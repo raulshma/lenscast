@@ -2,6 +2,7 @@ package com.raulshma.lenscast.streaming
 
 import android.content.ContentValues
 import android.content.Context
+import android.content.Intent
 import android.os.Environment
 import android.provider.MediaStore
 import android.util.Log
@@ -185,12 +186,12 @@ class WebApiController(private val context: Context) {
                 val isCharging = app.powerManager.isCharging.value
                 val isPowerSave = app.powerManager.isPowerSaveMode.value
                 val clientCount = app.streamingManager.clientCount.value
-                val isServerRunning = app.streamingManager.isServerRunning.value
+                val isLiveStreaming = app.streamingManager.isLiveStreaming()
                 val streamUrl = app.streamingManager.streamUrl.value
 
                 val json = JSONObject()
                 val streaming = JSONObject().apply {
-                    put("isActive", isServerRunning)
+                    put("isActive", isLiveStreaming)
                     put("url", streamUrl)
                     put("clientCount", clientCount)
                 }
@@ -210,6 +211,75 @@ class WebApiController(private val context: Context) {
         } catch (e: Exception) {
             Log.e(TAG, "Failed to get status", e)
             """{"error":"${e.message?.replace("\"", "\\\"")}"}"""
+        }
+    }
+
+    fun handleStartStream(): String {
+        return try {
+            val wasLiveStreaming = app.streamingManager.isLiveStreaming()
+            if (!wasLiveStreaming) {
+                app.powerManager.refreshBatteryState()
+                app.powerManager.acquireWakeLock()
+                app.thermalMonitor.startMonitoring()
+                app.streamingManager.thermalMonitor = app.thermalMonitor
+                app.streamingManager.applyBatteryOptimization(app.powerManager.optimizationResult.value)
+
+                val success = app.streamingManager.startStreaming()
+                if (!success) {
+                    return """{"success":false,"error":"Failed to start streaming server"}"""
+                }
+
+                runBlocking {
+                    withContext(Dispatchers.Main) {
+                        app.cameraService.acquireKeepAlive()
+                        app.cameraService.rebindUseCases()
+                    }
+                }
+
+                val intent = Intent(context, StreamingService::class.java).apply {
+                    action = StreamingService.ACTION_START
+                    putExtra(StreamingService.EXTRA_URL, app.streamingManager.streamUrl.value)
+                }
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                    context.startForegroundService(intent)
+                } else {
+                    context.startService(intent)
+                }
+            }
+
+            val streamUrl = app.streamingManager.streamUrl.value
+            """{"success":true,"isActive":true,"url":"${streamUrl.replace("\"", "\\\"")}"}"""
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to start stream", e)
+            """{"success":false,"error":"${e.message?.replace("\"", "\\\"")}"}"""
+        }
+    }
+
+    fun handleStopStream(): String {
+        return try {
+            val wasLiveStreaming = app.streamingManager.isLiveStreaming()
+            if (wasLiveStreaming) {
+                app.streamingManager.pauseStreaming()
+                app.powerManager.releaseWakeLock()
+                app.thermalMonitor.stopMonitoring()
+
+                runBlocking {
+                    withContext(Dispatchers.Main) {
+                        app.cameraService.releaseKeepAlive()
+                        app.cameraService.rebindUseCases()
+                    }
+                }
+
+                val intent = Intent(context, StreamingService::class.java).apply {
+                    action = StreamingService.ACTION_STOP
+                }
+                context.startService(intent)
+            }
+
+            """{"success":true,"isActive":false}"""
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to stop stream", e)
+            """{"success":false,"error":"${e.message?.replace("\"", "\\\"")}"}"""
         }
     }
 

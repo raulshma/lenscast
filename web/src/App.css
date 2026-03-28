@@ -517,6 +517,26 @@ input[type="range"]::-moz-range-thumb {
   border-color: var(--danger);
 }
 
+.btn-warning {
+  background: transparent;
+  color: var(--warning);
+  border-color: var(--warning);
+}
+
+.btn-warning:hover:not(:disabled) {
+  background: rgba(210, 153, 34, 0.12);
+}
+
+.btn-success {
+  background: transparent;
+  color: var(--success);
+  border-color: var(--success);
+}
+
+.btn-success:hover:not(:disabled) {
+  background: rgba(63, 185, 80, 0.12);
+}
+
 .btn-danger:hover {
   background: rgba(248, 81, 73, 0.1);
 }

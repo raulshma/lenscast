@@ -36,6 +36,8 @@ class StreamingManager(private val context: Context) {
     private val _isServerRunning = MutableStateFlow(false)
     val isServerRunning: StateFlow<Boolean> = _isServerRunning
 
+    fun isLiveStreaming(): Boolean = isStreaming.get()
+
     fun setPort(port: Int) {
         if (isStreaming.get()) {
             Log.w(TAG, "Cannot change port while streaming")
@@ -51,15 +53,20 @@ class StreamingManager(private val context: Context) {
     fun startStreaming(): Boolean {
         if (isStreaming.getAndSet(true)) return true
 
-        val started = server.startServer()
-        if (!started) {
-            isStreaming.set(false)
-            return false
+        if (!_isServerRunning.value) {
+            val started = server.startServer()
+            if (!started) {
+                isStreaming.set(false)
+                return false
+            }
+
+            _isServerRunning.value = true
         }
 
-        val url = NetworkUtils.getStreamingUrl(currentPort)
-        _streamUrl.value = url ?: "http://localhost:$currentPort/stream"
-        _isServerRunning.value = true
+        if (_streamUrl.value.isBlank()) {
+            val url = NetworkUtils.getStreamingUrl(currentPort)
+            _streamUrl.value = url ?: "http://localhost:$currentPort/stream"
+        }
 
         Log.d(TAG, "Streaming started at ${_streamUrl.value}")
         return true
@@ -76,6 +83,12 @@ class StreamingManager(private val context: Context) {
         _isServerRunning.value = false
 
         Log.d(TAG, "Streaming stopped")
+    }
+
+    fun pauseStreaming() {
+        if (!isStreaming.getAndSet(false)) return
+        _clientCount.value = 0
+        Log.d(TAG, "Live streaming paused (server still running)")
     }
 
     fun pushFrame(bitmap: Bitmap) {
@@ -120,10 +133,6 @@ class StreamingManager(private val context: Context) {
             server.authUsername = null
             server.authPassword = null
         }
-    }
-
-    fun pauseStreaming() {
-        Log.w(TAG, "Thermal CRITICAL: streaming should pause due to thermal throttling")
     }
 
     private fun bitmapToJpeg(bitmap: Bitmap, quality: Int): ByteArray {

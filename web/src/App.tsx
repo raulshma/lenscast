@@ -17,6 +17,8 @@ function App() {
   const [captureMsg, setCaptureMsg] = createSignal('')
   const [saving, setSaving] = createSignal(false)
   const [previewVisible, setPreviewVisible] = createSignal(true)
+  const [streamActionLoading, setStreamActionLoading] = createSignal(false)
+  const [streamNonce, setStreamNonce] = createSignal(0)
 
   let saveTimer: ReturnType<typeof setTimeout> | null = null
 
@@ -106,6 +108,46 @@ function App() {
     fetchSettings()
   }
 
+  async function handleStopStream() {
+    if (streamActionLoading()) return
+    setStreamActionLoading(true)
+    try {
+      const result = await api.stopStream()
+      if (!result.success) {
+        setError(result.error || 'Failed to stop stream')
+      } else {
+        setError('')
+        setPreviewVisible(false)
+        setStreamNonce((v) => v + 1)
+        await fetchStatus()
+      }
+    } catch (e: any) {
+      setError(e.message || 'Failed to stop stream')
+    } finally {
+      setStreamActionLoading(false)
+    }
+  }
+
+  async function handleResumeStream() {
+    if (streamActionLoading()) return
+    setStreamActionLoading(true)
+    try {
+      const result = await api.startStream()
+      if (!result.success) {
+        setError(result.error || 'Failed to resume stream')
+      } else {
+        setError('')
+        setPreviewVisible(true)
+        setStreamNonce((v) => v + 1)
+        await fetchStatus()
+      }
+    } catch (e: any) {
+      setError(e.message || 'Failed to resume stream')
+    } finally {
+      setStreamActionLoading(false)
+    }
+  }
+
   const Select = (props: {
     label: string
     value: string
@@ -155,6 +197,12 @@ function App() {
   const s = () => settings()
   const st = () => status()
 
+  createEffect(() => {
+    if (st()?.streaming?.isActive) {
+      setPreviewVisible(true)
+    }
+  })
+
   return (
     <div class="app">
       <header class="header">
@@ -187,7 +235,7 @@ function App() {
             {previewVisible() && st()?.streaming?.isActive ? (
               <img
                 class="preview-img"
-                src="/stream"
+                src={`/stream?t=${streamNonce()}`}
                 alt="Live camera feed"
                 onError={() => setPreviewVisible(false)}
               />
@@ -205,6 +253,15 @@ function App() {
             <button class="btn btn-primary" onClick={handleCapture} disabled={!st()?.streaming?.isActive}>
               Capture Photo
             </button>
+            {st()?.streaming?.isActive ? (
+              <button class="btn btn-warning" onClick={handleStopStream} disabled={streamActionLoading()}>
+                {streamActionLoading() ? 'Stopping...' : 'Stop Stream'}
+              </button>
+            ) : (
+              <button class="btn btn-success" onClick={handleResumeStream} disabled={streamActionLoading()}>
+                {streamActionLoading() ? 'Starting...' : 'Resume Stream'}
+              </button>
+            )}
             <a class="btn btn-secondary" href="/snapshot" target="_blank" download>
               Snapshot
             </a>

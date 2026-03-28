@@ -40,3 +40,13 @@ export async function selectLens(index: number): Promise<{ success: boolean }> {
   })
   return res.json()
 }
+
+export async function stopStream(): Promise<{ success: boolean; isActive?: boolean; error?: string }> {
+  const res = await fetch('/api/stream/stop', { method: 'POST' })
+  return res.json()
+}
+
+export async function startStream(): Promise<{ success: boolean; isActive?: boolean; url?: string; error?: string }> {
+  const res = await fetch('/api/stream/start', { method: 'POST' })
+  return res.json()
+}
