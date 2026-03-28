@@ -183,6 +183,9 @@ class CameraViewModel(
         viewModelScope.launch {
             cameraService.applySettings(_settings.value)
         }
+        if (!_streamStatus.value.isActive) {
+            startStreaming()
+        }
     }
 
     fun switchCamera() {
