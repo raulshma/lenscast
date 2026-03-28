@@ -19,10 +19,16 @@ import androidx.camera.core.SurfaceOrientedMeteringPointFactory
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.lifecycle.LifecycleOwner
+import android.hardware.camera2.CaptureRequest
+import android.util.Range
+import androidx.camera.camera2.interop.Camera2CameraControl
+import androidx.camera.camera2.interop.CaptureRequestOptions
 import com.raulshma.lenscast.camera.model.CameraLensInfo
 import com.raulshma.lenscast.camera.model.CameraSettings
 import com.raulshma.lenscast.camera.model.CameraState
 import com.raulshma.lenscast.camera.model.FocusMode
+import com.raulshma.lenscast.camera.model.WhiteBalance
+import com.raulshma.lenscast.camera.model.HdrMode
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -121,6 +127,7 @@ class CameraService(private val context: Context) {
                         lensFacing = lensFacing,
                         focalLength = logicalFocalLength,
                         cameraSelector = logicalSelector,
+                        physicalCameraId = null,
                     )
                     lenses.add(logicalCamInfo)
 
@@ -146,6 +153,7 @@ class CameraService(private val context: Context) {
                                     lensFacing = lensFacing,
                                     focalLength = focalLength,
                                     cameraSelector = selector,
+                                    physicalCameraId = physId,
                                 )
                             )
                         }
@@ -262,6 +270,7 @@ class CameraService(private val context: Context) {
         }
     }
 
+    @androidx.camera.camera2.interop.ExperimentalCamera2Interop
     fun startPreview(previewView: PreviewView) {
         val provider = cameraProvider
         if (provider == null) {
@@ -287,23 +296,32 @@ class CameraService(private val context: Context) {
 
         // Intentionally DO NOT bind ResolutionSelector to Preview. 
         // Let CameraX decide the best display aspect ratio natively to prevent surface bind failures.
-        preview = Preview.Builder()
-            .build()
-            .also {
-                Log.d(TAG, "startPreview: setting surfaceProvider")
-                it.surfaceProvider = previewView.surfaceProvider
-            }
-
-        imageCapture = ImageCapture.Builder()
+        val previewBuilder = Preview.Builder()
+        val captureBuilder = ImageCapture.Builder()
             .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
             .setResolutionSelector(resolutionSelector)
-            .build()
-
-        imageAnalysis = ImageAnalysis.Builder()
+        val analysisBuilder = ImageAnalysis.Builder()
             .setResolutionSelector(resolutionSelector)
             .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_RGBA_8888)
             .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
-            .build()
+
+        val selectedLens = _availableLenses.value.getOrNull(_selectedLensIndex.value)
+        if (selectedLens?.physicalCameraId != null) {
+            val physId = selectedLens.physicalCameraId
+            androidx.camera.camera2.interop.Camera2Interop.Extender(previewBuilder).setPhysicalCameraId(physId)
+            androidx.camera.camera2.interop.Camera2Interop.Extender(captureBuilder).setPhysicalCameraId(physId)
+            androidx.camera.camera2.interop.Camera2Interop.Extender(analysisBuilder).setPhysicalCameraId(physId)
+            Log.d(TAG, "startPreview: applied physicalCameraId $physId to all use cases")
+        }
+
+        preview = previewBuilder.build().also {
+            Log.d(TAG, "startPreview: setting surfaceProvider")
+            it.surfaceProvider = previewView.surfaceProvider
+        }
+
+        imageCapture = captureBuilder.build()
+
+        imageAnalysis = analysisBuilder.build()
             .also { analysis ->
                 analysis.setAnalyzer(analysisExecutor) { imageProxy ->
                     processFrame(imageProxy)
@@ -399,11 +417,22 @@ class CameraService(private val context: Context) {
 
     private var currentResolution: android.util.Size = android.util.Size(1920, 1080)
 
+    @androidx.annotation.OptIn(androidx.camera.camera2.interop.ExperimentalCamera2Interop::class)
     suspend fun applySettings(settings: CameraSettings) {
+        if (settings.resolution.size != currentResolution) {
+            currentResolution = settings.resolution.size
+            val pv = currentPreviewView
+            if (pv != null) {
+                withContext(Dispatchers.Main) {
+                    startPreview(pv)
+                }
+            }
+        }
+
         val cam = camera ?: return
 
         try {
-            cam.cameraControl.setZoomRatio(settings.zoomRatio).await()
+            cam.cameraControl.setZoomRatio(settings.zoomRatio)
         } catch (e: Exception) {
             Log.w(TAG, "Zoom failed", e)
         }
@@ -414,12 +443,7 @@ class CameraService(private val context: Context) {
             val upper = expState.exposureCompensationRange.upper
             val value = settings.exposureCompensation.coerceIn(lower, upper)
             if (value != expState.exposureCompensationIndex) {
-                try {
-                    val method = cam.cameraControl.javaClass.getMethod(
-                        "setExposureCompensation", Int::class.javaPrimitiveType
-                    )
-                    method.invoke(cam.cameraControl, value)
-                } catch (_: Exception) { }
+                cam.cameraControl.setExposureCompensationIndex(value)
             }
         } catch (e: Exception) {
             Log.w(TAG, "Exposure compensation failed", e)
@@ -434,27 +458,77 @@ class CameraService(private val context: Context) {
                         FocusMeteringAction.Builder(center)
                             .setAutoCancelDuration(5, java.util.concurrent.TimeUnit.SECONDS)
                             .build()
-                    ).await()
+                    )
                 }
                 FocusMode.MANUAL -> { }
                 else -> {
                     cam.cameraControl.startFocusAndMetering(
                         FocusMeteringAction.Builder(center).build()
-                    ).await()
+                    )
                 }
             }
         } catch (e: Exception) {
             Log.w(TAG, "Focus failed", e)
         }
 
-        if (settings.resolution.size != currentResolution) {
-            currentResolution = settings.resolution.size
-            val pv = currentPreviewView
-            if (pv != null) {
-                withContext(Dispatchers.Main) {
-                    startPreview(pv)
+        try {
+            val camera2Control = Camera2CameraControl.from(cam.cameraControl)
+            val builder = CaptureRequestOptions.Builder()
+            
+            val fpsRange = Range(settings.frameRate, settings.frameRate)
+            builder.setCaptureRequestOption(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, fpsRange)
+            
+            if (settings.stabilization) {
+                builder.setCaptureRequestOption(CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE, CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_ON)
+                builder.setCaptureRequestOption(CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE, CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE_ON)
+            } else {
+                builder.setCaptureRequestOption(CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE, CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_OFF)
+                builder.setCaptureRequestOption(CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE, CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE_OFF)
+            }
+            
+            when (settings.hdrMode) {
+                HdrMode.ON -> builder.setCaptureRequestOption(CaptureRequest.CONTROL_SCENE_MODE, CaptureRequest.CONTROL_SCENE_MODE_HDR)
+                else -> { }
+            }
+            
+            if (settings.iso != null || settings.exposureTime != null) {
+                builder.setCaptureRequestOption(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_OFF)
+                settings.iso?.let {
+                    builder.setCaptureRequestOption(CaptureRequest.SENSOR_SENSITIVITY, it)
+                }
+                settings.exposureTime?.let {
+                    builder.setCaptureRequestOption(CaptureRequest.SENSOR_EXPOSURE_TIME, it)
+                }
+            } else {
+                builder.setCaptureRequestOption(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON)
+            }
+            
+            when (settings.whiteBalance) {
+               WhiteBalance.AUTO -> builder.setCaptureRequestOption(CaptureRequest.CONTROL_AWB_MODE, CaptureRequest.CONTROL_AWB_MODE_AUTO)
+               WhiteBalance.DAYLIGHT -> builder.setCaptureRequestOption(CaptureRequest.CONTROL_AWB_MODE, CaptureRequest.CONTROL_AWB_MODE_DAYLIGHT)
+               WhiteBalance.CLOUDY -> builder.setCaptureRequestOption(CaptureRequest.CONTROL_AWB_MODE, CaptureRequest.CONTROL_AWB_MODE_CLOUDY_DAYLIGHT)
+               WhiteBalance.INDOOR -> builder.setCaptureRequestOption(CaptureRequest.CONTROL_AWB_MODE, CaptureRequest.CONTROL_AWB_MODE_INCANDESCENT)
+               WhiteBalance.FLUORESCENT -> builder.setCaptureRequestOption(CaptureRequest.CONTROL_AWB_MODE, CaptureRequest.CONTROL_AWB_MODE_FLUORESCENT)
+               WhiteBalance.MANUAL -> {
+                   builder.setCaptureRequestOption(CaptureRequest.CONTROL_AWB_MODE, CaptureRequest.CONTROL_AWB_MODE_OFF)
+               }
+            }
+            
+            if (settings.focusMode == FocusMode.MANUAL) {
+                builder.setCaptureRequestOption(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_OFF)
+                settings.focusDistance?.let {
+                    builder.setCaptureRequestOption(CaptureRequest.LENS_FOCUS_DISTANCE, it)
                 }
             }
+            
+            settings.sceneMode?.toIntOrNull()?.let {
+                builder.setCaptureRequestOption(CaptureRequest.CONTROL_SCENE_MODE, it)
+            }
+            
+            camera2Control.setCaptureRequestOptions(builder.build())
+            
+        } catch (e: Exception) {
+            Log.w(TAG, "Advanced settings failed", e)
         }
     }
 

@@ -10,6 +10,7 @@ import androidx.camera.core.CameraSelector
  * @param lensFacing CameraSelector lens facing constant
  * @param focalLength Focal length in mm (used for sorting / labeling)
  * @param cameraSelector CameraSelector that targets this specific camera
+ * @param physicalCameraId Optional physical camera ID if this isn't the primary logical camera
  */
 data class CameraLensInfo(
     val id: String,
@@ -17,4 +18,5 @@ data class CameraLensInfo(
     val lensFacing: Int,
     val focalLength: Float,
     val cameraSelector: CameraSelector,
+    val physicalCameraId: String? = null,
 )

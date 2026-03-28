@@ -96,6 +96,7 @@ class CameraViewModel(
         settingsJob = viewModelScope.launch {
             settingsDataStore.settings.collect { saved ->
                 _settings.value = saved
+                cameraService.applySettings(saved)
             }
         }
         viewModelScope.launch {
@@ -167,6 +168,9 @@ class CameraViewModel(
             streamingManager.pushFrame(bitmap)
         }
         cameraService.startPreview(previewView)
+        viewModelScope.launch {
+            cameraService.applySettings(_settings.value)
+        }
     }
 
     fun switchCamera() {
