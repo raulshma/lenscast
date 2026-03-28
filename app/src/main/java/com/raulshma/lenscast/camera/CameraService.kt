@@ -307,17 +307,58 @@ class CameraService(private val context: Context) {
 
     fun selectLens(index: Int) {
         val lenses = _availableLenses.value
-        if (index < 0 || index >= lenses.size) return
+        if (index < 0 || index >= lenses.size) {
+            Log.w(TAG, "selectLens: index $index out of bounds (size ${lenses.size})")
+            return
+        }
         val lens = lenses[index]
+        Log.d(TAG, "selectLens: switching to lens $index: ${lens.label}, provider=${cameraProvider != null}, previewView=${currentPreviewView != null}")
+        
         _selectedLensIndex.value = index
         currentCameraSelector = lens.cameraSelector
         _isFrontCamera.value = lens.lensFacing == CameraSelector.LENS_FACING_FRONT
-        rebindUseCases()
+
+        val needsKeepAlive = keepAliveRefCount == 0 && lifecycleOwner == null
+        if (needsKeepAlive) {
+            keepAliveRefCount++
+            keepAliveLifecycle.activate()
+            Log.d(TAG, "selectLens: temporarily activated keep-alive for lens change")
+        }
+
+        val pv = currentPreviewView
+        if (pv != null) {
+            Log.d(TAG, "selectLens: restarting preview with new lens")
+            startPreview(pv)
+        } else {
+            Log.w(TAG, "selectLens: no previewView available, trying rebind")
+            rebindUseCases()
+        }
+
+        if (needsKeepAlive) {
+            keepAliveRefCount = max(0, keepAliveRefCount - 1)
+            if (keepAliveRefCount == 0) {
+                keepAliveLifecycle.deactivate()
+                Log.d(TAG, "selectLens: deactivated temporary keep-alive")
+            }
+            Log.d(TAG, "selectLens: ref count after temporary release: $keepAliveRefCount")
+        }
     }
 
     fun rebindUseCases() {
-        val provider = cameraProvider ?: return
-        val owner = if (keepAliveRefCount > 0) keepAliveLifecycle else lifecycleOwner ?: return
+        val provider = cameraProvider
+        Log.d(TAG, "rebindUseCases: provider=${provider != null}, refCount=$keepAliveRefCount, lifecycleOwner=${lifecycleOwner != null}")
+        
+        if (provider == null) {
+            Log.w(TAG, "rebindUseCases: cameraProvider is null, cannot rebind")
+            return
+        }
+        
+        val owner = if (keepAliveRefCount > 0) keepAliveLifecycle else lifecycleOwner
+        if (owner == null) {
+            Log.w(TAG, "rebindUseCases: no lifecycle owner available and no keep-alive, cannot rebind")
+            return
+        }
+        
         val pv = currentPreviewView
 
         val useCases = mutableListOf<UseCase>()
@@ -330,7 +371,10 @@ class CameraService(private val context: Context) {
         imageCapture?.let { useCases.add(it) }
         imageAnalysis?.let { useCases.add(it) }
 
-        if (useCases.isEmpty()) return
+        if (useCases.isEmpty()) {
+            Log.w(TAG, "rebindUseCases: no use cases to rebind (preview=$preview, imageCapture=$imageCapture, imageAnalysis=$imageAnalysis)")
+            return
+        }
 
         try {
             provider.unbindAll()
