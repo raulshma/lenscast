@@ -61,6 +61,7 @@ fun CameraSettingsScreen(
     val authSettings by viewModel.authSettings.collectAsState()
     val streamingPort by viewModel.streamingPort.collectAsState()
     val jpegQuality by viewModel.jpegQuality.collectAsState()
+    val showPreview by viewModel.showPreview.collectAsState()
 
     Scaffold(
         topBar = {
@@ -86,6 +87,16 @@ fun CameraSettingsScreen(
             contentPadding = PaddingValues(16.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
+            item {
+                SettingsSection(title = "Display") {
+                    SwitchSetting(
+                        title = "Show Camera Preview",
+                        checked = showPreview,
+                        onCheckedChange = { viewModel.updateShowPreview(it) }
+                    )
+                }
+            }
+
             item {
                 SettingsSection(title = "Exposure") {
                     SliderSetting(

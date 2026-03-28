@@ -19,7 +19,11 @@ import com.raulshma.lenscast.MainApplication
 import com.raulshma.lenscast.camera.model.CameraLensInfo
 import com.raulshma.lenscast.camera.model.CameraSettings
 import com.raulshma.lenscast.camera.model.CameraState
+import com.raulshma.lenscast.camera.model.FocusMode
+import com.raulshma.lenscast.camera.model.HdrMode
+import com.raulshma.lenscast.camera.model.Resolution
 import com.raulshma.lenscast.camera.model.StreamStatus
+import com.raulshma.lenscast.camera.model.WhiteBalance
 import com.raulshma.lenscast.core.BatteryOptimizationResult
 import com.raulshma.lenscast.core.PowerManager
 import com.raulshma.lenscast.core.ThermalMonitor
@@ -78,6 +82,9 @@ class CameraViewModel(
     private val _isRecording = MutableStateFlow(false)
     val isRecording: StateFlow<Boolean> = _isRecording.asStateFlow()
 
+    private val _showPreview = MutableStateFlow(true)
+    val showPreview: StateFlow<Boolean> = _showPreview.asStateFlow()
+
     init {
         // Collect from service but ONLY update if the service is not Idle, 
         // to prevent overwriting our local RequestPermission state!
@@ -107,6 +114,11 @@ class CameraViewModel(
         viewModelScope.launch {
             settingsDataStore.jpegQuality.collect { quality ->
                 streamingManager.setJpegQuality(quality)
+            }
+        }
+        viewModelScope.launch {
+            settingsDataStore.showPreview.collect { show ->
+                _showPreview.value = show
             }
         }
 
@@ -186,6 +198,59 @@ class CameraViewModel(
         _settings.value = settings
         viewModelScope.launch {
             cameraService.applySettings(settings)
+        }
+    }
+
+    fun updateExposure(value: Int) {
+        updateSettings { it.copy(exposureCompensation = value) }
+    }
+
+    fun updateIso(value: String) {
+        val iso = if (value == "Auto") null else value.toIntOrNull()
+        updateSettings { it.copy(iso = iso) }
+    }
+
+    fun updateFocusMode(mode: String) {
+        updateSettings { it.copy(focusMode = FocusMode.valueOf(mode)) }
+    }
+
+    fun updateWhiteBalance(mode: String) {
+        updateSettings { it.copy(whiteBalance = WhiteBalance.valueOf(mode)) }
+    }
+
+    fun updateZoom(ratio: Float) {
+        updateSettings { it.copy(zoomRatio = ratio) }
+    }
+
+    fun updateHdrMode(mode: String) {
+        updateSettings { it.copy(hdrMode = HdrMode.valueOf(mode)) }
+    }
+
+    fun updateFrameRate(rate: Int) {
+        updateSettings { it.copy(frameRate = rate) }
+    }
+
+    fun updateResolution(name: String) {
+        updateSettings { it.copy(resolution = Resolution.valueOf(name)) }
+    }
+
+    fun updateStabilization(enabled: Boolean) {
+        updateSettings { it.copy(stabilization = enabled) }
+    }
+
+    fun togglePreview() {
+        _showPreview.value = !_showPreview.value
+        viewModelScope.launch {
+            settingsDataStore.saveShowPreview(_showPreview.value)
+        }
+    }
+
+    private fun updateSettings(transform: (CameraSettings) -> CameraSettings) {
+        val newSettings = transform(_settings.value)
+        _settings.value = newSettings
+        viewModelScope.launch {
+            cameraService.applySettings(newSettings)
+            settingsDataStore.saveSettings(newSettings)
         }
     }
 

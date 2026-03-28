@@ -51,6 +51,7 @@ class SettingsDataStore(private val context: Context) {
         val AUTH_ENABLED = stringPreferencesKey("auth_enabled")
         val AUTH_USERNAME = stringPreferencesKey("auth_username")
         val AUTH_PASSWORD = stringPreferencesKey("auth_password")
+        val SHOW_PREVIEW = stringPreferencesKey("show_preview")
     }
 
     val settings: Flow<CameraSettings> = context.dataStore.data.map { prefs ->
@@ -93,6 +94,10 @@ class SettingsDataStore(private val context: Context) {
 
     val jpegQuality: Flow<Int> = context.dataStore.data.map { prefs ->
         prefs[Keys.JPEG_QUALITY] ?: 80
+    }
+
+    val showPreview: Flow<Boolean> = context.dataStore.data.map { prefs ->
+        prefs[Keys.SHOW_PREVIEW] != "false"
     }
 
     val authSettings: Flow<StreamAuthSettings> = context.dataStore.data.map { prefs ->
@@ -154,6 +159,12 @@ class SettingsDataStore(private val context: Context) {
     suspend fun saveJpegQuality(quality: Int) {
         context.dataStore.edit { prefs ->
             prefs[Keys.JPEG_QUALITY] = quality
+        }
+    }
+
+    suspend fun saveShowPreview(show: Boolean) {
+        context.dataStore.edit { prefs ->
+            prefs[Keys.SHOW_PREVIEW] = if (show) "true" else "false"
         }
     }
 

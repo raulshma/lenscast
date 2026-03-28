@@ -37,6 +37,9 @@ class SettingsViewModel(
     private val _jpegQuality = MutableStateFlow(80)
     val jpegQuality: StateFlow<Int> = _jpegQuality.asStateFlow()
 
+    private val _showPreview = MutableStateFlow(true)
+    val showPreview: StateFlow<Boolean> = _showPreview.asStateFlow()
+
     val availableZoomRange: StateFlow<ClosedFloatingPointRange<Float>> = cameraService.availableZoomRange
     val availableExposureRange: StateFlow<ClosedRange<Int>> = cameraService.availableExposureRange
 
@@ -62,6 +65,11 @@ class SettingsViewModel(
             settingsDataStore.jpegQuality.collect { quality ->
                 _jpegQuality.value = quality
                 streamingManager?.setJpegQuality(quality)
+            }
+        }
+        viewModelScope.launch {
+            settingsDataStore.showPreview.collect { show ->
+                _showPreview.value = show
             }
         }
     }
@@ -132,6 +140,13 @@ class SettingsViewModel(
         viewModelScope.launch {
             settingsDataStore.saveJpegQuality(quality)
             streamingManager?.setJpegQuality(quality)
+        }
+    }
+
+    fun updateShowPreview(show: Boolean) {
+        _showPreview.value = show
+        viewModelScope.launch {
+            settingsDataStore.saveShowPreview(show)
         }
     }
 
