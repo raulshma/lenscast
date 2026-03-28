@@ -268,6 +268,21 @@ class CameraViewModel(
         startThermalMonitoring()
         val success = streamingManager.startStreaming()
         if (success) {
+            cameraService.acquireKeepAlive()
+            cameraService.rebindUseCases()
+
+            val intent = Intent(context, com.raulshma.lenscast.streaming.StreamingService::class.java)
+            intent.action = com.raulshma.lenscast.streaming.StreamingService.ACTION_START
+            intent.putExtra(
+                com.raulshma.lenscast.streaming.StreamingService.EXTRA_URL,
+                streamingManager.streamUrl.value
+            )
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                context.startForegroundService(intent)
+            } else {
+                context.startService(intent)
+            }
+
             _streamStatus.value = StreamStatus(
                 isActive = true,
                 url = streamingManager.streamUrl.value,
@@ -290,6 +305,13 @@ class CameraViewModel(
         thermalMonitorJob?.cancel()
         thermalMonitorJob = null
         _streamStatus.value = StreamStatus()
+
+        cameraService.releaseKeepAlive()
+        cameraService.rebindUseCases()
+
+        val intent = Intent(context, com.raulshma.lenscast.streaming.StreamingService::class.java)
+        intent.action = com.raulshma.lenscast.streaming.StreamingService.ACTION_STOP
+        context.startService(intent)
     }
 
     private fun startStreamMonitor() {
@@ -405,6 +427,7 @@ class CameraViewModel(
             intent.action = com.raulshma.lenscast.capture.RecordingService.ACTION_STOP
             context.startService(intent)
             _isRecording.value = false
+            cameraService.rebindUseCases()
         } else {
             intent.action = com.raulshma.lenscast.capture.RecordingService.ACTION_START
             if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {

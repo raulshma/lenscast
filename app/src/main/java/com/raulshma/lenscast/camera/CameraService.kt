@@ -18,11 +18,14 @@ import androidx.camera.core.Preview
 import androidx.camera.core.SurfaceOrientedMeteringPointFactory
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
+import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleOwner
+import androidx.lifecycle.LifecycleRegistry
 import android.hardware.camera2.CaptureRequest
 import android.util.Range
 import androidx.camera.camera2.interop.Camera2CameraControl
 import androidx.camera.camera2.interop.CaptureRequestOptions
+import androidx.camera.core.UseCase
 import com.raulshma.lenscast.camera.model.CameraLensInfo
 import com.raulshma.lenscast.camera.model.CameraSettings
 import com.raulshma.lenscast.camera.model.CameraState
@@ -36,9 +39,27 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.guava.await
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
+import kotlin.math.max
 
 @Suppress("DEPRECATION")
 class CameraService(private val context: Context) {
+
+    private class KeepAliveLifecycle : LifecycleOwner {
+        private val registry = LifecycleRegistry(this)
+        override val lifecycle: Lifecycle get() = registry
+
+        init {
+            registry.currentState = Lifecycle.State.CREATED
+        }
+
+        fun activate() {
+            registry.currentState = Lifecycle.State.STARTED
+        }
+
+        fun deactivate() {
+            registry.currentState = Lifecycle.State.CREATED
+        }
+    }
 
     private var cameraProvider: ProcessCameraProvider? = null
     private var preview: Preview? = null
@@ -48,6 +69,9 @@ class CameraService(private val context: Context) {
     private var lifecycleOwner: LifecycleOwner? = null
     private var frameListener: ((Bitmap) -> Unit)? = null
     private var currentCameraSelector: CameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
+
+    private val keepAliveLifecycle = KeepAliveLifecycle()
+    private var keepAliveRefCount = 0
 
     private val _cameraState = MutableStateFlow<CameraState>(CameraState.Idle)
     val cameraState: StateFlow<CameraState> = _cameraState.asStateFlow()
@@ -69,6 +93,30 @@ class CameraService(private val context: Context) {
 
     fun setLifecycleOwner(owner: LifecycleOwner) {
         lifecycleOwner = owner
+    }
+
+    fun acquireKeepAlive() {
+        keepAliveRefCount++
+        if (keepAliveRefCount == 1) {
+            keepAliveLifecycle.activate()
+            Log.d(TAG, "Keep-alive lifecycle activated")
+        }
+        Log.d(TAG, "Keep-alive ref count: $keepAliveRefCount")
+    }
+
+    fun releaseKeepAlive() {
+        keepAliveRefCount = max(0, keepAliveRefCount - 1)
+        if (keepAliveRefCount == 0) {
+            keepAliveLifecycle.deactivate()
+            Log.d(TAG, "Keep-alive lifecycle deactivated")
+        }
+        Log.d(TAG, "Keep-alive ref count: $keepAliveRefCount")
+    }
+
+    fun isKeepAliveActive(): Boolean = keepAliveRefCount > 0
+
+    fun getEffectiveLifecycleOwner(): LifecycleOwner {
+        return if (keepAliveRefCount > 0) keepAliveLifecycle else lifecycleOwner!!
     }
 
     fun setFrameListener(listener: ((Bitmap) -> Unit)?) {
@@ -264,9 +312,35 @@ class CameraService(private val context: Context) {
         _selectedLensIndex.value = index
         currentCameraSelector = lens.cameraSelector
         _isFrontCamera.value = lens.lensFacing == CameraSelector.LENS_FACING_FRONT
+        rebindUseCases()
+    }
+
+    fun rebindUseCases() {
+        val provider = cameraProvider ?: return
+        val owner = if (keepAliveRefCount > 0) keepAliveLifecycle else lifecycleOwner ?: return
         val pv = currentPreviewView
-        if (pv != null) {
-            startPreview(pv)
+
+        val useCases = mutableListOf<UseCase>()
+        if (preview != null) {
+            if (pv != null && isActivityForeground) {
+                preview!!.surfaceProvider = pv.surfaceProvider
+                useCases.add(preview!!)
+            }
+        }
+        imageCapture?.let { useCases.add(it) }
+        imageAnalysis?.let { useCases.add(it) }
+
+        if (useCases.isEmpty()) return
+
+        try {
+            provider.unbindAll()
+            camera = provider.bindToLifecycle(
+                owner, currentCameraSelector,
+                *useCases.toTypedArray()
+            )
+            Log.d(TAG, "rebindUseCases: rebound ${useCases.size} use cases")
+        } catch (e: Exception) {
+            Log.e(TAG, "rebindUseCases: failed", e)
         }
     }
 
@@ -277,9 +351,9 @@ class CameraService(private val context: Context) {
             Log.e(TAG, "startPreview: cameraProvider is null")
             return
         }
-        val owner = lifecycleOwner
+        val owner = if (keepAliveRefCount > 0) keepAliveLifecycle else lifecycleOwner
         if (owner == null) {
-            Log.e(TAG, "startPreview: lifecycleOwner is null")
+            Log.e(TAG, "startPreview: no lifecycle owner available")
             return
         }
         currentPreviewView = previewView
@@ -415,20 +489,42 @@ class CameraService(private val context: Context) {
         }
     }
 
+    private var pendingResolution: android.util.Size? = null
     private var currentResolution: android.util.Size = android.util.Size(1920, 1080)
 
     @androidx.annotation.OptIn(androidx.camera.camera2.interop.ExperimentalCamera2Interop::class)
     suspend fun applySettings(settings: CameraSettings) {
         if (settings.resolution.size != currentResolution) {
             currentResolution = settings.resolution.size
-            val pv = currentPreviewView
-            if (pv != null) {
-                withContext(Dispatchers.Main) {
-                    startPreview(pv)
+            if (isActivityForeground) {
+                val pv = currentPreviewView
+                if (pv != null) {
+                    withContext(Dispatchers.Main) {
+                        startPreview(pv)
+                    }
+                    applyCameraControls(settings)
+                    return
                 }
+            } else {
+                pendingResolution = settings.resolution.size
+                Log.d(TAG, "applySettings: deferring resolution change until foreground")
             }
         }
 
+        applyCameraControls(settings)
+    }
+
+    fun applyPendingResolution() {
+        val res = pendingResolution ?: return
+        pendingResolution = null
+        currentResolution = res
+        val pv = currentPreviewView ?: return
+        startPreview(pv)
+        Log.d(TAG, "applyPendingResolution: applied deferred resolution $res")
+    }
+
+    @androidx.annotation.OptIn(androidx.camera.camera2.interop.ExperimentalCamera2Interop::class)
+    private fun applyCameraControls(settings: CameraSettings) {
         val cam = camera ?: return
 
         try {
@@ -533,6 +629,31 @@ class CameraService(private val context: Context) {
     }
 
     private var currentPreviewView: PreviewView? = null
+    private var isActivityForeground = true
+
+    fun onActivityResume() {
+        isActivityForeground = true
+        if (keepAliveRefCount > 0) {
+            if (pendingResolution != null) {
+                applyPendingResolution()
+            } else if (currentPreviewView != null) {
+                rebindUseCases()
+            } else if (preview != null) {
+                preview!!.surfaceProvider = currentPreviewView!!.surfaceProvider
+            }
+            Log.d(TAG, "onActivityResume: restored preview")
+        }
+    }
+
+    fun onActivityStop() {
+        isActivityForeground = false
+        if (keepAliveRefCount > 0) {
+            preview?.surfaceProvider = null
+            Log.d(TAG, "onActivityStop: detached preview surface for background operation")
+        }
+    }
+
+    fun isPreviewAvailable(): Boolean = isActivityForeground
 
     fun getImageCapture(): ImageCapture? = imageCapture
     fun getCamera(): Camera? = camera

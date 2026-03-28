@@ -79,6 +79,8 @@ class RecordingService : Service() {
         val cameraService = app.cameraService
         val fileName = "VID_${SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())}.mp4"
 
+        cameraService.acquireKeepAlive()
+
         try {
             val contentValues = ContentValues().apply {
                 put(MediaStore.MediaColumns.DISPLAY_NAME, fileName)
@@ -114,6 +116,7 @@ class RecordingService : Service() {
 
                 val cameraProvider = cameraService.getCameraProvider() ?: run {
                     Log.e(TAG, "Camera provider not available")
+                    cameraService.releaseKeepAlive()
                     stopSelf()
                     return
                 }
@@ -121,6 +124,7 @@ class RecordingService : Service() {
                 val camera = cameraService.getCamera()
                 if (camera == null) {
                     Log.e(TAG, "Camera not available")
+                    cameraService.releaseKeepAlive()
                     stopSelf()
                     return
                 }
@@ -128,26 +132,49 @@ class RecordingService : Service() {
                 @Suppress("DEPRECATION")
                 cameraProvider.unbindAll()
 
-                val preview = cameraService.getPreview()
+                val preview = if (cameraService.isPreviewAvailable()) cameraService.getPreview() else null
                 val imageCapture = cameraService.getImageCapture()
+                val imageAnalysis = cameraService.getImageAnalysis()
 
-                val lifecycleOwner = cameraService.getLifecycleOwner()
-                if (lifecycleOwner == null) {
-                    Log.e(TAG, "LifecycleOwner not available")
-                    stopSelf()
-                    return
-                }
+                val lifecycleOwner = cameraService.getEffectiveLifecycleOwner()
 
                 @Suppress("DEPRECATION")
-                val boundCamera = if (preview != null && imageCapture != null) {
-                    cameraProvider.bindToLifecycle(
-                        lifecycleOwner,
-                        camera.cameraInfo.cameraSelector,
-                        preview,
-                        imageCapture,
-                        videoCapture
-                    )
-                } else {
+                try {
+                    when {
+                        preview != null && imageCapture != null && imageAnalysis != null ->
+                            cameraProvider.bindToLifecycle(
+                                lifecycleOwner, camera.cameraInfo.cameraSelector,
+                                preview, imageCapture, imageAnalysis, videoCapture
+                            )
+                        preview != null && imageCapture != null ->
+                            cameraProvider.bindToLifecycle(
+                                lifecycleOwner, camera.cameraInfo.cameraSelector,
+                                preview, imageCapture, videoCapture
+                            )
+                        preview != null && imageAnalysis != null ->
+                            cameraProvider.bindToLifecycle(
+                                lifecycleOwner, camera.cameraInfo.cameraSelector,
+                                preview, imageAnalysis, videoCapture
+                            )
+                        preview != null ->
+                            cameraProvider.bindToLifecycle(
+                                lifecycleOwner, camera.cameraInfo.cameraSelector,
+                                preview, videoCapture
+                            )
+                        imageAnalysis != null ->
+                            cameraProvider.bindToLifecycle(
+                                lifecycleOwner, camera.cameraInfo.cameraSelector,
+                                imageAnalysis, videoCapture
+                            )
+                        else ->
+                            cameraProvider.bindToLifecycle(
+                                lifecycleOwner, camera.cameraInfo.cameraSelector,
+                                videoCapture
+                            )
+                    }
+                    Log.d(TAG, "Bound use cases for recording (streaming preserved if active)")
+                } catch (e: Exception) {
+                    Log.w(TAG, "Failed to bind all use cases, trying with VideoCapture only", e)
                     cameraProvider.bindToLifecycle(
                         lifecycleOwner,
                         camera.cameraInfo.cameraSelector,
@@ -187,6 +214,7 @@ class RecordingService : Service() {
             }
         } catch (e: Exception) {
             Log.e(TAG, "Failed to start recording", e)
+            cameraService.releaseKeepAlive()
         }
 
         isRecording = true
@@ -208,6 +236,9 @@ class RecordingService : Service() {
 
         activeRecording?.stop()
         activeRecording = null
+
+        val app = applicationContext as MainApplication
+        app.cameraService.releaseKeepAlive()
 
         val duration = System.currentTimeMillis() - startTimeMs
         Log.d(TAG, "Recording stopped. Duration: ${duration}ms")

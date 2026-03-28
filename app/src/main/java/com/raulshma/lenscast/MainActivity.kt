@@ -8,6 +8,8 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.ui.Modifier
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import com.raulshma.lenscast.navigation.NavigationGraph
 import com.raulshma.lenscast.ui.theme.LensCastTheme
 
@@ -18,6 +20,15 @@ class MainActivity : ComponentActivity() {
 
         val app = application as MainApplication
         app.cameraService.setLifecycleOwner(this)
+
+        lifecycle.addObserver(LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_RESUME -> app.cameraService.onActivityResume()
+                Lifecycle.Event.ON_STOP -> app.cameraService.onActivityStop()
+                else -> {}
+            }
+        })
+
         setContent {
             LensCastTheme {
                 Surface(
