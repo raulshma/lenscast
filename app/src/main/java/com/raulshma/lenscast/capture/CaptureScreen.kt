@@ -1,5 +1,6 @@
 package com.raulshma.lenscast.capture
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -68,6 +69,7 @@ import java.util.Locale
 @Composable
 fun CaptureScreen(
     onNavigateBack: () -> Unit,
+    onViewMedia: (String) -> Unit = {},
 ) {
     val context = LocalContext.current
     val app = context.applicationContext as MainApplication
@@ -381,7 +383,8 @@ fun CaptureScreen(
                 items(captureHistory, key = { it.id }) { entry ->
                     CaptureHistoryItem(
                         entry = entry,
-                        onDelete = { viewModel.deleteHistoryEntry(entry.id) }
+                        onDelete = { viewModel.deleteHistoryEntry(entry.id) },
+                        onClick = { onViewMedia(entry.id) },
                     )
                 }
             }
@@ -393,9 +396,12 @@ fun CaptureScreen(
 private fun CaptureHistoryItem(
     entry: CaptureHistory,
     onDelete: () -> Unit,
+    onClick: () -> Unit = {},
 ) {
     Card(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick),
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surfaceContainer
         )

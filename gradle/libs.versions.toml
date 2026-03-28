@@ -15,6 +15,7 @@ junitVersion = "1.2.1"
 espressoCore = "3.6.1"
 coroutines = "1.9.0"
 moshi = "1.15.2"
+coil = "2.7.0"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -47,6 +48,8 @@ datastore-preferences = { group = "androidx.datastore", name = "datastore-prefer
 coroutines-guava = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-guava", version.ref = "coroutines" }
 
 moshi = { group = "com.squareup.moshi", name = "moshi-kotlin", version.ref = "moshi" }
+
+coil-compose = { group = "io.coil-kt", name = "coil-compose", version.ref = "coil" }
 
 junit = { group = "junit", name = "junit", version.ref = "junit" }
 androidx-junit = { group = "androidx.test.ext", name = "junit", version.ref = "junitVersion" }

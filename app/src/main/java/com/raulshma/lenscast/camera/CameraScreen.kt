@@ -30,6 +30,7 @@ import androidx.compose.material.icons.filled.Cameraswitch
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.FiberManualRecord
 import androidx.compose.material.icons.filled.PhotoLibrary
+import androidx.compose.material.icons.filled.Collections
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.Videocam
@@ -74,6 +75,7 @@ import kotlinx.coroutines.launch
 fun CameraScreen(
     onNavigateToSettings: () -> Unit,
     onNavigateToCapture: () -> Unit,
+    onNavigateToGallery: () -> Unit,
 ) {
     val context = LocalContext.current
     val app = context.applicationContext as MainApplication
@@ -109,8 +111,11 @@ fun CameraScreen(
                     containerColor = MaterialTheme.colorScheme.primaryContainer
                 ),
                 actions = {
+                    IconButton(onClick = onNavigateToGallery) {
+                        Icon(Icons.Default.Collections, contentDescription = "Gallery")
+                    }
                     IconButton(onClick = onNavigateToCapture) {
-                        Icon(Icons.Default.PhotoLibrary, contentDescription = "Capture History")
+                        Icon(Icons.Default.PhotoLibrary, contentDescription = "Capture")
                     }
                     IconButton(onClick = onNavigateToSettings) {
                         Icon(Icons.Default.Settings, contentDescription = "Settings")
