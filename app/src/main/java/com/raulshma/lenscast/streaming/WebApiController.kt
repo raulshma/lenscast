@@ -15,8 +15,10 @@ import com.raulshma.lenscast.camera.model.HdrMode
 import com.raulshma.lenscast.camera.model.Resolution
 import com.raulshma.lenscast.camera.model.WhiteBalance
 import com.raulshma.lenscast.data.StreamAuthSettings
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.io.File
 import java.text.SimpleDateFormat
@@ -326,7 +328,11 @@ class WebApiController(private val context: Context) {
         return try {
             val json = JSONObject(body)
             val index = json.getInt("index")
-            app.cameraService.selectLens(index)
+            runBlocking {
+                withContext(Dispatchers.Main) {
+                    app.cameraService.selectLens(index)
+                }
+            }
             """{"success":true}"""
         } catch (e: Exception) {
             Log.e(TAG, "Failed to select lens", e)

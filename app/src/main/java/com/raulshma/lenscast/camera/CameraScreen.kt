@@ -81,6 +81,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
@@ -218,12 +219,16 @@ fun CameraScreen(
                 }
                 is CameraState.Ready -> {
                     Box(modifier = Modifier.fillMaxSize()) {
-                        if (showPreview) {
-                            CameraPreview(
-                                viewModel = viewModel,
-                                modifier = Modifier.fillMaxSize()
-                            )
-                        } else {
+                        CameraPreview(
+                            viewModel = viewModel,
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .then(
+                                    if (showPreview) Modifier else Modifier.alpha(0f)
+                                )
+                        )
+
+                        if (!showPreview) {
                             Box(
                                 modifier = Modifier
                                     .fillMaxSize()
