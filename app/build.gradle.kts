@@ -3,6 +3,60 @@ plugins {
     alias(libs.plugins.kotlin.compose)
 }
 
+val installWebDeps by tasks.registering(Exec::class) {
+    description = "Installs web UI npm dependencies if needed"
+    group = "build"
+
+    workingDir = file("${rootProject.projectDir}/web")
+    if (org.gradle.internal.os.OperatingSystem.current().isWindows) {
+        commandLine("cmd", "/c", "npm", "install")
+    } else {
+        commandLine("npm", "install")
+    }
+
+    inputs.file(file("${rootProject.projectDir}/web/package.json"))
+    inputs.file(file("${rootProject.projectDir}/web/package-lock.json"))
+    outputs.dir(file("${rootProject.projectDir}/web/node_modules"))
+}
+
+val buildWebUi by tasks.registering(Exec::class) {
+    description = "Builds the SolidJS web UI into Android assets"
+    group = "build"
+
+    dependsOn(installWebDeps)
+
+    workingDir = file("${rootProject.projectDir}/web")
+    if (org.gradle.internal.os.OperatingSystem.current().isWindows) {
+        commandLine("cmd", "/c", "npm", "run", "build")
+    } else {
+        commandLine("npm", "run", "build")
+    }
+
+    val webSrc = file("${rootProject.projectDir}/web/src")
+    val webPkg = file("${rootProject.projectDir}/web/package.json")
+    val webVite = file("${rootProject.projectDir}/web/vite.config.ts")
+    inputs.dir(webSrc)
+    inputs.file(webPkg)
+    inputs.file(webVite)
+    outputs.dir(file("src/main/assets/webui"))
+
+    isIgnoreExitValue = true
+
+    doLast {
+        val result = executionResult.get()
+        if (result.exitValue != 0) {
+            throw GradleException(
+                """
+                |Web UI build failed (exit code ${result.exitValue}).
+                |Make sure Node.js and npm are installed, then run:
+                |  cd web && npm install && npm run build
+                |Then rebuild the Android project.
+                """.trimMargin()
+            )
+        }
+    }
+}
+
 android {
     namespace = "com.raulshma.lenscast"
     compileSdk = 36
@@ -33,6 +87,16 @@ android {
     buildFeatures {
         compose = true
     }
+}
+
+tasks.matching {
+    it.name.startsWith("merge") && it.name.endsWith("Assets")
+}.configureEach {
+    dependsOn(buildWebUi)
+}
+
+tasks.matching { it.name == "preBuild" }.configureEach {
+    dependsOn(buildWebUi)
 }
 
 dependencies {

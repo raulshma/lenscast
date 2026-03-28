@@ -19,7 +19,7 @@ import java.util.concurrent.atomic.AtomicInteger
 
 class StreamingManager(private val context: Context) {
 
-    private var server: StreamingServer = StreamingServer(DEFAULT_PORT)
+    private var server: StreamingServer = StreamingServer(DEFAULT_PORT, context)
     private var encoder: H264Encoder? = null
     private val isStreaming = AtomicBoolean(false)
     private val jpegQuality = AtomicInteger(DEFAULT_JPEG_QUALITY)
@@ -43,7 +43,7 @@ class StreamingManager(private val context: Context) {
         }
         if (port != currentPort) {
             currentPort = port
-            server = StreamingServer(port)
+            server = StreamingServer(port, context)
             Log.d(TAG, "Streaming port set to $port")
         }
     }

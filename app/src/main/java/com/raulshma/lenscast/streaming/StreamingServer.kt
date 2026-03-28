@@ -1,10 +1,9 @@
 package com.raulshma.lenscast.streaming
 
-import android.graphics.Bitmap
-import android.graphics.BitmapFactory
+import android.content.Context
+import android.util.Base64
 import android.util.Log
 import fi.iki.elonen.NanoHTTPD
-import android.util.Base64
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.io.InputStream
@@ -13,6 +12,7 @@ import java.util.concurrent.atomic.AtomicInteger
 
 class StreamingServer(
     private val port: Int = 8080,
+    private val context: Context? = null,
 ) : NanoHTTPD(port) {
 
     private val boundary = "LensCastBoundary"
@@ -23,7 +23,9 @@ class StreamingServer(
     var authUsername: String? = null
     var authPassword: String? = null
 
-    private val controlPageHtml = """
+    private val apiController: WebApiController? = context?.let { WebApiController(it) }
+
+    private val fallbackControlPageHtml = """
         <!DOCTYPE html>
         <html>
         <head><title>LensCast - IPTV Camera</title>
@@ -40,8 +42,7 @@ class StreamingServer(
             <h1>LensCast Camera</h1>
             <a href="/stream">MJPEG Stream</a>
             <a href="/snapshot">Snapshot</a>
-            <a href="/settings">Settings (JSON)</a>
-            <p class="info">Stream URL: /stream | Snapshot: /snapshot | Settings: /settings</p>
+            <p class="info">Stream URL: /stream | Snapshot: /snapshot | API: /api/settings</p>
         </body>
         </html>
     """.trimIndent()
@@ -63,12 +64,15 @@ class StreamingServer(
                 addHeader("WWW-Authenticate", "Basic realm=\"LensCast\"")
             }
         }
-        return when (session.uri) {
-            "/" -> newFixedLengthResponse(Response.Status.OK, "text/html", controlPageHtml)
-            "/stream" -> serveMjpegStream()
-            "/snapshot" -> serveSnapshot()
-            "/settings" -> serveSettings(session)
-            else -> newFixedLengthResponse(Response.Status.NOT_FOUND, MIME_PLAINTEXT, "Not Found")
+
+        val uri = session.uri
+        val method = session.method
+
+        return when {
+            uri == "/stream" -> serveMjpegStream()
+            uri == "/snapshot" -> serveSnapshot()
+            uri.startsWith("/api/") -> handleApiRoute(uri, method, session)
+            else -> serveStaticFile(uri)
         }
     }
 
@@ -91,6 +95,111 @@ class StreamingServer(
         val parts = decoded.split(":", limit = 2)
         if (parts.size != 2) return false
         return parts[0] == username && parts[1] == password
+    }
+
+    private fun handleApiRoute(uri: String, method: Method, session: IHTTPSession): Response {
+        val controller = apiController
+        if (controller == null) {
+            return newFixedLengthResponse(
+                Response.Status.INTERNAL_ERROR,
+                "application/json",
+                """{"error":"API not available"}"""
+            )
+        }
+
+        val body = readBody(session)
+        val json = when {
+            method == Method.GET && uri == "/api/settings" -> controller.handleGetSettings()
+            method == Method.PUT && uri == "/api/settings" -> controller.handlePutSettings(body)
+            method == Method.POST && uri == "/api/settings" -> controller.handlePutSettings(body)
+            method == Method.GET && uri == "/api/status" -> controller.handleGetStatus()
+            method == Method.POST && uri == "/api/capture" -> controller.handleCapture()
+            method == Method.GET && uri == "/api/camera/lenses" -> controller.handleGetLenses()
+            method == Method.PUT && uri == "/api/camera/lens" -> controller.handleSelectLens(body)
+            method == Method.POST && uri == "/api/camera/lens" -> controller.handleSelectLens(body)
+            else -> null
+        }
+
+        return if (json != null) {
+            newFixedLengthResponse(Response.Status.OK, "application/json", json).apply {
+                addHeader("Access-Control-Allow-Origin", "*")
+            }
+        } else {
+            newFixedLengthResponse(
+                Response.Status.NOT_FOUND,
+                "application/json",
+                """{"error":"Not found"}"""
+            ).apply {
+                addHeader("Access-Control-Allow-Origin", "*")
+            }
+        }
+    }
+
+    private fun readBody(session: IHTTPSession): String {
+        val contentLength = session.headers["content-length"]?.toLongOrNull() ?: 0L
+        if (contentLength <= 0L) return ""
+        return try {
+            val files = HashMap<String, String>()
+            session.parseBody(files)
+            files["postData"]
+                ?: files["content"]?.let { java.io.File(it).readText() }
+                ?: ""
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to read request body", e)
+            ""
+        }
+    }
+
+    private fun serveStaticFile(uri: String): Response {
+        val assetMgr = context?.assets ?: return serveFallbackControlPage()
+
+        val path = if (uri == "/" || uri == "") "webui/index.html" else "webui$uri"
+
+        return try {
+            val bytes = assetMgr.open(path).use { it.readBytes() }
+            val mimeType = getMimeType(path)
+            newFixedLengthResponse(
+                Response.Status.OK, mimeType,
+                ByteArrayInputStream(bytes), bytes.size.toLong()
+            )
+        } catch (_: Exception) {
+            if (path != "webui/index.html") {
+                try {
+                    val bytes = assetMgr.open("webui/index.html").use { it.readBytes() }
+                    newFixedLengthResponse(
+                        Response.Status.OK, "text/html",
+                        ByteArrayInputStream(bytes), bytes.size.toLong()
+                    )
+                } catch (_: Exception) {
+                    serveFallbackControlPage()
+                }
+            } else {
+                serveFallbackControlPage()
+            }
+        }
+    }
+
+    private fun serveFallbackControlPage(): Response {
+        return newFixedLengthResponse(Response.Status.OK, "text/html", fallbackControlPageHtml)
+    }
+
+    private fun getMimeType(path: String): String {
+        return when {
+            path.endsWith(".html") -> "text/html"
+            path.endsWith(".js") -> "application/javascript"
+            path.endsWith(".mjs") -> "application/javascript"
+            path.endsWith(".css") -> "text/css"
+            path.endsWith(".json") -> "application/json"
+            path.endsWith(".png") -> "image/png"
+            path.endsWith(".jpg") || path.endsWith(".jpeg") -> "image/jpeg"
+            path.endsWith(".svg") -> "image/svg+xml"
+            path.endsWith(".ico") -> "image/x-icon"
+            path.endsWith(".woff") -> "font/woff"
+            path.endsWith(".woff2") -> "font/woff2"
+            path.endsWith(".ttf") -> "font/ttf"
+            path.endsWith(".webp") -> "image/webp"
+            else -> "application/octet-stream"
+        }
     }
 
     private fun serveMjpegStream(): Response {
@@ -125,13 +234,18 @@ class StreamingServer(
                     val frame = frameQueue.poll()
                     if (frame != null) {
                         buffer.reset()
-                        val header = "\r\n--$boundary\r\nContent-Type: image/jpeg\r\nContent-Length: ${frame.size}\r\n\r\n"
+                        val header =
+                            "\r\n--$boundary\r\nContent-Type: image/jpeg\r\nContent-Length: ${frame.size}\r\n\r\n"
                         val headerBytes = header.toByteArray()
-                        val combined = ByteArray(headerBytes.size + frame.size + "\r\n".toByteArray().size)
+                        val combined =
+                            ByteArray(headerBytes.size + frame.size + "\r\n".toByteArray().size)
                         System.arraycopy(headerBytes, 0, combined, 0, headerBytes.size)
                         System.arraycopy(frame, 0, combined, headerBytes.size, frame.size)
                         val ending = "\r\n".toByteArray()
-                        System.arraycopy(ending, 0, combined, headerBytes.size + frame.size, ending.size)
+                        System.arraycopy(
+                            ending, 0, combined,
+                            headerBytes.size + frame.size, ending.size
+                        )
                         currentFrame = ByteArrayInputStream(combined)
                     } else {
                         Thread.sleep(16)
@@ -156,17 +270,13 @@ class StreamingServer(
     private fun serveSnapshot(): Response {
         val jpeg = latestJpeg
         return if (jpeg != null) {
-            newFixedLengthResponse(Response.Status.OK, "image/jpeg", ByteArrayInputStream(jpeg), jpeg.size.toLong())
+            newFixedLengthResponse(
+                Response.Status.OK, "image/jpeg",
+                ByteArrayInputStream(jpeg), jpeg.size.toLong()
+            )
         } else {
             newFixedLengthResponse(Response.Status.NOT_FOUND, MIME_PLAINTEXT, "No frame available")
         }
-    }
-
-    private fun serveSettings(session: IHTTPSession): Response {
-        val clients = clientCount.get()
-        val hasFrame = latestJpeg != null
-        val json = """{"streaming":$hasFrame,"clients":$clients}"""
-        return newFixedLengthResponse(Response.Status.OK, "application/json", json)
     }
 
     fun getClientCount(): Int = clientCount.get()
