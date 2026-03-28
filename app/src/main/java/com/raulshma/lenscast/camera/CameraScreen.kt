@@ -5,6 +5,9 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.camera.view.PreviewView
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -46,6 +49,8 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -62,6 +67,7 @@ import com.raulshma.lenscast.MainApplication
 import com.raulshma.lenscast.camera.model.CameraLensInfo
 import com.raulshma.lenscast.camera.model.CameraState
 import com.raulshma.lenscast.core.ThermalState
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -91,6 +97,9 @@ fun CameraScreen(
     ) { granted ->
         viewModel.onPermissionResult(granted)
     }
+
+    val coroutineScope = rememberCoroutineScope()
+    val flashAlpha = remember { Animatable(0f) }
 
     Scaffold(
         topBar = {
@@ -129,7 +138,13 @@ fun CameraScreen(
                     isStreaming = streamStatus.isActive,
                     isRecording = isRecording,
                     onStreamToggle = { viewModel.toggleStreaming() },
-                    onCapture = { viewModel.capturePhoto() },
+                    onCapture = { 
+                        viewModel.capturePhoto()
+                        coroutineScope.launch {
+                            flashAlpha.snapTo(1f)
+                            flashAlpha.animateTo(0f, animationSpec = tween(durationMillis = 150))
+                        }
+                    },
                     onRecord = { viewModel.toggleRecording() },
                 )
             }
@@ -153,6 +168,14 @@ fun CameraScreen(
                         viewModel = viewModel,
                         modifier = Modifier.fillMaxSize()
                     )
+                    
+                    if (flashAlpha.value > 0f) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .background(Color.White.copy(alpha = flashAlpha.value))
+                        )
+                    }
                 }
                 is CameraState.Error -> {
                     ErrorDisplay(
