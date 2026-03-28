@@ -15,6 +15,9 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+
+        val app = application as MainApplication
+        app.cameraService.setLifecycleOwner(this)
         setContent {
             LensCastTheme {
                 Surface(

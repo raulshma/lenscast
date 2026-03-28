@@ -16,6 +16,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.raulshma.lenscast.MainApplication
+import com.raulshma.lenscast.camera.model.CameraLensInfo
 import com.raulshma.lenscast.camera.model.CameraSettings
 import com.raulshma.lenscast.camera.model.CameraState
 import com.raulshma.lenscast.camera.model.StreamStatus
@@ -66,6 +67,9 @@ class CameraViewModel(
     private val _wifiConnected = MutableStateFlow(true)
     val wifiConnected: StateFlow<Boolean> = _wifiConnected.asStateFlow()
 
+    val availableLenses: StateFlow<List<CameraLensInfo>> = cameraService.availableLenses
+    val selectedLensIndex: StateFlow<Int> = cameraService.selectedLensIndex
+
     private var currentPreviewView: PreviewView? = null
     private var streamMonitorJob: Job? = null
     private var batteryMonitorJob: Job? = null
@@ -75,10 +79,13 @@ class CameraViewModel(
     val isRecording: StateFlow<Boolean> = _isRecording.asStateFlow()
 
     init {
-        checkPermission()
+        // Collect from service but ONLY update if the service is not Idle, 
+        // to prevent overwriting our local RequestPermission state!
         viewModelScope.launch {
             cameraService.cameraState.collect { state ->
-                _cameraState.value = state
+                if (state != CameraState.Idle) {
+                    _cameraState.value = state
+                }
             }
         }
         viewModelScope.launch {
@@ -101,14 +108,17 @@ class CameraViewModel(
                 streamingManager.setJpegQuality(quality)
             }
         }
+
+        // Run checkPermission AFTER collectors are set up
+        checkPermission()
     }
 
     fun checkPermission() {
         _hasCameraPermission.value = ContextCompat.checkSelfPermission(
             context, android.Manifest.permission.CAMERA
         ) == PackageManager.PERMISSION_GRANTED
+        Log.d(TAG, "checkPermission: granted=${_hasCameraPermission.value}")
         if (_hasCameraPermission.value) {
-            _cameraState.value = CameraState.Idle
             initializeCamera()
         } else {
             _cameraState.value = CameraState.RequestPermission
@@ -126,9 +136,13 @@ class CameraViewModel(
 
     private fun initializeCamera() {
         viewModelScope.launch {
-            _cameraState.value = CameraState.Idle
+            Log.d(TAG, "initializeCamera: starting...")
+            _cameraState.value = CameraState.Initializing
             val result = cameraService.initialize()
-            if (result.isFailure) {
+            Log.d(TAG, "initializeCamera: result=${result.isSuccess}, exception=${result.exceptionOrNull()?.message}")
+            if (result.isSuccess) {
+                _cameraState.value = CameraState.Ready
+            } else {
                 _cameraState.value = CameraState.Error(
                     result.exceptionOrNull()?.message ?: "Camera initialization failed"
                 )
@@ -146,8 +160,9 @@ class CameraViewModel(
         }
     }
 
-    fun startPreview(previewView: PreviewView) {
+    fun startPreview(previewView: PreviewView, lifecycleOwner: androidx.lifecycle.LifecycleOwner) {
         currentPreviewView = previewView
+        cameraService.setLifecycleOwner(lifecycleOwner)
         cameraService.setFrameListener { bitmap ->
             streamingManager.pushFrame(bitmap)
         }
@@ -157,6 +172,10 @@ class CameraViewModel(
     fun switchCamera() {
         val pv = currentPreviewView ?: return
         cameraService.switchCamera(pv)
+    }
+
+    fun selectLens(index: Int) {
+        cameraService.selectLens(index)
     }
 
     fun updateSettings(settings: CameraSettings) {
@@ -354,5 +373,9 @@ class CameraViewModel(
                 powerManager, thermalMonitor, settingsDataStore
             ) as T
         }
+    }
+
+    companion object {
+        private const val TAG = "CameraViewModel"
     }
 }

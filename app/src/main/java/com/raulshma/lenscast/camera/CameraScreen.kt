@@ -4,6 +4,8 @@ import android.Manifest
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.camera.view.PreviewView
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -14,7 +16,10 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Camera
 import androidx.compose.material.icons.filled.CameraAlt
@@ -28,6 +33,8 @@ import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material.icons.filled.Wifi
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -44,10 +51,15 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.raulshma.lenscast.MainApplication
+import com.raulshma.lenscast.camera.model.CameraLensInfo
 import com.raulshma.lenscast.camera.model.CameraState
 import com.raulshma.lenscast.core.ThermalState
 
@@ -71,6 +83,8 @@ fun CameraScreen(
     val thermalState by viewModel.thermalState.collectAsState()
     val isRecording by viewModel.isRecording.collectAsState()
     val wifiConnected by viewModel.wifiConnected.collectAsState()
+    val availableLenses by viewModel.availableLenses.collectAsState()
+    val selectedLensIndex by viewModel.selectedLensIndex.collectAsState()
 
     val permissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
@@ -102,6 +116,13 @@ fun CameraScreen(
                         url = streamStatus.url,
                         clientCount = streamStatus.clientCount,
                         onCopyUrl = { viewModel.copyStreamUrl() }
+                    )
+                }
+                if (cameraState is CameraState.Ready && availableLenses.size > 1) {
+                    LensSelectorRow(
+                        lenses = availableLenses,
+                        selectedIndex = selectedLensIndex,
+                        onLensSelected = { index -> viewModel.selectLens(index) }
                     )
                 }
                 BottomControlBar(
@@ -141,13 +162,26 @@ fun CameraScreen(
                         }
                     )
                 }
-                is CameraState.Idle -> {
+                is CameraState.Initializing -> {
                     Box(
                         modifier = Modifier.fillMaxSize(),
                         contentAlignment = Alignment.Center
                     ) {
-                        Text("Initializing camera...", style = MaterialTheme.typography.bodyLarge)
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.Center
+                        ) {
+                            androidx.compose.material3.CircularProgressIndicator(
+                                modifier = Modifier.size(48.dp),
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                            Spacer(modifier = Modifier.height(16.dp))
+                            Text("Initializing camera...", style = MaterialTheme.typography.bodyLarge)
+                        }
                     }
+                }
+                is CameraState.Idle -> {
+                    // Waiting for permission check / init to start
                 }
             }
 
@@ -250,12 +284,21 @@ private fun CameraPreview(
     viewModel: CameraViewModel,
     modifier: Modifier = Modifier,
 ) {
+    val context = LocalContext.current
+    val previewView = androidx.compose.runtime.remember {
+        PreviewView(context).apply {
+            scaleType = PreviewView.ScaleType.FILL_CENTER
+        }
+    }
+
+    val lifecycleOwner = LocalLifecycleOwner.current
+    androidx.compose.runtime.DisposableEffect(previewView, lifecycleOwner) {
+        viewModel.startPreview(previewView, lifecycleOwner)
+        onDispose { }
+    }
+
     AndroidView(
-        factory = { ctx ->
-            val previewView = PreviewView(ctx)
-            viewModel.startPreview(previewView)
-            previewView
-        },
+        factory = { previewView },
         modifier = modifier
     )
 }
@@ -461,5 +504,49 @@ private fun ThermalWarningOverlay(
             style = MaterialTheme.typography.labelSmall,
             color = Color.White
         )
+    }
+}
+
+@Composable
+private fun LensSelectorRow(
+    lenses: List<CameraLensInfo>,
+    selectedIndex: Int,
+    onLensSelected: (Int) -> Unit,
+) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        color = MaterialTheme.colorScheme.surfaceContainerHigh
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState())
+                .padding(horizontal = 16.dp, vertical = 8.dp),
+            horizontalArrangement = Arrangement.Center,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            lenses.forEachIndexed { index, lens ->
+                if (index > 0) Spacer(modifier = Modifier.width(8.dp))
+                val isSelected = index == selectedIndex
+                FilterChip(
+                    selected = isSelected,
+                    onClick = { onLensSelected(index) },
+                    label = {
+                        Text(
+                            text = lens.label,
+                            style = MaterialTheme.typography.labelMedium.copy(
+                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                            ),
+                            textAlign = TextAlign.Center,
+                        )
+                    },
+                    colors = FilterChipDefaults.filterChipColors(
+                        selectedContainerColor = MaterialTheme.colorScheme.primary,
+                        selectedLabelColor = MaterialTheme.colorScheme.onPrimary,
+                    ),
+                    shape = RoundedCornerShape(50),
+                )
+            }
+        }
     }
 }

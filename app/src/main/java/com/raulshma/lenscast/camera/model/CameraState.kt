@@ -2,6 +2,7 @@ package com.raulshma.lenscast.camera.model
 
 sealed class CameraState {
     data object Idle : CameraState()
+    data object Initializing : CameraState()
     data object RequestPermission : CameraState()
     data object Ready : CameraState()
     data class Error(val message: String) : CameraState()
