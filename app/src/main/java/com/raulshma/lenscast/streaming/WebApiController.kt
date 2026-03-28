@@ -217,6 +217,7 @@ class WebApiController(private val context: Context) {
     fun handleStartStream(): String {
         return try {
             val wasLiveStreaming = app.streamingManager.isLiveStreaming()
+            val wasServerRunning = app.streamingManager.isServerRunning.value
             if (!wasLiveStreaming) {
                 app.powerManager.refreshBatteryState()
                 app.powerManager.acquireWakeLock()
@@ -240,7 +241,8 @@ class WebApiController(private val context: Context) {
                     action = StreamingService.ACTION_START
                     putExtra(StreamingService.EXTRA_URL, app.streamingManager.streamUrl.value)
                 }
-                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                val shouldStartForeground = !wasServerRunning
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O && shouldStartForeground) {
                     context.startForegroundService(intent)
                 } else {
                     context.startService(intent)
@@ -271,7 +273,8 @@ class WebApiController(private val context: Context) {
                 }
 
                 val intent = Intent(context, StreamingService::class.java).apply {
-                    action = StreamingService.ACTION_STOP
+                    action = StreamingService.ACTION_PAUSE
+                    putExtra(StreamingService.EXTRA_URL, app.streamingManager.streamUrl.value)
                 }
                 context.startService(intent)
             }

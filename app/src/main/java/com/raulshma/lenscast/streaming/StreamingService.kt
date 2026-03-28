@@ -25,6 +25,7 @@ class StreamingService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             ACTION_START -> startStreamingForeground(intent.getStringExtra(EXTRA_URL))
+            ACTION_PAUSE -> pauseStreamingForeground(intent.getStringExtra(EXTRA_URL))
             ACTION_STOP -> stopStreamingForeground()
         }
         return START_STICKY
@@ -48,6 +49,20 @@ class StreamingService : Service() {
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
         Log.d(TAG, "Streaming foreground service stopped")
+    }
+
+    private fun pauseStreamingForeground(url: String?) {
+        val message = if (!url.isNullOrEmpty()) "Paused - $url" else "Streaming paused"
+        val notification = buildNotification(message)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            startForeground(
+                NOTIFICATION_ID, notification,
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA
+            )
+        } else {
+            startForeground(NOTIFICATION_ID, notification)
+        }
+        Log.d(TAG, "Streaming foreground service paused")
     }
 
     private fun buildNotification(message: String): Notification {
@@ -91,6 +106,7 @@ class StreamingService : Service() {
 
     companion object {
         const val ACTION_START = "com.raulshma.lenscast.START_STREAMING"
+        const val ACTION_PAUSE = "com.raulshma.lenscast.PAUSE_STREAMING"
         const val ACTION_STOP = "com.raulshma.lenscast.STOP_STREAMING"
         const val EXTRA_URL = "stream_url"
         private const val CHANNEL_ID = "streaming_channel"
