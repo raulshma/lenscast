@@ -111,6 +111,7 @@ class StreamingServer(
         val response = when {
             uri == "/stream" -> serveMjpegStream()
             uri == "/snapshot" -> serveSnapshot()
+            uri.startsWith("/api/media/") -> serveMediaFile(uri, session)
             uri.startsWith("/api/") -> handleApiRoute(uri, method, session)
             else -> serveStaticFile(uri)
         }
@@ -232,6 +233,20 @@ class StreamingServer(
             method == Method.GET && uri == "/api/camera/lenses" -> controller.handleGetLenses()
             method == Method.PUT && uri == "/api/camera/lens" -> controller.handleSelectLens(body)
             method == Method.POST && uri == "/api/camera/lens" -> controller.handleSelectLens(body)
+            method == Method.GET && uri == "/api/capture/interval/status" -> controller.handleGetIntervalCaptureStatus()
+            method == Method.POST && uri == "/api/capture/interval/start" -> controller.handleStartIntervalCapture(body)
+            method == Method.POST && uri == "/api/capture/interval/stop" -> controller.handleStopIntervalCapture()
+            method == Method.GET && uri == "/api/recording/status" -> controller.handleGetRecordingStatus()
+            method == Method.POST && uri == "/api/recording/start" -> controller.handleStartRecording(body)
+            method == Method.POST && uri == "/api/recording/stop" -> controller.handleStopRecording()
+            method == Method.GET && uri == "/api/gallery" -> {
+                val type = session.parameters?.get("type")?.firstOrNull()
+                controller.handleGetGallery(type)
+            }
+            uri.startsWith("/api/media/") && method == Method.DELETE -> {
+                val id = uri.removePrefix("/api/media/")
+                controller.handleDeleteMedia(id)
+            }
             else -> null
         }
 
@@ -298,6 +313,37 @@ class StreamingServer(
                 serveFallbackControlPage()
             }
         }
+    }
+
+    private fun serveMediaFile(uri: String, session: IHTTPSession): Response {
+        val controller = apiController ?: return newFixedLengthResponse(
+            Response.Status.INTERNAL_ERROR, "application/json",
+            """{"error":"API not available"}"""
+        )
+
+        val id = uri.removePrefix("/api/media/")
+        if (id.isEmpty()) {
+            return newFixedLengthResponse(
+                Response.Status.BAD_REQUEST, "application/json",
+                """{"error":"Missing media ID"}"""
+            )
+        }
+
+        val resolved = controller.resolveMediaFile(id)
+        if (resolved == null) {
+            return newFixedLengthResponse(
+                Response.Status.NOT_FOUND, "application/json",
+                """{"error":"Media not found"}"""
+            )
+        }
+
+        val (inputStream, mimeType) = resolved
+        val download = session.parameters?.containsKey("download") == true
+        val response = newChunkedResponse(Response.Status.OK, mimeType, inputStream)
+        if (download) {
+            response.addHeader("Content-Disposition", "attachment")
+        }
+        return response
     }
 
     private fun serveFallbackControlPage(): Response {

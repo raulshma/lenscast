@@ -1,11 +1,15 @@
 import { createSignal, createEffect, onCleanup, Show } from 'solid-js'
 import * as api from './api/client'
+import Gallery from './Gallery'
 import type {
   AllSettings, DeviceStatus, LensInfo, CameraSettings,
   FocusMode, WhiteBalance, Resolution, HdrMode,
+  IntervalCaptureConfig, RecordingConfig,
+  CaptureMode, FlashMode, RecordingQuality,
 } from './types'
 import {
   RESOLUTION_LABELS, FOCUS_MODE_LABELS, WB_LABELS, HDR_LABELS, FRAME_RATE_OPTIONS,
+  SCENE_MODE_OPTIONS, CAPTURE_MODE_LABELS, FLASH_MODE_LABELS, RECORDING_QUALITY_LABELS,
 } from './types'
 import './App.css'
 
@@ -105,6 +109,21 @@ function App() {
   const [previewVisible, setPreviewVisible] = createSignal(true)
   const [streamActionLoading, setStreamActionLoading] = createSignal(false)
   const [streamNonce, setStreamNonce] = createSignal(0)
+  const [showGallery, setShowGallery] = createSignal(false)
+
+  const [intervalConfig, setIntervalConfig] = createSignal<IntervalCaptureConfig>({
+    intervalSeconds: 5, totalCaptures: 100, imageQuality: 90,
+    captureMode: 'MINIMIZE_LATENCY', flashMode: 'OFF',
+  })
+  const [intervalRunning, setIntervalRunning] = createSignal(false)
+  const [intervalCompleted, setIntervalCompleted] = createSignal(0)
+
+  const [recordingConfig, setRecordingConfig] = createSignal<RecordingConfig>({
+    durationSeconds: 0, repeatIntervalSeconds: 0,
+    quality: 'HIGH', maxFileSizeBytes: 0,
+  })
+  const [isRecording, setIsRecording] = createSignal(false)
+  const [recordingElapsed, setRecordingElapsed] = createSignal(0)
 
   let saveTimer: ReturnType<typeof setTimeout> | null = null
 
@@ -194,6 +213,22 @@ function App() {
     }
   }
 
+  async function fetchIntervalStatus() {
+    try {
+      const s = await api.getIntervalCaptureStatus()
+      setIntervalRunning(s.isRunning)
+      setIntervalCompleted(s.completedCaptures)
+    } catch { }
+  }
+
+  async function fetchRecordingStatus() {
+    try {
+      const s = await api.getRecordingStatus()
+      setIsRecording(s.isRecording)
+      setRecordingElapsed(s.elapsedSeconds)
+    } catch { }
+  }
+
   createEffect(() => {
     checkAuth()
   })
@@ -203,14 +238,20 @@ function App() {
     fetchSettings()
     fetchStatus()
     fetchLenses()
+    fetchIntervalStatus()
+    fetchRecordingStatus()
     const settingsInterval = setInterval(fetchSettings, 10000)
     const statusInterval = setInterval(fetchStatus, 5000)
     const lensesInterval = setInterval(fetchLenses, 15000)
+    const intervalStatusInterval = setInterval(fetchIntervalStatus, 3000)
+    const recordingStatusInterval = setInterval(fetchRecordingStatus, 1000)
     const handleVisibility = () => {
       if (!document.hidden) {
         fetchSettings()
         fetchStatus()
         fetchLenses()
+        fetchIntervalStatus()
+        fetchRecordingStatus()
       }
     }
     document.addEventListener('visibilitychange', handleVisibility)
@@ -218,6 +259,8 @@ function App() {
       clearInterval(settingsInterval)
       clearInterval(statusInterval)
       clearInterval(lensesInterval)
+      clearInterval(intervalStatusInterval)
+      clearInterval(recordingStatusInterval)
       document.removeEventListener('visibilitychange', handleVisibility)
     })
   })
@@ -305,6 +348,64 @@ function App() {
     }
   }
 
+  async function handleStartIntervalCapture() {
+    try {
+      const result = await api.startIntervalCapture(intervalConfig())
+      if (!result.success) {
+        setError(result.error || 'Failed to start interval capture')
+      } else {
+        setError('')
+        setIntervalRunning(true)
+        setIntervalCompleted(0)
+      }
+    } catch (e: any) {
+      setError(e.message || 'Failed to start interval capture')
+    }
+  }
+
+  async function handleStopIntervalCapture() {
+    try {
+      const result = await api.stopIntervalCapture()
+      if (!result.success) {
+        setError(result.error || 'Failed to stop interval capture')
+      } else {
+        setError('')
+        setIntervalRunning(false)
+      }
+    } catch (e: any) {
+      setError(e.message || 'Failed to stop interval capture')
+    }
+  }
+
+  async function handleStartRecording() {
+    try {
+      const result = await api.startRecording(recordingConfig())
+      if (!result.success) {
+        setError(result.error || 'Failed to start recording')
+      } else {
+        setError('')
+        setIsRecording(true)
+        setRecordingElapsed(0)
+      }
+    } catch (e: any) {
+      setError(e.message || 'Failed to start recording')
+    }
+  }
+
+  async function handleStopRecording() {
+    try {
+      const result = await api.stopRecording()
+      if (!result.success) {
+        setError(result.error || 'Failed to stop recording')
+      } else {
+        setError('')
+        setIsRecording(false)
+      }
+    } catch (e: any) {
+      setError(e.message || 'Failed to stop recording')
+    }
+  }
+
   createEffect(() => {
     if (status()?.streaming?.isActive) {
       setPreviewVisible(true)
@@ -355,6 +456,12 @@ function App() {
               <div class="badge badge-outline badge-info">
                 {st()?.streaming?.clientCount ?? 0} client{(st()?.streaming?.clientCount ?? 0) !== 1 ? 's' : ''}
               </div>
+              <button class="btn btn-ghost btn-xs gap-1" onClick={() => setShowGallery(true)}>
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                </svg>
+                Gallery
+              </button>
               <div
                 class="badge badge-outline"
                 classList={{
@@ -526,6 +633,44 @@ function App() {
                       )}
                     </div>
                   </div>
+                  <div class="form-control mt-2">
+                    <label class="label py-1">
+                      <span class="label-text text-xs">Exposure Time</span>
+                    </label>
+                    <div class="flex gap-2">
+                      <select
+                        class="select select-bordered select-sm w-24"
+                        value={s()?.camera?.exposureTime == null ? 'auto' : 'manual'}
+                        onChange={(e) => {
+                          if (e.currentTarget.value === 'auto') {
+                            updateCamera({ exposureTime: null })
+                          } else {
+                            updateCamera({ exposureTime: s()?.camera?.exposureTime ?? 10000000 })
+                          }
+                        }}
+                      >
+                        <option value="auto">Auto</option>
+                        <option value="manual">Manual</option>
+                      </select>
+                      {s()?.camera?.exposureTime != null && (
+                        <input
+                          type="number"
+                          class="input input-bordered input-sm flex-1"
+                          value={s()?.camera?.exposureTime ?? ''}
+                          min={100000}
+                          max={500000000}
+                          step={1000000}
+                          placeholder="ns"
+                          onChange={(e) => updateCamera({ exposureTime: parseInt(e.currentTarget.value) || null })}
+                        />
+                      )}
+                    </div>
+                    {s()?.camera?.exposureTime != null && (
+                      <span class="text-[10px] opacity-50 mt-1">
+                        {(s()!.camera.exposureTime! / 1_000_000).toFixed(1)}ms ({(s()!.camera.exposureTime! / 1_000_000_000).toFixed(3)}s)
+                      </span>
+                    )}
+                  </div>
                 </div>
               </div>
 
@@ -666,6 +811,23 @@ function App() {
                 <div class="card-body p-4">
                   <h3 class="text-xs font-semibold uppercase tracking-widest text-base-content/60 mb-3">Effects</h3>
                   <div class="form-control">
+                    <label class="label py-1">
+                      <span class="label-text text-xs">Scene Mode</span>
+                    </label>
+                    <select
+                      class="select select-bordered select-sm"
+                      value={s()?.camera?.sceneMode ?? ''}
+                      onChange={(e) => {
+                        const v = e.currentTarget.value
+                        updateCamera({ sceneMode: v === '' ? null : v })
+                      }}
+                    >
+                      {SCENE_MODE_OPTIONS.map((opt) => (
+                        <option value={opt.value}>{opt.label}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div class="form-control mt-2">
                     <label class="label cursor-pointer py-1">
                       <span class="label-text text-xs">Stabilization</span>
                       <input
@@ -743,6 +905,196 @@ function App() {
               </div>
 
 
+              {/* Interval Capture */}
+              <div class="card bg-base-200 shadow-sm">
+                <div class="card-body p-4">
+                  <h3 class="text-xs font-semibold uppercase tracking-widest text-base-content/60 mb-3">Interval Capture</h3>
+                  {intervalRunning() && (
+                    <div class="alert alert-info alert-soft text-sm py-2 mb-2">
+                      <span>Running: {intervalCompleted()} captures completed</span>
+                    </div>
+                  )}
+                  <div class="form-control">
+                    <label class="label py-1">
+                      <span class="label-text text-xs">Interval (seconds)</span>
+                      <span class="badge badge-primary badge-xs font-mono">
+                        {intervalConfig().intervalSeconds}s
+                      </span>
+                    </label>
+                    <input
+                      type="range"
+                      class="range range-primary range-xs"
+                      min={1}
+                      max={3600}
+                      value={intervalConfig().intervalSeconds}
+                      onInput={(e) => setIntervalConfig({ ...intervalConfig(), intervalSeconds: parseInt(e.currentTarget.value) })}
+                      disabled={intervalRunning()}
+                    />
+                  </div>
+                  <div class="form-control mt-2">
+                    <label class="label py-1">
+                      <span class="label-text text-xs">Total Captures</span>
+                      <span class="badge badge-primary badge-xs font-mono">
+                        {intervalConfig().totalCaptures}
+                      </span>
+                    </label>
+                    <input
+                      type="range"
+                      class="range range-primary range-xs"
+                      min={1}
+                      max={1000}
+                      value={intervalConfig().totalCaptures}
+                      onInput={(e) => setIntervalConfig({ ...intervalConfig(), totalCaptures: parseInt(e.currentTarget.value) })}
+                      disabled={intervalRunning()}
+                    />
+                  </div>
+                  <div class="form-control mt-2">
+                    <label class="label py-1">
+                      <span class="label-text text-xs">Image Quality</span>
+                      <span class="badge badge-primary badge-xs font-mono">
+                        {intervalConfig().imageQuality}%
+                      </span>
+                    </label>
+                    <input
+                      type="range"
+                      class="range range-primary range-xs"
+                      min={10}
+                      max={100}
+                      value={intervalConfig().imageQuality}
+                      onInput={(e) => setIntervalConfig({ ...intervalConfig(), imageQuality: parseInt(e.currentTarget.value) })}
+                      disabled={intervalRunning()}
+                    />
+                  </div>
+                  <div class="form-control mt-2">
+                    <label class="label py-1">
+                      <span class="label-text text-xs">Capture Mode</span>
+                    </label>
+                    <select
+                      class="select select-bordered select-sm"
+                      value={intervalConfig().captureMode}
+                      onChange={(e) => setIntervalConfig({ ...intervalConfig(), captureMode: e.currentTarget.value as CaptureMode })}
+                      disabled={intervalRunning()}
+                    >
+                      {Object.entries(CAPTURE_MODE_LABELS).map(([k, v]) => (
+                        <option value={k}>{v}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div class="form-control mt-2">
+                    <label class="label py-1">
+                      <span class="label-text text-xs">Flash Mode</span>
+                    </label>
+                    <select
+                      class="select select-bordered select-sm"
+                      value={intervalConfig().flashMode}
+                      onChange={(e) => setIntervalConfig({ ...intervalConfig(), flashMode: e.currentTarget.value as FlashMode })}
+                      disabled={intervalRunning()}
+                    >
+                      {Object.entries(FLASH_MODE_LABELS).map(([k, v]) => (
+                        <option value={k}>{v}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div class="mt-3">
+                    {intervalRunning() ? (
+                      <button
+                        class="btn btn-error btn-outline btn-sm w-full"
+                        onClick={handleStopIntervalCapture}
+                      >
+                        Stop Interval Capture
+                      </button>
+                    ) : (
+                      <button
+                        class="btn btn-primary btn-sm w-full"
+                        onClick={handleStartIntervalCapture}
+                        disabled={!st()?.streaming?.isActive}
+                      >
+                        Start Interval Capture
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* Recording */}
+              <div class="card bg-base-200 shadow-sm">
+                <div class="card-body p-4">
+                  <h3 class="text-xs font-semibold uppercase tracking-widest text-base-content/60 mb-3">Recording</h3>
+                  {isRecording() && (
+                    <div class="alert alert-error alert-soft text-sm py-2 mb-2">
+                      <span>Recording: {Math.floor(recordingElapsed() / 60).toString().padStart(2, '0')}:{(recordingElapsed() % 60).toString().padStart(2, '0')}</span>
+                    </div>
+                  )}
+                  <div class="form-control">
+                    <label class="label py-1">
+                      <span class="label-text text-xs">Quality</span>
+                    </label>
+                    <select
+                      class="select select-bordered select-sm"
+                      value={recordingConfig().quality}
+                      onChange={(e) => setRecordingConfig({ ...recordingConfig(), quality: e.currentTarget.value as RecordingQuality })}
+                      disabled={isRecording()}
+                    >
+                      {Object.entries(RECORDING_QUALITY_LABELS).map(([k, v]) => (
+                        <option value={k}>{v}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div class="form-control mt-2">
+                    <label class="label py-1">
+                      <span class="label-text text-xs">Duration (seconds, 0 = unlimited)</span>
+                      <span class="badge badge-primary badge-xs font-mono">
+                        {recordingConfig().durationSeconds === 0 ? 'Unlimited' : `${recordingConfig().durationSeconds}s`}
+                      </span>
+                    </label>
+                    <input
+                      type="range"
+                      class="range range-primary range-xs"
+                      min={0}
+                      max={3600}
+                      value={recordingConfig().durationSeconds}
+                      onInput={(e) => setRecordingConfig({ ...recordingConfig(), durationSeconds: parseInt(e.currentTarget.value) })}
+                      disabled={isRecording()}
+                    />
+                  </div>
+                  <div class="form-control mt-2">
+                    <label class="label py-1">
+                      <span class="label-text text-xs">Repeat Interval (seconds, 0 = no repeat)</span>
+                      <span class="badge badge-primary badge-xs font-mono">
+                        {recordingConfig().repeatIntervalSeconds === 0 ? 'None' : `${recordingConfig().repeatIntervalSeconds}s`}
+                      </span>
+                    </label>
+                    <input
+                      type="range"
+                      class="range range-primary range-xs"
+                      min={0}
+                      max={3600}
+                      value={recordingConfig().repeatIntervalSeconds}
+                      onInput={(e) => setRecordingConfig({ ...recordingConfig(), repeatIntervalSeconds: parseInt(e.currentTarget.value) })}
+                      disabled={isRecording()}
+                    />
+                  </div>
+                  <div class="mt-3">
+                    {isRecording() ? (
+                      <button
+                        class="btn btn-error btn-outline btn-sm w-full"
+                        onClick={handleStopRecording}
+                      >
+                        Stop Recording
+                      </button>
+                    ) : (
+                      <button
+                        class="btn btn-primary btn-sm w-full"
+                        onClick={handleStartRecording}
+                        disabled={!st()?.streaming?.isActive}
+                      >
+                        Start Recording
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
+
               {/* Actions */}
               <div class="flex justify-end">
                 <button class="btn btn-error btn-outline btn-sm" onClick={handleResetDefaults}>
@@ -751,6 +1103,10 @@ function App() {
               </div>
             </section>
           </div>
+
+          <Show when={showGallery()}>
+            <Gallery onClose={() => setShowGallery(false)} />
+          </Show>
         </>
       }>
         {/* Login Screen */}

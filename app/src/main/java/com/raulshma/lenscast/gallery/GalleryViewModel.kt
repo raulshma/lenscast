@@ -22,6 +22,10 @@ class GalleryViewModel(
     private val captureHistoryStore: CaptureHistoryStore,
 ) : ViewModel() {
 
+    init {
+        captureHistoryStore.refreshFromMediaStore()
+    }
+
     private val _filter = MutableStateFlow(GalleryFilter.ALL)
     val filter: StateFlow<GalleryFilter> = _filter.asStateFlow()
 
@@ -41,7 +45,7 @@ class GalleryViewModel(
     }
 
     fun deleteItem(id: String) {
-        captureHistoryStore.remove(id)
+        captureHistoryStore.deleteMedia(id)
     }
 
     fun getItemById(id: String): CaptureHistory? {

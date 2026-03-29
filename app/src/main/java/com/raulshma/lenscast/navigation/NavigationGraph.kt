@@ -1,7 +1,6 @@
 package com.raulshma.lenscast.navigation
 
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.remember
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.compose.NavHost
@@ -54,9 +53,7 @@ fun NavigationGraph() {
             val galleryViewModel: GalleryViewModel = viewModel(
                 factory = GalleryViewModel.Factory(app.captureHistoryStore)
             )
-            val mediaItem = remember(mediaId) {
-                galleryViewModel.getItemById(mediaId)
-            }
+            val mediaItem = galleryViewModel.getItemById(mediaId)
 
             MediaViewerScreen(
                 mediaItem = mediaItem,

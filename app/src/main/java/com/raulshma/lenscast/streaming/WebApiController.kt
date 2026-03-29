@@ -9,12 +9,19 @@ import android.util.Log
 import androidx.camera.core.ImageCapture
 import androidx.camera.core.ImageCaptureException
 import androidx.core.content.ContextCompat
+import androidx.work.Constraints
+import androidx.work.Data
+import androidx.work.ExistingPeriodicWorkPolicy
+import androidx.work.PeriodicWorkRequestBuilder
+import androidx.work.WorkManager
 import com.raulshma.lenscast.MainApplication
 import com.raulshma.lenscast.camera.model.CameraSettings
 import com.raulshma.lenscast.camera.model.FocusMode
 import com.raulshma.lenscast.camera.model.HdrMode
 import com.raulshma.lenscast.camera.model.Resolution
 import com.raulshma.lenscast.camera.model.WhiteBalance
+import com.raulshma.lenscast.capture.IntervalCaptureWorker
+import com.raulshma.lenscast.capture.RecordingService
 
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
@@ -25,11 +32,24 @@ import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.util.concurrent.TimeUnit
 
 class WebApiController(private val context: Context) {
 
     private val app: MainApplication
         get() = context.applicationContext as MainApplication
+
+    @Volatile
+    private var intervalCaptureRunning = false
+
+    @Volatile
+    private var intervalCaptureCompleted = 0
+
+    @Volatile
+    private var isRecording = false
+
+    @Volatile
+    private var recordingStartTime: Long = 0
 
     private val moshi by lazy {
         com.squareup.moshi.Moshi.Builder()
@@ -401,8 +421,205 @@ class WebApiController(private val context: Context) {
         }
     }
 
+    fun handleGetIntervalCaptureStatus(): String {
+        return try {
+            val workManager = WorkManager.getInstance(context)
+            val workInfos = workManager.getWorkInfosForUniqueWork(WORK_NAME_INTERVAL).get()
+            val isRunning = workInfos.any { !it.state.isFinished }
+            if (!isRunning) intervalCaptureRunning = false
+
+            JSONObject().apply {
+                put("isRunning", isRunning || intervalCaptureRunning)
+                put("completedCaptures", intervalCaptureCompleted)
+            }.toString()
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to get interval capture status", e)
+            """{"error":"${e.message?.replace("\"", "'")}"}"""
+        }
+    }
+
+    fun handleStartIntervalCapture(body: String): String {
+        return try {
+            val json = JSONObject(body)
+            val intervalSeconds = json.optLong("intervalSeconds", 5)
+            val totalCaptures = json.optInt("totalCaptures", 100)
+            val imageQuality = json.optInt("imageQuality", 90)
+
+            val constraints = Constraints.Builder()
+                .setRequiresBatteryNotLow(false)
+                .build()
+
+            val workRequest = PeriodicWorkRequestBuilder<IntervalCaptureWorker>(
+                intervalSeconds.coerceIn(1, 3600), TimeUnit.SECONDS
+            )
+                .setInputData(
+                    Data.Builder()
+                        .putLong(IntervalCaptureWorker.KEY_INTERVAL_SECONDS, intervalSeconds)
+                        .putInt(IntervalCaptureWorker.KEY_TOTAL_CAPTURES, totalCaptures)
+                        .putInt(IntervalCaptureWorker.KEY_IMAGE_QUALITY, imageQuality)
+                        .putInt(IntervalCaptureWorker.KEY_COMPLETED_CAPTURES, intervalCaptureCompleted)
+                        .build()
+                )
+                .setConstraints(constraints)
+                .build()
+
+            WorkManager.getInstance(context).enqueueUniquePeriodicWork(
+                WORK_NAME_INTERVAL,
+                ExistingPeriodicWorkPolicy.UPDATE,
+                workRequest
+            )
+
+            intervalCaptureRunning = true
+            intervalCaptureCompleted = 0
+
+            Log.d(TAG, "Interval capture started: every ${intervalSeconds}s, total=$totalCaptures")
+            """{"success":true}"""
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to start interval capture", e)
+            """{"success":false,"error":"${e.message?.replace("\"", "\\\"")}"}"""
+        }
+    }
+
+    fun handleStopIntervalCapture(): String {
+        return try {
+            WorkManager.getInstance(context).cancelUniqueWork(WORK_NAME_INTERVAL)
+            intervalCaptureRunning = false
+            Log.d(TAG, "Interval capture stopped")
+            """{"success":true}"""
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to stop interval capture", e)
+            """{"success":false,"error":"${e.message?.replace("\"", "\\\"")}"}"""
+        }
+    }
+
+    fun handleGetRecordingStatus(): String {
+        return try {
+            val elapsed = if (isRecording && recordingStartTime > 0) {
+                ((System.currentTimeMillis() - recordingStartTime) / 1000).toInt()
+            } else {
+                0
+            }
+            JSONObject().apply {
+                put("isRecording", isRecording)
+                put("elapsedSeconds", elapsed)
+            }.toString()
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to get recording status", e)
+            """{"error":"${e.message?.replace("\"", "'")}"}"""
+        }
+    }
+
+    fun handleStartRecording(body: String): String {
+        return try {
+            val configJson = if (body.isNotEmpty()) body else "{}"
+            val intent = Intent(context, RecordingService::class.java).apply {
+                action = RecordingService.ACTION_START
+                putExtra(RecordingService.EXTRA_CONFIG, configJson)
+            }
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                context.startForegroundService(intent)
+            } else {
+                context.startService(intent)
+            }
+            isRecording = true
+            recordingStartTime = System.currentTimeMillis()
+            Log.d(TAG, "Recording started")
+            """{"success":true}"""
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to start recording", e)
+            """{"success":false,"error":"${e.message?.replace("\"", "\\\"")}"}"""
+        }
+    }
+
+    fun handleStopRecording(): String {
+        return try {
+            val intent = Intent(context, RecordingService::class.java).apply {
+                action = RecordingService.ACTION_STOP
+            }
+            context.startService(intent)
+            isRecording = false
+            recordingStartTime = 0
+            Log.d(TAG, "Recording stopped")
+            """{"success":true}"""
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to stop recording", e)
+            """{"success":false,"error":"${e.message?.replace("\"", "\\\"")}"}"""
+        }
+    }
+
+    fun handleGetGallery(type: String?): String {
+        return try {
+            app.captureHistoryStore.refreshFromMediaStore()
+            val history = app.captureHistoryStore.history.value
+            val filtered = when (type?.uppercase()) {
+                "PHOTO" -> history.filter { it.type == com.raulshma.lenscast.capture.model.CaptureType.PHOTO }
+                "VIDEO" -> history.filter { it.type == com.raulshma.lenscast.capture.model.CaptureType.VIDEO }
+                else -> history
+            }
+            val array = org.json.JSONArray()
+            for (entry in filtered) {
+                val obj = JSONObject().apply {
+                    put("id", entry.id)
+                    put("type", entry.type.name)
+                    put("fileName", entry.fileName)
+                    put("timestamp", entry.timestamp)
+                    put("fileSizeBytes", entry.fileSizeBytes)
+                    put("durationMs", entry.durationMs)
+                    put("thumbnailUrl", "/api/media/${entry.id}")
+                    put("downloadUrl", "/api/media/${entry.id}?download=1")
+                }
+                array.put(obj)
+            }
+            JSONObject().apply {
+                put("items", array)
+                put("total", filtered.size)
+            }.toString()
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to get gallery", e)
+            """{"error":"${e.message?.replace("\"", "'")}"}"""
+        }
+    }
+
+    fun handleDeleteMedia(id: String): String {
+        return try {
+            val history = app.captureHistoryStore.history.value
+            val entry = history.find { it.id == id }
+            if (entry == null) {
+                """{"success":false,"error":"Media not found"}"""
+            } else {
+                app.captureHistoryStore.deleteMedia(id)
+                """{"success":true}"""
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to delete media", e)
+            """{"success":false,"error":"${e.message?.replace("\"", "'")}"}"""
+        }
+    }
+
+    fun resolveMediaFile(id: String): Pair<java.io.InputStream, String>? {
+        val history = app.captureHistoryStore.history.value
+        val entry = history.find { it.id == id } ?: return null
+        val mimeType = when (entry.type) {
+            com.raulshma.lenscast.capture.model.CaptureType.PHOTO -> "image/jpeg"
+            com.raulshma.lenscast.capture.model.CaptureType.VIDEO -> "video/mp4"
+        }
+        return try {
+            val uri = android.net.Uri.parse(entry.filePath)
+            val inputStream = context.contentResolver.openInputStream(uri)
+            if (inputStream != null) return Pair(inputStream, mimeType)
+            val file = java.io.File(entry.filePath)
+            if (file.exists()) Pair(file.inputStream(), mimeType) else null
+        } catch (_: Exception) {
+            try {
+                val file = java.io.File(entry.filePath)
+                if (file.exists()) Pair(file.inputStream(), mimeType) else null
+            } catch (_: Exception) { null }
+        }
+    }
+
     companion object {
         private const val TAG = "WebApiController"
         private val DATE_FORMAT = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US)
+        private const val WORK_NAME_INTERVAL = "interval_capture"
     }
 }

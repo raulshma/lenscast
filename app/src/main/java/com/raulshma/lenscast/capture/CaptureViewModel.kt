@@ -82,6 +82,7 @@ class CaptureViewModel(
     }
 
     init {
+        captureHistoryStore.refreshFromMediaStore()
         viewModelScope.launch {
             captureHistoryStore.history.collect { history ->
                 _captureHistory.value = history
@@ -306,7 +307,7 @@ class CaptureViewModel(
     }
 
     fun deleteHistoryEntry(id: String) {
-        captureHistoryStore.remove(id)
+        captureHistoryStore.deleteMedia(id)
     }
 
     override fun onCleared() {

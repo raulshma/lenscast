@@ -79,3 +79,60 @@ export async function startStream(): Promise<{ success: boolean; isActive?: bool
   if (!res.ok) throw new Error(`Failed to start stream: ${res.status}`)
   return res.json()
 }
+
+export async function getIntervalCaptureStatus(): Promise<import('../types').IntervalCaptureStatus> {
+  const res = await fetch('/api/capture/interval/status')
+  if (!res.ok) throw new Error(`Failed to fetch interval status: ${res.status}`)
+  return res.json()
+}
+
+export async function startIntervalCapture(config: import('../types').IntervalCaptureConfig): Promise<{ success: boolean; error?: string }> {
+  const res = await fetch('/api/capture/interval/start', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(config),
+  })
+  if (!res.ok) throw new Error(`Failed to start interval capture: ${res.status}`)
+  return res.json()
+}
+
+export async function stopIntervalCapture(): Promise<{ success: boolean; error?: string }> {
+  const res = await fetch('/api/capture/interval/stop', { method: 'POST' })
+  if (!res.ok) throw new Error(`Failed to stop interval capture: ${res.status}`)
+  return res.json()
+}
+
+export async function getRecordingStatus(): Promise<import('../types').RecordingStatus> {
+  const res = await fetch('/api/recording/status')
+  if (!res.ok) throw new Error(`Failed to fetch recording status: ${res.status}`)
+  return res.json()
+}
+
+export async function startRecording(config: import('../types').RecordingConfig): Promise<{ success: boolean; error?: string }> {
+  const res = await fetch('/api/recording/start', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(config),
+  })
+  if (!res.ok) throw new Error(`Failed to start recording: ${res.status}`)
+  return res.json()
+}
+
+export async function stopRecording(): Promise<{ success: boolean; error?: string }> {
+  const res = await fetch('/api/recording/stop', { method: 'POST' })
+  if (!res.ok) throw new Error(`Failed to stop recording: ${res.status}`)
+  return res.json()
+}
+
+export async function getGallery(type?: string): Promise<import('../types').GalleryResponse> {
+  const url = type ? `/api/gallery?type=${type}` : '/api/gallery'
+  const res = await fetch(url)
+  if (!res.ok) throw new Error(`Failed to fetch gallery: ${res.status}`)
+  return res.json()
+}
+
+export async function deleteMedia(id: string): Promise<{ success: boolean; error?: string }> {
+  const res = await fetch(`/api/media/${id}`, { method: 'DELETE' })
+  if (!res.ok) throw new Error(`Failed to delete media: ${res.status}`)
+  return res.json()
+}

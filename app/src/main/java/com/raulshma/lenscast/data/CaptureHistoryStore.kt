@@ -1,8 +1,14 @@
 package com.raulshma.lenscast.data
 
+import android.content.ContentUris
 import android.content.Context
+import android.net.Uri
+import android.os.Build
+import android.os.Environment
+import android.provider.MediaStore
 import android.util.Log
 import com.raulshma.lenscast.capture.model.CaptureHistory
+import com.raulshma.lenscast.capture.model.CaptureType
 import com.squareup.moshi.Moshi
 import com.squareup.moshi.Types
 import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
@@ -27,7 +33,7 @@ class CaptureHistoryStore(private val context: Context) {
     private val adapter = moshi.adapter<List<CaptureHistory>>(listType)
 
     private val historyFile = File(context.filesDir, "capture_history.json")
-    private val saveExecutor = Executors.newSingleThreadExecutor { r ->
+    private val ioExecutor = Executors.newSingleThreadExecutor { r ->
         Thread(r, "CaptureHistoryIO").apply { isDaemon = true }
     }
 
@@ -36,6 +42,7 @@ class CaptureHistoryStore(private val context: Context) {
 
     init {
         load()
+        refreshFromMediaStore()
     }
 
     private fun load() {
@@ -53,7 +60,7 @@ class CaptureHistoryStore(private val context: Context) {
 
     private fun save() {
         val snapshot = _history.value
-        saveExecutor.execute {
+        ioExecutor.execute {
             try {
                 val json = adapter.toJson(snapshot)
                 historyFile.writeText(json)
@@ -64,9 +71,23 @@ class CaptureHistoryStore(private val context: Context) {
     }
 
     fun add(entry: CaptureHistory) {
+        val existingIndex = _history.value.indexOfFirst {
+            normalizePath(it.filePath) == normalizePath(entry.filePath)
+        }
         val current = _history.value.toMutableList()
-        current.add(0, entry)
-        _history.value = current
+
+        if (existingIndex >= 0) {
+            current[existingIndex] = current[existingIndex].copy(
+                fileName = entry.fileName,
+                timestamp = maxOf(current[existingIndex].timestamp, entry.timestamp),
+                fileSizeBytes = entry.fileSizeBytes.takeIf { it > 0 } ?: current[existingIndex].fileSizeBytes,
+                durationMs = entry.durationMs.takeIf { it > 0 } ?: current[existingIndex].durationMs,
+            )
+        } else {
+            current.add(0, entry)
+        }
+
+        _history.value = current.sortedByDescending { it.timestamp }
         save()
     }
 
@@ -80,6 +101,30 @@ class CaptureHistoryStore(private val context: Context) {
     fun clear() {
         _history.value = emptyList()
         save()
+    }
+
+    fun refreshFromMediaStore() {
+        ioExecutor.execute {
+            try {
+                val merged = mergeWithMediaStore(_history.value)
+                if (merged != _history.value) {
+                    _history.value = merged
+                    save()
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to refresh capture history from MediaStore", e)
+            }
+        }
+    }
+
+    fun deleteMedia(id: String) {
+        val entry = _history.value.find { it.id == id } ?: return
+        val deleted = deleteBackingMedia(entry.filePath)
+        if (deleted || !mediaExists(entry.filePath)) {
+            remove(id)
+        } else {
+            Log.w(TAG, "Failed to delete media for history entry ${entry.filePath}")
+        }
     }
 
     suspend fun deleteOlderThan(beforeTimestamp: Long): Int = withContext(Dispatchers.IO) {
@@ -98,7 +143,7 @@ class CaptureHistoryStore(private val context: Context) {
     ): CaptureHistory {
         return CaptureHistory(
             id = UUID.randomUUID().toString(),
-            type = com.raulshma.lenscast.capture.model.CaptureType.PHOTO,
+            type = CaptureType.PHOTO,
             fileName = fileName,
             filePath = filePath,
             timestamp = System.currentTimeMillis(),
@@ -114,7 +159,7 @@ class CaptureHistoryStore(private val context: Context) {
     ): CaptureHistory {
         return CaptureHistory(
             id = UUID.randomUUID().toString(),
-            type = com.raulshma.lenscast.capture.model.CaptureType.VIDEO,
+            type = CaptureType.VIDEO,
             fileName = fileName,
             filePath = filePath,
             timestamp = System.currentTimeMillis(),
@@ -122,6 +167,189 @@ class CaptureHistoryStore(private val context: Context) {
             durationMs = durationMs,
         )
     }
+
+    private fun mergeWithMediaStore(current: List<CaptureHistory>): List<CaptureHistory> {
+        val deviceMedia = queryCapturedMedia()
+        if (deviceMedia.isEmpty()) {
+            return current.sortedByDescending { it.timestamp }
+        }
+
+        val deviceByPath = deviceMedia.associateBy { normalizePath(it.filePath) }
+        val merged = current.map { existing ->
+            val deviceMatch = deviceByPath[normalizePath(existing.filePath)]
+            if (deviceMatch == null) {
+                existing
+            } else {
+                existing.copy(
+                    fileName = deviceMatch.fileName.ifBlank { existing.fileName },
+                    timestamp = maxOf(existing.timestamp, deviceMatch.timestamp),
+                    fileSizeBytes = deviceMatch.fileSizeBytes.takeIf { it > 0 } ?: existing.fileSizeBytes,
+                    durationMs = deviceMatch.durationMs.takeIf { it > 0 } ?: existing.durationMs,
+                )
+            }
+        }.toMutableList()
+
+        val existingPaths = merged.mapTo(mutableSetOf()) { normalizePath(it.filePath) }
+        deviceMedia.forEach { media ->
+            if (existingPaths.add(normalizePath(media.filePath))) {
+                merged.add(media.copy(id = UUID.randomUUID().toString()))
+            }
+        }
+
+        return merged.sortedByDescending { it.timestamp }
+    }
+
+    private fun queryCapturedMedia(): List<CaptureHistory> {
+        val photos = queryPhotos()
+        val videos = queryVideos()
+        return (photos + videos).sortedByDescending { it.timestamp }
+    }
+
+    private fun queryPhotos(): List<CaptureHistory> {
+        return queryMediaCollection(
+            collection = MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+            projection = arrayOf(
+                MediaStore.Images.Media._ID,
+                MediaStore.MediaColumns.DISPLAY_NAME,
+                MediaStore.MediaColumns.SIZE,
+                MediaStore.Images.Media.DATE_TAKEN,
+                MediaStore.MediaColumns.DATE_ADDED,
+                MediaStore.MediaColumns.RELATIVE_PATH,
+                MediaStore.MediaColumns.DATA,
+            ),
+            folderPath = "${Environment.DIRECTORY_PICTURES}/LensCast/",
+            type = CaptureType.PHOTO,
+        )
+    }
+
+    private fun queryVideos(): List<CaptureHistory> {
+        return queryMediaCollection(
+            collection = MediaStore.Video.Media.EXTERNAL_CONTENT_URI,
+            projection = arrayOf(
+                MediaStore.Video.Media._ID,
+                MediaStore.MediaColumns.DISPLAY_NAME,
+                MediaStore.MediaColumns.SIZE,
+                MediaStore.Video.Media.DATE_TAKEN,
+                MediaStore.MediaColumns.DATE_ADDED,
+                MediaStore.MediaColumns.RELATIVE_PATH,
+                MediaStore.MediaColumns.DATA,
+                MediaStore.Video.Media.DURATION,
+            ),
+            folderPath = "${Environment.DIRECTORY_MOVIES}/LensCast/",
+            type = CaptureType.VIDEO,
+        )
+    }
+
+    private fun queryMediaCollection(
+        collection: Uri,
+        projection: Array<String>,
+        folderPath: String,
+        type: CaptureType,
+    ): List<CaptureHistory> {
+        val entries = mutableListOf<CaptureHistory>()
+        val (selection, selectionArgs) = mediaSelection(folderPath)
+
+        context.contentResolver.query(
+            collection,
+            projection,
+            selection,
+            selectionArgs,
+            "${MediaStore.MediaColumns.DATE_ADDED} DESC"
+        )?.use { cursor ->
+            val idIndex = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns._ID)
+            val nameIndex = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.DISPLAY_NAME)
+            val sizeIndex = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.SIZE)
+            val dateAddedIndex = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.DATE_ADDED)
+            val dateTakenIndex = cursor.getColumnIndex(MediaStore.Images.Media.DATE_TAKEN)
+            val durationIndex = cursor.getColumnIndex(MediaStore.Video.Media.DURATION)
+
+            while (cursor.moveToNext()) {
+                val id = cursor.getLong(idIndex)
+                val displayName = cursor.getString(nameIndex).orEmpty()
+                val fileSize = if (!cursor.isNull(sizeIndex)) cursor.getLong(sizeIndex) else 0L
+                val dateTakenMs = if (dateTakenIndex >= 0 && !cursor.isNull(dateTakenIndex)) {
+                    cursor.getLong(dateTakenIndex)
+                } else {
+                    0L
+                }
+                val dateAddedMs = if (!cursor.isNull(dateAddedIndex)) {
+                    cursor.getLong(dateAddedIndex) * 1000L
+                } else {
+                    0L
+                }
+                val durationMs = if (durationIndex >= 0 && !cursor.isNull(durationIndex)) {
+                    cursor.getLong(durationIndex)
+                } else {
+                    0L
+                }
+
+                entries.add(
+                    CaptureHistory(
+                        id = "",
+                        type = type,
+                        fileName = displayName,
+                        filePath = ContentUris.withAppendedId(collection, id).toString(),
+                        timestamp = maxOf(dateTakenMs, dateAddedMs),
+                        fileSizeBytes = fileSize,
+                        durationMs = durationMs,
+                    )
+                )
+            }
+        }
+
+        return entries
+    }
+
+    private fun mediaSelection(folderPath: String): Pair<String, Array<String>> {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            Pair(
+                "${MediaStore.MediaColumns.RELATIVE_PATH} LIKE ?",
+                arrayOf("$folderPath%")
+            )
+        } else {
+            @Suppress("DEPRECATION")
+            Pair(
+                "${MediaStore.MediaColumns.DATA} LIKE ?",
+                arrayOf("%/$folderPath%")
+            )
+        }
+    }
+
+    private fun deleteBackingMedia(filePath: String): Boolean {
+        return runCatching {
+            when {
+                filePath.startsWith("content://") -> {
+                    context.contentResolver.delete(Uri.parse(filePath), null, null) > 0
+                }
+                filePath.startsWith("file://") -> {
+                    File(Uri.parse(filePath).path.orEmpty()).delete()
+                }
+                else -> {
+                    val file = File(filePath)
+                    !file.exists() || file.delete()
+                }
+            }
+        }.getOrElse { error ->
+            Log.w(TAG, "Failed to delete backing media $filePath", error)
+            false
+        }
+    }
+
+    private fun mediaExists(filePath: String): Boolean {
+        return runCatching {
+            when {
+                filePath.startsWith("content://") -> {
+                    context.contentResolver.openInputStream(Uri.parse(filePath))?.use { true } ?: false
+                }
+                filePath.startsWith("file://") -> {
+                    File(Uri.parse(filePath).path.orEmpty()).exists()
+                }
+                else -> File(filePath).exists()
+            }
+        }.getOrDefault(false)
+    }
+
+    private fun normalizePath(filePath: String): String = filePath.trim()
 
     companion object {
         private const val TAG = "CaptureHistoryStore"

@@ -429,7 +429,6 @@ class CameraViewModel(
             intent.action = com.raulshma.lenscast.capture.RecordingService.ACTION_STOP
             context.startService(intent)
             _isRecording.value = false
-            cameraService.rebindUseCases()
         } else {
             intent.action = com.raulshma.lenscast.capture.RecordingService.ACTION_START
             if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {

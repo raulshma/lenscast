@@ -34,6 +34,7 @@ class RecordingService : Service() {
     private var isRecording = false
     private var startTimeMs: Long = 0
     private var recordingConfig: RecordingConfig? = null
+    private var isFinalizingRecording = false
 
     private val moshi by lazy {
         com.squareup.moshi.Moshi.Builder()
@@ -68,6 +69,7 @@ class RecordingService : Service() {
     private fun startRecording(config: RecordingConfig?) {
         if (isRecording) return
         recordingConfig = config
+        isFinalizingRecording = false
         startTimeMs = System.currentTimeMillis()
 
         val notification = buildNotification("Recording video...")
@@ -98,131 +100,134 @@ class RecordingService : Service() {
                 }
             }
 
-            val uri = contentResolver.insert(
-                MediaStore.Video.Media.EXTERNAL_CONTENT_URI, contentValues
-            )
+            val mediaStoreOutput = MediaStoreOutputOptions
+                .Builder(contentResolver, MediaStore.Video.Media.EXTERNAL_CONTENT_URI)
+                .setContentValues(contentValues)
+                .build()
 
-            if (uri != null) {
-                val mediaStoreOutput = MediaStoreOutputOptions
-                    .Builder(contentResolver, uri)
-                    .build()
+            val quality = when (config?.quality ?: RecordingQuality.HIGH) {
+                RecordingQuality.HIGH -> Quality.HIGHEST
+                RecordingQuality.MEDIUM -> Quality.FHD
+                RecordingQuality.LOW -> Quality.HD
+            }
 
-                val quality = when (config?.quality ?: RecordingQuality.HIGH) {
-                    RecordingQuality.HIGH -> Quality.HIGHEST
-                    RecordingQuality.MEDIUM -> Quality.FHD
-                    RecordingQuality.LOW -> Quality.HD
+            val recorder = Recorder.Builder()
+                .setQualitySelector(QualitySelector.from(quality))
+                .build()
+
+            val videoCapture = VideoCapture.withOutput(recorder)
+
+            val cameraProvider = cameraService.getCameraProvider() ?: run {
+                Log.e(TAG, "Camera provider not available")
+                cleanupFailedStart()
+                return
+            }
+
+            val camera = cameraService.getCamera()
+            if (camera == null) {
+                Log.e(TAG, "Camera not available")
+                cleanupFailedStart()
+                return
+            }
+
+            @Suppress("DEPRECATION")
+            cameraProvider.unbindAll()
+
+            val preview = if (cameraService.isPreviewAvailable()) cameraService.getPreview() else null
+            val imageCapture = cameraService.getImageCapture()
+            val imageAnalysis = cameraService.getImageAnalysis()
+
+            val lifecycleOwner = cameraService.getEffectiveLifecycleOwner()
+
+            @Suppress("DEPRECATION")
+            try {
+                when {
+                    preview != null && imageCapture != null && imageAnalysis != null ->
+                        cameraProvider.bindToLifecycle(
+                            lifecycleOwner, camera.cameraInfo.cameraSelector,
+                            preview, imageCapture, imageAnalysis, videoCapture
+                        )
+                    preview != null && imageCapture != null ->
+                        cameraProvider.bindToLifecycle(
+                            lifecycleOwner, camera.cameraInfo.cameraSelector,
+                            preview, imageCapture, videoCapture
+                        )
+                    preview != null && imageAnalysis != null ->
+                        cameraProvider.bindToLifecycle(
+                            lifecycleOwner, camera.cameraInfo.cameraSelector,
+                            preview, imageAnalysis, videoCapture
+                        )
+                    preview != null ->
+                        cameraProvider.bindToLifecycle(
+                            lifecycleOwner, camera.cameraInfo.cameraSelector,
+                            preview, videoCapture
+                        )
+                    imageAnalysis != null ->
+                        cameraProvider.bindToLifecycle(
+                            lifecycleOwner, camera.cameraInfo.cameraSelector,
+                            imageAnalysis, videoCapture
+                        )
+                    else ->
+                        cameraProvider.bindToLifecycle(
+                            lifecycleOwner, camera.cameraInfo.cameraSelector,
+                            videoCapture
+                        )
                 }
+                Log.d(TAG, "Bound use cases for recording (streaming preserved if active)")
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to bind all use cases, trying with VideoCapture only", e)
+                cameraProvider.bindToLifecycle(
+                    lifecycleOwner,
+                    camera.cameraInfo.cameraSelector,
+                    videoCapture
+                )
+            }
 
-                val recorder = Recorder.Builder()
-                    .setQualitySelector(QualitySelector.from(quality))
-                    .build()
-
-                val videoCapture = VideoCapture.withOutput(recorder)
-
-                val cameraProvider = cameraService.getCameraProvider() ?: run {
-                    Log.e(TAG, "Camera provider not available")
-                    cameraService.releaseKeepAlive()
-                    stopSelf()
-                    return
-                }
-
-                val camera = cameraService.getCamera()
-                if (camera == null) {
-                    Log.e(TAG, "Camera not available")
-                    cameraService.releaseKeepAlive()
-                    stopSelf()
-                    return
-                }
-
-                @Suppress("DEPRECATION")
-                cameraProvider.unbindAll()
-
-                val preview = if (cameraService.isPreviewAvailable()) cameraService.getPreview() else null
-                val imageCapture = cameraService.getImageCapture()
-                val imageAnalysis = cameraService.getImageAnalysis()
-
-                val lifecycleOwner = cameraService.getEffectiveLifecycleOwner()
-
-                @Suppress("DEPRECATION")
-                try {
-                    when {
-                        preview != null && imageCapture != null && imageAnalysis != null ->
-                            cameraProvider.bindToLifecycle(
-                                lifecycleOwner, camera.cameraInfo.cameraSelector,
-                                preview, imageCapture, imageAnalysis, videoCapture
-                            )
-                        preview != null && imageCapture != null ->
-                            cameraProvider.bindToLifecycle(
-                                lifecycleOwner, camera.cameraInfo.cameraSelector,
-                                preview, imageCapture, videoCapture
-                            )
-                        preview != null && imageAnalysis != null ->
-                            cameraProvider.bindToLifecycle(
-                                lifecycleOwner, camera.cameraInfo.cameraSelector,
-                                preview, imageAnalysis, videoCapture
-                            )
-                        preview != null ->
-                            cameraProvider.bindToLifecycle(
-                                lifecycleOwner, camera.cameraInfo.cameraSelector,
-                                preview, videoCapture
-                            )
-                        imageAnalysis != null ->
-                            cameraProvider.bindToLifecycle(
-                                lifecycleOwner, camera.cameraInfo.cameraSelector,
-                                imageAnalysis, videoCapture
-                            )
-                        else ->
-                            cameraProvider.bindToLifecycle(
-                                lifecycleOwner, camera.cameraInfo.cameraSelector,
-                                videoCapture
-                            )
-                    }
-                    Log.d(TAG, "Bound use cases for recording (streaming preserved if active)")
-                } catch (e: Exception) {
-                    Log.w(TAG, "Failed to bind all use cases, trying with VideoCapture only", e)
-                    cameraProvider.bindToLifecycle(
-                        lifecycleOwner,
-                        camera.cameraInfo.cameraSelector,
-                        videoCapture
-                    )
-                }
-
-                val currentRecording = videoCapture.output
-                    .prepareRecording(this, mediaStoreOutput)
-                    .start(ContextCompat.getMainExecutor(this)) { event ->
-                        when (event) {
-                            is VideoRecordEvent.Start -> {
-                                Log.d(TAG, "Recording started: $fileName")
+            val currentRecording = videoCapture.output
+                .prepareRecording(this, mediaStoreOutput)
+                .start(ContextCompat.getMainExecutor(this)) { event ->
+                    when (event) {
+                        is VideoRecordEvent.Start -> {
+                            Log.d(TAG, "Recording started: $fileName")
+                        }
+                        is VideoRecordEvent.Finalize -> {
+                            val savedUri = event.outputResults.outputUri.takeIf {
+                                it.toString().isNotBlank()
                             }
-                            is VideoRecordEvent.Finalize -> {
-                                if (!event.hasError()) {
-                                    val duration = System.currentTimeMillis() - startTimeMs
-                                    val entry = app.captureHistoryStore.createVideoEntry(
-                                        fileName = fileName,
-                                        filePath = uri.toString(),
-                                        fileSizeBytes = 0,
-                                        durationMs = duration,
-                                    )
-                                    app.captureHistoryStore.add(entry)
-                                    Log.d(TAG, "Recording saved: $fileName")
-                                } else {
-                                    Log.e(TAG, "Recording error: ${event.error}")
-                                }
-                                if (recordingConfig?.repeatIntervalSeconds?.let { it > 0 } == true) {
-                                    scheduleNextRecording(recordingConfig!!)
+
+                            if (!event.hasError() && savedUri != null) {
+                                val duration = System.currentTimeMillis() - startTimeMs
+                                val fileSizeBytes = queryMediaSize(savedUri)
+                                val entry = app.captureHistoryStore.createVideoEntry(
+                                    fileName = fileName,
+                                    filePath = savedUri.toString(),
+                                    fileSizeBytes = fileSizeBytes,
+                                    durationMs = duration,
+                                )
+                                app.captureHistoryStore.add(entry)
+                                Log.d(TAG, "Recording saved: $fileName at $savedUri ($fileSizeBytes bytes)")
+                            } else {
+                                Log.e(TAG, "Recording error: ${event.error}, uri=$savedUri")
+                                savedUri?.let { failedUri ->
+                                    runCatching {
+                                        contentResolver.delete(failedUri, null, null)
+                                    }.onFailure { deleteError ->
+                                        Log.w(TAG, "Failed to clean up incomplete recording $failedUri", deleteError)
+                                    }
                                 }
                             }
+
+                            finishRecordingSession()
                         }
                     }
+                }
 
-                activeRecording = currentRecording
-            }
+            activeRecording = currentRecording
+            isRecording = true
         } catch (e: Exception) {
             Log.e(TAG, "Failed to start recording", e)
-            cameraService.releaseKeepAlive()
+            cleanupFailedStart()
         }
-
-        isRecording = true
     }
 
     private fun scheduleNextRecording(config: RecordingConfig) {
@@ -236,20 +241,75 @@ class RecordingService : Service() {
     }
 
     private fun stopRecording() {
-        if (!isRecording) return
+        if (!isRecording || isFinalizingRecording) return
         isRecording = false
+        isFinalizingRecording = true
 
-        activeRecording?.stop()
-        activeRecording = null
-
-        val app = applicationContext as MainApplication
-        app.cameraService.releaseKeepAlive()
+        val currentRecording = activeRecording
+        if (currentRecording == null) {
+            finishRecordingSession()
+            return
+        }
 
         val duration = System.currentTimeMillis() - startTimeMs
         Log.d(TAG, "Recording stopped. Duration: ${duration}ms")
 
+        currentRecording.stop()
+    }
+
+    private fun finishRecordingSession() {
+        activeRecording = null
+        isFinalizingRecording = false
+
+        val app = applicationContext as MainApplication
+        app.cameraService.releaseKeepAlive()
+        app.cameraService.rebindUseCases()
+
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
+    }
+
+    private fun cleanupFailedStart(uri: android.net.Uri? = null) {
+        activeRecording = null
+        isRecording = false
+        isFinalizingRecording = false
+
+        uri?.let {
+            runCatching {
+                contentResolver.delete(it, null, null)
+            }.onFailure { deleteError ->
+                Log.w(TAG, "Failed to clean up recording entry $it", deleteError)
+            }
+        }
+
+        val app = applicationContext as MainApplication
+        app.cameraService.releaseKeepAlive()
+        app.cameraService.rebindUseCases()
+        stopForeground(STOP_FOREGROUND_REMOVE)
+        stopSelf()
+    }
+
+    private fun queryMediaSize(uri: android.net.Uri): Long {
+        return runCatching {
+            contentResolver.query(
+                uri,
+                arrayOf(MediaStore.MediaColumns.SIZE),
+                null,
+                null,
+                null
+            )?.use { cursor ->
+                if (cursor.moveToFirst()) {
+                    val sizeIndex = cursor.getColumnIndex(MediaStore.MediaColumns.SIZE)
+                    if (sizeIndex >= 0 && !cursor.isNull(sizeIndex)) {
+                        cursor.getLong(sizeIndex)
+                    } else {
+                        0L
+                    }
+                } else {
+                    0L
+                }
+            } ?: 0L
+        }.getOrDefault(0L)
     }
 
     private fun buildNotification(message: String): Notification {
