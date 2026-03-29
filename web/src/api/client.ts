@@ -136,3 +136,13 @@ export async function deleteMedia(id: string): Promise<{ success: boolean; error
   if (!res.ok) throw new Error(`Failed to delete media: ${res.status}`)
   return res.json()
 }
+
+export async function deleteMediaBatch(ids: string[]): Promise<{ success: boolean; error?: string; deleted?: string[] }> {
+  const res = await fetch('/api/media/batch-delete', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ids }),
+  })
+  if (!res.ok) throw new Error(`Failed to batch delete: ${res.status}`)
+  return res.json()
+}

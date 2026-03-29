@@ -258,6 +258,43 @@ html, body {
   opacity: 1;
 }
 
+.gallery-item-selected {
+  outline: 2px solid oklch(var(--p));
+  outline-offset: -2px;
+}
+
+.gallery-select-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 16px;
+  border-bottom: 1px solid oklch(var(--b2));
+  background: oklch(var(--b2));
+  flex-shrink: 0;
+}
+
+.gallery-select-check {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  z-index: 5;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.7);
+  background: rgba(0, 0, 0, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: white;
+  transition: all 0.15s;
+}
+
+.gallery-select-check-on {
+  border-color: oklch(var(--p));
+  background: oklch(var(--p));
+}
+
 .gallery-empty,
 .gallery-loading {
   display: flex;
@@ -303,4 +340,42 @@ html, body {
   padding: 12px 16px;
   background: rgba(0, 0, 0, 0.5);
   flex-shrink: 0;
+}
+
+.recording-timer-overlay {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(4px);
+  padding: 6px 14px;
+  border-radius: 20px;
+  z-index: 5;
+  user-select: none;
+}
+
+.recording-dot {
+  width: 10px;
+  height: 10px;
+  background: #f85149;
+  border-radius: 50%;
+  flex-shrink: 0;
+  animation: recording-pulse 1.5s ease-in-out infinite;
+}
+
+.recording-time {
+  font-family: ui-monospace, 'Cascadia Code', 'Source Code Pro', Menlo, Consolas, monospace;
+  font-size: 14px;
+  color: white;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  line-height: 1;
+}
+
+@keyframes recording-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
 }

@@ -596,6 +596,20 @@ class WebApiController(private val context: Context) {
         }
     }
 
+    fun handleBatchDeleteMedia(body: String): String {
+        return try {
+            val json = org.json.JSONObject(body)
+            val ids = json.getJSONArray("ids")
+            val idList = (0 until ids.length()).map { ids.getString(it) }
+            val deleted = app.captureHistoryStore.deleteMediaBatch(idList)
+            val deletedArr = org.json.JSONArray(deleted)
+            """{"success":true,"deleted":$deletedArr}"""
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to batch delete media", e)
+            """{"success":false,"error":"${e.message?.replace("\"", "'")}"}"""
+        }
+    }
+
     fun resolveMediaFile(id: String): Pair<java.io.InputStream, String>? {
         val history = app.captureHistoryStore.history.value
         val entry = history.find { it.id == id } ?: return null

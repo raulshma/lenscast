@@ -247,6 +247,9 @@ class StreamingServer(
                 val id = uri.removePrefix("/api/media/")
                 controller.handleDeleteMedia(id)
             }
+            uri == "/api/media/batch-delete" && method == Method.POST -> {
+                controller.handleBatchDeleteMedia(body)
+            }
             else -> null
         }
 

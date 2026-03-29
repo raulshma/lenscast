@@ -1,6 +1,7 @@
 import { createSignal, createEffect, onCleanup, Show } from 'solid-js'
 import * as api from './api/client'
 import Gallery from './Gallery'
+import { createRecordingTimer } from './RecordingTimer'
 import type {
   AllSettings, DeviceStatus, LensInfo, CameraSettings,
   FocusMode, WhiteBalance, Resolution, HdrMode,
@@ -124,6 +125,7 @@ function App() {
   })
   const [isRecording, setIsRecording] = createSignal(false)
   const [recordingElapsed, setRecordingElapsed] = createSignal(0)
+  const recordingTimer = createRecordingTimer(isRecording, recordingElapsed)
 
   let saveTimer: ReturnType<typeof setTimeout> | null = null
 
@@ -244,7 +246,7 @@ function App() {
     const statusInterval = setInterval(fetchStatus, 5000)
     const lensesInterval = setInterval(fetchLenses, 15000)
     const intervalStatusInterval = setInterval(fetchIntervalStatus, 3000)
-    const recordingStatusInterval = setInterval(fetchRecordingStatus, 1000)
+    const recordingStatusInterval = setInterval(fetchRecordingStatus, 5000)
     const handleVisibility = () => {
       if (!document.hidden) {
         fetchSettings()
@@ -500,6 +502,12 @@ function App() {
                     <span class="text-sm">{st()?.streaming?.isActive ? 'Stream error' : 'Stream not active'}</span>
                   </div>
                 )}
+                <Show when={isRecording()}>
+                  <div class="recording-timer-overlay">
+                    <span class="recording-dot" />
+                    <span class="recording-time">{recordingTimer.formatElapsed()}</span>
+                  </div>
+                </Show>
               </div>
               <div class="flex items-center gap-2 flex-shrink-0">
                 <button
@@ -1022,7 +1030,7 @@ function App() {
                   <h3 class="text-xs font-semibold uppercase tracking-widest text-base-content/60 mb-3">Recording</h3>
                   {isRecording() && (
                     <div class="alert alert-error alert-soft text-sm py-2 mb-2">
-                      <span>Recording: {Math.floor(recordingElapsed() / 60).toString().padStart(2, '0')}:{(recordingElapsed() % 60).toString().padStart(2, '0')}</span>
+                      <span>Recording: {recordingTimer.formatElapsed()}</span>
                     </div>
                   )}
                   <div class="form-control">

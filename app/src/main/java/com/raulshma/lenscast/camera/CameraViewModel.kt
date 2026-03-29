@@ -82,6 +82,11 @@ class CameraViewModel(
     private val _isRecording = MutableStateFlow(false)
     val isRecording: StateFlow<Boolean> = _isRecording.asStateFlow()
 
+    private val _recordingElapsedSeconds = MutableStateFlow(0)
+    val recordingElapsedSeconds: StateFlow<Int> = _recordingElapsedSeconds.asStateFlow()
+    private var recordingStartTimeMs: Long = 0L
+    private var recordingTimerJob: Job? = null
+
     private val _showPreview = MutableStateFlow(true)
     val showPreview: StateFlow<Boolean> = _showPreview.asStateFlow()
 
@@ -429,6 +434,9 @@ class CameraViewModel(
             intent.action = com.raulshma.lenscast.capture.RecordingService.ACTION_STOP
             context.startService(intent)
             _isRecording.value = false
+            recordingTimerJob?.cancel()
+            recordingTimerJob = null
+            _recordingElapsedSeconds.value = 0
         } else {
             intent.action = com.raulshma.lenscast.capture.RecordingService.ACTION_START
             if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
@@ -437,6 +445,15 @@ class CameraViewModel(
                 context.startService(intent)
             }
             _isRecording.value = true
+            recordingStartTimeMs = System.currentTimeMillis()
+            _recordingElapsedSeconds.value = 0
+            recordingTimerJob = viewModelScope.launch {
+                while (true) {
+                    delay(1000)
+                    _recordingElapsedSeconds.value =
+                        ((System.currentTimeMillis() - recordingStartTimeMs) / 1000).toInt()
+                }
+            }
         }
     }
 
@@ -445,6 +462,7 @@ class CameraViewModel(
         streamMonitorJob?.cancel()
         batteryMonitorJob?.cancel()
         thermalMonitorJob?.cancel()
+        recordingTimerJob?.cancel()
         streamingManager.release()
         cameraService.release()
         powerManager.releaseWakeLock()

@@ -7,7 +7,12 @@ import androidx.camera.view.PreviewView
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.InfiniteTransition
+import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -125,6 +130,7 @@ fun CameraScreen(
     val streamStatus by viewModel.streamStatus.collectAsState()
     val thermalState by viewModel.thermalState.collectAsState()
     val isRecording by viewModel.isRecording.collectAsState()
+    val recordingElapsedSeconds by viewModel.recordingElapsedSeconds.collectAsState()
     val wifiConnected by viewModel.wifiConnected.collectAsState()
     val availableLenses by viewModel.availableLenses.collectAsState()
     val selectedLensIndex by viewModel.selectedLensIndex.collectAsState()
@@ -317,6 +323,15 @@ fun CameraScreen(
                     modifier = Modifier
                         .align(Alignment.TopStart)
                         .padding(16.dp)
+                )
+            }
+
+            if (isRecording) {
+                RecordingIndicator(
+                    elapsedSeconds = recordingElapsedSeconds,
+                    modifier = Modifier
+                        .align(Alignment.TopStart)
+                        .padding(start = 16.dp, top = if (streamStatus.isActive) 44.dp else 16.dp)
                 )
             }
 
@@ -919,6 +934,57 @@ private fun StreamIndicator(
             Text(
                 text = "LIVE",
                 style = MaterialTheme.typography.labelSmall,
+                color = Color.White
+            )
+        }
+    }
+}
+
+@Composable
+private fun RecordingIndicator(
+    elapsedSeconds: Int,
+    modifier: Modifier = Modifier,
+) {
+    val infiniteTransition = rememberInfiniteTransition(label = "recDot")
+    val dotAlpha by infiniteTransition.animateFloat(
+        initialValue = 1f,
+        targetValue = 0.3f,
+        animationSpec = infiniteRepeatable(
+            animation = tween<Float>(durationMillis = 750),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "dotPulse"
+    )
+    val h = elapsedSeconds / 3600
+    val m = (elapsedSeconds % 3600) / 60
+    val s = elapsedSeconds % 60
+    val timeText = if (h > 0) {
+        String.format("%d:%02d:%02d", h, m, s)
+    } else {
+        String.format("%02d:%02d", m, s)
+    }
+
+    Surface(
+        modifier = modifier,
+        color = Color.Black.copy(alpha = 0.7f),
+        shape = RoundedCornerShape(16.dp)
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 5.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Surface(
+                modifier = Modifier.size(10.dp),
+                shape = CircleShape,
+                color = Color(0xFFF85149).copy(alpha = dotAlpha)
+            ) {}
+            Spacer(modifier = Modifier.size(8.dp))
+            Text(
+                text = timeText,
+                style = MaterialTheme.typography.labelMedium.copy(
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.SemiBold
+                ),
                 color = Color.White
             )
         }

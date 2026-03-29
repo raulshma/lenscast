@@ -127,6 +127,23 @@ class CaptureHistoryStore(private val context: Context) {
         }
     }
 
+    fun deleteMediaBatch(ids: List<String>): List<String> {
+        val deleted = mutableListOf<String>()
+        for (id in ids) {
+            val entry = _history.value.find { it.id == id } ?: continue
+            val ok = deleteBackingMedia(entry.filePath)
+            if (ok || !mediaExists(entry.filePath)) {
+                deleted.add(id)
+            }
+        }
+        if (deleted.isNotEmpty()) {
+            val idSet = deleted.toSet()
+            _history.value = _history.value.filterNot { it.id in idSet }
+            save()
+        }
+        return deleted
+    }
+
     suspend fun deleteOlderThan(beforeTimestamp: Long): Int = withContext(Dispatchers.IO) {
         val current = _history.value
         val remaining = current.filter { it.timestamp >= beforeTimestamp }

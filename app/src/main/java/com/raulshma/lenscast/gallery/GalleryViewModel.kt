@@ -40,12 +40,56 @@ class GalleryViewModel(
         }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
+    private val _selectMode = MutableStateFlow(false)
+    val selectMode: StateFlow<Boolean> = _selectMode.asStateFlow()
+
+    private val _selectedIds = MutableStateFlow<Set<String>>(emptySet())
+    val selectedIds: StateFlow<Set<String>> = _selectedIds.asStateFlow()
+
+    private val _batchDeleting = MutableStateFlow(false)
+    val batchDeleting: StateFlow<Boolean> = _batchDeleting.asStateFlow()
+
     fun setFilter(filter: GalleryFilter) {
         _filter.value = filter
     }
 
+    fun setSelectMode(enabled: Boolean) {
+        _selectMode.value = enabled
+        if (!enabled) {
+            _selectedIds.value = emptySet()
+        }
+    }
+
+    fun toggleSelect(id: String) {
+        val current = _selectedIds.value
+        _selectedIds.value = if (id in current) {
+            current - id
+        } else {
+            current + id
+        }
+    }
+
+    fun selectAll() {
+        _selectedIds.value = galleryItems.value.mapTo(mutableSetOf()) { it.id }
+    }
+
+    fun selectNone() {
+        _selectedIds.value = emptySet()
+    }
+
     fun deleteItem(id: String) {
         captureHistoryStore.deleteMedia(id)
+    }
+
+    fun deleteSelected() {
+        val ids = _selectedIds.value.toList()
+        if (ids.isEmpty()) return
+        viewModelScope.launch {
+            _batchDeleting.value = true
+            captureHistoryStore.deleteMediaBatch(ids)
+            _selectedIds.value = emptySet()
+            _batchDeleting.value = false
+        }
     }
 
     fun getItemById(id: String): CaptureHistory? {
