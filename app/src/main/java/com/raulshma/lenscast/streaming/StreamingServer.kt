@@ -5,12 +5,10 @@ import android.util.Base64
 import android.util.Log
 import fi.iki.elonen.NanoHTTPD
 import java.io.ByteArrayInputStream
-import java.io.ByteArrayOutputStream
 import java.io.InputStream
 import java.security.MessageDigest
 import java.security.SecureRandom
 import java.util.concurrent.ConcurrentHashMap
-import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.atomic.AtomicInteger
 
 class StreamingServer(
@@ -21,10 +19,9 @@ class StreamingServer(
     private val boundary = "LensCastBoundary"
     private val clientCount = AtomicInteger(0)
     private var latestJpeg: ByteArray? = null
-    private val listeners = ConcurrentLinkedQueue<(ByteArray?) -> Unit>()
     private val frameLock = Object()
+    private var latestFrameVersion = 0L
     private var isRunning = false
-    private val maxQueueDepth = 2
     var authUsername: String? = null
     var authPasswordHash: String? = null
 
@@ -60,9 +57,8 @@ class StreamingServer(
     fun updateFrame(jpegData: ByteArray) {
         synchronized(frameLock) {
             latestJpeg = jpegData
-        }
-        for (listener in listeners) {
-            listener(jpegData)
+            latestFrameVersion++
+            frameLock.notifyAll()
         }
     }
 
@@ -377,31 +373,16 @@ class StreamingServer(
         Log.d(TAG, "Client connected. Total: $clientNum")
 
         val stream = object : InputStream() {
-            private val frameQueue = ConcurrentLinkedQueue<ByteArray>()
-            private var currentFrame: ByteArrayInputStream? = null
-            private var listener: (ByteArray?) -> Unit = {}
-            private val queueLock = Object()
+            private var currentFrame: ByteArray? = null
+            private var currentFrameVersion = -1L
+            private var frameOffset = 0
+            private var headerBytes = ByteArray(0)
+            private var headerOffset = 0
+            private var footerOffset = 0
+            private var isFirstPart = true
+            private val footerBytes = "\r\n".toByteArray()
             @Volatile
             private var closed = false
-
-            init {
-                listener = { data ->
-                    if (data != null) {
-                        synchronized(queueLock) {
-                            while (frameQueue.size >= maxQueueDepth) {
-                                frameQueue.poll()
-                            }
-                            frameQueue.add(data)
-                            queueLock.notify()
-                        }
-                    }
-                }
-                listeners.add(listener)
-
-                synchronized(frameLock) {
-                    latestJpeg?.let { frameQueue.add(it) }
-                }
-            }
 
             override fun read(): Int {
                 val buf = ByteArray(1)
@@ -412,44 +393,111 @@ class StreamingServer(
             override fun read(b: ByteArray, off: Int, len: Int): Int {
                 if (closed) return -1
                 if (off < 0 || len < 0 || len > b.size - off) throw IndexOutOfBoundsException()
+                if (len == 0) return 0
 
-                while (true) {
-                    if (closed) return -1
+                var totalRead = 0
+                while (totalRead < len) {
+                    if (!ensureCurrentPart()) {
+                        return if (totalRead > 0) totalRead else -1
+                    }
 
-                    currentFrame?.let { frameStream ->
-                        val n = frameStream.read(b, off, len)
-                        if (n > 0) return n
+                    val writtenHeader = copyChunk(
+                        source = headerBytes,
+                        sourceOffset = headerOffset,
+                        target = b,
+                        targetOffset = off + totalRead,
+                        maxLength = len - totalRead,
+                    )
+                    headerOffset += writtenHeader
+                    totalRead += writtenHeader
+                    if (totalRead == len) break
+
+                    val frame = currentFrame ?: continue
+                    val writtenFrame = copyChunk(
+                        source = frame,
+                        sourceOffset = frameOffset,
+                        target = b,
+                        targetOffset = off + totalRead,
+                        maxLength = len - totalRead,
+                    )
+                    frameOffset += writtenFrame
+                    totalRead += writtenFrame
+                    if (totalRead == len) break
+
+                    val writtenFooter = copyChunk(
+                        source = footerBytes,
+                        sourceOffset = footerOffset,
+                        target = b,
+                        targetOffset = off + totalRead,
+                        maxLength = len - totalRead,
+                    )
+                    footerOffset += writtenFooter
+                    totalRead += writtenFooter
+
+                    if (headerOffset >= headerBytes.size &&
+                        frameOffset >= frame.size &&
+                        footerOffset >= footerBytes.size
+                    ) {
                         currentFrame = null
                     }
+                }
 
-                    synchronized(queueLock) {
-                        if (closed) return -1
-                        val frame = frameQueue.poll()
-                        if (frame != null) {
-                            val header =
-                                "\r\n--$boundary\r\nContent-Type: image/jpeg\r\nContent-Length: ${frame.size}\r\n\r\n"
-                            val headerBytes = header.toByteArray()
-                            val ending = "\r\n".toByteArray()
-                            val combined =
-                                ByteArray(headerBytes.size + frame.size + ending.size)
-                            System.arraycopy(headerBytes, 0, combined, 0, headerBytes.size)
-                            System.arraycopy(frame, 0, combined, headerBytes.size, frame.size)
-                            System.arraycopy(
-                                ending, 0, combined,
-                                headerBytes.size + frame.size, ending.size
-                            )
-                            currentFrame = ByteArrayInputStream(combined)
-                        } else {
-                            queueLock.wait(100)
+                return totalRead
+            }
+
+            private fun ensureCurrentPart(): Boolean {
+                if (closed) return false
+                val frame = currentFrame
+                if (frame != null && (
+                    headerOffset < headerBytes.size ||
+                        frameOffset < frame.size ||
+                        footerOffset < footerBytes.size
+                    )
+                ) {
+                    return true
+                }
+
+                synchronized(frameLock) {
+                    while (!closed) {
+                        val nextFrame = latestJpeg
+                        if (nextFrame != null && latestFrameVersion != currentFrameVersion) {
+                            currentFrame = nextFrame
+                            currentFrameVersion = latestFrameVersion
+                            frameOffset = 0
+                            footerOffset = 0
+                            headerOffset = 0
+                            headerBytes = buildHeader(nextFrame.size, isFirstPart).toByteArray()
+                            isFirstPart = false
+                            return true
                         }
+                        frameLock.wait(250)
                     }
                 }
+
+                return false
+            }
+
+            private fun buildHeader(frameSize: Int, isFirst: Boolean): String {
+                val prefix = if (isFirst) "--" else "\r\n--"
+                return "$prefix$boundary\r\nContent-Type: image/jpeg\r\nContent-Length: $frameSize\r\n\r\n"
+            }
+
+            private fun copyChunk(
+                source: ByteArray,
+                sourceOffset: Int,
+                target: ByteArray,
+                targetOffset: Int,
+                maxLength: Int,
+            ): Int {
+                if (sourceOffset >= source.size || maxLength <= 0) return 0
+                val copyLength = minOf(source.size - sourceOffset, maxLength)
+                System.arraycopy(source, sourceOffset, target, targetOffset, copyLength)
+                return copyLength
             }
 
             override fun close() {
                 closed = true
-                synchronized(queueLock) { queueLock.notifyAll() }
-                listeners.remove(listener)
+                synchronized(frameLock) { frameLock.notifyAll() }
                 val num = clientCount.decrementAndGet()
                 Log.d(TAG, "Client disconnected. Total: $num")
             }
@@ -459,7 +507,12 @@ class StreamingServer(
             Response.Status.OK,
             "multipart/x-mixed-replace; boundary=$boundary",
             stream
-        )
+        ).apply {
+            addHeader("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
+            addHeader("Pragma", "no-cache")
+            addHeader("Expires", "0")
+            addHeader("X-Accel-Buffering", "no")
+        }
     }
 
     private fun serveSnapshot(): Response {
@@ -468,7 +521,11 @@ class StreamingServer(
             newFixedLengthResponse(
                 Response.Status.OK, "image/jpeg",
                 ByteArrayInputStream(jpeg), jpeg.size.toLong()
-            )
+            ).apply {
+                addHeader("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
+                addHeader("Pragma", "no-cache")
+                addHeader("Expires", "0")
+            }
         } else {
             newFixedLengthResponse(Response.Status.NOT_FOUND, MIME_PLAINTEXT, "No frame available")
         }
@@ -492,7 +549,6 @@ class StreamingServer(
         if (isRunning) {
             stop()
             isRunning = false
-            listeners.clear()
             sessions.clear()
             Log.d(TAG, "Streaming server stopped")
         }

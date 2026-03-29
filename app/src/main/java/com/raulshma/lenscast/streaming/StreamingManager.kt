@@ -50,28 +50,50 @@ class StreamingManager(private val context: Context) {
             return
         }
         if (port != currentPort) {
+            val wasServerRunning = _isServerRunning.value
+            if (wasServerRunning) {
+                server.stopServer()
+                _isServerRunning.value = false
+            }
             currentPort = port
             server = StreamingServer(port, context)
+            _streamUrl.value = NetworkUtils.getStreamingUrl(currentPort) ?: "http://localhost:$currentPort/stream"
+            if (wasServerRunning) {
+                val restarted = server.startServer()
+                _isServerRunning.value = restarted
+                if (!restarted) {
+                    Log.e(TAG, "Failed to restart streaming server on new port $port")
+                }
+            }
             Log.d(TAG, "Streaming port set to $port")
         }
+    }
+
+    fun ensureServerRunning(): Boolean {
+        if (_isServerRunning.value) {
+            if (_streamUrl.value.isBlank()) {
+                _streamUrl.value = NetworkUtils.getStreamingUrl(currentPort) ?: "http://localhost:$currentPort/stream"
+            }
+            return true
+        }
+
+        val started = server.startServer()
+        if (!started) {
+            return false
+        }
+
+        _isServerRunning.value = true
+        _streamUrl.value = NetworkUtils.getStreamingUrl(currentPort) ?: "http://localhost:$currentPort/stream"
+        Log.d(TAG, "Streaming server ready at ${_streamUrl.value}")
+        return true
     }
 
     fun startStreaming(): Boolean {
         if (isStreaming.getAndSet(true)) return true
 
-        if (!_isServerRunning.value) {
-            val started = server.startServer()
-            if (!started) {
-                isStreaming.set(false)
-                return false
-            }
-
-            _isServerRunning.value = true
-        }
-
-        if (_streamUrl.value.isBlank()) {
-            val url = NetworkUtils.getStreamingUrl(currentPort)
-            _streamUrl.value = url ?: "http://localhost:$currentPort/stream"
+        if (!ensureServerRunning()) {
+            isStreaming.set(false)
+            return false
         }
 
         Log.d(TAG, "Streaming started at ${_streamUrl.value}")

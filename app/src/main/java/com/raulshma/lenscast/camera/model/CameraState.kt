@@ -10,6 +10,7 @@ sealed class CameraState {
 
 data class StreamStatus(
     val isActive: Boolean = false,
+    val isServerRunning: Boolean = false,
     val url: String = "",
     val clientCount: Int = 0,
 )

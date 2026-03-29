@@ -7,6 +7,11 @@ import com.raulshma.lenscast.core.ThermalMonitor
 import com.raulshma.lenscast.data.CaptureHistoryStore
 import com.raulshma.lenscast.data.SettingsDataStore
 import com.raulshma.lenscast.streaming.StreamingManager
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.launch
 
 class MainApplication : Application() {
     val cameraService: CameraService by lazy { CameraService(this) }
@@ -15,10 +20,31 @@ class MainApplication : Application() {
     val captureHistoryStore: CaptureHistoryStore by lazy { CaptureHistoryStore(this) }
     val powerManager: PowerManager by lazy { PowerManager(this) }
     val thermalMonitor: ThermalMonitor by lazy { ThermalMonitor(this) }
+    private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
     override fun onCreate() {
         super.onCreate()
         instance = this
+        initializeStreamingServer()
+    }
+
+    private fun initializeStreamingServer() {
+        appScope.launch {
+            settingsDataStore.streamingPort.collectLatest { port ->
+                streamingManager.setPort(port)
+                streamingManager.ensureServerRunning()
+            }
+        }
+        appScope.launch {
+            settingsDataStore.jpegQuality.collectLatest { quality ->
+                streamingManager.setJpegQuality(quality)
+            }
+        }
+        appScope.launch {
+            settingsDataStore.authSettings.collectLatest { auth ->
+                streamingManager.updateAuthSettings(auth)
+            }
+        }
     }
 
     companion object {

@@ -1,4 +1,4 @@
-import { createSignal, createEffect, onCleanup, Show } from 'solid-js'
+import { createEffect, createSignal, onCleanup, Show } from 'solid-js'
 import * as api from './api/client'
 import Gallery from './Gallery'
 import { createRecordingTimer } from './RecordingTimer'
@@ -13,85 +13,6 @@ import {
   SCENE_MODE_OPTIONS, CAPTURE_MODE_LABELS, FLASH_MODE_LABELS, RECORDING_QUALITY_LABELS,
 } from './types'
 import './App.css'
-
-const JPEG_SOI = new Uint8Array([0xff, 0xd8])
-const JPEG_EOI = new Uint8Array([0xff, 0xd9])
-
-function indexOfBytes(data: Uint8Array, pattern: Uint8Array, from = 0): number {
-  const max = data.length - pattern.length
-  for (let i = from; i <= max; i++) {
-    let ok = true
-    for (let j = 0; j < pattern.length; j++) {
-      if (data[i + j] !== pattern[j]) { ok = false; break }
-    }
-    if (ok) return i
-  }
-  return -1
-}
-
-function StreamCanvas(props: { url: string; onError: () => void }) {
-  const ctrl = new AbortController()
-  let aborted = false
-
-  onCleanup(() => {
-    aborted = true
-    ctrl.abort()
-  })
-
-  function init(el: HTMLCanvasElement) {
-    ;(async () => {
-      try {
-        const res = await fetch(props.url, { signal: ctrl.signal })
-        if (!res.body || aborted) return
-        const reader = res.body.getReader()
-        let buf = new Uint8Array(0)
-
-        while (!aborted) {
-          const { done, value } = await reader.read()
-          if (done) break
-          if (!value) continue
-
-          const next = new Uint8Array(buf.length + value.length)
-          next.set(buf)
-          next.set(value, buf.length)
-          buf = next
-
-          let latestFrame: Uint8Array | null = null
-
-          for (;;) {
-            const soi = indexOfBytes(buf, JPEG_SOI)
-            if (soi === -1) { buf = new Uint8Array(0); break }
-            const eoi = indexOfBytes(buf, JPEG_EOI, soi + 2)
-            if (eoi === -1) { buf = buf.slice(soi); break }
-            latestFrame = buf.slice(soi, eoi + 2)
-            buf = buf.slice(eoi + 2)
-          }
-
-          if (latestFrame && !aborted) {
-            try {
-              const blob = new Blob([new Uint8Array(latestFrame)], { type: 'image/jpeg' })
-              const bmp = await createImageBitmap(blob)
-              if (!aborted) {
-                if (el.width !== bmp.width) el.width = bmp.width
-                if (el.height !== bmp.height) el.height = bmp.height
-                el.getContext('2d')!.drawImage(bmp, 0, 0)
-              }
-              bmp.close()
-            } catch { /* partial frame */ }
-          }
-
-          if (buf.length > 3 * 1024 * 1024) {
-            buf = buf.slice(buf.length - 1024 * 1024)
-          }
-        }
-      } catch (e: any) {
-        if (!aborted && e.name !== 'AbortError') props.onError()
-      }
-    })()
-  }
-
-  return <canvas ref={init} class="preview-img" />
-}
 
 function App() {
   const [authRequired, setAuthRequired] = createSignal(false)
@@ -128,6 +49,10 @@ function App() {
   const recordingTimer = createRecordingTimer(isRecording, recordingElapsed)
 
   let saveTimer: ReturnType<typeof setTimeout> | null = null
+
+  function isPageHidden() {
+    return typeof document !== 'undefined' && document.hidden
+  }
 
   function debounceSave(fn: () => void, ms = 400) {
     if (saveTimer) clearTimeout(saveTimer)
@@ -237,23 +162,46 @@ function App() {
 
   createEffect(() => {
     if (!authenticated()) return
-    fetchSettings()
-    fetchStatus()
-    fetchLenses()
-    fetchIntervalStatus()
-    fetchRecordingStatus()
-    const settingsInterval = setInterval(fetchSettings, 10000)
-    const statusInterval = setInterval(fetchStatus, 5000)
-    const lensesInterval = setInterval(fetchLenses, 15000)
-    const intervalStatusInterval = setInterval(fetchIntervalStatus, 3000)
-    const recordingStatusInterval = setInterval(fetchRecordingStatus, 5000)
+
+    const refreshDashboard = (force = false) => {
+      if (!force && isPageHidden()) return
+
+      void fetchStatus()
+
+      if (force || !st()?.streaming?.isActive) {
+        void fetchSettings()
+        void fetchLenses()
+      }
+
+      void fetchIntervalStatus()
+      void fetchRecordingStatus()
+    }
+
+    refreshDashboard(true)
+
+    const settingsInterval = setInterval(() => {
+      if (isPageHidden() || st()?.streaming?.isActive) return
+      void fetchSettings()
+    }, 30000)
+    const statusInterval = setInterval(() => {
+      if (isPageHidden()) return
+      void fetchStatus()
+    }, 3000)
+    const lensesInterval = setInterval(() => {
+      if (isPageHidden()) return
+      void fetchLenses()
+    }, 30000)
+    const intervalStatusInterval = setInterval(() => {
+      if (isPageHidden()) return
+      void fetchIntervalStatus()
+    }, 5000)
+    const recordingStatusInterval = setInterval(() => {
+      if (isPageHidden()) return
+      void fetchRecordingStatus()
+    }, 3000)
     const handleVisibility = () => {
       if (!document.hidden) {
-        fetchSettings()
-        fetchStatus()
-        fetchLenses()
-        fetchIntervalStatus()
-        fetchRecordingStatus()
+        refreshDashboard(true)
       }
     }
     document.addEventListener('visibilitychange', handleVisibility)
@@ -489,8 +437,13 @@ function App() {
             <section class="preview-section">
               <div class="preview-container">
                 {previewVisible() && st()?.streaming?.isActive ? (
-                  <StreamCanvas
-                    url={`/stream?t=${streamNonce()}`}
+                  <img
+                    class="preview-img"
+                    src={`/stream?t=${streamNonce()}`}
+                    alt="Live camera stream"
+                    draggable={false}
+                    loading="eager"
+                    decoding="async"
                     onError={() => setPreviewVisible(false)}
                   />
                 ) : (

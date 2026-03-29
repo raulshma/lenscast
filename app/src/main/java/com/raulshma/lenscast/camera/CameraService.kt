@@ -4,6 +4,7 @@ package com.raulshma.lenscast.camera
 import android.content.Context
 import android.hardware.camera2.CameraCharacteristics
 import android.util.Log
+import android.util.Size
 import androidx.camera.camera2.interop.Camera2CameraInfo
 import androidx.camera.core.Camera
 import androidx.camera.core.CameraInfo
@@ -41,6 +42,7 @@ import kotlinx.coroutines.guava.await
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.math.max
+import java.util.concurrent.TimeUnit
 
 @Suppress("DEPRECATION")
 class CameraService(private val context: Context) {
@@ -70,6 +72,10 @@ class CameraService(private val context: Context) {
     private var lifecycleOwner: LifecycleOwner? = null
     private var frameListener: ((ByteArray, Int, Int, Int) -> Unit)? = null
     private var currentCameraSelector: CameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
+    private var previewRequested = false
+    private var exclusiveSessionRefCount = 0
+    private var currentPreviewView: PreviewView? = null
+    private var activeSettings = CameraSettings()
 
     private val keepAliveLifecycle = KeepAliveLifecycle()
     private var keepAliveRefCount = 0
@@ -116,9 +122,21 @@ class CameraService(private val context: Context) {
 
     fun isKeepAliveActive(): Boolean = keepAliveRefCount > 0
 
+    fun beginExclusiveSession() {
+        exclusiveSessionRefCount++
+        Log.d(TAG, "Exclusive camera session started (count=$exclusiveSessionRefCount)")
+    }
+
+    fun endExclusiveSession() {
+        exclusiveSessionRefCount = max(0, exclusiveSessionRefCount - 1)
+        Log.d(TAG, "Exclusive camera session ended (count=$exclusiveSessionRefCount)")
+    }
+
     fun getEffectiveLifecycleOwner(): LifecycleOwner {
         return if (keepAliveRefCount > 0) keepAliveLifecycle else lifecycleOwner!!
     }
+
+    fun getCurrentCameraSelector(): CameraSelector = currentCameraSelector
 
     fun setFrameListener(listener: ((ByteArray, Int, Int, Int) -> Unit)?) {
         frameListener = listener
@@ -142,6 +160,30 @@ class CameraService(private val context: Context) {
             _cameraState.value = CameraState.Error(e.message ?: "Camera initialization failed")
             Result.failure(e)
         }
+    }
+
+    private fun ensureCameraProviderAvailable(): ProcessCameraProvider? {
+        cameraProvider?.let { return it }
+
+        return try {
+            Log.d(TAG, "ensureCameraProviderAvailable: initializing camera provider")
+            _cameraState.value = CameraState.Initializing
+            val provider = ProcessCameraProvider.getInstance(context).get(10, TimeUnit.SECONDS)
+            cameraProvider = provider
+            enumerateCameras(provider)
+            _cameraState.value = CameraState.Ready
+            provider
+        } catch (e: Exception) {
+            Log.e(TAG, "ensureCameraProviderAvailable: failed", e)
+            _cameraState.value = CameraState.Error(e.message ?: "Camera initialization failed")
+            null
+        }
+    }
+
+    private fun hasActiveCameraDemand(): Boolean = previewRequested || keepAliveRefCount > 0
+
+    private fun shouldAttachPreview(): Boolean {
+        return previewRequested && currentPreviewView != null && isActivityForeground
     }
 
     @androidx.camera.camera2.interop.ExperimentalCamera2Interop
@@ -319,38 +361,31 @@ class CameraService(private val context: Context) {
         currentCameraSelector = lens.cameraSelector
         _isFrontCamera.value = lens.lensFacing == CameraSelector.LENS_FACING_FRONT
 
-        val needsKeepAlive = keepAliveRefCount == 0 && lifecycleOwner == null
-        if (needsKeepAlive) {
-            keepAliveRefCount++
-            keepAliveLifecycle.activate()
-            Log.d(TAG, "selectLens: temporarily activated keep-alive for lens change")
-        }
-
-        val pv = currentPreviewView
-        if (pv != null) {
-            Log.d(TAG, "selectLens: restarting preview with new lens")
-            startPreview(pv)
-        } else {
-            Log.w(TAG, "selectLens: no previewView available, trying rebind")
+        if (hasActiveCameraDemand() && exclusiveSessionRefCount == 0) {
             rebindUseCases()
-        }
-
-        if (needsKeepAlive) {
-            keepAliveRefCount = max(0, keepAliveRefCount - 1)
-            if (keepAliveRefCount == 0) {
-                keepAliveLifecycle.deactivate()
-                Log.d(TAG, "selectLens: deactivated temporary keep-alive")
-            }
-            Log.d(TAG, "selectLens: ref count after temporary release: $keepAliveRefCount")
+        } else {
+            Log.d(TAG, "selectLens: selector updated; camera will switch on next active session")
         }
     }
 
     fun rebindUseCases() {
-        val provider = cameraProvider
-        Log.d(TAG, "rebindUseCases: provider=${provider != null}, refCount=$keepAliveRefCount, lifecycleOwner=${lifecycleOwner != null}")
+        if (exclusiveSessionRefCount > 0) {
+            Log.d(TAG, "rebindUseCases: skipped while an exclusive session is active")
+            return
+        }
+
+        val provider = ensureCameraProviderAvailable()
+        Log.d(TAG, "rebindUseCases: provider=${provider != null}, refCount=$keepAliveRefCount, previewRequested=$previewRequested, lifecycleOwner=${lifecycleOwner != null}")
         
         if (provider == null) {
             Log.w(TAG, "rebindUseCases: cameraProvider is null, cannot rebind")
+            return
+        }
+
+        if (!hasActiveCameraDemand()) {
+            provider.unbindAll()
+            clearBoundUseCases()
+            Log.d(TAG, "rebindUseCases: unbound camera because there is no active demand")
             return
         }
         
@@ -359,55 +394,78 @@ class CameraService(private val context: Context) {
             Log.w(TAG, "rebindUseCases: no lifecycle owner available and no keep-alive, cannot rebind")
             return
         }
-        
-        val pv = currentPreviewView
 
-        val useCases = mutableListOf<UseCase>()
-        if (preview != null) {
-            if (pv != null && isActivityForeground) {
-                preview!!.surfaceProvider = pv.surfaceProvider
-                useCases.add(preview!!)
-            }
-        }
-        imageCapture?.let { useCases.add(it) }
-        imageAnalysis?.let { useCases.add(it) }
-
-        if (useCases.isEmpty()) {
-            Log.w(TAG, "rebindUseCases: no use cases to rebind (preview=$preview, imageCapture=$imageCapture, imageAnalysis=$imageAnalysis)")
-            return
-        }
-
-        try {
-            provider.unbindAll()
-            camera = provider.bindToLifecycle(
-                owner, currentCameraSelector,
-                *useCases.toTypedArray()
-            )
-            Log.d(TAG, "rebindUseCases: rebound ${useCases.size} use cases")
-        } catch (e: Exception) {
-            Log.e(TAG, "rebindUseCases: failed", e)
-        }
+        bindUseCases(provider, owner)
     }
 
     @androidx.camera.camera2.interop.ExperimentalCamera2Interop
     fun startPreview(previewView: PreviewView) {
-        val provider = cameraProvider
+        val provider = ensureCameraProviderAvailable()
         if (provider == null) {
-            Log.e(TAG, "startPreview: cameraProvider is null")
+            Log.e(TAG, "startPreview: camera provider is unavailable")
             return
         }
+
+        currentPreviewView = previewView
+        previewRequested = true
+        Log.d(TAG, "startPreview: requested with selector=$currentCameraSelector, resolution=$currentResolution")
+
         val owner = if (keepAliveRefCount > 0) keepAliveLifecycle else lifecycleOwner
         if (owner == null) {
             Log.e(TAG, "startPreview: no lifecycle owner available")
             return
         }
-        currentPreviewView = previewView
-        Log.d(TAG, "startPreview: starting with selector=$currentCameraSelector, resolution=$currentResolution")
 
-        val resolutionSelector = ResolutionSelector.Builder()
+        bindUseCases(provider, owner)
+    }
+
+    fun stopPreview() {
+        previewRequested = false
+        preview?.surfaceProvider = null
+        currentPreviewView = null
+
+        if (exclusiveSessionRefCount > 0) {
+            Log.d(TAG, "stopPreview: preview released while exclusive session remains active")
+            return
+        }
+
+        rebindUseCases()
+    }
+
+    fun acquirePhotoCapture(): ImageCapture? {
+        acquireKeepAlive()
+        rebindUseCases()
+        return imageCapture ?: run {
+            releaseKeepAlive()
+            rebindUseCases()
+            null
+        }
+    }
+
+    fun releasePhotoCapture() {
+        releaseKeepAlive()
+        rebindUseCases()
+    }
+
+    @androidx.camera.camera2.interop.ExperimentalCamera2Interop
+    private fun bindUseCases(
+        provider: ProcessCameraProvider,
+        owner: LifecycleOwner,
+    ) {
+        Log.d(TAG, "bindUseCases: selector=$currentCameraSelector, resolution=$currentResolution, attachPreview=${shouldAttachPreview()}")
+
+        val captureResolutionSelector = ResolutionSelector.Builder()
             .setResolutionStrategy(
                 ResolutionStrategy(
                     currentResolution,
+                    ResolutionStrategy.FALLBACK_RULE_CLOSEST_LOWER_THEN_HIGHER
+                )
+            )
+            .build()
+        val analysisResolutionSelector = ResolutionSelector.Builder()
+            .setResolutionStrategy(
+                ResolutionStrategy(
+                    getStreamingAnalysisResolution(currentResolution),
                     ResolutionStrategy.FALLBACK_RULE_CLOSEST_LOWER_THEN_HIGHER
                 )
             )
@@ -418,9 +476,9 @@ class CameraService(private val context: Context) {
         val previewBuilder = Preview.Builder()
         val captureBuilder = ImageCapture.Builder()
             .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
-            .setResolutionSelector(resolutionSelector)
+            .setResolutionSelector(captureResolutionSelector)
         val analysisBuilder = ImageAnalysis.Builder()
-            .setResolutionSelector(resolutionSelector)
+            .setResolutionSelector(analysisResolutionSelector)
             .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
 
         val selectedLens = _availableLenses.value.getOrNull(_selectedLensIndex.value)
@@ -429,12 +487,17 @@ class CameraService(private val context: Context) {
             Camera2Interop.Extender(previewBuilder).setPhysicalCameraId(physId)
             Camera2Interop.Extender(captureBuilder).setPhysicalCameraId(physId)
             Camera2Interop.Extender(analysisBuilder).setPhysicalCameraId(physId)
-            Log.d(TAG, "startPreview: applied physicalCameraId $physId to all use cases")
+            Log.d(TAG, "bindUseCases: applied physicalCameraId $physId to all use cases")
         }
 
-        preview = previewBuilder.build().also {
-            Log.d(TAG, "startPreview: setting surfaceProvider")
-            it.surfaceProvider = previewView.surfaceProvider
+        val previewView = currentPreviewView
+        preview = if (shouldAttachPreview() && previewView != null) {
+            previewBuilder.build().also {
+                Log.d(TAG, "bindUseCases: setting surfaceProvider")
+                it.surfaceProvider = previewView.surfaceProvider
+            }
+        } else {
+            null
         }
 
         imageCapture = captureBuilder.build()
@@ -449,28 +512,11 @@ class CameraService(private val context: Context) {
         try {
             provider.unbindAll()
             try {
-                // Try binding all 3 use cases first
-                camera = provider.bindToLifecycle(
-                    owner,
-                    currentCameraSelector,
-                    preview,
-                    imageCapture,
-                    imageAnalysis
-                )
-                Log.d(TAG, "startPreview: bound with Preview + ImageCapture + ImageAnalysis")
+                camera = bindBestAvailableCombination(provider, owner)
             } catch (e: Exception) {
-                // Some devices (LIMITED hardware) can't bind 3 use cases;
-                // fall back to Preview + ImageAnalysis (streaming is priority)
-                Log.w(TAG, "startPreview: 3 use-case binding failed, falling back to 2", e)
-                provider.unbindAll()
-                imageCapture = null
-                camera = provider.bindToLifecycle(
-                    owner,
-                    currentCameraSelector,
-                    preview,
-                    imageAnalysis
-                )
-                Log.d(TAG, "startPreview: bound with Preview + ImageAnalysis (fallback)")
+                Log.e(TAG, "bindUseCases: failed to bind camera", e)
+                _cameraState.value = CameraState.Error("Failed to start camera: ${e.message}")
+                return
             }
 
             camera?.let { cam ->
@@ -481,10 +527,69 @@ class CameraService(private val context: Context) {
                 _availableExposureRange.value = expState.exposureCompensationRange.lower..
                         expState.exposureCompensationRange.upper
             }
+
+            applyCameraControls(activeSettings)
         } catch (e: Exception) {
-            Log.e(TAG, "startPreview: failed to bind camera", e)
-            _cameraState.value = CameraState.Error("Failed to start preview: ${e.message}")
+            Log.e(TAG, "bindUseCases: failed to bind camera", e)
+            _cameraState.value = CameraState.Error("Failed to start camera: ${e.message}")
         }
+    }
+
+    private fun bindBestAvailableCombination(
+        provider: ProcessCameraProvider,
+        owner: LifecycleOwner,
+    ): Camera {
+        val preferredCombinations = buildList<List<UseCase>> {
+            if (preview != null && imageCapture != null && imageAnalysis != null) {
+                add(listOf(preview!!, imageCapture!!, imageAnalysis!!))
+                add(listOf(preview!!, imageCapture!!))
+                add(listOf(preview!!, imageAnalysis!!))
+            }
+            if (imageCapture != null && imageAnalysis != null) {
+                add(listOf(imageCapture!!, imageAnalysis!!))
+            }
+            imageCapture?.let { add(listOf(it)) }
+            imageAnalysis?.let { add(listOf(it)) }
+        }
+
+        var lastError: Exception? = null
+        preferredCombinations.forEach { useCases ->
+            try {
+                provider.unbindAll()
+                val boundCamera = provider.bindToLifecycle(
+                    owner,
+                    currentCameraSelector,
+                    *useCases.toTypedArray()
+                )
+
+                preview = useCases.filterIsInstance<Preview>().firstOrNull()
+                imageCapture = useCases.filterIsInstance<ImageCapture>().firstOrNull()
+                imageAnalysis = useCases.filterIsInstance<ImageAnalysis>().firstOrNull()
+
+                Log.d(
+                    TAG,
+                    "bindBestAvailableCombination: bound ${useCases.joinToString { it.javaClass.simpleName }}"
+                )
+                return boundCamera
+            } catch (e: Exception) {
+                lastError = e
+                Log.w(
+                    TAG,
+                    "bindBestAvailableCombination: failed for ${useCases.joinToString { it.javaClass.simpleName }}",
+                    e
+                )
+            }
+        }
+
+        throw lastError ?: IllegalStateException("No compatible camera use case combination found")
+    }
+
+    private fun clearBoundUseCases() {
+        preview?.surfaceProvider = null
+        preview = null
+        imageCapture = null
+        imageAnalysis = null
+        camera = null
     }
 
     fun switchCamera(previewView: PreviewView) {
@@ -593,25 +698,40 @@ class CameraService(private val context: Context) {
         return nv21
     }
 
-    private var pendingResolution: android.util.Size? = null
-    private var currentResolution: android.util.Size = android.util.Size(1920, 1080)
+    private fun getStreamingAnalysisResolution(captureResolution: Size): Size {
+        if (captureResolution.width <= MAX_ANALYSIS_WIDTH &&
+            captureResolution.height <= MAX_ANALYSIS_HEIGHT
+        ) {
+            return captureResolution
+        }
+
+        val isFourThree = captureResolution.width * 3 >= captureResolution.height * 4 - 8 &&
+            captureResolution.width * 3 <= captureResolution.height * 4 + 8
+
+        return if (isFourThree) {
+            Size(960, 720)
+        } else {
+            Size(MAX_ANALYSIS_WIDTH, MAX_ANALYSIS_HEIGHT)
+        }
+    }
+
+    private var pendingResolution: Size? = null
+    private var currentResolution: Size = Size(1920, 1080)
 
     @androidx.annotation.OptIn(androidx.camera.camera2.interop.ExperimentalCamera2Interop::class)
     suspend fun applySettings(settings: CameraSettings) {
+        activeSettings = settings
         if (settings.resolution.size != currentResolution) {
             currentResolution = settings.resolution.size
-            if (isActivityForeground) {
-                val pv = currentPreviewView
-                if (pv != null) {
-                    withContext(Dispatchers.Main) {
-                        startPreview(pv)
-                    }
-                    applyCameraControls(settings)
-                    return
+            if (hasActiveCameraDemand() && exclusiveSessionRefCount == 0) {
+                withContext(Dispatchers.Main) {
+                    rebindUseCases()
                 }
+                applyCameraControls(settings)
+                return
             } else {
                 pendingResolution = settings.resolution.size
-                Log.d(TAG, "applySettings: deferring resolution change until foreground")
+                Log.d(TAG, "applySettings: deferring resolution change until next active session")
             }
         }
 
@@ -622,8 +742,9 @@ class CameraService(private val context: Context) {
         val res = pendingResolution ?: return
         pendingResolution = null
         currentResolution = res
-        val pv = currentPreviewView ?: return
-        startPreview(pv)
+        if (hasActiveCameraDemand() && exclusiveSessionRefCount == 0) {
+            rebindUseCases()
+        }
         Log.d(TAG, "applyPendingResolution: applied deferred resolution $res")
     }
 
@@ -732,18 +853,15 @@ class CameraService(private val context: Context) {
         }
     }
 
-    private var currentPreviewView: PreviewView? = null
     private var isActivityForeground = true
 
     fun onActivityResume() {
         isActivityForeground = true
-        if (keepAliveRefCount > 0) {
+        if (previewRequested && exclusiveSessionRefCount == 0) {
             if (pendingResolution != null) {
                 applyPendingResolution()
-            } else if (currentPreviewView != null) {
+            } else {
                 rebindUseCases()
-            } else if (preview != null) {
-                preview!!.surfaceProvider = currentPreviewView!!.surfaceProvider
             }
             Log.d(TAG, "onActivityResume: restored preview")
         }
@@ -751,7 +869,7 @@ class CameraService(private val context: Context) {
 
     fun onActivityStop() {
         isActivityForeground = false
-        if (keepAliveRefCount > 0) {
+        if (currentPreviewView != null) {
             preview?.surfaceProvider = null
             Log.d(TAG, "onActivityStop: detached preview surface for background operation")
         }
@@ -769,11 +887,11 @@ class CameraService(private val context: Context) {
     fun release() {
         cameraProvider?.unbindAll()
         cameraProvider = null
-        preview = null
-        imageCapture = null
-        imageAnalysis = null
-        camera = null
+        clearBoundUseCases()
         _cameraState.value = CameraState.Idle
+        previewRequested = false
+        exclusiveSessionRefCount = 0
+        currentPreviewView = null
         try {
             analysisExecutor.shutdown()
         } catch (_: Exception) {
@@ -782,5 +900,7 @@ class CameraService(private val context: Context) {
 
     companion object {
         private const val TAG = "CameraService"
+        private const val MAX_ANALYSIS_WIDTH = 1280
+        private const val MAX_ANALYSIS_HEIGHT = 720
     }
 }

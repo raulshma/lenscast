@@ -75,7 +75,6 @@ class CameraViewModel(
     val selectedLensIndex: StateFlow<Int> = cameraService.selectedLensIndex
 
     private var currentPreviewView: PreviewView? = null
-    private var streamMonitorJob: Job? = null
     private var batteryMonitorJob: Job? = null
     private var thermalMonitorJob: Job? = null
     private var settingsJob: Job? = null
@@ -104,6 +103,24 @@ class CameraViewModel(
             cameraService.isFrontCamera.collect { isFront ->
                 _isFrontCamera.value = isFront
             }
+        }
+        viewModelScope.launch {
+            streamingManager.isServerRunning.collect { isRunning ->
+                _streamStatus.value = _streamStatus.value.copy(isServerRunning = isRunning)
+            }
+        }
+        viewModelScope.launch {
+            streamingManager.streamUrl.collect { url ->
+                _streamStatus.value = _streamStatus.value.copy(url = url)
+            }
+        }
+        viewModelScope.launch {
+            streamingManager.clientCount.collect { count ->
+                _streamStatus.value = _streamStatus.value.copy(clientCount = count)
+            }
+        }
+        cameraService.setFrameListener { yuvData, width, height, rotation ->
+            streamingManager.pushFrame(yuvData, width, height, rotation)
         }
         settingsJob = viewModelScope.launch {
             settingsDataStore.settings.collect { saved ->
@@ -181,16 +198,15 @@ class CameraViewModel(
     fun startPreview(previewView: PreviewView, lifecycleOwner: androidx.lifecycle.LifecycleOwner) {
         currentPreviewView = previewView
         cameraService.setLifecycleOwner(lifecycleOwner)
-        cameraService.setFrameListener { yuvData, width, height, rotation ->
-            streamingManager.pushFrame(yuvData, width, height, rotation)
-        }
         cameraService.startPreview(previewView)
         viewModelScope.launch {
             cameraService.applySettings(_settings.value)
         }
-        if (!_streamStatus.value.isActive) {
-            startStreaming()
-        }
+    }
+
+    fun stopPreview() {
+        currentPreviewView = null
+        cameraService.stopPreview()
     }
 
     fun switchCamera() {
@@ -293,12 +309,17 @@ class CameraViewModel(
 
             _streamStatus.value = StreamStatus(
                 isActive = true,
+                isServerRunning = streamingManager.isServerRunning.value,
                 url = streamingManager.streamUrl.value,
                 clientCount = 0
             )
-            startStreamMonitor()
         } else {
-            _streamStatus.value = StreamStatus(isActive = false, url = "Failed to start server")
+            _streamStatus.value = _streamStatus.value.copy(
+                isActive = false,
+                isServerRunning = false,
+                url = "Failed to start server",
+                clientCount = 0
+            )
         }
     }
 
@@ -306,13 +327,16 @@ class CameraViewModel(
         streamingManager.stopStreaming()
         powerManager.releaseWakeLock()
         thermalMonitor.stopMonitoring()
-        streamMonitorJob?.cancel()
-        streamMonitorJob = null
         batteryMonitorJob?.cancel()
         batteryMonitorJob = null
         thermalMonitorJob?.cancel()
         thermalMonitorJob = null
-        _streamStatus.value = StreamStatus()
+        _streamStatus.value = _streamStatus.value.copy(
+            isActive = false,
+            isServerRunning = streamingManager.isServerRunning.value,
+            url = streamingManager.streamUrl.value,
+            clientCount = 0
+        )
 
         cameraService.releaseKeepAlive()
         cameraService.rebindUseCases()
@@ -320,17 +344,6 @@ class CameraViewModel(
         val intent = Intent(context, com.raulshma.lenscast.streaming.StreamingService::class.java)
         intent.action = com.raulshma.lenscast.streaming.StreamingService.ACTION_STOP
         context.startService(intent)
-    }
-
-    private fun startStreamMonitor() {
-        streamMonitorJob?.cancel()
-        streamMonitorJob = viewModelScope.launch(Dispatchers.Main) {
-            streamingManager.clientCount.collect { count ->
-                if (_streamStatus.value.isActive) {
-                    _streamStatus.value = _streamStatus.value.copy(clientCount = count)
-                }
-            }
-        }
     }
 
     private fun startBatteryMonitoring() {
@@ -356,7 +369,7 @@ class CameraViewModel(
     }
 
     fun copyStreamUrl() {
-        val url = _streamStatus.value.url
+        val url = _streamStatus.value.url.ifEmpty { streamingManager.streamUrl.value }
         if (url.isNotEmpty()) {
             val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
             clipboard.setPrimaryClip(ClipData.newPlainText("Stream URL", url))
@@ -365,7 +378,7 @@ class CameraViewModel(
     }
 
     fun capturePhoto() {
-        val imageCapture = cameraService.getImageCapture() ?: return
+        val imageCapture = cameraService.acquirePhotoCapture() ?: return
         val fileName = "IMG_${DATE_FORMAT.format(java.util.Date())}.jpg"
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
             val contentValues = android.content.ContentValues().apply {
@@ -391,9 +404,11 @@ class CameraViewModel(
                             fileSizeBytes = 0,
                         )
                         app.captureHistoryStore.add(entry)
+                        cameraService.releasePhotoCapture()
                     }
                     override fun onError(exception: ImageCaptureException) {
                         Log.e("CameraViewModel", "Capture failed", exception)
+                        cameraService.releasePhotoCapture()
                     }
                 },
             )
@@ -419,9 +434,11 @@ class CameraViewModel(
                             fileSizeBytes = outputFile.length(),
                         )
                         app.captureHistoryStore.add(entry)
+                        cameraService.releasePhotoCapture()
                     }
                     override fun onError(exception: ImageCaptureException) {
                         Log.e("CameraViewModel", "Capture failed", exception)
+                        cameraService.releasePhotoCapture()
                     }
                 },
             )
@@ -459,7 +476,6 @@ class CameraViewModel(
 
     override fun onCleared() {
         super.onCleared()
-        streamMonitorJob?.cancel()
         batteryMonitorJob?.cancel()
         thermalMonitorJob?.cancel()
         recordingTimerJob?.cancel()

@@ -9,6 +9,7 @@ import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -21,7 +22,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
@@ -53,6 +54,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -76,6 +78,7 @@ import coil.compose.AsyncImage
 import com.raulshma.lenscast.MainApplication
 import com.raulshma.lenscast.capture.model.CaptureHistory
 import com.raulshma.lenscast.capture.model.CaptureType
+import com.raulshma.lenscast.ui.components.LensCastTopBar
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -139,21 +142,17 @@ fun GalleryScreen(
                     onExitSelectMode = { viewModel.setSelectMode(false) },
                 )
             } else {
-                TopAppBar(
-                    title = { Text("Gallery") },
-                    navigationIcon = {
-                        IconButton(onClick = onNavigateBack) {
-                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
-                        }
-                    },
+                LensCastTopBar(
+                    title = "Gallery",
+                    onNavigateBack = onNavigateBack,
                     actions = {
                         IconButton(onClick = { viewModel.setSelectMode(true) }) {
                             Icon(
-                                Icons.Default.PhotoCamera,
+                                Icons.Default.SelectAll,
                                 contentDescription = "Select"
                             )
                         }
-                    }
+                    },
                 )
             }
         },
@@ -242,7 +241,13 @@ private fun SelectModeTopBar(
                     contentDescription = if (allSelected) "Deselect all" else "Select all"
                 )
             }
-        }
+        },
+        colors = TopAppBarDefaults.topAppBarColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainer,
+            titleContentColor = MaterialTheme.colorScheme.onSurface,
+            navigationIconContentColor = MaterialTheme.colorScheme.onSurface,
+            actionIconContentColor = MaterialTheme.colorScheme.onSurface,
+        ),
     )
 }
 
@@ -337,6 +342,7 @@ private fun FilterRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .horizontalScroll(rememberScrollState())
             .padding(horizontal = 16.dp, vertical = 8.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {

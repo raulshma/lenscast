@@ -297,7 +297,11 @@ class WebApiController(private val context: Context) {
 
     fun handleCapture(): String {
         return try {
-            val imageCapture = app.cameraService.getImageCapture()
+            val imageCapture = runBlocking {
+                withContext(Dispatchers.Main) {
+                    app.cameraService.acquirePhotoCapture()
+                }
+            }
             if (imageCapture == null) {
                 """{"success":false,"error":"Camera not available"}"""
             } else {
@@ -328,10 +332,12 @@ class WebApiController(private val context: Context) {
                                     fileSizeBytes = 0,
                                 )
                                 app.captureHistoryStore.add(entry)
+                                app.cameraService.releasePhotoCapture()
                                 Log.d(TAG, "Photo captured via web: $fileName")
                             }
 
                             override fun onError(exc: ImageCaptureException) {
+                                app.cameraService.releasePhotoCapture()
                                 Log.e(TAG, "Web capture failed", exc)
                             }
                         },
@@ -357,10 +363,12 @@ class WebApiController(private val context: Context) {
                                     fileSizeBytes = outputFile.length(),
                                 )
                                 app.captureHistoryStore.add(entry)
+                                app.cameraService.releasePhotoCapture()
                                 Log.d(TAG, "Photo captured via web: $fileName")
                             }
 
                             override fun onError(exc: ImageCaptureException) {
+                                app.cameraService.releasePhotoCapture()
                                 Log.e(TAG, "Web capture failed", exc)
                             }
                         },

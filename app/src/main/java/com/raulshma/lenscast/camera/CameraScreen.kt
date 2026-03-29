@@ -108,6 +108,8 @@ import com.raulshma.lenscast.camera.model.HdrMode
 import com.raulshma.lenscast.camera.model.Resolution
 import com.raulshma.lenscast.camera.model.WhiteBalance
 import com.raulshma.lenscast.core.ThermalState
+import com.raulshma.lenscast.ui.theme.LensOrange
+import com.raulshma.lenscast.ui.theme.LensRed
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -155,7 +157,7 @@ fun CameraScreen(
             TopAppBar(
                 title = { Text("LensCast") },
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.primaryContainer
+                    containerColor = MaterialTheme.colorScheme.surfaceContainer
                 ),
                 actions = {
                     if (cameraState is CameraState.Ready) {
@@ -180,9 +182,10 @@ fun CameraScreen(
         },
         bottomBar = {
             Column {
-                if (streamStatus.isActive) {
+                if (streamStatus.isServerRunning && streamStatus.url.isNotBlank()) {
                     StreamInfoBar(
                         url = streamStatus.url,
+                        isStreaming = streamStatus.isActive,
                         clientCount = streamStatus.clientCount,
                         onCopyUrl = { viewModel.copyStreamUrl() }
                     )
@@ -225,14 +228,12 @@ fun CameraScreen(
                 }
                 is CameraState.Ready -> {
                     Box(modifier = Modifier.fillMaxSize()) {
-                        CameraPreview(
-                            viewModel = viewModel,
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .then(
-                                    if (showPreview) Modifier else Modifier.alpha(0f)
-                                )
-                        )
+                        if (showPreview) {
+                            CameraPreview(
+                                viewModel = viewModel,
+                                modifier = Modifier.fillMaxSize()
+                            )
+                        }
 
                         if (!showPreview) {
                             Box(
@@ -249,12 +250,12 @@ fun CameraScreen(
                                         imageVector = Icons.Default.VisibilityOff,
                                         contentDescription = null,
                                         modifier = Modifier.size(48.dp),
-                                        tint = Color.White.copy(alpha = 0.4f)
+                                        tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f)
                                     )
                                     Spacer(modifier = Modifier.height(8.dp))
                                     Text(
                                         text = "Preview Hidden",
-                                        color = Color.White.copy(alpha = 0.4f),
+                                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f),
                                         style = MaterialTheme.typography.bodyMedium
                                     )
                                 }
@@ -343,13 +344,13 @@ fun CameraScreen(
                         .padding(16.dp)
                 ) {
                     Surface(
-                        color = Color.Black.copy(alpha = 0.5f),
+                        color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.92f),
                         shape = CircleShape
                     ) {
                         Icon(
                             Icons.Default.Cameraswitch,
                             contentDescription = "Switch camera",
-                            tint = Color.White,
+                            tint = MaterialTheme.colorScheme.onSurface,
                             modifier = Modifier.padding(8.dp)
                         )
                     }
@@ -366,19 +367,23 @@ fun CameraScreen(
                 )
             }
 
-            if (streamStatus.isActive && !wifiConnected) {
+            if (streamStatus.isServerRunning && !wifiConnected) {
                 Surface(
                     modifier = Modifier
                         .align(Alignment.TopCenter)
                         .padding(top = 16.dp),
-                    color = Color(0xFFFF9800).copy(alpha = 0.85f),
+                    color = LensOrange.copy(alpha = 0.92f),
                     shape = MaterialTheme.shapes.small
                 ) {
                     Text(
-                        text = "Not on WiFi - stream may not be reachable",
+                        text = if (streamStatus.isActive) {
+                            "Not on WiFi - stream may not be reachable"
+                        } else {
+                            "Not on WiFi - web server may not be reachable"
+                        },
                         modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
                         style = MaterialTheme.typography.labelSmall,
-                        color = Color.White
+                        color = MaterialTheme.colorScheme.onSecondary
                     )
                 }
             }
@@ -433,7 +438,7 @@ private fun ProQuickSettingsBar(
                 modifier = Modifier
                     .width(52.dp)
                     .background(
-                        Color.Black.copy(alpha = 0.75f),
+                        MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.92f),
                         RoundedCornerShape(26.dp)
                     )
                     .padding(vertical = 8.dp),
@@ -501,7 +506,7 @@ private fun ProQuickSettingsBar(
                 )
                 Spacer(modifier = Modifier.height(2.dp))
                 Surface(
-                    color = Color.White.copy(alpha = 0.15f),
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.92f),
                     shape = CircleShape,
                     modifier = Modifier.padding(vertical = 2.dp)
                 ) {
@@ -512,7 +517,7 @@ private fun ProQuickSettingsBar(
                         Icon(
                             Icons.Default.Flip,
                             contentDescription = "Collapse",
-                            tint = Color.White.copy(alpha = 0.7f),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.size(16.dp)
                         )
                     }
@@ -533,7 +538,7 @@ private fun ProQuickSettingsBar(
             )
         ) {
             Surface(
-                color = Color.Black.copy(alpha = 0.5f),
+                color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.86f),
                 shape = CircleShape,
                 modifier = Modifier.padding(4.dp)
             ) {
@@ -541,7 +546,7 @@ private fun ProQuickSettingsBar(
                     Icon(
                         Icons.Default.Flip,
                         contentDescription = "Quick settings",
-                        tint = Color.White,
+                        tint = MaterialTheme.colorScheme.onSurface,
                         modifier = Modifier.size(20.dp)
                     )
                 }
@@ -560,8 +565,8 @@ private fun QuickSettingChip(
     val scale = remember { Animatable(1f) }
     val coroutineScope = rememberCoroutineScope()
     val bgColor by animateColorAsState(
-        targetValue = if (isActive) Color(0xFF2196F3).copy(alpha = 0.7f)
-                      else Color.White.copy(alpha = 0.12f),
+        targetValue = if (isActive) MaterialTheme.colorScheme.primary.copy(alpha = 0.82f)
+        else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.92f),
         animationSpec = tween(200)
     )
 
@@ -591,7 +596,7 @@ private fun QuickSettingChip(
         }
         Text(
             text = label,
-            color = Color.White,
+            color = if (isActive) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface,
             fontSize = 8.sp,
             fontWeight = if (isActive) FontWeight.Bold else FontWeight.Normal,
             maxLines = 1,
@@ -626,7 +631,7 @@ private fun QuickSettingSheet(
             }
         },
         sheetState = sheetState,
-        containerColor = Color(0xFF1A1A1A),
+        containerColor = MaterialTheme.colorScheme.surfaceContainer,
         shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
     ) {
         Column(
@@ -647,7 +652,7 @@ private fun QuickSettingSheet(
                     QuickSettingType.FRAME_RATE -> "Frame Rate"
                     QuickSettingType.STABILIZATION -> "Stabilization"
                 },
-                color = Color.White,
+                color = MaterialTheme.colorScheme.onSurface,
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.SemiBold
             )
@@ -721,15 +726,15 @@ private fun QuickSettingSheet(
                     ) {
                         Text(
                             text = "Image Stabilization",
-                            color = Color.White,
+                            color = MaterialTheme.colorScheme.onSurface,
                             style = MaterialTheme.typography.bodyLarge
                         )
                         androidx.compose.material3.Switch(
                             checked = settings.stabilization,
                             onCheckedChange = onUpdateStabilization,
                             colors = androidx.compose.material3.SwitchDefaults.colors(
-                                checkedTrackColor = Color(0xFF2196F3),
-                                checkedThumbColor = Color.White
+                                checkedTrackColor = MaterialTheme.colorScheme.primary,
+                                checkedThumbColor = MaterialTheme.colorScheme.onPrimary
                             )
                         )
                     }
@@ -749,7 +754,7 @@ private fun ProSliderControl(
     Column(modifier = Modifier.fillMaxWidth()) {
         Text(
             text = label,
-            color = Color(0xFF2196F3),
+            color = MaterialTheme.colorScheme.primary,
             style = MaterialTheme.typography.headlineSmall,
             fontWeight = FontWeight.Bold,
             fontFamily = FontFamily.Monospace
@@ -760,9 +765,9 @@ private fun ProSliderControl(
             onValueChange = onValueChange,
             valueRange = range,
             colors = androidx.compose.material3.SliderDefaults.colors(
-                activeTrackColor = Color(0xFF2196F3),
-                thumbColor = Color.White,
-                inactiveTrackColor = Color.White.copy(alpha = 0.2f)
+                activeTrackColor = MaterialTheme.colorScheme.primary,
+                thumbColor = MaterialTheme.colorScheme.primary,
+                inactiveTrackColor = MaterialTheme.colorScheme.surfaceVariant
             )
         )
         Row(
@@ -771,12 +776,12 @@ private fun ProSliderControl(
         ) {
             Text(
                 text = "${range.start}".let { if (it.endsWith(".0")) it.dropLast(2) else it },
-                color = Color.White.copy(alpha = 0.5f),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
                 style = MaterialTheme.typography.labelSmall
             )
             Text(
                 text = "${range.endInclusive}".let { if (it.endsWith(".0")) it.dropLast(2) else it },
-                color = Color.White.copy(alpha = 0.5f),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
                 style = MaterialTheme.typography.labelSmall
             )
         }
@@ -798,11 +803,11 @@ private fun ProChipSelector(
         options.forEach { option ->
             val isSelected = option == selected
             val bgColor by animateColorAsState(
-                targetValue = if (isSelected) Color(0xFF2196F3) else Color.White.copy(alpha = 0.1f),
+                targetValue = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
                 animationSpec = tween(200)
             )
             val textColor by animateColorAsState(
-                targetValue = if (isSelected) Color.White else Color.White.copy(alpha = 0.7f),
+                targetValue = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface,
                 animationSpec = tween(200)
             )
 
@@ -873,7 +878,7 @@ private fun CameraPreview(
     val lifecycleOwner = LocalLifecycleOwner.current
     androidx.compose.runtime.DisposableEffect(previewView, lifecycleOwner) {
         viewModel.startPreview(previewView, lifecycleOwner)
-        onDispose { }
+        onDispose { viewModel.stopPreview() }
     }
 
     AndroidView(
@@ -918,8 +923,8 @@ private fun StreamIndicator(
 ) {
     Surface(
         modifier = modifier,
-        color = Color.Black.copy(alpha = 0.7f),
-        shape = MaterialTheme.shapes.extraSmall
+        color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.92f),
+        shape = RoundedCornerShape(999.dp)
     ) {
         Row(
             modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
@@ -928,13 +933,13 @@ private fun StreamIndicator(
             Surface(
                 modifier = Modifier.size(8.dp),
                 shape = CircleShape,
-                color = Color.Red
+                color = MaterialTheme.colorScheme.error
             ) {}
             Spacer(modifier = Modifier.size(6.dp))
             Text(
                 text = "LIVE",
                 style = MaterialTheme.typography.labelSmall,
-                color = Color.White
+                color = MaterialTheme.colorScheme.onErrorContainer
             )
         }
     }
@@ -966,7 +971,7 @@ private fun RecordingIndicator(
 
     Surface(
         modifier = modifier,
-        color = Color.Black.copy(alpha = 0.7f),
+        color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.92f),
         shape = RoundedCornerShape(16.dp)
     ) {
         Row(
@@ -976,7 +981,7 @@ private fun RecordingIndicator(
             Surface(
                 modifier = Modifier.size(10.dp),
                 shape = CircleShape,
-                color = Color(0xFFF85149).copy(alpha = dotAlpha)
+                color = MaterialTheme.colorScheme.error.copy(alpha = dotAlpha)
             ) {}
             Spacer(modifier = Modifier.size(8.dp))
             Text(
@@ -985,7 +990,7 @@ private fun RecordingIndicator(
                     fontFamily = FontFamily.Monospace,
                     fontWeight = FontWeight.SemiBold
                 ),
-                color = Color.White
+                color = MaterialTheme.colorScheme.onSurface
             )
         }
     }
@@ -994,6 +999,7 @@ private fun RecordingIndicator(
 @Composable
 private fun StreamInfoBar(
     url: String,
+    isStreaming: Boolean,
     clientCount: Int,
     onCopyUrl: () -> Unit,
 ) {
@@ -1020,9 +1026,18 @@ private fun StreamInfoBar(
                     style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
                     maxLines = 1
                 )
-                if (clientCount > 0) {
+                Text(
+                    text = when {
+                        clientCount > 0 -> "$clientCount viewer(s)"
+                        isStreaming -> "Live stream active"
+                        else -> "Web server ready"
+                    },
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                if (clientCount > 0 && !isStreaming) {
                     Text(
-                        text = "$clientCount viewer(s)",
+                        text = "Waiting for live frames",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -1116,12 +1131,12 @@ private fun ThermalWarningOverlay(
 ) {
     val (color, label) = when (thermalState) {
         ThermalState.MODERATE ->
-            Color(0xFFFF9800) to "Thermal: Moderate"
+            LensOrange to "Thermal: Moderate"
         ThermalState.SEVERE ->
-            Color(0xFFFF5722) to "Thermal: Severe"
+            LensRed to "Thermal: Severe"
         ThermalState.CRITICAL ->
-            Color.Red to "Thermal: Critical!"
-        else -> Color.Yellow to "Thermal: Warm"
+            MaterialTheme.colorScheme.error to "Thermal: Critical!"
+        else -> LensOrange to "Thermal: Warm"
     }
     Surface(
         modifier = modifier,
@@ -1132,7 +1147,7 @@ private fun ThermalWarningOverlay(
             text = label,
             modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
             style = MaterialTheme.typography.labelSmall,
-            color = Color.White
+            color = MaterialTheme.colorScheme.onError
         )
     }
 }

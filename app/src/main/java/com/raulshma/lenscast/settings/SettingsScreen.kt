@@ -13,10 +13,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
@@ -35,6 +31,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.raulshma.lenscast.MainApplication
@@ -42,8 +39,9 @@ import com.raulshma.lenscast.camera.model.FocusMode
 import com.raulshma.lenscast.camera.model.HdrMode
 import com.raulshma.lenscast.camera.model.Resolution
 import com.raulshma.lenscast.camera.model.WhiteBalance
+import com.raulshma.lenscast.ui.components.LensCastSectionCard
+import com.raulshma.lenscast.ui.components.LensCastTopBar
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CameraSettingsScreen(
     onNavigateBack: () -> Unit,
@@ -66,18 +64,14 @@ fun CameraSettingsScreen(
 
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = { Text("Camera Settings") },
-                navigationIcon = {
-                    IconButton(onClick = onNavigateBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
-                    }
-                },
+            LensCastTopBar(
+                title = "Camera Settings",
+                onNavigateBack = onNavigateBack,
                 actions = {
                     TextButton(onClick = { viewModel.resetToDefaults() }) {
                         Text("Reset", color = MaterialTheme.colorScheme.error)
                     }
-                }
+                },
             )
         }
     ) { padding ->
@@ -262,15 +256,8 @@ fun SettingsSection(
     title: String,
     content: @Composable () -> Unit,
 ) {
-    Column(modifier = Modifier.fillMaxWidth()) {
-        Text(
-            text = title,
-            style = MaterialTheme.typography.titleMedium,
-            color = MaterialTheme.colorScheme.primary,
-            modifier = Modifier.padding(bottom = 8.dp)
-        )
+    LensCastSectionCard(title = title) {
         content()
-        Spacer(modifier = Modifier.height(8.dp))
     }
 }
 
@@ -286,11 +273,16 @@ fun SliderSetting(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            Text(text = title, style = MaterialTheme.typography.bodyMedium)
+            Text(
+                text = title,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
             Text(
                 text = if (value == value.toInt().toFloat()) "${value.toInt()}" else String.format("%.1f", value),
                 style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.primary
+                color = MaterialTheme.colorScheme.primary,
+                fontFamily = FontFamily.Monospace,
             )
         }
         Slider(
@@ -315,7 +307,8 @@ fun DropdownSetting(
         Text(
             text = title,
             style = MaterialTheme.typography.bodyMedium,
-            modifier = Modifier.padding(bottom = 4.dp)
+            color = MaterialTheme.colorScheme.onSurface,
+            modifier = Modifier.padding(bottom = 6.dp)
         )
         Row(
             modifier = Modifier
@@ -345,7 +338,11 @@ fun SwitchSetting(
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Text(text = title, style = MaterialTheme.typography.bodyMedium)
+        Text(
+            text = title,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurface,
+        )
         Switch(checked = checked, onCheckedChange = onCheckedChange)
     }
 }
@@ -359,15 +356,15 @@ fun FilterChip(
     Surface(
         onClick = onClick,
         color = if (selected) MaterialTheme.colorScheme.primaryContainer
-               else MaterialTheme.colorScheme.surfaceVariant,
-        shape = MaterialTheme.shapes.small
+        else MaterialTheme.colorScheme.surfaceVariant,
+        shape = MaterialTheme.shapes.medium
     ) {
         Text(
             text = label,
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
             style = MaterialTheme.typography.labelMedium,
             color = if (selected) MaterialTheme.colorScheme.onPrimaryContainer
-                   else MaterialTheme.colorScheme.onSurfaceVariant
+            else MaterialTheme.colorScheme.onSurfaceVariant
         )
     }
 }

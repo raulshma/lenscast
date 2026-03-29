@@ -91,7 +91,7 @@ class CaptureViewModel(
     }
 
     fun capturePhoto() {
-        val imageCapture = cameraService.getImageCapture() ?: return
+        val imageCapture = cameraService.acquirePhotoCapture() ?: return
 
         val fileName = "IMG_${DATE_FORMAT.format(Date())}.jpg"
 
@@ -128,10 +128,12 @@ class CaptureViewModel(
                         fileSizeBytes = 0,
                     )
                     captureHistoryStore.add(entry)
+                    cameraService.releasePhotoCapture()
                     Log.d(TAG, "Photo saved via MediaStore: $fileName")
                 }
 
                 override fun onError(exception: ImageCaptureException) {
+                    cameraService.releasePhotoCapture()
                     Log.e(TAG, "Photo capture failed", exception)
                 }
             },
@@ -159,10 +161,12 @@ class CaptureViewModel(
                         fileSizeBytes = outputFile.length(),
                     )
                     captureHistoryStore.add(entry)
+                    cameraService.releasePhotoCapture()
                     Log.d(TAG, "Photo saved: ${outputFile.absolutePath}")
                 }
 
                 override fun onError(exception: ImageCaptureException) {
+                    cameraService.releasePhotoCapture()
                     Log.e(TAG, "Photo capture failed", exception)
                 }
             },

@@ -87,6 +87,7 @@ class RecordingService : Service() {
         val fileName = "VID_${DATE_FORMAT.format(Date())}.mp4"
 
         cameraService.acquireKeepAlive()
+        cameraService.beginExclusiveSession()
 
         try {
             val contentValues = ContentValues().apply {
@@ -122,13 +123,7 @@ class RecordingService : Service() {
                 cleanupFailedStart()
                 return
             }
-
-            val camera = cameraService.getCamera()
-            if (camera == null) {
-                Log.e(TAG, "Camera not available")
-                cleanupFailedStart()
-                return
-            }
+            val cameraSelector = cameraService.getCurrentCameraSelector()
 
             @Suppress("DEPRECATION")
             cameraProvider.unbindAll()
@@ -144,32 +139,32 @@ class RecordingService : Service() {
                 when {
                     preview != null && imageCapture != null && imageAnalysis != null ->
                         cameraProvider.bindToLifecycle(
-                            lifecycleOwner, camera.cameraInfo.cameraSelector,
+                            lifecycleOwner, cameraSelector,
                             preview, imageCapture, imageAnalysis, videoCapture
                         )
                     preview != null && imageCapture != null ->
                         cameraProvider.bindToLifecycle(
-                            lifecycleOwner, camera.cameraInfo.cameraSelector,
+                            lifecycleOwner, cameraSelector,
                             preview, imageCapture, videoCapture
                         )
                     preview != null && imageAnalysis != null ->
                         cameraProvider.bindToLifecycle(
-                            lifecycleOwner, camera.cameraInfo.cameraSelector,
+                            lifecycleOwner, cameraSelector,
                             preview, imageAnalysis, videoCapture
                         )
                     preview != null ->
                         cameraProvider.bindToLifecycle(
-                            lifecycleOwner, camera.cameraInfo.cameraSelector,
+                            lifecycleOwner, cameraSelector,
                             preview, videoCapture
                         )
                     imageAnalysis != null ->
                         cameraProvider.bindToLifecycle(
-                            lifecycleOwner, camera.cameraInfo.cameraSelector,
+                            lifecycleOwner, cameraSelector,
                             imageAnalysis, videoCapture
                         )
                     else ->
                         cameraProvider.bindToLifecycle(
-                            lifecycleOwner, camera.cameraInfo.cameraSelector,
+                            lifecycleOwner, cameraSelector,
                             videoCapture
                         )
                 }
@@ -178,7 +173,7 @@ class RecordingService : Service() {
                 Log.w(TAG, "Failed to bind all use cases, trying with VideoCapture only", e)
                 cameraProvider.bindToLifecycle(
                     lifecycleOwner,
-                    camera.cameraInfo.cameraSelector,
+                    cameraSelector,
                     videoCapture
                 )
             }
@@ -262,6 +257,7 @@ class RecordingService : Service() {
         isFinalizingRecording = false
 
         val app = applicationContext as MainApplication
+        app.cameraService.endExclusiveSession()
         app.cameraService.releaseKeepAlive()
         app.cameraService.rebindUseCases()
 
@@ -283,6 +279,7 @@ class RecordingService : Service() {
         }
 
         val app = applicationContext as MainApplication
+        app.cameraService.endExclusiveSession()
         app.cameraService.releaseKeepAlive()
         app.cameraService.rebindUseCases()
         stopForeground(STOP_FOREGROUND_REMOVE)

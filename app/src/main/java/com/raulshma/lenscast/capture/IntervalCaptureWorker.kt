@@ -59,7 +59,7 @@ class IntervalCaptureWorker(
         app: MainApplication,
         cameraService: com.raulshma.lenscast.camera.CameraService,
     ): Boolean = withContext(Dispatchers.Main) {
-        val imageCapture = cameraService.getImageCapture() ?: return@withContext false
+        val imageCapture = cameraService.acquirePhotoCapture() ?: return@withContext false
 
         val dateFormat = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US)
         val fileName = "IMG_${dateFormat.format(Date())}.jpg"
@@ -85,11 +85,13 @@ class IntervalCaptureWorker(
                             fileSizeBytes = outputFile.length(),
                         )
                         app.captureHistoryStore.add(entry)
+                        cameraService.releasePhotoCapture()
                         Log.d(TAG, "Photo saved: ${outputFile.absolutePath}")
                         continuation.resume(true)
                     }
 
                     override fun onError(exception: ImageCaptureException) {
+                        cameraService.releasePhotoCapture()
                         Log.e(TAG, "Photo capture failed", exception)
                         continuation.resume(false)
                     }

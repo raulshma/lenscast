@@ -1,6 +1,7 @@
 package com.raulshma.lenscast.capture
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -14,7 +15,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material.icons.filled.Schedule
@@ -29,14 +29,11 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TimeInput
-import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.rememberTimePickerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -60,12 +57,12 @@ import com.raulshma.lenscast.capture.model.RecordingQuality
 import com.raulshma.lenscast.settings.DropdownSetting
 import com.raulshma.lenscast.settings.SettingsSection
 import com.raulshma.lenscast.settings.SliderSetting
+import com.raulshma.lenscast.ui.components.LensCastTopBar
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
 import java.util.Locale
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CaptureScreen(
     onNavigateBack: () -> Unit,
@@ -89,14 +86,7 @@ fun CaptureScreen(
 
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = { Text("Capture") },
-                navigationIcon = {
-                    IconButton(onClick = onNavigateBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
-                    }
-                }
-            )
+            LensCastTopBar(title = "Capture", onNavigateBack = onNavigateBack)
         }
     ) { padding ->
         LazyColumn(
@@ -353,7 +343,7 @@ fun CaptureScreen(
                     Text(
                         text = "Capture History",
                         style = MaterialTheme.typography.titleMedium,
-                        color = MaterialTheme.colorScheme.primary
+                        color = MaterialTheme.colorScheme.onBackground
                     )
                     if (captureHistory.isNotEmpty()) {
                         TextButton(onClick = { viewModel.clearHistory() }) {
@@ -368,7 +358,7 @@ fun CaptureScreen(
                     Card(
                         modifier = Modifier.fillMaxWidth(),
                         colors = CardDefaults.cardColors(
-                            containerColor = MaterialTheme.colorScheme.surfaceVariant
+                            containerColor = MaterialTheme.colorScheme.surfaceContainer
                         )
                     ) {
                         Text(
