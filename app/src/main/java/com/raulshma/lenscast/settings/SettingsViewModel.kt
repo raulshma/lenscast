@@ -169,10 +169,11 @@ class SettingsViewModel(
     }
 
     fun updateAuthPassword(password: String) {
-        val newAuth = _authSettings.value.copy(password = password)
+        val hash = StreamAuthSettings.hashPassword(password)
+        val newAuth = _authSettings.value.copy(passwordHash = hash)
         _authSettings.value = newAuth
         viewModelScope.launch {
-            settingsDataStore.saveAuthSettings(newAuth)
+            settingsDataStore.saveAuthSettings(newAuth, rawPassword = password)
             streamingManager?.updateAuthSettings(newAuth)
         }
     }

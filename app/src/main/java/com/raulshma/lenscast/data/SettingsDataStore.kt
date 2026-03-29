@@ -1,6 +1,7 @@
 package com.raulshma.lenscast.data
 
 import android.content.Context
+import android.util.Base64
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.doublePreferencesKey
@@ -17,12 +18,22 @@ import com.raulshma.lenscast.camera.model.Resolution
 import com.raulshma.lenscast.camera.model.WhiteBalance
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
+import java.security.MessageDigest
 
 data class StreamAuthSettings(
     val enabled: Boolean = false,
     val username: String = "",
-    val password: String = "",
-)
+    val passwordHash: String = "",
+) {
+    companion object {
+        fun hashPassword(password: String): String {
+            if (password.isEmpty()) return ""
+            val digest = MessageDigest.getInstance("SHA-256")
+            val hash = digest.digest(password.toByteArray(Charsets.UTF_8))
+            return Base64.encodeToString(hash, Base64.NO_WRAP)
+        }
+    }
+}
 
 private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "camera_settings")
 
@@ -50,7 +61,7 @@ class SettingsDataStore(private val context: Context) {
         val JPEG_QUALITY = intPreferencesKey("jpeg_quality")
         val AUTH_ENABLED = stringPreferencesKey("auth_enabled")
         val AUTH_USERNAME = stringPreferencesKey("auth_username")
-        val AUTH_PASSWORD = stringPreferencesKey("auth_password")
+        val AUTH_PASSWORD_HASH = stringPreferencesKey("auth_password_hash")
         val SHOW_PREVIEW = stringPreferencesKey("show_preview")
     }
 
@@ -104,7 +115,7 @@ class SettingsDataStore(private val context: Context) {
         StreamAuthSettings(
             enabled = prefs[Keys.AUTH_ENABLED] == "true",
             username = prefs[Keys.AUTH_USERNAME] ?: "",
-            password = prefs[Keys.AUTH_PASSWORD] ?: "",
+            passwordHash = prefs[Keys.AUTH_PASSWORD_HASH] ?: "",
         )
     }
 
@@ -168,11 +179,13 @@ class SettingsDataStore(private val context: Context) {
         }
     }
 
-    suspend fun saveAuthSettings(settings: StreamAuthSettings) {
+    suspend fun saveAuthSettings(settings: StreamAuthSettings, rawPassword: String? = null) {
         context.dataStore.edit { prefs ->
             prefs[Keys.AUTH_ENABLED] = if (settings.enabled) "true" else "false"
             prefs[Keys.AUTH_USERNAME] = settings.username
-            prefs[Keys.AUTH_PASSWORD] = settings.password
+            if (rawPassword != null) {
+                prefs[Keys.AUTH_PASSWORD_HASH] = StreamAuthSettings.hashPassword(rawPassword)
+            }
         }
     }
 }

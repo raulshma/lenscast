@@ -7,6 +7,9 @@ import fi.iki.elonen.NanoHTTPD
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.io.InputStream
+import java.security.MessageDigest
+import java.security.SecureRandom
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.atomic.AtomicInteger
 
@@ -23,11 +26,14 @@ class StreamingServer(
     private var isRunning = false
     private val maxQueueDepth = 2
     var authUsername: String? = null
-    var authPassword: String? = null
+    var authPasswordHash: String? = null
 
     private val apiController: WebApiController? = context?.let { WebApiController(it) }
 
-    private val assetCache = java.util.concurrent.ConcurrentHashMap<String, Pair<ByteArray, String>>()
+    private val assetCache = ConcurrentHashMap<String, Pair<ByteArray, String>>()
+
+    private val sessions = ConcurrentHashMap<String, Long>()
+    private val secureRandom = SecureRandom()
 
     private val fallbackControlPageHtml = """
         <!DOCTYPE html>
@@ -61,46 +67,146 @@ class StreamingServer(
     }
 
     override fun serve(session: IHTTPSession): Response {
-        if (!checkAuth(session)) {
+        val uri = session.uri
+
+        if (uri == "/api/auth/status") {
+            val isAuthEnabled = authUsername != null && !authUsername.isNullOrEmpty() && authPasswordHash != null
+            return newFixedLengthResponse(
+                Response.Status.OK,
+                "application/json",
+                """{"required":$isAuthEnabled}"""
+            ).apply { addSecurityHeaders() }
+        }
+
+        if (uri == "/api/auth/logout" && session.method == Method.POST) {
+            val cookieHeader = session.headers["cookie"] ?: ""
+            val token = extractCookie(cookieHeader, "lenscast_session")
+            if (token != null) {
+                sessions.remove(token)
+            }
+            return newFixedLengthResponse(
+                Response.Status.OK,
+                "application/json",
+                """{"success":true}"""
+            ).apply {
+                addHeader("Set-Cookie", "lenscast_session=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax")
+                addSecurityHeaders()
+            }
+        }
+
+        val authResult = checkAuth(session)
+        if (!authResult.authorized) {
             return newFixedLengthResponse(
                 Response.Status.UNAUTHORIZED,
                 "text/plain",
                 "Unauthorized"
             ).apply {
                 addHeader("WWW-Authenticate", "Basic realm=\"LensCast\"")
+                addSecurityHeaders()
             }
         }
 
-        val uri = session.uri
         val method = session.method
 
-        return when {
+        val response = when {
             uri == "/stream" -> serveMjpegStream()
             uri == "/snapshot" -> serveSnapshot()
             uri.startsWith("/api/") -> handleApiRoute(uri, method, session)
             else -> serveStaticFile(uri)
         }
+
+        if (authResult.viaBasicAuth) {
+            val token = createSession()
+            response.addHeader(
+                "Set-Cookie",
+                "lenscast_session=$token; Path=/; Max-Age=$SESSION_MAX_AGE_SEC; HttpOnly; SameSite=Lax"
+            )
+        }
+
+        response.addSecurityHeaders()
+        return response
     }
 
-    private fun checkAuth(session: IHTTPSession): Boolean {
-        val username = authUsername ?: return true
-        val password = authPassword ?: return true
-        if (username.isEmpty()) return true
+    private fun Response.addSecurityHeaders() {
+        addHeader("X-Content-Type-Options", "nosniff")
+        addHeader("X-Frame-Options", "DENY")
+        addHeader("X-XSS-Protection", "1; mode=block")
+        addHeader("Referrer-Policy", "no-referrer")
+    }
 
-        val authHeader = session.headers["authorization"] ?: return false
-        if (!authHeader.startsWith("Basic ", ignoreCase = true)) return false
+    private data class AuthResult(val authorized: Boolean, val viaBasicAuth: Boolean)
+
+    private fun checkAuth(session: IHTTPSession): AuthResult {
+        val username = authUsername ?: return AuthResult(true, false)
+        val storedHash = authPasswordHash ?: return AuthResult(true, false)
+        if (username.isEmpty()) return AuthResult(true, false)
+
+        val cookieHeader = session.headers["cookie"] ?: ""
+        val sessionToken = extractCookie(cookieHeader, "lenscast_session")
+        if (sessionToken != null && validateSession(sessionToken)) {
+            return AuthResult(true, false)
+        }
+
+        val authHeader = session.headers["authorization"] ?: return AuthResult(false, false)
+        if (!authHeader.startsWith("Basic ", ignoreCase = true)) return AuthResult(false, false)
 
         val encoded = authHeader.substring(6).trim()
         val decoded: String
         try {
             decoded = String(Base64.decode(encoded, Base64.DEFAULT))
         } catch (_: Exception) {
-            return false
+            return AuthResult(false, false)
         }
 
         val parts = decoded.split(":", limit = 2)
-        if (parts.size != 2) return false
-        return parts[0] == username && parts[1] == password
+        if (parts.size != 2) return AuthResult(false, false)
+        if (!constantTimeEquals(parts[0], username)) return AuthResult(false, false)
+
+        val incomingHash = sha256Base64(parts[1])
+        return if (constantTimeEquals(incomingHash, storedHash)) {
+            AuthResult(true, true)
+        } else {
+            AuthResult(false, false)
+        }
+    }
+
+    private fun createSession(): String {
+        val bytes = ByteArray(32)
+        secureRandom.nextBytes(bytes)
+        val token = bytes.joinToString("") { "%02x".format(it) }
+        sessions[token] = System.currentTimeMillis() + SESSION_DURATION_MS
+        return token
+    }
+
+    private fun validateSession(token: String): Boolean {
+        val expiry = sessions[token] ?: return false
+        if (System.currentTimeMillis() > expiry) {
+            sessions.remove(token)
+            return false
+        }
+        return true
+    }
+
+    private fun extractCookie(cookieHeader: String, name: String): String? {
+        return cookieHeader.split(";")
+            .map { it.trim() }
+            .find { it.startsWith("$name=") }
+            ?.substring(name.length + 1)
+    }
+
+    private fun sha256Base64(input: String): String {
+        val digest = MessageDigest.getInstance("SHA-256")
+        val hash = digest.digest(input.toByteArray(Charsets.UTF_8))
+        return Base64.encodeToString(hash, Base64.NO_WRAP)
+    }
+
+    private fun constantTimeEquals(a: String, b: String): Boolean {
+        if (a.length != b.length) return false
+        var result = 0
+        for (i in a.indices) {
+            result = result or (a[i].code xor b[i].code)
+        }
+        return result == 0
     }
 
     private fun handleApiRoute(uri: String, method: Method, session: IHTTPSession): Response {
@@ -130,17 +236,13 @@ class StreamingServer(
         }
 
         return if (json != null) {
-            newFixedLengthResponse(Response.Status.OK, "application/json", json).apply {
-                addHeader("Access-Control-Allow-Origin", "*")
-            }
+            newFixedLengthResponse(Response.Status.OK, "application/json", json)
         } else {
             newFixedLengthResponse(
                 Response.Status.NOT_FOUND,
                 "application/json",
                 """{"error":"Not found"}"""
-            ).apply {
-                addHeader("Access-Control-Allow-Origin", "*")
-            }
+            )
         }
     }
 
@@ -179,8 +281,7 @@ class StreamingServer(
                     val indexPath = "webui/index.html"
                     val cached = assetCache[indexPath]
                     val bytes = cached?.first ?: assetMgr.open(indexPath).use { it.readBytes() }
-                        .also { assetCache[indexPath] = Pair(
-                            it, "text/html") }
+                        .also { assetCache[indexPath] = Pair(it, "text/html") }
                     newFixedLengthResponse(
                         Response.Status.OK, "text/html",
                         ByteArrayInputStream(bytes), bytes.size.toLong()
@@ -226,6 +327,8 @@ class StreamingServer(
             private var currentFrame: ByteArrayInputStream? = null
             private var listener: (ByteArray?) -> Unit = {}
             private val queueLock = Object()
+            @Volatile
+            private var closed = false
 
             init {
                 listener = { data ->
@@ -247,24 +350,36 @@ class StreamingServer(
             }
 
             override fun read(): Int {
+                val buf = ByteArray(1)
+                val n = read(buf, 0, 1)
+                return if (n <= 0) -1 else buf[0].toInt() and 0xFF
+            }
+
+            override fun read(b: ByteArray, off: Int, len: Int): Int {
+                if (closed) return -1
+                if (off < 0 || len < 0 || len > b.size - off) throw IndexOutOfBoundsException()
+
                 while (true) {
-                    currentFrame?.let { stream ->
-                        val b = stream.read()
-                        if (b != -1) return b
+                    if (closed) return -1
+
+                    currentFrame?.let { frameStream ->
+                        val n = frameStream.read(b, off, len)
+                        if (n > 0) return n
                         currentFrame = null
                     }
 
                     synchronized(queueLock) {
+                        if (closed) return -1
                         val frame = frameQueue.poll()
                         if (frame != null) {
                             val header =
                                 "\r\n--$boundary\r\nContent-Type: image/jpeg\r\nContent-Length: ${frame.size}\r\n\r\n"
                             val headerBytes = header.toByteArray()
+                            val ending = "\r\n".toByteArray()
                             val combined =
-                                ByteArray(headerBytes.size + frame.size + "\r\n".toByteArray().size)
+                                ByteArray(headerBytes.size + frame.size + ending.size)
                             System.arraycopy(headerBytes, 0, combined, 0, headerBytes.size)
                             System.arraycopy(frame, 0, combined, headerBytes.size, frame.size)
-                            val ending = "\r\n".toByteArray()
                             System.arraycopy(
                                 ending, 0, combined,
                                 headerBytes.size + frame.size, ending.size
@@ -278,6 +393,8 @@ class StreamingServer(
             }
 
             override fun close() {
+                closed = true
+                synchronized(queueLock) { queueLock.notifyAll() }
                 listeners.remove(listener)
                 val num = clientCount.decrementAndGet()
                 Log.d(TAG, "Client disconnected. Total: $num")
@@ -322,11 +439,14 @@ class StreamingServer(
             stop()
             isRunning = false
             listeners.clear()
+            sessions.clear()
             Log.d(TAG, "Streaming server stopped")
         }
     }
 
     companion object {
         private const val TAG = "StreamingServer"
+        private const val SESSION_DURATION_MS = 24 * 60 * 60 * 1000L
+        private const val SESSION_MAX_AGE_SEC = 24 * 60 * 60
     }
 }

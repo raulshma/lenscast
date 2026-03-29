@@ -154,10 +154,10 @@ class StreamingManager(private val context: Context) {
     fun updateAuthSettings(settings: StreamAuthSettings) {
         if (settings.enabled && settings.username.isNotEmpty()) {
             server.authUsername = settings.username
-            server.authPassword = settings.password
+            server.authPasswordHash = settings.passwordHash
         } else {
             server.authUsername = null
-            server.authPassword = null
+            server.authPasswordHash = null
         }
     }
 

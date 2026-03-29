@@ -26,16 +26,9 @@ export interface StreamingSettings {
   showPreview: boolean
 }
 
-export interface AuthSettings {
-  enabled: boolean
-  username: string
-  password?: string
-}
-
 export interface AllSettings {
   camera: CameraSettings
   streaming: StreamingSettings
-  auth: AuthSettings
 }
 
 export interface DeviceStatus {

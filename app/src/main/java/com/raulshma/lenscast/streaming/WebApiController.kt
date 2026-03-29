@@ -15,7 +15,7 @@ import com.raulshma.lenscast.camera.model.FocusMode
 import com.raulshma.lenscast.camera.model.HdrMode
 import com.raulshma.lenscast.camera.model.Resolution
 import com.raulshma.lenscast.camera.model.WhiteBalance
-import com.raulshma.lenscast.data.StreamAuthSettings
+
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
@@ -38,8 +38,6 @@ class WebApiController(private val context: Context) {
                 val port = app.settingsDataStore.streamingPort.first()
                 val quality = app.settingsDataStore.jpegQuality.first()
                 val showPreview = app.settingsDataStore.showPreview.first()
-                val auth = app.settingsDataStore.authSettings.first()
-
                 val json = JSONObject()
 
                 val camera = JSONObject().apply {
@@ -64,14 +62,8 @@ class WebApiController(private val context: Context) {
                     put("showPreview", showPreview)
                 }
 
-                val authJson = JSONObject().apply {
-                    put("enabled", auth.enabled)
-                    put("username", auth.username)
-                }
-
                 json.put("camera", camera)
                 json.put("streaming", streaming)
-                json.put("auth", authJson)
 
                 json.toString()
             }
@@ -156,18 +148,6 @@ class WebApiController(private val context: Context) {
                     if (stream.has("showPreview")) {
                         app.settingsDataStore.saveShowPreview(stream.getBoolean("showPreview"))
                     }
-                }
-
-                if (json.has("auth")) {
-                    val authJson = json.getJSONObject("auth")
-                    val currentAuth = app.settingsDataStore.authSettings.first()
-                    val newAuth = StreamAuthSettings(
-                        enabled = authJson.optBoolean("enabled", currentAuth.enabled),
-                        username = authJson.optString("username", currentAuth.username),
-                        password = if (authJson.has("password")) authJson.getString("password") else currentAuth.password,
-                    )
-                    app.settingsDataStore.saveAuthSettings(newAuth)
-                    app.streamingManager.updateAuthSettings(newAuth)
                 }
 
                 """{"success":true}"""
