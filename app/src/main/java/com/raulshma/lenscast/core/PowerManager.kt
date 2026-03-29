@@ -44,9 +44,9 @@ class PowerManager(private val context: Context) {
     private val _optimizationResult = MutableStateFlow(
         BatteryOptimizationResult(
             suggestedBitrate = 2_000_000,
-            suggestedFrameRate = 30,
+            suggestedFrameRate = 24,
             suggestedResolution = "FHD_1080P",
-            suggestedJpegQuality = 80,
+            suggestedJpegQuality = 70,
             batteryLevel = 100,
             isPowerSaveMode = false,
             message = "Normal operation"
@@ -119,9 +119,9 @@ class PowerManager(private val context: Context) {
         _optimizationResult.value = when {
             charging -> BatteryOptimizationResult(
                 suggestedBitrate = 2_000_000,
-                suggestedFrameRate = 30,
+                suggestedFrameRate = 24,
                 suggestedResolution = "FHD_1080P",
-                suggestedJpegQuality = 80,
+                suggestedJpegQuality = 70,
                 batteryLevel = level,
                 isPowerSaveMode = powerSave,
                 message = "Charging - full quality"
@@ -146,18 +146,18 @@ class PowerManager(private val context: Context) {
             )
             level < 50 || powerSave -> BatteryOptimizationResult(
                 suggestedBitrate = 1_000_000,
-                suggestedFrameRate = 24,
+                suggestedFrameRate = 20,
                 suggestedResolution = "HD_720P",
-                suggestedJpegQuality = 70,
+                suggestedJpegQuality = 65,
                 batteryLevel = level,
                 isPowerSaveMode = powerSave,
                 message = "Battery saver - balanced quality"
             )
             else -> BatteryOptimizationResult(
                 suggestedBitrate = 2_000_000,
-                suggestedFrameRate = 30,
+                suggestedFrameRate = 24,
                 suggestedResolution = "FHD_1080P",
-                suggestedJpegQuality = 80,
+                suggestedJpegQuality = 70,
                 batteryLevel = level,
                 isPowerSaveMode = powerSave,
                 message = "Normal operation"

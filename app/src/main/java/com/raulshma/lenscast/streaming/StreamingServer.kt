@@ -271,10 +271,13 @@ class StreamingServer(
             val bytes = cached?.first ?: assetMgr.open(path).use { it.readBytes() }
                 .also { assetCache[path] = Pair(it, getMimeType(path)) }
             val mimeType = cached?.second ?: getMimeType(path)
-            newFixedLengthResponse(
+            val response = newFixedLengthResponse(
                 Response.Status.OK, mimeType,
                 ByteArrayInputStream(bytes), bytes.size.toLong()
             )
+            val maxAge = if (path == "webui/index.html") 0 else 86400
+            response.addHeader("Cache-Control", "public, max-age=$maxAge")
+            response
         } catch (_: Exception) {
             if (path != "webui/index.html") {
                 try {
@@ -282,10 +285,12 @@ class StreamingServer(
                     val cached = assetCache[indexPath]
                     val bytes = cached?.first ?: assetMgr.open(indexPath).use { it.readBytes() }
                         .also { assetCache[indexPath] = Pair(it, "text/html") }
-                    newFixedLengthResponse(
+                    val response = newFixedLengthResponse(
                         Response.Status.OK, "text/html",
                         ByteArrayInputStream(bytes), bytes.size.toLong()
                     )
+                    response.addHeader("Cache-Control", "no-cache")
+                    response
                 } catch (_: Exception) {
                     serveFallbackControlPage()
                 }

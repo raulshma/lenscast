@@ -72,6 +72,15 @@ class CaptureViewModel(
     private val _scheduledStartTime = MutableStateFlow<Long?>(null)
     val scheduledStartTime: StateFlow<Long?> = _scheduledStartTime.asStateFlow()
 
+    private val moshi by lazy {
+        com.squareup.moshi.Moshi.Builder()
+            .addLast(com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory())
+            .build()
+    }
+    private val recordingConfigAdapter by lazy {
+        moshi.adapter(com.raulshma.lenscast.capture.model.RecordingConfig::class.java)
+    }
+
     init {
         viewModelScope.launch {
             captureHistoryStore.history.collect { history ->
@@ -83,8 +92,7 @@ class CaptureViewModel(
     fun capturePhoto() {
         val imageCapture = cameraService.getImageCapture() ?: return
 
-        val dateFormat = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US)
-        val fileName = "IMG_${dateFormat.format(Date())}.jpg"
+        val fileName = "IMG_${DATE_FORMAT.format(Date())}.jpg"
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             captureWithMediaStore(imageCapture, fileName)
@@ -238,11 +246,7 @@ class CaptureViewModel(
     }
 
     private fun startRecordingWithConfig(config: RecordingConfig) {
-        val moshi = com.squareup.moshi.Moshi.Builder()
-            .addLast(com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory())
-            .build()
-        val adapter = moshi.adapter(RecordingConfig::class.java)
-        val configJson = adapter.toJson(config)
+        val configJson = recordingConfigAdapter.toJson(config)
 
         val intent = Intent(context, RecordingService::class.java).apply {
             action = RecordingService.ACTION_START
@@ -328,5 +332,6 @@ class CaptureViewModel(
     companion object {
         private const val TAG = "CaptureViewModel"
         private const val WORK_NAME_INTERVAL = "interval_capture"
+        private val DATE_FORMAT = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US)
     }
 }

@@ -82,7 +82,7 @@ class RecordingService : Service() {
 
         val app = applicationContext as MainApplication
         val cameraService = app.cameraService
-        val fileName = "VID_${SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())}.mp4"
+        val fileName = "VID_${DATE_FORMAT.format(Date())}.mp4"
 
         cameraService.acquireKeepAlive()
 
@@ -297,5 +297,6 @@ class RecordingService : Service() {
         private const val NOTIFICATION_ID = 1001
         private const val TAG = "RecordingService"
         private var activeRecording: Recording? = null
+        private val DATE_FORMAT = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US)
     }
 }

@@ -83,7 +83,7 @@ class SettingsDataStore(private val context: Context) {
             },
             colorTemperature = if (prefs[Keys.COLOR_TEMPERATURE_NULL] != "true") prefs[Keys.COLOR_TEMPERATURE] else null,
             zoomRatio = prefs[Keys.ZOOM_RATIO] ?: 1.0f,
-            frameRate = prefs[Keys.FRAME_RATE] ?: 30,
+            frameRate = prefs[Keys.FRAME_RATE] ?: 24,
             resolution = try {
                 Resolution.valueOf(prefs[Keys.RESOLUTION] ?: Resolution.FHD_1080P.name)
             } catch (_: Exception) {
@@ -104,7 +104,7 @@ class SettingsDataStore(private val context: Context) {
     }
 
     val jpegQuality: Flow<Int> = context.dataStore.data.map { prefs ->
-        prefs[Keys.JPEG_QUALITY] ?: 80
+        prefs[Keys.JPEG_QUALITY] ?: 70
     }
 
     val showPreview: Flow<Boolean> = context.dataStore.data.map { prefs ->

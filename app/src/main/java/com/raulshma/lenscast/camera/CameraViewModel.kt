@@ -176,8 +176,8 @@ class CameraViewModel(
     fun startPreview(previewView: PreviewView, lifecycleOwner: androidx.lifecycle.LifecycleOwner) {
         currentPreviewView = previewView
         cameraService.setLifecycleOwner(lifecycleOwner)
-        cameraService.setFrameListener { bitmap ->
-            streamingManager.pushFrame(bitmap)
+        cameraService.setFrameListener { yuvData, width, height, rotation ->
+            streamingManager.pushFrame(yuvData, width, height, rotation)
         }
         cameraService.startPreview(previewView)
         viewModelScope.launch {
@@ -361,8 +361,7 @@ class CameraViewModel(
 
     fun capturePhoto() {
         val imageCapture = cameraService.getImageCapture() ?: return
-        val dateFormat = java.text.SimpleDateFormat("yyyyMMdd_HHmmss", java.util.Locale.US)
-        val fileName = "IMG_${dateFormat.format(java.util.Date())}.jpg"
+        val fileName = "IMG_${DATE_FORMAT.format(java.util.Date())}.jpg"
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
             val contentValues = android.content.ContentValues().apply {
                 put(android.provider.MediaStore.MediaColumns.DISPLAY_NAME, fileName)
@@ -472,5 +471,6 @@ class CameraViewModel(
 
     companion object {
         private const val TAG = "CameraViewModel"
+        private val DATE_FORMAT = java.text.SimpleDateFormat("yyyyMMdd_HHmmss", java.util.Locale.US)
     }
 }

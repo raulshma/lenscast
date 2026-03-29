@@ -27,6 +27,7 @@ class StreamingManager(private val context: Context) {
     private var lastFrameTimeMs = 0L
     private var minFrameIntervalMs = 1000L / DEFAULT_STREAM_FPS
     private val reusableBuffer = ByteArrayOutputStream(256 * 1024)
+    private val reusableYuvBuffer = ByteArrayOutputStream(256 * 1024)
     private val bufferLock = Any()
     private var lastReportedClientCount = -1
 
@@ -120,9 +121,39 @@ class StreamingManager(private val context: Context) {
 
     fun pushFrame(yuvData: ByteArray, width: Int, height: Int, rotation: Int = 0) {
         if (!isStreaming.get()) return
-        val bitmap = yuvToBitmap(yuvData, width, height, rotation) ?: return
-        pushFrame(bitmap)
-        bitmap.recycle()
+
+        val now = System.currentTimeMillis()
+        val elapsed = now - lastFrameTimeMs
+        val adjustedInterval = thermalMonitor?.getAdjustedFrameDelay(minFrameIntervalMs)
+            ?: minFrameIntervalMs
+        if (elapsed < adjustedInterval) return
+        lastFrameTimeMs = now
+
+        val clientCount = server.getClientCount()
+        if (clientCount == 0) return
+
+        val quality = thermalMonitor?.getAdjustedQuality(jpegQuality.get()) ?: jpegQuality.get()
+        val jpegData = yuvToJpeg(yuvData, width, height, quality) ?: return
+        server.updateFrame(jpegData)
+
+        if (clientCount != lastReportedClientCount) {
+            lastReportedClientCount = clientCount
+            _clientCount.value = clientCount
+        }
+    }
+
+    private fun yuvToJpeg(yuvData: ByteArray, width: Int, height: Int, quality: Int): ByteArray? {
+        return try {
+            val yuvImage = YuvImage(yuvData, ImageFormat.NV21, width, height, null)
+            synchronized(bufferLock) {
+                reusableBuffer.reset()
+                yuvImage.compressToJpeg(Rect(0, 0, width, height), quality, reusableBuffer)
+                reusableBuffer.toByteArray()
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "YUV to JPEG conversion failed", e)
+            null
+        }
     }
 
     fun setJpegQuality(quality: Int) {
@@ -172,16 +203,20 @@ class StreamingManager(private val context: Context) {
     private fun yuvToBitmap(yuvData: ByteArray, width: Int, height: Int, rotation: Int): Bitmap? {
         return try {
             val yuvImage = YuvImage(yuvData, ImageFormat.NV21, width, height, null)
-            val stream = ByteArrayOutputStream()
-            yuvImage.compressToJpeg(Rect(0, 0, width, height), 80, stream)
-            val bitmap = BitmapFactory.decodeByteArray(stream.toByteArray(), 0, stream.size())
+            val jpegData: ByteArray
+            synchronized(bufferLock) {
+                reusableYuvBuffer.reset()
+                yuvImage.compressToJpeg(Rect(0, 0, width, height), jpegQuality.get(), reusableYuvBuffer)
+                jpegData = reusableYuvBuffer.toByteArray()
+            }
+            val bitmap = BitmapFactory.decodeByteArray(jpegData, 0, jpegData.size)
             if (rotation != 0 && bitmap != null) {
                 val matrix = Matrix()
                 matrix.postRotate(rotation.toFloat())
                 val rotated = Bitmap.createBitmap(
                     bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true
                 )
-                if (rotated != bitmap) bitmap.recycle()
+                if (rotated !== bitmap) bitmap.recycle()
                 rotated
             } else {
                 bitmap
@@ -222,7 +257,7 @@ class StreamingManager(private val context: Context) {
     companion object {
         private const val TAG = "StreamingManager"
         const val DEFAULT_PORT = 8080
-        private const val DEFAULT_JPEG_QUALITY = 80
-        private const val DEFAULT_STREAM_FPS = 30
+        private const val DEFAULT_JPEG_QUALITY = 70
+        private const val DEFAULT_STREAM_FPS = 24
     }
 }

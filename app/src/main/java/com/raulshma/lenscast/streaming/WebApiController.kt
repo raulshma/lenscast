@@ -31,6 +31,15 @@ class WebApiController(private val context: Context) {
     private val app: MainApplication
         get() = context.applicationContext as MainApplication
 
+    private val moshi by lazy {
+        com.squareup.moshi.Moshi.Builder()
+            .addLast(com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory())
+            .build()
+    }
+    private val recordingConfigAdapter by lazy {
+        moshi.adapter(com.raulshma.lenscast.capture.model.RecordingConfig::class.java)
+    }
+
     fun handleGetSettings(): String {
         return try {
             runBlocking {
@@ -272,8 +281,7 @@ class WebApiController(private val context: Context) {
             if (imageCapture == null) {
                 """{"success":false,"error":"Camera not available"}"""
             } else {
-                val dateFormat = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US)
-                val fileName = "IMG_${dateFormat.format(Date())}.jpg"
+                val fileName = "IMG_${DATE_FORMAT.format(Date())}.jpg"
 
                 if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
                     val contentValues = ContentValues().apply {
@@ -395,5 +403,6 @@ class WebApiController(private val context: Context) {
 
     companion object {
         private const val TAG = "WebApiController"
+        private val DATE_FORMAT = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US)
     }
 }

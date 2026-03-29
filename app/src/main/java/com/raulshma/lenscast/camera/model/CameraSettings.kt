@@ -29,7 +29,7 @@ data class CameraSettings(
     val whiteBalance: WhiteBalance = WhiteBalance.AUTO,
     val colorTemperature: Int? = null,
     val zoomRatio: Float = 1.0f,
-    val frameRate: Int = 30,
+    val frameRate: Int = 24,
     val resolution: Resolution = Resolution.FHD_1080P,
     val sceneMode: String? = null,
     val stabilization: Boolean = true,

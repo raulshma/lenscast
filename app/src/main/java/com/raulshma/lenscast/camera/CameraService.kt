@@ -2,8 +2,6 @@ package com.raulshma.lenscast.camera
 
 
 import android.content.Context
-import android.graphics.Bitmap
-import android.graphics.Matrix
 import android.hardware.camera2.CameraCharacteristics
 import android.util.Log
 import androidx.camera.camera2.interop.Camera2CameraInfo
@@ -16,6 +14,8 @@ import androidx.camera.core.ImageCapture
 import androidx.camera.core.ImageProxy
 import androidx.camera.core.Preview
 import androidx.camera.core.SurfaceOrientedMeteringPointFactory
+import androidx.camera.core.resolutionselector.ResolutionSelector
+import androidx.camera.core.resolutionselector.ResolutionStrategy
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.lifecycle.Lifecycle
@@ -24,6 +24,7 @@ import androidx.lifecycle.LifecycleRegistry
 import android.hardware.camera2.CaptureRequest
 import android.util.Range
 import androidx.camera.camera2.interop.Camera2CameraControl
+import androidx.camera.camera2.interop.Camera2Interop
 import androidx.camera.camera2.interop.CaptureRequestOptions
 import androidx.camera.core.UseCase
 import com.raulshma.lenscast.camera.model.CameraLensInfo
@@ -67,7 +68,7 @@ class CameraService(private val context: Context) {
     private var imageAnalysis: ImageAnalysis? = null
     private var camera: Camera? = null
     private var lifecycleOwner: LifecycleOwner? = null
-    private var frameListener: ((Bitmap) -> Unit)? = null
+    private var frameListener: ((ByteArray, Int, Int, Int) -> Unit)? = null
     private var currentCameraSelector: CameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
 
     private val keepAliveLifecycle = KeepAliveLifecycle()
@@ -119,7 +120,7 @@ class CameraService(private val context: Context) {
         return if (keepAliveRefCount > 0) keepAliveLifecycle else lifecycleOwner!!
     }
 
-    fun setFrameListener(listener: ((Bitmap) -> Unit)?) {
+    fun setFrameListener(listener: ((ByteArray, Int, Int, Int) -> Unit)?) {
         frameListener = listener
     }
 
@@ -403,11 +404,11 @@ class CameraService(private val context: Context) {
         currentPreviewView = previewView
         Log.d(TAG, "startPreview: starting with selector=$currentCameraSelector, resolution=$currentResolution")
 
-        val resolutionSelector = androidx.camera.core.resolutionselector.ResolutionSelector.Builder()
+        val resolutionSelector = ResolutionSelector.Builder()
             .setResolutionStrategy(
-                androidx.camera.core.resolutionselector.ResolutionStrategy(
+                ResolutionStrategy(
                     currentResolution,
-                    androidx.camera.core.resolutionselector.ResolutionStrategy.FALLBACK_RULE_CLOSEST_LOWER_THEN_HIGHER
+                    ResolutionStrategy.FALLBACK_RULE_CLOSEST_LOWER_THEN_HIGHER
                 )
             )
             .build()
@@ -420,15 +421,14 @@ class CameraService(private val context: Context) {
             .setResolutionSelector(resolutionSelector)
         val analysisBuilder = ImageAnalysis.Builder()
             .setResolutionSelector(resolutionSelector)
-            .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_RGBA_8888)
             .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
 
         val selectedLens = _availableLenses.value.getOrNull(_selectedLensIndex.value)
         if (selectedLens?.physicalCameraId != null) {
             val physId = selectedLens.physicalCameraId
-            androidx.camera.camera2.interop.Camera2Interop.Extender(previewBuilder).setPhysicalCameraId(physId)
-            androidx.camera.camera2.interop.Camera2Interop.Extender(captureBuilder).setPhysicalCameraId(physId)
-            androidx.camera.camera2.interop.Camera2Interop.Extender(analysisBuilder).setPhysicalCameraId(physId)
+            Camera2Interop.Extender(previewBuilder).setPhysicalCameraId(physId)
+            Camera2Interop.Extender(captureBuilder).setPhysicalCameraId(physId)
+            Camera2Interop.Extender(analysisBuilder).setPhysicalCameraId(physId)
             Log.d(TAG, "startPreview: applied physicalCameraId $physId to all use cases")
         }
 
@@ -513,29 +513,84 @@ class CameraService(private val context: Context) {
         }
     }
 
-    private var cachedRotation: Float = -1f
-    private var rotationMatrix: Matrix? = null
-
     private fun processFrame(imageProxy: ImageProxy) {
         try {
-            val bitmap = imageProxy.toBitmap()
-            val rotation = imageProxy.imageInfo.rotationDegrees.toFloat()
-            val result = if (rotation != 0f) {
-                if (rotation != cachedRotation || rotationMatrix == null) {
-                    cachedRotation = rotation
-                    rotationMatrix = Matrix().apply { postRotate(rotation) }
-                }
-                Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, rotationMatrix, true)
-            } else {
-                bitmap
+            val width = imageProxy.width
+            val height = imageProxy.height
+            val rotation = imageProxy.imageInfo.rotationDegrees
+            val yuvData = yuvToNv21(imageProxy)
+            if (yuvData != null) {
+                frameListener?.invoke(yuvData, width, height, rotation)
             }
-            frameListener?.invoke(result)
-            if (result !== bitmap) bitmap.recycle()
         } catch (e: Exception) {
             Log.e(TAG, "Frame processing error", e)
         } finally {
             imageProxy.close()
         }
+    }
+
+    private fun yuvToNv21(image: ImageProxy): ByteArray? {
+        val planes = image.planes
+        if (planes.size < 3) return null
+
+        val yPlane = planes[0]
+        val uPlane = planes[1]
+        val vPlane = planes[2]
+
+        val width = image.width
+        val height = image.height
+        val ySize = width * height
+        val uvSize = ySize / 2
+        val nv21 = ByteArray(ySize + uvSize)
+
+        // Copy Y plane (handle row stride/padding)
+        val yBuffer = yPlane.buffer
+        val yRowStride = yPlane.rowStride
+        if (yRowStride == width) {
+            yBuffer.position(0)
+            yBuffer.get(nv21, 0, ySize)
+        } else {
+            var pos = 0
+            for (row in 0 until height) {
+                yBuffer.position(row * yRowStride)
+                yBuffer.get(nv21, pos, width)
+                pos += width
+            }
+        }
+
+        // Copy UV planes interleaved as VU (NV21 format)
+        val uBuffer = uPlane.buffer
+        val vBuffer = vPlane.buffer
+        val uvRowStride = uPlane.rowStride
+        val uvPixelStride = uPlane.pixelStride
+        var uvPos = ySize
+
+        if (uvPixelStride == 2 && uvRowStride == width) {
+            // Optimal case: interleaved UV with no padding
+            for (i in 0 until width * height / 4) {
+                val vIdx = i * uvPixelStride
+                val uIdx = i * uvPixelStride
+                vBuffer.position(vIdx)
+                uBuffer.position(uIdx)
+                nv21[uvPos++] = vBuffer.get()
+                nv21[uvPos++] = uBuffer.get()
+            }
+        } else {
+            // General case: handle arbitrary stride/padding
+            val uvWidth = width / 2
+            val uvHeight = height / 2
+            for (row in 0 until uvHeight) {
+                for (col in 0 until uvWidth) {
+                    val uvIndex = row * uvRowStride + col * uvPixelStride
+                    vBuffer.position(uvIndex)
+                    uBuffer.position(uvIndex)
+                    nv21[uvPos++] = vBuffer.get()
+                    nv21[uvPos++] = uBuffer.get()
+                }
+            }
+        }
+
+        return nv21
     }
 
     private var pendingResolution: android.util.Size? = null
@@ -719,6 +774,10 @@ class CameraService(private val context: Context) {
         imageAnalysis = null
         camera = null
         _cameraState.value = CameraState.Idle
+        try {
+            analysisExecutor.shutdown()
+        } catch (_: Exception) {
+        }
     }
 
     companion object {

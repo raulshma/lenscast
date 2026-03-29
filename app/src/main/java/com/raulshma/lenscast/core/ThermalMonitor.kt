@@ -16,7 +16,7 @@ class ThermalMonitor(private val context: Context) {
     private val _throttlingResult = MutableStateFlow(ThermalThrottlingResult(
         bitrateMultiplier = 1.0f,
         frameRateMultiplier = 1.0f,
-        jpegQuality = 80,
+        jpegQuality = 70,
         shouldPause = false,
     ))
     val throttlingResult: StateFlow<ThermalThrottlingResult> = _throttlingResult.asStateFlow()
@@ -59,13 +59,13 @@ class ThermalMonitor(private val context: Context) {
             ThermalState.NORMAL -> ThermalThrottlingResult(
                 bitrateMultiplier = 1.0f,
                 frameRateMultiplier = 1.0f,
-                jpegQuality = 80,
+                jpegQuality = 70,
                 shouldPause = false,
             )
             ThermalState.LIGHT -> ThermalThrottlingResult(
                 bitrateMultiplier = 0.9f,
                 frameRateMultiplier = 0.9f,
-                jpegQuality = 70,
+                jpegQuality = 60,
                 shouldPause = false,
             )
             ThermalState.MODERATE -> ThermalThrottlingResult(

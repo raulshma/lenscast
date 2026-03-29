@@ -66,6 +66,8 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
+private val GALLERY_DATE_FORMAT = SimpleDateFormat("MMM dd, HH:mm", Locale.getDefault())
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun GalleryScreen(
@@ -310,6 +312,5 @@ private fun resolveMediaUri(filePath: String): Any? {
 }
 
 private fun formatGalleryDate(timestamp: Long): String {
-    val sdf = SimpleDateFormat("MMM dd, HH:mm", Locale.getDefault())
-    return sdf.format(Date(timestamp))
+    return GALLERY_DATE_FORMAT.format(Date(timestamp))
 }
