@@ -19,11 +19,15 @@ class StreamingServer(
     private val clientCount = AtomicInteger(0)
     private var latestJpeg: ByteArray? = null
     private val listeners = ConcurrentLinkedQueue<(ByteArray?) -> Unit>()
+    private val frameLock = Object()
     private var isRunning = false
+    private val maxQueueDepth = 2
     var authUsername: String? = null
     var authPassword: String? = null
 
     private val apiController: WebApiController? = context?.let { WebApiController(it) }
+
+    private val assetCache = java.util.concurrent.ConcurrentHashMap<String, Pair<ByteArray, String>>()
 
     private val fallbackControlPageHtml = """
         <!DOCTYPE html>
@@ -48,7 +52,9 @@ class StreamingServer(
     """.trimIndent()
 
     fun updateFrame(jpegData: ByteArray) {
-        latestJpeg = jpegData
+        synchronized(frameLock) {
+            latestJpeg = jpegData
+        }
         for (listener in listeners) {
             listener(jpegData)
         }
@@ -159,8 +165,10 @@ class StreamingServer(
         val path = if (uri == "/" || uri == "") "webui/index.html" else "webui$uri"
 
         return try {
-            val bytes = assetMgr.open(path).use { it.readBytes() }
-            val mimeType = getMimeType(path)
+            val cached = assetCache[path]
+            val bytes = cached?.first ?: assetMgr.open(path).use { it.readBytes() }
+                .also { assetCache[path] = Pair(it, getMimeType(path)) }
+            val mimeType = cached?.second ?: getMimeType(path)
             newFixedLengthResponse(
                 Response.Status.OK, mimeType,
                 ByteArrayInputStream(bytes), bytes.size.toLong()
@@ -168,7 +176,11 @@ class StreamingServer(
         } catch (_: Exception) {
             if (path != "webui/index.html") {
                 try {
-                    val bytes = assetMgr.open("webui/index.html").use { it.readBytes() }
+                    val indexPath = "webui/index.html"
+                    val cached = assetCache[indexPath]
+                    val bytes = cached?.first ?: assetMgr.open(indexPath).use { it.readBytes() }
+                        .also { assetCache[indexPath] = Pair(
+                            it, "text/html") }
                     newFixedLengthResponse(
                         Response.Status.OK, "text/html",
                         ByteArrayInputStream(bytes), bytes.size.toLong()
@@ -210,20 +222,28 @@ class StreamingServer(
         Log.d(TAG, "Client connected. Total: $clientNum")
 
         val stream = object : InputStream() {
-            private val buffer = ByteArrayOutputStream()
-            private var frameQueue = ConcurrentLinkedQueue<ByteArray>()
+            private val frameQueue = ConcurrentLinkedQueue<ByteArray>()
             private var currentFrame: ByteArrayInputStream? = null
             private var listener: (ByteArray?) -> Unit = {}
+            private val queueLock = Object()
 
             init {
                 listener = { data ->
                     if (data != null) {
-                        frameQueue.add(data)
+                        synchronized(queueLock) {
+                            while (frameQueue.size >= maxQueueDepth) {
+                                frameQueue.poll()
+                            }
+                            frameQueue.add(data)
+                            queueLock.notify()
+                        }
                     }
                 }
                 listeners.add(listener)
 
-                latestJpeg?.let { frameQueue.add(it) }
+                synchronized(frameLock) {
+                    latestJpeg?.let { frameQueue.add(it) }
+                }
             }
 
             override fun read(): Int {
@@ -234,24 +254,25 @@ class StreamingServer(
                         currentFrame = null
                     }
 
-                    val frame = frameQueue.poll()
-                    if (frame != null) {
-                        buffer.reset()
-                        val header =
-                            "\r\n--$boundary\r\nContent-Type: image/jpeg\r\nContent-Length: ${frame.size}\r\n\r\n"
-                        val headerBytes = header.toByteArray()
-                        val combined =
-                            ByteArray(headerBytes.size + frame.size + "\r\n".toByteArray().size)
-                        System.arraycopy(headerBytes, 0, combined, 0, headerBytes.size)
-                        System.arraycopy(frame, 0, combined, headerBytes.size, frame.size)
-                        val ending = "\r\n".toByteArray()
-                        System.arraycopy(
-                            ending, 0, combined,
-                            headerBytes.size + frame.size, ending.size
-                        )
-                        currentFrame = ByteArrayInputStream(combined)
-                    } else {
-                        Thread.sleep(16)
+                    synchronized(queueLock) {
+                        val frame = frameQueue.poll()
+                        if (frame != null) {
+                            val header =
+                                "\r\n--$boundary\r\nContent-Type: image/jpeg\r\nContent-Length: ${frame.size}\r\n\r\n"
+                            val headerBytes = header.toByteArray()
+                            val combined =
+                                ByteArray(headerBytes.size + frame.size + "\r\n".toByteArray().size)
+                            System.arraycopy(headerBytes, 0, combined, 0, headerBytes.size)
+                            System.arraycopy(frame, 0, combined, headerBytes.size, frame.size)
+                            val ending = "\r\n".toByteArray()
+                            System.arraycopy(
+                                ending, 0, combined,
+                                headerBytes.size + frame.size, ending.size
+                            )
+                            currentFrame = ByteArrayInputStream(combined)
+                        } else {
+                            queueLock.wait(100)
+                        }
                     }
                 }
             }

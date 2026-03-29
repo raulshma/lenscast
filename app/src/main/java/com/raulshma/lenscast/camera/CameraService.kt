@@ -513,14 +513,19 @@ class CameraService(private val context: Context) {
         }
     }
 
+    private var cachedRotation: Float = -1f
+    private var rotationMatrix: Matrix? = null
+
     private fun processFrame(imageProxy: ImageProxy) {
         try {
             val bitmap = imageProxy.toBitmap()
             val rotation = imageProxy.imageInfo.rotationDegrees.toFloat()
             val result = if (rotation != 0f) {
-                val matrix = Matrix()
-                matrix.postRotate(rotation)
-                Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
+                if (rotation != cachedRotation || rotationMatrix == null) {
+                    cachedRotation = rotation
+                    rotationMatrix = Matrix().apply { postRotate(rotation) }
+                }
+                Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, rotationMatrix, true)
             } else {
                 bitmap
             }

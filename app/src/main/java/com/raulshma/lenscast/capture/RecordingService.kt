@@ -35,6 +35,15 @@ class RecordingService : Service() {
     private var startTimeMs: Long = 0
     private var recordingConfig: RecordingConfig? = null
 
+    private val moshi by lazy {
+        com.squareup.moshi.Moshi.Builder()
+            .addLast(com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory())
+            .build()
+    }
+    private val recordingConfigAdapter by lazy {
+        moshi.adapter(RecordingConfig::class.java)
+    }
+
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onCreate() {
@@ -47,11 +56,7 @@ class RecordingService : Service() {
             ACTION_START -> {
                 val configJson = intent.getStringExtra(EXTRA_CONFIG)
                 val config = if (configJson != null) {
-                    com.squareup.moshi.Moshi.Builder()
-                        .addLast(com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory())
-                        .build()
-                        .adapter(RecordingConfig::class.java)
-                        .fromJson(configJson)
+                    recordingConfigAdapter.fromJson(configJson)
                 } else null
                 startRecording(config)
             }

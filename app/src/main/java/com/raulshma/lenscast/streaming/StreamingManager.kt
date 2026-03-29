@@ -20,10 +20,15 @@ import java.util.concurrent.atomic.AtomicInteger
 class StreamingManager(private val context: Context) {
 
     private var server: StreamingServer = StreamingServer(DEFAULT_PORT, context)
-    private var encoder: H264Encoder? = null
     private val isStreaming = AtomicBoolean(false)
     private val jpegQuality = AtomicInteger(DEFAULT_JPEG_QUALITY)
     private var currentPort: Int = DEFAULT_PORT
+
+    private var lastFrameTimeMs = 0L
+    private var minFrameIntervalMs = 1000L / DEFAULT_STREAM_FPS
+    private val reusableBuffer = ByteArrayOutputStream(256 * 1024)
+    private val bufferLock = Any()
+    private var lastReportedClientCount = -1
 
     var thermalMonitor: ThermalMonitor? = null
 
@@ -76,10 +81,9 @@ class StreamingManager(private val context: Context) {
         if (!isStreaming.getAndSet(false)) return
 
         server.stopServer()
-        encoder?.release()
-        encoder = null
         _streamUrl.value = ""
         _clientCount.value = 0
+        lastReportedClientCount = -1
         _isServerRunning.value = false
 
         Log.d(TAG, "Streaming stopped")
@@ -93,10 +97,25 @@ class StreamingManager(private val context: Context) {
 
     fun pushFrame(bitmap: Bitmap) {
         if (!isStreaming.get()) return
+
+        val now = System.currentTimeMillis()
+        val elapsed = now - lastFrameTimeMs
+        val adjustedInterval = thermalMonitor?.getAdjustedFrameDelay(minFrameIntervalMs)
+            ?: minFrameIntervalMs
+        if (elapsed < adjustedInterval) return
+        lastFrameTimeMs = now
+
+        val clientCount = server.getClientCount()
+        if (clientCount == 0) return
+
         val quality = thermalMonitor?.getAdjustedQuality(jpegQuality.get()) ?: jpegQuality.get()
-        val jpegData = bitmapToJpeg(bitmap, quality)
+        val jpegData = bitmapToJpegReuse(bitmap, quality)
         server.updateFrame(jpegData)
-        _clientCount.value = server.getClientCount()
+
+        if (clientCount != lastReportedClientCount) {
+            lastReportedClientCount = clientCount
+            _clientCount.value = clientCount
+        }
     }
 
     fun pushFrame(yuvData: ByteArray, width: Int, height: Int, rotation: Int = 0) {
@@ -110,6 +129,10 @@ class StreamingManager(private val context: Context) {
         jpegQuality.set(quality.coerceIn(10, 100))
     }
 
+    fun setStreamFrameRate(fps: Int) {
+        minFrameIntervalMs = if (fps > 0) 1000L / fps else 1000L / DEFAULT_STREAM_FPS
+    }
+
     fun reduceBitrate(multiplier: Float) {
         val current = jpegQuality.get()
         jpegQuality.set((current * multiplier).toInt().coerceIn(10, 100))
@@ -117,11 +140,14 @@ class StreamingManager(private val context: Context) {
     }
 
     fun reduceFrameRate(multiplier: Float) {
-        Log.d(TAG, "Thermal: frame rate reduction requested (factor $multiplier)")
+        val baseInterval = 1000L / DEFAULT_STREAM_FPS
+        minFrameIntervalMs = if (multiplier > 0f) (baseInterval / multiplier).toLong() else Long.MAX_VALUE
+        Log.d(TAG, "Thermal: frame interval adjusted to ${minFrameIntervalMs}ms (factor $multiplier)")
     }
 
     fun restoreNormalSettings() {
         jpegQuality.set(DEFAULT_JPEG_QUALITY)
+        minFrameIntervalMs = 1000L / DEFAULT_STREAM_FPS
         Log.d(TAG, "Thermal: settings restored to normal")
     }
 
@@ -135,10 +161,12 @@ class StreamingManager(private val context: Context) {
         }
     }
 
-    private fun bitmapToJpeg(bitmap: Bitmap, quality: Int): ByteArray {
-        val stream = ByteArrayOutputStream()
-        bitmap.compress(Bitmap.CompressFormat.JPEG, quality, stream)
-        return stream.toByteArray()
+    private fun bitmapToJpegReuse(bitmap: Bitmap, quality: Int): ByteArray {
+        synchronized(bufferLock) {
+            reusableBuffer.reset()
+            bitmap.compress(Bitmap.CompressFormat.JPEG, quality, reusableBuffer)
+            return reusableBuffer.toByteArray()
+        }
     }
 
     private fun yuvToBitmap(yuvData: ByteArray, width: Int, height: Int, rotation: Int): Bitmap? {
@@ -195,5 +223,6 @@ class StreamingManager(private val context: Context) {
         private const val TAG = "StreamingManager"
         const val DEFAULT_PORT = 8080
         private const val DEFAULT_JPEG_QUALITY = 80
+        private const val DEFAULT_STREAM_FPS = 30
     }
 }

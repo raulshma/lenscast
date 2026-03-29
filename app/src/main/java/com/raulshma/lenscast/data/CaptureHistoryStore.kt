@@ -13,6 +13,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.util.UUID
+import java.util.concurrent.Executors
 
 class CaptureHistoryStore(private val context: Context) {
 
@@ -26,6 +27,9 @@ class CaptureHistoryStore(private val context: Context) {
     private val adapter = moshi.adapter<List<CaptureHistory>>(listType)
 
     private val historyFile = File(context.filesDir, "capture_history.json")
+    private val saveExecutor = Executors.newSingleThreadExecutor { r ->
+        Thread(r, "CaptureHistoryIO").apply { isDaemon = true }
+    }
 
     private val _history = MutableStateFlow<List<CaptureHistory>>(emptyList())
     val history: StateFlow<List<CaptureHistory>> = _history.asStateFlow()
@@ -48,11 +52,14 @@ class CaptureHistoryStore(private val context: Context) {
     }
 
     private fun save() {
-        try {
-            val json = adapter.toJson(_history.value)
-            historyFile.writeText(json)
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to save capture history", e)
+        val snapshot = _history.value
+        saveExecutor.execute {
+            try {
+                val json = adapter.toJson(snapshot)
+                historyFile.writeText(json)
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to save capture history", e)
+            }
         }
     }
 

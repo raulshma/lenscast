@@ -55,13 +55,22 @@ function App() {
     fetchSettings()
     fetchStatus()
     fetchLenses()
-    const settingsInterval = setInterval(fetchSettings, 5000)
-    const statusInterval = setInterval(fetchStatus, 3000)
-    const lensesInterval = setInterval(fetchLenses, 10000)
+    const settingsInterval = setInterval(fetchSettings, 10000)
+    const statusInterval = setInterval(fetchStatus, 5000)
+    const lensesInterval = setInterval(fetchLenses, 15000)
+    const handleVisibility = () => {
+      if (!document.hidden) {
+        fetchSettings()
+        fetchStatus()
+        fetchLenses()
+      }
+    }
+    document.addEventListener('visibilitychange', handleVisibility)
     onCleanup(() => {
       clearInterval(settingsInterval)
       clearInterval(statusInterval)
       clearInterval(lensesInterval)
+      document.removeEventListener('visibilitychange', handleVisibility)
     })
   })
 
