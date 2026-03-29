@@ -133,7 +133,7 @@ class StreamingManager(private val context: Context) {
         if (clientCount == 0) return
 
         val quality = thermalMonitor?.getAdjustedQuality(jpegQuality.get()) ?: jpegQuality.get()
-        val jpegData = yuvToJpeg(yuvData, width, height, quality) ?: return
+        val jpegData = yuvToJpeg(yuvData, width, height, quality, rotation) ?: return
         server.updateFrame(jpegData)
 
         if (clientCount != lastReportedClientCount) {
@@ -142,16 +142,47 @@ class StreamingManager(private val context: Context) {
         }
     }
 
-    private fun yuvToJpeg(yuvData: ByteArray, width: Int, height: Int, quality: Int): ByteArray? {
+    private fun yuvToJpeg(yuvData: ByteArray, width: Int, height: Int, quality: Int, rotation: Int = 0): ByteArray? {
         return try {
-            val yuvImage = YuvImage(yuvData, ImageFormat.NV21, width, height, null)
-            synchronized(bufferLock) {
-                reusableBuffer.reset()
-                yuvImage.compressToJpeg(Rect(0, 0, width, height), quality, reusableBuffer)
-                reusableBuffer.toByteArray()
+            if (rotation != 0) {
+                val bitmap = yuvToRotatedBitmap(yuvData, width, height, quality, rotation) ?: return null
+                synchronized(bufferLock) {
+                    reusableBuffer.reset()
+                    bitmap.compress(Bitmap.CompressFormat.JPEG, quality, reusableBuffer)
+                    bitmap.recycle()
+                    reusableBuffer.toByteArray()
+                }
+            } else {
+                val yuvImage = YuvImage(yuvData, ImageFormat.NV21, width, height, null)
+                synchronized(bufferLock) {
+                    reusableBuffer.reset()
+                    yuvImage.compressToJpeg(Rect(0, 0, width, height), quality, reusableBuffer)
+                    reusableBuffer.toByteArray()
+                }
             }
         } catch (e: Exception) {
             Log.e(TAG, "YUV to JPEG conversion failed", e)
+            null
+        }
+    }
+
+    private fun yuvToRotatedBitmap(yuvData: ByteArray, width: Int, height: Int, quality: Int, rotation: Int): Bitmap? {
+        return try {
+            val yuvImage = YuvImage(yuvData, ImageFormat.NV21, width, height, null)
+            val jpegData: ByteArray
+            synchronized(bufferLock) {
+                reusableYuvBuffer.reset()
+                yuvImage.compressToJpeg(Rect(0, 0, width, height), quality, reusableYuvBuffer)
+                jpegData = reusableYuvBuffer.toByteArray()
+            }
+            val bitmap = BitmapFactory.decodeByteArray(jpegData, 0, jpegData.size) ?: return null
+            val matrix = Matrix()
+            matrix.postRotate(rotation.toFloat())
+            val rotated = Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
+            if (rotated !== bitmap) bitmap.recycle()
+            rotated
+        } catch (e: Exception) {
+            Log.e(TAG, "YUV to rotated bitmap conversion failed", e)
             null
         }
     }
@@ -200,32 +231,7 @@ class StreamingManager(private val context: Context) {
         }
     }
 
-    private fun yuvToBitmap(yuvData: ByteArray, width: Int, height: Int, rotation: Int): Bitmap? {
-        return try {
-            val yuvImage = YuvImage(yuvData, ImageFormat.NV21, width, height, null)
-            val jpegData: ByteArray
-            synchronized(bufferLock) {
-                reusableYuvBuffer.reset()
-                yuvImage.compressToJpeg(Rect(0, 0, width, height), jpegQuality.get(), reusableYuvBuffer)
-                jpegData = reusableYuvBuffer.toByteArray()
-            }
-            val bitmap = BitmapFactory.decodeByteArray(jpegData, 0, jpegData.size)
-            if (rotation != 0 && bitmap != null) {
-                val matrix = Matrix()
-                matrix.postRotate(rotation.toFloat())
-                val rotated = Bitmap.createBitmap(
-                    bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true
-                )
-                if (rotated !== bitmap) bitmap.recycle()
-                rotated
-            } else {
-                bitmap
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "YUV to bitmap conversion failed", e)
-            null
-        }
-    }
+
 
     fun applyBatteryOptimization(result: com.raulshma.lenscast.core.BatteryOptimizationResult?) {
         if (result == null) return
