@@ -49,6 +49,9 @@ class WebApiController(private val context: Context) {
     private val recordingConfigAdapter by lazy {
         moshi.adapter(com.raulshma.lenscast.capture.model.RecordingConfig::class.java)
     }
+    private val intervalConfigAdapter by lazy {
+        moshi.adapter(com.raulshma.lenscast.capture.model.IntervalCaptureConfig::class.java)
+    }
 
     fun handleGetSettings(): String {
         return try {
@@ -473,20 +476,25 @@ class WebApiController(private val context: Context) {
 
     fun handleStartIntervalCapture(body: String): String {
         return try {
-            val json = JSONObject(body)
-            val intervalSeconds = json.optLong("intervalSeconds", 5)
-            val totalCaptures = json.optInt("totalCaptures", 100)
-            val imageQuality = json.optInt("imageQuality", 90)
+            val config = intervalConfigAdapter.fromJson(if (body.isNotEmpty()) body else "{}")
+                ?: com.raulshma.lenscast.capture.model.IntervalCaptureConfig()
+            val intervalSeconds = config.intervalSeconds
+            val totalCaptures = config.totalCaptures
+            val imageQuality = config.imageQuality
 
             IntervalCaptureScheduler.start(
                 context = context,
                 intervalSeconds = intervalSeconds.coerceIn(1, 3600),
                 totalCaptures = totalCaptures,
                 imageQuality = imageQuality,
+                flashMode = config.flashMode.name,
                 completedCaptures = 0,
             )
 
-            Log.d(TAG, "Interval capture started: every ${intervalSeconds}s, total=$totalCaptures")
+            Log.d(
+                TAG,
+                "Interval capture started: every ${intervalSeconds}s, total=$totalCaptures, flash=${config.flashMode}"
+            )
             """{"success":true}"""
         } catch (e: Exception) {
             Log.e(TAG, "Failed to start interval capture", e)

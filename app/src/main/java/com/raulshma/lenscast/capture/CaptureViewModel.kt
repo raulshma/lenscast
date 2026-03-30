@@ -190,6 +190,7 @@ class CaptureViewModel(
             intervalSeconds = config.intervalSeconds,
             totalCaptures = config.totalCaptures,
             imageQuality = config.imageQuality,
+            flashMode = config.flashMode.name,
             completedCaptures = 0,
         )
 

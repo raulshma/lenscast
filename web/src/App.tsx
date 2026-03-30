@@ -1236,7 +1236,6 @@ function App() {
                       <button
                         class="btn btn-primary btn-sm w-full"
                         onClick={handleStartIntervalCapture}
-                        disabled={!st()?.streaming?.isActive}
                       >
                         Start Interval Capture
                       </button>

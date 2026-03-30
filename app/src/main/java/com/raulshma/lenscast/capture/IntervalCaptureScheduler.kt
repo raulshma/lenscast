@@ -16,6 +16,7 @@ object IntervalCaptureScheduler {
         intervalSeconds: Long,
         totalCaptures: Int,
         imageQuality: Int,
+        flashMode: String = "OFF",
         completedCaptures: Int = 0,
     ) {
         enqueue(
@@ -24,6 +25,7 @@ object IntervalCaptureScheduler {
             intervalSeconds = intervalSeconds,
             totalCaptures = totalCaptures,
             imageQuality = imageQuality,
+            flashMode = flashMode,
             completedCaptures = completedCaptures,
             initialDelaySeconds = 0L,
         )
@@ -34,6 +36,7 @@ object IntervalCaptureScheduler {
         intervalSeconds: Long,
         totalCaptures: Int,
         imageQuality: Int,
+        flashMode: String = "OFF",
         completedCaptures: Int,
     ) {
         enqueue(
@@ -42,6 +45,7 @@ object IntervalCaptureScheduler {
             intervalSeconds = intervalSeconds,
             totalCaptures = totalCaptures,
             imageQuality = imageQuality,
+            flashMode = flashMode,
             completedCaptures = completedCaptures,
             initialDelaySeconds = intervalSeconds.coerceAtLeast(1L),
         )
@@ -67,6 +71,7 @@ object IntervalCaptureScheduler {
         intervalSeconds: Long,
         totalCaptures: Int,
         imageQuality: Int,
+        flashMode: String,
         completedCaptures: Int,
         initialDelaySeconds: Long,
     ) {
@@ -76,6 +81,7 @@ object IntervalCaptureScheduler {
                     .putLong(IntervalCaptureWorker.KEY_INTERVAL_SECONDS, intervalSeconds.coerceAtLeast(1L))
                     .putInt(IntervalCaptureWorker.KEY_TOTAL_CAPTURES, totalCaptures.coerceAtLeast(0))
                     .putInt(IntervalCaptureWorker.KEY_IMAGE_QUALITY, imageQuality.coerceIn(10, 100))
+                    .putString(IntervalCaptureWorker.KEY_FLASH_MODE, flashMode)
                     .putInt(
                         IntervalCaptureWorker.KEY_COMPLETED_CAPTURES,
                         completedCaptures.coerceAtLeast(0)

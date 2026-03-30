@@ -52,10 +52,10 @@ import androidx.compose.material.icons.filled.Handyman
 import androidx.compose.material.icons.filled.HdrOn
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Iso
-import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
@@ -193,7 +193,7 @@ fun CameraScreen(
                         Icon(Icons.Default.Collections, contentDescription = "Gallery")
                     }
                     IconButton(onClick = onNavigateToCapture) {
-                        Icon(Icons.Default.PhotoLibrary, contentDescription = "Capture")
+                        Icon(Icons.Default.Tune, contentDescription = "Capture tools")
                     }
                     IconButton(onClick = onNavigateToSettings) {
                         Icon(Icons.Default.Settings, contentDescription = "Settings")

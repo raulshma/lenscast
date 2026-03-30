@@ -56,5 +56,10 @@
             android:exported="false"
             android:foregroundServiceType="camera|microphone" />
 
+        <service
+            android:name="androidx.work.impl.foreground.SystemForegroundService"
+            android:foregroundServiceType="camera"
+            tools:node="merge" />
+
     </application>
 </manifest>
