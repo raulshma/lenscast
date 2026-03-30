@@ -332,16 +332,23 @@ class CaptureHistoryStore(private val context: Context) {
         }
     }
 
+    /**
+     * Deletes the backing media file using proper Uri parsing.
+     * Uses Uri.scheme to distinguish content providers from file URIs,
+     * rather than brittle string prefix matching.
+     */
     private fun deleteBackingMedia(filePath: String): Boolean {
         return runCatching {
-            when {
-                filePath.startsWith("content://") -> {
-                    context.contentResolver.delete(Uri.parse(filePath), null, null) > 0
+            val uri = Uri.parse(filePath)
+            when (uri.scheme) {
+                "content" -> {
+                    context.contentResolver.delete(uri, null, null) > 0
                 }
-                filePath.startsWith("file://") -> {
-                    File(Uri.parse(filePath).path.orEmpty()).delete()
+                "file" -> {
+                    File(uri.path.orEmpty()).delete()
                 }
                 else -> {
+                    // No scheme — treat as a raw file path
                     val file = File(filePath)
                     !file.exists() || file.delete()
                 }
@@ -352,14 +359,18 @@ class CaptureHistoryStore(private val context: Context) {
         }
     }
 
+    /**
+     * Checks whether the backing media file exists using proper Uri parsing.
+     */
     private fun mediaExists(filePath: String): Boolean {
         return runCatching {
-            when {
-                filePath.startsWith("content://") -> {
-                    context.contentResolver.openInputStream(Uri.parse(filePath))?.use { true } ?: false
+            val uri = Uri.parse(filePath)
+            when (uri.scheme) {
+                "content" -> {
+                    context.contentResolver.openInputStream(uri)?.use { true } ?: false
                 }
-                filePath.startsWith("file://") -> {
-                    File(Uri.parse(filePath).path.orEmpty()).exists()
+                "file" -> {
+                    File(uri.path.orEmpty()).exists()
                 }
                 else -> File(filePath).exists()
             }

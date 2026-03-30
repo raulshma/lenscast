@@ -11,10 +11,12 @@ import fi.iki.elonen.NanoHTTPD
 import java.io.ByteArrayInputStream
 import java.io.InputStream
 import java.math.BigInteger
+import java.net.URI
 import java.net.URLDecoder
 import java.nio.charset.StandardCharsets
 import java.security.KeyPairGenerator
 import java.security.KeyStore
+import java.security.MessageDigest
 import java.security.SecureRandom
 import java.util.Date
 import java.util.concurrent.ConcurrentHashMap
@@ -24,12 +26,12 @@ import javax.net.ssl.SSLContext
 import javax.security.auth.x500.X500Principal
 
 class StreamingServer(
-    private val port: Int = 8080,
+    private val port: Int = DEFAULT_PORT,
     private val context: Context? = null,
     private val audioStreamingManager: AudioStreamingManager? = null,
 ) : NanoHTTPD(port) {
 
-    private val boundary = "LensCastBoundary"
+    private val boundary = BOUNDARY_MARKER
     private val clientCount = AtomicInteger(0)
     private var latestJpeg: ByteArray? = null
     private val frameLock = Object()
@@ -92,8 +94,28 @@ class StreamingServer(
         }
 
         if (uri == "/api/auth/logout" && session.method == Method.POST) {
+            // Apply CSRF check to logout to prevent forced-logout DoS
+            val logoutAuthResult = checkAuth(session)
+            if (!logoutAuthResult.authorized) {
+                return newFixedLengthResponse(
+                    Response.Status.UNAUTHORIZED,
+                    "text/plain",
+                    "Unauthorized"
+                ).apply {
+                    addHeader("WWW-Authenticate", "Basic realm=\"LensCast\"")
+                    addSecurityHeaders()
+                }
+            }
+            if (!isCsrfSafe(session, logoutAuthResult.viaBasicAuth)) {
+                return newFixedLengthResponse(
+                    Response.Status.FORBIDDEN,
+                    "application/json",
+                    """{"error":"CSRF check failed"}"""
+                ).apply { addSecurityHeaders() }
+            }
+
             val cookieHeader = session.headers["cookie"] ?: ""
-            val token = extractCookie(cookieHeader, "lenscast_session")
+            val token = extractCookie(cookieHeader, COOKIE_NAME)
             if (token != null) {
                 sessions.remove(token)
             }
@@ -102,7 +124,7 @@ class StreamingServer(
                 "application/json",
                 """{"success":true}"""
             ).apply {
-                addHeader("Set-Cookie", "lenscast_session=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax")
+                addHeader("Set-Cookie", "$COOKIE_NAME=; Path=$COOKIE_PATH; Max-Age=0; HttpOnly; SameSite=Lax")
                 addHeader("Cache-Control", "no-store")
                 addSecurityHeaders()
             }
@@ -143,7 +165,7 @@ class StreamingServer(
             val token = createSession()
             response.addHeader(
                 "Set-Cookie",
-                "lenscast_session=$token; Path=/; Max-Age=$SESSION_MAX_AGE_SEC; HttpOnly; SameSite=Lax"
+                "$COOKIE_NAME=$token; Path=$COOKIE_PATH; Max-Age=$SESSION_MAX_AGE_SEC; HttpOnly; SameSite=Lax"
             )
         }
 
@@ -172,7 +194,7 @@ class StreamingServer(
         if (username.isEmpty()) return AuthResult(true, false)
 
         val cookieHeader = session.headers["cookie"] ?: ""
-        val sessionToken = extractCookie(cookieHeader, "lenscast_session")
+        val sessionToken = extractCookie(cookieHeader, COOKIE_NAME)
         if (sessionToken != null && validateSession(sessionToken)) {
             return AuthResult(true, false)
         }
@@ -201,7 +223,14 @@ class StreamingServer(
 
     private fun createSession(): String {
         cleanExpiredSessions()
-        val bytes = ByteArray(32)
+        // Enforce maximum session count to prevent OOM via session flooding
+        if (sessions.size >= MAX_SESSIONS) {
+            // Evict oldest sessions beyond the cap
+            val sorted = sessions.entries.sortedBy { it.value }
+            val toRemove = sorted.take(sessions.size - MAX_SESSIONS + 1)
+            toRemove.forEach { sessions.remove(it.key) }
+        }
+        val bytes = ByteArray(SESSION_TOKEN_BYTES)
         secureRandom.nextBytes(bytes)
         val token = bytes.joinToString("") { "%02x".format(it) }
         sessions[token] = System.currentTimeMillis() + SESSION_DURATION_MS
@@ -214,6 +243,8 @@ class StreamingServer(
     }
 
     private fun validateSession(token: String): Boolean {
+        // Opportunistically clean expired sessions on each validation
+        cleanExpiredSessions()
         val expiry = sessions[token] ?: return false
         if (System.currentTimeMillis() > expiry) {
             sessions.remove(token)
@@ -229,13 +260,16 @@ class StreamingServer(
             ?.substring(name.length + 1)
     }
 
+    /**
+     * Constant-time comparison that does not leak string length via timing.
+     * Uses MessageDigest.isEqual on SHA-256 hashes so both operands are always
+     * the same length regardless of input.
+     */
     private fun constantTimeEquals(a: String, b: String): Boolean {
-        if (a.length != b.length) return false
-        var result = 0
-        for (i in a.indices) {
-            result = result or (a[i].code xor b[i].code)
-        }
-        return result == 0
+        val digest = MessageDigest.getInstance("SHA-256")
+        val hashA = digest.digest(a.toByteArray(Charsets.UTF_8))
+        val hashB = digest.digest(b.toByteArray(Charsets.UTF_8))
+        return MessageDigest.isEqual(hashA, hashB)
     }
 
     /**
@@ -250,16 +284,27 @@ class StreamingServer(
         // Check for X-Requested-With header (sent by XHR/fetch)
         if (session.headers.containsKey("x-requested-with")) return true
 
-        // Check Origin or Referer header matches this server
-        val origin = session.headers["origin"] ?: session.headers["referer"]
-        if (origin != null) {
+        // Check Origin or Referer header matches this server using strict URI parsing
+        val originHeader = session.headers["origin"] ?: session.headers["referer"]
+        if (originHeader != null) {
             val localIp = NetworkUtils.getLocalIpAddress()
             val allowedOrigins = buildList {
                 add("http://localhost:$port")
                 add("http://127.0.0.1:$port")
                 if (localIp != null) add("http://$localIp:$port")
             }
-            return allowedOrigins.any { origin.startsWith(it) }
+            return try {
+                val requestUri = URI(originHeader)
+                val requestOrigin = "${requestUri.scheme}://${requestUri.host}:${requestUri.port}"
+                allowedOrigins.any { allowed ->
+                    val allowedUri = URI(allowed)
+                    val normalizedAllowed = "${allowedUri.scheme}://${allowedUri.host}:${allowedUri.port}"
+                    requestOrigin == normalizedAllowed
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to parse CSRF origin header: $originHeader", e)
+                false
+            }
         }
 
         // No recognized CSRF protection headers found
@@ -727,7 +772,13 @@ class StreamingServer(
 
     companion object {
         private const val TAG = "StreamingServer"
+        const val DEFAULT_PORT = 8080
+        const val BOUNDARY_MARKER = "LensCastBoundary"
         private const val SESSION_DURATION_MS = 24 * 60 * 60 * 1000L
         private const val SESSION_MAX_AGE_SEC = 24 * 60 * 60
+        private const val MAX_SESSIONS = 1000
+        private const val SESSION_TOKEN_BYTES = 32
+        private const val COOKIE_NAME = "lenscast_session"
+        private const val COOKIE_PATH = "/"
     }
 }

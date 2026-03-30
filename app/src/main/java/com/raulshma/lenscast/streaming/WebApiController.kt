@@ -2,12 +2,8 @@ package com.raulshma.lenscast.streaming
 
 import android.content.Context
 import android.content.Intent
-import android.os.Environment
-import android.provider.MediaStore
 import android.util.Log
-import androidx.camera.core.ImageCapture
-import androidx.camera.core.ImageCaptureException
-import androidx.core.content.ContextCompat
+import androidx.camera.core.CameraSelector
 import com.raulshma.lenscast.MainApplication
 import com.raulshma.lenscast.capture.IntervalCaptureScheduler
 import com.raulshma.lenscast.camera.model.CameraSettings
@@ -15,23 +11,23 @@ import com.raulshma.lenscast.camera.model.FocusMode
 import com.raulshma.lenscast.camera.model.HdrMode
 import com.raulshma.lenscast.camera.model.Resolution
 import com.raulshma.lenscast.camera.model.WhiteBalance
-import com.raulshma.lenscast.capture.IntervalCaptureWorker
 import com.raulshma.lenscast.capture.PhotoCaptureHelper
 import com.raulshma.lenscast.capture.RecordingService
+import com.raulshma.lenscast.streaming.model.*
 
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
-import org.json.JSONObject
-import java.io.File
-import java.util.Date
-import java.util.Locale
-import java.util.concurrent.TimeUnit
+import com.squareup.moshi.Moshi
+import com.squareup.moshi.Types
+import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
 
 class WebApiController(private val context: Context) {
 
@@ -40,36 +36,63 @@ class WebApiController(private val context: Context) {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
-    @Volatile
-    private var cachedSettings = CameraSettings()
-    @Volatile
-    private var cachedPort = 8080
-    @Volatile
-    private var cachedJpegQuality = 70
-    @Volatile
-    private var cachedShowPreview = true
-    @Volatile
-    private var cachedStreamAudioEnabled = true
-    @Volatile
-    private var cachedStreamAudioBitrateKbps = 128
-    @Volatile
-    private var cachedStreamAudioChannels = 1
-    @Volatile
-    private var cachedStreamAudioEchoCancellation = true
-    @Volatile
-    private var cachedRecordingAudioEnabled = true
-
-    init {
-        scope.launch { app.settingsDataStore.settings.collect { cachedSettings = it } }
-        scope.launch { app.settingsDataStore.streamingPort.collect { cachedPort = it } }
-        scope.launch { app.settingsDataStore.jpegQuality.collect { cachedJpegQuality = it } }
-        scope.launch { app.settingsDataStore.showPreview.collect { cachedShowPreview = it } }
-        scope.launch { app.settingsDataStore.streamAudioEnabled.collect { cachedStreamAudioEnabled = it } }
-        scope.launch { app.settingsDataStore.streamAudioBitrateKbps.collect { cachedStreamAudioBitrateKbps = it } }
-        scope.launch { app.settingsDataStore.streamAudioChannels.collect { cachedStreamAudioChannels = it } }
-        scope.launch { app.settingsDataStore.streamAudioEchoCancellation.collect { cachedStreamAudioEchoCancellation = it } }
-        scope.launch { app.settingsDataStore.recordingAudioEnabled.collect { cachedRecordingAudioEnabled = it } }
+    // ── Issue 2.1 fix: Unified Moshi instance for all JSON serialization ──
+    private val moshi by lazy {
+        Moshi.Builder()
+            .addLast(KotlinJsonAdapterFactory())
+            .build()
     }
+
+    // Adapters for request/response DTOs
+    private val settingsResponseAdapter by lazy { moshi.adapter(SettingsResponseDto::class.java) }
+    private val settingsUpdateAdapter by lazy { moshi.adapter(SettingsUpdateRequestDto::class.java) }
+    private val statusResponseAdapter by lazy { moshi.adapter(StatusResponseDto::class.java) }
+    private val successAdapter by lazy { moshi.adapter(SuccessResponse::class.java) }
+    private val streamActionAdapter by lazy { moshi.adapter(StreamActionResponse::class.java) }
+    private val captureResponseAdapter by lazy { moshi.adapter(CaptureResponse::class.java) }
+    private val lensesAdapter by lazy { moshi.adapter(LensesResponseDto::class.java) }
+    private val lensSelectAdapter by lazy { moshi.adapter(LensSelectRequest::class.java) }
+    private val intervalStatusAdapter by lazy { moshi.adapter(IntervalCaptureStatusDto::class.java) }
+    private val intervalConfigAdapter by lazy {
+        moshi.adapter(com.raulshma.lenscast.capture.model.IntervalCaptureConfig::class.java)
+    }
+    private val recordingStatusAdapter by lazy { moshi.adapter(RecordingStatusDto::class.java) }
+    private val recordingConfigAdapter by lazy {
+        moshi.adapter(com.raulshma.lenscast.capture.model.RecordingConfig::class.java)
+    }
+    private val galleryAdapter by lazy { moshi.adapter(GalleryResponseDto::class.java) }
+    private val batchDeleteRequestAdapter by lazy { moshi.adapter(BatchDeleteRequest::class.java) }
+    private val batchDeleteResponseAdapter by lazy { moshi.adapter(BatchDeleteResponse::class.java) }
+    private val errorAdapter by lazy { moshi.adapter(ErrorResponse::class.java) }
+
+    // ── Issue 2.2 fix: Replace @Volatile cached fields with StateFlow.value ──
+    // StateFlow inherently holds the latest value synchronously, eliminating duplication.
+    private val settingsFlow: StateFlow<CameraSettings> =
+        app.settingsDataStore.settings.stateIn(scope, SharingStarted.Eagerly, CameraSettings())
+
+    private val portFlow: StateFlow<Int> =
+        app.settingsDataStore.streamingPort.stateIn(scope, SharingStarted.Eagerly, StreamingServer.DEFAULT_PORT)
+
+    private val jpegQualityFlow: StateFlow<Int> =
+        app.settingsDataStore.jpegQuality.stateIn(scope, SharingStarted.Eagerly, StreamingSettingsDto.DEFAULT_JPEG_QUALITY)
+
+    private val showPreviewFlow: StateFlow<Boolean> =
+        app.settingsDataStore.showPreview.stateIn(scope, SharingStarted.Eagerly, true)
+
+    private val streamAudioEnabledFlow: StateFlow<Boolean> =
+        app.settingsDataStore.streamAudioEnabled.stateIn(scope, SharingStarted.Eagerly, true)
+
+    private val streamAudioBitrateFlow: StateFlow<Int> =
+        app.settingsDataStore.streamAudioBitrateKbps.stateIn(scope, SharingStarted.Eagerly, StreamingSettingsDto.DEFAULT_AUDIO_BITRATE_KBPS)
+
+    private val streamAudioChannelsFlow: StateFlow<Int> =
+        app.settingsDataStore.streamAudioChannels.stateIn(scope, SharingStarted.Eagerly, 1)
+
+    private val streamAudioEchoCancellationFlow: StateFlow<Boolean> =
+        app.settingsDataStore.streamAudioEchoCancellation.stateIn(scope, SharingStarted.Eagerly, true)
+
+    private val recordingAudioEnabledFlow: StateFlow<Boolean> =
+        app.settingsDataStore.recordingAudioEnabled.stateIn(scope, SharingStarted.Eagerly, true)
 
     @Volatile
     private var isRecording = false
@@ -77,54 +100,39 @@ class WebApiController(private val context: Context) {
     @Volatile
     private var recordingStartTime: Long = 0
 
-    private val moshi by lazy {
-        com.squareup.moshi.Moshi.Builder()
-            .addLast(com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory())
-            .build()
-    }
-    private val recordingConfigAdapter by lazy {
-        moshi.adapter(com.raulshma.lenscast.capture.model.RecordingConfig::class.java)
-    }
-    private val intervalConfigAdapter by lazy {
-        moshi.adapter(com.raulshma.lenscast.capture.model.IntervalCaptureConfig::class.java)
-    }
+    // ── Issue 2.1 fix: Type-safe settings serialization via DTOs ──
 
     fun handleGetSettings(): String {
         return try {
-            val settings = cachedSettings
-            val json = JSONObject()
-
-            val camera = JSONObject().apply {
-                put("exposureCompensation", settings.exposureCompensation)
-                put("iso", settings.iso ?: JSONObject.NULL)
-                put("exposureTime", settings.exposureTime ?: JSONObject.NULL)
-                put("focusMode", settings.focusMode.name)
-                put("focusDistance", settings.focusDistance ?: JSONObject.NULL)
-                put("whiteBalance", settings.whiteBalance.name)
-                put("colorTemperature", settings.colorTemperature ?: JSONObject.NULL)
-                put("zoomRatio", settings.zoomRatio.toDouble())
-                put("frameRate", settings.frameRate)
-                put("resolution", settings.resolution.name)
-                put("stabilization", settings.stabilization)
-                put("hdrMode", settings.hdrMode.name)
-                put("sceneMode", settings.sceneMode ?: JSONObject.NULL)
-            }
-
-            val streaming = JSONObject().apply {
-                put("port", cachedPort)
-                put("jpegQuality", cachedJpegQuality)
-                put("showPreview", cachedShowPreview)
-                put("streamAudioEnabled", cachedStreamAudioEnabled)
-                put("streamAudioBitrateKbps", cachedStreamAudioBitrateKbps)
-                put("streamAudioChannels", cachedStreamAudioChannels)
-                put("streamAudioEchoCancellation", cachedStreamAudioEchoCancellation)
-                put("recordingAudioEnabled", cachedRecordingAudioEnabled)
-            }
-
-            json.put("camera", camera)
-            json.put("streaming", streaming)
-
-            json.toString()
+            val settings = settingsFlow.value
+            val response = SettingsResponseDto(
+                camera = CameraSettingsDto(
+                    exposureCompensation = settings.exposureCompensation,
+                    iso = settings.iso,
+                    exposureTime = settings.exposureTime,
+                    focusMode = settings.focusMode.name,
+                    focusDistance = settings.focusDistance,
+                    whiteBalance = settings.whiteBalance.name,
+                    colorTemperature = settings.colorTemperature,
+                    zoomRatio = settings.zoomRatio.toDouble(),
+                    frameRate = settings.frameRate,
+                    resolution = settings.resolution.name,
+                    stabilization = settings.stabilization,
+                    hdrMode = settings.hdrMode.name,
+                    sceneMode = settings.sceneMode,
+                ),
+                streaming = StreamingSettingsDto(
+                    port = portFlow.value,
+                    jpegQuality = jpegQualityFlow.value,
+                    showPreview = showPreviewFlow.value,
+                    streamAudioEnabled = streamAudioEnabledFlow.value,
+                    streamAudioBitrateKbps = streamAudioBitrateFlow.value,
+                    streamAudioChannels = streamAudioChannelsFlow.value,
+                    streamAudioEchoCancellation = streamAudioEchoCancellationFlow.value,
+                    recordingAudioEnabled = recordingAudioEnabledFlow.value,
+                ),
+            )
+            settingsResponseAdapter.toJson(response)
         } catch (e: Exception) {
             Log.e(TAG, "Failed to get settings", e)
             errorJson(e)
@@ -133,63 +141,43 @@ class WebApiController(private val context: Context) {
 
     fun handlePutSettings(body: String): String {
         return try {
-            val json = JSONObject(body)
+            val request = settingsUpdateAdapter.fromJson(body)
+                ?: return errorJson(IllegalArgumentException("Invalid settings JSON"))
 
-            if (json.has("camera")) {
-                val cam = json.getJSONObject("camera")
-                val current = cachedSettings
+            if (request.camera != null) {
+                val cam = request.camera
+                val current = settingsFlow.value
                 val newSettings = CameraSettings(
-                    exposureCompensation = cam.optInt("exposureCompensation", current.exposureCompensation),
-                    iso = when {
-                        !cam.has("iso") -> current.iso
-                        cam.isNull("iso") -> null
-                        else -> cam.getInt("iso")
-                    },
-                    exposureTime = when {
-                        !cam.has("exposureTime") -> current.exposureTime
-                        cam.isNull("exposureTime") -> null
-                        else -> cam.getLong("exposureTime")
-                    },
+                    exposureCompensation = cam.exposureCompensation,
+                    iso = cam.iso,
+                    exposureTime = cam.exposureTime,
                     focusMode = try {
-                        FocusMode.valueOf(cam.optString("focusMode", current.focusMode.name))
+                        FocusMode.valueOf(cam.focusMode)
                     } catch (_: Exception) {
                         current.focusMode
                     },
-                    focusDistance = when {
-                        !cam.has("focusDistance") -> current.focusDistance
-                        cam.isNull("focusDistance") -> null
-                        else -> cam.getDouble("focusDistance").toFloat()
-                    },
+                    focusDistance = cam.focusDistance,
                     whiteBalance = try {
-                        WhiteBalance.valueOf(cam.optString("whiteBalance", current.whiteBalance.name))
+                        WhiteBalance.valueOf(cam.whiteBalance)
                     } catch (_: Exception) {
                         current.whiteBalance
                     },
-                    colorTemperature = when {
-                        !cam.has("colorTemperature") -> current.colorTemperature
-                        cam.isNull("colorTemperature") -> null
-                        else -> cam.getInt("colorTemperature")
-                    },
-                    zoomRatio = cam.optDouble("zoomRatio", current.zoomRatio.toDouble()).toFloat(),
-                    frameRate = cam.optInt("frameRate", current.frameRate),
+                    colorTemperature = cam.colorTemperature,
+                    zoomRatio = cam.zoomRatio.toFloat(),
+                    frameRate = cam.frameRate,
                     resolution = try {
-                        Resolution.valueOf(cam.optString("resolution", current.resolution.name))
+                        Resolution.valueOf(cam.resolution)
                     } catch (_: Exception) {
                         current.resolution
                     },
-                    stabilization = cam.optBoolean("stabilization", current.stabilization),
+                    stabilization = cam.stabilization,
                     hdrMode = try {
-                        HdrMode.valueOf(cam.optString("hdrMode", current.hdrMode.name))
+                        HdrMode.valueOf(cam.hdrMode)
                     } catch (_: Exception) {
                         current.hdrMode
                     },
-                    sceneMode = when {
-                        !cam.has("sceneMode") -> current.sceneMode
-                        cam.isNull("sceneMode") -> null
-                        else -> cam.getString("sceneMode").takeIf { it.isNotEmpty() }
-                    },
+                    sceneMode = cam.sceneMode,
                 )
-                cachedSettings = newSettings
                 scope.launch {
                     app.settingsDataStore.saveSettings(newSettings)
                     withContext(Dispatchers.Main) {
@@ -198,62 +186,42 @@ class WebApiController(private val context: Context) {
                 }
             }
 
-            if (json.has("streaming")) {
-                val stream = json.getJSONObject("streaming")
-                stream.optInt("port", -1).takeIf { it > 0 }?.let {
-                    cachedPort = it
-                    scope.launch { app.settingsDataStore.saveStreamingPort(it) }
+            if (request.streaming != null) {
+                val stream = request.streaming
+                if (stream.port > 0) {
+                    scope.launch { app.settingsDataStore.saveStreamingPort(stream.port) }
                 }
-                stream.optInt("jpegQuality", -1).takeIf { it > 0 }?.let {
-                    cachedJpegQuality = it
+                if (stream.jpegQuality > 0) {
                     scope.launch {
-                        app.settingsDataStore.saveJpegQuality(it)
-                        app.streamingManager.setJpegQuality(it)
+                        app.settingsDataStore.saveJpegQuality(stream.jpegQuality)
+                        app.streamingManager.setJpegQuality(stream.jpegQuality)
                     }
                 }
-                if (stream.has("showPreview")) {
-                    val show = stream.getBoolean("showPreview")
-                    cachedShowPreview = show
-                    scope.launch { app.settingsDataStore.saveShowPreview(show) }
+                scope.launch { app.settingsDataStore.saveShowPreview(stream.showPreview) }
+                scope.launch {
+                    app.settingsDataStore.saveStreamAudioEnabled(stream.streamAudioEnabled)
+                    app.streamingManager.setStreamAudioEnabled(stream.streamAudioEnabled)
                 }
-                if (stream.has("streamAudioEnabled")) {
-                    val enabled = stream.getBoolean("streamAudioEnabled")
-                    cachedStreamAudioEnabled = enabled
+                if (stream.streamAudioBitrateKbps > 0) {
                     scope.launch {
-                        app.settingsDataStore.saveStreamAudioEnabled(enabled)
-                        app.streamingManager.setStreamAudioEnabled(enabled)
+                        app.settingsDataStore.saveStreamAudioBitrateKbps(stream.streamAudioBitrateKbps)
+                        app.streamingManager.setStreamAudioBitrateKbps(stream.streamAudioBitrateKbps)
                     }
                 }
-                stream.optInt("streamAudioBitrateKbps", -1).takeIf { it > 0 }?.let {
-                    cachedStreamAudioBitrateKbps = it
+                if (stream.streamAudioChannels > 0) {
                     scope.launch {
-                        app.settingsDataStore.saveStreamAudioBitrateKbps(it)
-                        app.streamingManager.setStreamAudioBitrateKbps(it)
+                        app.settingsDataStore.saveStreamAudioChannels(stream.streamAudioChannels)
+                        app.streamingManager.setStreamAudioChannels(stream.streamAudioChannels)
                     }
                 }
-                stream.optInt("streamAudioChannels", -1).takeIf { it > 0 }?.let {
-                    cachedStreamAudioChannels = it
-                    scope.launch {
-                        app.settingsDataStore.saveStreamAudioChannels(it)
-                        app.streamingManager.setStreamAudioChannels(it)
-                    }
+                scope.launch {
+                    app.settingsDataStore.saveStreamAudioEchoCancellation(stream.streamAudioEchoCancellation)
+                    app.streamingManager.setStreamAudioEchoCancellation(stream.streamAudioEchoCancellation)
                 }
-                if (stream.has("streamAudioEchoCancellation")) {
-                    val enabled = stream.getBoolean("streamAudioEchoCancellation")
-                    cachedStreamAudioEchoCancellation = enabled
-                    scope.launch {
-                        app.settingsDataStore.saveStreamAudioEchoCancellation(enabled)
-                        app.streamingManager.setStreamAudioEchoCancellation(enabled)
-                    }
-                }
-                if (stream.has("recordingAudioEnabled")) {
-                    val enabled = stream.getBoolean("recordingAudioEnabled")
-                    cachedRecordingAudioEnabled = enabled
-                    scope.launch { app.settingsDataStore.saveRecordingAudioEnabled(enabled) }
-                }
+                scope.launch { app.settingsDataStore.saveRecordingAudioEnabled(stream.recordingAudioEnabled) }
             }
 
-            """{"success":true}"""
+            successAdapter.toJson(SuccessResponse())
         } catch (e: Exception) {
             Log.e(TAG, "Failed to update settings", e)
             errorJson(e)
@@ -272,26 +240,23 @@ class WebApiController(private val context: Context) {
             val isAudioStreaming = app.streamingManager.isAudioStreaming.value
             val audioUrl = app.streamingManager.audioStreamUrl.value
 
-            val json = JSONObject()
-            val streaming = JSONObject().apply {
-                put("isActive", isLiveStreaming)
-                put("url", streamUrl)
-                put("clientCount", clientCount)
-                put("audioEnabled", isAudioStreaming)
-                put("audioUrl", audioUrl)
-            }
-            json.put("streaming", streaming)
-            json.put("thermal", thermal.name)
-            json.put("camera", app.cameraService.cameraState.value.toString())
-
-            val batteryJson = JSONObject().apply {
-                put("level", battery)
-                put("isCharging", isCharging)
-                put("isPowerSaveMode", isPowerSave)
-            }
-            json.put("battery", batteryJson)
-
-            json.toString()
+            val response = StatusResponseDto(
+                streaming = StreamingStatusDto(
+                    isActive = isLiveStreaming,
+                    url = streamUrl,
+                    clientCount = clientCount,
+                    audioEnabled = isAudioStreaming,
+                    audioUrl = audioUrl,
+                ),
+                thermal = thermal.name,
+                camera = app.cameraService.cameraState.value.toString(),
+                battery = BatteryStatusDto(
+                    level = battery,
+                    isCharging = isCharging,
+                    isPowerSaveMode = isPowerSave,
+                ),
+            )
+            statusResponseAdapter.toJson(response)
         } catch (e: Exception) {
             Log.e(TAG, "Failed to get status", e)
             errorJson(e)
@@ -311,7 +276,9 @@ class WebApiController(private val context: Context) {
 
                 val success = app.streamingManager.startStreaming()
                 if (!success) {
-                    return """{"success":false,"error":"Failed to start streaming server"}"""
+                    return streamActionAdapter.toJson(
+                        StreamActionResponse(success = false, error = "Failed to start streaming server")
+                    )
                 }
 
                 runBlocking {
@@ -337,7 +304,7 @@ class WebApiController(private val context: Context) {
             }
 
             val streamUrl = app.streamingManager.streamUrl.value
-            """{"success":true,"isActive":true,"url":"${safeJsonString(streamUrl)}"}"""
+            streamActionAdapter.toJson(StreamActionResponse(success = true, isActive = true, url = streamUrl))
         } catch (e: Exception) {
             Log.e(TAG, "Failed to start stream", e)
             errorJson(e)
@@ -368,7 +335,7 @@ class WebApiController(private val context: Context) {
                 context.startService(intent)
             }
 
-            """{"success":true,"isActive":false}"""
+            streamActionAdapter.toJson(StreamActionResponse(success = true, isActive = false))
         } catch (e: Exception) {
             Log.e(TAG, "Failed to stop stream", e)
             errorJson(e)
@@ -385,7 +352,7 @@ class WebApiController(private val context: Context) {
                 }
             }
             if (imageCapture == null) {
-                """{"success":false,"error":"Camera not available"}"""
+                captureResponseAdapter.toJson(CaptureResponse(success = false, error = "Camera not available"))
             } else {
                 val fileName = PhotoCaptureHelper.generateFileName()
                 PhotoCaptureHelper.takePhoto(
@@ -405,7 +372,7 @@ class WebApiController(private val context: Context) {
                         Log.e(TAG, "Web capture failed", exc)
                     },
                 )
-                """{"success":true,"fileName":"${safeJsonString(fileName)}"}"""
+                captureResponseAdapter.toJson(CaptureResponse(success = true, fileName = fileName))
             }
         } catch (e: Exception) {
             Log.e(TAG, "Capture failed", e)
@@ -418,26 +385,18 @@ class WebApiController(private val context: Context) {
             val lenses = app.cameraService.availableLenses.value
             val selectedIndex = app.cameraService.selectedLensIndex.value
 
-            val array = org.json.JSONArray()
-            for ((index, lens) in lenses.withIndex()) {
-                val obj = JSONObject().apply {
-                    put("index", index)
-                    put("id", lens.id)
-                    put("label", lens.label)
-                    put("focalLength", lens.focalLength.toDouble())
-                    put(
-                        "isFront",
-                        lens.lensFacing == androidx.camera.core.CameraSelector.LENS_FACING_FRONT
-                    )
-                    put("selected", index == selectedIndex)
-                }
-                array.put(obj)
+            val lensDtos = lenses.mapIndexed { index, lens ->
+                LensDto(
+                    index = index,
+                    id = lens.id,
+                    label = lens.label,
+                    focalLength = lens.focalLength.toDouble(),
+                    isFront = lens.lensFacing == CameraSelector.LENS_FACING_FRONT,
+                    selected = index == selectedIndex,
+                )
             }
 
-            JSONObject().apply {
-                put("lenses", array)
-                put("selectedIndex", selectedIndex)
-            }.toString()
+            lensesAdapter.toJson(LensesResponseDto(lenses = lensDtos, selectedIndex = selectedIndex))
         } catch (e: Exception) {
             Log.e(TAG, "Failed to get lenses", e)
             errorJson(e)
@@ -446,14 +405,14 @@ class WebApiController(private val context: Context) {
 
     fun handleSelectLens(body: String): String {
         return try {
-            val json = JSONObject(body)
-            val index = json.getInt("index")
+            val request = lensSelectAdapter.fromJson(body)
+                ?: return errorJson(IllegalArgumentException("Invalid lens selection JSON"))
             runBlocking {
                 withContext(Dispatchers.Main) {
-                    app.cameraService.selectLens(index)
+                    app.cameraService.selectLens(request.index)
                 }
             }
-            """{"success":true}"""
+            successAdapter.toJson(SuccessResponse())
         } catch (e: Exception) {
             Log.e(TAG, "Failed to select lens", e)
             errorJson(e)
@@ -463,11 +422,12 @@ class WebApiController(private val context: Context) {
     fun handleGetIntervalCaptureStatus(): String {
         return try {
             val snapshot = IntervalCaptureScheduler.getStatus(context)
-
-            JSONObject().apply {
-                put("isRunning", snapshot.isRunning)
-                put("completedCaptures", snapshot.completedCaptures)
-            }.toString()
+            intervalStatusAdapter.toJson(
+                IntervalCaptureStatusDto(
+                    isRunning = snapshot.isRunning,
+                    completedCaptures = snapshot.completedCaptures,
+                )
+            )
         } catch (e: Exception) {
             Log.e(TAG, "Failed to get interval capture status", e)
             errorJson(e)
@@ -495,7 +455,7 @@ class WebApiController(private val context: Context) {
                 TAG,
                 "Interval capture started: every ${intervalSeconds}s, total=$totalCaptures, flash=${config.flashMode}"
             )
-            """{"success":true}"""
+            successAdapter.toJson(SuccessResponse())
         } catch (e: Exception) {
             Log.e(TAG, "Failed to start interval capture", e)
             errorJson(e)
@@ -506,7 +466,7 @@ class WebApiController(private val context: Context) {
         return try {
             IntervalCaptureScheduler.stop(context)
             Log.d(TAG, "Interval capture stopped")
-            """{"success":true}"""
+            successAdapter.toJson(SuccessResponse())
         } catch (e: Exception) {
             Log.e(TAG, "Failed to stop interval capture", e)
             errorJson(e)
@@ -520,10 +480,9 @@ class WebApiController(private val context: Context) {
             } else {
                 0
             }
-            JSONObject().apply {
-                put("isRecording", isRecording)
-                put("elapsedSeconds", elapsed)
-            }.toString()
+            recordingStatusAdapter.toJson(
+                RecordingStatusDto(isRecording = isRecording, elapsedSeconds = elapsed)
+            )
         } catch (e: Exception) {
             Log.e(TAG, "Failed to get recording status", e)
             errorJson(e)
@@ -545,7 +504,7 @@ class WebApiController(private val context: Context) {
             isRecording = true
             recordingStartTime = System.currentTimeMillis()
             Log.d(TAG, "Recording started")
-            """{"success":true}"""
+            successAdapter.toJson(SuccessResponse())
         } catch (e: Exception) {
             Log.e(TAG, "Failed to start recording", e)
             errorJson(e)
@@ -561,7 +520,7 @@ class WebApiController(private val context: Context) {
             isRecording = false
             recordingStartTime = 0
             Log.d(TAG, "Recording stopped")
-            """{"success":true}"""
+            successAdapter.toJson(SuccessResponse())
         } catch (e: Exception) {
             Log.e(TAG, "Failed to stop recording", e)
             errorJson(e)
@@ -577,24 +536,19 @@ class WebApiController(private val context: Context) {
                 "VIDEO" -> history.filter { it.type == com.raulshma.lenscast.capture.model.CaptureType.VIDEO }
                 else -> history
             }
-            val array = org.json.JSONArray()
-            for (entry in filtered) {
-                val obj = JSONObject().apply {
-                    put("id", entry.id)
-                    put("type", entry.type.name)
-                    put("fileName", entry.fileName)
-                    put("timestamp", entry.timestamp)
-                    put("fileSizeBytes", entry.fileSizeBytes)
-                    put("durationMs", entry.durationMs)
-                    put("thumbnailUrl", "/api/media/${entry.id}")
-                    put("downloadUrl", "/api/media/${entry.id}?download=1")
-                }
-                array.put(obj)
+            val items = filtered.map { entry ->
+                GalleryItemDto(
+                    id = entry.id,
+                    type = entry.type.name,
+                    fileName = entry.fileName,
+                    timestamp = entry.timestamp,
+                    fileSizeBytes = entry.fileSizeBytes,
+                    durationMs = entry.durationMs,
+                    thumbnailUrl = "/api/media/${entry.id}",
+                    downloadUrl = "/api/media/${entry.id}?download=1",
+                )
             }
-            JSONObject().apply {
-                put("items", array)
-                put("total", filtered.size)
-            }.toString()
+            galleryAdapter.toJson(GalleryResponseDto(items = items, total = filtered.size))
         } catch (e: Exception) {
             Log.e(TAG, "Failed to get gallery", e)
             errorJson(e)
@@ -606,10 +560,10 @@ class WebApiController(private val context: Context) {
             val history = app.captureHistoryStore.history.value
             val entry = history.find { it.id == id }
             if (entry == null) {
-                """{"success":false,"error":"Media not found"}"""
+                errorAdapter.toJson(ErrorResponse(error = "Media not found"))
             } else {
                 app.captureHistoryStore.deleteMedia(id)
-                """{"success":true}"""
+                successAdapter.toJson(SuccessResponse())
             }
         } catch (e: Exception) {
             Log.e(TAG, "Failed to delete media", e)
@@ -619,12 +573,10 @@ class WebApiController(private val context: Context) {
 
     fun handleBatchDeleteMedia(body: String): String {
         return try {
-            val json = org.json.JSONObject(body)
-            val ids = json.getJSONArray("ids")
-            val idList = (0 until ids.length()).map { ids.getString(it) }
-            val deleted = app.captureHistoryStore.deleteMediaBatch(idList)
-            val deletedArr = org.json.JSONArray(deleted)
-            """{"success":true,"deleted":$deletedArr}"""
+            val request = batchDeleteRequestAdapter.fromJson(body)
+                ?: return errorJson(IllegalArgumentException("Invalid batch delete JSON"))
+            val deleted = app.captureHistoryStore.deleteMediaBatch(request.ids)
+            batchDeleteResponseAdapter.toJson(BatchDeleteResponse(deleted = deleted))
         } catch (e: Exception) {
             Log.e(TAG, "Failed to batch delete media", e)
             errorJson(e)
@@ -652,18 +604,9 @@ class WebApiController(private val context: Context) {
         }
     }
 
-    private fun safeJsonString(value: String): String {
-        return value
-            .replace("\\", "\\\\")
-            .replace("\"", "\\\"")
-            .replace("\n", " ")
-            .replace("\r", "")
-            .replace("\t", " ")
-    }
-
     private fun errorJson(e: Exception): String {
-        val msg = e.message?.take(200)?.let { safeJsonString(it) } ?: "Internal error"
-        return """{"success":false,"error":"$msg"}"""
+        val msg = e.message?.take(200) ?: "Internal error"
+        return errorAdapter.toJson(ErrorResponse(error = msg))
     }
 
     companion object {
