@@ -472,13 +472,13 @@ class StreamingServer(
             )
         }
 
-        val (inputStream, mimeType) = resolved
+        val (inputStream, mimeType, fileSize) = resolved
         val download = session.parameters?.containsKey("download") == true
 
         // For video files, support HTTP Range requests for proper playback
         if (mimeType.startsWith("video/") && !download) {
             val rangeHeader = session.headers["range"]
-            return serveVideoWithRange(inputStream, mimeType, rangeHeader)
+            return serveVideoWithRange(inputStream, mimeType, fileSize, rangeHeader)
         }
 
         val response = newChunkedResponse(Response.Status.OK, mimeType, inputStream)
@@ -491,12 +491,9 @@ class StreamingServer(
     private fun serveVideoWithRange(
         inputStream: InputStream,
         mimeType: String,
+        totalSize: Long,
         rangeHeader: String?,
     ): Response {
-        // Read the full content to support seeking (video files from content:// URIs)
-        val bytes = inputStream.use { it.readBytes() }
-        val totalSize = bytes.size.toLong()
-
         if (rangeHeader != null && rangeHeader.startsWith("bytes=")) {
             val rangeSpec = rangeHeader.removePrefix("bytes=").trim()
             val dashIdx = rangeSpec.indexOf('-')
@@ -511,10 +508,17 @@ class StreamingServer(
                     (start + 2 * 1024 * 1024 - 1).coerceAtMost(totalSize - 1)
                 }
                 val contentLength = end - start + 1
-                val rangeStream = ByteArrayInputStream(bytes, start.toInt(), contentLength.toInt())
+                
+                var skipped = 0L
+                while (skipped < start) {
+                    val skippedThisTime = inputStream.skip(start - skipped)
+                    if (skippedThisTime <= 0L) break
+                    skipped += skippedThisTime
+                }
+
                 return newFixedLengthResponse(
                     Response.Status.PARTIAL_CONTENT, mimeType,
-                    rangeStream, contentLength
+                    inputStream, contentLength
                 ).apply {
                     addHeader("Content-Range", "bytes $start-$end/$totalSize")
                     addHeader("Accept-Ranges", "bytes")
@@ -526,7 +530,7 @@ class StreamingServer(
         // No range requested – serve full content
         return newFixedLengthResponse(
             Response.Status.OK, mimeType,
-            ByteArrayInputStream(bytes), totalSize
+            inputStream, totalSize
         ).apply {
             addHeader("Accept-Ranges", "bytes")
             addHeader("Content-Length", totalSize.toString())

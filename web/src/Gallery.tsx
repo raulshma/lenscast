@@ -37,6 +37,7 @@ export default function Gallery(props: { onClose: () => void }) {
   const [selectMode, setSelectMode] = createSignal(false)
   const [selectedIds, setSelectedIds] = createSignal<Set<string>>(new Set())
   const [batchDeleting, setBatchDeleting] = createSignal(false)
+  const [videoLoading, setVideoLoading] = createSignal(false)
 
   async function fetchGallery() {
     setLoading(true)
@@ -386,14 +387,25 @@ export default function Gallery(props: { onClose: () => void }) {
           <div class="gallery-viewer" onClick={() => setViewer(null)}>
             <div class="gallery-viewer-content" onClick={(e) => e.stopPropagation()}>
               <Show when={item().type === 'PHOTO'} fallback={
-                <video
-                  src={`/api/media/${item().id}`}
-                  controls
-                  autoplay
-                  preload="metadata"
-                  class="gallery-viewer-media"
-                  poster={item().thumbnailUrl}
-                />
+                <div style={{ position: 'relative', display: 'flex', 'align-items': 'center', 'justify-content': 'center', width: '100%', height: '100%' }}>
+                  <Show when={videoLoading()}>
+                    <div style={{ position: 'absolute', 'z-index': 10, display: 'flex', 'align-items': 'center', 'justify-content': 'center', background: 'rgba(0,0,0,0.5)', inset: 0, 'border-radius': 'var(--lc-radius)' }}>
+                      <div class="login-spinner" style={{ width: '40px', height: '40px', 'border-color': 'rgba(255,255,255,0.3)', 'border-top-color': '#fff' }}></div>
+                    </div>
+                  </Show>
+                  <video
+                    src={`/api/media/${item().id}`}
+                    controls
+                    autoplay
+                    preload="metadata"
+                    class="gallery-viewer-media"
+                    poster={`${item().thumbnailUrl}?t=${item().timestamp}`}
+                    onLoadStart={() => setVideoLoading(true)}
+                    onWaiting={() => setVideoLoading(true)}
+                    onCanPlay={() => setVideoLoading(false)}
+                    onPlaying={() => setVideoLoading(false)}
+                  />
+                </div>
               }>
                 <img src={item().thumbnailUrl} alt={item().fileName} class="gallery-viewer-media" />
               </Show>

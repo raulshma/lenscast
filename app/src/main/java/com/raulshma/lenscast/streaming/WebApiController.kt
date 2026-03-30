@@ -584,23 +584,24 @@ class WebApiController(private val context: Context) {
         }
     }
 
-    fun resolveMediaFile(id: String): Pair<java.io.InputStream, String>? {
+    fun resolveMediaFile(id: String): Triple<java.io.InputStream, String, Long>? {
         val history = app.captureHistoryStore.history.value
         val entry = history.find { it.id == id } ?: return null
         val mimeType = when (entry.type) {
             com.raulshma.lenscast.capture.model.CaptureType.PHOTO -> "image/jpeg"
             com.raulshma.lenscast.capture.model.CaptureType.VIDEO -> "video/mp4"
         }
+        val size = entry.fileSizeBytes
         return try {
             val uri = android.net.Uri.parse(entry.filePath)
             val inputStream = context.contentResolver.openInputStream(uri)
-            if (inputStream != null) return Pair(inputStream, mimeType)
+            if (inputStream != null) return Triple(inputStream, mimeType, size)
             val file = java.io.File(entry.filePath)
-            if (file.exists()) Pair(file.inputStream(), mimeType) else null
+            if (file.exists()) Triple(file.inputStream(), mimeType, file.length()) else null
         } catch (_: Exception) {
             try {
                 val file = java.io.File(entry.filePath)
-                if (file.exists()) Pair(file.inputStream(), mimeType) else null
+                if (file.exists()) Triple(file.inputStream(), mimeType, file.length()) else null
             } catch (_: Exception) { null }
         }
     }
