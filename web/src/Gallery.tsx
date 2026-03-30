@@ -311,7 +311,12 @@ export default function Gallery(props: { onClose: () => void }) {
                       </Show>
                       <Show when={item.type === 'PHOTO'} fallback={
                         <div class="gallery-video-thumb">
-                          <img src={`${item.thumbnailUrl}?t=${item.timestamp}`} alt={item.fileName} loading="lazy" />
+                          <img
+                            src={`${item.thumbnailUrl}?t=${item.timestamp}`}
+                            alt={item.fileName}
+                            loading="lazy"
+                            onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none' }}
+                          />
                           <div class="gallery-video-overlay">
                             <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
                               <path d="M8 5v14l11-7z" />
@@ -382,10 +387,12 @@ export default function Gallery(props: { onClose: () => void }) {
             <div class="gallery-viewer-content" onClick={(e) => e.stopPropagation()}>
               <Show when={item().type === 'PHOTO'} fallback={
                 <video
-                  src={item().thumbnailUrl}
+                  src={`/api/media/${item().id}`}
                   controls
                   autoplay
+                  preload="metadata"
                   class="gallery-viewer-media"
+                  poster={item().thumbnailUrl}
                 />
               }>
                 <img src={item().thumbnailUrl} alt={item().fileName} class="gallery-viewer-media" />

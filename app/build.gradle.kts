@@ -129,6 +129,7 @@ dependencies {
     implementation(libs.moshi)
 
     implementation(libs.coil.compose)
+    implementation(libs.coil.video)
 
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)

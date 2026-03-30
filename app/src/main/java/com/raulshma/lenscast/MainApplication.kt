@@ -1,6 +1,9 @@
 package com.raulshma.lenscast
 
 import android.app.Application
+import coil.ImageLoader
+import coil.ImageLoaderFactory
+import coil.decode.VideoFrameDecoder
 import com.raulshma.lenscast.camera.CameraService
 import com.raulshma.lenscast.core.PowerManager
 import com.raulshma.lenscast.core.ThermalMonitor
@@ -13,7 +16,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 
-class MainApplication : Application() {
+class MainApplication : Application(), ImageLoaderFactory {
     val cameraService: CameraService by lazy { CameraService(this) }
     val streamingManager: StreamingManager by lazy { StreamingManager(this) }
     val settingsDataStore: SettingsDataStore by lazy { SettingsDataStore(this) }
@@ -25,6 +28,15 @@ class MainApplication : Application() {
     override fun onCreate() {
         super.onCreate()
         initializeStreamingServer()
+    }
+
+    override fun newImageLoader(): ImageLoader {
+        return ImageLoader.Builder(this)
+            .components {
+                add(VideoFrameDecoder.Factory())
+            }
+            .crossfade(true)
+            .build()
     }
 
     private fun initializeStreamingServer() {

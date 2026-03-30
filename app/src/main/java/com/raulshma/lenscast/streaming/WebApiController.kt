@@ -537,6 +537,7 @@ class WebApiController(private val context: Context) {
                 else -> history
             }
             val items = filtered.map { entry ->
+                val isVideo = entry.type == com.raulshma.lenscast.capture.model.CaptureType.VIDEO
                 GalleryItemDto(
                     id = entry.id,
                     type = entry.type.name,
@@ -544,7 +545,7 @@ class WebApiController(private val context: Context) {
                     timestamp = entry.timestamp,
                     fileSizeBytes = entry.fileSizeBytes,
                     durationMs = entry.durationMs,
-                    thumbnailUrl = "/api/media/${entry.id}",
+                    thumbnailUrl = if (isVideo) "/api/media/${entry.id}/thumbnail" else "/api/media/${entry.id}",
                     downloadUrl = "/api/media/${entry.id}?download=1",
                 )
             }
@@ -601,6 +602,47 @@ class WebApiController(private val context: Context) {
                 val file = java.io.File(entry.filePath)
                 if (file.exists()) Pair(file.inputStream(), mimeType) else null
             } catch (_: Exception) { null }
+        }
+    }
+
+    fun resolveVideoThumbnail(id: String): ByteArray? {
+        val history = app.captureHistoryStore.history.value
+        val entry = history.find { it.id == id } ?: return null
+        if (entry.type != com.raulshma.lenscast.capture.model.CaptureType.VIDEO) {
+            return null
+        }
+        return try {
+            val retriever = android.media.MediaMetadataRetriever()
+            try {
+                val uri = android.net.Uri.parse(entry.filePath)
+                if (entry.filePath.startsWith("content://")) {
+                    retriever.setDataSource(context, uri)
+                } else {
+                    val file = java.io.File(entry.filePath)
+                    if (file.exists()) {
+                        retriever.setDataSource(file.absolutePath)
+                    } else {
+                        retriever.setDataSource(context, uri)
+                    }
+                }
+                val bitmap = retriever.getFrameAtTime(
+                    1_000_000, // 1 second in microseconds
+                    android.media.MediaMetadataRetriever.OPTION_CLOSEST_SYNC
+                ) ?: retriever.getFrameAtTime(0)
+                if (bitmap != null) {
+                    val stream = java.io.ByteArrayOutputStream()
+                    bitmap.compress(android.graphics.Bitmap.CompressFormat.JPEG, 75, stream)
+                    bitmap.recycle()
+                    stream.toByteArray()
+                } else {
+                    null
+                }
+            } finally {
+                retriever.release()
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to generate video thumbnail for $id", e)
+            null
         }
     }
 

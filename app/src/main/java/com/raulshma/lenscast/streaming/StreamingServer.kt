@@ -156,7 +156,7 @@ class StreamingServer(
             uri == "/stream" -> serveMjpegStream()
             uri == "/audio" -> serveAudioStream()
             uri == "/snapshot" -> serveSnapshot()
-            uri.startsWith("/api/media/") -> serveMediaFile(uri, session)
+            uri.startsWith("/api/media/") && method == Method.GET -> serveMediaFile(uri, session)
             uri.startsWith("/api/") -> handleApiRoute(uri, method, session)
             else -> serveStaticFile(uri)
         }
@@ -430,14 +430,40 @@ class StreamingServer(
             """{"error":"API not available"}"""
         )
 
-        val id = uri.removePrefix("/api/media/")
-        if (id.isEmpty()) {
+        val path = uri.removePrefix("/api/media/")
+        if (path.isEmpty()) {
             return newFixedLengthResponse(
                 Response.Status.BAD_REQUEST, "application/json",
                 """{"error":"Missing media ID"}"""
             )
         }
 
+        // Handle /api/media/{id}/thumbnail
+        if (path.endsWith("/thumbnail")) {
+            val id = path.removeSuffix("/thumbnail")
+            val thumbnailBytes = controller.resolveVideoThumbnail(id)
+            return if (thumbnailBytes != null) {
+                newFixedLengthResponse(
+                    Response.Status.OK, "image/jpeg",
+                    ByteArrayInputStream(thumbnailBytes), thumbnailBytes.size.toLong()
+                ).apply {
+                    addHeader("Cache-Control", "public, max-age=3600")
+                }
+            } else {
+                // Fallback: try to serve the media file itself (for photos)
+                val resolved = controller.resolveMediaFile(id)
+                if (resolved != null) {
+                    newChunkedResponse(Response.Status.OK, resolved.second, resolved.first)
+                } else {
+                    newFixedLengthResponse(
+                        Response.Status.NOT_FOUND, "application/json",
+                        """{"error":"Thumbnail not available"}"""
+                    )
+                }
+            }
+        }
+
+        val id = path
         val resolved = controller.resolveMediaFile(id)
         if (resolved == null) {
             return newFixedLengthResponse(
@@ -448,11 +474,63 @@ class StreamingServer(
 
         val (inputStream, mimeType) = resolved
         val download = session.parameters?.containsKey("download") == true
+
+        // For video files, support HTTP Range requests for proper playback
+        if (mimeType.startsWith("video/") && !download) {
+            val rangeHeader = session.headers["range"]
+            return serveVideoWithRange(inputStream, mimeType, rangeHeader)
+        }
+
         val response = newChunkedResponse(Response.Status.OK, mimeType, inputStream)
         if (download) {
             response.addHeader("Content-Disposition", "attachment")
         }
         return response
+    }
+
+    private fun serveVideoWithRange(
+        inputStream: InputStream,
+        mimeType: String,
+        rangeHeader: String?,
+    ): Response {
+        // Read the full content to support seeking (video files from content:// URIs)
+        val bytes = inputStream.use { it.readBytes() }
+        val totalSize = bytes.size.toLong()
+
+        if (rangeHeader != null && rangeHeader.startsWith("bytes=")) {
+            val rangeSpec = rangeHeader.removePrefix("bytes=").trim()
+            val dashIdx = rangeSpec.indexOf('-')
+            if (dashIdx >= 0) {
+                val startStr = rangeSpec.substring(0, dashIdx).trim()
+                val endStr = rangeSpec.substring(dashIdx + 1).trim()
+                val start = if (startStr.isNotEmpty()) startStr.toLongOrNull() ?: 0L else 0L
+                val end = if (endStr.isNotEmpty()) {
+                    (endStr.toLongOrNull() ?: (totalSize - 1)).coerceAtMost(totalSize - 1)
+                } else {
+                    // Limit chunk size to 2MB to avoid excessive memory use
+                    (start + 2 * 1024 * 1024 - 1).coerceAtMost(totalSize - 1)
+                }
+                val contentLength = end - start + 1
+                val rangeStream = ByteArrayInputStream(bytes, start.toInt(), contentLength.toInt())
+                return newFixedLengthResponse(
+                    Response.Status.PARTIAL_CONTENT, mimeType,
+                    rangeStream, contentLength
+                ).apply {
+                    addHeader("Content-Range", "bytes $start-$end/$totalSize")
+                    addHeader("Accept-Ranges", "bytes")
+                    addHeader("Content-Length", contentLength.toString())
+                }
+            }
+        }
+
+        // No range requested – serve full content
+        return newFixedLengthResponse(
+            Response.Status.OK, mimeType,
+            ByteArrayInputStream(bytes), totalSize
+        ).apply {
+            addHeader("Accept-Ranges", "bytes")
+            addHeader("Content-Length", totalSize.toString())
+        }
     }
 
     private fun serveFallbackControlPage(): Response {
