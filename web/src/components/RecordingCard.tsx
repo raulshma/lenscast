@@ -1,4 +1,4 @@
-import { Show } from 'solid-js'
+import { Show, createSignal } from 'solid-js'
 import SettingsCard from './SettingsCard'
 import type { RecordingConfig, RecordingQuality } from '../types'
 import { RECORDING_QUALITY_LABELS } from '../types'
@@ -7,6 +7,8 @@ interface Props {
   recordingConfig: () => RecordingConfig
   setRecordingConfig: (v: RecordingConfig) => void
   isRecording: () => boolean
+  isScheduled: () => boolean
+  scheduledStartTimeMs: () => number | null
   recordingTimer: { formatElapsed: () => string }
   handleStartRecording: () => void
   handleStopRecording: () => void
@@ -14,6 +16,24 @@ interface Props {
 
 export default function RecordingCard(props: Props) {
   const cfg = () => props.recordingConfig()
+  const [scheduleTimeStr, setScheduleTimeStr] = createSignal('')
+
+  const handleStartAction = () => {
+    const timeStr = scheduleTimeStr()
+    if (timeStr) {
+      const now = new Date()
+      const [hours, minutes] = timeStr.split(':').map(Number)
+      const scheduledTime = new Date()
+      scheduledTime.setHours(hours, minutes, 0, 0)
+      if (scheduledTime.getTime() <= now.getTime()) {
+        scheduledTime.setDate(scheduledTime.getDate() + 1)
+      }
+      props.setRecordingConfig({ ...cfg(), startTimeMs: scheduledTime.getTime() })
+    } else {
+      props.setRecordingConfig({ ...cfg(), startTimeMs: null })
+    }
+    props.handleStartRecording()
+  }
 
   return (
     <SettingsCard
@@ -29,6 +49,16 @@ export default function RecordingCard(props: Props) {
         <div class="status-banner status-banner-danger">
           <span class="recording-dot" />
           Recording — {props.recordingTimer.formatElapsed()}
+        </div>
+      </Show>
+
+      <Show when={props.isScheduled()}>
+        <div class="status-banner status-banner-warning" style={{ background: '#3d3014', color: '#ffd54f', border: '1px solid rgba(255, 213, 79, 0.2)' }}>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style={{ "flex-shrink": 0, width: '16px', height: '16px' }}>
+            <circle cx="12" cy="12" r="10" />
+            <path d="M12 6v6l4 2" />
+          </svg>
+          Scheduled for: {props.scheduledStartTimeMs() ? new Date(props.scheduledStartTimeMs()!).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '...'}
         </div>
       </Show>
 
@@ -103,23 +133,39 @@ export default function RecordingCard(props: Props) {
           max={3600}
           value={cfg().repeatIntervalSeconds}
           onInput={(e) => props.setRecordingConfig({ ...cfg(), repeatIntervalSeconds: parseInt(e.currentTarget.value) })}
-          disabled={props.isRecording()}
+          disabled={props.isRecording() || props.isScheduled()}
+        />
+      </div>
+
+      {/* Schedule Time */}
+      <div class="field-group">
+        <div class="field-row">
+          <span class="field-label">Schedule Time (Optional)</span>
+        </div>
+        <input
+          id="recording-schedule-time"
+          type="time"
+          class="field-input field-select-full"
+          style={{ width: '100%' }}
+          value={scheduleTimeStr()}
+          onInput={(e) => setScheduleTimeStr(e.currentTarget.value)}
+          disabled={props.isRecording() || props.isScheduled()}
         />
       </div>
 
       {/* Start/Stop */}
       <div class="card-action">
-        {props.isRecording() ? (
+        {props.isRecording() || props.isScheduled() ? (
           <button id="stop-recording-btn" class="card-btn card-btn-danger" onClick={props.handleStopRecording}>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <rect x="6" y="6" width="12" height="12" rx="2" />
             </svg>
-            Stop Recording
+            Stop {props.isScheduled() ? 'Scheduled' : 'Recording'}
           </button>
         ) : (
-          <button id="start-recording-btn" class="card-btn card-btn-primary" onClick={props.handleStartRecording}>
+          <button id="start-recording-btn" class="card-btn card-btn-primary" onClick={handleStartAction}>
             <span class="rec-dot-icon" />
-            Start Recording
+            {scheduleTimeStr() ? 'Schedule Recording' : 'Start Recording'}
           </button>
         )}
       </div>

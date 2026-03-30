@@ -44,6 +44,8 @@ export function useAppState() {
   })
   const [isRecording, setIsRecording] = createSignal(false)
   const [recordingElapsed, setRecordingElapsed] = createSignal(0)
+  const [isScheduled, setIsScheduled] = createSignal(false)
+  const [scheduledStartTimeMs, setScheduledStartTimeMs] = createSignal<number | null>(null)
   const recordingTimer = createRecordingTimer(isRecording, recordingElapsed)
 
   // ── Live Audio ──
@@ -262,6 +264,8 @@ export function useAppState() {
       const s = await api.getRecordingStatus()
       setIsRecording(s.isRecording)
       setRecordingElapsed(s.elapsedSeconds)
+      setIsScheduled(s.isScheduled ?? false)
+      setScheduledStartTimeMs(s.scheduledStartTimeMs ?? null)
     } catch { }
   }
 
@@ -404,8 +408,13 @@ export function useAppState() {
         setError(result.error || 'Failed to start recording')
       } else {
         setError('')
-        setIsRecording(true)
-        setRecordingElapsed(0)
+        if (recordingConfig().startTimeMs) {
+          setIsScheduled(true)
+          setScheduledStartTimeMs(recordingConfig().startTimeMs ?? null)
+        } else {
+          setIsRecording(true)
+          setRecordingElapsed(0)
+        }
       }
     } catch (e: any) {
       setError(e.message || 'Failed to start recording')
@@ -420,6 +429,8 @@ export function useAppState() {
       } else {
         setError('')
         setIsRecording(false)
+        setIsScheduled(false)
+        setScheduledStartTimeMs(null)
       }
     } catch (e: any) {
       setError(e.message || 'Failed to stop recording')
@@ -513,6 +524,7 @@ export function useAppState() {
     intervalConfig, setIntervalConfig, intervalRunning, intervalCompleted,
     // Recording
     recordingConfig, setRecordingConfig, isRecording, recordingElapsed, recordingTimer,
+    isScheduled, scheduledStartTimeMs,
     // Audio
     liveAudioStatus,
     // Actions

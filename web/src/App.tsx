@@ -56,6 +56,8 @@ function App() {
               recordingConfig={state.recordingConfig}
               setRecordingConfig={state.setRecordingConfig}
               isRecording={state.isRecording}
+              isScheduled={state.isScheduled}
+              scheduledStartTimeMs={state.scheduledStartTimeMs}
               recordingTimer={state.recordingTimer}
               handleStartRecording={state.handleStartRecording}
               handleStopRecording={state.handleStopRecording}

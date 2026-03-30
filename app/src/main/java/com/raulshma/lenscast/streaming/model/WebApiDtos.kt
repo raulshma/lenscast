@@ -123,6 +123,8 @@ data class IntervalCaptureStatusDto(
 data class RecordingStatusDto(
     val isRecording: Boolean,
     val elapsedSeconds: Int,
+    val isScheduled: Boolean = false,
+    val scheduledStartTimeMs: Long? = null,
 )
 
 // ── Gallery DTOs ──

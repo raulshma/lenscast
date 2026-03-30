@@ -31,6 +31,8 @@ interface Props {
   recordingConfig: () => RecordingConfig
   setRecordingConfig: (v: RecordingConfig) => void
   isRecording: () => boolean
+  isScheduled: () => boolean
+  scheduledStartTimeMs: () => number | null
   recordingTimer: { formatElapsed: () => string }
   handleStartRecording: () => void
   handleStopRecording: () => void
@@ -80,6 +82,8 @@ export default function SettingsPanel(props: Props) {
         recordingConfig={props.recordingConfig}
         setRecordingConfig={props.setRecordingConfig}
         isRecording={props.isRecording}
+        isScheduled={props.isScheduled}
+        scheduledStartTimeMs={props.scheduledStartTimeMs}
         recordingTimer={props.recordingTimer}
         handleStartRecording={props.handleStartRecording}
         handleStopRecording={props.handleStopRecording}

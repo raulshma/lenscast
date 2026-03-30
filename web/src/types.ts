@@ -157,6 +157,7 @@ export interface RecordingConfig {
   quality: RecordingQuality
   maxFileSizeBytes: number
   includeAudio: boolean
+  startTimeMs?: number | null
 }
 
 export interface IntervalCaptureStatus {
@@ -167,6 +168,8 @@ export interface IntervalCaptureStatus {
 export interface RecordingStatus {
   isRecording: boolean
   elapsedSeconds: number
+  isScheduled?: boolean
+  scheduledStartTimeMs?: number | null
 }
 
 export type GalleryFilter = 'ALL' | 'PHOTO' | 'VIDEO'
@@ -186,3 +189,4 @@ export interface GalleryResponse {
   items: GalleryItem[]
   total: number
 }
+

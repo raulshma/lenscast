@@ -100,6 +100,10 @@ class WebApiController(private val context: Context) {
     @Volatile
     private var recordingStartTime: Long = 0
 
+    private var scheduledRecordingJob: kotlinx.coroutines.Job? = null
+    @Volatile
+    private var scheduledStartTimeMs: Long? = null
+
     // ── Issue 2.1 fix: Type-safe settings serialization via DTOs ──
 
     fun handleGetSettings(): String {
@@ -481,7 +485,12 @@ class WebApiController(private val context: Context) {
                 0
             }
             recordingStatusAdapter.toJson(
-                RecordingStatusDto(isRecording = isRecording, elapsedSeconds = elapsed)
+                RecordingStatusDto(
+                    isRecording = isRecording, 
+                    elapsedSeconds = elapsed,
+                    isScheduled = scheduledStartTimeMs != null,
+                    scheduledStartTimeMs = scheduledStartTimeMs
+                )
             )
         } catch (e: Exception) {
             Log.e(TAG, "Failed to get recording status", e)
@@ -492,19 +501,52 @@ class WebApiController(private val context: Context) {
     fun handleStartRecording(body: String): String {
         return try {
             val configJson = if (body.isNotEmpty()) body else "{}"
-            val intent = Intent(context, RecordingService::class.java).apply {
-                action = RecordingService.ACTION_START
-                putExtra(RecordingService.EXTRA_CONFIG, configJson)
-            }
-            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
-                context.startForegroundService(intent)
+            val config = recordingConfigAdapter.fromJson(configJson)
+                ?: com.raulshma.lenscast.capture.model.RecordingConfig()
+            
+            scheduledRecordingJob?.cancel()
+            scheduledRecordingJob = null
+            scheduledStartTimeMs = null
+
+            val delayMs = if (config.startTimeMs != null && config.startTimeMs > System.currentTimeMillis()) {
+                config.startTimeMs - System.currentTimeMillis()
+            } else 0L
+
+            if (delayMs > 0) {
+                scheduledStartTimeMs = config.startTimeMs
+                scheduledRecordingJob = scope.launch {
+                    kotlinx.coroutines.delay(delayMs)
+                    val intent = Intent(context, RecordingService::class.java).apply {
+                        action = RecordingService.ACTION_START
+                        putExtra(RecordingService.EXTRA_CONFIG, configJson)
+                    }
+                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                        context.startForegroundService(intent)
+                    } else {
+                        context.startService(intent)
+                    }
+                    isRecording = true
+                    recordingStartTime = System.currentTimeMillis()
+                    scheduledStartTimeMs = null
+                    Log.d(TAG, "Scheduled recording started")
+                }
+                Log.d(TAG, "Recording scheduled in $delayMs ms")
+                successAdapter.toJson(SuccessResponse())
             } else {
-                context.startService(intent)
+                val intent = Intent(context, RecordingService::class.java).apply {
+                    action = RecordingService.ACTION_START
+                    putExtra(RecordingService.EXTRA_CONFIG, configJson)
+                }
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                    context.startForegroundService(intent)
+                } else {
+                    context.startService(intent)
+                }
+                isRecording = true
+                recordingStartTime = System.currentTimeMillis()
+                Log.d(TAG, "Recording started")
+                successAdapter.toJson(SuccessResponse())
             }
-            isRecording = true
-            recordingStartTime = System.currentTimeMillis()
-            Log.d(TAG, "Recording started")
-            successAdapter.toJson(SuccessResponse())
         } catch (e: Exception) {
             Log.e(TAG, "Failed to start recording", e)
             errorJson(e)
@@ -513,6 +555,10 @@ class WebApiController(private val context: Context) {
 
     fun handleStopRecording(): String {
         return try {
+            scheduledRecordingJob?.cancel()
+            scheduledRecordingJob = null
+            scheduledStartTimeMs = null
+
             val intent = Intent(context, RecordingService::class.java).apply {
                 action = RecordingService.ACTION_STOP
             }
