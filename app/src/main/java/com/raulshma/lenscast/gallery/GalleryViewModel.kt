@@ -28,9 +28,10 @@ class GalleryViewModel(
 
     private val _filter = MutableStateFlow(GalleryFilter.ALL)
     val filter: StateFlow<GalleryFilter> = _filter.asStateFlow()
+    val allItems: StateFlow<List<CaptureHistory>> = captureHistoryStore.history
 
     val galleryItems: StateFlow<List<CaptureHistory>> = combine(
-        captureHistoryStore.history,
+        allItems,
         _filter,
     ) { history, filter ->
         when (filter) {
@@ -51,6 +52,10 @@ class GalleryViewModel(
 
     fun setFilter(filter: GalleryFilter) {
         _filter.value = filter
+    }
+
+    fun refresh() {
+        captureHistoryStore.refreshFromMediaStore()
     }
 
     fun setSelectMode(enabled: Boolean) {
@@ -93,7 +98,19 @@ class GalleryViewModel(
     }
 
     fun getItemById(id: String): CaptureHistory? {
-        return captureHistoryStore.history.value.find { it.id == id }
+        return allItems.value.find { it.id == id }
+    }
+
+    fun getItemIndex(id: String): Int {
+        return allItems.value.indexOfFirst { it.id == id }
+    }
+
+    fun getAdjacentItem(id: String, step: Int): CaptureHistory? {
+        val items = allItems.value
+        val currentIndex = items.indexOfFirst { it.id == id }
+        if (currentIndex == -1) return null
+        val nextIndex = currentIndex + step
+        return items.getOrNull(nextIndex)
     }
 
     class Factory(
