@@ -64,17 +64,13 @@ export default function Gallery(props: { onClose: () => void }) {
 
   function toggleSelect(id: string) {
     const next = new Set(selectedIds())
-    if (next.has(id)) {
-      next.delete(id)
-    } else {
-      next.add(id)
-    }
+    if (next.has(id)) next.delete(id)
+    else next.add(id)
     setSelectedIds(next)
   }
 
   function selectAll() {
-    const all = new Set(items().map(i => i.id))
-    setSelectedIds(all)
+    setSelectedIds(new Set(items().map(i => i.id)))
   }
 
   function selectNone() {
@@ -137,11 +133,8 @@ export default function Gallery(props: { onClose: () => void }) {
   }
 
   function handleItemClick(item: GalleryItem) {
-    if (selectMode()) {
-      toggleSelect(item.id)
-    } else {
-      setViewer(item)
-    }
+    if (selectMode()) toggleSelect(item.id)
+    else setViewer(item)
   }
 
   function handleKeyDown(e: KeyboardEvent) {
@@ -170,17 +163,17 @@ export default function Gallery(props: { onClose: () => void }) {
       {/* Header */}
       <div class="gallery-header">
         <div class="flex items-center gap-3">
-          <h2 class="text-lg font-bold">Gallery</h2>
-          <span class="badge badge-ghost badge-sm">{items().length} items</span>
+          <h2>Gallery</h2>
+          <span class="gallery-count">{items().length} items</span>
         </div>
-        <div class="flex items-center gap-2">
+        <div class="gallery-header-actions">
           <Show when={!selectMode()}>
-            <div class="tabs tabs-boxed tabs-sm">
+            <div class="gallery-filters">
               <For each={[['ALL', 'All'], ['PHOTO', 'Photos'], ['VIDEO', 'Videos']] as [GalleryFilter, string][]}>
                 {([key, label]) => (
                   <button
-                    class="tab"
-                    classList={{ 'tab-active': filter() === key }}
+                    class="gallery-filter-btn"
+                    classList={{ 'gallery-filter-active': filter() === key }}
                     onClick={() => setFilter(key)}
                   >
                     {label}
@@ -190,20 +183,23 @@ export default function Gallery(props: { onClose: () => void }) {
             </div>
           </Show>
           <button
-            class="btn btn-sm btn-ghost"
-            classList={{ 'btn-active': selectMode() }}
+            class="navbar-icon-btn"
+            classList={{ 'navbar-icon-btn-active': selectMode() }}
             onClick={toggleSelectMode}
             title="Select multiple"
           >
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+              <rect x="3" y="3" width="7" height="7" rx="1.5" />
+              <rect x="14" y="3" width="7" height="7" rx="1.5" />
+              <rect x="3" y="14" width="7" height="7" rx="1.5" />
+              <rect x="14" y="14" width="7" height="7" rx="1.5" />
+              <path d="M6 6.5h1M17 6.5h1M6 17.5h1M17 17.5h1" stroke-width="2" stroke-linecap="round" />
             </svg>
-            Select
           </button>
           <Show when={!selectMode()}>
-            <button class="btn btn-ghost btn-sm btn-circle" onClick={props.onClose}>
-              <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+            <button class="navbar-icon-btn" onClick={props.onClose} title="Close">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M18 6L6 18M6 6l12 12" />
               </svg>
             </button>
           </Show>
@@ -214,7 +210,7 @@ export default function Gallery(props: { onClose: () => void }) {
       <Show when={selectMode()}>
         <div class="gallery-select-bar">
           <div class="flex items-center gap-3">
-            <button class="btn btn-ghost btn-xs" onClick={() => allSelected() ? selectNone() : selectAll()}>
+            <button class="action-btn action-btn-ghost" onClick={() => allSelected() ? selectNone() : selectAll()}>
               <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <Show when={allSelected()} fallback={
                   <rect x="3" y="3" width="18" height="18" rx="3" stroke-width="2" />
@@ -223,45 +219,44 @@ export default function Gallery(props: { onClose: () => void }) {
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
                 </Show>
               </svg>
-              {allSelected() ? 'Deselect all' : 'Select all'}
+              <span>{allSelected() ? 'Deselect all' : 'Select all'}</span>
             </button>
-            <span class="text-sm opacity-70">
+            <span class="text-xs" style={{ color: 'var(--lc-text-muted)' }}>
               {selectedCount()} selected
             </span>
           </div>
           <div class="flex items-center gap-2">
             <button
-              class="btn btn-ghost btn-sm"
+              class="action-btn action-btn-ghost"
               onClick={handleBatchDownload}
               disabled={selectedCount() === 0}
-              title="Download selected"
             >
               <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
               </svg>
-              Download
+              <span>Download</span>
             </button>
             <button
-              class="btn btn-ghost btn-sm text-error"
+              class="action-btn"
+              style={{ color: 'var(--lc-danger)', 'border-color': 'rgba(244, 63, 94, 0.3)' }}
               onClick={handleBatchDelete}
               disabled={selectedCount() === 0 || batchDeleting()}
-              title="Delete selected"
             >
               <Show when={batchDeleting()} fallback={
                 <>
                   <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
                   </svg>
-                  Delete
+                  <span>Delete</span>
                 </>
               }>
-                <span class="loading loading-spinner loading-xs"></span>
-                Deleting...
+                <span class="btn-spinner" />
+                <span>Deleting...</span>
               </Show>
             </button>
-            <button class="btn btn-ghost btn-sm btn-circle" onClick={toggleSelectMode} title="Cancel selection">
-              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+            <button class="navbar-icon-btn" onClick={toggleSelectMode} title="Cancel">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M18 6L6 18M6 6l12 12" />
               </svg>
             </button>
           </div>
@@ -271,7 +266,12 @@ export default function Gallery(props: { onClose: () => void }) {
       {/* Content */}
       <div class="gallery-content">
         <Show when={error()}>
-          <div class="alert alert-error alert-soft text-sm py-2 m-4">
+          <div class="error-banner" style={{ margin: '12px 16px' }}>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="10" />
+              <line x1="12" y1="8" x2="12" y2="12" />
+              <line x1="12" y1="16" x2="12.01" y2="16" />
+            </svg>
             <span>{error()}</span>
           </div>
         </Show>
@@ -279,11 +279,14 @@ export default function Gallery(props: { onClose: () => void }) {
         <Show when={loading()} fallback={
           <Show when={items().length > 0} fallback={
             <div class="gallery-empty">
-              <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                <path d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+              <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" style={{ opacity: 0.3 }}>
+                <rect x="3" y="3" width="7" height="7" rx="1.5" />
+                <rect x="14" y="3" width="7" height="7" rx="1.5" />
+                <rect x="3" y="14" width="7" height="7" rx="1.5" />
+                <rect x="14" y="14" width="7" height="7" rx="1.5" />
               </svg>
-              <span class="text-sm opacity-60">No captures yet</span>
-              <span class="text-xs opacity-40">Photos and videos will appear here</span>
+              <span style={{ 'font-size': '14px', 'font-weight': '500' }}>No captures yet</span>
+              <span style={{ 'font-size': '12px' }}>Photos and videos will appear here</span>
             </div>
           }>
             <div class="gallery-grid">
@@ -313,7 +316,7 @@ export default function Gallery(props: { onClose: () => void }) {
                             <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
                               <path d="M8 5v14l11-7z" />
                             </svg>
-                            <span class="text-xs">{formatDuration(item.durationMs)}</span>
+                            <span style={{ 'font-size': '11px', 'font-family': 'var(--lc-mono)' }}>{formatDuration(item.durationMs)}</span>
                           </div>
                         </div>
                       }>
@@ -322,7 +325,7 @@ export default function Gallery(props: { onClose: () => void }) {
                     </div>
                     <div class="gallery-item-info">
                       <span class="gallery-item-name">{item.fileName}</span>
-                      <div class="flex items-center gap-2 text-[10px] opacity-50">
+                      <div class="gallery-item-meta">
                         <span>{formatDate(item.timestamp)}</span>
                         <Show when={item.fileSizeBytes > 0}>
                           <span>{formatFileSize(item.fileSizeBytes)}</span>
@@ -332,28 +335,30 @@ export default function Gallery(props: { onClose: () => void }) {
                     <Show when={!selectMode()}>
                       <div class="gallery-item-actions">
                         <a
-                          class="btn btn-ghost btn-xs btn-circle"
+                          class="gallery-action-btn"
                           href={item.downloadUrl}
                           download
                           onClick={(e) => e.stopPropagation()}
                           title="Download"
                         >
-                          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                          <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
+                            <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" />
+                            <polyline points="7 10 12 15 17 10" />
+                            <line x1="12" y1="15" x2="12" y2="3" />
                           </svg>
                         </a>
                         <button
-                          class="btn btn-ghost btn-xs btn-circle text-error"
+                          class="gallery-action-btn gallery-action-btn-danger"
                           onClick={(e) => handleDelete(item, e)}
                           disabled={deleting() === item.id}
                           title="Delete"
                         >
                           <Show when={deleting() === item.id} fallback={
-                            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
+                              <path d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
                             </svg>
                           }>
-                            <span class="loading loading-spinner loading-xs"></span>
+                            <span class="btn-spinner" style={{ width: '12px', height: '12px' }} />
                           </Show>
                         </button>
                       </div>
@@ -365,7 +370,7 @@ export default function Gallery(props: { onClose: () => void }) {
           </Show>
         }>
           <div class="gallery-loading">
-            <span class="loading loading-spinner loading-md"></span>
+            <span class="btn-spinner" style={{ width: '24px', height: '24px', 'border-width': '3px' }} />
           </div>
         </Show>
       </div>
@@ -386,27 +391,30 @@ export default function Gallery(props: { onClose: () => void }) {
                 <img src={item().thumbnailUrl} alt={item().fileName} class="gallery-viewer-media" />
               </Show>
             </div>
-            <div class="gallery-viewer-bar">
-              <div class="flex flex-col">
-                <span class="text-sm font-medium">{item().fileName}</span>
-                <span class="text-xs opacity-60">{formatDate(item().timestamp)}</span>
+            <div class="gallery-viewer-bar" onClick={(e) => e.stopPropagation()}>
+              <div class="viewer-info">
+                <span class="viewer-name">{item().fileName}</span>
+                <span class="viewer-date">{formatDate(item().timestamp)}</span>
               </div>
               <div class="flex items-center gap-2">
-                <a class="btn btn-ghost btn-sm" href={item().downloadUrl} download>
-                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                <a class="action-btn action-btn-ghost" href={item().downloadUrl} download>
+                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
+                    <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" />
+                    <polyline points="7 10 12 15 17 10" />
+                    <line x1="12" y1="15" x2="12" y2="3" />
                   </svg>
-                  Download
+                  <span>Download</span>
                 </a>
                 <button
-                  class="btn btn-ghost btn-sm text-error"
+                  class="action-btn"
+                  style={{ color: 'var(--lc-danger)', 'border-color': 'rgba(244, 63, 94, 0.3)' }}
                   onClick={() => handleDelete(item(), new Event('click'))}
                 >
-                  Delete
+                  <span>Delete</span>
                 </button>
-                <button class="btn btn-ghost btn-sm btn-circle" onClick={() => setViewer(null)}>
-                  <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                <button class="navbar-icon-btn" onClick={() => setViewer(null)}>
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M18 6L6 18M6 6l12 12" />
                   </svg>
                 </button>
               </div>
