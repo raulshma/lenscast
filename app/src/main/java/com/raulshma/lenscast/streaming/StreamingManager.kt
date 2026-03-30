@@ -26,6 +26,7 @@ class StreamingManager(private val context: Context) {
     private val streamAudioEnabled = AtomicBoolean(true)
     private val streamAudioBitrateKbps = AtomicInteger(DEFAULT_AUDIO_BITRATE_KBPS)
     private val streamAudioChannels = AtomicInteger(DEFAULT_AUDIO_CHANNELS)
+    private val streamAudioEchoCancellation = AtomicBoolean(true)
     private var currentPort: Int = DEFAULT_PORT
 
     private var lastFrameTimeMs = 0L
@@ -262,6 +263,13 @@ class StreamingManager(private val context: Context) {
         }
     }
 
+    fun setStreamAudioEchoCancellation(enabled: Boolean) {
+        streamAudioEchoCancellation.set(enabled)
+        if (isStreaming.get() && streamAudioEnabled.get()) {
+            refreshAudioStreamingState()
+        }
+    }
+
     fun reduceBitrate(multiplier: Float) {
         val current = jpegQuality.get()
         jpegQuality.set((current * multiplier).toInt().coerceIn(10, 100))
@@ -336,6 +344,7 @@ class StreamingManager(private val context: Context) {
             AudioStreamingManager.Config(
                 bitrateKbps = streamAudioBitrateKbps.get(),
                 channelCount = streamAudioChannels.get(),
+                echoCancellation = streamAudioEchoCancellation.get(),
             )
         )
         _isAudioStreaming.value = audioStarted

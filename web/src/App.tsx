@@ -1095,6 +1095,24 @@ function App() {
                   </div>
                   <div class="form-control mt-2">
                     <label class="label cursor-pointer py-1">
+                      <span class="label-text text-xs">Echo Cancellation & Noise Suppression</span>
+                      <input
+                        type="checkbox"
+                        class="toggle toggle-primary toggle-sm"
+                        checked={s()?.streaming?.streamAudioEchoCancellation ?? true}
+                        onChange={() => {
+                          const current = settings()
+                          if (!current) return
+                          const newVal = !(current.streaming.streamAudioEchoCancellation ?? true)
+                          const nextStreaming = { ...current.streaming, streamAudioEchoCancellation: newVal }
+                          setSettings({ ...current, streaming: nextStreaming })
+                          saveSettings({ streaming: nextStreaming })
+                        }}
+                      />
+                    </label>
+                  </div>
+                  <div class="form-control mt-2">
+                    <label class="label cursor-pointer py-1">
                       <span class="label-text text-xs">Default Recording Audio</span>
                       <input
                         type="checkbox"

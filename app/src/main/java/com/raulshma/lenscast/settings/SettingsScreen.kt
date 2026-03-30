@@ -64,6 +64,7 @@ fun CameraSettingsScreen(
     val streamAudioEnabled by viewModel.streamAudioEnabled.collectAsState()
     val streamAudioBitrateKbps by viewModel.streamAudioBitrateKbps.collectAsState()
     val streamAudioChannels by viewModel.streamAudioChannels.collectAsState()
+    val streamAudioEchoCancellation by viewModel.streamAudioEchoCancellation.collectAsState()
     val recordingAudioEnabled by viewModel.recordingAudioEnabled.collectAsState()
 
     Scaffold(
@@ -229,6 +230,11 @@ fun CameraSettingsScreen(
                         title = "Include Audio in Live Stream",
                         checked = streamAudioEnabled,
                         onCheckedChange = { viewModel.updateStreamAudioEnabled(it) }
+                    )
+                    SwitchSetting(
+                        title = "Echo Cancellation & Noise Suppression",
+                        checked = streamAudioEchoCancellation,
+                        onCheckedChange = { viewModel.updateStreamAudioEchoCancellation(it) }
                     )
                     SliderSetting(
                         title = "Live Audio Bitrate (kbps)",

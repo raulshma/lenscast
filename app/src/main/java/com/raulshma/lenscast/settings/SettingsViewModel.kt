@@ -47,6 +47,9 @@ class SettingsViewModel(
     private val _streamAudioChannels = MutableStateFlow(1)
     val streamAudioChannels: StateFlow<Int> = _streamAudioChannels.asStateFlow()
 
+    private val _streamAudioEchoCancellation = MutableStateFlow(true)
+    val streamAudioEchoCancellation: StateFlow<Boolean> = _streamAudioEchoCancellation.asStateFlow()
+
     private val _recordingAudioEnabled = MutableStateFlow(true)
     val recordingAudioEnabled: StateFlow<Boolean> = _recordingAudioEnabled.asStateFlow()
 
@@ -98,6 +101,12 @@ class SettingsViewModel(
             settingsDataStore.streamAudioChannels.collect { channels ->
                 _streamAudioChannels.value = channels
                 streamingManager?.setStreamAudioChannels(channels)
+            }
+        }
+        viewModelScope.launch {
+            settingsDataStore.streamAudioEchoCancellation.collect { enabled ->
+                _streamAudioEchoCancellation.value = enabled
+                streamingManager?.setStreamAudioEchoCancellation(enabled)
             }
         }
         viewModelScope.launch {
@@ -206,6 +215,14 @@ class SettingsViewModel(
         viewModelScope.launch {
             settingsDataStore.saveStreamAudioChannels(sanitized)
             streamingManager?.setStreamAudioChannels(sanitized)
+        }
+    }
+
+    fun updateStreamAudioEchoCancellation(enabled: Boolean) {
+        _streamAudioEchoCancellation.value = enabled
+        viewModelScope.launch {
+            settingsDataStore.saveStreamAudioEchoCancellation(enabled)
+            streamingManager?.setStreamAudioEchoCancellation(enabled)
         }
     }
 

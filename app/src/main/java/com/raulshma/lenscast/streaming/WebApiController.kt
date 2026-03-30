@@ -70,6 +70,7 @@ class WebApiController(private val context: Context) {
                 val streamAudioEnabled = app.settingsDataStore.streamAudioEnabled.first()
                 val streamAudioBitrateKbps = app.settingsDataStore.streamAudioBitrateKbps.first()
                 val streamAudioChannels = app.settingsDataStore.streamAudioChannels.first()
+                val streamAudioEchoCancellation = app.settingsDataStore.streamAudioEchoCancellation.first()
                 val recordingAudioEnabled = app.settingsDataStore.recordingAudioEnabled.first()
                 val json = JSONObject()
 
@@ -96,6 +97,7 @@ class WebApiController(private val context: Context) {
                     put("streamAudioEnabled", streamAudioEnabled)
                     put("streamAudioBitrateKbps", streamAudioBitrateKbps)
                     put("streamAudioChannels", streamAudioChannels)
+                    put("streamAudioEchoCancellation", streamAudioEchoCancellation)
                     put("recordingAudioEnabled", recordingAudioEnabled)
                 }
 
@@ -197,6 +199,11 @@ class WebApiController(private val context: Context) {
                     stream.optInt("streamAudioChannels", -1).takeIf { it > 0 }?.let {
                         app.settingsDataStore.saveStreamAudioChannels(it)
                         app.streamingManager.setStreamAudioChannels(it)
+                    }
+                    if (stream.has("streamAudioEchoCancellation")) {
+                        val enabled = stream.getBoolean("streamAudioEchoCancellation")
+                        app.settingsDataStore.saveStreamAudioEchoCancellation(enabled)
+                        app.streamingManager.setStreamAudioEchoCancellation(enabled)
                     }
                     if (stream.has("recordingAudioEnabled")) {
                         app.settingsDataStore.saveRecordingAudioEnabled(

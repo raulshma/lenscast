@@ -30,6 +30,7 @@ export interface StreamingSettings {
   streamAudioEnabled: boolean
   streamAudioBitrateKbps: number
   streamAudioChannels: number
+  streamAudioEchoCancellation: boolean
   recordingAudioEnabled: boolean
 }
 

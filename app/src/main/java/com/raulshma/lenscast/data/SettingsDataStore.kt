@@ -62,6 +62,7 @@ class SettingsDataStore(private val context: Context) {
         val STREAM_AUDIO_ENABLED = stringPreferencesKey("stream_audio_enabled")
         val STREAM_AUDIO_BITRATE_KBPS = intPreferencesKey("stream_audio_bitrate_kbps")
         val STREAM_AUDIO_CHANNELS = intPreferencesKey("stream_audio_channels")
+        val STREAM_AUDIO_ECHO_CANCELLATION = stringPreferencesKey("stream_audio_echo_cancellation")
         val RECORDING_AUDIO_ENABLED = stringPreferencesKey("recording_audio_enabled")
         val AUTH_ENABLED = stringPreferencesKey("auth_enabled")
         val AUTH_USERNAME = stringPreferencesKey("auth_username")
@@ -125,6 +126,10 @@ class SettingsDataStore(private val context: Context) {
 
     val streamAudioChannels: Flow<Int> = context.dataStore.data.map { prefs ->
         prefs[Keys.STREAM_AUDIO_CHANNELS] ?: 1
+    }
+
+    val streamAudioEchoCancellation: Flow<Boolean> = context.dataStore.data.map { prefs ->
+        prefs[Keys.STREAM_AUDIO_ECHO_CANCELLATION] != "false"
     }
 
     val recordingAudioEnabled: Flow<Boolean> = context.dataStore.data.map { prefs ->
@@ -214,6 +219,12 @@ class SettingsDataStore(private val context: Context) {
     suspend fun saveStreamAudioChannels(channels: Int) {
         context.dataStore.edit { prefs ->
             prefs[Keys.STREAM_AUDIO_CHANNELS] = channels.coerceIn(1, 2)
+        }
+    }
+
+    suspend fun saveStreamAudioEchoCancellation(enabled: Boolean) {
+        context.dataStore.edit { prefs ->
+            prefs[Keys.STREAM_AUDIO_ECHO_CANCELLATION] = if (enabled) "true" else "false"
         }
     }
 

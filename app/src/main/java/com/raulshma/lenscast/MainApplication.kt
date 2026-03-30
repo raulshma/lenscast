@@ -56,6 +56,11 @@ class MainApplication : Application() {
             }
         }
         appScope.launch {
+            settingsDataStore.streamAudioEchoCancellation.collectLatest { enabled ->
+                streamingManager.setStreamAudioEchoCancellation(enabled)
+            }
+        }
+        appScope.launch {
             settingsDataStore.authSettings.collectLatest { auth ->
                 streamingManager.updateAuthSettings(auth)
             }

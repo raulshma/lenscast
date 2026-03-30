@@ -7,6 +7,8 @@ import android.media.AudioAttributes
 import android.media.AudioFormat
 import android.media.AudioRecord
 import android.media.MediaRecorder
+import android.media.audiofx.AcousticEchoCanceler
+import android.media.audiofx.NoiseSuppressor
 import android.os.Process
 import android.util.Log
 import androidx.core.content.ContextCompat
@@ -21,6 +23,7 @@ class AudioStreamingManager(private val context: Context) {
     data class Config(
         val bitrateKbps: Int = 128,
         val channelCount: Int = 1,
+        val echoCancellation: Boolean = true,
     )
 
     private val isStreaming = AtomicBoolean(false)
@@ -36,6 +39,12 @@ class AudioStreamingManager(private val context: Context) {
     @Volatile
     private var activeConfig: ActiveConfig = ActiveConfig()
 
+    @Volatile
+    private var echoCanceler: AcousticEchoCanceler? = null
+
+    @Volatile
+    private var noiseSuppressor: NoiseSuppressor? = null
+
     fun start(config: Config = Config()): Boolean {
         if (isStreaming.get()) return true
         if (!hasAudioPermission()) {
@@ -45,7 +54,7 @@ class AudioStreamingManager(private val context: Context) {
 
         return try {
             val resolved = resolveConfig(config)
-            val recorder = buildAudioRecord(resolved)
+            val recorder = buildAudioRecord(resolved, config.echoCancellation)
             recorder.startRecording()
 
             audioRecord = recorder
@@ -124,9 +133,15 @@ class AudioStreamingManager(private val context: Context) {
         throw IllegalStateException("No supported audio recording configuration found")
     }
 
-    private fun buildAudioRecord(config: ActiveConfig): AudioRecord {
+    private fun buildAudioRecord(config: ActiveConfig, echoCancellation: Boolean): AudioRecord {
+        val audioSource = if (echoCancellation) {
+            MediaRecorder.AudioSource.VOICE_COMMUNICATION
+        } else {
+            MediaRecorder.AudioSource.MIC
+        }
+
         return AudioRecord.Builder()
-            .setAudioSource(MediaRecorder.AudioSource.MIC)
+            .setAudioSource(audioSource)
             .setAudioFormat(
                 AudioFormat.Builder()
                     .setEncoding(AUDIO_ENCODING)
@@ -141,7 +156,42 @@ class AudioStreamingManager(private val context: Context) {
                     record.release()
                     throw IllegalStateException("AudioRecord failed to initialize")
                 }
+                if (echoCancellation) {
+                    enableAudioEffects(record.audioSessionId)
+                }
             }
+    }
+
+    private fun enableAudioEffects(sessionId: Int) {
+        if (AcousticEchoCanceler.isAvailable()) {
+            try {
+                echoCanceler = AcousticEchoCanceler.create(sessionId)?.also {
+                    it.enabled = true
+                }
+                if (echoCanceler != null) {
+                    Log.d(TAG, "AcousticEchoCanceler enabled")
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to enable AcousticEchoCanceler", e)
+            }
+        } else {
+            Log.d(TAG, "AcousticEchoCanceler not available on this device")
+        }
+
+        if (NoiseSuppressor.isAvailable()) {
+            try {
+                noiseSuppressor = NoiseSuppressor.create(sessionId)?.also {
+                    it.enabled = true
+                }
+                if (noiseSuppressor != null) {
+                    Log.d(TAG, "NoiseSuppressor enabled")
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to enable NoiseSuppressor", e)
+            }
+        } else {
+            Log.d(TAG, "NoiseSuppressor not available on this device")
+        }
     }
 
     private fun startReader(recorder: AudioRecord, config: ActiveConfig) {
@@ -174,6 +224,11 @@ class AudioStreamingManager(private val context: Context) {
     }
 
     private fun cleanupRecorder() {
+        runCatching { echoCanceler?.release() }
+        echoCanceler = null
+        runCatching { noiseSuppressor?.release() }
+        noiseSuppressor = null
+
         runCatching { readerThread?.interrupt() }
         readerThread = null
 
