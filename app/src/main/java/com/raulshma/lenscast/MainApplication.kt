@@ -24,7 +24,6 @@ class MainApplication : Application() {
 
     override fun onCreate() {
         super.onCreate()
-        instance = this
         initializeStreamingServer()
     }
 
@@ -65,10 +64,5 @@ class MainApplication : Application() {
                 streamingManager.updateAuthSettings(auth)
             }
         }
-    }
-
-    companion object {
-        lateinit var instance: MainApplication
-            private set
     }
 }

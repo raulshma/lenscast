@@ -35,9 +35,11 @@ import java.util.Locale
 
 class RecordingService : Service() {
 
+    @Volatile
     private var isRecording = false
     private var startTimeMs: Long = 0
     private var recordingConfig: RecordingConfig? = null
+    @Volatile
     private var isFinalizingRecording = false
     private var capturedRecordingAudioExclusively = false
 
@@ -397,6 +399,7 @@ class RecordingService : Service() {
         private const val CHANNEL_ID = "recording_channel"
         private const val NOTIFICATION_ID = 1001
         private const val TAG = "RecordingService"
+        @Volatile
         private var activeRecording: Recording? = null
         private val DATE_FORMAT = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US)
     }

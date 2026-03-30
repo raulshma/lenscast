@@ -20,6 +20,7 @@ import androidx.work.ForegroundInfo
 import androidx.work.WorkerParameters
 import com.raulshma.lenscast.MainActivity
 import com.raulshma.lenscast.MainApplication
+import com.raulshma.lenscast.capture.PhotoCaptureHelper
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
@@ -105,74 +106,28 @@ class IntervalCaptureWorker(
         }
         Log.d(TAG, "Capturing interval photo with quality=$imageQuality flash=$flashMode")
 
-        val dateFormat = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US)
-        val fileName = "IMG_${dateFormat.format(Date())}.jpg"
+        val fileName = PhotoCaptureHelper.generateFileName()
 
         suspendCancellableCoroutine { continuation ->
-            val handleSaved: (String, Long) -> Unit = { filePath, fileSizeBytes ->
-                val entry = app.captureHistoryStore.createPhotoEntry(
-                    fileName = fileName,
-                    filePath = filePath,
-                    fileSizeBytes = fileSizeBytes,
-                )
-                app.captureHistoryStore.add(entry)
-                cameraService.releasePhotoCapture()
-                Log.d(TAG, "Photo saved: $filePath")
-                continuation.resume(true)
-            }
-
-            val handleError: (ImageCaptureException) -> Unit = { exception ->
-                cameraService.releasePhotoCapture()
-                Log.e(TAG, "Photo capture failed", exception)
-                continuation.resume(false)
-            }
-
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                val contentValues = android.content.ContentValues().apply {
-                    put(MediaStore.MediaColumns.DISPLAY_NAME, fileName)
-                    put(MediaStore.MediaColumns.MIME_TYPE, "image/jpeg")
-                    put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_PICTURES + "/LensCast")
-                }
-                val outputOptions = ImageCapture.OutputFileOptions.Builder(
-                    app.contentResolver,
-                    MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
-                    contentValues
-                ).build()
-                imageCapture.takePicture(
-                    outputOptions,
-                    ContextCompat.getMainExecutor(app),
-                    object : ImageCapture.OnImageSavedCallback {
-                        override fun onImageSaved(output: ImageCapture.OutputFileResults) {
-                            val uriString = output.savedUri?.toString().orEmpty()
-                            handleSaved(uriString, 0L)
-                        }
-
-                        override fun onError(exception: ImageCaptureException) = handleError(exception)
-                    },
-                )
-            } else {
-                @Suppress("DEPRECATION")
-                val dir = File(
-                    Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES),
-                    "LensCast"
-                )
-                if (!dir.exists()) dir.mkdirs()
-                val outputFile = File(dir, fileName)
-                val outputOptions = ImageCapture.OutputFileOptions
-                    .Builder(outputFile)
-                    .build()
-                imageCapture.takePicture(
-                    outputOptions,
-                    ContextCompat.getMainExecutor(app),
-                    object : ImageCapture.OnImageSavedCallback {
-                        override fun onImageSaved(output: ImageCapture.OutputFileResults) {
-                            handleSaved(outputFile.absolutePath, outputFile.length())
-                        }
-
-                        override fun onError(exception: ImageCaptureException) = handleError(exception)
-                    },
-                )
-            }
+            PhotoCaptureHelper.takePhoto(
+                app, imageCapture, fileName,
+                onSaved = { filePath, fileSizeBytes ->
+                    val entry = app.captureHistoryStore.createPhotoEntry(
+                        fileName = fileName,
+                        filePath = filePath,
+                        fileSizeBytes = fileSizeBytes,
+                    )
+                    app.captureHistoryStore.add(entry)
+                    cameraService.releasePhotoCapture()
+                    Log.d(TAG, "Photo saved: $filePath")
+                    continuation.resume(true)
+                },
+                onError = { exception ->
+                    cameraService.releasePhotoCapture()
+                    Log.e(TAG, "Photo capture failed", exception)
+                    continuation.resume(false)
+                },
+            )
         }
     }
 

@@ -23,19 +23,19 @@ object NetworkUtils {
         return null
     }
 
-    fun getStreamingUrl(port: Int): String? {
+    fun getStreamingUrl(port: Int, ssl: Boolean = false): String? {
         val ip = getLocalIpAddress() ?: return null
-        return "http://$ip:$port/stream"
+        return "${if (ssl) "https" else "http"}://$ip:$port/stream"
     }
 
-    fun getAudioUrl(port: Int): String? {
+    fun getAudioUrl(port: Int, ssl: Boolean = false): String? {
         val ip = getLocalIpAddress() ?: return null
-        return "http://$ip:$port/audio"
+        return "${if (ssl) "https" else "http"}://$ip:$port/audio"
     }
 
-    fun getSnapshotUrl(port: Int): String? {
+    fun getSnapshotUrl(port: Int, ssl: Boolean = false): String? {
         val ip = getLocalIpAddress() ?: return null
-        return "http://$ip:$port/snapshot"
+        return "${if (ssl) "https" else "http"}://$ip:$port/snapshot"
     }
 
     fun isWifiConnected(context: Context): Boolean {

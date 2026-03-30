@@ -16,6 +16,7 @@ import kotlinx.coroutines.flow.StateFlow
 import java.io.ByteArrayOutputStream
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicLong
 
 class StreamingManager(private val context: Context) {
 
@@ -33,8 +34,8 @@ class StreamingManager(private val context: Context) {
     private var recordingAudioCaptureActive = false
     private var currentPort: Int = DEFAULT_PORT
 
-    private var lastFrameTimeMs = 0L
-    private var minFrameIntervalMs = 1000L / DEFAULT_STREAM_FPS
+    private val lastFrameTimeMs = AtomicLong(0L)
+    private val minFrameIntervalMs = AtomicLong(1000L / DEFAULT_STREAM_FPS)
     private val reusableBuffer = ByteArrayOutputStream(256 * 1024)
     private val reusableYuvBuffer = ByteArrayOutputStream(256 * 1024)
     private val bufferLock = Any()
@@ -148,11 +149,11 @@ class StreamingManager(private val context: Context) {
         if (!isStreaming.get()) return
 
         val now = System.currentTimeMillis()
-        val elapsed = now - lastFrameTimeMs
-        val adjustedInterval = thermalMonitor?.getAdjustedFrameDelay(minFrameIntervalMs)
-            ?: minFrameIntervalMs
+        val elapsed = now - lastFrameTimeMs.get()
+        val adjustedInterval = thermalMonitor?.getAdjustedFrameDelay(minFrameIntervalMs.get())
+            ?: minFrameIntervalMs.get()
         if (elapsed < adjustedInterval) return
-        lastFrameTimeMs = now
+        lastFrameTimeMs.set(now)
 
         val clientCount = server.getClientCount()
         if (clientCount == 0) return
@@ -171,11 +172,11 @@ class StreamingManager(private val context: Context) {
         if (!isStreaming.get()) return
 
         val now = System.currentTimeMillis()
-        val elapsed = now - lastFrameTimeMs
-        val adjustedInterval = thermalMonitor?.getAdjustedFrameDelay(minFrameIntervalMs)
-            ?: minFrameIntervalMs
+        val elapsed = now - lastFrameTimeMs.get()
+        val adjustedInterval = thermalMonitor?.getAdjustedFrameDelay(minFrameIntervalMs.get())
+            ?: minFrameIntervalMs.get()
         if (elapsed < adjustedInterval) return
-        lastFrameTimeMs = now
+        lastFrameTimeMs.set(now)
 
         val clientCount = server.getClientCount()
         if (clientCount == 0) return
@@ -240,7 +241,7 @@ class StreamingManager(private val context: Context) {
     }
 
     fun setStreamFrameRate(fps: Int) {
-        minFrameIntervalMs = if (fps > 0) 1000L / fps else 1000L / DEFAULT_STREAM_FPS
+        minFrameIntervalMs.set(if (fps > 0) 1000L / fps else 1000L / DEFAULT_STREAM_FPS)
     }
 
     fun setStreamAudioEnabled(enabled: Boolean) {
@@ -302,13 +303,13 @@ class StreamingManager(private val context: Context) {
 
     fun reduceFrameRate(multiplier: Float) {
         val baseInterval = 1000L / DEFAULT_STREAM_FPS
-        minFrameIntervalMs = if (multiplier > 0f) (baseInterval / multiplier).toLong() else Long.MAX_VALUE
-        Log.d(TAG, "Thermal: frame interval adjusted to ${minFrameIntervalMs}ms (factor $multiplier)")
+        minFrameIntervalMs.set(if (multiplier > 0f) (baseInterval / multiplier).toLong() else Long.MAX_VALUE)
+        Log.d(TAG, "Thermal: frame interval adjusted to ${minFrameIntervalMs.get()}ms (factor $multiplier)")
     }
 
     fun restoreNormalSettings() {
         jpegQuality.set(DEFAULT_JPEG_QUALITY)
-        minFrameIntervalMs = 1000L / DEFAULT_STREAM_FPS
+        minFrameIntervalMs.set(1000L / DEFAULT_STREAM_FPS)
         Log.d(TAG, "Thermal: settings restored to normal")
     }
 

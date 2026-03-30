@@ -16,6 +16,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.raulshma.lenscast.MainApplication
+import com.raulshma.lenscast.capture.PhotoCaptureHelper
 import com.raulshma.lenscast.camera.model.CameraLensInfo
 import com.raulshma.lenscast.camera.model.CameraSettings
 import com.raulshma.lenscast.camera.model.CameraState
@@ -39,13 +40,16 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
 class CameraViewModel(
-    private val context: Context,
+    context: Context,
     private val cameraService: CameraService,
     private val streamingManager: StreamingManager,
     private val powerManager: PowerManager,
     private val thermalMonitor: ThermalMonitor,
     private val settingsDataStore: SettingsDataStore,
 ) : ViewModel() {
+    private val context: Context = context.applicationContext
+    private val app: MainApplication
+        get() = context as MainApplication
 
     private val _cameraState = MutableStateFlow<CameraState>(CameraState.Idle)
     val cameraState: StateFlow<CameraState> = _cameraState.asStateFlow()
@@ -429,70 +433,23 @@ class CameraViewModel(
 
     fun capturePhoto() {
         val imageCapture = cameraService.acquirePhotoCapture() ?: return
-        val fileName = "IMG_${DATE_FORMAT.format(java.util.Date())}.jpg"
-        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
-            val contentValues = android.content.ContentValues().apply {
-                put(android.provider.MediaStore.MediaColumns.DISPLAY_NAME, fileName)
-                put(android.provider.MediaStore.MediaColumns.MIME_TYPE, "image/jpeg")
-                put(android.provider.MediaStore.MediaColumns.RELATIVE_PATH,
-                    android.os.Environment.DIRECTORY_PICTURES + "/LensCast")
-            }
-            val outputOptions = ImageCapture.OutputFileOptions.Builder(
-                context.contentResolver,
-                android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
-                contentValues
-            ).build()
-            imageCapture.takePicture(
-                outputOptions,
-                ContextCompat.getMainExecutor(context),
-                object : ImageCapture.OnImageSavedCallback {
-                    override fun onImageSaved(output: ImageCapture.OutputFileResults) {
-                        val app = context.applicationContext as MainApplication
-                        val entry = app.captureHistoryStore.createPhotoEntry(
-                            fileName = fileName,
-                            filePath = output.savedUri?.toString() ?: "",
-                            fileSizeBytes = 0,
-                        )
-                        app.captureHistoryStore.add(entry)
-                        cameraService.releasePhotoCapture()
-                    }
-                    override fun onError(exception: ImageCaptureException) {
-                        Log.e("CameraViewModel", "Capture failed", exception)
-                        cameraService.releasePhotoCapture()
-                    }
-                },
-            )
-        } else {
-            @Suppress("DEPRECATION")
-            val dir = java.io.File(
-                android.os.Environment.getExternalStoragePublicDirectory(
-                    android.os.Environment.DIRECTORY_PICTURES
-                ), "LensCast"
-            )
-            if (!dir.exists()) dir.mkdirs()
-            val outputFile = java.io.File(dir, fileName)
-            val outputOptions = ImageCapture.OutputFileOptions.Builder(outputFile).build()
-            imageCapture.takePicture(
-                outputOptions,
-                ContextCompat.getMainExecutor(context),
-                object : ImageCapture.OnImageSavedCallback {
-                    override fun onImageSaved(output: ImageCapture.OutputFileResults) {
-                        val app = context.applicationContext as MainApplication
-                        val entry = app.captureHistoryStore.createPhotoEntry(
-                            fileName = fileName,
-                            filePath = outputFile.absolutePath,
-                            fileSizeBytes = outputFile.length(),
-                        )
-                        app.captureHistoryStore.add(entry)
-                        cameraService.releasePhotoCapture()
-                    }
-                    override fun onError(exception: ImageCaptureException) {
-                        Log.e("CameraViewModel", "Capture failed", exception)
-                        cameraService.releasePhotoCapture()
-                    }
-                },
-            )
-        }
+        val fileName = PhotoCaptureHelper.generateFileName()
+        PhotoCaptureHelper.takePhoto(
+            context, imageCapture, fileName,
+            onSaved = { filePath, fileSizeBytes ->
+                val entry = app.captureHistoryStore.createPhotoEntry(
+                    fileName = fileName,
+                    filePath = filePath,
+                    fileSizeBytes = fileSizeBytes,
+                )
+                app.captureHistoryStore.add(entry)
+                cameraService.releasePhotoCapture()
+            },
+            onError = { exception ->
+                Log.e(TAG, "Capture failed", exception)
+                cameraService.releasePhotoCapture()
+            },
+        )
     }
 
     fun toggleRecording() {
@@ -562,7 +519,6 @@ class CameraViewModel(
 
     companion object {
         private const val TAG = "CameraViewModel"
-        private val DATE_FORMAT = java.text.SimpleDateFormat("yyyyMMdd_HHmmss", java.util.Locale.US)
     }
 
     private fun refreshPermissions() {

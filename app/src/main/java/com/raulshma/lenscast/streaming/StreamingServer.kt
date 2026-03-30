@@ -1,17 +1,27 @@
 package com.raulshma.lenscast.streaming
 
 import android.content.Context
+import android.security.keystore.KeyGenParameterSpec
+import android.security.keystore.KeyProperties
 import android.util.Base64
 import android.util.Log
+import com.raulshma.lenscast.core.NetworkUtils
 import com.raulshma.lenscast.data.StreamAuthSettings
 import fi.iki.elonen.NanoHTTPD
 import java.io.ByteArrayInputStream
 import java.io.InputStream
+import java.math.BigInteger
 import java.net.URLDecoder
-import java.security.SecureRandom
 import java.nio.charset.StandardCharsets
+import java.security.KeyPairGenerator
+import java.security.KeyStore
+import java.security.SecureRandom
+import java.util.Date
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicInteger
+import javax.net.ssl.KeyManagerFactory
+import javax.net.ssl.SSLContext
+import javax.security.auth.x500.X500Principal
 
 class StreamingServer(
     private val port: Int = 8080,
@@ -110,7 +120,15 @@ class StreamingServer(
             }
         }
 
+        // CSRF protection for state-changing requests
         val method = session.method
+        if (method != Method.GET && !isCsrfSafe(session, authResult.viaBasicAuth)) {
+            return newFixedLengthResponse(
+                Response.Status.FORBIDDEN,
+                "application/json",
+                """{"error":"CSRF check failed"}"""
+            ).apply { addSecurityHeaders() }
+        }
 
         val response = when {
             uri == "/stream" -> serveMjpegStream()
@@ -182,11 +200,17 @@ class StreamingServer(
     }
 
     private fun createSession(): String {
+        cleanExpiredSessions()
         val bytes = ByteArray(32)
         secureRandom.nextBytes(bytes)
         val token = bytes.joinToString("") { "%02x".format(it) }
         sessions[token] = System.currentTimeMillis() + SESSION_DURATION_MS
         return token
+    }
+
+    private fun cleanExpiredSessions() {
+        val now = System.currentTimeMillis()
+        sessions.entries.removeAll { now > it.value }
     }
 
     private fun validateSession(token: String): Boolean {
@@ -212,6 +236,34 @@ class StreamingServer(
             result = result or (a[i].code xor b[i].code)
         }
         return result == 0
+    }
+
+    /**
+     * CSRF protection for state-changing requests.
+     * Basic Auth requests are inherently CSRF-protected (browsers won't auto-include credentials).
+     * Session-based requests must have a matching Origin/Referer or X-Requested-With header.
+     */
+    private fun isCsrfSafe(session: IHTTPSession, isBasicAuth: Boolean): Boolean {
+        // Basic Auth provides inherent CSRF protection
+        if (isBasicAuth) return true
+
+        // Check for X-Requested-With header (sent by XHR/fetch)
+        if (session.headers.containsKey("x-requested-with")) return true
+
+        // Check Origin or Referer header matches this server
+        val origin = session.headers["origin"] ?: session.headers["referer"]
+        if (origin != null) {
+            val localIp = NetworkUtils.getLocalIpAddress()
+            val allowedOrigins = buildList {
+                add("http://localhost:$port")
+                add("http://127.0.0.1:$port")
+                if (localIp != null) add("http://$localIp:$port")
+            }
+            return allowedOrigins.any { origin.startsWith(it) }
+        }
+
+        // No recognized CSRF protection headers found
+        return false
     }
 
     private fun handleApiRoute(uri: String, method: Method, session: IHTTPSession): Response {
@@ -587,11 +639,76 @@ class StreamingServer(
 
     fun getClientCount(): Int = clientCount.get()
 
+    private var sslEnabled = false
+    private var sslServerSocketFactory: javax.net.ssl.SSLServerSocketFactory? = null
+
+    /**
+     * Enables HTTPS using a self-signed certificate stored in the Android Keystore.
+     * Must be called before [startServer]. When enabled, all connections use TLS.
+     */
+    fun enableSsl(ctx: Context): Boolean {
+        return try {
+            val alias = "lenscast_ssl"
+            val keyStore = KeyStore.getInstance("AndroidKeyStore")
+            keyStore.load(null)
+
+            // Generate a self-signed key if not already present
+            if (!keyStore.containsAlias(alias)) {
+                val kpg = KeyPairGenerator.getInstance(
+                    KeyProperties.KEY_ALGORITHM_RSA, "AndroidKeyStore"
+                )
+                kpg.initialize(
+                    KeyGenParameterSpec.Builder(
+                        alias,
+                        KeyProperties.PURPOSE_ENCRYPT or
+                            KeyProperties.PURPOSE_DECRYPT or
+                            KeyProperties.PURPOSE_SIGN or
+                            KeyProperties.PURPOSE_VERIFY
+                    )
+                        .setKeySize(2048)
+                        .setCertificateSubject(X500Principal("CN=LensCast, O=LensCast"))
+                        .setCertificateSerialNumber(BigInteger.ONE)
+                        .setCertificateNotBefore(Date())
+                        .setCertificateNotAfter(
+                            Date(System.currentTimeMillis() + 3650L * 24 * 3600 * 1000)
+                        )
+                        .build()
+                )
+                kpg.generateKeyPair()
+                Log.d(TAG, "Self-signed TLS certificate generated")
+            }
+
+            // Reload keystore to pick up the new key
+            val loadedKeyStore = KeyStore.getInstance("AndroidKeyStore")
+            loadedKeyStore.load(null)
+
+            val kmf = KeyManagerFactory.getInstance(KeyManagerFactory.getDefaultAlgorithm())
+            kmf.init(loadedKeyStore, null)
+
+            val sslCtx = SSLContext.getInstance("TLS").apply {
+                init(kmf.keyManagers, null, null)
+            }
+            sslServerSocketFactory = sslCtx.serverSocketFactory
+            sslEnabled = true
+            Log.d(TAG, "TLS enabled for streaming server")
+            true
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to enable TLS", e)
+            sslEnabled = false
+            false
+        }
+    }
+
+    fun isSslEnabled(): Boolean = sslEnabled
+
     fun startServer(): Boolean {
         return try {
-            start(SOCKET_READ_TIMEOUT, false)
+            if (sslEnabled && sslServerSocketFactory != null) {
+                makeSecure(sslServerSocketFactory, null)
+            }
+            start()
             isRunning = true
-            Log.d(TAG, "Streaming server started on port $port")
+            Log.d(TAG, if (sslEnabled) "HTTPS streaming server started on port $port" else "Streaming server started on port $port")
             true
         } catch (e: Exception) {
             Log.e(TAG, "Failed to start server", e)
