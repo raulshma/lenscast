@@ -32,6 +32,7 @@
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
         android:theme="@style/Theme.LensCast"
+        android:networkSecurityConfig="@xml/network_security_config"
         tools:targetApi="36">
 
         <activity

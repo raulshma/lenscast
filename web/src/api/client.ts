@@ -12,6 +12,7 @@ async function requestJson<T>(input: string, init: RequestInit = {}): Promise<T>
     credentials: 'same-origin',
     ...init,
     headers: {
+      'X-Requested-With': 'XMLHttpRequest',
       ...(init.headers ?? {}),
     },
   })

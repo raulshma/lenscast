@@ -192,7 +192,7 @@ class WebApiController(private val context: Context) {
 
             if (request.streaming != null) {
                 val stream = request.streaming
-                if (stream.port > 0) {
+                if (stream.port in 1024..65535) {
                     scope.launch { app.settingsDataStore.saveStreamingPort(stream.port) }
                 }
                 if (stream.jpegQuality > 0) {
@@ -694,7 +694,7 @@ class WebApiController(private val context: Context) {
     }
 
     private fun errorJson(e: Exception): String {
-        val msg = e.message?.take(200) ?: "Internal error"
+        val msg = e.message?.take(200)?.replace('\n', ' ') ?: "Internal error"
         return errorAdapter.toJson(ErrorResponse(error = msg))
     }
 

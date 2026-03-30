@@ -163,9 +163,10 @@ class StreamingServer(
 
         if (authResult.viaBasicAuth) {
             val token = createSession()
+            val secureFlag = if (sslEnabled) "; Secure" else ""
             response.addHeader(
                 "Set-Cookie",
-                "$COOKIE_NAME=$token; Path=$COOKIE_PATH; Max-Age=$SESSION_MAX_AGE_SEC; HttpOnly; SameSite=Lax"
+                "$COOKIE_NAME=$token; Path=$COOKIE_PATH; Max-Age=$SESSION_MAX_AGE_SEC; HttpOnly; SameSite=Lax$secureFlag"
             )
         }
 
@@ -179,14 +180,24 @@ class StreamingServer(
         addHeader("X-XSS-Protection", "1; mode=block")
         addHeader("Referrer-Policy", "no-referrer")
         addHeader(
+            "Permissions-Policy",
+            "camera=(), microphone=(), geolocation=(), payment=()"
+        )
+        addHeader(
             "Content-Security-Policy",
             "default-src 'self'; img-src 'self' data: blob:; media-src 'self' blob:; " +
                 "style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; " +
                 "object-src 'none'; base-uri 'self'; frame-ancestors 'none'"
         )
+        if (sslEnabled) {
+            addHeader("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+        }
     }
 
     private data class AuthResult(val authorized: Boolean, val viaBasicAuth: Boolean)
+
+    private val authAttempts = ConcurrentHashMap<String, AuthAttempt>()
+    private data class AuthAttempt(var count: Int, var blockedUntil: Long)
 
     private fun checkAuth(session: IHTTPSession): AuthResult {
         val username = authUsername ?: return AuthResult(true, false)
@@ -197,6 +208,19 @@ class StreamingServer(
         val sessionToken = extractCookie(cookieHeader, COOKIE_NAME)
         if (sessionToken != null && validateSession(sessionToken)) {
             return AuthResult(true, false)
+        }
+
+        val clientIp = session.remoteIpAddress ?: "unknown"
+        val attempt = authAttempts.getOrPut(clientIp) { AuthAttempt(0, 0L) }
+        val now = System.currentTimeMillis()
+        if (attempt.blockedUntil > now) {
+            return AuthResult(false, false)
+        }
+        if (attempt.count >= MAX_AUTH_ATTEMPTS) {
+            attempt.blockedUntil = now + AUTH_LOCKOUT_MS
+            attempt.count = 0
+            Log.w(TAG, "Rate limiting auth attempts from $clientIp for ${AUTH_LOCKOUT_MS / 1000}s")
+            return AuthResult(false, false)
         }
 
         val authHeader = session.headers["authorization"] ?: return AuthResult(false, false)
@@ -215,8 +239,10 @@ class StreamingServer(
         if (!constantTimeEquals(parts[0], username)) return AuthResult(false, false)
 
         return if (StreamAuthSettings.verifyPassword(parts[1], storedHash)) {
+            attempt.count = 0
             AuthResult(true, true)
         } else {
+            attempt.count++
             AuthResult(false, false)
         }
     }
@@ -322,6 +348,13 @@ class StreamingServer(
         }
 
         val body = readBody(session)
+        if (body == null) {
+            return newFixedLengthResponse(
+                Response.Status.PAYLOAD_TOO_LARGE,
+                "application/json",
+                """{"error":"Request body too large (max ${MAX_BODY_BYTES / 1024 / 1024}MB)"}"""
+            )
+        }
         val json = when {
             method == Method.GET && uri == "/api/settings" -> controller.handleGetSettings()
             method == Method.PUT && uri == "/api/settings" -> controller.handlePutSettings(body)
@@ -365,9 +398,13 @@ class StreamingServer(
         }
     }
 
-    private fun readBody(session: IHTTPSession): String {
+    private fun readBody(session: IHTTPSession): String? {
         val contentLength = session.headers["content-length"]?.toLongOrNull() ?: 0L
         if (contentLength <= 0L) return ""
+        if (contentLength > MAX_BODY_BYTES) {
+            Log.w(TAG, "Request body too large: $contentLength bytes (max $MAX_BODY_BYTES)")
+            return null
+        }
         return try {
             val files = HashMap<String, String>()
             session.parseBody(files)
@@ -862,5 +899,8 @@ class StreamingServer(
         private const val SESSION_TOKEN_BYTES = 32
         private const val COOKIE_NAME = "lenscast_session"
         private const val COOKIE_PATH = "/"
+        private const val MAX_BODY_BYTES = 1L * 1024 * 1024
+        private const val MAX_AUTH_ATTEMPTS = 10
+        private const val AUTH_LOCKOUT_MS = 60 * 1000L
     }
 }
