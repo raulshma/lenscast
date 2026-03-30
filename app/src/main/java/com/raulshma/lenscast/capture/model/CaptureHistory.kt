@@ -38,6 +38,7 @@ data class RecordingConfig(
     val repeatIntervalSeconds: Long = 0,
     val quality: RecordingQuality = RecordingQuality.HIGH,
     val maxFileSizeBytes: Long = 0,
+    val includeAudio: Boolean = true,
 )
 
 enum class RecordingQuality {

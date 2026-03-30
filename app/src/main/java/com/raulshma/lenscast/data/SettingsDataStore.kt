@@ -59,6 +59,10 @@ class SettingsDataStore(private val context: Context) {
         val SCENE_MODE = stringPreferencesKey("scene_mode")
         val STREAMING_PORT = intPreferencesKey("streaming_port")
         val JPEG_QUALITY = intPreferencesKey("jpeg_quality")
+        val STREAM_AUDIO_ENABLED = stringPreferencesKey("stream_audio_enabled")
+        val STREAM_AUDIO_BITRATE_KBPS = intPreferencesKey("stream_audio_bitrate_kbps")
+        val STREAM_AUDIO_CHANNELS = intPreferencesKey("stream_audio_channels")
+        val RECORDING_AUDIO_ENABLED = stringPreferencesKey("recording_audio_enabled")
         val AUTH_ENABLED = stringPreferencesKey("auth_enabled")
         val AUTH_USERNAME = stringPreferencesKey("auth_username")
         val AUTH_PASSWORD_HASH = stringPreferencesKey("auth_password_hash")
@@ -109,6 +113,22 @@ class SettingsDataStore(private val context: Context) {
 
     val showPreview: Flow<Boolean> = context.dataStore.data.map { prefs ->
         prefs[Keys.SHOW_PREVIEW] != "false"
+    }
+
+    val streamAudioEnabled: Flow<Boolean> = context.dataStore.data.map { prefs ->
+        prefs[Keys.STREAM_AUDIO_ENABLED] != "false"
+    }
+
+    val streamAudioBitrateKbps: Flow<Int> = context.dataStore.data.map { prefs ->
+        prefs[Keys.STREAM_AUDIO_BITRATE_KBPS] ?: 128
+    }
+
+    val streamAudioChannels: Flow<Int> = context.dataStore.data.map { prefs ->
+        prefs[Keys.STREAM_AUDIO_CHANNELS] ?: 1
+    }
+
+    val recordingAudioEnabled: Flow<Boolean> = context.dataStore.data.map { prefs ->
+        prefs[Keys.RECORDING_AUDIO_ENABLED] != "false"
     }
 
     val authSettings: Flow<StreamAuthSettings> = context.dataStore.data.map { prefs ->
@@ -176,6 +196,30 @@ class SettingsDataStore(private val context: Context) {
     suspend fun saveShowPreview(show: Boolean) {
         context.dataStore.edit { prefs ->
             prefs[Keys.SHOW_PREVIEW] = if (show) "true" else "false"
+        }
+    }
+
+    suspend fun saveStreamAudioEnabled(enabled: Boolean) {
+        context.dataStore.edit { prefs ->
+            prefs[Keys.STREAM_AUDIO_ENABLED] = if (enabled) "true" else "false"
+        }
+    }
+
+    suspend fun saveStreamAudioBitrateKbps(bitrateKbps: Int) {
+        context.dataStore.edit { prefs ->
+            prefs[Keys.STREAM_AUDIO_BITRATE_KBPS] = bitrateKbps.coerceIn(32, 320)
+        }
+    }
+
+    suspend fun saveStreamAudioChannels(channels: Int) {
+        context.dataStore.edit { prefs ->
+            prefs[Keys.STREAM_AUDIO_CHANNELS] = channels.coerceIn(1, 2)
+        }
+    }
+
+    suspend fun saveRecordingAudioEnabled(enabled: Boolean) {
+        context.dataStore.edit { prefs ->
+            prefs[Keys.RECORDING_AUDIO_ENABLED] = if (enabled) "true" else "false"
         }
     }
 

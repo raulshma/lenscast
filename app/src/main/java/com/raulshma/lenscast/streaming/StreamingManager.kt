@@ -19,9 +19,13 @@ import java.util.concurrent.atomic.AtomicInteger
 
 class StreamingManager(private val context: Context) {
 
-    private var server: StreamingServer = StreamingServer(DEFAULT_PORT, context)
+    private val audioStreamingManager = AudioStreamingManager(context)
+    private var server: StreamingServer = StreamingServer(DEFAULT_PORT, context, audioStreamingManager)
     private val isStreaming = AtomicBoolean(false)
     private val jpegQuality = AtomicInteger(DEFAULT_JPEG_QUALITY)
+    private val streamAudioEnabled = AtomicBoolean(true)
+    private val streamAudioBitrateKbps = AtomicInteger(DEFAULT_AUDIO_BITRATE_KBPS)
+    private val streamAudioChannels = AtomicInteger(DEFAULT_AUDIO_CHANNELS)
     private var currentPort: Int = DEFAULT_PORT
 
     private var lastFrameTimeMs = 0L
@@ -42,6 +46,12 @@ class StreamingManager(private val context: Context) {
     private val _isServerRunning = MutableStateFlow(false)
     val isServerRunning: StateFlow<Boolean> = _isServerRunning
 
+    private val _audioStreamUrl = MutableStateFlow("")
+    val audioStreamUrl: StateFlow<String> = _audioStreamUrl
+
+    private val _isAudioStreaming = MutableStateFlow(false)
+    val isAudioStreaming: StateFlow<Boolean> = _isAudioStreaming
+
     fun isLiveStreaming(): Boolean = isStreaming.get()
 
     fun setPort(port: Int) {
@@ -56,8 +66,11 @@ class StreamingManager(private val context: Context) {
                 _isServerRunning.value = false
             }
             currentPort = port
-            server = StreamingServer(port, context)
-            _streamUrl.value = NetworkUtils.getStreamingUrl(currentPort) ?: "http://localhost:$currentPort/stream"
+            server = StreamingServer(port, context, audioStreamingManager)
+            _streamUrl.value = buildVideoUrl()
+            if (_isAudioStreaming.value) {
+                _audioStreamUrl.value = buildAudioUrl()
+            }
             if (wasServerRunning) {
                 val restarted = server.startServer()
                 _isServerRunning.value = restarted
@@ -72,7 +85,7 @@ class StreamingManager(private val context: Context) {
     fun ensureServerRunning(): Boolean {
         if (_isServerRunning.value) {
             if (_streamUrl.value.isBlank()) {
-                _streamUrl.value = NetworkUtils.getStreamingUrl(currentPort) ?: "http://localhost:$currentPort/stream"
+                _streamUrl.value = buildVideoUrl()
             }
             return true
         }
@@ -83,7 +96,7 @@ class StreamingManager(private val context: Context) {
         }
 
         _isServerRunning.value = true
-        _streamUrl.value = NetworkUtils.getStreamingUrl(currentPort) ?: "http://localhost:$currentPort/stream"
+        _streamUrl.value = buildVideoUrl()
         Log.d(TAG, "Streaming server ready at ${_streamUrl.value}")
         return true
     }
@@ -96,6 +109,8 @@ class StreamingManager(private val context: Context) {
             return false
         }
 
+        refreshAudioStreamingState()
+
         Log.d(TAG, "Streaming started at ${_streamUrl.value}")
         return true
     }
@@ -103,18 +118,24 @@ class StreamingManager(private val context: Context) {
     fun stopStreaming() {
         if (!isStreaming.getAndSet(false)) return
 
+        audioStreamingManager.stop()
         server.stopServer()
         _streamUrl.value = ""
+        _audioStreamUrl.value = ""
         _clientCount.value = 0
         lastReportedClientCount = -1
         _isServerRunning.value = false
+        _isAudioStreaming.value = false
 
         Log.d(TAG, "Streaming stopped")
     }
 
     fun pauseStreaming() {
         if (!isStreaming.getAndSet(false)) return
+        audioStreamingManager.stop()
         _clientCount.value = 0
+        _audioStreamUrl.value = ""
+        _isAudioStreaming.value = false
         Log.d(TAG, "Live streaming paused (server still running)")
     }
 
@@ -217,6 +238,30 @@ class StreamingManager(private val context: Context) {
         minFrameIntervalMs = if (fps > 0) 1000L / fps else 1000L / DEFAULT_STREAM_FPS
     }
 
+    fun setStreamAudioEnabled(enabled: Boolean) {
+        streamAudioEnabled.set(enabled)
+        if (isStreaming.get()) {
+            refreshAudioStreamingState()
+        } else {
+            _isAudioStreaming.value = false
+            _audioStreamUrl.value = ""
+        }
+    }
+
+    fun setStreamAudioBitrateKbps(bitrateKbps: Int) {
+        streamAudioBitrateKbps.set(bitrateKbps.coerceIn(32, 320))
+        if (isStreaming.get() && streamAudioEnabled.get()) {
+            refreshAudioStreamingState()
+        }
+    }
+
+    fun setStreamAudioChannels(channels: Int) {
+        streamAudioChannels.set(channels.coerceIn(1, 2))
+        if (isStreaming.get() && streamAudioEnabled.get()) {
+            refreshAudioStreamingState()
+        }
+    }
+
     fun reduceBitrate(multiplier: Float) {
         val current = jpegQuality.get()
         jpegQuality.set((current * multiplier).toInt().coerceIn(10, 100))
@@ -265,19 +310,49 @@ class StreamingManager(private val context: Context) {
     fun getStreamUrls(): StreamUrls {
         val port = currentPort
         return StreamUrls(
-            streamUrl = NetworkUtils.getStreamingUrl(port) ?: "",
+            streamUrl = buildVideoUrl(),
+            audioUrl = if (_isAudioStreaming.value) buildAudioUrl() else "",
             snapshotUrl = NetworkUtils.getSnapshotUrl(port) ?: "",
             controlUrl = NetworkUtils.getLocalIpAddress()?.let { "http://$it:$port/" } ?: ""
         )
     }
 
     fun release() {
+        audioStreamingManager.release()
         stopStreaming()
         thermalMonitor?.stopMonitoring()
     }
 
+    private fun refreshAudioStreamingState() {
+        audioStreamingManager.stop()
+
+        if (!isStreaming.get() || !streamAudioEnabled.get()) {
+            _isAudioStreaming.value = false
+            _audioStreamUrl.value = ""
+            return
+        }
+
+        val audioStarted = audioStreamingManager.start(
+            AudioStreamingManager.Config(
+                bitrateKbps = streamAudioBitrateKbps.get(),
+                channelCount = streamAudioChannels.get(),
+            )
+        )
+        _isAudioStreaming.value = audioStarted
+        _audioStreamUrl.value = if (audioStarted) buildAudioUrl() else ""
+    }
+
+    private fun buildVideoUrl(): String {
+        return NetworkUtils.getStreamingUrl(currentPort) ?: "http://localhost:$currentPort/stream"
+    }
+
+    private fun buildAudioUrl(): String {
+        return NetworkUtils.getAudioUrl(currentPort) ?: "http://localhost:$currentPort/audio"
+    }
+
     data class StreamUrls(
         val streamUrl: String,
+        val audioUrl: String,
         val snapshotUrl: String,
         val controlUrl: String,
     )
@@ -287,5 +362,7 @@ class StreamingManager(private val context: Context) {
         const val DEFAULT_PORT = 8080
         private const val DEFAULT_JPEG_QUALITY = 70
         private const val DEFAULT_STREAM_FPS = 24
+        private const val DEFAULT_AUDIO_BITRATE_KBPS = 128
+        private const val DEFAULT_AUDIO_CHANNELS = 1
     }
 }

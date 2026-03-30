@@ -13,4 +13,6 @@ data class StreamStatus(
     val isServerRunning: Boolean = false,
     val url: String = "",
     val clientCount: Int = 0,
+    val isAudioActive: Boolean = false,
+    val audioUrl: String = "",
 )

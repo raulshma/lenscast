@@ -61,6 +61,10 @@ fun CameraSettingsScreen(
     val streamingPort by viewModel.streamingPort.collectAsState()
     val jpegQuality by viewModel.jpegQuality.collectAsState()
     val showPreview by viewModel.showPreview.collectAsState()
+    val streamAudioEnabled by viewModel.streamAudioEnabled.collectAsState()
+    val streamAudioBitrateKbps by viewModel.streamAudioBitrateKbps.collectAsState()
+    val streamAudioChannels by viewModel.streamAudioChannels.collectAsState()
+    val recordingAudioEnabled by viewModel.recordingAudioEnabled.collectAsState()
 
     Scaffold(
         topBar = {
@@ -215,6 +219,33 @@ fun CameraSettingsScreen(
                         value = jpegQuality.toFloat(),
                         range = 10f..100f,
                         onValueChange = { viewModel.updateJpegQuality(it.toInt()) }
+                    )
+                }
+            }
+
+            item {
+                SettingsSection(title = "Audio") {
+                    SwitchSetting(
+                        title = "Include Audio in Live Stream",
+                        checked = streamAudioEnabled,
+                        onCheckedChange = { viewModel.updateStreamAudioEnabled(it) }
+                    )
+                    SliderSetting(
+                        title = "Live Audio Bitrate (kbps)",
+                        value = streamAudioBitrateKbps.toFloat(),
+                        range = 32f..320f,
+                        onValueChange = { viewModel.updateStreamAudioBitrateKbps(it.toInt()) }
+                    )
+                    DropdownSetting(
+                        title = "Live Audio Channels",
+                        options = listOf("Mono", "Stereo"),
+                        selected = if (streamAudioChannels == 2) "Stereo" else "Mono",
+                        onSelect = { viewModel.updateStreamAudioChannels(if (it == "Stereo") 2 else 1) }
+                    )
+                    SwitchSetting(
+                        title = "Include Audio in Recordings",
+                        checked = recordingAudioEnabled,
+                        onCheckedChange = { viewModel.updateRecordingAudioEnabled(it) }
                     )
                 }
             }

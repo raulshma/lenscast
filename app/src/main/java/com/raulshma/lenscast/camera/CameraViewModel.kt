@@ -59,6 +59,9 @@ class CameraViewModel(
     private val _hasCameraPermission = MutableStateFlow(false)
     val hasCameraPermission: StateFlow<Boolean> = _hasCameraPermission.asStateFlow()
 
+    private val _hasAudioPermission = MutableStateFlow(false)
+    val hasAudioPermission: StateFlow<Boolean> = _hasAudioPermission.asStateFlow()
+
     private val _batteryInfo = MutableStateFlow<BatteryOptimizationResult?>(null)
     val batteryInfo: StateFlow<BatteryOptimizationResult?> = _batteryInfo.asStateFlow()
 
@@ -88,6 +91,9 @@ class CameraViewModel(
 
     private val _showPreview = MutableStateFlow(true)
     val showPreview: StateFlow<Boolean> = _showPreview.asStateFlow()
+
+    private val _streamAudioEnabled = MutableStateFlow(true)
+    private val _recordingAudioEnabled = MutableStateFlow(true)
 
     init {
         // Collect from service but ONLY update if the service is not Idle, 
@@ -119,6 +125,16 @@ class CameraViewModel(
                 _streamStatus.value = _streamStatus.value.copy(clientCount = count)
             }
         }
+        viewModelScope.launch {
+            streamingManager.isAudioStreaming.collect { isAudioStreaming ->
+                _streamStatus.value = _streamStatus.value.copy(isAudioActive = isAudioStreaming)
+            }
+        }
+        viewModelScope.launch {
+            streamingManager.audioStreamUrl.collect { audioUrl ->
+                _streamStatus.value = _streamStatus.value.copy(audioUrl = audioUrl)
+            }
+        }
         cameraService.setFrameListener { yuvData, width, height, rotation ->
             streamingManager.pushFrame(yuvData, width, height, rotation)
         }
@@ -143,15 +159,23 @@ class CameraViewModel(
                 _showPreview.value = show
             }
         }
+        viewModelScope.launch {
+            settingsDataStore.streamAudioEnabled.collect { enabled ->
+                _streamAudioEnabled.value = enabled
+            }
+        }
+        viewModelScope.launch {
+            settingsDataStore.recordingAudioEnabled.collect { enabled ->
+                _recordingAudioEnabled.value = enabled
+            }
+        }
 
         // Run checkPermission AFTER collectors are set up
         checkPermission()
     }
 
     fun checkPermission() {
-        _hasCameraPermission.value = ContextCompat.checkSelfPermission(
-            context, android.Manifest.permission.CAMERA
-        ) == PackageManager.PERMISSION_GRANTED
+        refreshPermissions()
         Log.d(TAG, "checkPermission: granted=${_hasCameraPermission.value}")
         if (_hasCameraPermission.value) {
             initializeCamera()
@@ -160,12 +184,20 @@ class CameraViewModel(
         }
     }
 
-    fun onPermissionResult(granted: Boolean) {
-        _hasCameraPermission.value = granted
-        if (granted) {
+    fun onPermissionResult(cameraGranted: Boolean, audioGranted: Boolean) {
+        _hasCameraPermission.value = cameraGranted
+        _hasAudioPermission.value = audioGranted
+        if (cameraGranted) {
             initializeCamera()
         } else {
             _cameraState.value = CameraState.RequestPermission
+        }
+    }
+
+    fun onAudioPermissionResult(granted: Boolean) {
+        _hasAudioPermission.value = granted
+        if (granted && _streamStatus.value.isActive && _streamAudioEnabled.value) {
+            streamingManager.setStreamAudioEnabled(true)
         }
     }
 
@@ -283,6 +315,14 @@ class CameraViewModel(
     }
 
     private fun startStreaming() {
+        refreshAudioPermission()
+        if (_streamAudioEnabled.value && !_hasAudioPermission.value) {
+            Toast.makeText(
+                context,
+                "Microphone permission not granted. Streaming video without audio.",
+                Toast.LENGTH_SHORT
+            ).show()
+        }
         _wifiConnected.value = com.raulshma.lenscast.core.NetworkUtils.isWifiConnected(context)
         powerManager.refreshBatteryState()
         powerManager.acquireWakeLock()
@@ -301,6 +341,10 @@ class CameraViewModel(
                 com.raulshma.lenscast.streaming.StreamingService.EXTRA_URL,
                 streamingManager.streamUrl.value
             )
+            intent.putExtra(
+                com.raulshma.lenscast.streaming.StreamingService.EXTRA_AUDIO_ACTIVE,
+                streamingManager.isAudioStreaming.value
+            )
             if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
                 context.startForegroundService(intent)
             } else {
@@ -311,14 +355,18 @@ class CameraViewModel(
                 isActive = true,
                 isServerRunning = streamingManager.isServerRunning.value,
                 url = streamingManager.streamUrl.value,
-                clientCount = 0
+                clientCount = 0,
+                isAudioActive = streamingManager.isAudioStreaming.value,
+                audioUrl = streamingManager.audioStreamUrl.value,
             )
         } else {
             _streamStatus.value = _streamStatus.value.copy(
                 isActive = false,
                 isServerRunning = false,
                 url = "Failed to start server",
-                clientCount = 0
+                clientCount = 0,
+                isAudioActive = false,
+                audioUrl = "",
             )
         }
     }
@@ -335,7 +383,9 @@ class CameraViewModel(
             isActive = false,
             isServerRunning = streamingManager.isServerRunning.value,
             url = streamingManager.streamUrl.value,
-            clientCount = 0
+            clientCount = 0,
+            isAudioActive = false,
+            audioUrl = "",
         )
 
         cameraService.releaseKeepAlive()
@@ -455,6 +505,14 @@ class CameraViewModel(
             recordingTimerJob = null
             _recordingElapsedSeconds.value = 0
         } else {
+            refreshAudioPermission()
+            if (_recordingAudioEnabled.value && !_hasAudioPermission.value) {
+                Toast.makeText(
+                    context,
+                    "Microphone permission not granted. Recording video without audio.",
+                    Toast.LENGTH_SHORT
+                ).show()
+            }
             intent.action = com.raulshma.lenscast.capture.RecordingService.ACTION_START
             if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
                 context.startForegroundService(intent)
@@ -505,5 +563,20 @@ class CameraViewModel(
     companion object {
         private const val TAG = "CameraViewModel"
         private val DATE_FORMAT = java.text.SimpleDateFormat("yyyyMMdd_HHmmss", java.util.Locale.US)
+    }
+
+    private fun refreshPermissions() {
+        _hasCameraPermission.value = ContextCompat.checkSelfPermission(
+            context,
+            android.Manifest.permission.CAMERA
+        ) == PackageManager.PERMISSION_GRANTED
+        refreshAudioPermission()
+    }
+
+    private fun refreshAudioPermission() {
+        _hasAudioPermission.value = ContextCompat.checkSelfPermission(
+            context,
+            android.Manifest.permission.RECORD_AUDIO
+        ) == PackageManager.PERMISSION_GRANTED
     }
 }

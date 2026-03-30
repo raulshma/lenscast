@@ -1,12 +1,15 @@
 package com.raulshma.lenscast.capture
 
+import android.Manifest
 import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
 import android.util.Log
+import android.widget.Toast
 import androidx.camera.core.ImageCapture
 import androidx.camera.core.ImageCaptureException
 import androidx.core.content.ContextCompat
@@ -24,6 +27,7 @@ import com.raulshma.lenscast.capture.model.CaptureHistory
 import com.raulshma.lenscast.capture.model.IntervalCaptureConfig
 import com.raulshma.lenscast.capture.model.RecordingConfig
 import com.raulshma.lenscast.capture.model.RecordingQuality
+import com.raulshma.lenscast.data.SettingsDataStore
 import com.raulshma.lenscast.data.CaptureHistoryStore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -31,6 +35,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.io.File
@@ -43,6 +48,7 @@ class CaptureViewModel(
     private val context: Context,
     private val cameraService: CameraService,
     private val captureHistoryStore: CaptureHistoryStore,
+    private val settingsDataStore: SettingsDataStore,
 ) : ViewModel() {
 
     private val _captureHistory = MutableStateFlow<List<CaptureHistory>>(emptyList())
@@ -87,6 +93,11 @@ class CaptureViewModel(
             captureHistoryStore.history.collect { history ->
                 _captureHistory.value = history
             }
+        }
+        viewModelScope.launch {
+            _recordingConfig.value = _recordingConfig.value.copy(
+                includeAudio = settingsDataStore.recordingAudioEnabled.first()
+            )
         }
     }
 
@@ -251,6 +262,13 @@ class CaptureViewModel(
     }
 
     private fun startRecordingWithConfig(config: RecordingConfig) {
+        if (config.includeAudio && !hasAudioPermission()) {
+            Toast.makeText(
+                context,
+                "Microphone permission not granted. Recording video without audio.",
+                Toast.LENGTH_SHORT
+            ).show()
+        }
         val configJson = recordingConfigAdapter.toJson(config)
 
         val intent = Intent(context, RecordingService::class.java).apply {
@@ -327,10 +345,16 @@ class CaptureViewModel(
         private val context: Context,
         private val cameraService: CameraService,
         private val captureHistoryStore: CaptureHistoryStore,
+        private val settingsDataStore: SettingsDataStore,
     ) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
         override fun <T : androidx.lifecycle.ViewModel> create(modelClass: Class<T>): T {
-            return CaptureViewModel(context, cameraService, captureHistoryStore) as T
+            return CaptureViewModel(
+                context,
+                cameraService,
+                captureHistoryStore,
+                settingsDataStore
+            ) as T
         }
     }
 
@@ -338,5 +362,12 @@ class CaptureViewModel(
         private const val TAG = "CaptureViewModel"
         private const val WORK_NAME_INTERVAL = "interval_capture"
         private val DATE_FORMAT = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US)
+    }
+
+    private fun hasAudioPermission(): Boolean {
+        return ContextCompat.checkSelfPermission(
+            context,
+            Manifest.permission.RECORD_AUDIO
+        ) == PackageManager.PERMISSION_GRANTED
     }
 }

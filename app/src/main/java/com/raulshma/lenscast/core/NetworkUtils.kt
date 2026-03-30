@@ -28,6 +28,11 @@ object NetworkUtils {
         return "http://$ip:$port/stream"
     }
 
+    fun getAudioUrl(port: Int): String? {
+        val ip = getLocalIpAddress() ?: return null
+        return "http://$ip:$port/audio"
+    }
+
     fun getSnapshotUrl(port: Int): String? {
         val ip = getLocalIpAddress() ?: return null
         return "http://$ip:$port/snapshot"

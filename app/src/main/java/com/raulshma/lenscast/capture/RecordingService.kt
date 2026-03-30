@@ -1,5 +1,6 @@
 package com.raulshma.lenscast.capture
 
+import android.Manifest
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -8,6 +9,7 @@ import android.app.Service
 import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
@@ -25,6 +27,8 @@ import com.raulshma.lenscast.MainApplication
 import com.raulshma.lenscast.MainActivity
 import com.raulshma.lenscast.capture.model.RecordingConfig
 import com.raulshma.lenscast.capture.model.RecordingQuality
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.runBlocking
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -72,17 +76,24 @@ class RecordingService : Service() {
         isFinalizingRecording = false
         startTimeMs = System.currentTimeMillis()
 
-        val notification = buildNotification("Recording video...")
+        val app = applicationContext as MainApplication
+        val shouldIncludeAudio = config?.includeAudio ?: runBlocking {
+            app.settingsDataStore.recordingAudioEnabled.first()
+        }
+        val audioEnabled = shouldIncludeAudio && hasAudioPermission()
+
+        val notification = buildNotification(
+            if (audioEnabled) "Recording video and audio..." else "Recording video..."
+        )
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             startForeground(
                 NOTIFICATION_ID, notification,
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA
+                foregroundServiceTypes(audioEnabled)
             )
         } else {
             startForeground(NOTIFICATION_ID, notification)
         }
 
-        val app = applicationContext as MainApplication
         val cameraService = app.cameraService
         val fileName = "VID_${DATE_FORMAT.format(Date())}.mp4"
 
@@ -178,8 +189,12 @@ class RecordingService : Service() {
                 )
             }
 
-            val currentRecording = videoCapture.output
-                .prepareRecording(this, mediaStoreOutput)
+            var pendingRecording = videoCapture.output.prepareRecording(this, mediaStoreOutput)
+            if (audioEnabled) {
+                pendingRecording = pendingRecording.withAudioEnabled()
+            }
+
+            val currentRecording = pendingRecording
                 .start(ContextCompat.getMainExecutor(this)) { event ->
                     when (event) {
                         is VideoRecordEvent.Start -> {
@@ -344,6 +359,21 @@ class RecordingService : Service() {
             val manager = getSystemService(NotificationManager::class.java)
             manager.createNotificationChannel(channel)
         }
+    }
+
+    private fun hasAudioPermission(): Boolean {
+        return ContextCompat.checkSelfPermission(
+            this,
+            Manifest.permission.RECORD_AUDIO
+        ) == PackageManager.PERMISSION_GRANTED
+    }
+
+    private fun foregroundServiceTypes(includeAudio: Boolean): Int {
+        var serviceTypes = ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA
+        if (includeAudio && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            serviceTypes = serviceTypes or ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+        }
+        return serviceTypes
     }
 
     companion object {

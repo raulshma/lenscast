@@ -42,16 +42,144 @@ function App() {
 
   const [recordingConfig, setRecordingConfig] = createSignal<RecordingConfig>({
     durationSeconds: 0, repeatIntervalSeconds: 0,
-    quality: 'HIGH', maxFileSizeBytes: 0,
+    quality: 'HIGH', maxFileSizeBytes: 0, includeAudio: true,
   })
   const [isRecording, setIsRecording] = createSignal(false)
   const [recordingElapsed, setRecordingElapsed] = createSignal(0)
   const recordingTimer = createRecordingTimer(isRecording, recordingElapsed)
+  const [liveAudioStatus, setLiveAudioStatus] = createSignal<'idle' | 'connecting' | 'live' | 'error'>('idle')
 
   let saveTimer: ReturnType<typeof setTimeout> | null = null
+  let liveAudioAbortController: AbortController | null = null
+  let liveAudioContext: AudioContext | null = null
+  let liveAudioPlaybackTime = 0
+  let liveAudioSession = 0
+  let liveAudioKey = ''
 
   function isPageHidden() {
     return typeof document !== 'undefined' && document.hidden
+  }
+
+  function concatBytes(a: Uint8Array, b: Uint8Array) {
+    const merged = new Uint8Array(a.length + b.length)
+    merged.set(a, 0)
+    merged.set(b, a.length)
+    return merged
+  }
+
+  async function stopLiveAudioPlayback(resetKey = true) {
+    if (resetKey) {
+      liveAudioKey = ''
+    }
+    liveAudioSession += 1
+    liveAudioAbortController?.abort()
+    liveAudioAbortController = null
+    liveAudioPlaybackTime = 0
+    if (liveAudioContext) {
+      try {
+        await liveAudioContext.close()
+      } catch { }
+      liveAudioContext = null
+    }
+    setLiveAudioStatus('idle')
+  }
+
+  async function ensureLiveAudioContext(sampleRate: number) {
+    const AudioContextCtor = (window as any).AudioContext || (window as any).webkitAudioContext
+    if (!AudioContextCtor) return null
+
+    if (!liveAudioContext || liveAudioContext.state === 'closed') {
+      liveAudioContext = new AudioContextCtor({
+        latencyHint: 'interactive',
+        sampleRate,
+      })
+    }
+
+    if (liveAudioContext.state === 'suspended') {
+      try {
+        await liveAudioContext.resume()
+      } catch { }
+    }
+
+    return liveAudioContext
+  }
+
+  function schedulePcmChunk(ctx: AudioContext, pcmBytes: Uint8Array, sampleRate: number, channelCount: number) {
+    const int16 = new Int16Array(pcmBytes.buffer, pcmBytes.byteOffset, Math.floor(pcmBytes.byteLength / 2))
+    const frameCount = Math.floor(int16.length / channelCount)
+    if (frameCount <= 0) return
+
+    const audioBuffer = ctx.createBuffer(channelCount, frameCount, sampleRate)
+    for (let channel = 0; channel < channelCount; channel += 1) {
+      const data = audioBuffer.getChannelData(channel)
+      for (let i = 0; i < frameCount; i += 1) {
+        data[i] = int16[i * channelCount + channel] / 32768
+      }
+    }
+
+    const source = ctx.createBufferSource()
+    source.buffer = audioBuffer
+    source.connect(ctx.destination)
+
+    const now = ctx.currentTime
+    if (liveAudioPlaybackTime < now - 0.1 || liveAudioPlaybackTime > now + 0.35) {
+      liveAudioPlaybackTime = now + 0.05
+    }
+
+    source.start(liveAudioPlaybackTime)
+    liveAudioPlaybackTime += audioBuffer.duration
+  }
+
+  async function startLiveAudioPlayback(url: string) {
+    await stopLiveAudioPlayback(false)
+
+    const sessionId = ++liveAudioSession
+    const controller = new AbortController()
+    liveAudioAbortController = controller
+    setLiveAudioStatus('connecting')
+
+    try {
+      const res = await fetch(url, {
+        cache: 'no-store',
+        signal: controller.signal,
+      })
+      if (!res.ok || !res.body) {
+        throw new Error(`Audio stream unavailable: ${res.status}`)
+      }
+
+      const sampleRate = parseInt(res.headers.get('X-Audio-Sample-Rate') || '48000', 10)
+      const channelCount = parseInt(res.headers.get('X-Audio-Channels') || '1', 10)
+      const bytesPerFrame = 2 * channelCount
+      const ctx = await ensureLiveAudioContext(sampleRate)
+      if (!ctx) throw new Error('Web Audio not supported')
+
+      setLiveAudioStatus('live')
+      liveAudioPlaybackTime = ctx.currentTime + 0.05
+
+      const reader = res.body.getReader()
+      let pending = new Uint8Array(0)
+
+      while (sessionId === liveAudioSession) {
+        const { value, done } = await reader.read()
+        if (done) break
+        if (!value || value.length === 0) continue
+
+        const merged = pending.length > 0 ? concatBytes(pending, value) : value
+        const usableLength = merged.length - (merged.length % bytesPerFrame)
+        if (usableLength > 0) {
+          schedulePcmChunk(ctx, merged.subarray(0, usableLength), sampleRate, channelCount)
+        }
+        pending = usableLength < merged.length ? merged.subarray(usableLength) : new Uint8Array(0)
+      }
+
+      if (!controller.signal.aborted && sessionId === liveAudioSession) {
+        setLiveAudioStatus('idle')
+      }
+    } catch (e) {
+      if (!controller.signal.aborted) {
+        setLiveAudioStatus('error')
+      }
+    }
   }
 
   function debounceSave(fn: () => void, ms = 400) {
@@ -108,6 +236,10 @@ function App() {
     try {
       const s = await api.getSettings()
       setSettings(s)
+      setRecordingConfig((current) => ({
+        ...current,
+        includeAudio: s.streaming?.recordingAudioEnabled ?? current.includeAudio,
+      }))
       setError('')
     } catch (e: any) {
       if (e.message?.includes('401') || e.message?.includes('Authentication')) {
@@ -362,6 +494,26 @@ function App() {
     }
   })
 
+  createEffect(() => {
+    const streaming = st()?.streaming
+    const nonce = streamNonce()
+
+    if (!streaming?.isActive || !streaming.audioEnabled) {
+      void stopLiveAudioPlayback()
+      return
+    }
+
+    const nextKey = `${streaming.isActive}:${streaming.audioEnabled}:${nonce}`
+    if (nextKey === liveAudioKey) return
+    liveAudioKey = nextKey
+
+    void startLiveAudioPlayback(`/audio?t=${nonce}`)
+  })
+
+  onCleanup(() => {
+    void stopLiveAudioPlayback()
+  })
+
   const s = () => settings()
   const st = () => status()
 
@@ -503,6 +655,21 @@ function App() {
                   <span class="text-xs text-success animate-pulse">{captureMsg()}</span>
                 )}
               </div>
+              {st()?.streaming?.isActive && st()?.streaming?.audioEnabled ? (
+                <div class="bg-base-300 rounded-lg px-3 py-3 border border-base-200 flex-shrink-0">
+                  <div class="text-[11px] uppercase tracking-widest text-base-content/60 mb-2">Live Audio</div>
+                  <div class="text-xs">
+                    {liveAudioStatus() === 'live' ? 'Playing live audio' :
+                      liveAudioStatus() === 'connecting' ? 'Connecting audio...' :
+                        liveAudioStatus() === 'error' ? 'Audio playback error' :
+                          'Audio idle'}
+                  </div>
+                </div>
+              ) : st()?.streaming?.isActive ? (
+                <div class="text-xs text-base-content/60 flex-shrink-0">
+                  Microphone audio is unavailable for this stream.
+                </div>
+              ) : null}
               {st()?.streaming?.isActive && st()?.streaming?.url && (
                 <div class="bg-base-300 rounded-lg px-3 py-2 border border-base-200 flex-shrink-0">
                   <code class="text-xs text-primary font-mono">{st()!.streaming.url}</code>
@@ -862,6 +1029,89 @@ function App() {
                       />
                     </label>
                   </div>
+                  <div class="form-control mt-2">
+                    <label class="label cursor-pointer py-1">
+                      <span class="label-text text-xs">Include Audio in Live Stream</span>
+                      <input
+                        type="checkbox"
+                        class="toggle toggle-primary toggle-sm"
+                        checked={s()?.streaming?.streamAudioEnabled ?? true}
+                        onChange={() => {
+                          const current = settings()
+                          if (!current) return
+                          const newVal = !(current.streaming.streamAudioEnabled ?? true)
+                          const nextStreaming = { ...current.streaming, streamAudioEnabled: newVal }
+                          setSettings({ ...current, streaming: nextStreaming })
+                          saveSettings({ streaming: nextStreaming })
+                        }}
+                      />
+                    </label>
+                  </div>
+                  <div class="form-control mt-2">
+                    <label class="label py-1">
+                      <span class="label-text text-xs">Live Audio Bitrate</span>
+                      <span class="badge badge-primary badge-xs font-mono">
+                        {s()?.streaming?.streamAudioBitrateKbps ?? 128} kbps
+                      </span>
+                    </label>
+                    <input
+                      type="range"
+                      class="range range-primary range-xs"
+                      min={32}
+                      max={320}
+                      step={16}
+                      value={s()?.streaming?.streamAudioBitrateKbps ?? 128}
+                      onInput={(e) => {
+                        const v = parseInt(e.currentTarget.value)
+                        const current = settings()
+                        if (current) {
+                          const nextStreaming = { ...current.streaming, streamAudioBitrateKbps: v }
+                          setSettings({ ...current, streaming: nextStreaming })
+                          debounceSave(() => saveSettings({ streaming: nextStreaming }))
+                        }
+                      }}
+                    />
+                  </div>
+                  <div class="form-control mt-2">
+                    <label class="label py-1">
+                      <span class="label-text text-xs">Live Audio Channels</span>
+                    </label>
+                    <select
+                      class="select select-bordered select-sm"
+                      value={`${s()?.streaming?.streamAudioChannels ?? 1}`}
+                      onChange={(e) => {
+                        const v = parseInt(e.currentTarget.value)
+                        const current = settings()
+                        if (current) {
+                          const nextStreaming = { ...current.streaming, streamAudioChannels: v }
+                          setSettings({ ...current, streaming: nextStreaming })
+                          saveSettings({ streaming: nextStreaming })
+                        }
+                      }}
+                    >
+                      <option value="1">Mono</option>
+                      <option value="2">Stereo</option>
+                    </select>
+                  </div>
+                  <div class="form-control mt-2">
+                    <label class="label cursor-pointer py-1">
+                      <span class="label-text text-xs">Default Recording Audio</span>
+                      <input
+                        type="checkbox"
+                        class="toggle toggle-primary toggle-sm"
+                        checked={s()?.streaming?.recordingAudioEnabled ?? true}
+                        onChange={() => {
+                          const current = settings()
+                          if (!current) return
+                          const newVal = !(current.streaming.recordingAudioEnabled ?? true)
+                          const nextStreaming = { ...current.streaming, recordingAudioEnabled: newVal }
+                          setSettings({ ...current, streaming: nextStreaming })
+                          saveSettings({ streaming: nextStreaming })
+                          setRecordingConfig({ ...recordingConfig(), includeAudio: newVal })
+                        }}
+                      />
+                    </label>
+                  </div>
                 </div>
               </div>
 
@@ -987,6 +1237,18 @@ function App() {
                     </div>
                   )}
                   <div class="form-control">
+                    <label class="label cursor-pointer py-1">
+                      <span class="label-text text-xs">Include Audio</span>
+                      <input
+                        type="checkbox"
+                        class="toggle toggle-primary toggle-sm"
+                        checked={recordingConfig().includeAudio}
+                        onChange={() => setRecordingConfig({ ...recordingConfig(), includeAudio: !recordingConfig().includeAudio })}
+                        disabled={isRecording()}
+                      />
+                    </label>
+                  </div>
+                  <div class="form-control mt-2">
                     <label class="label py-1">
                       <span class="label-text text-xs">Quality</span>
                     </label>

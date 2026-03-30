@@ -41,6 +41,21 @@ class MainApplication : Application() {
             }
         }
         appScope.launch {
+            settingsDataStore.streamAudioEnabled.collectLatest { enabled ->
+                streamingManager.setStreamAudioEnabled(enabled)
+            }
+        }
+        appScope.launch {
+            settingsDataStore.streamAudioBitrateKbps.collectLatest { bitrateKbps ->
+                streamingManager.setStreamAudioBitrateKbps(bitrateKbps)
+            }
+        }
+        appScope.launch {
+            settingsDataStore.streamAudioChannels.collectLatest { channels ->
+                streamingManager.setStreamAudioChannels(channels)
+            }
+        }
+        appScope.launch {
             settingsDataStore.authSettings.collectLatest { auth ->
                 streamingManager.updateAuthSettings(auth)
             }

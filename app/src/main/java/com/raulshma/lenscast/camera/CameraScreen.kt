@@ -78,6 +78,7 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -138,11 +139,20 @@ fun CameraScreen(
     val selectedLensIndex by viewModel.selectedLensIndex.collectAsState()
     val settings by viewModel.settings.collectAsState()
     val showPreview by viewModel.showPreview.collectAsState()
+    val hasAudioPermission by viewModel.hasAudioPermission.collectAsState()
 
-    val permissionLauncher = rememberLauncherForActivityResult(
+    val mediaPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestMultiplePermissions()
+    ) { results ->
+        viewModel.onPermissionResult(
+            cameraGranted = results[Manifest.permission.CAMERA] == true,
+            audioGranted = results[Manifest.permission.RECORD_AUDIO] == true,
+        )
+    }
+    val audioPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
     ) { granted ->
-        viewModel.onPermissionResult(granted)
+        viewModel.onAudioPermissionResult(granted)
     }
 
     val coroutineScope = rememberCoroutineScope()
@@ -151,6 +161,17 @@ fun CameraScreen(
     var quickSettingsExpanded by remember { mutableStateOf(false) }
     var activeSetting by remember { mutableStateOf<QuickSettingType?>(null) }
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    var requestedMissingAudioPermission by remember { mutableStateOf(false) }
+
+    LaunchedEffect(cameraState, hasAudioPermission) {
+        if (cameraState is CameraState.Ready &&
+            !hasAudioPermission &&
+            !requestedMissingAudioPermission
+        ) {
+            requestedMissingAudioPermission = true
+            audioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+        }
+    }
 
     Scaffold(
         topBar = {
@@ -222,7 +243,12 @@ fun CameraScreen(
                 is CameraState.RequestPermission -> {
                     CameraPermissionRequest(
                         onRequestPermission = {
-                            permissionLauncher.launch(Manifest.permission.CAMERA)
+                            mediaPermissionLauncher.launch(
+                                arrayOf(
+                                    Manifest.permission.CAMERA,
+                                    Manifest.permission.RECORD_AUDIO,
+                                )
+                            )
                         }
                     )
                 }
@@ -852,7 +878,7 @@ private fun CameraPermissionRequest(
         )
         Spacer(modifier = Modifier.height(8.dp))
         Text(
-            text = "LensCast needs access to your camera to stream video.",
+            text = "LensCast uses the camera for video and the microphone for live audio and recordings.",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )

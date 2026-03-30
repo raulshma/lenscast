@@ -57,6 +57,7 @@ import com.raulshma.lenscast.capture.model.RecordingQuality
 import com.raulshma.lenscast.settings.DropdownSetting
 import com.raulshma.lenscast.settings.SettingsSection
 import com.raulshma.lenscast.settings.SliderSetting
+import com.raulshma.lenscast.settings.SwitchSetting
 import com.raulshma.lenscast.ui.components.LensCastTopBar
 import java.text.SimpleDateFormat
 import java.util.Calendar
@@ -72,7 +73,7 @@ fun CaptureScreen(
     val app = context.applicationContext as MainApplication
     val viewModel: CaptureViewModel = viewModel(
         factory = CaptureViewModel.Factory(
-            context, app.cameraService, app.captureHistoryStore
+            context, app.cameraService, app.captureHistoryStore, app.settingsDataStore
         )
     )
 
@@ -220,6 +221,15 @@ fun CaptureScreen(
 
             item {
                 SettingsSection(title = "Scheduled Recording") {
+                    SwitchSetting(
+                        title = "Include Audio",
+                        checked = recordingConfig.includeAudio,
+                        onCheckedChange = {
+                            viewModel.updateRecordingConfig(
+                                recordingConfig.copy(includeAudio = it)
+                            )
+                        }
+                    )
                     DropdownSetting(
                         title = "Recording Quality",
                         options = RecordingQuality.entries.map { it.name },

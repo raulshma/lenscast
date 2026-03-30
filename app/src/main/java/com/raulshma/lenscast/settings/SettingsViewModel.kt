@@ -13,10 +13,8 @@ import com.raulshma.lenscast.data.SettingsDataStore
 import com.raulshma.lenscast.data.StreamAuthSettings
 import com.raulshma.lenscast.streaming.StreamingManager
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
 class SettingsViewModel(
@@ -39,6 +37,18 @@ class SettingsViewModel(
 
     private val _showPreview = MutableStateFlow(true)
     val showPreview: StateFlow<Boolean> = _showPreview.asStateFlow()
+
+    private val _streamAudioEnabled = MutableStateFlow(true)
+    val streamAudioEnabled: StateFlow<Boolean> = _streamAudioEnabled.asStateFlow()
+
+    private val _streamAudioBitrateKbps = MutableStateFlow(128)
+    val streamAudioBitrateKbps: StateFlow<Int> = _streamAudioBitrateKbps.asStateFlow()
+
+    private val _streamAudioChannels = MutableStateFlow(1)
+    val streamAudioChannels: StateFlow<Int> = _streamAudioChannels.asStateFlow()
+
+    private val _recordingAudioEnabled = MutableStateFlow(true)
+    val recordingAudioEnabled: StateFlow<Boolean> = _recordingAudioEnabled.asStateFlow()
 
     val availableZoomRange: StateFlow<ClosedFloatingPointRange<Float>> = cameraService.availableZoomRange
     val availableExposureRange: StateFlow<ClosedRange<Int>> = cameraService.availableExposureRange
@@ -70,6 +80,29 @@ class SettingsViewModel(
         viewModelScope.launch {
             settingsDataStore.showPreview.collect { show ->
                 _showPreview.value = show
+            }
+        }
+        viewModelScope.launch {
+            settingsDataStore.streamAudioEnabled.collect { enabled ->
+                _streamAudioEnabled.value = enabled
+                streamingManager?.setStreamAudioEnabled(enabled)
+            }
+        }
+        viewModelScope.launch {
+            settingsDataStore.streamAudioBitrateKbps.collect { bitrate ->
+                _streamAudioBitrateKbps.value = bitrate
+                streamingManager?.setStreamAudioBitrateKbps(bitrate)
+            }
+        }
+        viewModelScope.launch {
+            settingsDataStore.streamAudioChannels.collect { channels ->
+                _streamAudioChannels.value = channels
+                streamingManager?.setStreamAudioChannels(channels)
+            }
+        }
+        viewModelScope.launch {
+            settingsDataStore.recordingAudioEnabled.collect { enabled ->
+                _recordingAudioEnabled.value = enabled
             }
         }
     }
@@ -147,6 +180,39 @@ class SettingsViewModel(
         _showPreview.value = show
         viewModelScope.launch {
             settingsDataStore.saveShowPreview(show)
+        }
+    }
+
+    fun updateStreamAudioEnabled(enabled: Boolean) {
+        _streamAudioEnabled.value = enabled
+        viewModelScope.launch {
+            settingsDataStore.saveStreamAudioEnabled(enabled)
+            streamingManager?.setStreamAudioEnabled(enabled)
+        }
+    }
+
+    fun updateStreamAudioBitrateKbps(bitrateKbps: Int) {
+        val sanitized = bitrateKbps.coerceIn(32, 320)
+        _streamAudioBitrateKbps.value = sanitized
+        viewModelScope.launch {
+            settingsDataStore.saveStreamAudioBitrateKbps(sanitized)
+            streamingManager?.setStreamAudioBitrateKbps(sanitized)
+        }
+    }
+
+    fun updateStreamAudioChannels(channels: Int) {
+        val sanitized = channels.coerceIn(1, 2)
+        _streamAudioChannels.value = sanitized
+        viewModelScope.launch {
+            settingsDataStore.saveStreamAudioChannels(sanitized)
+            streamingManager?.setStreamAudioChannels(sanitized)
+        }
+    }
+
+    fun updateRecordingAudioEnabled(enabled: Boolean) {
+        _recordingAudioEnabled.value = enabled
+        viewModelScope.launch {
+            settingsDataStore.saveRecordingAudioEnabled(enabled)
         }
     }
 

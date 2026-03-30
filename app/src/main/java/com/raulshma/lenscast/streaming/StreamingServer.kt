@@ -14,6 +14,7 @@ import java.util.concurrent.atomic.AtomicInteger
 class StreamingServer(
     private val port: Int = 8080,
     private val context: Context? = null,
+    private val audioStreamingManager: AudioStreamingManager? = null,
 ) : NanoHTTPD(port) {
 
     private val boundary = "LensCastBoundary"
@@ -48,8 +49,9 @@ class StreamingServer(
         <body>
             <h1>LensCast Camera</h1>
             <a href="/stream">MJPEG Stream</a>
+            <a href="/audio">AAC Audio Stream</a>
             <a href="/snapshot">Snapshot</a>
-            <p class="info">Stream URL: /stream | Snapshot: /snapshot | API: /api/settings</p>
+            <p class="info">Stream URL: /stream | Audio: /audio | Snapshot: /snapshot | API: /api/settings</p>
         </body>
         </html>
     """.trimIndent()
@@ -106,6 +108,7 @@ class StreamingServer(
 
         val response = when {
             uri == "/stream" -> serveMjpegStream()
+            uri == "/audio" -> serveAudioStream()
             uri == "/snapshot" -> serveSnapshot()
             uri.startsWith("/api/media/") -> serveMediaFile(uri, session)
             uri.startsWith("/api/") -> handleApiRoute(uri, method, session)
@@ -528,6 +531,31 @@ class StreamingServer(
             }
         } else {
             newFixedLengthResponse(Response.Status.NOT_FOUND, MIME_PLAINTEXT, "No frame available")
+        }
+    }
+
+    private fun serveAudioStream(): Response {
+        val audioStream = audioStreamingManager?.openStream()
+        return if (audioStream != null) {
+            newChunkedResponse(
+                Response.Status.OK,
+                "application/octet-stream",
+                audioStream
+            ).apply {
+                addHeader("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
+                addHeader("Pragma", "no-cache")
+                addHeader("Expires", "0")
+                addHeader("X-Accel-Buffering", "no")
+                addHeader("X-Audio-Format", "pcm_s16le")
+                addHeader("X-Audio-Sample-Rate", "${audioStreamingManager?.getSampleRateHz() ?: 48000}")
+                addHeader("X-Audio-Channels", "${audioStreamingManager?.getChannelCount() ?: 1}")
+            }
+        } else {
+            newFixedLengthResponse(
+                Response.Status.SERVICE_UNAVAILABLE,
+                MIME_PLAINTEXT,
+                "Audio stream not available"
+            )
         }
     }
 

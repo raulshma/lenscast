@@ -27,6 +27,10 @@ export interface StreamingSettings {
   port: number
   jpegQuality: number
   showPreview: boolean
+  streamAudioEnabled: boolean
+  streamAudioBitrateKbps: number
+  streamAudioChannels: number
+  recordingAudioEnabled: boolean
 }
 
 export interface AllSettings {
@@ -39,6 +43,8 @@ export interface DeviceStatus {
     isActive: boolean
     url: string
     clientCount: number
+    audioEnabled: boolean
+    audioUrl: string
   }
   thermal: ThermalState
   battery: {
@@ -149,6 +155,7 @@ export interface RecordingConfig {
   repeatIntervalSeconds: number
   quality: RecordingQuality
   maxFileSizeBytes: number
+  includeAudio: boolean
 }
 
 export interface IntervalCaptureStatus {

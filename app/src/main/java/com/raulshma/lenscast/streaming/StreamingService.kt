@@ -24,20 +24,27 @@ class StreamingService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
-            ACTION_START -> startStreamingForeground(intent.getStringExtra(EXTRA_URL))
+            ACTION_START -> startStreamingForeground(
+                url = intent.getStringExtra(EXTRA_URL),
+                includeAudio = intent.getBooleanExtra(EXTRA_AUDIO_ACTIVE, false)
+            )
             ACTION_PAUSE -> pauseStreamingForeground(intent.getStringExtra(EXTRA_URL))
             ACTION_STOP -> stopStreamingForeground()
         }
         return START_STICKY
     }
 
-    private fun startStreamingForeground(url: String?) {
-        val message = if (!url.isNullOrEmpty()) "Streaming to $url" else "Streaming camera feed"
+    private fun startStreamingForeground(url: String?, includeAudio: Boolean) {
+        val message = if (!url.isNullOrEmpty()) {
+            if (includeAudio) "Streaming video and audio to $url" else "Streaming to $url"
+        } else {
+            if (includeAudio) "Streaming camera feed with audio" else "Streaming camera feed"
+        }
         val notification = buildNotification(message)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             startForeground(
                 NOTIFICATION_ID, notification,
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA
+                foregroundServiceTypes(includeAudio)
             )
         } else {
             startForeground(NOTIFICATION_ID, notification)
@@ -57,7 +64,7 @@ class StreamingService : Service() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             startForeground(
                 NOTIFICATION_ID, notification,
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA
+                foregroundServiceTypes(includeAudio = false)
             )
         } else {
             startForeground(NOTIFICATION_ID, notification)
@@ -104,11 +111,20 @@ class StreamingService : Service() {
         }
     }
 
+    private fun foregroundServiceTypes(includeAudio: Boolean): Int {
+        var serviceTypes = ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA
+        if (includeAudio && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            serviceTypes = serviceTypes or ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+        }
+        return serviceTypes
+    }
+
     companion object {
         const val ACTION_START = "com.raulshma.lenscast.START_STREAMING"
         const val ACTION_PAUSE = "com.raulshma.lenscast.PAUSE_STREAMING"
         const val ACTION_STOP = "com.raulshma.lenscast.STOP_STREAMING"
         const val EXTRA_URL = "stream_url"
+        const val EXTRA_AUDIO_ACTIVE = "stream_audio_active"
         private const val CHANNEL_ID = "streaming_channel"
         private const val NOTIFICATION_ID = 1002
         private const val TAG = "StreamingService"

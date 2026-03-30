@@ -67,6 +67,10 @@ class WebApiController(private val context: Context) {
                 val port = app.settingsDataStore.streamingPort.first()
                 val quality = app.settingsDataStore.jpegQuality.first()
                 val showPreview = app.settingsDataStore.showPreview.first()
+                val streamAudioEnabled = app.settingsDataStore.streamAudioEnabled.first()
+                val streamAudioBitrateKbps = app.settingsDataStore.streamAudioBitrateKbps.first()
+                val streamAudioChannels = app.settingsDataStore.streamAudioChannels.first()
+                val recordingAudioEnabled = app.settingsDataStore.recordingAudioEnabled.first()
                 val json = JSONObject()
 
                 val camera = JSONObject().apply {
@@ -89,6 +93,10 @@ class WebApiController(private val context: Context) {
                     put("port", port)
                     put("jpegQuality", quality)
                     put("showPreview", showPreview)
+                    put("streamAudioEnabled", streamAudioEnabled)
+                    put("streamAudioBitrateKbps", streamAudioBitrateKbps)
+                    put("streamAudioChannels", streamAudioChannels)
+                    put("recordingAudioEnabled", recordingAudioEnabled)
                 }
 
                 json.put("camera", camera)
@@ -177,6 +185,24 @@ class WebApiController(private val context: Context) {
                     if (stream.has("showPreview")) {
                         app.settingsDataStore.saveShowPreview(stream.getBoolean("showPreview"))
                     }
+                    if (stream.has("streamAudioEnabled")) {
+                        val enabled = stream.getBoolean("streamAudioEnabled")
+                        app.settingsDataStore.saveStreamAudioEnabled(enabled)
+                        app.streamingManager.setStreamAudioEnabled(enabled)
+                    }
+                    stream.optInt("streamAudioBitrateKbps", -1).takeIf { it > 0 }?.let {
+                        app.settingsDataStore.saveStreamAudioBitrateKbps(it)
+                        app.streamingManager.setStreamAudioBitrateKbps(it)
+                    }
+                    stream.optInt("streamAudioChannels", -1).takeIf { it > 0 }?.let {
+                        app.settingsDataStore.saveStreamAudioChannels(it)
+                        app.streamingManager.setStreamAudioChannels(it)
+                    }
+                    if (stream.has("recordingAudioEnabled")) {
+                        app.settingsDataStore.saveRecordingAudioEnabled(
+                            stream.getBoolean("recordingAudioEnabled")
+                        )
+                    }
                 }
 
                 """{"success":true}"""
@@ -197,12 +223,16 @@ class WebApiController(private val context: Context) {
                 val clientCount = app.streamingManager.clientCount.value
                 val isLiveStreaming = app.streamingManager.isLiveStreaming()
                 val streamUrl = app.streamingManager.streamUrl.value
+                val isAudioStreaming = app.streamingManager.isAudioStreaming.value
+                val audioUrl = app.streamingManager.audioStreamUrl.value
 
                 val json = JSONObject()
                 val streaming = JSONObject().apply {
                     put("isActive", isLiveStreaming)
                     put("url", streamUrl)
                     put("clientCount", clientCount)
+                    put("audioEnabled", isAudioStreaming)
+                    put("audioUrl", audioUrl)
                 }
                 json.put("streaming", streaming)
                 json.put("thermal", thermal.name)
@@ -249,6 +279,7 @@ class WebApiController(private val context: Context) {
                 val intent = Intent(context, StreamingService::class.java).apply {
                     action = StreamingService.ACTION_START
                     putExtra(StreamingService.EXTRA_URL, app.streamingManager.streamUrl.value)
+                    putExtra(StreamingService.EXTRA_AUDIO_ACTIVE, app.streamingManager.isAudioStreaming.value)
                 }
                 val shouldStartForeground = !wasServerRunning
                 if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O && shouldStartForeground) {
