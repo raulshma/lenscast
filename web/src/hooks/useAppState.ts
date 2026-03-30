@@ -10,6 +10,7 @@ import type {
 
 export function useAppState() {
   // ── Auth ──
+  const [authChecked, setAuthChecked] = createSignal(false)
   const [authRequired, setAuthRequired] = createSignal(false)
   const [authenticated, setAuthenticated] = createSignal(false)
   const [loginUser, setLoginUser] = createSignal('')
@@ -88,7 +89,7 @@ export function useAppState() {
     if (!liveAudioContext || liveAudioContext.state === 'closed') {
       liveAudioContext = new AudioContextCtor({ latencyHint: 'interactive', sampleRate })
     }
-    if (liveAudioContext.state === 'suspended') {
+    if (liveAudioContext && liveAudioContext.state === 'suspended') {
       try { await liveAudioContext.resume() } catch { }
     }
     return liveAudioContext
@@ -177,18 +178,20 @@ export function useAppState() {
       if (!authStatus.required) {
         setAuthRequired(false)
         setAuthenticated(true)
-        return
-      }
-      setAuthRequired(true)
-      try {
-        await api.getSettings()
-        setAuthenticated(true)
-      } catch {
-        setAuthenticated(false)
+      } else {
+        setAuthRequired(true)
+        try {
+          const session = await api.getSessionStatus()
+          setAuthenticated(session.authenticated)
+        } catch {
+          setAuthenticated(false)
+        }
       }
     } catch {
       setAuthRequired(false)
       setAuthenticated(true)
+    } finally {
+      setAuthChecked(true)
     }
   }
 
@@ -511,7 +514,7 @@ export function useAppState() {
 
   return {
     // Auth
-    authRequired, authenticated, loginUser, setLoginUser, loginPass, setLoginPass,
+    authChecked, authRequired, authenticated, loginUser, setLoginUser, loginPass, setLoginPass,
     loginError, loginLoading, handleLogin, handleLogout,
     // Core
     settings, status, lenses, error, captureMsg, saving,

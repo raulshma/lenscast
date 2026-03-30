@@ -35,7 +35,7 @@ export default function Gallery(props: { onClose: () => void }) {
   const [viewer, setViewer] = createSignal<GalleryItem | null>(null)
   const [deleting, setDeleting] = createSignal<string | null>(null)
   const [selectMode, setSelectMode] = createSignal(false)
-  const [selectedIds, setSelectedIds] = createSignal<Set<string>>(new Set())
+  const [selectedIds, setSelectedIds] = createSignal<Set<string>>(new Set<string>())
   const [batchDeleting, setBatchDeleting] = createSignal(false)
   const [videoLoading, setVideoLoading] = createSignal(false)
 
@@ -60,7 +60,7 @@ export default function Gallery(props: { onClose: () => void }) {
 
   function toggleSelectMode() {
     setSelectMode(!selectMode())
-    setSelectedIds(new Set())
+    setSelectedIds(new Set<string>())
   }
 
   function toggleSelect(id: string) {
@@ -71,11 +71,11 @@ export default function Gallery(props: { onClose: () => void }) {
   }
 
   function selectAll() {
-    setSelectedIds(new Set(items().map(i => i.id)))
+    setSelectedIds(new Set<string>(items().map(i => i.id)))
   }
 
   function selectNone() {
-    setSelectedIds(new Set())
+    setSelectedIds(new Set<string>())
   }
 
   async function handleDelete(item: GalleryItem, e: Event) {
@@ -102,7 +102,7 @@ export default function Gallery(props: { onClose: () => void }) {
     try {
       await api.deleteMediaBatch(ids)
       setItems(items().filter(i => !selectedIds().has(i.id)))
-      setSelectedIds(new Set())
+      setSelectedIds(new Set<string>())
     } catch {
       setError('Batch delete failed, falling back to individual deletes...')
       let failed = 0
@@ -115,7 +115,7 @@ export default function Gallery(props: { onClose: () => void }) {
         }
       }
       if (failed > 0) setError(`Failed to delete ${failed} item(s)`)
-      setSelectedIds(new Set())
+      setSelectedIds(new Set<string>())
     } finally {
       setBatchDeleting(false)
     }
@@ -142,7 +142,7 @@ export default function Gallery(props: { onClose: () => void }) {
     if (e.key === 'Escape') {
       if (selectMode()) {
         setSelectMode(false)
-        setSelectedIds(new Set())
+        setSelectedIds(new Set<string>())
       } else if (viewer()) {
         setViewer(null)
       } else {
@@ -343,7 +343,7 @@ export default function Gallery(props: { onClose: () => void }) {
                         <a
                           class="gallery-action-btn"
                           href={item.downloadUrl}
-                          download
+                          download=""
                           onClick={(e) => e.stopPropagation()}
                           title="Download"
                         >
@@ -416,7 +416,7 @@ export default function Gallery(props: { onClose: () => void }) {
                 <span class="viewer-date">{formatDate(item().timestamp)}</span>
               </div>
               <div class="flex items-center gap-2">
-                <a class="action-btn action-btn-ghost" href={item().downloadUrl} download>
+                <a class="action-btn action-btn-ghost" href={item().downloadUrl} download="">
                   <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
                     <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" />
                     <polyline points="7 10 12 15 17 10" />

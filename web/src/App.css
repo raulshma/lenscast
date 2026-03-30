@@ -1044,6 +1044,14 @@ html, body {
   overflow: hidden;
 }
 
+.app-loading {
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--lc-bg);
+}
+
 .login-ambient {
   position: absolute;
   inset: 0;

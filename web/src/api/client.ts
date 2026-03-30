@@ -1,9 +1,5 @@
 import type { AllSettings, DeviceStatus, LensesResponse } from '../types'
 
-function basicAuthHeader(username: string, password: string): string {
-  return 'Basic ' + btoa(username + ':' + password)
-}
-
 type JsonValue = Record<string, unknown> | unknown[] | string | number | boolean | null
 
 async function requestJson<T>(input: string, init: RequestInit = {}): Promise<T> {
@@ -54,12 +50,16 @@ export async function getAuthStatus(): Promise<{ required: boolean }> {
   return requestJson('/api/auth/status')
 }
 
-export async function login(username: string, password: string): Promise<AllSettings> {
-  return requestJson('/api/settings', {
-    headers: {
-      Authorization: basicAuthHeader(username, password),
-    },
+export async function login(username: string, password: string): Promise<{ success: boolean; required?: boolean }> {
+  return requestJson('/api/auth/login', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username, password }),
   })
+}
+
+export async function getSessionStatus(): Promise<{ authenticated: boolean }> {
+  return requestJson('/api/auth/session')
 }
 
 export async function logout(): Promise<void> {

@@ -114,7 +114,7 @@ export default function StreamPreview(props: Props) {
             </button>
           )}
 
-          <a id="snapshot-btn" class="action-btn action-btn-ghost" href="/snapshot" target="_blank" download title="Download Snapshot">
+          <a id="snapshot-btn" class="action-btn action-btn-ghost" href="/snapshot" target="_blank" download="" title="Download Snapshot">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" />
               <polyline points="7 10 12 15 17 10" />

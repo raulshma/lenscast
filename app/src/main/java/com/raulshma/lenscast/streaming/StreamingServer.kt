@@ -3,7 +3,6 @@ package com.raulshma.lenscast.streaming
 import android.content.Context
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
-import android.util.Base64
 import android.util.Log
 import com.raulshma.lenscast.core.NetworkUtils
 import com.raulshma.lenscast.data.StreamAuthSettings
@@ -37,8 +36,8 @@ class StreamingServer(
     private val frameLock = Object()
     private var latestFrameVersion = 0L
     private var isRunning = false
-    var authUsername: String? = null
-    var authPasswordHash: String? = null
+    @Volatile var authUsername: String? = null
+    @Volatile var authPasswordHash: String? = null
 
     private val apiController: WebApiController? = context?.let { WebApiController(it) }
 
@@ -46,6 +45,9 @@ class StreamingServer(
 
     private val sessions = ConcurrentHashMap<String, Long>()
     private val secureRandom = SecureRandom()
+
+    private data class AuthAttempt(var count: Int, var blockedUntil: Long)
+    private val authAttempts = ConcurrentHashMap<String, AuthAttempt>()
 
     private val fallbackControlPageHtml = """
         <!DOCTYPE html>
@@ -79,7 +81,8 @@ class StreamingServer(
     }
 
     override fun serve(session: IHTTPSession): Response {
-        val uri = session.uri
+        val uri = session.uri.substringBefore("?")
+        val method = session.method
 
         if (uri == "/api/auth/status") {
             val isAuthEnabled = authUsername != null && !authUsername.isNullOrEmpty() && authPasswordHash != null
@@ -93,20 +96,104 @@ class StreamingServer(
             }
         }
 
-        if (uri == "/api/auth/logout" && session.method == Method.POST) {
-            // Apply CSRF check to logout to prevent forced-logout DoS
-            val logoutAuthResult = checkAuth(session)
-            if (!logoutAuthResult.authorized) {
+        if (uri == "/api/auth/login" && method == Method.POST) {
+            if (authUsername == null || authUsername.isNullOrEmpty() || authPasswordHash == null) {
+                return newFixedLengthResponse(
+                    Response.Status.OK,
+                    "application/json",
+                    """{"required":false}"""
+                ).apply { addHeader("Cache-Control", "no-store"); addSecurityHeaders() }
+            }
+            val loginBody = try {
+                val contentLength = session.headers["content-length"]?.toIntOrNull() ?: 0
+                if (contentLength <= 0) return newFixedLengthResponse(
+                    Response.Status.BAD_REQUEST, "application/json", """{"error":"Missing request body"}"""
+                ).apply { addSecurityHeaders() }
+                val buf = ByteArray(contentLength)
+                session.inputStream.read(buf)
+                val json = String(buf, Charsets.UTF_8)
+                val parsed = org.json.JSONObject(json)
+                val username = parsed.optString("username", "")
+                val password = parsed.optString("password", "")
+                if (username.isEmpty() || password.isEmpty()) return newFixedLengthResponse(
+                    Response.Status.BAD_REQUEST, "application/json", """{"error":"Missing credentials"}"""
+                ).apply { addSecurityHeaders() }
+                Pair(username, password)
+            } catch (_: Exception) {
+                return newFixedLengthResponse(
+                    Response.Status.BAD_REQUEST, "application/json", """{"error":"Invalid request"}"""
+                ).apply { addSecurityHeaders() }
+            }
+            val clientIp = session.remoteIpAddress ?: "unknown"
+            val attempt = authAttempts.getOrPut(clientIp) { AuthAttempt(0, 0L) }
+            val now = System.currentTimeMillis()
+            if (attempt.blockedUntil > now) {
+                return newFixedLengthResponse(
+                    Response.Status.UNAUTHORIZED, "application/json",
+                    """{"error":"Too many attempts. Try again later."}"""
+                ).apply { addSecurityHeaders() }
+            }
+            if (attempt.count >= MAX_AUTH_ATTEMPTS) {
+                attempt.blockedUntil = now + AUTH_LOCKOUT_MS
+                attempt.count = 0
+                return newFixedLengthResponse(
+                    Response.Status.UNAUTHORIZED, "application/json",
+                    """{"error":"Too many attempts. Try again later."}"""
+                ).apply { addSecurityHeaders() }
+            }
+            val storedUsername = authUsername
+            val storedHash = authPasswordHash
+            if (storedUsername == null || storedHash == null) {
+                return newFixedLengthResponse(
+                    Response.Status.INTERNAL_ERROR, "application/json",
+                    """{"error":"Auth not configured"}"""
+                ).apply { addSecurityHeaders() }
+            }
+            if (!constantTimeEquals(loginBody.first, storedUsername)) {
+                attempt.count++
+                return newFixedLengthResponse(
+                    Response.Status.UNAUTHORIZED, "application/json",
+                    """{"error":"Invalid credentials"}"""
+                ).apply { addSecurityHeaders() }
+            }
+            if (!StreamAuthSettings.verifyPassword(loginBody.second, storedHash)) {
+                attempt.count++
+                return newFixedLengthResponse(
+                    Response.Status.UNAUTHORIZED, "application/json",
+                    """{"error":"Invalid credentials"}"""
+                ).apply { addSecurityHeaders() }
+            }
+            attempt.count = 0
+            val token = createSession()
+            val secureFlag = if (sslEnabled) "; Secure" else ""
+            return newFixedLengthResponse(
+                Response.Status.OK, "application/json", """{"success":true}"""
+            ).apply {
+                addHeader("Set-Cookie", "$COOKIE_NAME=$token; Path=$COOKIE_PATH; Max-Age=$SESSION_MAX_AGE_SEC; HttpOnly; SameSite=Lax$secureFlag")
+                addHeader("Cache-Control", "no-store")
+                addSecurityHeaders()
+            }
+        }
+
+        if (uri == "/api/auth/session" && method == Method.GET) {
+            val cookieHeader = session.headers["cookie"] ?: ""
+            val sessionToken = extractCookie(cookieHeader, COOKIE_NAME)
+            val isValid = sessionToken != null && validateSession(sessionToken)
+            return newFixedLengthResponse(
+                Response.Status.OK, "application/json",
+                """{"authenticated":$isValid}"""
+            ).apply { addHeader("Cache-Control", "no-store"); addSecurityHeaders() }
+        }
+
+        if (uri == "/api/auth/logout" && method == Method.POST) {
+            if (!checkAuth(session)) {
                 return newFixedLengthResponse(
                     Response.Status.UNAUTHORIZED,
-                    "text/plain",
-                    "Unauthorized"
-                ).apply {
-                    addHeader("WWW-Authenticate", "Basic realm=\"LensCast\"")
-                    addSecurityHeaders()
-                }
+                    "application/json",
+                    """{"error":"Authentication required"}"""
+                ).apply { addSecurityHeaders() }
             }
-            if (!isCsrfSafe(session, logoutAuthResult.viaBasicAuth)) {
+            if (!isCsrfSafe(session)) {
                 return newFixedLengthResponse(
                     Response.Status.FORBIDDEN,
                     "application/json",
@@ -130,21 +217,21 @@ class StreamingServer(
             }
         }
 
-        val authResult = checkAuth(session)
-        if (!authResult.authorized) {
-            return newFixedLengthResponse(
-                Response.Status.UNAUTHORIZED,
-                "text/plain",
-                "Unauthorized"
-            ).apply {
-                addHeader("WWW-Authenticate", "Basic realm=\"LensCast\"")
-                addSecurityHeaders()
-            }
+        val isProtectedRoute = uri.startsWith("/api/") || uri == "/stream" || uri == "/audio" || uri == "/snapshot"
+
+        if (!isProtectedRoute) {
+            return serveStaticFile(uri)
         }
 
-        // CSRF protection for state-changing requests
-        val method = session.method
-        if (method != Method.GET && !isCsrfSafe(session, authResult.viaBasicAuth)) {
+        if (!checkAuth(session)) {
+            return newFixedLengthResponse(
+                Response.Status.UNAUTHORIZED,
+                "application/json",
+                """{"error":"Authentication required"}"""
+            ).apply { addSecurityHeaders() }
+        }
+
+        if (method != Method.GET && !isCsrfSafe(session)) {
             return newFixedLengthResponse(
                 Response.Status.FORBIDDEN,
                 "application/json",
@@ -159,15 +246,6 @@ class StreamingServer(
             uri.startsWith("/api/media/") && method == Method.GET -> serveMediaFile(uri, session)
             uri.startsWith("/api/") -> handleApiRoute(uri, method, session)
             else -> serveStaticFile(uri)
-        }
-
-        if (authResult.viaBasicAuth) {
-            val token = createSession()
-            val secureFlag = if (sslEnabled) "; Secure" else ""
-            response.addHeader(
-                "Set-Cookie",
-                "$COOKIE_NAME=$token; Path=$COOKIE_PATH; Max-Age=$SESSION_MAX_AGE_SEC; HttpOnly; SameSite=Lax$secureFlag"
-            )
         }
 
         response.addSecurityHeaders()
@@ -194,57 +272,18 @@ class StreamingServer(
         }
     }
 
-    private data class AuthResult(val authorized: Boolean, val viaBasicAuth: Boolean)
-
-    private val authAttempts = ConcurrentHashMap<String, AuthAttempt>()
-    private data class AuthAttempt(var count: Int, var blockedUntil: Long)
-
-    private fun checkAuth(session: IHTTPSession): AuthResult {
-        val username = authUsername ?: return AuthResult(true, false)
-        val storedHash = authPasswordHash ?: return AuthResult(true, false)
-        if (username.isEmpty()) return AuthResult(true, false)
+    private fun checkAuth(session: IHTTPSession): Boolean {
+        val username = authUsername ?: return true
+        val storedHash = authPasswordHash ?: return true
+        if (username.isEmpty()) return true
 
         val cookieHeader = session.headers["cookie"] ?: ""
         val sessionToken = extractCookie(cookieHeader, COOKIE_NAME)
         if (sessionToken != null && validateSession(sessionToken)) {
-            return AuthResult(true, false)
+            return true
         }
 
-        val clientIp = session.remoteIpAddress ?: "unknown"
-        val attempt = authAttempts.getOrPut(clientIp) { AuthAttempt(0, 0L) }
-        val now = System.currentTimeMillis()
-        if (attempt.blockedUntil > now) {
-            return AuthResult(false, false)
-        }
-        if (attempt.count >= MAX_AUTH_ATTEMPTS) {
-            attempt.blockedUntil = now + AUTH_LOCKOUT_MS
-            attempt.count = 0
-            Log.w(TAG, "Rate limiting auth attempts from $clientIp for ${AUTH_LOCKOUT_MS / 1000}s")
-            return AuthResult(false, false)
-        }
-
-        val authHeader = session.headers["authorization"] ?: return AuthResult(false, false)
-        if (!authHeader.startsWith("Basic ", ignoreCase = true)) return AuthResult(false, false)
-
-        val encoded = authHeader.substring(6).trim()
-        val decoded: String
-        try {
-            decoded = String(Base64.decode(encoded, Base64.DEFAULT))
-        } catch (_: Exception) {
-            return AuthResult(false, false)
-        }
-
-        val parts = decoded.split(":", limit = 2)
-        if (parts.size != 2) return AuthResult(false, false)
-        if (!constantTimeEquals(parts[0], username)) return AuthResult(false, false)
-
-        return if (StreamAuthSettings.verifyPassword(parts[1], storedHash)) {
-            attempt.count = 0
-            AuthResult(true, true)
-        } else {
-            attempt.count++
-            AuthResult(false, false)
-        }
+        return false
     }
 
     private fun createSession(): String {
@@ -300,13 +339,9 @@ class StreamingServer(
 
     /**
      * CSRF protection for state-changing requests.
-     * Basic Auth requests are inherently CSRF-protected (browsers won't auto-include credentials).
      * Session-based requests must have a matching Origin/Referer or X-Requested-With header.
      */
-    private fun isCsrfSafe(session: IHTTPSession, isBasicAuth: Boolean): Boolean {
-        // Basic Auth provides inherent CSRF protection
-        if (isBasicAuth) return true
-
+    private fun isCsrfSafe(session: IHTTPSession): Boolean {
         // Check for X-Requested-With header (sent by XHR/fetch)
         if (session.headers.containsKey("x-requested-with")) return true
 
