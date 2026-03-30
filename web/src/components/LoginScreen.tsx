@@ -18,10 +18,7 @@ export default function LoginScreen(props: Props) {
         <div class="login-logo">
           <div class="login-lens-ring">
             <div class="login-lens-inner">
-              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
-                <circle cx="12" cy="13" r="4" />
-              </svg>
+              <img src="/logo.svg" alt="LensCast" width="36" height="36" />
             </div>
           </div>
           <h1 class="login-title">LensCast</h1>

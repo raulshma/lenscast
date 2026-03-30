@@ -16,6 +16,7 @@ export default function Navbar(props: Props) {
     <nav class="app-navbar" id="main-navbar">
       <div class="navbar-left">
         <div class="navbar-brand">
+          <img src="/logo.svg" alt="LensCast" width="24" height="24" style={{ "margin-right": "8px" }} />
           <div class="brand-dot" classList={{ 'brand-dot-active': !!st()?.streaming?.isActive }} />
           <span class="brand-name">LensCast</span>
         </div>

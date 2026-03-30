@@ -1,0 +1,48 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" fill="none">
+  <defs>
+    <!-- Dark, sharp camera body gradient -->
+    <linearGradient id="bodyGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1A1C23" />
+      <stop offset="100%" stop-color="#090A0F" />
+    </linearGradient>
+
+    <!-- Hot pink to yellow recording/lens ring -->
+    <linearGradient id="ringGrad" x1="0%" y1="100%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#FF007A" />
+      <stop offset="100%" stop-color="#7928CA" />
+    </linearGradient>
+
+    <!-- Bright cyan lens -->
+    <linearGradient id="lensGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#00F2FE" />
+      <stop offset="100%" stop-color="#4FACFE" />
+    </linearGradient>
+
+    <!-- Vibrant waves (cyan to purple/pink) -->
+    <linearGradient id="waveGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#00F2FE" />
+      <stop offset="100%" stop-color="#FF007A" />
+    </linearGradient>
+  </defs>
+
+  <!-- Sharp Camera Body -->
+  <path d="M 20 25 h 40 l 15 15 v 35 a 10 10 0 0 1 -10 10 h -45 a 10 10 0 0 1 -10 -10 v -40 a 10 10 0 0 1 10 -10 z" fill="url(#bodyGrad)" stroke="#333333" stroke-width="2" />
+
+  <!-- Recording Dot -->
+  <circle cx="22" cy="38" r="4" fill="#FF0055" />
+
+  <!-- Lens Ring -->
+  <circle cx="42" cy="55" r="20" fill="url(#ringGrad)" />
+  
+  <!-- Lens Core -->
+  <circle cx="42" cy="55" r="16" fill="url(#lensGrad)" />
+  
+  <!-- Lens Reflections -->
+  <path d="M 42 39 a 16 16 0 0 1 11 4" stroke="#ffffff" stroke-width="2.5" stroke-linecap="round" fill="none" opacity="0.6" />
+  <circle cx="48" cy="48" r="3" fill="#ffffff" opacity="0.9" />
+  <circle cx="38" cy="62" r="1.5" fill="#ffffff" opacity="0.7" />
+
+  <!-- Broadcast Waves -->
+  <path d="M 78 40 A 25 25 0 0 1 78 70" stroke="url(#waveGrad)" stroke-width="6" stroke-linecap="round" />
+  <path d="M 88 30 A 40 40 0 0 1 88 80" stroke="url(#waveGrad)" stroke-width="6" stroke-linecap="round" />
+</svg>

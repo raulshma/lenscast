@@ -15,3 +15,5 @@
 local.properties
 /app/src/main/assets/webui/
 /web/node_modules/
+*.jks
+*.keystore
