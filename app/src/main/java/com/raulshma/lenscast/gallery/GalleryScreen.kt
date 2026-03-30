@@ -52,7 +52,6 @@ fun GalleryScreen(
 
     val overview = remember(allItems) { buildGalleryOverview(allItems) }
     val sections = remember(galleryItems) { buildGallerySections(galleryItems) }
-    val visibleBytes = remember(galleryItems) { galleryItems.sumOf { it.fileSizeBytes.coerceAtLeast(0L) } }
 
     var showBatchDeleteDialog by remember { mutableStateOf(false) }
 
@@ -132,13 +131,6 @@ fun GalleryScreen(
                 .fillMaxSize()
                 .padding(padding)
         ) {
-            GalleryOverviewCard(
-                overview = overview,
-                visibleCount = galleryItems.size,
-                visibleBytes = visibleBytes,
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
-            )
-
             GalleryFilterRow(
                 currentFilter = filter,
                 onFilterChanged = viewModel::setFilter,

@@ -21,6 +21,9 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.PagerState
+
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -43,10 +46,12 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -55,10 +60,16 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.only
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import kotlinx.coroutines.launch
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.raulshma.lenscast.capture.model.CaptureHistory
@@ -66,19 +77,14 @@ import com.raulshma.lenscast.capture.model.CaptureType
 
 @Composable
 fun MediaViewerScreen(
-    mediaItem: CaptureHistory?,
-    currentIndex: Int,
-    totalCount: Int,
-    canViewPrevious: Boolean,
-    canViewNext: Boolean,
-    onViewPrevious: () -> Unit,
-    onViewNext: () -> Unit,
-    onNavigateBack: () -> Unit,
+    allItems: List<CaptureHistory>,
+    pagerState: PagerState,
     onDeleteCurrent: () -> Unit,
+    onNavigateBack: () -> Unit,
 ) {
-    if (mediaItem == null) {
-        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            Text("Media not found", style = MaterialTheme.typography.bodyLarge)
+    if (allItems.isEmpty()) {
+        Box(modifier = Modifier.fillMaxSize().background(Color.Black), contentAlignment = Alignment.Center) {
+            Text("Media not found", style = MaterialTheme.typography.bodyLarge, color = Color.White)
         }
         return
     }
@@ -86,6 +92,10 @@ fun MediaViewerScreen(
     val context = LocalContext.current
     var showDeleteDialog by remember { mutableStateOf(false) }
     var detailsExpanded by remember { mutableStateOf(true) }
+    val coroutineScope = rememberCoroutineScope()
+
+    val currentIndex = pagerState.currentPage
+    val mediaItem = allItems.getOrElse(currentIndex) { allItems.first() }
 
     if (showDeleteDialog) {
         AlertDialog(
@@ -104,12 +114,23 @@ fun MediaViewerScreen(
     }
 
     Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
-        when (mediaItem.type) {
-            CaptureType.PHOTO -> PhotoViewer(filePath = mediaItem.filePath)
-            CaptureType.VIDEO -> VideoViewer(filePath = mediaItem.filePath)
+        HorizontalPager(
+            state = pagerState,
+            modifier = Modifier.fillMaxSize(),
+        ) { page ->
+            val item = allItems.getOrElse(page) { return@HorizontalPager }
+            when (item.type) {
+                CaptureType.PHOTO -> PhotoViewer(filePath = item.filePath)
+                CaptureType.VIDEO -> VideoViewer(filePath = item.filePath)
+            }
         }
 
-        Surface(modifier = Modifier.align(Alignment.TopCenter).fillMaxWidth(), color = Color.Black.copy(alpha = 0.42f)) {
+        Surface(modifier = Modifier
+            .align(Alignment.TopCenter)
+            .fillMaxWidth()
+            .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top)),
+            color = Color.Black.copy(alpha = 0.42f),
+        ) {
             Row(
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 10.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -121,7 +142,7 @@ fun MediaViewerScreen(
                     }
                     Column(modifier = Modifier.padding(end = 8.dp)) {
                         Text(mediaItem.fileName, color = Color.White, style = MaterialTheme.typography.titleSmall, maxLines = 1)
-                        Text("${(currentIndex + 1).coerceAtLeast(1)} of $totalCount", color = Color.White.copy(alpha = 0.75f), style = MaterialTheme.typography.labelSmall)
+                        Text("${(currentIndex + 1).coerceAtLeast(1)} of ${allItems.size}", color = Color.White.copy(alpha = 0.75f), style = MaterialTheme.typography.labelSmall)
                     }
                 }
                 IconButton(onClick = { detailsExpanded = !detailsExpanded }) {
@@ -140,25 +161,27 @@ fun MediaViewerScreen(
         }
 
         ViewerNavButton(
-            visible = canViewPrevious,
+            visible = currentIndex > 0,
             icon = Icons.Default.ChevronLeft,
             contentDescription = "Previous item",
             modifier = Modifier.align(Alignment.CenterStart).padding(start = 12.dp),
-            onClick = onViewPrevious,
+            onClick = { coroutineScope.launch { pagerState.animateScrollToPage(currentIndex - 1) } },
         )
         ViewerNavButton(
-            visible = canViewNext,
+            visible = currentIndex < allItems.lastIndex,
             icon = Icons.Default.ChevronRight,
             contentDescription = "Next item",
             modifier = Modifier.align(Alignment.CenterEnd).padding(end = 12.dp),
-            onClick = onViewNext,
+            onClick = { coroutineScope.launch { pagerState.animateScrollToPage(currentIndex + 1) } },
         )
 
         AnimatedVisibility(
             visible = detailsExpanded,
             enter = fadeIn(),
             exit = fadeOut(),
-            modifier = Modifier.align(Alignment.BottomCenter),
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom)),
         ) {
             Surface(
                 modifier = Modifier.fillMaxWidth().padding(16.dp),
