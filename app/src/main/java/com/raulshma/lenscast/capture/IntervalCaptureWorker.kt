@@ -27,25 +27,40 @@ class IntervalCaptureWorker(
         val app = applicationContext as MainApplication
         val cameraService = app.cameraService
 
+        if (isStopped) return Result.success()
+
+        val intervalSeconds = inputData.getLong(KEY_INTERVAL_SECONDS, 1L).coerceAtLeast(1L)
         val totalCaptures = inputData.getInt(KEY_TOTAL_CAPTURES, 0)
         val completed = inputData.getInt(KEY_COMPLETED_CAPTURES, 0)
+        val imageQuality = inputData.getInt(KEY_IMAGE_QUALITY, 90)
 
         if (totalCaptures > 0 && completed >= totalCaptures) {
             Log.d(TAG, "Interval capture complete: $completed/$totalCaptures")
-            return Result.success()
+            return Result.success(progressData(completed))
         }
 
         return try {
             val captured = captureImage(app, cameraService)
             if (captured) {
                 val newCompleted = completed + 1
+                setProgress(progressData(newCompleted))
                 Log.d(TAG, "Interval capture: $newCompleted/$totalCaptures")
 
                 if (totalCaptures > 0 && newCompleted >= totalCaptures) {
                     Log.d(TAG, "All captures complete")
-                    return Result.success()
+                    return Result.success(progressData(newCompleted))
                 }
-                Result.success()
+
+                if (!isStopped) {
+                    IntervalCaptureScheduler.scheduleNext(
+                        context = applicationContext,
+                        intervalSeconds = intervalSeconds,
+                        totalCaptures = totalCaptures,
+                        imageQuality = imageQuality,
+                        completedCaptures = newCompleted,
+                    )
+                }
+                Result.success(progressData(newCompleted))
             } else {
                 Result.retry()
             }
@@ -107,5 +122,11 @@ class IntervalCaptureWorker(
         const val KEY_COMPLETED_CAPTURES = "completed_captures"
 
         private const val TAG = "IntervalCapture"
+
+        private fun progressData(completedCaptures: Int): Data {
+            return Data.Builder()
+                .putInt(KEY_COMPLETED_CAPTURES, completedCaptures.coerceAtLeast(0))
+                .build()
+        }
     }
 }

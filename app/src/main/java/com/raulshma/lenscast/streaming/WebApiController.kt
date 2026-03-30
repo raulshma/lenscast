@@ -9,12 +9,8 @@ import android.util.Log
 import androidx.camera.core.ImageCapture
 import androidx.camera.core.ImageCaptureException
 import androidx.core.content.ContextCompat
-import androidx.work.Constraints
-import androidx.work.Data
-import androidx.work.ExistingPeriodicWorkPolicy
-import androidx.work.PeriodicWorkRequestBuilder
-import androidx.work.WorkManager
 import com.raulshma.lenscast.MainApplication
+import com.raulshma.lenscast.capture.IntervalCaptureScheduler
 import com.raulshma.lenscast.camera.model.CameraSettings
 import com.raulshma.lenscast.camera.model.FocusMode
 import com.raulshma.lenscast.camera.model.HdrMode
@@ -38,12 +34,6 @@ class WebApiController(private val context: Context) {
 
     private val app: MainApplication
         get() = context.applicationContext as MainApplication
-
-    @Volatile
-    private var intervalCaptureRunning = false
-
-    @Volatile
-    private var intervalCaptureCompleted = 0
 
     @Volatile
     private var isRecording = false
@@ -469,14 +459,11 @@ class WebApiController(private val context: Context) {
 
     fun handleGetIntervalCaptureStatus(): String {
         return try {
-            val workManager = WorkManager.getInstance(context)
-            val workInfos = workManager.getWorkInfosForUniqueWork(WORK_NAME_INTERVAL).get()
-            val isRunning = workInfos.any { !it.state.isFinished }
-            if (!isRunning) intervalCaptureRunning = false
+            val snapshot = IntervalCaptureScheduler.getStatus(context)
 
             JSONObject().apply {
-                put("isRunning", isRunning || intervalCaptureRunning)
-                put("completedCaptures", intervalCaptureCompleted)
+                put("isRunning", snapshot.isRunning)
+                put("completedCaptures", snapshot.completedCaptures)
             }.toString()
         } catch (e: Exception) {
             Log.e(TAG, "Failed to get interval capture status", e)
@@ -491,32 +478,13 @@ class WebApiController(private val context: Context) {
             val totalCaptures = json.optInt("totalCaptures", 100)
             val imageQuality = json.optInt("imageQuality", 90)
 
-            val constraints = Constraints.Builder()
-                .setRequiresBatteryNotLow(false)
-                .build()
-
-            val workRequest = PeriodicWorkRequestBuilder<IntervalCaptureWorker>(
-                intervalSeconds.coerceIn(1, 3600), TimeUnit.SECONDS
+            IntervalCaptureScheduler.start(
+                context = context,
+                intervalSeconds = intervalSeconds.coerceIn(1, 3600),
+                totalCaptures = totalCaptures,
+                imageQuality = imageQuality,
+                completedCaptures = 0,
             )
-                .setInputData(
-                    Data.Builder()
-                        .putLong(IntervalCaptureWorker.KEY_INTERVAL_SECONDS, intervalSeconds)
-                        .putInt(IntervalCaptureWorker.KEY_TOTAL_CAPTURES, totalCaptures)
-                        .putInt(IntervalCaptureWorker.KEY_IMAGE_QUALITY, imageQuality)
-                        .putInt(IntervalCaptureWorker.KEY_COMPLETED_CAPTURES, intervalCaptureCompleted)
-                        .build()
-                )
-                .setConstraints(constraints)
-                .build()
-
-            WorkManager.getInstance(context).enqueueUniquePeriodicWork(
-                WORK_NAME_INTERVAL,
-                ExistingPeriodicWorkPolicy.UPDATE,
-                workRequest
-            )
-
-            intervalCaptureRunning = true
-            intervalCaptureCompleted = 0
 
             Log.d(TAG, "Interval capture started: every ${intervalSeconds}s, total=$totalCaptures")
             """{"success":true}"""
@@ -528,8 +496,7 @@ class WebApiController(private val context: Context) {
 
     fun handleStopIntervalCapture(): String {
         return try {
-            WorkManager.getInstance(context).cancelUniqueWork(WORK_NAME_INTERVAL)
-            intervalCaptureRunning = false
+            IntervalCaptureScheduler.stop(context)
             Log.d(TAG, "Interval capture stopped")
             """{"success":true}"""
         } catch (e: Exception) {
@@ -680,6 +647,5 @@ class WebApiController(private val context: Context) {
     companion object {
         private const val TAG = "WebApiController"
         private val DATE_FORMAT = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US)
-        private const val WORK_NAME_INTERVAL = "interval_capture"
     }
 }

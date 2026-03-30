@@ -3,11 +3,13 @@ package com.raulshma.lenscast.streaming
 import android.content.Context
 import android.util.Base64
 import android.util.Log
+import com.raulshma.lenscast.data.StreamAuthSettings
 import fi.iki.elonen.NanoHTTPD
 import java.io.ByteArrayInputStream
 import java.io.InputStream
-import java.security.MessageDigest
+import java.net.URLDecoder
 import java.security.SecureRandom
+import java.nio.charset.StandardCharsets
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicInteger
 
@@ -73,7 +75,10 @@ class StreamingServer(
                 Response.Status.OK,
                 "application/json",
                 """{"required":$isAuthEnabled}"""
-            ).apply { addSecurityHeaders() }
+            ).apply {
+                addHeader("Cache-Control", "no-store")
+                addSecurityHeaders()
+            }
         }
 
         if (uri == "/api/auth/logout" && session.method == Method.POST) {
@@ -88,6 +93,7 @@ class StreamingServer(
                 """{"success":true}"""
             ).apply {
                 addHeader("Set-Cookie", "lenscast_session=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax")
+                addHeader("Cache-Control", "no-store")
                 addSecurityHeaders()
             }
         }
@@ -132,6 +138,12 @@ class StreamingServer(
         addHeader("X-Frame-Options", "DENY")
         addHeader("X-XSS-Protection", "1; mode=block")
         addHeader("Referrer-Policy", "no-referrer")
+        addHeader(
+            "Content-Security-Policy",
+            "default-src 'self'; img-src 'self' data: blob:; media-src 'self' blob:; " +
+                "style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; " +
+                "object-src 'none'; base-uri 'self'; frame-ancestors 'none'"
+        )
     }
 
     private data class AuthResult(val authorized: Boolean, val viaBasicAuth: Boolean)
@@ -162,8 +174,7 @@ class StreamingServer(
         if (parts.size != 2) return AuthResult(false, false)
         if (!constantTimeEquals(parts[0], username)) return AuthResult(false, false)
 
-        val incomingHash = sha256Base64(parts[1])
-        return if (constantTimeEquals(incomingHash, storedHash)) {
+        return if (StreamAuthSettings.verifyPassword(parts[1], storedHash)) {
             AuthResult(true, true)
         } else {
             AuthResult(false, false)
@@ -192,12 +203,6 @@ class StreamingServer(
             .map { it.trim() }
             .find { it.startsWith("$name=") }
             ?.substring(name.length + 1)
-    }
-
-    private fun sha256Base64(input: String): String {
-        val digest = MessageDigest.getInstance("SHA-256")
-        val hash = digest.digest(input.toByteArray(Charsets.UTF_8))
-        return Base64.encodeToString(hash, Base64.NO_WRAP)
     }
 
     private fun constantTimeEquals(a: String, b: String): Boolean {
@@ -281,7 +286,12 @@ class StreamingServer(
     private fun serveStaticFile(uri: String): Response {
         val assetMgr = context?.assets ?: return serveFallbackControlPage()
 
-        val path = if (uri == "/" || uri == "") "webui/index.html" else "webui$uri"
+        val path = resolveAssetPath(uri)
+            ?: return newFixedLengthResponse(
+                Response.Status.BAD_REQUEST,
+                MIME_PLAINTEXT,
+                "Invalid asset path"
+            )
 
         return try {
             val cached = assetCache[path]
@@ -516,6 +526,22 @@ class StreamingServer(
             addHeader("Expires", "0")
             addHeader("X-Accel-Buffering", "no")
         }
+    }
+
+    private fun resolveAssetPath(uri: String): String? {
+        val normalizedUri = URLDecoder.decode(uri, StandardCharsets.UTF_8.name())
+        if (normalizedUri.contains('\u0000')) return null
+
+        val relativePath = normalizedUri
+            .removePrefix("/")
+            .ifEmpty { "index.html" }
+            .split('/')
+            .filter { it.isNotBlank() && it != "." }
+
+        if (relativePath.any { it == ".." }) return null
+
+        val assetPath = relativePath.joinToString("/")
+        return if (assetPath.isBlank()) "webui/index.html" else "webui/$assetPath"
     }
 
     private fun serveSnapshot(): Response {

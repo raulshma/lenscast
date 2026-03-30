@@ -16,11 +16,6 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
-import androidx.work.Constraints
-import androidx.work.Data
-import androidx.work.ExistingPeriodicWorkPolicy
-import androidx.work.PeriodicWorkRequestBuilder
-import androidx.work.WorkManager
 import com.raulshma.lenscast.MainApplication
 import com.raulshma.lenscast.camera.CameraService
 import com.raulshma.lenscast.capture.model.CaptureHistory
@@ -98,6 +93,11 @@ class CaptureViewModel(
             _recordingConfig.value = _recordingConfig.value.copy(
                 includeAudio = settingsDataStore.recordingAudioEnabled.first()
             )
+        }
+        viewModelScope.launch(Dispatchers.IO) {
+            val snapshot = IntervalCaptureScheduler.getStatus(context)
+            _isIntervalRunning.value = snapshot.isRunning
+            _captureCount.value = snapshot.completedCaptures
         }
     }
 
@@ -185,28 +185,12 @@ class CaptureViewModel(
     }
 
     fun startIntervalCapture(config: IntervalCaptureConfig) {
-        val constraints = Constraints.Builder()
-            .setRequiresBatteryNotLow(false)
-            .build()
-
-        val workRequest = PeriodicWorkRequestBuilder<IntervalCaptureWorker>(
-            config.intervalSeconds, TimeUnit.SECONDS
-        )
-            .setInputData(
-                Data.Builder()
-                    .putLong(IntervalCaptureWorker.KEY_INTERVAL_SECONDS, config.intervalSeconds)
-                    .putInt(IntervalCaptureWorker.KEY_TOTAL_CAPTURES, config.totalCaptures)
-                    .putInt(IntervalCaptureWorker.KEY_IMAGE_QUALITY, config.imageQuality)
-                    .putInt(IntervalCaptureWorker.KEY_COMPLETED_CAPTURES, _captureCount.value)
-                    .build()
-            )
-            .setConstraints(constraints)
-            .build()
-
-        WorkManager.getInstance(context).enqueueUniquePeriodicWork(
-            WORK_NAME_INTERVAL,
-            ExistingPeriodicWorkPolicy.KEEP,
-            workRequest
+        IntervalCaptureScheduler.start(
+            context = context,
+            intervalSeconds = config.intervalSeconds,
+            totalCaptures = config.totalCaptures,
+            imageQuality = config.imageQuality,
+            completedCaptures = 0,
         )
 
         _isIntervalRunning.value = true
@@ -215,7 +199,7 @@ class CaptureViewModel(
     }
 
     fun stopIntervalCapture() {
-        WorkManager.getInstance(context).cancelUniqueWork(WORK_NAME_INTERVAL)
+        IntervalCaptureScheduler.stop(context)
         _isIntervalRunning.value = false
         Log.d(TAG, "Interval capture stopped")
     }
@@ -360,7 +344,6 @@ class CaptureViewModel(
 
     companion object {
         private const val TAG = "CaptureViewModel"
-        private const val WORK_NAME_INTERVAL = "interval_capture"
         private val DATE_FORMAT = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US)
     }
 

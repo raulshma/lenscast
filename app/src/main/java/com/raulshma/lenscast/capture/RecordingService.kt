@@ -39,6 +39,7 @@ class RecordingService : Service() {
     private var startTimeMs: Long = 0
     private var recordingConfig: RecordingConfig? = null
     private var isFinalizingRecording = false
+    private var capturedRecordingAudioExclusively = false
 
     private val moshi by lazy {
         com.squareup.moshi.Moshi.Builder()
@@ -85,22 +86,27 @@ class RecordingService : Service() {
         val notification = buildNotification(
             if (audioEnabled) "Recording video and audio..." else "Recording video..."
         )
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            startForeground(
-                NOTIFICATION_ID, notification,
-                foregroundServiceTypes(audioEnabled)
-            )
-        } else {
-            startForeground(NOTIFICATION_ID, notification)
-        }
-
         val cameraService = app.cameraService
         val fileName = "VID_${DATE_FORMAT.format(Date())}.mp4"
 
-        cameraService.acquireKeepAlive()
-        cameraService.beginExclusiveSession()
-
         try {
+            if (audioEnabled) {
+                app.streamingManager.setRecordingAudioCaptureActive(true)
+                capturedRecordingAudioExclusively = true
+            }
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                startForeground(
+                    NOTIFICATION_ID, notification,
+                    foregroundServiceTypes(audioEnabled)
+                )
+            } else {
+                startForeground(NOTIFICATION_ID, notification)
+            }
+
+            cameraService.acquireKeepAlive()
+            cameraService.beginExclusiveSession()
+
             val contentValues = ContentValues().apply {
                 put(MediaStore.MediaColumns.DISPLAY_NAME, fileName)
                 put(MediaStore.MediaColumns.MIME_TYPE, "video/mp4")
@@ -272,6 +278,7 @@ class RecordingService : Service() {
         isFinalizingRecording = false
 
         val app = applicationContext as MainApplication
+        releaseExclusiveRecordingAudio(app)
         app.cameraService.endExclusiveSession()
         app.cameraService.releaseKeepAlive()
         app.cameraService.rebindUseCases()
@@ -294,11 +301,18 @@ class RecordingService : Service() {
         }
 
         val app = applicationContext as MainApplication
+        releaseExclusiveRecordingAudio(app)
         app.cameraService.endExclusiveSession()
         app.cameraService.releaseKeepAlive()
         app.cameraService.rebindUseCases()
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
+    }
+
+    private fun releaseExclusiveRecordingAudio(app: MainApplication) {
+        if (!capturedRecordingAudioExclusively) return
+        capturedRecordingAudioExclusively = false
+        app.streamingManager.setRecordingAudioCaptureActive(false)
     }
 
     private fun queryMediaSize(uri: android.net.Uri): Long {

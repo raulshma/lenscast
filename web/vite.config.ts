@@ -14,6 +14,7 @@ export default defineConfig({
     proxy: {
       '/api': 'http://localhost:8080',
       '/stream': 'http://localhost:8080',
+      '/audio': 'http://localhost:8080',
       '/snapshot': 'http://localhost:8080',
     },
   },

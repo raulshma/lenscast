@@ -1327,7 +1327,6 @@ function App() {
                       <button
                         class="btn btn-primary btn-sm w-full"
                         onClick={handleStartRecording}
-                        disabled={!st()?.streaming?.isActive}
                       >
                         Start Recording
                       </button>

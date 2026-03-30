@@ -19,6 +19,9 @@ import com.raulshma.lenscast.camera.model.WhiteBalance
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import java.security.MessageDigest
+import java.security.SecureRandom
+import javax.crypto.SecretKeyFactory
+import javax.crypto.spec.PBEKeySpec
 
 data class StreamAuthSettings(
     val enabled: Boolean = false,
@@ -26,11 +29,53 @@ data class StreamAuthSettings(
     val passwordHash: String = "",
 ) {
     companion object {
+        private const val HASH_PREFIX = "pbkdf2_sha256"
+        private const val PBKDF2_ITERATIONS = 120_000
+        private const val KEY_LENGTH_BITS = 256
+        private const val SALT_LENGTH_BYTES = 16
+
         fun hashPassword(password: String): String {
             if (password.isEmpty()) return ""
+            val salt = ByteArray(SALT_LENGTH_BYTES).also { SecureRandom().nextBytes(it) }
+            val derived = derivePassword(password, salt, PBKDF2_ITERATIONS)
+            val saltEncoded = Base64.encodeToString(salt, Base64.NO_WRAP)
+            val hashEncoded = Base64.encodeToString(derived, Base64.NO_WRAP)
+            return "$HASH_PREFIX$$PBKDF2_ITERATIONS$$saltEncoded$$hashEncoded"
+        }
+
+        fun verifyPassword(password: String, storedHash: String): Boolean {
+            if (password.isEmpty() || storedHash.isEmpty()) return false
+
+            val parts = storedHash.split("$")
+            if (parts.size == 4 && parts[0] == HASH_PREFIX) {
+                val iterations = parts[1].toIntOrNull() ?: return false
+                val salt = decodeBase64(parts[2]) ?: return false
+                val expected = decodeBase64(parts[3]) ?: return false
+                val candidate = derivePassword(password, salt, iterations)
+                return MessageDigest.isEqual(candidate, expected)
+            }
+
             val digest = MessageDigest.getInstance("SHA-256")
-            val hash = digest.digest(password.toByteArray(Charsets.UTF_8))
-            return Base64.encodeToString(hash, Base64.NO_WRAP)
+            val legacyHash = digest.digest(password.toByteArray(Charsets.UTF_8))
+            val expectedLegacy = storedHash.toByteArray(Charsets.UTF_8)
+            val candidateLegacy = Base64.encodeToString(legacyHash, Base64.NO_WRAP)
+                .toByteArray(Charsets.UTF_8)
+            return MessageDigest.isEqual(candidateLegacy, expectedLegacy)
+        }
+
+        private fun derivePassword(password: String, salt: ByteArray, iterations: Int): ByteArray {
+            val spec = PBEKeySpec(password.toCharArray(), salt, iterations, KEY_LENGTH_BITS)
+            return try {
+                SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256")
+                    .generateSecret(spec)
+                    .encoded
+            } finally {
+                spec.clearPassword()
+            }
+        }
+
+        private fun decodeBase64(value: String): ByteArray? {
+            return runCatching { Base64.decode(value, Base64.DEFAULT) }.getOrNull()
         }
     }
 }
@@ -234,12 +279,12 @@ class SettingsDataStore(private val context: Context) {
         }
     }
 
-    suspend fun saveAuthSettings(settings: StreamAuthSettings, rawPassword: String? = null) {
+    suspend fun saveAuthSettings(settings: StreamAuthSettings) {
         context.dataStore.edit { prefs ->
             prefs[Keys.AUTH_ENABLED] = if (settings.enabled) "true" else "false"
             prefs[Keys.AUTH_USERNAME] = settings.username
-            if (rawPassword != null) {
-                prefs[Keys.AUTH_PASSWORD_HASH] = StreamAuthSettings.hashPassword(rawPassword)
+            if (settings.passwordHash.isNotEmpty()) {
+                prefs[Keys.AUTH_PASSWORD_HASH] = settings.passwordHash
             }
         }
     }

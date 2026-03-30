@@ -20,13 +20,17 @@ import java.util.concurrent.atomic.AtomicInteger
 class StreamingManager(private val context: Context) {
 
     private val audioStreamingManager = AudioStreamingManager(context)
-    private var server: StreamingServer = StreamingServer(DEFAULT_PORT, context, audioStreamingManager)
+    @Volatile
+    private var currentAuthSettings = StreamAuthSettings()
+    private var server: StreamingServer = createServer(DEFAULT_PORT)
     private val isStreaming = AtomicBoolean(false)
     private val jpegQuality = AtomicInteger(DEFAULT_JPEG_QUALITY)
     private val streamAudioEnabled = AtomicBoolean(true)
     private val streamAudioBitrateKbps = AtomicInteger(DEFAULT_AUDIO_BITRATE_KBPS)
     private val streamAudioChannels = AtomicInteger(DEFAULT_AUDIO_CHANNELS)
     private val streamAudioEchoCancellation = AtomicBoolean(true)
+    @Volatile
+    private var recordingAudioCaptureActive = false
     private var currentPort: Int = DEFAULT_PORT
 
     private var lastFrameTimeMs = 0L
@@ -67,7 +71,7 @@ class StreamingManager(private val context: Context) {
                 _isServerRunning.value = false
             }
             currentPort = port
-            server = StreamingServer(port, context, audioStreamingManager)
+            server = createServer(port)
             _streamUrl.value = buildVideoUrl()
             if (_isAudioStreaming.value) {
                 _audioStreamUrl.value = buildAudioUrl()
@@ -270,6 +274,26 @@ class StreamingManager(private val context: Context) {
         }
     }
 
+    fun setRecordingAudioCaptureActive(active: Boolean) {
+        val wasActive = recordingAudioCaptureActive
+        recordingAudioCaptureActive = active
+
+        when {
+            active && !wasActive -> {
+                if (_isAudioStreaming.value) {
+                    audioStreamingManager.stop()
+                    _isAudioStreaming.value = false
+                    _audioStreamUrl.value = ""
+                    Log.d(TAG, "Paused live audio streaming so recording can capture the microphone")
+                }
+            }
+            !active && wasActive -> {
+                refreshAudioStreamingState()
+                Log.d(TAG, "Recording microphone capture finished; refreshed live audio streaming state")
+            }
+        }
+    }
+
     fun reduceBitrate(multiplier: Float) {
         val current = jpegQuality.get()
         jpegQuality.set((current * multiplier).toInt().coerceIn(10, 100))
@@ -289,7 +313,18 @@ class StreamingManager(private val context: Context) {
     }
 
     fun updateAuthSettings(settings: StreamAuthSettings) {
-        if (settings.enabled && settings.username.isNotEmpty()) {
+        currentAuthSettings = settings
+        applyAuthSettings(server, settings)
+    }
+
+    private fun createServer(port: Int): StreamingServer {
+        return StreamingServer(port, context, audioStreamingManager).also {
+            applyAuthSettings(it, currentAuthSettings)
+        }
+    }
+
+    private fun applyAuthSettings(server: StreamingServer, settings: StreamAuthSettings) {
+        if (settings.enabled && settings.username.isNotEmpty() && settings.passwordHash.isNotEmpty()) {
             server.authUsername = settings.username
             server.authPasswordHash = settings.passwordHash
         } else {
@@ -334,7 +369,7 @@ class StreamingManager(private val context: Context) {
     private fun refreshAudioStreamingState() {
         audioStreamingManager.stop()
 
-        if (!isStreaming.get() || !streamAudioEnabled.get()) {
+        if (!isStreaming.get() || !streamAudioEnabled.get() || recordingAudioCaptureActive) {
             _isAudioStreaming.value = false
             _audioStreamUrl.value = ""
             return
