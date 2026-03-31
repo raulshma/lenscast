@@ -22,8 +22,10 @@ import androidx.compose.animation.scaleOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -32,9 +34,10 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -54,16 +57,21 @@ import androidx.compose.material.icons.filled.HdrOn
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Iso
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
-import androidx.compose.material.icons.filled.WbSunny
 import androidx.compose.material.icons.filled.Wifi
+import androidx.compose.material.icons.filled.WbSunny
 import androidx.compose.material.icons.filled.ZoomIn
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
@@ -71,14 +79,15 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -88,10 +97,11 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -113,6 +123,15 @@ import com.raulshma.lenscast.core.ThermalState
 import com.raulshma.lenscast.ui.theme.LensOrange
 import com.raulshma.lenscast.ui.theme.LensRed
 import kotlinx.coroutines.launch
+
+private val OverlayScrim = Color(0xB3000000)
+private val OverlayLight = Color(0x80000000)
+private val TopGradientColor = Color(0x78000000)
+private val BottomGradientColor = Color(0x78000000)
+
+private enum class QuickSettingType {
+    EXPOSURE, ISO, WHITE_BALANCE, FOCUS, ZOOM, HDR, RESOLUTION, FRAME_RATE, STABILIZATION
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -174,389 +193,498 @@ fun CameraScreen(
         }
     }
 
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text("LensCast") },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceContainer
-                ),
-                actions = {
-                    if (cameraState is CameraState.Ready) {
-                        IconButton(onClick = { viewModel.togglePreview() }) {
-                            Icon(
-                                if (showPreview) Icons.Default.Visibility else Icons.Default.VisibilityOff,
-                                contentDescription = if (showPreview) "Hide preview" else "Show preview"
-                            )
-                        }
+    when (cameraState) {
+        is CameraState.RequestPermission -> CameraPermissionRequest(
+            onRequestPermission = {
+                mediaPermissionLauncher.launch(
+                    arrayOf(Manifest.permission.CAMERA, Manifest.permission.RECORD_AUDIO)
+                )
+            }
+        )
+        is CameraState.Initializing -> CameraInitializingScreen()
+        is CameraState.Error -> ErrorDisplay(
+            message = (cameraState as CameraState.Error).message,
+            onRetry = { viewModel.retryCameraInit() }
+        )
+        is CameraState.Ready -> {
+            ImmersiveCameraView(
+                viewModel = viewModel,
+                streamStatus = streamStatus,
+                thermalState = thermalState,
+                isRecording = isRecording,
+                recordingElapsedSeconds = recordingElapsedSeconds,
+                wifiConnected = wifiConnected,
+                availableLenses = availableLenses,
+                selectedLensIndex = selectedLensIndex,
+                settings = settings,
+                showPreview = showPreview,
+                quickSettingsExpanded = quickSettingsExpanded,
+                activeSetting = activeSetting,
+                flashAlpha = flashAlpha,
+                onToggleQuickSettings = {
+                    quickSettingsExpanded = !quickSettingsExpanded
+                    if (!quickSettingsExpanded) activeSetting = null
+                },
+                onQuickSettingTap = { type ->
+                    activeSetting = if (activeSetting == type) null else type
+                },
+                onCapture = {
+                    viewModel.capturePhoto()
+                    coroutineScope.launch {
+                        flashAlpha.snapTo(1f)
+                        flashAlpha.animateTo(0f, animationSpec = tween(150))
                     }
-                    IconButton(onClick = onNavigateToGallery) {
-                        Icon(Icons.Default.Collections, contentDescription = "Gallery")
-                    }
-                    IconButton(onClick = onNavigateToCapture) {
-                        Icon(Icons.Default.Tune, contentDescription = "Capture tools")
-                    }
-                    IconButton(onClick = onNavigateToSettings) {
-                        Icon(Icons.Default.Settings, contentDescription = "Settings")
-                    }
-                }
+                },
+                onStreamToggle = { viewModel.toggleStreaming() },
+                onRecord = { viewModel.toggleRecording() },
+                onSwitchCamera = { viewModel.switchCamera() },
+                onTogglePreview = { viewModel.togglePreview() },
+                onNavigateToGallery = onNavigateToGallery,
+                onNavigateToCapture = onNavigateToCapture,
+                onNavigateToSettings = onNavigateToSettings,
+                onCopyStreamUrl = { viewModel.copyStreamUrl() },
+                onSelectLens = { viewModel.selectLens(it) },
             )
-        },
-        bottomBar = {
-            Column(
-                modifier = Modifier.navigationBarsPadding(),
-            ) {
-                if (streamStatus.isServerRunning && streamStatus.url.isNotBlank()) {
-                    StreamInfoBar(
-                        url = streamStatus.url,
-                        isStreaming = streamStatus.isActive,
-                        clientCount = streamStatus.clientCount,
-                        onCopyUrl = { viewModel.copyStreamUrl() }
-                    )
-                }
-                if (cameraState is CameraState.Ready && availableLenses.size > 1) {
-                    LensSelectorRow(
-                        lenses = availableLenses,
-                        selectedIndex = selectedLensIndex,
-                        onLensSelected = { index -> viewModel.selectLens(index) }
-                    )
-                }
-                BottomControlBar(
-                    isStreaming = streamStatus.isActive,
-                    isRecording = isRecording,
-                    onStreamToggle = { viewModel.toggleStreaming() },
-                    onCapture = {
-                        viewModel.capturePhoto()
-                        coroutineScope.launch {
-                            flashAlpha.snapTo(1f)
-                            flashAlpha.animateTo(0f, animationSpec = tween(durationMillis = 150))
-                        }
-                    },
-                    onRecord = { viewModel.toggleRecording() },
+
+            if (activeSetting != null) {
+                QuickSettingSheet(
+                    type = activeSetting!!,
+                    settings = settings,
+                    sheetState = sheetState,
+                    onDismiss = { activeSetting = null },
+                    onUpdateExposure = { viewModel.updateExposure(it) },
+                    onUpdateIso = { viewModel.updateIso(it) },
+                    onUpdateFocusMode = { viewModel.updateFocusMode(it) },
+                    onUpdateWhiteBalance = { viewModel.updateWhiteBalance(it) },
+                    onUpdateZoom = { viewModel.updateZoom(it) },
+                    onUpdateHdrMode = { viewModel.updateHdrMode(it) },
+                    onUpdateFrameRate = { viewModel.updateFrameRate(it) },
+                    onUpdateResolution = { viewModel.updateResolution(it) },
+                    onUpdateStabilization = { viewModel.updateStabilization(it) },
                 )
             }
         }
-    ) { padding ->
+        is CameraState.Idle -> {}
+    }
+}
+
+@Composable
+private fun ImmersiveCameraView(
+    viewModel: CameraViewModel,
+    streamStatus: com.raulshma.lenscast.camera.model.StreamStatus,
+    thermalState: ThermalState,
+    isRecording: Boolean,
+    recordingElapsedSeconds: Int,
+    wifiConnected: Boolean,
+    availableLenses: List<CameraLensInfo>,
+    selectedLensIndex: Int,
+    settings: CameraSettings,
+    showPreview: Boolean,
+    quickSettingsExpanded: Boolean,
+    activeSetting: QuickSettingType?,
+    flashAlpha: Animatable<Float, *>,
+    onToggleQuickSettings: () -> Unit,
+    onQuickSettingTap: (QuickSettingType) -> Unit,
+    onCapture: () -> Unit,
+    onStreamToggle: () -> Unit,
+    onRecord: () -> Unit,
+    onSwitchCamera: () -> Unit,
+    onTogglePreview: () -> Unit,
+    onNavigateToGallery: () -> Unit,
+    onNavigateToCapture: () -> Unit,
+    onNavigateToSettings: () -> Unit,
+    onCopyStreamUrl: () -> Unit,
+    onSelectLens: (Int) -> Unit,
+) {
+    Box(modifier = Modifier.fillMaxSize()) {
+        if (showPreview) {
+            CameraPreview(
+                viewModel = viewModel,
+                modifier = Modifier.fillMaxSize()
+            )
+        } else {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color(0xFF0A0A0A)),
+                contentAlignment = Alignment.Center
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Icon(
+                        imageVector = Icons.Default.VisibilityOff,
+                        contentDescription = null,
+                        modifier = Modifier.size(48.dp),
+                        tint = Color.White.copy(alpha = 0.35f)
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = "Preview Hidden",
+                        color = Color.White.copy(alpha = 0.35f),
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                }
+            }
+        }
+
+        if (flashAlpha.value > 0f) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.White.copy(alpha = flashAlpha.value))
+            )
+        }
+
         Box(
             modifier = Modifier
-                .fillMaxSize()
-                .padding(padding)
-        ) {
-            when (cameraState) {
-                is CameraState.RequestPermission -> {
-                    CameraPermissionRequest(
-                        onRequestPermission = {
-                            mediaPermissionLauncher.launch(
-                                arrayOf(
-                                    Manifest.permission.CAMERA,
-                                    Manifest.permission.RECORD_AUDIO,
-                                )
-                            )
-                        }
+                .fillMaxWidth()
+                .height(120.dp)
+                .align(Alignment.TopCenter)
+                .background(
+                    Brush.verticalGradient(
+                        colors = listOf(TopGradientColor, Color.Transparent)
                     )
-                }
-                is CameraState.Ready -> {
-                    Box(modifier = Modifier.fillMaxSize()) {
-                        if (showPreview) {
-                            CameraPreview(
-                                viewModel = viewModel,
-                                modifier = Modifier.fillMaxSize()
-                            )
-                        }
+                )
+        )
 
-                        if (!showPreview) {
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .background(Color.Black),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Column(
-                                    horizontalAlignment = Alignment.CenterHorizontally,
-                                    verticalArrangement = Arrangement.Center
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.VisibilityOff,
-                                        contentDescription = null,
-                                        modifier = Modifier.size(48.dp),
-                                        tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f)
-                                    )
-                                    Spacer(modifier = Modifier.height(8.dp))
-                                    Text(
-                                        text = "Preview Hidden",
-                                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f),
-                                        style = MaterialTheme.typography.bodyMedium
-                                    )
-                                }
-                            }
-                        }
-
-                        if (flashAlpha.value > 0f) {
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .background(Color.White.copy(alpha = flashAlpha.value))
-                            )
-                        }
-
-                        ProQuickSettingsBar(
-                            settings = settings,
-                            expanded = quickSettingsExpanded,
-                            onToggleExpand = {
-                                quickSettingsExpanded = !quickSettingsExpanded
-                                if (!quickSettingsExpanded) activeSetting = null
-                            },
-                            onSettingTap = { type ->
-                                if (activeSetting == type) {
-                                    activeSetting = null
-                                } else {
-                                    activeSetting = type
-                                }
-                            },
-                            activeSetting = activeSetting,
-                            modifier = Modifier.align(Alignment.CenterEnd)
-                        )
-                    }
-                }
-                is CameraState.Error -> {
-                    ErrorDisplay(
-                        message = (cameraState as CameraState.Error).message,
-                        onRetry = {
-                            viewModel.retryCameraInit()
-                        }
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(180.dp)
+                .align(Alignment.BottomCenter)
+                .background(
+                    Brush.verticalGradient(
+                        colors = listOf(Color.Transparent, BottomGradientColor)
                     )
-                }
-                is CameraState.Initializing -> {
-                    Box(
-                        modifier = Modifier.fillMaxSize(),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Column(
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.Center
-                        ) {
-                            androidx.compose.material3.CircularProgressIndicator(
-                                modifier = Modifier.size(48.dp),
-                                color = MaterialTheme.colorScheme.primary
-                            )
-                            Spacer(modifier = Modifier.height(16.dp))
-                            Text("Initializing camera...", style = MaterialTheme.typography.bodyLarge)
-                        }
-                    }
-                }
-                is CameraState.Idle -> {
-                }
-            }
-
-            if (streamStatus.isActive) {
-                StreamIndicator(
-                    modifier = Modifier
-                        .align(Alignment.TopStart)
-                        .padding(16.dp)
                 )
-            }
+        )
 
-            if (isRecording) {
-                RecordingIndicator(
-                    elapsedSeconds = recordingElapsedSeconds,
-                    modifier = Modifier
-                        .align(Alignment.TopStart)
-                        .padding(start = 16.dp, top = if (streamStatus.isActive) 44.dp else 16.dp)
-                )
-            }
+        CameraTopOverlay(
+            streamStatus = streamStatus,
+            isRecording = isRecording,
+            recordingElapsedSeconds = recordingElapsedSeconds,
+            showPreview = showPreview,
+            onSwitchCamera = onSwitchCamera,
+            onTogglePreview = onTogglePreview,
+            onNavigateToGallery = onNavigateToGallery,
+            onNavigateToCapture = onNavigateToCapture,
+            onNavigateToSettings = onNavigateToSettings,
+            onToggleQuickSettings = onToggleQuickSettings,
+            modifier = Modifier
+                .align(Alignment.TopStart)
+                .fillMaxWidth()
+                .statusBarsPadding()
+                .padding(horizontal = 8.dp, vertical = 8.dp)
+        )
 
-            if (cameraState is CameraState.Ready) {
-                IconButton(
-                    onClick = { viewModel.switchCamera() },
-                    modifier = Modifier
-                        .align(Alignment.TopEnd)
-                        .padding(16.dp)
+        if (!wifiConnected && streamStatus.isServerRunning) {
+            Surface(
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .statusBarsPadding()
+                    .padding(top = 56.dp),
+                color = LensOrange.copy(alpha = 0.92f),
+                shape = RoundedCornerShape(8.dp)
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Surface(
-                        color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.92f),
-                        shape = CircleShape
-                    ) {
-                        Icon(
-                            Icons.Default.Cameraswitch,
-                            contentDescription = "Switch camera",
-                            tint = MaterialTheme.colorScheme.onSurface,
-                            modifier = Modifier.padding(8.dp)
-                        )
-                    }
-                }
-            }
-
-            if (thermalState != ThermalState.NORMAL
-                && thermalState != ThermalState.LIGHT) {
-                ThermalWarningOverlay(
-                    thermalState = thermalState,
-                    modifier = Modifier
-                        .align(Alignment.BottomCenter)
-                        .padding(bottom = 16.dp)
-                )
-            }
-
-            if (streamStatus.isServerRunning && !wifiConnected) {
-                Surface(
-                    modifier = Modifier
-                        .align(Alignment.TopCenter)
-                        .padding(top = 16.dp),
-                    color = LensOrange.copy(alpha = 0.92f),
-                    shape = MaterialTheme.shapes.small
-                ) {
+                    Icon(
+                        Icons.Default.Wifi,
+                        contentDescription = null,
+                        modifier = Modifier.size(14.dp),
+                        tint = Color.White
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
                     Text(
-                        text = if (streamStatus.isActive) {
-                            "Not on WiFi - stream may not be reachable"
-                        } else {
-                            "Not on WiFi - web server may not be reachable"
-                        },
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+                        text = if (streamStatus.isActive) "Not on WiFi"
+                        else "Not on WiFi — server may not be reachable",
                         style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSecondary
+                        color = Color.White
+                    )
+                }
+            }
+        }
+
+        CameraBottomOverlay(
+            streamStatus = streamStatus,
+            availableLenses = availableLenses,
+            selectedLensIndex = selectedLensIndex,
+            settings = settings,
+            quickSettingsExpanded = quickSettingsExpanded,
+            activeSetting = activeSetting,
+            isRecording = isRecording,
+            onStreamToggle = onStreamToggle,
+            onCapture = onCapture,
+            onRecord = onRecord,
+            onCopyStreamUrl = onCopyStreamUrl,
+            onSelectLens = onSelectLens,
+            onToggleQuickSettings = onToggleQuickSettings,
+            onQuickSettingTap = onQuickSettingTap,
+            modifier = Modifier
+                .align(Alignment.BottomStart)
+                .fillMaxWidth()
+        )
+
+        if (thermalState != ThermalState.NORMAL && thermalState != ThermalState.LIGHT) {
+            ThermalWarningOverlay(
+                thermalState = thermalState,
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .navigationBarsPadding()
+                    .padding(bottom = 200.dp)
+            )
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun CameraTopOverlay(
+    streamStatus: com.raulshma.lenscast.camera.model.StreamStatus,
+    isRecording: Boolean,
+    recordingElapsedSeconds: Int,
+    showPreview: Boolean,
+    onSwitchCamera: () -> Unit,
+    onTogglePreview: () -> Unit,
+    onNavigateToGallery: () -> Unit,
+    onNavigateToCapture: () -> Unit,
+    onNavigateToSettings: () -> Unit,
+    onToggleQuickSettings: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    var menuExpanded by remember { mutableStateOf(false) }
+
+    Row(
+        modifier = modifier,
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.Top
+    ) {
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(2.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            CameraControlButton(
+                icon = Icons.Default.Cameraswitch,
+                contentDescription = "Switch camera",
+                onClick = onSwitchCamera
+            )
+            if (streamStatus.isActive) {
+                StreamIndicator()
+            }
+            if (isRecording) {
+                RecordingIndicator(elapsedSeconds = recordingElapsedSeconds)
+            }
+        }
+
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(2.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            CameraControlButton(
+                icon = if (showPreview) Icons.Default.Visibility else Icons.Default.VisibilityOff,
+                contentDescription = if (showPreview) "Hide preview" else "Show preview",
+                onClick = onTogglePreview
+            )
+            CameraControlButton(
+                icon = Icons.Default.Collections,
+                contentDescription = "Gallery",
+                onClick = onNavigateToGallery
+            )
+            Box {
+                CameraControlButton(
+                    icon = Icons.Default.MoreVert,
+                    contentDescription = "More options",
+                    onClick = { menuExpanded = true }
+                )
+                DropdownMenu(
+                    expanded = menuExpanded,
+                    onDismissRequest = { menuExpanded = false },
+                    containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    shape = RoundedCornerShape(16.dp),
+                ) {
+                    DropdownMenuItem(
+                        text = {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(
+                                    Icons.Default.Tune,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(18.dp),
+                                    tint = MaterialTheme.colorScheme.onSurface
+                                )
+                                Spacer(modifier = Modifier.width(12.dp))
+                                Text(
+                                    "Camera controls",
+                                    style = MaterialTheme.typography.bodyMedium
+                                )
+                            }
+                        },
+                        onClick = {
+                            menuExpanded = false
+                            onToggleQuickSettings()
+                        }
+                    )
+                    DropdownMenuItem(
+                        text = {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(
+                                    Icons.Default.CameraAlt,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(18.dp),
+                                    tint = MaterialTheme.colorScheme.onSurface
+                                )
+                                Spacer(modifier = Modifier.width(12.dp))
+                                Text(
+                                    "Capture tools",
+                                    style = MaterialTheme.typography.bodyMedium
+                                )
+                            }
+                        },
+                        onClick = {
+                            menuExpanded = false
+                            onNavigateToCapture()
+                        }
+                    )
+                    DropdownMenuItem(
+                        text = {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(
+                                    Icons.Default.Settings,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(18.dp),
+                                    tint = MaterialTheme.colorScheme.onSurface
+                                )
+                                Spacer(modifier = Modifier.width(12.dp))
+                                Text(
+                                    "Settings",
+                                    style = MaterialTheme.typography.bodyMedium
+                                )
+                            }
+                        },
+                        onClick = {
+                            menuExpanded = false
+                            onNavigateToSettings()
+                        }
                     )
                 }
             }
         }
     }
+}
 
-    if (activeSetting != null && cameraState is CameraState.Ready) {
-        QuickSettingSheet(
-            type = activeSetting!!,
-            settings = settings,
-            sheetState = sheetState,
-            onDismiss = { activeSetting = null },
-            onUpdateExposure = { viewModel.updateExposure(it) },
-            onUpdateIso = { viewModel.updateIso(it) },
-            onUpdateFocusMode = { viewModel.updateFocusMode(it) },
-            onUpdateWhiteBalance = { viewModel.updateWhiteBalance(it) },
-            onUpdateZoom = { viewModel.updateZoom(it) },
-            onUpdateHdrMode = { viewModel.updateHdrMode(it) },
-            onUpdateFrameRate = { viewModel.updateFrameRate(it) },
-            onUpdateResolution = { viewModel.updateResolution(it) },
-            onUpdateStabilization = { viewModel.updateStabilization(it) },
+@Composable
+private fun CameraControlButton(
+    icon: ImageVector,
+    contentDescription: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    tint: Color = Color.White,
+) {
+    Surface(
+        modifier = modifier.size(40.dp),
+        color = OverlayScrim,
+        shape = CircleShape,
+        onClick = onClick
+    ) {
+        Box(contentAlignment = Alignment.Center) {
+            Icon(
+                imageVector = icon,
+                contentDescription = contentDescription,
+                tint = tint,
+                modifier = Modifier.size(22.dp)
+            )
+        }
+    }
+}
+
+@Composable
+private fun CameraBottomOverlay(
+    streamStatus: com.raulshma.lenscast.camera.model.StreamStatus,
+    availableLenses: List<CameraLensInfo>,
+    selectedLensIndex: Int,
+    settings: CameraSettings,
+    quickSettingsExpanded: Boolean,
+    activeSetting: QuickSettingType?,
+    isRecording: Boolean,
+    onStreamToggle: () -> Unit,
+    onCapture: () -> Unit,
+    onRecord: () -> Unit,
+    onCopyStreamUrl: () -> Unit,
+    onSelectLens: (Int) -> Unit,
+    onToggleQuickSettings: () -> Unit,
+    onQuickSettingTap: (QuickSettingType) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Column(
+        modifier = modifier.navigationBarsPadding(),
+        verticalArrangement = Arrangement.Bottom
+    ) {
+        AnimatedVisibility(
+            visible = quickSettingsExpanded,
+            enter = fadeIn(tween(200)) + androidx.compose.animation.expandVertically(
+                expandFrom = Alignment.Bottom,
+                animationSpec = spring(stiffness = Spring.StiffnessMedium)
+            ),
+            exit = fadeOut(tween(150)) + androidx.compose.animation.shrinkVertically(
+                shrinkTowards = Alignment.Bottom,
+                animationSpec = tween(150)
+            )
+        ) {
+            HorizontalQuickSettingsBar(
+                settings = settings,
+                activeSetting = activeSetting,
+                onSettingTap = onQuickSettingTap,
+            )
+        }
+
+        if (streamStatus.isServerRunning && streamStatus.url.isNotBlank()) {
+            StreamInfoBar(
+                url = streamStatus.url,
+                isStreaming = streamStatus.isActive,
+                clientCount = streamStatus.clientCount,
+                onCopyUrl = onCopyStreamUrl
+            )
+        }
+
+        if (availableLenses.size > 1) {
+            LensSelectorRow(
+                lenses = availableLenses,
+                selectedIndex = selectedLensIndex,
+                onLensSelected = onSelectLens
+            )
+        }
+
+        ShutterRow(
+            isStreaming = streamStatus.isActive,
+            isRecording = isRecording,
+            quickSettingsExpanded = quickSettingsExpanded,
+            onStreamToggle = onStreamToggle,
+            onCapture = onCapture,
+            onRecord = onRecord,
+            onToggleQuickSettings = onToggleQuickSettings,
         )
     }
 }
 
-private enum class QuickSettingType {
-    EXPOSURE, ISO, WHITE_BALANCE, FOCUS, ZOOM, HDR, RESOLUTION, FRAME_RATE, STABILIZATION
-}
-
 @Composable
-private fun ProQuickSettingsBar(
-    settings: CameraSettings,
-    expanded: Boolean,
-    onToggleExpand: () -> Unit,
-    onSettingTap: (QuickSettingType) -> Unit,
-    activeSetting: QuickSettingType?,
-    modifier: Modifier = Modifier,
+private fun ShutterRow(
+    isStreaming: Boolean,
+    isRecording: Boolean,
+    quickSettingsExpanded: Boolean,
+    onStreamToggle: () -> Unit,
+    onCapture: () -> Unit,
+    onRecord: () -> Unit,
+    onToggleQuickSettings: () -> Unit,
 ) {
-    Box(modifier = modifier) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 24.dp, vertical = 20.dp),
+        horizontalArrangement = Arrangement.SpaceEvenly,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
         AnimatedVisibility(
-            visible = expanded,
-            enter = fadeIn(tween(200)) + slideInHorizontally(
-                initialOffsetX = { it / 2 },
-                animationSpec = spring(stiffness = Spring.StiffnessMedium)
-            ),
-            exit = fadeOut(tween(150)) + slideOutHorizontally(
-                targetOffsetX = { it / 2 },
-                animationSpec = tween(150)
-            )
-        ) {
-            Column(
-                modifier = Modifier
-                    .width(52.dp)
-                    .background(
-                        MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.92f),
-                        RoundedCornerShape(26.dp)
-                    )
-                    .padding(vertical = 8.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(2.dp)
-            ) {
-                Spacer(modifier = Modifier.height(4.dp))
-                QuickSettingChip(
-                    icon = { Icon(Icons.Default.Exposure, contentDescription = null, modifier = Modifier.size(18.dp)) },
-                    label = "${settings.exposureCompensation}",
-                    isActive = activeSetting == QuickSettingType.EXPOSURE,
-                    onClick = { onSettingTap(QuickSettingType.EXPOSURE) }
-                )
-                QuickSettingChip(
-                    icon = { Icon(Icons.Default.Iso, contentDescription = null, modifier = Modifier.size(18.dp)) },
-                    label = settings.iso?.toString() ?: "A",
-                    isActive = activeSetting == QuickSettingType.ISO,
-                    onClick = { onSettingTap(QuickSettingType.ISO) }
-                )
-                QuickSettingChip(
-                    icon = { Icon(Icons.Default.WbSunny, contentDescription = null, modifier = Modifier.size(18.dp)) },
-                    label = when (settings.whiteBalance) {
-                        WhiteBalance.AUTO -> "AWB"
-                        WhiteBalance.MANUAL -> "${settings.colorTemperature ?: 5500}K"
-                        else -> settings.whiteBalance.name.take(3)
-                    },
-                    isActive = activeSetting == QuickSettingType.WHITE_BALANCE,
-                    onClick = { onSettingTap(QuickSettingType.WHITE_BALANCE) }
-                )
-                QuickSettingChip(
-                    icon = { Icon(Icons.Default.Bolt, contentDescription = null, modifier = Modifier.size(18.dp)) },
-                    label = settings.focusMode.name.take(3),
-                    isActive = activeSetting == QuickSettingType.FOCUS,
-                    onClick = { onSettingTap(QuickSettingType.FOCUS) }
-                )
-                QuickSettingChip(
-                    icon = { Icon(Icons.Default.ZoomIn, contentDescription = null, modifier = Modifier.size(18.dp)) },
-                    label = "${String.format("%.1f", settings.zoomRatio)}x",
-                    isActive = activeSetting == QuickSettingType.ZOOM,
-                    onClick = { onSettingTap(QuickSettingType.ZOOM) }
-                )
-                QuickSettingChip(
-                    icon = { Icon(Icons.Default.HdrOn, contentDescription = null, modifier = Modifier.size(18.dp)) },
-                    label = settings.hdrMode.name,
-                    isActive = activeSetting == QuickSettingType.HDR,
-                    onClick = { onSettingTap(QuickSettingType.HDR) }
-                )
-                QuickSettingChip(
-                    icon = { Icon(Icons.Default.Image, contentDescription = null, modifier = Modifier.size(18.dp)) },
-                    label = settings.resolution.name.replace("_", " ").take(5),
-                    isActive = activeSetting == QuickSettingType.RESOLUTION,
-                    onClick = { onSettingTap(QuickSettingType.RESOLUTION) }
-                )
-                QuickSettingChip(
-                    icon = { Icon(Icons.Default.Speed, contentDescription = null, modifier = Modifier.size(18.dp)) },
-                    label = "${settings.frameRate}",
-                    isActive = activeSetting == QuickSettingType.FRAME_RATE,
-                    onClick = { onSettingTap(QuickSettingType.FRAME_RATE) }
-                )
-                QuickSettingChip(
-                    icon = { Icon(Icons.Default.Handyman, contentDescription = null, modifier = Modifier.size(18.dp)) },
-                    label = if (settings.stabilization) "OIS" else "OFF",
-                    isActive = activeSetting == QuickSettingType.STABILIZATION,
-                    onClick = { onSettingTap(QuickSettingType.STABILIZATION) }
-                )
-                Spacer(modifier = Modifier.height(2.dp))
-                Surface(
-                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.92f),
-                    shape = CircleShape,
-                    modifier = Modifier.padding(vertical = 2.dp)
-                ) {
-                    IconButton(
-                        onClick = onToggleExpand,
-                        modifier = Modifier.size(32.dp)
-                    ) {
-                        Icon(
-                            Icons.Default.Flip,
-                            contentDescription = "Collapse",
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(16.dp)
-                        )
-                    }
-                }
-                Spacer(modifier = Modifier.height(4.dp))
-            }
-        }
-
-        AnimatedVisibility(
-            visible = !expanded,
+            visible = !quickSettingsExpanded,
             enter = fadeIn(tween(200)) + scaleIn(
                 initialScale = 0.8f,
                 animationSpec = spring(stiffness = Spring.StiffnessMedium)
@@ -567,26 +695,191 @@ private fun ProQuickSettingsBar(
             )
         ) {
             Surface(
-                color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.86f),
+                modifier = Modifier.size(52.dp),
+                color = if (isStreaming) Color(0xFFD32F2F) else OverlayScrim,
                 shape = CircleShape,
-                modifier = Modifier.padding(4.dp)
+                onClick = onStreamToggle
             ) {
-                IconButton(onClick = onToggleExpand) {
+                Box(contentAlignment = Alignment.Center) {
                     Icon(
-                        Icons.Default.Flip,
-                        contentDescription = "Quick settings",
-                        tint = MaterialTheme.colorScheme.onSurface,
-                        modifier = Modifier.size(20.dp)
+                        imageVector = if (isStreaming) Icons.Default.Stop else Icons.Default.Videocam,
+                        contentDescription = if (isStreaming) "Stop streaming" else "Start streaming",
+                        tint = Color.White,
+                        modifier = Modifier.size(26.dp)
                     )
                 }
+            }
+        }
+
+        AnimatedVisibility(
+            visible = quickSettingsExpanded,
+            enter = fadeIn(tween(150)),
+            exit = fadeOut(tween(100))
+        ) {
+            Surface(
+                modifier = Modifier.size(52.dp),
+                color = OverlayScrim,
+                shape = CircleShape,
+                onClick = onToggleQuickSettings
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        imageVector = Icons.Default.Flip,
+                        contentDescription = "Collapse quick settings",
+                        tint = Color.White.copy(alpha = 0.7f),
+                        modifier = Modifier.size(24.dp)
+                    )
+                }
+            }
+        }
+
+        ShutterButton(onClick = onCapture)
+
+        Surface(
+            modifier = Modifier.size(52.dp),
+            color = if (isRecording) Color(0xFFD32F2F) else OverlayScrim,
+            shape = CircleShape,
+            onClick = onRecord
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                Icon(
+                    imageVector = if (isRecording) Icons.Default.Stop else Icons.Default.FiberManualRecord,
+                    contentDescription = if (isRecording) "Stop recording" else "Record video",
+                    tint = if (isRecording) Color.White else Color(0xFFD32F2F),
+                    modifier = Modifier.size(26.dp)
+                )
             }
         }
     }
 }
 
 @Composable
-private fun QuickSettingChip(
-    icon: @Composable () -> Unit,
+private fun ShutterButton(
+    onClick: () -> Unit,
+) {
+    val scale = remember { Animatable(1f) }
+    val coroutineScope = rememberCoroutineScope()
+
+    Box(
+        modifier = Modifier
+            .size(76.dp)
+            .border(4.dp, Color.White, CircleShape)
+            .padding(4.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Surface(
+            modifier = Modifier
+                .size(60.dp)
+                .graphicsLayer {
+                    scaleX = scale.value
+                    scaleY = scale.value
+                },
+            color = Color.White,
+            shape = CircleShape,
+            onClick = {
+                coroutineScope.launch {
+                    scale.snapTo(0.85f)
+                    scale.animateTo(1f, spring(stiffness = Spring.StiffnessHigh))
+                }
+                onClick()
+            }
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                Icon(
+                    imageVector = Icons.Default.Camera,
+                    contentDescription = "Capture photo",
+                    tint = Color(0xFF1A1A1A),
+                    modifier = Modifier.size(28.dp)
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun HorizontalQuickSettingsBar(
+    settings: CameraSettings,
+    activeSetting: QuickSettingType?,
+    onSettingTap: (QuickSettingType) -> Unit,
+) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        color = OverlayScrim,
+        shape = RoundedCornerShape(0.dp)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState())
+                .padding(horizontal = 12.dp, vertical = 10.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            QuickSettingPill(
+                icon = Icons.Default.Exposure,
+                label = "${settings.exposureCompensation}",
+                isActive = activeSetting == QuickSettingType.EXPOSURE,
+                onClick = { onSettingTap(QuickSettingType.EXPOSURE) }
+            )
+            QuickSettingPill(
+                icon = Icons.Default.Iso,
+                label = settings.iso?.toString() ?: "A",
+                isActive = activeSetting == QuickSettingType.ISO,
+                onClick = { onSettingTap(QuickSettingType.ISO) }
+            )
+            QuickSettingPill(
+                icon = Icons.Default.WbSunny,
+                label = when (settings.whiteBalance) {
+                    WhiteBalance.AUTO -> "AWB"
+                    WhiteBalance.MANUAL -> "${settings.colorTemperature ?: 5500}K"
+                    else -> settings.whiteBalance.name.take(3)
+                },
+                isActive = activeSetting == QuickSettingType.WHITE_BALANCE,
+                onClick = { onSettingTap(QuickSettingType.WHITE_BALANCE) }
+            )
+            QuickSettingPill(
+                icon = Icons.Default.Bolt,
+                label = settings.focusMode.name.take(3),
+                isActive = activeSetting == QuickSettingType.FOCUS,
+                onClick = { onSettingTap(QuickSettingType.FOCUS) }
+            )
+            QuickSettingPill(
+                icon = Icons.Default.ZoomIn,
+                label = "${String.format("%.1f", settings.zoomRatio)}x",
+                isActive = activeSetting == QuickSettingType.ZOOM,
+                onClick = { onSettingTap(QuickSettingType.ZOOM) }
+            )
+            QuickSettingPill(
+                icon = Icons.Default.HdrOn,
+                label = settings.hdrMode.name,
+                isActive = activeSetting == QuickSettingType.HDR,
+                onClick = { onSettingTap(QuickSettingType.HDR) }
+            )
+            QuickSettingPill(
+                icon = Icons.Default.Image,
+                label = settings.resolution.name.replace("_", " ").take(5),
+                isActive = activeSetting == QuickSettingType.RESOLUTION,
+                onClick = { onSettingTap(QuickSettingType.RESOLUTION) }
+            )
+            QuickSettingPill(
+                icon = Icons.Default.Speed,
+                label = "${settings.frameRate}",
+                isActive = activeSetting == QuickSettingType.FRAME_RATE,
+                onClick = { onSettingTap(QuickSettingType.FRAME_RATE) }
+            )
+            QuickSettingPill(
+                icon = Icons.Default.Handyman,
+                label = if (settings.stabilization) "OIS" else "OFF",
+                isActive = activeSetting == QuickSettingType.STABILIZATION,
+                onClick = { onSettingTap(QuickSettingType.STABILIZATION) }
+            )
+        }
+    }
+}
+
+@Composable
+private fun QuickSettingPill(
+    icon: ImageVector,
     label: String,
     isActive: Boolean,
     onClick: () -> Unit,
@@ -594,43 +887,46 @@ private fun QuickSettingChip(
     val scale = remember { Animatable(1f) }
     val coroutineScope = rememberCoroutineScope()
     val bgColor by animateColorAsState(
-        targetValue = if (isActive) MaterialTheme.colorScheme.primary.copy(alpha = 0.82f)
-        else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.92f),
+        targetValue = if (isActive) MaterialTheme.colorScheme.primary.copy(alpha = 0.9f)
+        else OverlayLight,
         animationSpec = tween(200)
     )
 
-    Column(
-        modifier = Modifier
-            .clip(RoundedCornerShape(12.dp))
-            .background(bgColor)
-            .clickable {
-                coroutineScope.launch {
-                    scale.snapTo(0.9f)
-                    scale.animateTo(1f, spring(stiffness = Spring.StiffnessHigh))
-                }
-                onClick()
+    Surface(
+        color = bgColor,
+        shape = RoundedCornerShape(16.dp),
+        onClick = {
+            coroutineScope.launch {
+                scale.snapTo(0.92f)
+                scale.animateTo(1f, spring(stiffness = Spring.StiffnessHigh))
             }
-            .padding(horizontal = 4.dp, vertical = 4.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
+            onClick()
+        }
     ) {
-        Box(
+        Row(
             modifier = Modifier
                 .graphicsLayer {
                     scaleX = scale.value
                     scaleY = scale.value
-                },
-            contentAlignment = Alignment.Center
+                }
+                .padding(horizontal = 10.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
         ) {
-            icon()
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                modifier = Modifier.size(14.dp),
+                tint = if (isActive) MaterialTheme.colorScheme.onPrimary else Color.White.copy(alpha = 0.9f)
+            )
+            Text(
+                text = label,
+                color = if (isActive) MaterialTheme.colorScheme.onPrimary else Color.White.copy(alpha = 0.85f),
+                fontSize = 11.sp,
+                fontWeight = if (isActive) FontWeight.Bold else FontWeight.Normal,
+                maxLines = 1
+            )
         }
-        Text(
-            text = label,
-            color = if (isActive) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface,
-            fontSize = 8.sp,
-            fontWeight = if (isActive) FontWeight.Bold else FontWeight.Normal,
-            maxLines = 1,
-            textAlign = TextAlign.Center
-        )
     }
 }
 
@@ -661,7 +957,7 @@ private fun QuickSettingSheet(
         },
         sheetState = sheetState,
         containerColor = MaterialTheme.colorScheme.surfaceContainer,
-        shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
+        shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
     ) {
         Column(
             modifier = Modifier
@@ -688,65 +984,49 @@ private fun QuickSettingSheet(
             Spacer(modifier = Modifier.height(20.dp))
 
             when (type) {
-                QuickSettingType.EXPOSURE -> {
-                    ProSliderControl(
-                        value = settings.exposureCompensation.toFloat(),
-                        range = -12f..12f,
-                        label = "${settings.exposureCompensation}",
-                        onValueChange = { onUpdateExposure(it.toInt()) }
-                    )
-                }
-                QuickSettingType.ISO -> {
-                    ProChipSelector(
-                        options = listOf("Auto", "100", "200", "400", "800", "1600", "3200"),
-                        selected = settings.iso?.toString() ?: "Auto",
-                        onSelect = onUpdateIso
-                    )
-                }
-                QuickSettingType.WHITE_BALANCE -> {
-                    ProChipSelector(
-                        options = WhiteBalance.entries.map { it.name },
-                        selected = settings.whiteBalance.name,
-                        onSelect = onUpdateWhiteBalance
-                    )
-                }
-                QuickSettingType.FOCUS -> {
-                    ProChipSelector(
-                        options = FocusMode.entries.map { it.name },
-                        selected = settings.focusMode.name,
-                        onSelect = onUpdateFocusMode
-                    )
-                }
-                QuickSettingType.ZOOM -> {
-                    ProSliderControl(
-                        value = settings.zoomRatio,
-                        range = 0.5f..10f,
-                        label = "${String.format("%.1f", settings.zoomRatio)}x",
-                        onValueChange = onUpdateZoom
-                    )
-                }
-                QuickSettingType.HDR -> {
-                    ProChipSelector(
-                        options = HdrMode.entries.map { it.name },
-                        selected = settings.hdrMode.name,
-                        onSelect = onUpdateHdrMode
-                    )
-                }
-                QuickSettingType.RESOLUTION -> {
-                    ProChipSelector(
-                        options = Resolution.entries.map { it.name },
-                        selected = settings.resolution.name,
-                        onSelect = onUpdateResolution
-                    )
-                }
-                QuickSettingType.FRAME_RATE -> {
-                    ProSliderControl(
-                        value = settings.frameRate.toFloat(),
-                        range = 15f..60f,
-                        label = "${settings.frameRate} fps",
-                        onValueChange = { onUpdateFrameRate(it.toInt()) }
-                    )
-                }
+                QuickSettingType.EXPOSURE -> ProSliderControl(
+                    value = settings.exposureCompensation.toFloat(),
+                    range = -12f..12f,
+                    label = "${settings.exposureCompensation}",
+                    onValueChange = { onUpdateExposure(it.toInt()) }
+                )
+                QuickSettingType.ISO -> ProChipSelector(
+                    options = listOf("Auto", "100", "200", "400", "800", "1600", "3200"),
+                    selected = settings.iso?.toString() ?: "Auto",
+                    onSelect = onUpdateIso
+                )
+                QuickSettingType.WHITE_BALANCE -> ProChipSelector(
+                    options = WhiteBalance.entries.map { it.name },
+                    selected = settings.whiteBalance.name,
+                    onSelect = onUpdateWhiteBalance
+                )
+                QuickSettingType.FOCUS -> ProChipSelector(
+                    options = FocusMode.entries.map { it.name },
+                    selected = settings.focusMode.name,
+                    onSelect = onUpdateFocusMode
+                )
+                QuickSettingType.ZOOM -> ProSliderControl(
+                    value = settings.zoomRatio,
+                    range = 0.5f..10f,
+                    label = "${String.format("%.1f", settings.zoomRatio)}x",
+                    onValueChange = onUpdateZoom
+                )
+                QuickSettingType.HDR -> ProChipSelector(
+                    options = HdrMode.entries.map { it.name },
+                    selected = settings.hdrMode.name,
+                    onSelect = onUpdateHdrMode
+                )
+                QuickSettingType.RESOLUTION -> ProChipSelector(
+                    options = Resolution.entries.map { it.name },
+                    selected = settings.resolution.name,
+                    onSelect = onUpdateResolution
+                )
+                QuickSettingType.FRAME_RATE -> ProSliderControl(
+                    value = settings.frameRate.toFloat(),
+                    range = 15f..60f,
+                    label = "${settings.frameRate} fps",
+                    onValueChange = { onUpdateFrameRate(it.toInt()) }
+                )
                 QuickSettingType.STABILIZATION -> {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -758,10 +1038,10 @@ private fun QuickSettingSheet(
                             color = MaterialTheme.colorScheme.onSurface,
                             style = MaterialTheme.typography.bodyLarge
                         )
-                        androidx.compose.material3.Switch(
+                        Switch(
                             checked = settings.stabilization,
                             onCheckedChange = onUpdateStabilization,
-                            colors = androidx.compose.material3.SwitchDefaults.colors(
+                            colors = SwitchDefaults.colors(
                                 checkedTrackColor = MaterialTheme.colorScheme.primary,
                                 checkedThumbColor = MaterialTheme.colorScheme.onPrimary
                             )
@@ -793,7 +1073,7 @@ private fun ProSliderControl(
             value = value,
             onValueChange = onValueChange,
             valueRange = range,
-            colors = androidx.compose.material3.SliderDefaults.colors(
+            colors = SliderDefaults.colors(
                 activeTrackColor = MaterialTheme.colorScheme.primary,
                 thumbColor = MaterialTheme.colorScheme.primary,
                 inactiveTrackColor = MaterialTheme.colorScheme.surfaceVariant
@@ -832,11 +1112,13 @@ private fun ProChipSelector(
         options.forEach { option ->
             val isSelected = option == selected
             val bgColor by animateColorAsState(
-                targetValue = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
+                targetValue = if (isSelected) MaterialTheme.colorScheme.primary
+                else MaterialTheme.colorScheme.surfaceVariant,
                 animationSpec = tween(200)
             )
             val textColor by animateColorAsState(
-                targetValue = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface,
+                targetValue = if (isSelected) MaterialTheme.colorScheme.onPrimary
+                else MaterialTheme.colorScheme.onSurface,
                 animationSpec = tween(200)
             )
 
@@ -861,33 +1143,58 @@ private fun ProChipSelector(
 private fun CameraPermissionRequest(
     onRequestPermission: () -> Unit,
 ) {
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(32.dp),
-        verticalArrangement = Arrangement.Center,
-        horizontalAlignment = Alignment.CenterHorizontally
+    Surface(
+        modifier = Modifier.fillMaxSize(),
+        color = MaterialTheme.colorScheme.background
     ) {
-        Icon(
-            imageVector = Icons.Default.CameraAlt,
-            contentDescription = null,
-            modifier = Modifier.size(64.dp),
-            tint = MaterialTheme.colorScheme.primary
-        )
-        Spacer(modifier = Modifier.height(16.dp))
-        Text(
-            text = "Camera permission is required",
-            style = MaterialTheme.typography.headlineSmall
-        )
-        Spacer(modifier = Modifier.height(8.dp))
-        Text(
-            text = "LensCast uses the camera for video and the microphone for live audio and recordings.",
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-        Spacer(modifier = Modifier.height(24.dp))
-        Button(onClick = onRequestPermission) {
-            Text("Grant Permission")
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(32.dp),
+            verticalArrangement = Arrangement.Center,
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Surface(
+                modifier = Modifier.size(80.dp),
+                color = MaterialTheme.colorScheme.primaryContainer,
+                shape = CircleShape
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        imageVector = Icons.Default.CameraAlt,
+                        contentDescription = null,
+                        modifier = Modifier.size(40.dp),
+                        tint = MaterialTheme.colorScheme.onPrimaryContainer
+                    )
+                }
+            }
+            Spacer(modifier = Modifier.height(24.dp))
+            Text(
+                text = "Camera access required",
+                style = MaterialTheme.typography.headlineSmall,
+                fontWeight = FontWeight.SemiBold,
+                textAlign = TextAlign.Center
+            )
+            Spacer(modifier = Modifier.height(12.dp))
+            Text(
+                text = "LensCast needs camera access for the live preview and microphone for audio streaming and recordings.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center
+            )
+            Spacer(modifier = Modifier.height(32.dp))
+            Button(
+                onClick = onRequestPermission,
+                shape = RoundedCornerShape(12.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.primary
+                )
+            ) {
+                Text(
+                    text = "Grant permission",
+                    modifier = Modifier.padding(horizontal = 8.dp)
+                )
+            }
         }
     }
 }
@@ -905,7 +1212,7 @@ private fun CameraPreview(
     }
 
     val lifecycleOwner = LocalLifecycleOwner.current
-    androidx.compose.runtime.DisposableEffect(previewView, lifecycleOwner) {
+    DisposableEffect(previewView, lifecycleOwner) {
         viewModel.startPreview(previewView, lifecycleOwner)
         onDispose { viewModel.stopPreview() }
     }
@@ -917,31 +1224,88 @@ private fun CameraPreview(
 }
 
 @Composable
+private fun CameraInitializingScreen() {
+    Surface(
+        modifier = Modifier.fillMaxSize(),
+        color = MaterialTheme.colorScheme.background
+    ) {
+        Box(
+            modifier = Modifier.fillMaxSize(),
+            contentAlignment = Alignment.Center
+        ) {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center
+            ) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(48.dp),
+                    color = MaterialTheme.colorScheme.primary
+                )
+                Spacer(modifier = Modifier.height(16.dp))
+                Text(
+                    "Initializing camera\u2026",
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+    }
+}
+
+@Composable
 private fun ErrorDisplay(
     message: String,
     onRetry: () -> Unit,
 ) {
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(32.dp),
-        verticalArrangement = Arrangement.Center,
-        horizontalAlignment = Alignment.CenterHorizontally
+    Surface(
+        modifier = Modifier.fillMaxSize(),
+        color = MaterialTheme.colorScheme.background
     ) {
-        Text(
-            text = "Error",
-            style = MaterialTheme.typography.headlineSmall,
-            color = MaterialTheme.colorScheme.error
-        )
-        Spacer(modifier = Modifier.height(8.dp))
-        Text(
-            text = message,
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-        Spacer(modifier = Modifier.height(16.dp))
-        Button(onClick = onRetry) {
-            Text("Retry")
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(32.dp),
+            verticalArrangement = Arrangement.Center,
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Surface(
+                modifier = Modifier.size(64.dp),
+                color = MaterialTheme.colorScheme.errorContainer,
+                shape = CircleShape
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Text(
+                        text = "!",
+                        color = MaterialTheme.colorScheme.onErrorContainer,
+                        style = MaterialTheme.typography.headlineMedium,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+            Spacer(modifier = Modifier.height(16.dp))
+            Text(
+                text = "Camera error",
+                style = MaterialTheme.typography.headlineSmall,
+                color = MaterialTheme.colorScheme.error,
+                fontWeight = FontWeight.SemiBold
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                text = message,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center
+            )
+            Spacer(modifier = Modifier.height(24.dp))
+            Button(
+                onClick = onRetry,
+                shape = RoundedCornerShape(12.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.primary
+                )
+            ) {
+                Text("Retry")
+            }
         }
     }
 }
@@ -952,23 +1316,26 @@ private fun StreamIndicator(
 ) {
     Surface(
         modifier = modifier,
-        color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.92f),
-        shape = RoundedCornerShape(999.dp)
+        color = Color(0xFFD32F2F).copy(alpha = 0.9f),
+        shape = RoundedCornerShape(16.dp)
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Surface(
                 modifier = Modifier.size(8.dp),
                 shape = CircleShape,
-                color = MaterialTheme.colorScheme.error
+                color = Color.White
             ) {}
             Spacer(modifier = Modifier.size(6.dp))
             Text(
                 text = "LIVE",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onErrorContainer
+                style = MaterialTheme.typography.labelSmall.copy(
+                    fontWeight = FontWeight.Bold,
+                    fontFamily = FontFamily.Monospace
+                ),
+                color = Color.White
             )
         }
     }
@@ -1000,7 +1367,7 @@ private fun RecordingIndicator(
 
     Surface(
         modifier = modifier,
-        color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.92f),
+        color = OverlayScrim,
         shape = RoundedCornerShape(16.dp)
     ) {
         Row(
@@ -1010,7 +1377,7 @@ private fun RecordingIndicator(
             Surface(
                 modifier = Modifier.size(10.dp),
                 shape = CircleShape,
-                color = MaterialTheme.colorScheme.error.copy(alpha = dotAlpha)
+                color = Color(0xFFD32F2F).copy(alpha = dotAlpha)
             ) {}
             Spacer(modifier = Modifier.size(8.dp))
             Text(
@@ -1019,7 +1386,7 @@ private fun RecordingIndicator(
                     fontFamily = FontFamily.Monospace,
                     fontWeight = FontWeight.SemiBold
                 ),
-                color = MaterialTheme.colorScheme.onSurface
+                color = Color.White
             )
         }
     }
@@ -1034,7 +1401,8 @@ private fun StreamInfoBar(
 ) {
     Surface(
         modifier = Modifier.fillMaxWidth(),
-        color = MaterialTheme.colorScheme.surfaceContainerHigh
+        color = OverlayScrim,
+        shape = RoundedCornerShape(0.dp)
     ) {
         Row(
             modifier = Modifier
@@ -1052,8 +1420,11 @@ private fun StreamInfoBar(
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = url,
-                    style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
-                    maxLines = 1
+                    style = MaterialTheme.typography.labelSmall.copy(
+                        fontFamily = FontFamily.Monospace
+                    ),
+                    maxLines = 1,
+                    color = Color.White.copy(alpha = 0.9f)
                 )
                 Text(
                     text = when {
@@ -1062,92 +1433,25 @@ private fun StreamInfoBar(
                         else -> "Web server ready"
                     },
                     style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                if (clientCount > 0 && !isStreaming) {
-                    Text(
-                        text = "Waiting for live frames",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-            }
-            IconButton(
-                onClick = onCopyUrl,
-                modifier = Modifier.size(32.dp)
-            ) {
-                Icon(
-                    imageVector = Icons.Default.ContentCopy,
-                    contentDescription = "Copy URL",
-                    modifier = Modifier.size(16.dp)
+                    color = Color.White.copy(alpha = 0.6f)
                 )
             }
-        }
-    }
-}
-
-@Composable
-private fun BottomControlBar(
-    isStreaming: Boolean,
-    isRecording: Boolean,
-    onStreamToggle: () -> Unit,
-    onCapture: () -> Unit,
-    onRecord: () -> Unit,
-) {
-    Surface(
-        modifier = Modifier.fillMaxWidth(),
-        color = MaterialTheme.colorScheme.surfaceContainer
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 32.dp, vertical = 16.dp),
-            horizontalArrangement = Arrangement.SpaceEvenly,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            IconButton(
-                onClick = onStreamToggle,
-                modifier = Modifier.size(48.dp)
+            Surface(
+                color = OverlayLight,
+                shape = CircleShape,
+                onClick = onCopyUrl
             ) {
-                Icon(
-                    imageVector = if (isStreaming) Icons.Default.Stop else Icons.Default.Videocam,
-                    contentDescription = if (isStreaming) "Stop streaming" else "Start streaming",
-                    tint = if (isStreaming) MaterialTheme.colorScheme.error
-                           else MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(32.dp)
-                )
-            }
-
-            IconButton(
-                onClick = onCapture,
-                modifier = Modifier.size(64.dp)
-            ) {
-                Surface(
-                    modifier = Modifier.size(56.dp),
-                    shape = CircleShape,
-                    color = MaterialTheme.colorScheme.primary
+                Box(
+                    modifier = Modifier.size(32.dp),
+                    contentAlignment = Alignment.Center
                 ) {
                     Icon(
-                        imageVector = Icons.Default.Camera,
-                        contentDescription = "Capture photo",
-                        tint = MaterialTheme.colorScheme.onPrimary,
-                        modifier = Modifier
-                            .size(32.dp)
-                            .padding(2.dp)
+                        imageVector = Icons.Default.ContentCopy,
+                        contentDescription = "Copy URL",
+                        modifier = Modifier.size(16.dp),
+                        tint = Color.White.copy(alpha = 0.8f)
                     )
                 }
-            }
-
-            IconButton(
-                onClick = onRecord,
-                modifier = Modifier.size(48.dp)
-            ) {
-                Icon(
-                    imageVector = if (isRecording) Icons.Default.Stop else Icons.Default.FiberManualRecord,
-                    contentDescription = if (isRecording) "Stop recording" else "Record video",
-                    tint = MaterialTheme.colorScheme.error,
-                    modifier = Modifier.size(32.dp)
-                )
             }
         }
     }
@@ -1159,24 +1463,21 @@ private fun ThermalWarningOverlay(
     modifier: Modifier = Modifier,
 ) {
     val (color, label) = when (thermalState) {
-        ThermalState.MODERATE ->
-            LensOrange to "Thermal: Moderate"
-        ThermalState.SEVERE ->
-            LensRed to "Thermal: Severe"
-        ThermalState.CRITICAL ->
-            MaterialTheme.colorScheme.error to "Thermal: Critical!"
+        ThermalState.MODERATE -> LensOrange to "Thermal: Moderate"
+        ThermalState.SEVERE -> LensRed to "Thermal: Severe"
+        ThermalState.CRITICAL -> MaterialTheme.colorScheme.error to "Thermal: Critical!"
         else -> LensOrange to "Thermal: Warm"
     }
     Surface(
         modifier = modifier,
-        color = color.copy(alpha = 0.85f),
-        shape = MaterialTheme.shapes.small
+        color = color.copy(alpha = 0.92f),
+        shape = RoundedCornerShape(8.dp)
     ) {
         Text(
             text = label,
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 5.dp),
             style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onError
+            color = Color.White
         )
     }
 }
@@ -1189,18 +1490,19 @@ private fun LensSelectorRow(
 ) {
     Surface(
         modifier = Modifier.fillMaxWidth(),
-        color = MaterialTheme.colorScheme.surfaceContainerHigh
+        color = OverlayScrim.copy(alpha = 0.6f),
+        shape = RoundedCornerShape(0.dp)
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .horizontalScroll(rememberScrollState())
-                .padding(horizontal = 16.dp, vertical = 8.dp),
+                .padding(horizontal = 16.dp, vertical = 6.dp),
             horizontalArrangement = Arrangement.Center,
             verticalAlignment = Alignment.CenterVertically
         ) {
             lenses.forEachIndexed { index, lens ->
-                if (index > 0) Spacer(modifier = Modifier.width(8.dp))
+                if (index > 0) Spacer(modifier = Modifier.width(6.dp))
                 val isSelected = index == selectedIndex
                 FilterChip(
                     selected = isSelected,
@@ -1215,9 +1517,12 @@ private fun LensSelectorRow(
                         )
                     },
                     colors = FilterChipDefaults.filterChipColors(
-                        selectedContainerColor = MaterialTheme.colorScheme.primary,
-                        selectedLabelColor = MaterialTheme.colorScheme.onPrimary,
+                        selectedContainerColor = Color.White.copy(alpha = 0.25f),
+                        selectedLabelColor = Color.White,
+                        containerColor = Color.White.copy(alpha = 0.08f),
+                        labelColor = Color.White.copy(alpha = 0.7f),
                     ),
+                    border = null,
                     shape = RoundedCornerShape(50),
                 )
             }
