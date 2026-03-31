@@ -86,6 +86,11 @@
 -keep class com.raulshma.lenscast.data.** { *; }
 -keep class com.raulshma.lenscast.gallery.GalleryFilter { *; }
 
+# ── WorkManager / Room (WorkDatabase_Impl) ──
+-keep class * extends androidx.room.RoomDatabase { *; }
+-keep class * extends androidx.work.impl.WorkDatabase { *; }
+-dontwarn androidx.work.impl.WorkDatabase_Impl
+
 # ── Enum safety (valueOf / values) ──
 -keepclassmembers enum * {
     **[] values();
