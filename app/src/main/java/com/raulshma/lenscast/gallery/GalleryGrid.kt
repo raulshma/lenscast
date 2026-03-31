@@ -1,5 +1,7 @@
 package com.raulshma.lenscast.gallery
 
+import androidx.compose.animation.ExperimentalSharedTransitionApi
+import androidx.compose.animation.SharedTransitionScope
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
@@ -49,6 +51,8 @@ import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.raulshma.lenscast.capture.model.CaptureHistory
 import com.raulshma.lenscast.capture.model.CaptureType
+import com.raulshma.lenscast.ui.animation.LocalAnimatedVisibilityScope
+import com.raulshma.lenscast.ui.animation.LocalSharedTransitionScope
 
 @Composable
 fun GalleryMediaGrid(
@@ -128,7 +132,7 @@ private fun GallerySectionHeader(section: GallerySection) {
     }
 }
 
-@OptIn(ExperimentalFoundationApi::class)
+@OptIn(ExperimentalFoundationApi::class, ExperimentalSharedTransitionApi::class)
 @Composable
 private fun GalleryMediaCard(
     item: CaptureHistory,
@@ -137,6 +141,9 @@ private fun GalleryMediaCard(
     onClick: () -> Unit,
     onLongClick: () -> Unit,
 ) {
+    val sharedTransitionScope = LocalSharedTransitionScope.current
+    val animatedVisibilityScope = LocalAnimatedVisibilityScope.current
+
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -157,7 +164,18 @@ private fun GalleryMediaCard(
                 AsyncImage(
                     model = ImageRequest.Builder(LocalContext.current).data(imageModel).crossfade(true).build(),
                     contentDescription = item.fileName,
-                    modifier = Modifier.fillMaxSize(),
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .then(
+                            if (sharedTransitionScope != null && animatedVisibilityScope != null) {
+                                with(sharedTransitionScope) {
+                                    Modifier.sharedElement(
+                                        rememberSharedContentState(key = "media-${item.id}"),
+                                        animatedVisibilityScope,
+                                    )
+                                }
+                            } else Modifier
+                        ),
                     contentScale = ContentScale.Crop,
                 )
             } else {

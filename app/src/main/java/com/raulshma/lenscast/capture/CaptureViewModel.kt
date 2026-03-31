@@ -18,7 +18,6 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.raulshma.lenscast.MainApplication
 import com.raulshma.lenscast.camera.CameraService
-import com.raulshma.lenscast.capture.model.CaptureHistory
 import com.raulshma.lenscast.capture.PhotoCaptureHelper
 import com.raulshma.lenscast.capture.model.IntervalCaptureConfig
 import com.raulshma.lenscast.capture.model.RecordingConfig
@@ -47,9 +46,6 @@ class CaptureViewModel(
     private val settingsDataStore: SettingsDataStore,
 ) : ViewModel() {
     private val context: Context = context.applicationContext
-
-    private val _captureHistory = MutableStateFlow<List<CaptureHistory>>(emptyList())
-    val captureHistory: StateFlow<List<CaptureHistory>> = _captureHistory.asStateFlow()
 
     private val _intervalConfig = MutableStateFlow(IntervalCaptureConfig())
     val intervalConfig: StateFlow<IntervalCaptureConfig> = _intervalConfig.asStateFlow()
@@ -85,12 +81,6 @@ class CaptureViewModel(
     }
 
     init {
-        captureHistoryStore.refreshFromMediaStore()
-        viewModelScope.launch {
-            captureHistoryStore.history.collect { history ->
-                _captureHistory.value = history
-            }
-        }
         viewModelScope.launch {
             _recordingConfig.value = _recordingConfig.value.copy(
                 includeAudio = settingsDataStore.recordingAudioEnabled.first()
@@ -248,14 +238,6 @@ class CaptureViewModel(
         _isRecording.value = false
         recordingTimerJob?.cancel()
         recordingTimerJob = null
-    }
-
-    fun clearHistory() {
-        captureHistoryStore.clear()
-    }
-
-    fun deleteHistoryEntry(id: String) {
-        captureHistoryStore.deleteMedia(id)
     }
 
     override fun onCleared() {

@@ -376,7 +376,7 @@ class CameraViewModel(
     }
 
     private fun stopStreaming() {
-        streamingManager.stopStreaming()
+        streamingManager.pauseStreaming()
         powerManager.releaseWakeLock()
         thermalMonitor.stopMonitoring()
         batteryMonitorJob?.cancel()
@@ -396,7 +396,11 @@ class CameraViewModel(
         cameraService.rebindUseCases()
 
         val intent = Intent(context, com.raulshma.lenscast.streaming.StreamingService::class.java)
-        intent.action = com.raulshma.lenscast.streaming.StreamingService.ACTION_STOP
+        intent.action = com.raulshma.lenscast.streaming.StreamingService.ACTION_PAUSE
+        intent.putExtra(
+            com.raulshma.lenscast.streaming.StreamingService.EXTRA_URL,
+            streamingManager.streamUrl.value
+        )
         context.startService(intent)
     }
 

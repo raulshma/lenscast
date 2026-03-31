@@ -6,6 +6,7 @@ import android.widget.FrameLayout
 import android.widget.MediaController
 import android.widget.VideoView
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
@@ -23,7 +24,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.PagerState
-
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -74,10 +74,13 @@ import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.raulshma.lenscast.capture.model.CaptureHistory
 import com.raulshma.lenscast.capture.model.CaptureType
+import com.raulshma.lenscast.ui.animation.LocalAnimatedVisibilityScope
+import com.raulshma.lenscast.ui.animation.LocalSharedTransitionScope
 
 @Composable
 fun MediaViewerScreen(
     allItems: List<CaptureHistory>,
+    initialMediaId: String,
     pagerState: PagerState,
     onDeleteCurrent: () -> Unit,
     onNavigateBack: () -> Unit,
@@ -120,7 +123,11 @@ fun MediaViewerScreen(
         ) { page ->
             val item = allItems.getOrElse(page) { return@HorizontalPager }
             when (item.type) {
-                CaptureType.PHOTO -> PhotoViewer(filePath = item.filePath)
+                CaptureType.PHOTO -> PhotoViewer(
+                    filePath = item.filePath,
+                    mediaId = item.id,
+                    enableSharedElement = item.id == initialMediaId,
+                )
                 CaptureType.VIDEO -> VideoViewer(filePath = item.filePath)
             }
         }
@@ -201,8 +208,15 @@ fun MediaViewerScreen(
     }
 }
 
+@OptIn(ExperimentalSharedTransitionApi::class)
 @Composable
-private fun PhotoViewer(filePath: String) {
+private fun PhotoViewer(
+    filePath: String,
+    mediaId: String,
+    enableSharedElement: Boolean,
+) {
+    val sharedTransitionScope = LocalSharedTransitionScope.current
+    val animatedVisibilityScope = LocalAnimatedVisibilityScope.current
     var scale by remember { mutableFloatStateOf(1f) }
     var offsetX by remember { mutableFloatStateOf(0f) }
     var offsetY by remember { mutableFloatStateOf(0f) }
@@ -240,6 +254,16 @@ private fun PhotoViewer(filePath: String) {
                 contentDescription = null,
                 modifier = Modifier
                     .fillMaxSize()
+                    .then(
+                        if (enableSharedElement && sharedTransitionScope != null && animatedVisibilityScope != null) {
+                            with(sharedTransitionScope) {
+                                Modifier.sharedElement(
+                                    rememberSharedContentState(key = "media-$mediaId"),
+                                    animatedVisibilityScope,
+                                )
+                            }
+                        } else Modifier
+                    )
                     .graphicsLayer {
                         scaleX = scale
                         scaleY = scale

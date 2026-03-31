@@ -1,7 +1,5 @@
 package com.raulshma.lenscast.capture
 
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -13,7 +11,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.PhotoCamera
@@ -22,15 +19,12 @@ import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TimeInput
@@ -44,13 +38,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.raulshma.lenscast.MainApplication
-import com.raulshma.lenscast.capture.model.CaptureHistory
 import com.raulshma.lenscast.capture.model.CaptureMode
-import com.raulshma.lenscast.capture.model.CaptureType
 import com.raulshma.lenscast.capture.model.FlashMode
 import com.raulshma.lenscast.capture.model.RecordingConfig
 import com.raulshma.lenscast.capture.model.RecordingQuality
@@ -67,7 +58,6 @@ import java.util.Locale
 @Composable
 fun CaptureScreen(
     onNavigateBack: () -> Unit,
-    onViewMedia: (String) -> Unit = {},
 ) {
     val context = LocalContext.current
     val app = context.applicationContext as MainApplication
@@ -80,7 +70,6 @@ fun CaptureScreen(
     val intervalConfig by viewModel.intervalConfig.collectAsState()
     val isIntervalRunning by viewModel.isIntervalRunning.collectAsState()
     val isRecording by viewModel.isRecording.collectAsState()
-    val captureHistory by viewModel.captureHistory.collectAsState()
     val recordingConfig by viewModel.recordingConfig.collectAsState()
     val recordingElapsedMs by viewModel.recordingElapsedMs.collectAsState()
     val scheduledStartTime by viewModel.scheduledStartTime.collectAsState()
@@ -344,138 +333,12 @@ fun CaptureScreen(
                 }
             }
 
-            item {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = "Capture History",
-                        style = MaterialTheme.typography.titleMedium,
-                        color = MaterialTheme.colorScheme.onBackground
-                    )
-                    if (captureHistory.isNotEmpty()) {
-                        TextButton(onClick = { viewModel.clearHistory() }) {
-                            Text("Clear All", color = MaterialTheme.colorScheme.error)
-                        }
-                    }
-                }
-            }
 
-            if (captureHistory.isEmpty()) {
-                item {
-                    Card(
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = CardDefaults.cardColors(
-                            containerColor = MaterialTheme.colorScheme.surfaceContainer
-                        )
-                    ) {
-                        Text(
-                            text = "No captures yet. Take a photo or start recording!",
-                            modifier = Modifier.padding(16.dp),
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                }
-            } else {
-                items(captureHistory, key = { it.id }) { entry ->
-                    CaptureHistoryItem(
-                        entry = entry,
-                        onDelete = { viewModel.deleteHistoryEntry(entry.id) },
-                        onClick = { onViewMedia(entry.id) },
-                    )
-                }
-            }
         }
     }
 }
 
-@Composable
-private fun CaptureHistoryItem(
-    entry: CaptureHistory,
-    onDelete: () -> Unit,
-    onClick: () -> Unit = {},
-) {
-    Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onClick),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainer
-        )
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(12.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Icon(
-                imageVector = if (entry.type == CaptureType.PHOTO)
-                    Icons.Default.PhotoCamera else Icons.Default.Videocam,
-                contentDescription = null,
-                tint = if (entry.type == CaptureType.PHOTO)
-                    MaterialTheme.colorScheme.primary
-                else MaterialTheme.colorScheme.error,
-                modifier = Modifier.size(24.dp)
-            )
-            Column(
-                modifier = Modifier
-                    .weight(1f)
-                    .padding(start = 12.dp)
-            ) {
-                Text(
-                    text = entry.fileName,
-                    style = MaterialTheme.typography.bodyMedium,
-                    maxLines = 1
-                )
-                Text(
-                    text = formatTimestamp(entry.timestamp),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    fontFamily = FontFamily.Monospace
-                )
-                if (entry.type == CaptureType.VIDEO && entry.durationMs > 0) {
-                    Text(
-                        text = "Duration: ${entry.durationMs / 1000}s",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-                if (entry.fileSizeBytes > 0) {
-                    Text(
-                        text = formatFileSize(entry.fileSizeBytes),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-            }
-            IconButton(onClick = onDelete) {
-                Icon(
-                    Icons.Default.Delete,
-                    contentDescription = "Delete",
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.size(20.dp)
-                )
-            }
-        }
-    }
-}
 
-private fun formatTimestamp(timestamp: Long): String {
-    val sdf = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault())
-    return sdf.format(Date(timestamp))
-}
-
-private fun formatFileSize(bytes: Long): String {
-    return when {
-        bytes < 1024 -> "$bytes B"
-        bytes < 1024 * 1024 -> "${bytes / 1024} KB"
-        else -> "${bytes / (1024 * 1024)} MB"
-    }
-}
 
 private fun formatDuration(ms: Long): String {
     val seconds = ms / 1000
