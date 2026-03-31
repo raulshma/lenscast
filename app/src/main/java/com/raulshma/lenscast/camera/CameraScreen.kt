@@ -47,6 +47,7 @@ import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.Camera
 import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.Cameraswitch
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Collections
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Exposure
@@ -65,6 +66,7 @@ import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material.icons.filled.Wifi
+import androidx.compose.material.icons.filled.WifiOff
 import androidx.compose.material.icons.filled.WbSunny
 import androidx.compose.material.icons.filled.ZoomIn
 import androidx.compose.material3.Button
@@ -243,6 +245,7 @@ fun CameraScreen(
                 onNavigateToCapture = onNavigateToCapture,
                 onNavigateToSettings = onNavigateToSettings,
                 onCopyStreamUrl = { viewModel.copyStreamUrl() },
+                onToggleServer = { viewModel.toggleServer() },
                 onSelectLens = { viewModel.selectLens(it) },
             )
 
@@ -294,6 +297,7 @@ private fun ImmersiveCameraView(
     onNavigateToCapture: () -> Unit,
     onNavigateToSettings: () -> Unit,
     onCopyStreamUrl: () -> Unit,
+    onToggleServer: () -> Unit,
     onSelectLens: (Int) -> Unit,
 ) {
     Box(modifier = Modifier.fillMaxSize()) {
@@ -369,6 +373,8 @@ private fun ImmersiveCameraView(
             onNavigateToCapture = onNavigateToCapture,
             onNavigateToSettings = onNavigateToSettings,
             onToggleQuickSettings = onToggleQuickSettings,
+            onCopyStreamUrl = onCopyStreamUrl,
+            onToggleServer = onToggleServer,
             modifier = Modifier
                 .align(Alignment.TopStart)
                 .fillMaxWidth()
@@ -417,7 +423,6 @@ private fun ImmersiveCameraView(
             onStreamToggle = onStreamToggle,
             onCapture = onCapture,
             onRecord = onRecord,
-            onCopyStreamUrl = onCopyStreamUrl,
             onSelectLens = onSelectLens,
             onToggleQuickSettings = onToggleQuickSettings,
             onQuickSettingTap = onQuickSettingTap,
@@ -451,6 +456,8 @@ private fun CameraTopOverlay(
     onNavigateToCapture: () -> Unit,
     onNavigateToSettings: () -> Unit,
     onToggleQuickSettings: () -> Unit,
+    onCopyStreamUrl: () -> Unit,
+    onToggleServer: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
@@ -481,6 +488,11 @@ private fun CameraTopOverlay(
             horizontalArrangement = Arrangement.spacedBy(2.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
+            ServerStatusButton(
+                streamStatus = streamStatus,
+                onCopyUrl = onCopyStreamUrl,
+                onToggleServer = onToggleServer,
+            )
             CameraControlButton(
                 icon = if (showPreview) Icons.Default.Visibility else Icons.Default.VisibilityOff,
                 contentDescription = if (showPreview) "Hide preview" else "Show preview",
@@ -609,7 +621,6 @@ private fun CameraBottomOverlay(
     onStreamToggle: () -> Unit,
     onCapture: () -> Unit,
     onRecord: () -> Unit,
-    onCopyStreamUrl: () -> Unit,
     onSelectLens: (Int) -> Unit,
     onToggleQuickSettings: () -> Unit,
     onQuickSettingTap: (QuickSettingType) -> Unit,
@@ -634,15 +645,6 @@ private fun CameraBottomOverlay(
                 settings = settings,
                 activeSetting = activeSetting,
                 onSettingTap = onQuickSettingTap,
-            )
-        }
-
-        if (streamStatus.isServerRunning && streamStatus.url.isNotBlank()) {
-            StreamInfoBar(
-                url = streamStatus.url,
-                isStreaming = streamStatus.isActive,
-                clientCount = streamStatus.clientCount,
-                onCopyUrl = onCopyStreamUrl
             )
         }
 
@@ -1393,66 +1395,131 @@ private fun RecordingIndicator(
 }
 
 @Composable
-private fun StreamInfoBar(
-    url: String,
-    isStreaming: Boolean,
-    clientCount: Int,
+private fun ServerStatusButton(
+    streamStatus: com.raulshma.lenscast.camera.model.StreamStatus,
     onCopyUrl: () -> Unit,
+    onToggleServer: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
-    Surface(
-        modifier = Modifier.fillMaxWidth(),
-        color = OverlayScrim,
-        shape = RoundedCornerShape(0.dp)
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically
+    var expanded by remember { mutableStateOf(false) }
+
+    val iconTint by animateColorAsState(
+        targetValue = when {
+            streamStatus.isActive -> Color(0xFF4CAF50)
+            streamStatus.isServerRunning -> MaterialTheme.colorScheme.primary
+            else -> Color.White.copy(alpha = 0.4f)
+        },
+        animationSpec = tween(300),
+        label = "server_status_tint"
+    )
+
+    Box(modifier = modifier) {
+        CameraControlButton(
+            icon = Icons.Default.Wifi,
+            contentDescription = "Web server status",
+            onClick = { expanded = true },
+            tint = iconTint,
+        )
+        DropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false },
+            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+            shape = RoundedCornerShape(16.dp),
         ) {
-            Icon(
-                imageVector = Icons.Default.Wifi,
-                contentDescription = null,
-                modifier = Modifier.size(16.dp),
-                tint = MaterialTheme.colorScheme.primary
+            DropdownMenuItem(
+                text = {
+                    Column {
+                        Text(
+                            "Web Server",
+                            style = MaterialTheme.typography.labelLarge,
+                            fontWeight = FontWeight.Bold,
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        if (streamStatus.url.isNotBlank()) {
+                            Text(
+                                streamStatus.url,
+                                style = MaterialTheme.typography.bodySmall.copy(
+                                    fontFamily = FontFamily.Monospace
+                                ),
+                                maxLines = 1,
+                            )
+                        } else {
+                            Text(
+                                "Server offline",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text(
+                            when {
+                                streamStatus.clientCount > 0 -> "${streamStatus.clientCount} viewer(s) connected"
+                                streamStatus.isActive -> "Live stream active"
+                                streamStatus.isServerRunning -> "Server ready"
+                                else -> "Offline"
+                            },
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                        )
+                    }
+                },
+                onClick = { expanded = false },
+                enabled = false,
             )
-            Spacer(modifier = Modifier.size(8.dp))
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = url,
-                    style = MaterialTheme.typography.labelSmall.copy(
-                        fontFamily = FontFamily.Monospace
-                    ),
-                    maxLines = 1,
-                    color = Color.White.copy(alpha = 0.9f)
-                )
-                Text(
-                    text = when {
-                        clientCount > 0 -> "$clientCount viewer(s)"
-                        isStreaming -> "Live stream active"
-                        else -> "Web server ready"
+            if (streamStatus.url.isNotBlank()) {
+                DropdownMenuItem(
+                    text = {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                Icons.Default.ContentCopy,
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp),
+                                tint = MaterialTheme.colorScheme.onSurface,
+                            )
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Text("Copy URL", style = MaterialTheme.typography.bodyMedium)
+                        }
                     },
-                    style = MaterialTheme.typography.labelSmall,
-                    color = Color.White.copy(alpha = 0.6f)
+                    onClick = {
+                        expanded = false
+                        onCopyUrl()
+                    },
                 )
             }
-            Surface(
-                color = OverlayLight,
-                shape = CircleShape,
-                onClick = onCopyUrl
-            ) {
-                Box(
-                    modifier = Modifier.size(32.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.ContentCopy,
-                        contentDescription = "Copy URL",
-                        modifier = Modifier.size(16.dp),
-                        tint = Color.White.copy(alpha = 0.8f)
-                    )
-                }
-            }
+            DropdownMenuItem(
+                text = {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                if (streamStatus.isServerRunning) Icons.Default.Wifi else Icons.Default.WifiOff,
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp),
+                                tint = MaterialTheme.colorScheme.onSurface,
+                            )
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Text(
+                                if (streamStatus.isServerRunning) "Turn off server" else "Turn on server",
+                                style = MaterialTheme.typography.bodyMedium,
+                            )
+                        }
+                        Switch(
+                            checked = streamStatus.isServerRunning,
+                            onCheckedChange = null,
+                            thumbContent = if (streamStatus.isServerRunning) {
+                                { Icon(Icons.Default.Check, null, Modifier.size(12.dp)) }
+                            } else null,
+                        )
+                    }
+                },
+                onClick = {
+                    expanded = false
+                    onToggleServer()
+                },
+            )
         }
     }
 }

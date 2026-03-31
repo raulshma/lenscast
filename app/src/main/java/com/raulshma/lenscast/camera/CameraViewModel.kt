@@ -426,6 +426,57 @@ class CameraViewModel(
         }
     }
 
+    fun toggleServer() {
+        if (_streamStatus.value.isServerRunning) {
+            stopServer()
+        } else {
+            startServer()
+        }
+    }
+
+    private fun startServer() {
+        val started = streamingManager.ensureServerRunning()
+        if (started) {
+            _streamStatus.value = _streamStatus.value.copy(
+                isServerRunning = true,
+                url = streamingManager.streamUrl.value,
+            )
+        } else {
+            _streamStatus.value = _streamStatus.value.copy(
+                isServerRunning = false,
+                url = "Failed to start server",
+            )
+        }
+    }
+
+    private fun stopServer() {
+        if (_streamStatus.value.isActive) {
+            streamingManager.stopStreaming()
+            powerManager.releaseWakeLock()
+            thermalMonitor.stopMonitoring()
+            batteryMonitorJob?.cancel()
+            batteryMonitorJob = null
+            thermalMonitorJob?.cancel()
+            thermalMonitorJob = null
+            cameraService.releaseKeepAlive()
+            cameraService.rebindUseCases()
+
+            val intent = Intent(context, com.raulshma.lenscast.streaming.StreamingService::class.java)
+            intent.action = com.raulshma.lenscast.streaming.StreamingService.ACTION_PAUSE
+            context.startService(intent)
+        } else {
+            streamingManager.stopStreaming()
+        }
+        _streamStatus.value = _streamStatus.value.copy(
+            isActive = false,
+            isServerRunning = false,
+            url = "",
+            clientCount = 0,
+            isAudioActive = false,
+            audioUrl = "",
+        )
+    }
+
     fun copyStreamUrl() {
         val url = _streamStatus.value.url.ifEmpty { streamingManager.streamUrl.value }
         if (url.isNotEmpty()) {
