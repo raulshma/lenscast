@@ -72,3 +72,23 @@
 -keep class * implements android.os.Parcelable {
     public static final android.os.Parcelable$Creator *;
 }
+
+# ── Kotlin reflection (needed by Moshi KotlinJsonAdapterFactory) ──
+-keep class kotlin.Metadata { *; }
+-keep class kotlin.reflect.** { *; }
+-keepattributes *Annotation*,Signature,EnclosingMethod,InnerClasses
+
+# ── App model classes: Compose state, Moshi DTOs, enums ──
+-keep class com.raulshma.lenscast.camera.model.** { *; }
+-keep class com.raulshma.lenscast.capture.model.** { *; }
+-keep class com.raulshma.lenscast.streaming.model.** { *; }
+-keep class com.raulshma.lenscast.core.** { *; }
+-keep class com.raulshma.lenscast.data.** { *; }
+-keep class com.raulshma.lenscast.gallery.GalleryFilter { *; }
+
+# ── Enum safety (valueOf / values) ──
+-keepclassmembers enum * {
+    **[] values();
+    public static **[] values();
+    public static ** valueOf(java.lang.String);
+}

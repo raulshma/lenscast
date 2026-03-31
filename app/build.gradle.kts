@@ -63,8 +63,9 @@ android {
 
     signingConfigs {
         create("release") {
-            val keystoreExists = file("lenscast-release.jks").exists()
-            storeFile = if (keystoreExists) file("lenscast-release.jks") else null
+            val keystorePath = rootProject.file("lenscast-release.jks")
+            val keystoreExists = keystorePath.exists()
+            storeFile = if (keystoreExists) keystorePath else null
             storePassword = System.getenv("KEYSTORE_PASSWORD")
             keyAlias = System.getenv("KEY_ALIAS")
             keyPassword = System.getenv("KEY_PASSWORD")

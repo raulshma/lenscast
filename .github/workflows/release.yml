@@ -42,7 +42,7 @@ jobs:
 
       - name: Decode Keystore
         run: |
-          echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > app/lenscast-release.jks
+          echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > lenscast-release.jks
 
       - name: Calculate Release Version
         id: version
