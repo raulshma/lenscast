@@ -139,8 +139,19 @@ class CameraViewModel(
                 _streamStatus.value = _streamStatus.value.copy(audioUrl = audioUrl)
             }
         }
+        viewModelScope.launch {
+            streamingManager.isRtspRunning.collect { isRtsp ->
+                _streamStatus.value = _streamStatus.value.copy(isRtspActive = isRtsp)
+            }
+        }
+        viewModelScope.launch {
+            streamingManager.rtspUrl.collect { rtspUrl ->
+                _streamStatus.value = _streamStatus.value.copy(rtspUrl = rtspUrl)
+            }
+        }
         cameraService.setFrameListener { yuvData, width, height, rotation ->
             streamingManager.pushFrame(yuvData, width, height, rotation)
+            streamingManager.pushFrameToRtsp(yuvData, width, height, rotation)
         }
         settingsJob = viewModelScope.launch {
             settingsDataStore.settings.collect { saved ->
@@ -483,6 +494,15 @@ class CameraViewModel(
             val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
             clipboard.setPrimaryClip(ClipData.newPlainText("Stream URL", url))
             Toast.makeText(context, "Stream URL copied", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    fun copyRtspUrl() {
+        val url = _streamStatus.value.rtspUrl.ifEmpty { streamingManager.rtspUrl.value }
+        if (url.isNotEmpty()) {
+            val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+            clipboard.setPrimaryClip(ClipData.newPlainText("RTSP URL", url))
+            Toast.makeText(context, "RTSP URL copied", Toast.LENGTH_SHORT).show()
         }
     }
 

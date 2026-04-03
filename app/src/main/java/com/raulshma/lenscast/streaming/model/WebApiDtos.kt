@@ -33,11 +33,15 @@ data class StreamingSettingsDto(
     val streamAudioChannels: Int = 1,
     val streamAudioEchoCancellation: Boolean = true,
     val recordingAudioEnabled: Boolean = true,
+    val rtspEnabled: Boolean = false,
+    val rtspPort: Int = DEFAULT_RTSP_PORT,
+    val rtspInputFormat: String = "",
 ) {
     companion object {
         const val DEFAULT_PORT = 8080
         const val DEFAULT_AUDIO_BITRATE_KBPS = 128
         const val DEFAULT_JPEG_QUALITY = 70
+        const val DEFAULT_RTSP_PORT = 8554
     }
 }
 
@@ -59,6 +63,8 @@ data class StreamingStatusDto(
     val clientCount: Int,
     val audioEnabled: Boolean,
     val audioUrl: String,
+    val rtspEnabled: Boolean = false,
+    val rtspUrl: String = "",
 )
 
 data class BatteryStatusDto(

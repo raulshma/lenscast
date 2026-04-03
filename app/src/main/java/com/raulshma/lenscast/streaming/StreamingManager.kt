@@ -11,6 +11,8 @@ import android.util.Log
 import com.raulshma.lenscast.core.NetworkUtils
 import com.raulshma.lenscast.core.ThermalMonitor
 import com.raulshma.lenscast.data.StreamAuthSettings
+import com.raulshma.lenscast.streaming.rtsp.RtspInputFormat
+import com.raulshma.lenscast.streaming.rtsp.RtspServer
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import java.io.ByteArrayOutputStream
@@ -33,6 +35,13 @@ class StreamingManager(private val context: Context) {
     @Volatile
     private var recordingAudioCaptureActive = false
     private var currentPort: Int = DEFAULT_PORT
+
+    private val rtspEnabled = AtomicBoolean(false)
+    @Volatile
+    private var currentRtspPort: Int = RtspServer.DEFAULT_PORT
+    @Volatile
+    private var currentRtspInputFormat: RtspInputFormat = RtspInputFormat.AUTO
+    private var rtspServer: RtspServer? = null
 
     private val lastFrameTimeMs = AtomicLong(0L)
     private val minFrameIntervalMs = AtomicLong(1000L / DEFAULT_STREAM_FPS)
@@ -57,6 +66,12 @@ class StreamingManager(private val context: Context) {
 
     private val _isAudioStreaming = MutableStateFlow(false)
     val isAudioStreaming: StateFlow<Boolean> = _isAudioStreaming
+
+    private val _rtspUrl = MutableStateFlow("")
+    val rtspUrl: StateFlow<String> = _rtspUrl
+
+    private val _isRtspRunning = MutableStateFlow(false)
+    val isRtspRunning: StateFlow<Boolean> = _isRtspRunning
 
     fun isLiveStreaming(): Boolean = isStreaming.get()
 
@@ -117,6 +132,10 @@ class StreamingManager(private val context: Context) {
 
         refreshAudioStreamingState()
 
+        if (rtspEnabled.get()) {
+            startRtspServer()
+        }
+
         Log.d(TAG, "Streaming started at ${_streamUrl.value}")
         return true
     }
@@ -124,6 +143,7 @@ class StreamingManager(private val context: Context) {
     fun stopStreaming() {
         if (!isStreaming.getAndSet(false)) return
 
+        stopRtspServer()
         audioStreamingManager.stop()
         server.stopServer()
         _streamUrl.value = ""
@@ -189,6 +209,12 @@ class StreamingManager(private val context: Context) {
             lastReportedClientCount = clientCount
             _clientCount.value = clientCount
         }
+    }
+
+    fun pushFrameToRtsp(yuvData: ByteArray, width: Int, height: Int, rotation: Int = 0) {
+        if (!rtspEnabled.get()) return
+        val rtsp = rtspServer ?: return
+        rtsp.pushFrame(yuvData, width, height, rotation)
     }
 
     private fun yuvToJpeg(yuvData: ByteArray, width: Int, height: Int, quality: Int, rotation: Int = 0): ByteArray? {
@@ -299,6 +325,7 @@ class StreamingManager(private val context: Context) {
         val current = jpegQuality.get()
         jpegQuality.set((current * multiplier).toInt().coerceIn(10, 100))
         Log.d(TAG, "Thermal: JPEG quality adjusted to ${jpegQuality.get()}")
+        rtspServer?.setBitrate((2_000_000 * multiplier).toInt())
     }
 
     fun reduceFrameRate(multiplier: Float) {
@@ -310,12 +337,38 @@ class StreamingManager(private val context: Context) {
     fun restoreNormalSettings() {
         jpegQuality.set(DEFAULT_JPEG_QUALITY)
         minFrameIntervalMs.set(1000L / DEFAULT_STREAM_FPS)
+        rtspServer?.setBitrate(2_000_000)
         Log.d(TAG, "Thermal: settings restored to normal")
     }
 
     fun updateAuthSettings(settings: StreamAuthSettings) {
         currentAuthSettings = settings
         applyAuthSettings(server, settings)
+        applyRtspAuthSettings(rtspServer, settings)
+    }
+
+    fun setRtspEnabled(enabled: Boolean) {
+        rtspEnabled.set(enabled)
+        if (enabled && isStreaming.get()) {
+            startRtspServer()
+        } else {
+            stopRtspServer()
+        }
+    }
+
+    fun setRtspPort(port: Int) {
+        if (port == currentRtspPort) return
+        currentRtspPort = port
+        if (rtspEnabled.get() && rtspServer != null) {
+            stopRtspServer()
+            startRtspServer()
+        }
+    }
+
+    fun setRtspInputFormat(format: RtspInputFormat) {
+        if (format == currentRtspInputFormat) return
+        currentRtspInputFormat = format
+        rtspServer?.setInputFormat(format)
     }
 
     private fun createServer(port: Int): StreamingServer {
@@ -332,6 +385,16 @@ class StreamingManager(private val context: Context) {
             server.authUsername = null
             server.authPasswordHash = null
         }
+    }
+
+    private fun applyRtspAuthSettings(server: RtspServer?, settings: StreamAuthSettings) {
+        val target = server ?: return
+        target.setAuthSettings(
+            enabled = settings.enabled,
+            username = settings.username,
+            passwordHash = settings.passwordHash,
+            digestHa1 = settings.rtspDigestHa1,
+        )
     }
 
     private fun bitmapToJpegReuse(bitmap: Bitmap, quality: Int): ByteArray {
@@ -393,6 +456,33 @@ class StreamingManager(private val context: Context) {
 
     private fun buildAudioUrl(): String {
         return NetworkUtils.getAudioUrl(currentPort) ?: "http://localhost:$currentPort/audio"
+    }
+
+    private fun buildRtspUrl(): String {
+        val ip = NetworkUtils.getLocalIpAddress() ?: "localhost"
+        return "rtsp://$ip:$currentRtspPort/${RtspServer.DEFAULT_STREAM_PATH}"
+    }
+
+    private fun startRtspServer() {
+        if (rtspServer != null) return
+        val server = RtspServer(currentRtspPort)
+        applyRtspAuthSettings(server, currentAuthSettings)
+        server.setInputFormat(currentRtspInputFormat)
+        if (server.start()) {
+            rtspServer = server
+            _rtspUrl.value = buildRtspUrl()
+            _isRtspRunning.value = true
+            Log.d(TAG, "RTSP server started on port $currentRtspPort")
+        } else {
+            Log.e(TAG, "Failed to start RTSP server on port $currentRtspPort")
+        }
+    }
+
+    private fun stopRtspServer() {
+        rtspServer?.stop()
+        rtspServer = null
+        _rtspUrl.value = ""
+        _isRtspRunning.value = false
     }
 
     data class StreamUrls(

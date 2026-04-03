@@ -161,6 +161,13 @@ export default function StreamPreview(props: Props) {
           <code>{st()!.streaming.url}</code>
         </div>
       </Show>
+
+      {/* RTSP URL */}
+      <Show when={isActive() && st()?.streaming?.rtspEnabled && st()?.streaming?.rtspUrl}>
+        <div class="stream-url-bar">
+          <code>{st()!.streaming.rtspUrl}</code>
+        </div>
+      </Show>
     </section>
   )
 }

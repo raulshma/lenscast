@@ -76,5 +76,20 @@ class MainApplication : Application(), ImageLoaderFactory {
                 streamingManager.updateAuthSettings(auth)
             }
         }
+        appScope.launch {
+            settingsDataStore.rtspEnabled.collectLatest { enabled ->
+                streamingManager.setRtspEnabled(enabled)
+            }
+        }
+        appScope.launch {
+            settingsDataStore.rtspPort.collectLatest { port ->
+                streamingManager.setRtspPort(port)
+            }
+        }
+        appScope.launch {
+            settingsDataStore.rtspInputFormat.collectLatest { format ->
+                streamingManager.setRtspInputFormat(format)
+            }
+        }
     }
 }

@@ -14,6 +14,7 @@ import com.raulshma.lenscast.camera.model.WhiteBalance
 import com.raulshma.lenscast.capture.PhotoCaptureHelper
 import com.raulshma.lenscast.capture.RecordingService
 import com.raulshma.lenscast.streaming.model.*
+import com.raulshma.lenscast.streaming.rtsp.RtspInputFormat
 
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -94,6 +95,15 @@ class WebApiController(private val context: Context) {
     private val recordingAudioEnabledFlow: StateFlow<Boolean> =
         app.settingsDataStore.recordingAudioEnabled.stateIn(scope, SharingStarted.Eagerly, true)
 
+    private val rtspEnabledFlow: StateFlow<Boolean> =
+        app.settingsDataStore.rtspEnabled.stateIn(scope, SharingStarted.Eagerly, false)
+
+    private val rtspPortFlow: StateFlow<Int> =
+        app.settingsDataStore.rtspPort.stateIn(scope, SharingStarted.Eagerly, StreamingSettingsDto.DEFAULT_RTSP_PORT)
+
+    private val rtspInputFormatFlow: StateFlow<RtspInputFormat> =
+        app.settingsDataStore.rtspInputFormat.stateIn(scope, SharingStarted.Eagerly, RtspInputFormat.AUTO)
+
     @Volatile
     private var isRecording = false
 
@@ -134,6 +144,9 @@ class WebApiController(private val context: Context) {
                     streamAudioChannels = streamAudioChannelsFlow.value,
                     streamAudioEchoCancellation = streamAudioEchoCancellationFlow.value,
                     recordingAudioEnabled = recordingAudioEnabledFlow.value,
+                    rtspEnabled = rtspEnabledFlow.value,
+                    rtspPort = rtspPortFlow.value,
+                    rtspInputFormat = rtspInputFormatFlow.value.name,
                 ),
             )
             settingsResponseAdapter.toJson(response)
@@ -223,6 +236,25 @@ class WebApiController(private val context: Context) {
                     app.streamingManager.setStreamAudioEchoCancellation(stream.streamAudioEchoCancellation)
                 }
                 scope.launch { app.settingsDataStore.saveRecordingAudioEnabled(stream.recordingAudioEnabled) }
+                scope.launch {
+                    app.settingsDataStore.saveRtspEnabled(stream.rtspEnabled)
+                    app.streamingManager.setRtspEnabled(stream.rtspEnabled)
+                }
+                if (stream.rtspPort in 1024..65535) {
+                    scope.launch {
+                        app.settingsDataStore.saveRtspPort(stream.rtspPort)
+                        app.streamingManager.setRtspPort(stream.rtspPort)
+                    }
+                }
+                if (stream.rtspInputFormat.isNotBlank()) {
+                    val format = runCatching { RtspInputFormat.valueOf(stream.rtspInputFormat) }.getOrNull()
+                    if (format != null) {
+                        scope.launch {
+                            app.settingsDataStore.saveRtspInputFormat(format)
+                            app.streamingManager.setRtspInputFormat(format)
+                        }
+                    }
+                }
             }
 
             successAdapter.toJson(SuccessResponse())
@@ -251,6 +283,8 @@ class WebApiController(private val context: Context) {
                     clientCount = clientCount,
                     audioEnabled = isAudioStreaming,
                     audioUrl = audioUrl,
+                    rtspEnabled = app.streamingManager.isRtspRunning.value,
+                    rtspUrl = app.streamingManager.rtspUrl.value,
                 ),
                 thermal = thermal.name,
                 camera = app.cameraService.cameraState.value.toString(),

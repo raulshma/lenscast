@@ -620,8 +620,9 @@ class CameraService(private val context: Context) {
 
     private fun processFrame(imageProxy: ImageProxy) {
         try {
-            val width = imageProxy.width
-            val height = imageProxy.height
+            val cropRect = imageProxy.cropRect
+            val width = cropRect.width()
+            val height = cropRect.height()
             val rotation = imageProxy.imageInfo.rotationDegrees
             val yuvData = yuvToNv21(imageProxy)
             if (yuvData != null) {
@@ -642,56 +643,54 @@ class CameraService(private val context: Context) {
         val uPlane = planes[1]
         val vPlane = planes[2]
 
-        val width = image.width
-        val height = image.height
+        val crop = image.cropRect
+        val width = crop.width()
+        val height = crop.height()
+        if (width <= 0 || height <= 0) return null
+
         val ySize = width * height
         val uvSize = ySize / 2
         val nv21 = ByteArray(ySize + uvSize)
 
-        // Copy Y plane (handle row stride/padding)
-        val yBuffer = yPlane.buffer
+        // Copy Y plane with row/pixel stride and crop handling.
+        val yBuffer = yPlane.buffer.duplicate()
         val yRowStride = yPlane.rowStride
-        if (yRowStride == width) {
-            yBuffer.position(0)
-            yBuffer.get(nv21, 0, ySize)
-        } else {
-            var pos = 0
-            for (row in 0 until height) {
-                yBuffer.position(row * yRowStride)
-                yBuffer.get(nv21, pos, width)
-                pos += width
+        val yPixelStride = yPlane.pixelStride
+        var yOut = 0
+        val yCropTop = crop.top
+        val yCropLeft = crop.left
+        for (row in 0 until height) {
+            val rowStart = (row + yCropTop) * yRowStride + yCropLeft * yPixelStride
+            var srcIndex = rowStart
+            for (col in 0 until width) {
+                nv21[yOut++] = yBuffer.get(srcIndex)
+                srcIndex += yPixelStride
             }
         }
 
-        // Copy UV planes interleaved as VU (NV21 format)
-        val uBuffer = uPlane.buffer
-        val vBuffer = vPlane.buffer
-        val uvRowStride = uPlane.rowStride
-        val uvPixelStride = uPlane.pixelStride
+        // Copy UV planes interleaved as VU (NV21) with independent strides and crop.
+        val uBuffer = uPlane.buffer.duplicate()
+        val vBuffer = vPlane.buffer.duplicate()
+        val uRowStride = uPlane.rowStride
+        val vRowStride = vPlane.rowStride
+        val uPixelStride = uPlane.pixelStride
+        val vPixelStride = vPlane.pixelStride
+        val uvWidth = width / 2
+        val uvHeight = height / 2
+        val uvCropTop = crop.top / 2
+        val uvCropLeft = crop.left / 2
         var uvPos = ySize
 
-        if (uvPixelStride == 2 && uvRowStride == width) {
-            // Optimal case: interleaved UV with no padding
-            for (i in 0 until width * height / 4) {
-                val vIdx = i * uvPixelStride
-                val uIdx = i * uvPixelStride
-                vBuffer.position(vIdx)
-                uBuffer.position(uIdx)
-                nv21[uvPos++] = vBuffer.get()
-                nv21[uvPos++] = uBuffer.get()
-            }
-        } else {
-            // General case: handle arbitrary stride/padding
-            val uvWidth = width / 2
-            val uvHeight = height / 2
-            for (row in 0 until uvHeight) {
-                for (col in 0 until uvWidth) {
-                    val uvIndex = row * uvRowStride + col * uvPixelStride
-                    vBuffer.position(uvIndex)
-                    uBuffer.position(uvIndex)
-                    nv21[uvPos++] = vBuffer.get()
-                    nv21[uvPos++] = uBuffer.get()
-                }
+        for (row in 0 until uvHeight) {
+            val uRowStart = (row + uvCropTop) * uRowStride + uvCropLeft * uPixelStride
+            val vRowStart = (row + uvCropTop) * vRowStride + uvCropLeft * vPixelStride
+            var uIndex = uRowStart
+            var vIndex = vRowStart
+            for (col in 0 until uvWidth) {
+                nv21[uvPos++] = vBuffer.get(vIndex)
+                nv21[uvPos++] = uBuffer.get(uIndex)
+                uIndex += uPixelStride
+                vIndex += vPixelStride
             }
         }
 

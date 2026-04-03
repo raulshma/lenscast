@@ -149,6 +149,44 @@ export default function StreamingCard(props: Props) {
           </label>
         </div>
       </div>
+
+      {/* RTSP Stream */}
+      <div class="field-group">
+        <div class="field-row field-row-toggle">
+          <span class="field-label">RTSP Stream</span>
+          <label class="toggle-switch" for="rtsp-toggle">
+            <input
+              id="rtsp-toggle"
+              type="checkbox"
+              checked={s()?.streaming?.rtspEnabled ?? false}
+              onChange={() => props.updateStreamingAndSave({ rtspEnabled: !(s()?.streaming?.rtspEnabled ?? false) })}
+            />
+            <span class="toggle-slider" />
+          </label>
+        </div>
+      </div>
+
+      <Show when={s()?.streaming?.rtspEnabled}>
+        <div class="field-group">
+          <div class="field-row">
+            <span class="field-label">RTSP Port</span>
+            <span class="field-value">{s()?.streaming?.rtspPort ?? 8554}</span>
+          </div>
+          <input
+            id="rtsp-port-slider"
+            type="range"
+            class="custom-range"
+            min={1024}
+            max={65535}
+            step={1}
+            value={s()?.streaming?.rtspPort ?? 8554}
+            onInput={(e) => {
+              const v = parseInt(e.currentTarget.value)
+              props.updateStreamingDebounced({ rtspPort: v })
+            }}
+          />
+        </div>
+      </Show>
     </SettingsCard>
   )
 }

@@ -38,6 +38,11 @@ object NetworkUtils {
         return "${if (ssl) "https" else "http"}://$ip:$port/snapshot"
     }
 
+    fun getRtspUrl(port: Int): String? {
+        val ip = getLocalIpAddress() ?: return null
+        return "rtsp://$ip:$port"
+    }
+
     fun isWifiConnected(context: Context): Boolean {
         val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
         val network = cm.activeNetwork ?: return false

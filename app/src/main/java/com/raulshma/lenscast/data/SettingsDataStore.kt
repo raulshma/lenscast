@@ -16,6 +16,7 @@ import com.raulshma.lenscast.camera.model.FocusMode
 import com.raulshma.lenscast.camera.model.HdrMode
 import com.raulshma.lenscast.camera.model.Resolution
 import com.raulshma.lenscast.camera.model.WhiteBalance
+import com.raulshma.lenscast.streaming.rtsp.RtspInputFormat
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import java.security.MessageDigest
@@ -27,12 +28,14 @@ data class StreamAuthSettings(
     val enabled: Boolean = false,
     val username: String = "",
     val passwordHash: String = "",
+    val rtspDigestHa1: String = "",
 ) {
     companion object {
         private const val HASH_PREFIX = "pbkdf2_sha256"
         private const val PBKDF2_ITERATIONS = 120_000
         private const val KEY_LENGTH_BITS = 256
         private const val SALT_LENGTH_BYTES = 16
+        private const val RTSP_DIGEST_REALM = "LensCast RTSP"
 
         fun hashPassword(password: String): String {
             if (password.isEmpty()) return ""
@@ -61,6 +64,22 @@ data class StreamAuthSettings(
             val candidateLegacy = Base64.encodeToString(legacyHash, Base64.NO_WRAP)
                 .toByteArray(Charsets.UTF_8)
             return MessageDigest.isEqual(candidateLegacy, expectedLegacy)
+        }
+
+        fun computeRtspDigestHa1(
+            username: String,
+            password: String,
+            realm: String = RTSP_DIGEST_REALM,
+        ): String {
+            if (username.isEmpty() || password.isEmpty()) return ""
+            val input = "$username:$realm:$password"
+            return md5Hex(input)
+        }
+
+        private fun md5Hex(input: String): String {
+            val digest = MessageDigest.getInstance("MD5")
+            val bytes = digest.digest(input.toByteArray(Charsets.UTF_8))
+            return bytes.joinToString("") { "%02x".format(it) }
         }
 
         private fun derivePassword(password: String, salt: ByteArray, iterations: Int): ByteArray {
@@ -112,7 +131,11 @@ class SettingsDataStore(private val context: Context) {
         val AUTH_ENABLED = stringPreferencesKey("auth_enabled")
         val AUTH_USERNAME = stringPreferencesKey("auth_username")
         val AUTH_PASSWORD_HASH = stringPreferencesKey("auth_password_hash")
+        val AUTH_RTSP_DIGEST_HA1 = stringPreferencesKey("auth_rtsp_digest_ha1")
         val SHOW_PREVIEW = stringPreferencesKey("show_preview")
+        val RTSP_ENABLED = stringPreferencesKey("rtsp_enabled")
+        val RTSP_PORT = intPreferencesKey("rtsp_port")
+        val RTSP_INPUT_FORMAT = stringPreferencesKey("rtsp_input_format")
     }
 
     val settings: Flow<CameraSettings> = context.dataStore.data.map { prefs ->
@@ -186,7 +209,25 @@ class SettingsDataStore(private val context: Context) {
             enabled = prefs[Keys.AUTH_ENABLED] == "true",
             username = prefs[Keys.AUTH_USERNAME] ?: "",
             passwordHash = prefs[Keys.AUTH_PASSWORD_HASH] ?: "",
+            rtspDigestHa1 = prefs[Keys.AUTH_RTSP_DIGEST_HA1] ?: "",
         )
+    }
+
+    val rtspEnabled: Flow<Boolean> = context.dataStore.data.map { prefs ->
+        prefs[Keys.RTSP_ENABLED] == "true"
+    }
+
+    val rtspPort: Flow<Int> = context.dataStore.data.map { prefs ->
+        prefs[Keys.RTSP_PORT] ?: 8554
+    }
+
+    val rtspInputFormat: Flow<RtspInputFormat> = context.dataStore.data.map { prefs ->
+        val raw = prefs[Keys.RTSP_INPUT_FORMAT] ?: RtspInputFormat.AUTO.name
+        try {
+            RtspInputFormat.valueOf(raw)
+        } catch (_: Exception) {
+            RtspInputFormat.AUTO
+        }
     }
 
     suspend fun saveSettings(settings: CameraSettings) {
@@ -286,6 +327,29 @@ class SettingsDataStore(private val context: Context) {
             if (settings.passwordHash.isNotEmpty()) {
                 prefs[Keys.AUTH_PASSWORD_HASH] = settings.passwordHash
             }
+            if (settings.rtspDigestHa1.isNotEmpty()) {
+                prefs[Keys.AUTH_RTSP_DIGEST_HA1] = settings.rtspDigestHa1
+            } else {
+                prefs.remove(Keys.AUTH_RTSP_DIGEST_HA1)
+            }
+        }
+    }
+
+    suspend fun saveRtspEnabled(enabled: Boolean) {
+        context.dataStore.edit { prefs ->
+            prefs[Keys.RTSP_ENABLED] = if (enabled) "true" else "false"
+        }
+    }
+
+    suspend fun saveRtspPort(port: Int) {
+        context.dataStore.edit { prefs ->
+            prefs[Keys.RTSP_PORT] = port
+        }
+    }
+
+    suspend fun saveRtspInputFormat(format: RtspInputFormat) {
+        context.dataStore.edit { prefs ->
+            prefs[Keys.RTSP_INPUT_FORMAT] = format.name
         }
     }
 }

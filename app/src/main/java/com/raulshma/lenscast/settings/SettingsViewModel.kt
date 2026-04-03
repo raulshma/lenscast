@@ -12,6 +12,7 @@ import com.raulshma.lenscast.camera.model.WhiteBalance
 import com.raulshma.lenscast.data.SettingsDataStore
 import com.raulshma.lenscast.data.StreamAuthSettings
 import com.raulshma.lenscast.streaming.StreamingManager
+import com.raulshma.lenscast.streaming.rtsp.RtspInputFormat
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -52,6 +53,15 @@ class SettingsViewModel(
 
     private val _recordingAudioEnabled = MutableStateFlow(true)
     val recordingAudioEnabled: StateFlow<Boolean> = _recordingAudioEnabled.asStateFlow()
+
+    private val _rtspEnabled = MutableStateFlow(false)
+    val rtspEnabled: StateFlow<Boolean> = _rtspEnabled.asStateFlow()
+
+    private val _rtspPort = MutableStateFlow(8554)
+    val rtspPort: StateFlow<Int> = _rtspPort.asStateFlow()
+
+    private val _rtspInputFormat = MutableStateFlow(RtspInputFormat.AUTO)
+    val rtspInputFormat: StateFlow<RtspInputFormat> = _rtspInputFormat.asStateFlow()
 
     val availableZoomRange: StateFlow<ClosedFloatingPointRange<Float>> = cameraService.availableZoomRange
     val availableExposureRange: StateFlow<ClosedRange<Int>> = cameraService.availableExposureRange
@@ -112,6 +122,24 @@ class SettingsViewModel(
         viewModelScope.launch {
             settingsDataStore.recordingAudioEnabled.collect { enabled ->
                 _recordingAudioEnabled.value = enabled
+            }
+        }
+        viewModelScope.launch {
+            settingsDataStore.rtspEnabled.collect { enabled ->
+                _rtspEnabled.value = enabled
+                streamingManager?.setRtspEnabled(enabled)
+            }
+        }
+        viewModelScope.launch {
+            settingsDataStore.rtspPort.collect { port ->
+                _rtspPort.value = port
+                streamingManager?.setRtspPort(port)
+            }
+        }
+        viewModelScope.launch {
+            settingsDataStore.rtspInputFormat.collect { format ->
+                _rtspInputFormat.value = format
+                streamingManager?.setRtspInputFormat(format)
             }
         }
     }
@@ -233,6 +261,31 @@ class SettingsViewModel(
         }
     }
 
+    fun updateRtspEnabled(enabled: Boolean) {
+        _rtspEnabled.value = enabled
+        viewModelScope.launch {
+            settingsDataStore.saveRtspEnabled(enabled)
+            streamingManager?.setRtspEnabled(enabled)
+        }
+    }
+
+    fun updateRtspPort(port: Int) {
+        _rtspPort.value = port
+        viewModelScope.launch {
+            settingsDataStore.saveRtspPort(port)
+            streamingManager?.setRtspPort(port)
+        }
+    }
+
+    fun updateRtspInputFormat(name: String) {
+        val format = runCatching { RtspInputFormat.valueOf(name) }.getOrDefault(RtspInputFormat.AUTO)
+        _rtspInputFormat.value = format
+        viewModelScope.launch {
+            settingsDataStore.saveRtspInputFormat(format)
+            streamingManager?.setRtspInputFormat(format)
+        }
+    }
+
     fun updateAuthEnabled(enabled: Boolean) {
         val newAuth = _authSettings.value.copy(enabled = enabled)
         _authSettings.value = newAuth
@@ -243,7 +296,10 @@ class SettingsViewModel(
     }
 
     fun updateAuthUsername(username: String) {
-        val newAuth = _authSettings.value.copy(username = username)
+        val newAuth = _authSettings.value.copy(
+            username = username,
+            rtspDigestHa1 = "",
+        )
         _authSettings.value = newAuth
         viewModelScope.launch {
             settingsDataStore.saveAuthSettings(newAuth)
@@ -253,7 +309,12 @@ class SettingsViewModel(
 
     fun updateAuthPassword(password: String) {
         val hash = StreamAuthSettings.hashPassword(password)
-        val newAuth = _authSettings.value.copy(passwordHash = hash)
+        val username = _authSettings.value.username
+        val digestHa1 = StreamAuthSettings.computeRtspDigestHa1(username, password)
+        val newAuth = _authSettings.value.copy(
+            passwordHash = hash,
+            rtspDigestHa1 = digestHa1,
+        )
         _authSettings.value = newAuth
         viewModelScope.launch {
             settingsDataStore.saveAuthSettings(newAuth)

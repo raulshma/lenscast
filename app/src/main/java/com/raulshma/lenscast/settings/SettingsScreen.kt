@@ -46,6 +46,7 @@ import com.raulshma.lenscast.camera.model.FocusMode
 import com.raulshma.lenscast.camera.model.HdrMode
 import com.raulshma.lenscast.camera.model.Resolution
 import com.raulshma.lenscast.camera.model.WhiteBalance
+import com.raulshma.lenscast.streaming.rtsp.RtspInputFormat
 import com.raulshma.lenscast.ui.components.LensCastSectionCard
 import com.raulshma.lenscast.ui.components.LensCastTopBar
 
@@ -73,6 +74,9 @@ fun CameraSettingsScreen(
     val streamAudioChannels by viewModel.streamAudioChannels.collectAsState()
     val streamAudioEchoCancellation by viewModel.streamAudioEchoCancellation.collectAsState()
     val recordingAudioEnabled by viewModel.recordingAudioEnabled.collectAsState()
+    val rtspEnabled by viewModel.rtspEnabled.collectAsState()
+    val rtspPort by viewModel.rtspPort.collectAsState()
+    val rtspInputFormat by viewModel.rtspInputFormat.collectAsState()
 
     Scaffold(
         topBar = {
@@ -228,6 +232,30 @@ fun CameraSettingsScreen(
                         range = 10f..100f,
                         onValueChange = { viewModel.updateJpegQuality(it.toInt()) }
                     )
+                }
+            }
+
+            item {
+                SettingsSection(title = "RTSP Stream") {
+                    SwitchSetting(
+                        title = "Enable RTSP Streaming",
+                        checked = rtspEnabled,
+                        onCheckedChange = { viewModel.updateRtspEnabled(it) }
+                    )
+                    if (rtspEnabled) {
+                        SliderSetting(
+                            title = "RTSP Port",
+                            value = rtspPort.toFloat(),
+                            range = 1024f..65535f,
+                            onValueChange = { viewModel.updateRtspPort(it.toInt()) }
+                        )
+                        DropdownSetting(
+                            title = "RTSP Encoder Input Format",
+                            options = RtspInputFormat.entries.map { it.name },
+                            selected = rtspInputFormat.name,
+                            onSelect = { viewModel.updateRtspInputFormat(it) }
+                        )
+                    }
                 }
             }
 

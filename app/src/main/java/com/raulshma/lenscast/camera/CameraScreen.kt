@@ -245,6 +245,7 @@ fun CameraScreen(
                 onNavigateToCapture = onNavigateToCapture,
                 onNavigateToSettings = onNavigateToSettings,
                 onCopyStreamUrl = { viewModel.copyStreamUrl() },
+                onCopyRtspUrl = { viewModel.copyRtspUrl() },
                 onToggleServer = { viewModel.toggleServer() },
                 onSelectLens = { viewModel.selectLens(it) },
             )
@@ -297,6 +298,7 @@ private fun ImmersiveCameraView(
     onNavigateToCapture: () -> Unit,
     onNavigateToSettings: () -> Unit,
     onCopyStreamUrl: () -> Unit,
+    onCopyRtspUrl: () -> Unit,
     onToggleServer: () -> Unit,
     onSelectLens: (Int) -> Unit,
 ) {
@@ -374,6 +376,7 @@ private fun ImmersiveCameraView(
             onNavigateToSettings = onNavigateToSettings,
             onToggleQuickSettings = onToggleQuickSettings,
             onCopyStreamUrl = onCopyStreamUrl,
+            onCopyRtspUrl = onCopyRtspUrl,
             onToggleServer = onToggleServer,
             modifier = Modifier
                 .align(Alignment.TopStart)
@@ -457,6 +460,7 @@ private fun CameraTopOverlay(
     onNavigateToSettings: () -> Unit,
     onToggleQuickSettings: () -> Unit,
     onCopyStreamUrl: () -> Unit,
+    onCopyRtspUrl: () -> Unit,
     onToggleServer: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -491,6 +495,7 @@ private fun CameraTopOverlay(
             ServerStatusButton(
                 streamStatus = streamStatus,
                 onCopyUrl = onCopyStreamUrl,
+                onCopyRtspUrl = onCopyRtspUrl,
                 onToggleServer = onToggleServer,
             )
             CameraControlButton(
@@ -1398,6 +1403,7 @@ private fun RecordingIndicator(
 private fun ServerStatusButton(
     streamStatus: com.raulshma.lenscast.camera.model.StreamStatus,
     onCopyUrl: () -> Unit,
+    onCopyRtspUrl: () -> Unit,
     onToggleServer: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -1483,6 +1489,47 @@ private fun ServerStatusButton(
                     onClick = {
                         expanded = false
                         onCopyUrl()
+                    },
+                )
+            }
+            if (streamStatus.rtspUrl.isNotBlank()) {
+                DropdownMenuItem(
+                    text = {
+                        Column {
+                            Text(
+                                "RTSP Stream",
+                                style = MaterialTheme.typography.labelLarge,
+                                fontWeight = FontWeight.Bold,
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                streamStatus.rtspUrl,
+                                style = MaterialTheme.typography.bodySmall.copy(
+                                    fontFamily = FontFamily.Monospace
+                                ),
+                                maxLines = 1,
+                            )
+                        }
+                    },
+                    onClick = { expanded = false },
+                    enabled = false,
+                )
+                DropdownMenuItem(
+                    text = {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                Icons.Default.ContentCopy,
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp),
+                                tint = MaterialTheme.colorScheme.onSurface,
+                            )
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Text("Copy RTSP URL", style = MaterialTheme.typography.bodyMedium)
+                        }
+                    },
+                    onClick = {
+                        expanded = false
+                        onCopyRtspUrl()
                     },
                 )
             }

@@ -32,6 +32,8 @@ export interface StreamingSettings {
   streamAudioChannels: number
   streamAudioEchoCancellation: boolean
   recordingAudioEnabled: boolean
+  rtspEnabled: boolean
+  rtspPort: number
 }
 
 export interface AllSettings {
@@ -46,6 +48,8 @@ export interface DeviceStatus {
     clientCount: number
     audioEnabled: boolean
     audioUrl: string
+    rtspEnabled: boolean
+    rtspUrl: string
   }
   thermal: ThermalState
   battery: {
