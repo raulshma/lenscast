@@ -107,12 +107,6 @@ class WebApiController(private val context: Context) {
     private val rtspInputFormatFlow: StateFlow<RtspInputFormat> =
         app.settingsDataStore.rtspInputFormat.stateIn(scope, SharingStarted.Eagerly, RtspInputFormat.AUTO)
 
-    @Volatile
-    private var isRecording = false
-
-    @Volatile
-    private var recordingStartTime: Long = 0
-
     private var scheduledRecordingJob: kotlinx.coroutines.Job? = null
     @Volatile
     private var scheduledStartTimeMs: Long? = null
@@ -528,7 +522,12 @@ class WebApiController(private val context: Context) {
 
     fun handleGetRecordingStatus(): String {
         return try {
-            val elapsed = if (isRecording && recordingStartTime > 0) {
+            val isRecording = RecordingService.isRecordingActive()
+            val recordingStartTime = RecordingService.recordingStartTimeMs()
+            if (isRecording && scheduledStartTimeMs != null) {
+                scheduledStartTimeMs = null
+            }
+            val elapsed = if (isRecording && recordingStartTime > 0L) {
                 ((System.currentTimeMillis() - recordingStartTime) / 1000).toInt()
             } else {
                 0
@@ -537,7 +536,7 @@ class WebApiController(private val context: Context) {
                 RecordingStatusDto(
                     isRecording = isRecording, 
                     elapsedSeconds = elapsed,
-                    isScheduled = scheduledStartTimeMs != null,
+                    isScheduled = !isRecording && scheduledStartTimeMs != null,
                     scheduledStartTimeMs = scheduledStartTimeMs
                 )
             )
@@ -574,8 +573,6 @@ class WebApiController(private val context: Context) {
                     } else {
                         context.startService(intent)
                     }
-                    isRecording = true
-                    recordingStartTime = System.currentTimeMillis()
                     scheduledStartTimeMs = null
                     Log.d(TAG, "Scheduled recording started")
                 }
@@ -591,8 +588,6 @@ class WebApiController(private val context: Context) {
                 } else {
                     context.startService(intent)
                 }
-                isRecording = true
-                recordingStartTime = System.currentTimeMillis()
                 Log.d(TAG, "Recording started")
                 successAdapter.toJson(SuccessResponse())
             }
@@ -612,8 +607,6 @@ class WebApiController(private val context: Context) {
                 action = RecordingService.ACTION_STOP
             }
             context.startService(intent)
-            isRecording = false
-            recordingStartTime = 0
             Log.d(TAG, "Recording stopped")
             successAdapter.toJson(SuccessResponse())
         } catch (e: Exception) {

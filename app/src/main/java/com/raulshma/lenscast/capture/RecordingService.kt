@@ -32,6 +32,8 @@ import kotlinx.coroutines.runBlocking
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicLong
 
 class RecordingService : Service() {
 
@@ -206,6 +208,8 @@ class RecordingService : Service() {
                 .start(ContextCompat.getMainExecutor(this)) { event ->
                     when (event) {
                         is VideoRecordEvent.Start -> {
+                            serviceRecordingActive.set(true)
+                            serviceRecordingStartTimeMs.set(startTimeMs)
                             Log.d(TAG, "Recording started: $fileName")
                         }
                         is VideoRecordEvent.Finalize -> {
@@ -278,6 +282,8 @@ class RecordingService : Service() {
     private fun finishRecordingSession() {
         activeRecording = null
         isFinalizingRecording = false
+        serviceRecordingActive.set(false)
+        serviceRecordingStartTimeMs.set(0L)
 
         val app = applicationContext as MainApplication
         releaseExclusiveRecordingAudio(app)
@@ -293,6 +299,8 @@ class RecordingService : Service() {
         activeRecording = null
         isRecording = false
         isFinalizingRecording = false
+        serviceRecordingActive.set(false)
+        serviceRecordingStartTimeMs.set(0L)
 
         uri?.let {
             runCatching {
@@ -401,6 +409,14 @@ class RecordingService : Service() {
         private const val TAG = "RecordingService"
         @Volatile
         private var activeRecording: Recording? = null
+        private val serviceRecordingActive = AtomicBoolean(false)
+        private val serviceRecordingStartTimeMs = AtomicLong(0L)
         private val DATE_FORMAT = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US)
+
+        @JvmStatic
+        fun isRecordingActive(): Boolean = serviceRecordingActive.get()
+
+        @JvmStatic
+        fun recordingStartTimeMs(): Long = serviceRecordingStartTimeMs.get()
     }
 }

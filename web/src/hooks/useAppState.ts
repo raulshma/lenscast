@@ -313,8 +313,12 @@ export function useAppState() {
   // ── Actions ──
   async function handleCapture() {
     setCaptureMsg('Capturing...')
-    const result = await api.capturePhoto()
-    setCaptureMsg(result.success ? `Captured: ${result.fileName}` : `Failed: ${result.error}`)
+    try {
+      const result = await api.capturePhoto()
+      setCaptureMsg(result.success ? `Captured: ${result.fileName}` : `Failed: ${result.error}`)
+    } catch (e: any) {
+      setCaptureMsg(`Failed: ${e?.message ?? 'Capture failed'}`)
+    }
     setTimeout(() => setCaptureMsg(''), 4000)
   }
 
