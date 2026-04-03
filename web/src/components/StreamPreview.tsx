@@ -1,5 +1,6 @@
 import { Show } from 'solid-js'
 import type { DeviceStatus } from '../types'
+import { useZoomable } from '../hooks/useZoomable'
 
 interface Props {
   status: () => DeviceStatus | null
@@ -21,18 +22,31 @@ export default function StreamPreview(props: Props) {
   const isActive = () => !!st()?.streaming?.isActive
   const webStreamingEnabled = () => st()?.streaming?.webStreamingEnabled ?? true
 
+  const zoom = useZoomable({
+    minScale: 1,
+    maxScale: 10,
+    wheelZoomFactor: 0.15,
+  })
+
   return (
     <section class="preview-section" id="preview-section">
-      <div class="preview-container" classList={{ 'preview-active': isActive() && props.previewVisible() }}>
+      <div
+        class="preview-container zoomable-container"
+        classList={{ 'preview-active': isActive() && props.previewVisible() }}
+        ref={zoom.containerRef}
+      >
         {props.previewVisible() && isActive() ? (
           <img
-            class="preview-img"
+            class="preview-img zoomable-content"
             src={`/stream?t=${props.streamNonce()}`}
             alt="Live camera stream"
             draggable={false}
             loading="eager"
             decoding="async"
             onError={() => props.setPreviewVisible(false)}
+            style={{
+              transform: `scale(${zoom.scale()}) translate(${zoom.translateX()}px, ${zoom.translateY()}px)`,
+            }}
           />
         ) : (
           <div class="preview-placeholder">
@@ -48,6 +62,20 @@ export default function StreamPreview(props: Props) {
             </span>
           </div>
         )}
+
+        {/* Reset zoom button */}
+        <Show when={zoom.isZoomed()}>
+          <div class="zoom-indicator">
+            <span class="zoom-percent">{zoom.zoomPercent()}%</span>
+            <button class="reset-zoom-btn" onClick={zoom.resetZoom} title="Reset zoom">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="11" cy="11" r="8" />
+                <path d="M21 21l-4.35-4.35" />
+                <path d="M11 8v6M8 11h6" />
+              </svg>
+            </button>
+          </div>
+        </Show>
 
         {/* Recording overlay */}
         <Show when={props.isRecording()}>

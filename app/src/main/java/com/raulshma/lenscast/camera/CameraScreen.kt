@@ -24,6 +24,14 @@ import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.calculateCentroid
+import androidx.compose.foundation.gestures.calculateZoom
+import androidx.compose.foundation.gestures.detectTransformGestures
+import androidx.compose.ui.input.pointer.AwaitPointerEventScope
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
@@ -88,6 +96,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -99,6 +108,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -124,6 +134,8 @@ import com.raulshma.lenscast.camera.model.WhiteBalance
 import com.raulshma.lenscast.core.ThermalState
 import com.raulshma.lenscast.ui.theme.LensOrange
 import com.raulshma.lenscast.ui.theme.LensRed
+import kotlin.math.absoluteValue
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 private val OverlayScrim = Color(0xB3000000)
@@ -182,6 +194,8 @@ fun CameraScreen(
 
     var quickSettingsExpanded by remember { mutableStateOf(false) }
     var activeSetting by remember { mutableStateOf<QuickSettingType?>(null) }
+    var isPinching by remember { mutableStateOf(false) }
+    var pinchZoomRatio by remember { mutableFloatStateOf(1f) }
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     var requestedMissingAudioPermission by remember { mutableStateOf(false) }
 
@@ -223,6 +237,12 @@ fun CameraScreen(
                 quickSettingsExpanded = quickSettingsExpanded,
                 activeSetting = activeSetting,
                 flashAlpha = flashAlpha,
+                isPinching = isPinching,
+                pinchZoomRatio = pinchZoomRatio,
+                onPinchStateChange = { pinching, ratio ->
+                    isPinching = pinching
+                    pinchZoomRatio = ratio
+                },
                 onToggleQuickSettings = {
                     quickSettingsExpanded = !quickSettingsExpanded
                     if (!quickSettingsExpanded) activeSetting = null
@@ -287,6 +307,8 @@ private fun ImmersiveCameraView(
     quickSettingsExpanded: Boolean,
     activeSetting: QuickSettingType?,
     flashAlpha: Animatable<Float, *>,
+    isPinching: Boolean,
+    pinchZoomRatio: Float,
     onToggleQuickSettings: () -> Unit,
     onQuickSettingTap: (QuickSettingType) -> Unit,
     onCapture: () -> Unit,
@@ -301,12 +323,16 @@ private fun ImmersiveCameraView(
     onCopyRtspUrl: () -> Unit,
     onToggleServer: () -> Unit,
     onSelectLens: (Int) -> Unit,
+    onPinchStateChange: (Boolean, Float) -> Unit,
 ) {
     Box(modifier = Modifier.fillMaxSize()) {
         if (showPreview) {
             CameraPreview(
                 viewModel = viewModel,
-                modifier = Modifier.fillMaxSize()
+                modifier = Modifier.fillMaxSize(),
+                isPinching = isPinching,
+                pinchZoomRatio = pinchZoomRatio,
+                onPinchStateChange = onPinchStateChange
             )
         } else {
             Box(
@@ -441,6 +467,14 @@ private fun ImmersiveCameraView(
                     .align(Alignment.BottomCenter)
                     .navigationBarsPadding()
                     .padding(bottom = 200.dp)
+            )
+        }
+
+        if (isPinching) {
+            ZoomIndicator(
+                zoomRatio = pinchZoomRatio,
+                modifier = Modifier
+                    .align(Alignment.Center)
             )
         }
     }
@@ -1210,6 +1244,9 @@ private fun CameraPermissionRequest(
 private fun CameraPreview(
     viewModel: CameraViewModel,
     modifier: Modifier = Modifier,
+    isPinching: Boolean = false,
+    pinchZoomRatio: Float = 1f,
+    onPinchStateChange: (Boolean, Float) -> Unit = { _, _ -> },
 ) {
     val context = LocalContext.current
     val previewView = remember {
@@ -1217,6 +1254,7 @@ private fun CameraPreview(
             scaleType = PreviewView.ScaleType.FILL_CENTER
         }
     }
+    val settings by viewModel.settings.collectAsState()
 
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(previewView, lifecycleOwner) {
@@ -1224,10 +1262,36 @@ private fun CameraPreview(
         onDispose { viewModel.stopPreview() }
     }
 
-    AndroidView(
-        factory = { previewView },
-        modifier = modifier
-    )
+    Box(modifier = modifier) {
+        AndroidView(
+            factory = { previewView },
+            modifier = Modifier.fillMaxSize()
+        )
+
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .pointerInput(Unit) {
+                    detectTransformGestures { _, _, zoom, _ ->
+                        if (zoom != 1f) {
+                            val currentZoom = settings.zoomRatio
+                            val newZoom = (currentZoom * zoom).coerceIn(0.5f, 10f)
+                            if ((newZoom - currentZoom).absoluteValue > 0.01f) {
+                                viewModel.updateZoom(newZoom)
+                                onPinchStateChange(true, newZoom)
+                            }
+                        }
+                    }
+                }
+        )
+    }
+
+    LaunchedEffect(isPinching) {
+        if (!isPinching) {
+            delay(800)
+            onPinchStateChange(false, settings.zoomRatio)
+        }
+    }
 }
 
 @Composable
@@ -1593,6 +1657,39 @@ private fun ThermalWarningOverlay(
             style = MaterialTheme.typography.labelSmall,
             color = Color.White
         )
+    }
+}
+
+@Composable
+private fun ZoomIndicator(
+    zoomRatio: Float,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        modifier = modifier,
+        color = OverlayScrim.copy(alpha = 0.85f),
+        shape = RoundedCornerShape(24.dp)
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                imageVector = Icons.Default.ZoomIn,
+                contentDescription = null,
+                tint = Color.White,
+                modifier = Modifier.size(20.dp)
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(
+                text = "${String.format("%.1f", zoomRatio)}x",
+                style = MaterialTheme.typography.titleMedium.copy(
+                    fontWeight = FontWeight.Bold,
+                    fontFamily = FontFamily.Monospace
+                ),
+                color = Color.White
+            )
+        }
     }
 }
 
