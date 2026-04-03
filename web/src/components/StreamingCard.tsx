@@ -65,6 +65,26 @@ export default function StreamingCard(props: Props) {
         />
       </div>
 
+      {/* Adaptive Bitrate */}
+      <div class="field-group">
+        <div class="field-row field-row-toggle">
+          <span class="field-label">Adaptive Bitrate</span>
+          <label class="toggle-switch" for="adaptive-bitrate-toggle">
+            <input
+              id="adaptive-bitrate-toggle"
+              type="checkbox"
+              checked={s()?.streaming?.adaptiveBitrateEnabled ?? false}
+              onChange={() => props.updateStreamingAndSave({ adaptiveBitrateEnabled: !(s()?.streaming?.adaptiveBitrateEnabled ?? false) })}
+            />
+            <span class="toggle-slider" />
+          </label>
+        </div>
+        <div class="status-banner status-banner-info stream-mode-hint" role="note" aria-live="polite">
+          <span class="status-banner-dot" aria-hidden="true" />
+          <span>Automatically adjusts quality and frame rate based on network conditions.</span>
+        </div>
+      </div>
+
       {/* Show Preview */}
       <div class="field-group">
         <div class="field-row field-row-toggle">

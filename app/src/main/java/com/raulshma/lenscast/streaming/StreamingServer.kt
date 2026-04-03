@@ -4,6 +4,7 @@ import android.content.Context
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.Log
+import com.raulshma.lenscast.core.NetworkQualityMonitor
 import com.raulshma.lenscast.core.NetworkUtils
 import com.raulshma.lenscast.data.StreamAuthSettings
 import fi.iki.elonen.NanoHTTPD
@@ -32,6 +33,7 @@ class StreamingServer(
 
     private val boundary = BOUNDARY_MARKER
     private val clientCount = AtomicInteger(0)
+    private val clientCounter = AtomicInteger(0)
     private var latestJpeg: ByteArray? = null
     private val frameLock = Object()
     private var latestFrameVersion = 0L
@@ -39,6 +41,8 @@ class StreamingServer(
     @Volatile private var webStreamingEnabled = true
     @Volatile var authUsername: String? = null
     @Volatile var authPasswordHash: String? = null
+
+    var networkQualityMonitor: NetworkQualityMonitor? = null
 
     private val apiController: WebApiController? = context?.let { WebApiController(it) }
 
@@ -647,7 +651,10 @@ class StreamingServer(
         }
 
         val clientNum = clientCount.incrementAndGet()
-        Log.d(TAG, "Client connected. Total: $clientNum")
+        val clientId = "mjpeg_${clientCounter.incrementAndGet()}"
+        Log.d(TAG, "Client connected: $clientId. Total: $clientNum")
+
+        networkQualityMonitor?.registerClient(clientId)
 
         val stream = object : InputStream() {
             private var currentFrame: ByteArray? = null
@@ -660,6 +667,8 @@ class StreamingServer(
             private val footerBytes = "\r\n".toByteArray()
             @Volatile
             private var closed = false
+            private var frameSendStartTime = 0L
+            private var currentFrameTotalBytes = 0
 
             override fun read(): Int {
                 val buf = ByteArray(1)
@@ -715,6 +724,12 @@ class StreamingServer(
                         frameOffset >= frame.size &&
                         footerOffset >= footerBytes.size
                     ) {
+                        val sendDuration = System.currentTimeMillis() - frameSendStartTime
+                        networkQualityMonitor?.recordFrameSent(
+                            clientId = clientId,
+                            frameSizeBytes = currentFrameTotalBytes,
+                            sendDurationMs = sendDuration,
+                        )
                         currentFrame = null
                     }
                 }
@@ -745,6 +760,8 @@ class StreamingServer(
                             headerOffset = 0
                             headerBytes = buildHeader(nextFrame.size, isFirstPart).toByteArray()
                             isFirstPart = false
+                            currentFrameTotalBytes = nextFrame.size + headerBytes.size + footerBytes.size
+                            frameSendStartTime = System.currentTimeMillis()
                             return true
                         }
                         frameLock.wait(250)
@@ -775,8 +792,9 @@ class StreamingServer(
             override fun close() {
                 closed = true
                 synchronized(frameLock) { frameLock.notifyAll() }
+                networkQualityMonitor?.unregisterClient(clientId)
                 val num = clientCount.decrementAndGet()
-                Log.d(TAG, "Client disconnected. Total: $num")
+                Log.d(TAG, "Client disconnected: $clientId. Total: $num")
             }
         }
 

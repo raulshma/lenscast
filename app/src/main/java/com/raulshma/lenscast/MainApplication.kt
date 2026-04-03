@@ -96,5 +96,10 @@ class MainApplication : Application(), ImageLoaderFactory {
                 streamingManager.setRtspInputFormat(format)
             }
         }
+        appScope.launch {
+            settingsDataStore.adaptiveBitrateEnabled.collectLatest { enabled ->
+                streamingManager.setAdaptiveBitrateEnabled(enabled)
+            }
+        }
     }
 }

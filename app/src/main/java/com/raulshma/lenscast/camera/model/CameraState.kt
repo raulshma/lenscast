@@ -17,4 +17,6 @@ data class StreamStatus(
     val audioUrl: String = "",
     val isRtspActive: Boolean = false,
     val rtspUrl: String = "",
+    val isWebEnabled: Boolean = true,
+    val isRtspEnabled: Boolean = false,
 )

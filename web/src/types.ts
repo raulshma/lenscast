@@ -35,6 +35,7 @@ export interface StreamingSettings {
   recordingAudioEnabled: boolean
   rtspEnabled: boolean
   rtspPort: number
+  adaptiveBitrateEnabled: boolean
 }
 
 export interface AllSettings {
@@ -60,6 +61,18 @@ export interface DeviceStatus {
     isPowerSaveMode: boolean
   }
   camera: string
+  adaptiveBitrate?: {
+    enabled: boolean
+    qualityLevel: string
+    currentQuality: number
+    targetQuality: number
+    currentFps: number
+    targetFps: number
+    estimatedBandwidthKbps: number
+    minClientThroughputKbps: number
+    activeClients: number
+    adjustmentCount: number
+  }
 }
 
 export interface LensInfo {

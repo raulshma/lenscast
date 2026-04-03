@@ -66,6 +66,9 @@ class SettingsViewModel(
     private val _rtspInputFormat = MutableStateFlow(RtspInputFormat.AUTO)
     val rtspInputFormat: StateFlow<RtspInputFormat> = _rtspInputFormat.asStateFlow()
 
+    private val _adaptiveBitrateEnabled = MutableStateFlow(false)
+    val adaptiveBitrateEnabled: StateFlow<Boolean> = _adaptiveBitrateEnabled.asStateFlow()
+
     val availableZoomRange: StateFlow<ClosedFloatingPointRange<Float>> = cameraService.availableZoomRange
     val availableExposureRange: StateFlow<ClosedRange<Int>> = cameraService.availableExposureRange
 
@@ -149,6 +152,12 @@ class SettingsViewModel(
             settingsDataStore.rtspInputFormat.collect { format ->
                 _rtspInputFormat.value = format
                 streamingManager?.setRtspInputFormat(format)
+            }
+        }
+        viewModelScope.launch {
+            settingsDataStore.adaptiveBitrateEnabled.collect { enabled ->
+                _adaptiveBitrateEnabled.value = enabled
+                streamingManager?.setAdaptiveBitrateEnabled(enabled)
             }
         }
     }
@@ -300,6 +309,14 @@ class SettingsViewModel(
         viewModelScope.launch {
             settingsDataStore.saveRtspInputFormat(format)
             streamingManager?.setRtspInputFormat(format)
+        }
+    }
+
+    fun updateAdaptiveBitrateEnabled(enabled: Boolean) {
+        _adaptiveBitrateEnabled.value = enabled
+        viewModelScope.launch {
+            settingsDataStore.saveAdaptiveBitrateEnabled(enabled)
+            streamingManager?.setAdaptiveBitrateEnabled(enabled)
         }
     }
 

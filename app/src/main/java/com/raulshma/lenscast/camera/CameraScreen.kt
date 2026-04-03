@@ -131,6 +131,7 @@ import com.raulshma.lenscast.camera.model.FocusMode
 import com.raulshma.lenscast.camera.model.HdrMode
 import com.raulshma.lenscast.camera.model.Resolution
 import com.raulshma.lenscast.camera.model.WhiteBalance
+import com.raulshma.lenscast.core.NetworkQualityMonitor.NetworkQualityLevel
 import com.raulshma.lenscast.core.ThermalState
 import com.raulshma.lenscast.ui.theme.LensOrange
 import com.raulshma.lenscast.ui.theme.LensRed
@@ -173,6 +174,7 @@ fun CameraScreen(
     val selectedLensIndex by viewModel.selectedLensIndex.collectAsState()
     val settings by viewModel.settings.collectAsState()
     val showPreview by viewModel.showPreview.collectAsState()
+    val adaptiveBitrateState by viewModel.adaptiveBitrateState.collectAsState()
     val hasAudioPermission by viewModel.hasAudioPermission.collectAsState()
 
     val mediaPermissionLauncher = rememberLauncherForActivityResult(
@@ -234,6 +236,7 @@ fun CameraScreen(
                 selectedLensIndex = selectedLensIndex,
                 settings = settings,
                 showPreview = showPreview,
+                adaptiveBitrateState = adaptiveBitrateState,
                 quickSettingsExpanded = quickSettingsExpanded,
                 activeSetting = activeSetting,
                 flashAlpha = flashAlpha,
@@ -304,6 +307,7 @@ private fun ImmersiveCameraView(
     selectedLensIndex: Int,
     settings: CameraSettings,
     showPreview: Boolean,
+    adaptiveBitrateState: com.raulshma.lenscast.streaming.AdaptiveBitrateController.AdaptiveState,
     quickSettingsExpanded: Boolean,
     activeSetting: QuickSettingType?,
     flashAlpha: Animatable<Float, *>,
@@ -470,6 +474,16 @@ private fun ImmersiveCameraView(
             )
         }
 
+        if (streamStatus.isActive && adaptiveBitrateState.enabled) {
+            NetworkQualityBadge(
+                state = adaptiveBitrateState,
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .statusBarsPadding()
+                    .padding(top = 56.dp, end = 8.dp)
+            )
+        }
+
         if (isPinching) {
             ZoomIndicator(
                 zoomRatio = pinchZoomRatio,
@@ -515,7 +529,7 @@ private fun CameraTopOverlay(
                 onClick = onSwitchCamera
             )
             if (streamStatus.isActive) {
-                StreamIndicator()
+                StreamIndicator(streamStatus = streamStatus)
             }
             if (isRecording) {
                 RecordingIndicator(elapsedSeconds = recordingElapsedSeconds)
@@ -1383,30 +1397,78 @@ private fun ErrorDisplay(
 
 @Composable
 private fun StreamIndicator(
+    streamStatus: com.raulshma.lenscast.camera.model.StreamStatus,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        modifier = modifier,
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Surface(
+            color = Color(0xFFD32F2F).copy(alpha = 0.9f),
+            shape = RoundedCornerShape(16.dp)
+        ) {
+            Row(
+                modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Surface(
+                    modifier = Modifier.size(8.dp),
+                    shape = CircleShape,
+                    color = Color.White
+                ) {}
+                Spacer(modifier = Modifier.size(6.dp))
+                Text(
+                    text = "LIVE",
+                    style = MaterialTheme.typography.labelSmall.copy(
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace
+                    ),
+                    color = Color.White
+                )
+            }
+        }
+
+        if (streamStatus.isWebEnabled) {
+            StreamBadge(icon = Icons.Default.Wifi, label = "WEB")
+        }
+        if (streamStatus.isRtspEnabled) {
+            StreamBadge(icon = Icons.Default.Videocam, label = "RTSP")
+        }
+    }
+}
+
+@Composable
+private fun StreamBadge(
+    icon: ImageVector,
+    label: String,
     modifier: Modifier = Modifier,
 ) {
     Surface(
         modifier = modifier,
-        color = Color(0xFFD32F2F).copy(alpha = 0.9f),
-        shape = RoundedCornerShape(16.dp)
+        color = OverlayScrim,
+        shape = RoundedCornerShape(12.dp)
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
-            verticalAlignment = Alignment.CenterVertically
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
         ) {
-            Surface(
-                modifier = Modifier.size(8.dp),
-                shape = CircleShape,
-                color = Color.White
-            ) {}
-            Spacer(modifier = Modifier.size(6.dp))
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                modifier = Modifier.size(12.dp),
+                tint = Color.White.copy(alpha = 0.8f)
+            )
             Text(
-                text = "LIVE",
+                text = label,
                 style = MaterialTheme.typography.labelSmall.copy(
-                    fontWeight = FontWeight.Bold,
+                    fontWeight = FontWeight.Medium,
                     fontFamily = FontFamily.Monospace
                 ),
-                color = Color.White
+                color = Color.White.copy(alpha = 0.8f),
+                fontSize = 10.sp
             )
         }
     }
@@ -1689,6 +1751,67 @@ private fun ZoomIndicator(
                 ),
                 color = Color.White
             )
+        }
+    }
+}
+
+@Composable
+private fun NetworkQualityBadge(
+    state: com.raulshma.lenscast.streaming.AdaptiveBitrateController.AdaptiveState,
+    modifier: Modifier = Modifier,
+) {
+    val (dotColor, label) = when (state.qualityLevel) {
+        NetworkQualityLevel.EXCELLENT -> Color(0xFF4CAF50) to "EXC"
+        NetworkQualityLevel.GOOD -> Color(0xFF8BC34A) to "GOOD"
+        NetworkQualityLevel.FAIR -> Color(0xFFFFC107) to "FAIR"
+        NetworkQualityLevel.POOR -> Color(0xFFFF9800) to "POOR"
+        NetworkQualityLevel.CRITICAL -> Color(0xFFF44336) to "CRIT"
+    }
+
+    Surface(
+        modifier = modifier,
+        color = OverlayScrim,
+        shape = RoundedCornerShape(16.dp)
+    ) {
+        Column(
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+            horizontalAlignment = Alignment.End
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Surface(
+                    modifier = Modifier.size(8.dp),
+                    shape = CircleShape,
+                    color = dotColor
+                ) {}
+                Spacer(modifier = Modifier.width(4.dp))
+                Text(
+                    text = label,
+                    style = MaterialTheme.typography.labelSmall.copy(
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace
+                    ),
+                    color = Color.White
+                )
+            }
+            Spacer(modifier = Modifier.height(2.dp))
+            Text(
+                text = "${state.currentQuality}q ${state.currentFps}fps",
+                style = MaterialTheme.typography.labelSmall.copy(
+                    fontFamily = FontFamily.Monospace,
+                    color = Color.White.copy(alpha = 0.7f)
+                )
+            )
+            if (state.activeClients > 0) {
+                Text(
+                    text = "${state.activeClients} client${if (state.activeClients != 1) "s" else ""} · ${state.minClientThroughputKbps}kbps",
+                    style = MaterialTheme.typography.labelSmall.copy(
+                        fontFamily = FontFamily.Monospace,
+                        color = Color.White.copy(alpha = 0.5f)
+                    )
+                )
+            }
         }
     }
 }

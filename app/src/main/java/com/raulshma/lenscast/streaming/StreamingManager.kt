@@ -8,9 +8,12 @@ import android.graphics.Matrix
 import android.graphics.Rect
 import android.graphics.YuvImage
 import android.util.Log
+import com.raulshma.lenscast.core.NetworkQualityMonitor
 import com.raulshma.lenscast.core.NetworkUtils
 import com.raulshma.lenscast.core.ThermalMonitor
 import com.raulshma.lenscast.data.StreamAuthSettings
+import com.raulshma.lenscast.streaming.AdaptiveBitrateController.AdaptiveBitrateConfig
+import com.raulshma.lenscast.streaming.AdaptiveBitrateController.AdaptiveResult
 import com.raulshma.lenscast.streaming.rtsp.RtspInputFormat
 import com.raulshma.lenscast.streaming.rtsp.RtspServer
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -27,7 +30,7 @@ class StreamingManager(private val context: Context) {
     @Volatile
     private var currentAuthSettings = StreamAuthSettings()
     private var server: StreamingServer = createServer(DEFAULT_PORT)
-    private val isStreaming = AtomicBoolean(false)
+    private val streamingActive = AtomicBoolean(false)
     private val jpegQuality = AtomicInteger(DEFAULT_JPEG_QUALITY)
     private val streamAudioEnabled = AtomicBoolean(true)
     private val streamAudioBitrateKbps = AtomicInteger(DEFAULT_AUDIO_BITRATE_KBPS)
@@ -52,6 +55,17 @@ class StreamingManager(private val context: Context) {
     private var lastReportedClientCount = -1
 
     var thermalMonitor: ThermalMonitor? = null
+    val networkQualityMonitor = NetworkQualityMonitor()
+    private val adaptiveBitrateController = AdaptiveBitrateController(networkQualityMonitor)
+
+    private val _isStreaming = MutableStateFlow(false)
+    val isStreaming: StateFlow<Boolean> = _isStreaming
+
+    private val _isWebEnabled = MutableStateFlow(true)
+    val isWebEnabled: StateFlow<Boolean> = _isWebEnabled
+
+    private val _isRtspEnabled = MutableStateFlow(false)
+    val isRtspEnabled: StateFlow<Boolean> = _isRtspEnabled
 
     private val _streamUrl = MutableStateFlow("")
     val streamUrl: StateFlow<String> = _streamUrl
@@ -74,14 +88,20 @@ class StreamingManager(private val context: Context) {
     private val _isRtspRunning = MutableStateFlow(false)
     val isRtspRunning: StateFlow<Boolean> = _isRtspRunning
 
-    fun isLiveStreaming(): Boolean = isStreaming.get()
+    val adaptiveBitrateState: StateFlow<AdaptiveBitrateController.AdaptiveState> = adaptiveBitrateController.state
+
+    fun getAdaptiveBitrateState(): AdaptiveBitrateController.AdaptiveState = adaptiveBitrateController.state.value
+
+    fun getNetworkStatsSnapshot(): NetworkQualityMonitor.NetworkStatsSnapshot = networkQualityMonitor.getStatsSnapshot()
+
+    fun isLiveStreaming(): Boolean = streamingActive.get()
 
     fun isWebStreamingEnabled(): Boolean = webStreamingEnabled.get()
 
-    fun isWebStreamingActive(): Boolean = isStreaming.get() && webStreamingEnabled.get() && _isServerRunning.value
+    fun isWebStreamingActive(): Boolean = streamingActive.get() && webStreamingEnabled.get() && _isServerRunning.value
 
     fun setPort(port: Int) {
-        if (isStreaming.get()) {
+        if (streamingActive.get()) {
             Log.w(TAG, "Cannot change port while streaming")
             return
         }
@@ -106,6 +126,18 @@ class StreamingManager(private val context: Context) {
             }
             Log.d(TAG, "Streaming port set to $port")
         }
+    }
+
+    fun setAdaptiveBitrateEnabled(enabled: Boolean) {
+        adaptiveBitrateController.setEnabled(enabled)
+        Log.d(TAG, "Adaptive bitrate ${if (enabled) "enabled" else "disabled"}")
+    }
+
+    fun isAdaptiveBitrateEnabled(): Boolean = adaptiveBitrateController.isEnabled
+
+    fun setAdaptiveBitrateConfig(config: AdaptiveBitrateConfig) {
+        adaptiveBitrateController.reset()
+        Log.d(TAG, "Adaptive bitrate config updated")
     }
 
     fun ensureServerRunning(): Boolean {
@@ -133,11 +165,13 @@ class StreamingManager(private val context: Context) {
             return false
         }
 
-        if (isStreaming.getAndSet(true)) return true
+        if (streamingActive.getAndSet(true)) return true
+        _isStreaming.value = true
 
         if (webStreamingEnabled.get()) {
             if (!ensureServerRunning()) {
-                isStreaming.set(false)
+                streamingActive.set(false)
+                _isStreaming.value = false
                 return false
             }
         } else {
@@ -155,7 +189,8 @@ class StreamingManager(private val context: Context) {
     }
 
     fun stopStreaming() {
-        if (!isStreaming.getAndSet(false)) return
+        if (!streamingActive.getAndSet(false)) return
+        _isStreaming.value = false
 
         stopRtspServer()
         audioStreamingManager.stop()
@@ -171,7 +206,8 @@ class StreamingManager(private val context: Context) {
     }
 
     fun pauseStreaming() {
-        if (!isStreaming.getAndSet(false)) return
+        if (!streamingActive.getAndSet(false)) return
+        _isStreaming.value = false
         audioStreamingManager.stop()
         _clientCount.value = 0
         _audioStreamUrl.value = ""
@@ -180,21 +216,29 @@ class StreamingManager(private val context: Context) {
     }
 
     fun pushFrame(bitmap: Bitmap) {
-        if (!isStreaming.get() || !webStreamingEnabled.get()) return
+        if (!streamingActive.get() || !webStreamingEnabled.get()) return
 
         val now = System.currentTimeMillis()
         val elapsed = now - lastFrameTimeMs.get()
-        val adjustedInterval = thermalMonitor?.getAdjustedFrameDelay(minFrameIntervalMs.get())
-            ?: minFrameIntervalMs.get()
-        if (elapsed < adjustedInterval) return
+
+        val baseInterval = minFrameIntervalMs.get()
+        val thermalAdjustedInterval = thermalMonitor?.getAdjustedFrameDelay(baseInterval) ?: baseInterval
+        val adaptiveInterval = adaptiveBitrateController.getAdaptiveFrameInterval(baseInterval, thermalAdjustedInterval)
+
+        if (elapsed < adaptiveInterval) return
         lastFrameTimeMs.set(now)
 
         val clientCount = server.getClientCount()
         if (clientCount == 0) return
 
-        val quality = thermalMonitor?.getAdjustedQuality(jpegQuality.get()) ?: jpegQuality.get()
+        val baseQuality = jpegQuality.get()
+        val thermalAdjustedQuality = thermalMonitor?.getAdjustedQuality(baseQuality) ?: baseQuality
+        val quality = adaptiveBitrateController.getAdaptiveQuality(baseQuality, thermalAdjustedQuality)
+
         val jpegData = bitmapToJpegReuse(bitmap, quality)
         server.updateFrame(jpegData)
+
+        networkQualityMonitor.updateEstimatedBandwidth()
 
         if (clientCount != lastReportedClientCount) {
             lastReportedClientCount = clientCount
@@ -203,21 +247,29 @@ class StreamingManager(private val context: Context) {
     }
 
     fun pushFrame(yuvData: ByteArray, width: Int, height: Int, rotation: Int = 0) {
-        if (!isStreaming.get() || !webStreamingEnabled.get()) return
+        if (!streamingActive.get() || !webStreamingEnabled.get()) return
 
         val now = System.currentTimeMillis()
         val elapsed = now - lastFrameTimeMs.get()
-        val adjustedInterval = thermalMonitor?.getAdjustedFrameDelay(minFrameIntervalMs.get())
-            ?: minFrameIntervalMs.get()
-        if (elapsed < adjustedInterval) return
+
+        val baseInterval = minFrameIntervalMs.get()
+        val thermalAdjustedInterval = thermalMonitor?.getAdjustedFrameDelay(baseInterval) ?: baseInterval
+        val adaptiveInterval = adaptiveBitrateController.getAdaptiveFrameInterval(baseInterval, thermalAdjustedInterval)
+
+        if (elapsed < adaptiveInterval) return
         lastFrameTimeMs.set(now)
 
         val clientCount = server.getClientCount()
         if (clientCount == 0) return
 
-        val quality = thermalMonitor?.getAdjustedQuality(jpegQuality.get()) ?: jpegQuality.get()
+        val baseQuality = jpegQuality.get()
+        val thermalAdjustedQuality = thermalMonitor?.getAdjustedQuality(baseQuality) ?: baseQuality
+        val quality = adaptiveBitrateController.getAdaptiveQuality(baseQuality, thermalAdjustedQuality)
+
         val jpegData = yuvToJpeg(yuvData, width, height, quality, rotation) ?: return
         server.updateFrame(jpegData)
+
+        networkQualityMonitor.updateEstimatedBandwidth()
 
         if (clientCount != lastReportedClientCount) {
             lastReportedClientCount = clientCount
@@ -286,7 +338,7 @@ class StreamingManager(private val context: Context) {
 
     fun setStreamAudioEnabled(enabled: Boolean) {
         streamAudioEnabled.set(enabled)
-        if (isStreaming.get()) {
+        if (streamingActive.get()) {
             refreshAudioStreamingState()
         } else {
             _isAudioStreaming.value = false
@@ -298,16 +350,20 @@ class StreamingManager(private val context: Context) {
         val changed = webStreamingEnabled.getAndSet(enabled) != enabled
         if (!changed) return
 
+        _isWebEnabled.value = enabled
         server.setWebStreamingEnabled(enabled)
 
         if (!enabled) {
+            if (streamingActive.getAndSet(false)) {
+                _isStreaming.value = false
+            }
             audioStreamingManager.stop()
             _isAudioStreaming.value = false
             _audioStreamUrl.value = ""
             _streamUrl.value = ""
             _clientCount.value = 0
             lastReportedClientCount = -1
-        } else if (isStreaming.get()) {
+        } else if (streamingActive.get()) {
             ensureServerRunning()
             _streamUrl.value = buildVideoUrl()
             refreshAudioStreamingState()
@@ -316,21 +372,21 @@ class StreamingManager(private val context: Context) {
 
     fun setStreamAudioBitrateKbps(bitrateKbps: Int) {
         streamAudioBitrateKbps.set(bitrateKbps.coerceIn(32, 320))
-        if (isStreaming.get() && streamAudioEnabled.get()) {
+        if (streamingActive.get() && streamAudioEnabled.get()) {
             refreshAudioStreamingState()
         }
     }
 
     fun setStreamAudioChannels(channels: Int) {
         streamAudioChannels.set(channels.coerceIn(1, 2))
-        if (isStreaming.get() && streamAudioEnabled.get()) {
+        if (streamingActive.get() && streamAudioEnabled.get()) {
             refreshAudioStreamingState()
         }
     }
 
     fun setStreamAudioEchoCancellation(enabled: Boolean) {
         streamAudioEchoCancellation.set(enabled)
-        if (isStreaming.get() && streamAudioEnabled.get()) {
+        if (streamingActive.get() && streamAudioEnabled.get()) {
             refreshAudioStreamingState()
         }
     }
@@ -383,7 +439,8 @@ class StreamingManager(private val context: Context) {
 
     fun setRtspEnabled(enabled: Boolean) {
         rtspEnabled.set(enabled)
-        if (enabled && isStreaming.get()) {
+        _isRtspEnabled.value = enabled
+        if (enabled && streamingActive.get()) {
             startRtspServer()
         } else {
             stopRtspServer()
@@ -407,6 +464,7 @@ class StreamingManager(private val context: Context) {
 
     private fun createServer(port: Int): StreamingServer {
         return StreamingServer(port, context, audioStreamingManager).also {
+            it.networkQualityMonitor = networkQualityMonitor
             applyAuthSettings(it, currentAuthSettings)
             it.setWebStreamingEnabled(webStreamingEnabled.get())
         }
@@ -468,7 +526,7 @@ class StreamingManager(private val context: Context) {
     private fun refreshAudioStreamingState() {
         audioStreamingManager.stop()
 
-        if (!isStreaming.get() || !webStreamingEnabled.get() || !streamAudioEnabled.get() || recordingAudioCaptureActive) {
+        if (!streamingActive.get() || !webStreamingEnabled.get() || !streamAudioEnabled.get() || recordingAudioCaptureActive) {
             _isAudioStreaming.value = false
             _audioStreamUrl.value = ""
             return

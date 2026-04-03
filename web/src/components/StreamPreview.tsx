@@ -43,7 +43,15 @@ export default function StreamPreview(props: Props) {
             draggable={false}
             loading="eager"
             decoding="async"
-            onError={() => props.setPreviewVisible(false)}
+            onError={() => {
+              const next = props.streamNonce() + 1
+              props.setPreviewVisible(false)
+              setTimeout(() => {
+                if (isActive()) {
+                  props.setPreviewVisible(true)
+                }
+              }, 2000)
+            }}
             style={{
               transform: `scale(${zoom.scale()}) translate(${zoom.translateX()}px, ${zoom.translateY()}px)`,
             }}
@@ -90,6 +98,30 @@ export default function StreamPreview(props: Props) {
           <div class="live-badge">
             <span class="live-badge-dot" />
             LIVE
+          </div>
+        </Show>
+
+        {/* Network quality stats */}
+        <Show when={isActive() && props.previewVisible() && st()?.adaptiveBitrate?.enabled}>
+          <div class="network-quality-overlay">
+            <div class="nq-header">
+              <span class="nq-dot" classList={{
+                'nq-excellent': st()?.adaptiveBitrate?.qualityLevel === 'EXCELLENT',
+                'nq-good': st()?.adaptiveBitrate?.qualityLevel === 'GOOD',
+                'nq-fair': st()?.adaptiveBitrate?.qualityLevel === 'FAIR',
+                'nq-poor': st()?.adaptiveBitrate?.qualityLevel === 'POOR',
+                'nq-critical': st()?.adaptiveBitrate?.qualityLevel === 'CRITICAL',
+              }} />
+              <span class="nq-label">{st()?.adaptiveBitrate?.qualityLevel ?? 'N/A'}</span>
+            </div>
+            <div class="nq-stats">
+              {st()!.adaptiveBitrate!.currentQuality}q {st()!.adaptiveBitrate!.currentFps}fps
+            </div>
+            <Show when={st()?.adaptiveBitrate?.activeClients ?? 0 > 0}>
+              <div class="nq-clients">
+                {st()!.adaptiveBitrate!.activeClients} client{st()!.adaptiveBitrate!.activeClients !== 1 ? 's' : ''} · {st()!.adaptiveBitrate!.minClientThroughputKbps}kbps
+              </div>
+            </Show>
           </div>
         </Show>
       </div>

@@ -37,6 +37,7 @@ data class StreamingSettingsDto(
     val rtspEnabled: Boolean = false,
     val rtspPort: Int = DEFAULT_RTSP_PORT,
     val rtspInputFormat: String = "",
+    val adaptiveBitrateEnabled: Boolean = false,
 ) {
     companion object {
         const val DEFAULT_PORT = 8080
@@ -80,6 +81,20 @@ data class StatusResponseDto(
     val thermal: String,
     val camera: String,
     val battery: BatteryStatusDto,
+    val adaptiveBitrate: AdaptiveBitrateStatusDto? = null,
+)
+
+data class AdaptiveBitrateStatusDto(
+    val enabled: Boolean,
+    val qualityLevel: String,
+    val currentQuality: Int,
+    val targetQuality: Int,
+    val currentFps: Int,
+    val targetFps: Int,
+    val estimatedBandwidthKbps: Int,
+    val minClientThroughputKbps: Int,
+    val activeClients: Int,
+    val adjustmentCount: Int,
 )
 
 // ── API Response DTOs ──

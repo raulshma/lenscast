@@ -78,6 +78,7 @@ fun CameraSettingsScreen(
     val rtspEnabled by viewModel.rtspEnabled.collectAsState()
     val rtspPort by viewModel.rtspPort.collectAsState()
     val rtspInputFormat by viewModel.rtspInputFormat.collectAsState()
+    val adaptiveBitrateEnabled by viewModel.adaptiveBitrateEnabled.collectAsState()
 
     Scaffold(
         topBar = {
@@ -237,6 +238,11 @@ fun CameraSettingsScreen(
                         value = jpegQuality.toFloat(),
                         range = 10f..100f,
                         onValueChange = { viewModel.updateJpegQuality(it.toInt()) }
+                    )
+                    SwitchSetting(
+                        title = "Adaptive Bitrate",
+                        checked = adaptiveBitrateEnabled,
+                        onCheckedChange = { viewModel.updateAdaptiveBitrateEnabled(it) }
                     )
                 }
             }

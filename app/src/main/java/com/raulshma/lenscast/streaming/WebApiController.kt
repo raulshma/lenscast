@@ -107,6 +107,9 @@ class WebApiController(private val context: Context) {
     private val rtspInputFormatFlow: StateFlow<RtspInputFormat> =
         app.settingsDataStore.rtspInputFormat.stateIn(scope, SharingStarted.Eagerly, RtspInputFormat.AUTO)
 
+    private val adaptiveBitrateEnabledFlow: StateFlow<Boolean> =
+        app.settingsDataStore.adaptiveBitrateEnabled.stateIn(scope, SharingStarted.Eagerly, false)
+
     private var scheduledRecordingJob: kotlinx.coroutines.Job? = null
     @Volatile
     private var scheduledStartTimeMs: Long? = null
@@ -145,6 +148,7 @@ class WebApiController(private val context: Context) {
                     rtspEnabled = rtspEnabledFlow.value,
                     rtspPort = rtspPortFlow.value,
                     rtspInputFormat = rtspInputFormatFlow.value.name,
+                    adaptiveBitrateEnabled = adaptiveBitrateEnabledFlow.value,
                 ),
             )
             settingsResponseAdapter.toJson(response)
@@ -257,6 +261,10 @@ class WebApiController(private val context: Context) {
                         }
                     }
                 }
+                scope.launch {
+                    app.settingsDataStore.saveAdaptiveBitrateEnabled(stream.adaptiveBitrateEnabled)
+                    app.streamingManager.setAdaptiveBitrateEnabled(stream.adaptiveBitrateEnabled)
+                }
             }
 
             successAdapter.toJson(SuccessResponse())
@@ -278,6 +286,24 @@ class WebApiController(private val context: Context) {
             val isAudioStreaming = app.streamingManager.isAudioStreaming.value
             val audioUrl = app.streamingManager.audioStreamUrl.value
 
+            val adaptiveState = app.streamingManager.adaptiveBitrateState.value
+            val adaptiveBitrateDto = if (adaptiveState.enabled) {
+                AdaptiveBitrateStatusDto(
+                    enabled = adaptiveState.enabled,
+                    qualityLevel = adaptiveState.qualityLevel.name,
+                    currentQuality = adaptiveState.currentQuality,
+                    targetQuality = adaptiveState.targetQuality,
+                    currentFps = adaptiveState.currentFps,
+                    targetFps = adaptiveState.targetFps,
+                    estimatedBandwidthKbps = adaptiveState.estimatedBandwidthKbps,
+                    minClientThroughputKbps = adaptiveState.minClientThroughputKbps,
+                    activeClients = adaptiveState.activeClients,
+                    adjustmentCount = adaptiveState.adjustmentCount,
+                )
+            } else {
+                null
+            }
+
             val response = StatusResponseDto(
                 streaming = StreamingStatusDto(
                     isActive = isLiveStreaming,
@@ -296,6 +322,7 @@ class WebApiController(private val context: Context) {
                     isCharging = isCharging,
                     isPowerSaveMode = isPowerSave,
                 ),
+                adaptiveBitrate = adaptiveBitrateDto,
             )
             statusResponseAdapter.toJson(response)
         } catch (e: Exception) {

@@ -137,6 +137,7 @@ class SettingsDataStore(private val context: Context) {
         val RTSP_ENABLED = stringPreferencesKey("rtsp_enabled")
         val RTSP_PORT = intPreferencesKey("rtsp_port")
         val RTSP_INPUT_FORMAT = stringPreferencesKey("rtsp_input_format")
+        val ADAPTIVE_BITRATE_ENABLED = stringPreferencesKey("adaptive_bitrate_enabled")
     }
 
     val settings: Flow<CameraSettings> = context.dataStore.data.map { prefs ->
@@ -361,6 +362,16 @@ class SettingsDataStore(private val context: Context) {
     suspend fun saveRtspInputFormat(format: RtspInputFormat) {
         context.dataStore.edit { prefs ->
             prefs[Keys.RTSP_INPUT_FORMAT] = format.name
+        }
+    }
+
+    val adaptiveBitrateEnabled: Flow<Boolean> = context.dataStore.data.map { prefs ->
+        prefs[Keys.ADAPTIVE_BITRATE_ENABLED] == "true"
+    }
+
+    suspend fun saveAdaptiveBitrateEnabled(enabled: Boolean) {
+        context.dataStore.edit { prefs ->
+            prefs[Keys.ADAPTIVE_BITRATE_ENABLED] = if (enabled) "true" else "false"
         }
     }
 }

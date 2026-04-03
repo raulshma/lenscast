@@ -424,6 +424,63 @@ html, body {
   animation: recording-pulse 1.5s ease-in-out infinite;
 }
 
+/* Network Quality Overlay */
+.network-quality-overlay {
+  position: absolute;
+  top: 44px;
+  right: 12px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  background: rgba(0, 0, 0, 0.7);
+  backdrop-filter: blur(8px);
+  padding: 8px 12px;
+  border-radius: var(--lc-radius-full);
+  z-index: 5;
+}
+
+.nq-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  color: white;
+}
+
+.nq-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.nq-excellent { background: #4CAF50; }
+.nq-good { background: #8BC34A; }
+.nq-fair { background: #FFC107; }
+.nq-poor { background: #FF9800; }
+.nq-critical { background: #F44336; }
+
+.nq-label {
+  font-family: var(--lc-font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 1px;
+}
+
+.nq-stats {
+  font-family: var(--lc-font-mono);
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.nq-clients {
+  font-family: var(--lc-font-mono);
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.5);
+}
+
 /* Recording Overlay */
 .recording-timer-overlay {
   position: absolute;

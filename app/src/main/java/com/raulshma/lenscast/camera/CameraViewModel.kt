@@ -30,6 +30,7 @@ import com.raulshma.lenscast.core.PowerManager
 import com.raulshma.lenscast.core.ThermalMonitor
 import com.raulshma.lenscast.core.ThermalState
 import com.raulshma.lenscast.data.SettingsDataStore
+import com.raulshma.lenscast.streaming.AdaptiveBitrateController
 import com.raulshma.lenscast.streaming.StreamingManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -96,6 +97,19 @@ class CameraViewModel(
     private val _showPreview = MutableStateFlow(true)
     val showPreview: StateFlow<Boolean> = _showPreview.asStateFlow()
 
+    private val _adaptiveBitrateState = MutableStateFlow(AdaptiveBitrateController.AdaptiveState(
+        enabled = false,
+        qualityLevel = com.raulshma.lenscast.core.NetworkQualityMonitor.NetworkQualityLevel.GOOD,
+        currentQuality = 70,
+        targetQuality = 70,
+        currentFps = 24,
+        targetFps = 24,
+        estimatedBandwidthKbps = 5000,
+        minClientThroughputKbps = 5000,
+        activeClients = 0,
+    ))
+    val adaptiveBitrateState: StateFlow<AdaptiveBitrateController.AdaptiveState> = _adaptiveBitrateState.asStateFlow()
+
     private val _streamAudioEnabled = MutableStateFlow(true)
     private val _recordingAudioEnabled = MutableStateFlow(true)
 
@@ -112,6 +126,11 @@ class CameraViewModel(
         viewModelScope.launch {
             cameraService.isFrontCamera.collect { isFront ->
                 _isFrontCamera.value = isFront
+            }
+        }
+        viewModelScope.launch {
+            streamingManager.isStreaming.collect { isActive ->
+                _streamStatus.value = _streamStatus.value.copy(isActive = isActive)
             }
         }
         viewModelScope.launch {
@@ -149,6 +168,16 @@ class CameraViewModel(
                 _streamStatus.value = _streamStatus.value.copy(rtspUrl = rtspUrl)
             }
         }
+        viewModelScope.launch {
+            streamingManager.isWebEnabled.collect { enabled ->
+                _streamStatus.value = _streamStatus.value.copy(isWebEnabled = enabled)
+            }
+        }
+        viewModelScope.launch {
+            streamingManager.isRtspEnabled.collect { enabled ->
+                _streamStatus.value = _streamStatus.value.copy(isRtspEnabled = enabled)
+            }
+        }
         cameraService.setFrameListener { yuvData, width, height, rotation ->
             streamingManager.pushFrame(yuvData, width, height, rotation)
             streamingManager.pushFrameToRtsp(yuvData, width, height, rotation)
@@ -182,6 +211,11 @@ class CameraViewModel(
         viewModelScope.launch {
             settingsDataStore.recordingAudioEnabled.collect { enabled ->
                 _recordingAudioEnabled.value = enabled
+            }
+        }
+        viewModelScope.launch {
+            streamingManager.adaptiveBitrateState.collect { state ->
+                _adaptiveBitrateState.value = state
             }
         }
 
@@ -345,6 +379,12 @@ class CameraViewModel(
         streamingManager.thermalMonitor = thermalMonitor
         startBatteryMonitoring()
         startThermalMonitoring()
+        if (!streamingManager.isWebEnabled.value && !streamingManager.isRtspEnabled.value) {
+            streamingManager.setWebStreamingEnabled(true)
+            viewModelScope.launch {
+                settingsDataStore.saveWebStreamingEnabled(true)
+            }
+        }
         val success = streamingManager.startStreaming()
         if (success) {
             cameraService.acquireKeepAlive()
