@@ -19,6 +19,7 @@ interface Props {
 export default function StreamPreview(props: Props) {
   const st = () => props.status()
   const isActive = () => !!st()?.streaming?.isActive
+  const webStreamingEnabled = () => st()?.streaming?.webStreamingEnabled ?? true
 
   return (
     <section class="preview-section" id="preview-section">
@@ -42,7 +43,9 @@ export default function StreamPreview(props: Props) {
               </svg>
             </div>
             <span class="preview-placeholder-text">{isActive() ? 'Stream error' : 'Stream not active'}</span>
-            <span class="preview-placeholder-sub">Start streaming to see the live feed</span>
+            <span class="preview-placeholder-sub">
+              {webStreamingEnabled() ? 'Start streaming to see the live feed' : 'Web streaming is disabled in settings'}
+            </span>
           </div>
         )}
 
@@ -101,7 +104,7 @@ export default function StreamPreview(props: Props) {
               id="resume-stream-btn"
               class="action-btn action-btn-success"
               onClick={props.handleResumeStream}
-              disabled={props.streamActionLoading()}
+              disabled={props.streamActionLoading() || !webStreamingEnabled()}
             >
               <Show when={props.streamActionLoading()} fallback={
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">

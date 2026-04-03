@@ -67,6 +67,7 @@ fun CameraSettingsScreen(
     val exposureRange by viewModel.availableExposureRange.collectAsState()
     val authSettings by viewModel.authSettings.collectAsState()
     val streamingPort by viewModel.streamingPort.collectAsState()
+    val webStreamingEnabled by viewModel.webStreamingEnabled.collectAsState()
     val jpegQuality by viewModel.jpegQuality.collectAsState()
     val showPreview by viewModel.showPreview.collectAsState()
     val streamAudioEnabled by viewModel.streamAudioEnabled.collectAsState()
@@ -220,6 +221,11 @@ fun CameraSettingsScreen(
 
             item {
                 SettingsSection(title = "Streaming") {
+                    SwitchSetting(
+                        title = "Enable Web Streaming",
+                        checked = webStreamingEnabled,
+                        onCheckedChange = { viewModel.updateWebStreamingEnabled(it) }
+                    )
                     SliderSetting(
                         title = "Streaming Port",
                         value = streamingPort.toFloat(),

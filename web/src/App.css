@@ -674,6 +674,16 @@ html, body {
   color: var(--lc-danger);
 }
 
+.stream-mode-hint {
+  margin-top: 2px;
+  align-items: flex-start;
+  line-height: 1.35;
+}
+
+.stream-mode-hint span:last-child {
+  font-size: 11px;
+}
+
 .status-banner-dot {
   width: 6px;
   height: 6px;

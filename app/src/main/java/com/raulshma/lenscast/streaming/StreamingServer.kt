@@ -36,6 +36,7 @@ class StreamingServer(
     private val frameLock = Object()
     private var latestFrameVersion = 0L
     private var isRunning = false
+    @Volatile private var webStreamingEnabled = true
     @Volatile var authUsername: String? = null
     @Volatile var authPasswordHash: String? = null
 
@@ -632,7 +633,19 @@ class StreamingServer(
         }
     }
 
+    fun setWebStreamingEnabled(enabled: Boolean) {
+        webStreamingEnabled = enabled
+    }
+
     private fun serveMjpegStream(): Response {
+        if (!webStreamingEnabled) {
+            return newFixedLengthResponse(
+                Response.Status.SERVICE_UNAVAILABLE,
+                MIME_PLAINTEXT,
+                "Web streaming is disabled"
+            )
+        }
+
         val clientNum = clientCount.incrementAndGet()
         Log.d(TAG, "Client connected. Total: $clientNum")
 
@@ -796,6 +809,14 @@ class StreamingServer(
     }
 
     private fun serveSnapshot(): Response {
+        if (!webStreamingEnabled) {
+            return newFixedLengthResponse(
+                Response.Status.SERVICE_UNAVAILABLE,
+                MIME_PLAINTEXT,
+                "Web streaming is disabled"
+            )
+        }
+
         val jpeg = latestJpeg
         return if (jpeg != null) {
             newFixedLengthResponse(
@@ -812,6 +833,14 @@ class StreamingServer(
     }
 
     private fun serveAudioStream(): Response {
+        if (!webStreamingEnabled) {
+            return newFixedLengthResponse(
+                Response.Status.SERVICE_UNAVAILABLE,
+                MIME_PLAINTEXT,
+                "Web streaming is disabled"
+            )
+        }
+
         val audioStream = audioStreamingManager?.openStream()
         return if (audioStream != null) {
             newChunkedResponse(

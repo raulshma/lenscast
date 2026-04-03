@@ -26,6 +26,7 @@ data class CameraSettingsDto(
 
 data class StreamingSettingsDto(
     val port: Int = DEFAULT_PORT,
+    val webStreamingEnabled: Boolean = true,
     val jpegQuality: Int = DEFAULT_JPEG_QUALITY,
     val showPreview: Boolean = true,
     val streamAudioEnabled: Boolean = true,
@@ -60,6 +61,7 @@ data class SettingsUpdateRequestDto(
 data class StreamingStatusDto(
     val isActive: Boolean,
     val url: String,
+    val webStreamingEnabled: Boolean = true,
     val clientCount: Int,
     val audioEnabled: Boolean,
     val audioUrl: String,

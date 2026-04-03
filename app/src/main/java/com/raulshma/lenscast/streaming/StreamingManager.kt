@@ -23,6 +23,7 @@ import java.util.concurrent.atomic.AtomicLong
 class StreamingManager(private val context: Context) {
 
     private val audioStreamingManager = AudioStreamingManager(context)
+    private val webStreamingEnabled = AtomicBoolean(true)
     @Volatile
     private var currentAuthSettings = StreamAuthSettings()
     private var server: StreamingServer = createServer(DEFAULT_PORT)
@@ -75,6 +76,10 @@ class StreamingManager(private val context: Context) {
 
     fun isLiveStreaming(): Boolean = isStreaming.get()
 
+    fun isWebStreamingEnabled(): Boolean = webStreamingEnabled.get()
+
+    fun isWebStreamingActive(): Boolean = isStreaming.get() && webStreamingEnabled.get() && _isServerRunning.value
+
     fun setPort(port: Int) {
         if (isStreaming.get()) {
             Log.w(TAG, "Cannot change port while streaming")
@@ -123,11 +128,20 @@ class StreamingManager(private val context: Context) {
     }
 
     fun startStreaming(): Boolean {
+        if (!webStreamingEnabled.get() && !rtspEnabled.get()) {
+            Log.w(TAG, "Cannot start streaming: both web and RTSP outputs are disabled")
+            return false
+        }
+
         if (isStreaming.getAndSet(true)) return true
 
-        if (!ensureServerRunning()) {
-            isStreaming.set(false)
-            return false
+        if (webStreamingEnabled.get()) {
+            if (!ensureServerRunning()) {
+                isStreaming.set(false)
+                return false
+            }
+        } else {
+            _streamUrl.value = ""
         }
 
         refreshAudioStreamingState()
@@ -166,7 +180,7 @@ class StreamingManager(private val context: Context) {
     }
 
     fun pushFrame(bitmap: Bitmap) {
-        if (!isStreaming.get()) return
+        if (!isStreaming.get() || !webStreamingEnabled.get()) return
 
         val now = System.currentTimeMillis()
         val elapsed = now - lastFrameTimeMs.get()
@@ -189,7 +203,7 @@ class StreamingManager(private val context: Context) {
     }
 
     fun pushFrame(yuvData: ByteArray, width: Int, height: Int, rotation: Int = 0) {
-        if (!isStreaming.get()) return
+        if (!isStreaming.get() || !webStreamingEnabled.get()) return
 
         val now = System.currentTimeMillis()
         val elapsed = now - lastFrameTimeMs.get()
@@ -277,6 +291,26 @@ class StreamingManager(private val context: Context) {
         } else {
             _isAudioStreaming.value = false
             _audioStreamUrl.value = ""
+        }
+    }
+
+    fun setWebStreamingEnabled(enabled: Boolean) {
+        val changed = webStreamingEnabled.getAndSet(enabled) != enabled
+        if (!changed) return
+
+        server.setWebStreamingEnabled(enabled)
+
+        if (!enabled) {
+            audioStreamingManager.stop()
+            _isAudioStreaming.value = false
+            _audioStreamUrl.value = ""
+            _streamUrl.value = ""
+            _clientCount.value = 0
+            lastReportedClientCount = -1
+        } else if (isStreaming.get()) {
+            ensureServerRunning()
+            _streamUrl.value = buildVideoUrl()
+            refreshAudioStreamingState()
         }
     }
 
@@ -374,6 +408,7 @@ class StreamingManager(private val context: Context) {
     private fun createServer(port: Int): StreamingServer {
         return StreamingServer(port, context, audioStreamingManager).also {
             applyAuthSettings(it, currentAuthSettings)
+            it.setWebStreamingEnabled(webStreamingEnabled.get())
         }
     }
 
@@ -433,7 +468,7 @@ class StreamingManager(private val context: Context) {
     private fun refreshAudioStreamingState() {
         audioStreamingManager.stop()
 
-        if (!isStreaming.get() || !streamAudioEnabled.get() || recordingAudioCaptureActive) {
+        if (!isStreaming.get() || !webStreamingEnabled.get() || !streamAudioEnabled.get() || recordingAudioCaptureActive) {
             _isAudioStreaming.value = false
             _audioStreamUrl.value = ""
             return

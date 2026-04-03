@@ -72,6 +72,11 @@ class MainApplication : Application(), ImageLoaderFactory {
             }
         }
         appScope.launch {
+            settingsDataStore.webStreamingEnabled.collectLatest { enabled ->
+                streamingManager.setWebStreamingEnabled(enabled)
+            }
+        }
+        appScope.launch {
             settingsDataStore.authSettings.collectLatest { auth ->
                 streamingManager.updateAuthSettings(auth)
             }

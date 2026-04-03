@@ -77,6 +77,9 @@ class WebApiController(private val context: Context) {
     private val jpegQualityFlow: StateFlow<Int> =
         app.settingsDataStore.jpegQuality.stateIn(scope, SharingStarted.Eagerly, StreamingSettingsDto.DEFAULT_JPEG_QUALITY)
 
+    private val webStreamingEnabledFlow: StateFlow<Boolean> =
+        app.settingsDataStore.webStreamingEnabled.stateIn(scope, SharingStarted.Eagerly, true)
+
     private val showPreviewFlow: StateFlow<Boolean> =
         app.settingsDataStore.showPreview.stateIn(scope, SharingStarted.Eagerly, true)
 
@@ -137,6 +140,7 @@ class WebApiController(private val context: Context) {
                 ),
                 streaming = StreamingSettingsDto(
                     port = portFlow.value,
+                    webStreamingEnabled = webStreamingEnabledFlow.value,
                     jpegQuality = jpegQualityFlow.value,
                     showPreview = showPreviewFlow.value,
                     streamAudioEnabled = streamAudioEnabledFlow.value,
@@ -208,6 +212,10 @@ class WebApiController(private val context: Context) {
                 if (stream.port in 1024..65535) {
                     scope.launch { app.settingsDataStore.saveStreamingPort(stream.port) }
                 }
+                scope.launch {
+                    app.settingsDataStore.saveWebStreamingEnabled(stream.webStreamingEnabled)
+                    app.streamingManager.setWebStreamingEnabled(stream.webStreamingEnabled)
+                }
                 if (stream.jpegQuality > 0) {
                     scope.launch {
                         app.settingsDataStore.saveJpegQuality(stream.jpegQuality)
@@ -271,7 +279,7 @@ class WebApiController(private val context: Context) {
             val isCharging = app.powerManager.isCharging.value
             val isPowerSave = app.powerManager.isPowerSaveMode.value
             val clientCount = app.streamingManager.clientCount.value
-            val isLiveStreaming = app.streamingManager.isLiveStreaming()
+            val isLiveStreaming = app.streamingManager.isWebStreamingActive()
             val streamUrl = app.streamingManager.streamUrl.value
             val isAudioStreaming = app.streamingManager.isAudioStreaming.value
             val audioUrl = app.streamingManager.audioStreamUrl.value
@@ -280,6 +288,7 @@ class WebApiController(private val context: Context) {
                 streaming = StreamingStatusDto(
                     isActive = isLiveStreaming,
                     url = streamUrl,
+                    webStreamingEnabled = webStreamingEnabledFlow.value,
                     clientCount = clientCount,
                     audioEnabled = isAudioStreaming,
                     audioUrl = audioUrl,
@@ -303,6 +312,12 @@ class WebApiController(private val context: Context) {
 
     fun handleStartStream(): String {
         return try {
+            if (!webStreamingEnabledFlow.value) {
+                return streamActionAdapter.toJson(
+                    StreamActionResponse(success = false, error = "Web streaming is disabled")
+                )
+            }
+
             val wasLiveStreaming = app.streamingManager.isLiveStreaming()
             val wasServerRunning = app.streamingManager.isServerRunning.value
             if (!wasLiveStreaming) {

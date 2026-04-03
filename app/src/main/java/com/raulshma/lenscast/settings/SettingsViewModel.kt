@@ -33,6 +33,9 @@ class SettingsViewModel(
     private val _streamingPort = MutableStateFlow(8080)
     val streamingPort: StateFlow<Int> = _streamingPort.asStateFlow()
 
+    private val _webStreamingEnabled = MutableStateFlow(true)
+    val webStreamingEnabled: StateFlow<Boolean> = _webStreamingEnabled.asStateFlow()
+
     private val _jpegQuality = MutableStateFlow(80)
     val jpegQuality: StateFlow<Int> = _jpegQuality.asStateFlow()
 
@@ -82,6 +85,12 @@ class SettingsViewModel(
         viewModelScope.launch {
             settingsDataStore.streamingPort.collect { port ->
                 _streamingPort.value = port
+            }
+        }
+        viewModelScope.launch {
+            settingsDataStore.webStreamingEnabled.collect { enabled ->
+                _webStreamingEnabled.value = enabled
+                streamingManager?.setWebStreamingEnabled(enabled)
             }
         }
         viewModelScope.launch {
@@ -202,6 +211,14 @@ class SettingsViewModel(
         _streamingPort.value = port
         viewModelScope.launch {
             settingsDataStore.saveStreamingPort(port)
+        }
+    }
+
+    fun updateWebStreamingEnabled(enabled: Boolean) {
+        _webStreamingEnabled.value = enabled
+        viewModelScope.launch {
+            settingsDataStore.saveWebStreamingEnabled(enabled)
+            streamingManager?.setWebStreamingEnabled(enabled)
         }
     }
 

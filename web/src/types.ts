@@ -25,6 +25,7 @@ export interface CameraSettings {
 
 export interface StreamingSettings {
   port: number
+  webStreamingEnabled: boolean
   jpegQuality: number
   showPreview: boolean
   streamAudioEnabled: boolean
@@ -45,6 +46,7 @@ export interface DeviceStatus {
   streaming: {
     isActive: boolean
     url: string
+    webStreamingEnabled: boolean
     clientCount: number
     audioEnabled: boolean
     audioUrl: string

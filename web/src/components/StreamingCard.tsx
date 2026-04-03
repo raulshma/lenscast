@@ -1,3 +1,4 @@
+import { Show } from 'solid-js'
 import SettingsCard from './SettingsCard'
 import type { AllSettings } from '../types'
 
@@ -10,6 +11,7 @@ interface Props {
 
 export default function StreamingCard(props: Props) {
   const s = () => props.settings()
+  const webStreamingEnabled = () => s()?.streaming?.webStreamingEnabled ?? true
 
   return (
     <SettingsCard
@@ -21,6 +23,26 @@ export default function StreamingCard(props: Props) {
       }
       title="Streaming"
     >
+      {/* Web Stream */}
+      <div class="field-group">
+        <div class="field-row field-row-toggle">
+          <span class="field-label">Web Stream</span>
+          <label class="toggle-switch" for="web-stream-toggle">
+            <input
+              id="web-stream-toggle"
+              type="checkbox"
+              checked={webStreamingEnabled()}
+              onChange={() => props.updateStreamingAndSave({ webStreamingEnabled: !webStreamingEnabled() })}
+            />
+            <span class="toggle-slider" />
+          </label>
+        </div>
+        <div class="status-banner status-banner-info stream-mode-hint" role="note" aria-live="polite">
+          <span class="status-banner-dot" aria-hidden="true" />
+          <span>Web Stream and RTSP are independent. You can keep RTSP enabled while Web Stream is off.</span>
+        </div>
+      </div>
+
       {/* JPEG Quality */}
       <div class="field-group">
         <div class="field-row">
@@ -34,6 +56,7 @@ export default function StreamingCard(props: Props) {
           min={10}
           max={100}
           step={5}
+          disabled={!webStreamingEnabled()}
           value={s()?.streaming?.jpegQuality ?? 80}
           onInput={(e) => {
             const v = parseInt(e.currentTarget.value)
@@ -50,6 +73,7 @@ export default function StreamingCard(props: Props) {
             <input
               id="show-preview-toggle"
               type="checkbox"
+              disabled={!webStreamingEnabled()}
               checked={s()?.streaming?.showPreview ?? true}
               onChange={() => props.updateStreamingAndSave({ showPreview: !(s()?.streaming?.showPreview ?? true) })}
             />
@@ -66,6 +90,7 @@ export default function StreamingCard(props: Props) {
             <input
               id="stream-audio-toggle"
               type="checkbox"
+              disabled={!webStreamingEnabled()}
               checked={s()?.streaming?.streamAudioEnabled ?? true}
               onChange={() => props.updateStreamingAndSave({ streamAudioEnabled: !(s()?.streaming?.streamAudioEnabled ?? true) })}
             />
@@ -87,6 +112,7 @@ export default function StreamingCard(props: Props) {
           min={32}
           max={320}
           step={16}
+          disabled={!webStreamingEnabled()}
           value={s()?.streaming?.streamAudioBitrateKbps ?? 128}
           onInput={(e) => {
             const v = parseInt(e.currentTarget.value)
@@ -103,6 +129,7 @@ export default function StreamingCard(props: Props) {
         <select
           id="audio-channels-select"
           class="field-select field-select-full"
+          disabled={!webStreamingEnabled()}
           value={`${s()?.streaming?.streamAudioChannels ?? 1}`}
           onChange={(e) => {
             const v = parseInt(e.currentTarget.value)
@@ -122,6 +149,7 @@ export default function StreamingCard(props: Props) {
             <input
               id="echo-cancel-toggle"
               type="checkbox"
+              disabled={!webStreamingEnabled()}
               checked={s()?.streaming?.streamAudioEchoCancellation ?? true}
               onChange={() => props.updateStreamingAndSave({ streamAudioEchoCancellation: !(s()?.streaming?.streamAudioEchoCancellation ?? true) })}
             />

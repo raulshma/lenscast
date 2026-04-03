@@ -128,6 +128,7 @@ class SettingsDataStore(private val context: Context) {
         val STREAM_AUDIO_CHANNELS = intPreferencesKey("stream_audio_channels")
         val STREAM_AUDIO_ECHO_CANCELLATION = stringPreferencesKey("stream_audio_echo_cancellation")
         val RECORDING_AUDIO_ENABLED = stringPreferencesKey("recording_audio_enabled")
+        val WEB_STREAMING_ENABLED = stringPreferencesKey("web_streaming_enabled")
         val AUTH_ENABLED = stringPreferencesKey("auth_enabled")
         val AUTH_USERNAME = stringPreferencesKey("auth_username")
         val AUTH_PASSWORD_HASH = stringPreferencesKey("auth_password_hash")
@@ -202,6 +203,10 @@ class SettingsDataStore(private val context: Context) {
 
     val recordingAudioEnabled: Flow<Boolean> = context.dataStore.data.map { prefs ->
         prefs[Keys.RECORDING_AUDIO_ENABLED] != "false"
+    }
+
+    val webStreamingEnabled: Flow<Boolean> = context.dataStore.data.map { prefs ->
+        prefs[Keys.WEB_STREAMING_ENABLED] != "false"
     }
 
     val authSettings: Flow<StreamAuthSettings> = context.dataStore.data.map { prefs ->
@@ -317,6 +322,12 @@ class SettingsDataStore(private val context: Context) {
     suspend fun saveRecordingAudioEnabled(enabled: Boolean) {
         context.dataStore.edit { prefs ->
             prefs[Keys.RECORDING_AUDIO_ENABLED] = if (enabled) "true" else "false"
+        }
+    }
+
+    suspend fun saveWebStreamingEnabled(enabled: Boolean) {
+        context.dataStore.edit { prefs ->
+            prefs[Keys.WEB_STREAMING_ENABLED] = if (enabled) "true" else "false"
         }
     }
 
