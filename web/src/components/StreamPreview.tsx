@@ -60,6 +60,7 @@ export default function StreamPreview(props: Props) {
   const overlayBgColor = () => overlay()?.overlayBackgroundColor ?? '#80000000'
   const overlayFontSize = () => overlay()?.overlayFontSize ?? 28
   const overlayPadding = () => overlay()?.overlayPadding ?? 8
+  const overlayLineHeight = () => overlay()?.overlayLineHeight ?? 4
 
   const positionStyles: Record<string, { top?: string; right?: string; bottom?: string; left?: string }> = {
     TOP_LEFT: { top: '12px', left: '12px' },
@@ -147,44 +148,6 @@ export default function StreamPreview(props: Props) {
             </span>
           </div>
         )}
-
-        {/* Client-side overlay preview */}
-        <Show when={overlayEnabled() && isActive() && props.previewVisible() && buildOverlayLines().length > 0}>
-          <div
-            class="stream-overlay-preview"
-            style={{
-              position: 'absolute',
-              ...(positionStyles[overlayPosition()] || positionStyles.TOP_LEFT),
-              'background-color': overlayBgColor(),
-              color: overlayTextColor(),
-              'font-size': `${overlayFontSize() * 0.4}px`,
-              padding: `${overlayPadding() * 0.4}px`,
-              'border-radius': '4px',
-              'font-family': 'monospace',
-              'z-index': '5',
-              'pointer-events': 'none',
-              'line-height': '1.4',
-            }}
-          >
-            {buildOverlayLines().map((line) => (
-              <div>{line}</div>
-            ))}
-          </div>
-        </Show>
-
-        {/* Reset zoom button */}
-        <Show when={zoom.isZoomed()}>
-          <div class="zoom-indicator">
-            <span class="zoom-percent">{zoom.zoomPercent()}%</span>
-            <button class="reset-zoom-btn" onClick={zoom.resetZoom} title="Reset zoom">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <circle cx="11" cy="11" r="8" />
-                <path d="M21 21l-4.35-4.35" />
-                <path d="M11 8v6M8 11h6" />
-              </svg>
-            </button>
-          </div>
-        </Show>
 
         {/* Recording overlay */}
         <Show when={props.isRecording()}>

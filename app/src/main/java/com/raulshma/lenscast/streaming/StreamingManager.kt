@@ -34,6 +34,8 @@ class StreamingManager(private val context: Context) {
     private var currentAuthSettings = StreamAuthSettings()
     @Volatile
     private var currentOverlaySettings = OverlaySettings()
+    val networkQualityMonitor = NetworkQualityMonitor()
+    private val adaptiveBitrateController = AdaptiveBitrateController(networkQualityMonitor)
     private var server: StreamingServer = createServer(DEFAULT_PORT)
     private val streamingActive = AtomicBoolean(false)
     private val jpegQuality = AtomicInteger(DEFAULT_JPEG_QUALITY)
@@ -60,8 +62,6 @@ class StreamingManager(private val context: Context) {
     private var lastReportedClientCount = -1
 
     var thermalMonitor: ThermalMonitor? = null
-    val networkQualityMonitor = NetworkQualityMonitor()
-    private val adaptiveBitrateController = AdaptiveBitrateController(networkQualityMonitor)
 
     private val _isStreaming = MutableStateFlow(false)
     val isStreaming: StateFlow<Boolean> = _isStreaming

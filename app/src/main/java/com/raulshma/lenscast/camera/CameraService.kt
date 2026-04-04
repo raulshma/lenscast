@@ -880,6 +880,12 @@ class CameraService(private val context: Context) {
                     Log.d(TAG, "Night vision AUTO: scene=NIGHT_PORTRAIT, auto flash")
                 }
                 NightVisionMode.OFF -> {
+                    // Reset scene mode, AE mode, and AE lock when disabling night vision
+                    // (only if not overridden by HDR or manual scene mode)
+                    if (settings.hdrMode != HdrMode.ON && settings.sceneMode == null) {
+                        builder.setCaptureRequestOption(CaptureRequest.CONTROL_SCENE_MODE, CaptureRequest.CONTROL_SCENE_MODE_DISABLED)
+                    }
+                    builder.setCaptureRequestOption(CaptureRequest.CONTROL_AE_LOCK, false)
                 }
             }
             
