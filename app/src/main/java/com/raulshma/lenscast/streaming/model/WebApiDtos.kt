@@ -22,6 +22,20 @@ data class CameraSettingsDto(
     val stabilization: Boolean = true,
     val hdrMode: String = "OFF",
     val sceneMode: String? = null,
+    val nightVisionMode: String = "OFF",
+)
+
+data class MaskingZoneDto(
+    val id: String = "",
+    val label: String = "",
+    val enabled: Boolean = true,
+    val type: String = "BLACKOUT",
+    val x: Double = 0.0,
+    val y: Double = 0.0,
+    val width: Double = 0.2,
+    val height: Double = 0.2,
+    val pixelateSize: Int = 16,
+    val blurRadius: Double = 10.0,
 )
 
 data class StreamingSettingsDto(
@@ -38,6 +52,22 @@ data class StreamingSettingsDto(
     val rtspPort: Int = DEFAULT_RTSP_PORT,
     val rtspInputFormat: String = "",
     val adaptiveBitrateEnabled: Boolean = false,
+    val overlayEnabled: Boolean = false,
+    val showTimestamp: Boolean = true,
+    val timestampFormat: String = "yyyy-MM-dd HH:mm:ss",
+    val showBranding: Boolean = false,
+    val brandingText: String = "LensCast",
+    val showStatus: Boolean = false,
+    val showCustomText: Boolean = false,
+    val customText: String = "",
+    val overlayPosition: String = "TOP_LEFT",
+    val overlayFontSize: Int = 28,
+    val overlayTextColor: String = "#FFFFFF",
+    val overlayBackgroundColor: String = "#80000000",
+    val overlayPadding: Int = 8,
+    val overlayLineHeight: Int = 4,
+    val maskingEnabled: Boolean = false,
+    val maskingZones: List<MaskingZoneDto> = emptyList(),
 ) {
     companion object {
         const val DEFAULT_PORT = 8080
@@ -82,6 +112,7 @@ data class StatusResponseDto(
     val camera: String,
     val battery: BatteryStatusDto,
     val adaptiveBitrate: AdaptiveBitrateStatusDto? = null,
+    val connectionQuality: ConnectionQualityStatusDto? = null,
 )
 
 data class AdaptiveBitrateStatusDto(
@@ -95,6 +126,27 @@ data class AdaptiveBitrateStatusDto(
     val minClientThroughputKbps: Int,
     val activeClients: Int,
     val adjustmentCount: Int,
+)
+
+data class ConnectionQualityStatusDto(
+    val qualityLevel: String,
+    val estimatedBandwidthKbps: Int,
+    val avgThroughputKbps: Int,
+    val minThroughputKbps: Int,
+    val worstLatencyMs: Long,
+    val avgFrameSizeBytes: Int,
+    val totalBytesSent: Long,
+    val activeClients: Int,
+    val framesPerSecond: Double,
+    val clientDetails: Map<String, ClientConnectionDetailDto>,
+)
+
+data class ClientConnectionDetailDto(
+    val framesSent: Long,
+    val bytesSent: Long,
+    val avgThroughputKbps: Int,
+    val lastFrameSizeBytes: Int,
+    val lastSendDurationMs: Long,
 )
 
 // ── API Response DTOs ──
@@ -173,4 +225,9 @@ data class BatchDeleteRequest(val ids: List<String>)
 data class BatchDeleteResponse(
     val success: Boolean = true,
     val deleted: List<String>,
+)
+
+data class TapFocusRequest(
+    val x: Double,
+    val y: Double,
 )

@@ -8,6 +8,7 @@ import android.graphics.Matrix
 import android.graphics.Rect
 import android.graphics.YuvImage
 import android.util.Log
+import com.raulshma.lenscast.camera.model.OverlaySettings
 import com.raulshma.lenscast.core.NetworkQualityMonitor
 import com.raulshma.lenscast.core.NetworkUtils
 import com.raulshma.lenscast.core.ThermalMonitor
@@ -31,6 +32,8 @@ class StreamingManager(private val context: Context) {
     private var mdnsEnabled = AtomicBoolean(true)
     @Volatile
     private var currentAuthSettings = StreamAuthSettings()
+    @Volatile
+    private var currentOverlaySettings = OverlaySettings()
     private var server: StreamingServer = createServer(DEFAULT_PORT)
     private val streamingActive = AtomicBoolean(false)
     private val jpegQuality = AtomicInteger(DEFAULT_JPEG_QUALITY)
@@ -242,7 +245,19 @@ class StreamingManager(private val context: Context) {
         val thermalAdjustedQuality = thermalMonitor?.getAdjustedQuality(baseQuality) ?: baseQuality
         val quality = adaptiveBitrateController.getAdaptiveQuality(baseQuality, thermalAdjustedQuality)
 
-        val jpegData = bitmapToJpegReuse(bitmap, quality)
+        var jpegData = bitmapToJpegReuse(bitmap, quality)
+
+        val overlay = currentOverlaySettings
+        if (overlay.enabled) {
+            val decoded = BitmapFactory.decodeByteArray(jpegData, 0, jpegData.size)
+            if (decoded != null) {
+                val withOverlay = StreamOverlayRenderer.applyOverlay(decoded, overlay, clientCount)
+                if (withOverlay !== decoded) decoded.recycle()
+                jpegData = bitmapToJpegReuse(withOverlay, quality.coerceAtLeast(85))
+                if (withOverlay !== bitmap && withOverlay.isRecycled.not()) withOverlay.recycle()
+            }
+        }
+
         server.updateFrame(jpegData)
 
         if (clientCount != lastReportedClientCount) {
@@ -271,7 +286,19 @@ class StreamingManager(private val context: Context) {
         val thermalAdjustedQuality = thermalMonitor?.getAdjustedQuality(baseQuality) ?: baseQuality
         val quality = adaptiveBitrateController.getAdaptiveQuality(baseQuality, thermalAdjustedQuality)
 
-        val jpegData = yuvToJpeg(yuvData, width, height, quality, rotation) ?: return
+        var jpegData = yuvToJpeg(yuvData, width, height, quality, rotation) ?: return
+
+        val overlay = currentOverlaySettings
+        if (overlay.enabled) {
+            val decoded = BitmapFactory.decodeByteArray(jpegData, 0, jpegData.size)
+            if (decoded != null) {
+                val withOverlay = StreamOverlayRenderer.applyOverlay(decoded, overlay, clientCount)
+                if (withOverlay !== decoded) decoded.recycle()
+                jpegData = bitmapToJpegReuse(withOverlay, quality.coerceAtLeast(85))
+                if (withOverlay !== decoded && withOverlay.isRecycled.not()) withOverlay.recycle()
+            }
+        }
+
         server.updateFrame(jpegData)
 
         if (clientCount != lastReportedClientCount) {
@@ -438,6 +465,11 @@ class StreamingManager(private val context: Context) {
         currentAuthSettings = settings
         applyAuthSettings(server, settings)
         applyRtspAuthSettings(rtspServer, settings)
+    }
+
+    fun setOverlaySettings(settings: OverlaySettings) {
+        currentOverlaySettings = settings
+        Log.d(TAG, "Overlay settings updated: enabled=${settings.enabled}, position=${settings.position}")
     }
 
     fun setRtspEnabled(enabled: Boolean) {

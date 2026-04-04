@@ -34,6 +34,7 @@ import com.raulshma.lenscast.camera.model.CameraState
 import com.raulshma.lenscast.camera.model.FocusMode
 import com.raulshma.lenscast.camera.model.WhiteBalance
 import com.raulshma.lenscast.camera.model.HdrMode
+import com.raulshma.lenscast.camera.model.NightVisionMode
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -137,6 +138,25 @@ class CameraService(private val context: Context) {
     }
 
     fun getCurrentCameraSelector(): CameraSelector = currentCameraSelector
+
+    fun tapToFocus(x: Float, y: Float) {
+        val cam = camera ?: run {
+            Log.w(TAG, "tapToFocus: camera not available")
+            return
+        }
+        try {
+            val factory = SurfaceOrientedMeteringPointFactory(1f, 1f)
+            val point = factory.createPoint(x.coerceIn(0f, 1f), y.coerceIn(0f, 1f))
+            cam.cameraControl.startFocusAndMetering(
+                FocusMeteringAction.Builder(point)
+                    .setAutoCancelDuration(5, TimeUnit.SECONDS)
+                    .build()
+            )
+            Log.d(TAG, "tapToFocus: x=$x, y=$y")
+        } catch (e: Exception) {
+            Log.w(TAG, "tapToFocus failed", e)
+        }
+    }
 
     fun setFrameListener(listener: ((ByteArray, Int, Int, Int) -> Unit)?) {
         frameListener = listener
@@ -843,6 +863,24 @@ class CameraService(private val context: Context) {
             
             settings.sceneMode?.toIntOrNull()?.let {
                 builder.setCaptureRequestOption(CaptureRequest.CONTROL_SCENE_MODE, it)
+            }
+            
+            when (settings.nightVisionMode) {
+                NightVisionMode.ON -> {
+                    builder.setCaptureRequestOption(CaptureRequest.CONTROL_SCENE_MODE, CaptureRequest.CONTROL_SCENE_MODE_NIGHT)
+                    builder.setCaptureRequestOption(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON)
+                    builder.setCaptureRequestOption(CaptureRequest.CONTROL_AE_LOCK, false)
+                    val nightFpsRange = Range(10, settings.frameRate.coerceAtMost(15))
+                    builder.setCaptureRequestOption(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, nightFpsRange)
+                    Log.d(TAG, "Night vision ON: scene=NIGHT, fps=$nightFpsRange")
+                }
+                NightVisionMode.AUTO -> {
+                    builder.setCaptureRequestOption(CaptureRequest.CONTROL_SCENE_MODE, CaptureRequest.CONTROL_SCENE_MODE_NIGHT_PORTRAIT)
+                    builder.setCaptureRequestOption(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON_AUTO_FLASH)
+                    Log.d(TAG, "Night vision AUTO: scene=NIGHT_PORTRAIT, auto flash")
+                }
+                NightVisionMode.OFF -> {
+                }
             }
             
             camera2Control.setCaptureRequestOptions(builder.build())

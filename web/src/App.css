@@ -305,6 +305,7 @@ html, body {
   touch-action: none;
   user-select: none;
   -webkit-user-drag: none;
+  cursor: crosshair;
 }
 
 .zoomable-container {
@@ -371,6 +372,36 @@ html, body {
 .reset-zoom-btn:hover {
   background: rgba(0, 0, 0, 0.9);
   transform: scale(1.1);
+}
+
+.focus-indicator {
+  position: absolute;
+  width: 60px;
+  height: 60px;
+  border: 2px solid #4ade80;
+  border-radius: 4px;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  z-index: 15;
+  box-shadow: 0 0 12px rgba(74, 222, 128, 0.4);
+}
+
+@keyframes focusPulse {
+  0% {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1.4);
+    border-color: #4ade80;
+  }
+  30% {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+    border-color: #4ade80;
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.8);
+    border-color: rgba(74, 222, 128, 0.3);
+  }
 }
 
 .preview-placeholder {

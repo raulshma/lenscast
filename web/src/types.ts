@@ -2,10 +2,26 @@ export type FocusMode = 'AUTO' | 'MANUAL' | 'MACRO' | 'CONTINUOUS_PICTURE' | 'CO
 export type WhiteBalance = 'AUTO' | 'DAYLIGHT' | 'CLOUDY' | 'INDOOR' | 'FLUORESCENT' | 'MANUAL'
 export type Resolution = 'SD_480P' | 'HD_720P' | 'FHD_1080P' | 'QHD_1440P' | 'UHD_4K'
 export type HdrMode = 'OFF' | 'ON' | 'AUTO'
+export type NightVisionMode = 'OFF' | 'AUTO' | 'ON'
 export type ThermalState = 'NORMAL' | 'LIGHT' | 'MODERATE' | 'SEVERE' | 'CRITICAL'
 export type CaptureMode = 'MINIMIZE_LATENCY' | 'MAXIMIZE_QUALITY'
 export type FlashMode = 'ON' | 'OFF' | 'AUTO'
 export type RecordingQuality = 'HIGH' | 'MEDIUM' | 'LOW'
+export type OverlayPosition = 'TOP_LEFT' | 'TOP_RIGHT' | 'BOTTOM_LEFT' | 'BOTTOM_RIGHT'
+export type MaskingType = 'BLACKOUT' | 'PIXELATE' | 'BLUR'
+
+export interface MaskingZone {
+  id: string
+  label: string
+  enabled: boolean
+  type: MaskingType
+  x: number
+  y: number
+  width: number
+  height: number
+  pixelateSize: number
+  blurRadius: number
+}
 
 export interface CameraSettings {
   exposureCompensation: number
@@ -21,6 +37,7 @@ export interface CameraSettings {
   stabilization: boolean
   hdrMode: HdrMode
   sceneMode: string | null
+  nightVisionMode: NightVisionMode
 }
 
 export interface StreamingSettings {
@@ -36,6 +53,22 @@ export interface StreamingSettings {
   rtspEnabled: boolean
   rtspPort: number
   adaptiveBitrateEnabled: boolean
+  overlayEnabled: boolean
+  showTimestamp: boolean
+  timestampFormat: string
+  showBranding: boolean
+  brandingText: string
+  showStatus: boolean
+  showCustomText: boolean
+  customText: string
+  overlayPosition: OverlayPosition
+  overlayFontSize: number
+  overlayTextColor: string
+  overlayBackgroundColor: string
+  overlayPadding: number
+  overlayLineHeight: number
+  maskingEnabled: boolean
+  maskingZones: MaskingZone[]
 }
 
 export interface AllSettings {
@@ -73,6 +106,28 @@ export interface DeviceStatus {
     activeClients: number
     adjustmentCount: number
   }
+  connectionQuality?: ConnectionQualityStatus
+}
+
+export interface ClientConnectionDetail {
+  framesSent: number
+  bytesSent: number
+  avgThroughputKbps: number
+  lastFrameSizeBytes: number
+  lastSendDurationMs: number
+}
+
+export interface ConnectionQualityStatus {
+  qualityLevel: string
+  estimatedBandwidthKbps: number
+  avgThroughputKbps: number
+  minThroughputKbps: number
+  worstLatencyMs: number
+  avgFrameSizeBytes: number
+  totalBytesSent: number
+  activeClients: number
+  framesPerSecond: number
+  clientDetails: Record<string, ClientConnectionDetail>
 }
 
 export interface LensInfo {
@@ -118,6 +173,12 @@ export const HDR_LABELS: Record<HdrMode, string> = {
   OFF: 'Off',
   ON: 'On',
   AUTO: 'Auto',
+}
+
+export const NIGHT_VISION_LABELS: Record<NightVisionMode, string> = {
+  OFF: 'Off',
+  AUTO: 'Auto',
+  ON: 'IR On',
 }
 
 export const FRAME_RATE_OPTIONS = [15, 24, 25, 30, 60]
@@ -207,5 +268,35 @@ export interface GalleryItem {
 export interface GalleryResponse {
   items: GalleryItem[]
   total: number
+}
+
+export const OVERLAY_POSITION_LABELS: Record<OverlayPosition, string> = {
+  TOP_LEFT: 'Top Left',
+  TOP_RIGHT: 'Top Right',
+  BOTTOM_LEFT: 'Bottom Left',
+  BOTTOM_RIGHT: 'Bottom Right',
+}
+
+export const MASKING_TYPE_LABELS: Record<MaskingType, string> = {
+  BLACKOUT: 'Blackout',
+  PIXELATE: 'Pixelate',
+  BLUR: 'Blur',
+}
+
+export const DEFAULT_OVERLAY_SETTINGS: Partial<StreamingSettings> = {
+  overlayEnabled: false,
+  showTimestamp: true,
+  timestampFormat: 'yyyy-MM-dd HH:mm:ss',
+  showBranding: false,
+  brandingText: 'LensCast',
+  showStatus: false,
+  showCustomText: false,
+  customText: '',
+  overlayPosition: 'TOP_LEFT',
+  overlayFontSize: 28,
+  overlayTextColor: '#FFFFFF',
+  overlayBackgroundColor: '#80000000',
+  overlayPadding: 8,
+  overlayLineHeight: 4,
 }
 

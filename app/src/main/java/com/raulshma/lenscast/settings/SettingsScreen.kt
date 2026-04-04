@@ -44,6 +44,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.raulshma.lenscast.MainApplication
 import com.raulshma.lenscast.camera.model.FocusMode
 import com.raulshma.lenscast.camera.model.HdrMode
+import com.raulshma.lenscast.camera.model.NightVisionMode
 import com.raulshma.lenscast.camera.model.Resolution
 import com.raulshma.lenscast.camera.model.WhiteBalance
 import com.raulshma.lenscast.streaming.rtsp.RtspInputFormat
@@ -206,6 +207,27 @@ fun CameraSettingsScreen(
                         title = "Image Stabilization",
                         checked = settings.stabilization,
                         onCheckedChange = { viewModel.updateStabilization(it) }
+                    )
+                }
+            }
+
+            item {
+                SettingsSection(title = "Night Vision / IR") {
+                    DropdownSetting(
+                        title = "Mode",
+                        options = NightVisionMode.entries.map { it.name },
+                        selected = settings.nightVisionMode.name,
+                        onSelect = { viewModel.updateNightVisionMode(it) }
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = when (settings.nightVisionMode) {
+                            NightVisionMode.ON -> "Forces night scene mode with maximum exposure and reduced frame rate for best low-light performance."
+                            NightVisionMode.AUTO -> "Automatically adapts to lighting conditions using night portrait mode with auto flash."
+                            NightVisionMode.OFF -> "Standard camera behavior without low-light enhancements."
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
             }

@@ -106,5 +106,10 @@ class MainApplication : Application(), ImageLoaderFactory {
                 streamingManager.setMdnsEnabled(enabled)
             }
         }
+        appScope.launch {
+            settingsDataStore.overlaySettings.collectLatest { overlay ->
+                streamingManager.setOverlaySettings(overlay)
+            }
+        }
     }
 }

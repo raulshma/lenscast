@@ -2,6 +2,7 @@ package com.raulshma.lenscast.data
 
 import android.content.Context
 import android.util.Base64
+import android.util.Log
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.doublePreferencesKey
@@ -14,11 +15,18 @@ import androidx.datastore.preferences.preferencesDataStore
 import com.raulshma.lenscast.camera.model.CameraSettings
 import com.raulshma.lenscast.camera.model.FocusMode
 import com.raulshma.lenscast.camera.model.HdrMode
+import com.raulshma.lenscast.camera.model.NightVisionMode
+import com.raulshma.lenscast.camera.model.MaskingType
+import com.raulshma.lenscast.camera.model.MaskingZone
+import com.raulshma.lenscast.camera.model.OverlayPosition
+import com.raulshma.lenscast.camera.model.OverlaySettings
 import com.raulshma.lenscast.camera.model.Resolution
 import com.raulshma.lenscast.camera.model.WhiteBalance
 import com.raulshma.lenscast.streaming.rtsp.RtspInputFormat
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
+import org.json.JSONArray
+import org.json.JSONObject
 import java.security.MessageDigest
 import java.security.SecureRandom
 import javax.crypto.SecretKeyFactory
@@ -139,6 +147,23 @@ class SettingsDataStore(private val context: Context) {
         val RTSP_INPUT_FORMAT = stringPreferencesKey("rtsp_input_format")
         val ADAPTIVE_BITRATE_ENABLED = stringPreferencesKey("adaptive_bitrate_enabled")
         val MDNS_ENABLED = stringPreferencesKey("mdns_enabled")
+        val NIGHT_VISION_MODE = stringPreferencesKey("night_vision_mode")
+        val OVERLAY_ENABLED = stringPreferencesKey("overlay_enabled")
+        val OVERLAY_SHOW_TIMESTAMP = stringPreferencesKey("overlay_show_timestamp")
+        val OVERLAY_TIMESTAMP_FORMAT = stringPreferencesKey("overlay_timestamp_format")
+        val OVERLAY_SHOW_BRANDING = stringPreferencesKey("overlay_show_branding")
+        val OVERLAY_BRANDING_TEXT = stringPreferencesKey("overlay_branding_text")
+        val OVERLAY_SHOW_STATUS = stringPreferencesKey("overlay_show_status")
+        val OVERLAY_SHOW_CUSTOM_TEXT = stringPreferencesKey("overlay_show_custom_text")
+        val OVERLAY_CUSTOM_TEXT = stringPreferencesKey("overlay_custom_text")
+        val OVERLAY_POSITION = stringPreferencesKey("overlay_position")
+        val OVERLAY_FONT_SIZE = intPreferencesKey("overlay_font_size")
+        val OVERLAY_TEXT_COLOR = stringPreferencesKey("overlay_text_color")
+        val OVERLAY_BG_COLOR = stringPreferencesKey("overlay_bg_color")
+        val OVERLAY_PADDING = intPreferencesKey("overlay_padding")
+        val OVERLAY_LINE_HEIGHT = intPreferencesKey("overlay_line_height")
+        val MASKING_ENABLED = stringPreferencesKey("masking_enabled")
+        val MASKING_ZONES = stringPreferencesKey("masking_zones")
     }
 
     val settings: Flow<CameraSettings> = context.dataStore.data.map { prefs ->
@@ -172,6 +197,11 @@ class SettingsDataStore(private val context: Context) {
                 HdrMode.OFF
             },
             sceneMode = prefs[Keys.SCENE_MODE],
+            nightVisionMode = try {
+                NightVisionMode.valueOf(prefs[Keys.NIGHT_VISION_MODE] ?: NightVisionMode.OFF.name)
+            } catch (_: Exception) {
+                NightVisionMode.OFF
+            },
         )
     }
 
@@ -276,6 +306,7 @@ class SettingsDataStore(private val context: Context) {
             } else {
                 prefs.remove(Keys.SCENE_MODE)
             }
+            prefs[Keys.NIGHT_VISION_MODE] = settings.nightVisionMode.name
         }
     }
 
@@ -383,6 +414,120 @@ class SettingsDataStore(private val context: Context) {
     suspend fun saveMdnsEnabled(enabled: Boolean) {
         context.dataStore.edit { prefs ->
             prefs[Keys.MDNS_ENABLED] = if (enabled) "true" else "false"
+        }
+    }
+
+    val nightVisionMode: Flow<NightVisionMode> = context.dataStore.data.map { prefs ->
+        val raw = prefs[Keys.NIGHT_VISION_MODE] ?: NightVisionMode.OFF.name
+        try {
+            NightVisionMode.valueOf(raw)
+        } catch (_: Exception) {
+            NightVisionMode.OFF
+        }
+    }
+
+    suspend fun saveNightVisionMode(mode: NightVisionMode) {
+        context.dataStore.edit { prefs ->
+            prefs[Keys.NIGHT_VISION_MODE] = mode.name
+        }
+    }
+
+    val overlaySettings: Flow<OverlaySettings> = context.dataStore.data.map { prefs ->
+        OverlaySettings(
+            enabled = prefs[Keys.OVERLAY_ENABLED] == "true",
+            showTimestamp = prefs[Keys.OVERLAY_SHOW_TIMESTAMP] != "false",
+            timestampFormat = prefs[Keys.OVERLAY_TIMESTAMP_FORMAT] ?: "yyyy-MM-dd HH:mm:ss",
+            showBranding = prefs[Keys.OVERLAY_SHOW_BRANDING] == "true",
+            brandingText = prefs[Keys.OVERLAY_BRANDING_TEXT] ?: "LensCast",
+            showStatus = prefs[Keys.OVERLAY_SHOW_STATUS] == "true",
+            showCustomText = prefs[Keys.OVERLAY_SHOW_CUSTOM_TEXT] == "true",
+            customText = prefs[Keys.OVERLAY_CUSTOM_TEXT] ?: "",
+            position = try {
+                OverlayPosition.valueOf(prefs[Keys.OVERLAY_POSITION] ?: OverlayPosition.TOP_LEFT.name)
+            } catch (_: Exception) {
+                OverlayPosition.TOP_LEFT
+            },
+            fontSize = prefs[Keys.OVERLAY_FONT_SIZE] ?: 28,
+            textColor = prefs[Keys.OVERLAY_TEXT_COLOR] ?: "#FFFFFF",
+            backgroundColor = prefs[Keys.OVERLAY_BG_COLOR] ?: "#80000000",
+            padding = prefs[Keys.OVERLAY_PADDING] ?: 8,
+            lineHeight = prefs[Keys.OVERLAY_LINE_HEIGHT] ?: 4,
+            maskingEnabled = prefs[Keys.MASKING_ENABLED] == "true",
+            maskingZones = parseMaskingZones(prefs[Keys.MASKING_ZONES]),
+        )
+    }
+
+    suspend fun saveOverlaySettings(settings: OverlaySettings) {
+        context.dataStore.edit { prefs ->
+            prefs[Keys.OVERLAY_ENABLED] = if (settings.enabled) "true" else "false"
+            prefs[Keys.OVERLAY_SHOW_TIMESTAMP] = if (settings.showTimestamp) "true" else "false"
+            prefs[Keys.OVERLAY_TIMESTAMP_FORMAT] = settings.timestampFormat
+            prefs[Keys.OVERLAY_SHOW_BRANDING] = if (settings.showBranding) "true" else "false"
+            prefs[Keys.OVERLAY_BRANDING_TEXT] = settings.brandingText
+            prefs[Keys.OVERLAY_SHOW_STATUS] = if (settings.showStatus) "true" else "false"
+            prefs[Keys.OVERLAY_SHOW_CUSTOM_TEXT] = if (settings.showCustomText) "true" else "false"
+            prefs[Keys.OVERLAY_CUSTOM_TEXT] = settings.customText
+            prefs[Keys.OVERLAY_POSITION] = settings.position.name
+            prefs[Keys.OVERLAY_FONT_SIZE] = settings.fontSize
+            prefs[Keys.OVERLAY_TEXT_COLOR] = settings.textColor
+            prefs[Keys.OVERLAY_BG_COLOR] = settings.backgroundColor
+            prefs[Keys.OVERLAY_PADDING] = settings.padding
+            prefs[Keys.OVERLAY_LINE_HEIGHT] = settings.lineHeight
+            prefs[Keys.MASKING_ENABLED] = if (settings.maskingEnabled) "true" else "false"
+            prefs[Keys.MASKING_ZONES] = serializeMaskingZones(settings.maskingZones)
+        }
+    }
+
+    private fun parseMaskingZones(jsonString: String?): List<MaskingZone> {
+        if (jsonString.isNullOrEmpty()) return emptyList()
+        return try {
+            val array = JSONArray(jsonString)
+            List(array.length()) { i ->
+                val obj = array.getJSONObject(i)
+                MaskingZone(
+                    id = obj.optString("id", java.util.UUID.randomUUID().toString()),
+                    label = obj.optString("label", ""),
+                    enabled = obj.optBoolean("enabled", true),
+                    type = try {
+                        MaskingType.valueOf(obj.optString("type", MaskingType.BLACKOUT.name))
+                    } catch (_: Exception) {
+                        MaskingType.BLACKOUT
+                    },
+                    x = obj.optDouble("x", 0.0).toFloat(),
+                    y = obj.optDouble("y", 0.0).toFloat(),
+                    width = obj.optDouble("width", 0.2).toFloat(),
+                    height = obj.optDouble("height", 0.2).toFloat(),
+                    pixelateSize = obj.optInt("pixelateSize", 16),
+                    blurRadius = obj.optDouble("blurRadius", 10.0).toFloat(),
+                )
+            }
+        } catch (e: Exception) {
+            Log.e("SettingsDataStore", "Failed to parse masking zones", e)
+            emptyList()
+        }
+    }
+
+    private fun serializeMaskingZones(zones: List<MaskingZone>): String {
+        return try {
+            val array = JSONArray()
+            for (zone in zones) {
+                val obj = JSONObject()
+                obj.put("id", zone.id)
+                obj.put("label", zone.label)
+                obj.put("enabled", zone.enabled)
+                obj.put("type", zone.type.name)
+                obj.put("x", zone.x.toDouble())
+                obj.put("y", zone.y.toDouble())
+                obj.put("width", zone.width.toDouble())
+                obj.put("height", zone.height.toDouble())
+                obj.put("pixelateSize", zone.pixelateSize)
+                obj.put("blurRadius", zone.blurRadius.toDouble())
+                array.put(obj)
+            }
+            array.toString()
+        } catch (e: Exception) {
+            Log.e("SettingsDataStore", "Failed to serialize masking zones", e)
+            "[]"
         }
     }
 }

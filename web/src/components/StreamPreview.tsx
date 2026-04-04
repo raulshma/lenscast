@@ -1,6 +1,8 @@
-import { Show } from 'solid-js'
-import type { DeviceStatus } from '../types'
+import { Show, createSignal } from 'solid-js'
+import type { DeviceStatus, StreamingSettings } from '../types'
 import { useZoomable } from '../hooks/useZoomable'
+import ConnectionQualityIndicator from './ConnectionQualityIndicator'
+import { tapToFocus as apiTapToFocus } from '../api/client'
 
 interface Props {
   status: () => DeviceStatus | null
@@ -15,6 +17,7 @@ interface Props {
   handleStopStream: () => void
   handleResumeStream: () => void
   setPreviewVisible: (v: boolean) => void
+  overlaySettings: () => StreamingSettings | null
 }
 
 export default function StreamPreview(props: Props) {
@@ -22,11 +25,85 @@ export default function StreamPreview(props: Props) {
   const isActive = () => !!st()?.streaming?.isActive
   const webStreamingEnabled = () => st()?.streaming?.webStreamingEnabled ?? true
 
+  const [focusIndicator, setFocusIndicator] = createSignal<{ x: number; y: number; visible: boolean }>({
+    x: 0,
+    y: 0,
+    visible: false,
+  })
+
+  const handleStreamClick = async (e: MouseEvent) => {
+    const container = e.currentTarget as HTMLElement
+    const rect = container.getBoundingClientRect()
+    const x = (e.clientX - rect.left) / rect.width
+    const y = (e.clientY - rect.top) / rect.height
+
+    setFocusIndicator({ x, y, visible: true })
+    setTimeout(() => setFocusIndicator((prev) => ({ ...prev, visible: false })), 1500)
+
+    try {
+      await apiTapToFocus(x, y)
+    } catch (err) {
+      console.error('Tap to focus failed:', err)
+    }
+  }
+
   const zoom = useZoomable({
     minScale: 1,
     maxScale: 10,
     wheelZoomFactor: 0.15,
   })
+
+  const overlay = () => props.overlaySettings()
+  const overlayEnabled = () => overlay()?.overlayEnabled ?? false
+  const overlayPosition = () => overlay()?.overlayPosition ?? 'TOP_LEFT'
+  const overlayTextColor = () => overlay()?.overlayTextColor ?? '#FFFFFF'
+  const overlayBgColor = () => overlay()?.overlayBackgroundColor ?? '#80000000'
+  const overlayFontSize = () => overlay()?.overlayFontSize ?? 28
+  const overlayPadding = () => overlay()?.overlayPadding ?? 8
+
+  const positionStyles: Record<string, { top?: string; right?: string; bottom?: string; left?: string }> = {
+    TOP_LEFT: { top: '12px', left: '12px' },
+    TOP_RIGHT: { top: '12px', right: '12px' },
+    BOTTOM_LEFT: { bottom: '12px', left: '12px' },
+    BOTTOM_RIGHT: { bottom: '12px', right: '12px' },
+  }
+
+  const buildOverlayLines = () => {
+    const lines: string[] = []
+    const o = overlay()
+    if (!o) return lines
+
+    if (o.showTimestamp) {
+      const now = new Date()
+      const fmt = o.timestampFormat || 'yyyy-MM-dd HH:mm:ss'
+      const formatted = fmt
+        .replace('yyyy', String(now.getFullYear()))
+        .replace('MM', String(now.getMonth() + 1).padStart(2, '0'))
+        .replace('dd', String(now.getDate()).padStart(2, '0'))
+        .replace('HH', String(now.getHours()).padStart(2, '0'))
+        .replace('mm', String(now.getMinutes()).padStart(2, '0'))
+        .replace('ss', String(now.getSeconds()).padStart(2, '0'))
+      lines.push(formatted)
+    }
+
+    if (o.showBranding && o.brandingText) {
+      lines.push(o.brandingText)
+    }
+
+    if (o.showStatus) {
+      const statusParts: string[] = []
+      if (props.isRecording()) statusParts.push('REC')
+      const clientCount = st()?.streaming?.clientCount ?? 0
+      if (clientCount > 0) statusParts.push(`${clientCount} viewer${clientCount !== 1 ? 's' : ''}`)
+      if (statusParts.length > 0) lines.push(statusParts.join('  '))
+    }
+
+    if (o.showCustomText && o.customText) {
+      lines.push(o.customText)
+    }
+
+    return lines
+  }
 
   return (
     <section class="preview-section" id="preview-section">
@@ -43,8 +120,8 @@ export default function StreamPreview(props: Props) {
             draggable={false}
             loading="eager"
             decoding="async"
+            onClick={handleStreamClick}
             onError={() => {
-              const next = props.streamNonce() + 1
               props.setPreviewVisible(false)
               setTimeout(() => {
                 if (isActive()) {
@@ -70,6 +147,30 @@ export default function StreamPreview(props: Props) {
             </span>
           </div>
         )}
+
+        {/* Client-side overlay preview */}
+        <Show when={overlayEnabled() && isActive() && props.previewVisible() && buildOverlayLines().length > 0}>
+          <div
+            class="stream-overlay-preview"
+            style={{
+              position: 'absolute',
+              ...(positionStyles[overlayPosition()] || positionStyles.TOP_LEFT),
+              'background-color': overlayBgColor(),
+              color: overlayTextColor(),
+              'font-size': `${overlayFontSize() * 0.4}px`,
+              padding: `${overlayPadding() * 0.4}px`,
+              'border-radius': '4px',
+              'font-family': 'monospace',
+              'z-index': '5',
+              'pointer-events': 'none',
+              'line-height': '1.4',
+            }}
+          >
+            {buildOverlayLines().map((line) => (
+              <div>{line}</div>
+            ))}
+          </div>
+        </Show>
 
         {/* Reset zoom button */}
         <Show when={zoom.isZoomed()}>
@@ -101,28 +202,35 @@ export default function StreamPreview(props: Props) {
           </div>
         </Show>
 
-        {/* Network quality stats */}
-        <Show when={isActive() && props.previewVisible() && st()?.adaptiveBitrate?.enabled}>
-          <div class="network-quality-overlay">
-            <div class="nq-header">
-              <span class="nq-dot" classList={{
-                'nq-excellent': st()?.adaptiveBitrate?.qualityLevel === 'EXCELLENT',
-                'nq-good': st()?.adaptiveBitrate?.qualityLevel === 'GOOD',
-                'nq-fair': st()?.adaptiveBitrate?.qualityLevel === 'FAIR',
-                'nq-poor': st()?.adaptiveBitrate?.qualityLevel === 'POOR',
-                'nq-critical': st()?.adaptiveBitrate?.qualityLevel === 'CRITICAL',
-              }} />
-              <span class="nq-label">{st()?.adaptiveBitrate?.qualityLevel ?? 'N/A'}</span>
-            </div>
-            <div class="nq-stats">
-              {st()!.adaptiveBitrate!.currentQuality}q {st()!.adaptiveBitrate!.currentFps}fps
-            </div>
-            <Show when={st()?.adaptiveBitrate?.activeClients ?? 0 > 0}>
-              <div class="nq-clients">
-                {st()!.adaptiveBitrate!.activeClients} client{st()!.adaptiveBitrate!.activeClients !== 1 ? 's' : ''} · {st()!.adaptiveBitrate!.minClientThroughputKbps}kbps
-              </div>
-            </Show>
+        {/* Connection quality indicator */}
+        <Show when={isActive() && props.previewVisible() && st()?.adaptiveBitrate?.enabled && st()?.connectionQuality}>
+          <div style={{
+            position: 'absolute',
+            top: '12px',
+            right: '12px',
+            'z-index': '10',
+          }}>
+            <ConnectionQualityIndicator status={() => st()?.connectionQuality} />
           </div>
+        </Show>
+
+        <Show when={focusIndicator().visible}>
+          <div
+            class="focus-indicator"
+            style={{
+              position: 'absolute',
+              left: `${focusIndicator().x * 100}%`,
+              top: `${focusIndicator().y * 100}%`,
+              transform: 'translate(-50%, -50%)',
+              width: '60px',
+              height: '60px',
+              border: '2px solid #4ade80',
+              'border-radius': '4px',
+              'z-index': '15',
+              'pointer-events': 'none',
+              animation: 'focusPulse 1.5s ease-out forwards',
+            }}
+          />
         </Show>
       </div>
 

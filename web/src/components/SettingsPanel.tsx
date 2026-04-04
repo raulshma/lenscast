@@ -1,5 +1,5 @@
 import { Show } from 'solid-js'
-import type { AllSettings, CameraSettings, IntervalCaptureConfig, RecordingConfig } from '../types'
+import type { AllSettings, CameraSettings, IntervalCaptureConfig, RecordingConfig, NightVisionMode } from '../types'
 import LensSelector from './LensSelector'
 import ExposureCard from './ExposureCard'
 import FocusCard from './FocusCard'
@@ -7,8 +7,11 @@ import WhiteBalanceCard from './WhiteBalanceCard'
 import ZoomFrameCard from './ZoomFrameCard'
 import EffectsCard from './EffectsCard'
 import StreamingCard from './StreamingCard'
+import { NightVisionCard } from './NightVisionCard'
 import IntervalCaptureCard from './IntervalCaptureCard'
 import RecordingCard from './RecordingCard'
+import OverlayCard from './OverlayCard'
+import PrivacyMaskingCard from './PrivacyMaskingCard'
 import type { LensInfo } from '../types'
 
 interface Props {
@@ -64,12 +67,26 @@ export default function SettingsPanel(props: Props) {
       <WhiteBalanceCard settings={props.settings} updateCamera={props.updateCamera} />
       <ZoomFrameCard settings={props.settings} updateCamera={props.updateCamera} />
       <EffectsCard settings={props.settings} updateCamera={props.updateCamera} />
+      <NightVisionCard
+        value={props.settings()?.camera?.nightVisionMode ?? 'OFF'}
+        onChange={(mode: NightVisionMode) => props.updateCamera({ nightVisionMode: mode })}
+      />
       <StreamingCard
         settings={props.settings}
         updateStreamingAndSave={props.updateStreamingAndSave}
         updateStreamingDebounced={props.updateStreamingDebounced}
         setRecordingConfigAudio={(v) => props.setRecordingConfig({ ...props.recordingConfig(), includeAudio: v })}
       />
+      <Show when={props.settings()?.streaming}>
+        <OverlayCard
+          streaming={() => props.settings()!.streaming}
+          onUpdate={props.updateStreamingDebounced}
+        />
+        <PrivacyMaskingCard
+          streaming={() => props.settings()!.streaming}
+          onUpdate={props.updateStreamingDebounced}
+        />
+      </Show>
       <IntervalCaptureCard
         intervalConfig={props.intervalConfig}
         setIntervalConfig={props.setIntervalConfig}

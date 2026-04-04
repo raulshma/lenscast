@@ -10,6 +10,11 @@ import com.raulshma.lenscast.capture.IntervalCaptureScheduler
 import com.raulshma.lenscast.camera.model.CameraSettings
 import com.raulshma.lenscast.camera.model.FocusMode
 import com.raulshma.lenscast.camera.model.HdrMode
+import com.raulshma.lenscast.camera.model.MaskingType
+import com.raulshma.lenscast.camera.model.MaskingZone
+import com.raulshma.lenscast.camera.model.NightVisionMode
+import com.raulshma.lenscast.camera.model.OverlayPosition
+import com.raulshma.lenscast.camera.model.OverlaySettings
 import com.raulshma.lenscast.camera.model.Resolution
 import com.raulshma.lenscast.camera.model.WhiteBalance
 import com.raulshma.lenscast.capture.PhotoCaptureHelper
@@ -111,6 +116,9 @@ class WebApiController(private val context: Context) {
     private val adaptiveBitrateEnabledFlow: StateFlow<Boolean> =
         app.settingsDataStore.adaptiveBitrateEnabled.stateIn(scope, SharingStarted.Eagerly, false)
 
+    private val overlaySettingsFlow: StateFlow<OverlaySettings> =
+        app.settingsDataStore.overlaySettings.stateIn(scope, SharingStarted.Eagerly, OverlaySettings())
+
     private var scheduledRecordingJob: kotlinx.coroutines.Job? = null
     @Volatile
     private var scheduledStartTimeMs: Long? = null
@@ -135,6 +143,7 @@ class WebApiController(private val context: Context) {
                     stabilization = settings.stabilization,
                     hdrMode = settings.hdrMode.name,
                     sceneMode = settings.sceneMode,
+                    nightVisionMode = settings.nightVisionMode.name,
                 ),
                 streaming = StreamingSettingsDto(
                     port = portFlow.value,
@@ -150,6 +159,35 @@ class WebApiController(private val context: Context) {
                     rtspPort = rtspPortFlow.value,
                     rtspInputFormat = rtspInputFormatFlow.value.name,
                     adaptiveBitrateEnabled = adaptiveBitrateEnabledFlow.value,
+                    overlayEnabled = overlaySettingsFlow.value.enabled,
+                    showTimestamp = overlaySettingsFlow.value.showTimestamp,
+                    timestampFormat = overlaySettingsFlow.value.timestampFormat,
+                    showBranding = overlaySettingsFlow.value.showBranding,
+                    brandingText = overlaySettingsFlow.value.brandingText,
+                    showStatus = overlaySettingsFlow.value.showStatus,
+                    showCustomText = overlaySettingsFlow.value.showCustomText,
+                    customText = overlaySettingsFlow.value.customText,
+                    overlayPosition = overlaySettingsFlow.value.position.name,
+                    overlayFontSize = overlaySettingsFlow.value.fontSize,
+                    overlayTextColor = overlaySettingsFlow.value.textColor,
+                    overlayBackgroundColor = overlaySettingsFlow.value.backgroundColor,
+                    overlayPadding = overlaySettingsFlow.value.padding,
+                    overlayLineHeight = overlaySettingsFlow.value.lineHeight,
+                    maskingEnabled = overlaySettingsFlow.value.maskingEnabled,
+                    maskingZones = overlaySettingsFlow.value.maskingZones.map { zone ->
+                        com.raulshma.lenscast.streaming.model.MaskingZoneDto(
+                            id = zone.id,
+                            label = zone.label,
+                            enabled = zone.enabled,
+                            type = zone.type.name,
+                            x = zone.x.toDouble(),
+                            y = zone.y.toDouble(),
+                            width = zone.width.toDouble(),
+                            height = zone.height.toDouble(),
+                            pixelateSize = zone.pixelateSize,
+                            blurRadius = zone.blurRadius.toDouble(),
+                        )
+                    },
                 ),
             )
             settingsResponseAdapter.toJson(response)
@@ -197,6 +235,11 @@ class WebApiController(private val context: Context) {
                         current.hdrMode
                     },
                     sceneMode = cam.sceneMode,
+                    nightVisionMode = try {
+                        NightVisionMode.valueOf(cam.nightVisionMode)
+                    } catch (_: Exception) {
+                        current.nightVisionMode
+                    },
                 )
                 scope.launch {
                     app.settingsDataStore.saveSettings(newSettings)
@@ -247,6 +290,42 @@ class WebApiController(private val context: Context) {
                     }
                     app.settingsDataStore.saveAdaptiveBitrateEnabled(stream.adaptiveBitrateEnabled)
                     app.streamingManager.setAdaptiveBitrateEnabled(stream.adaptiveBitrateEnabled)
+
+                    val currentOverlay = overlaySettingsFlow.value
+                    val maskingZones = stream.maskingZones.map { dto ->
+                        MaskingZone(
+                            id = dto.id.takeIf { it.isNotBlank() } ?: java.util.UUID.randomUUID().toString(),
+                            label = dto.label,
+                            enabled = dto.enabled,
+                            type = runCatching { MaskingType.valueOf(dto.type) }.getOrDefault(MaskingType.BLACKOUT),
+                            x = dto.x.toFloat().coerceIn(0f, 1f),
+                            y = dto.y.toFloat().coerceIn(0f, 1f),
+                            width = dto.width.toFloat().coerceIn(0.01f, 1f),
+                            height = dto.height.toFloat().coerceIn(0.01f, 1f),
+                            pixelateSize = dto.pixelateSize.coerceIn(4, 64),
+                            blurRadius = dto.blurRadius.toFloat().coerceIn(1f, 50f),
+                        )
+                    }
+                    val newOverlay = OverlaySettings(
+                        enabled = stream.overlayEnabled,
+                        showTimestamp = stream.showTimestamp,
+                        timestampFormat = stream.timestampFormat.takeIf { it.isNotBlank() } ?: currentOverlay.timestampFormat,
+                        showBranding = stream.showBranding,
+                        brandingText = stream.brandingText,
+                        showStatus = stream.showStatus,
+                        showCustomText = stream.showCustomText,
+                        customText = stream.customText,
+                        position = runCatching { OverlayPosition.valueOf(stream.overlayPosition) }.getOrDefault(currentOverlay.position),
+                        fontSize = stream.overlayFontSize.coerceIn(8, 120),
+                        textColor = stream.overlayTextColor.takeIf { it.isNotBlank() } ?: currentOverlay.textColor,
+                        backgroundColor = stream.overlayBackgroundColor.takeIf { it.isNotBlank() } ?: currentOverlay.backgroundColor,
+                        padding = stream.overlayPadding.coerceIn(0, 48),
+                        lineHeight = stream.overlayLineHeight.coerceIn(0, 32),
+                        maskingEnabled = stream.maskingEnabled,
+                        maskingZones = maskingZones,
+                    )
+                    app.settingsDataStore.saveOverlaySettings(newOverlay)
+                    app.streamingManager.setOverlaySettings(newOverlay)
                 }
             }
 
@@ -287,6 +366,37 @@ class WebApiController(private val context: Context) {
                 null
             }
 
+            val networkStats = app.streamingManager.getNetworkStatsSnapshot()
+            val connectionQualityDto = if (app.streamingManager.isLiveStreaming()) {
+                val clientDetailDtos = networkStats.clientDetails.mapValues { (_, detail) ->
+                    ClientConnectionDetailDto(
+                        framesSent = detail.framesSent,
+                        bytesSent = detail.bytesSent,
+                        avgThroughputKbps = detail.avgThroughputKbps,
+                        lastFrameSizeBytes = detail.lastFrameSizeBytes,
+                        lastSendDurationMs = detail.lastSendDurationMs,
+                    )
+                }
+                ConnectionQualityStatusDto(
+                    qualityLevel = networkStats.qualityLevel.name,
+                    estimatedBandwidthKbps = networkStats.estimatedBandwidthKbps,
+                    avgThroughputKbps = networkStats.avgThroughputKbps,
+                    minThroughputKbps = networkStats.minThroughputKbps,
+                    worstLatencyMs = networkStats.worstLatencyMs,
+                    avgFrameSizeBytes = networkStats.avgFrameSizeBytes,
+                    totalBytesSent = networkStats.totalBytesSent,
+                    activeClients = networkStats.activeClients,
+                    framesPerSecond = if (networkStats.activeClients > 0 && networkStats.clientDetails.isNotEmpty()) {
+                        app.streamingManager.networkQualityMonitor.getFramesPerSecond(networkStats.clientDetails.keys.first())
+                    } else {
+                        0.0
+                    },
+                    clientDetails = clientDetailDtos,
+                )
+            } else {
+                null
+            }
+
             val response = StatusResponseDto(
                 streaming = StreamingStatusDto(
                     isActive = isLiveStreaming,
@@ -306,6 +416,7 @@ class WebApiController(private val context: Context) {
                     isPowerSaveMode = isPowerSave,
                 ),
                 adaptiveBitrate = adaptiveBitrateDto,
+                connectionQuality = connectionQualityDto,
             )
             statusResponseAdapter.toJson(response)
         } catch (e: Exception) {
@@ -621,6 +732,28 @@ class WebApiController(private val context: Context) {
             successAdapter.toJson(SuccessResponse())
         } catch (e: Exception) {
             Log.e(TAG, "Failed to stop recording", e)
+            errorJson(e)
+        }
+    }
+
+    fun handleTapFocus(body: String): String {
+        return try {
+            val request = moshi.adapter(TapFocusRequest::class.java).fromJson(body)
+                ?: return errorJson(IllegalArgumentException("Invalid tap focus JSON"))
+
+            val x = request.x.toFloat().coerceIn(0f, 1f)
+            val y = request.y.toFloat().coerceIn(0f, 1f)
+
+            runBlocking {
+                withContext(Dispatchers.Main) {
+                    app.cameraService.tapToFocus(x, y)
+                }
+            }
+
+            Log.d(TAG, "Tap focus: x=$x, y=$y")
+            successAdapter.toJson(SuccessResponse())
+        } catch (e: Exception) {
+            Log.e(TAG, "Tap focus failed", e)
             errorJson(e)
         }
     }

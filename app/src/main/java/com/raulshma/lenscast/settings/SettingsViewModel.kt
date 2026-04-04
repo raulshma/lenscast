@@ -7,6 +7,7 @@ import com.raulshma.lenscast.camera.CameraService
 import com.raulshma.lenscast.camera.model.CameraSettings
 import com.raulshma.lenscast.camera.model.FocusMode
 import com.raulshma.lenscast.camera.model.HdrMode
+import com.raulshma.lenscast.camera.model.NightVisionMode
 import com.raulshma.lenscast.camera.model.Resolution
 import com.raulshma.lenscast.camera.model.WhiteBalance
 import com.raulshma.lenscast.data.SettingsDataStore
@@ -223,6 +224,10 @@ class SettingsViewModel(
     fun updateSceneMode(mode: String) {
         val sceneMode = if (mode == "OFF") null else mode
         update { it.copy(sceneMode = sceneMode) }
+    }
+
+    fun updateNightVisionMode(mode: String) {
+        update { it.copy(nightVisionMode = NightVisionMode.valueOf(mode)) }
     }
 
     fun updateStreamingPort(port: Int) {

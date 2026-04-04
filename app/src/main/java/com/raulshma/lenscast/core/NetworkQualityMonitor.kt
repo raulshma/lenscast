@@ -227,6 +227,7 @@ class NetworkQualityMonitor {
             worstLatencyMs = getWorstClientLatencyMs(),
             qualityLevel = getNetworkQualityLevel(),
             clientDetails = clientDetails,
+            avgFrameSizeBytes = if (clientDetails.isNotEmpty()) clientDetails.values.map { it.lastFrameSizeBytes }.average().toInt() else 0,
         )
     }
 
@@ -258,6 +259,7 @@ class NetworkQualityMonitor {
         val worstLatencyMs: Long,
         val qualityLevel: NetworkQualityLevel,
         val clientDetails: Map<String, ClientStatsSnapshot>,
+        val avgFrameSizeBytes: Int,
     )
 
     enum class NetworkQualityLevel {

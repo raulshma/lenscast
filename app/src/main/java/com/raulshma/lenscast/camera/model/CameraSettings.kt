@@ -20,6 +20,8 @@ enum class Resolution(val size: Size) {
 
 enum class HdrMode { OFF, ON, AUTO }
 
+enum class NightVisionMode { OFF, AUTO, ON }
+
 data class CameraSettings(
     val exposureCompensation: Int = 0,
     val iso: Int? = null,
@@ -34,4 +36,5 @@ data class CameraSettings(
     val sceneMode: String? = null,
     val stabilization: Boolean = true,
     val hdrMode: HdrMode = HdrMode.OFF,
+    val nightVisionMode: NightVisionMode = NightVisionMode.OFF,
 )

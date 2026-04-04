@@ -161,3 +161,11 @@ export async function deleteMediaBatch(ids: string[]): Promise<{ success: boolea
     body: JSON.stringify({ ids }),
   })
 }
+
+export async function tapToFocus(x: number, y: number): Promise<{ success: boolean; error?: string }> {
+  return requestJson('/api/camera/focus', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ x, y }),
+  })
+}

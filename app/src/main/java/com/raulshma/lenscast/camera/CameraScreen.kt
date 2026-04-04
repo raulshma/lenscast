@@ -65,6 +65,7 @@ import androidx.compose.material.icons.filled.Handyman
 import androidx.compose.material.icons.filled.HdrOn
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Iso
+import androidx.compose.material.icons.filled.NightsStay
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Speed
@@ -129,6 +130,7 @@ import com.raulshma.lenscast.camera.model.CameraSettings
 import com.raulshma.lenscast.camera.model.CameraState
 import com.raulshma.lenscast.camera.model.FocusMode
 import com.raulshma.lenscast.camera.model.HdrMode
+import com.raulshma.lenscast.camera.model.NightVisionMode
 import com.raulshma.lenscast.camera.model.Resolution
 import com.raulshma.lenscast.camera.model.WhiteBalance
 import com.raulshma.lenscast.core.NetworkQualityMonitor.NetworkQualityLevel
@@ -145,7 +147,7 @@ private val TopGradientColor = Color(0x78000000)
 private val BottomGradientColor = Color(0x78000000)
 
 private enum class QuickSettingType {
-    EXPOSURE, ISO, WHITE_BALANCE, FOCUS, ZOOM, HDR, RESOLUTION, FRAME_RATE, STABILIZATION
+    EXPOSURE, ISO, WHITE_BALANCE, FOCUS, ZOOM, HDR, RESOLUTION, FRAME_RATE, STABILIZATION, NIGHT_VISION
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -175,6 +177,7 @@ fun CameraScreen(
     val settings by viewModel.settings.collectAsState()
     val showPreview by viewModel.showPreview.collectAsState()
     val adaptiveBitrateState by viewModel.adaptiveBitrateState.collectAsState()
+    val connectionQualityStats by viewModel.connectionQualityStats.collectAsState()
     val hasAudioPermission by viewModel.hasAudioPermission.collectAsState()
 
     val mediaPermissionLauncher = rememberLauncherForActivityResult(
@@ -237,6 +240,7 @@ fun CameraScreen(
                 settings = settings,
                 showPreview = showPreview,
                 adaptiveBitrateState = adaptiveBitrateState,
+                connectionQualityStats = connectionQualityStats,
                 quickSettingsExpanded = quickSettingsExpanded,
                 activeSetting = activeSetting,
                 flashAlpha = flashAlpha,
@@ -288,6 +292,7 @@ fun CameraScreen(
                     onUpdateFrameRate = { viewModel.updateFrameRate(it) },
                     onUpdateResolution = { viewModel.updateResolution(it) },
                     onUpdateStabilization = { viewModel.updateStabilization(it) },
+                    onUpdateNightVisionMode = { viewModel.updateNightVisionMode(it) },
                 )
             }
         }
@@ -308,6 +313,7 @@ private fun ImmersiveCameraView(
     settings: CameraSettings,
     showPreview: Boolean,
     adaptiveBitrateState: com.raulshma.lenscast.streaming.AdaptiveBitrateController.AdaptiveState,
+    connectionQualityStats: com.raulshma.lenscast.core.NetworkQualityMonitor.NetworkStatsSnapshot?,
     quickSettingsExpanded: Boolean,
     activeSetting: QuickSettingType?,
     flashAlpha: Animatable<Float, *>,
@@ -475,8 +481,14 @@ private fun ImmersiveCameraView(
         }
 
         if (streamStatus.isActive && adaptiveBitrateState.enabled) {
-            NetworkQualityBadge(
-                state = adaptiveBitrateState,
+            ConnectionQualityIndicator(
+                qualityLevel = adaptiveBitrateState.qualityLevel,
+                currentQuality = adaptiveBitrateState.currentQuality,
+                currentFps = adaptiveBitrateState.currentFps,
+                activeClients = adaptiveBitrateState.activeClients,
+                minThroughputKbps = adaptiveBitrateState.minClientThroughputKbps,
+                estimatedBandwidthKbps = adaptiveBitrateState.estimatedBandwidthKbps,
+                stats = connectionQualityStats,
                 modifier = Modifier
                     .align(Alignment.TopEnd)
                     .statusBarsPadding()
@@ -928,6 +940,16 @@ private fun HorizontalQuickSettingsBar(
                 isActive = activeSetting == QuickSettingType.STABILIZATION,
                 onClick = { onSettingTap(QuickSettingType.STABILIZATION) }
             )
+            QuickSettingPill(
+                icon = Icons.Default.NightsStay,
+                label = when (settings.nightVisionMode) {
+                    NightVisionMode.ON -> "IR"
+                    NightVisionMode.AUTO -> "AUTO"
+                    NightVisionMode.OFF -> "OFF"
+                },
+                isActive = activeSetting == QuickSettingType.NIGHT_VISION,
+                onClick = { onSettingTap(QuickSettingType.NIGHT_VISION) }
+            )
         }
     }
 }
@@ -1001,6 +1023,7 @@ private fun QuickSettingSheet(
     onUpdateFrameRate: (Int) -> Unit,
     onUpdateResolution: (String) -> Unit,
     onUpdateStabilization: (Boolean) -> Unit,
+    onUpdateNightVisionMode: (String) -> Unit,
 ) {
     val coroutineScope = rememberCoroutineScope()
 
@@ -1031,6 +1054,7 @@ private fun QuickSettingSheet(
                     QuickSettingType.RESOLUTION -> "Resolution"
                     QuickSettingType.FRAME_RATE -> "Frame Rate"
                     QuickSettingType.STABILIZATION -> "Stabilization"
+                    QuickSettingType.NIGHT_VISION -> "Night Vision / IR"
                 },
                 color = MaterialTheme.colorScheme.onSurface,
                 style = MaterialTheme.typography.titleMedium,
@@ -1100,6 +1124,47 @@ private fun QuickSettingSheet(
                                 checkedTrackColor = MaterialTheme.colorScheme.primary,
                                 checkedThumbColor = MaterialTheme.colorScheme.onPrimary
                             )
+                        )
+                    }
+                }
+                QuickSettingType.NIGHT_VISION -> {
+                    Column(modifier = Modifier.fillMaxWidth()) {
+                        Text(
+                            text = "Mode",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            style = MaterialTheme.typography.labelMedium
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            NightVisionMode.entries.forEach { mode ->
+                                FilterChip(
+                                    selected = settings.nightVisionMode == mode,
+                                    onClick = { onUpdateNightVisionMode(mode.name) },
+                                    label = {
+                                        Text(
+                                            text = when (mode) {
+                                                NightVisionMode.ON -> "IR On"
+                                                NightVisionMode.AUTO -> "Auto"
+                                                NightVisionMode.OFF -> "Off"
+                                            }
+                                        )
+                                    },
+                                    modifier = Modifier.weight(1f)
+                                )
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Text(
+                            text = when (settings.nightVisionMode) {
+                                NightVisionMode.ON -> "Forces night scene mode with maximum exposure and reduced frame rate for best low-light performance."
+                                NightVisionMode.AUTO -> "Automatically adapts to lighting conditions using night portrait mode with auto flash."
+                                NightVisionMode.OFF -> "Standard camera behavior without low-light enhancements."
+                            },
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            style = MaterialTheme.typography.bodySmall
                         )
                     }
                 }
@@ -1756,11 +1821,18 @@ private fun ZoomIndicator(
 }
 
 @Composable
-private fun NetworkQualityBadge(
-    state: com.raulshma.lenscast.streaming.AdaptiveBitrateController.AdaptiveState,
+private fun ConnectionQualityIndicator(
+    qualityLevel: NetworkQualityLevel,
+    currentQuality: Int,
+    currentFps: Int,
+    activeClients: Int,
+    minThroughputKbps: Int,
+    estimatedBandwidthKbps: Int,
+    stats: com.raulshma.lenscast.core.NetworkQualityMonitor.NetworkStatsSnapshot?,
     modifier: Modifier = Modifier,
 ) {
-    val (dotColor, label) = when (state.qualityLevel) {
+    var expanded by remember { mutableStateOf(false) }
+    val (dotColor, label) = when (qualityLevel) {
         NetworkQualityLevel.EXCELLENT -> Color(0xFF4CAF50) to "EXC"
         NetworkQualityLevel.GOOD -> Color(0xFF8BC34A) to "GOOD"
         NetworkQualityLevel.FAIR -> Color(0xFFFFC107) to "FAIR"
@@ -1768,51 +1840,143 @@ private fun NetworkQualityBadge(
         NetworkQualityLevel.CRITICAL -> Color(0xFFF44336) to "CRIT"
     }
 
-    Surface(
-        modifier = modifier,
-        color = OverlayScrim,
-        shape = RoundedCornerShape(16.dp)
-    ) {
-        Column(
-            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-            horizontalAlignment = Alignment.End
+    Box(modifier = modifier) {
+        Surface(
+            modifier = Modifier.clickable { expanded = !expanded },
+            color = OverlayScrim,
+            shape = RoundedCornerShape(16.dp)
         ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically
+            Column(
+                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                horizontalAlignment = Alignment.End
             ) {
-                Surface(
-                    modifier = Modifier.size(8.dp),
-                    shape = CircleShape,
-                    color = dotColor
-                ) {}
-                Spacer(modifier = Modifier.width(4.dp))
+                Row(
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Surface(
+                        modifier = Modifier.size(8.dp),
+                        shape = CircleShape,
+                        color = dotColor
+                    ) {}
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(
+                        text = label,
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            fontWeight = FontWeight.Bold,
+                            fontFamily = FontFamily.Monospace
+                        ),
+                        color = Color.White
+                    )
+                }
+                Spacer(modifier = Modifier.height(2.dp))
                 Text(
-                    text = label,
-                    style = MaterialTheme.typography.labelSmall.copy(
-                        fontWeight = FontWeight.Bold,
-                        fontFamily = FontFamily.Monospace
-                    ),
-                    color = Color.White
-                )
-            }
-            Spacer(modifier = Modifier.height(2.dp))
-            Text(
-                text = "${state.currentQuality}q ${state.currentFps}fps",
-                style = MaterialTheme.typography.labelSmall.copy(
-                    fontFamily = FontFamily.Monospace,
-                    color = Color.White.copy(alpha = 0.7f)
-                )
-            )
-            if (state.activeClients > 0) {
-                Text(
-                    text = "${state.activeClients} client${if (state.activeClients != 1) "s" else ""} · ${state.minClientThroughputKbps}kbps",
+                    text = "${currentQuality}q ${currentFps}fps",
                     style = MaterialTheme.typography.labelSmall.copy(
                         fontFamily = FontFamily.Monospace,
-                        color = Color.White.copy(alpha = 0.5f)
+                        color = Color.White.copy(alpha = 0.7f)
                     )
                 )
+                if (activeClients > 0) {
+                    Text(
+                        text = "${activeClients} client${if (activeClients != 1) "s" else ""} · ${minThroughputKbps}kbps",
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            fontFamily = FontFamily.Monospace,
+                            color = Color.White.copy(alpha = 0.5f)
+                        )
+                    )
+                }
             }
         }
+
+        if (expanded && stats != null) {
+            Surface(
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(top = 40.dp)
+                    .width(220.dp),
+                color = Color(0xDD1C1C1E),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Column(
+                    modifier = Modifier.padding(12.dp)
+                ) {
+                    Text(
+                        text = "Connection Quality",
+                        style = MaterialTheme.typography.labelMedium.copy(
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White
+                        )
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+                    ConnectionStatRow(label = "Quality", value = label, valueColor = dotColor)
+                    ConnectionStatRow(label = "Bandwidth", value = "${estimatedBandwidthKbps} kbps")
+                    ConnectionStatRow(label = "Min Throughput", value = "${stats.minThroughputKbps} kbps")
+                    ConnectionStatRow(label = "Avg Throughput", value = "${stats.avgThroughputKbps} kbps")
+                    ConnectionStatRow(label = "Latency", value = "${stats.worstLatencyMs} ms")
+                    ConnectionStatRow(label = "Avg Frame", value = "${stats.avgFrameSizeBytes / 1024} KB")
+                    ConnectionStatRow(label = "Clients", value = "${stats.activeClients}")
+                    ConnectionStatRow(label = "Total Sent", value = formatBytes(stats.totalBytesSent))
+
+                    if (stats.clientDetails.isNotEmpty()) {
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(
+                            text = "Per-Client Stats",
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                fontWeight = FontWeight.SemiBold,
+                                color = Color.White.copy(alpha = 0.6f)
+                            )
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        stats.clientDetails.forEach { (clientId, detail) ->
+                            Text(
+                                text = "Client ${clientId.take(8)}:",
+                                style = MaterialTheme.typography.labelSmall.copy(
+                                    fontWeight = FontWeight.Medium,
+                                    color = Color.White.copy(alpha = 0.7f)
+                                )
+                            )
+                            ConnectionStatRow(label = "  Frames", value = "${detail.framesSent}")
+                            ConnectionStatRow(label = "  Throughput", value = "${detail.avgThroughputKbps} kbps")
+                            ConnectionStatRow(label = "  Latency", value = "${detail.lastSendDurationMs} ms")
+                            ConnectionStatRow(label = "  Frame Size", value = "${detail.lastFrameSizeBytes / 1024} KB")
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ConnectionStatRow(label: String, value: String, valueColor: Color = Color.White) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelSmall.copy(
+                fontFamily = FontFamily.Monospace,
+                color = Color.White.copy(alpha = 0.5f)
+            )
+        )
+        Text(
+            text = value,
+            style = MaterialTheme.typography.labelSmall.copy(
+                fontFamily = FontFamily.Monospace,
+                fontWeight = FontWeight.Medium,
+                color = valueColor
+            )
+        )
+    }
+}
+
+private fun formatBytes(bytes: Long): String {
+    return when {
+        bytes < 1024 -> "${bytes} B"
+        bytes < 1024 * 1024 -> "${bytes / 1024} KB"
+        bytes < 1024 * 1024 * 1024 -> "${bytes / (1024 * 1024)} MB"
+        else -> "${bytes / (1024 * 1024 * 1024)} GB"
     }
 }
 

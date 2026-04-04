@@ -22,6 +22,7 @@ import com.raulshma.lenscast.camera.model.CameraSettings
 import com.raulshma.lenscast.camera.model.CameraState
 import com.raulshma.lenscast.camera.model.FocusMode
 import com.raulshma.lenscast.camera.model.HdrMode
+import com.raulshma.lenscast.camera.model.NightVisionMode
 import com.raulshma.lenscast.camera.model.Resolution
 import com.raulshma.lenscast.camera.model.StreamStatus
 import com.raulshma.lenscast.camera.model.WhiteBalance
@@ -109,6 +110,9 @@ class CameraViewModel(
         activeClients = 0,
     ))
     val adaptiveBitrateState: StateFlow<AdaptiveBitrateController.AdaptiveState> = _adaptiveBitrateState.asStateFlow()
+
+    private val _connectionQualityStats = MutableStateFlow<com.raulshma.lenscast.core.NetworkQualityMonitor.NetworkStatsSnapshot?>(null)
+    val connectionQualityStats: StateFlow<com.raulshma.lenscast.core.NetworkQualityMonitor.NetworkStatsSnapshot?> = _connectionQualityStats.asStateFlow()
 
     private val _streamAudioEnabled = MutableStateFlow(true)
     private val _recordingAudioEnabled = MutableStateFlow(true)
@@ -216,6 +220,18 @@ class CameraViewModel(
         viewModelScope.launch {
             streamingManager.adaptiveBitrateState.collect { state ->
                 _adaptiveBitrateState.value = state
+            }
+        }
+        viewModelScope.launch {
+            streamingManager.isStreaming.collect { isActive ->
+                if (isActive) {
+                    while (true) {
+                        _connectionQualityStats.value = streamingManager.getNetworkStatsSnapshot()
+                        delay(1000)
+                    }
+                } else {
+                    _connectionQualityStats.value = null
+                }
             }
         }
 
@@ -341,6 +357,10 @@ class CameraViewModel(
 
     fun updateStabilization(enabled: Boolean) {
         updateSettings { it.copy(stabilization = enabled) }
+    }
+
+    fun updateNightVisionMode(mode: String) {
+        updateSettings { it.copy(nightVisionMode = NightVisionMode.valueOf(mode)) }
     }
 
     fun togglePreview() {

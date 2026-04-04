@@ -411,6 +411,7 @@ class StreamingServer(
             method == Method.GET && uri == "/api/camera/lenses" -> controller.handleGetLenses()
             method == Method.PUT && uri == "/api/camera/lens" -> controller.handleSelectLens(body)
             method == Method.POST && uri == "/api/camera/lens" -> controller.handleSelectLens(body)
+            method == Method.POST && uri == "/api/camera/focus" -> controller.handleTapFocus(body)
             method == Method.GET && uri == "/api/capture/interval/status" -> controller.handleGetIntervalCaptureStatus()
             method == Method.POST && uri == "/api/capture/interval/start" -> controller.handleStartIntervalCapture(body)
             method == Method.POST && uri == "/api/capture/interval/stop" -> controller.handleStopIntervalCapture()
@@ -480,8 +481,9 @@ class StreamingServer(
                 Response.Status.OK, mimeType,
                 ByteArrayInputStream(bytes), bytes.size.toLong()
             )
-            val maxAge = if (path == "webui/index.html") 0 else 86400
-            response.addHeader("Cache-Control", "public, max-age=$maxAge")
+            response.addHeader("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
+            response.addHeader("Pragma", "no-cache")
+            response.addHeader("Expires", "0")
             response
         } catch (_: Exception) {
             if (path != "webui/index.html") {
