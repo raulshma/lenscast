@@ -29,6 +29,14 @@ class RtspServer(private val port: Int = DEFAULT_PORT) {
     private val running = AtomicBoolean(false)
 
     private val encoder = H264Encoder()
+    private val aacEncoder = AacEncoder()
+    @Volatile private var audioEnabled = false
+    private var audioSampleRateHz = 48000
+    private var audioChannelCount = 1
+    private var audioBitrateKbps = 128
+    private var audioTimestamp: Long = 0
+    private val audioTimestampIncrement: Long = 1024 // AAC-LC: 1024 samples per frame
+
     private val clients = ConcurrentHashMap<String, ClientSession>()
     private val sessionIdCounter = AtomicInteger(0)
 
@@ -86,6 +94,17 @@ class RtspServer(private val port: Int = DEFAULT_PORT) {
                 return false
             }
 
+            if (audioEnabled) {
+                aacEncoder.configure(audioSampleRateHz, audioChannelCount, audioBitrateKbps)
+                aacEncoder.onEncodedFrame = { aacData, _ ->
+                    distributeEncodedAudioFrame(aacData)
+                }
+                aacEncoder.start()
+                AacRtpPacketizer.reset()
+                audioTimestamp = 0
+                Log.d(TAG, "AAC audio enabled for RTSP: ${audioSampleRateHz}Hz, ${audioChannelCount}ch")
+            }
+
             acceptThread = Thread({ acceptLoop() }, "RtspServer-Accept").apply {
                 isDaemon = true
                 priority = Thread.NORM_PRIORITY - 1
@@ -105,6 +124,9 @@ class RtspServer(private val port: Int = DEFAULT_PORT) {
         if (!running.getAndSet(false)) return
 
         encoder.stop()
+        if (audioEnabled) {
+            aacEncoder.stop()
+        }
 
         clients.values.forEach { it.close() }
         clients.clear()
@@ -182,6 +204,25 @@ class RtspServer(private val port: Int = DEFAULT_PORT) {
         }
     }
 
+    fun setAudioEnabled(enabled: Boolean) {
+        audioEnabled = enabled
+    }
+
+    fun setAudioConfig(sampleRateHz: Int, channelCount: Int, bitrateKbps: Int) {
+        audioSampleRateHz = sampleRateHz
+        audioChannelCount = channelCount
+        audioBitrateKbps = bitrateKbps
+    }
+
+    fun setAudioStream(stream: InputStream?) {
+        aacEncoder.setAudioStream(stream)
+    }
+
+    fun setAudioBitrate(bitrateKbps: Int) {
+        audioBitrateKbps = bitrateKbps.coerceIn(32, 320)
+        aacEncoder.setBitrate(audioBitrateKbps)
+    }
+
     fun setAuthSettings(enabled: Boolean, username: String?, passwordHash: String?, digestHa1: String?) {
         authEnabled = enabled && !username.isNullOrBlank() && !passwordHash.isNullOrBlank()
         authUsername = if (authEnabled) username else null
@@ -217,6 +258,17 @@ class RtspServer(private val port: Int = DEFAULT_PORT) {
                         client.sendRtpPacket(packet)
                     }
                 }
+            }
+        }
+    }
+
+    private fun distributeEncodedAudioFrame(aacData: ByteArray) {
+        audioTimestamp += audioTimestampIncrement
+
+        for (client in clients.values) {
+            if (client.isPlaying && client.isAudioSetup) {
+                val packet = AacRtpPacketizer.packetize(aacData, audioTimestamp)
+                client.sendAudioRtpPacket(packet)
             }
         }
     }
@@ -375,12 +427,27 @@ class RtspServer(private val port: Int = DEFAULT_PORT) {
         private var state = SessionState.INIT
         private var cSeq = 0
         private var lastCSeq = -1
-        private var rtpChannel = 0
-        private var rtcpChannel = 1
         private var rtspSessionId = ""
         private val createdAt = System.currentTimeMillis()
         private var lastActivity = System.currentTimeMillis()
         private var lastRtcpActivity = 0L
+
+        private val tracks = mutableMapOf<Int, TrackState>()
+
+        init {
+            // Default video track on channels 0-1
+            tracks[0] = TrackState(trackId = 0, rtpChannel = 0, rtcpChannel = 1)
+            // Default audio track on channels 2-3
+            tracks[1] = TrackState(trackId = 1, rtpChannel = 2, rtcpChannel = 3)
+        }
+
+        val isVideoSetup: Boolean get() = tracks[0]?.isSetup == true
+        val isAudioSetup: Boolean get() = tracks[1]?.isSetup == true
+
+        private val videoRtpChannel: Int get() = tracks[0]?.rtpChannel ?: 0
+        private val videoRtcpChannel: Int get() = tracks[0]?.rtcpChannel ?: 1
+        private val audioRtpChannel: Int get() = tracks[1]?.rtpChannel ?: 2
+        private val audioRtcpChannel: Int get() = tracks[1]?.rtcpChannel ?: 3
 
         var isPlaying = false
             private set
@@ -415,12 +482,12 @@ class RtspServer(private val port: Int = DEFAULT_PORT) {
                         if (channel < 0 || sizeHi < 0 || sizeLo < 0) break
 
                         val frameSize = (sizeHi shl 8) or sizeLo
+                        if (channel == videoRtcpChannel || channel == audioRtcpChannel) {
+                            lastRtcpActivity = lastActivity
+                        }
                         if (!discardBytes(input, frameSize)) break
 
                         lastActivity = System.currentTimeMillis()
-                        if (channel == rtcpChannel) {
-                            lastRtcpActivity = lastActivity
-                        }
                         continue
                     }
 
@@ -555,7 +622,14 @@ class RtspServer(private val port: Int = DEFAULT_PORT) {
         }
 
         private fun handleSetup(output: OutputStream, headers: Map<String, String>, requestUri: String) {
-            if (!isStreamControlUri(requestUri)) {
+            val trackId = resolveTrackId(requestUri)
+            if (trackId == null) {
+                sendResponse(output, "404 Not Found")
+                return
+            }
+
+            // Reject audio track if audio is not enabled
+            if (trackId == 1 && !audioEnabled) {
                 sendResponse(output, "404 Not Found")
                 return
             }
@@ -577,11 +651,18 @@ class RtspServer(private val port: Int = DEFAULT_PORT) {
                 }
             }
 
+            val trackState = tracks[trackId] ?: run {
+                sendResponse(output, "404 Not Found")
+                return
+            }
+
             val interleavedMatch = Regex("interleaved=(\\d+)-(\\d+)").find(transport)
             if (interleavedMatch != null) {
-                rtpChannel = interleavedMatch.groupValues[1].toInt()
-                rtcpChannel = interleavedMatch.groupValues[2].toInt()
+                trackState.rtpChannel = interleavedMatch.groupValues[1].toInt()
+                trackState.rtcpChannel = interleavedMatch.groupValues[2].toInt()
             }
+
+            trackState.isSetup = true
 
             if (rtspSessionId.isEmpty()) {
                 rtspSessionId = sessionId + "_" + System.currentTimeMillis().toString(16)
@@ -591,7 +672,7 @@ class RtspServer(private val port: Int = DEFAULT_PORT) {
 
             sendResponse(
                 output, "200 OK", mapOf(
-                    "Transport" to "RTP/AVP/TCP;unicast;interleaved=$rtpChannel-$rtcpChannel",
+                    "Transport" to "RTP/AVP/TCP;unicast;interleaved=${trackState.rtpChannel}-${trackState.rtcpChannel}",
                     "Session" to "$rtspSessionId;timeout=60"
                 )
             )
@@ -612,13 +693,21 @@ class RtspServer(private val port: Int = DEFAULT_PORT) {
             isPlaying = true
 
             encoder.requestKeyFrame()
-            val streamUrl = buildAbsoluteRtspUrl(requestUri)
+
+            val rtpInfoParts = mutableListOf<String>()
+            val streamBase = buildAbsoluteRtspUrl("/$DEFAULT_STREAM_PATH")
+            rtpInfoParts.add("url=$streamBase;seq=${RtpPacketizer.currentSeq};rtptime=$rtpTimestamp")
+
+            if (isAudioSetup && audioEnabled) {
+                val audioUrl = buildAbsoluteRtspUrl("/$DEFAULT_STREAM_PATH/trackID=1")
+                rtpInfoParts.add("url=$audioUrl;seq=${AacRtpPacketizer.currentSeq};rtptime=$audioTimestamp")
+            }
 
             sendResponse(
                 output, "200 OK", mapOf(
                     "Session" to rtspSessionId,
                     "Range" to "npt=0.000-",
-                    "RTP-Info" to "url=$streamUrl;seq=${RtpPacketizer.currentSeq};rtptime=$rtpTimestamp"
+                    "RTP-Info" to rtpInfoParts.joinToString(",")
                 )
             )
         }
@@ -848,7 +937,7 @@ class RtspServer(private val port: Int = DEFAULT_PORT) {
         private fun isRequestUriAllowed(method: String, requestUri: String): Boolean {
             return when (method) {
                 "OPTIONS", "DESCRIBE" -> isAggregateOrStreamUri(requestUri)
-                "SETUP" -> isStreamControlUri(requestUri)
+                "SETUP" -> isStreamControlUri(requestUri) || isTrackUri(requestUri)
                 "PLAY", "TEARDOWN" -> isAggregateOrStreamUri(requestUri) || isStreamControlUri(requestUri)
                 "GET_PARAMETER", "SET_PARAMETER" -> true
                 else -> true
@@ -867,6 +956,28 @@ class RtspServer(private val port: Int = DEFAULT_PORT) {
             if (path.startsWith("/$DEFAULT_STREAM_PATH/trackid=", ignoreCase = true)) return true
             if (path.startsWith("/$DEFAULT_STREAM_PATH/track", ignoreCase = true)) return true
             return false
+        }
+
+        private fun isTrackUri(requestUri: String): Boolean {
+            val path = normalizeRtspPath(extractRtspPath(requestUri))
+            if (path.equals("/trackID=0", ignoreCase = true)) return true
+            if (path.equals("/trackID=1", ignoreCase = true)) return true
+            if (path.startsWith("/$DEFAULT_STREAM_PATH/trackID=", ignoreCase = true)) return true
+            return false
+        }
+
+        private fun resolveTrackId(requestUri: String): Int? {
+            val path = normalizeRtspPath(extractRtspPath(requestUri))
+            // Aggregate or stream path defaults to video (track 0)
+            if (path == "/$DEFAULT_STREAM_PATH" || path == "/") return 0
+            // Explicit trackID matching
+            val trackMatch = Regex("""/trackID=(\d+)$""", RegexOption.IGNORE_CASE).find(path)
+                ?: Regex("""/trackid=(\d+)$""", RegexOption.IGNORE_CASE).find(path)
+            if (trackMatch != null) {
+                val id = trackMatch.groupValues[1].toInt()
+                return if (id == 0 || id == 1) id else null
+            }
+            return null
         }
 
         private fun extractRtspPath(requestUri: String): String {
@@ -919,7 +1030,23 @@ class RtspServer(private val port: Int = DEFAULT_PORT) {
             try {
                 synchronized(output) {
                     output.write(0x24)
-                    output.write(rtpChannel)
+                    output.write(videoRtpChannel)
+                    output.write((packet.size shr 8) and 0xFF)
+                    output.write(packet.size and 0xFF)
+                    output.write(packet)
+                    output.flush()
+                }
+            } catch (_: Exception) {
+                isPlaying = false
+            }
+        }
+
+        fun sendAudioRtpPacket(packet: ByteArray) {
+            val output = outputStream ?: return
+            try {
+                synchronized(output) {
+                    output.write(0x24)
+                    output.write(audioRtpChannel)
                     output.write((packet.size shr 8) and 0xFF)
                     output.write(packet.size and 0xFF)
                     output.write(packet)
@@ -1005,6 +1132,19 @@ class RtspServer(private val port: Int = DEFAULT_PORT) {
                 appendLine("a=rtpmap:96 H264/90000")
                 appendLine("a=fmtp:96 packetization-mode=1;profile-level-id=$profileLevelId;${spropParams}")
                 appendLine("a=control:$DEFAULT_STREAM_PATH")
+
+                if (audioEnabled) {
+                    val config = aacEncoder.audioSpecificConfig
+                    val configHex = config?.let {
+                        "%02x%02x".format(it[0].toInt() and 0xFF, it[1].toInt() and 0xFF)
+                    } ?: "1190" // fallback: AAC-LC 48kHz mono
+
+                    appendLine("m=audio 0 RTP/AVP 97")
+                    appendLine("c=IN IP4 0.0.0.0")
+                    appendLine("a=rtpmap:97 mpeg4-generic/${audioSampleRateHz}/${audioChannelCount}")
+                    appendLine("a=fmtp:97 streamtype=5;profile-level-id=1;mode=AAC-hbr;sizelength=13;indexlength=3;indexdeltalength=3;config=$configHex")
+                    appendLine("a=control:trackID=1")
+                }
             }
         }
 
@@ -1018,6 +1158,13 @@ class RtspServer(private val port: Int = DEFAULT_PORT) {
     private enum class SessionState {
         INIT, READY, PLAYING
     }
+
+    private class TrackState(
+        val trackId: Int,
+        var rtpChannel: Int,
+        var rtcpChannel: Int,
+        var isSetup: Boolean = false,
+    )
 
     companion object {
         private const val TAG = "RtspServer"

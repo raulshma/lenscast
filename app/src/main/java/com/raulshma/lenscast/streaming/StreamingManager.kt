@@ -26,6 +26,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import java.io.ByteArrayOutputStream
+import java.io.InputStream
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
@@ -72,6 +73,8 @@ class StreamingManager(private val context: Context) {
     @Volatile
     private var currentRtspInputFormat: RtspInputFormat = RtspInputFormat.AUTO
     private var rtspServer: RtspServer? = null
+    @Volatile
+    private var rtspAudioStream: InputStream? = null
 
     private val lastFrameTimeMs = AtomicLong(0L)
     private val minFrameIntervalMs = AtomicLong(1000L / DEFAULT_STREAM_FPS)
@@ -488,6 +491,11 @@ class StreamingManager(private val context: Context) {
             _isAudioStreaming.value = false
             _audioStreamUrl.value = ""
         }
+        // Restart RTSP server if running to pick up audio change
+        if (rtspStreamingActive.get()) {
+            stopRtspServer()
+            startRtspServer()
+        }
     }
 
     fun setWebStreamingEnabled(enabled: Boolean) {
@@ -507,6 +515,9 @@ class StreamingManager(private val context: Context) {
         if (webStreamingActive.get() && streamAudioEnabled.get()) {
             refreshAudioStreamingState()
         }
+        if (rtspStreamingActive.get() && streamAudioEnabled.get()) {
+            rtspServer?.setAudioBitrate(streamAudioBitrateKbps.get())
+        }
     }
 
     fun setStreamAudioChannels(channels: Int) {
@@ -514,12 +525,20 @@ class StreamingManager(private val context: Context) {
         if (webStreamingActive.get() && streamAudioEnabled.get()) {
             refreshAudioStreamingState()
         }
+        if (rtspStreamingActive.get()) {
+            stopRtspServer()
+            startRtspServer()
+        }
     }
 
     fun setStreamAudioEchoCancellation(enabled: Boolean) {
         streamAudioEchoCancellation.set(enabled)
         if (webStreamingActive.get() && streamAudioEnabled.get()) {
             refreshAudioStreamingState()
+        }
+        if (rtspStreamingActive.get()) {
+            stopRtspServer()
+            startRtspServer()
         }
     }
 
@@ -548,6 +567,7 @@ class StreamingManager(private val context: Context) {
         jpegQuality.set((current * multiplier).toInt().coerceIn(10, 100))
         Log.d(TAG, "Thermal: JPEG quality adjusted to ${jpegQuality.get()}")
         rtspServer?.setBitrate((2_000_000 * multiplier).toInt())
+        rtspServer?.setAudioBitrate((DEFAULT_AUDIO_BITRATE_KBPS * multiplier).toInt().coerceIn(32, 320))
     }
 
     fun reduceFrameRate(multiplier: Float) {
@@ -731,12 +751,43 @@ class StreamingManager(private val context: Context) {
         val server = RtspServer(currentRtspPort)
         applyRtspAuthSettings(server, currentAuthSettings)
         server.setInputFormat(currentRtspInputFormat)
+
+        // Configure audio for RTSP if enabled
+        val audioEnabled = streamAudioEnabled.get() && !recordingAudioCaptureActive
+        if (audioEnabled) {
+            // Ensure audio capture is running
+            if (!audioStreamingManager.isRunning()) {
+                audioStreamingManager.start(
+                    AudioStreamingManager.Config(
+                        bitrateKbps = streamAudioBitrateKbps.get(),
+                        channelCount = streamAudioChannels.get(),
+                        echoCancellation = streamAudioEchoCancellation.get(),
+                    )
+                )
+            }
+            if (audioStreamingManager.isRunning()) {
+                val audioStream = audioStreamingManager.openStream()
+                if (audioStream != null) {
+                    rtspAudioStream = audioStream
+                    server.setAudioEnabled(true)
+                    server.setAudioConfig(
+                        audioStreamingManager.getSampleRateHz(),
+                        audioStreamingManager.getChannelCount(),
+                        streamAudioBitrateKbps.get()
+                    )
+                    server.setAudioStream(audioStream)
+                }
+            }
+        }
+
         if (server.start()) {
             rtspServer = server
             _rtspUrl.value = buildRtspUrl()
             _isRtspRunning.value = true
-            Log.d(TAG, "RTSP server started on port $currentRtspPort")
+            Log.d(TAG, "RTSP server started on port $currentRtspPort (audio=${audioEnabled && rtspAudioStream != null})")
         } else {
+            rtspAudioStream?.close()
+            rtspAudioStream = null
             Log.e(TAG, "Failed to start RTSP server on port $currentRtspPort")
         }
     }
@@ -744,6 +795,14 @@ class StreamingManager(private val context: Context) {
     private fun stopRtspServer() {
         rtspServer?.stop()
         rtspServer = null
+        rtspAudioStream?.close()
+        rtspAudioStream = null
+        // If audio was started only for RTSP and web streaming is not active, stop it
+        if (!webStreamingActive.get()) {
+            audioStreamingManager.stop()
+            _isAudioStreaming.value = false
+            _audioStreamUrl.value = ""
+        }
         _rtspUrl.value = ""
         _isRtspRunning.value = false
     }

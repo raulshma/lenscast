@@ -121,11 +121,28 @@ class AudioStreamingManager(private val context: Context) {
                 AUDIO_ENCODING
             )
             if (minBuffer > 0) {
+                val resolvedChannelCount = if (requestedChannelConfig == AudioFormat.CHANNEL_IN_STEREO) 2 else 1
+                val bytesPerFrame = resolvedChannelCount * PCM_BYTES_PER_SAMPLE
+                val bytesPerSecond = sampleRate * bytesPerFrame
+                val targetReadChunkBytes = alignToFrame(
+                    value = (bytesPerSecond * AUDIO_READ_CHUNK_MS) / 1000,
+                    bytesPerFrame = bytesPerFrame,
+                )
+                val readChunkBytes = alignToFrame(
+                    value = maxOf(targetReadChunkBytes, minBuffer / 2),
+                    bytesPerFrame = bytesPerFrame,
+                )
+                val recordBufferBytes = alignToFrame(
+                    value = maxOf(minBuffer, readChunkBytes * 3),
+                    bytesPerFrame = bytesPerFrame,
+                )
+
                 return ActiveConfig(
                     sampleRateHz = sampleRate,
-                    channelCount = if (requestedChannelConfig == AudioFormat.CHANNEL_IN_STEREO) 2 else 1,
+                    channelCount = resolvedChannelCount,
                     channelConfig = requestedChannelConfig,
-                    bufferSizeBytes = minBuffer.coerceAtLeast(sampleRate / 5),
+                    bufferSizeBytes = recordBufferBytes,
+                    readChunkBytes = readChunkBytes,
                 )
             }
         }
@@ -197,7 +214,7 @@ class AudioStreamingManager(private val context: Context) {
     private fun startReader(recorder: AudioRecord, config: ActiveConfig) {
         readerThread = Thread({
             Process.setThreadPriority(Process.THREAD_PRIORITY_AUDIO)
-            val buffer = ByteArray(config.bufferSizeBytes)
+            val buffer = ByteArray(config.readChunkBytes)
             try {
                 while (!Thread.currentThread().isInterrupted && isStreaming.get()) {
                     val read = recorder.read(buffer, 0, buffer.size, AudioRecord.READ_BLOCKING)
@@ -285,7 +302,7 @@ class AudioStreamingManager(private val context: Context) {
                         return -1
                     }
 
-                    lock.wait(100L)
+                    lock.wait(20L)
                 }
             }
         }
@@ -322,11 +339,20 @@ class AudioStreamingManager(private val context: Context) {
         val channelCount: Int = 1,
         val channelConfig: Int = AudioFormat.CHANNEL_IN_MONO,
         val bufferSizeBytes: Int = 8192,
+        val readChunkBytes: Int = 2048,
     )
+
+    private fun alignToFrame(value: Int, bytesPerFrame: Int): Int {
+        if (bytesPerFrame <= 1) return value.coerceAtLeast(1)
+        val remainder = value % bytesPerFrame
+        return if (remainder == 0) value else value + (bytesPerFrame - remainder)
+    }
 
     companion object {
         private const val TAG = "AudioStreamingManager"
         private const val AUDIO_ENCODING = AudioFormat.ENCODING_PCM_16BIT
-        private const val MAX_PENDING_CHUNKS = 24
+        private const val PCM_BYTES_PER_SAMPLE = 2
+        private const val AUDIO_READ_CHUNK_MS = 20
+        private const val MAX_PENDING_CHUNKS = 6
     }
 }
