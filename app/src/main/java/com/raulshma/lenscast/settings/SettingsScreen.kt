@@ -79,6 +79,7 @@ fun CameraSettingsScreen(
     val rtspPort by viewModel.rtspPort.collectAsState()
     val rtspInputFormat by viewModel.rtspInputFormat.collectAsState()
     val adaptiveBitrateEnabled by viewModel.adaptiveBitrateEnabled.collectAsState()
+    val mdnsEnabled by viewModel.mdnsEnabled.collectAsState()
 
     Scaffold(
         topBar = {
@@ -243,6 +244,11 @@ fun CameraSettingsScreen(
                         title = "Adaptive Bitrate",
                         checked = adaptiveBitrateEnabled,
                         onCheckedChange = { viewModel.updateAdaptiveBitrateEnabled(it) }
+                    )
+                    SwitchSetting(
+                        title = "Network Discovery (mDNS)",
+                        checked = mdnsEnabled,
+                        onCheckedChange = { viewModel.updateMdnsEnabled(it) }
                     )
                 }
             }

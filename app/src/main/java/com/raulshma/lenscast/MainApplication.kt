@@ -101,5 +101,10 @@ class MainApplication : Application(), ImageLoaderFactory {
                 streamingManager.setAdaptiveBitrateEnabled(enabled)
             }
         }
+        appScope.launch {
+            settingsDataStore.mdnsEnabled.collectLatest { enabled ->
+                streamingManager.setMdnsEnabled(enabled)
+            }
+        }
     }
 }

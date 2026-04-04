@@ -69,6 +69,9 @@ class SettingsViewModel(
     private val _adaptiveBitrateEnabled = MutableStateFlow(false)
     val adaptiveBitrateEnabled: StateFlow<Boolean> = _adaptiveBitrateEnabled.asStateFlow()
 
+    private val _mdnsEnabled = MutableStateFlow(true)
+    val mdnsEnabled: StateFlow<Boolean> = _mdnsEnabled.asStateFlow()
+
     val availableZoomRange: StateFlow<ClosedFloatingPointRange<Float>> = cameraService.availableZoomRange
     val availableExposureRange: StateFlow<ClosedRange<Int>> = cameraService.availableExposureRange
 
@@ -158,6 +161,12 @@ class SettingsViewModel(
             settingsDataStore.adaptiveBitrateEnabled.collect { enabled ->
                 _adaptiveBitrateEnabled.value = enabled
                 streamingManager?.setAdaptiveBitrateEnabled(enabled)
+            }
+        }
+        viewModelScope.launch {
+            settingsDataStore.mdnsEnabled.collect { enabled ->
+                _mdnsEnabled.value = enabled
+                streamingManager?.setMdnsEnabled(enabled)
             }
         }
     }
@@ -317,6 +326,14 @@ class SettingsViewModel(
         viewModelScope.launch {
             settingsDataStore.saveAdaptiveBitrateEnabled(enabled)
             streamingManager?.setAdaptiveBitrateEnabled(enabled)
+        }
+    }
+
+    fun updateMdnsEnabled(enabled: Boolean) {
+        _mdnsEnabled.value = enabled
+        viewModelScope.launch {
+            settingsDataStore.saveMdnsEnabled(enabled)
+            streamingManager?.setMdnsEnabled(enabled)
         }
     }
 

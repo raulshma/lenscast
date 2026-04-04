@@ -26,7 +26,9 @@ import java.util.concurrent.atomic.AtomicLong
 class StreamingManager(private val context: Context) {
 
     private val audioStreamingManager = AudioStreamingManager(context)
+    private val serviceDiscoveryManager = ServiceDiscoveryManager(context)
     private val webStreamingEnabled = AtomicBoolean(true)
+    private var mdnsEnabled = AtomicBoolean(true)
     @Volatile
     private var currentAuthSettings = StreamAuthSettings()
     private var server: StreamingServer = createServer(DEFAULT_PORT)
@@ -184,6 +186,10 @@ class StreamingManager(private val context: Context) {
             startRtspServer()
         }
 
+        if (mdnsEnabled.get() && webStreamingEnabled.get()) {
+            registerMdnsService(currentPort)
+        }
+
         Log.d(TAG, "Streaming started at ${_streamUrl.value}")
         return true
     }
@@ -195,6 +201,7 @@ class StreamingManager(private val context: Context) {
         stopRtspServer()
         audioStreamingManager.stop()
         server.stopServer()
+        unregisterMdnsService()
         _streamUrl.value = ""
         _audioStreamUrl.value = ""
         _clientCount.value = 0
@@ -456,6 +463,26 @@ class StreamingManager(private val context: Context) {
         if (format == currentRtspInputFormat) return
         currentRtspInputFormat = format
         rtspServer?.setInputFormat(format)
+    }
+
+    fun setMdnsEnabled(enabled: Boolean) {
+        val changed = mdnsEnabled.getAndSet(enabled) != enabled
+        if (!changed) return
+
+        if (enabled && streamingActive.get() && webStreamingEnabled.get()) {
+            registerMdnsService(currentPort)
+        } else {
+            unregisterMdnsService()
+        }
+        Log.d(TAG, "mDNS service discovery ${if (enabled) "enabled" else "disabled"}")
+    }
+
+    private fun registerMdnsService(port: Int) {
+        serviceDiscoveryManager.registerService(port = port)
+    }
+
+    private fun unregisterMdnsService() {
+        serviceDiscoveryManager.unregisterService()
     }
 
     private fun createServer(port: Int): StreamingServer {
