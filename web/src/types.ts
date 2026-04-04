@@ -81,10 +81,12 @@ export interface DeviceStatus {
     isActive: boolean
     url: string
     webStreamingEnabled: boolean
+    webStreamingActive: boolean
     clientCount: number
     audioEnabled: boolean
     audioUrl: string
     rtspEnabled: boolean
+    rtspStreamingActive: boolean
     rtspUrl: string
   }
   thermal: ThermalState

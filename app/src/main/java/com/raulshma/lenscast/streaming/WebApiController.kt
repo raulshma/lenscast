@@ -343,7 +343,7 @@ class WebApiController(private val context: Context) {
             val isCharging = app.powerManager.isCharging.value
             val isPowerSave = app.powerManager.isPowerSaveMode.value
             val clientCount = app.streamingManager.clientCount.value
-            val isLiveStreaming = app.streamingManager.isWebStreamingActive()
+            val isLiveStreaming = app.streamingManager.isLiveStreaming()
             val streamUrl = app.streamingManager.streamUrl.value
             val isAudioStreaming = app.streamingManager.isAudioStreaming.value
             val audioUrl = app.streamingManager.audioStreamUrl.value
@@ -402,10 +402,12 @@ class WebApiController(private val context: Context) {
                     isActive = isLiveStreaming,
                     url = streamUrl,
                     webStreamingEnabled = webStreamingEnabledFlow.value,
+                    webStreamingActive = app.streamingManager.isWebStreamActive(),
                     clientCount = clientCount,
                     audioEnabled = isAudioStreaming,
                     audioUrl = audioUrl,
-                    rtspEnabled = app.streamingManager.isRtspRunning.value,
+                    rtspEnabled = app.streamingManager.isRtspEnabled.value,
+                    rtspStreamingActive = app.streamingManager.isRtspRunning.value,
                     rtspUrl = app.streamingManager.rtspUrl.value,
                 ),
                 thermal = thermal.name,
@@ -427,12 +429,6 @@ class WebApiController(private val context: Context) {
 
     fun handleStartStream(): String {
         return try {
-            if (!webStreamingEnabledFlow.value) {
-                return streamActionAdapter.toJson(
-                    StreamActionResponse(success = false, error = "Web streaming is disabled")
-                )
-            }
-
             val wasLiveStreaming = app.streamingManager.isLiveStreaming()
             val wasServerRunning = app.streamingManager.isServerRunning.value
             if (!wasLiveStreaming) {
@@ -479,30 +475,155 @@ class WebApiController(private val context: Context) {
         }
     }
 
-    fun handleStopStream(): String {
-        return try {
-            val wasLiveStreaming = app.streamingManager.isLiveStreaming()
-            if (wasLiveStreaming) {
-                app.streamingManager.pauseStreaming()
-                app.powerManager.releaseWakeLock()
-                app.thermalMonitor.stopMonitoring()
+    private fun ensureCameraAndForeground() {
+        runBlocking {
+            withTimeoutOrNull(2000L) {
+                withContext(Dispatchers.Main) {
+                    app.cameraService.acquireKeepAlive()
+                    app.cameraService.rebindUseCases()
+                }
+            }
+        }
 
-                runBlocking {
-                    withTimeoutOrNull(2000L) {
-                        withContext(Dispatchers.Main) {
-                            app.cameraService.releaseKeepAlive()
-                            app.cameraService.rebindUseCases()
-                        }
+        val wasServerRunning = app.streamingManager.isServerRunning.value
+        val intent = Intent(context, StreamingService::class.java).apply {
+            action = StreamingService.ACTION_START
+            putExtra(StreamingService.EXTRA_URL, app.streamingManager.streamUrl.value)
+            putExtra(StreamingService.EXTRA_AUDIO_ACTIVE, app.streamingManager.isAudioStreaming.value)
+        }
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O && !wasServerRunning) {
+            context.startForegroundService(intent)
+        } else {
+            context.startService(intent)
+        }
+    }
+
+    private fun releaseCameraIfNeeded() {
+        if (!app.streamingManager.isLiveStreaming()) {
+            app.powerManager.releaseWakeLock()
+            app.thermalMonitor.stopMonitoring()
+
+            runBlocking {
+                withTimeoutOrNull(2000L) {
+                    withContext(Dispatchers.Main) {
+                        app.cameraService.releaseKeepAlive()
+                        app.cameraService.rebindUseCases()
                     }
                 }
-
-                val intent = Intent(context, StreamingService::class.java).apply {
-                    action = StreamingService.ACTION_PAUSE
-                    putExtra(StreamingService.EXTRA_URL, app.streamingManager.streamUrl.value)
-                }
-                context.startService(intent)
             }
 
+            val intent = Intent(context, StreamingService::class.java).apply {
+                action = StreamingService.ACTION_PAUSE
+                putExtra(StreamingService.EXTRA_URL, app.streamingManager.streamUrl.value)
+            }
+            context.startService(intent)
+        }
+    }
+
+    fun handleStartWebStream(): String {
+        return try {
+            if (!app.streamingManager.isWebEnabled.value) {
+                return streamActionAdapter.toJson(
+                    StreamActionResponse(success = false, error = "Web streaming is disabled")
+                )
+            }
+
+            if (!app.streamingManager.isLiveStreaming()) {
+                app.powerManager.refreshBatteryState()
+                app.powerManager.acquireWakeLock()
+                app.thermalMonitor.startMonitoring()
+                app.streamingManager.thermalMonitor = app.thermalMonitor
+                app.streamingManager.applyBatteryOptimization(app.powerManager.optimizationResult.value)
+            }
+
+            val success = app.streamingManager.startWebStreaming()
+            if (!success) {
+                return streamActionAdapter.toJson(
+                    StreamActionResponse(success = false, error = "Failed to start web streaming")
+                )
+            }
+
+            ensureCameraAndForeground()
+
+            streamActionAdapter.toJson(StreamActionResponse(
+                success = true,
+                isActive = app.streamingManager.isLiveStreaming(),
+                url = app.streamingManager.streamUrl.value,
+            ))
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to start web stream", e)
+            errorJson(e)
+        }
+    }
+
+    fun handleStopWebStream(): String {
+        return try {
+            app.streamingManager.stopWebStreaming()
+            releaseCameraIfNeeded()
+            streamActionAdapter.toJson(StreamActionResponse(
+                success = true,
+                isActive = app.streamingManager.isLiveStreaming(),
+            ))
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to stop web stream", e)
+            errorJson(e)
+        }
+    }
+
+    fun handleStartRtspStream(): String {
+        return try {
+            if (!app.streamingManager.isRtspEnabled.value) {
+                return streamActionAdapter.toJson(
+                    StreamActionResponse(success = false, error = "RTSP streaming is disabled")
+                )
+            }
+
+            if (!app.streamingManager.isLiveStreaming()) {
+                app.powerManager.refreshBatteryState()
+                app.powerManager.acquireWakeLock()
+                app.thermalMonitor.startMonitoring()
+                app.streamingManager.thermalMonitor = app.thermalMonitor
+                app.streamingManager.applyBatteryOptimization(app.powerManager.optimizationResult.value)
+            }
+
+            val success = app.streamingManager.startRtspStreaming()
+            if (!success) {
+                return streamActionAdapter.toJson(
+                    StreamActionResponse(success = false, error = "Failed to start RTSP streaming")
+                )
+            }
+
+            ensureCameraAndForeground()
+
+            streamActionAdapter.toJson(StreamActionResponse(
+                success = true,
+                isActive = app.streamingManager.isLiveStreaming(),
+                url = app.streamingManager.rtspUrl.value,
+            ))
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to start RTSP stream", e)
+            errorJson(e)
+        }
+    }
+
+    fun handleStopRtspStream(): String {
+        return try {
+            app.streamingManager.stopRtspStreaming()
+            releaseCameraIfNeeded()
+            streamActionAdapter.toJson(StreamActionResponse(
+                success = true,
+                isActive = app.streamingManager.isLiveStreaming(),
+            ))
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to stop RTSP stream", e)
+            errorJson(e)
+        }
+    }
+
+    fun handleStopStream(): String {
+        return try {
+            app.streamingManager.pauseStreaming()
+            releaseCameraIfNeeded()
             streamActionAdapter.toJson(StreamActionResponse(success = true, isActive = false))
         } catch (e: Exception) {
             Log.e(TAG, "Failed to stop stream", e)

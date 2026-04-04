@@ -4,6 +4,7 @@ import LoginScreen from './components/LoginScreen'
 import Navbar from './components/Navbar'
 import StreamPreview from './components/StreamPreview'
 import SettingsPanel from './components/SettingsPanel'
+import AppSettingsPanel from './components/AppSettingsPanel'
 import Gallery from './Gallery'
 import './App.css'
 
@@ -48,6 +49,10 @@ function App() {
                   handleCapture={state.handleCapture}
                   handleStopStream={state.handleStopStream}
                   handleResumeStream={state.handleResumeStream}
+                  handleStartWebStream={state.handleStartWebStream}
+                  handleStopWebStream={state.handleStopWebStream}
+                  handleStartRtspStream={state.handleStartRtspStream}
+                  handleStopRtspStream={state.handleStopRtspStream}
                   setPreviewVisible={state.setPreviewVisible}
                   overlaySettings={() => state.settings()?.streaming ?? null}
                 />
@@ -75,7 +80,18 @@ function App() {
                   recordingTimer={state.recordingTimer}
                   handleStartRecording={state.handleStartRecording}
                   handleStopRecording={state.handleStopRecording}
+                  activeTab={state.activeTab}
+                  setActiveTab={state.setActiveTab}
                 />
+
+                <Show when={state.activeTab() === 'app'}>
+                  <AppSettingsPanel
+                    settings={state.settings}
+                    updateStreamingAndSave={state.updateStreamingAndSave}
+                    updateStreamingDebounced={state.updateStreamingDebounced}
+                    setRecordingConfigAudio={(v) => state.setRecordingConfig({ ...state.recordingConfig(), includeAudio: v })}
+                  />
+                </Show>
               </main>
 
               <Show when={state.showGallery()}>

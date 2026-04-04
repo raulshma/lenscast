@@ -724,6 +724,44 @@ html, body {
   flex-shrink: 0;
 }
 
+/* Settings Tabs */
+.settings-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  background: var(--lc-surface);
+  border-radius: var(--lc-radius);
+  border: 1px solid var(--lc-border);
+}
+
+.settings-tab-btn {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 8px 16px;
+  border: none;
+  background: transparent;
+  color: var(--lc-text-secondary);
+  font-size: 13px;
+  font-weight: 500;
+  border-radius: calc(var(--lc-radius) - 4px);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.settings-tab-btn:hover {
+  color: var(--lc-text);
+  background: var(--lc-surface-2);
+}
+
+.settings-tab-btn-active {
+  color: var(--lc-text);
+  background: var(--lc-surface-2);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
 /* Custom scrollbar */
 .settings-panel::-webkit-scrollbar {
   width: 5px;

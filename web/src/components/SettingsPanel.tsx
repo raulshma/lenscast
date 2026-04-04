@@ -6,7 +6,6 @@ import FocusCard from './FocusCard'
 import WhiteBalanceCard from './WhiteBalanceCard'
 import ZoomFrameCard from './ZoomFrameCard'
 import EffectsCard from './EffectsCard'
-import StreamingCard from './StreamingCard'
 import { NightVisionCard } from './NightVisionCard'
 import IntervalCaptureCard from './IntervalCaptureCard'
 import RecordingCard from './RecordingCard'
@@ -39,11 +38,40 @@ interface Props {
   recordingTimer: { formatElapsed: () => string }
   handleStartRecording: () => void
   handleStopRecording: () => void
+  // Navigation
+  activeTab: () => 'camera' | 'app'
+  setActiveTab: (v: 'camera' | 'app') => void
 }
 
 export default function SettingsPanel(props: Props) {
   return (
     <section class="settings-panel" id="settings-panel">
+      {/* Tab Navigation */}
+      <div class="settings-tabs">
+        <button
+          class="settings-tab-btn"
+          classList={{ 'settings-tab-btn-active': props.activeTab() === 'camera' }}
+          onClick={() => props.setActiveTab('camera')}
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style={{ width: '16px', height: '16px' }}>
+            <path d="M23 19a2 2 0 01-2 2H3a2 2 0 01-2-2V8a2 2 0 012-2h4l2-3h6l2 3h4a2 2 0 012 2z" />
+            <circle cx="12" cy="13" r="4" />
+          </svg>
+          Camera
+        </button>
+        <button
+          class="settings-tab-btn"
+          classList={{ 'settings-tab-btn-active': props.activeTab() === 'app' }}
+          onClick={() => props.setActiveTab('app')}
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style={{ width: '16px', height: '16px' }}>
+            <circle cx="12" cy="12" r="3" />
+            <path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z" />
+          </svg>
+          App
+        </button>
+      </div>
+
       {/* Error */}
       <Show when={props.error()}>
         <div class="error-banner">
@@ -56,55 +84,52 @@ export default function SettingsPanel(props: Props) {
         </div>
       </Show>
 
-      {/* Lens Selector */}
-      <Show when={props.lenses().length > 0}>
-        <LensSelector lenses={props.lenses} handleSelectLens={props.handleSelectLens} />
-      </Show>
+      {/* Camera Tab Content */}
+      <Show when={props.activeTab() === 'camera'}>
+        {/* Lens Selector */}
+        <Show when={props.lenses().length > 0}>
+          <LensSelector lenses={props.lenses} handleSelectLens={props.handleSelectLens} />
+        </Show>
 
-      {/* Settings Cards */}
-      <ExposureCard settings={props.settings} updateCamera={props.updateCamera} />
-      <FocusCard settings={props.settings} updateCamera={props.updateCamera} />
-      <WhiteBalanceCard settings={props.settings} updateCamera={props.updateCamera} />
-      <ZoomFrameCard settings={props.settings} updateCamera={props.updateCamera} />
-      <EffectsCard settings={props.settings} updateCamera={props.updateCamera} />
-      <NightVisionCard
-        value={props.settings()?.camera?.nightVisionMode ?? 'OFF'}
-        onChange={(mode: NightVisionMode) => props.updateCamera({ nightVisionMode: mode })}
-      />
-      <StreamingCard
-        settings={props.settings}
-        updateStreamingAndSave={props.updateStreamingAndSave}
-        updateStreamingDebounced={props.updateStreamingDebounced}
-        setRecordingConfigAudio={(v) => props.setRecordingConfig({ ...props.recordingConfig(), includeAudio: v })}
-      />
-      <Show when={props.settings()?.streaming}>
-        <OverlayCard
-          streaming={() => props.settings()!.streaming}
-          onUpdate={props.updateStreamingDebounced}
+        {/* Settings Cards */}
+        <ExposureCard settings={props.settings} updateCamera={props.updateCamera} />
+        <FocusCard settings={props.settings} updateCamera={props.updateCamera} />
+        <WhiteBalanceCard settings={props.settings} updateCamera={props.updateCamera} />
+        <ZoomFrameCard settings={props.settings} updateCamera={props.updateCamera} />
+        <EffectsCard settings={props.settings} updateCamera={props.updateCamera} />
+        <NightVisionCard
+          value={props.settings()?.camera?.nightVisionMode ?? 'OFF'}
+          onChange={(mode: NightVisionMode) => props.updateCamera({ nightVisionMode: mode })}
         />
-        <PrivacyMaskingCard
-          streaming={() => props.settings()!.streaming}
-          onUpdate={props.updateStreamingDebounced}
+        <Show when={props.settings()?.streaming}>
+          <OverlayCard
+            streaming={() => props.settings()!.streaming}
+            onUpdate={props.updateStreamingDebounced}
+          />
+          <PrivacyMaskingCard
+            streaming={() => props.settings()!.streaming}
+            onUpdate={props.updateStreamingDebounced}
+          />
+        </Show>
+        <IntervalCaptureCard
+          intervalConfig={props.intervalConfig}
+          setIntervalConfig={props.setIntervalConfig}
+          intervalRunning={props.intervalRunning}
+          intervalCompleted={props.intervalCompleted}
+          handleStartIntervalCapture={props.handleStartIntervalCapture}
+          handleStopIntervalCapture={props.handleStopIntervalCapture}
+        />
+        <RecordingCard
+          recordingConfig={props.recordingConfig}
+          setRecordingConfig={props.setRecordingConfig}
+          isRecording={props.isRecording}
+          isScheduled={props.isScheduled}
+          scheduledStartTimeMs={props.scheduledStartTimeMs}
+          recordingTimer={props.recordingTimer}
+          handleStartRecording={props.handleStartRecording}
+          handleStopRecording={props.handleStopRecording}
         />
       </Show>
-      <IntervalCaptureCard
-        intervalConfig={props.intervalConfig}
-        setIntervalConfig={props.setIntervalConfig}
-        intervalRunning={props.intervalRunning}
-        intervalCompleted={props.intervalCompleted}
-        handleStartIntervalCapture={props.handleStartIntervalCapture}
-        handleStopIntervalCapture={props.handleStopIntervalCapture}
-      />
-      <RecordingCard
-        recordingConfig={props.recordingConfig}
-        setRecordingConfig={props.setRecordingConfig}
-        isRecording={props.isRecording}
-        isScheduled={props.isScheduled}
-        scheduledStartTimeMs={props.scheduledStartTimeMs}
-        recordingTimer={props.recordingTimer}
-        handleStartRecording={props.handleStartRecording}
-        handleStopRecording={props.handleStopRecording}
-      />
 
       {/* Reset */}
       <div class="settings-footer">

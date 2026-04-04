@@ -55,7 +55,8 @@ class StreamingManager(private val context: Context) {
     val networkQualityMonitor = NetworkQualityMonitor()
     private val adaptiveBitrateController = AdaptiveBitrateController(networkQualityMonitor)
     private var server: StreamingServer = createServer(DEFAULT_PORT)
-    private val streamingActive = AtomicBoolean(false)
+    private val webStreamingActive = AtomicBoolean(false)
+    private val rtspStreamingActive = AtomicBoolean(false)
     private val jpegQuality = AtomicInteger(DEFAULT_JPEG_QUALITY)
     private val streamAudioEnabled = AtomicBoolean(true)
     private val streamAudioBitrateKbps = AtomicInteger(DEFAULT_AUDIO_BITRATE_KBPS)
@@ -98,6 +99,9 @@ class StreamingManager(private val context: Context) {
     private val _isStreaming = MutableStateFlow(false)
     val isStreaming: StateFlow<Boolean> = _isStreaming
 
+    private val _isWebStreamingActive = MutableStateFlow(false)
+    val isWebStreamingActive: StateFlow<Boolean> = _isWebStreamingActive
+
     private val _isWebEnabled = MutableStateFlow(true)
     val isWebEnabled: StateFlow<Boolean> = _isWebEnabled
 
@@ -137,14 +141,20 @@ class StreamingManager(private val context: Context) {
 
     fun getNetworkStatsSnapshot(): NetworkQualityMonitor.NetworkStatsSnapshot = networkQualityMonitor.getStatsSnapshot()
 
-    fun isLiveStreaming(): Boolean = streamingActive.get()
+    fun isLiveStreaming(): Boolean = webStreamingActive.get() || rtspStreamingActive.get()
 
     fun isWebStreamingEnabled(): Boolean = webStreamingEnabled.get()
 
-    fun isWebStreamingActive(): Boolean = streamingActive.get() && webStreamingEnabled.get() && _isServerRunning.value
+    fun isWebStreamActive(): Boolean = webStreamingActive.get()
+
+    private fun updateStreamingState() {
+        val anyActive = webStreamingActive.get() || rtspStreamingActive.get()
+        _isStreaming.value = anyActive
+        _isWebStreamingActive.value = webStreamingActive.get()
+    }
 
     fun setPort(port: Int) {
-        if (streamingActive.get()) {
+        if (isLiveStreaming()) {
             Log.w(TAG, "Cannot change port while streaming")
             return
         }
@@ -208,27 +218,11 @@ class StreamingManager(private val context: Context) {
             return false
         }
 
-        if (streamingActive.getAndSet(true)) return true
-        _isStreaming.value = true
-
         if (webStreamingEnabled.get()) {
-            if (!ensureServerRunning()) {
-                streamingActive.set(false)
-                _isStreaming.value = false
-                return false
-            }
-        } else {
-            _streamUrl.value = ""
+            if (!startWebStreaming()) return false
         }
-
-        refreshAudioStreamingState()
-
         if (rtspEnabled.get()) {
-            startRtspServer()
-        }
-
-        if (mdnsEnabled.get() && webStreamingEnabled.get()) {
-            registerMdnsService(currentPort)
+            startRtspStreaming()
         }
 
         Log.d(TAG, "Streaming started at ${_streamUrl.value}")
@@ -236,35 +230,77 @@ class StreamingManager(private val context: Context) {
     }
 
     fun stopStreaming() {
-        if (!streamingActive.getAndSet(false)) return
-        _isStreaming.value = false
-
-        stopRtspServer()
-        audioStreamingManager.stop()
+        stopWebStreaming()
+        stopRtspStreaming()
         server.stopServer()
         unregisterMdnsService()
-        _streamUrl.value = ""
-        _audioStreamUrl.value = ""
-        _clientCount.value = 0
-        lastReportedClientCount = -1
         _isServerRunning.value = false
-        _isAudioStreaming.value = false
-
         Log.d(TAG, "Streaming stopped")
     }
 
     fun pauseStreaming() {
-        if (!streamingActive.getAndSet(false)) return
-        _isStreaming.value = false
-        audioStreamingManager.stop()
-        _clientCount.value = 0
-        _audioStreamUrl.value = ""
-        _isAudioStreaming.value = false
+        stopWebStreaming()
+        stopRtspStreaming()
         Log.d(TAG, "Live streaming paused (server still running)")
     }
 
+    fun startWebStreaming(): Boolean {
+        if (!webStreamingEnabled.get()) {
+            Log.w(TAG, "Cannot start web streaming: web streaming is disabled")
+            return false
+        }
+        if (webStreamingActive.getAndSet(true)) return true
+
+        if (!ensureServerRunning()) {
+            webStreamingActive.set(false)
+            updateStreamingState()
+            return false
+        }
+
+        refreshAudioStreamingState()
+        if (mdnsEnabled.get()) {
+            registerMdnsService(currentPort)
+        }
+
+        updateStreamingState()
+        Log.d(TAG, "Web streaming started at ${_streamUrl.value}")
+        return true
+    }
+
+    fun stopWebStreaming() {
+        if (!webStreamingActive.getAndSet(false)) return
+        audioStreamingManager.stop()
+        _isAudioStreaming.value = false
+        _audioStreamUrl.value = ""
+        _streamUrl.value = ""
+        _clientCount.value = 0
+        lastReportedClientCount = -1
+        unregisterMdnsService()
+        updateStreamingState()
+        Log.d(TAG, "Web streaming stopped")
+    }
+
+    fun startRtspStreaming(): Boolean {
+        if (!rtspEnabled.get()) {
+            Log.w(TAG, "Cannot start RTSP streaming: RTSP is disabled")
+            return false
+        }
+        if (rtspStreamingActive.getAndSet(true)) return true
+        startRtspServer()
+        updateStreamingState()
+        Log.d(TAG, "RTSP streaming started")
+        return true
+    }
+
+    fun stopRtspStreaming() {
+        if (!rtspStreamingActive.getAndSet(false)) return
+        stopRtspServer()
+        updateStreamingState()
+        Log.d(TAG, "RTSP streaming stopped")
+    }
+
     fun pushFrame(bitmap: Bitmap) {
-        if (!streamingActive.get() || !webStreamingEnabled.get()) return
+        if (!webStreamingActive.get()) return
 
         val now = System.currentTimeMillis()
         val elapsed = now - lastFrameTimeMs.get()
@@ -309,7 +345,7 @@ class StreamingManager(private val context: Context) {
     }
 
     fun pushFrame(yuvData: ByteArray, width: Int, height: Int, rotation: Int = 0) {
-        if (!streamingActive.get() || !webStreamingEnabled.get()) return
+        if (!webStreamingActive.get()) return
 
         val now = System.currentTimeMillis()
         val elapsed = now - lastFrameTimeMs.get()
@@ -337,7 +373,7 @@ class StreamingManager(private val context: Context) {
     }
 
     fun pushFrameToRtsp(yuvData: ByteArray, width: Int, height: Int, rotation: Int = 0) {
-        if (!rtspEnabled.get()) return
+        if (!rtspStreamingActive.get()) return
         val rtsp = rtspServer ?: return
         rtsp.pushFrame(yuvData, width, height, rotation)
     }
@@ -446,7 +482,7 @@ class StreamingManager(private val context: Context) {
 
     fun setStreamAudioEnabled(enabled: Boolean) {
         streamAudioEnabled.set(enabled)
-        if (streamingActive.get()) {
+        if (webStreamingActive.get()) {
             refreshAudioStreamingState()
         } else {
             _isAudioStreaming.value = false
@@ -461,40 +497,28 @@ class StreamingManager(private val context: Context) {
         _isWebEnabled.value = enabled
         server.setWebStreamingEnabled(enabled)
 
-        if (!enabled) {
-            if (streamingActive.getAndSet(false)) {
-                _isStreaming.value = false
-            }
-            audioStreamingManager.stop()
-            _isAudioStreaming.value = false
-            _audioStreamUrl.value = ""
-            _streamUrl.value = ""
-            _clientCount.value = 0
-            lastReportedClientCount = -1
-        } else if (streamingActive.get()) {
-            ensureServerRunning()
-            _streamUrl.value = buildVideoUrl()
-            refreshAudioStreamingState()
+        if (!enabled && webStreamingActive.get()) {
+            stopWebStreaming()
         }
     }
 
     fun setStreamAudioBitrateKbps(bitrateKbps: Int) {
         streamAudioBitrateKbps.set(bitrateKbps.coerceIn(32, 320))
-        if (streamingActive.get() && streamAudioEnabled.get()) {
+        if (webStreamingActive.get() && streamAudioEnabled.get()) {
             refreshAudioStreamingState()
         }
     }
 
     fun setStreamAudioChannels(channels: Int) {
         streamAudioChannels.set(channels.coerceIn(1, 2))
-        if (streamingActive.get() && streamAudioEnabled.get()) {
+        if (webStreamingActive.get() && streamAudioEnabled.get()) {
             refreshAudioStreamingState()
         }
     }
 
     fun setStreamAudioEchoCancellation(enabled: Boolean) {
         streamAudioEchoCancellation.set(enabled)
-        if (streamingActive.get() && streamAudioEnabled.get()) {
+        if (webStreamingActive.get() && streamAudioEnabled.get()) {
             refreshAudioStreamingState()
         }
     }
@@ -551,12 +575,11 @@ class StreamingManager(private val context: Context) {
     }
 
     fun setRtspEnabled(enabled: Boolean) {
-        rtspEnabled.set(enabled)
+        val changed = rtspEnabled.getAndSet(enabled) != enabled
+        if (!changed) return
         _isRtspEnabled.value = enabled
-        if (enabled && streamingActive.get()) {
-            startRtspServer()
-        } else {
-            stopRtspServer()
+        if (!enabled && rtspStreamingActive.get()) {
+            stopRtspStreaming()
         }
     }
 
@@ -583,7 +606,7 @@ class StreamingManager(private val context: Context) {
         val changed = mdnsEnabled.getAndSet(enabled) != enabled
         if (!changed) return
 
-        if (enabled && streamingActive.get() && webStreamingEnabled.get()) {
+        if (enabled && webStreamingActive.get() && webStreamingEnabled.get()) {
             registerMdnsService(currentPort)
         } else {
             unregisterMdnsService()
@@ -673,7 +696,7 @@ class StreamingManager(private val context: Context) {
     private fun refreshAudioStreamingState() {
         audioStreamingManager.stop()
 
-        if (!streamingActive.get() || !webStreamingEnabled.get() || !streamAudioEnabled.get() || recordingAudioCaptureActive) {
+        if (!webStreamingActive.get() || !webStreamingEnabled.get() || !streamAudioEnabled.get() || recordingAudioCaptureActive) {
             _isAudioStreaming.value = false
             _audioStreamUrl.value = ""
             return

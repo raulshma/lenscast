@@ -52,6 +52,9 @@ export function useAppState() {
   // ── Live Audio ──
   const [liveAudioStatus, setLiveAudioStatus] = createSignal<'idle' | 'connecting' | 'live' | 'error'>('idle')
 
+  // ── Settings Tabs ──
+  const [activeTab, setActiveTab] = createSignal<'camera' | 'app'>('camera')
+
   let saveTimer: ReturnType<typeof setTimeout> | null = null
   let liveAudioAbortController: AbortController | null = null
   let liveAudioContext: AudioContext | null = null
@@ -412,6 +415,82 @@ export function useAppState() {
     }
   }
 
+  async function handleStartWebStream() {
+    if (streamActionLoading()) return
+    setStreamActionLoading(true)
+    try {
+      const result = await api.startWebStream()
+      if (!result.success) {
+        setError(result.error || 'Failed to start web stream')
+      } else {
+        setError('')
+        setPreviewVisible(true)
+        setStreamNonce((v) => v + 1)
+        await fetchStatus()
+      }
+    } catch (e: any) {
+      setError(e.message || 'Failed to start web stream')
+    } finally {
+      setStreamActionLoading(false)
+    }
+  }
+
+  async function handleStopWebStream() {
+    if (streamActionLoading()) return
+    setStreamActionLoading(true)
+    try {
+      const result = await api.stopWebStream()
+      if (!result.success) {
+        setError(result.error || 'Failed to stop web stream')
+      } else {
+        setError('')
+        setPreviewVisible(false)
+        setStreamNonce((v) => v + 1)
+        await fetchStatus()
+      }
+    } catch (e: any) {
+      setError(e.message || 'Failed to stop web stream')
+    } finally {
+      setStreamActionLoading(false)
+    }
+  }
+
+  async function handleStartRtspStream() {
+    if (streamActionLoading()) return
+    setStreamActionLoading(true)
+    try {
+      const result = await api.startRtspStream()
+      if (!result.success) {
+        setError(result.error || 'Failed to start RTSP stream')
+      } else {
+        setError('')
+        await fetchStatus()
+      }
+    } catch (e: any) {
+      setError(e.message || 'Failed to start RTSP stream')
+    } finally {
+      setStreamActionLoading(false)
+    }
+  }
+
+  async function handleStopRtspStream() {
+    if (streamActionLoading()) return
+    setStreamActionLoading(true)
+    try {
+      const result = await api.stopRtspStream()
+      if (!result.success) {
+        setError(result.error || 'Failed to stop RTSP stream')
+      } else {
+        setError('')
+        await fetchStatus()
+      }
+    } catch (e: any) {
+      setError(e.message || 'Failed to stop RTSP stream')
+    } finally {
+      setStreamActionLoading(false)
+    }
+  }
+
   async function handleStartIntervalCapture() {
     try {
       const result = await api.startIntervalCapture(intervalConfig())
@@ -554,7 +633,7 @@ export function useAppState() {
   })
 
   createEffect(() => {
-    if (status()?.streaming?.isActive) setPreviewVisible(true)
+    if (status()?.streaming?.webStreamingActive) setPreviewVisible(true)
   })
 
   createEffect(() => {
@@ -593,7 +672,11 @@ export function useAppState() {
     // Actions
     handleCapture, handleSelectLens, handleResetDefaults,
     handleStopStream, handleResumeStream,
+    handleStartWebStream, handleStopWebStream,
+    handleStartRtspStream, handleStopRtspStream,
     handleStartIntervalCapture, handleStopIntervalCapture,
     handleStartRecording, handleStopRecording,
+    // Tabs
+    activeTab, setActiveTab,
   }
 }

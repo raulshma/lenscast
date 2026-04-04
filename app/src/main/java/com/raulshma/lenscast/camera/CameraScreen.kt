@@ -264,7 +264,8 @@ fun CameraScreen(
                         flashAlpha.animateTo(0f, animationSpec = tween(150))
                     }
                 },
-                onStreamToggle = { viewModel.toggleStreaming() },
+                onWebStreamToggle = { viewModel.toggleWebStreaming() },
+                onRtspStreamToggle = { viewModel.toggleRtspStreaming() },
                 onRecord = { viewModel.toggleRecording() },
                 onSwitchCamera = { viewModel.switchCamera() },
                 onTogglePreview = { viewModel.togglePreview() },
@@ -322,7 +323,8 @@ private fun ImmersiveCameraView(
     onToggleQuickSettings: () -> Unit,
     onQuickSettingTap: (QuickSettingType) -> Unit,
     onCapture: () -> Unit,
-    onStreamToggle: () -> Unit,
+    onWebStreamToggle: () -> Unit,
+    onRtspStreamToggle: () -> Unit,
     onRecord: () -> Unit,
     onSwitchCamera: () -> Unit,
     onTogglePreview: () -> Unit,
@@ -459,7 +461,8 @@ private fun ImmersiveCameraView(
             quickSettingsExpanded = quickSettingsExpanded,
             activeSetting = activeSetting,
             isRecording = isRecording,
-            onStreamToggle = onStreamToggle,
+            onWebStreamToggle = onWebStreamToggle,
+            onRtspStreamToggle = onRtspStreamToggle,
             onCapture = onCapture,
             onRecord = onRecord,
             onSelectLens = onSelectLens,
@@ -683,7 +686,8 @@ private fun CameraBottomOverlay(
     quickSettingsExpanded: Boolean,
     activeSetting: QuickSettingType?,
     isRecording: Boolean,
-    onStreamToggle: () -> Unit,
+    onWebStreamToggle: () -> Unit,
+    onRtspStreamToggle: () -> Unit,
     onCapture: () -> Unit,
     onRecord: () -> Unit,
     onSelectLens: (Int) -> Unit,
@@ -722,10 +726,14 @@ private fun CameraBottomOverlay(
         }
 
         ShutterRow(
-            isStreaming = streamStatus.isActive,
+            isWebStreaming = streamStatus.isWebActive,
+            isRtspStreaming = streamStatus.isRtspActive,
+            isWebEnabled = streamStatus.isWebEnabled,
+            isRtspEnabled = streamStatus.isRtspEnabled,
             isRecording = isRecording,
             quickSettingsExpanded = quickSettingsExpanded,
-            onStreamToggle = onStreamToggle,
+            onWebStreamToggle = onWebStreamToggle,
+            onRtspStreamToggle = onRtspStreamToggle,
             onCapture = onCapture,
             onRecord = onRecord,
             onToggleQuickSettings = onToggleQuickSettings,
@@ -735,86 +743,153 @@ private fun CameraBottomOverlay(
 
 @Composable
 private fun ShutterRow(
-    isStreaming: Boolean,
+    isWebStreaming: Boolean,
+    isRtspStreaming: Boolean,
+    isWebEnabled: Boolean,
+    isRtspEnabled: Boolean,
     isRecording: Boolean,
     quickSettingsExpanded: Boolean,
-    onStreamToggle: () -> Unit,
+    onWebStreamToggle: () -> Unit,
+    onRtspStreamToggle: () -> Unit,
     onCapture: () -> Unit,
     onRecord: () -> Unit,
     onToggleQuickSettings: () -> Unit,
 ) {
-    Row(
+    Surface(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 24.dp, vertical = 20.dp),
-        horizontalArrangement = Arrangement.SpaceEvenly,
-        verticalAlignment = Alignment.CenterVertically
+            .padding(horizontal = 16.dp, vertical = 16.dp),
+        color = OverlayScrim.copy(alpha = 0.45f),
+        shape = RoundedCornerShape(30.dp)
     ) {
-        AnimatedVisibility(
-            visible = !quickSettingsExpanded,
-            enter = fadeIn(tween(200)) + scaleIn(
-                initialScale = 0.8f,
-                animationSpec = spring(stiffness = Spring.StiffnessMedium)
-            ),
-            exit = fadeOut(tween(100)) + scaleOut(
-                targetScale = 0.8f,
-                animationSpec = tween(100)
-            )
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 10.dp),
+            horizontalArrangement = Arrangement.spacedBy(14.dp, Alignment.CenterHorizontally),
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            Surface(
+            Box(
                 modifier = Modifier.size(52.dp),
-                color = if (isStreaming) Color(0xFFD32F2F) else OverlayScrim,
-                shape = CircleShape,
-                onClick = onStreamToggle
+                contentAlignment = Alignment.Center
             ) {
-                Box(contentAlignment = Alignment.Center) {
-                    Icon(
-                        imageVector = if (isStreaming) Icons.Default.Stop else Icons.Default.Videocam,
-                        contentDescription = if (isStreaming) "Stop streaming" else "Start streaming",
-                        tint = Color.White,
-                        modifier = Modifier.size(26.dp)
+                androidx.compose.animation.AnimatedVisibility(
+                    visible = !quickSettingsExpanded,
+                    enter = fadeIn(tween(200)) + scaleIn(
+                        initialScale = 0.8f,
+                        animationSpec = spring(stiffness = Spring.StiffnessMedium)
+                    ),
+                    exit = fadeOut(tween(100)) + scaleOut(
+                        targetScale = 0.8f,
+                        animationSpec = tween(100)
                     )
+                ) {
+                    Surface(
+                        modifier = Modifier.size(52.dp),
+                        color = if (isWebStreaming) Color(0xFFD32F2F)
+                        else if (isWebEnabled) OverlayLight
+                        else OverlayLight.copy(alpha = 0.45f),
+                        shape = CircleShape,
+                        onClick = {
+                            if (isWebEnabled) {
+                                onWebStreamToggle()
+                            }
+                        }
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                imageVector = if (isWebStreaming) Icons.Default.Stop else Icons.Default.Wifi,
+                                contentDescription = if (isWebStreaming) "Stop web stream" else "Start web stream",
+                                tint = if (isWebEnabled || isWebStreaming) Color.White else Color.White.copy(alpha = 0.35f),
+                                modifier = Modifier.size(24.dp)
+                            )
+                        }
+                    }
+                }
+
+                androidx.compose.animation.AnimatedVisibility(
+                    visible = quickSettingsExpanded,
+                    enter = fadeIn(tween(150)),
+                    exit = fadeOut(tween(100))
+                ) {
+                    Surface(
+                        modifier = Modifier.size(52.dp),
+                        color = OverlayLight,
+                        shape = CircleShape,
+                        onClick = onToggleQuickSettings
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                imageVector = Icons.Default.Flip,
+                                contentDescription = "Collapse quick settings",
+                                tint = Color.White.copy(alpha = 0.7f),
+                                modifier = Modifier.size(22.dp)
+                            )
+                        }
+                    }
                 }
             }
-        }
 
-        AnimatedVisibility(
-            visible = quickSettingsExpanded,
-            enter = fadeIn(tween(150)),
-            exit = fadeOut(tween(100))
-        ) {
+            Box(
+                modifier = Modifier.size(52.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                androidx.compose.animation.AnimatedVisibility(
+                    visible = !quickSettingsExpanded,
+                    enter = fadeIn(tween(200)) + scaleIn(
+                        initialScale = 0.8f,
+                        animationSpec = spring(stiffness = Spring.StiffnessMedium)
+                    ),
+                    exit = fadeOut(tween(100)) + scaleOut(
+                        targetScale = 0.8f,
+                        animationSpec = tween(100)
+                    )
+                ) {
+                    Surface(
+                        modifier = Modifier.size(52.dp),
+                        color = if (isRtspStreaming) Color(0xFFD32F2F)
+                        else if (isRtspEnabled) OverlayLight
+                        else OverlayLight.copy(alpha = 0.45f),
+                        shape = CircleShape,
+                        onClick = {
+                            if (isRtspEnabled) {
+                                onRtspStreamToggle()
+                            }
+                        }
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                imageVector = if (isRtspStreaming) Icons.Default.Stop else Icons.Default.Videocam,
+                                contentDescription = if (isRtspStreaming) "Stop RTSP stream" else "Start RTSP stream",
+                                tint = if (isRtspEnabled || isRtspStreaming) Color.White else Color.White.copy(alpha = 0.35f),
+                                modifier = Modifier.size(24.dp)
+                            )
+                        }
+                    }
+                }
+            }
+
             Surface(
                 modifier = Modifier.size(52.dp),
-                color = OverlayScrim,
+                color = if (isRecording) Color(0xFFD32F2F) else OverlayLight,
                 shape = CircleShape,
-                onClick = onToggleQuickSettings
+                onClick = onRecord
             ) {
                 Box(contentAlignment = Alignment.Center) {
                     Icon(
-                        imageVector = Icons.Default.Flip,
-                        contentDescription = "Collapse quick settings",
-                        tint = Color.White.copy(alpha = 0.7f),
+                        imageVector = if (isRecording) Icons.Default.Stop else Icons.Default.FiberManualRecord,
+                        contentDescription = if (isRecording) "Stop recording" else "Record video",
+                        tint = if (isRecording) Color.White else Color(0xFFD32F2F),
                         modifier = Modifier.size(24.dp)
                     )
                 }
             }
-        }
 
-        ShutterButton(onClick = onCapture)
-
-        Surface(
-            modifier = Modifier.size(52.dp),
-            color = if (isRecording) Color(0xFFD32F2F) else OverlayScrim,
-            shape = CircleShape,
-            onClick = onRecord
-        ) {
-            Box(contentAlignment = Alignment.Center) {
-                Icon(
-                    imageVector = if (isRecording) Icons.Default.Stop else Icons.Default.FiberManualRecord,
-                    contentDescription = if (isRecording) "Stop recording" else "Record video",
-                    tint = if (isRecording) Color.White else Color(0xFFD32F2F),
-                    modifier = Modifier.size(26.dp)
-                )
+            Box(
+                modifier = Modifier.size(70.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                ShutterButton(onClick = onCapture)
             }
         }
     }
@@ -829,14 +904,14 @@ private fun ShutterButton(
 
     Box(
         modifier = Modifier
-            .size(76.dp)
-            .border(4.dp, Color.White, CircleShape)
+            .size(70.dp)
+            .border(3.dp, Color.White.copy(alpha = 0.95f), CircleShape)
             .padding(4.dp),
         contentAlignment = Alignment.Center
     ) {
         Surface(
             modifier = Modifier
-                .size(60.dp)
+                .size(56.dp)
                 .graphicsLayer {
                     scaleX = scale.value
                     scaleY = scale.value
@@ -856,7 +931,7 @@ private fun ShutterButton(
                     imageVector = Icons.Default.Camera,
                     contentDescription = "Capture photo",
                     tint = Color(0xFF1A1A1A),
-                    modifier = Modifier.size(28.dp)
+                    modifier = Modifier.size(24.dp)
                 )
             }
         }
@@ -1495,10 +1570,10 @@ private fun StreamIndicator(
             }
         }
 
-        if (streamStatus.isWebEnabled) {
+        if (streamStatus.isWebActive) {
             StreamBadge(icon = Icons.Default.Wifi, label = "WEB")
         }
-        if (streamStatus.isRtspEnabled) {
+        if (streamStatus.isRtspActive) {
             StreamBadge(icon = Icons.Default.Videocam, label = "RTSP")
         }
     }

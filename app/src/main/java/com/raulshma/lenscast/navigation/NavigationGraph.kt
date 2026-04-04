@@ -26,6 +26,7 @@ import com.raulshma.lenscast.gallery.GalleryScreen
 import com.raulshma.lenscast.gallery.GalleryViewModel
 import com.raulshma.lenscast.gallery.MediaViewerScreen
 import com.raulshma.lenscast.settings.CameraSettingsScreen
+import com.raulshma.lenscast.settings.AppSettingsScreen
 import com.raulshma.lenscast.ui.animation.LocalAnimatedVisibilityScope
 import com.raulshma.lenscast.ui.animation.LocalSharedTransitionScope
 import androidx.compose.foundation.pager.rememberPagerState
@@ -71,6 +72,15 @@ fun NavigationGraph() {
                 composable("settings") {
                     CompositionLocalProvider(LocalAnimatedVisibilityScope provides this@composable) {
                         CameraSettingsScreen(
+                            onNavigateBack = { navController.popBackStack() },
+                            onNavigateToAppSettings = { navController.navigate("app-settings") },
+                        )
+                    }
+                }
+
+                composable("app-settings") {
+                    CompositionLocalProvider(LocalAnimatedVisibilityScope provides this@composable) {
+                        AppSettingsScreen(
                             onNavigateBack = { navController.popBackStack() },
                         )
                     }

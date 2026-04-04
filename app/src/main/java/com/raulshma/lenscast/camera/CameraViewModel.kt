@@ -136,12 +136,12 @@ class CameraViewModel(
         viewModelScope.launch {
             val videoFlow = combine(
                 streamingManager.isStreaming,
+                streamingManager.isWebStreamingActive,
                 streamingManager.isServerRunning,
                 streamingManager.streamUrl,
                 streamingManager.clientCount,
-                streamingManager.isWebEnabled,
-            ) { isStreaming, isServerRunning, streamUrl, clientCount, isWebEnabled ->
-                listOf(isStreaming, isServerRunning, streamUrl, clientCount, isWebEnabled)
+            ) { isStreaming, isWebActive, isServerRunning, streamUrl, clientCount ->
+                listOf(isStreaming, isWebActive, isServerRunning, streamUrl, clientCount)
             }
 
             val audioFlow = combine(
@@ -149,23 +149,28 @@ class CameraViewModel(
                 streamingManager.audioStreamUrl,
                 streamingManager.isRtspRunning,
                 streamingManager.rtspUrl,
-                streamingManager.isRtspEnabled,
-            ) { isAudioStreaming, audioUrl, isRtspRunning, rtspUrl, isRtspEnabled ->
-                listOf(isAudioStreaming, audioUrl, isRtspRunning, rtspUrl, isRtspEnabled)
+            ) { isAudioStreaming, audioUrl, isRtspRunning, rtspUrl ->
+                listOf(isAudioStreaming, audioUrl, isRtspRunning, rtspUrl)
             }
 
-            combine(videoFlow, audioFlow) { video, audio ->
+            combine(
+                videoFlow,
+                audioFlow,
+                streamingManager.isWebEnabled,
+                streamingManager.isRtspEnabled,
+            ) { video, audio, isWebEnabled, isRtspEnabled ->
                 _streamStatus.value = StreamStatus(
                     isActive = video[0] as Boolean,
-                    isServerRunning = video[1] as Boolean,
-                    url = video[2] as String,
-                    clientCount = video[3] as Int,
+                    isWebActive = video[1] as Boolean,
+                    isServerRunning = video[2] as Boolean,
+                    url = video[3] as String,
+                    clientCount = video[4] as Int,
                     isAudioActive = audio[0] as Boolean,
                     audioUrl = audio[1] as String,
                     isRtspActive = audio[2] as Boolean,
                     rtspUrl = audio[3] as String,
-                    isWebEnabled = video[4] as Boolean,
-                    isRtspEnabled = audio[4] as Boolean,
+                    isWebEnabled = isWebEnabled,
+                    isRtspEnabled = isRtspEnabled,
                 )
             }.collect { }
         }
@@ -361,10 +366,23 @@ class CameraViewModel(
     }
 
     fun toggleStreaming() {
-        if (_streamStatus.value.isActive) stopStreaming() else startStreaming()
+        toggleWebStreaming()
     }
 
-    private fun startStreaming() {
+    fun toggleWebStreaming() {
+        if (_streamStatus.value.isWebActive) stopWebStreaming() else startWebStreaming()
+    }
+
+    fun toggleRtspStreaming() {
+        if (_streamStatus.value.isRtspActive) stopRtspStreaming() else startRtspStreaming()
+    }
+
+    private fun startWebStreaming() {
+        if (!streamingManager.isWebEnabled.value) {
+            Toast.makeText(context, "Web streaming is disabled in settings.", Toast.LENGTH_SHORT).show()
+            return
+        }
+
         refreshAudioPermission()
         if (_streamAudioEnabled.value && !_hasAudioPermission.value) {
             Toast.makeText(
@@ -373,6 +391,62 @@ class CameraViewModel(
                 Toast.LENGTH_SHORT
             ).show()
         }
+
+        val wasLive = streamingManager.isLiveStreaming()
+        if (!wasLive) {
+            beginStreamingSession()
+        }
+
+        val success = streamingManager.startWebStreaming()
+        if (success) {
+            updateStreamingServiceNotification()
+        } else {
+            if (!wasLive && !streamingManager.isLiveStreaming()) {
+                endStreamingSession()
+            }
+            Toast.makeText(context, "Failed to start web streaming.", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun stopWebStreaming() {
+        streamingManager.stopWebStreaming()
+        updateStreamingServiceNotification()
+        if (!streamingManager.isLiveStreaming()) {
+            endStreamingSession()
+        }
+    }
+
+    private fun startRtspStreaming() {
+        if (!streamingManager.isRtspEnabled.value) {
+            Toast.makeText(context, "RTSP streaming is disabled in settings.", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        val wasLive = streamingManager.isLiveStreaming()
+        if (!wasLive) {
+            beginStreamingSession()
+        }
+
+        val success = streamingManager.startRtspStreaming()
+        if (success) {
+            updateStreamingServiceNotification()
+        } else {
+            if (!wasLive && !streamingManager.isLiveStreaming()) {
+                endStreamingSession()
+            }
+            Toast.makeText(context, "Failed to start RTSP streaming.", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun stopRtspStreaming() {
+        streamingManager.stopRtspStreaming()
+        updateStreamingServiceNotification()
+        if (!streamingManager.isLiveStreaming()) {
+            endStreamingSession()
+        }
+    }
+
+    private fun beginStreamingSession() {
         _wifiConnected.value = com.raulshma.lenscast.core.NetworkUtils.isWifiConnected(context)
         powerManager.refreshBatteryState()
         powerManager.acquireWakeLock()
@@ -380,18 +454,24 @@ class CameraViewModel(
         streamingManager.thermalMonitor = thermalMonitor
         startBatteryMonitoring()
         startThermalMonitoring()
-        if (!streamingManager.isWebEnabled.value && !streamingManager.isRtspEnabled.value) {
-            streamingManager.setWebStreamingEnabled(true)
-            viewModelScope.launch {
-                settingsDataStore.saveWebStreamingEnabled(true)
-            }
-        }
-        val success = streamingManager.startStreaming()
-        if (success) {
-            cameraService.acquireKeepAlive()
-            cameraService.rebindUseCases()
+        cameraService.acquireKeepAlive()
+        cameraService.rebindUseCases()
+    }
 
-            val intent = Intent(context, com.raulshma.lenscast.streaming.StreamingService::class.java)
+    private fun endStreamingSession() {
+        powerManager.releaseWakeLock()
+        thermalMonitor.stopMonitoring()
+        batteryMonitorJob?.cancel()
+        batteryMonitorJob = null
+        thermalMonitorJob?.cancel()
+        thermalMonitorJob = null
+        cameraService.releaseKeepAlive()
+        cameraService.rebindUseCases()
+    }
+
+    private fun updateStreamingServiceNotification() {
+        val intent = Intent(context, com.raulshma.lenscast.streaming.StreamingService::class.java)
+        if (streamingManager.isLiveStreaming()) {
             intent.action = com.raulshma.lenscast.streaming.StreamingService.ACTION_START
             intent.putExtra(
                 com.raulshma.lenscast.streaming.StreamingService.EXTRA_URL,
@@ -406,54 +486,10 @@ class CameraViewModel(
             } else {
                 context.startService(intent)
             }
-
-            _streamStatus.value = StreamStatus(
-                isActive = true,
-                isServerRunning = streamingManager.isServerRunning.value,
-                url = streamingManager.streamUrl.value,
-                clientCount = 0,
-                isAudioActive = streamingManager.isAudioStreaming.value,
-                audioUrl = streamingManager.audioStreamUrl.value,
-            )
         } else {
-            _streamStatus.value = _streamStatus.value.copy(
-                isActive = false,
-                isServerRunning = false,
-                url = "Failed to start server",
-                clientCount = 0,
-                isAudioActive = false,
-                audioUrl = "",
-            )
+            intent.action = com.raulshma.lenscast.streaming.StreamingService.ACTION_PAUSE
+            context.startService(intent)
         }
-    }
-
-    private fun stopStreaming() {
-        streamingManager.pauseStreaming()
-        powerManager.releaseWakeLock()
-        thermalMonitor.stopMonitoring()
-        batteryMonitorJob?.cancel()
-        batteryMonitorJob = null
-        thermalMonitorJob?.cancel()
-        thermalMonitorJob = null
-        _streamStatus.value = _streamStatus.value.copy(
-            isActive = false,
-            isServerRunning = streamingManager.isServerRunning.value,
-            url = streamingManager.streamUrl.value,
-            clientCount = 0,
-            isAudioActive = false,
-            audioUrl = "",
-        )
-
-        cameraService.releaseKeepAlive()
-        cameraService.rebindUseCases()
-
-        val intent = Intent(context, com.raulshma.lenscast.streaming.StreamingService::class.java)
-        intent.action = com.raulshma.lenscast.streaming.StreamingService.ACTION_PAUSE
-        intent.putExtra(
-            com.raulshma.lenscast.streaming.StreamingService.EXTRA_URL,
-            streamingManager.streamUrl.value
-        )
-        context.startService(intent)
     }
 
     private fun startBatteryMonitoring() {

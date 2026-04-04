@@ -16,6 +16,10 @@ interface Props {
   handleCapture: () => void
   handleStopStream: () => void
   handleResumeStream: () => void
+  handleStartWebStream: () => void
+  handleStopWebStream: () => void
+  handleStartRtspStream: () => void
+  handleStopRtspStream: () => void
   setPreviewVisible: (v: boolean) => void
   overlaySettings: () => StreamingSettings | null
 }
@@ -24,6 +28,9 @@ export default function StreamPreview(props: Props) {
   const st = () => props.status()
   const isActive = () => !!st()?.streaming?.isActive
   const webStreamingEnabled = () => st()?.streaming?.webStreamingEnabled ?? true
+  const webActive = () => st()?.streaming?.webStreamingActive ?? false
+  const rtspEnabled = () => st()?.streaming?.rtspEnabled ?? false
+  const rtspActive = () => st()?.streaming?.rtspStreamingActive ?? false
 
   const [focusIndicator, setFocusIndicator] = createSignal<{ x: number; y: number; visible: boolean }>({
     x: 0,
@@ -113,10 +120,10 @@ export default function StreamPreview(props: Props) {
     <section class="preview-section" id="preview-section">
       <div
         class="preview-container zoomable-container"
-        classList={{ 'preview-active': isActive() && props.previewVisible() }}
+        classList={{ 'preview-active': webActive() && props.previewVisible() }}
         ref={zoom.containerRef}
       >
-        {props.previewVisible() && isActive() ? (
+        {props.previewVisible() && webActive() ? (
           <img
             class="preview-img zoomable-content"
             src={`/stream?t=${props.streamNonce()}`}
@@ -150,9 +157,11 @@ export default function StreamPreview(props: Props) {
                 <circle cx="12" cy="13" r="4" />
               </svg>
             </div>
-            <span class="preview-placeholder-text">{isActive() ? 'Stream error' : 'Stream not active'}</span>
+            <span class="preview-placeholder-text">{webActive() ? 'Connecting...' : isActive() ? 'Stream error' : 'No active stream'}</span>
             <span class="preview-placeholder-sub">
-              {webStreamingEnabled() ? 'Start streaming to see the live feed' : 'Web streaming is disabled in settings'}
+              {!webStreamingEnabled() && !rtspEnabled()
+                ? 'Enable Web Stream or RTSP in settings to start'
+                : webStreamingEnabled() ? 'Click Web Stream to start the live feed' : 'Web streaming is disabled in settings'}
             </span>
           </div>
         )}
@@ -166,7 +175,7 @@ export default function StreamPreview(props: Props) {
         </Show>
 
         {/* Live badge */}
-        <Show when={isActive() && props.previewVisible()}>
+        <Show when={webActive() && props.previewVisible()}>
           <div class="live-badge">
             <span class="live-badge-dot" />
             LIVE
@@ -222,37 +231,51 @@ export default function StreamPreview(props: Props) {
             <span>Capture</span>
           </button>
 
-          {isActive() ? (
+          {webActive() ? (
             <button
-              id="stop-stream-btn"
               class="action-btn action-btn-warning"
-              onClick={props.handleStopStream}
+              onClick={props.handleStopWebStream}
               disabled={props.streamActionLoading()}
             >
-              <Show when={props.streamActionLoading()} fallback={
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <rect x="6" y="6" width="12" height="12" rx="2" />
-                </svg>
-              }>
-                <span class="btn-spinner" />
-              </Show>
-              <span>{props.streamActionLoading() ? 'Stopping...' : 'Stop'}</span>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="6" y="6" width="12" height="12" rx="2" />
+              </svg>
+              <span>Stop Web</span>
             </button>
           ) : (
             <button
-              id="resume-stream-btn"
               class="action-btn action-btn-success"
-              onClick={props.handleResumeStream}
+              onClick={props.handleStartWebStream}
               disabled={props.streamActionLoading() || !webStreamingEnabled()}
             >
-              <Show when={props.streamActionLoading()} fallback={
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <polygon points="5 3 19 12 5 21 5 3" />
-                </svg>
-              }>
-                <span class="btn-spinner" />
-              </Show>
-              <span>{props.streamActionLoading() ? 'Starting...' : 'Resume'}</span>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polygon points="5 3 19 12 5 21 5 3" />
+              </svg>
+              <span>Web Stream</span>
+            </button>
+          )}
+
+          {rtspActive() ? (
+            <button
+              class="action-btn action-btn-warning"
+              onClick={props.handleStopRtspStream}
+              disabled={props.streamActionLoading()}
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="6" y="6" width="12" height="12" rx="2" />
+              </svg>
+              <span>Stop RTSP</span>
+            </button>
+          ) : (
+            <button
+              class="action-btn action-btn-success"
+              onClick={props.handleStartRtspStream}
+              disabled={props.streamActionLoading() || !rtspEnabled()}
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polygon points="5 3 19 12 5 21 5 3" />
+              </svg>
+              <span>RTSP Stream</span>
             </button>
           )}
 
@@ -274,7 +297,7 @@ export default function StreamPreview(props: Props) {
       </div>
 
       {/* Audio status */}
-      <Show when={isActive() && st()?.streaming?.audioEnabled}>
+      <Show when={webActive() && st()?.streaming?.audioEnabled}>
         <div class="audio-status-bar">
           <div class="audio-status-indicator" classList={{
             'audio-live': props.liveAudioStatus() === 'live',
@@ -298,14 +321,14 @@ export default function StreamPreview(props: Props) {
       </Show>
 
       {/* Stream URL */}
-      <Show when={isActive() && st()?.streaming?.url}>
+      <Show when={webActive() && st()?.streaming?.url}>
         <div class="stream-url-bar">
           <code>{st()!.streaming.url}</code>
         </div>
       </Show>
 
       {/* RTSP URL */}
-      <Show when={isActive() && st()?.streaming?.rtspEnabled && st()?.streaming?.rtspUrl}>
+      <Show when={rtspActive() && st()?.streaming?.rtspUrl}>
         <div class="stream-url-bar">
           <code>{st()!.streaming.rtspUrl}</code>
         </div>

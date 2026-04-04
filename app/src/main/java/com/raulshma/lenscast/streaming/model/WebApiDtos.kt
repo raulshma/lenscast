@@ -93,10 +93,12 @@ data class StreamingStatusDto(
     val isActive: Boolean,
     val url: String,
     val webStreamingEnabled: Boolean = true,
+    val webStreamingActive: Boolean = false,
     val clientCount: Int,
     val audioEnabled: Boolean,
     val audioUrl: String,
     val rtspEnabled: Boolean = false,
+    val rtspStreamingActive: Boolean = false,
     val rtspUrl: String = "",
 )
 

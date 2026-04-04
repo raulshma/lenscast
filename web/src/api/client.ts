@@ -135,6 +135,22 @@ export async function startStream(): Promise<{ success: boolean; isActive?: bool
   return requestJson('/api/stream/start', { method: 'POST' })
 }
 
+export async function startWebStream(): Promise<{ success: boolean; isActive?: boolean; url?: string; error?: string }> {
+  return requestJson('/api/stream/web/start', { method: 'POST' })
+}
+
+export async function stopWebStream(): Promise<{ success: boolean; isActive?: boolean; error?: string }> {
+  return requestJson('/api/stream/web/stop', { method: 'POST' })
+}
+
+export async function startRtspStream(): Promise<{ success: boolean; isActive?: boolean; url?: string; error?: string }> {
+  return requestJson('/api/stream/rtsp/start', { method: 'POST' })
+}
+
+export async function stopRtspStream(): Promise<{ success: boolean; isActive?: boolean; error?: string }> {
+  return requestJson('/api/stream/rtsp/stop', { method: 'POST' })
+}
+
 export async function getIntervalCaptureStatus(): Promise<import('../types').IntervalCaptureStatus> {
   return requestJson('/api/capture/interval/status')
 }
