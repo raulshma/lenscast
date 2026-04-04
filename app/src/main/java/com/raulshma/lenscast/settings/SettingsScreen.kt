@@ -1,5 +1,6 @@
 package com.raulshma.lenscast.settings
 
+import androidx.activity.ComponentActivity
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -10,6 +11,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.Icons
@@ -26,6 +28,7 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -56,12 +59,18 @@ fun CameraSettingsScreen(
     onNavigateBack: () -> Unit,
 ) {
     val context = LocalContext.current
+    val activity = context as ComponentActivity
     val app = context.applicationContext as MainApplication
     val viewModel: SettingsViewModel = viewModel(
         factory = SettingsViewModel.Factory(
-            app.cameraService, app.settingsDataStore, app.streamingManager
+            app.cameraService, app.settingsDataStore, app.streamingManager, app.powerManager
         )
     )
+
+    LaunchedEffect(activity) {
+        viewModel.activityRef = activity
+        viewModel.refreshBatteryOptimizationStatus()
+    }
 
     val settings by viewModel.settings.collectAsState()
     val zoomRange by viewModel.availableZoomRange.collectAsState()
@@ -81,6 +90,7 @@ fun CameraSettingsScreen(
     val rtspInputFormat by viewModel.rtspInputFormat.collectAsState()
     val adaptiveBitrateEnabled by viewModel.adaptiveBitrateEnabled.collectAsState()
     val mdnsEnabled by viewModel.mdnsEnabled.collectAsState()
+    val isIgnoringBatteryOptimizations by viewModel.isIgnoringBatteryOptimizations
 
     Scaffold(
         topBar = {
@@ -272,6 +282,34 @@ fun CameraSettingsScreen(
                         checked = mdnsEnabled,
                         onCheckedChange = { viewModel.updateMdnsEnabled(it) }
                     )
+                }
+            }
+
+            item {
+                SettingsSection(title = "Background") {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Disable Battery Optimization",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurface,
+                            )
+                            Text(
+                                text = "Prevents the system from stopping the app in the background",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Switch(
+                            checked = isIgnoringBatteryOptimizations,
+                            onCheckedChange = { viewModel.requestIgnoreBatteryOptimization() }
+                        )
+                    }
                 }
             }
 

@@ -1,5 +1,7 @@
 package com.raulshma.lenscast.settings
 
+import android.app.Activity
+import androidx.compose.runtime.mutableStateOf
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
@@ -10,6 +12,7 @@ import com.raulshma.lenscast.camera.model.HdrMode
 import com.raulshma.lenscast.camera.model.NightVisionMode
 import com.raulshma.lenscast.camera.model.Resolution
 import com.raulshma.lenscast.camera.model.WhiteBalance
+import com.raulshma.lenscast.core.PowerManager
 import com.raulshma.lenscast.data.SettingsDataStore
 import com.raulshma.lenscast.data.StreamAuthSettings
 import com.raulshma.lenscast.streaming.StreamingManager
@@ -23,6 +26,7 @@ class SettingsViewModel(
     private val cameraService: CameraService,
     private val settingsDataStore: SettingsDataStore,
     private val streamingManager: StreamingManager? = null,
+    private val powerManager: PowerManager? = null,
 ) : ViewModel() {
 
     private val _settings = MutableStateFlow(CameraSettings())
@@ -72,6 +76,25 @@ class SettingsViewModel(
 
     private val _mdnsEnabled = MutableStateFlow(true)
     val mdnsEnabled: StateFlow<Boolean> = _mdnsEnabled.asStateFlow()
+
+    var activityRef: Activity? = null
+
+    private val _isIgnoringBatteryOptimizations = mutableStateOf(false)
+    val isIgnoringBatteryOptimizations = _isIgnoringBatteryOptimizations
+
+    init {
+        refreshBatteryOptimizationStatus()
+    }
+
+    fun refreshBatteryOptimizationStatus() {
+        _isIgnoringBatteryOptimizations.value = powerManager?.isIgnoringBatteryOptimizations() == true
+    }
+
+    fun requestIgnoreBatteryOptimization() {
+        activityRef?.let { activity ->
+            powerManager?.requestIgnoreBatteryOptimization(activity)
+        }
+    }
 
     val availableZoomRange: StateFlow<ClosedFloatingPointRange<Float>> = cameraService.availableZoomRange
     val availableExposureRange: StateFlow<ClosedRange<Int>> = cameraService.availableExposureRange
@@ -400,10 +423,11 @@ class SettingsViewModel(
         private val cameraService: CameraService,
         private val settingsDataStore: SettingsDataStore,
         private val streamingManager: StreamingManager? = null,
+        private val powerManager: PowerManager? = null,
     ) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
         override fun <T : androidx.lifecycle.ViewModel> create(modelClass: Class<T>): T {
-            return SettingsViewModel(cameraService, settingsDataStore, streamingManager) as T
+            return SettingsViewModel(cameraService, settingsDataStore, streamingManager, powerManager) as T
         }
     }
 }
