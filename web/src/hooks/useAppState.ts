@@ -58,6 +58,8 @@ export function useAppState() {
   let liveAudioPlaybackTime = 0
   let liveAudioSession = 0
   let liveAudioKey = ''
+  let audioBufferPool: ArrayBuffer[] = []
+  const MAX_BUFFER_POOL_SIZE = 8
 
   function isPageHidden() {
     return typeof document !== 'undefined' && document.hidden
@@ -68,6 +70,21 @@ export function useAppState() {
     merged.set(a, 0)
     merged.set(b, a.length)
     return merged
+  }
+
+  function getBufferFromPool(size: number): ArrayBuffer {
+    for (let i = 0; i < audioBufferPool.length; i++) {
+      if (audioBufferPool[i].byteLength >= size) {
+        return audioBufferPool.splice(i, 1)[0]
+      }
+    }
+    return new ArrayBuffer(size)
+  }
+
+  function returnBufferToPool(buffer: ArrayBuffer) {
+    if (audioBufferPool.length < MAX_BUFFER_POOL_SIZE) {
+      audioBufferPool.push(buffer)
+    }
   }
 
   async function stopLiveAudioPlayback(resetKey = true) {
@@ -127,43 +144,60 @@ export function useAppState() {
     liveAudioAbortController = controller
     setLiveAudioStatus('connecting')
 
-    try {
-      const res = await fetch(url, { cache: 'no-store', signal: controller.signal })
-      if (!res.ok || !res.body) throw new Error(`Audio stream unavailable: ${res.status}`)
+    let reconnectAttempts = 0
+    const MAX_RECONNECT_ATTEMPTS = 3
+    const RECONNECT_DELAY_MS = 2000
 
-      const sampleRate = parseInt(res.headers.get('X-Audio-Sample-Rate') || '48000', 10)
-      const channelCount = parseInt(res.headers.get('X-Audio-Channels') || '1', 10)
-      const bytesPerFrame = 2 * channelCount
-      const ctx = await ensureLiveAudioContext(sampleRate)
-      if (!ctx) throw new Error('Web Audio not supported')
+    async function attemptConnection() {
+      try {
+        const res = await fetch(url, { cache: 'no-store', signal: controller.signal })
+        if (!res.ok || !res.body) throw new Error(`Audio stream unavailable: ${res.status}`)
 
-      setLiveAudioStatus('live')
-      liveAudioPlaybackTime = ctx.currentTime + 0.05
+        const sampleRate = parseInt(res.headers.get('X-Audio-Sample-Rate') || '48000', 10)
+        const channelCount = parseInt(res.headers.get('X-Audio-Channels') || '1', 10)
+        const bytesPerFrame = 2 * channelCount
+        const ctx = await ensureLiveAudioContext(sampleRate)
+        if (!ctx) throw new Error('Web Audio not supported')
 
-      const reader = res.body.getReader()
-      let pending = new Uint8Array(0)
+        setLiveAudioStatus('live')
+        liveAudioPlaybackTime = ctx.currentTime + 0.05
+        reconnectAttempts = 0
 
-      while (sessionId === liveAudioSession) {
-        const { value, done } = await reader.read()
-        if (done) break
-        if (!value || value.length === 0) continue
+        const reader = res.body.getReader()
+        let pending = new Uint8Array(0)
 
-        const merged = pending.length > 0 ? concatBytes(pending, value) : value
-        const usableLength = merged.length - (merged.length % bytesPerFrame)
-        if (usableLength > 0) {
-          schedulePcmChunk(ctx, merged.subarray(0, usableLength), sampleRate, channelCount)
+        while (sessionId === liveAudioSession) {
+          const { value, done } = await reader.read()
+          if (done) break
+          if (!value || value.length === 0) continue
+
+          const merged = pending.length > 0 ? concatBytes(pending, value) : value
+          const usableLength = merged.length - (merged.length % bytesPerFrame)
+          if (usableLength > 0) {
+            schedulePcmChunk(ctx, merged.subarray(0, usableLength), sampleRate, channelCount)
+          }
+          pending = usableLength < merged.length ? merged.subarray(usableLength) : new Uint8Array(0)
         }
-        pending = usableLength < merged.length ? merged.subarray(usableLength) : new Uint8Array(0)
-      }
 
-      if (!controller.signal.aborted && sessionId === liveAudioSession) {
-        setLiveAudioStatus('idle')
-      }
-    } catch (e) {
-      if (!controller.signal.aborted) {
-        setLiveAudioStatus('error')
+        if (!controller.signal.aborted && sessionId === liveAudioSession) {
+          setLiveAudioStatus('idle')
+        }
+      } catch (e) {
+        if (!controller.signal.aborted && sessionId === liveAudioSession) {
+          if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
+            reconnectAttempts++
+            await new Promise(resolve => setTimeout(resolve, RECONNECT_DELAY_MS))
+            if (sessionId === liveAudioSession && !controller.signal.aborted) {
+              await attemptConnection()
+            }
+          } else {
+            setLiveAudioStatus('error')
+          }
+        }
       }
     }
+
+    await attemptConnection()
   }
 
   function debounceSave(fn: () => void, ms = 400) {
@@ -324,8 +358,6 @@ export function useAppState() {
 
   async function handleSelectLens(index: number) {
     await api.selectLens(index)
-    fetchLenses()
-    fetchSettings()
   }
 
   async function handleResetDefaults() {

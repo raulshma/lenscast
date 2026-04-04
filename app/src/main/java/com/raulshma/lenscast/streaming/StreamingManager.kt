@@ -17,12 +17,30 @@ import com.raulshma.lenscast.streaming.AdaptiveBitrateController.AdaptiveBitrate
 import com.raulshma.lenscast.streaming.AdaptiveBitrateController.AdaptiveResult
 import com.raulshma.lenscast.streaming.rtsp.RtspInputFormat
 import com.raulshma.lenscast.streaming.rtsp.RtspServer
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.launch
 import java.io.ByteArrayOutputStream
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
+
+sealed class FrameData {
+    data class YuvFrame(
+        val yuvData: ByteArray,
+        val width: Int,
+        val height: Int,
+        val rotation: Int,
+        val quality: Int,
+        val overlay: OverlaySettings,
+        val clientCount: Int,
+    ) : FrameData()
+}
 
 class StreamingManager(private val context: Context) {
 
@@ -56,10 +74,24 @@ class StreamingManager(private val context: Context) {
 
     private val lastFrameTimeMs = AtomicLong(0L)
     private val minFrameIntervalMs = AtomicLong(1000L / DEFAULT_STREAM_FPS)
-    private val reusableBuffer = ByteArrayOutputStream(256 * 1024)
-    private val reusableYuvBuffer = ByteArrayOutputStream(256 * 1024)
+    private val maxBufferSize = 4 * 1024 * 1024
+    private var reusableBuffer = ByteArrayOutputStream(256 * 1024)
+    private var reusableYuvBuffer = ByteArrayOutputStream(256 * 1024)
     private val bufferLock = Any()
     private var lastReportedClientCount = -1
+
+    private val frameQueueScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private val frameQueue = Channel<FrameData>(capacity = Channel.CONFLATED)
+    private val droppedFrameCount = AtomicInteger(0)
+    private val processedFrameCount = AtomicInteger(0)
+
+    init {
+        frameQueueScope.launch {
+            for (frame in frameQueue) {
+                processFrameInternal(frame)
+            }
+        }
+    }
 
     var thermalMonitor: ThermalMonitor? = null
 
@@ -92,6 +124,12 @@ class StreamingManager(private val context: Context) {
 
     private val _isRtspRunning = MutableStateFlow(false)
     val isRtspRunning: StateFlow<Boolean> = _isRtspRunning
+
+    private val _droppedFrames = MutableStateFlow(0)
+    val droppedFrames: StateFlow<Int> = _droppedFrames
+
+    private val _processedFrames = MutableStateFlow(0)
+    val processedFrames: StateFlow<Int> = _processedFrames
 
     val adaptiveBitrateState: StateFlow<AdaptiveBitrateController.AdaptiveState> = adaptiveBitrateController.state
 
@@ -235,7 +273,10 @@ class StreamingManager(private val context: Context) {
         val thermalAdjustedInterval = thermalMonitor?.getAdjustedFrameDelay(baseInterval) ?: baseInterval
         val adaptiveInterval = adaptiveBitrateController.getAdaptiveFrameInterval(baseInterval, thermalAdjustedInterval)
 
-        if (elapsed < adaptiveInterval) return
+        if (elapsed < adaptiveInterval) {
+            droppedFrameCount.incrementAndGet()
+            return
+        }
         lastFrameTimeMs.set(now)
 
         val clientCount = server.getClientCount()
@@ -259,6 +300,7 @@ class StreamingManager(private val context: Context) {
         }
 
         server.updateFrame(jpegData)
+        processedFrameCount.incrementAndGet()
 
         if (clientCount != lastReportedClientCount) {
             lastReportedClientCount = clientCount
@@ -276,41 +318,68 @@ class StreamingManager(private val context: Context) {
         val thermalAdjustedInterval = thermalMonitor?.getAdjustedFrameDelay(baseInterval) ?: baseInterval
         val adaptiveInterval = adaptiveBitrateController.getAdaptiveFrameInterval(baseInterval, thermalAdjustedInterval)
 
-        if (elapsed < adaptiveInterval) return
-        lastFrameTimeMs.set(now)
+        if (elapsed < adaptiveInterval) {
+            droppedFrameCount.incrementAndGet()
+            return
+        }
 
         val clientCount = server.getClientCount()
         if (clientCount == 0) return
+
+        lastFrameTimeMs.set(now)
 
         val baseQuality = jpegQuality.get()
         val thermalAdjustedQuality = thermalMonitor?.getAdjustedQuality(baseQuality) ?: baseQuality
         val quality = adaptiveBitrateController.getAdaptiveQuality(baseQuality, thermalAdjustedQuality)
 
-        var jpegData = yuvToJpeg(yuvData, width, height, quality, rotation) ?: return
-
-        val overlay = currentOverlaySettings
-        if (overlay.enabled) {
-            val decoded = BitmapFactory.decodeByteArray(jpegData, 0, jpegData.size)
-            if (decoded != null) {
-                val withOverlay = StreamOverlayRenderer.applyOverlay(decoded, overlay, clientCount)
-                if (withOverlay !== decoded) decoded.recycle()
-                jpegData = bitmapToJpegReuse(withOverlay, quality.coerceAtLeast(85))
-                if (withOverlay !== decoded && withOverlay.isRecycled.not()) withOverlay.recycle()
-            }
-        }
-
-        server.updateFrame(jpegData)
-
-        if (clientCount != lastReportedClientCount) {
-            lastReportedClientCount = clientCount
-            _clientCount.value = clientCount
-        }
+        val frame = FrameData.YuvFrame(yuvData.copyOf(), width, height, rotation, quality, currentOverlaySettings, clientCount)
+        frameQueue.trySend(frame)
     }
 
     fun pushFrameToRtsp(yuvData: ByteArray, width: Int, height: Int, rotation: Int = 0) {
         if (!rtspEnabled.get()) return
         val rtsp = rtspServer ?: return
         rtsp.pushFrame(yuvData, width, height, rotation)
+    }
+
+    private fun processFrameInternal(frame: FrameData) {
+        try {
+            when (frame) {
+                is FrameData.YuvFrame -> {
+                    var jpegData = yuvToJpeg(frame.yuvData, frame.width, frame.height, frame.quality, frame.rotation) ?: return
+
+                    if (frame.overlay.enabled) {
+                        val decoded = BitmapFactory.decodeByteArray(jpegData, 0, jpegData.size)
+                        if (decoded != null) {
+                            val withOverlay = StreamOverlayRenderer.applyOverlay(decoded, frame.overlay, frame.clientCount)
+                            if (withOverlay !== decoded) decoded.recycle()
+                            jpegData = bitmapToJpegReuse(withOverlay, frame.quality.coerceAtLeast(85))
+                            if (withOverlay !== decoded && withOverlay.isRecycled.not()) withOverlay.recycle()
+                        }
+                    }
+
+                    server.updateFrame(jpegData)
+                    processedFrameCount.incrementAndGet()
+
+                    if (frame.clientCount != lastReportedClientCount) {
+                        lastReportedClientCount = frame.clientCount
+                        _clientCount.value = frame.clientCount
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error processing frame", e)
+            droppedFrameCount.incrementAndGet()
+        }
+
+        val dropped = droppedFrameCount.get()
+        val processed = processedFrameCount.get()
+        if (dropped % 30 == 0 && dropped > 0) {
+            _droppedFrames.value = dropped
+        }
+        if (processed % 30 == 0 && processed > 0) {
+            _processedFrames.value = processed
+        }
     }
 
     private fun yuvToJpeg(yuvData: ByteArray, width: Int, height: Int, quality: Int, rotation: Int = 0): ByteArray? {
@@ -321,14 +390,18 @@ class StreamingManager(private val context: Context) {
                     reusableBuffer.reset()
                     bitmap.compress(Bitmap.CompressFormat.JPEG, quality, reusableBuffer)
                     bitmap.recycle()
-                    reusableBuffer.toByteArray()
+                    val result = reusableBuffer.toByteArray()
+                    capBuffer(reusableBuffer)
+                    result
                 }
             } else {
                 val yuvImage = YuvImage(yuvData, ImageFormat.NV21, width, height, null)
                 synchronized(bufferLock) {
                     reusableBuffer.reset()
                     yuvImage.compressToJpeg(Rect(0, 0, width, height), quality, reusableBuffer)
-                    reusableBuffer.toByteArray()
+                    val result = reusableBuffer.toByteArray()
+                    capBuffer(reusableBuffer)
+                    result
                 }
             }
         } catch (e: Exception) {
@@ -345,6 +418,7 @@ class StreamingManager(private val context: Context) {
                 reusableYuvBuffer.reset()
                 yuvImage.compressToJpeg(Rect(0, 0, width, height), quality, reusableYuvBuffer)
                 jpegData = reusableYuvBuffer.toByteArray()
+                capBuffer(reusableYuvBuffer)
             }
             val bitmap = BitmapFactory.decodeByteArray(jpegData, 0, jpegData.size) ?: return null
             val matrix = Matrix()
@@ -364,6 +438,10 @@ class StreamingManager(private val context: Context) {
 
     fun setStreamFrameRate(fps: Int) {
         minFrameIntervalMs.set(if (fps > 0) 1000L / fps else 1000L / DEFAULT_STREAM_FPS)
+    }
+
+    fun setAdaptiveDefaultFrameRate(fps: Int) {
+        adaptiveBitrateController.setDefaultFrameRate(fps)
     }
 
     fun setStreamAudioEnabled(enabled: Boolean) {
@@ -497,6 +575,10 @@ class StreamingManager(private val context: Context) {
         rtspServer?.setInputFormat(format)
     }
 
+    fun setRtspFrameRate(fps: Int) {
+        rtspServer?.setFrameRate(fps)
+    }
+
     fun setMdnsEnabled(enabled: Boolean) {
         val changed = mdnsEnabled.getAndSet(enabled) != enabled
         if (!changed) return
@@ -549,11 +631,19 @@ class StreamingManager(private val context: Context) {
         synchronized(bufferLock) {
             reusableBuffer.reset()
             bitmap.compress(Bitmap.CompressFormat.JPEG, quality, reusableBuffer)
-            return reusableBuffer.toByteArray()
+            val result = reusableBuffer.toByteArray()
+            capBuffer(reusableBuffer)
+            return result
         }
     }
 
-
+    private fun capBuffer(buffer: ByteArrayOutputStream) {
+        if (buffer.size() > maxBufferSize) {
+            val data = buffer.toByteArray()
+            buffer.reset()
+            buffer.write(data, 0, data.size.coerceAtMost(maxBufferSize))
+        }
+    }
 
     fun applyBatteryOptimization(result: com.raulshma.lenscast.core.BatteryOptimizationResult?) {
         if (result == null) return
@@ -573,6 +663,8 @@ class StreamingManager(private val context: Context) {
     }
 
     fun release() {
+        frameQueueScope.cancel()
+        frameQueue.close()
         audioStreamingManager.release()
         stopStreaming()
         thermalMonitor?.stopMonitoring()

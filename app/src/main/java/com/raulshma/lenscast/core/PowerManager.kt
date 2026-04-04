@@ -2,8 +2,11 @@ package com.raulshma.lenscast.core
 
 import android.annotation.SuppressLint
 import android.app.Activity
+import android.app.AlarmManager
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.net.Uri
 import android.os.Build
 import android.os.PowerManager as AndroidPowerManager
@@ -31,6 +34,7 @@ class PowerManager(private val context: Context) {
         context.getSystemService(Context.BATTERY_SERVICE) as android.os.BatteryManager
 
     private var wakeLock: AndroidPowerManager.WakeLock? = null
+    @Volatile private var wakeLockAcquired = false
 
     private val _batteryLevel = MutableStateFlow(100)
     val batteryLevel: StateFlow<Int> = _batteryLevel.asStateFlow()
@@ -54,15 +58,66 @@ class PowerManager(private val context: Context) {
     )
     val optimizationResult: StateFlow<BatteryOptimizationResult> = _optimizationResult.asStateFlow()
 
+    private val powerSaveReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            when (intent?.action) {
+                Intent.ACTION_POWER_CONNECTED -> {
+                    _isCharging.value = true
+                    refreshOptimizationResult()
+                    Log.d(TAG, "Power connected - restoring full quality")
+                }
+                Intent.ACTION_POWER_DISCONNECTED -> {
+                    _isCharging.value = false
+                    refreshOptimizationResult()
+                    Log.d(TAG, "Power disconnected - applying battery optimization")
+                }
+                Intent.ACTION_BATTERY_LOW -> {
+                    refreshBatteryState()
+                    Log.d(TAG, "Battery low warning received")
+                }
+                Intent.ACTION_BATTERY_OKAY -> {
+                    refreshBatteryState()
+                    Log.d(TAG, "Battery okay received")
+                }
+            }
+        }
+    }
+
+    private var receiverRegistered = false
+
+    init {
+        registerReceivers()
+    }
+
+    private fun registerReceivers() {
+        try {
+            val filter = IntentFilter().apply {
+                addAction(Intent.ACTION_POWER_CONNECTED)
+                addAction(Intent.ACTION_POWER_DISCONNECTED)
+                addAction(Intent.ACTION_BATTERY_LOW)
+                addAction(Intent.ACTION_BATTERY_OKAY)
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                context.registerReceiver(powerSaveReceiver, filter, Context.RECEIVER_EXPORTED)
+            } else {
+                context.registerReceiver(powerSaveReceiver, filter)
+            }
+            receiverRegistered = true
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to register power receivers", e)
+        }
+    }
+
     @SuppressLint("WakelockTimeout")
     fun acquireWakeLock(tag: String = "LensCast") {
+        if (wakeLockAcquired) return
         try {
-            releaseWakeLock()
             wakeLock = powerManager.newWakeLock(
                 AndroidPowerManager.PARTIAL_WAKE_LOCK, "$tag::Partial"
             ).apply {
                 acquire(WAKELOCK_TIMEOUT_MS)
             }
+            wakeLockAcquired = true
             Log.d(TAG, "Wake lock acquired with timeout ${WAKELOCK_TIMEOUT_MS}ms")
         } catch (e: Exception) {
             Log.e(TAG, "Failed to acquire wake lock", e)
@@ -70,6 +125,7 @@ class PowerManager(private val context: Context) {
     }
 
     fun releaseWakeLock() {
+        if (!wakeLockAcquired) return
         wakeLock?.let {
             try {
                 if (it.isHeld) {
@@ -81,6 +137,7 @@ class PowerManager(private val context: Context) {
             }
         }
         wakeLock = null
+        wakeLockAcquired = false
     }
 
     fun isIgnoringBatteryOptimizations(): Boolean {
@@ -111,6 +168,26 @@ class PowerManager(private val context: Context) {
         }
     }
 
+    fun isDeviceInDozeMode(): Boolean {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            powerManager.isDeviceIdleMode
+        } else {
+            false
+        }
+    }
+
+    fun requestDozeModeWhitelist(activity: Activity) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            try {
+                val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS)
+                intent.data = Uri.parse("package:${context.packageName}")
+                activity.startActivity(intent)
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to request doze mode whitelist", e)
+            }
+        }
+    }
+
     fun refreshBatteryState() {
         val level = batteryManager.getIntProperty(
             android.os.BatteryManager.BATTERY_PROPERTY_CAPACITY
@@ -122,6 +199,15 @@ class PowerManager(private val context: Context) {
         _isPowerSaveMode.value = powerSave
         _isCharging.value = charging
 
+        refreshOptimizationResult()
+    }
+
+    private fun refreshOptimizationResult() {
+        val level = _batteryLevel.value
+        val powerSave = _isPowerSaveMode.value
+        val charging = _isCharging.value
+        val inDoze = isDeviceInDozeMode()
+
         _optimizationResult.value = when {
             charging -> BatteryOptimizationResult(
                 suggestedBitrate = 2_000_000,
@@ -131,6 +217,15 @@ class PowerManager(private val context: Context) {
                 batteryLevel = level,
                 isPowerSaveMode = powerSave,
                 message = "Charging - full quality"
+            )
+            inDoze -> BatteryOptimizationResult(
+                suggestedBitrate = 500_000,
+                suggestedFrameRate = 10,
+                suggestedResolution = "SD_480P",
+                suggestedJpegQuality = 40,
+                batteryLevel = level,
+                isPowerSaveMode = true,
+                message = "Doze mode - minimal quality"
             )
             level < 15 -> BatteryOptimizationResult(
                 suggestedBitrate = 500_000,
@@ -168,6 +263,18 @@ class PowerManager(private val context: Context) {
                 isPowerSaveMode = powerSave,
                 message = "Normal operation"
             )
+        }
+    }
+
+    fun release() {
+        releaseWakeLock()
+        if (receiverRegistered) {
+            try {
+                context.unregisterReceiver(powerSaveReceiver)
+                receiverRegistered = false
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to unregister power receiver", e)
+            }
         }
     }
 

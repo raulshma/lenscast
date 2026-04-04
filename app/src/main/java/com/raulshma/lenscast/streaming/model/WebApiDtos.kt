@@ -218,6 +218,9 @@ data class GalleryItemDto(
 data class GalleryResponseDto(
     val items: List<GalleryItemDto>,
     val total: Int,
+    val page: Int = 0,
+    val pageSize: Int = 0,
+    val hasMore: Boolean = false,
 )
 
 data class BatchDeleteRequest(val ids: List<String>)

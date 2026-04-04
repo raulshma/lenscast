@@ -1,4 +1,4 @@
-import { Show, createSignal } from 'solid-js'
+import { Show, createSignal, createMemo } from 'solid-js'
 import type { DeviceStatus, StreamingSettings } from '../types'
 import { useZoomable } from '../hooks/useZoomable'
 import ConnectionQualityIndicator from './ConnectionQualityIndicator'
@@ -30,6 +30,9 @@ export default function StreamPreview(props: Props) {
     y: 0,
     visible: false,
   })
+
+  const [previewErrorCount, setPreviewErrorCount] = createSignal(0)
+  const MAX_PREVIEW_ERRORS = 5
 
   const handleStreamClick = async (e: MouseEvent) => {
     const container = e.currentTarget as HTMLElement
@@ -69,7 +72,7 @@ export default function StreamPreview(props: Props) {
     BOTTOM_RIGHT: { bottom: '12px', right: '12px' },
   }
 
-  const buildOverlayLines = () => {
+  const overlayLines = createMemo(() => {
     const lines: string[] = []
     const o = overlay()
     if (!o) return lines
@@ -104,7 +107,7 @@ export default function StreamPreview(props: Props) {
     }
 
     return lines
-  }
+  })
 
   return (
     <section class="preview-section" id="preview-section">
@@ -123,12 +126,17 @@ export default function StreamPreview(props: Props) {
             decoding="async"
             onClick={handleStreamClick}
             onError={() => {
+              const count = previewErrorCount() + 1
+              setPreviewErrorCount(count)
+              if (count >= MAX_PREVIEW_ERRORS) {
+                return
+              }
               props.setPreviewVisible(false)
               setTimeout(() => {
                 if (isActive()) {
                   props.setPreviewVisible(true)
                 }
-              }, 2000)
+              }, 2000 * Math.min(count, 4))
             }}
             style={{
               transform: `scale(${zoom.scale()}) translate(${zoom.translateX()}px, ${zoom.translateY()}px)`,
@@ -248,7 +256,7 @@ export default function StreamPreview(props: Props) {
             </button>
           )}
 
-          <a id="snapshot-btn" class="action-btn action-btn-ghost" href="/snapshot?highres=1" target="_blank" download="" title="Download High-Res Snapshot">
+          <a id="snapshot-btn" class="action-btn action-btn-ghost" href="/snapshot?highres=1" target="_blank" rel="noopener noreferrer" title="Download High-Res Snapshot">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" />
               <polyline points="7 10 12 15 17 10" />

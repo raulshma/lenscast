@@ -1,6 +1,5 @@
 package com.raulshma.lenscast.camera
 
- 
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
@@ -39,6 +38,8 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 
 class CameraViewModel(
@@ -118,8 +119,6 @@ class CameraViewModel(
     private val _recordingAudioEnabled = MutableStateFlow(true)
 
     init {
-        // Collect from service but ONLY update if the service is not Idle, 
-        // to prevent overwriting our local RequestPermission state!
         viewModelScope.launch {
             cameraService.cameraState.collect { state ->
                 if (state != CameraState.Idle) {
@@ -132,96 +131,79 @@ class CameraViewModel(
                 _isFrontCamera.value = isFront
             }
         }
+
+        // Combined: All streaming status updates using nested combines (Kotlin combine supports max 5 flows)
         viewModelScope.launch {
-            streamingManager.isStreaming.collect { isActive ->
-                _streamStatus.value = _streamStatus.value.copy(isActive = isActive)
+            val videoFlow = combine(
+                streamingManager.isStreaming,
+                streamingManager.isServerRunning,
+                streamingManager.streamUrl,
+                streamingManager.clientCount,
+                streamingManager.isWebEnabled,
+            ) { isStreaming, isServerRunning, streamUrl, clientCount, isWebEnabled ->
+                listOf(isStreaming, isServerRunning, streamUrl, clientCount, isWebEnabled)
             }
-        }
-        viewModelScope.launch {
-            streamingManager.isServerRunning.collect { isRunning ->
-                _streamStatus.value = _streamStatus.value.copy(isServerRunning = isRunning)
+
+            val audioFlow = combine(
+                streamingManager.isAudioStreaming,
+                streamingManager.audioStreamUrl,
+                streamingManager.isRtspRunning,
+                streamingManager.rtspUrl,
+                streamingManager.isRtspEnabled,
+            ) { isAudioStreaming, audioUrl, isRtspRunning, rtspUrl, isRtspEnabled ->
+                listOf(isAudioStreaming, audioUrl, isRtspRunning, rtspUrl, isRtspEnabled)
             }
+
+            combine(videoFlow, audioFlow) { video, audio ->
+                _streamStatus.value = StreamStatus(
+                    isActive = video[0] as Boolean,
+                    isServerRunning = video[1] as Boolean,
+                    url = video[2] as String,
+                    clientCount = video[3] as Int,
+                    isAudioActive = audio[0] as Boolean,
+                    audioUrl = audio[1] as String,
+                    isRtspActive = audio[2] as Boolean,
+                    rtspUrl = audio[3] as String,
+                    isWebEnabled = video[4] as Boolean,
+                    isRtspEnabled = audio[4] as Boolean,
+                )
+            }.collect { }
         }
-        viewModelScope.launch {
-            streamingManager.streamUrl.collect { url ->
-                _streamStatus.value = _streamStatus.value.copy(url = url)
-            }
-        }
-        viewModelScope.launch {
-            streamingManager.clientCount.collect { count ->
-                _streamStatus.value = _streamStatus.value.copy(clientCount = count)
-            }
-        }
-        viewModelScope.launch {
-            streamingManager.isAudioStreaming.collect { isAudioStreaming ->
-                _streamStatus.value = _streamStatus.value.copy(isAudioActive = isAudioStreaming)
-            }
-        }
-        viewModelScope.launch {
-            streamingManager.audioStreamUrl.collect { audioUrl ->
-                _streamStatus.value = _streamStatus.value.copy(audioUrl = audioUrl)
-            }
-        }
-        viewModelScope.launch {
-            streamingManager.isRtspRunning.collect { isRtsp ->
-                _streamStatus.value = _streamStatus.value.copy(isRtspActive = isRtsp)
-            }
-        }
-        viewModelScope.launch {
-            streamingManager.rtspUrl.collect { rtspUrl ->
-                _streamStatus.value = _streamStatus.value.copy(rtspUrl = rtspUrl)
-            }
-        }
-        viewModelScope.launch {
-            streamingManager.isWebEnabled.collect { enabled ->
-                _streamStatus.value = _streamStatus.value.copy(isWebEnabled = enabled)
-            }
-        }
-        viewModelScope.launch {
-            streamingManager.isRtspEnabled.collect { enabled ->
-                _streamStatus.value = _streamStatus.value.copy(isRtspEnabled = enabled)
-            }
-        }
+
         cameraService.setFrameListener { yuvData, width, height, rotation ->
             streamingManager.pushFrame(yuvData, width, height, rotation)
             streamingManager.pushFrameToRtsp(yuvData, width, height, rotation)
         }
+
+        // Combined: Settings + streaming config in fewer coroutines
         settingsJob = viewModelScope.launch {
             settingsDataStore.settings.collect { saved ->
                 _settings.value = saved
                 cameraService.applySettings(saved)
             }
         }
+
+        // Combined: Only listen to settings not covered by MainApplication
+        // (MainApplication handles streamingPort, jpegQuality, streamAudioEnabled)
         viewModelScope.launch {
-            settingsDataStore.streamingPort.collect { port ->
-                streamingManager.setPort(port)
+            settingsDataStore.recordingAudioEnabled.collect { recordingAudio ->
+                _recordingAudioEnabled.value = recordingAudio
             }
         }
-        viewModelScope.launch {
-            settingsDataStore.jpegQuality.collect { quality ->
-                streamingManager.setJpegQuality(quality)
-            }
-        }
+
         viewModelScope.launch {
             settingsDataStore.showPreview.collect { show ->
                 _showPreview.value = show
             }
         }
-        viewModelScope.launch {
-            settingsDataStore.streamAudioEnabled.collect { enabled ->
-                _streamAudioEnabled.value = enabled
-            }
-        }
-        viewModelScope.launch {
-            settingsDataStore.recordingAudioEnabled.collect { enabled ->
-                _recordingAudioEnabled.value = enabled
-            }
-        }
+
         viewModelScope.launch {
             streamingManager.adaptiveBitrateState.collect { state ->
                 _adaptiveBitrateState.value = state
             }
         }
+
+        // Optimized: Connection quality polling with early cancellation
         viewModelScope.launch {
             streamingManager.isStreaming.collect { isActive ->
                 if (isActive) {
@@ -235,7 +217,6 @@ class CameraViewModel(
             }
         }
 
-        // Run checkPermission AFTER collectors are set up
         checkPermission()
     }
 

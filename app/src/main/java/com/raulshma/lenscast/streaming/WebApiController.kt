@@ -758,7 +758,7 @@ class WebApiController(private val context: Context) {
         }
     }
 
-    fun handleGetGallery(type: String?): String {
+    fun handleGetGallery(type: String?, page: Int = 0, pageSize: Int = 0): String {
         return try {
             app.captureHistoryStore.refreshFromMediaStore()
             val history = app.captureHistoryStore.history.value
@@ -767,7 +767,19 @@ class WebApiController(private val context: Context) {
                 "VIDEO" -> history.filter { it.type == com.raulshma.lenscast.capture.model.CaptureType.VIDEO }
                 else -> history
             }
-            val items = filtered.map { entry ->
+
+            val effectivePageSize = if (pageSize > 0) pageSize else DEFAULT_GALLERY_PAGE_SIZE
+            val hasMore = if (effectivePageSize > 0) {
+                page * effectivePageSize + effectivePageSize < filtered.size
+            } else false
+
+            val paged = if (effectivePageSize > 0 && page >= 0) {
+                filtered.drop(page * effectivePageSize).take(effectivePageSize)
+            } else {
+                filtered
+            }
+
+            val items = paged.map { entry ->
                 val isVideo = entry.type == com.raulshma.lenscast.capture.model.CaptureType.VIDEO
                 GalleryItemDto(
                     id = entry.id,
@@ -780,7 +792,7 @@ class WebApiController(private val context: Context) {
                     downloadUrl = "/api/media/${entry.id}?download=1",
                 )
             }
-            galleryAdapter.toJson(GalleryResponseDto(items = items, total = filtered.size))
+            galleryAdapter.toJson(GalleryResponseDto(items = items, total = filtered.size, page = page, pageSize = effectivePageSize, hasMore = hasMore))
         } catch (e: Exception) {
             Log.e(TAG, "Failed to get gallery", e)
             errorJson(e)
@@ -822,47 +834,51 @@ class WebApiController(private val context: Context) {
 
                 val executor = ContextCompat.getMainExecutor(context)
 
-                if (saveToDisk) {
-                    val fileName = PhotoCaptureHelper.generateFileName()
-                    PhotoCaptureHelper.takePhoto(
-                        context, imageCapture, fileName,
-                        onSaved = { filePath, fileSizeBytes ->
-                            val entry = app.captureHistoryStore.createPhotoEntry(
-                                fileName = fileName,
-                                filePath = filePath,
-                                fileSizeBytes = fileSizeBytes,
+                runBlocking {
+                    withContext(Dispatchers.Main) {
+                        if (saveToDisk) {
+                            val fileName = PhotoCaptureHelper.generateFileName()
+                            PhotoCaptureHelper.takePhoto(
+                                context, imageCapture, fileName,
+                                onSaved = { filePath, fileSizeBytes ->
+                                    val entry = app.captureHistoryStore.createPhotoEntry(
+                                        fileName = fileName,
+                                        filePath = filePath,
+                                        fileSizeBytes = fileSizeBytes,
+                                    )
+                                    app.captureHistoryStore.add(entry)
+                                    savedFilePath = filePath
+                                    loadCapturedBytes(filePath, context) { bytes ->
+                                        snapshotBytes = bytes
+                                        snapshotLatch.countDown()
+                                    }
+                                },
+                                onError = { exc ->
+                                    snapshotError = exc
+                                    snapshotLatch.countDown()
+                                    app.cameraService.releasePhotoCapture()
+                                },
                             )
-                            app.captureHistoryStore.add(entry)
-                            savedFilePath = filePath
-                            loadCapturedBytes(filePath, context) { bytes ->
-                                snapshotBytes = bytes
-                                snapshotLatch.countDown()
-                            }
-                        },
-                        onError = { exc ->
-                            snapshotError = exc
-                            snapshotLatch.countDown()
-                            app.cameraService.releasePhotoCapture()
-                        },
-                    )
-                } else {
-                    val tempFile = java.io.File.createTempFile("lenscast_snapshot_", ".jpg", context.cacheDir)
-                    val outputOptions = androidx.camera.core.ImageCapture.OutputFileOptions.Builder(tempFile).build()
-                    imageCapture.takePicture(
-                        outputOptions, executor,
-                        object : androidx.camera.core.ImageCapture.OnImageSavedCallback {
-                            override fun onImageSaved(output: androidx.camera.core.ImageCapture.OutputFileResults) {
-                                snapshotBytes = tempFile.readBytes()
-                                tempFile.delete()
-                                snapshotLatch.countDown()
-                            }
-                            override fun onError(exception: androidx.camera.core.ImageCaptureException) {
-                                snapshotError = exception
-                                tempFile.delete()
-                                snapshotLatch.countDown()
-                            }
+                        } else {
+                            val tempFile = java.io.File.createTempFile("lenscast_snapshot_", ".jpg", context.cacheDir)
+                            val outputOptions = androidx.camera.core.ImageCapture.OutputFileOptions.Builder(tempFile).build()
+                            imageCapture.takePicture(
+                                outputOptions, executor,
+                                object : androidx.camera.core.ImageCapture.OnImageSavedCallback {
+                                    override fun onImageSaved(output: androidx.camera.core.ImageCapture.OutputFileResults) {
+                                        snapshotBytes = tempFile.readBytes()
+                                        tempFile.delete()
+                                        snapshotLatch.countDown()
+                                    }
+                                    override fun onError(exception: androidx.camera.core.ImageCaptureException) {
+                                        snapshotError = exception
+                                        tempFile.delete()
+                                        snapshotLatch.countDown()
+                                    }
+                                }
+                            )
                         }
-                    )
+                    }
                 }
 
                 val acquired = snapshotLatch.await(5000, java.util.concurrent.TimeUnit.MILLISECONDS)
@@ -988,5 +1004,6 @@ class WebApiController(private val context: Context) {
 
     companion object {
         private const val TAG = "WebApiController"
+        private const val DEFAULT_GALLERY_PAGE_SIZE = 50
     }
 }

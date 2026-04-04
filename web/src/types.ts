@@ -268,6 +268,9 @@ export interface GalleryItem {
 export interface GalleryResponse {
   items: GalleryItem[]
   total: number
+  page: number
+  pageSize: number
+  hasMore: boolean
 }
 
 export const OVERLAY_POSITION_LABELS: Record<OverlayPosition, string> = {

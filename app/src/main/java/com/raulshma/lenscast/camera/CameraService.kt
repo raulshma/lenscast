@@ -133,8 +133,8 @@ class CameraService(private val context: Context) {
         Log.d(TAG, "Exclusive camera session ended (count=$exclusiveSessionRefCount)")
     }
 
-    fun getEffectiveLifecycleOwner(): LifecycleOwner {
-        return if (keepAliveRefCount > 0) keepAliveLifecycle else lifecycleOwner!!
+    fun getEffectiveLifecycleOwner(): LifecycleOwner? {
+        return if (keepAliveRefCount > 0) keepAliveLifecycle else lifecycleOwner
     }
 
     fun getCurrentCameraSelector(): CameraSelector = currentCameraSelector
@@ -634,9 +634,12 @@ class CameraService(private val context: Context) {
 
     private val analysisExecutor by lazy {
         java.util.concurrent.Executors.newSingleThreadExecutor { r ->
-            Thread(r, "FrameAnalysis").apply { isDaemon = true }
+            Thread(r, "FrameAnalysis").apply { isDaemon = true; priority = Thread.MAX_PRIORITY }
         }
     }
+
+    private var consecutiveFrameErrors = 0
+    private var lastFrameErrorTime = 0L
 
     private fun processFrame(imageProxy: ImageProxy) {
         try {
@@ -646,12 +649,36 @@ class CameraService(private val context: Context) {
             val rotation = imageProxy.imageInfo.rotationDegrees
             val yuvData = yuvToNv21(imageProxy)
             if (yuvData != null) {
+                consecutiveFrameErrors = 0
                 frameListener?.invoke(yuvData, width, height, rotation)
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Frame processing error", e)
+            val now = System.currentTimeMillis()
+            if (now - lastFrameErrorTime > 5000) {
+                consecutiveFrameErrors = 0
+            }
+            consecutiveFrameErrors++
+            lastFrameErrorTime = now
+            Log.e(TAG, "Frame processing error #${consecutiveFrameErrors}", e)
+            if (consecutiveFrameErrors >= MAX_CONSECUTIVE_FRAME_ERRORS) {
+                Log.w(TAG, "Too many frame errors, attempting recovery")
+                consecutiveFrameErrors = 0
+                triggerAutoRecovery()
+            }
         } finally {
             imageProxy.close()
+        }
+    }
+
+    private fun triggerAutoRecovery() {
+        try {
+            if (hasActiveCameraDemand() && exclusiveSessionRefCount == 0) {
+                rebindUseCases()
+                Log.d(TAG, "Auto-recovery: rebind use cases attempted")
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Auto-recovery: rebind failed", e)
+            _cameraState.value = CameraState.Error("Camera error, please restart the app")
         }
     }
 
@@ -885,6 +912,7 @@ class CameraService(private val context: Context) {
                     if (settings.hdrMode != HdrMode.ON && settings.sceneMode == null) {
                         builder.setCaptureRequestOption(CaptureRequest.CONTROL_SCENE_MODE, CaptureRequest.CONTROL_SCENE_MODE_DISABLED)
                     }
+                    builder.setCaptureRequestOption(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON)
                     builder.setCaptureRequestOption(CaptureRequest.CONTROL_AE_LOCK, false)
                 }
             }
@@ -945,5 +973,6 @@ class CameraService(private val context: Context) {
         private const val TAG = "CameraService"
         private const val MAX_ANALYSIS_WIDTH = 1280
         private const val MAX_ANALYSIS_HEIGHT = 720
+        private const val MAX_CONSECUTIVE_FRAME_ERRORS = 10
     }
 }

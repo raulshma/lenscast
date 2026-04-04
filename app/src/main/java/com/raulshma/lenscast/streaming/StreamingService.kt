@@ -31,7 +31,7 @@ class StreamingService : Service() {
             ACTION_PAUSE -> pauseStreamingForeground(intent.getStringExtra(EXTRA_URL))
             ACTION_STOP -> stopStreamingForeground()
         }
-        return START_NOT_STICKY
+        return START_STICKY
     }
 
     private fun startStreamingForeground(url: String?, includeAudio: Boolean) {

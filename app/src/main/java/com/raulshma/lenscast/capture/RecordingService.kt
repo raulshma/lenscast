@@ -27,8 +27,6 @@ import com.raulshma.lenscast.MainApplication
 import com.raulshma.lenscast.MainActivity
 import com.raulshma.lenscast.capture.model.RecordingConfig
 import com.raulshma.lenscast.capture.model.RecordingQuality
-import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.runBlocking
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -82,9 +80,7 @@ class RecordingService : Service() {
         startTimeMs = System.currentTimeMillis()
 
         val app = applicationContext as MainApplication
-        val shouldIncludeAudio = config?.includeAudio ?: runBlocking {
-            app.settingsDataStore.recordingAudioEnabled.first()
-        }
+        val shouldIncludeAudio = config?.includeAudio ?: true
         val audioEnabled = shouldIncludeAudio && hasAudioPermission()
 
         val notification = buildNotification(
@@ -154,6 +150,11 @@ class RecordingService : Service() {
             val imageAnalysis = cameraService.getImageAnalysis()
 
             val lifecycleOwner = cameraService.getEffectiveLifecycleOwner()
+            if (lifecycleOwner == null) {
+                Log.e(TAG, "No lifecycle owner available for recording")
+                cleanupFailedStart()
+                return
+            }
 
             @Suppress("DEPRECATION")
             try {

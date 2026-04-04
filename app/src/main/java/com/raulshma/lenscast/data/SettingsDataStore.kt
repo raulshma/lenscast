@@ -209,6 +209,10 @@ class SettingsDataStore(private val context: Context) {
         prefs[Keys.STREAMING_PORT] ?: 8080
     }
 
+    val frameRate: Flow<Int> = context.dataStore.data.map { prefs ->
+        prefs[Keys.FRAME_RATE] ?: 24
+    }
+
     val jpegQuality: Flow<Int> = context.dataStore.data.map { prefs ->
         prefs[Keys.JPEG_QUALITY] ?: 70
     }

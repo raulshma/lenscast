@@ -38,14 +38,26 @@ export default function Gallery(props: { onClose: () => void }) {
   const [selectedIds, setSelectedIds] = createSignal<Set<string>>(new Set<string>())
   const [batchDeleting, setBatchDeleting] = createSignal(false)
   const [videoLoading, setVideoLoading] = createSignal(false)
+  const [page, setPage] = createSignal(0)
+  const [hasMore, setHasMore] = createSignal(false)
+  const [totalItems, setTotalItems] = createSignal(0)
+  const PAGE_SIZE = 50
 
-  async function fetchGallery() {
-    setLoading(true)
+  async function fetchGallery(resetPage = false) {
+    if (resetPage) setPage(0)
+    const currentPage = resetPage ? 0 : page()
+    setLoading(currentPage === 0)
     setError('')
     try {
       const f = filter()
-      const res = await api.getGallery(f === 'ALL' ? undefined : f)
-      setItems(res.items)
+      const res = await api.getGallery(f === 'ALL' ? undefined : f, currentPage, PAGE_SIZE)
+      if (currentPage === 0) {
+        setItems(res.items)
+      } else {
+        setItems((prev) => [...prev, ...res.items])
+      }
+      setHasMore(res.hasMore)
+      setTotalItems(res.total)
     } catch (e: any) {
       setError(e.message || 'Failed to load gallery')
     } finally {
@@ -53,9 +65,19 @@ export default function Gallery(props: { onClose: () => void }) {
     }
   }
 
+  function loadMore() {
+    if (!hasMore() || loading()) return
+    setPage((p) => p + 1)
+  }
+
   createEffect(() => {
     filter()
-    fetchGallery()
+    fetchGallery(true)
+  })
+
+  createEffect(() => {
+    page()
+    if (page() > 0) fetchGallery()
   })
 
   function toggleSelectMode() {
@@ -373,6 +395,15 @@ export default function Gallery(props: { onClose: () => void }) {
                 )}
               </For>
             </div>
+            <Show when={hasMore()}>
+              <div style={{ display: 'flex', 'justify-content': 'center', padding: '16px' }}>
+                <button class="btn btn-outline btn-sm" onClick={loadMore} disabled={loading()}>
+                  <Show when={loading()} fallback={<>Load more ({totalItems() - items().length} remaining)</>}>
+                    <span class="btn-spinner" style={{ width: '16px', height: '16px' }} />
+                  </Show>
+                </button>
+              </div>
+            </Show>
           </Show>
         }>
           <div class="gallery-loading">

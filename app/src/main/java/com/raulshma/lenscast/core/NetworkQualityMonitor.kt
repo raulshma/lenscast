@@ -156,8 +156,24 @@ class NetworkQualityMonitor {
         }
     }
 
+    private var cachedQualityLevel: NetworkQualityLevel? = null
+    private var cachedQualityLevelTime = 0L
+    private val CACHE_VALIDITY_MS = 500L
+
+    private fun getCachedQualityLevel(): NetworkQualityLevel {
+        val now = System.currentTimeMillis()
+        val cached = cachedQualityLevel
+        if (cached != null && now - cachedQualityLevelTime < CACHE_VALIDITY_MS) {
+            return cached
+        }
+        val fresh = getNetworkQualityLevel()
+        cachedQualityLevel = fresh
+        cachedQualityLevelTime = now
+        return fresh
+    }
+
     fun getAdaptiveQuality(baseQuality: Int, thermalAdjustedQuality: Int): Int {
-        val level = getNetworkQualityLevel()
+        val level = getCachedQualityLevel()
         val minQuality = 15
         val maxQuality = baseQuality.coerceIn(10, 100)
 
@@ -176,7 +192,7 @@ class NetworkQualityMonitor {
     }
 
     fun getAdaptiveFrameInterval(baseIntervalMs: Long, thermalAdjustedIntervalMs: Long): Long {
-        val level = getNetworkQualityLevel()
+        val level = getCachedQualityLevel()
 
         val fpsFactor = when (level) {
             NetworkQualityLevel.EXCELLENT -> 1.0f

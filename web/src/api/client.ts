@@ -2,29 +2,51 @@ import type { AllSettings, DeviceStatus, LensesResponse } from '../types'
 
 type JsonValue = Record<string, unknown> | unknown[] | string | number | boolean | null
 
+const pendingRequests = new Map<string, Promise<JsonValue>>()
+
+function dedupeKey(input: string, init: RequestInit = {}): string {
+  return `${init.method || 'GET'}:${input}`
+}
+
 async function requestJson<T>(input: string, init: RequestInit = {}): Promise<T> {
-  const response = await fetch(input, {
-    cache: 'no-store',
-    credentials: 'same-origin',
-    ...init,
-    headers: {
-      'X-Requested-With': 'XMLHttpRequest',
-      ...(init.headers ?? {}),
-    },
-  })
-
-  const rawBody = await response.text()
-  const body = rawBody ? safeParseJson(rawBody) : null
-
-  if (!response.ok) {
-    const message = extractErrorMessage(body) ?? `Request failed: ${response.status}`
-    if (response.status === 401 && message === `Request failed: ${response.status}`) {
-      throw new Error('Authentication required')
-    }
-    throw new Error(message)
+  const key = dedupeKey(input, init)
+  const existing = pendingRequests.get(key)
+  if (existing) {
+    return existing as Promise<T>
   }
 
-  return body as T
+  const promise = (async () => {
+    try {
+      const response = await fetch(input, {
+        cache: 'no-store',
+        credentials: 'same-origin',
+        keepalive: true,
+        ...init,
+        headers: {
+          'X-Requested-With': 'XMLHttpRequest',
+          ...(init.headers ?? {}),
+        },
+      })
+
+      const rawBody = await response.text()
+      const body = rawBody ? safeParseJson(rawBody) : null
+
+      if (!response.ok) {
+        const message = extractErrorMessage(body) ?? `Request failed: ${response.status}`
+        if (response.status === 401 && message === `Request failed: ${response.status}`) {
+          throw new Error('Authentication required')
+        }
+        throw new Error(message)
+      }
+
+      return body as T
+    } finally {
+      pendingRequests.delete(key)
+    }
+  })()
+
+  pendingRequests.set(key, promise)
+  return promise
 }
 
 function safeParseJson(value: string): JsonValue {
@@ -145,8 +167,12 @@ export async function stopRecording(): Promise<{ success: boolean; error?: strin
   return requestJson('/api/recording/stop', { method: 'POST' })
 }
 
-export async function getGallery(type?: string): Promise<import('../types').GalleryResponse> {
-  const url = type ? `/api/gallery?type=${encodeURIComponent(type)}` : '/api/gallery'
+export async function getGallery(type?: string, page: number = 0, pageSize: number = 0): Promise<import('../types').GalleryResponse> {
+  const params = new URLSearchParams()
+  if (type) params.set('type', encodeURIComponent(type))
+  if (page > 0) params.set('page', String(page))
+  if (pageSize > 0) params.set('pageSize', String(pageSize))
+  const url = params.toString() ? `/api/gallery?${params.toString()}` : '/api/gallery'
   return requestJson(url)
 }
 

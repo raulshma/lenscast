@@ -18,8 +18,16 @@ object StreamOverlayRenderer {
 
     private const val TAG = "StreamOverlayRenderer"
     private const val REFERENCE_WIDTH = 1920f
+    private const val MAX_DATE_FORMATS = 16
 
-    private val dateFormatCache = mutableMapOf<String, SimpleDateFormat>()
+    private val dateFormatCache = object : LinkedHashMap<String, SimpleDateFormat>(16, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, SimpleDateFormat>): Boolean {
+            return size > MAX_DATE_FORMATS
+        }
+    }
+
+    private val reusableDate = java.util.Date()
+    private val reusableRect = android.graphics.Rect()
 
     fun applyOverlay(
         bitmap: Bitmap,
@@ -187,17 +195,17 @@ object StreamOverlayRenderer {
             style = Paint.Style.FILL
         }
 
-        val lineHeights = lines.map { line ->
-            val textBounds = android.graphics.Rect()
-            textPaint.getTextBounds(line, 0, line.length, textBounds)
-            textBounds.height()
+        var maxWidth = 0
+        var totalHeight = 0
+        synchronized(reusableRect) {
+            for ((i, line) in lines.withIndex()) {
+                textPaint.getTextBounds(line, 0, line.length, reusableRect)
+                if (reusableRect.width() > maxWidth) maxWidth = reusableRect.width()
+                totalHeight += reusableRect.height()
+                if (i < lines.size - 1) totalHeight += lineHeight
+            }
         }
-        val totalHeight = lineHeights.sum() + lineHeight * (lines.size - 1) + padding * 2
-        val maxWidth = lines.maxOfOrNull { line ->
-            val textBounds = android.graphics.Rect()
-            textPaint.getTextBounds(line, 0, line.length, textBounds)
-            textBounds.width()
-        } ?: 0
+        totalHeight += padding * 2
         val bgWidth = maxWidth + padding * 2
 
         val position = computeOverlayPosition(
@@ -220,11 +228,13 @@ object StreamOverlayRenderer {
             bgPaint,
         )
 
-        var y = position.top + padding + lineHeights.first()
-        for ((i, line) in lines.withIndex()) {
-            canvas.drawText(line, (position.left + padding).toFloat(), y.toFloat(), textPaint)
-            if (i < lines.size - 1) {
-                y += lineHeights[i] + lineHeight
+        var y = position.top + padding
+        synchronized(reusableRect) {
+            for (line in lines) {
+                textPaint.getTextBounds(line, 0, line.length, reusableRect)
+                y += reusableRect.height()
+                canvas.drawText(line, (position.left + padding).toFloat(), y.toFloat(), textPaint)
+                y += lineHeight
             }
         }
     }
@@ -238,7 +248,10 @@ object StreamOverlayRenderer {
 
         if (settings.showTimestamp) {
             val formatter = getDateFormat(settings.timestampFormat)
-            lines.add(formatter.format(java.util.Date()))
+            synchronized(reusableDate) {
+                reusableDate.time = System.currentTimeMillis()
+                lines.add(formatter.format(reusableDate))
+            }
         }
 
         if (settings.showBranding && settings.brandingText.isNotBlank()) {

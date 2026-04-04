@@ -34,13 +34,18 @@ class StreamingServer(
     private val boundary = BOUNDARY_MARKER
     private val clientCount = AtomicInteger(0)
     private val clientCounter = AtomicInteger(0)
-    private var latestJpeg: ByteArray? = null
+    @Volatile private var latestJpeg: ByteArray? = null
     private val frameLock = Object()
     private var latestFrameVersion = 0L
     private var isRunning = false
     @Volatile private var webStreamingEnabled = true
     @Volatile var authUsername: String? = null
     @Volatile var authPasswordHash: String? = null
+
+    private val precomputedMjpegHeaderFirst = "--$boundary\r\nContent-Type: image/jpeg\r\nContent-Length: ".toByteArray()
+    private val precomputedMjpegHeaderSubsequent = "\r\n--$boundary\r\nContent-Type: image/jpeg\r\nContent-Length: ".toByteArray()
+    private val precomputedMjpegHeaderSuffix = "\r\n\r\n".toByteArray()
+    private val precomputedMjpegFooter = "\r\n".toByteArray()
 
     var networkQualityMonitor: NetworkQualityMonitor? = null
 
@@ -57,6 +62,7 @@ class StreamingServer(
 
     private data class AuthAttempt(var count: Int, var blockedUntil: Long)
     private val authAttempts = ConcurrentHashMap<String, AuthAttempt>()
+    private val authAttemptsLock = Any()
 
     private val fallbackControlPageHtml = """
         <!DOCTYPE html>
@@ -134,45 +140,49 @@ class StreamingServer(
                 ).apply { addSecurityHeaders() }
             }
             val clientIp = session.remoteIpAddress ?: "unknown"
-            val attempt = authAttempts.getOrPut(clientIp) { AuthAttempt(0, 0L) }
             val now = System.currentTimeMillis()
-            if (attempt.blockedUntil > now) {
-                return newFixedLengthResponse(
-                    Response.Status.UNAUTHORIZED, "application/json",
-                    """{"error":"Too many attempts. Try again later."}"""
-                ).apply { addSecurityHeaders() }
-            }
-            if (attempt.count >= MAX_AUTH_ATTEMPTS) {
-                attempt.blockedUntil = now + AUTH_LOCKOUT_MS
+
+            synchronized(authAttemptsLock) {
+                cleanupExpiredAuthAttempts(now)
+                val attempt = authAttempts.getOrPut(clientIp) { AuthAttempt(0, 0L) }
+                if (attempt.blockedUntil > now) {
+                    return newFixedLengthResponse(
+                        Response.Status.UNAUTHORIZED, "application/json",
+                        """{"error":"Too many attempts. Try again later."}"""
+                    ).apply { addSecurityHeaders() }
+                }
+                if (attempt.count >= MAX_AUTH_ATTEMPTS) {
+                    attempt.blockedUntil = now + AUTH_LOCKOUT_MS
+                    attempt.count = 0
+                    return newFixedLengthResponse(
+                        Response.Status.UNAUTHORIZED, "application/json",
+                        """{"error":"Too many attempts. Try again later."}"""
+                    ).apply { addSecurityHeaders() }
+                }
+                val storedUsername = authUsername
+                val storedHash = authPasswordHash
+                if (storedUsername == null || storedHash == null) {
+                    return newFixedLengthResponse(
+                        Response.Status.INTERNAL_ERROR, "application/json",
+                        """{"error":"Auth not configured"}"""
+                    ).apply { addSecurityHeaders() }
+                }
+                if (!constantTimeEquals(loginBody.first, storedUsername)) {
+                    attempt.count++
+                    return newFixedLengthResponse(
+                        Response.Status.UNAUTHORIZED, "application/json",
+                        """{"error":"Invalid credentials"}"""
+                    ).apply { addSecurityHeaders() }
+                }
+                if (!StreamAuthSettings.verifyPassword(loginBody.second, storedHash)) {
+                    attempt.count++
+                    return newFixedLengthResponse(
+                        Response.Status.UNAUTHORIZED, "application/json",
+                        """{"error":"Invalid credentials"}"""
+                    ).apply { addSecurityHeaders() }
+                }
                 attempt.count = 0
-                return newFixedLengthResponse(
-                    Response.Status.UNAUTHORIZED, "application/json",
-                    """{"error":"Too many attempts. Try again later."}"""
-                ).apply { addSecurityHeaders() }
             }
-            val storedUsername = authUsername
-            val storedHash = authPasswordHash
-            if (storedUsername == null || storedHash == null) {
-                return newFixedLengthResponse(
-                    Response.Status.INTERNAL_ERROR, "application/json",
-                    """{"error":"Auth not configured"}"""
-                ).apply { addSecurityHeaders() }
-            }
-            if (!constantTimeEquals(loginBody.first, storedUsername)) {
-                attempt.count++
-                return newFixedLengthResponse(
-                    Response.Status.UNAUTHORIZED, "application/json",
-                    """{"error":"Invalid credentials"}"""
-                ).apply { addSecurityHeaders() }
-            }
-            if (!StreamAuthSettings.verifyPassword(loginBody.second, storedHash)) {
-                attempt.count++
-                return newFixedLengthResponse(
-                    Response.Status.UNAUTHORIZED, "application/json",
-                    """{"error":"Invalid credentials"}"""
-                ).apply { addSecurityHeaders() }
-            }
-            attempt.count = 0
             val token = createSession()
             val secureFlag = if (sslEnabled) "; Secure" else ""
             return newFixedLengthResponse(
@@ -316,6 +326,16 @@ class StreamingServer(
         sessions.entries.removeAll { now > it.value }
     }
 
+    private fun cleanupExpiredAuthAttempts(now: Long) {
+        authAttempts.entries.removeAll { (_, attempt) ->
+            attempt.blockedUntil > 0 && now > attempt.blockedUntil + AUTH_LOCKOUT_MS * 2 && attempt.count == 0
+        }
+        if (authAttempts.size > MAX_AUTH_ATTEMPTS_TRACKED) {
+            val sorted = authAttempts.entries.sortedByDescending { it.value.blockedUntil }
+            sorted.take(authAttempts.size - MAX_AUTH_ATTEMPTS_TRACKED).forEach { authAttempts.remove(it.key) }
+        }
+    }
+
     private fun validateSession(token: String): Boolean {
         // Opportunistically clean expired sessions on each validation
         cleanExpiredSessions()
@@ -420,7 +440,9 @@ class StreamingServer(
             method == Method.POST && uri == "/api/recording/stop" -> controller.handleStopRecording()
             method == Method.GET && uri == "/api/gallery" -> {
                 val type = session.parameters?.get("type")?.firstOrNull()
-                controller.handleGetGallery(type)
+                val page = session.parameters?.get("page")?.firstOrNull()?.toIntOrNull() ?: 0
+                val pageSize = session.parameters?.get("pageSize")?.firstOrNull()?.toIntOrNull() ?: 0
+                controller.handleGetGallery(type, page, pageSize)
             }
             uri.startsWith("/api/media/") && method == Method.DELETE -> {
                 val id = uri.removePrefix("/api/media/")
@@ -671,11 +693,11 @@ class StreamingServer(
             private var headerOffset = 0
             private var footerOffset = 0
             private var isFirstPart = true
-            private val footerBytes = "\r\n".toByteArray()
             @Volatile
             private var closed = false
             private var frameSendStartTime = 0L
             private var currentFrameTotalBytes = 0
+            private val lengthBuffer = ByteArray(16)
 
             override fun read(): Int {
                 val buf = ByteArray(1)
@@ -718,7 +740,7 @@ class StreamingServer(
                     if (totalRead == len) break
 
                     val writtenFooter = copyChunk(
-                        source = footerBytes,
+                        source = precomputedMjpegFooter,
                         sourceOffset = footerOffset,
                         target = b,
                         targetOffset = off + totalRead,
@@ -728,8 +750,8 @@ class StreamingServer(
                     totalRead += writtenFooter
 
                     if (headerOffset >= headerBytes.size &&
-                        frameOffset >= frame.size &&
-                        footerOffset >= footerBytes.size
+                        frameOffset >= currentFrame!!.size &&
+                        footerOffset >= precomputedMjpegFooter.size
                     ) {
                         val sendDuration = System.currentTimeMillis() - frameSendStartTime
                         networkQualityMonitor?.recordFrameSent(
@@ -750,7 +772,7 @@ class StreamingServer(
                 if (frame != null && (
                     headerOffset < headerBytes.size ||
                         frameOffset < frame.size ||
-                        footerOffset < footerBytes.size
+                        footerOffset < precomputedMjpegFooter.size
                     )
                 ) {
                     return true
@@ -765,9 +787,14 @@ class StreamingServer(
                             frameOffset = 0
                             footerOffset = 0
                             headerOffset = 0
-                            headerBytes = buildHeader(nextFrame.size, isFirstPart).toByteArray()
+                            val prefix = if (isFirstPart) precomputedMjpegHeaderFirst else precomputedMjpegHeaderSubsequent
+                            val len = formatIntIntoBuffer(nextFrame.size)
+                            headerBytes = ByteArray(prefix.size + len + precomputedMjpegHeaderSuffix.size)
+                            System.arraycopy(prefix, 0, headerBytes, 0, prefix.size)
+                            System.arraycopy(lengthBuffer, 0, headerBytes, prefix.size, len)
+                            System.arraycopy(precomputedMjpegHeaderSuffix, 0, headerBytes, prefix.size + len, precomputedMjpegHeaderSuffix.size)
                             isFirstPart = false
-                            currentFrameTotalBytes = nextFrame.size + headerBytes.size + footerBytes.size
+                            currentFrameTotalBytes = nextFrame.size + headerBytes.size + precomputedMjpegFooter.size
                             frameSendStartTime = System.currentTimeMillis()
                             return true
                         }
@@ -778,9 +805,32 @@ class StreamingServer(
                 return false
             }
 
-            private fun buildHeader(frameSize: Int, isFirst: Boolean): String {
-                val prefix = if (isFirst) "--" else "\r\n--"
-                return "$prefix$boundary\r\nContent-Type: image/jpeg\r\nContent-Length: $frameSize\r\n\r\n"
+            private fun formatIntIntoBuffer(value: Int): Int {
+                var v = value
+                var pos = 0
+                if (v == 0) {
+                    lengthBuffer[pos++] = '0'.code.toByte()
+                    return pos
+                }
+                val start = pos
+                while (v > 0) {
+                    lengthBuffer[pos++] = ('0'.code + (v % 10)).toByte()
+                    v /= 10
+                }
+                reverse(lengthBuffer, start, pos - 1)
+                return pos - start
+            }
+
+            private fun reverse(buf: ByteArray, start: Int, end: Int) {
+                var i = start
+                var j = end
+                while (i < j) {
+                    val tmp = buf[i]
+                    buf[i] = buf[j]
+                    buf[j] = tmp
+                    i++
+                    j--
+                }
             }
 
             private fun copyChunk(
@@ -1029,6 +1079,7 @@ class StreamingServer(
         private const val MAX_BODY_BYTES = 1L * 1024 * 1024
         private const val MAX_AUTH_ATTEMPTS = 10
         private const val AUTH_LOCKOUT_MS = 60 * 1000L
+        private const val MAX_AUTH_ATTEMPTS_TRACKED = 500
         private const val MAX_CACHED_ASSETS = 50
     }
 }
