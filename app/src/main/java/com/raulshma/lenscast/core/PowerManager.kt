@@ -87,6 +87,7 @@ class PowerManager(private val context: Context) {
 
     init {
         registerReceivers()
+        refreshBatteryState()
     }
 
     private fun registerReceivers() {

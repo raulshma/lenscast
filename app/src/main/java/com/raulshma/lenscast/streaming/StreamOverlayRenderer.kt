@@ -24,6 +24,18 @@ object StreamOverlayRenderer {
     private val reusableDate = java.util.Date()
     private val reusableRect = android.graphics.Rect()
 
+    // Reusable Paint objects to avoid per-frame allocations
+    private val maskPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.BLACK
+        style = Paint.Style.FILL
+    }
+    private val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        typeface = android.graphics.Typeface.MONOSPACE
+    }
+    private val bgPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.FILL
+    }
+
     fun applyOverlay(
         bitmap: Bitmap,
         settings: OverlaySettings,
@@ -63,8 +75,6 @@ object StreamOverlayRenderer {
         bitmapWidth: Int,
         bitmapHeight: Int,
     ) {
-        val paint = Paint(Paint.ANTI_ALIAS_FLAG)
-
         for (zone in zones) {
             if (!zone.enabled) continue
 
@@ -77,9 +87,8 @@ object StreamOverlayRenderer {
 
             when (zone.type) {
                 MaskingType.BLACKOUT -> {
-                    paint.color = Color.BLACK
-                    paint.style = Paint.Style.FILL
-                    canvas.drawRect(Rect(left, top, right, bottom), paint)
+                    maskPaint.color = Color.BLACK
+                    canvas.drawRect(Rect(left, top, right, bottom), maskPaint)
                 }
 
                 MaskingType.PIXELATE -> {
@@ -122,11 +131,8 @@ object StreamOverlayRenderer {
             scaledUp.recycle()
         } catch (e: Exception) {
             Log.e(TAG, "Pixelate failed, falling back to blackout", e)
-            val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                color = Color.BLACK
-                style = Paint.Style.FILL
-            }
-            canvas.drawRect(Rect(left, top, right, bottom), paint)
+            maskPaint.color = Color.BLACK
+            canvas.drawRect(Rect(left, top, right, bottom), maskPaint)
         }
     }
 
@@ -159,11 +165,8 @@ object StreamOverlayRenderer {
             scaledUp.recycle()
         } catch (e: Exception) {
             Log.e(TAG, "Blur failed, falling back to blackout", e)
-            val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                color = Color.BLACK
-                style = Paint.Style.FILL
-            }
-            canvas.drawRect(Rect(left, top, right, bottom), paint)
+            maskPaint.color = Color.BLACK
+            canvas.drawRect(Rect(left, top, right, bottom), maskPaint)
         }
     }
 
@@ -180,16 +183,10 @@ object StreamOverlayRenderer {
         val lines = buildOverlayLines(settings, clientCount, isRecording)
         if (lines.isEmpty()) return
 
-        val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = parseColor(settings.textColor, Color.WHITE)
-            textSize = fontSize.toFloat()
-            typeface = android.graphics.Typeface.MONOSPACE
-        }
+        textPaint.color = parseColor(settings.textColor, Color.WHITE)
+        textPaint.textSize = fontSize.toFloat()
 
-        val bgPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = parseColor(settings.backgroundColor, Color.parseColor("#80000000"))
-            style = Paint.Style.FILL
-        }
+        bgPaint.color = parseColor(settings.backgroundColor, Color.parseColor("#80000000"))
 
         var maxWidth = 0
         var totalHeight = 0

@@ -184,7 +184,7 @@ class CameraViewModel(
 
         // Combined: Settings + streaming config in fewer coroutines
         settingsJob = viewModelScope.launch {
-            settingsDataStore.settings.collect { saved ->
+            settingsDataStore.settings.distinctUntilChanged().collect { saved ->
                 _settings.value = saved
                 cameraService.applySettings(saved)
             }
@@ -216,7 +216,7 @@ class CameraViewModel(
                 if (isActive) {
                     while (true) {
                         _connectionQualityStats.value = streamingManager.getNetworkStatsSnapshot()
-                        delay(1000)
+                        delay(2500)
                     }
                 } else {
                     _connectionQualityStats.value = null

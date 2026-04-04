@@ -72,26 +72,35 @@ class NetworkQualityMonitor {
 
     fun getMinClientThroughputKbps(): Int {
         if (clientStats.isEmpty()) return DEFAULT_BANDWIDTH_KBPS
-        return clientStats.values
-            .mapNotNull { stats ->
-                synchronized(stats) {
-                    val samples = stats.throughputSamples
-                    if (samples.isEmpty()) null else samples.average().toInt()
+        var minThroughput = Int.MAX_VALUE
+        var hasData = false
+        for (stats in clientStats.values) {
+            synchronized(stats) {
+                val samples = stats.throughputSamples
+                if (samples.isNotEmpty()) {
+                    hasData = true
+                    val avg = samples.average().toInt()
+                    if (avg < minThroughput) minThroughput = avg
                 }
             }
-            .minOrNull() ?: DEFAULT_BANDWIDTH_KBPS
+        }
+        return if (hasData) minThroughput else DEFAULT_BANDWIDTH_KBPS
     }
 
     fun getAvgClientThroughputKbps(): Int {
         if (clientStats.isEmpty()) return DEFAULT_BANDWIDTH_KBPS
-        val throughputs = clientStats.values.mapNotNull { stats ->
+        var total = 0L
+        var count = 0
+        for (stats in clientStats.values) {
             synchronized(stats) {
                 val samples = stats.throughputSamples
-                if (samples.isEmpty()) null else samples.average().toInt()
+                if (samples.isNotEmpty()) {
+                    total += samples.average().toLong()
+                    count++
+                }
             }
         }
-        if (throughputs.isEmpty()) return DEFAULT_BANDWIDTH_KBPS
-        return throughputs.average().toInt()
+        return if (count > 0) (total / count).toInt() else DEFAULT_BANDWIDTH_KBPS
     }
 
     fun getWorstClientLatencyMs(): Long {

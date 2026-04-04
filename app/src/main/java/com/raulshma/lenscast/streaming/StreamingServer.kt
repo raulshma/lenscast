@@ -321,8 +321,12 @@ class StreamingServer(
         return token
     }
 
+    private var lastSessionCleanupMillis = 0L
+
     private fun cleanExpiredSessions() {
         val now = System.currentTimeMillis()
+        if (now - lastSessionCleanupMillis < SESSION_CLEANUP_INTERVAL_MS && sessions.size < MAX_SESSIONS * 0.9) return
+        lastSessionCleanupMillis = now
         sessions.entries.removeAll { now > it.value }
     }
 
@@ -1075,6 +1079,7 @@ class StreamingServer(
         const val DEFAULT_PORT = 8080
         const val BOUNDARY_MARKER = "LensCastBoundary"
         private const val SESSION_DURATION_MS = 24 * 60 * 60 * 1000L
+        private const val SESSION_CLEANUP_INTERVAL_MS = 60 * 1000L
         private const val SESSION_MAX_AGE_SEC = 24 * 60 * 60
         private const val MAX_SESSIONS = 1000
         private const val SESSION_TOKEN_BYTES = 32

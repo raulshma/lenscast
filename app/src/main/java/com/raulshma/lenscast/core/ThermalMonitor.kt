@@ -87,11 +87,13 @@ class ThermalMonitor(private val context: Context) {
         return false
     }
 
-    @Suppress("DiscouragedPrivateApi")
     private fun getThermalStatus(pm: PowerManager): Int {
         return try {
-            val method = pm.javaClass.getMethod("getThermalStatus")
-            method.invoke(pm) as Int
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                pm.currentThermalStatus
+            } else {
+                PowerManager.THERMAL_STATUS_NONE
+            }
         } catch (e: Exception) {
             PowerManager.THERMAL_STATUS_NONE
         }

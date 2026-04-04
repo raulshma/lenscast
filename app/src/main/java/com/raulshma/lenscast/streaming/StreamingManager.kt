@@ -325,17 +325,15 @@ class StreamingManager(private val context: Context) {
         val thermalAdjustedQuality = thermalMonitor?.getAdjustedQuality(baseQuality) ?: baseQuality
         val quality = adaptiveBitrateController.getAdaptiveQuality(baseQuality, thermalAdjustedQuality)
 
-        var jpegData = bitmapToJpegReuse(bitmap, quality)
-
         val overlay = currentOverlaySettings
-        if (overlay.enabled) {
-            val decoded = BitmapFactory.decodeByteArray(jpegData, 0, jpegData.size)
-            if (decoded != null) {
-                val withOverlay = StreamOverlayRenderer.applyOverlay(decoded, overlay, clientCount)
-                if (withOverlay !== decoded) decoded.recycle()
-                jpegData = bitmapToJpegReuse(withOverlay, quality.coerceAtLeast(85))
-                if (withOverlay !== bitmap && withOverlay.isRecycled.not()) withOverlay.recycle()
-            }
+        val jpegData = if (overlay.enabled) {
+            // Apply overlay directly to source bitmap, then encode once
+            val withOverlay = StreamOverlayRenderer.applyOverlay(bitmap, overlay, clientCount)
+            val data = bitmapToJpegReuse(withOverlay, quality.coerceAtLeast(85))
+            if (withOverlay !== bitmap && !withOverlay.isRecycled) withOverlay.recycle()
+            data
+        } else {
+            bitmapToJpegReuse(bitmap, quality)
         }
 
         server.updateFrame(jpegData)
@@ -413,10 +411,10 @@ class StreamingManager(private val context: Context) {
 
         val dropped = droppedFrameCount.get()
         val processed = processedFrameCount.get()
-        if (dropped % 30 == 0 && dropped > 0) {
+        if (dropped != _droppedFrames.value && dropped % 30 == 0) {
             _droppedFrames.value = dropped
         }
-        if (processed % 30 == 0 && processed > 0) {
+        if (processed != _processedFrames.value && processed % 30 == 0) {
             _processedFrames.value = processed
         }
     }
@@ -682,9 +680,7 @@ class StreamingManager(private val context: Context) {
 
     private fun capBuffer(buffer: ByteArrayOutputStream) {
         if (buffer.size() > maxBufferSize) {
-            val data = buffer.toByteArray()
             buffer.reset()
-            buffer.write(data, 0, data.size.coerceAtMost(maxBufferSize))
         }
     }
 

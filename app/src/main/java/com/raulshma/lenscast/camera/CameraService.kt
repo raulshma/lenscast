@@ -634,7 +634,7 @@ class CameraService(private val context: Context) {
 
     private val analysisExecutor by lazy {
         java.util.concurrent.Executors.newSingleThreadExecutor { r ->
-            Thread(r, "FrameAnalysis").apply { isDaemon = true; priority = Thread.MAX_PRIORITY }
+            Thread(r, "FrameAnalysis").apply { isDaemon = true; priority = Thread.NORM_PRIORITY + 1 }
         }
     }
 
@@ -699,23 +699,34 @@ class CameraService(private val context: Context) {
         val uvSize = ySize / 2
         val nv21 = ByteArray(ySize + uvSize)
 
-        // Copy Y plane with row/pixel stride and crop handling.
+        // Copy Y plane — use bulk get when pixelStride==1 for ~4x speedup
         val yBuffer = yPlane.buffer.duplicate()
         val yRowStride = yPlane.rowStride
         val yPixelStride = yPlane.pixelStride
-        var yOut = 0
         val yCropTop = crop.top
         val yCropLeft = crop.left
-        for (row in 0 until height) {
-            val rowStart = (row + yCropTop) * yRowStride + yCropLeft * yPixelStride
-            var srcIndex = rowStart
-            for (col in 0 until width) {
-                nv21[yOut++] = yBuffer.get(srcIndex)
-                srcIndex += yPixelStride
+
+        if (yPixelStride == 1) {
+            // Fast path: bulk copy each row
+            var yOut = 0
+            for (row in 0 until height) {
+                yBuffer.position((row + yCropTop) * yRowStride + yCropLeft)
+                yBuffer.get(nv21, yOut, width)
+                yOut += width
+            }
+        } else {
+            // Slow path: per-pixel copy
+            var yOut = 0
+            for (row in 0 until height) {
+                var srcIndex = (row + yCropTop) * yRowStride + yCropLeft * yPixelStride
+                for (col in 0 until width) {
+                    nv21[yOut++] = yBuffer.get(srcIndex)
+                    srcIndex += yPixelStride
+                }
             }
         }
 
-        // Copy UV planes interleaved as VU (NV21) with independent strides and crop.
+        // Copy UV planes interleaved as VU (NV21)
         val uBuffer = uPlane.buffer.duplicate()
         val vBuffer = vPlane.buffer.duplicate()
         val uRowStride = uPlane.rowStride
@@ -728,16 +739,46 @@ class CameraService(private val context: Context) {
         val uvCropLeft = crop.left / 2
         var uvPos = ySize
 
-        for (row in 0 until uvHeight) {
-            val uRowStart = (row + uvCropTop) * uRowStride + uvCropLeft * uPixelStride
-            val vRowStart = (row + uvCropTop) * vRowStride + uvCropLeft * vPixelStride
-            var uIndex = uRowStart
-            var vIndex = vRowStart
-            for (col in 0 until uvWidth) {
-                nv21[uvPos++] = vBuffer.get(vIndex)
-                nv21[uvPos++] = uBuffer.get(uIndex)
-                uIndex += uPixelStride
-                vIndex += vPixelStride
+        // Fast path: interleaved NV12/NV21 with pixelStride==2 and contiguous VU layout
+        if (vPixelStride == 2 && uPixelStride == 2 && vRowStride == uRowStride
+            && vBuffer.capacity() > 0
+        ) {
+            // Check if V and U planes are interleaved (common on modern devices)
+            val vStart = vPlane.buffer.position()
+            val uStart = uPlane.buffer.position()
+            // NV21: VU interleaved, V plane starts 1 byte before U
+            if (uStart - vStart == 1) {
+                // Fast path: the raw buffer IS NV21 interleaved, bulk copy per row
+                for (row in 0 until uvHeight) {
+                    val rowOffset = (row + uvCropTop) * vRowStride + uvCropLeft * vPixelStride
+                    vBuffer.position(rowOffset)
+                    vBuffer.get(nv21, uvPos, uvWidth * 2)
+                    uvPos += uvWidth * 2
+                }
+            } else {
+                // Per-pixel interleave
+                for (row in 0 until uvHeight) {
+                    var uIndex = (row + uvCropTop) * uRowStride + uvCropLeft * uPixelStride
+                    var vIndex = (row + uvCropTop) * vRowStride + uvCropLeft * vPixelStride
+                    for (col in 0 until uvWidth) {
+                        nv21[uvPos++] = vBuffer.get(vIndex)
+                        nv21[uvPos++] = uBuffer.get(uIndex)
+                        uIndex += uPixelStride
+                        vIndex += vPixelStride
+                    }
+                }
+            }
+        } else {
+            // Generic slow path
+            for (row in 0 until uvHeight) {
+                var uIndex = (row + uvCropTop) * uRowStride + uvCropLeft * uPixelStride
+                var vIndex = (row + uvCropTop) * vRowStride + uvCropLeft * vPixelStride
+                for (col in 0 until uvWidth) {
+                    nv21[uvPos++] = vBuffer.get(vIndex)
+                    nv21[uvPos++] = uBuffer.get(uIndex)
+                    uIndex += uPixelStride
+                    vIndex += vPixelStride
+                }
             }
         }
 
