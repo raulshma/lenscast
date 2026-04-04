@@ -54,6 +54,8 @@ class CameraViewModel(
     private val app: MainApplication
         get() = context as MainApplication
 
+    val watchdogState = app.streamWatchdog.state
+
     private val _cameraState = MutableStateFlow<CameraState>(CameraState.Idle)
     val cameraState: StateFlow<CameraState> = _cameraState.asStateFlow()
 
@@ -456,9 +458,11 @@ class CameraViewModel(
         startThermalMonitoring()
         cameraService.acquireKeepAlive()
         cameraService.rebindUseCases()
+        app.streamWatchdog.startMonitoring()
     }
 
     private fun endStreamingSession() {
+        app.streamWatchdog.stopMonitoring()
         powerManager.releaseWakeLock()
         thermalMonitor.stopMonitoring()
         batteryMonitorJob?.cancel()
@@ -646,6 +650,7 @@ class CameraViewModel(
         batteryMonitorJob?.cancel()
         thermalMonitorJob?.cancel()
         recordingTimerJob?.cancel()
+        app.streamWatchdog.stopMonitoring()
         streamingManager.release()
         cameraService.release()
         powerManager.releaseWakeLock()

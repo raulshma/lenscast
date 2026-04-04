@@ -164,6 +164,9 @@ class SettingsDataStore(private val context: Context) {
         val OVERLAY_LINE_HEIGHT = intPreferencesKey("overlay_line_height")
         val MASKING_ENABLED = stringPreferencesKey("masking_enabled")
         val MASKING_ZONES = stringPreferencesKey("masking_zones")
+        val WATCHDOG_ENABLED = stringPreferencesKey("watchdog_enabled")
+        val WATCHDOG_MAX_RETRIES = intPreferencesKey("watchdog_max_retries")
+        val WATCHDOG_CHECK_INTERVAL_SECONDS = intPreferencesKey("watchdog_check_interval_seconds")
     }
 
     val settings: Flow<CameraSettings> = context.dataStore.data.map { prefs ->
@@ -412,6 +415,36 @@ class SettingsDataStore(private val context: Context) {
     suspend fun saveAdaptiveBitrateEnabled(enabled: Boolean) {
         context.dataStore.edit { prefs ->
             prefs[Keys.ADAPTIVE_BITRATE_ENABLED] = if (enabled) "true" else "false"
+        }
+    }
+
+    val watchdogEnabled: Flow<Boolean> = context.dataStore.data.map { prefs ->
+        prefs[Keys.WATCHDOG_ENABLED] == "true"
+    }
+
+    val watchdogMaxRetries: Flow<Int> = context.dataStore.data.map { prefs ->
+        prefs[Keys.WATCHDOG_MAX_RETRIES] ?: 5
+    }
+
+    val watchdogCheckIntervalSeconds: Flow<Int> = context.dataStore.data.map { prefs ->
+        prefs[Keys.WATCHDOG_CHECK_INTERVAL_SECONDS] ?: 5
+    }
+
+    suspend fun saveWatchdogEnabled(enabled: Boolean) {
+        context.dataStore.edit { prefs ->
+            prefs[Keys.WATCHDOG_ENABLED] = if (enabled) "true" else "false"
+        }
+    }
+
+    suspend fun saveWatchdogMaxRetries(maxRetries: Int) {
+        context.dataStore.edit { prefs ->
+            prefs[Keys.WATCHDOG_MAX_RETRIES] = maxRetries.coerceIn(1, 20)
+        }
+    }
+
+    suspend fun saveWatchdogCheckIntervalSeconds(seconds: Int) {
+        context.dataStore.edit { prefs ->
+            prefs[Keys.WATCHDOG_CHECK_INTERVAL_SECONDS] = seconds.coerceIn(3, 30)
         }
     }
 

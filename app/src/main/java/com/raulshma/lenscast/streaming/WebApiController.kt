@@ -119,6 +119,15 @@ class WebApiController(private val context: Context) {
     private val overlaySettingsFlow: StateFlow<OverlaySettings> =
         app.settingsDataStore.overlaySettings.stateIn(scope, SharingStarted.Eagerly, OverlaySettings())
 
+    private val watchdogEnabledFlow: StateFlow<Boolean> =
+        app.settingsDataStore.watchdogEnabled.stateIn(scope, SharingStarted.Eagerly, false)
+
+    private val watchdogMaxRetriesFlow: StateFlow<Int> =
+        app.settingsDataStore.watchdogMaxRetries.stateIn(scope, SharingStarted.Eagerly, 5)
+
+    private val watchdogCheckIntervalFlow: StateFlow<Int> =
+        app.settingsDataStore.watchdogCheckIntervalSeconds.stateIn(scope, SharingStarted.Eagerly, 5)
+
     private var scheduledRecordingJob: kotlinx.coroutines.Job? = null
     @Volatile
     private var scheduledStartTimeMs: Long? = null
@@ -188,6 +197,9 @@ class WebApiController(private val context: Context) {
                             blurRadius = zone.blurRadius.toDouble(),
                         )
                     },
+                    watchdogEnabled = watchdogEnabledFlow.value,
+                    watchdogMaxRetries = watchdogMaxRetriesFlow.value,
+                    watchdogCheckIntervalSeconds = watchdogCheckIntervalFlow.value,
                 ),
             )
             settingsResponseAdapter.toJson(response)
@@ -326,6 +338,14 @@ class WebApiController(private val context: Context) {
                     )
                     app.settingsDataStore.saveOverlaySettings(newOverlay)
                     app.streamingManager.setOverlaySettings(newOverlay)
+
+                    // Watchdog settings
+                    app.settingsDataStore.saveWatchdogEnabled(stream.watchdogEnabled)
+                    app.streamWatchdog.setEnabled(stream.watchdogEnabled)
+                    app.settingsDataStore.saveWatchdogMaxRetries(stream.watchdogMaxRetries)
+                    app.streamWatchdog.setMaxRetries(stream.watchdogMaxRetries)
+                    app.settingsDataStore.saveWatchdogCheckIntervalSeconds(stream.watchdogCheckIntervalSeconds)
+                    app.streamWatchdog.setCheckIntervalSeconds(stream.watchdogCheckIntervalSeconds)
                 }
             }
 
@@ -419,6 +439,17 @@ class WebApiController(private val context: Context) {
                 ),
                 adaptiveBitrate = adaptiveBitrateDto,
                 connectionQuality = connectionQualityDto,
+                watchdog = run {
+                    val wdState = app.streamWatchdog.state.value
+                    WatchdogStatusDto(
+                        enabled = wdState.enabled,
+                        status = wdState.status.name,
+                        consecutiveFailures = wdState.consecutiveFailures,
+                        totalRecoveries = wdState.totalRecoveries,
+                        lastRecoveryTimestamp = wdState.lastRecoveryTimestamp,
+                        lastFailureReason = wdState.lastFailureReason,
+                    )
+                },
             )
             statusResponseAdapter.toJson(response)
         } catch (e: Exception) {
@@ -467,6 +498,9 @@ class WebApiController(private val context: Context) {
                 }
             }
 
+            // Start watchdog if enabled
+            app.streamWatchdog.startMonitoring()
+
             val streamUrl = app.streamingManager.streamUrl.value
             streamActionAdapter.toJson(StreamActionResponse(success = true, isActive = true, url = streamUrl))
         } catch (e: Exception) {
@@ -496,10 +530,14 @@ class WebApiController(private val context: Context) {
         } else {
             context.startService(intent)
         }
+
+        // Start watchdog if enabled
+        app.streamWatchdog.startMonitoring()
     }
 
     private fun releaseCameraIfNeeded() {
         if (!app.streamingManager.isLiveStreaming()) {
+            app.streamWatchdog.stopMonitoring()
             app.powerManager.releaseWakeLock()
             app.thermalMonitor.stopMonitoring()
 

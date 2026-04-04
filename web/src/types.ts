@@ -79,6 +79,9 @@ export interface StreamingSettings {
   overlayLineHeight: number
   maskingEnabled: boolean
   maskingZones: MaskingZone[]
+  watchdogEnabled: boolean
+  watchdogMaxRetries: number
+  watchdogCheckIntervalSeconds: number
 }
 
 export interface AllSettings {
@@ -119,6 +122,14 @@ export interface DeviceStatus {
     adjustmentCount: number
   }
   connectionQuality?: ConnectionQualityStatus
+  watchdog?: {
+    enabled: boolean
+    status: string
+    consecutiveFailures: number
+    totalRecoveries: number
+    lastRecoveryTimestamp: number
+    lastFailureReason: string | null
+  }
 }
 
 export interface ClientConnectionDetail {

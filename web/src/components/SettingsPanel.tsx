@@ -1,5 +1,5 @@
 import { Show } from 'solid-js'
-import type { AllSettings, CameraSettings, IntervalCaptureConfig, RecordingConfig, NightVisionMode } from '../types'
+import type { AllSettings, CameraSettings, DeviceStatus, IntervalCaptureConfig, RecordingConfig, NightVisionMode } from '../types'
 import LensSelector from './LensSelector'
 import ExposureCard from './ExposureCard'
 import FocusCard from './FocusCard'
@@ -11,10 +11,12 @@ import IntervalCaptureCard from './IntervalCaptureCard'
 import RecordingCard from './RecordingCard'
 import OverlayCard from './OverlayCard'
 import PrivacyMaskingCard from './PrivacyMaskingCard'
+import WatchdogCard from './WatchdogCard'
 import type { LensInfo } from '../types'
 
 interface Props {
   settings: () => AllSettings | null
+  status: () => DeviceStatus | null
   lenses: () => LensInfo[]
   error: () => string
   updateCamera: (patch: Partial<CameraSettings>) => void
@@ -129,6 +131,14 @@ export default function SettingsPanel(props: Props) {
           handleStartRecording={props.handleStartRecording}
           handleStopRecording={props.handleStopRecording}
         />
+        <Show when={props.settings()?.streaming}>
+          <WatchdogCard
+            settings={props.settings}
+            status={props.status}
+            updateStreamingAndSave={props.updateStreamingAndSave}
+            updateStreamingDebounced={props.updateStreamingDebounced}
+          />
+        </Show>
       </Show>
 
       {/* Reset */}

@@ -68,12 +68,17 @@ data class StreamingSettingsDto(
     val overlayLineHeight: Int = 4,
     val maskingEnabled: Boolean = false,
     val maskingZones: List<MaskingZoneDto> = emptyList(),
+    val watchdogEnabled: Boolean = false,
+    val watchdogMaxRetries: Int = DEFAULT_MAX_RETRIES,
+    val watchdogCheckIntervalSeconds: Int = DEFAULT_CHECK_INTERVAL_SECONDS,
 ) {
     companion object {
         const val DEFAULT_PORT = 8080
         const val DEFAULT_AUDIO_BITRATE_KBPS = 128
         const val DEFAULT_JPEG_QUALITY = 70
         const val DEFAULT_RTSP_PORT = 8554
+        const val DEFAULT_MAX_RETRIES = 5
+        const val DEFAULT_CHECK_INTERVAL_SECONDS = 5
     }
 }
 
@@ -115,6 +120,16 @@ data class StatusResponseDto(
     val battery: BatteryStatusDto,
     val adaptiveBitrate: AdaptiveBitrateStatusDto? = null,
     val connectionQuality: ConnectionQualityStatusDto? = null,
+    val watchdog: WatchdogStatusDto? = null,
+)
+
+data class WatchdogStatusDto(
+    val enabled: Boolean,
+    val status: String,
+    val consecutiveFailures: Int,
+    val totalRecoveries: Int,
+    val lastRecoveryTimestamp: Long,
+    val lastFailureReason: String?,
 )
 
 data class AdaptiveBitrateStatusDto(

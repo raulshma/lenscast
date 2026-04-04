@@ -6,6 +6,7 @@ import coil.ImageLoaderFactory
 import coil.decode.VideoFrameDecoder
 import com.raulshma.lenscast.camera.CameraService
 import com.raulshma.lenscast.core.PowerManager
+import com.raulshma.lenscast.core.StreamWatchdog
 import com.raulshma.lenscast.core.ThermalMonitor
 import com.raulshma.lenscast.data.CaptureHistoryStore
 import com.raulshma.lenscast.data.SettingsDataStore
@@ -25,6 +26,9 @@ class MainApplication : Application(), ImageLoaderFactory {
     val captureHistoryStore: CaptureHistoryStore by lazy { CaptureHistoryStore(this) }
     val powerManager: PowerManager by lazy { PowerManager(this) }
     val thermalMonitor: ThermalMonitor by lazy { ThermalMonitor(this) }
+    val streamWatchdog: StreamWatchdog by lazy {
+        StreamWatchdog(cameraService, streamingManager, powerManager, thermalMonitor)
+    }
     private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
     override fun onCreate() {
@@ -125,6 +129,21 @@ class MainApplication : Application(), ImageLoaderFactory {
                 streamingManager.updateAuthSettings(auth)
             }
         }
+
+        // Watchdog settings
+        appScope.launch {
+            combine(
+                settingsDataStore.watchdogEnabled,
+                settingsDataStore.watchdogMaxRetries,
+                settingsDataStore.watchdogCheckIntervalSeconds,
+            ) { enabled, maxRetries, checkInterval ->
+                WatchdogSettings(enabled, maxRetries, checkInterval)
+            }.collectLatest { watchdog ->
+                streamWatchdog.setEnabled(watchdog.enabled)
+                streamWatchdog.setMaxRetries(watchdog.maxRetries)
+                streamWatchdog.setCheckIntervalSeconds(watchdog.checkInterval)
+            }
+        }
     }
 
     private data class AudioSettings(
@@ -149,5 +168,11 @@ class MainApplication : Application(), ImageLoaderFactory {
         val webEnabled: Boolean,
         val mdns: Boolean,
         val adaptive: Boolean,
+    )
+
+    private data class WatchdogSettings(
+        val enabled: Boolean,
+        val maxRetries: Int,
+        val checkInterval: Int,
     )
 }

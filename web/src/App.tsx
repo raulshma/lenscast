@@ -59,6 +59,7 @@ function App() {
 
                 <SettingsPanel
                   settings={state.settings}
+                  status={state.status}
                   lenses={state.lenses}
                   error={state.error}
                   updateCamera={state.updateCamera}
