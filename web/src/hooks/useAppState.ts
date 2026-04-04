@@ -463,36 +463,59 @@ export function useAppState() {
 
     refreshDashboard(true)
 
-    const settingsInterval = setInterval(() => {
-      if (isPageHidden() || status()?.streaming?.isActive) return
-      void fetchSettings()
-    }, 30000)
-    const statusInterval = setInterval(() => {
+    const POLL_TICK_MS = 1000
+    const STATUS_INTERVAL = 3
+    const RECORDING_INTERVAL = 3
+    const INTERVAL_CAPTURE_INTERVAL = 5
+    const SETTINGS_INTERVAL = 30
+    const LENSES_INTERVAL = 30
+
+    let tickCount = 0
+    let settingsTick = 0
+    let lensesTick = 0
+    let intervalTick = 0
+    let recordingTick = 0
+    let statusTick = 0
+
+    const pollTimer = setInterval(() => {
       if (isPageHidden()) return
-      void fetchStatus()
-    }, 3000)
-    const lensesInterval = setInterval(() => {
-      if (isPageHidden()) return
-      void fetchLenses()
-    }, 30000)
-    const intervalStatusInterval = setInterval(() => {
-      if (isPageHidden()) return
-      void fetchIntervalStatus()
-    }, 5000)
-    const recordingStatusInterval = setInterval(() => {
-      if (isPageHidden()) return
-      void fetchRecordingStatus()
-    }, 3000)
+      tickCount++
+      statusTick++
+      recordingTick++
+      intervalTick++
+      settingsTick++
+      lensesTick++
+
+      if (statusTick >= STATUS_INTERVAL) {
+        statusTick = 0
+        void fetchStatus()
+      }
+      if (recordingTick >= RECORDING_INTERVAL) {
+        recordingTick = 0
+        void fetchRecordingStatus()
+      }
+      if (intervalTick >= INTERVAL_CAPTURE_INTERVAL) {
+        intervalTick = 0
+        void fetchIntervalStatus()
+      }
+      if (!status()?.streaming?.isActive) {
+        if (settingsTick >= SETTINGS_INTERVAL) {
+          settingsTick = 0
+          void fetchSettings()
+        }
+        if (lensesTick >= LENSES_INTERVAL) {
+          lensesTick = 0
+          void fetchLenses()
+        }
+      }
+    }, POLL_TICK_MS)
+
     const handleVisibility = () => {
       if (!document.hidden) refreshDashboard(true)
     }
     document.addEventListener('visibilitychange', handleVisibility)
     onCleanup(() => {
-      clearInterval(settingsInterval)
-      clearInterval(statusInterval)
-      clearInterval(lensesInterval)
-      clearInterval(intervalStatusInterval)
-      clearInterval(recordingStatusInterval)
+      clearInterval(pollTimer)
       document.removeEventListener('visibilitychange', handleVisibility)
     })
   })

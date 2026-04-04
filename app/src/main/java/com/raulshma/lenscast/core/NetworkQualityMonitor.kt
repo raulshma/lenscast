@@ -39,11 +39,16 @@ class NetworkQualityMonitor {
             stats.totalSendDurationMs += sendDurationMs
 
             if (sendDurationMs > 0) {
-                val throughputKbps = (frameSizeBytes * 8L) / (sendDurationMs)
+                val throughputKbps = (frameSizeBytes * 8.0) / sendDurationMs.toDouble()
                 stats.throughputSamples.add(throughputKbps.toInt())
                 if (stats.throughputSamples.size > THROUGHPUT_WINDOW) {
                     stats.throughputSamples.removeAt(0)
                 }
+            }
+
+            stats.frameTimestamps.add(System.currentTimeMillis())
+            if (stats.frameTimestamps.size > THROUGHPUT_WINDOW) {
+                stats.frameTimestamps.removeAt(0)
             }
 
             stats.lastFrameTimeMs = System.currentTimeMillis()
@@ -112,11 +117,11 @@ class NetworkQualityMonitor {
     fun getFramesPerSecond(clientId: String): Double {
         val stats = clientStats[clientId] ?: return 0.0
         synchronized(stats) {
-            if (stats.framesSent < 2) return 0.0
-            val windowStart = stats.throughputWindowStartMs.takeIf { it > 0 } ?: System.currentTimeMillis()
-            val elapsed = System.currentTimeMillis() - windowStart
+            val timestamps = stats.frameTimestamps
+            if (timestamps.size < 2) return 0.0
+            val elapsed = timestamps.last() - timestamps.first()
             if (elapsed <= 0) return 0.0
-            return (stats.framesSent * 1000.0) / elapsed
+            return (timestamps.size - 1) * 1000.0 / elapsed
         }
     }
 
@@ -230,10 +235,10 @@ class NetworkQualityMonitor {
         var bytesSent: Long = 0,
         var totalSendDurationMs: Long = 0,
         val throughputSamples: MutableList<Int> = mutableListOf(),
+        val frameTimestamps: MutableList<Long> = mutableListOf(),
         var lastFrameTimeMs: Long = 0,
         var lastFrameSizeBytes: Int = 0,
         var lastSendDurationMs: Long = 0,
-        var throughputWindowStartMs: Long = System.currentTimeMillis(),
     )
 
     data class ClientStatsSnapshot(

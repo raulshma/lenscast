@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.Intent
 import android.util.Log
 import androidx.camera.core.CameraSelector
+import androidx.core.content.ContextCompat
 import com.raulshma.lenscast.MainApplication
 import com.raulshma.lenscast.capture.IntervalCaptureScheduler
 import com.raulshma.lenscast.camera.model.CameraSettings
@@ -207,61 +208,43 @@ class WebApiController(private val context: Context) {
 
             if (request.streaming != null) {
                 val stream = request.streaming
-                if (stream.port in 1024..65535) {
-                    scope.launch { app.settingsDataStore.saveStreamingPort(stream.port) }
-                }
                 scope.launch {
+                    if (stream.port in 1024..65535) {
+                        app.settingsDataStore.saveStreamingPort(stream.port)
+                    }
                     app.settingsDataStore.saveWebStreamingEnabled(stream.webStreamingEnabled)
                     app.streamingManager.setWebStreamingEnabled(stream.webStreamingEnabled)
-                }
-                if (stream.jpegQuality > 0) {
-                    scope.launch {
+                    if (stream.jpegQuality > 0) {
                         app.settingsDataStore.saveJpegQuality(stream.jpegQuality)
                         app.streamingManager.setJpegQuality(stream.jpegQuality)
                     }
-                }
-                scope.launch { app.settingsDataStore.saveShowPreview(stream.showPreview) }
-                scope.launch {
+                    app.settingsDataStore.saveShowPreview(stream.showPreview)
                     app.settingsDataStore.saveStreamAudioEnabled(stream.streamAudioEnabled)
                     app.streamingManager.setStreamAudioEnabled(stream.streamAudioEnabled)
-                }
-                if (stream.streamAudioBitrateKbps > 0) {
-                    scope.launch {
+                    if (stream.streamAudioBitrateKbps > 0) {
                         app.settingsDataStore.saveStreamAudioBitrateKbps(stream.streamAudioBitrateKbps)
                         app.streamingManager.setStreamAudioBitrateKbps(stream.streamAudioBitrateKbps)
                     }
-                }
-                if (stream.streamAudioChannels > 0) {
-                    scope.launch {
+                    if (stream.streamAudioChannels > 0) {
                         app.settingsDataStore.saveStreamAudioChannels(stream.streamAudioChannels)
                         app.streamingManager.setStreamAudioChannels(stream.streamAudioChannels)
                     }
-                }
-                scope.launch {
                     app.settingsDataStore.saveStreamAudioEchoCancellation(stream.streamAudioEchoCancellation)
                     app.streamingManager.setStreamAudioEchoCancellation(stream.streamAudioEchoCancellation)
-                }
-                scope.launch { app.settingsDataStore.saveRecordingAudioEnabled(stream.recordingAudioEnabled) }
-                scope.launch {
+                    app.settingsDataStore.saveRecordingAudioEnabled(stream.recordingAudioEnabled)
                     app.settingsDataStore.saveRtspEnabled(stream.rtspEnabled)
                     app.streamingManager.setRtspEnabled(stream.rtspEnabled)
-                }
-                if (stream.rtspPort in 1024..65535) {
-                    scope.launch {
+                    if (stream.rtspPort in 1024..65535) {
                         app.settingsDataStore.saveRtspPort(stream.rtspPort)
                         app.streamingManager.setRtspPort(stream.rtspPort)
                     }
-                }
-                if (stream.rtspInputFormat.isNotBlank()) {
-                    val format = runCatching { RtspInputFormat.valueOf(stream.rtspInputFormat) }.getOrNull()
-                    if (format != null) {
-                        scope.launch {
+                    if (stream.rtspInputFormat.isNotBlank()) {
+                        val format = runCatching { RtspInputFormat.valueOf(stream.rtspInputFormat) }.getOrNull()
+                        if (format != null) {
                             app.settingsDataStore.saveRtspInputFormat(format)
                             app.streamingManager.setRtspInputFormat(format)
                         }
                     }
-                }
-                scope.launch {
                     app.settingsDataStore.saveAdaptiveBitrateEnabled(stream.adaptiveBitrateEnabled)
                     app.streamingManager.setAdaptiveBitrateEnabled(stream.adaptiveBitrateEnabled)
                 }
@@ -685,6 +668,109 @@ class WebApiController(private val context: Context) {
             Log.e(TAG, "Failed to delete media", e)
             errorJson(e)
         }
+    }
+
+    fun handleHighResSnapshot(saveToDisk: Boolean = false): SnapshotResult {
+        return try {
+            val imageCapture = runBlocking {
+                withTimeoutOrNull(2000L) {
+                    withContext(Dispatchers.Main) {
+                        app.cameraService.acquirePhotoCapture()
+                    }
+                }
+            }
+            if (imageCapture == null) {
+                SnapshotResult.Error("Camera not available")
+            } else {
+                val snapshotLatch = java.util.concurrent.CountDownLatch(1)
+                var snapshotBytes: ByteArray? = null
+                var snapshotError: Exception? = null
+                var savedFilePath: String? = null
+
+                val executor = ContextCompat.getMainExecutor(context)
+
+                if (saveToDisk) {
+                    val fileName = PhotoCaptureHelper.generateFileName()
+                    PhotoCaptureHelper.takePhoto(
+                        context, imageCapture, fileName,
+                        onSaved = { filePath, fileSizeBytes ->
+                            val entry = app.captureHistoryStore.createPhotoEntry(
+                                fileName = fileName,
+                                filePath = filePath,
+                                fileSizeBytes = fileSizeBytes,
+                            )
+                            app.captureHistoryStore.add(entry)
+                            savedFilePath = filePath
+                            loadCapturedBytes(filePath, context) { bytes ->
+                                snapshotBytes = bytes
+                                snapshotLatch.countDown()
+                            }
+                        },
+                        onError = { exc ->
+                            snapshotError = exc
+                            snapshotLatch.countDown()
+                            app.cameraService.releasePhotoCapture()
+                        },
+                    )
+                } else {
+                    val tempFile = java.io.File.createTempFile("lenscast_snapshot_", ".jpg", context.cacheDir)
+                    val outputOptions = androidx.camera.core.ImageCapture.OutputFileOptions.Builder(tempFile).build()
+                    imageCapture.takePicture(
+                        outputOptions, executor,
+                        object : androidx.camera.core.ImageCapture.OnImageSavedCallback {
+                            override fun onImageSaved(output: androidx.camera.core.ImageCapture.OutputFileResults) {
+                                snapshotBytes = tempFile.readBytes()
+                                tempFile.delete()
+                                snapshotLatch.countDown()
+                            }
+                            override fun onError(exception: androidx.camera.core.ImageCaptureException) {
+                                snapshotError = exception
+                                tempFile.delete()
+                                snapshotLatch.countDown()
+                            }
+                        }
+                    )
+                }
+
+                val acquired = snapshotLatch.await(5000, java.util.concurrent.TimeUnit.MILLISECONDS)
+                app.cameraService.releasePhotoCapture()
+
+                if (!acquired) {
+                    SnapshotResult.Error("Snapshot timed out")
+                } else if (snapshotError != null) {
+                    SnapshotResult.Error("Snapshot failed: ${snapshotError?.message}")
+                } else if (snapshotBytes != null) {
+                    SnapshotResult.Success(snapshotBytes!!, savedFilePath)
+                } else {
+                    SnapshotResult.Error("No image data returned")
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "High-res snapshot failed", e)
+            SnapshotResult.Error("Snapshot error: ${e.message}")
+        }
+    }
+
+    private fun loadCapturedBytes(filePath: String, context: Context, callback: (ByteArray?) -> Unit) {
+        try {
+            if (filePath.startsWith("content://")) {
+                val uri = android.net.Uri.parse(filePath)
+                context.contentResolver.openInputStream(uri)?.use { input ->
+                    callback(input.readBytes())
+                } ?: callback(null)
+            } else {
+                val file = java.io.File(filePath)
+                callback(if (file.exists()) file.readBytes() else null)
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to load captured bytes", e)
+            callback(null)
+        }
+    }
+
+    sealed class SnapshotResult {
+        data class Success(val data: ByteArray, val savedPath: String? = null) : SnapshotResult()
+        data class Error(val message: String) : SnapshotResult()
     }
 
     fun handleBatchDeleteMedia(body: String): String {

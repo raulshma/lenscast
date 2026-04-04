@@ -46,7 +46,11 @@ class StreamingServer(
 
     private val apiController: WebApiController? = context?.let { WebApiController(it) }
 
-    private val assetCache = ConcurrentHashMap<String, Pair<ByteArray, String>>()
+    private val assetCache = object : LinkedHashMap<String, Pair<ByteArray, String>>(16, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Pair<ByteArray, String>>): Boolean {
+            return size > MAX_CACHED_ASSETS
+        }
+    }
 
     private val sessions = ConcurrentHashMap<String, Long>()
     private val secureRandom = SecureRandom()
@@ -222,7 +226,7 @@ class StreamingServer(
             }
         }
 
-        val isProtectedRoute = uri.startsWith("/api/") || uri == "/stream" || uri == "/audio" || uri == "/snapshot"
+        val isProtectedRoute = uri.startsWith("/api/") || uri == "/stream" || uri == "/audio" || uri.startsWith("/snapshot")
 
         if (!isProtectedRoute) {
             return serveStaticFile(uri)
@@ -247,7 +251,7 @@ class StreamingServer(
         val response = when {
             uri == "/stream" -> serveMjpegStream()
             uri == "/audio" -> serveAudioStream()
-            uri == "/snapshot" -> serveSnapshot()
+            uri.startsWith("/snapshot") -> serveSnapshot(session)
             uri.startsWith("/api/media/") && method == Method.GET -> serveMediaFile(uri, session)
             uri.startsWith("/api/") -> handleApiRoute(uri, method, session)
             else -> serveStaticFile(uri)
@@ -616,6 +620,7 @@ class StreamingServer(
 
     private fun serveFallbackControlPage(): Response {
         return newFixedLengthResponse(Response.Status.OK, "text/html", fallbackControlPageHtml)
+            .apply { addSecurityHeaders() }
     }
 
     private fun getMimeType(path: String): String {
@@ -826,13 +831,51 @@ class StreamingServer(
         return if (assetPath.isBlank()) "webui/index.html" else "webui/$assetPath"
     }
 
-    private fun serveSnapshot(): Response {
+    private fun serveSnapshot(session: IHTTPSession): Response {
         if (!webStreamingEnabled) {
             return newFixedLengthResponse(
                 Response.Status.SERVICE_UNAVAILABLE,
                 MIME_PLAINTEXT,
                 "Web streaming is disabled"
             )
+        }
+
+        val params = session.queryParameterString ?: ""
+        val highRes = params.contains("highres=1") || params.contains("high_res=1")
+        val saveToDisk = params.contains("save=1") || params.contains("save_to_disk=1")
+
+        if (highRes) {
+            val controller = apiController
+            if (controller == null) {
+                return newFixedLengthResponse(
+                    Response.Status.INTERNAL_ERROR,
+                    MIME_PLAINTEXT,
+                    "API not available"
+                )
+            }
+
+            return when (val result = controller.handleHighResSnapshot(saveToDisk)) {
+                is WebApiController.SnapshotResult.Success -> {
+                    newFixedLengthResponse(
+                        Response.Status.OK, "image/jpeg",
+                        ByteArrayInputStream(result.data), result.data.size.toLong()
+                    ).apply {
+                        addHeader("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
+                        addHeader("Pragma", "no-cache")
+                        addHeader("Expires", "0")
+                        result.savedPath?.let { path ->
+                            addHeader("X-Saved-Path", path)
+                        }
+                    }
+                }
+                is WebApiController.SnapshotResult.Error -> {
+                    newFixedLengthResponse(
+                        Response.Status.INTERNAL_ERROR,
+                        "application/json",
+                        """{"error":"${result.message.replace("\"", "\\\"")}"}"""
+                    )
+                }
+            }
         }
 
         val jpeg = latestJpeg
@@ -984,5 +1027,6 @@ class StreamingServer(
         private const val MAX_BODY_BYTES = 1L * 1024 * 1024
         private const val MAX_AUTH_ATTEMPTS = 10
         private const val AUTH_LOCKOUT_MS = 60 * 1000L
+        private const val MAX_CACHED_ASSETS = 50
     }
 }

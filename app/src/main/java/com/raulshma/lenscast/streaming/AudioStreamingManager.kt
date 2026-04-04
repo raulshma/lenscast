@@ -220,7 +220,8 @@ class AudioStreamingManager(private val context: Context) {
     }
 
     private fun publish(chunk: ByteArray) {
-        subscribers.values.forEach { it.enqueue(chunk) }
+        val snapshot = subscribers.values.toList()
+        snapshot.forEach { it.enqueue(chunk) }
     }
 
     private fun cleanupRecorder() {

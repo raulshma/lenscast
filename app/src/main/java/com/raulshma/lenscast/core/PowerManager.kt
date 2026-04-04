@@ -60,8 +60,10 @@ class PowerManager(private val context: Context) {
             releaseWakeLock()
             wakeLock = powerManager.newWakeLock(
                 AndroidPowerManager.PARTIAL_WAKE_LOCK, "$tag::Partial"
-            ).apply { acquire() }
-            Log.d(TAG, "Wake lock acquired")
+            ).apply {
+                acquire(WAKELOCK_TIMEOUT_MS)
+            }
+            Log.d(TAG, "Wake lock acquired with timeout ${WAKELOCK_TIMEOUT_MS}ms")
         } catch (e: Exception) {
             Log.e(TAG, "Failed to acquire wake lock", e)
         }
@@ -69,9 +71,13 @@ class PowerManager(private val context: Context) {
 
     fun releaseWakeLock() {
         wakeLock?.let {
-            if (it.isHeld) {
-                it.release()
-                Log.d(TAG, "Wake lock released")
+            try {
+                if (it.isHeld) {
+                    it.release()
+                    Log.d(TAG, "Wake lock released")
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Wake lock already released by timeout", e)
             }
         }
         wakeLock = null
@@ -167,5 +173,6 @@ class PowerManager(private val context: Context) {
 
     companion object {
         private const val TAG = "PowerManager"
+        private const val WAKELOCK_TIMEOUT_MS = 60 * 60 * 1000L
     }
 }

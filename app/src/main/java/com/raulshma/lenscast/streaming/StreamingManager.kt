@@ -238,8 +238,6 @@ class StreamingManager(private val context: Context) {
         val jpegData = bitmapToJpegReuse(bitmap, quality)
         server.updateFrame(jpegData)
 
-        networkQualityMonitor.updateEstimatedBandwidth()
-
         if (clientCount != lastReportedClientCount) {
             lastReportedClientCount = clientCount
             _clientCount.value = clientCount
@@ -268,8 +266,6 @@ class StreamingManager(private val context: Context) {
 
         val jpegData = yuvToJpeg(yuvData, width, height, quality, rotation) ?: return
         server.updateFrame(jpegData)
-
-        networkQualityMonitor.updateEstimatedBandwidth()
 
         if (clientCount != lastReportedClientCount) {
             lastReportedClientCount = clientCount

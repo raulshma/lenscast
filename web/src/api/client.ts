@@ -86,6 +86,13 @@ export async function capturePhoto(): Promise<{ success: boolean; fileName?: str
   return requestJson('/api/capture', { method: 'POST' })
 }
 
+export async function downloadHighResSnapshot(saveToDisk: boolean = false): Promise<string> {
+  const params = new URLSearchParams()
+  params.set('highres', '1')
+  if (saveToDisk) params.set('save', '1')
+  return `/snapshot?${params.toString()}`
+}
+
 export async function getLenses(): Promise<LensesResponse> {
   return requestJson('/api/camera/lenses')
 }
