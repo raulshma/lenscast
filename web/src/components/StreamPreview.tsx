@@ -136,6 +136,13 @@ export default function StreamPreview(props: Props) {
               const count = previewErrorCount() + 1
               setPreviewErrorCount(count)
               if (count >= MAX_PREVIEW_ERRORS) {
+                // Auto-recover after a longer delay so the stream isn't permanently stuck
+                setTimeout(() => {
+                  setPreviewErrorCount(0)
+                  if (isActive()) {
+                    props.setPreviewVisible(true)
+                  }
+                }, 15_000)
                 return
               }
               props.setPreviewVisible(false)

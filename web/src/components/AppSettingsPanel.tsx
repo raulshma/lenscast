@@ -1,5 +1,5 @@
 import { Show } from 'solid-js'
-import type { AllSettings } from '../types'
+import type { AllSettings, RtspInputFormat } from '../types'
 import SettingsCard from './SettingsCard'
 
 interface Props {
@@ -277,12 +277,13 @@ export default function AppSettingsPanel(props: Props) {
               class="field-select field-select-full"
               value={s()?.streaming?.rtspInputFormat ?? 'AUTO'}
               onChange={(e) => {
-                props.updateStreamingAndSave({ rtspInputFormat: e.currentTarget.value as any })
+                props.updateStreamingAndSave({ rtspInputFormat: e.currentTarget.value as RtspInputFormat })
               }}
             >
               <option value="AUTO">Auto</option>
-              <option value="H264">H.264</option>
-              <option value="H265">H.265</option>
+              <option value="NV21">NV21</option>
+              <option value="NV12">NV12</option>
+              <option value="I420">I420</option>
             </select>
           </div>
         </Show>

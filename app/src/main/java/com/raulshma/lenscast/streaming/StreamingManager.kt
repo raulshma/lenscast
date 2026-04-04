@@ -302,6 +302,9 @@ class StreamingManager(private val context: Context) {
     fun pushFrame(bitmap: Bitmap) {
         if (!webStreamingActive.get()) return
 
+        val clientCount = server.getClientCount()
+        if (clientCount == 0) return
+
         val now = System.currentTimeMillis()
         val elapsed = now - lastFrameTimeMs.get()
 
@@ -314,9 +317,6 @@ class StreamingManager(private val context: Context) {
             return
         }
         lastFrameTimeMs.set(now)
-
-        val clientCount = server.getClientCount()
-        if (clientCount == 0) return
 
         val baseQuality = jpegQuality.get()
         val thermalAdjustedQuality = thermalMonitor?.getAdjustedQuality(baseQuality) ?: baseQuality
@@ -347,6 +347,9 @@ class StreamingManager(private val context: Context) {
     fun pushFrame(yuvData: ByteArray, width: Int, height: Int, rotation: Int = 0) {
         if (!webStreamingActive.get()) return
 
+        val clientCount = server.getClientCount()
+        if (clientCount == 0) return
+
         val now = System.currentTimeMillis()
         val elapsed = now - lastFrameTimeMs.get()
 
@@ -358,9 +361,6 @@ class StreamingManager(private val context: Context) {
             droppedFrameCount.incrementAndGet()
             return
         }
-
-        val clientCount = server.getClientCount()
-        if (clientCount == 0) return
 
         lastFrameTimeMs.set(now)
 

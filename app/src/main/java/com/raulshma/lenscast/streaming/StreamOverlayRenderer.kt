@@ -18,13 +18,8 @@ object StreamOverlayRenderer {
 
     private const val TAG = "StreamOverlayRenderer"
     private const val REFERENCE_WIDTH = 1920f
-    private const val MAX_DATE_FORMATS = 16
 
-    private val dateFormatCache = object : LinkedHashMap<String, SimpleDateFormat>(16, 0.75f, true) {
-        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, SimpleDateFormat>): Boolean {
-            return size > MAX_DATE_FORMATS
-        }
-    }
+    private val dateFormatCache = java.util.concurrent.ConcurrentHashMap<String, SimpleDateFormat>()
 
     private val reusableDate = java.util.Date()
     private val reusableRect = android.graphics.Rect()
@@ -111,8 +106,9 @@ object StreamOverlayRenderer {
         val regionHeight = bottom - top
         if (regionWidth <= 0 || regionHeight <= 0) return
 
-        val smallWidth = maxOf(1, regionWidth / pixelSize)
-        val smallHeight = maxOf(1, regionHeight / pixelSize)
+        val safePixelSize = pixelSize.coerceAtLeast(1)
+        val smallWidth = maxOf(1, regionWidth / safePixelSize)
+        val smallHeight = maxOf(1, regionHeight / safePixelSize)
 
         try {
             val regionBitmap = Bitmap.createBitmap(sourceBitmap, left, top, regionWidth, regionHeight)

@@ -206,23 +206,23 @@ class WebApiController(private val context: Context) {
                 val cam = request.camera
                 val current = settingsFlow.value
                 val newSettings = CameraSettings(
-                    exposureCompensation = cam.exposureCompensation,
-                    iso = cam.iso,
-                    exposureTime = cam.exposureTime,
+                    exposureCompensation = cam.exposureCompensation.coerceIn(-12, 12),
+                    iso = cam.iso?.let { if (it > 0) it else null },
+                    exposureTime = cam.exposureTime?.let { if (it > 0) it else null },
                     focusMode = try {
                         FocusMode.valueOf(cam.focusMode)
                     } catch (_: Exception) {
                         current.focusMode
                     },
-                    focusDistance = cam.focusDistance,
+                    focusDistance = cam.focusDistance?.coerceIn(0f, 20f),
                     whiteBalance = try {
                         WhiteBalance.valueOf(cam.whiteBalance)
                     } catch (_: Exception) {
                         current.whiteBalance
                     },
-                    colorTemperature = cam.colorTemperature,
-                    zoomRatio = cam.zoomRatio.toFloat(),
-                    frameRate = cam.frameRate,
+                    colorTemperature = cam.colorTemperature?.coerceIn(1000, 15000),
+                    zoomRatio = cam.zoomRatio.toFloat().coerceIn(0.1f, 10f),
+                    frameRate = cam.frameRate.coerceIn(1, 120),
                     resolution = try {
                         Resolution.valueOf(cam.resolution)
                     } catch (_: Exception) {

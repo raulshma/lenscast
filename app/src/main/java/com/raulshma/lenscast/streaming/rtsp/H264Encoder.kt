@@ -182,6 +182,11 @@ class H264Encoder {
                 return
             }
             val frameData = convertInputFrame(nv21Data, width, height)
+            if (frameData.size > inputBuffer.capacity()) {
+                pendingFrames.decrementAndGet()
+                Log.w(TAG, "Frame data (${frameData.size}) exceeds input buffer capacity (${inputBuffer.capacity()})")
+                return
+            }
             inputBuffer.clear()
             inputBuffer.put(frameData)
 

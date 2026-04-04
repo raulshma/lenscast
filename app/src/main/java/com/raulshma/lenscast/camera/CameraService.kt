@@ -852,13 +852,15 @@ class CameraService(private val context: Context) {
                 builder.setCaptureRequestOption(CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE, CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_OFF)
                 builder.setCaptureRequestOption(CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE, CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE_OFF)
             }
-            
+
             when (settings.hdrMode) {
                 HdrMode.ON -> builder.setCaptureRequestOption(CaptureRequest.CONTROL_SCENE_MODE, CaptureRequest.CONTROL_SCENE_MODE_HDR)
                 else -> { }
             }
-            
-            if (settings.iso != null || settings.exposureTime != null) {
+
+            val hasManualExposure = settings.iso != null || settings.exposureTime != null
+
+            if (hasManualExposure) {
                 builder.setCaptureRequestOption(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_OFF)
                 settings.iso?.let {
                     builder.setCaptureRequestOption(CaptureRequest.SENSOR_SENSITIVITY, it)
@@ -891,11 +893,13 @@ class CameraService(private val context: Context) {
             settings.sceneMode?.toIntOrNull()?.let {
                 builder.setCaptureRequestOption(CaptureRequest.CONTROL_SCENE_MODE, it)
             }
-            
+
             when (settings.nightVisionMode) {
                 NightVisionMode.ON -> {
                     builder.setCaptureRequestOption(CaptureRequest.CONTROL_SCENE_MODE, CaptureRequest.CONTROL_SCENE_MODE_NIGHT)
-                    builder.setCaptureRequestOption(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON)
+                    if (!hasManualExposure) {
+                        builder.setCaptureRequestOption(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON)
+                    }
                     builder.setCaptureRequestOption(CaptureRequest.CONTROL_AE_LOCK, false)
                     val nightFpsRange = Range(10, settings.frameRate.coerceAtMost(15))
                     builder.setCaptureRequestOption(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, nightFpsRange)
@@ -903,16 +907,20 @@ class CameraService(private val context: Context) {
                 }
                 NightVisionMode.AUTO -> {
                     builder.setCaptureRequestOption(CaptureRequest.CONTROL_SCENE_MODE, CaptureRequest.CONTROL_SCENE_MODE_NIGHT_PORTRAIT)
-                    builder.setCaptureRequestOption(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON_AUTO_FLASH)
+                    if (!hasManualExposure) {
+                        builder.setCaptureRequestOption(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON_AUTO_FLASH)
+                    }
                     Log.d(TAG, "Night vision AUTO: scene=NIGHT_PORTRAIT, auto flash")
                 }
                 NightVisionMode.OFF -> {
-                    // Reset scene mode, AE mode, and AE lock when disabling night vision
+                    // Reset scene mode when disabling night vision
                     // (only if not overridden by HDR or manual scene mode)
                     if (settings.hdrMode != HdrMode.ON && settings.sceneMode == null) {
                         builder.setCaptureRequestOption(CaptureRequest.CONTROL_SCENE_MODE, CaptureRequest.CONTROL_SCENE_MODE_DISABLED)
                     }
-                    builder.setCaptureRequestOption(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON)
+                    if (!hasManualExposure) {
+                        builder.setCaptureRequestOption(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON)
+                    }
                     builder.setCaptureRequestOption(CaptureRequest.CONTROL_AE_LOCK, false)
                 }
             }

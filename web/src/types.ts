@@ -9,6 +9,13 @@ export type FlashMode = 'ON' | 'OFF' | 'AUTO'
 export type RecordingQuality = 'HIGH' | 'MEDIUM' | 'LOW'
 export type OverlayPosition = 'TOP_LEFT' | 'TOP_RIGHT' | 'BOTTOM_LEFT' | 'BOTTOM_RIGHT'
 export type MaskingType = 'BLACKOUT' | 'PIXELATE' | 'BLUR'
+export type RtspInputFormat = 'AUTO' | 'NV21' | 'NV12' | 'I420'
+
+export interface StreamAuthSettings {
+  enabled: boolean
+  username: string
+  password: string
+}
 
 export interface MaskingZone {
   id: string
@@ -52,6 +59,9 @@ export interface StreamingSettings {
   recordingAudioEnabled: boolean
   rtspEnabled: boolean
   rtspPort: number
+  rtspInputFormat: RtspInputFormat
+  mdnsEnabled?: boolean
+  auth?: StreamAuthSettings
   adaptiveBitrateEnabled: boolean
   overlayEnabled: boolean
   showTimestamp: boolean

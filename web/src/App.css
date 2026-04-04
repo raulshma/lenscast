@@ -494,20 +494,20 @@ html, body {
 .nq-critical { background: #F44336; }
 
 .nq-label {
-  font-family: var(--lc-font-mono);
+  font-family: var(--lc-mono);
   font-size: 10px;
   font-weight: 700;
   letter-spacing: 1px;
 }
 
 .nq-stats {
-  font-family: var(--lc-font-mono);
+  font-family: var(--lc-mono);
   font-size: 11px;
   color: rgba(255, 255, 255, 0.7);
 }
 
 .nq-clients {
-  font-family: var(--lc-font-mono);
+  font-family: var(--lc-mono);
   font-size: 10px;
   color: rgba(255, 255, 255, 0.5);
 }

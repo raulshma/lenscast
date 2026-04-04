@@ -64,6 +64,12 @@ export function useAppState() {
   let audioBufferPool: ArrayBuffer[] = []
   const MAX_BUFFER_POOL_SIZE = 8
 
+  function isAuthError(e: any): boolean {
+    if (e?.status === 401) return true
+    const msg = e?.message ?? ''
+    return msg.includes('401') || msg.includes('Authentication required')
+  }
+
   function isPageHidden() {
     return typeof document !== 'undefined' && document.hidden
   }
@@ -96,6 +102,7 @@ export function useAppState() {
     liveAudioAbortController?.abort()
     liveAudioAbortController = null
     liveAudioPlaybackTime = 0
+    audioBufferPool = []
     if (liveAudioContext) {
       try { await liveAudioContext.close() } catch { }
       liveAudioContext = null
@@ -265,7 +272,7 @@ export function useAppState() {
       }))
       setError('')
     } catch (e: any) {
-      if (e.message?.includes('401') || e.message?.includes('Authentication')) {
+      if (isAuthError(e)) {
         setAuthenticated(false)
         return
       }
@@ -278,7 +285,7 @@ export function useAppState() {
       const s = await api.getStatus()
       setStatus(s)
     } catch (e: any) {
-      if (e.message?.includes('401')) setAuthenticated(false)
+      if (isAuthError(e)) setAuthenticated(false)
     }
   }
 
@@ -287,7 +294,7 @@ export function useAppState() {
       const r = await api.getLenses()
       setLenses(r.lenses)
     } catch (e: any) {
-      if (e.message?.includes('401')) setAuthenticated(false)
+      if (isAuthError(e)) setAuthenticated(false)
     }
   }
 
@@ -296,7 +303,9 @@ export function useAppState() {
       const s = await api.getIntervalCaptureStatus()
       setIntervalRunning(s.isRunning)
       setIntervalCompleted(s.completedCaptures)
-    } catch { }
+    } catch (e) {
+      console.warn('Failed to fetch interval status:', e)
+    }
   }
 
   async function fetchRecordingStatus() {
@@ -306,7 +315,9 @@ export function useAppState() {
       setRecordingElapsed(s.elapsedSeconds)
       setIsScheduled(s.isScheduled ?? false)
       setScheduledStartTimeMs(s.scheduledStartTimeMs ?? null)
-    } catch { }
+    } catch (e) {
+      console.warn('Failed to fetch recording status:', e)
+    }
   }
 
   // ── Settings ──

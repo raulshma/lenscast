@@ -45,7 +45,7 @@ async function requestJson<T>(input: string, init: RequestInit = {}): Promise<T>
     }
   })()
 
-  pendingRequests.set(key, promise)
+  pendingRequests.set(key, promise as Promise<JsonValue>)
   return promise
 }
 
