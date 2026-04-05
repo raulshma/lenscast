@@ -51,17 +51,26 @@ class CameraService(private val context: Context) {
     private class KeepAliveLifecycle : LifecycleOwner {
         private val registry = LifecycleRegistry(this)
         override val lifecycle: Lifecycle get() = registry
+        private val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())
 
         init {
-            registry.currentState = Lifecycle.State.CREATED
+            runOnMainThread { registry.currentState = Lifecycle.State.CREATED }
         }
 
         fun activate() {
-            registry.currentState = Lifecycle.State.STARTED
+            runOnMainThread { registry.currentState = Lifecycle.State.STARTED }
         }
 
         fun deactivate() {
-            registry.currentState = Lifecycle.State.CREATED
+            runOnMainThread { registry.currentState = Lifecycle.State.CREATED }
+        }
+
+        private fun runOnMainThread(action: () -> Unit) {
+            if (android.os.Looper.getMainLooper().isCurrentThread) {
+                action()
+            } else {
+                mainHandler.post(action)
+            }
         }
     }
 

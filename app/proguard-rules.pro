@@ -76,7 +76,15 @@
 # ── Kotlin reflection (needed by Moshi KotlinJsonAdapterFactory) ──
 -keep class kotlin.Metadata { *; }
 -keep class kotlin.reflect.** { *; }
+-keep class kotlin.reflect.jvm.internal.** { *; }
+-keep class kotlin.jvm.internal.** { *; }
 -keepattributes *Annotation*,Signature,EnclosingMethod,InnerClasses
+
+# ── Moshi Kotlin Adapter Factory ──
+-keep class com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory { *; }
+-keep class com.squareup.moshi.kotlin.reflect.** { *; }
+-dontwarn com.squareup.moshi.kotlin.reflect.**
+-dontwarn kotlin.reflect.jvm.internal.**
 
 # ── App model classes: Compose state, Moshi DTOs, enums ──
 -keep class com.raulshma.lenscast.camera.model.** { *; }
