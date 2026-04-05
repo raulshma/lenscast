@@ -14,9 +14,14 @@ import com.raulshma.lenscast.data.CaptureHistoryStore
 import com.raulshma.lenscast.data.SettingsDataStore
 import com.raulshma.lenscast.streaming.StreamingManager
 import com.raulshma.lenscast.streaming.rtsp.RtspInputFormat
+import com.raulshma.lenscast.update.UpdateChecker
+import com.raulshma.lenscast.update.UpdateNotifier
+import com.raulshma.lenscast.update.model.UpdateCheckResult
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
@@ -31,11 +36,14 @@ class MainApplication : Application(), SingletonImageLoader.Factory {
     val streamWatchdog: StreamWatchdog by lazy {
         StreamWatchdog(cameraService, streamingManager, powerManager, thermalMonitor)
     }
+    val updateChecker: UpdateChecker by lazy { UpdateChecker(this) }
+    val updateNotifier: UpdateNotifier by lazy { UpdateNotifier(this) }
     private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
     override fun onCreate() {
         super.onCreate()
         initializeStreamingServer()
+        initializeAutoUpdateCheck()
     }
 
     override fun newImageLoader(context: Context): ImageLoader {
@@ -177,4 +185,31 @@ class MainApplication : Application(), SingletonImageLoader.Factory {
         val maxRetries: Int,
         val checkInterval: Int,
     )
+
+    private fun initializeAutoUpdateCheck() {
+        appScope.launch {
+            delay(3_000)
+            val settings = settingsDataStore
+            val enabled = settings.updateAutoCheckEnabled.first()
+            if (!enabled) return@launch
+            val lastCheck = settings.updateLastCheckTime.first()
+            val oneDayAgo = System.currentTimeMillis() - 24 * 60 * 60 * 1000L
+            if (lastCheck > oneDayAgo) return@launch
+
+            when (val result = updateChecker.checkForUpdate()) {
+                is UpdateCheckResult.UpdateAvailable -> {
+                    val remoteVersion = result.release.tagName.trimStart('v')
+                    val dismissed = settings.updateDismissedVersion.first()
+                    if (dismissed != remoteVersion) {
+                        updateNotifier.showUpdateAvailable(remoteVersion)
+                    }
+                    settings.saveUpdateLastCheckTime(System.currentTimeMillis())
+                }
+                is com.raulshma.lenscast.update.model.UpdateCheckResult.UpToDate -> {
+                    settings.saveUpdateLastCheckTime(System.currentTimeMillis())
+                }
+                else -> { /* RateLimited or Error: silent */ }
+            }
+        }
+    }
 }

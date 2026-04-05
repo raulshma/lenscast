@@ -20,6 +20,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import com.raulshma.lenscast.MainApplication
+import com.raulshma.lenscast.MainActivity
 import com.raulshma.lenscast.camera.CameraScreen
 import com.raulshma.lenscast.capture.CaptureScreen
 import com.raulshma.lenscast.gallery.GalleryScreen
@@ -29,6 +30,7 @@ import com.raulshma.lenscast.settings.CameraSettingsScreen
 import com.raulshma.lenscast.settings.AppSettingsScreen
 import com.raulshma.lenscast.ui.animation.LocalAnimatedVisibilityScope
 import com.raulshma.lenscast.ui.animation.LocalSharedTransitionScope
+import com.raulshma.lenscast.update.UpdateNotifier
 import androidx.compose.foundation.pager.rememberPagerState
 import kotlinx.coroutines.launch
 
@@ -40,6 +42,14 @@ fun NavigationGraph() {
     val navController = rememberNavController()
     val context = LocalContext.current
     val app = context.applicationContext as MainApplication
+
+    // Handle notification deep links
+    val activity = context as? MainActivity
+    LaunchedEffect(Unit) {
+        activity?.navigationEvents?.collect { destination ->
+            navController.navigate(destination)
+        }
+    }
 
     SharedTransitionLayout {
         CompositionLocalProvider(LocalSharedTransitionScope provides this@SharedTransitionLayout) {

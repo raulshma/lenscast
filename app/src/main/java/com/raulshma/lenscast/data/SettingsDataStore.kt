@@ -167,6 +167,9 @@ class SettingsDataStore(private val context: Context) {
         val WATCHDOG_ENABLED = stringPreferencesKey("watchdog_enabled")
         val WATCHDOG_MAX_RETRIES = intPreferencesKey("watchdog_max_retries")
         val WATCHDOG_CHECK_INTERVAL_SECONDS = intPreferencesKey("watchdog_check_interval_seconds")
+        val UPDATE_AUTO_CHECK_ENABLED = stringPreferencesKey("update_auto_check_enabled")
+        val UPDATE_LAST_CHECK_TIME = longPreferencesKey("update_last_check_time")
+        val UPDATE_DISMISSED_VERSION = stringPreferencesKey("update_dismissed_version")
     }
 
     val settings: Flow<CameraSettings> = context.dataStore.data.map { prefs ->
@@ -541,6 +544,36 @@ class SettingsDataStore(private val context: Context) {
         } catch (e: Exception) {
             Log.e("SettingsDataStore", "Failed to parse masking zones", e)
             emptyList()
+        }
+    }
+
+    val updateAutoCheckEnabled: Flow<Boolean> = context.dataStore.data.map { prefs ->
+        prefs[Keys.UPDATE_AUTO_CHECK_ENABLED] != "false"
+    }
+
+    val updateLastCheckTime: Flow<Long> = context.dataStore.data.map { prefs ->
+        prefs[Keys.UPDATE_LAST_CHECK_TIME] ?: 0L
+    }
+
+    val updateDismissedVersion: Flow<String> = context.dataStore.data.map { prefs ->
+        prefs[Keys.UPDATE_DISMISSED_VERSION] ?: ""
+    }
+
+    suspend fun saveUpdateAutoCheckEnabled(enabled: Boolean) {
+        context.dataStore.edit { prefs ->
+            prefs[Keys.UPDATE_AUTO_CHECK_ENABLED] = if (enabled) "true" else "false"
+        }
+    }
+
+    suspend fun saveUpdateLastCheckTime(timeMs: Long) {
+        context.dataStore.edit { prefs ->
+            prefs[Keys.UPDATE_LAST_CHECK_TIME] = timeMs
+        }
+    }
+
+    suspend fun saveUpdateDismissedVersion(version: String) {
+        context.dataStore.edit { prefs ->
+            prefs[Keys.UPDATE_DISMISSED_VERSION] = version
         }
     }
 
