@@ -98,6 +98,7 @@ class SettingsViewModel(
 
     val availableZoomRange: StateFlow<ClosedFloatingPointRange<Float>> = cameraService.availableZoomRange
     val availableExposureRange: StateFlow<ClosedRange<Int>> = cameraService.availableExposureRange
+    val availableIsoRange: StateFlow<ClosedRange<Int>> = cameraService.availableIsoRange
 
     init {
         viewModelScope.launch {

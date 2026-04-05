@@ -101,6 +101,11 @@ class CameraService(private val context: Context) {
     private val _availableExposureRange = MutableStateFlow<ClosedRange<Int>>(-12..12)
     val availableExposureRange: StateFlow<ClosedRange<Int>> = _availableExposureRange.asStateFlow()
 
+    private val _availableIsoRange = MutableStateFlow<ClosedRange<Int>>(100..3200)
+    val availableIsoRange: StateFlow<ClosedRange<Int>> = _availableIsoRange.asStateFlow()
+
+    private var sensorExposureTimeRange: LongRange = 1L..1_000_000_000L
+
     private val _availableLenses = MutableStateFlow<List<CameraLensInfo>>(emptyList())
     val availableLenses: StateFlow<List<CameraLensInfo>> = _availableLenses.asStateFlow()
 
@@ -554,6 +559,23 @@ class CameraService(private val context: Context) {
                 val expState = cam.cameraInfo.exposureState
                 _availableExposureRange.value = expState.exposureCompensationRange.lower..
                         expState.exposureCompensationRange.upper
+
+                // Query sensor ISO and exposure time ranges for the selected lens
+                try {
+                    val cameraId = selectedLens?.physicalCameraId
+                        ?: Camera2CameraInfo.from(cam.cameraInfo).cameraId
+                    val cameraManager = context.getSystemService(Context.CAMERA_SERVICE) as android.hardware.camera2.CameraManager
+                    val chars = cameraManager.getCameraCharacteristics(cameraId)
+                    chars.get(CameraCharacteristics.SENSOR_INFO_SENSITIVITY_RANGE)?.let { range ->
+                        _availableIsoRange.value = range.lower..range.upper
+                    }
+                    chars.get(CameraCharacteristics.SENSOR_INFO_EXPOSURE_TIME_RANGE)?.let { range ->
+                        sensorExposureTimeRange = range.lower..range.upper
+                    }
+                    Log.d(TAG, "Sensor ranges for camera $cameraId: ISO=${_availableIsoRange.value}, exposure=${sensorExposureTimeRange}")
+                } catch (e: Exception) {
+                    Log.w(TAG, "Failed to query sensor ranges", e)
+                }
             }
 
             applyCameraControls(activeSettings)
@@ -911,12 +933,16 @@ class CameraService(private val context: Context) {
 
             if (hasManualExposure) {
                 builder.setCaptureRequestOption(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_OFF)
-                settings.iso?.let {
-                    builder.setCaptureRequestOption(CaptureRequest.SENSOR_SENSITIVITY, it)
+                settings.iso?.let { iso ->
+                    val clampedIso = iso.coerceIn(_availableIsoRange.value)
+                    builder.setCaptureRequestOption(CaptureRequest.SENSOR_SENSITIVITY, clampedIso)
                 }
-                settings.exposureTime?.let {
-                    builder.setCaptureRequestOption(CaptureRequest.SENSOR_EXPOSURE_TIME, it)
+                val exposureTime = settings.exposureTime ?: run {
+                    // Default to 1/frameRate when ISO is set without explicit exposure time
+                    val defaultNs = 1_000_000_000L / settings.frameRate.coerceAtLeast(1)
+                    defaultNs.coerceIn(sensorExposureTimeRange.first, sensorExposureTimeRange.last)
                 }
+                builder.setCaptureRequestOption(CaptureRequest.SENSOR_EXPOSURE_TIME, exposureTime)
             } else {
                 builder.setCaptureRequestOption(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON)
             }

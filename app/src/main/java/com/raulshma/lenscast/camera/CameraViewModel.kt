@@ -85,6 +85,7 @@ class CameraViewModel(
 
     val availableLenses: StateFlow<List<CameraLensInfo>> = cameraService.availableLenses
     val selectedLensIndex: StateFlow<Int> = cameraService.selectedLensIndex
+    val availableIsoRange: StateFlow<ClosedRange<Int>> = cameraService.availableIsoRange
 
     private var currentPreviewView: PreviewView? = null
     private var batteryMonitorJob: Job? = null

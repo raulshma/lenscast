@@ -26,6 +26,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -63,6 +64,16 @@ fun CameraSettingsScreen(
     val settings by viewModel.settings.collectAsState()
     val zoomRange by viewModel.availableZoomRange.collectAsState()
     val exposureRange by viewModel.availableExposureRange.collectAsState()
+    val isoRange by viewModel.availableIsoRange.collectAsState()
+    val isoOptions = remember(isoRange) {
+        val stops = mutableListOf("Auto")
+        var value = 100
+        while (value <= isoRange.endInclusive) {
+            if (value >= isoRange.start) stops.add(value.toString())
+            value *= 2
+        }
+        stops
+    }
     val showPreview by viewModel.showPreview.collectAsState()
 
     Scaffold(
@@ -108,7 +119,7 @@ fun CameraSettingsScreen(
                     )
                     DropdownSetting(
                         title = "ISO",
-                        options = listOf("Auto", "100", "200", "400", "800", "1600", "3200"),
+                        options = isoOptions,
                         selected = settings.iso?.toString() ?: "Auto",
                         onSelect = { viewModel.updateIso(it) }
                     )

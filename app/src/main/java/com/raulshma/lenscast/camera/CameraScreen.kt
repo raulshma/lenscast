@@ -279,9 +279,11 @@ fun CameraScreen(
             )
 
             if (activeSetting != null) {
+                val isoRange by viewModel.availableIsoRange.collectAsState()
                 QuickSettingSheet(
                     type = activeSetting!!,
                     settings = settings,
+                    isoOptions = buildIsoOptions(isoRange),
                     sheetState = sheetState,
                     onDismiss = { activeSetting = null },
                     onUpdateExposure = { viewModel.updateExposure(it) },
@@ -1082,11 +1084,22 @@ private fun QuickSettingPill(
     }
 }
 
+private fun buildIsoOptions(isoRange: ClosedRange<Int>): List<String> {
+    val stops = mutableListOf("Auto")
+    var value = 100
+    while (value <= isoRange.endInclusive) {
+        if (value >= isoRange.start) stops.add(value.toString())
+        value *= 2
+    }
+    return stops
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun QuickSettingSheet(
     type: QuickSettingType,
     settings: CameraSettings,
+    isoOptions: List<String>,
     sheetState: androidx.compose.material3.SheetState,
     onDismiss: () -> Unit,
     onUpdateExposure: (Int) -> Unit,
@@ -1145,7 +1158,7 @@ private fun QuickSettingSheet(
                     onValueChange = { onUpdateExposure(it.toInt()) }
                 )
                 QuickSettingType.ISO -> ProChipSelector(
-                    options = listOf("Auto", "100", "200", "400", "800", "1600", "3200"),
+                    options = isoOptions,
                     selected = settings.iso?.toString() ?: "Auto",
                     onSelect = onUpdateIso
                 )
