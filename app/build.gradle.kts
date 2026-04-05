@@ -74,7 +74,7 @@ android {
 
     defaultConfig {
         applicationId = "com.raulshma.lenscast"
-        minSdk = 26
+        minSdk = 23
         targetSdk = 36
         versionCode = 1
         versionName = project.findProperty("versionName") as String? ?: "0.1.0"
@@ -150,7 +150,6 @@ dependencies {
     implementation(libs.camerax.lifecycle)
     implementation(libs.camerax.view)
     implementation(libs.camerax.video)
-    implementation(libs.camerax.extensions)
 
     implementation(libs.work.manager)
     implementation(libs.nanohttpd)

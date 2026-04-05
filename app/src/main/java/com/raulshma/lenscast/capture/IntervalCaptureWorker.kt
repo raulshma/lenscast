@@ -3,6 +3,7 @@ package com.raulshma.lenscast.capture
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import androidx.core.app.NotificationCompat
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
@@ -136,14 +137,14 @@ class IntervalCaptureWorker(
             applicationContext,
             0,
             Intent(applicationContext, MainActivity::class.java),
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            PendingIntent.FLAG_UPDATE_CURRENT or if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) PendingIntent.FLAG_IMMUTABLE else 0
         )
         val contentText = if (totalCaptures > 0) {
             "Capturing photo ${completedCaptures + 1} of $totalCaptures"
         } else {
             "Capturing interval photo"
         }
-        val notification = Notification.Builder(applicationContext, CHANNEL_ID)
+        val notification = NotificationCompat.Builder(applicationContext, CHANNEL_ID)
             .setContentTitle("LensCast Interval Capture")
             .setContentText(contentText)
             .setSmallIcon(android.R.drawable.ic_menu_camera)
