@@ -79,24 +79,13 @@ class StreamingService : Service() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            Notification.Builder(this, CHANNEL_ID)
-                .setContentTitle("LensCast Streaming")
-                .setContentText(message)
-                .setSmallIcon(android.R.drawable.ic_menu_camera)
-                .setOngoing(true)
-                .setContentIntent(pendingIntent)
-                .build()
-        } else {
-            @Suppress("DEPRECATION")
-            Notification.Builder(this)
-                .setContentTitle("LensCast Streaming")
-                .setContentText(message)
-                .setSmallIcon(android.R.drawable.ic_menu_camera)
-                .setOngoing(true)
-                .setContentIntent(pendingIntent)
-                .build()
-        }
+        return Notification.Builder(this, CHANNEL_ID)
+            .setContentTitle("LensCast Streaming")
+            .setContentText(message)
+            .setSmallIcon(android.R.drawable.ic_menu_camera)
+            .setOngoing(true)
+            .setContentIntent(pendingIntent)
+            .build()
     }
 
     private fun createNotificationChannel() {

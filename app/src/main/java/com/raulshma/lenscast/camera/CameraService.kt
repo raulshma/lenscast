@@ -45,7 +45,6 @@ import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.math.max
 import java.util.concurrent.TimeUnit
 
-@Suppress("DEPRECATION")
 class CameraService(private val context: Context) {
 
     private class KeepAliveLifecycle : LifecycleOwner {

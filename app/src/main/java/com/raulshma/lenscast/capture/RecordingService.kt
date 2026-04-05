@@ -142,7 +142,6 @@ class RecordingService : Service() {
             }
             val cameraSelector = cameraService.getCurrentCameraSelector()
 
-            @Suppress("DEPRECATION")
             cameraProvider.unbindAll()
 
             val preview = if (cameraService.isPreviewAvailable()) cameraService.getPreview() else null
@@ -156,7 +155,6 @@ class RecordingService : Service() {
                 return
             }
 
-            @Suppress("DEPRECATION")
             try {
                 when {
                     preview != null && imageCapture != null && imageAnalysis != null ->
@@ -356,22 +354,12 @@ class RecordingService : Service() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            Notification.Builder(this, CHANNEL_ID)
-                .setContentTitle("LensCast Recording")
-                .setContentText(message)
-                .setSmallIcon(android.R.drawable.ic_menu_camera)
-                .setContentIntent(pendingIntent)
-                .build()
-        } else {
-            @Suppress("DEPRECATION")
-            Notification.Builder(this)
-                .setContentTitle("LensCast Recording")
-                .setContentText(message)
-                .setSmallIcon(android.R.drawable.ic_menu_camera)
-                .setContentIntent(pendingIntent)
-                .build()
-        }
+        return Notification.Builder(this, CHANNEL_ID)
+            .setContentTitle("LensCast Recording")
+            .setContentText(message)
+            .setSmallIcon(android.R.drawable.ic_menu_camera)
+            .setContentIntent(pendingIntent)
+            .build()
     }
 
     private fun createNotificationChannel() {

@@ -8,6 +8,7 @@ import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
 import android.net.NetworkRequest
+import android.os.Build
 import android.util.Log
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -75,8 +76,12 @@ class NetworkChangeMonitor(private val context: Context) {
             val filter = IntentFilter()
             @Suppress("DEPRECATION")
             filter.addAction(android.net.ConnectivityManager.CONNECTIVITY_ACTION)
-            @Suppress("DEPRECATION")
-            context.registerReceiver(receiver, filter)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                context.registerReceiver(receiver, filter, Context.RECEIVER_NOT_EXPORTED)
+            } else {
+                @Suppress("DEPRECATION")
+                context.registerReceiver(receiver, filter)
+            }
             legacyReceiver = receiver
             isRegistered = true
             Log.d(TAG, "Network monitoring started (legacy receiver)")

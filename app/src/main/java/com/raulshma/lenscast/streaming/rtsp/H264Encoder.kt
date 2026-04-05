@@ -9,6 +9,7 @@ import java.nio.ByteBuffer
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 
+@Suppress("DEPRECATION")
 class H264Encoder {
 
     private var encoder: MediaCodec? = null

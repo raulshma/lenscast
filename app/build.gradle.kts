@@ -158,6 +158,7 @@ dependencies {
     implementation(libs.coroutines.guava)
     implementation(libs.moshi)
 
+    implementation(libs.coil.base)
     implementation(libs.coil.compose)
     implementation(libs.coil.video)
 

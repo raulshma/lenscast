@@ -109,6 +109,7 @@ fun shareGalleryMedia(context: Context, items: List<CaptureHistory>) {
     }
 
     intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+    intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
     context.startActivity(
         Intent.createChooser(
             intent,
@@ -122,6 +123,7 @@ fun openMediaExternal(context: Context, item: CaptureHistory) {
     val intent = Intent(Intent.ACTION_VIEW).apply {
         setDataAndType(uri, mimeTypeForCapture(item.type))
         addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
     }
     context.startActivity(Intent.createChooser(intent, "Open ${item.fileName}"))
 }

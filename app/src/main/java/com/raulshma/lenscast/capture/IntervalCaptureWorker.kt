@@ -143,24 +143,13 @@ class IntervalCaptureWorker(
         } else {
             "Capturing interval photo"
         }
-        val notification = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            Notification.Builder(applicationContext, CHANNEL_ID)
-                .setContentTitle("LensCast Interval Capture")
-                .setContentText(contentText)
-                .setSmallIcon(android.R.drawable.ic_menu_camera)
-                .setContentIntent(pendingIntent)
-                .setOngoing(true)
-                .build()
-        } else {
-            @Suppress("DEPRECATION")
-            Notification.Builder(applicationContext)
-                .setContentTitle("LensCast Interval Capture")
-                .setContentText(contentText)
-                .setSmallIcon(android.R.drawable.ic_menu_camera)
-                .setContentIntent(pendingIntent)
-                .setOngoing(true)
-                .build()
-        }
+        val notification = Notification.Builder(applicationContext, CHANNEL_ID)
+            .setContentTitle("LensCast Interval Capture")
+            .setContentText(contentText)
+            .setSmallIcon(android.R.drawable.ic_menu_camera)
+            .setContentIntent(pendingIntent)
+            .setOngoing(true)
+            .build()
 
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             ForegroundInfo(
