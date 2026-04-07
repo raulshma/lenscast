@@ -1,6 +1,42 @@
+<div align="center">
+
+<img src="media-resources/app_logo.svg" width="150" />
+
+</div>
+
+<div align="center">
+
 # LensCast
 
-An Android camera application with live video/audio streaming to web browsers over WiFi. LensCast turns your Android device into a networked camera station with professional controls, remote web access, interval photography, and scheduled recording.
+</div>
+
+<p align="center">
+  <img alt="API" src="https://img.shields.io/badge/Api%2023+-50f270?logo=android&logoColor=black&style=for-the-badge"/>
+  <img alt="Kotlin" src="https://img.shields.io/badge/Kotlin-7F52FF?logo=kotlin&logoColor=white&style=for-the-badge"/>
+  <img alt="Jetpack Compose" src="https://img.shields.io/badge/Jetpack%20Compose-4285F4?logo=jetpackcompose&logoColor=white&style=for-the-badge"/>
+  <img alt="Material 3" src="https://custom-icon-badges.demolab.com/badge/material%20you-lightblue?style=for-the-badge&logoColor=333&logo=material-you"/>
+  <img alt="CameraX" src="https://img.shields.io/badge/CameraX-FF6F00?style=for-the-badge&logo=android&logoColor=white"/>
+</p>
+
+</br>
+
+<p align="middle">
+    <img src="media-resources/screenshots/01_camera.png" width="18%" />
+    <img src="media-resources/screenshots/02_settings.png" width="18%" />
+    <img src="media-resources/screenshots/03_gallery.png" width="18%" />
+    <img src="media-resources/screenshots/04_streaming.png" width="18%" />
+    <img src="media-resources/screenshots/05_controls.png" width="18%" />
+</p>
+
+<div align="center">
+
+# Project Overview
+
+LensCast is an Android camera application with live video/audio streaming to web browsers over WiFi. It turns your Android device into a networked camera station with professional controls, remote web access, interval photography, and scheduled recording.
+
+</div>
+
+---
 
 ## Features
 
@@ -24,7 +60,6 @@ An Android camera application with live video/audio streaming to web browsers ov
 - Privacy masking zones with blackout, pixelate, or blur effects on user-defined regions
 - Optional HTTP Basic Authentication for secure access (web and RTSP)
 - mDNS / NSD service discovery so clients can find the stream on the local network automatically
-- Configurable streaming port and JPEG quality
 - Network quality monitoring with per-client throughput tracking and quality level classification (Excellent → Critical)
 - Foreground service with persistent notification to keep streaming alive in the background
 
@@ -71,6 +106,8 @@ An Android camera application with live video/audio streaming to web browsers ov
 - Per-client connection statistics with throughput, latency, and frames-per-second tracking
 - HTTP Range request support for video file streaming in the web gallery
 
+---
+
 ## Tech Stack
 
 **Android**
@@ -84,6 +121,8 @@ An Android camera application with live video/audio streaming to web browsers ov
 - SolidJS, Tailwind CSS v4, DaisyUI v5, Vite, TypeScript
 - Built output embedded directly into Android assets at build time
 
+---
+
 ## Requirements
 
 - Android 8.0 (API 26) or later
@@ -92,30 +131,17 @@ An Android camera application with live video/audio streaming to web browsers ov
 - Node.js 20+ and npm (for building the web UI)
 - JDK 17 (for building the Android app)
 
-## Permissions
-
-LensCast requires the following Android permissions:
-
-| Permission | Purpose |
-|---|---|
-| `CAMERA` | Camera preview and capture |
-| `RECORD_AUDIO` | Live audio streaming and video recording with audio |
-| `INTERNET` | Serving the HTTP/RTSP streams |
-| `ACCESS_NETWORK_STATE` / `ACCESS_WIFI_STATE` | Detecting network connectivity and IP address |
-| `CHANGE_WIFI_MULTICAST_STATE` | mDNS service discovery |
-| `FOREGROUND_SERVICE` / `FOREGROUND_SERVICE_CAMERA` / `FOREGROUND_SERVICE_MICROPHONE` | Background streaming and recording |
-| `WAKE_LOCK` | Keeping the device awake during long sessions |
-| `REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` | Requesting Doze mode exemption |
-| `READ_MEDIA_IMAGES` / `READ_MEDIA_VIDEO` | Accessing captured media in gallery |
-| `POST_NOTIFICATIONS` | Foreground service notifications |
+---
 
 ## Building
 
-### Prerequisites
+<details>
+<summary><strong>Prerequisites</strong></summary>
 
-- Android Studio or Gradle CLI
-- JDK 17
-- Node.js 20+ with npm
+  - Android Studio or Gradle CLI
+  - JDK 17
+  - Node.js 20+ with npm
+</details>
 
 ### Build Commands
 
@@ -146,12 +172,33 @@ npm run dev    # Starts dev server on port 3000 with proxy to Android device
 
 The Vite dev server proxies `/api`, `/stream`, `/audio`, and `/snapshot` requests to `localhost:8080` for local development against a running LensCast instance.
 
+---
+
 ## CI/CD
 
 A GitHub Actions workflow (`.github/workflows/release.yml`) automates release builds:
 - Triggers on pushes to `v*` or `release/**` branches, or via manual dispatch
 - Builds a signed release APK with automatic semantic version tagging
 - Publishes per-ABI APKs (`arm64-v8a`, `armeabi-v7a`, `x86`, `x86_64`, universal) to GitHub Releases
+
+---
+
+## Permissions
+
+| Permission | Purpose |
+|---|---|
+| `CAMERA` | Camera preview and capture |
+| `RECORD_AUDIO` | Live audio streaming and video recording with audio |
+| `INTERNET` | Serving the HTTP/RTSP streams |
+| `ACCESS_NETWORK_STATE` / `ACCESS_WIFI_STATE` | Detecting network connectivity and IP address |
+| `CHANGE_WIFI_MULTICAST_STATE` | mDNS service discovery |
+| `FOREGROUND_SERVICE` / `FOREGROUND_SERVICE_CAMERA` / `FOREGROUND_SERVICE_MICROPHONE` | Background streaming and recording |
+| `WAKE_LOCK` | Keeping the device awake during long sessions |
+| `REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` | Requesting Doze mode exemption |
+| `READ_MEDIA_IMAGES` / `READ_MEDIA_VIDEO` | Accessing captured media in gallery |
+| `POST_NOTIFICATIONS` | Foreground service notifications |
+
+---
 
 ## Project Structure
 
@@ -180,7 +227,20 @@ web/                 SolidJS web UI for remote control
 └── vite.config.ts   Build config (outputs to Android assets)
 ```
 
+---
+
+## Star History
+
+<a href="https://www.star-history.com/#raulshma/lenscast&type=timeline&legend=top-left">
+ <picture>
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=raulshma/lenscast&type=timeline&theme=dark&legend=top-left" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=raulshma/lenscast&type=timeline&legend=top-left" />
+   <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=raulshma/lenscast&type=timeline&legend=top-left" />
+ </picture>
+</a>
+
+---
+
 ## License
 
 This project is licensed under the GNU General Public License v3.0 — see the [LICENSE](LICENSE) file for details.
-
