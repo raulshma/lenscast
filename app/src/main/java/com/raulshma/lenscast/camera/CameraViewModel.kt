@@ -183,11 +183,11 @@ class CameraViewModel(
             streamingManager.pushFrameToRtsp(yuvData, width, height, rotation)
         }
 
-        // Combined: Settings + streaming config in fewer coroutines
+        // Mirror persisted camera settings for the UI; runtime application is
+        // owned by SettingsApplier.
         settingsJob = viewModelScope.launch {
             settingsDataStore.settings.distinctUntilChanged().collect { saved ->
                 _settings.value = saved
-                cameraService.applySettings(saved)
             }
         }
 
@@ -304,13 +304,6 @@ class CameraViewModel(
         cameraService.selectLens(index)
     }
 
-    fun updateSettings(settings: CameraSettings) {
-        _settings.value = settings
-        viewModelScope.launch {
-            cameraService.applySettings(settings)
-        }
-    }
-
     fun updateExposure(value: Int) {
         updateSettings { it.copy(exposureCompensation = value) }
     }
@@ -362,6 +355,9 @@ class CameraViewModel(
     private fun updateSettings(transform: (CameraSettings) -> CameraSettings) {
         val newSettings = transform(_settings.value)
         _settings.value = newSettings
+        // Gesture-driven camera controls apply immediately for responsiveness;
+        // SettingsApplier re-applies after persistence — applying camera controls
+        // is idempotent, so the overlap is harmless.
         viewModelScope.launch {
             cameraService.applySettings(newSettings)
             settingsDataStore.saveSettings(newSettings)

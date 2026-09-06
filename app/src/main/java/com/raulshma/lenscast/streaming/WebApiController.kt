@@ -255,9 +255,6 @@ class WebApiController(private val context: Context) {
                 )
                 scope.launch {
                     app.settingsDataStore.saveSettings(newSettings)
-                    withContext(Dispatchers.Main) {
-                        app.cameraService.applySettings(newSettings)
-                    }
                 }
             }
 
@@ -268,40 +265,30 @@ class WebApiController(private val context: Context) {
                         app.settingsDataStore.saveStreamingPort(stream.port)
                     }
                     app.settingsDataStore.saveWebStreamingEnabled(stream.webStreamingEnabled)
-                    app.streamingManager.setWebStreamingEnabled(stream.webStreamingEnabled)
                     if (stream.jpegQuality > 0) {
                         app.settingsDataStore.saveJpegQuality(stream.jpegQuality)
-                        app.streamingManager.setJpegQuality(stream.jpegQuality)
                     }
                     app.settingsDataStore.saveShowPreview(stream.showPreview)
                     app.settingsDataStore.saveStreamAudioEnabled(stream.streamAudioEnabled)
-                    app.streamingManager.setStreamAudioEnabled(stream.streamAudioEnabled)
                     if (stream.streamAudioBitrateKbps > 0) {
                         app.settingsDataStore.saveStreamAudioBitrateKbps(stream.streamAudioBitrateKbps)
-                        app.streamingManager.setStreamAudioBitrateKbps(stream.streamAudioBitrateKbps)
                     }
                     if (stream.streamAudioChannels > 0) {
                         app.settingsDataStore.saveStreamAudioChannels(stream.streamAudioChannels)
-                        app.streamingManager.setStreamAudioChannels(stream.streamAudioChannels)
                     }
                     app.settingsDataStore.saveStreamAudioEchoCancellation(stream.streamAudioEchoCancellation)
-                    app.streamingManager.setStreamAudioEchoCancellation(stream.streamAudioEchoCancellation)
                     app.settingsDataStore.saveRecordingAudioEnabled(stream.recordingAudioEnabled)
                     app.settingsDataStore.saveRtspEnabled(stream.rtspEnabled)
-                    app.streamingManager.setRtspEnabled(stream.rtspEnabled)
                     if (stream.rtspPort in 1024..65535) {
                         app.settingsDataStore.saveRtspPort(stream.rtspPort)
-                        app.streamingManager.setRtspPort(stream.rtspPort)
                     }
                     if (stream.rtspInputFormat.isNotBlank()) {
                         val format = runCatching { RtspInputFormat.valueOf(stream.rtspInputFormat) }.getOrNull()
                         if (format != null) {
                             app.settingsDataStore.saveRtspInputFormat(format)
-                            app.streamingManager.setRtspInputFormat(format)
                         }
                     }
                     app.settingsDataStore.saveAdaptiveBitrateEnabled(stream.adaptiveBitrateEnabled)
-                    app.streamingManager.setAdaptiveBitrateEnabled(stream.adaptiveBitrateEnabled)
 
                     val currentOverlay = overlaySettingsFlow.value
                     val maskingZones = stream.maskingZones.map { dto ->
@@ -337,15 +324,11 @@ class WebApiController(private val context: Context) {
                         maskingZones = maskingZones,
                     )
                     app.settingsDataStore.saveOverlaySettings(newOverlay)
-                    app.streamingManager.setOverlaySettings(newOverlay)
 
                     // Watchdog settings
                     app.settingsDataStore.saveWatchdogEnabled(stream.watchdogEnabled)
-                    app.streamWatchdog.setEnabled(stream.watchdogEnabled)
                     app.settingsDataStore.saveWatchdogMaxRetries(stream.watchdogMaxRetries)
-                    app.streamWatchdog.setMaxRetries(stream.watchdogMaxRetries)
                     app.settingsDataStore.saveWatchdogCheckIntervalSeconds(stream.watchdogCheckIntervalSeconds)
-                    app.streamWatchdog.setCheckIntervalSeconds(stream.watchdogCheckIntervalSeconds)
                 }
             }
 

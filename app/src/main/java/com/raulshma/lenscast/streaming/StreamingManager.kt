@@ -13,8 +13,6 @@ import com.raulshma.lenscast.core.NetworkQualityMonitor
 import com.raulshma.lenscast.core.NetworkUtils
 import com.raulshma.lenscast.core.ThermalMonitor
 import com.raulshma.lenscast.data.StreamAuthSettings
-import com.raulshma.lenscast.streaming.AdaptiveBitrateController.AdaptiveBitrateConfig
-import com.raulshma.lenscast.streaming.AdaptiveBitrateController.AdaptiveResult
 import com.raulshma.lenscast.streaming.rtsp.RtspInputFormat
 import com.raulshma.lenscast.streaming.rtsp.RtspServer
 import kotlinx.coroutines.CoroutineScope
@@ -140,8 +138,6 @@ class StreamingManager(private val context: Context) {
 
     val adaptiveBitrateState: StateFlow<AdaptiveBitrateController.AdaptiveState> = adaptiveBitrateController.state
 
-    fun getAdaptiveBitrateState(): AdaptiveBitrateController.AdaptiveState = adaptiveBitrateController.state.value
-
     fun getNetworkStatsSnapshot(): NetworkQualityMonitor.NetworkStatsSnapshot = networkQualityMonitor.getStatsSnapshot()
 
     fun isLiveStreaming(): Boolean = webStreamingActive.get() || rtspStreamingActive.get()
@@ -190,11 +186,6 @@ class StreamingManager(private val context: Context) {
     }
 
     fun isAdaptiveBitrateEnabled(): Boolean = adaptiveBitrateController.isEnabled
-
-    fun setAdaptiveBitrateConfig(config: AdaptiveBitrateConfig) {
-        adaptiveBitrateController.reset()
-        Log.d(TAG, "Adaptive bitrate config updated")
-    }
 
     fun ensureServerRunning(): Boolean {
         if (_isServerRunning.value) {
@@ -300,49 +291,6 @@ class StreamingManager(private val context: Context) {
         stopRtspServer()
         updateStreamingState()
         Log.d(TAG, "RTSP streaming stopped")
-    }
-
-    fun pushFrame(bitmap: Bitmap) {
-        if (!webStreamingActive.get()) return
-
-        val clientCount = server.getClientCount()
-        if (clientCount == 0) return
-
-        val now = System.currentTimeMillis()
-        val elapsed = now - lastFrameTimeMs.get()
-
-        val baseInterval = minFrameIntervalMs.get()
-        val thermalAdjustedInterval = thermalMonitor?.getAdjustedFrameDelay(baseInterval) ?: baseInterval
-        val adaptiveInterval = adaptiveBitrateController.getAdaptiveFrameInterval(baseInterval, thermalAdjustedInterval)
-
-        if (elapsed < adaptiveInterval) {
-            droppedFrameCount.incrementAndGet()
-            return
-        }
-        lastFrameTimeMs.set(now)
-
-        val baseQuality = jpegQuality.get()
-        val thermalAdjustedQuality = thermalMonitor?.getAdjustedQuality(baseQuality) ?: baseQuality
-        val quality = adaptiveBitrateController.getAdaptiveQuality(baseQuality, thermalAdjustedQuality)
-
-        val overlay = currentOverlaySettings
-        val jpegData = if (overlay.enabled) {
-            // Apply overlay directly to source bitmap, then encode once
-            val withOverlay = StreamOverlayRenderer.applyOverlay(bitmap, overlay, clientCount)
-            val data = bitmapToJpegReuse(withOverlay, quality.coerceAtLeast(85))
-            if (withOverlay !== bitmap && !withOverlay.isRecycled) withOverlay.recycle()
-            data
-        } else {
-            bitmapToJpegReuse(bitmap, quality)
-        }
-
-        server.updateFrame(jpegData)
-        processedFrameCount.incrementAndGet()
-
-        if (clientCount != lastReportedClientCount) {
-            lastReportedClientCount = clientCount
-            _clientCount.value = clientCount
-        }
     }
 
     fun pushFrame(yuvData: ByteArray, width: Int, height: Int, rotation: Int = 0) {
@@ -562,27 +510,6 @@ class StreamingManager(private val context: Context) {
         }
     }
 
-    fun reduceBitrate(multiplier: Float) {
-        val current = jpegQuality.get()
-        jpegQuality.set((current * multiplier).toInt().coerceIn(10, 100))
-        Log.d(TAG, "Thermal: JPEG quality adjusted to ${jpegQuality.get()}")
-        rtspServer?.setBitrate((2_000_000 * multiplier).toInt())
-        rtspServer?.setAudioBitrate((DEFAULT_AUDIO_BITRATE_KBPS * multiplier).toInt().coerceIn(32, 320))
-    }
-
-    fun reduceFrameRate(multiplier: Float) {
-        val baseInterval = 1000L / DEFAULT_STREAM_FPS
-        minFrameIntervalMs.set(if (multiplier > 0f) (baseInterval / multiplier).toLong() else Long.MAX_VALUE)
-        Log.d(TAG, "Thermal: frame interval adjusted to ${minFrameIntervalMs.get()}ms (factor $multiplier)")
-    }
-
-    fun restoreNormalSettings() {
-        jpegQuality.set(DEFAULT_JPEG_QUALITY)
-        minFrameIntervalMs.set(1000L / DEFAULT_STREAM_FPS)
-        rtspServer?.setBitrate(2_000_000)
-        Log.d(TAG, "Thermal: settings restored to normal")
-    }
-
     fun updateAuthSettings(settings: StreamAuthSettings) {
         currentAuthSettings = settings
         applyAuthSettings(server, settings)
@@ -693,16 +620,6 @@ class StreamingManager(private val context: Context) {
                 "bitrate=${result.suggestedBitrate}, fps=${result.suggestedFrameRate}")
     }
 
-    fun getStreamUrls(): StreamUrls {
-        val port = currentPort
-        return StreamUrls(
-            streamUrl = buildVideoUrl(),
-            audioUrl = if (_isAudioStreaming.value) buildAudioUrl() else "",
-            snapshotUrl = NetworkUtils.getSnapshotUrl(port) ?: "",
-            controlUrl = NetworkUtils.getLocalIpAddress()?.let { "http://$it:$port/" } ?: ""
-        )
-    }
-
     fun release() {
         frameQueueScope.cancel()
         frameQueue.close()
@@ -804,13 +721,6 @@ class StreamingManager(private val context: Context) {
         _rtspUrl.value = ""
         _isRtspRunning.value = false
     }
-
-    data class StreamUrls(
-        val streamUrl: String,
-        val audioUrl: String,
-        val snapshotUrl: String,
-        val controlUrl: String,
-    )
 
     companion object {
         private const val TAG = "StreamingManager"

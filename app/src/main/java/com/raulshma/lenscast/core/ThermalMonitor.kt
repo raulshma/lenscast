@@ -22,8 +22,6 @@ class ThermalMonitor(private val context: Context) {
     val throttlingResult: StateFlow<ThermalThrottlingResult> = _throttlingResult.asStateFlow()
 
     private var listener: PowerManager.OnThermalStatusChangedListener? = null
-    private var consecutiveElevatedReadings = 0
-    private var lastThermalCheckTime = 0L
 
     fun startMonitoring() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -52,7 +50,6 @@ class ThermalMonitor(private val context: Context) {
             pm.removeThermalStatusListener(listener!!)
             listener = null
         }
-        consecutiveElevatedReadings = 0
         _thermalState.value = ThermalState.NORMAL
         _throttlingResult.value = ThermalThrottlingResult(
             bitrateMultiplier = 1.0f,
@@ -61,30 +58,6 @@ class ThermalMonitor(private val context: Context) {
             shouldPause = false,
         )
         Log.d(TAG, "Thermal monitoring stopped")
-    }
-
-    fun isDeviceOverheating(): Boolean {
-        return _thermalState.value == ThermalState.SEVERE || _thermalState.value == ThermalState.CRITICAL
-    }
-
-    fun shouldReduceQualityProactively(): Boolean {
-        val now = System.currentTimeMillis()
-        if (now - lastThermalCheckTime < PROACTIVE_CHECK_INTERVAL_MS) {
-            return _throttlingResult.value.bitrateMultiplier < 1.0f
-        }
-        lastThermalCheckTime = now
-
-        if (Build.VERSION.SDK_INT >= 30) {
-            val pm = context.getSystemService(Context.POWER_SERVICE) as PowerManager
-            val status = getThermalStatus(pm)
-            if (status >= PowerManager.THERMAL_STATUS_MODERATE) {
-                consecutiveElevatedReadings++
-            } else {
-                consecutiveElevatedReadings = 0
-            }
-            return consecutiveElevatedReadings >= PROACTIVE_THRESHOLD
-        }
-        return false
     }
 
     private fun getThermalStatus(pm: PowerManager): Int {
@@ -159,7 +132,5 @@ class ThermalMonitor(private val context: Context) {
 
     companion object {
         private const val TAG = "ThermalMonitor"
-        private const val PROACTIVE_CHECK_INTERVAL_MS = 10_000L
-        private const val PROACTIVE_THRESHOLD = 2
     }
 }

@@ -15,7 +15,6 @@ import com.raulshma.lenscast.camera.model.WhiteBalance
 import com.raulshma.lenscast.core.PowerManager
 import com.raulshma.lenscast.data.SettingsDataStore
 import com.raulshma.lenscast.data.StreamAuthSettings
-import com.raulshma.lenscast.streaming.StreamingManager
 import com.raulshma.lenscast.streaming.rtsp.RtspInputFormat
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -25,7 +24,6 @@ import kotlinx.coroutines.launch
 class SettingsViewModel(
     private val cameraService: CameraService,
     private val settingsDataStore: SettingsDataStore,
-    private val streamingManager: StreamingManager? = null,
     private val powerManager: PowerManager? = null,
 ) : ViewModel() {
 
@@ -101,16 +99,16 @@ class SettingsViewModel(
     val availableIsoRange: StateFlow<ClosedRange<Int>> = cameraService.availableIsoRange
 
     init {
+        // Mirrors persisted settings for the UI. Runtime application is owned by
+        // SettingsApplier; this ViewModel only writes settings.
         viewModelScope.launch {
             settingsDataStore.settings.collect { saved ->
                 _settings.value = saved
-                cameraService.applySettings(saved)
             }
         }
         viewModelScope.launch {
             settingsDataStore.authSettings.collect { auth ->
                 _authSettings.value = auth
-                streamingManager?.updateAuthSettings(auth)
             }
         }
         viewModelScope.launch {
@@ -121,13 +119,11 @@ class SettingsViewModel(
         viewModelScope.launch {
             settingsDataStore.webStreamingEnabled.collect { enabled ->
                 _webStreamingEnabled.value = enabled
-                streamingManager?.setWebStreamingEnabled(enabled)
             }
         }
         viewModelScope.launch {
             settingsDataStore.jpegQuality.collect { quality ->
                 _jpegQuality.value = quality
-                streamingManager?.setJpegQuality(quality)
             }
         }
         viewModelScope.launch {
@@ -138,25 +134,21 @@ class SettingsViewModel(
         viewModelScope.launch {
             settingsDataStore.streamAudioEnabled.collect { enabled ->
                 _streamAudioEnabled.value = enabled
-                streamingManager?.setStreamAudioEnabled(enabled)
             }
         }
         viewModelScope.launch {
             settingsDataStore.streamAudioBitrateKbps.collect { bitrate ->
                 _streamAudioBitrateKbps.value = bitrate
-                streamingManager?.setStreamAudioBitrateKbps(bitrate)
             }
         }
         viewModelScope.launch {
             settingsDataStore.streamAudioChannels.collect { channels ->
                 _streamAudioChannels.value = channels
-                streamingManager?.setStreamAudioChannels(channels)
             }
         }
         viewModelScope.launch {
             settingsDataStore.streamAudioEchoCancellation.collect { enabled ->
                 _streamAudioEchoCancellation.value = enabled
-                streamingManager?.setStreamAudioEchoCancellation(enabled)
             }
         }
         viewModelScope.launch {
@@ -167,31 +159,26 @@ class SettingsViewModel(
         viewModelScope.launch {
             settingsDataStore.rtspEnabled.collect { enabled ->
                 _rtspEnabled.value = enabled
-                streamingManager?.setRtspEnabled(enabled)
             }
         }
         viewModelScope.launch {
             settingsDataStore.rtspPort.collect { port ->
                 _rtspPort.value = port
-                streamingManager?.setRtspPort(port)
             }
         }
         viewModelScope.launch {
             settingsDataStore.rtspInputFormat.collect { format ->
                 _rtspInputFormat.value = format
-                streamingManager?.setRtspInputFormat(format)
             }
         }
         viewModelScope.launch {
             settingsDataStore.adaptiveBitrateEnabled.collect { enabled ->
                 _adaptiveBitrateEnabled.value = enabled
-                streamingManager?.setAdaptiveBitrateEnabled(enabled)
             }
         }
         viewModelScope.launch {
             settingsDataStore.mdnsEnabled.collect { enabled ->
                 _mdnsEnabled.value = enabled
-                streamingManager?.setMdnsEnabled(enabled)
             }
         }
     }
@@ -265,7 +252,6 @@ class SettingsViewModel(
         _webStreamingEnabled.value = enabled
         viewModelScope.launch {
             settingsDataStore.saveWebStreamingEnabled(enabled)
-            streamingManager?.setWebStreamingEnabled(enabled)
         }
     }
 
@@ -273,7 +259,6 @@ class SettingsViewModel(
         _jpegQuality.value = quality
         viewModelScope.launch {
             settingsDataStore.saveJpegQuality(quality)
-            streamingManager?.setJpegQuality(quality)
         }
     }
 
@@ -288,7 +273,6 @@ class SettingsViewModel(
         _streamAudioEnabled.value = enabled
         viewModelScope.launch {
             settingsDataStore.saveStreamAudioEnabled(enabled)
-            streamingManager?.setStreamAudioEnabled(enabled)
         }
     }
 
@@ -297,7 +281,6 @@ class SettingsViewModel(
         _streamAudioBitrateKbps.value = sanitized
         viewModelScope.launch {
             settingsDataStore.saveStreamAudioBitrateKbps(sanitized)
-            streamingManager?.setStreamAudioBitrateKbps(sanitized)
         }
     }
 
@@ -306,7 +289,6 @@ class SettingsViewModel(
         _streamAudioChannels.value = sanitized
         viewModelScope.launch {
             settingsDataStore.saveStreamAudioChannels(sanitized)
-            streamingManager?.setStreamAudioChannels(sanitized)
         }
     }
 
@@ -314,7 +296,6 @@ class SettingsViewModel(
         _streamAudioEchoCancellation.value = enabled
         viewModelScope.launch {
             settingsDataStore.saveStreamAudioEchoCancellation(enabled)
-            streamingManager?.setStreamAudioEchoCancellation(enabled)
         }
     }
 
@@ -329,7 +310,6 @@ class SettingsViewModel(
         _rtspEnabled.value = enabled
         viewModelScope.launch {
             settingsDataStore.saveRtspEnabled(enabled)
-            streamingManager?.setRtspEnabled(enabled)
         }
     }
 
@@ -337,7 +317,6 @@ class SettingsViewModel(
         _rtspPort.value = port
         viewModelScope.launch {
             settingsDataStore.saveRtspPort(port)
-            streamingManager?.setRtspPort(port)
         }
     }
 
@@ -346,7 +325,6 @@ class SettingsViewModel(
         _rtspInputFormat.value = format
         viewModelScope.launch {
             settingsDataStore.saveRtspInputFormat(format)
-            streamingManager?.setRtspInputFormat(format)
         }
     }
 
@@ -354,7 +332,6 @@ class SettingsViewModel(
         _adaptiveBitrateEnabled.value = enabled
         viewModelScope.launch {
             settingsDataStore.saveAdaptiveBitrateEnabled(enabled)
-            streamingManager?.setAdaptiveBitrateEnabled(enabled)
         }
     }
 
@@ -362,7 +339,6 @@ class SettingsViewModel(
         _mdnsEnabled.value = enabled
         viewModelScope.launch {
             settingsDataStore.saveMdnsEnabled(enabled)
-            streamingManager?.setMdnsEnabled(enabled)
         }
     }
 
@@ -371,7 +347,6 @@ class SettingsViewModel(
         _authSettings.value = newAuth
         viewModelScope.launch {
             settingsDataStore.saveAuthSettings(newAuth)
-            streamingManager?.updateAuthSettings(newAuth)
         }
     }
 
@@ -383,7 +358,6 @@ class SettingsViewModel(
         _authSettings.value = newAuth
         viewModelScope.launch {
             settingsDataStore.saveAuthSettings(newAuth)
-            streamingManager?.updateAuthSettings(newAuth)
         }
     }
 
@@ -398,7 +372,6 @@ class SettingsViewModel(
         _authSettings.value = newAuth
         viewModelScope.launch {
             settingsDataStore.saveAuthSettings(newAuth)
-            streamingManager?.updateAuthSettings(newAuth)
         }
     }
 
@@ -407,7 +380,6 @@ class SettingsViewModel(
         _settings.value = defaults
         viewModelScope.launch {
             settingsDataStore.saveSettings(defaults)
-            cameraService.applySettings(defaults)
         }
     }
 
@@ -416,19 +388,17 @@ class SettingsViewModel(
         _settings.value = newSettings
         viewModelScope.launch {
             settingsDataStore.saveSettings(newSettings)
-            cameraService.applySettings(newSettings)
         }
     }
 
     class Factory(
         private val cameraService: CameraService,
         private val settingsDataStore: SettingsDataStore,
-        private val streamingManager: StreamingManager? = null,
         private val powerManager: PowerManager? = null,
     ) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
         override fun <T : androidx.lifecycle.ViewModel> create(modelClass: Class<T>): T {
-            return SettingsViewModel(cameraService, settingsDataStore, streamingManager, powerManager) as T
+            return SettingsViewModel(cameraService, settingsDataStore, powerManager) as T
         }
     }
 }

@@ -1,8 +1,6 @@
 package com.raulshma.lenscast.streaming
 
 import android.content.Context
-import android.security.keystore.KeyGenParameterSpec
-import android.security.keystore.KeyProperties
 import android.util.Log
 import com.raulshma.lenscast.core.NetworkQualityMonitor
 import com.raulshma.lenscast.core.NetworkUtils
@@ -10,20 +8,13 @@ import com.raulshma.lenscast.data.StreamAuthSettings
 import fi.iki.elonen.NanoHTTPD
 import java.io.ByteArrayInputStream
 import java.io.InputStream
-import java.math.BigInteger
 import java.net.URI
 import java.net.URLDecoder
 import java.nio.charset.StandardCharsets
-import java.security.KeyPairGenerator
-import java.security.KeyStore
 import java.security.MessageDigest
 import java.security.SecureRandom
-import java.util.Date
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicInteger
-import javax.net.ssl.KeyManagerFactory
-import javax.net.ssl.SSLContext
-import javax.security.auth.x500.X500Principal
 
 class StreamingServer(
     private val port: Int = DEFAULT_PORT,
@@ -184,11 +175,10 @@ class StreamingServer(
                 attempt.count = 0
             }
             val token = createSession()
-            val secureFlag = if (sslEnabled) "; Secure" else ""
             return newFixedLengthResponse(
                 Response.Status.OK, "application/json", """{"success":true}"""
             ).apply {
-                addHeader("Set-Cookie", "$COOKIE_NAME=$token; Path=$COOKIE_PATH; Max-Age=$SESSION_MAX_AGE_SEC; HttpOnly; SameSite=Lax$secureFlag")
+                addHeader("Set-Cookie", "$COOKIE_NAME=$token; Path=$COOKIE_PATH; Max-Age=$SESSION_MAX_AGE_SEC; HttpOnly; SameSite=Lax")
                 addHeader("Cache-Control", "no-store")
                 addSecurityHeaders()
             }
@@ -286,9 +276,6 @@ class StreamingServer(
                 "style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; " +
                 "object-src 'none'; base-uri 'self'; frame-ancestors 'none'"
         )
-        if (sslEnabled) {
-            addHeader("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
-        }
     }
 
     private fun checkAuth(session: IHTTPSession): Boolean {
@@ -988,76 +975,11 @@ class StreamingServer(
 
     fun getClientCount(): Int = clientCount.get()
 
-    private var sslEnabled = false
-    private var sslServerSocketFactory: javax.net.ssl.SSLServerSocketFactory? = null
-
-    /**
-     * Enables HTTPS using a self-signed certificate stored in the Android Keystore.
-     * Must be called before [startServer]. When enabled, all connections use TLS.
-     */
-    fun enableSsl(ctx: Context): Boolean {
-        return try {
-            val alias = "lenscast_ssl"
-            val keyStore = KeyStore.getInstance("AndroidKeyStore")
-            keyStore.load(null)
-
-            // Generate a self-signed key if not already present
-            if (!keyStore.containsAlias(alias)) {
-                val kpg = KeyPairGenerator.getInstance(
-                    KeyProperties.KEY_ALGORITHM_RSA, "AndroidKeyStore"
-                )
-                kpg.initialize(
-                    KeyGenParameterSpec.Builder(
-                        alias,
-                        KeyProperties.PURPOSE_ENCRYPT or
-                            KeyProperties.PURPOSE_DECRYPT or
-                            KeyProperties.PURPOSE_SIGN or
-                            KeyProperties.PURPOSE_VERIFY
-                    )
-                        .setKeySize(2048)
-                        .setCertificateSubject(X500Principal("CN=LensCast, O=LensCast"))
-                        .setCertificateSerialNumber(BigInteger.ONE)
-                        .setCertificateNotBefore(Date())
-                        .setCertificateNotAfter(
-                            Date(System.currentTimeMillis() + 3650L * 24 * 3600 * 1000)
-                        )
-                        .build()
-                )
-                kpg.generateKeyPair()
-                Log.d(TAG, "Self-signed TLS certificate generated")
-            }
-
-            // Reload keystore to pick up the new key
-            val loadedKeyStore = KeyStore.getInstance("AndroidKeyStore")
-            loadedKeyStore.load(null)
-
-            val kmf = KeyManagerFactory.getInstance(KeyManagerFactory.getDefaultAlgorithm())
-            kmf.init(loadedKeyStore, null)
-
-            val sslCtx = SSLContext.getInstance("TLS").apply {
-                init(kmf.keyManagers, null, null)
-            }
-            sslServerSocketFactory = sslCtx.serverSocketFactory
-            sslEnabled = true
-            Log.d(TAG, "TLS enabled for streaming server")
-            true
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to enable TLS", e)
-            sslEnabled = false
-            false
-        }
-    }
-
-    fun isSslEnabled(): Boolean = sslEnabled
-
     fun startServer(): Boolean {
         return try {
-            if (sslEnabled && sslServerSocketFactory != null) {
-                makeSecure(sslServerSocketFactory, null)
-            }
             start()
             isRunning = true
-            Log.d(TAG, if (sslEnabled) "HTTPS streaming server started on port $port" else "Streaming server started on port $port")
+            Log.d(TAG, "Streaming server started on port $port")
             true
         } catch (e: Exception) {
             Log.e(TAG, "Failed to start server", e)

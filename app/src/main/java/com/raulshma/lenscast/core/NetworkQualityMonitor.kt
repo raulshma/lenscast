@@ -14,8 +14,6 @@ class NetworkQualityMonitor {
     val activeClients: Int get() = _activeClients.get()
 
     private var totalBytesSent = 0L
-    private var lastBandwidthCalcTime = 0L
-    private var lastBandwidthCalcBytes = 0L
 
     fun registerClient(clientId: String) {
         clientStats.compute(clientId) { _, existing ->
@@ -147,24 +145,6 @@ class NetworkQualityMonitor {
         }
     }
 
-    fun updateEstimatedBandwidth() {
-        val now = System.currentTimeMillis()
-        val elapsed = now - lastBandwidthCalcTime
-        if (elapsed < BANDWIDTH_CALC_INTERVAL_MS) return
-
-        val bytesDelta = synchronized(this) {
-            val delta = totalBytesSent - lastBandwidthCalcBytes
-            lastBandwidthCalcBytes = totalBytesSent
-            delta
-        }
-        lastBandwidthCalcTime = now
-
-        if (elapsed > 0 && bytesDelta > 0) {
-            val bandwidthKbps = ((bytesDelta * 8L) / elapsed).toInt().coerceAtLeast(MIN_BANDWIDTH_KBPS)
-            _estimatedBandwidthKbps.set(bandwidthKbps)
-        }
-    }
-
     private var cachedQualityLevel: NetworkQualityLevel? = null
     private var cachedQualityLevelTime = 0L
     private val CACHE_VALIDITY_MS = 500L
@@ -225,7 +205,6 @@ class NetworkQualityMonitor {
         _activeClients.set(0)
         synchronized(this) {
             totalBytesSent = 0L
-            lastBandwidthCalcBytes = 0L
         }
         _estimatedBandwidthKbps.set(DEFAULT_BANDWIDTH_KBPS)
     }
@@ -294,9 +273,7 @@ class NetworkQualityMonitor {
     companion object {
         private const val TAG = "NetworkQualityMonitor"
         private const val DEFAULT_BANDWIDTH_KBPS = 5000
-        private const val MIN_BANDWIDTH_KBPS = 100
         private const val THROUGHPUT_WINDOW = 20
-        private const val BANDWIDTH_CALC_INTERVAL_MS = 2000L
         private const val GOOD_BANDWIDTH_THRESHOLD_KBPS = 3000
         private const val FAIR_BANDWIDTH_THRESHOLD_KBPS = 1500
         private const val POOR_BANDWIDTH_THRESHOLD_KBPS = 500
