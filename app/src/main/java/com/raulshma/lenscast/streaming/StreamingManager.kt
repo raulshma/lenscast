@@ -523,7 +523,9 @@ class StreamingManager(private val context: Context) {
         if (webStreamingActive.get() && streamAudioEnabled.get()) {
             refreshAudioStreamingState()
         }
-        if (rtspStreamingActive.get()) {
+        // Only meaningful for RTSP when its audio track is active; restarting
+        // otherwise drops connected viewers for no benefit.
+        if (rtspStreamingActive.get() && streamAudioEnabled.get()) {
             stopRtspServer()
             startRtspServer()
         }
@@ -534,7 +536,7 @@ class StreamingManager(private val context: Context) {
         if (webStreamingActive.get() && streamAudioEnabled.get()) {
             refreshAudioStreamingState()
         }
-        if (rtspStreamingActive.get()) {
+        if (rtspStreamingActive.get() && streamAudioEnabled.get()) {
             stopRtspServer()
             startRtspServer()
         }

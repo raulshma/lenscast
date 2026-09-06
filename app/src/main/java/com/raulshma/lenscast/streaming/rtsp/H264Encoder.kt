@@ -54,6 +54,7 @@ class H264Encoder {
 
     fun start(): Boolean {
         if (running.getAndSet(true)) return true
+        encoder = null
         pendingFrames.set(0)
         droppedFrames = 0
 
@@ -73,7 +74,20 @@ class H264Encoder {
                 setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 2)
                 setInteger(MediaFormat.KEY_MAX_B_FRAMES, 0)
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                    setInteger(MediaFormat.KEY_LOW_LATENCY, 1)
+                    try {
+                        if (capabilities.isFeatureSupported(
+                                MediaCodecInfo.CodecCapabilities.FEATURE_LowLatency
+                            )
+                        ) {
+                            setInteger(MediaFormat.KEY_LOW_LATENCY, 1)
+                        } else {
+                            Log.d(TAG, "Encoder does not support low-latency; configuring without it")
+                        }
+                    } catch (_: Exception) {
+                        // Capability query failed: leave KEY_LOW_LATENCY unset rather than
+                        // risk configure() rejecting the format (legacy OMX encoders return
+                        // BAD_VALUE for unsupported keys instead of ignoring them).
+                    }
                 }
                 try {
                     setInteger(MediaFormat.KEY_PRIORITY, 0)
@@ -155,6 +169,19 @@ class H264Encoder {
         } catch (e: Exception) {
             Log.w(TAG, "Failed to request key frame", e)
         }
+    }
+
+    /**
+     * Queues a black frame so a freshly started codec emits its CSD (SPS/PPS)
+     * immediately. Lets the RTSP server advertise real sprop-parameter-sets in
+     * the SDP before the first client reaches PLAY, instead of an empty fmtp.
+     */
+    fun submitBlackFrame() {
+        val ySize = width * height
+        val black = ByteArray(ySize * 3 / 2)
+        java.util.Arrays.fill(black, 0, ySize, 16.toByte())
+        java.util.Arrays.fill(black, ySize, black.size, 128.toByte())
+        encodeFrame(black)
     }
 
     fun encodeFrame(nv21Data: ByteArray) {
@@ -285,109 +312,27 @@ class H264Encoder {
         return flags and MediaCodec.BUFFER_FLAG_KEY_FRAME != 0
     }
 
-    private fun extractNalUnits(data: ByteArray): List<ByteArray> {
-        val annexB = extractAnnexBNalUnits(data)
-        if (annexB.isNotEmpty()) return annexB
-
-        val avcc = extractAvccNalUnits(data)
-        if (avcc.isNotEmpty()) return avcc
-
-        return emptyList()
-    }
+    private fun extractNalUnits(data: ByteArray): List<ByteArray> = H264NalParser.extractNalUnits(data)
 
     private fun extractSpsAndPps(buffer: ByteBuffer, info: MediaCodec.BufferInfo) {
         val data = ByteArray(info.size)
         buffer.position(info.offset)
         buffer.get(data)
 
-        val nalUnits = extractNalUnits(data)
+        val nalUnits = H264NalParser.extractNalUnits(data)
         for (nalUnit in nalUnits) {
             if (nalUnit.isEmpty()) continue
-            val nalType = nalUnit[0].toInt() and 0x1F
-            when (nalType) {
+            when (H264NalParser.nalType(nalUnit)) {
                 7 -> sps = nalUnit
                 8 -> pps = nalUnit
             }
         }
     }
 
-    private fun extractAnnexBNalUnits(data: ByteArray): List<ByteArray> {
-        val result = mutableListOf<ByteArray>()
-        var offset = 0
-
-        while (offset < data.size) {
-            val startCodeLen = when {
-                offset + 3 < data.size &&
-                    data[offset] == 0.toByte() &&
-                    data[offset + 1] == 0.toByte() &&
-                    data[offset + 2] == 0.toByte() &&
-                    data[offset + 3] == 1.toByte() -> 4
-
-                offset + 2 < data.size &&
-                    data[offset] == 0.toByte() &&
-                    data[offset + 1] == 0.toByte() &&
-                    data[offset + 2] == 1.toByte() -> 3
-
-                else -> break
-            }
-
-            val nalStart = offset + startCodeLen
-            var nalEnd = data.size
-            var scan = nalStart
-            while (scan + 2 < data.size) {
-                if (data[scan] == 0.toByte() && data[scan + 1] == 0.toByte()) {
-                    if (data[scan + 2] == 1.toByte()) {
-                        nalEnd = scan
-                        break
-                    }
-                    if (scan + 3 < data.size && data[scan + 2] == 0.toByte() && data[scan + 3] == 1.toByte()) {
-                        nalEnd = scan
-                        break
-                    }
-                }
-                scan++
-            }
-
-            if (nalStart < nalEnd) {
-                result.add(data.copyOfRange(nalStart, nalEnd))
-            }
-
-            offset = nalEnd
-        }
-
-        return result
-    }
-
-    private fun extractAvccNalUnits(data: ByteArray): List<ByteArray> {
-        val result = mutableListOf<ByteArray>()
-        var offset = 0
-
-        while (offset + 4 <= data.size) {
-            val nalSize =
-                ((data[offset].toInt() and 0xFF) shl 24) or
-                    ((data[offset + 1].toInt() and 0xFF) shl 16) or
-                    ((data[offset + 2].toInt() and 0xFF) shl 8) or
-                    (data[offset + 3].toInt() and 0xFF)
-            offset += 4
-
-            if (nalSize <= 0 || offset + nalSize > data.size) {
-                return emptyList()
-            }
-
-            result.add(data.copyOfRange(offset, offset + nalSize))
-            offset += nalSize
-        }
-
-        return if (offset == data.size) result else emptyList()
-    }
-
     private fun extractNalFromCsd(buffer: ByteBuffer): ByteArray {
         val bytes = ByteArray(buffer.remaining())
         buffer.get(bytes)
-        var start = 0
-        while (start < bytes.size && bytes[start] == 0.toByte()) start++
-        if (start < bytes.size && bytes[start] == 1.toByte()) start++
-        return if (start < bytes.size) bytes.copyOfRange(start, bytes.size) else bytes
+        return H264NalParser.stripStartCode(bytes)
     }
 
     private fun chooseInputColorFormat(
@@ -504,6 +449,9 @@ class H264Encoder {
 
     companion object {
         private const val TAG = "H264Encoder"
-        private const val MAX_PENDING_FRAMES = 2
+
+        // Encoder output typically lags input by 1-2 buffers; 6 allows transient
+        // hiccups (reconfigure, HW contention) without starving the stream to zero.
+        private const val MAX_PENDING_FRAMES = 6
     }
 }

@@ -13,8 +13,21 @@ object RtpPacketizer {
     var currentSeq: Int = 0
         private set
 
+    /** Low 32 bits of the random SSRC, as written on the wire. */
+    val wireSsrc: Int get() = (ssrc and 0xFFFFFFFFL).toInt()
+
+    @Volatile
+    var sentPacketCount: Long = 0
+        private set
+
+    @Volatile
+    var sentOctetCount: Long = 0
+        private set
+
     fun reset() {
         sequenceNumber = 0L
+        sentPacketCount = 0
+        sentOctetCount = 0
     }
 
     fun packetizeNalUnit(nalUnit: ByteArray, timestamp: Long, marker: Boolean): List<ByteArray> {
@@ -90,5 +103,8 @@ object RtpPacketizer {
         packet[9] = (ssrc ushr 16).toByte()
         packet[10] = (ssrc ushr 8).toByte()
         packet[11] = ssrc.toByte()
+
+        sentPacketCount++
+        sentOctetCount += (packet.size - RTP_HEADER_SIZE).toLong()
     }
 }

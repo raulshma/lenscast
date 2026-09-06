@@ -7,6 +7,7 @@ import java.io.InputStream
 import java.io.OutputStream
 import java.io.OutputStreamWriter
 import java.net.InetAddress
+import java.net.InetSocketAddress
 import java.net.ServerSocket
 import java.net.Socket
 import java.net.SocketException
@@ -64,7 +65,15 @@ class RtspServer(private val port: Int = DEFAULT_PORT) {
         get() = if (videoFrameRate > 0) 90000L / videoFrameRate else 3750L
 
     private val lastFrameTime = AtomicLong(0)
-    private var lastEncodedTime = 0L
+
+    private val distributedAus = AtomicLong(0)
+    private val distributedPackets = AtomicLong(0)
+
+    @Volatile
+    private var firstKeyframeLogged = false
+
+    @Volatile
+    private var lastSenderReportTime = 0L
     private val minFrameIntervalMs: Long
         get() = if (videoFrameRate > 0) 1000L / videoFrameRate else 42L
 
@@ -77,8 +86,15 @@ class RtspServer(private val port: Int = DEFAULT_PORT) {
         if (running.getAndSet(true)) return true
 
         return try {
-            serverSocket = ServerSocket(port, 5, InetAddress.getByName("0.0.0.0"))
+            serverSocket = ServerSocket().apply {
+                reuseAddress = true
+                bind(InetSocketAddress(InetAddress.getByName("0.0.0.0"), port), 5)
+            }
             rtpTimestamp = 0
+            firstKeyframeLogged = false
+            lastSenderReportTime = 0L
+            distributedAus.set(0)
+            distributedPackets.set(0)
             RtpPacketizer.reset()
 
             encoder.configure(videoWidth, videoHeight, videoBitrate, videoFrameRate)
@@ -93,6 +109,10 @@ class RtspServer(private val port: Int = DEFAULT_PORT) {
                 serverSocket = null
                 return false
             }
+
+            // Force CSD emission so the first DESCRIBE can advertise real
+            // sprop-parameter-sets instead of an empty/degraded fmtp.
+            encoder.submitBlackFrame()
 
             if (audioEnabled) {
                 aacEncoder.configure(audioSampleRateHz, audioChannelCount, audioBitrateKbps)
@@ -122,6 +142,12 @@ class RtspServer(private val port: Int = DEFAULT_PORT) {
 
     fun stop() {
         if (!running.getAndSet(false)) return
+
+        // Capture the caller: an unexpected stop() is the prime suspect when the
+        // RTSP port silently dies while the app keeps running, so make the
+        // initiator visible in logcat.
+        val caller = Throwable().stackTrace.drop(1).take(6).joinToString(" <- ")
+        Log.d(TAG, "RTSP server stopped; stop() called from: $caller")
 
         encoder.stop()
         if (audioEnabled) {
@@ -239,7 +265,20 @@ class RtspServer(private val port: Int = DEFAULT_PORT) {
         encoder.onEncodedFrame = { nalUnits ->
             distributeEncodedFrame(nalUnits)
         }
-        encoder.start()
+        if (!encoder.start()) {
+            Log.e(TAG, "Encoder restart at ${width}x${height} failed; retrying once")
+            try {
+                Thread.sleep(100)
+            } catch (_: InterruptedException) {
+            }
+            if (!encoder.start()) {
+                // Encoder stays stopped: encodeFrame() no-ops safely, and the cached
+                // SPS/PPS keep serving SDP until a later reconfigure succeeds.
+                Log.e(TAG, "Encoder restart at ${width}x${height} failed permanently; frames skipped until next reconfigure")
+                return
+            }
+        }
+        encoder.submitBlackFrame()
         Log.d(TAG, "Encoder reconfigured to ${width}x${height}")
     }
 
@@ -247,19 +286,71 @@ class RtspServer(private val port: Int = DEFAULT_PORT) {
         if (nalUnits.isEmpty()) return
 
         rtpTimestamp += timestampIncrement
-        lastEncodedTime = System.currentTimeMillis()
+
+        if (nalUnits.any { it.isKeyFrame } && !firstKeyframeLogged) {
+            firstKeyframeLogged = true
+            Log.d(
+                TAG,
+                "First keyframe AU distributed: " +
+                    nalUnits.joinToString { "${H264NalParser.nalType(it.data)}:${it.data.size}" }
+            )
+        }
+
+        val auCount = distributedAus.incrementAndGet()
+        if (auCount % 300L == 0L) {
+            Log.d(
+                TAG,
+                "RTSP video stats: AUs=$auCount packets=${distributedPackets.get()} rtpTimestamp=$rtpTimestamp playingClients=${getClientCount()}"
+            )
+        }
+
+        val senderReport = if (System.currentTimeMillis() - lastSenderReportTime >= RTCP_SR_INTERVAL_MS) {
+            lastSenderReportTime = System.currentTimeMillis()
+            buildVideoSenderReport()
+        } else {
+            null
+        }
 
         for (client in clients.values) {
             if (client.isPlaying) {
+                if (senderReport != null) client.sendVideoRtcpPacket(senderReport)
                 for ((index, nalUnit) in nalUnits.withIndex()) {
                     val marker = index == nalUnits.lastIndex
                     val packets = RtpPacketizer.packetizeNalUnit(nalUnit.data, rtpTimestamp, marker)
+                    distributedPackets.addAndGet(packets.size.toLong())
                     for (packet in packets) {
                         client.sendRtpPacket(packet)
                     }
                 }
             }
         }
+    }
+
+    /** RFC 3550 sender report (no report blocks) for the video RTP stream. */
+    private fun buildVideoSenderReport(): ByteArray {
+        val ntpTimeMs = System.currentTimeMillis() + NTP_EPOCH_OFFSET_MS
+        val ntpSeconds = ntpTimeMs / 1000
+        val ntpFraction = ((ntpTimeMs % 1000) shl 32) / 1000
+
+        val packet = ByteArray(28)
+        packet[0] = 0x80.toByte() // V=2, P=0, RC=0
+        packet[1] = 200.toByte()  // PT=SR
+        packet[2] = 0
+        packet[3] = 6             // length in 32-bit words minus one
+        writeInt(packet, 4, RtpPacketizer.wireSsrc)
+        writeInt(packet, 8, ntpSeconds.toInt())
+        writeInt(packet, 12, ntpFraction.toInt())
+        writeInt(packet, 16, (rtpTimestamp and 0xFFFFFFFFL).toInt())
+        writeInt(packet, 20, (RtpPacketizer.sentPacketCount and 0xFFFFFFFFL).toInt())
+        writeInt(packet, 24, (RtpPacketizer.sentOctetCount and 0xFFFFFFFFL).toInt())
+        return packet
+    }
+
+    private fun writeInt(dest: ByteArray, offset: Int, value: Int) {
+        dest[offset] = (value ushr 24).toByte()
+        dest[offset + 1] = (value ushr 16).toByte()
+        dest[offset + 2] = (value ushr 8).toByte()
+        dest[offset + 3] = value.toByte()
     }
 
     private fun distributeEncodedAudioFrame(aacData: ByteArray) {
@@ -319,7 +410,11 @@ class RtspServer(private val port: Int = DEFAULT_PORT) {
                     serverSocket = null
                     if (running.get()) {
                         try {
-                            serverSocket = ServerSocket(port, 5, InetAddress.getByName("0.0.0.0"))
+                            serverSocket = ServerSocket().apply {
+                                reuseAddress = true
+                                bind(InetSocketAddress(InetAddress.getByName("0.0.0.0"), port), 5)
+                            }
+                            Log.w(TAG, "Accept socket reopened after SocketException")
                         } catch (e: Exception) {
                             Log.e(TAG, "Failed to reopen server socket", e)
                             running.set(false)
@@ -696,7 +791,9 @@ class RtspServer(private val port: Int = DEFAULT_PORT) {
 
             val rtpInfoParts = mutableListOf<String>()
             val streamBase = buildAbsoluteRtspUrl("/$DEFAULT_STREAM_PATH")
-            rtpInfoParts.add("url=$streamBase;seq=${RtpPacketizer.currentSeq};rtptime=$rtpTimestamp")
+            val nextSeq = (RtpPacketizer.currentSeq + 1) and 0xFFFF
+            val nextRtpTime = (rtpTimestamp + timestampIncrement) and 0xFFFFFFFFL
+            rtpInfoParts.add("url=$streamBase;seq=$nextSeq;rtptime=$nextRtpTime")
 
             if (isAudioSetup && audioEnabled) {
                 val audioUrl = buildAbsoluteRtspUrl("/$DEFAULT_STREAM_PATH/trackID=1")
@@ -1025,15 +1122,22 @@ class RtspServer(private val port: Int = DEFAULT_PORT) {
             return 0
         }
 
-        fun sendRtpPacket(packet: ByteArray) {
+        /**
+         * Writes one `$`-framed interleaved packet in a single write() call.
+         * Writing the 4 header bytes individually produced several tiny TCP
+         * segments per RTP packet under TCP_NODELAY.
+         */
+        private fun sendInterleaved(channel: Int, packet: ByteArray) {
             val output = outputStream ?: return
+            val frame = ByteArray(4 + packet.size)
+            frame[0] = INTERLEAVED_FRAME_MAGIC.toByte()
+            frame[1] = channel.toByte()
+            frame[2] = ((packet.size shr 8) and 0xFF).toByte()
+            frame[3] = (packet.size and 0xFF).toByte()
+            System.arraycopy(packet, 0, frame, 4, packet.size)
             try {
                 synchronized(output) {
-                    output.write(0x24)
-                    output.write(videoRtpChannel)
-                    output.write((packet.size shr 8) and 0xFF)
-                    output.write(packet.size and 0xFF)
-                    output.write(packet)
+                    output.write(frame)
                     output.flush()
                 }
             } catch (_: Exception) {
@@ -1041,21 +1145,11 @@ class RtspServer(private val port: Int = DEFAULT_PORT) {
             }
         }
 
-        fun sendAudioRtpPacket(packet: ByteArray) {
-            val output = outputStream ?: return
-            try {
-                synchronized(output) {
-                    output.write(0x24)
-                    output.write(audioRtpChannel)
-                    output.write((packet.size shr 8) and 0xFF)
-                    output.write(packet.size and 0xFF)
-                    output.write(packet)
-                    output.flush()
-                }
-            } catch (_: Exception) {
-                isPlaying = false
-            }
-        }
+        fun sendRtpPacket(packet: ByteArray) = sendInterleaved(videoRtpChannel, packet)
+
+        fun sendAudioRtpPacket(packet: ByteArray) = sendInterleaved(audioRtpChannel, packet)
+
+        fun sendVideoRtcpPacket(packet: ByteArray) = sendInterleaved(videoRtcpChannel, packet)
 
         fun close() {
             isPlaying = false
@@ -1096,24 +1190,13 @@ class RtspServer(private val port: Int = DEFAULT_PORT) {
             val spsData = encoder.sps
             val ppsData = encoder.pps
 
-            val spsHex = spsData?.let { bytesToBase64(it) } ?: ""
-            val ppsHex = ppsData?.let { bytesToBase64(it) } ?: ""
-
-            val profileLevelId = if (spsData != null && spsData.size >= 4) {
-                "%02x%02x%02x".format(
-                    spsData[1].toInt() and 0xFF,
-                    spsData[2].toInt() and 0xFF,
-                    spsData[3].toInt() and 0xFF
-                )
-            } else {
-                "42c01e"
-            }
-
-            val spropParams = if (spsHex.isNotEmpty() && ppsHex.isNotEmpty()) {
-                "sprop-parameter-sets=$spsHex,$ppsHex;"
-            } else {
-                ""
-            }
+            val spsBase64 = spsData?.let { bytesToBase64(it) }
+            val ppsBase64 = ppsData?.let { bytesToBase64(it) }
+            val fmtp = H264NalParser.buildFmtp(
+                H264NalParser.profileLevelId(spsData),
+                spsBase64,
+                ppsBase64
+            )
 
             val ip = socket.localAddress.hostAddress
 
@@ -1130,7 +1213,7 @@ class RtspServer(private val port: Int = DEFAULT_PORT) {
                 appendLine("c=IN IP4 0.0.0.0")
                 appendLine("b=AS:${videoBitrate / 1000}")
                 appendLine("a=rtpmap:96 H264/90000")
-                appendLine("a=fmtp:96 packetization-mode=1;profile-level-id=$profileLevelId;${spropParams}")
+                appendLine("a=fmtp:96 $fmtp")
                 appendLine("a=control:$DEFAULT_STREAM_PATH")
 
                 if (audioEnabled) {
@@ -1178,6 +1261,8 @@ class RtspServer(private val port: Int = DEFAULT_PORT) {
         private const val DIGEST_NONCE_BYTES = 16
         private const val DIGEST_NONCE_TTL_MS = 5 * 60 * 1000L
         private const val MAX_DIGEST_NONCES = 512
+        private const val RTCP_SR_INTERVAL_MS = 5_000L
+        private const val NTP_EPOCH_OFFSET_MS = 2_208_988_800_000L // 1900-01-01 vs 1970-01-01
         private val RFC_1123_FORMAT = object : ThreadLocal<SimpleDateFormat>() {
             override fun initialValue(): SimpleDateFormat {
                 return SimpleDateFormat("EEE, dd MMM yyyy HH:mm:ss 'GMT'", Locale.US).apply {
