@@ -30,7 +30,6 @@ class StreamingService : Service() {
                 includeAudio = intent.getBooleanExtra(EXTRA_AUDIO_ACTIVE, false)
             )
             ACTION_PAUSE -> pauseStreamingForeground(intent.getStringExtra(EXTRA_URL))
-            ACTION_STOP -> stopStreamingForeground()
         }
         return START_STICKY
     }
@@ -51,12 +50,6 @@ class StreamingService : Service() {
             startForeground(NOTIFICATION_ID, notification)
         }
         Log.d(TAG, "Streaming foreground service started")
-    }
-
-    private fun stopStreamingForeground() {
-        stopForeground(STOP_FOREGROUND_REMOVE)
-        stopSelf()
-        Log.d(TAG, "Streaming foreground service stopped")
     }
 
     private fun pauseStreamingForeground(url: String?) {
@@ -112,7 +105,6 @@ class StreamingService : Service() {
     companion object {
         const val ACTION_START = "com.raulshma.lenscast.START_STREAMING"
         const val ACTION_PAUSE = "com.raulshma.lenscast.PAUSE_STREAMING"
-        const val ACTION_STOP = "com.raulshma.lenscast.STOP_STREAMING"
         const val EXTRA_URL = "stream_url"
         const val EXTRA_AUDIO_ACTIVE = "stream_audio_active"
         private const val CHANNEL_ID = "streaming_channel"

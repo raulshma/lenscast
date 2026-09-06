@@ -9,7 +9,6 @@ enum class ThermalState {
 }
 
 data class ThermalThrottlingResult(
-    val bitrateMultiplier: Float,
     val frameRateMultiplier: Float,
     val jpegQuality: Int,
     val shouldPause: Boolean,

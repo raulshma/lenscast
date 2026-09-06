@@ -22,6 +22,7 @@ import com.raulshma.lenscast.camera.model.OverlayPosition
 import com.raulshma.lenscast.camera.model.OverlaySettings
 import com.raulshma.lenscast.camera.model.Resolution
 import com.raulshma.lenscast.camera.model.WhiteBalance
+import com.raulshma.lenscast.core.StreamDefaults
 import com.raulshma.lenscast.streaming.rtsp.RtspInputFormat
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
@@ -190,7 +191,7 @@ class SettingsDataStore(private val context: Context) {
             },
             colorTemperature = if (prefs[Keys.COLOR_TEMPERATURE_NULL] != "true") prefs[Keys.COLOR_TEMPERATURE] else null,
             zoomRatio = prefs[Keys.ZOOM_RATIO] ?: 1.0f,
-            frameRate = prefs[Keys.FRAME_RATE] ?: 24,
+            frameRate = prefs[Keys.FRAME_RATE] ?: StreamDefaults.STREAM_FPS,
             resolution = try {
                 Resolution.valueOf(prefs[Keys.RESOLUTION] ?: Resolution.FHD_1080P.name)
             } catch (_: Exception) {
@@ -212,15 +213,15 @@ class SettingsDataStore(private val context: Context) {
     }
 
     val streamingPort: Flow<Int> = context.dataStore.data.map { prefs ->
-        prefs[Keys.STREAMING_PORT] ?: 8080
+        prefs[Keys.STREAMING_PORT] ?: StreamDefaults.WEB_PORT
     }
 
     val frameRate: Flow<Int> = context.dataStore.data.map { prefs ->
-        prefs[Keys.FRAME_RATE] ?: 24
+        prefs[Keys.FRAME_RATE] ?: StreamDefaults.STREAM_FPS
     }
 
     val jpegQuality: Flow<Int> = context.dataStore.data.map { prefs ->
-        prefs[Keys.JPEG_QUALITY] ?: 70
+        prefs[Keys.JPEG_QUALITY] ?: StreamDefaults.JPEG_QUALITY
     }
 
     val showPreview: Flow<Boolean> = context.dataStore.data.map { prefs ->
@@ -232,11 +233,11 @@ class SettingsDataStore(private val context: Context) {
     }
 
     val streamAudioBitrateKbps: Flow<Int> = context.dataStore.data.map { prefs ->
-        prefs[Keys.STREAM_AUDIO_BITRATE_KBPS] ?: 128
+        prefs[Keys.STREAM_AUDIO_BITRATE_KBPS] ?: StreamDefaults.AUDIO_BITRATE_KBPS
     }
 
     val streamAudioChannels: Flow<Int> = context.dataStore.data.map { prefs ->
-        prefs[Keys.STREAM_AUDIO_CHANNELS] ?: 1
+        prefs[Keys.STREAM_AUDIO_CHANNELS] ?: StreamDefaults.AUDIO_CHANNELS
     }
 
     val streamAudioEchoCancellation: Flow<Boolean> = context.dataStore.data.map { prefs ->
@@ -265,7 +266,7 @@ class SettingsDataStore(private val context: Context) {
     }
 
     val rtspPort: Flow<Int> = context.dataStore.data.map { prefs ->
-        prefs[Keys.RTSP_PORT] ?: 8554
+        prefs[Keys.RTSP_PORT] ?: StreamDefaults.RTSP_PORT
     }
 
     val rtspInputFormat: Flow<RtspInputFormat> = context.dataStore.data.map { prefs ->
@@ -426,11 +427,11 @@ class SettingsDataStore(private val context: Context) {
     }
 
     val watchdogMaxRetries: Flow<Int> = context.dataStore.data.map { prefs ->
-        prefs[Keys.WATCHDOG_MAX_RETRIES] ?: 5
+        prefs[Keys.WATCHDOG_MAX_RETRIES] ?: StreamDefaults.WATCHDOG_MAX_RETRIES
     }
 
     val watchdogCheckIntervalSeconds: Flow<Int> = context.dataStore.data.map { prefs ->
-        prefs[Keys.WATCHDOG_CHECK_INTERVAL_SECONDS] ?: 5
+        prefs[Keys.WATCHDOG_CHECK_INTERVAL_SECONDS] ?: StreamDefaults.WATCHDOG_CHECK_INTERVAL_SECONDS
     }
 
     suspend fun saveWatchdogEnabled(enabled: Boolean) {

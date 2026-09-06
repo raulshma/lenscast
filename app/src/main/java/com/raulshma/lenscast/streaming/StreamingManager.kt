@@ -11,6 +11,7 @@ import android.util.Log
 import com.raulshma.lenscast.camera.model.OverlaySettings
 import com.raulshma.lenscast.core.NetworkQualityMonitor
 import com.raulshma.lenscast.core.NetworkUtils
+import com.raulshma.lenscast.core.StreamDefaults
 import com.raulshma.lenscast.core.ThermalMonitor
 import com.raulshma.lenscast.data.StreamAuthSettings
 import com.raulshma.lenscast.streaming.rtsp.RtspInputFormat
@@ -41,41 +42,47 @@ sealed class FrameData {
     ) : FrameData()
 }
 
-class StreamingManager(private val context: Context) {
+class StreamingManager(
+    private val context: Context,
+    private val thermalMonitor: ThermalMonitor,
+) {
 
     private val audioStreamingManager = AudioStreamingManager(context)
     private val serviceDiscoveryManager = ServiceDiscoveryManager(context)
     private val webStreamingEnabled = AtomicBoolean(true)
-    private var mdnsEnabled = AtomicBoolean(true)
+    private val mdnsEnabled = AtomicBoolean(true)
     @Volatile
     private var currentAuthSettings = StreamAuthSettings()
     @Volatile
     private var currentOverlaySettings = OverlaySettings()
     val networkQualityMonitor = NetworkQualityMonitor()
     private val adaptiveBitrateController = AdaptiveBitrateController(networkQualityMonitor)
-    private var server: StreamingServer = createServer(DEFAULT_PORT)
+    private val apiController by lazy { WebApiController(context) }
+    private var server: StreamingServer = createServer(StreamDefaults.WEB_PORT)
     private val webStreamingActive = AtomicBoolean(false)
     private val rtspStreamingActive = AtomicBoolean(false)
-    private val jpegQuality = AtomicInteger(DEFAULT_JPEG_QUALITY)
+    private val jpegQuality = AtomicInteger(StreamDefaults.JPEG_QUALITY)
     private val streamAudioEnabled = AtomicBoolean(true)
-    private val streamAudioBitrateKbps = AtomicInteger(DEFAULT_AUDIO_BITRATE_KBPS)
-    private val streamAudioChannels = AtomicInteger(DEFAULT_AUDIO_CHANNELS)
+    private val streamAudioBitrateKbps = AtomicInteger(StreamDefaults.AUDIO_BITRATE_KBPS)
+    private val streamAudioChannels = AtomicInteger(StreamDefaults.AUDIO_CHANNELS)
     private val streamAudioEchoCancellation = AtomicBoolean(true)
     @Volatile
     private var recordingAudioCaptureActive = false
-    private var currentPort: Int = DEFAULT_PORT
+    private var currentPort: Int = StreamDefaults.WEB_PORT
 
     private val rtspEnabled = AtomicBoolean(false)
     @Volatile
     private var currentRtspPort: Int = RtspServer.DEFAULT_PORT
     @Volatile
     private var currentRtspInputFormat: RtspInputFormat = RtspInputFormat.AUTO
+    @Volatile
+    private var currentRtspFrameRate: Int = StreamDefaults.STREAM_FPS
     private var rtspServer: RtspServer? = null
     @Volatile
     private var rtspAudioStream: InputStream? = null
 
     private val lastFrameTimeMs = AtomicLong(0L)
-    private val minFrameIntervalMs = AtomicLong(1000L / DEFAULT_STREAM_FPS)
+    private val minFrameIntervalMs = AtomicLong(1000L / StreamDefaults.STREAM_FPS)
     private val maxBufferSize = 4 * 1024 * 1024
     private var reusableBuffer = ByteArrayOutputStream(256 * 1024)
     private var reusableYuvBuffer = ByteArrayOutputStream(256 * 1024)
@@ -94,8 +101,6 @@ class StreamingManager(private val context: Context) {
             }
         }
     }
-
-    var thermalMonitor: ThermalMonitor? = null
 
     private val _isStreaming = MutableStateFlow(false)
     val isStreaming: StateFlow<Boolean> = _isStreaming
@@ -185,8 +190,6 @@ class StreamingManager(private val context: Context) {
         Log.d(TAG, "Adaptive bitrate ${if (enabled) "enabled" else "disabled"}")
     }
 
-    fun isAdaptiveBitrateEnabled(): Boolean = adaptiveBitrateController.isEnabled
-
     fun ensureServerRunning(): Boolean {
         if (_isServerRunning.value) {
             if (_streamUrl.value.isBlank()) {
@@ -264,8 +267,7 @@ class StreamingManager(private val context: Context) {
     fun stopWebStreaming() {
         if (!webStreamingActive.getAndSet(false)) return
         audioStreamingManager.stop()
-        _isAudioStreaming.value = false
-        _audioStreamUrl.value = ""
+        clearWebAudioState()
         _streamUrl.value = ""
         _clientCount.value = 0
         lastReportedClientCount = -1
@@ -303,7 +305,7 @@ class StreamingManager(private val context: Context) {
         val elapsed = now - lastFrameTimeMs.get()
 
         val baseInterval = minFrameIntervalMs.get()
-        val thermalAdjustedInterval = thermalMonitor?.getAdjustedFrameDelay(baseInterval) ?: baseInterval
+        val thermalAdjustedInterval = thermalMonitor.getAdjustedFrameDelay(baseInterval)
         val adaptiveInterval = adaptiveBitrateController.getAdaptiveFrameInterval(baseInterval, thermalAdjustedInterval)
 
         if (elapsed < adaptiveInterval) {
@@ -314,7 +316,7 @@ class StreamingManager(private val context: Context) {
         lastFrameTimeMs.set(now)
 
         val baseQuality = jpegQuality.get()
-        val thermalAdjustedQuality = thermalMonitor?.getAdjustedQuality(baseQuality) ?: baseQuality
+        val thermalAdjustedQuality = thermalMonitor.getAdjustedQuality(baseQuality)
         val quality = adaptiveBitrateController.getAdaptiveQuality(baseQuality, thermalAdjustedQuality)
 
         val frame = FrameData.YuvFrame(yuvData.copyOf(), width, height, rotation, quality, currentOverlaySettings, clientCount)
@@ -422,7 +424,7 @@ class StreamingManager(private val context: Context) {
     }
 
     fun setStreamFrameRate(fps: Int) {
-        minFrameIntervalMs.set(if (fps > 0) 1000L / fps else 1000L / DEFAULT_STREAM_FPS)
+        minFrameIntervalMs.set(if (fps > 0) 1000L / fps else 1000L / StreamDefaults.STREAM_FPS)
     }
 
     fun setAdaptiveDefaultFrameRate(fps: Int) {
@@ -431,16 +433,11 @@ class StreamingManager(private val context: Context) {
 
     fun setStreamAudioEnabled(enabled: Boolean) {
         streamAudioEnabled.set(enabled)
-        if (webStreamingActive.get()) {
-            refreshAudioStreamingState()
-        } else {
-            _isAudioStreaming.value = false
-            _audioStreamUrl.value = ""
-        }
-        // Restart RTSP server if running to pick up audio change
+        onWebAudioChanged()
+        // The only exception to the onRtspAudioChanged ladder: a toggle changes
+        // the RTSP audio track either way, so restart even when turning off.
         if (rtspStreamingActive.get()) {
-            stopRtspServer()
-            startRtspServer()
+            restartRtspServer()
         }
     }
 
@@ -457,37 +454,66 @@ class StreamingManager(private val context: Context) {
     }
 
     fun setStreamAudioBitrateKbps(bitrateKbps: Int) {
-        streamAudioBitrateKbps.set(bitrateKbps.coerceIn(32, 320))
-        if (webStreamingActive.get() && streamAudioEnabled.get()) {
-            refreshAudioStreamingState()
-        }
-        if (rtspStreamingActive.get() && streamAudioEnabled.get()) {
-            rtspServer?.setAudioBitrate(streamAudioBitrateKbps.get())
-        }
+        streamAudioBitrateKbps.set(bitrateKbps.coerceIn(MIN_AUDIO_BITRATE_KBPS, MAX_AUDIO_BITRATE_KBPS))
+        onWebAudioChanged()
+        // RTSP supports live bitrate updates; no restart needed.
+        onRtspAudioChanged(liveUpdate = { rtspServer?.setAudioBitrate(streamAudioBitrateKbps.get()) })
     }
 
     fun setStreamAudioChannels(channels: Int) {
-        streamAudioChannels.set(channels.coerceIn(1, 2))
-        if (webStreamingActive.get() && streamAudioEnabled.get()) {
-            refreshAudioStreamingState()
-        }
-        // Only meaningful for RTSP when its audio track is active; restarting
-        // otherwise drops connected viewers for no benefit.
-        if (rtspStreamingActive.get() && streamAudioEnabled.get()) {
-            stopRtspServer()
-            startRtspServer()
-        }
+        streamAudioChannels.set(channels.coerceIn(MIN_AUDIO_CHANNELS, MAX_AUDIO_CHANNELS))
+        onWebAudioChanged()
+        // Channel count is an encoder config; RTSP restart required.
+        onRtspAudioChanged()
     }
 
     fun setStreamAudioEchoCancellation(enabled: Boolean) {
         streamAudioEchoCancellation.set(enabled)
-        if (webStreamingActive.get() && streamAudioEnabled.get()) {
+        onWebAudioChanged()
+        // Echo cancellation is an audio-capture config; RTSP restart required.
+        onRtspAudioChanged()
+    }
+
+    // ── Stream-audio change policy: one decision point for every audio setting ──
+
+    private fun onWebAudioChanged() {
+        if (webStreamingActive.get()) {
             refreshAudioStreamingState()
+        } else {
+            clearWebAudioState()
         }
-        if (rtspStreamingActive.get() && streamAudioEnabled.get()) {
-            stopRtspServer()
-            startRtspServer()
+    }
+
+    /**
+     * React to an audio setting that affects the RTSP track. [liveUpdate] is
+     * used when the running server can apply the change without a restart;
+     * otherwise the server restarts so the encoder picks the new config up.
+     */
+    private fun onRtspAudioChanged(liveUpdate: (() -> Unit)? = null) {
+        if (!rtspStreamingActive.get() || !streamAudioEnabled.get()) return
+        if (liveUpdate != null) {
+            liveUpdate()
+        } else {
+            restartRtspServer()
         }
+    }
+
+    private fun restartRtspServer() {
+        stopRtspServer()
+        startRtspServer()
+    }
+
+    private fun clearWebAudioState() {
+        _isAudioStreaming.value = false
+        _audioStreamUrl.value = ""
+    }
+
+    private fun audioConfig(): AudioStreamingManager.Config {
+        return AudioStreamingManager.Config(
+            bitrateKbps = streamAudioBitrateKbps.get(),
+            channelCount = streamAudioChannels.get(),
+            echoCancellation = streamAudioEchoCancellation.get(),
+        )
     }
 
     fun setRecordingAudioCaptureActive(active: Boolean) {
@@ -546,6 +572,9 @@ class StreamingManager(private val context: Context) {
     }
 
     fun setRtspFrameRate(fps: Int) {
+        // Retain even when RTSP is not running so the next start picks it up —
+        // every RTSP setting is retained, no silent drops.
+        currentRtspFrameRate = fps
         rtspServer?.setFrameRate(fps)
     }
 
@@ -570,7 +599,7 @@ class StreamingManager(private val context: Context) {
     }
 
     private fun createServer(port: Int): StreamingServer {
-        return StreamingServer(port, context, audioStreamingManager).also {
+        return StreamingServer(port, context, audioStreamingManager, apiController).also {
             it.networkQualityMonitor = networkQualityMonitor
             applyAuthSettings(it, currentAuthSettings)
             it.setWebStreamingEnabled(webStreamingEnabled.get())
@@ -616,8 +645,7 @@ class StreamingManager(private val context: Context) {
     fun applyBatteryOptimization(result: com.raulshma.lenscast.core.BatteryOptimizationResult?) {
         if (result == null) return
         setJpegQuality(result.suggestedJpegQuality)
-        Log.d(TAG, "Battery optimization applied: quality=${result.suggestedJpegQuality}, " +
-                "bitrate=${result.suggestedBitrate}, fps=${result.suggestedFrameRate}")
+        Log.d(TAG, "Battery optimization applied: quality=${result.suggestedJpegQuality} (${result.message})")
     }
 
     fun release() {
@@ -625,25 +653,17 @@ class StreamingManager(private val context: Context) {
         frameQueue.close()
         audioStreamingManager.release()
         stopStreaming()
-        thermalMonitor?.stopMonitoring()
     }
 
     private fun refreshAudioStreamingState() {
         audioStreamingManager.stop()
 
         if (!webStreamingActive.get() || !webStreamingEnabled.get() || !streamAudioEnabled.get() || recordingAudioCaptureActive) {
-            _isAudioStreaming.value = false
-            _audioStreamUrl.value = ""
+            clearWebAudioState()
             return
         }
 
-        val audioStarted = audioStreamingManager.start(
-            AudioStreamingManager.Config(
-                bitrateKbps = streamAudioBitrateKbps.get(),
-                channelCount = streamAudioChannels.get(),
-                echoCancellation = streamAudioEchoCancellation.get(),
-            )
-        )
+        val audioStarted = audioStreamingManager.start(audioConfig())
         _isAudioStreaming.value = audioStarted
         _audioStreamUrl.value = if (audioStarted) buildAudioUrl() else ""
     }
@@ -666,19 +686,14 @@ class StreamingManager(private val context: Context) {
         val server = RtspServer(currentRtspPort)
         applyRtspAuthSettings(server, currentAuthSettings)
         server.setInputFormat(currentRtspInputFormat)
+        server.setFrameRate(currentRtspFrameRate)
 
         // Configure audio for RTSP if enabled
         val audioEnabled = streamAudioEnabled.get() && !recordingAudioCaptureActive
         if (audioEnabled) {
             // Ensure audio capture is running
             if (!audioStreamingManager.isRunning()) {
-                audioStreamingManager.start(
-                    AudioStreamingManager.Config(
-                        bitrateKbps = streamAudioBitrateKbps.get(),
-                        channelCount = streamAudioChannels.get(),
-                        echoCancellation = streamAudioEchoCancellation.get(),
-                    )
-                )
+                audioStreamingManager.start(audioConfig())
             }
             if (audioStreamingManager.isRunning()) {
                 val audioStream = audioStreamingManager.openStream()
@@ -715,8 +730,7 @@ class StreamingManager(private val context: Context) {
         // If audio was started only for RTSP and web streaming is not active, stop it
         if (!webStreamingActive.get()) {
             audioStreamingManager.stop()
-            _isAudioStreaming.value = false
-            _audioStreamUrl.value = ""
+            clearWebAudioState()
         }
         _rtspUrl.value = ""
         _isRtspRunning.value = false
@@ -724,10 +738,9 @@ class StreamingManager(private val context: Context) {
 
     companion object {
         private const val TAG = "StreamingManager"
-        const val DEFAULT_PORT = 8080
-        private const val DEFAULT_JPEG_QUALITY = 70
-        private const val DEFAULT_STREAM_FPS = 24
-        private const val DEFAULT_AUDIO_BITRATE_KBPS = 128
-        private const val DEFAULT_AUDIO_CHANNELS = 1
+        private const val MIN_AUDIO_BITRATE_KBPS = 32
+        private const val MAX_AUDIO_BITRATE_KBPS = 320
+        private const val MIN_AUDIO_CHANNELS = 1
+        private const val MAX_AUDIO_CHANNELS = 2
     }
 }

@@ -4,6 +4,7 @@ import android.content.Context
 import android.util.Log
 import com.raulshma.lenscast.core.NetworkQualityMonitor
 import com.raulshma.lenscast.core.NetworkUtils
+import com.raulshma.lenscast.core.StreamDefaults
 import com.raulshma.lenscast.data.StreamAuthSettings
 import fi.iki.elonen.NanoHTTPD
 import java.io.ByteArrayInputStream
@@ -17,9 +18,12 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicInteger
 
 class StreamingServer(
-    private val port: Int = DEFAULT_PORT,
-    private val context: Context? = null,
-    private val audioStreamingManager: AudioStreamingManager? = null,
+    private val port: Int = StreamDefaults.WEB_PORT,
+    private val context: Context,
+    private val audioStreamingManager: AudioStreamingManager,
+    // Received at the seam, never manufactured here: the transport layer must
+    // not grow its own WebApiController (and its eager scope) per instance.
+    private val apiController: WebApiController,
 ) : NanoHTTPD(port) {
 
     private val boundary = BOUNDARY_MARKER
@@ -39,8 +43,6 @@ class StreamingServer(
     private val precomputedMjpegFooter = "\r\n".toByteArray()
 
     var networkQualityMonitor: NetworkQualityMonitor? = null
-
-    private val apiController: WebApiController? = context?.let { WebApiController(it) }
 
     private val assetCache = object : LinkedHashMap<String, Pair<ByteArray, String>>(16, 0.75f, true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Pair<ByteArray, String>>): Boolean {
@@ -394,13 +396,6 @@ class StreamingServer(
 
     private fun handleApiRoute(uri: String, method: Method, session: IHTTPSession): Response {
         val controller = apiController
-        if (controller == null) {
-            return newFixedLengthResponse(
-                Response.Status.INTERNAL_ERROR,
-                "application/json",
-                """{"error":"API not available"}"""
-            )
-        }
 
         val body = readBody(session)
         if (body == null) {
@@ -480,7 +475,7 @@ class StreamingServer(
     }
 
     private fun serveStaticFile(uri: String): Response {
-        val assetMgr = context?.assets ?: return serveFallbackControlPage()
+        val assetMgr = context.assets
 
         val path = resolveAssetPath(uri)
             ?: return newFixedLengthResponse(
@@ -525,10 +520,7 @@ class StreamingServer(
     }
 
     private fun serveMediaFile(uri: String, session: IHTTPSession): Response {
-        val controller = apiController ?: return newFixedLengthResponse(
-            Response.Status.INTERNAL_ERROR, "application/json",
-            """{"error":"API not available"}"""
-        )
+        val controller = apiController
 
         val path = uri.removePrefix("/api/media/")
         if (path.isEmpty()) {
@@ -893,13 +885,6 @@ class StreamingServer(
 
         if (highRes) {
             val controller = apiController
-            if (controller == null) {
-                return newFixedLengthResponse(
-                    Response.Status.INTERNAL_ERROR,
-                    MIME_PLAINTEXT,
-                    "API not available"
-                )
-            }
 
             return when (val result = controller.handleHighResSnapshot(saveToDisk)) {
                 is WebApiController.SnapshotResult.Success -> {
@@ -949,7 +934,7 @@ class StreamingServer(
             )
         }
 
-        val audioStream = audioStreamingManager?.openStream()
+        val audioStream = audioStreamingManager.openStream()
         return if (audioStream != null) {
             newChunkedResponse(
                 Response.Status.OK,
@@ -961,8 +946,8 @@ class StreamingServer(
                 addHeader("Expires", "0")
                 addHeader("X-Accel-Buffering", "no")
                 addHeader("X-Audio-Format", "pcm_s16le")
-                addHeader("X-Audio-Sample-Rate", "${audioStreamingManager?.getSampleRateHz() ?: 48000}")
-                addHeader("X-Audio-Channels", "${audioStreamingManager?.getChannelCount() ?: 1}")
+                addHeader("X-Audio-Sample-Rate", "${audioStreamingManager.getSampleRateHz()}")
+                addHeader("X-Audio-Channels", "${audioStreamingManager.getChannelCount()}")
             }
         } else {
             newFixedLengthResponse(
@@ -998,7 +983,6 @@ class StreamingServer(
 
     companion object {
         private const val TAG = "StreamingServer"
-        const val DEFAULT_PORT = 8080
         const val BOUNDARY_MARKER = "LensCastBoundary"
         private const val SESSION_DURATION_MS = 24 * 60 * 60 * 1000L
         private const val SESSION_CLEANUP_INTERVAL_MS = 60 * 1000L

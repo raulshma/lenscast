@@ -1,6 +1,7 @@
 package com.raulshma.lenscast.streaming.rtsp
 
 import android.util.Log
+import com.raulshma.lenscast.core.StreamDefaults
 import com.raulshma.lenscast.data.StreamAuthSettings
 import java.io.ByteArrayOutputStream
 import java.io.InputStream
@@ -33,8 +34,8 @@ class RtspServer(private val port: Int = DEFAULT_PORT) {
     private val aacEncoder = AacEncoder()
     @Volatile private var audioEnabled = false
     private var audioSampleRateHz = 48000
-    private var audioChannelCount = 1
-    private var audioBitrateKbps = 128
+    private var audioChannelCount = StreamDefaults.AUDIO_CHANNELS
+    private var audioBitrateKbps = StreamDefaults.AUDIO_BITRATE_KBPS
     private var audioTimestamp: Long = 0
     private val audioTimestampIncrement: Long = 1024 // AAC-LC: 1024 samples per frame
 
@@ -56,7 +57,7 @@ class RtspServer(private val port: Int = DEFAULT_PORT) {
     private var videoWidth = 1280
     private var videoHeight = 720
     private var videoBitrate = 2_000_000
-    private var videoFrameRate = 24
+    private var videoFrameRate = StreamDefaults.STREAM_FPS
     private var videoInputFormat = RtspInputFormat.AUTO
     private var lastRotation = 0
 
@@ -1253,7 +1254,7 @@ class RtspServer(private val port: Int = DEFAULT_PORT) {
         private const val TAG = "RtspServer"
         private const val AUTH_REALM = "LensCast RTSP"
         private const val AUTH_OPAQUE = "lenscast-rtsp"
-        const val DEFAULT_PORT = 8554
+        const val DEFAULT_PORT = StreamDefaults.RTSP_PORT
         const val DEFAULT_STREAM_PATH = "stream"
         private const val INTERLEAVED_FRAME_MAGIC = 0x24
         private const val MAX_CLIENTS = 4

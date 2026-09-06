@@ -4,6 +4,7 @@ import android.util.Log
 import com.raulshma.lenscast.camera.CameraService
 import com.raulshma.lenscast.camera.model.CameraState
 import com.raulshma.lenscast.streaming.StreamingManager
+import com.raulshma.lenscast.streaming.StreamingSession
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -32,8 +33,7 @@ import java.util.concurrent.atomic.AtomicInteger
 class StreamWatchdog(
     private val cameraService: CameraService,
     private val streamingManager: StreamingManager,
-    private val powerManager: PowerManager,
-    private val thermalMonitor: ThermalMonitor,
+    private val streamingSession: StreamingSession,
 ) {
 
     // ── Configuration ──
@@ -43,11 +43,11 @@ class StreamWatchdog(
         private set
 
     @Volatile
-    var maxRetries: Int = DEFAULT_MAX_RETRIES
+    var maxRetries: Int = StreamDefaults.WATCHDOG_MAX_RETRIES
         private set
 
     @Volatile
-    var checkIntervalSeconds: Int = DEFAULT_CHECK_INTERVAL_SECONDS
+    var checkIntervalSeconds: Int = StreamDefaults.WATCHDOG_CHECK_INTERVAL_SECONDS
         private set
 
     // ── State ──
@@ -190,19 +190,6 @@ class StreamWatchdog(
         lastFailureReason = null
         updateState(WatchdogStatus.IDLE)
         Log.d(TAG, "Watchdog monitoring stopped")
-    }
-
-    /**
-     * Reset the watchdog state (e.g., after user manually resolves an issue).
-     */
-    fun reset() {
-        consecutiveFailures.set(0)
-        lastFailureReason = null
-        if (monitorJob?.isActive == true) {
-            updateState(WatchdogStatus.MONITORING)
-        } else {
-            updateState(WatchdogStatus.IDLE)
-        }
     }
 
     // ── Health Checks ──
@@ -358,15 +345,9 @@ class StreamWatchdog(
         }
 
         // Re-acquire keep-alive and rebind
-        withContext(Dispatchers.Main) {
-            cameraService.acquireKeepAlive()
-            cameraService.rebindUseCases()
-        }
-
-        // Refresh power and thermal state
-        powerManager.refreshBatteryState()
-        thermalMonitor.startMonitoring()
-        streamingManager.thermalMonitor = thermalMonitor
+        // The session stayed active through recovery, so keep-alive and the
+        // foreground service are still held; only refresh what recovery disturbed.
+        streamingSession.refreshAfterRecovery()
 
         // Restart streaming
         val started = streamingManager.startStreaming()
@@ -446,8 +427,6 @@ class StreamWatchdog(
     companion object {
         private const val TAG = "StreamWatchdog"
 
-        const val DEFAULT_MAX_RETRIES = 5
-        const val DEFAULT_CHECK_INTERVAL_SECONDS = 5
         const val MIN_CHECK_INTERVAL_SECONDS = 3
         const val MAX_CHECK_INTERVAL_SECONDS = 30
 

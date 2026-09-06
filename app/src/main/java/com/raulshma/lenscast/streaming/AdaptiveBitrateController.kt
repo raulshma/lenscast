@@ -2,217 +2,129 @@ package com.raulshma.lenscast.streaming
 
 import android.util.Log
 import com.raulshma.lenscast.core.NetworkQualityMonitor
-import com.raulshma.lenscast.core.NetworkQualityMonitor.NetworkQualityLevel
+import com.raulshma.lenscast.core.StreamDefaults
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
-import java.util.concurrent.atomic.AtomicLong
 
+/**
+ * The single adaptive-bitrate brain. Applies NetworkQualityMonitor's live
+ * quality ladders onto the frame path via [getAdaptiveQuality] and
+ * [getAdaptiveFrameInterval], and publishes the driven state for dashboards:
+ * what the UI and the Web API read is what the frame path actually applied.
+ *
+ * There is no separate planning step — the frame path is the driver, and the
+ * published state is updated from the values it produces.
+ */
 class AdaptiveBitrateController(
     private val networkMonitor: NetworkQualityMonitor,
     private val config: AdaptiveBitrateConfig = AdaptiveBitrateConfig(),
 ) {
 
-    private val _isEnabled = AtomicBoolean(config.enabledByDefault)
-    val isEnabled: Boolean get() = _isEnabled.get()
+    private val isEnabled = AtomicBoolean(config.enabledByDefault)
+    private val adjustmentCount = AtomicInteger(0)
 
-    private val _currentQuality = AtomicInteger(config.defaultQuality)
-    val currentQuality: Int get() = _currentQuality.get()
+    // Mutable because settings (stream fps) update it at runtime; written from
+    // the settings applier coroutine, read on frame threads.
+    @Volatile
+    private var defaultIntervalMs = config.defaultFrameIntervalMs
 
-    private val _currentFrameIntervalMs = AtomicLong(config.defaultFrameIntervalMs)
-    val currentFrameIntervalMs: Long get() = _currentFrameIntervalMs.get()
+    // Last values actually applied on the frame path.
+    @Volatile
+    private var appliedQuality = config.defaultQuality
+    @Volatile
+    private var appliedIntervalMs = defaultIntervalMs
+    @Volatile
+    private var lastPublishMs = 0L
 
-    private val _adjustmentCount = AtomicInteger(0)
-    val adjustmentCount: Int get() = _adjustmentCount.get()
+    // Values as of the last published state — the adjustment counter ticks
+    // once per published change, not once per frame.
+    @Volatile
+    private var publishedQuality = config.defaultQuality
+    @Volatile
+    private var publishedIntervalMs = defaultIntervalMs
 
-    private val _qualityLevel = MutableStateFlow(NetworkQualityLevel.GOOD)
-    val qualityLevel: StateFlow<NetworkQualityLevel> = _qualityLevel.asStateFlow()
-
-    private var lastAdjustmentTime = 0L
-    private var lastAppliedQuality = config.defaultQuality
-    private var lastAppliedInterval = config.defaultFrameIntervalMs
-
-    private val _state = MutableStateFlow(AdaptiveState(
-        enabled = config.enabledByDefault,
-        qualityLevel = NetworkQualityLevel.GOOD,
-        currentQuality = config.defaultQuality,
-        targetQuality = config.defaultQuality,
-        currentFps = (1000f / config.defaultFrameIntervalMs).toInt(),
-        targetFps = (1000f / config.defaultFrameIntervalMs).toInt(),
-        estimatedBandwidthKbps = networkMonitor.estimatedBandwidthKbps,
-        minClientThroughputKbps = networkMonitor.getMinClientThroughputKbps(),
-        activeClients = networkMonitor.activeClients,
-    ))
+    private val _state = MutableStateFlow(buildState())
     val state: StateFlow<AdaptiveState> = _state.asStateFlow()
 
     fun setEnabled(enabled: Boolean) {
-        _isEnabled.set(enabled)
+        if (isEnabled.getAndSet(enabled) == enabled) return
         if (!enabled) {
-            _currentQuality.set(config.defaultQuality)
-            _currentFrameIntervalMs.set(config.defaultFrameIntervalMs)
-            lastAppliedQuality = config.defaultQuality
-            lastAppliedInterval = config.defaultFrameIntervalMs
-            Log.d(TAG, "Adaptive bitrate disabled, restored defaults")
-        } else {
-            evaluate()
+            appliedQuality = config.defaultQuality
+            appliedIntervalMs = defaultIntervalMs
         }
-        updateState()
-    }
-
-    fun setDefaultQuality(quality: Int) {
-        val clamped = quality.coerceIn(config.minQuality, config.maxQuality)
-        _currentQuality.set(clamped)
-        lastAppliedQuality = clamped
+        publishState(force = true)
+        Log.d(TAG, "Adaptive bitrate ${if (enabled) "enabled" else "disabled"}")
     }
 
     fun setDefaultFrameRate(fps: Int) {
         val clampedFps = fps.coerceIn(config.minFps, config.maxFps)
-        val interval = (1000L / clampedFps)
-        _currentFrameIntervalMs.set(interval)
-        lastAppliedInterval = interval
-    }
-
-    fun evaluate(): AdaptiveResult {
-        if (!_isEnabled.get()) {
-            return AdaptiveResult(
-                quality = config.defaultQuality,
-                frameIntervalMs = config.defaultFrameIntervalMs,
-                adjusted = false,
-                reason = "disabled",
-            )
+        val interval = 1000L / clampedFps
+        if (defaultIntervalMs == interval) return
+        defaultIntervalMs = interval
+        if (!isEnabled.get()) {
+            appliedIntervalMs = interval
         }
-
-        val now = System.currentTimeMillis()
-        val elapsedSinceLastAdjustment = now - lastAdjustmentTime
-
-        if (elapsedSinceLastAdjustment < config.minAdjustmentIntervalMs) {
-            return AdaptiveResult(
-                quality = lastAppliedQuality,
-                frameIntervalMs = lastAppliedInterval,
-                adjusted = false,
-                reason = "cooldown",
-            )
-        }
-
-        val qualityLevel = networkMonitor.getNetworkQualityLevel()
-        _qualityLevel.value = qualityLevel
-
-        val activeClients = networkMonitor.activeClients
-
-        if (activeClients == 0) {
-            return AdaptiveResult(
-                quality = config.defaultQuality,
-                frameIntervalMs = config.defaultFrameIntervalMs,
-                adjusted = false,
-                reason = "no_clients",
-            )
-        }
-
-        val baseQuality = _currentQuality.get()
-        val baseInterval = _currentFrameIntervalMs.get()
-
-        val thermalAdjustedQuality = baseQuality
-        val thermalAdjustedInterval = baseInterval
-
-        val adaptedQuality = networkMonitor.getAdaptiveQuality(baseQuality, thermalAdjustedQuality)
-        val adaptedInterval = networkMonitor.getAdaptiveFrameInterval(baseInterval, thermalAdjustedInterval)
-
-        val qualityDelta = adaptedQuality - lastAppliedQuality
-        val intervalDelta = adaptedInterval - lastAppliedInterval
-
-        val qualityChanged = kotlin.math.abs(qualityDelta) >= config.minQualityChangeThreshold
-        val intervalChanged = kotlin.math.abs(intervalDelta) >= config.minIntervalChangeThresholdMs
-
-        if (!qualityChanged && !intervalChanged) {
-            return AdaptiveResult(
-                quality = lastAppliedQuality,
-                frameIntervalMs = lastAppliedInterval,
-                adjusted = false,
-                reason = "stable",
-            )
-        }
-
-        val finalQuality = if (qualityChanged) adaptedQuality else lastAppliedQuality
-        val finalInterval = if (intervalChanged) adaptedInterval else lastAppliedInterval
-
-        lastAppliedQuality = finalQuality
-        lastAppliedInterval = finalInterval
-        lastAdjustmentTime = now
-        _adjustmentCount.incrementAndGet()
-
-        val reason = buildString {
-            if (qualityChanged) append("quality=${lastAppliedQuality}->$finalQuality")
-            if (qualityChanged && intervalChanged) append(", ")
-            if (intervalChanged) {
-                val oldFps = 1000 / lastAppliedInterval
-                val newFps = 1000 / finalInterval
-                append("fps=$oldFps->$newFps")
-            }
-            append(" [${qualityLevel.name}]")
-        }
-
-        Log.d(TAG, "Adaptive: $reason")
-
-        updateState()
-
-        return AdaptiveResult(
-            quality = finalQuality,
-            frameIntervalMs = finalInterval,
-            adjusted = true,
-            reason = reason,
-        )
+        publishState(force = true)
     }
 
     fun getAdaptiveQuality(baseQuality: Int, thermalAdjustedQuality: Int): Int {
-        if (!_isEnabled.get()) return thermalAdjustedQuality
-        return networkMonitor.getAdaptiveQuality(baseQuality, thermalAdjustedQuality)
+        val applied = if (!isEnabled.get()) {
+            thermalAdjustedQuality
+        } else {
+            networkMonitor.getAdaptiveQuality(baseQuality, thermalAdjustedQuality)
+        }
+        appliedQuality = applied
+        publishState()
+        return applied
     }
 
     fun getAdaptiveFrameInterval(baseIntervalMs: Long, thermalAdjustedIntervalMs: Long): Long {
-        if (!_isEnabled.get()) return thermalAdjustedIntervalMs
-        return networkMonitor.getAdaptiveFrameInterval(baseIntervalMs, thermalAdjustedIntervalMs)
+        val applied = if (!isEnabled.get()) {
+            thermalAdjustedIntervalMs
+        } else {
+            networkMonitor.getAdaptiveFrameInterval(baseIntervalMs, thermalAdjustedIntervalMs)
+        }
+        appliedIntervalMs = applied
+        publishState()
+        return applied
     }
 
-    fun reset() {
-        _currentQuality.set(config.defaultQuality)
-        _currentFrameIntervalMs.set(config.defaultFrameIntervalMs)
-        lastAppliedQuality = config.defaultQuality
-        lastAppliedInterval = config.defaultFrameIntervalMs
-        lastAdjustmentTime = 0L
-        _adjustmentCount.set(0)
-        _qualityLevel.value = NetworkQualityLevel.GOOD
-        updateState()
+    private fun publishState(force: Boolean = false) {
+        val now = System.currentTimeMillis()
+        if (!force && now - lastPublishMs < STATE_PUBLISH_INTERVAL_MS) return
+        lastPublishMs = now
+        if (appliedQuality != publishedQuality || appliedIntervalMs != publishedIntervalMs) {
+            adjustmentCount.incrementAndGet()
+            publishedQuality = appliedQuality
+            publishedIntervalMs = appliedIntervalMs
+        }
+        _state.value = buildState()
     }
 
-    private fun updateState() {
-        val quality = if (_isEnabled.get()) lastAppliedQuality else config.defaultQuality
-        val interval = if (_isEnabled.get()) lastAppliedInterval else config.defaultFrameIntervalMs
-        _state.value = AdaptiveState(
-            enabled = _isEnabled.get(),
-            qualityLevel = _qualityLevel.value,
-            currentQuality = quality,
+    private fun buildState(): AdaptiveState {
+        val activeClients = networkMonitor.activeClients
+        return AdaptiveState(
+            enabled = isEnabled.get(),
+            qualityLevel = networkMonitor.getNetworkQualityLevel(),
+            currentQuality = appliedQuality,
             targetQuality = config.defaultQuality,
-            currentFps = if (interval > 0) (1000f / interval).toInt() else 0,
-            targetFps = if (config.defaultFrameIntervalMs > 0) (1000f / config.defaultFrameIntervalMs).toInt() else 0,
-            estimatedBandwidthKbps = networkMonitor.estimatedBandwidthKbps,
-            minClientThroughputKbps = networkMonitor.getMinClientThroughputKbps(),
-            activeClients = networkMonitor.activeClients,
-            adjustmentCount = _adjustmentCount.get(),
+            currentFps = if (appliedIntervalMs > 0) (1000f / appliedIntervalMs).toInt() else 0,
+            targetFps = if (defaultIntervalMs > 0) (1000f / defaultIntervalMs).toInt() else 0,
+            // Measured aggregate client throughput — 0 until a client is
+            // actually sending frames. Never invent a bandwidth number.
+            estimatedBandwidthKbps = networkMonitor.getMeasuredBandwidthKbps(),
+            minClientThroughputKbps = if (activeClients > 0) networkMonitor.getMinClientThroughputKbps() else 0,
+            activeClients = activeClients,
+            adjustmentCount = adjustmentCount.get(),
         )
     }
 
-    data class AdaptiveResult(
-        val quality: Int,
-        val frameIntervalMs: Long,
-        val adjusted: Boolean,
-        val reason: String,
-    )
-
     data class AdaptiveState(
         val enabled: Boolean,
-        val qualityLevel: NetworkQualityLevel,
+        val qualityLevel: NetworkQualityMonitor.NetworkQualityLevel,
         val currentQuality: Int,
         val targetQuality: Int,
         val currentFps: Int,
@@ -225,18 +137,16 @@ class AdaptiveBitrateController(
 
     data class AdaptiveBitrateConfig(
         val enabledByDefault: Boolean = false,
-        val defaultQuality: Int = 70,
+        val defaultQuality: Int = StreamDefaults.JPEG_QUALITY,
         val minQuality: Int = 15,
         val maxQuality: Int = 95,
-        val defaultFrameIntervalMs: Long = 1000L / 24,
+        val defaultFrameIntervalMs: Long = 1000L / StreamDefaults.STREAM_FPS,
         val minFps: Int = 3,
         val maxFps: Int = 30,
-        val minAdjustmentIntervalMs: Long = 3000L,
-        val minQualityChangeThreshold: Int = 3,
-        val minIntervalChangeThresholdMs: Long = 10L,
     )
 
     companion object {
         private const val TAG = "AdaptiveBitrate"
+        private const val STATE_PUBLISH_INTERVAL_MS = 250L
     }
 }

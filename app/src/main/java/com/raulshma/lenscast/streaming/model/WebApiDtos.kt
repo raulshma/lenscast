@@ -1,5 +1,7 @@
 package com.raulshma.lenscast.streaming.model
 
+import com.raulshma.lenscast.core.StreamDefaults
+
 /**
  * Data Transfer Objects for the Web API.
  * These replace manual JSONObject construction with type-safe Moshi serialization.
@@ -39,17 +41,17 @@ data class MaskingZoneDto(
 )
 
 data class StreamingSettingsDto(
-    val port: Int = DEFAULT_PORT,
+    val port: Int = StreamDefaults.WEB_PORT,
     val webStreamingEnabled: Boolean = true,
-    val jpegQuality: Int = DEFAULT_JPEG_QUALITY,
+    val jpegQuality: Int = StreamDefaults.JPEG_QUALITY,
     val showPreview: Boolean = true,
     val streamAudioEnabled: Boolean = true,
-    val streamAudioBitrateKbps: Int = DEFAULT_AUDIO_BITRATE_KBPS,
-    val streamAudioChannels: Int = 1,
+    val streamAudioBitrateKbps: Int = StreamDefaults.AUDIO_BITRATE_KBPS,
+    val streamAudioChannels: Int = StreamDefaults.AUDIO_CHANNELS,
     val streamAudioEchoCancellation: Boolean = true,
     val recordingAudioEnabled: Boolean = true,
     val rtspEnabled: Boolean = false,
-    val rtspPort: Int = DEFAULT_RTSP_PORT,
+    val rtspPort: Int = StreamDefaults.RTSP_PORT,
     val rtspInputFormat: String = "",
     val adaptiveBitrateEnabled: Boolean = false,
     val overlayEnabled: Boolean = false,
@@ -69,18 +71,9 @@ data class StreamingSettingsDto(
     val maskingEnabled: Boolean = false,
     val maskingZones: List<MaskingZoneDto> = emptyList(),
     val watchdogEnabled: Boolean = false,
-    val watchdogMaxRetries: Int = DEFAULT_MAX_RETRIES,
-    val watchdogCheckIntervalSeconds: Int = DEFAULT_CHECK_INTERVAL_SECONDS,
-) {
-    companion object {
-        const val DEFAULT_PORT = 8080
-        const val DEFAULT_AUDIO_BITRATE_KBPS = 128
-        const val DEFAULT_JPEG_QUALITY = 70
-        const val DEFAULT_RTSP_PORT = 8554
-        const val DEFAULT_MAX_RETRIES = 5
-        const val DEFAULT_CHECK_INTERVAL_SECONDS = 5
-    }
-}
+    val watchdogMaxRetries: Int = StreamDefaults.WATCHDOG_MAX_RETRIES,
+    val watchdogCheckIntervalSeconds: Int = StreamDefaults.WATCHDOG_CHECK_INTERVAL_SECONDS,
+)
 
 data class SettingsResponseDto(
     val camera: CameraSettingsDto,

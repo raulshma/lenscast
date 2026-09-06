@@ -7,8 +7,6 @@ import java.util.concurrent.atomic.AtomicInteger
 class NetworkQualityMonitor {
 
     private val clientStats = ConcurrentHashMap<String, ClientStats>()
-    private val _estimatedBandwidthKbps = AtomicInteger(DEFAULT_BANDWIDTH_KBPS)
-    val estimatedBandwidthKbps: Int get() = _estimatedBandwidthKbps.get()
 
     private val _activeClients = AtomicInteger(0)
     val activeClients: Int get() = _activeClients.get()
@@ -99,6 +97,15 @@ class NetworkQualityMonitor {
             }
         }
         return if (count > 0) (total / count).toInt() else DEFAULT_BANDWIDTH_KBPS
+    }
+
+    /**
+     * Measured aggregate client throughput for display: 0 while no client is
+     * sending frames. Unlike [getAvgClientThroughputKbps] (the adaptation
+     * ladder's view), this never reports a default constant.
+     */
+    fun getMeasuredBandwidthKbps(): Int {
+        return if (_activeClients.get() > 0) getAvgClientThroughputKbps() else 0
     }
 
     fun getWorstClientLatencyMs(): Long {
@@ -206,7 +213,6 @@ class NetworkQualityMonitor {
         synchronized(this) {
             totalBytesSent = 0L
         }
-        _estimatedBandwidthKbps.set(DEFAULT_BANDWIDTH_KBPS)
     }
 
     fun getStatsSnapshot(): NetworkStatsSnapshot {
@@ -224,10 +230,12 @@ class NetworkQualityMonitor {
         }
         return NetworkStatsSnapshot(
             activeClients = _activeClients.get(),
-            estimatedBandwidthKbps = _estimatedBandwidthKbps.get(),
+            estimatedBandwidthKbps = getMeasuredBandwidthKbps(),
             totalBytesSent = getTotalBytesSent(),
-            minThroughputKbps = getMinClientThroughputKbps(),
-            avgThroughputKbps = getAvgClientThroughputKbps(),
+            // Display fields: 0 while nobody is connected — no invented constant.
+            // The adaptation ladder keeps its own default-aware view.
+            minThroughputKbps = if (_activeClients.get() > 0) getMinClientThroughputKbps() else 0,
+            avgThroughputKbps = if (_activeClients.get() > 0) getAvgClientThroughputKbps() else 0,
             worstLatencyMs = getWorstClientLatencyMs(),
             qualityLevel = getNetworkQualityLevel(),
             clientDetails = clientDetails,

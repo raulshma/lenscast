@@ -72,7 +72,6 @@ fun AppSettingsScreen(
     )
 
     LaunchedEffect(activity) {
-        viewModel.activityRef = activity
         viewModel.refreshBatteryOptimizationStatus()
     }
 
@@ -316,7 +315,7 @@ fun AppSettingsScreen(
                         Spacer(modifier = Modifier.width(12.dp))
                         Switch(
                             checked = isIgnoringBatteryOptimizations,
-                            onCheckedChange = { viewModel.requestIgnoreBatteryOptimization() }
+                            onCheckedChange = { viewModel.requestIgnoreBatteryOptimization(activity) }
                         )
                     }
                 }

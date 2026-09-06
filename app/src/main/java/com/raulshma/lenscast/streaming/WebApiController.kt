@@ -19,6 +19,7 @@ import com.raulshma.lenscast.camera.model.Resolution
 import com.raulshma.lenscast.camera.model.WhiteBalance
 import com.raulshma.lenscast.capture.PhotoCaptureHelper
 import com.raulshma.lenscast.capture.RecordingService
+import com.raulshma.lenscast.core.StreamDefaults
 import com.raulshma.lenscast.streaming.model.*
 import com.raulshma.lenscast.streaming.rtsp.RtspInputFormat
 
@@ -42,6 +43,8 @@ class WebApiController(private val context: Context) {
         get() = context.applicationContext as MainApplication
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    // App-scoped by design: one instance lives for the process lifetime (owned
+    // by StreamingManager), so its scope is never cancelled mid-flight.
 
     // ── Issue 2.1 fix: Unified Moshi instance for all JSON serialization ──
     private val moshi by lazy {
@@ -78,10 +81,10 @@ class WebApiController(private val context: Context) {
         app.settingsDataStore.settings.stateIn(scope, SharingStarted.Eagerly, CameraSettings())
 
     private val portFlow: StateFlow<Int> =
-        app.settingsDataStore.streamingPort.stateIn(scope, SharingStarted.Eagerly, StreamingServer.DEFAULT_PORT)
+        app.settingsDataStore.streamingPort.stateIn(scope, SharingStarted.Eagerly, StreamDefaults.WEB_PORT)
 
     private val jpegQualityFlow: StateFlow<Int> =
-        app.settingsDataStore.jpegQuality.stateIn(scope, SharingStarted.Eagerly, StreamingSettingsDto.DEFAULT_JPEG_QUALITY)
+        app.settingsDataStore.jpegQuality.stateIn(scope, SharingStarted.Eagerly, StreamDefaults.JPEG_QUALITY)
 
     private val webStreamingEnabledFlow: StateFlow<Boolean> =
         app.settingsDataStore.webStreamingEnabled.stateIn(scope, SharingStarted.Eagerly, true)
@@ -93,10 +96,10 @@ class WebApiController(private val context: Context) {
         app.settingsDataStore.streamAudioEnabled.stateIn(scope, SharingStarted.Eagerly, true)
 
     private val streamAudioBitrateFlow: StateFlow<Int> =
-        app.settingsDataStore.streamAudioBitrateKbps.stateIn(scope, SharingStarted.Eagerly, StreamingSettingsDto.DEFAULT_AUDIO_BITRATE_KBPS)
+        app.settingsDataStore.streamAudioBitrateKbps.stateIn(scope, SharingStarted.Eagerly, StreamDefaults.AUDIO_BITRATE_KBPS)
 
     private val streamAudioChannelsFlow: StateFlow<Int> =
-        app.settingsDataStore.streamAudioChannels.stateIn(scope, SharingStarted.Eagerly, 1)
+        app.settingsDataStore.streamAudioChannels.stateIn(scope, SharingStarted.Eagerly, StreamDefaults.AUDIO_CHANNELS)
 
     private val streamAudioEchoCancellationFlow: StateFlow<Boolean> =
         app.settingsDataStore.streamAudioEchoCancellation.stateIn(scope, SharingStarted.Eagerly, true)
@@ -108,7 +111,7 @@ class WebApiController(private val context: Context) {
         app.settingsDataStore.rtspEnabled.stateIn(scope, SharingStarted.Eagerly, false)
 
     private val rtspPortFlow: StateFlow<Int> =
-        app.settingsDataStore.rtspPort.stateIn(scope, SharingStarted.Eagerly, StreamingSettingsDto.DEFAULT_RTSP_PORT)
+        app.settingsDataStore.rtspPort.stateIn(scope, SharingStarted.Eagerly, StreamDefaults.RTSP_PORT)
 
     private val rtspInputFormatFlow: StateFlow<RtspInputFormat> =
         app.settingsDataStore.rtspInputFormat.stateIn(scope, SharingStarted.Eagerly, RtspInputFormat.AUTO)
@@ -123,10 +126,10 @@ class WebApiController(private val context: Context) {
         app.settingsDataStore.watchdogEnabled.stateIn(scope, SharingStarted.Eagerly, false)
 
     private val watchdogMaxRetriesFlow: StateFlow<Int> =
-        app.settingsDataStore.watchdogMaxRetries.stateIn(scope, SharingStarted.Eagerly, 5)
+        app.settingsDataStore.watchdogMaxRetries.stateIn(scope, SharingStarted.Eagerly, StreamDefaults.WATCHDOG_MAX_RETRIES)
 
     private val watchdogCheckIntervalFlow: StateFlow<Int> =
-        app.settingsDataStore.watchdogCheckIntervalSeconds.stateIn(scope, SharingStarted.Eagerly, 5)
+        app.settingsDataStore.watchdogCheckIntervalSeconds.stateIn(scope, SharingStarted.Eagerly, StreamDefaults.WATCHDOG_CHECK_INTERVAL_SECONDS)
 
     private var scheduledRecordingJob: kotlinx.coroutines.Job? = null
     @Volatile
@@ -443,101 +446,26 @@ class WebApiController(private val context: Context) {
 
     fun handleStartStream(): String {
         return try {
-            val wasLiveStreaming = app.streamingManager.isLiveStreaming()
-            val wasServerRunning = app.streamingManager.isServerRunning.value
-            if (!wasLiveStreaming) {
-                app.powerManager.refreshBatteryState()
-                app.powerManager.acquireWakeLock()
-                app.thermalMonitor.startMonitoring()
-                app.streamingManager.thermalMonitor = app.thermalMonitor
-                app.streamingManager.applyBatteryOptimization(app.powerManager.optimizationResult.value)
-
-                val success = app.streamingManager.startStreaming()
-                if (!success) {
-                    return streamActionAdapter.toJson(
-                        StreamActionResponse(success = false, error = "Failed to start streaming server")
-                    )
-                }
-
-                runBlocking {
-                    withTimeoutOrNull(2000L) {
-                        withContext(Dispatchers.Main) {
-                            app.cameraService.acquireKeepAlive()
-                            app.cameraService.rebindUseCases()
-                        }
-                    }
-                }
-
-                val intent = Intent(context, StreamingService::class.java).apply {
-                    action = StreamingService.ACTION_START
-                    putExtra(StreamingService.EXTRA_URL, app.streamingManager.streamUrl.value)
-                    putExtra(StreamingService.EXTRA_AUDIO_ACTIVE, app.streamingManager.isAudioStreaming.value)
-                }
-                val shouldStartForeground = !wasServerRunning
-                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O && shouldStartForeground) {
-                    context.startForegroundService(intent)
-                } else {
-                    context.startService(intent)
-                }
+            val success = app.streamingManager.startStreaming()
+            if (!success) {
+                return streamActionAdapter.toJson(
+                    StreamActionResponse(success = false, error = "Failed to start streaming server")
+                )
             }
 
-            // Start watchdog if enabled
-            app.streamWatchdog.startMonitoring()
+            try {
+                runBlocking { app.streamingSession.begin() }
+            } catch (e: Exception) {
+                // Never answer "failed" while the stream is still live.
+                app.streamingManager.stopStreaming()
+                throw e
+            }
 
             val streamUrl = app.streamingManager.streamUrl.value
             streamActionAdapter.toJson(StreamActionResponse(success = true, isActive = true, url = streamUrl))
         } catch (e: Exception) {
             Log.e(TAG, "Failed to start stream", e)
             errorJson(e)
-        }
-    }
-
-    private fun ensureCameraAndForeground() {
-        runBlocking {
-            withTimeoutOrNull(2000L) {
-                withContext(Dispatchers.Main) {
-                    app.cameraService.acquireKeepAlive()
-                    app.cameraService.rebindUseCases()
-                }
-            }
-        }
-
-        val wasServerRunning = app.streamingManager.isServerRunning.value
-        val intent = Intent(context, StreamingService::class.java).apply {
-            action = StreamingService.ACTION_START
-            putExtra(StreamingService.EXTRA_URL, app.streamingManager.streamUrl.value)
-            putExtra(StreamingService.EXTRA_AUDIO_ACTIVE, app.streamingManager.isAudioStreaming.value)
-        }
-        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O && !wasServerRunning) {
-            context.startForegroundService(intent)
-        } else {
-            context.startService(intent)
-        }
-
-        // Start watchdog if enabled
-        app.streamWatchdog.startMonitoring()
-    }
-
-    private fun releaseCameraIfNeeded() {
-        if (!app.streamingManager.isLiveStreaming()) {
-            app.streamWatchdog.stopMonitoring()
-            app.powerManager.releaseWakeLock()
-            app.thermalMonitor.stopMonitoring()
-
-            runBlocking {
-                withTimeoutOrNull(2000L) {
-                    withContext(Dispatchers.Main) {
-                        app.cameraService.releaseKeepAlive()
-                        app.cameraService.rebindUseCases()
-                    }
-                }
-            }
-
-            val intent = Intent(context, StreamingService::class.java).apply {
-                action = StreamingService.ACTION_PAUSE
-                putExtra(StreamingService.EXTRA_URL, app.streamingManager.streamUrl.value)
-            }
-            context.startService(intent)
         }
     }
 
@@ -549,14 +477,6 @@ class WebApiController(private val context: Context) {
                 )
             }
 
-            if (!app.streamingManager.isLiveStreaming()) {
-                app.powerManager.refreshBatteryState()
-                app.powerManager.acquireWakeLock()
-                app.thermalMonitor.startMonitoring()
-                app.streamingManager.thermalMonitor = app.thermalMonitor
-                app.streamingManager.applyBatteryOptimization(app.powerManager.optimizationResult.value)
-            }
-
             val success = app.streamingManager.startWebStreaming()
             if (!success) {
                 return streamActionAdapter.toJson(
@@ -564,7 +484,12 @@ class WebApiController(private val context: Context) {
                 )
             }
 
-            ensureCameraAndForeground()
+            try {
+                runBlocking { app.streamingSession.begin() }
+            } catch (e: Exception) {
+                app.streamingManager.stopWebStreaming()
+                throw e
+            }
 
             streamActionAdapter.toJson(StreamActionResponse(
                 success = true,
@@ -580,7 +505,7 @@ class WebApiController(private val context: Context) {
     fun handleStopWebStream(): String {
         return try {
             app.streamingManager.stopWebStreaming()
-            releaseCameraIfNeeded()
+            runBlocking { app.streamingSession.end() }
             streamActionAdapter.toJson(StreamActionResponse(
                 success = true,
                 isActive = app.streamingManager.isLiveStreaming(),
@@ -599,14 +524,6 @@ class WebApiController(private val context: Context) {
                 )
             }
 
-            if (!app.streamingManager.isLiveStreaming()) {
-                app.powerManager.refreshBatteryState()
-                app.powerManager.acquireWakeLock()
-                app.thermalMonitor.startMonitoring()
-                app.streamingManager.thermalMonitor = app.thermalMonitor
-                app.streamingManager.applyBatteryOptimization(app.powerManager.optimizationResult.value)
-            }
-
             val success = app.streamingManager.startRtspStreaming()
             if (!success) {
                 return streamActionAdapter.toJson(
@@ -614,7 +531,12 @@ class WebApiController(private val context: Context) {
                 )
             }
 
-            ensureCameraAndForeground()
+            try {
+                runBlocking { app.streamingSession.begin() }
+            } catch (e: Exception) {
+                app.streamingManager.stopRtspStreaming()
+                throw e
+            }
 
             streamActionAdapter.toJson(StreamActionResponse(
                 success = true,
@@ -630,7 +552,7 @@ class WebApiController(private val context: Context) {
     fun handleStopRtspStream(): String {
         return try {
             app.streamingManager.stopRtspStreaming()
-            releaseCameraIfNeeded()
+            runBlocking { app.streamingSession.end() }
             streamActionAdapter.toJson(StreamActionResponse(
                 success = true,
                 isActive = app.streamingManager.isLiveStreaming(),
@@ -644,7 +566,7 @@ class WebApiController(private val context: Context) {
     fun handleStopStream(): String {
         return try {
             app.streamingManager.pauseStreaming()
-            releaseCameraIfNeeded()
+            runBlocking { app.streamingSession.end() }
             streamActionAdapter.toJson(StreamActionResponse(success = true, isActive = false))
         } catch (e: Exception) {
             Log.e(TAG, "Failed to stop stream", e)

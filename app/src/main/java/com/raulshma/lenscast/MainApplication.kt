@@ -7,6 +7,7 @@ import coil3.SingletonImageLoader
 import coil3.request.crossfade
 import coil3.video.VideoFrameDecoder
 import com.raulshma.lenscast.camera.CameraService
+import com.raulshma.lenscast.core.ConnectivityMonitor
 import com.raulshma.lenscast.core.PowerManager
 import com.raulshma.lenscast.core.StreamWatchdog
 import com.raulshma.lenscast.core.ThermalMonitor
@@ -14,6 +15,7 @@ import com.raulshma.lenscast.data.CaptureHistoryStore
 import com.raulshma.lenscast.data.SettingsDataStore
 import com.raulshma.lenscast.settings.SettingsApplier
 import com.raulshma.lenscast.streaming.StreamingManager
+import com.raulshma.lenscast.streaming.StreamingSession
 import com.raulshma.lenscast.update.UpdateChecker
 import com.raulshma.lenscast.update.UpdateNotifier
 import com.raulshma.lenscast.update.model.UpdateCheckResult
@@ -26,13 +28,21 @@ import kotlinx.coroutines.launch
 
 class MainApplication : Application(), SingletonImageLoader.Factory {
     val cameraService: CameraService by lazy { CameraService(this) }
-    val streamingManager: StreamingManager by lazy { StreamingManager(this) }
+    val streamingManager: StreamingManager by lazy { StreamingManager(this, thermalMonitor) }
     val settingsDataStore: SettingsDataStore by lazy { SettingsDataStore(this) }
     val captureHistoryStore: CaptureHistoryStore by lazy { CaptureHistoryStore(this) }
     val powerManager: PowerManager by lazy { PowerManager(this) }
     val thermalMonitor: ThermalMonitor by lazy { ThermalMonitor(this) }
+    val connectivityMonitor: ConnectivityMonitor by lazy { ConnectivityMonitor(this) }
+    // The watchdog and the session reference each other; both resolve lazily
+    // and neither touches the other during construction.
     val streamWatchdog: StreamWatchdog by lazy {
-        StreamWatchdog(cameraService, streamingManager, powerManager, thermalMonitor)
+        StreamWatchdog(cameraService, streamingManager, streamingSession)
+    }
+    val streamingSession: StreamingSession by lazy {
+        StreamingSession(
+            this, cameraService, streamingManager, powerManager, thermalMonitor,
+        ) { streamWatchdog }
     }
     val settingsApplier: SettingsApplier by lazy {
         SettingsApplier(settingsDataStore, cameraService, streamingManager, streamWatchdog)
@@ -43,6 +53,7 @@ class MainApplication : Application(), SingletonImageLoader.Factory {
 
     override fun onCreate() {
         super.onCreate()
+        connectivityMonitor.start()
         settingsApplier.start(appScope)
         initializeAutoUpdateCheck()
     }

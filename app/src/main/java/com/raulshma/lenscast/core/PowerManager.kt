@@ -17,9 +17,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
 data class BatteryOptimizationResult(
-    val suggestedBitrate: Int,
-    val suggestedFrameRate: Int,
-    val suggestedResolution: String,
     val suggestedJpegQuality: Int,
     val batteryLevel: Int,
     val isPowerSaveMode: Boolean,
@@ -47,10 +44,7 @@ class PowerManager(private val context: Context) {
 
     private val _optimizationResult = MutableStateFlow(
         BatteryOptimizationResult(
-            suggestedBitrate = 2_000_000,
-            suggestedFrameRate = 24,
-            suggestedResolution = "FHD_1080P",
-            suggestedJpegQuality = 70,
+            suggestedJpegQuality = StreamDefaults.JPEG_QUALITY,
             batteryLevel = 100,
             isPowerSaveMode = false,
             message = "Normal operation"
@@ -211,55 +205,37 @@ class PowerManager(private val context: Context) {
 
         _optimizationResult.value = when {
             charging -> BatteryOptimizationResult(
-                suggestedBitrate = 2_000_000,
-                suggestedFrameRate = 24,
-                suggestedResolution = "FHD_1080P",
-                suggestedJpegQuality = 70,
+                suggestedJpegQuality = StreamDefaults.JPEG_QUALITY,
                 batteryLevel = level,
                 isPowerSaveMode = powerSave,
                 message = "Charging - full quality"
             )
             inDoze -> BatteryOptimizationResult(
-                suggestedBitrate = 500_000,
-                suggestedFrameRate = 10,
-                suggestedResolution = "SD_480P",
                 suggestedJpegQuality = 40,
                 batteryLevel = level,
                 isPowerSaveMode = true,
                 message = "Doze mode - minimal quality"
             )
             level < 15 -> BatteryOptimizationResult(
-                suggestedBitrate = 500_000,
-                suggestedFrameRate = 15,
-                suggestedResolution = "SD_480P",
                 suggestedJpegQuality = 50,
                 batteryLevel = level,
                 isPowerSaveMode = powerSave,
                 message = "Critical battery - minimal quality"
             )
             level < 30 -> BatteryOptimizationResult(
-                suggestedBitrate = 800_000,
-                suggestedFrameRate = 20,
-                suggestedResolution = "HD_720P",
                 suggestedJpegQuality = 60,
                 batteryLevel = level,
                 isPowerSaveMode = powerSave,
                 message = "Low battery - reduced quality"
             )
             level < 50 || powerSave -> BatteryOptimizationResult(
-                suggestedBitrate = 1_000_000,
-                suggestedFrameRate = 20,
-                suggestedResolution = "HD_720P",
                 suggestedJpegQuality = 65,
                 batteryLevel = level,
                 isPowerSaveMode = powerSave,
                 message = "Battery saver - balanced quality"
             )
             else -> BatteryOptimizationResult(
-                suggestedBitrate = 2_000_000,
-                suggestedFrameRate = 24,
-                suggestedResolution = "FHD_1080P",
-                suggestedJpegQuality = 70,
+                suggestedJpegQuality = StreamDefaults.JPEG_QUALITY,
                 batteryLevel = level,
                 isPowerSaveMode = powerSave,
                 message = "Normal operation"

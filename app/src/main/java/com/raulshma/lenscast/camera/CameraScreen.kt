@@ -162,7 +162,8 @@ fun CameraScreen(
     val viewModel: CameraViewModel = viewModel(
         factory = CameraViewModel.Factory(
             context, app.cameraService, app.streamingManager,
-            app.powerManager, app.thermalMonitor, app.settingsDataStore
+            app.thermalMonitor, app.settingsDataStore, app.streamingSession,
+            app.streamWatchdog, app.connectivityMonitor
         )
     )
 

@@ -25,42 +25,53 @@ import com.raulshma.lenscast.camera.model.NightVisionMode
 import com.raulshma.lenscast.camera.model.Resolution
 import com.raulshma.lenscast.camera.model.StreamStatus
 import com.raulshma.lenscast.camera.model.WhiteBalance
-import com.raulshma.lenscast.core.BatteryOptimizationResult
-import com.raulshma.lenscast.core.PowerManager
+import com.raulshma.lenscast.core.ConnectivityMonitor
+import com.raulshma.lenscast.core.NetworkQualityMonitor
+import com.raulshma.lenscast.core.StreamWatchdog
 import com.raulshma.lenscast.core.ThermalMonitor
 import com.raulshma.lenscast.core.ThermalState
 import com.raulshma.lenscast.data.SettingsDataStore
 import com.raulshma.lenscast.streaming.AdaptiveBitrateController
 import com.raulshma.lenscast.streaming.StreamingManager
-import kotlinx.coroutines.Dispatchers
+import com.raulshma.lenscast.streaming.StreamingSession
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
 class CameraViewModel(
     context: Context,
     private val cameraService: CameraService,
     private val streamingManager: StreamingManager,
-    private val powerManager: PowerManager,
     private val thermalMonitor: ThermalMonitor,
     private val settingsDataStore: SettingsDataStore,
+    private val streamingSession: StreamingSession,
+    streamWatchdog: StreamWatchdog,
+    connectivityMonitor: ConnectivityMonitor,
 ) : ViewModel() {
     private val context: Context = context.applicationContext
     private val app: MainApplication
         get() = context as MainApplication
 
-    val watchdogState = app.streamWatchdog.state
+    val watchdogState = streamWatchdog.state
+
+    // Live app-scoped state exposed directly — no ViewModel mirrors for state
+    // that outlives this ViewModel.
+    val wifiConnected: StateFlow<Boolean> = connectivityMonitor.isWifiConnected
+    val thermalState: StateFlow<ThermalState> = thermalMonitor.thermalState
+    val adaptiveBitrateState: StateFlow<AdaptiveBitrateController.AdaptiveState> =
+        streamingManager.adaptiveBitrateState
 
     private val _cameraState = MutableStateFlow<CameraState>(CameraState.Idle)
     val cameraState: StateFlow<CameraState> = _cameraState.asStateFlow()
 
-    private val _settings = MutableStateFlow(CameraSettings())
-    val settings: StateFlow<CameraSettings> = _settings.asStateFlow()
+    val settings: StateFlow<CameraSettings> = settingsDataStore.settings
+        .stateIn(viewModelScope, SharingStarted.Eagerly, CameraSettings())
 
     private val _streamStatus = MutableStateFlow(StreamStatus())
     val streamStatus: StateFlow<StreamStatus> = _streamStatus.asStateFlow()
@@ -71,26 +82,14 @@ class CameraViewModel(
     private val _hasAudioPermission = MutableStateFlow(false)
     val hasAudioPermission: StateFlow<Boolean> = _hasAudioPermission.asStateFlow()
 
-    private val _batteryInfo = MutableStateFlow<BatteryOptimizationResult?>(null)
-    val batteryInfo: StateFlow<BatteryOptimizationResult?> = _batteryInfo.asStateFlow()
-
-    private val _thermalState = MutableStateFlow(ThermalState.NORMAL)
-    val thermalState: StateFlow<ThermalState> = _thermalState.asStateFlow()
-
     private val _isFrontCamera = MutableStateFlow(false)
     val isFrontCamera: StateFlow<Boolean> = _isFrontCamera.asStateFlow()
-
-    private val _wifiConnected = MutableStateFlow(true)
-    val wifiConnected: StateFlow<Boolean> = _wifiConnected.asStateFlow()
 
     val availableLenses: StateFlow<List<CameraLensInfo>> = cameraService.availableLenses
     val selectedLensIndex: StateFlow<Int> = cameraService.selectedLensIndex
     val availableIsoRange: StateFlow<ClosedRange<Int>> = cameraService.availableIsoRange
 
     private var currentPreviewView: PreviewView? = null
-    private var batteryMonitorJob: Job? = null
-    private var thermalMonitorJob: Job? = null
-    private var settingsJob: Job? = null
     private val _isRecording = MutableStateFlow(false)
     val isRecording: StateFlow<Boolean> = _isRecording.asStateFlow()
 
@@ -99,27 +98,17 @@ class CameraViewModel(
     private var recordingStartTimeMs: Long = 0L
     private var recordingTimerJob: Job? = null
 
-    private val _showPreview = MutableStateFlow(true)
-    val showPreview: StateFlow<Boolean> = _showPreview.asStateFlow()
+    val showPreview: StateFlow<Boolean> = settingsDataStore.showPreview
+        .stateIn(viewModelScope, SharingStarted.Eagerly, true)
 
-    private val _adaptiveBitrateState = MutableStateFlow(AdaptiveBitrateController.AdaptiveState(
-        enabled = false,
-        qualityLevel = com.raulshma.lenscast.core.NetworkQualityMonitor.NetworkQualityLevel.GOOD,
-        currentQuality = 70,
-        targetQuality = 70,
-        currentFps = 24,
-        targetFps = 24,
-        estimatedBandwidthKbps = 5000,
-        minClientThroughputKbps = 5000,
-        activeClients = 0,
-    ))
-    val adaptiveBitrateState: StateFlow<AdaptiveBitrateController.AdaptiveState> = _adaptiveBitrateState.asStateFlow()
+    private val streamAudioEnabled: StateFlow<Boolean> = settingsDataStore.streamAudioEnabled
+        .stateIn(viewModelScope, SharingStarted.Eagerly, true)
 
-    private val _connectionQualityStats = MutableStateFlow<com.raulshma.lenscast.core.NetworkQualityMonitor.NetworkStatsSnapshot?>(null)
-    val connectionQualityStats: StateFlow<com.raulshma.lenscast.core.NetworkQualityMonitor.NetworkStatsSnapshot?> = _connectionQualityStats.asStateFlow()
+    private val recordingAudioEnabled: StateFlow<Boolean> = settingsDataStore.recordingAudioEnabled
+        .stateIn(viewModelScope, SharingStarted.Eagerly, true)
 
-    private val _streamAudioEnabled = MutableStateFlow(true)
-    private val _recordingAudioEnabled = MutableStateFlow(true)
+    private val _connectionQualityStats = MutableStateFlow<NetworkQualityMonitor.NetworkStatsSnapshot?>(null)
+    val connectionQualityStats: StateFlow<NetworkQualityMonitor.NetworkStatsSnapshot?> = _connectionQualityStats.asStateFlow()
 
     init {
         viewModelScope.launch {
@@ -183,34 +172,6 @@ class CameraViewModel(
             streamingManager.pushFrameToRtsp(yuvData, width, height, rotation)
         }
 
-        // Mirror persisted camera settings for the UI; runtime application is
-        // owned by SettingsApplier.
-        settingsJob = viewModelScope.launch {
-            settingsDataStore.settings.distinctUntilChanged().collect { saved ->
-                _settings.value = saved
-            }
-        }
-
-        // Combined: Only listen to settings not covered by MainApplication
-        // (MainApplication handles streamingPort, jpegQuality, streamAudioEnabled)
-        viewModelScope.launch {
-            settingsDataStore.recordingAudioEnabled.collect { recordingAudio ->
-                _recordingAudioEnabled.value = recordingAudio
-            }
-        }
-
-        viewModelScope.launch {
-            settingsDataStore.showPreview.collect { show ->
-                _showPreview.value = show
-            }
-        }
-
-        viewModelScope.launch {
-            streamingManager.adaptiveBitrateState.collect { state ->
-                _adaptiveBitrateState.value = state
-            }
-        }
-
         // Optimized: Connection quality polling with early cancellation
         viewModelScope.launch {
             streamingManager.isStreaming.collect { isActive ->
@@ -250,7 +211,7 @@ class CameraViewModel(
 
     fun onAudioPermissionResult(granted: Boolean) {
         _hasAudioPermission.value = granted
-        if (granted && _streamStatus.value.isActive && _streamAudioEnabled.value) {
+        if (granted && _streamStatus.value.isActive && streamAudioEnabled.value) {
             streamingManager.setStreamAudioEnabled(true)
         }
     }
@@ -286,7 +247,7 @@ class CameraViewModel(
         cameraService.setLifecycleOwner(lifecycleOwner)
         cameraService.startPreview(previewView)
         viewModelScope.launch {
-            cameraService.applySettings(_settings.value)
+            cameraService.applySettings(settings.value)
         }
     }
 
@@ -346,15 +307,13 @@ class CameraViewModel(
     }
 
     fun togglePreview() {
-        _showPreview.value = !_showPreview.value
         viewModelScope.launch {
-            settingsDataStore.saveShowPreview(_showPreview.value)
+            settingsDataStore.saveShowPreview(!showPreview.value)
         }
     }
 
     private fun updateSettings(transform: (CameraSettings) -> CameraSettings) {
-        val newSettings = transform(_settings.value)
-        _settings.value = newSettings
+        val newSettings = transform(settings.value)
         // Gesture-driven camera controls apply immediately for responsiveness;
         // SettingsApplier re-applies after persistence — applying camera controls
         // is idempotent, so the overlap is harmless.
@@ -383,7 +342,7 @@ class CameraViewModel(
         }
 
         refreshAudioPermission()
-        if (_streamAudioEnabled.value && !_hasAudioPermission.value) {
+        if (streamAudioEnabled.value && !_hasAudioPermission.value) {
             Toast.makeText(
                 context,
                 "Microphone permission not granted. Streaming video without audio.",
@@ -391,28 +350,17 @@ class CameraViewModel(
             ).show()
         }
 
-        val wasLive = streamingManager.isLiveStreaming()
-        if (!wasLive) {
-            beginStreamingSession()
-        }
-
         val success = streamingManager.startWebStreaming()
         if (success) {
-            updateStreamingServiceNotification()
+            beginSession()
         } else {
-            if (!wasLive && !streamingManager.isLiveStreaming()) {
-                endStreamingSession()
-            }
             Toast.makeText(context, "Failed to start web streaming.", Toast.LENGTH_SHORT).show()
         }
     }
 
     private fun stopWebStreaming() {
         streamingManager.stopWebStreaming()
-        updateStreamingServiceNotification()
-        if (!streamingManager.isLiveStreaming()) {
-            endStreamingSession()
-        }
+        endSession()
     }
 
     private fun startRtspStreaming() {
@@ -421,97 +369,31 @@ class CameraViewModel(
             return
         }
 
-        val wasLive = streamingManager.isLiveStreaming()
-        if (!wasLive) {
-            beginStreamingSession()
-        }
-
         val success = streamingManager.startRtspStreaming()
         if (success) {
-            updateStreamingServiceNotification()
+            beginSession()
         } else {
-            if (!wasLive && !streamingManager.isLiveStreaming()) {
-                endStreamingSession()
-            }
             Toast.makeText(context, "Failed to start RTSP streaming.", Toast.LENGTH_SHORT).show()
         }
     }
 
     private fun stopRtspStreaming() {
         streamingManager.stopRtspStreaming()
-        updateStreamingServiceNotification()
-        if (!streamingManager.isLiveStreaming()) {
-            endStreamingSession()
+        endSession()
+    }
+
+    // Session begin/end is owned by StreamingSession; failures here (e.g. a
+    // rejected foreground-service start) must not crash the app.
+    private fun beginSession() {
+        viewModelScope.launch {
+            runCatching { streamingSession.begin() }
+                .onFailure { Log.e(TAG, "Streaming session setup failed", it) }
         }
     }
 
-    private fun beginStreamingSession() {
-        _wifiConnected.value = com.raulshma.lenscast.core.NetworkUtils.isWifiConnected(context)
-        powerManager.refreshBatteryState()
-        powerManager.acquireWakeLock()
-        thermalMonitor.startMonitoring()
-        streamingManager.thermalMonitor = thermalMonitor
-        startBatteryMonitoring()
-        startThermalMonitoring()
-        cameraService.acquireKeepAlive()
-        cameraService.rebindUseCases()
-        app.streamWatchdog.startMonitoring()
-    }
-
-    private fun endStreamingSession() {
-        app.streamWatchdog.stopMonitoring()
-        powerManager.releaseWakeLock()
-        thermalMonitor.stopMonitoring()
-        batteryMonitorJob?.cancel()
-        batteryMonitorJob = null
-        thermalMonitorJob?.cancel()
-        thermalMonitorJob = null
-        cameraService.releaseKeepAlive()
-        cameraService.rebindUseCases()
-    }
-
-    private fun updateStreamingServiceNotification() {
-        val intent = Intent(context, com.raulshma.lenscast.streaming.StreamingService::class.java)
-        if (streamingManager.isLiveStreaming()) {
-            intent.action = com.raulshma.lenscast.streaming.StreamingService.ACTION_START
-            intent.putExtra(
-                com.raulshma.lenscast.streaming.StreamingService.EXTRA_URL,
-                streamingManager.streamUrl.value
-            )
-            intent.putExtra(
-                com.raulshma.lenscast.streaming.StreamingService.EXTRA_AUDIO_ACTIVE,
-                streamingManager.isAudioStreaming.value
-            )
-            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
-                context.startForegroundService(intent)
-            } else {
-                context.startService(intent)
-            }
-        } else {
-            intent.action = com.raulshma.lenscast.streaming.StreamingService.ACTION_PAUSE
-            context.startService(intent)
-        }
-    }
-
-    private fun startBatteryMonitoring() {
-        batteryMonitorJob?.cancel()
-        batteryMonitorJob = viewModelScope.launch(Dispatchers.IO) {
-            while (true) {
-                powerManager.refreshBatteryState()
-                val result = powerManager.optimizationResult.value
-                _batteryInfo.value = result
-                streamingManager.applyBatteryOptimization(result)
-                delay(30_000)
-            }
-        }
-    }
-
-    private fun startThermalMonitoring() {
-        thermalMonitorJob?.cancel()
-        thermalMonitorJob = viewModelScope.launch {
-            thermalMonitor.thermalState.collect { state ->
-                _thermalState.value = state
-            }
+    private fun endSession() {
+        viewModelScope.launch {
+            streamingSession.end()
         }
     }
 
@@ -539,23 +421,8 @@ class CameraViewModel(
     }
 
     private fun stopServer() {
-        if (_streamStatus.value.isActive) {
-            streamingManager.stopStreaming()
-            powerManager.releaseWakeLock()
-            thermalMonitor.stopMonitoring()
-            batteryMonitorJob?.cancel()
-            batteryMonitorJob = null
-            thermalMonitorJob?.cancel()
-            thermalMonitorJob = null
-            cameraService.releaseKeepAlive()
-            cameraService.rebindUseCases()
-
-            val intent = Intent(context, com.raulshma.lenscast.streaming.StreamingService::class.java)
-            intent.action = com.raulshma.lenscast.streaming.StreamingService.ACTION_PAUSE
-            context.startService(intent)
-        } else {
-            streamingManager.stopStreaming()
-        }
+        streamingManager.stopStreaming()
+        endSession()
         _streamStatus.value = _streamStatus.value.copy(
             isActive = false,
             isServerRunning = false,
@@ -616,7 +483,7 @@ class CameraViewModel(
             _recordingElapsedSeconds.value = 0
         } else {
             refreshAudioPermission()
-            if (_recordingAudioEnabled.value && !_hasAudioPermission.value) {
+            if (recordingAudioEnabled.value && !_hasAudioPermission.value) {
                 Toast.makeText(
                     context,
                     "Microphone permission not granted. Recording video without audio.",
@@ -642,31 +509,21 @@ class CameraViewModel(
         }
     }
 
-    override fun onCleared() {
-        super.onCleared()
-        batteryMonitorJob?.cancel()
-        thermalMonitorJob?.cancel()
-        recordingTimerJob?.cancel()
-        app.streamWatchdog.stopMonitoring()
-        streamingManager.release()
-        cameraService.release()
-        powerManager.releaseWakeLock()
-        thermalMonitor.stopMonitoring()
-    }
-
     class Factory(
         private val context: Context,
         private val cameraService: CameraService,
         private val streamingManager: StreamingManager,
-        private val powerManager: PowerManager,
         private val thermalMonitor: ThermalMonitor,
         private val settingsDataStore: SettingsDataStore,
+        private val streamingSession: StreamingSession,
+        private val streamWatchdog: StreamWatchdog,
+        private val connectivityMonitor: ConnectivityMonitor,
     ) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
         override fun <T : ViewModel> create(modelClass: Class<T>): T {
             return CameraViewModel(
-                context, cameraService, streamingManager,
-                powerManager, thermalMonitor, settingsDataStore
+                context, cameraService, streamingManager, thermalMonitor,
+                settingsDataStore, streamingSession, streamWatchdog, connectivityMonitor
             ) as T
         }
     }

@@ -252,16 +252,6 @@ class RecordingService : Service() {
         }
     }
 
-    private fun scheduleNextRecording(config: RecordingConfig) {
-        val delayMs = config.repeatIntervalSeconds * 1000
-        android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
-            if (isRecording) {
-                stopRecording()
-                startRecording(config)
-            }
-        }, delayMs)
-    }
-
     private fun stopRecording() {
         if (!isRecording || isFinalizingRecording) return
         isRecording = false

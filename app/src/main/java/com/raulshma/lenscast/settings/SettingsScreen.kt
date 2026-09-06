@@ -57,7 +57,6 @@ fun CameraSettingsScreen(
     )
 
     LaunchedEffect(activity) {
-        viewModel.activityRef = activity
         viewModel.refreshBatteryOptimizationStatus()
     }
 

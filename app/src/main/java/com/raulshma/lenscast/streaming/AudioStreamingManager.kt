@@ -9,6 +9,7 @@ import android.media.AudioRecord
 import android.media.MediaRecorder
 import android.media.audiofx.AcousticEchoCanceler
 import android.media.audiofx.NoiseSuppressor
+import com.raulshma.lenscast.core.StreamDefaults
 import android.os.Process
 import android.util.Log
 import androidx.core.content.ContextCompat
@@ -21,8 +22,8 @@ import java.util.concurrent.atomic.AtomicLong
 class AudioStreamingManager(private val context: Context) {
 
     data class Config(
-        val bitrateKbps: Int = 128,
-        val channelCount: Int = 1,
+        val bitrateKbps: Int = StreamDefaults.AUDIO_BITRATE_KBPS,
+        val channelCount: Int = StreamDefaults.AUDIO_CHANNELS,
         val echoCancellation: Boolean = true,
     )
 

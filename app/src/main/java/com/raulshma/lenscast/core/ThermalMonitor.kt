@@ -7,6 +7,7 @@ import android.util.Log
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import java.util.concurrent.atomic.AtomicBoolean
 
 class ThermalMonitor(private val context: Context) {
 
@@ -14,16 +15,17 @@ class ThermalMonitor(private val context: Context) {
     val thermalState: StateFlow<ThermalState> = _thermalState.asStateFlow()
 
     private val _throttlingResult = MutableStateFlow(ThermalThrottlingResult(
-        bitrateMultiplier = 1.0f,
         frameRateMultiplier = 1.0f,
-        jpegQuality = 70,
+        jpegQuality = StreamDefaults.JPEG_QUALITY,
         shouldPause = false,
     ))
     val throttlingResult: StateFlow<ThermalThrottlingResult> = _throttlingResult.asStateFlow()
 
     private var listener: PowerManager.OnThermalStatusChangedListener? = null
+    private val monitoring = AtomicBoolean(false)
 
     fun startMonitoring() {
+        if (!monitoring.compareAndSet(false, true)) return
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             val pm = context.getSystemService(Context.POWER_SERVICE) as PowerManager
             if (Build.VERSION.SDK_INT >= 30) {
@@ -45,6 +47,7 @@ class ThermalMonitor(private val context: Context) {
     }
 
     fun stopMonitoring() {
+        if (!monitoring.compareAndSet(true, false)) return
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && listener != null) {
             val pm = context.getSystemService(Context.POWER_SERVICE) as PowerManager
             pm.removeThermalStatusListener(listener!!)
@@ -52,9 +55,8 @@ class ThermalMonitor(private val context: Context) {
         }
         _thermalState.value = ThermalState.NORMAL
         _throttlingResult.value = ThermalThrottlingResult(
-            bitrateMultiplier = 1.0f,
             frameRateMultiplier = 1.0f,
-            jpegQuality = 70,
+            jpegQuality = StreamDefaults.JPEG_QUALITY,
             shouldPause = false,
         )
         Log.d(TAG, "Thermal monitoring stopped")
@@ -87,31 +89,26 @@ class ThermalMonitor(private val context: Context) {
     private fun applyThermalThrottling(state: ThermalState): ThermalThrottlingResult {
         return when (state) {
             ThermalState.NORMAL -> ThermalThrottlingResult(
-                bitrateMultiplier = 1.0f,
                 frameRateMultiplier = 1.0f,
-                jpegQuality = 70,
+                jpegQuality = StreamDefaults.JPEG_QUALITY,
                 shouldPause = false,
             )
             ThermalState.LIGHT -> ThermalThrottlingResult(
-                bitrateMultiplier = 0.9f,
                 frameRateMultiplier = 0.9f,
                 jpegQuality = 60,
                 shouldPause = false,
             )
             ThermalState.MODERATE -> ThermalThrottlingResult(
-                bitrateMultiplier = 0.7f,
                 frameRateMultiplier = 0.7f,
                 jpegQuality = 55,
                 shouldPause = false,
             )
             ThermalState.SEVERE -> ThermalThrottlingResult(
-                bitrateMultiplier = 0.5f,
                 frameRateMultiplier = 0.5f,
                 jpegQuality = 40,
                 shouldPause = false,
             )
             ThermalState.CRITICAL -> ThermalThrottlingResult(
-                bitrateMultiplier = 0.0f,
                 frameRateMultiplier = 0.0f,
                 jpegQuality = 20,
                 shouldPause = true,
