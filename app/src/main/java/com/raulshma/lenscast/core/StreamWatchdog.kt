@@ -14,8 +14,6 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
-import kotlinx.coroutines.withTimeoutOrNull
 import java.util.concurrent.atomic.AtomicInteger
 import com.raulshma.lenscast.core.WatchdogPolicy.RecoveryTier
 
@@ -24,10 +22,13 @@ import com.raulshma.lenscast.core.WatchdogPolicy.RecoveryTier
  * (camera crashes, server disconnections, frame stalls) and automatically restarts
  * the stream with escalating recovery strategies and exponential backoff.
  *
- * Recovery tiers:
+ * Recovery tiers (mechanics owned by [StreamingSession.recover]):
  *  1. SOFT  — Rebind CameraX use cases (fixes most transient camera glitches)
  *  2. MEDIUM — Restart streaming server + rebind camera
  *  3. HARD  — Full re-initialize: CameraService.initialize() → restart everything
+ *
+ * This class owns the monitoring loop: health checks ([WatchdogPolicy]), the
+ * tier decision, backoff, verification delays, and state publishing.
  *
  * The watchdog is disabled by default and must be explicitly enabled via settings.
  */
@@ -228,140 +229,63 @@ class StreamWatchdog(
 
     // ── Recovery Logic ──
 
+    /**
+     * The session performs the tier's mechanics ([StreamingSession.recover]
+     * owns the rebind, the attach choreography, and the conditional stream
+     * restarts); the watchdog owns the timing around them — backoff before
+     * (in the loop) and the verification window after.
+     */
     private suspend fun attemptRecovery(tier: RecoveryTier): Boolean {
         return try {
-            when (tier) {
-                RecoveryTier.SOFT -> softRecovery()
-                RecoveryTier.MEDIUM -> mediumRecovery()
-                RecoveryTier.HARD -> hardRecovery()
-            }
+            val recovered = streamingSession.recover(tier)
+            if (!recovered) return false
+            verifyRecovery(tier)
         } catch (e: Exception) {
             Log.e(TAG, "$tier recovery threw exception", e)
             false
         }
     }
 
-    /**
-     * Tier 1: Rebind CameraX use cases. Cheapest fix for transient camera glitches.
-     */
-    private suspend fun softRecovery(): Boolean {
-        Log.d(TAG, "Soft recovery: rebinding CameraX use cases")
+    /** Post-recovery health verification, per tier, with today's windows. */
+    private suspend fun verifyRecovery(tier: RecoveryTier): Boolean = when (tier) {
+        RecoveryTier.SOFT -> {
+            // Wait a moment and check if frames start flowing again
+            delay(WatchdogPolicy.RECOVERY_VERIFICATION_DELAY_MS)
+            val framesBeforeWait = streamingManager.processedFrames.value
+            delay(WatchdogPolicy.RECOVERY_VERIFICATION_WINDOW_MS)
+            val framesAfterWait = streamingManager.processedFrames.value
 
-        withContext(Dispatchers.Main) {
-            cameraService.rebindUseCases()
+            val success = framesAfterWait > framesBeforeWait ||
+                    streamingManager.clientCount.value == 0 // No clients = can't verify, assume OK
+
+            if (success) {
+                Log.d(TAG, "Soft recovery succeeded (frames: $framesBeforeWait → $framesAfterWait)")
+            }
+            success
         }
 
-        // Wait a moment and check if frames start flowing again
-        delay(WatchdogPolicy.RECOVERY_VERIFICATION_DELAY_MS)
-        val framesBeforeWait = streamingManager.processedFrames.value
-        delay(WatchdogPolicy.RECOVERY_VERIFICATION_WINDOW_MS)
-        val framesAfterWait = streamingManager.processedFrames.value
+        RecoveryTier.MEDIUM -> {
+            delay(WatchdogPolicy.RECOVERY_VERIFICATION_DELAY_MS)
+            val isLive = streamingManager.isLiveStreaming()
 
-        val success = framesAfterWait > framesBeforeWait ||
-                streamingManager.clientCount.value == 0 // No clients = can't verify, assume OK
-
-        if (success) {
-            Log.d(TAG, "Soft recovery succeeded (frames: $framesBeforeWait → $framesAfterWait)")
-        }
-        return success
-    }
-
-    /**
-     * Tier 2: Restart streaming server + rebind camera.
-     */
-    private suspend fun mediumRecovery(): Boolean {
-        Log.d(TAG, "Medium recovery: restarting streaming server + rebinding camera")
-
-        // Track which streams were active
-        val webWasActive = streamingManager.isWebStreamActive()
-        val rtspWasActive = streamingManager.isRtspRunning.value
-
-        // Stop everything
-        streamingManager.pauseStreaming()
-
-        // Restart server
-        val serverStarted = streamingManager.ensureServerRunning()
-        if (!serverStarted) {
-            Log.e(TAG, "Medium recovery: failed to restart server")
-            return false
+            if (isLive) {
+                Log.d(TAG, "Medium recovery succeeded")
+            }
+            isLive
         }
 
-        // Rebind camera
-        withContext(Dispatchers.Main) {
-            cameraService.rebindUseCases()
+        RecoveryTier.HARD -> {
+            // Verify with a longer window for hard recovery
+            delay(WatchdogPolicy.HARD_VERIFICATION_DELAY_MS)
+            val isLive = streamingManager.isLiveStreaming()
+            val cameraReady = cameraService.cameraState.value is CameraState.Ready
+
+            val success = isLive && cameraReady
+            if (success) {
+                Log.d(TAG, "Hard recovery succeeded")
+            }
+            success
         }
-
-        // Restart the streams that were previously active
-        if (webWasActive) {
-            streamingManager.startWebStreaming()
-        }
-        if (rtspWasActive) {
-            streamingManager.startRtspStreaming()
-        }
-
-        // Verify
-        delay(WatchdogPolicy.RECOVERY_VERIFICATION_DELAY_MS)
-        val isLive = streamingManager.isLiveStreaming()
-
-        if (isLive) {
-            Log.d(TAG, "Medium recovery succeeded")
-        }
-        return isLive
-    }
-
-    /**
-     * Tier 3: Full re-initialization of camera and streaming pipelines.
-     */
-    private suspend fun hardRecovery(): Boolean {
-        Log.d(TAG, "Hard recovery: full re-initialization")
-
-        // Track which streams were active
-        val webWasActive = streamingManager.isWebStreamActive()
-        val rtspWasActive = streamingManager.isRtspRunning.value
-
-        // Stop everything
-        streamingManager.stopStreaming()
-
-        // Re-initialize camera
-        val cameraResult = withContext(Dispatchers.Main) {
-            cameraService.initialize()
-        }
-
-        if (cameraResult.isFailure) {
-            Log.e(TAG, "Hard recovery: camera re-initialization failed", cameraResult.exceptionOrNull())
-            return false
-        }
-
-        // Re-acquire keep-alive and rebind
-        // The session stayed active through recovery, so keep-alive and the
-        // foreground service are still held; only refresh what recovery disturbed.
-        streamingSession.refreshAfterRecovery()
-
-        // Restart streaming
-        val started = streamingManager.startStreaming()
-        if (!started) {
-            Log.e(TAG, "Hard recovery: failed to restart streaming")
-            return false
-        }
-
-        // Restart specific streams if needed
-        if (webWasActive && !streamingManager.isWebStreamActive()) {
-            streamingManager.startWebStreaming()
-        }
-        if (rtspWasActive && !streamingManager.isRtspRunning.value) {
-            streamingManager.startRtspStreaming()
-        }
-
-        // Verify with a longer window for hard recovery
-        delay(WatchdogPolicy.HARD_VERIFICATION_DELAY_MS)
-        val isLive = streamingManager.isLiveStreaming()
-        val cameraReady = cameraService.cameraState.value is CameraState.Ready
-
-        val success = isLive && cameraReady
-        if (success) {
-            Log.d(TAG, "Hard recovery succeeded")
-        }
-        return success
     }
 
     // ── Helpers ──

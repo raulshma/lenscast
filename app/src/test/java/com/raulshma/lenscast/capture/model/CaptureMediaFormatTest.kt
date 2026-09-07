@@ -28,6 +28,24 @@ class CaptureMediaFormatTest {
     }
 
     @Test
+    fun `write paths are the rooted folder and the query prefixes derive from them`() {
+        // The exact RELATIVE_PATH RecordingService and PhotoCaptureManager
+        // insert — composed once here, never root + "/" + dir at the site.
+        assertEquals("Pictures/LensCast", CaptureMediaFormat.PHOTOS_WRITE_RELATIVE_PATH)
+        assertEquals("Movies/LensCast", CaptureMediaFormat.VIDEOS_WRITE_RELATIVE_PATH)
+        // The queries see the same folders with a trailing slash, so a rename
+        // can never desync the write path from the query prefix.
+        assertEquals(CaptureMediaFormat.PHOTOS_WRITE_RELATIVE_PATH + "/", CaptureMediaFormat.PHOTOS_RELATIVE_PATH)
+        assertEquals(CaptureMediaFormat.VIDEOS_WRITE_RELATIVE_PATH + "/", CaptureMediaFormat.VIDEOS_RELATIVE_PATH)
+    }
+
+    @Test
+    fun `write paths contain their folder name`() {
+        assertTrue(CaptureMediaFormat.PHOTOS_WRITE_RELATIVE_PATH.contains(CaptureMediaFormat.PHOTO_DIR_NAME))
+        assertTrue(CaptureMediaFormat.VIDEOS_WRITE_RELATIVE_PATH.contains(CaptureMediaFormat.VIDEO_DIR_NAME))
+    }
+
+    @Test
     fun `content uri sniff`() {
         assertTrue(CaptureMediaFormat.isContentUri("content://media/external/images/1"))
         assertFalse(CaptureMediaFormat.isContentUri("/storage/emulated/0/Pictures/LensCast/IMG_1.jpg"))

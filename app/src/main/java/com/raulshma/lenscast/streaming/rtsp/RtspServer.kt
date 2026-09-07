@@ -5,6 +5,7 @@ import com.raulshma.lenscast.core.StreamDefaults
 import com.raulshma.lenscast.core.YuvConverter
 import com.raulshma.lenscast.streaming.FrameThrottle
 import com.raulshma.lenscast.streaming.FrameTiming
+import com.raulshma.lenscast.streaming.RtspServerHandle
 import java.io.InputStream
 import java.io.OutputStream
 import java.io.OutputStreamWriter
@@ -23,7 +24,9 @@ import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
 
-class RtspServer(private val port: Int = DEFAULT_PORT) {
+// RtspServerHandle: the server-lifecycle seam [com.raulshma.lenscast.streaming.RtspOutput]
+// drives this class through; the method set is already this interface's shape.
+class RtspServer(private val port: Int = DEFAULT_PORT) : RtspServerHandle {
 
     private var serverSocket: ServerSocket? = null
     private var acceptThread: Thread? = null
@@ -35,7 +38,6 @@ class RtspServer(private val port: Int = DEFAULT_PORT) {
     private var videoPacketizer = RtpPacketizer()
     private var audioPacketizer = AacRtpPacketizer()
     private var audioTimestamp: Long = 0
-    private val audioTimestampIncrement: Long = 1024 // AAC-LC: 1024 samples per frame
 
     private val clients = ConcurrentHashMap<String, ClientSession>()
     private val sessionIdCounter = AtomicInteger(0)
@@ -85,7 +87,7 @@ class RtspServer(private val port: Int = DEFAULT_PORT) {
      * then start" ordering contract is now enforced by construction.
      * [audioStream] is the live AAC byte source for the audio track, if any.
      */
-    fun start(initial: RtspConfig, audioStream: InputStream? = null): Boolean {
+    override fun start(initial: RtspConfig, audioStream: InputStream?): Boolean {
         if (running.getAndSet(true)) return true
         config = normalize(initial)
         if (audioStream != null) aacEncoder.setAudioStream(audioStream)
@@ -147,7 +149,7 @@ class RtspServer(private val port: Int = DEFAULT_PORT) {
         }
     }
 
-    fun stop() {
+    override fun stop() {
         if (!running.getAndSet(false)) return
 
         // Capture the caller: an unexpected stop() is the prime suspect when the
@@ -179,7 +181,7 @@ class RtspServer(private val port: Int = DEFAULT_PORT) {
         Log.d(TAG, "RTSP server stopped")
     }
 
-    fun pushFrame(yuvData: ByteArray, width: Int, height: Int, rotation: Int) {
+    override fun pushFrame(yuvData: ByteArray, width: Int, height: Int, rotation: Int) {
         if (!running.get()) return
 
         val playingClients = clients.count { it.value.isPlaying }
@@ -236,24 +238,23 @@ class RtspServer(private val port: Int = DEFAULT_PORT) {
     )
 
     /**
-     * Live-update with a new config. The per-setting semantics that used to be
-     * invisible at the call site live in one place now: bitrates hot-swap in
-     * the encoders, frame rate changes the RTP timestamp increment, a new
-     * input format reconfigures the encoder. Structural changes (audio
-     * on/off, channels, sample rate, auth) take effect via a server restart
-     * by the caller.
+     * Live-update with a new config. Which changed fields this can take in
+     * place is the [RtspConfigDiff] verdict's call: the video bitrate
+     * hot-swaps through the encoder, the frame rate reaches the RTP
+     * timestamp increment via the live config, a new input format
+     * reconfigures the encoder, and the authorizer reads the auth spec live.
+     * NEEDS_RESTART fields (audio bitrate, audio structure) do nothing here —
+     * they only become real when the caller restarts the server with the
+     * retained config.
      */
-    fun apply(update: RtspConfig) {
-        val old = config
+    override fun apply(update: RtspConfig) {
+        val diff = RtspConfigDiff.of(config, normalize(update))
         config = normalize(update)
         if (!running.get()) return
-        if (config.videoBitrate != old.videoBitrate) {
+        if (RtspField.VIDEO_BITRATE in diff) {
             encoder.setBitrate(config.videoBitrate)
         }
-        if (config.audioBitrateKbps != old.audioBitrateKbps) {
-            aacEncoder.setBitrate(config.audioBitrateKbps)
-        }
-        if (config.inputFormat != old.inputFormat) {
+        if (RtspField.INPUT_FORMAT in diff) {
             encoder.setInputFormat(config.inputFormat)
             reconfigureEncoder(config.videoWidth, config.videoHeight)
         }
@@ -308,7 +309,13 @@ class RtspServer(private val port: Int = DEFAULT_PORT) {
 
         val senderReport = if (System.currentTimeMillis() - lastSenderReportTime >= RTCP_SR_INTERVAL_MS) {
             lastSenderReportTime = System.currentTimeMillis()
-            buildVideoSenderReport()
+            RtspSessionProtocol.senderReport(
+                ssrc = videoPacketizer.wireSsrc,
+                rtpTimestamp = rtpTimestamp,
+                packets = videoPacketizer.sentPacketCount,
+                octets = videoPacketizer.sentOctetCount,
+                wallClockMs = System.currentTimeMillis(),
+            )
         } else {
             null
         }
@@ -328,35 +335,8 @@ class RtspServer(private val port: Int = DEFAULT_PORT) {
         }
     }
 
-    /** RFC 3550 sender report (no report blocks) for the video RTP stream. */
-    private fun buildVideoSenderReport(): ByteArray {
-        val ntpTimeMs = System.currentTimeMillis() + NTP_EPOCH_OFFSET_MS
-        val ntpSeconds = ntpTimeMs / 1000
-        val ntpFraction = ((ntpTimeMs % 1000) shl 32) / 1000
-
-        val packet = ByteArray(28)
-        packet[0] = 0x80.toByte() // V=2, P=0, RC=0
-        packet[1] = 200.toByte()  // PT=SR
-        packet[2] = 0
-        packet[3] = 6             // length in 32-bit words minus one
-        writeInt(packet, 4, videoPacketizer.wireSsrc)
-        writeInt(packet, 8, ntpSeconds.toInt())
-        writeInt(packet, 12, ntpFraction.toInt())
-        writeInt(packet, 16, (rtpTimestamp and 0xFFFFFFFFL).toInt())
-        writeInt(packet, 20, (videoPacketizer.sentPacketCount and 0xFFFFFFFFL).toInt())
-        writeInt(packet, 24, (videoPacketizer.sentOctetCount and 0xFFFFFFFFL).toInt())
-        return packet
-    }
-
-    private fun writeInt(dest: ByteArray, offset: Int, value: Int) {
-        dest[offset] = (value ushr 24).toByte()
-        dest[offset + 1] = (value ushr 16).toByte()
-        dest[offset + 2] = (value ushr 8).toByte()
-        dest[offset + 3] = value.toByte()
-    }
-
     private fun distributeEncodedAudioFrame(aacData: ByteArray) {
-        audioTimestamp += audioTimestampIncrement
+        audioTimestamp += AUDIO_TIMESTAMP_INCREMENT
 
         for (client in clients.values) {
             if (client.isPlaying && client.isAudioSetup) {
@@ -449,7 +429,6 @@ class RtspServer(private val port: Int = DEFAULT_PORT) {
         private var lastCSeq = -1
         private var rtspSessionId = ""
         private var lastActivity = System.currentTimeMillis()
-        private var lastRtcpActivity = 0L
 
         private val tracks = mutableMapOf<Int, TrackState>()
 
@@ -495,16 +474,13 @@ class RtspServer(private val port: Int = DEFAULT_PORT) {
                     val firstByte = input.read()
                     if (firstByte < 0) break
 
-                    if (firstByte == INTERLEAVED_FRAME_MAGIC) {
+                    if (firstByte == RtspSessionProtocol.INTERLEAVED_FRAME_MAGIC) {
                         val channel = input.read()
                         val sizeHi = input.read()
                         val sizeLo = input.read()
                         if (channel < 0 || sizeHi < 0 || sizeLo < 0) break
 
                         val frameSize = (sizeHi shl 8) or sizeLo
-                        if (channel == videoRtcpChannel || channel == audioRtcpChannel) {
-                            lastRtcpActivity = lastActivity
-                        }
                         if (!wireReader.discardBytes(frameSize)) break
 
                         lastActivity = System.currentTimeMillis()
@@ -536,20 +512,19 @@ class RtspServer(private val port: Int = DEFAULT_PORT) {
         private fun processRequest(lines: List<String>, output: OutputStream) {
             val request = RtspRequestParser.parse(lines) ?: return
 
-            val parsedCSeq = request.headers["cseq"]?.toIntOrNull()
-            if (parsedCSeq == null || parsedCSeq < 0) {
-                cSeq = 0
-                sendResponse(output, "400 Bad Request")
-                return
+            // The CSeq monotonicity ladder lives in the pure protocol module;
+            // a violation answers 400 with the verdict's response CSeq.
+            when (val verdict = RtspSessionProtocol.cseqVerdict(lastCSeq, request.headers["cseq"])) {
+                is RtspSessionProtocol.CSeqVerdict.Reject -> {
+                    cSeq = verdict.cseq
+                    sendResponse(output, "400 Bad Request")
+                    return
+                }
+                is RtspSessionProtocol.CSeqVerdict.Ok -> {
+                    cSeq = verdict.cseq
+                    lastCSeq = verdict.cseq
+                }
             }
-            if (lastCSeq >= 0 && parsedCSeq <= lastCSeq) {
-                cSeq = parsedCSeq
-                sendResponse(output, "400 Bad Request")
-                return
-            }
-
-            cSeq = parsedCSeq
-            lastCSeq = parsedCSeq
 
             if (authorizer.requiresAuthentication(request.method) &&
                 !authorizer.authorize(request.method, request.uri, request.headers["authorization"])
@@ -620,17 +595,14 @@ class RtspServer(private val port: Int = DEFAULT_PORT) {
                 return
             }
 
-            val transport = headers["transport"] ?: ""
-
-            if (!transport.contains("RTP/AVP/TCP", ignoreCase = true) ||
-                !transport.contains("interleaved", ignoreCase = true)
-            ) {
+            val transportVerdict = RtspSessionProtocol.parseTransportHeader(headers["transport"])
+            if (transportVerdict is RtspSessionProtocol.TransportVerdict.Unsupported) {
                 sendResponse(output, "461 Unsupported Transport")
                 return
             }
 
             if (rtspSessionId.isNotEmpty()) {
-                val requestedSession = headers["session"]?.substringBefore(';')?.trim()
+                val requestedSession = RtspSessionProtocol.parseSessionHeader(headers["session"])
                 if (requestedSession != null && requestedSession != rtspSessionId) {
                     sendResponse(output, "454 Session Not Found")
                     return
@@ -642,10 +614,11 @@ class RtspServer(private val port: Int = DEFAULT_PORT) {
                 return
             }
 
-            val interleavedMatch = Regex("interleaved=(\\d+)-(\\d+)").find(transport)
-            if (interleavedMatch != null) {
-                trackState.rtpChannel = interleavedMatch.groupValues[1].toInt()
-                trackState.rtcpChannel = interleavedMatch.groupValues[2].toInt()
+            if (transportVerdict is RtspSessionProtocol.TransportVerdict.Interleaved) {
+                transportVerdict.channels?.let { channels ->
+                    trackState.rtpChannel = channels.rtp
+                    trackState.rtcpChannel = channels.rtcp
+                }
             }
 
             trackState.isSetup = true
@@ -680,22 +653,27 @@ class RtspServer(private val port: Int = DEFAULT_PORT) {
 
             encoder.requestKeyFrame()
 
-            val rtpInfoParts = mutableListOf<String>()
             val streamBase = buildAbsoluteRtspUrl("/${RtspUriPolicy.DEFAULT_STREAM_PATH}")
             val nextSeq = (videoPacketizer.currentSeq + 1) and 0xFFFF
             val nextRtpTime = (rtpTimestamp + timestampIncrement) and 0xFFFFFFFFL
-            rtpInfoParts.add("url=$streamBase;seq=$nextSeq;rtptime=$nextRtpTime")
-
-            if (isAudioSetup && config.audioEnabled) {
-                val audioUrl = buildAbsoluteRtspUrl("/${RtspUriPolicy.DEFAULT_STREAM_PATH}/trackID=1")
-                rtpInfoParts.add("url=$audioUrl;seq=${audioPacketizer.currentSeq};rtptime=$audioTimestamp")
+            val audioEntry = if (isAudioSetup && config.audioEnabled) {
+                RtspSessionProtocol.RtpInfoEntry(
+                    url = buildAbsoluteRtspUrl("/${RtspUriPolicy.DEFAULT_STREAM_PATH}/trackID=1"),
+                    seq = audioPacketizer.currentSeq,
+                    rtpTime = audioTimestamp,
+                )
+            } else {
+                null
             }
 
             sendResponse(
                 output, "200 OK", mapOf(
                     "Session" to rtspSessionId,
                     "Range" to "npt=0.000-",
-                    "RTP-Info" to rtpInfoParts.joinToString(",")
+                    "RTP-Info" to RtspSessionProtocol.buildRtpInfo(
+                        RtspSessionProtocol.RtpInfoEntry(url = streamBase, seq = nextSeq, rtpTime = nextRtpTime),
+                        audioEntry,
+                    )
                 )
             )
         }
@@ -728,8 +706,7 @@ class RtspServer(private val port: Int = DEFAULT_PORT) {
 
         private fun isValidSession(headers: Map<String, String>): Boolean {
             if (rtspSessionId.isEmpty()) return false
-            val sessionHeader = headers["session"] ?: return false
-            val providedSession = sessionHeader.substringBefore(';').trim()
+            val providedSession = RtspSessionProtocol.parseSessionHeader(headers["session"]) ?: return false
             return providedSession == rtspSessionId
         }
 
@@ -742,18 +719,12 @@ class RtspServer(private val port: Int = DEFAULT_PORT) {
         }
 
         /**
-         * Writes one `$`-framed interleaved packet in a single write() call.
-         * Writing the 4 header bytes individually produced several tiny TCP
-         * segments per RTP packet under TCP_NODELAY.
+         * Writes one `$`-framed interleaved packet in a single write() call;
+         * the frame bytes come from [RtspSessionProtocol.interleavedFrame].
          */
         private fun sendInterleaved(channel: Int, packet: ByteArray) {
             val output = outputStream ?: return
-            val frame = ByteArray(4 + packet.size)
-            frame[0] = INTERLEAVED_FRAME_MAGIC.toByte()
-            frame[1] = channel.toByte()
-            frame[2] = ((packet.size shr 8) and 0xFF).toByte()
-            frame[3] = (packet.size and 0xFF).toByte()
-            System.arraycopy(packet, 0, frame, 4, packet.size)
+            val frame = RtspSessionProtocol.interleavedFrame(channel, packet)
             try {
                 synchronized(output) {
                     output.write(frame)
@@ -824,8 +795,6 @@ class RtspServer(private val port: Int = DEFAULT_PORT) {
 
         const val DEFAULT_PORT = StreamDefaults.RTSP_PORT
 
-        private const val INTERLEAVED_FRAME_MAGIC = 0x24
-
         // ── Session lifecycle constants (one home) ──
         // MAX_CLIENTS caps concurrent client connections; the accept loop rejects beyond it.
         private const val MAX_CLIENTS = 4
@@ -837,7 +806,12 @@ class RtspServer(private val port: Int = DEFAULT_PORT) {
         private const val SESSION_TIMEOUT_HEADER_SECONDS = 60L
         private const val RTCP_SR_INTERVAL_MS = 5_000L
 
-        private const val NTP_EPOCH_OFFSET_MS = 2_208_988_800_000L // 1900-01-01 vs 1970-01-01
+        /**
+         * RTP timestamp advance per audio access unit. Internal so the contract
+         * test pins it to [AacFormat.SAMPLES_PER_ACCESS_UNIT] — the packetizer
+         * and the encoder must agree on the AU size by construction.
+         */
+        internal val AUDIO_TIMESTAMP_INCREMENT = AacFormat.SAMPLES_PER_ACCESS_UNIT.toLong()
 
         private val RFC_1123_FORMAT = object : ThreadLocal<SimpleDateFormat>() {
             override fun initialValue(): SimpleDateFormat {

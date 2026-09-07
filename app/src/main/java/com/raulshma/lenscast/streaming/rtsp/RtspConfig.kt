@@ -22,6 +22,72 @@ data class RtspConfig(
     val auth: RtspAuthSpec? = null,
 )
 
+/** How a changed [RtspConfig] field reaches the running server. */
+enum class RtspChangeScope {
+    /** [RtspServer.apply] takes the change in place — no restart owed. */
+    HOT_SWAP,
+
+    /**
+     * Only a server restart (stop + start with the retained config) makes the
+     * change effective; applying it live would silently do nothing.
+     */
+    NEEDS_RESTART,
+}
+
+/**
+ * One RTSP config field, tagged with the scope that makes its change real.
+ * Ground truth: the H.264 encoder applies a new bitrate live via
+ * `MediaCodec.setParameters`, while [AacEncoder.setBitrate] only stores an
+ * audio-bitrate change until its next `start()` — hence the one NEEDS_RESTART
+ * oddball. The frame rate flows into the RTP timestamp increment through the
+ * live config getter (the encoder's own rate catches up at its next
+ * reconfigure), dimensions ride the frame-path reconfigure, input-format
+ * changes reconfigure inside [RtspServer.apply], and the authorizer reads the
+ * auth spec live — all HOT_SWAP, and all restart-free today.
+ */
+enum class RtspField(val scope: RtspChangeScope) {
+    VIDEO_WIDTH(RtspChangeScope.HOT_SWAP),
+    VIDEO_HEIGHT(RtspChangeScope.HOT_SWAP),
+    VIDEO_BITRATE(RtspChangeScope.HOT_SWAP),
+    VIDEO_FRAME_RATE(RtspChangeScope.HOT_SWAP),
+    INPUT_FORMAT(RtspChangeScope.HOT_SWAP),
+    AUDIO_ENABLED(RtspChangeScope.NEEDS_RESTART),
+    AUDIO_SAMPLE_RATE_HZ(RtspChangeScope.NEEDS_RESTART),
+    AUDIO_CHANNEL_COUNT(RtspChangeScope.NEEDS_RESTART),
+    AUDIO_BITRATE_KBPS(RtspChangeScope.NEEDS_RESTART),
+    AUTH(RtspChangeScope.HOT_SWAP),
+}
+
+/**
+ * The pure restart-vs-hot-swap verdict for two [RtspConfig] values. Callers
+ * diff old vs new and let the changed fields' scopes decide: any
+ * NEEDS_RESTART field means restart the server; otherwise [RtspServer.apply]
+ * takes the update in place.
+ */
+object RtspConfigDiff {
+
+    /** The set of fields whose values differ between [old] and [new]. */
+    fun of(old: RtspConfig, new: RtspConfig): Set<RtspField> {
+        val changed = mutableSetOf<RtspField>()
+        if (old.videoWidth != new.videoWidth) changed += RtspField.VIDEO_WIDTH
+        if (old.videoHeight != new.videoHeight) changed += RtspField.VIDEO_HEIGHT
+        if (old.videoBitrate != new.videoBitrate) changed += RtspField.VIDEO_BITRATE
+        if (old.videoFrameRate != new.videoFrameRate) changed += RtspField.VIDEO_FRAME_RATE
+        if (old.inputFormat != new.inputFormat) changed += RtspField.INPUT_FORMAT
+        if (old.audioEnabled != new.audioEnabled) changed += RtspField.AUDIO_ENABLED
+        if (old.audioSampleRateHz != new.audioSampleRateHz) changed += RtspField.AUDIO_SAMPLE_RATE_HZ
+        if (old.audioChannelCount != new.audioChannelCount) changed += RtspField.AUDIO_CHANNEL_COUNT
+        if (old.audioBitrateKbps != new.audioBitrateKbps) changed += RtspField.AUDIO_BITRATE_KBPS
+        // RtspAuthSpec is identity-equals: a fresh spec instance counts as a change.
+        if (old.auth !== new.auth) changed += RtspField.AUTH
+        return changed
+    }
+
+    /** True when at least one changed field cannot be applied live. */
+    fun needsRestart(changed: Set<RtspField>): Boolean =
+        changed.any { it.scope == RtspChangeScope.NEEDS_RESTART }
+}
+
 /**
  * RTSP auth identity: a null spec means auth is off, presence means enabled.
  * The Digest HA1 is normalized to lowercase here, matching the server's

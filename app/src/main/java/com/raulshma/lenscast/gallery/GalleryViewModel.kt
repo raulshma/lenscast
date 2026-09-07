@@ -97,22 +97,6 @@ class GalleryViewModel(
         }
     }
 
-    fun getItemById(id: String): CaptureHistory? {
-        return allItems.value.find { it.id == id }
-    }
-
-    fun getItemIndex(id: String): Int {
-        return allItems.value.indexOfFirst { it.id == id }
-    }
-
-    fun getAdjacentItem(id: String, step: Int): CaptureHistory? {
-        val items = allItems.value
-        val currentIndex = items.indexOfFirst { it.id == id }
-        if (currentIndex == -1) return null
-        val nextIndex = currentIndex + step
-        return items.getOrNull(nextIndex)
-    }
-
     class Factory(
         private val captureHistoryStore: CaptureHistoryStore,
     ) : ViewModelProvider.Factory {

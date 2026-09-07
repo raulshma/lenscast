@@ -67,7 +67,7 @@ class NetworkQualityMonitor {
     }
 
     fun getMinClientThroughputKbps(): Int {
-        if (clientStats.isEmpty()) return DEFAULT_BANDWIDTH_KBPS
+        if (clientStats.isEmpty()) return NetworkAdaptationPolicy.DEFAULT_BANDWIDTH_KBPS
         var minThroughput = Int.MAX_VALUE
         var hasData = false
         for (stats in clientStats.values) {
@@ -80,11 +80,11 @@ class NetworkQualityMonitor {
                 }
             }
         }
-        return if (hasData) minThroughput else DEFAULT_BANDWIDTH_KBPS
+        return if (hasData) minThroughput else NetworkAdaptationPolicy.DEFAULT_BANDWIDTH_KBPS
     }
 
     fun getAvgClientThroughputKbps(): Int {
-        if (clientStats.isEmpty()) return DEFAULT_BANDWIDTH_KBPS
+        if (clientStats.isEmpty()) return NetworkAdaptationPolicy.DEFAULT_BANDWIDTH_KBPS
         var total = 0L
         var count = 0
         for (stats in clientStats.values) {
@@ -96,16 +96,20 @@ class NetworkQualityMonitor {
                 }
             }
         }
-        return if (count > 0) (total / count).toInt() else DEFAULT_BANDWIDTH_KBPS
+        return if (count > 0) (total / count).toInt() else NetworkAdaptationPolicy.DEFAULT_BANDWIDTH_KBPS
     }
 
     /**
      * Measured aggregate client throughput for display: 0 while no client is
      * sending frames. Unlike [getAvgClientThroughputKbps] (the adaptation
-     * ladder's view), this never reports a default constant.
+     * ladder's view), this never reports a default constant — the 0-while-idle
+     * rule is [NetworkAdaptationPolicy.displayKbps]'s.
      */
     fun getMeasuredBandwidthKbps(): Int {
-        return if (_activeClients.get() > 0) getAvgClientThroughputKbps() else 0
+        return NetworkAdaptationPolicy.displayKbps(
+            measuredKbps = getAvgClientThroughputKbps(),
+            hasActiveClients = _activeClients.get() > 0,
+        )
     }
 
     fun getWorstClientLatencyMs(): Long {
@@ -139,17 +143,12 @@ class NetworkQualityMonitor {
         }
     }
 
+    /** The ladder verdict is the policy's; this only feeds it measured inputs. */
     fun getNetworkQualityLevel(): NetworkQualityLevel {
-        val minThroughput = getMinClientThroughputKbps()
-        val activeCount = _activeClients.get()
-
-        return when {
-            minThroughput >= GOOD_BANDWIDTH_THRESHOLD_KBPS && activeCount <= 1 -> NetworkQualityLevel.EXCELLENT
-            minThroughput >= GOOD_BANDWIDTH_THRESHOLD_KBPS -> NetworkQualityLevel.GOOD
-            minThroughput >= FAIR_BANDWIDTH_THRESHOLD_KBPS -> NetworkQualityLevel.FAIR
-            minThroughput >= POOR_BANDWIDTH_THRESHOLD_KBPS -> NetworkQualityLevel.POOR
-            else -> NetworkQualityLevel.CRITICAL
-        }
+        return NetworkAdaptationPolicy.levelFor(
+            minThroughputKbps = getMinClientThroughputKbps(),
+            activeClients = _activeClients.get(),
+        )
     }
 
     private var cachedQualityLevel: NetworkQualityLevel? = null
@@ -169,42 +168,19 @@ class NetworkQualityMonitor {
     }
 
     fun getAdaptiveQuality(baseQuality: Int, thermalAdjustedQuality: Int): Int {
-        val level = getCachedQualityLevel()
-        val minQuality = StreamDefaults.ADAPTIVE_JPEG_QUALITY_MIN
-        val maxQuality = baseQuality.coerceIn(StreamDefaults.JPEG_QUALITY_MIN, StreamDefaults.JPEG_QUALITY_MAX)
-
-        val networkFactor = when (level) {
-            NetworkQualityLevel.EXCELLENT -> 1.0f
-            NetworkQualityLevel.GOOD -> 0.9f
-            NetworkQualityLevel.FAIR -> 0.75f
-            NetworkQualityLevel.POOR -> 0.55f
-            NetworkQualityLevel.CRITICAL -> 0.35f
-        }
-
-        val networkQuality = (thermalAdjustedQuality * networkFactor).toInt()
-            .coerceIn(minQuality, maxQuality)
-
-        return networkQuality.coerceAtMost(thermalAdjustedQuality)
+        return NetworkAdaptationPolicy.qualityFor(
+            level = getCachedQualityLevel(),
+            thermalAdjustedQuality = thermalAdjustedQuality,
+            baseQuality = baseQuality,
+        )
     }
 
     fun getAdaptiveFrameInterval(baseIntervalMs: Long, thermalAdjustedIntervalMs: Long): Long {
-        val level = getCachedQualityLevel()
-
-        val fpsFactor = when (level) {
-            NetworkQualityLevel.EXCELLENT -> 1.0f
-            NetworkQualityLevel.GOOD -> 1.0f
-            NetworkQualityLevel.FAIR -> 0.75f
-            NetworkQualityLevel.POOR -> 0.5f
-            NetworkQualityLevel.CRITICAL -> 0.3f
-        }
-
-        if (fpsFactor >= 1.0f) return thermalAdjustedIntervalMs
-
-        val baseFps = (1000f / baseIntervalMs)
-        val adaptedFps = (baseFps * fpsFactor).coerceAtLeast(MIN_FPS.toFloat())
-        val adaptedInterval = (1000f / adaptedFps).toLong()
-
-        return adaptedInterval.coerceAtLeast(thermalAdjustedIntervalMs)
+        return NetworkAdaptationPolicy.intervalFor(
+            level = getCachedQualityLevel(),
+            baseIntervalMs = baseIntervalMs,
+            thermalAdjustedIntervalMs = thermalAdjustedIntervalMs,
+        )
     }
 
     fun resetStats() {
@@ -232,10 +208,17 @@ class NetworkQualityMonitor {
             activeClients = _activeClients.get(),
             estimatedBandwidthKbps = getMeasuredBandwidthKbps(),
             totalBytesSent = getTotalBytesSent(),
-            // Display fields: 0 while nobody is connected — no invented constant.
-            // The adaptation ladder keeps its own default-aware view.
-            minThroughputKbps = if (_activeClients.get() > 0) getMinClientThroughputKbps() else 0,
-            avgThroughputKbps = if (_activeClients.get() > 0) getAvgClientThroughputKbps() else 0,
+            // Display fields: 0 while nobody is connected — no invented constant
+            // (NetworkAdaptationPolicy.displayKbps). The adaptation ladder keeps
+            // its own default-aware view.
+            minThroughputKbps = NetworkAdaptationPolicy.displayKbps(
+                getMinClientThroughputKbps(),
+                _activeClients.get() > 0,
+            ),
+            avgThroughputKbps = NetworkAdaptationPolicy.displayKbps(
+                getAvgClientThroughputKbps(),
+                _activeClients.get() > 0,
+            ),
             worstLatencyMs = getWorstClientLatencyMs(),
             qualityLevel = getNetworkQualityLevel(),
             clientDetails = clientDetails,
@@ -280,11 +263,6 @@ class NetworkQualityMonitor {
 
     companion object {
         private const val TAG = "NetworkQualityMonitor"
-        private const val DEFAULT_BANDWIDTH_KBPS = 5000
         private const val THROUGHPUT_WINDOW = 20
-        private const val GOOD_BANDWIDTH_THRESHOLD_KBPS = 3000
-        private const val FAIR_BANDWIDTH_THRESHOLD_KBPS = 1500
-        private const val POOR_BANDWIDTH_THRESHOLD_KBPS = 500
-        private const val MIN_FPS = 3
     }
 }

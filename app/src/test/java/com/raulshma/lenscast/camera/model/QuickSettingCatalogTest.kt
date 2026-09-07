@@ -1,7 +1,9 @@
 package com.raulshma.lenscast.camera.model
 
+import com.raulshma.lenscast.camera.CameraSettingsEditor
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -188,5 +190,158 @@ class QuickSettingCatalogTest {
     @Test
     fun `default color temperature constant is 5500`() {
         assertEquals(5500, CameraSettings.DEFAULT_COLOR_TEMPERATURE_K)
+    }
+
+    // ── write transforms (one row per setting) ──
+    // Writes persist exactly what the editor sent — no clamping, matching the
+    // ViewModel branches they replaced; the device's live ranges win at apply
+    // time (see CameraControlPlan).
+
+    private fun writeFor(type: QuickSettingType) = QuickSettingCatalog.descriptorFor(type).write
+
+    @Test
+    fun `exposure write sets the compensation from the slider value`() {
+        val result = writeFor(QuickSettingType.EXPOSURE)(
+            CameraSettings(), QuickSettingEditorValue.Slider(-3f)
+        )
+        assertEquals(-3, result.exposureCompensation)
+    }
+
+    @Test
+    fun `iso write parses Auto to null and digits to the value`() {
+        val write = writeFor(QuickSettingType.ISO)
+        assertNull(write(CameraSettings(iso = 400), QuickSettingEditorValue.Chips("Auto")).iso)
+        assertEquals(800, write(CameraSettings(), QuickSettingEditorValue.Chips("800")).iso)
+    }
+
+    @Test
+    fun `white balance write switches the mode`() {
+        val result = writeFor(QuickSettingType.WHITE_BALANCE)(
+            CameraSettings(), QuickSettingEditorValue.Chips("MANUAL")
+        )
+        assertEquals(WhiteBalance.MANUAL, result.whiteBalance)
+    }
+
+    @Test
+    fun `focus write switches the mode`() {
+        val result = writeFor(QuickSettingType.FOCUS)(
+            CameraSettings(), QuickSettingEditorValue.Chips("MACRO")
+        )
+        assertEquals(FocusMode.MACRO, result.focusMode)
+    }
+
+    @Test
+    fun `zoom write sets the ratio from the slider value`() {
+        val result = writeFor(QuickSettingType.ZOOM)(
+            CameraSettings(), QuickSettingEditorValue.Slider(2.5f)
+        )
+        assertEquals(2.5f, result.zoomRatio)
+    }
+
+    @Test
+    fun `hdr write switches the mode`() {
+        val result = writeFor(QuickSettingType.HDR)(
+            CameraSettings(), QuickSettingEditorValue.Chips("AUTO")
+        )
+        assertEquals(HdrMode.AUTO, result.hdrMode)
+    }
+
+    @Test
+    fun `resolution write switches the enum`() {
+        val result = writeFor(QuickSettingType.RESOLUTION)(
+            CameraSettings(), QuickSettingEditorValue.Chips("UHD_4K")
+        )
+        assertEquals(Resolution.UHD_4K, result.resolution)
+    }
+
+    @Test
+    fun `frame rate write sets the rate from the slider value`() {
+        val result = writeFor(QuickSettingType.FRAME_RATE)(
+            CameraSettings(), QuickSettingEditorValue.Slider(30f)
+        )
+        assertEquals(30, result.frameRate)
+    }
+
+    @Test
+    fun `stabilization write flips the toggle`() {
+        val write = writeFor(QuickSettingType.STABILIZATION)
+        assertEquals(false, write(CameraSettings(stabilization = true), QuickSettingEditorValue.Toggle(false)).stabilization)
+        assertEquals(true, write(CameraSettings(stabilization = false), QuickSettingEditorValue.Toggle(true)).stabilization)
+    }
+
+    @Test
+    fun `night vision write switches the mode`() {
+        val result = writeFor(QuickSettingType.NIGHT_VISION)(
+            CameraSettings(), QuickSettingEditorValue.Chips("ON")
+        )
+        assertEquals(NightVisionMode.ON, result.nightVisionMode)
+    }
+
+    @Test
+    fun `editorValueFor converts the raw callback value per the editor shape`() {
+        assertEquals(
+            QuickSettingEditorValue.Toggle(true),
+            QuickSettingCatalog.editorValueFor(QuickSettingType.STABILIZATION, true),
+        )
+        assertEquals(
+            QuickSettingEditorValue.Chips("MANUAL"),
+            QuickSettingCatalog.editorValueFor(QuickSettingType.WHITE_BALANCE, "MANUAL"),
+        )
+        assertEquals(
+            QuickSettingEditorValue.Slider(4f),
+            QuickSettingCatalog.editorValueFor(QuickSettingType.ZOOM, 4),
+        )
+        assertEquals(
+            QuickSettingEditorValue.Slider(2.5f),
+            QuickSettingCatalog.editorValueFor(QuickSettingType.ZOOM, 2.5f),
+        )
+    }
+
+    @Test
+    fun `editorValueFor is null when the raw value does not match the shape`() {
+        assertNull(QuickSettingCatalog.editorValueFor(QuickSettingType.STABILIZATION, "yes"))
+        assertNull(QuickSettingCatalog.editorValueFor(QuickSettingType.WHITE_BALANCE, 3))
+        assertNull(QuickSettingCatalog.editorValueFor(QuickSettingType.ZOOM, "4x"))
+    }
+
+    // ── settings-screen slider ranges vs persistence bounds ──
+    // The UI must offer the full persisted range; these assert on the
+    // referenced symbols so UI span and persistence clamp cannot drift.
+
+    @Test
+    fun `focus distance slider spans zero to the persistence ceiling`() {
+        val range = QuickSettingCatalog.focusDistanceRange()
+        assertEquals(0f, range.start)
+        assertEquals(CameraSettings.FOCUS_DISTANCE_MAX, range.endInclusive)
+    }
+
+    @Test
+    fun `color temperature slider spans the persistence clamp`() {
+        val range = QuickSettingCatalog.colorTemperatureRange()
+        assertEquals(CameraSettings.COLOR_TEMPERATURE_MIN.toFloat(), range.start)
+        assertEquals(CameraSettings.COLOR_TEMPERATURE_MAX.toFloat(), range.endInclusive)
+    }
+
+    @Test
+    fun `frame rate slider spans the shared slider bounds`() {
+        val range = QuickSettingCatalog.frameRateRange()
+        assertEquals(CameraSettings.FRAME_RATE_SLIDER_MIN.toFloat(), range.start)
+        assertEquals(CameraSettings.FRAME_RATE_SLIDER_MAX.toFloat(), range.endInclusive)
+    }
+
+    @Test
+    fun `scene mode options are the parsable set headed by OFF`() {
+        assertEquals(
+            listOf("OFF", "FACE_DETECTION", "NIGHT", "HDR", "SUNSET", "FIREWORKS"),
+            QuickSettingCatalog.sceneModeOptions,
+        )
+        // Every offered option round-trips through the one parser; OFF clears.
+        QuickSettingCatalog.sceneModeOptions.forEach { option ->
+            if (option == "OFF") {
+                assertNull(CameraSettingsEditor.parseSceneMode(option))
+            } else {
+                assertEquals(option, CameraSettingsEditor.parseSceneMode(option))
+            }
+        }
     }
 }

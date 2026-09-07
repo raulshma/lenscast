@@ -19,13 +19,10 @@ import com.raulshma.lenscast.streaming.web.SettingsWebHandler
 import com.raulshma.lenscast.streaming.web.StatusWebHandler
 import com.raulshma.lenscast.streaming.web.StreamWebHandler
 import com.raulshma.lenscast.streaming.rtsp.RtspAuthSpec
-import com.raulshma.lenscast.streaming.rtsp.RtspUriPolicy
-import com.raulshma.lenscast.streaming.rtsp.RtspConfig
+import com.raulshma.lenscast.streaming.rtsp.RtspConfigDiff
 import com.raulshma.lenscast.streaming.rtsp.RtspInputFormat
-import com.raulshma.lenscast.streaming.rtsp.RtspServer
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
-import java.io.InputStream
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 
@@ -35,6 +32,21 @@ class StreamingManager(
 ) {
 
     private val audioStreamingManager = AudioStreamingManager(context)
+
+    // The RTSP output behind this manager's public surface: retained config,
+    // server lifecycle, the restart-vs-apply choice, the audio-stream handle,
+    // the URL, and the audio-wanted/mic-arbitration decision all live in the
+    // deep module; this class keeps the fan-out and the web/mDNS concerns.
+    private val rtspOutput = RtspOutput(
+        audio = audioStreamingManager,
+        audioConfig = ::audioConfig,
+        authSpec = { rtspAuthSpec(currentAuthSettings) },
+        releaseAudio = ::releaseRtspOwnedAudio,
+        onStateChanged = { running, url ->
+            _isRtspRunning.value = running
+            _rtspUrl.value = url
+        },
+    )
     private val serviceDiscoveryManager = ServiceDiscoveryManager(context)
     private val webStreamingEnabled = AtomicBoolean(true)
     private val mdnsEnabled = AtomicBoolean(true)
@@ -49,7 +61,6 @@ class StreamingManager(
     private val webApiStack: WebApiStack by lazy { buildWebApiStack() }
     private var server: StreamingServer = createServer(StreamDefaults.WEB_PORT)
     private val webStreamingActive = AtomicBoolean(false)
-    private val rtspStreamingActive = AtomicBoolean(false)
     private val jpegQuality = AtomicInteger(StreamDefaults.JPEG_QUALITY)
     private val streamAudioEnabled = AtomicBoolean(true)
     private val streamAudioBitrateKbps = AtomicInteger(StreamDefaults.AUDIO_BITRATE_KBPS)
@@ -58,17 +69,6 @@ class StreamingManager(
     @Volatile
     private var recordingAudioCaptureActive = false
     private var currentPort: Int = StreamDefaults.WEB_PORT
-
-    private val rtspEnabled = AtomicBoolean(false)
-    @Volatile
-    private var currentRtspPort: Int = RtspServer.DEFAULT_PORT
-    // One retained config for the RTSP output; every RTSP setting lands here
-    // even while RTSP is not running, so the next start picks it all up.
-    @Volatile
-    private var rtspConfig = RtspConfig()
-    private var rtspServer: RtspServer? = null
-    @Volatile
-    private var rtspAudioStream: InputStream? = null
 
     private var lastReportedClientCount = -1
 
@@ -124,14 +124,14 @@ class StreamingManager(
     /** Per-client measured throughput/fps read seam for Web API handlers. */
     fun getFramesPerSecond(clientId: String): Double = networkQualityMonitor.getFramesPerSecond(clientId)
 
-    fun isLiveStreaming(): Boolean = webStreamingActive.get() || rtspStreamingActive.get()
+    fun isLiveStreaming(): Boolean = webStreamingActive.get() || rtspOutput.isActive()
 
     fun isWebStreamingEnabled(): Boolean = webStreamingEnabled.get()
 
     fun isWebStreamActive(): Boolean = webStreamingActive.get()
 
     private fun updateStreamingState() {
-        val anyActive = webStreamingActive.get() || rtspStreamingActive.get()
+        val anyActive = webStreamingActive.get() || rtspOutput.isActive()
         _isStreaming.value = anyActive
         _isWebStreamingActive.value = webStreamingActive.get()
     }
@@ -189,7 +189,7 @@ class StreamingManager(
     }
 
     fun startStreaming(): Boolean {
-        if (!webStreamingEnabled.get() && !rtspEnabled.get()) {
+        if (!webStreamingEnabled.get() && !rtspOutput.isEnabled()) {
             Log.w(TAG, "Cannot start streaming: both web and RTSP outputs are disabled")
             return false
         }
@@ -197,7 +197,7 @@ class StreamingManager(
         if (webStreamingEnabled.get()) {
             if (!startWebStreaming()) return false
         }
-        if (rtspEnabled.get()) {
+        if (rtspOutput.isEnabled()) {
             startRtspStreaming()
         }
 
@@ -256,20 +256,20 @@ class StreamingManager(
     }
 
     fun startRtspStreaming(): Boolean {
-        if (!rtspEnabled.get()) {
+        if (!rtspOutput.isEnabled()) {
             Log.w(TAG, "Cannot start RTSP streaming: RTSP is disabled")
             return false
         }
-        if (rtspStreamingActive.getAndSet(true)) return true
-        startRtspServer()
+        if (rtspOutput.isActive()) return true
+        rtspOutput.start()
         updateStreamingState()
         Log.d(TAG, "RTSP streaming started")
         return true
     }
 
     fun stopRtspStreaming() {
-        if (!rtspStreamingActive.getAndSet(false)) return
-        stopRtspServer()
+        if (!rtspOutput.isActive()) return
+        rtspOutput.stop()
         updateStreamingState()
         Log.d(TAG, "RTSP streaming stopped")
     }
@@ -300,9 +300,8 @@ class StreamingManager(
     }
 
     private fun pushFrameToRtsp(yuvData: ByteArray, width: Int, height: Int, rotation: Int) {
-        if (!rtspStreamingActive.get()) return
-        val rtsp = rtspServer ?: return
-        rtsp.pushFrame(yuvData, width, height, rotation)
+        if (!rtspOutput.isActive()) return
+        rtspOutput.pushFrame(yuvData, width, height, rotation)
     }
 
     fun setJpegQuality(quality: Int) {
@@ -312,12 +311,12 @@ class StreamingManager(
     /**
      * One user-facing frame rate fans out to every subsystem that throttles or
      * encodes by it: the M-JPEG frame interval, the adaptive-bitrate default,
-     * and the RTSP server.
+     * and the RTSP output.
      */
     fun setFrameRate(fps: Int) {
         setStreamFrameRate(fps)
         setAdaptiveDefaultFrameRate(fps)
-        setRtspFrameRate(fps)
+        rtspOutput.setFrameRate(fps)
     }
 
     private fun setStreamFrameRate(fps: Int) {
@@ -331,11 +330,9 @@ class StreamingManager(
     fun setStreamAudioEnabled(enabled: Boolean) {
         streamAudioEnabled.set(enabled)
         onWebAudioChanged()
-        // The only exception to the onRtspAudioChanged ladder: a toggle changes
-        // the RTSP audio track either way, so restart even when turning off.
-        if (rtspStreamingActive.get()) {
-            restartRtspServer()
-        }
+        // The one audio change that restarts even when turning the track
+        // off: a toggle changes the RTSP audio track either way.
+        rtspOutput.setAudioWanted(enabled)
     }
 
     fun setWebStreamingEnabled(enabled: Boolean) {
@@ -350,14 +347,19 @@ class StreamingManager(
         }
     }
 
+    /**
+     * The audio bitrate is a NeedsRestart change in the RTSP verdict
+     * ([RtspConfigDiff]): the AAC encoder only reads its bitrate at its next
+     * start, so applying it to a live server would silently no-op. The value
+     * is retained by the RTSP output and enforced by its restart ladder —
+     * the change actually takes effect instead of doing nothing.
+     */
     fun setStreamAudioBitrateKbps(bitrateKbps: Int) {
         streamAudioBitrateKbps.set(
             bitrateKbps.coerceIn(StreamDefaults.AUDIO_BITRATE_MIN_KBPS, StreamDefaults.AUDIO_BITRATE_MAX_KBPS)
         )
         onWebAudioChanged()
-        rtspConfig = rtspConfig.copy(audioBitrateKbps = streamAudioBitrateKbps.get())
-        // RTSP supports live bitrate updates; no restart needed.
-        onRtspAudioChanged(liveUpdate = { rtspServer?.apply(rtspConfig) })
+        rtspOutput.setAudioBitrate(streamAudioBitrateKbps.get())
     }
 
     fun setStreamAudioChannels(channels: Int) {
@@ -365,15 +367,17 @@ class StreamingManager(
             channels.coerceIn(StreamDefaults.AUDIO_CHANNELS_MIN, StreamDefaults.AUDIO_CHANNELS_MAX)
         )
         onWebAudioChanged()
-        // Channel count is an encoder config; RTSP restart required.
-        onRtspAudioChanged()
+        // Channel count is an encoder config the AAC encoder reads at start;
+        // RTSP restart required.
+        rtspOutput.restartForAudioConfigChange()
     }
 
     fun setStreamAudioEchoCancellation(enabled: Boolean) {
         streamAudioEchoCancellation.set(enabled)
         onWebAudioChanged()
-        // Echo cancellation is an audio-capture config; RTSP restart required.
-        onRtspAudioChanged()
+        // Echo cancellation is an audio-capture config applied at capture
+        // start; RTSP restart required.
+        rtspOutput.restartForAudioConfigChange()
     }
 
     // ── Stream-audio change policy: one decision point for every audio setting ──
@@ -384,25 +388,6 @@ class StreamingManager(
         } else {
             clearWebAudioState()
         }
-    }
-
-    /**
-     * React to an audio setting that affects the RTSP track. [liveUpdate] is
-     * used when the running server can apply the change without a restart;
-     * otherwise the server restarts so the encoder picks the new config up.
-     */
-    private fun onRtspAudioChanged(liveUpdate: (() -> Unit)? = null) {
-        if (!rtspStreamingActive.get() || !streamAudioEnabled.get()) return
-        if (liveUpdate != null) {
-            liveUpdate()
-        } else {
-            restartRtspServer()
-        }
-    }
-
-    private fun restartRtspServer() {
-        stopRtspServer()
-        startRtspServer()
     }
 
     private fun clearWebAudioState() {
@@ -421,6 +406,9 @@ class StreamingManager(
     fun setRecordingAudioCaptureActive(active: Boolean) {
         val wasActive = recordingAudioCaptureActive
         recordingAudioCaptureActive = active
+        // The RTSP output's mic-arbitration input: while recording captures,
+        // its next start opens no audio track.
+        rtspOutput.setRecordingCaptureActive(active)
 
         when {
             active && !wasActive -> {
@@ -441,8 +429,9 @@ class StreamingManager(
     fun updateAuthSettings(settings: StreamAuthSettings) {
         currentAuthSettings = settings
         applyAuthSettings(settings)
-        rtspConfig = rtspConfig.copy(auth = rtspAuthSpec(settings))
-        rtspServer?.apply(rtspConfig)
+        // The RTSP authorizer reads the (possibly restarted) auth spec live —
+        // a hot-swap through the output, no restart owed.
+        rtspOutput.setAuth()
     }
 
     fun setOverlaySettings(settings: OverlaySettings) {
@@ -451,34 +440,19 @@ class StreamingManager(
     }
 
     fun setRtspEnabled(enabled: Boolean) {
-        val changed = rtspEnabled.getAndSet(enabled) != enabled
-        if (!changed) return
+        if (!rtspOutput.setEnabled(enabled)) return
         _isRtspEnabled.value = enabled
-        if (!enabled && rtspStreamingActive.get()) {
+        if (!enabled) {
             stopRtspStreaming()
         }
     }
 
     fun setRtspPort(port: Int) {
-        if (port == currentRtspPort) return
-        currentRtspPort = port
-        if (rtspEnabled.get() && rtspServer != null) {
-            stopRtspServer()
-            startRtspServer()
-        }
+        rtspOutput.setPort(port)
     }
 
     fun setRtspInputFormat(format: RtspInputFormat) {
-        if (format == rtspConfig.inputFormat) return
-        rtspConfig = rtspConfig.copy(inputFormat = format)
-        rtspServer?.apply(rtspConfig)
-    }
-
-    private fun setRtspFrameRate(fps: Int) {
-        // Retained even when RTSP is not running — every RTSP setting is
-        // retained, no silent drops.
-        rtspConfig = rtspConfig.copy(videoFrameRate = fps)
-        rtspServer?.apply(rtspConfig)
+        rtspOutput.setInputFormat(format)
     }
 
     fun setMdnsEnabled(enabled: Boolean) {
@@ -587,60 +561,16 @@ class StreamingManager(
         return NetworkUtils.getAudioUrl(currentPort) ?: "http://localhost:$currentPort/audio"
     }
 
-    private fun buildRtspUrl(): String {
-        val ip = NetworkUtils.getLocalIpAddress() ?: "localhost"
-        return "rtsp://$ip:$currentRtspPort/${RtspUriPolicy.DEFAULT_STREAM_PATH}"
-    }
-
-    private fun startRtspServer() {
-        if (rtspServer != null) return
-        val server = RtspServer(currentRtspPort)
-
-        val audioWanted = streamAudioEnabled.get() && !recordingAudioCaptureActive
-        var audioStream: java.io.InputStream? = null
-        if (audioWanted) {
-            // Ensure audio capture is running
-            if (!audioStreamingManager.isRunning()) {
-                audioStreamingManager.start(audioConfig())
-            }
-            if (audioStreamingManager.isRunning()) {
-                audioStream = audioStreamingManager.openStream()
-                rtspAudioStream = audioStream
-            }
-        }
-
-        rtspConfig = rtspConfig.copy(
-            audioEnabled = audioStream != null,
-            audioSampleRateHz = audioStreamingManager.getSampleRateHz(),
-            audioChannelCount = audioStreamingManager.getChannelCount(),
-            audioBitrateKbps = streamAudioBitrateKbps.get(),
-            auth = rtspAuthSpec(currentAuthSettings),
-        )
-
-        if (server.start(rtspConfig, audioStream)) {
-            rtspServer = server
-            _rtspUrl.value = buildRtspUrl()
-            _isRtspRunning.value = true
-            Log.d(TAG, "RTSP server started on port $currentRtspPort (audio=${audioStream != null})")
-        } else {
-            rtspAudioStream?.close()
-            rtspAudioStream = null
-            Log.e(TAG, "Failed to start RTSP server on port $currentRtspPort")
-        }
-    }
-
-    private fun stopRtspServer() {
-        rtspServer?.stop()
-        rtspServer = null
-        rtspAudioStream?.close()
-        rtspAudioStream = null
-        // If audio was started only for RTSP and web streaming is not active, stop it
+    /**
+     * Invoked by [RtspOutput] when a stop releases the audio stream it
+     * opened: if the web output is not streaming, nobody needs the capture —
+     * stop it and clear the web audio state.
+     */
+    private fun releaseRtspOwnedAudio() {
         if (!webStreamingActive.get()) {
             audioStreamingManager.stop()
             clearWebAudioState()
         }
-        _rtspUrl.value = ""
-        _isRtspRunning.value = false
     }
 
     companion object {

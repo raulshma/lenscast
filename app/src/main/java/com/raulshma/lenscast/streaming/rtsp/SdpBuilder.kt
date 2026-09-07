@@ -6,8 +6,8 @@ import java.util.Base64
  * Pure SDP generation for the RTSP DESCRIBE response — the buildSdp body,
  * byte-identical. The server supplies the live encoder state (SPS/PPS, AAC
  * AudioSpecificConfig) plus the connection details; everything else — the
- * fmtp line, the AAC config hex with its AAC-LC 48kHz mono fallback, the
- * line order — is owned here so it is JVM-tested.
+ * fmtp line, the AAC config hex with its [AacFormat] fallback, the line
+ * order — is owned here so it is JVM-tested.
  */
 object SdpBuilder {
 
@@ -49,7 +49,7 @@ object SdpBuilder {
             if (audioEnabled) {
                 val configHex = audioSpecificConfig?.let {
                     "%02x%02x".format(it[0].toInt() and 0xFF, it[1].toInt() and 0xFF)
-                } ?: "1190" // fallback: AAC-LC 48kHz mono
+                } ?: AacFormat.SDP_FALLBACK_ASC_HEX
 
                 appendLine("m=audio 0 RTP/AVP 97")
                 appendLine("c=IN IP4 0.0.0.0")

@@ -100,10 +100,7 @@ class RecordingService : Service() {
                 put(MediaStore.MediaColumns.DISPLAY_NAME, fileName)
                 put(MediaStore.MediaColumns.MIME_TYPE, CaptureMediaFormat.MIME_VIDEO)
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                    put(
-                        MediaStore.MediaColumns.RELATIVE_PATH,
-                        android.os.Environment.DIRECTORY_MOVIES + "/" + CaptureMediaFormat.VIDEO_DIR_NAME
-                    )
+                    put(MediaStore.MediaColumns.RELATIVE_PATH, CaptureMediaFormat.VIDEOS_WRITE_RELATIVE_PATH)
                 }
             }
 
@@ -208,26 +205,26 @@ class RecordingService : Service() {
         currentRecording.stop()
     }
 
+    /** A completed recording: clear the finalizing flag, then the shared teardown. */
     private fun finishRecordingSession() {
-        activeRecording = null
         isFinalizingRecording = false
-
-        val cameraService = app.cameraService
-        releaseExclusiveRecordingAudio()
-        cameraService.endExclusiveSession()
-        cameraService.releaseKeepAlive()
-        cameraService.unbindRecording()
-
-        recordingController.onServiceStopped()
-
-        stopForeground(STOP_FOREGROUND_REMOVE)
-        stopSelf()
+        teardownSession()
     }
 
+    /** A start that never came live: clear both live flags, then the shared teardown. */
     private fun cleanupFailedStart() {
-        activeRecording = null
         isRecording = false
         isFinalizingRecording = false
+        teardownSession()
+    }
+
+    /**
+     * The one teardown ladder both a normal finish and a failed start run,
+     * in exactly this order: drop the recording, release audio/camera
+     * session/keep-alive/binding, report stopped, then retire the service.
+     */
+    private fun teardownSession() {
+        activeRecording = null
 
         val cameraService = app.cameraService
         releaseExclusiveRecordingAudio()

@@ -39,22 +39,6 @@ object IntervalCaptureScheduler {
         )
     }
 
-    /** Backward-compatible entry point: clamps through the policy. */
-    fun scheduleNext(
-        context: Context,
-        intervalSeconds: Long,
-        totalCaptures: Int,
-        flashMode: String = "OFF",
-        completedCaptures: Int,
-    ) {
-        scheduleNext(
-            context,
-            IntervalCapturePolicy.clamp(
-                intervalSeconds, totalCaptures, flashMode, completedCaptures,
-            ),
-        )
-    }
-
     fun stop(context: Context) {
         WorkManager.getInstance(context).cancelUniqueWork(WORK_NAME)
     }

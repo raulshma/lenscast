@@ -14,14 +14,14 @@ import androidx.lifecycle.viewModelScope
 import com.raulshma.lenscast.camera.model.CameraLensInfo
 import com.raulshma.lenscast.camera.model.CameraSettings
 import com.raulshma.lenscast.camera.model.CameraState
-import com.raulshma.lenscast.camera.model.FocusMode
-import com.raulshma.lenscast.camera.model.HdrMode
-import com.raulshma.lenscast.camera.model.NightVisionMode
+import com.raulshma.lenscast.camera.model.QuickSettingCatalog
+import com.raulshma.lenscast.camera.model.QuickSettingEditorValue
 import com.raulshma.lenscast.camera.model.QuickSettingType
-import com.raulshma.lenscast.camera.model.Resolution
+import com.raulshma.lenscast.camera.model.StreamKind
+import com.raulshma.lenscast.camera.model.StreamStartOutcome
 import com.raulshma.lenscast.camera.model.StreamStatus
 import com.raulshma.lenscast.camera.model.StreamStatusSnapshot
-import com.raulshma.lenscast.camera.model.WhiteBalance
+import com.raulshma.lenscast.camera.model.StreamToggle
 import com.raulshma.lenscast.core.ConnectivityMonitor
 import com.raulshma.lenscast.core.MicAccess
 import com.raulshma.lenscast.core.MicStartDecision
@@ -277,64 +277,21 @@ class CameraViewModel(
         cameraService.tapToFocus(x, y)
     }
 
-    fun updateExposure(value: Int) {
-        updateSettings { it.copy(exposureCompensation = value) }
-    }
-
-    fun updateIso(value: String) {
-        updateSettings { it.copy(iso = CameraSettingsEditor.parseIso(value)) }
-    }
-
-    fun updateFocusMode(mode: String) {
-        updateSettings { it.copy(focusMode = FocusMode.valueOf(mode)) }
-    }
-
-    fun updateWhiteBalance(mode: String) {
-        updateSettings { it.copy(whiteBalance = WhiteBalance.valueOf(mode)) }
-    }
-
+    /** Pinch-zoom path — the only per-field writer left; everything else funnels through [updateQuickSetting]. */
     fun updateZoom(ratio: Float) {
         updateSettings { it.copy(zoomRatio = ratio) }
     }
 
-    fun updateHdrMode(mode: String) {
-        updateSettings { it.copy(hdrMode = HdrMode.valueOf(mode)) }
-    }
-
-    fun updateFrameRate(rate: Int) {
-        updateSettings { it.copy(frameRate = rate) }
-    }
-
-    fun updateResolution(name: String) {
-        updateSettings { it.copy(resolution = Resolution.valueOf(name)) }
-    }
-
-    fun updateStabilization(enabled: Boolean) {
-        updateSettings { it.copy(stabilization = enabled) }
-    }
-
-    fun updateNightVisionMode(mode: String) {
-        updateSettings { it.copy(nightVisionMode = NightVisionMode.valueOf(mode)) }
-    }
-
     /**
-     * The quick-setting sheet's single write entry: dispatches the typed
-     * editor value onto the per-field update path above (one
-     * CameraSettingsEditor, apply-then-persist).
+     * The quick-setting sheet's single write entry: the raw editor callback
+     * value is converted once onto the typed [QuickSettingEditorValue] per
+     * the descriptor's editor shape, then dispatched through the catalog's
+     * pure write transform onto the one CameraSettingsEditor path
+     * (apply-then-persist).
      */
     fun updateQuickSetting(type: QuickSettingType, value: Any) {
-        when (type) {
-            QuickSettingType.EXPOSURE -> updateExposure((value as Number).toInt())
-            QuickSettingType.ISO -> updateIso(value as String)
-            QuickSettingType.WHITE_BALANCE -> updateWhiteBalance(value as String)
-            QuickSettingType.FOCUS -> updateFocusMode(value as String)
-            QuickSettingType.ZOOM -> updateZoom((value as Number).toFloat())
-            QuickSettingType.HDR -> updateHdrMode(value as String)
-            QuickSettingType.RESOLUTION -> updateResolution(value as String)
-            QuickSettingType.FRAME_RATE -> updateFrameRate((value as Number).toInt())
-            QuickSettingType.STABILIZATION -> updateStabilization(value as Boolean)
-            QuickSettingType.NIGHT_VISION -> updateNightVisionMode(value as String)
-        }
+        val editorValue = QuickSettingCatalog.editorValueFor(type, value) ?: return
+        updateSettings { current -> QuickSettingCatalog.descriptorFor(type).write(current, editorValue) }
     }
 
     fun togglePreview() {
@@ -355,81 +312,41 @@ class CameraViewModel(
      *  Cleared by the next successful start — retrying is the natural dismiss. */
     val lastServerError: StateFlow<String?> = _lastServerError.asStateFlow()
 
+    // One stream start/stop seam for both outputs and the server: the
+    // gate → start → session begin → rollback ladder lives once in
+    // StreamToggle; this ViewModel only maps outcomes onto toasts.
+    private val streamToggle = StreamToggle(
+        transports = object : StreamToggle.Transports {
+            override val webEnabled: Boolean get() = streamingManager.isWebEnabled.value
+            override val rtspEnabled: Boolean get() = streamingManager.isRtspEnabled.value
+            override val webActive: Boolean get() = _streamStatus.value.isWebActive
+            override val rtspActive: Boolean get() = _streamStatus.value.isRtspActive
+            override fun startWeb(): Boolean = streamingManager.startWebStreaming()
+            override fun stopWeb() = streamingManager.stopWebStreaming()
+            override fun startRtsp(): Boolean = streamingManager.startRtspStreaming()
+            override fun stopRtsp() = streamingManager.stopRtspStreaming()
+            override fun stopServer() = streamingManager.stopStreaming()
+            override suspend fun beginSession() = streamingSession.begin()
+            override suspend fun endSession() = streamingSession.end()
+        },
+        // The pre-start mic warn-and-degrade check — web only, exactly as
+        // before the seam existed.
+        onBeforeStart = { kind -> if (kind == StreamKind.WEB) warnIfMicUnavailable() },
+    )
+
     fun toggleWebStreaming() {
-        if (_streamStatus.value.isWebActive) stopWebStreaming() else startWebStreaming()
+        viewModelScope.launch { handleStreamOutcome(streamToggle.toggleWeb()) }
     }
 
     fun toggleRtspStreaming() {
-        if (_streamStatus.value.isRtspActive) stopRtspStreaming() else startRtspStreaming()
-    }
-
-    private fun startWebStreaming() {
-        if (!streamingManager.isWebEnabled.value) {
-            Toast.makeText(context, "Web streaming is disabled in settings.", Toast.LENGTH_SHORT).show()
-            return
-        }
-
-        refreshAudioPermission()
-        when (val decision = MicAccess.startDecision(
-            featureEnabled = streamAudioEnabled.value,
-            granted = _hasAudioPermission.value,
-            featureLabel = "Streaming video",
-        )) {
-            is MicStartDecision.Degrade ->
-                Toast.makeText(context, decision.warning, Toast.LENGTH_SHORT).show()
-            MicStartDecision.Proceed -> {}
-        }
-
-        val success = streamingManager.startWebStreaming()
-        if (success) {
-            beginSession()
-        } else {
-            Toast.makeText(context, "Failed to start web streaming.", Toast.LENGTH_SHORT).show()
-        }
-    }
-
-    private fun stopWebStreaming() {
-        streamingManager.stopWebStreaming()
-        endSession()
-    }
-
-    private fun startRtspStreaming() {
-        if (!streamingManager.isRtspEnabled.value) {
-            Toast.makeText(context, "RTSP streaming is disabled in settings.", Toast.LENGTH_SHORT).show()
-            return
-        }
-
-        val success = streamingManager.startRtspStreaming()
-        if (success) {
-            beginSession()
-        } else {
-            Toast.makeText(context, "Failed to start RTSP streaming.", Toast.LENGTH_SHORT).show()
-        }
-    }
-
-    private fun stopRtspStreaming() {
-        streamingManager.stopRtspStreaming()
-        endSession()
-    }
-
-    // Session begin/end is owned by StreamingSession; failures here (e.g. a
-    // rejected foreground-service start) must not crash the app.
-    private fun beginSession() {
-        viewModelScope.launch {
-            runCatching { streamingSession.begin() }
-                .onFailure { Log.e(TAG, "Streaming session setup failed", it) }
-        }
-    }
-
-    private fun endSession() {
-        viewModelScope.launch {
-            streamingSession.end()
-        }
+        viewModelScope.launch { handleStreamOutcome(streamToggle.toggleRtsp()) }
     }
 
     fun toggleServer() {
         if (_streamStatus.value.isServerRunning) {
-            stopServer()
+            // Stopped outcome needs no user-facing report — the derived
+            // StreamStatus flips on its own.
+            viewModelScope.launch { streamToggle.stopServer() }
         } else {
             startServer()
         }
@@ -446,9 +363,39 @@ class CameraViewModel(
         }
     }
 
-    private fun stopServer() {
-        streamingManager.stopStreaming()
-        endSession()
+    // Mic warn-and-degrade before a web start: the same shared policy the
+    // recording start consults.
+    private fun warnIfMicUnavailable() {
+        refreshAudioPermission()
+        when (val decision = MicAccess.startDecision(
+            featureEnabled = streamAudioEnabled.value,
+            granted = _hasAudioPermission.value,
+            featureLabel = "Streaming video",
+        )) {
+            is MicStartDecision.Degrade ->
+                Toast.makeText(context, decision.warning, Toast.LENGTH_SHORT).show()
+            MicStartDecision.Proceed -> {}
+        }
+    }
+
+    private fun handleStreamOutcome(outcome: StreamStartOutcome) {
+        when (outcome) {
+            StreamStartOutcome.Started, StreamStartOutcome.Stopped -> {}
+            is StreamStartOutcome.Disabled ->
+                Toast.makeText(
+                    context, StreamStartOutcome.disabledMessage(outcome.kind), Toast.LENGTH_SHORT
+                ).show()
+            is StreamStartOutcome.StartFailed ->
+                Toast.makeText(
+                    context, StreamStartOutcome.startFailedMessage(outcome.kind), Toast.LENGTH_SHORT
+                ).show()
+            is StreamStartOutcome.BeginFailedRolledBack -> {
+                Log.e(TAG, "Streaming session setup failed; stream rolled back", outcome.cause)
+                Toast.makeText(
+                    context, StreamStartOutcome.startFailedMessage(outcome.kind), Toast.LENGTH_SHORT
+                ).show()
+            }
+        }
     }
 
     fun copyStreamUrl() {

@@ -51,10 +51,6 @@ class CaptureViewModel(
 
     val isRecording: StateFlow<Boolean> = recordingController.isRecording
 
-    val captureCount: StateFlow<Int> = intervalStatus
-        .map { it?.completedCaptures ?: 0 }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(SUBSCRIBE_TIMEOUT_MS), 0)
-
     private val _recordingConfig = MutableStateFlow(RecordingConfig())
     val recordingConfig: StateFlow<RecordingConfig> = _recordingConfig.asStateFlow()
 
@@ -65,11 +61,6 @@ class CaptureViewModel(
         tickMs = 500L,
     )
     val recordingElapsedMs: StateFlow<Long> = recordingClock.elapsedMs
-
-    // The scheduled-start time is this screen's input field; once a start is
-    // handed to the controller, its Scheduled state is the truth.
-    private val _scheduledStartTime = MutableStateFlow<Long?>(null)
-    val scheduledStartTime: StateFlow<Long?> = _scheduledStartTime.asStateFlow()
 
     init {
         // Keep the recording draft's includeAudio in sync with the persisted
@@ -128,20 +119,24 @@ class CaptureViewModel(
     fun startScheduledRecording() {
         // Goes through the same path as an immediate start so the
         // max-duration/repeat policy is armed for scheduled recordings too —
-        // the policy waits out the Scheduled phase itself.
-        startRecordingWithConfig(_recordingConfig.value, _scheduledStartTime.value)
+        // the policy waits out the Scheduled phase itself. The picked time
+        // rides in the config draft's `startTimeMs`; the controller turns a
+        // future start into its Scheduled state, which becomes the only truth
+        // the screen renders.
+        startRecordingWithConfig(_recordingConfig.value)
     }
 
+    /**
+     * The clear (trash) button: cancels the controller's real armed schedule
+     * — not a screen-local shadow of it — and clears the picked time from the
+     * config draft so the next start is immediate.
+     */
     fun cancelScheduledRecording() {
         recordingController.cancelSchedule()
-        _scheduledStartTime.value = null
+        _recordingConfig.value = _recordingConfig.value.copy(startTimeMs = null)
     }
 
-    fun updateScheduledStartTime(time: Long?) {
-        _scheduledStartTime.value = time
-    }
-
-    private fun startRecordingWithConfig(config: RecordingConfig, startAtMs: Long? = null) {
+    private fun startRecordingWithConfig(config: RecordingConfig) {
         // Same decision as every other audio-wanting start: check the mic
         // live, then warn-and-degrade through MicAccess if audio is wanted
         // but unavailable.
@@ -157,7 +152,9 @@ class CaptureViewModel(
         // The max-duration auto-stop and repeat policy is armed by the
         // RecordingController itself, so it holds no matter which client
         // started the recording and survives navigating away from this screen.
-        recordingController.start(config, startAtMs)
+        // A future `startTimeMs` in the config becomes the controller's
+        // Scheduled state.
+        recordingController.start(config)
     }
 
     private fun stopRecording() {

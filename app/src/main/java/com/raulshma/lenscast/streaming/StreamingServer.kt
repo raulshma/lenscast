@@ -50,12 +50,12 @@ class StreamingServer(
         val method = session.method
 
         if (authFilter.isLoginRoute(method.name, uri)) {
-            val contentLength = session.headers["content-length"]?.toIntOrNull() ?: 0
-            val body = ByteArray(contentLength.coerceAtLeast(0))
-            if (contentLength > 0) session.inputStream.read(body)
+            val contentLength = session.headers["content-length"]?.toLongOrNull() ?: 0L
+            val body = readRequestBody(session, LOGIN_BODY_MAX_BYTES)
+                ?: return translate(tooLargeResult(LOGIN_BODY_MAX_BYTES)).apply { addSecurityHeaders() }
             val result = authFilter.handleLogin(
                 remoteIp = session.remoteIpAddress,
-                contentLength = contentLength,
+                contentLength = contentLength.toInt(),
                 body = body,
             )
             return translate(result).apply { addSecurityHeaders() }
@@ -137,12 +137,9 @@ class StreamingServer(
                     asset.bytes.size.toLong(),
                 )
                 if (asset.noStore) {
-                    streamResponse.addHeader(
-                        "Cache-Control",
-                        "no-store, no-cache, must-revalidate, max-age=0",
-                    )
-                    streamResponse.addHeader("Pragma", "no-cache")
-                    streamResponse.addHeader("Expires", "0")
+                    HttpResult.NO_STORE_HEADERS.forEach { (name, value) ->
+                        streamResponse.addHeader(name, value)
+                    }
                 } else {
                     streamResponse.addHeader("Cache-Control", "no-cache")
                 }
@@ -179,14 +176,8 @@ class StreamingServer(
     }
 
     private fun handleApiRoute(uri: String, method: Method, session: IHTTPSession): Response {
-        val body = readBody(session)
-        if (body == null) {
-            return newFixedLengthResponse(
-                Response.Status.PAYLOAD_TOO_LARGE,
-                "application/json",
-                """{"error":"Request body too large (max ${MAX_BODY_BYTES / 1024 / 1024}MB)"}"""
-            )
-        }
+        val body = readRequestBody(session, MAX_BODY_BYTES)?.toString(Charsets.UTF_8)
+            ?: return translate(tooLargeResult(MAX_BODY_BYTES))
 
         val apiMethod = when (method) {
             Method.GET -> ApiMethod.GET
@@ -195,11 +186,7 @@ class StreamingServer(
             Method.DELETE -> ApiMethod.DELETE
             // Unknown /api route with an unhandled method — same 404 the
             // router returns, preserving the client's contract.
-            else -> return newFixedLengthResponse(
-                Response.Status.NOT_FOUND,
-                "application/json",
-                """{"error":"Not found"}"""
-            )
+            else -> return translate(HttpResult.jsonError(404, "Not found"))
         }
         val query = session.parameters?.mapValues { it.value.firstOrNull() ?: "" } ?: emptyMap()
 
@@ -217,23 +204,48 @@ class StreamingServer(
         )
     }
 
-    private fun readBody(session: IHTTPSession): String? {
+    /** The 413 answer for a body beyond its route's cap — the one `{"error":…}` shape, via [HttpResult]. */
+    private fun tooLargeResult(capBytes: Long): HttpResult =
+        HttpResult.jsonError(413, "Request body too large (max ${describeCap(capBytes)})")
+
+    private fun describeCap(capBytes: Long): String = when {
+        capBytes >= 1024 * 1024 && capBytes % (1024 * 1024) == 0L -> "${capBytes / (1024 * 1024)}MB"
+        capBytes >= 1024 && capBytes % 1024 == 0L -> "${capBytes / 1024}KB"
+        else -> "${capBytes}B"
+    }
+
+    /**
+     * The one capped request-body reader, shared by the login and API paths.
+     * Reads the declared Content-Length in a loop — a single `read` short-reads
+     * under TCP scheduling and silently truncates the body — and fails closed
+     * with null when the declared length exceeds [capBytes], leaving the error
+     * response to the caller. EOF or an IO error mid-body returns whatever was
+     * read so far; downstream parsing fails the request exactly as before.
+     */
+    private fun readRequestBody(session: IHTTPSession, capBytes: Long): ByteArray? {
         val contentLength = session.headers["content-length"]?.toLongOrNull() ?: 0L
-        if (contentLength <= 0L) return ""
-        if (contentLength > MAX_BODY_BYTES) {
-            Log.w(TAG, "Request body too large: $contentLength bytes (max $MAX_BODY_BYTES)")
+        if (contentLength > capBytes) {
+            Log.w(TAG, "Request body too large: $contentLength bytes (max $capBytes)")
             return null
         }
-        return try {
-            val files = HashMap<String, String>()
-            session.parseBody(files)
-            files["postData"]
-                ?: files["content"]?.let { java.io.File(it).readText() }
-                ?: ""
+        if (contentLength <= 0L) return ByteArray(0)
+        return readCappedBody(contentLength, capBytes, session.inputStream)
+    }
+
+    /** The pure loop behind [readRequestBody] — [contentLength] must already be within [capBytes]. */
+    internal fun readCappedBody(contentLength: Long, capBytes: Long, input: java.io.InputStream): ByteArray {
+        val body = ByteArray(contentLength.toInt())
+        var total = 0
+        try {
+            while (total < body.size) {
+                val read = input.read(body, total, body.size - total)
+                if (read < 0) break
+                total += read
+            }
         } catch (e: Exception) {
             Log.w(TAG, "Failed to read request body", e)
-            ""
         }
+        return body
     }
 
     fun startServer(): Boolean {
@@ -262,5 +274,12 @@ class StreamingServer(
         private const val TAG = "StreamingServer"
         const val BOUNDARY_MARKER = "LensCastBoundary"
         private const val MAX_BODY_BYTES = 1L * 1024 * 1024
+
+        /**
+         * The credential-body cap for the login route: the JSON login body is
+         * two short strings, so 64 KiB is orders of magnitude above any real
+         * request while keeping an attacker's allocation bounded.
+         */
+        private const val LOGIN_BODY_MAX_BYTES = 64L * 1024
     }
 }

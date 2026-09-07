@@ -118,6 +118,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.raulshma.lenscast.MainApplication
+import com.raulshma.lenscast.camera.model.CameraDashboardPolicy
 import com.raulshma.lenscast.camera.model.CameraLensInfo
 import com.raulshma.lenscast.camera.model.CameraSettings
 import com.raulshma.lenscast.camera.model.CameraState
@@ -436,7 +437,7 @@ private fun ImmersiveCameraView(
                 .padding(horizontal = 8.dp, vertical = 8.dp)
         )
 
-        if (!wifiConnected && streamStatus.isServerRunning) {
+        if (CameraDashboardPolicy.shouldShowWifiBanner(wifiConnected, streamStatus.isServerRunning)) {
             Surface(
                 modifier = Modifier
                     .align(Alignment.TopCenter)
@@ -457,8 +458,7 @@ private fun ImmersiveCameraView(
                     )
                     Spacer(modifier = Modifier.width(6.dp))
                     Text(
-                        text = if (streamStatus.isActive) "Not on WiFi"
-                        else "Not on WiFi — server may not be reachable",
+                        text = CameraDashboardPolicy.wifiBannerMessage(streamStatus.isActive),
                         style = MaterialTheme.typography.labelSmall,
                         color = Color.White
                     )
@@ -486,9 +486,9 @@ private fun ImmersiveCameraView(
                 .fillMaxWidth()
         )
 
-        if (thermalState != ThermalState.NORMAL && thermalState != ThermalState.LIGHT) {
+        CameraDashboardPolicy.thermalBanner(thermalState)?.let { banner ->
             ThermalWarningOverlay(
-                thermalState = thermalState,
+                banner = banner,
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .navigationBarsPadding()
@@ -1152,12 +1152,12 @@ private fun ProSliderControl(
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
             Text(
-                text = "${range.start}".let { if (it.endsWith(".0")) it.dropLast(2) else it },
+                text = CameraDashboardPolicy.sliderEndpoint(range.start),
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 style = MaterialTheme.typography.labelSmall
             )
             Text(
-                text = "${range.endInclusive}".let { if (it.endsWith(".0")) it.dropLast(2) else it },
+                text = CameraDashboardPolicy.sliderEndpoint(range.endInclusive),
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 style = MaterialTheme.typography.labelSmall
             )
@@ -1552,10 +1552,12 @@ private fun ServerStatusButton(
     var expanded by remember { mutableStateOf(false) }
 
     val iconTint by animateColorAsState(
-        targetValue = when {
-            streamStatus.isActive -> Color(0xFF4CAF50)
-            streamStatus.isServerRunning -> MaterialTheme.colorScheme.primary
-            else -> Color.White.copy(alpha = 0.4f)
+        targetValue = when (
+            CameraDashboardPolicy.serverStatusTier(streamStatus.isActive, streamStatus.isServerRunning)
+        ) {
+            CameraDashboardPolicy.ServerStatusTier.LIVE -> Color(0xFF4CAF50)
+            CameraDashboardPolicy.ServerStatusTier.READY -> MaterialTheme.colorScheme.primary
+            CameraDashboardPolicy.ServerStatusTier.OFFLINE -> Color.White.copy(alpha = 0.4f)
         },
         animationSpec = tween(300),
         label = "server_status_tint"
@@ -1608,12 +1610,11 @@ private fun ServerStatusButton(
                             Spacer(modifier = Modifier.height(2.dp))
                         }
                         Text(
-                            when {
-                                streamStatus.clientCount > 0 -> "${streamStatus.clientCount} viewer(s) connected"
-                                streamStatus.isActive -> "Live stream active"
-                                streamStatus.isServerRunning -> "Server ready"
-                                else -> "Offline"
-                            },
+                            CameraDashboardPolicy.serverStatusText(
+                                clientCount = streamStatus.clientCount,
+                                isActive = streamStatus.isActive,
+                                isServerRunning = streamStatus.isServerRunning,
+                            ),
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
                         )
@@ -1723,14 +1724,15 @@ private fun ServerStatusButton(
 
 @Composable
 private fun ThermalWarningOverlay(
-    thermalState: ThermalState,
+    banner: CameraDashboardPolicy.ThermalBanner,
     modifier: Modifier = Modifier,
 ) {
-    val (color, label) = when (thermalState) {
-        ThermalState.MODERATE -> LensOrange to "Thermal: Moderate"
-        ThermalState.SEVERE -> LensRed to "Thermal: Severe"
-        ThermalState.CRITICAL -> MaterialTheme.colorScheme.error to "Thermal: Critical!"
-        else -> LensOrange to "Thermal: Warm"
+    // The verdict and label are the policy's; only the theme-adjacent color
+    // mapping stays here.
+    val color = when (banner.severity) {
+        CameraDashboardPolicy.ThermalSeverity.MODERATE -> LensOrange
+        CameraDashboardPolicy.ThermalSeverity.SEVERE -> LensRed
+        CameraDashboardPolicy.ThermalSeverity.CRITICAL -> MaterialTheme.colorScheme.error
     }
     Surface(
         modifier = modifier,
@@ -1738,7 +1740,7 @@ private fun ThermalWarningOverlay(
         shape = RoundedCornerShape(8.dp)
     ) {
         Text(
-            text = label,
+            text = banner.label,
             modifier = Modifier.padding(horizontal = 12.dp, vertical = 5.dp),
             style = MaterialTheme.typography.labelSmall,
             color = Color.White
@@ -1768,7 +1770,9 @@ private fun ZoomIndicator(
             )
             Spacer(modifier = Modifier.width(8.dp))
             Text(
-                text = "${String.format("%.1f", zoomRatio)}x",
+                // The zoom pill's own formatter — same Locale.US pin, so the
+                // indicator can never disagree with the pill.
+                text = QuickSettingCatalog.zoomLabel(zoomRatio),
                 style = MaterialTheme.typography.titleMedium.copy(
                     fontWeight = FontWeight.Bold,
                     fontFamily = FontFamily.Monospace
@@ -1791,13 +1795,9 @@ private fun ConnectionQualityIndicator(
     modifier: Modifier = Modifier,
 ) {
     var expanded by remember { mutableStateOf(false) }
-    val (dotColor, label) = when (qualityLevel) {
-        NetworkQualityLevel.EXCELLENT -> Color(0xFF4CAF50) to "EXC"
-        NetworkQualityLevel.GOOD -> Color(0xFF8BC34A) to "GOOD"
-        NetworkQualityLevel.FAIR -> Color(0xFFFFC107) to "FAIR"
-        NetworkQualityLevel.POOR -> Color(0xFFFF9800) to "POOR"
-        NetworkQualityLevel.CRITICAL -> Color(0xFFF44336) to "CRIT"
-    }
+    val badge = CameraDashboardPolicy.qualityBadge(qualityLevel)
+    val dotColor = badge.color
+    val label = badge.abbreviation
 
     Box(modifier = modifier) {
         Surface(
@@ -1837,7 +1837,7 @@ private fun ConnectionQualityIndicator(
                 )
                 if (activeClients > 0) {
                     Text(
-                        text = "${activeClients} client${if (activeClients != 1) "s" else ""} · ${minThroughputKbps}kbps",
+                        text = CameraDashboardPolicy.clientSummary(activeClients, minThroughputKbps),
                         style = MaterialTheme.typography.labelSmall.copy(
                             fontFamily = FontFamily.Monospace,
                             color = Color.White.copy(alpha = 0.5f)
@@ -1874,7 +1874,7 @@ private fun ConnectionQualityIndicator(
                     ConnectionStatRow(label = "Latency", value = "${stats.worstLatencyMs} ms")
                     ConnectionStatRow(label = "Avg Frame", value = "${stats.avgFrameSizeBytes / 1024} KB")
                     ConnectionStatRow(label = "Clients", value = "${stats.activeClients}")
-                    ConnectionStatRow(label = "Total Sent", value = formatBytes(stats.totalBytesSent))
+                    ConnectionStatRow(label = "Total Sent", value = CameraDashboardPolicy.formatBytes(stats.totalBytesSent))
 
                     if (stats.clientDetails.isNotEmpty()) {
                         Spacer(modifier = Modifier.height(6.dp))
@@ -1927,15 +1927,6 @@ private fun ConnectionStatRow(label: String, value: String, valueColor: Color = 
                 color = valueColor
             )
         )
-    }
-}
-
-private fun formatBytes(bytes: Long): String {
-    return when {
-        bytes < 1024 -> "${bytes} B"
-        bytes < 1024 * 1024 -> "${bytes / 1024} KB"
-        bytes < 1024 * 1024 * 1024 -> "${bytes / (1024 * 1024)} MB"
-        else -> "${bytes / (1024 * 1024 * 1024)} GB"
     }
 }
 

@@ -4,6 +4,7 @@ import android.content.Context
 import android.media.MediaMetadataRetriever
 import android.net.Uri
 import android.util.Log
+import com.raulshma.lenscast.capture.CaptureMediaResolver
 import com.raulshma.lenscast.capture.model.CaptureMediaFormat
 import com.raulshma.lenscast.capture.model.CaptureType
 import com.raulshma.lenscast.core.AppJson
@@ -32,6 +33,7 @@ class GalleryWebHandler(
     private val batchDeleteRequestAdapter by lazy { AppJson.moshi.adapter(BatchDeleteRequest::class.java) }
     private val batchDeleteResponseAdapter by lazy { AppJson.moshi.adapter(BatchDeleteResponse::class.java) }
     private val successAdapter by lazy { AppJson.moshi.adapter(SuccessResponse::class.java) }
+    private val mediaResolver = CaptureMediaResolver(context.contentResolver)
 
     fun getGallery(type: String?, page: Int = 0, pageSize: Int = 0): String {
         val galleryPage = GalleryPage.of(captureHistoryStore.history.value, type, page, pageSize)
@@ -88,26 +90,11 @@ class GalleryWebHandler(
         val history = captureHistoryStore.history.value
         val entry = history.find { it.id == id } ?: return null
         val mimeType = CaptureMediaFormat.mimeFor(entry.type)
-        return try {
-            val uri = Uri.parse(entry.filePath)
-            val inputStream = context.contentResolver.openInputStream(uri)
-            if (inputStream != null) {
-                ResolvedMedia(inputStream, mimeType, entry.fileSizeBytes)
-            } else {
-                fileFallback(entry.filePath, mimeType)
-            }
-        } catch (_: Exception) {
-            fileFallback(entry.filePath, mimeType)
-        }
-    }
-
-    private fun fileFallback(filePath: String, mimeType: String): ResolvedMedia? {
-        return try {
-            val file = File(filePath)
-            if (file.exists()) ResolvedMedia(file.inputStream(), mimeType, file.length()) else null
-        } catch (_: Exception) {
-            null
-        }
+        // The one scheme ladder: content URIs open through the resolver and
+        // report the history-recorded size; file-backed paths open from disk
+        // and report the actual length.
+        val opened = mediaResolver.openMedia(entry.filePath, entry.fileSizeBytes) ?: return null
+        return ResolvedMedia(opened.stream, mimeType, opened.sizeBytes)
     }
 
     fun resolveVideoThumbnail(id: String): ByteArray? {
@@ -116,19 +103,17 @@ class GalleryWebHandler(
         if (entry.type != CaptureType.VIDEO) {
             return null
         }
+        // One ladder for the retriever's data source: scheme'd paths go
+        // through their Uri, an existing plain file through its path, a
+        // missing file yields no thumbnail.
+        val source = mediaResolver.displayModel(entry.filePath) ?: return null
         return try {
             val retriever = MediaMetadataRetriever()
             try {
-                val uri = Uri.parse(entry.filePath)
-                if (CaptureMediaFormat.isContentUri(entry.filePath)) {
-                    retriever.setDataSource(context, uri)
-                } else {
-                    val file = File(entry.filePath)
-                    if (file.exists()) {
-                        retriever.setDataSource(file.absolutePath)
-                    } else {
-                        retriever.setDataSource(context, uri)
-                    }
+                when (source) {
+                    is Uri -> retriever.setDataSource(context, source)
+                    is File -> retriever.setDataSource(source.absolutePath)
+                    else -> return null
                 }
                 val bitmap = retriever.getFrameAtTime(
                     1_000_000, // 1 second in microseconds

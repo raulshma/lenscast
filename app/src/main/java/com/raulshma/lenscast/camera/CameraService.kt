@@ -35,6 +35,8 @@ import com.raulshma.lenscast.camera.model.CameraSettings
 import com.raulshma.lenscast.camera.model.CameraControlPlan
 import com.raulshma.lenscast.camera.model.CameraState
 import com.raulshma.lenscast.camera.model.FocusApplyPolicy
+import com.raulshma.lenscast.camera.model.FrameErrorPolicy
+import com.raulshma.lenscast.camera.model.ResolutionApplyPolicy
 import com.raulshma.lenscast.core.YuvConverter
 import com.raulshma.lenscast.camera.model.FocusMode
 import com.raulshma.lenscast.camera.model.WhiteBalance
@@ -721,18 +723,22 @@ class CameraService(private val context: Context) {
                 frameListener?.invoke(yuvData, width, height, rotation)
             }
         } catch (e: Exception) {
+            // The window/threshold verdicts are the pure FrameErrorPolicy's;
+            // this callback only keeps the counter and the last-error stamp.
             val now = System.currentTimeMillis()
-            if (now - lastFrameErrorTime > 5000) {
+            if (FrameErrorPolicy.streakExpired(now, lastFrameErrorTime)) {
                 consecutiveFrameErrors = 0
             }
             consecutiveFrameErrors++
-            lastFrameErrorTime = now
             Log.e(TAG, "Frame processing error #${consecutiveFrameErrors}", e)
-            if (consecutiveFrameErrors >= MAX_CONSECUTIVE_FRAME_ERRORS) {
+            // Consulted against the PREVIOUS stamp so the policy's window
+            // verdict is meaningful; the stamp advances after the verdict.
+            if (FrameErrorPolicy.shouldRecover(consecutiveFrameErrors, now, lastFrameErrorTime)) {
                 Log.w(TAG, "Too many frame errors, attempting recovery")
                 consecutiveFrameErrors = 0
                 triggerAutoRecovery()
             }
+            lastFrameErrorTime = now
         } finally {
             imageProxy.close()
         }
@@ -784,15 +790,24 @@ class CameraService(private val context: Context) {
         activeSettings = settings
         if (settings.resolution.size != currentResolution) {
             currentResolution = settings.resolution.size
-            if (hasActiveCameraDemand() && exclusiveSessionRefCount == 0) {
-                withContext(Dispatchers.Main) {
-                    rebindUseCases()
+            when (
+                ResolutionApplyPolicy.decide(
+                    demandActive = hasActiveCameraDemand(),
+                    exclusiveActive = exclusiveSessionRefCount > 0,
+                    resolutionChanged = true,
+                )
+            ) {
+                is ResolutionApplyPolicy.ResolutionDecision.RebindNow -> {
+                    withContext(Dispatchers.Main) {
+                        rebindUseCases()
+                    }
+                    applyCameraControls(settings, forceFocusReapply = false)
+                    return
                 }
-                applyCameraControls(settings, forceFocusReapply = false)
-                return
-            } else {
-                pendingResolution = settings.resolution.size
-                Log.d(TAG, "applySettings: deferring resolution change until next active session")
+                ResolutionApplyPolicy.ResolutionDecision.Defer -> {
+                    pendingResolution = settings.resolution.size
+                    Log.d(TAG, "applySettings: deferring resolution change until next active session")
+                }
             }
         }
 
@@ -803,7 +818,13 @@ class CameraService(private val context: Context) {
         val res = pendingResolution ?: return
         pendingResolution = null
         currentResolution = res
-        if (hasActiveCameraDemand() && exclusiveSessionRefCount == 0) {
+        if (
+            ResolutionApplyPolicy.decide(
+                demandActive = hasActiveCameraDemand(),
+                exclusiveActive = exclusiveSessionRefCount > 0,
+                resolutionChanged = true,
+            ) is ResolutionApplyPolicy.ResolutionDecision.RebindNow
+        ) {
             rebindUseCases()
         }
         Log.d(TAG, "applyPendingResolution: applied deferred resolution $res")
@@ -921,13 +942,22 @@ class CameraService(private val context: Context) {
 
     fun onActivityResume() {
         isActivityForeground = true
-        if (previewRequested && exclusiveSessionRefCount == 0) {
-            if (pendingResolution != null) {
-                applyPendingResolution()
-            } else {
-                rebindUseCases()
+        when (
+            val decision = ResolutionApplyPolicy.decide(
+                demandActive = previewRequested,
+                exclusiveActive = exclusiveSessionRefCount > 0,
+                resolutionChanged = pendingResolution != null,
+            )
+        ) {
+            is ResolutionApplyPolicy.ResolutionDecision.RebindNow -> {
+                if (decision.withResolutionChange) {
+                    applyPendingResolution()
+                } else {
+                    rebindUseCases()
+                }
+                Log.d(TAG, "onActivityResume: restored preview")
             }
-            Log.d(TAG, "onActivityResume: restored preview")
+            ResolutionApplyPolicy.ResolutionDecision.Defer -> {}
         }
     }
 
@@ -958,7 +988,6 @@ class CameraService(private val context: Context) {
         private const val TAG = "CameraService"
         internal const val MAX_ANALYSIS_WIDTH = 1280
         internal const val MAX_ANALYSIS_HEIGHT = 720
-        private const val MAX_CONSECUTIVE_FRAME_ERRORS = 10
     }
 }
 

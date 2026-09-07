@@ -8,6 +8,7 @@ import com.raulshma.lenscast.camera.CameraService
 import com.raulshma.lenscast.core.PowerManager
 import com.raulshma.lenscast.core.StreamWatchdog
 import com.raulshma.lenscast.core.ThermalMonitor
+import com.raulshma.lenscast.core.WatchdogPolicy
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -30,6 +31,8 @@ import java.util.concurrent.atomic.AtomicBoolean
  * only when no stream is live, so overlapping web/app sessions are safe.
  * begin/end/recovery are serialized on a mutex: a begin racing an end can
  * never leave a new stream attached to a session that is being torn down.
+ * [recover] owns all three watchdog recovery tiers' mechanics — the watchdog
+ * keeps only the tier decision, backoff, and verification.
  *
  * The watchdog is resolved lazily because the watchdog itself receives this
  * session for recovery; neither side may touch the other at construction time.
@@ -108,19 +111,95 @@ class StreamingSession(
     }
 
     /**
-     * Re-attach the environment after a watchdog recovery. The session stays
-     * active — keep-alive and the foreground service were never released — so
-     * only the state the recovery disturbed gets refreshed.
+     * The single owner of every recovery tier's mechanics. The watchdog
+     * decides *when* (WatchdogPolicy's tier ladder), applies backoff, and
+     * verifies afterwards; this owns *what happens*: the stream-activity
+     * snapshot, the camera rebind (through the bounded Main seam), and the
+     * conditional web/RTSP restarts.
+     *
+     * Tiers, per the watchdog's historical semantics:
+     *  - SOFT — rebind the camera use cases only.
+     *  - MEDIUM — snapshot the live outputs, pause them, restart the server,
+     *    rebind, and restart what was live.
+     *  - HARD — snapshot, stop streaming entirely, re-initialize the camera,
+     *    refresh the disturbed session state, restart streaming and the
+     *    outputs that did not come back.
+     *
+     * False means the tier's hard step failed (server or camera could not
+     * restart); the caller verifies stream health either way.
      */
-    suspend fun refreshAfterRecovery() {
-        lifecycleMutex.withLock {
-            if (!active.get()) return
-            powerManager.refreshBatteryState()
-            thermalMonitor.startMonitoring()
-            streamingManager.applyBatteryOptimization(powerManager.optimizationResult.value)
-            if (!rebindCamera()) {
-                Log.w(TAG, "Post-recovery camera rebind timed out")
+    suspend fun recover(tier: WatchdogPolicy.RecoveryTier): Boolean {
+        return when (tier) {
+            WatchdogPolicy.RecoveryTier.SOFT -> {
+                Log.d(TAG, "Soft recovery: rebinding CameraX use cases")
+                rebindCamera().also { bound ->
+                    if (!bound) Log.w(TAG, "Soft recovery: camera rebind timed out")
+                }
             }
+
+            WatchdogPolicy.RecoveryTier.MEDIUM -> {
+                Log.d(TAG, "Medium recovery: restarting streaming server + rebinding camera")
+                val webWasActive = streamingManager.isWebStreamActive()
+                val rtspWasActive = streamingManager.isRtspRunning.value
+                streamingManager.pauseStreaming()
+                if (!streamingManager.ensureServerRunning()) {
+                    Log.e(TAG, "Medium recovery: failed to restart server")
+                    return false
+                }
+                rebindCamera()
+                restartStreamsIfNotYetLive(webWasActive, rtspWasActive)
+                true
+            }
+
+            WatchdogPolicy.RecoveryTier.HARD -> {
+                Log.d(TAG, "Hard recovery: full re-initialization")
+                val webWasActive = streamingManager.isWebStreamActive()
+                val rtspWasActive = streamingManager.isRtspRunning.value
+                streamingManager.stopStreaming()
+                val cameraResult = withContext(Dispatchers.Main) {
+                    cameraService.initialize()
+                }
+                if (cameraResult.isFailure) {
+                    Log.e(TAG, "Hard recovery: camera re-initialization failed", cameraResult.exceptionOrNull())
+                    return false
+                }
+                // The session stayed active through recovery, so keep-alive and
+                // the foreground service are still held; only refresh what the
+                // recovery disturbed.
+                lifecycleMutex.withLock {
+                    if (active.get()) refreshDisturbedState()
+                }
+                if (!streamingManager.startStreaming()) {
+                    Log.e(TAG, "Hard recovery: failed to restart streaming")
+                    return false
+                }
+                restartStreamsIfNotYetLive(webWasActive, rtspWasActive)
+                true
+            }
+        }
+    }
+
+    /**
+     * The session-attached state a recovery disturbed: battery state, thermal
+     * monitoring, and the battery-optimization application, then the camera
+     * rebind. Runs under [lifecycleMutex].
+     */
+    private suspend fun refreshDisturbedState() {
+        powerManager.refreshBatteryState()
+        thermalMonitor.startMonitoring()
+        streamingManager.applyBatteryOptimization(powerManager.optimizationResult.value)
+        if (!rebindCamera()) {
+            Log.w(TAG, "Post-recovery camera rebind timed out")
+        }
+    }
+
+    /** Restart only the outputs that were live before the disturbance. */
+    private fun restartStreamsIfNotYetLive(webWasActive: Boolean, rtspWasActive: Boolean) {
+        if (webWasActive && !streamingManager.isWebStreamActive()) {
+            streamingManager.startWebStreaming()
+        }
+        if (rtspWasActive && !streamingManager.isRtspRunning.value) {
+            streamingManager.startRtspStreaming()
         }
     }
 

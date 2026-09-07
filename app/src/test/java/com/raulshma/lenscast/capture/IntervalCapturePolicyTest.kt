@@ -28,6 +28,32 @@ class IntervalCapturePolicyTest {
     }
 
     @Test
+    fun `clamp ceilings totals so every entry path is bounded`() {
+        assertEquals(
+            IntervalCapturePolicy.TOTAL_CAPTURES_MAX,
+            IntervalCapturePolicy.clamp(5, 100_000, "OFF").totalCaptures,
+        )
+        assertEquals(
+            IntervalCapturePolicy.TOTAL_CAPTURES_MAX,
+            IntervalCapturePolicy.clamp(5, IntervalCapturePolicy.TOTAL_CAPTURES_MAX, "OFF").totalCaptures,
+        )
+        assertEquals(1000, IntervalCapturePolicy.TOTAL_CAPTURES_MAX)
+        // The zero sentinel (run until stopped) survives the clamp.
+        assertEquals(0, IntervalCapturePolicy.clamp(5, 0, "OFF").totalCaptures)
+    }
+
+    @Test
+    fun `worker-read totals are ceiling-bounded too`() {
+        val data = Data.Builder()
+            .putInt(IntervalCapturePolicy.KEY_TOTAL_CAPTURES, 100_000)
+            .build()
+        assertEquals(
+            IntervalCapturePolicy.TOTAL_CAPTURES_MAX,
+            IntervalCapturePolicy.readTick(data).totalCaptures,
+        )
+    }
+
+    @Test
     fun `first tick fires immediately, continuations wait`() {
         assertEquals(0L, IntervalCapturePolicy.firstDelaySeconds())
         val tick = IntervalCapturePolicy.clamp(25, 10, "OFF")

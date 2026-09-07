@@ -73,7 +73,6 @@ import kotlinx.coroutines.launch
 import coil3.compose.AsyncImage
 import coil3.request.ImageRequest
 import coil3.request.crossfade
-import coil3.request.crossfade
 import com.raulshma.lenscast.capture.model.CaptureHistory
 import com.raulshma.lenscast.capture.model.CaptureType
 import com.raulshma.lenscast.ui.animation.LocalAnimatedVisibilityScope
@@ -230,22 +229,30 @@ private fun PhotoViewer(
             .fillMaxSize()
             .background(Color.Black)
             .pointerInput(Unit) {
+                // The gesture math is ViewerZoomPolicy's — the screen only
+                // normalizes coordinates and applies the returned transform.
                 detectTapGestures(onDoubleTap = {
-                    if (scale > 1.2f) {
-                        scale = 1f; offsetX = 0f; offsetY = 0f
-                    } else {
-                        scale = 2.5f
-                    }
+                    val next = ViewerZoomPolicy.onDoubleTap(scale)
+                    scale = next.scale
+                    offsetX = next.offsetX
+                    offsetY = next.offsetY
                 })
             }
             .pointerInput(Unit) {
                 detectTransformGestures { _, pan, zoom, _ ->
-                    val updatedScale = (scale * zoom).coerceIn(1f, 5f)
-                    val maxX = ((viewport.width * (updatedScale - 1f)) / 2f).coerceAtLeast(0f)
-                    val maxY = ((viewport.height * (updatedScale - 1f)) / 2f).coerceAtLeast(0f)
-                    scale = updatedScale
-                    offsetX = if (updatedScale == 1f) 0f else (offsetX + pan.x).coerceIn(-maxX, maxX)
-                    offsetY = if (updatedScale == 1f) 0f else (offsetY + pan.y).coerceIn(-maxY, maxY)
+                    val next = ViewerZoomPolicy.onTransform(
+                        currentScale = scale,
+                        currentOffsetX = offsetX,
+                        currentOffsetY = offsetY,
+                        zoom = zoom,
+                        panX = pan.x,
+                        panY = pan.y,
+                        viewportWidth = viewport.width.toFloat(),
+                        viewportHeight = viewport.height.toFloat(),
+                    )
+                    scale = next.scale
+                    offsetX = next.offsetX
+                    offsetY = next.offsetY
                 }
             },
         contentAlignment = Alignment.Center,

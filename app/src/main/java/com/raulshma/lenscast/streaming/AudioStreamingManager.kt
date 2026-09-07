@@ -9,6 +9,7 @@ import android.media.audiofx.AcousticEchoCanceler
 import android.media.audiofx.NoiseSuppressor
 import com.raulshma.lenscast.core.MicAccess
 import com.raulshma.lenscast.core.StreamDefaults
+import com.raulshma.lenscast.streaming.rtsp.AacFormat
 import android.os.Process
 import android.util.Log
 import java.io.InputStream
@@ -17,7 +18,9 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 
-class AudioStreamingManager(private val context: Context) {
+// RtspAudioSource: the mic-capture seam [RtspOutput] drives the RTSP audio
+// track through; the method set is already this interface's shape.
+class AudioStreamingManager(private val context: Context) : RtspAudioSource {
 
     data class Config(
         val bitrateKbps: Int = StreamDefaults.AUDIO_BITRATE_KBPS,
@@ -36,7 +39,7 @@ class AudioStreamingManager(private val context: Context) {
     private var readerThread: Thread? = null
 
     @Volatile
-    private var activeConfig: ActiveConfig = ActiveConfig()
+    private var activeConfig: AacFormat.ResolvedBuffers = AacFormat.ResolvedBuffers()
 
     @Volatile
     private var echoCanceler: AcousticEchoCanceler? = null
@@ -44,7 +47,7 @@ class AudioStreamingManager(private val context: Context) {
     @Volatile
     private var noiseSuppressor: NoiseSuppressor? = null
 
-    fun start(config: Config = Config()): Boolean {
+    override fun start(config: Config): Boolean {
         if (isStreaming.get()) return true
         if (!MicAccess.isGranted(context)) {
             Log.w(TAG, "Microphone permission is not granted, skipping audio stream")
@@ -70,7 +73,7 @@ class AudioStreamingManager(private val context: Context) {
         }
     }
 
-    fun stop() {
+    override fun stop() {
         if (!isStreaming.getAndSet(false)) return
 
         cleanupRecorder()
@@ -82,67 +85,31 @@ class AudioStreamingManager(private val context: Context) {
         Log.d(TAG, "Audio streaming stopped")
     }
 
-    fun openStream(): InputStream? {
+    override fun openStream(): InputStream? {
         if (!isStreaming.get()) return null
         val subscriberId = nextSubscriberId.getAndIncrement()
         return AudioClientStream(subscriberId).also { subscribers[subscriberId] = it }
     }
 
-    fun isRunning(): Boolean = isStreaming.get()
+    override fun isRunning(): Boolean = isStreaming.get()
 
-    fun getSampleRateHz(): Int = activeConfig.sampleRateHz
+    override fun getSampleRateHz(): Int = activeConfig.sampleRateHz
 
-    fun getChannelCount(): Int = activeConfig.channelCount
+    override fun getChannelCount(): Int = activeConfig.channelCount
 
     fun release() {
         stop()
     }
 
-    private fun resolveConfig(config: Config): ActiveConfig {
-        val requestedChannelConfig = if (config.channelCount >= 2) {
-            AudioFormat.CHANNEL_IN_STEREO
-        } else {
-            AudioFormat.CHANNEL_IN_MONO
+    private fun resolveConfig(config: Config): AacFormat.ResolvedBuffers {
+        // The capture-resolution decision is pure buffer math in [AacFormat];
+        // only the platform probe stays here.
+        return AacFormat.resolveBuffers(config.channelCount) { sampleRate, channelConfig ->
+            AudioRecord.getMinBufferSize(sampleRate, channelConfig, AUDIO_ENCODING)
         }
-
-        val sampleRates = intArrayOf(48_000, 44_100, 32_000, 24_000, 16_000)
-        sampleRates.forEach { sampleRate ->
-            val minBuffer = AudioRecord.getMinBufferSize(
-                sampleRate,
-                requestedChannelConfig,
-                AUDIO_ENCODING
-            )
-            if (minBuffer > 0) {
-                val resolvedChannelCount = if (requestedChannelConfig == AudioFormat.CHANNEL_IN_STEREO) 2 else 1
-                val bytesPerFrame = resolvedChannelCount * PCM_BYTES_PER_SAMPLE
-                val bytesPerSecond = sampleRate * bytesPerFrame
-                val targetReadChunkBytes = alignToFrame(
-                    value = (bytesPerSecond * AUDIO_READ_CHUNK_MS) / 1000,
-                    bytesPerFrame = bytesPerFrame,
-                )
-                val readChunkBytes = alignToFrame(
-                    value = maxOf(targetReadChunkBytes, minBuffer / 2),
-                    bytesPerFrame = bytesPerFrame,
-                )
-                val recordBufferBytes = alignToFrame(
-                    value = maxOf(minBuffer, readChunkBytes * 3),
-                    bytesPerFrame = bytesPerFrame,
-                )
-
-                return ActiveConfig(
-                    sampleRateHz = sampleRate,
-                    channelCount = resolvedChannelCount,
-                    channelConfig = requestedChannelConfig,
-                    bufferSizeBytes = recordBufferBytes,
-                    readChunkBytes = readChunkBytes,
-                )
-            }
-        }
-
-        throw IllegalStateException("No supported audio recording configuration found")
     }
 
-    private fun buildAudioRecord(config: ActiveConfig, echoCancellation: Boolean): AudioRecord {
+    private fun buildAudioRecord(config: AacFormat.ResolvedBuffers, echoCancellation: Boolean): AudioRecord {
         val audioSource = if (echoCancellation) {
             MediaRecorder.AudioSource.VOICE_COMMUNICATION
         } else {
@@ -203,7 +170,7 @@ class AudioStreamingManager(private val context: Context) {
         }
     }
 
-    private fun startReader(recorder: AudioRecord, config: ActiveConfig) {
+    private fun startReader(recorder: AudioRecord, config: AacFormat.ResolvedBuffers) {
         readerThread = Thread({
             Process.setThreadPriority(Process.THREAD_PRIORITY_AUDIO)
             val buffer = ByteArray(config.readChunkBytes)
@@ -326,25 +293,9 @@ class AudioStreamingManager(private val context: Context) {
         }
     }
 
-    private data class ActiveConfig(
-        val sampleRateHz: Int = 48_000,
-        val channelCount: Int = 1,
-        val channelConfig: Int = AudioFormat.CHANNEL_IN_MONO,
-        val bufferSizeBytes: Int = 8192,
-        val readChunkBytes: Int = 2048,
-    )
-
-    private fun alignToFrame(value: Int, bytesPerFrame: Int): Int {
-        if (bytesPerFrame <= 1) return value.coerceAtLeast(1)
-        val remainder = value % bytesPerFrame
-        return if (remainder == 0) value else value + (bytesPerFrame - remainder)
-    }
-
     companion object {
         private const val TAG = "AudioStreamingManager"
         private const val AUDIO_ENCODING = AudioFormat.ENCODING_PCM_16BIT
-        private const val PCM_BYTES_PER_SAMPLE = 2
-        private const val AUDIO_READ_CHUNK_MS = 20
         private const val MAX_PENDING_CHUNKS = 6
     }
 }

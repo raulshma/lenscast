@@ -32,6 +32,8 @@ class PhotoCaptureManager(
     private val captureHistoryStore: CaptureHistoryStore,
 ) {
 
+    private val mediaResolver = CaptureMediaResolver(context.contentResolver)
+
     /**
      * Capture a photo into the gallery (MediaStore / Pictures/LensCast) and
      * record it in history. Returns the generated file name, or null when the
@@ -190,10 +192,7 @@ class PhotoCaptureManager(
             ContentValues().apply {
                 put(MediaStore.MediaColumns.DISPLAY_NAME, fileName)
                 put(MediaStore.MediaColumns.MIME_TYPE, CaptureMediaFormat.MIME_PHOTO)
-                put(
-                    MediaStore.MediaColumns.RELATIVE_PATH,
-                    Environment.DIRECTORY_PICTURES + "/" + CaptureMediaFormat.PHOTO_DIR_NAME,
-                )
+                put(MediaStore.MediaColumns.RELATIVE_PATH, CaptureMediaFormat.PHOTOS_WRITE_RELATIVE_PATH)
             },
         ).build()
 
@@ -243,12 +242,9 @@ class PhotoCaptureManager(
 
     private fun loadCapturedBytes(filePath: String): ByteArray? {
         return try {
-            if (CaptureMediaFormat.isContentUri(filePath)) {
-                val uri = android.net.Uri.parse(filePath)
-                context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
-            } else {
-                File(filePath).takeIf { it.exists() }?.readBytes()
-            }
+            // One scheme ladder: content URIs open through the resolver,
+            // file URIs and plain paths from disk.
+            mediaResolver.openStream(filePath)?.use { it.readBytes() }
         } catch (e: Exception) {
             Log.e(TAG, "Failed to load captured bytes", e)
             null

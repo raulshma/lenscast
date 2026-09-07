@@ -34,6 +34,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.raulshma.lenscast.MainApplication
+import com.raulshma.lenscast.camera.model.CameraDashboardPolicy
 import com.raulshma.lenscast.camera.model.CameraSettings
 import com.raulshma.lenscast.camera.model.FocusMode
 import com.raulshma.lenscast.camera.model.HdrMode
@@ -94,13 +95,10 @@ fun CameraSettingsScreen(
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             item {
-                SettingsSection(title = "Display") {
-                    SwitchSetting(
-                        title = "Show Camera Preview",
-                        checked = showPreview,
-                        onCheckedChange = { viewModel.updateShowPreview(it) }
-                    )
-                }
+                DisplaySettingsSection(
+                    showPreview = showPreview,
+                    onTogglePreview = { viewModel.updateShowPreview(it) },
+                )
             }
 
             item {
@@ -132,7 +130,7 @@ fun CameraSettingsScreen(
                         SliderSetting(
                             title = "Focus Distance",
                             value = settings.focusDistance ?: 0f,
-                            range = 0f..10f,
+                            range = QuickSettingCatalog.focusDistanceRange(),
                             onValueChange = { viewModel.updateFocusDistance(it) }
                         )
                     }
@@ -151,7 +149,7 @@ fun CameraSettingsScreen(
                         SliderSetting(
                             title = "Color Temperature (K)",
                             value = (settings.colorTemperature ?: CameraSettings.DEFAULT_COLOR_TEMPERATURE_K).toFloat(),
-                            range = 2000f..9000f,
+                            range = QuickSettingCatalog.colorTemperatureRange(),
                             onValueChange = { viewModel.updateColorTemperature(it.toInt()) }
                         )
                     }
@@ -180,7 +178,7 @@ fun CameraSettingsScreen(
                     SliderSetting(
                         title = "Frame Rate",
                         value = settings.frameRate.toFloat(),
-                        range = CameraSettings.FRAME_RATE_SLIDER_MIN.toFloat()..CameraSettings.FRAME_RATE_SLIDER_MAX.toFloat(),
+                        range = QuickSettingCatalog.frameRateRange(),
                         onValueChange = { viewModel.updateFrameRate(it.toInt()) }
                     )
                     DropdownSetting(
@@ -223,7 +221,7 @@ fun CameraSettingsScreen(
                 SettingsSection(title = "Scene") {
                     DropdownSetting(
                         title = "Scene Mode",
-                        options = listOf("OFF", "FACE_DETECTION", "NIGHT", "HDR", "SUNSET", "FIREWORKS"),
+                        options = QuickSettingCatalog.sceneModeOptions,
                         selected = settings.sceneMode ?: "OFF",
                         onSelect = { viewModel.updateSceneMode(it) }
                     )
@@ -261,7 +259,7 @@ fun SliderSetting(
                 color = MaterialTheme.colorScheme.onSurface,
             )
             Text(
-                text = if (value == value.toInt().toFloat()) "${value.toInt()}" else String.format("%.1f", value),
+                text = CameraDashboardPolicy.sliderValueLabel(value),
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.primary,
                 fontFamily = FontFamily.Monospace,

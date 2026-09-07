@@ -17,7 +17,7 @@ class AacEncoder {
     private var outputThread: Thread? = null
     private val running = AtomicBoolean(false)
 
-    private var sampleRateHz = 48000
+    private var sampleRateHz = AacFormat.DEFAULT_SAMPLE_RATE_HZ
     private var channelCount = 1
     private var bitrate = 128_000
 
@@ -142,24 +142,9 @@ class AacEncoder {
         }
 
         if (audioSpecificConfig == null) {
-            audioSpecificConfig = computeAudioSpecificConfig()
+            audioSpecificConfig = AacFormat.audioSpecificConfigBytes(sampleRateHz, channelCount)
             Log.d(TAG, "AudioSpecificConfig computed: ${audioSpecificConfig!!.toHexString()}")
         }
-    }
-
-    private fun computeAudioSpecificConfig(): ByteArray {
-        val audioObjectType = 2 // AAC-LC
-        val samplingFreqIndex = when (sampleRateHz) {
-            96000 -> 0; 88200 -> 1; 64000 -> 2; 48000 -> 3
-            44100 -> 4; 32000 -> 5; 24000 -> 6; 22050 -> 7
-            16000 -> 8; 12000 -> 9; 11025 -> 10; 8000 -> 11
-            else -> 0xF // explicit frequency
-        }
-        val channelConfig = channelCount
-
-        val byte0 = ((audioObjectType shl 3) or (samplingFreqIndex shr 1)) and 0xFF
-        val byte1 = (((samplingFreqIndex and 0x1) shl 7) or (channelConfig shl 3)) and 0xFF
-        return byteArrayOf(byte0.toByte(), byte1.toByte())
     }
 
     @Volatile
@@ -250,13 +235,10 @@ class AacEncoder {
         joinToString("") { "%02x".format(it.toInt() and 0xFF) }
 
     private fun pcmFrameSizeBytes(): Int {
-        return AAC_SAMPLES_PER_ACCESS_UNIT * channelCount * PCM_BYTES_PER_SAMPLE
+        return AacFormat.pcmFrameSizeBytes(channelCount)
     }
 
     companion object {
         private const val TAG = "AacEncoder"
-        // AAC-LC encodes 1024 samples per access unit.
-        private const val AAC_SAMPLES_PER_ACCESS_UNIT = 1024
-        private const val PCM_BYTES_PER_SAMPLE = 2
     }
 }

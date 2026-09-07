@@ -26,7 +26,9 @@ import com.raulshma.lenscast.capture.CaptureScreen
 import com.raulshma.lenscast.gallery.GalleryScreen
 import com.raulshma.lenscast.gallery.GalleryViewModel
 import com.raulshma.lenscast.gallery.MediaViewerScreen
+import com.raulshma.lenscast.gallery.clampedPage
 import com.raulshma.lenscast.gallery.indexAfterDelete
+import com.raulshma.lenscast.gallery.initialIndexFor
 import com.raulshma.lenscast.settings.CameraSettingsScreen
 import com.raulshma.lenscast.settings.AppSettingsScreen
 import com.raulshma.lenscast.ui.animation.LocalAnimatedVisibilityScope
@@ -135,7 +137,7 @@ fun NavigationGraph() {
                     )
                     val allItems by galleryViewModel.allItems.collectAsState()
 
-                    val initialIndex = allItems.indexOfFirst { it.id == mediaId }.coerceAtLeast(0)
+                    val initialIndex = initialIndexFor(allItems, mediaId)
                     val pagerState = rememberPagerState(
                         initialPage = initialIndex,
                         pageCount = { allItems.size },
@@ -151,8 +153,8 @@ fun NavigationGraph() {
                     val coroutineScope = rememberCoroutineScope()
 
                     LaunchedEffect(allItems) {
-                        if (allItems.isNotEmpty() && pagerState.currentPage >= allItems.size) {
-                            pagerState.scrollToPage(allItems.size - 1)
+                        clampedPage(pagerState.currentPage, allItems.size)?.let { target ->
+                            pagerState.scrollToPage(target)
                         }
                     }
 

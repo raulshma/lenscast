@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import androidx.core.content.FileProvider
+import com.raulshma.lenscast.capture.CaptureMediaResolver
 import com.raulshma.lenscast.capture.model.CaptureHistory
 import com.raulshma.lenscast.capture.model.CaptureMediaFormat
 import com.raulshma.lenscast.capture.model.CaptureType
@@ -56,14 +57,17 @@ fun buildGalleryOverview(items: List<CaptureHistory>): GalleryOverview {
     )
 }
 
-fun buildGallerySections(items: List<CaptureHistory>): List<GallerySection> {
+fun buildGallerySections(
+    items: List<CaptureHistory>,
+    today: LocalDate = LocalDate.now(),
+): List<GallerySection> {
     return items
         .groupBy { it.timestamp.toLocalDate() }
         .toSortedMap(compareByDescending { it })
         .map { (day, entries) ->
             GallerySection(
                 key = day.toString(),
-                title = formatGallerySectionTitle(day),
+                title = formatGallerySectionTitle(day, today),
                 subtitle = galleryDayFormatter.format(day),
                 items = entries.sortedByDescending { it.timestamp },
                 totalBytes = entries.sumOf { it.fileSizeBytes.coerceAtLeast(0L) },
@@ -71,19 +75,12 @@ fun buildGallerySections(items: List<CaptureHistory>): List<GallerySection> {
         }
 }
 
-fun resolveMediaModel(filePath: String): Any? {
-    if (CaptureMediaFormat.isContentUri(filePath)) {
-        return Uri.parse(filePath)
-    }
-    if (filePath.startsWith("file://")) {
-        return Uri.parse(filePath)
-    }
-    val file = File(filePath)
-    if (file.exists()) {
-        return file
-    }
-    return null
-}
+/**
+ * The display model for a recorded path — [CaptureMediaResolver]'s scheme
+ * ladder in one call: a [Uri] for scheme'd paths, a [File] for existing
+ * plain paths, null otherwise.
+ */
+fun resolveMediaModel(filePath: String): Any? = CaptureMediaResolver().displayModel(filePath)
 
 fun shareGalleryMedia(context: Context, items: List<CaptureHistory>) {
     if (items.isEmpty()) return
@@ -93,7 +90,7 @@ fun shareGalleryMedia(context: Context, items: List<CaptureHistory>) {
 
     val intent = if (uris.size == 1) {
         Intent(Intent.ACTION_SEND).apply {
-            type = mimeTypeForCapture(items.first().type)
+            type = CaptureMediaFormat.mimeFor(items.first().type)
             putExtra(Intent.EXTRA_STREAM, uris.first())
         }
     } else {
@@ -122,7 +119,7 @@ fun shareGalleryMedia(context: Context, items: List<CaptureHistory>) {
 fun openMediaExternal(context: Context, item: CaptureHistory) {
     val uri = resolveShareableUri(context, item) ?: return
     val intent = Intent(Intent.ACTION_VIEW).apply {
-        setDataAndType(uri, mimeTypeForCapture(item.type))
+        setDataAndType(uri, CaptureMediaFormat.mimeFor(item.type))
         addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
     }
@@ -163,8 +160,12 @@ fun formatViewerDateTime(timestamp: Long): String {
     return viewerDateTimeFormatter.format(timestamp.toZonedDateTime())
 }
 
-private fun formatGallerySectionTitle(day: LocalDate): String {
-    val today = LocalDate.now()
+/**
+ * The section header for a capture day: Today / Yesterday relative to the
+ * injected [today] (callers default to now, keeping call sites clean; tests
+ * inject a fixed day), otherwise the formatted date.
+ */
+fun formatGallerySectionTitle(day: LocalDate, today: LocalDate = LocalDate.now()): String {
     return when (day) {
         today -> "Today"
         today.minusDays(1) -> "Yesterday"
@@ -188,9 +189,6 @@ private fun resolveShareableUri(context: Context, item: CaptureHistory): Uri? {
         else -> null
     }
 }
-
-private fun mimeTypeForCapture(type: CaptureType): String =
-    CaptureMediaFormat.mimeFor(type)
 
 private fun Long.toLocalDate(): LocalDate = toZonedDateTime().toLocalDate()
 

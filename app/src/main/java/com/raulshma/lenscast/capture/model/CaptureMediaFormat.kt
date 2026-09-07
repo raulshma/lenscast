@@ -4,7 +4,9 @@ package com.raulshma.lenscast.capture.model
  * Pure capture-media identity: the mime type each [CaptureType] serializes
  * as, the MediaStore folder the captures land in, and the content-URI sniff.
  * PhotoCaptureManager and RecordingService write these values into MediaStore
- * and CaptureHistoryStore queries them back — one home, byte-for-byte.
+ * and CaptureHistoryStore queries them back — one home, byte-for-byte. The
+ * rooted write paths and the query prefixes are derived from the same folder
+ * names, so a rename desyncs nothing.
  */
 object CaptureMediaFormat {
     const val MIME_PHOTO = "image/jpeg"
@@ -14,9 +16,21 @@ object CaptureMediaFormat {
     const val PHOTO_DIR_NAME = "LensCast"
     const val VIDEO_DIR_NAME = "LensCast"
 
+    private const val PICTURES_ROOT = "Pictures"
+    private const val MOVIES_ROOT = "Movies"
+
+    /**
+     * The MediaStore RELATIVE_PATH captures are written with (no trailing
+     * slash) — the exact strings RecordingService and PhotoCaptureManager
+     * insert, composed here once per format instead of root + dir at each
+     * write site.
+     */
+    const val PHOTOS_WRITE_RELATIVE_PATH = "$PICTURES_ROOT/$PHOTO_DIR_NAME"
+    const val VIDEOS_WRITE_RELATIVE_PATH = "$MOVIES_ROOT/$VIDEO_DIR_NAME"
+
     /** MediaStore RELATIVE_PATH query prefixes (trailing slash included). */
-    const val PHOTOS_RELATIVE_PATH = "Pictures/LensCast/"
-    const val VIDEOS_RELATIVE_PATH = "Movies/LensCast/"
+    const val PHOTOS_RELATIVE_PATH = "$PHOTOS_WRITE_RELATIVE_PATH/"
+    const val VIDEOS_RELATIVE_PATH = "$VIDEOS_WRITE_RELATIVE_PATH/"
 
     /** The one mime each capture type streams/saves as. */
     fun mimeFor(type: CaptureType): String = when (type) {

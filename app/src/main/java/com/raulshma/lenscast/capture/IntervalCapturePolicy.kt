@@ -18,6 +18,9 @@ object IntervalCapturePolicy {
     const val MIN_INTERVAL_SECONDS = 1L
     const val MAX_INTERVAL_SECONDS = 3600L
 
+    /** The total-captures ceiling both entry paths (screen slider and Web API) clamp to. */
+    const val TOTAL_CAPTURES_MAX = 1000
+
     const val KEY_INTERVAL_SECONDS = "interval_seconds"
     const val KEY_TOTAL_CAPTURES = "total_captures"
     const val KEY_FLASH_MODE = "flash_mode"
@@ -36,7 +39,7 @@ object IntervalCapturePolicy {
         val completedCaptures: Int,
     )
 
-    /** Clamp raw inputs to the valid tick. */
+    /** Clamp raw inputs to the valid tick (0 totals mean "run until stopped"). */
     fun clamp(
         intervalSeconds: Long,
         totalCaptures: Int,
@@ -44,21 +47,22 @@ object IntervalCapturePolicy {
         completedCaptures: Int = 0,
     ): Tick = Tick(
         intervalSeconds = intervalSeconds.coerceIn(MIN_INTERVAL_SECONDS, MAX_INTERVAL_SECONDS),
-        totalCaptures = totalCaptures.coerceAtLeast(0),
+        totalCaptures = totalCaptures.coerceIn(0, TOTAL_CAPTURES_MAX),
         flashMode = flashMode,
         completedCaptures = completedCaptures.coerceAtLeast(0),
     )
 
     /**
      * The worker's input with the historical defaults and the same bounds:
-     * a crafted or stale queue entry can't smuggle an unbounded interval in.
+     * a crafted or stale queue entry can't smuggle an unbounded interval or
+     * total in.
      */
     fun readTick(input: Data): Tick = Tick(
         intervalSeconds = input.getLong(KEY_INTERVAL_SECONDS, 1L)
             .coerceIn(MIN_INTERVAL_SECONDS, MAX_INTERVAL_SECONDS),
-        totalCaptures = input.getInt(KEY_TOTAL_CAPTURES, 0),
+        totalCaptures = input.getInt(KEY_TOTAL_CAPTURES, 0).coerceIn(0, TOTAL_CAPTURES_MAX),
         flashMode = input.getString(KEY_FLASH_MODE) ?: "OFF",
-        completedCaptures = input.getInt(KEY_COMPLETED_CAPTURES, 0),
+        completedCaptures = input.getInt(KEY_COMPLETED_CAPTURES, 0).coerceAtLeast(0),
     )
 
     fun inputData(tick: Tick): Data = Data.Builder()
@@ -66,7 +70,7 @@ object IntervalCapturePolicy {
             KEY_INTERVAL_SECONDS,
             tick.intervalSeconds.coerceIn(MIN_INTERVAL_SECONDS, MAX_INTERVAL_SECONDS),
         )
-        .putInt(KEY_TOTAL_CAPTURES, tick.totalCaptures.coerceAtLeast(0))
+        .putInt(KEY_TOTAL_CAPTURES, tick.totalCaptures.coerceIn(0, TOTAL_CAPTURES_MAX))
         .putString(KEY_FLASH_MODE, tick.flashMode)
         .putInt(KEY_COMPLETED_CAPTURES, tick.completedCaptures.coerceAtLeast(0))
         .build()

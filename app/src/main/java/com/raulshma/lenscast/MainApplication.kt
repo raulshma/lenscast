@@ -19,9 +19,9 @@ import com.raulshma.lenscast.settings.SettingsApplier
 import com.raulshma.lenscast.streaming.StreamingManager
 import com.raulshma.lenscast.streaming.StreamingSession
 import com.raulshma.lenscast.update.UpdateChecker
+import com.raulshma.lenscast.update.UpdateCheckPipeline
 import com.raulshma.lenscast.update.UpdateNotifier
 import com.raulshma.lenscast.update.UpdatePolicy
-import com.raulshma.lenscast.update.model.UpdateCheckResult
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -56,6 +56,9 @@ class MainApplication : Application(), SingletonImageLoader.Factory {
     }
     val updateChecker: UpdateChecker by lazy { UpdateChecker(this) }
     val updateNotifier: UpdateNotifier by lazy { UpdateNotifier(this) }
+    val updateCheckPipeline: UpdateCheckPipeline by lazy {
+        UpdateCheckPipeline.production(updateChecker, updateNotifier, settingsDataStore)
+    }
     private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
     override fun onCreate() {
@@ -86,23 +89,18 @@ class MainApplication : Application(), SingletonImageLoader.Factory {
             .build()
     }
 
+    /**
+     * Startup auto-check: only the gating (24h clock + enabled flag) and the
+     * delay live here — the check itself is [UpdateCheckPipeline]'s, shared
+     * with the manual check, and its outcome needs no UI on startup.
+     */
     private fun initializeAutoUpdateCheck() {
         appScope.launch {
             delay(3_000)
-            val settings = settingsDataStore
-            val enabled = settings.updateAutoCheckEnabled.first()
-            val lastCheck = settings.updateLastCheckTime.first()
+            val enabled = settingsDataStore.updateAutoCheckEnabled.first()
+            val lastCheck = settingsDataStore.updateLastCheckTime.first()
             if (!UpdatePolicy.shouldAutoCheck(lastCheck, enabled)) return@launch
-
-            val result = updateChecker.checkForUpdate()
-            val dismissed = settings.updateDismissedVersion.first()
-            val decision = UpdatePolicy.shouldNotifyAfterCheck(result, dismissed)
-            if (decision.saveLastCheck) {
-                settings.saveUpdateLastCheckTime(System.currentTimeMillis())
-            }
-            if (result is UpdateCheckResult.UpdateAvailable && decision.notify) {
-                updateNotifier.showUpdateAvailable(UpdatePolicy.normalize(result.release.tagName))
-            }
+            updateCheckPipeline.runCheck()
         }
     }
 }

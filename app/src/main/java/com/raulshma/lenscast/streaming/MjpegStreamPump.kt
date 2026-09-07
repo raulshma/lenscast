@@ -57,10 +57,7 @@ class MjpegStreamPump(
             statusCode = 200,
             mimeType = "multipart/x-mixed-replace; boundary=$boundary",
             body = Stream(MjpegInputStream(clientId), contentLength = null),
-            headers = mapOf(
-                "Cache-Control" to "no-store, no-cache, must-revalidate, max-age=0",
-                "Pragma" to "no-cache",
-                "Expires" to "0",
+            headers = HttpResult.NO_STORE_HEADERS + mapOf(
                 "X-Accel-Buffering" to "no",
             ),
         )

@@ -72,7 +72,11 @@ fun CaptureScreen(
     val isRecording by viewModel.isRecording.collectAsState()
     val recordingConfig by viewModel.recordingConfig.collectAsState()
     val recordingElapsedMs by viewModel.recordingElapsedMs.collectAsState()
-    val scheduledStartTime by viewModel.scheduledStartTime.collectAsState()
+    val recordingState by viewModel.recordingState.collectAsState()
+    // The armed schedule's truth is the controller's RecordingState; the
+    // config draft's startTimeMs is the picked-but-not-yet-armed input.
+    val scheduledUi = scheduledUiModel(recordingState)
+    val pendingStartMs = scheduledUi?.startAtMs ?: recordingConfig.startTimeMs
 
     Scaffold(
         topBar = {
@@ -139,7 +143,7 @@ fun CaptureScreen(
                     SliderSetting(
                         title = "Total Captures",
                         value = intervalConfig.totalCaptures.toFloat(),
-                        range = 1f..1000f,
+                        range = 1f..IntervalCapturePolicy.TOTAL_CAPTURES_MAX.toFloat(),
                         onValueChange = {
                             viewModel.updateIntervalConfig(
                                 intervalConfig.copy(totalCaptures = it.toInt())
@@ -233,9 +237,14 @@ fun CaptureScreen(
                     var showTimePicker by remember { mutableStateOf(false) }
                     if (showTimePicker) {
                         ScheduleTimePickerDialog(
+                            initialTimeMs = recordingConfig.startTimeMs,
                             onConfirm = { hour, minute ->
-                                viewModel.updateScheduledStartTime(
-                                    RecordingConfig.scheduledStartFor(hour, minute, System.currentTimeMillis())
+                                viewModel.updateRecordingConfig(
+                                    recordingConfig.copy(
+                                        startTimeMs = RecordingConfig.scheduledStartFor(
+                                            hour, minute, System.currentTimeMillis()
+                                        )
+                                    )
                                 )
                                 showTimePicker = false
                             },
@@ -258,14 +267,14 @@ fun CaptureScreen(
                                 modifier = Modifier.size(18.dp)
                             )
                             Text(
-                                scheduledStartTime?.let {
+                                pendingStartMs?.let {
                                     "Start: ${SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(it))}"
                                 } ?: "Set Start Time",
                                 modifier = Modifier.padding(start = 4.dp)
                             )
                         }
-                        if (scheduledStartTime != null) {
-                            IconButton(onClick = { viewModel.updateScheduledStartTime(null) }) {
+                        if (scheduledUi?.canCancel == true || recordingConfig.startTimeMs != null) {
+                            IconButton(onClick = { viewModel.cancelScheduledRecording() }) {
                                 Icon(Icons.Default.Delete, contentDescription = "Clear schedule")
                             }
                         }
@@ -298,7 +307,11 @@ fun CaptureScreen(
                             ) {
                                 Icon(Icons.Default.Videocam, null, Modifier.size(18.dp))
                                 Text(
-                                    if (scheduledStartTime != null) "Schedule" else "Start Now",
+                                    if (scheduledUi?.isScheduled == true || recordingConfig.startTimeMs != null) {
+                                        "Schedule"
+                                    } else {
+                                        "Start Now"
+                                    },
                                     Modifier.padding(start = 8.dp)
                                 )
                             }
@@ -317,10 +330,20 @@ fun CaptureScreen(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun ScheduleTimePickerDialog(
+    initialTimeMs: Long?,
     onConfirm: (hour: Int, minute: Int) -> Unit,
     onDismiss: () -> Unit,
 ) {
-    val timePickerState = rememberTimePickerState(is24Hour = true)
+    // The picked-but-not-yet-armed time prefills the picker so re-opening it
+    // shows what will be scheduled.
+    val initial = remember(initialTimeMs) {
+        initialTimeMs?.let { java.util.Calendar.getInstance().apply { timeInMillis = it } }
+    }
+    val timePickerState = rememberTimePickerState(
+        initialHour = initial?.get(java.util.Calendar.HOUR_OF_DAY) ?: 0,
+        initialMinute = initial?.get(java.util.Calendar.MINUTE) ?: 0,
+        is24Hour = true,
+    )
 
     androidx.compose.material3.AlertDialog(
         onDismissRequest = onDismiss,

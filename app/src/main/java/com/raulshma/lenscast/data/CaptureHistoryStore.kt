@@ -6,16 +6,15 @@ import android.net.Uri
 import android.os.Build
 import android.provider.MediaStore
 import android.util.Log
+import com.raulshma.lenscast.capture.CaptureMediaResolver
 import com.raulshma.lenscast.capture.model.CaptureHistory
 import com.raulshma.lenscast.capture.model.CaptureMediaFormat
 import com.raulshma.lenscast.capture.model.CaptureType
 import com.raulshma.lenscast.core.AppJson
 import com.squareup.moshi.Types
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.withContext
 import java.io.File
 import java.util.UUID
 import java.util.concurrent.Executors
@@ -31,6 +30,7 @@ class CaptureHistoryStore(private val context: Context) {
     private val ioExecutor = Executors.newSingleThreadExecutor { r ->
         Thread(r, "CaptureHistoryIO").apply { isDaemon = true }
     }
+    private val mediaResolver = CaptureMediaResolver(context.contentResolver)
 
     private val _history = MutableStateFlow<List<CaptureHistory>>(emptyList())
     val history: StateFlow<List<CaptureHistory>> = _history.asStateFlow()
@@ -70,18 +70,6 @@ class CaptureHistoryStore(private val context: Context) {
         save()
     }
 
-    fun remove(id: String) {
-        val current = _history.value.toMutableList()
-        current.removeAll { it.id == id }
-        _history.value = current
-        save()
-    }
-
-    fun clear() {
-        _history.value = emptyList()
-        save()
-    }
-
     fun refreshFromMediaStore() {
         ioExecutor.execute {
             try {
@@ -105,14 +93,16 @@ class CaptureHistoryStore(private val context: Context) {
      * Deletes the backing media for every [id] that resolves to a history
      * entry and returns the ids that were actually removed (backing media
      * deleted, or already gone). The history is rewritten once, after the
-     * batch, when anything was removed.
+     * batch, when anything was removed. The scheme ladder is
+     * [CaptureMediaResolver]'s — content URIs through the resolver, `file://`
+     * URIs and plain paths through their file.
      */
     fun deleteAll(ids: List<String>): List<String> {
         val deleted = mutableListOf<String>()
         for (id in ids) {
             val entry = _history.value.find { it.id == id } ?: continue
-            val ok = deleteBackingMedia(entry.filePath)
-            if (ok || !mediaExists(entry.filePath)) {
+            val ok = mediaResolver.delete(entry.filePath)
+            if (ok || !mediaResolver.exists(entry.filePath)) {
                 deleted.add(id)
             } else {
                 Log.w(TAG, "Failed to delete media for history entry ${entry.filePath}")
@@ -124,15 +114,6 @@ class CaptureHistoryStore(private val context: Context) {
             save()
         }
         return deleted
-    }
-
-    suspend fun deleteOlderThan(beforeTimestamp: Long): Int = withContext(Dispatchers.IO) {
-        val current = _history.value
-        val remaining = current.filter { it.timestamp >= beforeTimestamp }
-        val removed = current.size - remaining.size
-        _history.value = remaining
-        save()
-        removed
     }
 
     fun createPhotoEntry(
@@ -354,50 +335,5 @@ class CaptureHistoryStore(private val context: Context) {
                 arrayOf("%/$folderPath%")
             )
         }
-    }
-
-    /**
-     * Deletes the backing media file using proper Uri parsing.
-     * Uses Uri.scheme to distinguish content providers from file URIs,
-     * rather than brittle string prefix matching.
-     */
-    private fun deleteBackingMedia(filePath: String): Boolean {
-        return runCatching {
-            val uri = Uri.parse(filePath)
-            when (uri.scheme) {
-                "content" -> {
-                    context.contentResolver.delete(uri, null, null) > 0
-                }
-                "file" -> {
-                    File(uri.path.orEmpty()).delete()
-                }
-                else -> {
-                    // No scheme — treat as a raw file path
-                    val file = File(filePath)
-                    !file.exists() || file.delete()
-                }
-            }
-        }.getOrElse { error ->
-            Log.w(TAG, "Failed to delete backing media $filePath", error)
-            false
-        }
-    }
-
-    /**
-     * Checks whether the backing media file exists using proper Uri parsing.
-     */
-    private fun mediaExists(filePath: String): Boolean {
-        return runCatching {
-            val uri = Uri.parse(filePath)
-            when (uri.scheme) {
-                "content" -> {
-                    context.contentResolver.openInputStream(uri)?.use { true } ?: false
-                }
-                "file" -> {
-                    File(uri.path.orEmpty()).exists()
-                }
-                else -> File(filePath).exists()
-            }
-        }.getOrDefault(false)
     }
 }

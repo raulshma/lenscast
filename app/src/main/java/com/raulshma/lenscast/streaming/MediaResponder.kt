@@ -97,7 +97,7 @@ class MediaResponder(
                     statusCode = 200,
                     mimeType = "image/jpeg",
                     body = Bytes(result.data),
-                    headers = NO_CACHE + (
+                    headers = HttpResult.NO_STORE_HEADERS + (
                         result.savedPath?.let { path ->
                             mapOf("X-Saved-Path" to path)
                         } ?: emptyMap()
@@ -105,7 +105,7 @@ class MediaResponder(
                 )
                 is PhotoCaptureManager.SnapshotResult.Error -> HttpResult.jsonError(
                     500,
-                    result.message.escapeJson(),
+                    result.message,
                 )
             }
         }
@@ -116,7 +116,7 @@ class MediaResponder(
                 statusCode = 200,
                 mimeType = "image/jpeg",
                 body = Bytes(jpeg),
-                headers = NO_CACHE,
+                headers = HttpResult.NO_STORE_HEADERS,
             )
         } else {
             HttpResult.plainText(404, "No frame available")
@@ -134,7 +134,7 @@ class MediaResponder(
                 statusCode = 200,
                 mimeType = "application/octet-stream",
                 body = Stream(audioStream, contentLength = null),
-                headers = NO_CACHE + mapOf(
+                headers = HttpResult.NO_STORE_HEADERS + mapOf(
                     "X-Accel-Buffering" to "no",
                     "X-Audio-Format" to "pcm_s16le",
                     "X-Audio-Sample-Rate" to "${audioStreamingManager.getSampleRateHz()}",
@@ -192,12 +192,6 @@ class MediaResponder(
     companion object {
         private const val MAX_CHUNK_BYTES = 2 * 1024 * 1024L
 
-        private val NO_CACHE = mapOf(
-            "Cache-Control" to "no-store, no-cache, must-revalidate, max-age=0",
-            "Pragma" to "no-cache",
-            "Expires" to "0",
-        )
-
         /**
          * The `bytes=start-end` decision. Null means "serve full content":
          * no header, a foreign unit, or a spec without a dash.
@@ -229,7 +223,5 @@ class MediaResponder(
                 saveToDisk = params.contains("save=1") || params.contains("save_to_disk=1"),
             )
         }
-
-        private fun String.escapeJson(): String = replace("\"", "\\\"")
     }
 }

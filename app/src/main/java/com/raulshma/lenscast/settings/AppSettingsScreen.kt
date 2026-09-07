@@ -252,13 +252,10 @@ fun AppSettingsScreen(
             }
 
             item {
-                SettingsSection(title = "Display") {
-                    SwitchSetting(
-                        title = "Show Camera Preview",
-                        checked = showPreview,
-                        onCheckedChange = { viewModel.updateShowPreview(it) }
-                    )
-                }
+                DisplaySettingsSection(
+                    showPreview = showPreview,
+                    onTogglePreview = { viewModel.updateShowPreview(it) },
+                )
             }
 
             item {

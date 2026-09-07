@@ -7,7 +7,6 @@ import android.os.Build
 import android.util.Log
 import com.raulshma.lenscast.core.StreamDefaults
 import com.raulshma.lenscast.core.YuvConverter
-import java.nio.ByteBuffer
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 
@@ -35,13 +34,15 @@ class H264Encoder {
 
     data class EncodedNalUnit(val data: ByteArray, val isKeyFrame: Boolean)
 
-    @Volatile
-    var sps: ByteArray? = null
-        private set
+    // The SPS/PPS state machine and the keyframe prepend decision live in
+    // the pure assembler; this class keeps the MediaCodec lifecycle.
+    private val streamAssembler = H264StreamAssembler()
 
-    @Volatile
-    var pps: ByteArray? = null
-        private set
+    val sps: ByteArray?
+        get() = streamAssembler.sps
+
+    val pps: ByteArray?
+        get() = streamAssembler.pps
 
     fun configure(width: Int, height: Int, bitrate: Int, frameRate: Int) {
         this.width = width
@@ -251,7 +252,11 @@ class H264Encoder {
                         val outputBuffer = codec.getOutputBuffer(outputBufferIndex) ?: continue
 
                         if (bufferInfo.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG != 0) {
-                            extractSpsAndPps(outputBuffer, bufferInfo)
+                            streamAssembler.updateFromConfigBuffer(
+                                outputBuffer,
+                                bufferInfo.offset,
+                                bufferInfo.size,
+                            )
                         }
 
                         if (bufferInfo.size > 0 &&
@@ -270,22 +275,7 @@ class H264Encoder {
                                 continue
                             }
 
-                            if (isKeyFrame) {
-                                val spsData = sps
-                                val ppsData = pps
-                                if (spsData != null && ppsData != null) {
-                                    val allNals = mutableListOf<EncodedNalUnit>(
-                                        EncodedNalUnit(spsData, false),
-                                        EncodedNalUnit(ppsData, false)
-                                    )
-                                    allNals.addAll(nalUnits.map { EncodedNalUnit(it, true) })
-                                    onEncodedFrame?.invoke(allNals)
-                                } else {
-                                    onEncodedFrame?.invoke(nalUnits.map { EncodedNalUnit(it, true) })
-                                }
-                            } else {
-                                onEncodedFrame?.invoke(nalUnits.map { EncodedNalUnit(it, false) })
-                            }
+                            onEncodedFrame?.invoke(streamAssembler.assemble(nalUnits, isKeyFrame))
                         }
 
                         codec.releaseOutputBuffer(outputBufferIndex, false)
@@ -295,12 +285,10 @@ class H264Encoder {
                         val format = codec.outputFormat
                         Log.d(TAG, "Encoder format changed: $format")
                         try {
-                            format.getByteBuffer("csd-0")?.let { buf ->
-                                sps = extractNalFromCsd(buf)
-                            }
-                            format.getByteBuffer("csd-1")?.let { buf ->
-                                pps = extractNalFromCsd(buf)
-                            }
+                            streamAssembler.updateFromFormat(
+                                csd0 = format.getByteBuffer("csd-0"),
+                                csd1 = format.getByteBuffer("csd-1"),
+                            )
                             Log.d(TAG, "SPS/PPS extracted from format: sps=${sps?.size} pps=${pps?.size}")
                         } catch (e: Exception) {
                             Log.w(TAG, "Failed to extract SPS/PPS from format", e)
@@ -321,27 +309,6 @@ class H264Encoder {
     }
 
     private fun extractNalUnits(data: ByteArray): List<ByteArray> = H264NalParser.extractNalUnits(data)
-
-    private fun extractSpsAndPps(buffer: ByteBuffer, info: MediaCodec.BufferInfo) {
-        val data = ByteArray(info.size)
-        buffer.position(info.offset)
-        buffer.get(data)
-
-        val nalUnits = H264NalParser.extractNalUnits(data)
-        for (nalUnit in nalUnits) {
-            if (nalUnit.isEmpty()) continue
-            when (H264NalParser.nalType(nalUnit)) {
-                7 -> sps = nalUnit
-                8 -> pps = nalUnit
-            }
-        }
-    }
-
-    private fun extractNalFromCsd(buffer: ByteBuffer): ByteArray {
-        val bytes = ByteArray(buffer.remaining())
-        buffer.get(bytes)
-        return H264NalParser.stripStartCode(bytes)
-    }
 
     private fun convertInputFrame(nv21: ByteArray, width: Int, height: Int): ByteArray {
         return when (activeInputFormat) {
