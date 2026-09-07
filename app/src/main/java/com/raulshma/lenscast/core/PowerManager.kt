@@ -198,49 +198,12 @@ class PowerManager(private val context: Context) {
     }
 
     private fun refreshOptimizationResult() {
-        val level = _batteryLevel.value
-        val powerSave = _isPowerSaveMode.value
-        val charging = _isCharging.value
-        val inDoze = isDeviceInDozeMode()
-
-        _optimizationResult.value = when {
-            charging -> BatteryOptimizationResult(
-                suggestedJpegQuality = StreamDefaults.JPEG_QUALITY,
-                batteryLevel = level,
-                isPowerSaveMode = powerSave,
-                message = "Charging - full quality"
-            )
-            inDoze -> BatteryOptimizationResult(
-                suggestedJpegQuality = 40,
-                batteryLevel = level,
-                isPowerSaveMode = true,
-                message = "Doze mode - minimal quality"
-            )
-            level < 15 -> BatteryOptimizationResult(
-                suggestedJpegQuality = 50,
-                batteryLevel = level,
-                isPowerSaveMode = powerSave,
-                message = "Critical battery - minimal quality"
-            )
-            level < 30 -> BatteryOptimizationResult(
-                suggestedJpegQuality = 60,
-                batteryLevel = level,
-                isPowerSaveMode = powerSave,
-                message = "Low battery - reduced quality"
-            )
-            level < 50 || powerSave -> BatteryOptimizationResult(
-                suggestedJpegQuality = 65,
-                batteryLevel = level,
-                isPowerSaveMode = powerSave,
-                message = "Battery saver - balanced quality"
-            )
-            else -> BatteryOptimizationResult(
-                suggestedJpegQuality = StreamDefaults.JPEG_QUALITY,
-                batteryLevel = level,
-                isPowerSaveMode = powerSave,
-                message = "Normal operation"
-            )
-        }
+        _optimizationResult.value = BatteryQualityPolicy.resolve(
+            batteryLevel = _batteryLevel.value,
+            isPowerSave = _isPowerSaveMode.value,
+            isCharging = _isCharging.value,
+            inDoze = isDeviceInDozeMode(),
+        )
     }
 
     fun release() {

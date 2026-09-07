@@ -34,6 +34,7 @@ import com.raulshma.lenscast.camera.model.CameraLensInfo
 import com.raulshma.lenscast.camera.model.CameraSettings
 import com.raulshma.lenscast.camera.model.CameraControlPlan
 import com.raulshma.lenscast.camera.model.CameraState
+import com.raulshma.lenscast.camera.model.FocusApplyPolicy
 import com.raulshma.lenscast.core.YuvConverter
 import com.raulshma.lenscast.camera.model.FocusMode
 import com.raulshma.lenscast.camera.model.WhiteBalance
@@ -90,6 +91,11 @@ class CameraService(private val context: Context) {
     private var currentPreviewView: PreviewView? = null
     private var activeSettings = CameraSettings()
 
+    // Last settings whose center AF/AE metering was fired; the focus part of
+    // the next apply is gated on it (see FocusApplyPolicy). Reset on release
+    // so a fresh session re-establishes metering.
+    private var lastFocusApplied: CameraSettings? = null
+
     private val keepAliveLifecycle = KeepAliveLifecycle()
     private var keepAliveRefCount = 0
 
@@ -99,13 +105,18 @@ class CameraService(private val context: Context) {
     private val _isFrontCamera = MutableStateFlow(false)
     val isFrontCamera: StateFlow<Boolean> = _isFrontCamera.asStateFlow()
 
-    private val _availableZoomRange = MutableStateFlow<ClosedFloatingPointRange<Float>>(1f..10f)
+    // Defaults are the persistence-side bounds from the CameraSettings
+    // companion; the device's live ranges replace them at bind time.
+    private val _availableZoomRange =
+        MutableStateFlow<ClosedFloatingPointRange<Float>>(CameraSettings.effectiveZoomRange(CameraSettings.ZOOM_RATIO_MAX))
     val availableZoomRange: StateFlow<ClosedFloatingPointRange<Float>> = _availableZoomRange.asStateFlow()
 
-    private val _availableExposureRange = MutableStateFlow<ClosedRange<Int>>(-12..12)
+    private val _availableExposureRange =
+        MutableStateFlow<ClosedRange<Int>>(CameraSettings.EXPOSURE_COMPENSATION_MIN..CameraSettings.EXPOSURE_COMPENSATION_MAX)
     val availableExposureRange: StateFlow<ClosedRange<Int>> = _availableExposureRange.asStateFlow()
 
-    private val _availableIsoRange = MutableStateFlow<ClosedRange<Int>>(100..3200)
+    private val _availableIsoRange =
+        MutableStateFlow<ClosedRange<Int>>(CameraSettings.ISO_RANGE_MIN..CameraSettings.ISO_RANGE_MAX)
     val availableIsoRange: StateFlow<ClosedRange<Int>> = _availableIsoRange.asStateFlow()
 
     private var sensorExposureTimeRange: LongRange = 1L..1_000_000_000L
@@ -570,7 +581,9 @@ class CameraService(private val context: Context) {
 
             camera?.let { cam ->
                 cam.cameraInfo.zoomState.value?.let { zoom ->
-                    _availableZoomRange.value = 1f..zoom.maxZoomRatio.coerceAtMost(20f)
+                    // One ceiling: the device max clamped to the persistence
+                    // bound, so pinch and settings re-apply agree.
+                    _availableZoomRange.value = CameraSettings.effectiveZoomRange(zoom.maxZoomRatio)
                 }
                 val expState = cam.cameraInfo.exposureState
                 _availableExposureRange.value = expState.exposureCompensationRange.lower..
@@ -594,7 +607,7 @@ class CameraService(private val context: Context) {
                 }
             }
 
-            applyCameraControls(activeSettings)
+            applyCameraControls(activeSettings, forceFocusReapply = true)
         } catch (e: Exception) {
             Log.e(TAG, "bindUseCases: failed to bind camera", e)
             _cameraState.value = CameraState.Error("Failed to start camera: ${e.message}")
@@ -661,7 +674,7 @@ class CameraService(private val context: Context) {
         camera = null
     }
 
-    fun switchCamera(previewView: PreviewView) {
+    fun switchCamera() {
         val lenses = _availableLenses.value
         if (lenses.isEmpty()) {
             // Fallback to simple front/back toggle
@@ -671,7 +684,13 @@ class CameraService(private val context: Context) {
                 CameraSelector.DEFAULT_FRONT_CAMERA
             }
             _isFrontCamera.value = !_isFrontCamera.value
-            startPreview(previewView)
+            val previewView = currentPreviewView
+            if (previewView != null) {
+                startPreview(previewView)
+            } else if (hasActiveCameraDemand() && exclusiveSessionRefCount == 0) {
+                // Headless switch (preview hidden): just rebind to the new selector.
+                rebindUseCases()
+            }
             return
         }
 
@@ -769,7 +788,7 @@ class CameraService(private val context: Context) {
                 withContext(Dispatchers.Main) {
                     rebindUseCases()
                 }
-                applyCameraControls(settings)
+                applyCameraControls(settings, forceFocusReapply = false)
                 return
             } else {
                 pendingResolution = settings.resolution.size
@@ -777,7 +796,7 @@ class CameraService(private val context: Context) {
             }
         }
 
-        applyCameraControls(settings)
+        applyCameraControls(settings, forceFocusReapply = false)
     }
 
     fun applyPendingResolution() {
@@ -791,7 +810,7 @@ class CameraService(private val context: Context) {
     }
 
     @androidx.annotation.OptIn(androidx.camera.camera2.interop.ExperimentalCamera2Interop::class)
-    private fun applyCameraControls(settings: CameraSettings) {
+    private fun applyCameraControls(settings: CameraSettings, forceFocusReapply: Boolean) {
         val cam = camera ?: return
 
         try {
@@ -812,26 +831,33 @@ class CameraService(private val context: Context) {
             Log.w(TAG, "Exposure compensation failed", e)
         }
 
-        try {
-            val factory = SurfaceOrientedMeteringPointFactory(1f, 1f)
-            val center = factory.createPoint(0.5f, 0.5f)
-            when (settings.focusMode) {
-                FocusMode.CONTINUOUS_PICTURE, FocusMode.CONTINUOUS_VIDEO -> {
-                    cam.cameraControl.startFocusAndMetering(
-                        FocusMeteringAction.Builder(center)
-                            .setAutoCancelDuration(5, java.util.concurrent.TimeUnit.SECONDS)
-                            .build()
-                    )
+        // Center AF/AE metering only re-fires when the focus-relevant fields
+        // moved (or after a fresh bind): a plain settings apply — every
+        // slider tick reaches here twice — must not cancel a deliberate
+        // tap-to-focus. The pure decision lives in FocusApplyPolicy.
+        if (forceFocusReapply || FocusApplyPolicy.needsReapply(lastFocusApplied, settings)) {
+            try {
+                val factory = SurfaceOrientedMeteringPointFactory(1f, 1f)
+                val center = factory.createPoint(0.5f, 0.5f)
+                when (settings.focusMode) {
+                    FocusMode.CONTINUOUS_PICTURE, FocusMode.CONTINUOUS_VIDEO -> {
+                        cam.cameraControl.startFocusAndMetering(
+                            FocusMeteringAction.Builder(center)
+                                .setAutoCancelDuration(5, java.util.concurrent.TimeUnit.SECONDS)
+                                .build()
+                        )
+                    }
+                    FocusMode.MANUAL -> { }
+                    else -> {
+                        cam.cameraControl.startFocusAndMetering(
+                            FocusMeteringAction.Builder(center).build()
+                        )
+                    }
                 }
-                FocusMode.MANUAL -> { }
-                else -> {
-                    cam.cameraControl.startFocusAndMetering(
-                        FocusMeteringAction.Builder(center).build()
-                    )
-                }
+                lastFocusApplied = settings
+            } catch (e: Exception) {
+                Log.w(TAG, "Focus failed", e)
             }
-        } catch (e: Exception) {
-            Log.w(TAG, "Focus failed", e)
         }
 
         try {
@@ -921,6 +947,7 @@ class CameraService(private val context: Context) {
         previewRequested = false
         exclusiveSessionRefCount = 0
         currentPreviewView = null
+        lastFocusApplied = null
         try {
             analysisExecutor.shutdown()
         } catch (_: Exception) {

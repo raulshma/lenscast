@@ -40,13 +40,16 @@ class UpdateViewModel(
     fun checkForUpdate() {
         viewModelScope.launch {
             _updateState.value = UpdateState.Checking
-            when (val result = updateChecker.checkForUpdate()) {
+            val result = updateChecker.checkForUpdate()
+            val dismissed = settingsDataStore.updateDismissedVersion.first()
+            val decision = UpdatePolicy.shouldNotifyAfterCheck(result, dismissed)
+            if (decision.saveLastCheck) {
+                settingsDataStore.saveUpdateLastCheckTime(System.currentTimeMillis())
+            }
+            when (result) {
                 is UpdateCheckResult.UpdateAvailable -> {
                     val remoteVersion = UpdatePolicy.normalize(result.release.tagName)
-                    val dismissed = settingsDataStore.updateDismissedVersion.first()
-                    settingsDataStore.saveUpdateLastCheckTime(System.currentTimeMillis())
-
-                    if (!UpdatePolicy.shouldNotify(dismissed, result.release.tagName)) {
+                    if (!decision.notify) {
                         Log.d(TAG, "Update $remoteVersion dismissed by user")
                         _updateState.value = UpdateState.UpToDate(remoteVersion)
                     } else {
@@ -63,7 +66,6 @@ class UpdateViewModel(
                 }
                 is UpdateCheckResult.UpToDate -> {
                     Log.d(TAG, "App is up to date (local=${result.localVersion}, remote=${result.remoteVersion})")
-                    settingsDataStore.saveUpdateLastCheckTime(System.currentTimeMillis())
                     _updateState.value = UpdateState.UpToDate(result.remoteVersion)
                 }
                 is UpdateCheckResult.RateLimited -> {

@@ -9,6 +9,7 @@ import androidx.lifecycle.viewModelScope
 import com.raulshma.lenscast.capture.model.IntervalCaptureConfig
 import com.raulshma.lenscast.capture.model.RecordingConfig
 import com.raulshma.lenscast.core.MicAccess
+import com.raulshma.lenscast.core.MicStartDecision
 import com.raulshma.lenscast.data.SettingsDataStore
 import com.raulshma.lenscast.data.CaptureHistoryStore
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -141,12 +142,17 @@ class CaptureViewModel(
     }
 
     private fun startRecordingWithConfig(config: RecordingConfig, startAtMs: Long? = null) {
-        if (config.includeAudio && !MicAccess.isGranted(context)) {
-            Toast.makeText(
-                context,
-                MicAccess.degradedMessage("Recording video"),
-                Toast.LENGTH_SHORT
-            ).show()
+        // Same decision as every other audio-wanting start: check the mic
+        // live, then warn-and-degrade through MicAccess if audio is wanted
+        // but unavailable.
+        when (val decision = MicAccess.startDecision(
+            featureEnabled = config.includeAudio,
+            granted = MicAccess.isGranted(context),
+            featureLabel = "Recording video",
+        )) {
+            is MicStartDecision.Degrade ->
+                Toast.makeText(context, decision.warning, Toast.LENGTH_SHORT).show()
+            MicStartDecision.Proceed -> {}
         }
         // The max-duration auto-stop and repeat policy is armed by the
         // RecordingController itself, so it holds no matter which client

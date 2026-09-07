@@ -5,6 +5,7 @@ import android.content.Intent
 import android.net.Uri
 import androidx.core.content.FileProvider
 import com.raulshma.lenscast.capture.model.CaptureHistory
+import com.raulshma.lenscast.capture.model.CaptureMediaFormat
 import com.raulshma.lenscast.capture.model.CaptureType
 import java.io.File
 import java.time.Instant
@@ -71,7 +72,7 @@ fun buildGallerySections(items: List<CaptureHistory>): List<GallerySection> {
 }
 
 fun resolveMediaModel(filePath: String): Any? {
-    if (filePath.startsWith("content://")) {
+    if (CaptureMediaFormat.isContentUri(filePath)) {
         return Uri.parse(filePath)
     }
     if (filePath.startsWith("file://")) {
@@ -188,12 +189,8 @@ private fun resolveShareableUri(context: Context, item: CaptureHistory): Uri? {
     }
 }
 
-private fun mimeTypeForCapture(type: CaptureType): String {
-    return when (type) {
-        CaptureType.PHOTO -> "image/jpeg"
-        CaptureType.VIDEO -> "video/mp4"
-    }
-}
+private fun mimeTypeForCapture(type: CaptureType): String =
+    CaptureMediaFormat.mimeFor(type)
 
 private fun Long.toLocalDate(): LocalDate = toZonedDateTime().toLocalDate()
 

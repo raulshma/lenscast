@@ -3,8 +3,9 @@ package com.raulshma.lenscast.streaming.rtsp
 
 /**
  * RTP packetizer for H.264 NAL units (RFC 6184 FU-A + single NAL). Instance
- * state — sequence number, SSRC, counters — is owned per [RtspServer] session;
- * a fresh instance per start replaces the old global reset() ritual.
+ * state — sequence number, SSRC, counters — lives in the per-session
+ * [RtpStreamState]; a fresh instance per start replaces the old global
+ * reset() ritual.
  */
 class RtpPacketizer {
 
@@ -15,23 +16,16 @@ class RtpPacketizer {
 
     }
 
-    private var sequenceNumber = 0L
-    private val ssrc: Long = java.util.Random().nextLong()
+    private val streamState = RtpStreamState()
 
-    @Volatile
-    var currentSeq: Int = 0
-        private set
+    val currentSeq: Int get() = streamState.currentSeq
 
     /** Low 32 bits of the random SSRC, as written on the wire. */
-    val wireSsrc: Int get() = (ssrc and 0xFFFFFFFFL).toInt()
+    val wireSsrc: Int get() = streamState.wireSsrc
 
-    @Volatile
-    var sentPacketCount: Long = 0
-        private set
+    val sentPacketCount: Long get() = streamState.sentPacketCount
 
-    @Volatile
-    var sentOctetCount: Long = 0
-        private set
+    val sentOctetCount: Long get() = streamState.sentOctetCount
 
     fun packetizeNalUnit(nalUnit: ByteArray, timestamp: Long, marker: Boolean): List<ByteArray> {
         if (nalUnit.isEmpty()) return emptyList()
@@ -43,7 +37,7 @@ class RtpPacketizer {
 
     private fun createSingleNalPacket(nalUnit: ByteArray, timestamp: Long, marker: Boolean): ByteArray {
         val packet = ByteArray(RTP_HEADER_SIZE + nalUnit.size)
-        writeRtpHeader(packet, timestamp, marker = marker)
+        writeRtpHeader(packet, timestamp, marker = marker, payloadSize = nalUnit.size)
         System.arraycopy(nalUnit, 0, packet, RTP_HEADER_SIZE, nalUnit.size)
         return packet
     }
@@ -65,7 +59,7 @@ class RtpPacketizer {
 
             val packet = ByteArray(RTP_HEADER_SIZE + 2 + chunkSize)
 
-            writeRtpHeader(packet, timestamp, marker = isLast && marker)
+            writeRtpHeader(packet, timestamp, marker = isLast && marker, payloadSize = 2 + chunkSize)
 
             packet[RTP_HEADER_SIZE] = (fBit or nri or 0x1C).toByte()
 
@@ -85,29 +79,13 @@ class RtpPacketizer {
         return packets
     }
 
-    private fun writeRtpHeader(packet: ByteArray, timestamp: Long, marker: Boolean) {
-        packet[0] = 0x80.toByte()
-
-        val mBit = if (marker) 0x80 else 0
-        packet[1] = (mBit or PAYLOAD_TYPE).toByte()
-
-        val seq = (sequenceNumber++ and 0xFFFF).toInt()
-        currentSeq = seq
-        packet[2] = (seq shr 8).toByte()
-        packet[3] = seq.toByte()
-
-        val ts = (timestamp and 0xFFFFFFFFL).toInt()
-        packet[4] = (ts ushr 24).toByte()
-        packet[5] = (ts ushr 16).toByte()
-        packet[6] = (ts ushr 8).toByte()
-        packet[7] = ts.toByte()
-
-        packet[8] = (ssrc ushr 24).toByte()
-        packet[9] = (ssrc ushr 16).toByte()
-        packet[10] = (ssrc ushr 8).toByte()
-        packet[11] = ssrc.toByte()
-
-        sentPacketCount++
-        sentOctetCount += (packet.size - RTP_HEADER_SIZE).toLong()
+    private fun writeRtpHeader(packet: ByteArray, timestamp: Long, marker: Boolean, payloadSize: Int) {
+        val header = streamState.nextHeader(
+            timestamp = timestamp,
+            marker = marker,
+            payloadType = PAYLOAD_TYPE,
+            payloadSize = payloadSize,
+        )
+        System.arraycopy(header, 0, packet, 0, RTP_HEADER_SIZE)
     }
 }

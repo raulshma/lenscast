@@ -24,14 +24,7 @@ import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.awaitEachGesture
-import androidx.compose.foundation.gestures.awaitFirstDown
-import androidx.compose.foundation.gestures.calculateCentroid
-import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.gestures.detectTransformGestures
-import androidx.compose.ui.input.pointer.AwaitPointerEventScope
-import androidx.compose.ui.input.pointer.PointerEventPass
-import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
@@ -127,18 +120,21 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.raulshma.lenscast.MainApplication
 import com.raulshma.lenscast.camera.model.CameraLensInfo
 import com.raulshma.lenscast.camera.model.CameraSettings
-import com.raulshma.lenscast.camera.model.isoStops
 import com.raulshma.lenscast.camera.model.CameraState
-import com.raulshma.lenscast.camera.model.FocusMode
-import com.raulshma.lenscast.camera.model.HdrMode
-import com.raulshma.lenscast.camera.model.NightVisionMode
-import com.raulshma.lenscast.camera.model.Resolution
-import com.raulshma.lenscast.camera.model.WhiteBalance
+import com.raulshma.lenscast.camera.model.PreviewGestures
+import com.raulshma.lenscast.camera.model.QuickSettingCatalog
+import com.raulshma.lenscast.camera.model.QuickSettingDescriptor
+import com.raulshma.lenscast.camera.model.QuickSettingEditor
+import com.raulshma.lenscast.camera.model.QuickSettingIcon
+import com.raulshma.lenscast.camera.model.QuickSettingRanges
+import com.raulshma.lenscast.camera.model.QuickSettingType
+import com.raulshma.lenscast.core.MicAccess
 import com.raulshma.lenscast.core.NetworkQualityMonitor.NetworkQualityLevel
 import com.raulshma.lenscast.core.ThermalState
+import com.raulshma.lenscast.gallery.formatDuration
 import com.raulshma.lenscast.ui.theme.LensOrange
 import com.raulshma.lenscast.ui.theme.LensRed
-import kotlin.math.absoluteValue
+import com.raulshma.lenscast.ui.theme.RecordingRed
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -147,8 +143,18 @@ private val OverlayLight = Color(0x80000000)
 private val TopGradientColor = Color(0x78000000)
 private val BottomGradientColor = Color(0x78000000)
 
-private enum class QuickSettingType {
-    EXPOSURE, ISO, WHITE_BALANCE, FOCUS, ZOOM, HDR, RESOLUTION, FRAME_RATE, STABILIZATION, NIGHT_VISION
+/** The quick-setting controls' icon selectors, mapped to material vectors at this seam. */
+private fun QuickSettingIcon.vector(): ImageVector = when (this) {
+    QuickSettingIcon.EXPOSURE -> Icons.Default.Exposure
+    QuickSettingIcon.ISO -> Icons.Default.Iso
+    QuickSettingIcon.WHITE_BALANCE -> Icons.Default.WbSunny
+    QuickSettingIcon.FOCUS -> Icons.Default.Bolt
+    QuickSettingIcon.ZOOM -> Icons.Default.ZoomIn
+    QuickSettingIcon.HDR -> Icons.Default.HdrOn
+    QuickSettingIcon.RESOLUTION -> Icons.Default.Image
+    QuickSettingIcon.FRAME_RATE -> Icons.Default.Speed
+    QuickSettingIcon.STABILIZATION -> Icons.Default.Handyman
+    QuickSettingIcon.NIGHT_VISION -> Icons.Default.NightsStay
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -208,9 +214,11 @@ fun CameraScreen(
     var requestedMissingAudioPermission by remember { mutableStateOf(false) }
 
     LaunchedEffect(cameraState, hasAudioPermission) {
-        if (cameraState is CameraState.Ready &&
-            !hasAudioPermission &&
-            !requestedMissingAudioPermission
+        if (MicAccess.shouldAutoRequest(
+                featureReady = cameraState is CameraState.Ready,
+                granted = hasAudioPermission,
+                alreadyRequested = requestedMissingAudioPermission,
+            )
         ) {
             requestedMissingAudioPermission = true
             audioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
@@ -286,23 +294,16 @@ fun CameraScreen(
                 val zoomRange by viewModel.availableZoomRange.collectAsState()
                 val exposureRange by viewModel.availableExposureRange.collectAsState()
                 QuickSettingSheet(
-                    type = activeSetting!!,
+                    descriptor = QuickSettingCatalog.descriptorFor(activeSetting!!),
                     settings = settings,
-                    isoOptions = remember(isoRange) { isoStops(isoRange) },
-                    zoomRange = zoomRange,
-                    exposureRange = exposureRange,
+                    ranges = QuickSettingRanges(
+                        iso = isoRange,
+                        zoom = zoomRange,
+                        exposure = exposureRange,
+                    ),
                     sheetState = sheetState,
                     onDismiss = { activeSetting = null },
-                    onUpdateExposure = { viewModel.updateExposure(it) },
-                    onUpdateIso = { viewModel.updateIso(it) },
-                    onUpdateFocusMode = { viewModel.updateFocusMode(it) },
-                    onUpdateWhiteBalance = { viewModel.updateWhiteBalance(it) },
-                    onUpdateZoom = { viewModel.updateZoom(it) },
-                    onUpdateHdrMode = { viewModel.updateHdrMode(it) },
-                    onUpdateFrameRate = { viewModel.updateFrameRate(it) },
-                    onUpdateResolution = { viewModel.updateResolution(it) },
-                    onUpdateStabilization = { viewModel.updateStabilization(it) },
-                    onUpdateNightVisionMode = { viewModel.updateNightVisionMode(it) },
+                    onUpdate = { type, value -> viewModel.updateQuickSetting(type, value) },
                 )
             }
         }
@@ -800,7 +801,7 @@ private fun ShutterRow(
                 ) {
                     Surface(
                         modifier = Modifier.size(52.dp),
-                        color = if (isWebStreaming) Color(0xFFD32F2F)
+                        color = if (isWebStreaming) RecordingRed
                         else if (isWebEnabled) OverlayLight
                         else OverlayLight.copy(alpha = 0.45f),
                         shape = CircleShape,
@@ -861,7 +862,7 @@ private fun ShutterRow(
                 ) {
                     Surface(
                         modifier = Modifier.size(52.dp),
-                        color = if (isRtspStreaming) Color(0xFFD32F2F)
+                        color = if (isRtspStreaming) RecordingRed
                         else if (isRtspEnabled) OverlayLight
                         else OverlayLight.copy(alpha = 0.45f),
                         shape = CircleShape,
@@ -885,7 +886,7 @@ private fun ShutterRow(
 
             Surface(
                 modifier = Modifier.size(52.dp),
-                color = if (isRecording) Color(0xFFD32F2F) else OverlayLight,
+                color = if (isRecording) RecordingRed else OverlayLight,
                 shape = CircleShape,
                 onClick = onRecord
             ) {
@@ -893,7 +894,7 @@ private fun ShutterRow(
                     Icon(
                         imageVector = if (isRecording) Icons.Default.Stop else Icons.Default.FiberManualRecord,
                         contentDescription = if (isRecording) "Stop recording" else "Record video",
-                        tint = if (isRecording) Color.White else Color(0xFFD32F2F),
+                        tint = if (isRecording) Color.White else RecordingRed,
                         modifier = Modifier.size(24.dp)
                     )
                 }
@@ -971,74 +972,14 @@ private fun HorizontalQuickSettingsBar(
             horizontalArrangement = Arrangement.spacedBy(6.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            QuickSettingPill(
-                icon = Icons.Default.Exposure,
-                label = "${settings.exposureCompensation}",
-                isActive = activeSetting == QuickSettingType.EXPOSURE,
-                onClick = { onSettingTap(QuickSettingType.EXPOSURE) }
-            )
-            QuickSettingPill(
-                icon = Icons.Default.Iso,
-                label = settings.iso?.toString() ?: "A",
-                isActive = activeSetting == QuickSettingType.ISO,
-                onClick = { onSettingTap(QuickSettingType.ISO) }
-            )
-            QuickSettingPill(
-                icon = Icons.Default.WbSunny,
-                label = when (settings.whiteBalance) {
-                    WhiteBalance.AUTO -> "AWB"
-                    WhiteBalance.MANUAL -> "${settings.colorTemperature ?: 5500}K"
-                    else -> settings.whiteBalance.name.take(3)
-                },
-                isActive = activeSetting == QuickSettingType.WHITE_BALANCE,
-                onClick = { onSettingTap(QuickSettingType.WHITE_BALANCE) }
-            )
-            QuickSettingPill(
-                icon = Icons.Default.Bolt,
-                label = settings.focusMode.name.take(3),
-                isActive = activeSetting == QuickSettingType.FOCUS,
-                onClick = { onSettingTap(QuickSettingType.FOCUS) }
-            )
-            QuickSettingPill(
-                icon = Icons.Default.ZoomIn,
-                label = "${String.format("%.1f", settings.zoomRatio)}x",
-                isActive = activeSetting == QuickSettingType.ZOOM,
-                onClick = { onSettingTap(QuickSettingType.ZOOM) }
-            )
-            QuickSettingPill(
-                icon = Icons.Default.HdrOn,
-                label = settings.hdrMode.name,
-                isActive = activeSetting == QuickSettingType.HDR,
-                onClick = { onSettingTap(QuickSettingType.HDR) }
-            )
-            QuickSettingPill(
-                icon = Icons.Default.Image,
-                label = settings.resolution.name.replace("_", " ").take(5),
-                isActive = activeSetting == QuickSettingType.RESOLUTION,
-                onClick = { onSettingTap(QuickSettingType.RESOLUTION) }
-            )
-            QuickSettingPill(
-                icon = Icons.Default.Speed,
-                label = "${settings.frameRate}",
-                isActive = activeSetting == QuickSettingType.FRAME_RATE,
-                onClick = { onSettingTap(QuickSettingType.FRAME_RATE) }
-            )
-            QuickSettingPill(
-                icon = Icons.Default.Handyman,
-                label = if (settings.stabilization) "OIS" else "OFF",
-                isActive = activeSetting == QuickSettingType.STABILIZATION,
-                onClick = { onSettingTap(QuickSettingType.STABILIZATION) }
-            )
-            QuickSettingPill(
-                icon = Icons.Default.NightsStay,
-                label = when (settings.nightVisionMode) {
-                    NightVisionMode.ON -> "IR"
-                    NightVisionMode.AUTO -> "AUTO"
-                    NightVisionMode.OFF -> "OFF"
-                },
-                isActive = activeSetting == QuickSettingType.NIGHT_VISION,
-                onClick = { onSettingTap(QuickSettingType.NIGHT_VISION) }
-            )
+            QuickSettingCatalog.entries.forEach { descriptor ->
+                QuickSettingPill(
+                    icon = descriptor.icon.vector(),
+                    label = descriptor.label(settings),
+                    isActive = activeSetting == descriptor.type,
+                    onClick = { onSettingTap(descriptor.type) }
+                )
+            }
         }
     }
 }
@@ -1099,23 +1040,12 @@ private fun QuickSettingPill(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun QuickSettingSheet(
-    type: QuickSettingType,
+    descriptor: QuickSettingDescriptor,
     settings: CameraSettings,
-    isoOptions: List<String>,
-    zoomRange: ClosedFloatingPointRange<Float>,
-    exposureRange: ClosedRange<Int>,
+    ranges: QuickSettingRanges,
     sheetState: androidx.compose.material3.SheetState,
     onDismiss: () -> Unit,
-    onUpdateExposure: (Int) -> Unit,
-    onUpdateIso: (String) -> Unit,
-    onUpdateFocusMode: (String) -> Unit,
-    onUpdateWhiteBalance: (String) -> Unit,
-    onUpdateZoom: (Float) -> Unit,
-    onUpdateHdrMode: (String) -> Unit,
-    onUpdateFrameRate: (Int) -> Unit,
-    onUpdateResolution: (String) -> Unit,
-    onUpdateStabilization: (Boolean) -> Unit,
-    onUpdateNightVisionMode: (String) -> Unit,
+    onUpdate: (QuickSettingType, Any) -> Unit,
 ) {
     val coroutineScope = rememberCoroutineScope()
 
@@ -1136,82 +1066,28 @@ private fun QuickSettingSheet(
                 .padding(bottom = 32.dp)
         ) {
             Text(
-                text = when (type) {
-                    QuickSettingType.EXPOSURE -> "Exposure Compensation"
-                    QuickSettingType.ISO -> "ISO"
-                    QuickSettingType.WHITE_BALANCE -> "White Balance"
-                    QuickSettingType.FOCUS -> "Focus Mode"
-                    QuickSettingType.ZOOM -> "Zoom"
-                    QuickSettingType.HDR -> "HDR"
-                    QuickSettingType.RESOLUTION -> "Resolution"
-                    QuickSettingType.FRAME_RATE -> "Frame Rate"
-                    QuickSettingType.STABILIZATION -> "Stabilization"
-                    QuickSettingType.NIGHT_VISION -> "Night Vision / IR"
-                },
+                text = descriptor.title,
                 color = MaterialTheme.colorScheme.onSurface,
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.SemiBold
             )
             Spacer(modifier = Modifier.height(20.dp))
 
-            when (type) {
-                QuickSettingType.EXPOSURE -> ProSliderControl(
-                    value = settings.exposureCompensation.toFloat(),
-                    range = exposureRange.start.toFloat()..exposureRange.endInclusive.toFloat(),
-                    label = "${settings.exposureCompensation}",
-                    onValueChange = { onUpdateExposure(it.toInt()) }
-                )
-                QuickSettingType.ISO -> ProChipSelector(
-                    options = isoOptions,
-                    selected = settings.iso?.toString() ?: "Auto",
-                    onSelect = onUpdateIso
-                )
-                QuickSettingType.WHITE_BALANCE -> ProChipSelector(
-                    options = WhiteBalance.entries.map { it.name },
-                    selected = settings.whiteBalance.name,
-                    onSelect = onUpdateWhiteBalance
-                )
-                QuickSettingType.FOCUS -> ProChipSelector(
-                    options = FocusMode.entries.map { it.name },
-                    selected = settings.focusMode.name,
-                    onSelect = onUpdateFocusMode
-                )
-                QuickSettingType.ZOOM -> ProSliderControl(
-                    value = settings.zoomRatio,
-                    range = zoomRange,
-                    label = "${String.format("%.1f", settings.zoomRatio)}x",
-                    onValueChange = onUpdateZoom
-                )
-                QuickSettingType.HDR -> ProChipSelector(
-                    options = HdrMode.entries.map { it.name },
-                    selected = settings.hdrMode.name,
-                    onSelect = onUpdateHdrMode
-                )
-                QuickSettingType.RESOLUTION -> ProChipSelector(
-                    options = Resolution.entries.map { it.name },
-                    selected = settings.resolution.name,
-                    onSelect = onUpdateResolution
-                )
-                QuickSettingType.FRAME_RATE -> ProSliderControl(
-                    value = settings.frameRate.toFloat(),
-                    range = CameraSettings.FRAME_RATE_SLIDER_MIN.toFloat()..CameraSettings.FRAME_RATE_SLIDER_MAX.toFloat(),
-                    label = "${settings.frameRate} fps",
-                    onValueChange = { onUpdateFrameRate(it.toInt()) }
-                )
-                QuickSettingType.STABILIZATION -> {
+            when (val editor = descriptor.editor) {
+                is QuickSettingEditor.Toggle -> {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            text = "Image Stabilization",
+                            text = editor.title,
                             color = MaterialTheme.colorScheme.onSurface,
                             style = MaterialTheme.typography.bodyLarge
                         )
                         Switch(
-                            checked = settings.stabilization,
-                            onCheckedChange = onUpdateStabilization,
+                            checked = editor.checked(settings),
+                            onCheckedChange = { onUpdate(descriptor.type, it) },
                             colors = SwitchDefaults.colors(
                                 checkedTrackColor = MaterialTheme.colorScheme.primary,
                                 checkedThumbColor = MaterialTheme.colorScheme.onPrimary
@@ -1219,47 +1095,27 @@ private fun QuickSettingSheet(
                         )
                     }
                 }
-                QuickSettingType.NIGHT_VISION -> {
-                    Column(modifier = Modifier.fillMaxWidth()) {
-                        Text(
-                            text = "Mode",
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            style = MaterialTheme.typography.labelMedium
-                        )
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            NightVisionMode.entries.forEach { mode ->
-                                FilterChip(
-                                    selected = settings.nightVisionMode == mode,
-                                    onClick = { onUpdateNightVisionMode(mode.name) },
-                                    label = {
-                                        Text(
-                                            text = when (mode) {
-                                                NightVisionMode.ON -> "IR On"
-                                                NightVisionMode.AUTO -> "Auto"
-                                                NightVisionMode.OFF -> "Off"
-                                            }
-                                        )
-                                    },
-                                    modifier = Modifier.weight(1f)
-                                )
-                            }
-                        }
-                        Spacer(modifier = Modifier.height(12.dp))
-                        Text(
-                            text = when (settings.nightVisionMode) {
-                                NightVisionMode.ON -> "Forces night scene mode with maximum exposure and reduced frame rate for best low-light performance."
-                                NightVisionMode.AUTO -> "Automatically adapts to lighting conditions using night portrait mode with auto flash."
-                                NightVisionMode.OFF -> "Standard camera behavior without low-light enhancements."
-                            },
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            style = MaterialTheme.typography.bodySmall
-                        )
-                    }
-                }
+                is QuickSettingEditor.Chips -> ProChipSelector(
+                    options = editor.options(ranges),
+                    selected = editor.selected(settings),
+                    optionLabel = editor.optionLabel,
+                    onSelect = { onUpdate(descriptor.type, it) },
+                )
+                is QuickSettingEditor.Slider -> ProSliderControl(
+                    value = editor.value(settings),
+                    range = editor.range(ranges),
+                    label = editor.label(settings),
+                    onValueChange = { onUpdate(descriptor.type, it) },
+                )
+            }
+
+            descriptor.description?.invoke(settings)?.let { description ->
+                Spacer(modifier = Modifier.height(12.dp))
+                Text(
+                    text = description,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.bodySmall
+                )
             }
         }
     }
@@ -1314,6 +1170,7 @@ private fun ProChipSelector(
     options: List<String>,
     selected: String,
     onSelect: (String) -> Unit,
+    optionLabel: (String) -> String = { it.replace("_", " ") },
 ) {
     Row(
         modifier = Modifier
@@ -1323,6 +1180,7 @@ private fun ProChipSelector(
     ) {
         options.forEach { option ->
             val isSelected = option == selected
+            val label = optionLabel(option)
             val bgColor by animateColorAsState(
                 targetValue = if (isSelected) MaterialTheme.colorScheme.primary
                 else MaterialTheme.colorScheme.surfaceVariant,
@@ -1340,7 +1198,7 @@ private fun ProChipSelector(
                 shape = RoundedCornerShape(20.dp)
             ) {
                 Text(
-                    text = option.replace("_", " "),
+                    text = label,
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
                     color = textColor,
                     style = MaterialTheme.typography.bodyMedium,
@@ -1444,14 +1302,20 @@ private fun CameraPreview(
             modifier = Modifier
                 .fillMaxSize()
                 .pointerInput(Unit) {
-                    detectTransformGestures { _, _, zoom, _ ->
-                        if (zoom != 1f) {
-                            val currentZoom = settings.zoomRatio
-                            val newZoom = (currentZoom * zoom).coerceIn(zoomRange.start, zoomRange.endInclusive)
-                            if ((newZoom - currentZoom).absoluteValue > 0.01f) {
-                                viewModel.updateZoom(newZoom)
-                                onPinchStateChange(true, newZoom)
-                            }
+                    detectTransformGestures { centroid, pan, zoom, _ ->
+                        PreviewGestures.onScale(settings.zoomRatio, zoom, zoomRange)?.let { newZoom ->
+                            viewModel.updateZoom(newZoom)
+                            onPinchStateChange(true, newZoom)
+                        }
+                        // Identity zoom + minimal pan: a tap on the preview.
+                        // Coordinates are normalized like LensWebHandler's.
+                        if (size.width > 0 && size.height > 0 &&
+                            PreviewGestures.isTap(zoom, pan.getDistance())
+                        ) {
+                            viewModel.tapToFocus(
+                                (centroid.x / size.width).coerceIn(0f, 1f),
+                                (centroid.y / size.height).coerceIn(0f, 1f),
+                            )
                         }
                     }
                 }
@@ -1460,7 +1324,7 @@ private fun CameraPreview(
 
     LaunchedEffect(isPinching) {
         if (!isPinching) {
-            delay(800)
+            delay(PreviewGestures.INDICATOR_HIDE_DELAY_MS)
             onPinchStateChange(false, settings.zoomRatio)
         }
     }
@@ -1564,7 +1428,7 @@ private fun StreamIndicator(
         verticalAlignment = Alignment.CenterVertically
     ) {
         Surface(
-            color = Color(0xFFD32F2F).copy(alpha = 0.9f),
+            color = RecordingRed.copy(alpha = 0.9f),
             shape = RoundedCornerShape(16.dp)
         ) {
             Row(
@@ -1647,14 +1511,7 @@ private fun RecordingIndicator(
         ),
         label = "dotPulse"
     )
-    val h = elapsedSeconds / 3600
-    val m = (elapsedSeconds % 3600) / 60
-    val s = elapsedSeconds % 60
-    val timeText = if (h > 0) {
-        String.format("%d:%02d:%02d", h, m, s)
-    } else {
-        String.format("%02d:%02d", m, s)
-    }
+    val timeText = formatDuration(elapsedSeconds * 1000L)
 
     Surface(
         modifier = modifier,
@@ -1668,7 +1525,7 @@ private fun RecordingIndicator(
             Surface(
                 modifier = Modifier.size(10.dp),
                 shape = CircleShape,
-                color = Color(0xFFD32F2F).copy(alpha = dotAlpha)
+                color = RecordingRed.copy(alpha = dotAlpha)
             ) {}
             Spacer(modifier = Modifier.size(8.dp))
             Text(

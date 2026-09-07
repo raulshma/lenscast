@@ -1,5 +1,6 @@
 package com.raulshma.lenscast.streaming.web
 
+import com.raulshma.lenscast.core.AppJson
 import com.raulshma.lenscast.camera.CameraService
 import com.raulshma.lenscast.core.PowerManager
 import com.raulshma.lenscast.core.StreamWatchdog
@@ -18,7 +19,7 @@ class StatusWebHandler(
     private val settingsDataStore: SettingsDataStore,
 ) {
 
-    private val responseAdapter by lazy { WebJson.moshi.adapter(StatusResponseDto::class.java) }
+    private val responseAdapter by lazy { AppJson.moshi.adapter(StatusResponseDto::class.java) }
 
     suspend fun get(): String {
         val adaptiveState = streamingManager.adaptiveBitrateState.value

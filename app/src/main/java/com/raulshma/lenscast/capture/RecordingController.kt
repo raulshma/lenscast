@@ -273,12 +273,7 @@ class RecordingController(
 
 /** Moshi helper shared by everyone that puts a [RecordingConfig] on an intent. */
 object RecordingConfigJson {
-    private val moshi by lazy {
-        com.squareup.moshi.Moshi.Builder()
-            .addLast(com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory())
-            .build()
-    }
-    private val adapter by lazy { moshi.adapter(RecordingConfig::class.java) }
+    private val adapter by lazy { com.raulshma.lenscast.core.AppJson.moshi.adapter(RecordingConfig::class.java) }
 
     fun encode(config: RecordingConfig): String = adapter.toJson(config)
     fun decode(json: String): RecordingConfig? = adapter.fromJson(json)

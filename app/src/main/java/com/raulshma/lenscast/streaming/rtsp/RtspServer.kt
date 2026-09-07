@@ -1,11 +1,10 @@
 package com.raulshma.lenscast.streaming.rtsp
 
 import android.util.Log
-import com.raulshma.lenscast.core.StreamAuthCrypto
-import com.raulshma.lenscast.core.YuvConverter
 import com.raulshma.lenscast.core.StreamDefaults
-import com.raulshma.lenscast.data.StreamAuthSettings
-import java.io.ByteArrayOutputStream
+import com.raulshma.lenscast.core.YuvConverter
+import com.raulshma.lenscast.streaming.FrameThrottle
+import com.raulshma.lenscast.streaming.FrameTiming
 import java.io.InputStream
 import java.io.OutputStream
 import java.io.OutputStreamWriter
@@ -16,7 +15,6 @@ import java.net.Socket
 import java.net.SocketException
 import java.net.SocketTimeoutException
 import java.text.SimpleDateFormat
-import java.security.SecureRandom
 import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
@@ -42,28 +40,31 @@ class RtspServer(private val port: Int = DEFAULT_PORT) {
     private val clients = ConcurrentHashMap<String, ClientSession>()
     private val sessionIdCounter = AtomicInteger(0)
 
-    private val secureRandom = SecureRandom()
-    private val digestNonces = ConcurrentHashMap<String, DigestNonceState>()
+    // Protocol/auth/URI knowledge lives behind the pure seams; the server
+    // keeps sockets, fan-out, and the session state machine. The authorizer
+    // is per-instance so its nonce store survives stop/start, reading the
+    // (restart-applied) auth spec dynamically like the old authSpec getter.
+    private val authorizer = RtspSessionAuthorizer(specProvider = { config.auth })
 
     // One immutable config value replaces the old order-sensitive setter bag.
     @Volatile
     private var config = RtspConfig()
 
-    /** Auth spec when auth is on; null means auth is off. */
-    private val authSpec: RtspAuthSpec?
-        get() = config.auth
-
     private var lastRotation = 0
 
     private var rtpTimestamp: Long = 0
     private val timestampIncrement: Long
-        get() = if (config.videoFrameRate > 0) 90000L / config.videoFrameRate
-        else 90000L / StreamDefaults.STREAM_FPS
+        get() = FrameTiming.rtpClockIncrement(config.videoFrameRate)
 
     private val lastFrameTime = AtomicLong(0)
 
     private val distributedAus = AtomicLong(0)
     private val distributedPackets = AtomicLong(0)
+
+    // Frame counters for the push path, mirroring the FramePipeline pair:
+    // accepted = submitted to the encoder; dropped = throttle- or lag-rejected.
+    private val acceptedFrames = AtomicLong(0)
+    private val droppedFrames = AtomicLong(0)
 
     @Volatile
     private var firstKeyframeLogged = false
@@ -71,12 +72,12 @@ class RtspServer(private val port: Int = DEFAULT_PORT) {
     @Volatile
     private var lastSenderReportTime = 0L
     private val minFrameIntervalMs: Long
-        get() = if (config.videoFrameRate > 0) 1000L / config.videoFrameRate
-        else 1000L / StreamDefaults.STREAM_FPS
+        get() = FrameTiming.frameIntervalMs(config.videoFrameRate)
 
-    private data class DigestNonceState(
-        val expiresAtMs: Long,
-        val ncTrack: ConcurrentHashMap<String, Long> = ConcurrentHashMap(),
+    private val frameThrottle = FrameThrottle(
+        intervalMs = { minFrameIntervalMs },
+        tolerance = FrameThrottle.TOLERANCE,
+        updateClockOnReject = true,
     )
 
     /**
@@ -99,6 +100,8 @@ class RtspServer(private val port: Int = DEFAULT_PORT) {
             lastSenderReportTime = 0L
             distributedAus.set(0)
             distributedPackets.set(0)
+            acceptedFrames.set(0)
+            droppedFrames.set(0)
             videoPacketizer = RtpPacketizer()
             audioPacketizer = AacRtpPacketizer()
 
@@ -183,10 +186,13 @@ class RtspServer(private val port: Int = DEFAULT_PORT) {
         if (playingClients == 0) return
 
         val now = System.currentTimeMillis()
-        val elapsed = now - lastFrameTime.getAndSet(now)
-        if (elapsed < minFrameIntervalMs * 0.8) return
+        if (!frameThrottle.accept(now)) {
+            droppedFrames.incrementAndGet()
+            return
+        }
 
         if (encoder.isEncoderLagged()) {
+            droppedFrames.incrementAndGet()
             return
         }
 
@@ -213,8 +219,15 @@ class RtspServer(private val port: Int = DEFAULT_PORT) {
             reconfigureEncoder(effectiveWidth, effectiveHeight)
         }
 
+        acceptedFrames.incrementAndGet()
         encoder.encodeFrame(frameData)
     }
+
+    /** Frames accepted onto the encoder path since start (mirrors the FramePipeline counter). */
+    fun acceptedFrameCount(): Long = acceptedFrames.get()
+
+    /** Frames dropped by the push throttle or a lagged encoder since start. */
+    fun droppedFrameCount(): Long = droppedFrames.get()
 
     /** Entry-point validation: fps/bitrate clamped to their StreamDefaults bounds. */
     private fun normalize(config: RtspConfig): RtspConfig = config.copy(
@@ -289,7 +302,7 @@ class RtspServer(private val port: Int = DEFAULT_PORT) {
         if (auCount % 300L == 0L) {
             Log.d(
                 TAG,
-                "RTSP video stats: AUs=$auCount packets=${distributedPackets.get()} rtpTimestamp=$rtpTimestamp playingClients=${getClientCount()}"
+                "RTSP video stats: AUs=$auCount packets=${distributedPackets.get()} accepted=${acceptedFrames.get()} dropped=${droppedFrames.get()} rtpTimestamp=$rtpTimestamp playingClients=${getClientCount()}"
             )
         }
 
@@ -421,6 +434,12 @@ class RtspServer(private val port: Int = DEFAULT_PORT) {
 
     fun isRunning(): Boolean = running.get()
 
+    /**
+     * One client connection: reads the wire (via [RtspWireReader]), parses
+     * (via [RtspRequestParser]), authorizes (via [RtspSessionAuthorizer]),
+     * routes URIs (via [RtspUriPolicy]), and drives the SETUP/PLAY/TEARDOWN
+     * state machine plus the interleaved-frame writers.
+     */
     private inner class ClientSession(
         private val socket: Socket,
         private val sessionId: String
@@ -429,7 +448,6 @@ class RtspServer(private val port: Int = DEFAULT_PORT) {
         private var cSeq = 0
         private var lastCSeq = -1
         private var rtspSessionId = ""
-        private val createdAt = System.currentTimeMillis()
         private var lastActivity = System.currentTimeMillis()
         private var lastRtcpActivity = 0L
 
@@ -463,6 +481,7 @@ class RtspServer(private val port: Int = DEFAULT_PORT) {
         fun handle() {
             val input = socket.getInputStream()
             val output = socket.getOutputStream()
+            val wireReader = RtspWireReader(input)
 
             var requestLines = mutableListOf<String>()
 
@@ -486,22 +505,22 @@ class RtspServer(private val port: Int = DEFAULT_PORT) {
                         if (channel == videoRtcpChannel || channel == audioRtcpChannel) {
                             lastRtcpActivity = lastActivity
                         }
-                        if (!discardBytes(input, frameSize)) break
+                        if (!wireReader.discardBytes(frameSize)) break
 
                         lastActivity = System.currentTimeMillis()
                         continue
                     }
 
-                    val line = readRtspLine(input, firstByte) ?: break
+                    val line = wireReader.readLine(firstByte) ?: break
 
                     lastActivity = System.currentTimeMillis()
 
                     if (line.isNotEmpty()) {
                         requestLines.add(line)
                     } else if (requestLines.isNotEmpty()) {
-                        val contentLength = extractContentLength(requestLines)
+                        val contentLength = RtspRequestParser.extractContentLength(requestLines)
                         if (contentLength > 0) {
-                            if (!discardBytes(input, contentLength)) break
+                            if (!wireReader.discardBytes(contentLength)) break
                         }
                         processRequest(requestLines, output)
                         requestLines = mutableListOf()
@@ -514,56 +533,10 @@ class RtspServer(private val port: Int = DEFAULT_PORT) {
             }
         }
 
-        private fun readRtspLine(input: InputStream, firstByte: Int): String? {
-            val lineBuffer = ByteArrayOutputStream(128)
-            var current = firstByte
-
-            while (true) {
-                if (current < 0) return null
-                if (current == '\n'.code) {
-                    break
-                }
-                if (current != '\r'.code) {
-                    lineBuffer.write(current)
-                }
-                current = input.read()
-            }
-
-            return lineBuffer.toString(Charsets.UTF_8.name())
-        }
-
-        private fun discardBytes(input: InputStream, byteCount: Int): Boolean {
-            var remaining = byteCount
-            val discardBuffer = ByteArray(2048)
-
-            while (remaining > 0) {
-                val toRead = minOf(remaining, discardBuffer.size)
-                val read = input.read(discardBuffer, 0, toRead)
-                if (read <= 0) return false
-                remaining -= read
-            }
-            return true
-        }
-
         private fun processRequest(lines: List<String>, output: OutputStream) {
-            val requestLine = lines.firstOrNull() ?: return
-            val parts = requestLine.split(" ")
-            if (parts.size < 3) return
+            val request = RtspRequestParser.parse(lines) ?: return
 
-            val method = parts[0]
-            val requestUri = parts[1]
-
-            val headers = mutableMapOf<String, String>()
-            for (i in 1 until lines.size) {
-                val colonIdx = lines[i].indexOf(':')
-                if (colonIdx > 0) {
-                    val key = lines[i].substring(0, colonIdx).trim().lowercase()
-                    val value = lines[i].substring(colonIdx + 1).trim()
-                    headers[key] = value
-                }
-            }
-
-            val parsedCSeq = headers["cseq"]?.toIntOrNull()
+            val parsedCSeq = request.headers["cseq"]?.toIntOrNull()
             if (parsedCSeq == null || parsedCSeq < 0) {
                 cSeq = 0
                 sendResponse(output, "400 Bad Request")
@@ -578,24 +551,26 @@ class RtspServer(private val port: Int = DEFAULT_PORT) {
             cSeq = parsedCSeq
             lastCSeq = parsedCSeq
 
-            if (requiresAuthentication(method) && !isAuthorized(headers, method, requestUri)) {
+            if (authorizer.requiresAuthentication(request.method) &&
+                !authorizer.authorize(request.method, request.uri, request.headers["authorization"])
+            ) {
                 sendUnauthorized(output)
                 return
             }
 
-            if (!isRequestUriAllowed(method, requestUri)) {
+            if (!RtspUriPolicy.isRequestUriAllowed(request.method, request.uri)) {
                 sendResponse(output, "404 Not Found")
                 return
             }
 
-            when (method) {
+            when (request.method) {
                 "OPTIONS" -> handleOptions(output)
-                "DESCRIBE" -> handleDescribe(output, requestUri)
-                "SETUP" -> handleSetup(output, headers, requestUri)
-                "PLAY" -> handlePlay(output, headers, requestUri)
-                "TEARDOWN" -> handleTeardown(output, headers)
-                "GET_PARAMETER" -> if (isValidSession(headers)) sendOk(output) else sendResponse(output, "454 Session Not Found")
-                "SET_PARAMETER" -> if (isValidSession(headers)) sendOk(output) else sendResponse(output, "454 Session Not Found")
+                "DESCRIBE" -> handleDescribe(output)
+                "SETUP" -> handleSetup(output, request.headers, request.uri)
+                "PLAY" -> handlePlay(output, request.headers)
+                "TEARDOWN" -> handleTeardown(output, request.headers)
+                "GET_PARAMETER" -> if (isValidSession(request.headers)) sendOk(output) else sendResponse(output, "454 Session Not Found")
+                "SET_PARAMETER" -> if (isValidSession(request.headers)) sendOk(output) else sendResponse(output, "454 Session Not Found")
                 else -> sendResponse(output, "405 Method Not Allowed")
             }
         }
@@ -608,12 +583,22 @@ class RtspServer(private val port: Int = DEFAULT_PORT) {
             )
         }
 
-        private fun handleDescribe(output: OutputStream, requestUri: String) {
+        private fun handleDescribe(output: OutputStream) {
             if (rtspSessionId.isEmpty()) {
                 rtspSessionId = sessionId + "_" + System.currentTimeMillis().toString(16)
             }
 
-            val sdp = buildSdp()
+            val sdp = SdpBuilder.build(
+                sessionId = sessionId,
+                ip = socket.localAddress.hostAddress,
+                videoBitrate = config.videoBitrate,
+                audioEnabled = config.audioEnabled,
+                audioSampleRateHz = config.audioSampleRateHz,
+                audioChannelCount = config.audioChannelCount,
+                sps = encoder.sps,
+                pps = encoder.pps,
+                audioSpecificConfig = aacEncoder.audioSpecificConfig,
+            )
             sendResponse(
                 output, "200 OK", mapOf(
                     "Content-Type" to "application/sdp",
@@ -623,7 +608,7 @@ class RtspServer(private val port: Int = DEFAULT_PORT) {
         }
 
         private fun handleSetup(output: OutputStream, headers: Map<String, String>, requestUri: String) {
-            val trackId = resolveTrackId(requestUri)
+            val trackId = RtspUriPolicy.resolveTrackId(requestUri)
             if (trackId == null) {
                 sendResponse(output, "404 Not Found")
                 return
@@ -674,12 +659,12 @@ class RtspServer(private val port: Int = DEFAULT_PORT) {
             sendResponse(
                 output, "200 OK", mapOf(
                     "Transport" to "RTP/AVP/TCP;unicast;interleaved=${trackState.rtpChannel}-${trackState.rtcpChannel}",
-                    "Session" to "$rtspSessionId;timeout=60"
+                    "Session" to "$rtspSessionId;timeout=$SESSION_TIMEOUT_HEADER_SECONDS"
                 )
             )
         }
 
-        private fun handlePlay(output: OutputStream, headers: Map<String, String>, requestUri: String) {
+        private fun handlePlay(output: OutputStream, headers: Map<String, String>) {
             if (!isValidSession(headers)) {
                 sendResponse(output, "454 Session Not Found")
                 return
@@ -696,13 +681,13 @@ class RtspServer(private val port: Int = DEFAULT_PORT) {
             encoder.requestKeyFrame()
 
             val rtpInfoParts = mutableListOf<String>()
-            val streamBase = buildAbsoluteRtspUrl("/$DEFAULT_STREAM_PATH")
+            val streamBase = buildAbsoluteRtspUrl("/${RtspUriPolicy.DEFAULT_STREAM_PATH}")
             val nextSeq = (videoPacketizer.currentSeq + 1) and 0xFFFF
             val nextRtpTime = (rtpTimestamp + timestampIncrement) and 0xFFFFFFFFL
             rtpInfoParts.add("url=$streamBase;seq=$nextSeq;rtptime=$nextRtpTime")
 
             if (isAudioSetup && config.audioEnabled) {
-                val audioUrl = buildAbsoluteRtspUrl("/$DEFAULT_STREAM_PATH/trackID=1")
+                val audioUrl = buildAbsoluteRtspUrl("/${RtspUriPolicy.DEFAULT_STREAM_PATH}/trackID=1")
                 rtpInfoParts.add("url=$audioUrl;seq=${audioPacketizer.currentSeq};rtptime=$audioTimestamp")
             }
 
@@ -734,184 +719,11 @@ class RtspServer(private val port: Int = DEFAULT_PORT) {
             sendResponse(output, "200 OK")
         }
 
-        private fun requiresAuthentication(method: String): Boolean {
-            if (authSpec == null) return false
-            return method != "OPTIONS"
-        }
-
-        private fun isAuthorized(headers: Map<String, String>, method: String, requestUri: String): Boolean {
-            val auth = authSpec ?: return true
-            val authHeader = headers["authorization"] ?: return false
-
-            if (authHeader.startsWith("Digest ", ignoreCase = true)) {
-                if (auth.digestHa1.isBlank()) return false
-                return isAuthorizedDigest(authHeader, auth.username, auth.digestHa1, method, requestUri)
-            }
-            if (!authHeader.startsWith("Basic ", ignoreCase = true)) return false
-
-            val payload = authHeader.substringAfter(' ', "").trim()
-            if (payload.isEmpty()) return false
-
-            val decoded = runCatching {
-                val bytes = android.util.Base64.decode(payload, android.util.Base64.DEFAULT)
-                String(bytes, Charsets.UTF_8)
-            }.getOrNull() ?: return false
-
-            val separator = decoded.indexOf(':')
-            if (separator <= 0) return false
-
-            val providedUser = decoded.substring(0, separator)
-            val providedPassword = decoded.substring(separator + 1)
-
-            if (!StreamAuthCrypto.constantTimeEquals(providedUser, auth.username)) return false
-            return StreamAuthSettings.verifyPassword(providedPassword, auth.passwordHash)
-        }
-
-        private fun isAuthorizedDigest(
-            authHeader: String,
-            expectedUser: String,
-            digestHa1: String,
-            method: String,
-            requestUri: String,
-        ): Boolean {
-            val params = parseDigestParams(authHeader.substringAfter(' ', ""))
-
-            val username = params["username"] ?: return false
-            val realm = params["realm"] ?: return false
-            val nonce = params["nonce"] ?: return false
-            val uri = params["uri"] ?: return false
-            val response = params["response"]?.lowercase(Locale.US) ?: return false
-            val qop = params["qop"]?.lowercase(Locale.US)
-            val nc = params["nc"] ?: ""
-            val cnonce = params["cnonce"] ?: ""
-            val opaque = params["opaque"] ?: ""
-
-            if (!StreamAuthCrypto.constantTimeEquals(username, expectedUser)) return false
-            if (!StreamAuthCrypto.constantTimeEquals(realm, AUTH_REALM)) return false
-            if (!StreamAuthCrypto.constantTimeEquals(opaque, AUTH_OPAQUE)) return false
-            if (!isDigestUriMatch(uri, requestUri)) return false
-            if (!validateDigestNonce(nonce, username, cnonce, nc, qop)) return false
-
-            val ha2 = StreamAuthCrypto.md5Hex("$method:$uri")
-            val expectedResponse = if (!qop.isNullOrBlank()) {
-                if (cnonce.isBlank() || nc.isBlank()) return false
-                StreamAuthCrypto.md5Hex("$digestHa1:$nonce:$nc:$cnonce:$qop:$ha2")
-            } else {
-                StreamAuthCrypto.md5Hex("$digestHa1:$nonce:$ha2")
-            }
-
-            return StreamAuthCrypto.constantTimeEquals(response, expectedResponse)
-        }
-
-        private fun parseDigestParams(value: String): Map<String, String> {
-            val result = mutableMapOf<String, String>()
-            var i = 0
-            while (i < value.length) {
-                while (i < value.length && (value[i] == ' ' || value[i] == ',')) i++
-                if (i >= value.length) break
-
-                val keyStart = i
-                while (i < value.length && value[i] != '=') i++
-                if (i >= value.length) break
-                val key = value.substring(keyStart, i).trim().lowercase(Locale.US)
-                i++
-
-                val parsedValue = if (i < value.length && value[i] == '"') {
-                    i++
-                    val sb = StringBuilder()
-                    var escaped = false
-                    while (i < value.length) {
-                        val ch = value[i]
-                        if (escaped) {
-                            sb.append(ch)
-                            escaped = false
-                        } else if (ch == '\\') {
-                            escaped = true
-                        } else if (ch == '"') {
-                            i++
-                            break
-                        } else {
-                            sb.append(ch)
-                        }
-                        i++
-                    }
-                    sb.toString()
-                } else {
-                    val start = i
-                    while (i < value.length && value[i] != ',') i++
-                    value.substring(start, i).trim()
-                }
-
-                result[key] = parsedValue
-                while (i < value.length && value[i] != ',') i++
-                if (i < value.length && value[i] == ',') i++
-            }
-            return result
-        }
-
-        private fun validateDigestNonce(
-            nonce: String,
-            username: String,
-            cnonce: String,
-            ncHex: String,
-            qop: String?,
-        ): Boolean {
-            cleanExpiredDigestNonces()
-            val state = digestNonces[nonce] ?: return false
-            if (System.currentTimeMillis() > state.expiresAtMs) {
-                digestNonces.remove(nonce)
-                return false
-            }
-
-            if (qop.isNullOrBlank()) return true
-            val nc = ncHex.toLongOrNull(16) ?: return false
-            if (cnonce.isBlank()) return false
-            val key = "$username|$cnonce"
-            val previous = state.ncTrack[key] ?: 0L
-            if (nc <= previous) return false
-            state.ncTrack[key] = nc
-            return true
-        }
-
-        private fun isDigestUriMatch(digestUri: String, requestUri: String): Boolean {
-            val digestPath = normalizeRtspPath(extractRtspPath(digestUri))
-            val requestPath = normalizeRtspPath(extractRtspPath(requestUri))
-            return StreamAuthCrypto.constantTimeEquals(digestPath, requestPath)
-        }
-
         private fun sendUnauthorized(output: OutputStream) {
-            val digestChallenge = if (authSpec?.digestHa1?.isNotBlank() == true) {
-                val nonce = createDigestNonce()
-                "Digest realm=\"$AUTH_REALM\", nonce=\"$nonce\", opaque=\"$AUTH_OPAQUE\", algorithm=MD5, qop=\"auth\""
-            } else null
-
-            val challenge = digestChallenge ?: "Basic realm=\"$AUTH_REALM\""
-            sendResponse(output, "401 Unauthorized", mapOf("WWW-Authenticate" to challenge))
-        }
-
-        private fun createDigestNonce(): String {
-            cleanExpiredDigestNonces()
-            val bytes = ByteArray(DIGEST_NONCE_BYTES)
-            secureRandom.nextBytes(bytes)
-            val nonce = android.util.Base64.encodeToString(
-                bytes,
-                android.util.Base64.NO_WRAP or android.util.Base64.URL_SAFE,
+            sendResponse(
+                output, "401 Unauthorized",
+                mapOf("WWW-Authenticate" to authorizer.challengeHeader())
             )
-            digestNonces[nonce] = DigestNonceState(System.currentTimeMillis() + DIGEST_NONCE_TTL_MS)
-            return nonce
-        }
-
-        private fun cleanExpiredDigestNonces() {
-            val now = System.currentTimeMillis()
-            digestNonces.entries.removeIf { now > it.value.expiresAtMs }
-            if (digestNonces.size > MAX_DIGEST_NONCES) {
-                val overflow = digestNonces.size - MAX_DIGEST_NONCES
-                val keysToRemove = digestNonces.entries
-                    .sortedBy { it.value.expiresAtMs }
-                    .take(overflow)
-                    .map { it.key }
-                keysToRemove.forEach { digestNonces.remove(it) }
-            }
         }
 
         private fun isValidSession(headers: Map<String, String>): Boolean {
@@ -921,95 +733,12 @@ class RtspServer(private val port: Int = DEFAULT_PORT) {
             return providedSession == rtspSessionId
         }
 
-        private fun isRequestUriAllowed(method: String, requestUri: String): Boolean {
-            return when (method) {
-                "OPTIONS", "DESCRIBE" -> isAggregateOrStreamUri(requestUri)
-                "SETUP" -> isStreamControlUri(requestUri) || isTrackUri(requestUri)
-                "PLAY", "TEARDOWN" -> isAggregateOrStreamUri(requestUri) || isStreamControlUri(requestUri)
-                "GET_PARAMETER", "SET_PARAMETER" -> true
-                else -> true
-            }
-        }
-
-        private fun isAggregateOrStreamUri(requestUri: String): Boolean {
-            val path = normalizeRtspPath(extractRtspPath(requestUri))
-            return path == "/" || path == "/$DEFAULT_STREAM_PATH"
-        }
-
-        private fun isStreamControlUri(requestUri: String): Boolean {
-            val path = normalizeRtspPath(extractRtspPath(requestUri))
-            if (path == "/$DEFAULT_STREAM_PATH") return true
-            if (path.equals("/trackid=0", ignoreCase = true)) return true
-            if (path.startsWith("/$DEFAULT_STREAM_PATH/trackid=", ignoreCase = true)) return true
-            if (path.startsWith("/$DEFAULT_STREAM_PATH/track", ignoreCase = true)) return true
-            return false
-        }
-
-        private fun isTrackUri(requestUri: String): Boolean {
-            val path = normalizeRtspPath(extractRtspPath(requestUri))
-            if (path.equals("/trackID=0", ignoreCase = true)) return true
-            if (path.equals("/trackID=1", ignoreCase = true)) return true
-            if (path.startsWith("/$DEFAULT_STREAM_PATH/trackID=", ignoreCase = true)) return true
-            return false
-        }
-
-        private fun resolveTrackId(requestUri: String): Int? {
-            val path = normalizeRtspPath(extractRtspPath(requestUri))
-            // Aggregate or stream path defaults to video (track 0)
-            if (path == "/$DEFAULT_STREAM_PATH" || path == "/") return 0
-            // Explicit trackID matching
-            val trackMatch = Regex("""/trackID=(\d+)$""", RegexOption.IGNORE_CASE).find(path)
-                ?: Regex("""/trackid=(\d+)$""", RegexOption.IGNORE_CASE).find(path)
-            if (trackMatch != null) {
-                val id = trackMatch.groupValues[1].toInt()
-                return if (id == 0 || id == 1) id else null
-            }
-            return null
-        }
-
-        private fun extractRtspPath(requestUri: String): String {
-            val path = if (requestUri.startsWith("rtsp://", ignoreCase = true)) {
-                val schemeSep = requestUri.indexOf("://")
-                val afterScheme = if (schemeSep >= 0) requestUri.substring(schemeSep + 3) else requestUri
-                val slashIndex = afterScheme.indexOf('/')
-                if (slashIndex >= 0) afterScheme.substring(slashIndex) else "/"
-            } else {
-                requestUri
-            }
-            return if (path.startsWith('/')) path else "/$path"
-        }
-
-        private fun normalizeRtspPath(path: String): String {
-            var normalized = path.substringBefore('?').substringBefore('#').trim()
-            if (normalized.isEmpty()) return "/"
-            if (!normalized.startsWith('/')) normalized = "/$normalized"
-            while (normalized.contains("//")) {
-                normalized = normalized.replace("//", "/")
-            }
-            if (normalized.length > 1 && normalized.endsWith('/')) {
-                normalized = normalized.dropLast(1)
-            }
-            return normalized
-        }
-
         private fun buildAbsoluteRtspUrl(requestUri: String): String {
             if (requestUri.startsWith("rtsp://", ignoreCase = true)) {
                 return requestUri
             }
             val normalizedPath = if (requestUri.startsWith("/")) requestUri else "/$requestUri"
             return "rtsp://${socket.localAddress.hostAddress}:$port$normalizedPath"
-        }
-
-        private fun extractContentLength(lines: List<String>): Int {
-            for (i in 1 until lines.size) {
-                val line = lines[i]
-                val colonIdx = line.indexOf(':')
-                if (colonIdx <= 0) continue
-                val key = line.substring(0, colonIdx).trim()
-                if (!key.equals("Content-Length", ignoreCase = true)) continue
-                return line.substring(colonIdx + 1).trim().toIntOrNull() ?: 0
-            }
-            return 0
         }
 
         /**
@@ -1076,55 +805,6 @@ class RtspServer(private val port: Int = DEFAULT_PORT) {
             }
         }
 
-        private fun buildSdp(): String {
-            val spsData = encoder.sps
-            val ppsData = encoder.pps
-
-            val spsBase64 = spsData?.let { bytesToBase64(it) }
-            val ppsBase64 = ppsData?.let { bytesToBase64(it) }
-            val fmtp = H264NalParser.buildFmtp(
-                H264NalParser.profileLevelId(spsData),
-                spsBase64,
-                ppsBase64
-            )
-
-            val ip = socket.localAddress.hostAddress
-
-            return buildString {
-                appendLine("v=0")
-                appendLine("o=- $sessionId 1 IN IP4 $ip")
-                appendLine("s=LensCast Camera Stream")
-                appendLine("t=0 0")
-                appendLine("a=tool:LensCast")
-                appendLine("a=type:broadcast")
-                appendLine("a=control:*")
-                appendLine("a=range:npt=0-")
-                appendLine("m=video 0 RTP/AVP 96")
-                appendLine("c=IN IP4 0.0.0.0")
-                appendLine("b=AS:${config.videoBitrate / 1000}")
-                appendLine("a=rtpmap:96 H264/90000")
-                appendLine("a=fmtp:96 $fmtp")
-                appendLine("a=control:$DEFAULT_STREAM_PATH")
-
-                if (this@RtspServer.config.audioEnabled) {
-                    val audioCfg = aacEncoder.audioSpecificConfig
-                    val configHex = audioCfg?.let {
-                        "%02x%02x".format(it[0].toInt() and 0xFF, it[1].toInt() and 0xFF)
-                    } ?: "1190" // fallback: AAC-LC 48kHz mono
-
-                    appendLine("m=audio 0 RTP/AVP 97")
-                    appendLine("c=IN IP4 0.0.0.0")
-                    appendLine("a=rtpmap:97 mpeg4-generic/${this@RtspServer.config.audioSampleRateHz}/${this@RtspServer.config.audioChannelCount}")
-                    appendLine("a=fmtp:97 streamtype=5;profile-level-id=1;mode=AAC-hbr;sizelength=13;indexlength=3;indexdeltalength=3;config=$configHex")
-                    appendLine("a=control:trackID=1")
-                }
-            }
-        }
-
-        private fun bytesToBase64(bytes: ByteArray): String {
-            return android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP)
-        }
-
         private fun rfc1123Now(): String = checkNotNull(RFC_1123_FORMAT.get()).format(Date())
     }
 
@@ -1141,18 +821,24 @@ class RtspServer(private val port: Int = DEFAULT_PORT) {
 
     companion object {
         private const val TAG = "RtspServer"
-        private val AUTH_REALM = StreamAuthCrypto.RTSP_DIGEST_REALM
-        private const val AUTH_OPAQUE = "lenscast-rtsp"
+
         const val DEFAULT_PORT = StreamDefaults.RTSP_PORT
-        const val DEFAULT_STREAM_PATH = "stream"
+
         private const val INTERLEAVED_FRAME_MAGIC = 0x24
+
+        // ── Session lifecycle constants (one home) ──
+        // MAX_CLIENTS caps concurrent client connections; the accept loop rejects beyond it.
         private const val MAX_CLIENTS = 4
+        // SESSION_TIMEOUT_MS is the enforced idle timeout (socket read timeout and
+        // the handle() loop check). We advertise a slightly smaller timeout in the
+        // SETUP "Session" header so an idle-but-alive client times itself out
+        // before we would drop it — the 5s skew is deliberate grace.
         private const val SESSION_TIMEOUT_MS = 65_000L
-        private const val DIGEST_NONCE_BYTES = 16
-        private const val DIGEST_NONCE_TTL_MS = 5 * 60 * 1000L
-        private const val MAX_DIGEST_NONCES = 512
+        private const val SESSION_TIMEOUT_HEADER_SECONDS = 60L
         private const val RTCP_SR_INTERVAL_MS = 5_000L
+
         private const val NTP_EPOCH_OFFSET_MS = 2_208_988_800_000L // 1900-01-01 vs 1970-01-01
+
         private val RFC_1123_FORMAT = object : ThreadLocal<SimpleDateFormat>() {
             override fun initialValue(): SimpleDateFormat {
                 return SimpleDateFormat("EEE, dd MMM yyyy HH:mm:ss 'GMT'", Locale.US).apply {

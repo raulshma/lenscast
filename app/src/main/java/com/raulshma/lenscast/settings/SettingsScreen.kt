@@ -38,6 +38,7 @@ import com.raulshma.lenscast.camera.model.CameraSettings
 import com.raulshma.lenscast.camera.model.FocusMode
 import com.raulshma.lenscast.camera.model.HdrMode
 import com.raulshma.lenscast.camera.model.NightVisionMode
+import com.raulshma.lenscast.camera.model.QuickSettingCatalog
 import com.raulshma.lenscast.camera.model.Resolution
 import com.raulshma.lenscast.camera.model.WhiteBalance
 import com.raulshma.lenscast.camera.model.isoStops
@@ -149,7 +150,7 @@ fun CameraSettingsScreen(
                     if (settings.whiteBalance == WhiteBalance.MANUAL) {
                         SliderSetting(
                             title = "Color Temperature (K)",
-                            value = (settings.colorTemperature ?: 5500).toFloat(),
+                            value = (settings.colorTemperature ?: CameraSettings.DEFAULT_COLOR_TEMPERATURE_K).toFloat(),
                             range = 2000f..9000f,
                             onValueChange = { viewModel.updateColorTemperature(it.toInt()) }
                         )
@@ -211,11 +212,7 @@ fun CameraSettingsScreen(
                     )
                     Spacer(modifier = Modifier.height(8.dp))
                     Text(
-                        text = when (settings.nightVisionMode) {
-                            NightVisionMode.ON -> "Forces night scene mode with maximum exposure and reduced frame rate for best low-light performance."
-                            NightVisionMode.AUTO -> "Automatically adapts to lighting conditions using night portrait mode with auto flash."
-                            NightVisionMode.OFF -> "Standard camera behavior without low-light enhancements."
-                        },
+                        text = QuickSettingCatalog.nightVisionDescription(settings.nightVisionMode),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )

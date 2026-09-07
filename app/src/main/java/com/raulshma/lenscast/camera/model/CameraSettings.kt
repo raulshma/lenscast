@@ -47,10 +47,29 @@ data class CameraSettings(
         const val FOCUS_DISTANCE_MAX = 20f
         const val COLOR_TEMPERATURE_MIN = 1000
         const val COLOR_TEMPERATURE_MAX = 15000
+        /** The manual-WB fallback shown before a temperature was picked. */
+        const val DEFAULT_COLOR_TEMPERATURE_K = 5500
         const val ZOOM_RATIO_MIN = 0.1f
         const val ZOOM_RATIO_MAX = 10f
         const val FRAME_RATE_MIN = 1
         const val FRAME_RATE_MAX = 120
+        // The assumed sensor span published before the device's live ranges
+        // arrive; the device always wins at apply time.
+        const val ISO_RANGE_MIN = 100
+        const val ISO_RANGE_MAX = 3200
+
+        /**
+         * The zoom range the UI may drive: from 1x up to whichever is lower,
+         * the device's optical/digital ceiling or the persistence ceiling
+         * [ZOOM_RATIO_MAX]. Both ceilings must agree or settings re-apply
+         * snaps the zoom back while pinching. A device max below 1 (never in
+         * practice) degrades to a fixed 1x-only range instead of an inverted
+         * one.
+         */
+        fun effectiveZoomRange(deviceMaxZoom: Float): ClosedFloatingPointRange<Float> {
+            val max = deviceMaxZoom.coerceIn(1f, ZOOM_RATIO_MAX)
+            return 1f..max
+        }
 
         // The slider span offered in the UI — narrower than the persistence
         // bounds above, matching what typical sensors support.

@@ -44,13 +44,13 @@ import com.raulshma.lenscast.MainApplication
 import com.raulshma.lenscast.capture.model.FlashMode
 import com.raulshma.lenscast.capture.model.RecordingConfig
 import com.raulshma.lenscast.capture.model.RecordingQuality
+import com.raulshma.lenscast.gallery.formatDuration
 import com.raulshma.lenscast.settings.DropdownSetting
 import com.raulshma.lenscast.settings.SettingsSection
 import com.raulshma.lenscast.settings.SliderSetting
 import com.raulshma.lenscast.settings.SwitchSetting
 import com.raulshma.lenscast.ui.components.LensCastTopBar
 import java.text.SimpleDateFormat
-import java.util.Calendar
 import java.util.Date
 import java.util.Locale
 
@@ -129,7 +129,7 @@ fun CaptureScreen(
                     SliderSetting(
                         title = "Interval (seconds)",
                         value = intervalConfig.intervalSeconds.toFloat(),
-                        range = 1f..3600f,
+                        range = IntervalCapturePolicy.MIN_INTERVAL_SECONDS.toFloat()..IntervalCapturePolicy.MAX_INTERVAL_SECONDS.toFloat(),
                         onValueChange = {
                             viewModel.updateIntervalConfig(
                                 intervalConfig.copy(intervalSeconds = it.toLong())
@@ -212,7 +212,7 @@ fun CaptureScreen(
                     SliderSetting(
                         title = "Duration (seconds, 0 = unlimited)",
                         value = recordingConfig.durationSeconds.toFloat(),
-                        range = 0f..3600f,
+                        range = 0f..RecordingConfig.MAX_DURATION_SECONDS.toFloat(),
                         onValueChange = {
                             viewModel.updateRecordingConfig(
                                 recordingConfig.copy(durationSeconds = it.toLong())
@@ -222,7 +222,7 @@ fun CaptureScreen(
                     SliderSetting(
                         title = "Repeat Interval (seconds, 0 = no repeat)",
                         value = recordingConfig.repeatIntervalSeconds.toFloat(),
-                        range = 0f..3600f,
+                        range = 0f..RecordingConfig.MAX_REPEAT_SECONDS.toFloat(),
                         onValueChange = {
                             viewModel.updateRecordingConfig(
                                 recordingConfig.copy(repeatIntervalSeconds = it.toLong())
@@ -234,15 +234,9 @@ fun CaptureScreen(
                     if (showTimePicker) {
                         ScheduleTimePickerDialog(
                             onConfirm = { hour, minute ->
-                                val cal = Calendar.getInstance().apply {
-                                    set(Calendar.HOUR_OF_DAY, hour)
-                                    set(Calendar.MINUTE, minute)
-                                    set(Calendar.SECOND, 0)
-                                    if (timeInMillis < System.currentTimeMillis()) {
-                                        add(Calendar.DAY_OF_YEAR, 1)
-                                    }
-                                }
-                                viewModel.updateScheduledStartTime(cal.timeInMillis)
+                                viewModel.updateScheduledStartTime(
+                                    RecordingConfig.scheduledStartFor(hour, minute, System.currentTimeMillis())
+                                )
                                 showTimePicker = false
                             },
                             onDismiss = { showTimePicker = false }
@@ -319,13 +313,6 @@ fun CaptureScreen(
 }
 
 
-
-private fun formatDuration(ms: Long): String {
-    val seconds = ms / 1000
-    val m = seconds / 60
-    val s = seconds % 60
-    return String.format("%02d:%02d", m, s)
-}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable

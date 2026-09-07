@@ -1,7 +1,6 @@
 package com.raulshma.lenscast.streaming.web
 
-import com.squareup.moshi.Moshi
-import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
+import com.raulshma.lenscast.core.AppJson
 import com.raulshma.lenscast.streaming.model.ErrorResponse
 
 /** HTTP methods the Web API router understands — transport-agnostic on purpose. */
@@ -29,7 +28,7 @@ data class ApiResponse(
     val body: String,
 ) {
     companion object {
-        private val errorAdapter = WebJson.moshi.adapter(ErrorResponse::class.java)
+        private val errorAdapter = AppJson.moshi.adapter(ErrorResponse::class.java)
 
         fun ok(json: String) = ApiResponse(200, "application/json", json)
 
@@ -40,11 +39,4 @@ data class ApiResponse(
             return errorAdapter.toJson(ErrorResponse(error = msg))
         }
     }
-}
-
-/** One Moshi instance for every Web API handler. */
-object WebJson {
-    val moshi: Moshi = Moshi.Builder()
-        .addLast(KotlinJsonAdapterFactory())
-        .build()
 }

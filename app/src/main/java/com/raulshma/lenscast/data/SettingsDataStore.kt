@@ -1,7 +1,6 @@
 package com.raulshma.lenscast.data
 
 import android.content.Context
-import android.util.Base64
 import android.util.Log
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
@@ -24,6 +23,7 @@ import com.raulshma.lenscast.camera.model.Resolution
 import com.raulshma.lenscast.camera.model.WhiteBalance
 import com.raulshma.lenscast.core.StreamAuthCrypto
 import com.raulshma.lenscast.core.StreamDefaults
+import com.raulshma.lenscast.core.parseEnum
 import com.raulshma.lenscast.streaming.rtsp.RtspInputFormat
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -34,78 +34,18 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import org.json.JSONArray
 import org.json.JSONObject
-import java.security.MessageDigest
-import java.security.SecureRandom
-import javax.crypto.SecretKeyFactory
-import javax.crypto.spec.PBEKeySpec
 
+/**
+ * Plain value type for stream-auth settings. All crypto decisions live in
+ * [com.raulshma.lenscast.core.StreamAuthCrypto] — the single home the RTSP
+ * server and the Web Auth Gate also verify through.
+ */
 data class StreamAuthSettings(
     val enabled: Boolean = false,
     val username: String = "",
     val passwordHash: String = "",
     val rtspDigestHa1: String = "",
-) {
-    companion object {
-        private const val HASH_PREFIX = "pbkdf2_sha256"
-        private const val PBKDF2_ITERATIONS = 120_000
-        private const val KEY_LENGTH_BITS = 256
-        private const val SALT_LENGTH_BYTES = 16
-
-        fun hashPassword(password: String): String {
-            if (password.isEmpty()) return ""
-            val salt = ByteArray(SALT_LENGTH_BYTES).also { SecureRandom().nextBytes(it) }
-            val derived = derivePassword(password, salt, PBKDF2_ITERATIONS)
-            val saltEncoded = Base64.encodeToString(salt, Base64.NO_WRAP)
-            val hashEncoded = Base64.encodeToString(derived, Base64.NO_WRAP)
-            return "$HASH_PREFIX$$PBKDF2_ITERATIONS$$saltEncoded$$hashEncoded"
-        }
-
-        fun verifyPassword(password: String, storedHash: String): Boolean {
-            if (password.isEmpty() || storedHash.isEmpty()) return false
-
-            val parts = storedHash.split("$")
-            if (parts.size == 4 && parts[0] == HASH_PREFIX) {
-                val iterations = parts[1].toIntOrNull() ?: return false
-                val salt = decodeBase64(parts[2]) ?: return false
-                val expected = decodeBase64(parts[3]) ?: return false
-                val candidate = derivePassword(password, salt, iterations)
-                return MessageDigest.isEqual(candidate, expected)
-            }
-
-            val digest = MessageDigest.getInstance("SHA-256")
-            val legacyHash = digest.digest(password.toByteArray(Charsets.UTF_8))
-            val expectedLegacy = storedHash.toByteArray(Charsets.UTF_8)
-            val candidateLegacy = Base64.encodeToString(legacyHash, Base64.NO_WRAP)
-                .toByteArray(Charsets.UTF_8)
-            return MessageDigest.isEqual(candidateLegacy, expectedLegacy)
-        }
-
-        fun computeRtspDigestHa1(
-            username: String,
-            password: String,
-            realm: String = StreamAuthCrypto.RTSP_DIGEST_REALM,
-        ): String {
-            if (username.isEmpty() || password.isEmpty()) return ""
-            val input = "$username:$realm:$password"
-            return StreamAuthCrypto.md5Hex(input)
-        }
-
-        private fun derivePassword(password: String, salt: ByteArray, iterations: Int): ByteArray {
-            val spec = PBEKeySpec(password.toCharArray(), salt, iterations, KEY_LENGTH_BITS)
-            return try {
-                SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256")
-                    .generateSecret(spec)
-                    .encoded
-            } finally {
-                spec.clearPassword()
-            }
-        }
-
-        private fun decodeBase64(value: String): ByteArray? {
-            return runCatching { Base64.decode(value, Base64.DEFAULT) }.getOrNull()
-        }
-    }
-}
+)
 
 private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "camera_settings")
 
@@ -189,37 +129,17 @@ class SettingsDataStore(
             exposureCompensation = prefs[Keys.EXPOSURE_COMPENSATION] ?: 0,
             iso = if (prefs[Keys.ISO_AUTO] == "false") prefs[Keys.ISO] else null,
             exposureTime = if (prefs[Keys.EXPOSURE_TIME_AUTO] == "false") prefs[Keys.EXPOSURE_TIME] else null,
-            focusMode = try {
-                FocusMode.valueOf(prefs[Keys.FOCUS_MODE] ?: FocusMode.AUTO.name)
-            } catch (_: Exception) {
-                FocusMode.AUTO
-            },
+            focusMode = parseEnum(prefs[Keys.FOCUS_MODE], FocusMode.AUTO),
             focusDistance = if (prefs[Keys.FOCUS_DISTANCE_NULL] != "true") prefs[Keys.FOCUS_DISTANCE] else null,
-            whiteBalance = try {
-                WhiteBalance.valueOf(prefs[Keys.WHITE_BALANCE] ?: WhiteBalance.AUTO.name)
-            } catch (_: Exception) {
-                WhiteBalance.AUTO
-            },
+            whiteBalance = parseEnum(prefs[Keys.WHITE_BALANCE], WhiteBalance.AUTO),
             colorTemperature = if (prefs[Keys.COLOR_TEMPERATURE_NULL] != "true") prefs[Keys.COLOR_TEMPERATURE] else null,
             zoomRatio = prefs[Keys.ZOOM_RATIO] ?: 1.0f,
             frameRate = prefs[Keys.FRAME_RATE] ?: StreamDefaults.STREAM_FPS,
-            resolution = try {
-                Resolution.valueOf(prefs[Keys.RESOLUTION] ?: Resolution.FHD_1080P.name)
-            } catch (_: Exception) {
-                Resolution.FHD_1080P
-            },
+            resolution = parseEnum(prefs[Keys.RESOLUTION], Resolution.FHD_1080P),
             stabilization = prefs[Keys.STABILIZATION] != "false",
-            hdrMode = try {
-                HdrMode.valueOf(prefs[Keys.HDR_MODE] ?: HdrMode.OFF.name)
-            } catch (_: Exception) {
-                HdrMode.OFF
-            },
+            hdrMode = parseEnum(prefs[Keys.HDR_MODE], HdrMode.OFF),
             sceneMode = prefs[Keys.SCENE_MODE],
-            nightVisionMode = try {
-                NightVisionMode.valueOf(prefs[Keys.NIGHT_VISION_MODE] ?: NightVisionMode.OFF.name)
-            } catch (_: Exception) {
-                NightVisionMode.OFF
-            },
+            nightVisionMode = parseEnum(prefs[Keys.NIGHT_VISION_MODE], NightVisionMode.OFF),
         )
     }
 
@@ -281,12 +201,7 @@ class SettingsDataStore(
     }
 
     val rtspInputFormat: StateFlow<RtspInputFormat> = shared(RtspInputFormat.AUTO) { prefs ->
-        val raw = prefs[Keys.RTSP_INPUT_FORMAT] ?: RtspInputFormat.AUTO.name
-        try {
-            RtspInputFormat.valueOf(raw)
-        } catch (_: Exception) {
-            RtspInputFormat.AUTO
-        }
+        parseEnum(prefs[Keys.RTSP_INPUT_FORMAT], RtspInputFormat.AUTO)
     }
 
     val adaptiveBitrateEnabled: StateFlow<Boolean> = shared(false) { prefs ->
@@ -310,12 +225,7 @@ class SettingsDataStore(
     }
 
     val nightVisionMode: StateFlow<NightVisionMode> = shared(NightVisionMode.OFF) { prefs ->
-        val raw = prefs[Keys.NIGHT_VISION_MODE] ?: NightVisionMode.OFF.name
-        try {
-            NightVisionMode.valueOf(raw)
-        } catch (_: Exception) {
-            NightVisionMode.OFF
-        }
+        parseEnum(prefs[Keys.NIGHT_VISION_MODE], NightVisionMode.OFF)
     }
 
     val overlaySettings: StateFlow<OverlaySettings> = shared(OverlaySettings.DEFAULT) { prefs ->
@@ -329,11 +239,7 @@ class SettingsDataStore(
             showStatus = prefs[Keys.OVERLAY_SHOW_STATUS] == "true",
             showCustomText = prefs[Keys.OVERLAY_SHOW_CUSTOM_TEXT] == "true",
             customText = prefs[Keys.OVERLAY_CUSTOM_TEXT] ?: defaults.customText,
-            position = try {
-                OverlayPosition.valueOf(prefs[Keys.OVERLAY_POSITION] ?: OverlayPosition.TOP_LEFT.name)
-            } catch (_: Exception) {
-                OverlayPosition.TOP_LEFT
-            },
+            position = parseEnum(prefs[Keys.OVERLAY_POSITION], OverlayPosition.TOP_LEFT),
             fontSize = prefs[Keys.OVERLAY_FONT_SIZE] ?: defaults.fontSize,
             textColor = prefs[Keys.OVERLAY_TEXT_COLOR] ?: defaults.textColor,
             backgroundColor = prefs[Keys.OVERLAY_BG_COLOR] ?: defaults.backgroundColor,
@@ -401,13 +307,19 @@ class SettingsDataStore(
 
     suspend fun saveStreamingPort(port: Int) {
         context.dataStore.edit { prefs ->
-            prefs[Keys.STREAMING_PORT] = port
+            prefs[Keys.STREAMING_PORT] = port.coerceIn(
+                StreamDefaults.WEB_PORT_MIN,
+                StreamDefaults.WEB_PORT_MAX,
+            )
         }
     }
 
     suspend fun saveJpegQuality(quality: Int) {
         context.dataStore.edit { prefs ->
-            prefs[Keys.JPEG_QUALITY] = quality
+            prefs[Keys.JPEG_QUALITY] = quality.coerceIn(
+                StreamDefaults.JPEG_QUALITY_MIN,
+                StreamDefaults.JPEG_QUALITY_MAX,
+            )
         }
     }
 
@@ -482,7 +394,10 @@ class SettingsDataStore(
 
     suspend fun saveRtspPort(port: Int) {
         context.dataStore.edit { prefs ->
-            prefs[Keys.RTSP_PORT] = port
+            prefs[Keys.RTSP_PORT] = port.coerceIn(
+                StreamDefaults.RTSP_PORT_MIN,
+                StreamDefaults.RTSP_PORT_MAX,
+            )
         }
     }
 
@@ -535,23 +450,26 @@ class SettingsDataStore(
     }
 
     suspend fun saveOverlaySettings(settings: OverlaySettings) {
+        // The save-side clamp owner: out-of-range overlay/masking values are
+        // coerced here, whatever the writer (settings screen or Web API).
+        val normalized = OverlaySettings.normalized(settings)
         context.dataStore.edit { prefs ->
-            prefs[Keys.OVERLAY_ENABLED] = if (settings.enabled) "true" else "false"
-            prefs[Keys.OVERLAY_SHOW_TIMESTAMP] = if (settings.showTimestamp) "true" else "false"
-            prefs[Keys.OVERLAY_TIMESTAMP_FORMAT] = settings.timestampFormat
-            prefs[Keys.OVERLAY_SHOW_BRANDING] = if (settings.showBranding) "true" else "false"
-            prefs[Keys.OVERLAY_BRANDING_TEXT] = settings.brandingText
-            prefs[Keys.OVERLAY_SHOW_STATUS] = if (settings.showStatus) "true" else "false"
-            prefs[Keys.OVERLAY_SHOW_CUSTOM_TEXT] = if (settings.showCustomText) "true" else "false"
-            prefs[Keys.OVERLAY_CUSTOM_TEXT] = settings.customText
-            prefs[Keys.OVERLAY_POSITION] = settings.position.name
-            prefs[Keys.OVERLAY_FONT_SIZE] = settings.fontSize
-            prefs[Keys.OVERLAY_TEXT_COLOR] = settings.textColor
-            prefs[Keys.OVERLAY_BG_COLOR] = settings.backgroundColor
-            prefs[Keys.OVERLAY_PADDING] = settings.padding
-            prefs[Keys.OVERLAY_LINE_HEIGHT] = settings.lineHeight
-            prefs[Keys.MASKING_ENABLED] = if (settings.maskingEnabled) "true" else "false"
-            prefs[Keys.MASKING_ZONES] = serializeMaskingZones(settings.maskingZones)
+            prefs[Keys.OVERLAY_ENABLED] = if (normalized.enabled) "true" else "false"
+            prefs[Keys.OVERLAY_SHOW_TIMESTAMP] = if (normalized.showTimestamp) "true" else "false"
+            prefs[Keys.OVERLAY_TIMESTAMP_FORMAT] = normalized.timestampFormat
+            prefs[Keys.OVERLAY_SHOW_BRANDING] = if (normalized.showBranding) "true" else "false"
+            prefs[Keys.OVERLAY_BRANDING_TEXT] = normalized.brandingText
+            prefs[Keys.OVERLAY_SHOW_STATUS] = if (normalized.showStatus) "true" else "false"
+            prefs[Keys.OVERLAY_SHOW_CUSTOM_TEXT] = if (normalized.showCustomText) "true" else "false"
+            prefs[Keys.OVERLAY_CUSTOM_TEXT] = normalized.customText
+            prefs[Keys.OVERLAY_POSITION] = normalized.position.name
+            prefs[Keys.OVERLAY_FONT_SIZE] = normalized.fontSize
+            prefs[Keys.OVERLAY_TEXT_COLOR] = normalized.textColor
+            prefs[Keys.OVERLAY_BG_COLOR] = normalized.backgroundColor
+            prefs[Keys.OVERLAY_PADDING] = normalized.padding
+            prefs[Keys.OVERLAY_LINE_HEIGHT] = normalized.lineHeight
+            prefs[Keys.MASKING_ENABLED] = if (normalized.maskingEnabled) "true" else "false"
+            prefs[Keys.MASKING_ZONES] = serializeMaskingZones(normalized.maskingZones)
         }
     }
 
@@ -566,11 +484,7 @@ class SettingsDataStore(
                     id = obj.optString("id", java.util.UUID.randomUUID().toString()),
                     label = obj.optString("label", defaults.label),
                     enabled = obj.optBoolean("enabled", defaults.enabled),
-                    type = try {
-                        MaskingType.valueOf(obj.optString("type", MaskingType.BLACKOUT.name))
-                    } catch (_: Exception) {
-                        MaskingType.BLACKOUT
-                    },
+                    type = parseEnum(obj.optString("type", MaskingType.BLACKOUT.name), MaskingType.BLACKOUT),
                     x = obj.optDouble("x", defaults.x.toDouble()).toFloat(),
                     y = obj.optDouble("y", defaults.y.toDouble()).toFloat(),
                     width = obj.optDouble("width", defaults.width.toDouble()).toFloat(),

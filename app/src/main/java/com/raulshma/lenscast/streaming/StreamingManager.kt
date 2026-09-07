@@ -19,6 +19,7 @@ import com.raulshma.lenscast.streaming.web.SettingsWebHandler
 import com.raulshma.lenscast.streaming.web.StatusWebHandler
 import com.raulshma.lenscast.streaming.web.StreamWebHandler
 import com.raulshma.lenscast.streaming.rtsp.RtspAuthSpec
+import com.raulshma.lenscast.streaming.rtsp.RtspUriPolicy
 import com.raulshma.lenscast.streaming.rtsp.RtspConfig
 import com.raulshma.lenscast.streaming.rtsp.RtspInputFormat
 import com.raulshma.lenscast.streaming.rtsp.RtspServer
@@ -588,7 +589,7 @@ class StreamingManager(
 
     private fun buildRtspUrl(): String {
         val ip = NetworkUtils.getLocalIpAddress() ?: "localhost"
-        return "rtsp://$ip:$currentRtspPort/${RtspServer.DEFAULT_STREAM_PATH}"
+        return "rtsp://$ip:$currentRtspPort/${RtspUriPolicy.DEFAULT_STREAM_PATH}"
     }
 
     private fun startRtspServer() {

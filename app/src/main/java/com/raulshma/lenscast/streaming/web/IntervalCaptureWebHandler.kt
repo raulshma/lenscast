@@ -1,5 +1,6 @@
 package com.raulshma.lenscast.streaming.web
 
+import com.raulshma.lenscast.core.AppJson
 import android.content.Context
 import android.util.Log
 import com.raulshma.lenscast.capture.IntervalCaptureScheduler
@@ -12,9 +13,9 @@ import kotlinx.coroutines.withContext
 /** /api/capture/interval/... — WorkManager-driven interval capture control. */
 class IntervalCaptureWebHandler(private val context: Context) {
 
-    private val statusAdapter by lazy { WebJson.moshi.adapter(IntervalCaptureStatusDto::class.java) }
-    private val configAdapter by lazy { WebJson.moshi.adapter(IntervalCaptureConfig::class.java) }
-    private val successAdapter by lazy { WebJson.moshi.adapter(SuccessResponse::class.java) }
+    private val statusAdapter by lazy { AppJson.moshi.adapter(IntervalCaptureStatusDto::class.java) }
+    private val configAdapter by lazy { AppJson.moshi.adapter(IntervalCaptureConfig::class.java) }
+    private val successAdapter by lazy { AppJson.moshi.adapter(SuccessResponse::class.java) }
 
     suspend fun status(): String {
         // WorkManager's status query blocks; keep it off the caller's thread.

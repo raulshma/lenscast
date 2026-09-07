@@ -1,5 +1,6 @@
 package com.raulshma.lenscast.streaming.web
 
+import com.raulshma.lenscast.core.AppJson
 import android.util.Log
 import androidx.camera.core.CameraSelector
 import com.raulshma.lenscast.camera.CameraService
@@ -14,10 +15,10 @@ import kotlinx.coroutines.withContext
 /** /api/camera/... — lens enumeration/selection and tap-to-focus. */
 class LensWebHandler(private val cameraService: CameraService) {
 
-    private val lensesAdapter by lazy { WebJson.moshi.adapter(LensesResponseDto::class.java) }
-    private val lensSelectAdapter by lazy { WebJson.moshi.adapter(LensSelectRequest::class.java) }
-    private val tapFocusAdapter by lazy { WebJson.moshi.adapter(TapFocusRequest::class.java) }
-    private val successAdapter by lazy { WebJson.moshi.adapter(SuccessResponse::class.java) }
+    private val lensesAdapter by lazy { AppJson.moshi.adapter(LensesResponseDto::class.java) }
+    private val lensSelectAdapter by lazy { AppJson.moshi.adapter(LensSelectRequest::class.java) }
+    private val tapFocusAdapter by lazy { AppJson.moshi.adapter(TapFocusRequest::class.java) }
+    private val successAdapter by lazy { AppJson.moshi.adapter(SuccessResponse::class.java) }
 
     fun getLenses(): String {
         val lenses = cameraService.availableLenses.value

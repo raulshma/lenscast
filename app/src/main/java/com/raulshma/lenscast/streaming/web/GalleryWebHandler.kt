@@ -4,7 +4,9 @@ import android.content.Context
 import android.media.MediaMetadataRetriever
 import android.net.Uri
 import android.util.Log
+import com.raulshma.lenscast.capture.model.CaptureMediaFormat
 import com.raulshma.lenscast.capture.model.CaptureType
+import com.raulshma.lenscast.core.AppJson
 import com.raulshma.lenscast.data.CaptureHistoryStore
 import com.raulshma.lenscast.streaming.model.BatchDeleteRequest
 import com.raulshma.lenscast.streaming.model.BatchDeleteResponse
@@ -17,38 +19,24 @@ import java.io.InputStream
 /**
  * /api/gallery and /api/media routes — gallery listing/deletion and media resolution
  * (file streams and video thumbnails) for the transport layer to serve.
+ * Pagination is [GalleryPage]'s; this handler parses params and serializes.
+ * It serves the current history snapshot as-is — capture-time and app-side
+ * refreshes keep the store current.
  */
 class GalleryWebHandler(
     private val context: Context,
     private val captureHistoryStore: CaptureHistoryStore,
 ) {
 
-    private val galleryAdapter by lazy { WebJson.moshi.adapter(GalleryResponseDto::class.java) }
-    private val batchDeleteRequestAdapter by lazy { WebJson.moshi.adapter(BatchDeleteRequest::class.java) }
-    private val batchDeleteResponseAdapter by lazy { WebJson.moshi.adapter(BatchDeleteResponse::class.java) }
-    private val successAdapter by lazy { WebJson.moshi.adapter(SuccessResponse::class.java) }
+    private val galleryAdapter by lazy { AppJson.moshi.adapter(GalleryResponseDto::class.java) }
+    private val batchDeleteRequestAdapter by lazy { AppJson.moshi.adapter(BatchDeleteRequest::class.java) }
+    private val batchDeleteResponseAdapter by lazy { AppJson.moshi.adapter(BatchDeleteResponse::class.java) }
+    private val successAdapter by lazy { AppJson.moshi.adapter(SuccessResponse::class.java) }
 
     fun getGallery(type: String?, page: Int = 0, pageSize: Int = 0): String {
-        captureHistoryStore.refreshFromMediaStore()
-        val history = captureHistoryStore.history.value
-        val filtered = when (type?.uppercase()) {
-            "PHOTO" -> history.filter { it.type == CaptureType.PHOTO }
-            "VIDEO" -> history.filter { it.type == CaptureType.VIDEO }
-            else -> history
-        }
+        val galleryPage = GalleryPage.of(captureHistoryStore.history.value, type, page, pageSize)
 
-        val effectivePageSize = if (pageSize > 0) pageSize else DEFAULT_GALLERY_PAGE_SIZE
-        val hasMore = if (effectivePageSize > 0) {
-            page * effectivePageSize + effectivePageSize < filtered.size
-        } else false
-
-        val paged = if (effectivePageSize > 0 && page >= 0) {
-            filtered.drop(page * effectivePageSize).take(effectivePageSize)
-        } else {
-            filtered
-        }
-
-        val items = paged.map { entry ->
+        val items = galleryPage.items.map { entry ->
             val isVideo = entry.type == CaptureType.VIDEO
             GalleryItemDto(
                 id = entry.id,
@@ -62,7 +50,13 @@ class GalleryWebHandler(
             )
         }
         return galleryAdapter.toJson(
-            GalleryResponseDto(items = items, total = filtered.size, page = page, pageSize = effectivePageSize, hasMore = hasMore)
+            GalleryResponseDto(
+                items = items,
+                total = galleryPage.total,
+                page = page,
+                pageSize = galleryPage.pageSize,
+                hasMore = galleryPage.hasMore,
+            )
         )
     }
 
@@ -80,7 +74,7 @@ class GalleryWebHandler(
     fun batchDelete(body: String): String {
         val request = batchDeleteRequestAdapter.fromJson(body)
             ?: throw IllegalArgumentException("Invalid batch delete JSON")
-        val deleted = captureHistoryStore.deleteMediaBatch(request.ids)
+        val deleted = captureHistoryStore.deleteAll(request.ids)
         return batchDeleteResponseAdapter.toJson(BatchDeleteResponse(deleted = deleted))
     }
 
@@ -93,10 +87,7 @@ class GalleryWebHandler(
     fun resolveMediaFile(id: String): ResolvedMedia? {
         val history = captureHistoryStore.history.value
         val entry = history.find { it.id == id } ?: return null
-        val mimeType = when (entry.type) {
-            CaptureType.PHOTO -> "image/jpeg"
-            CaptureType.VIDEO -> "video/mp4"
-        }
+        val mimeType = CaptureMediaFormat.mimeFor(entry.type)
         return try {
             val uri = Uri.parse(entry.filePath)
             val inputStream = context.contentResolver.openInputStream(uri)
@@ -129,7 +120,7 @@ class GalleryWebHandler(
             val retriever = MediaMetadataRetriever()
             try {
                 val uri = Uri.parse(entry.filePath)
-                if (entry.filePath.startsWith("content://")) {
+                if (CaptureMediaFormat.isContentUri(entry.filePath)) {
                     retriever.setDataSource(context, uri)
                 } else {
                     val file = File(entry.filePath)
@@ -162,6 +153,5 @@ class GalleryWebHandler(
 
     companion object {
         private const val TAG = "GalleryWebHandler"
-        private const val DEFAULT_GALLERY_PAGE_SIZE = 50
     }
 }

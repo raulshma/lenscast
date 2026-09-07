@@ -1,15 +1,12 @@
 package com.raulshma.lenscast.streaming.web
 
+import com.raulshma.lenscast.core.AppJson
+import com.raulshma.lenscast.core.parseEnum
+import com.raulshma.lenscast.core.parseEnumOrNull
 import com.raulshma.lenscast.camera.model.CameraSettings
-import com.raulshma.lenscast.camera.model.FocusMode
-import com.raulshma.lenscast.camera.model.HdrMode
 import com.raulshma.lenscast.camera.model.MaskingType
 import com.raulshma.lenscast.camera.model.MaskingZone
-import com.raulshma.lenscast.camera.model.NightVisionMode
-import com.raulshma.lenscast.camera.model.OverlayPosition
 import com.raulshma.lenscast.camera.model.OverlaySettings
-import com.raulshma.lenscast.camera.model.Resolution
-import com.raulshma.lenscast.camera.model.WhiteBalance
 import com.raulshma.lenscast.data.SettingsDataStore
 import com.raulshma.lenscast.streaming.model.CameraSettingsDto
 import com.raulshma.lenscast.streaming.model.MaskingZoneDto
@@ -26,9 +23,9 @@ import com.raulshma.lenscast.streaming.rtsp.RtspInputFormat
  */
 class SettingsWebHandler(private val settingsDataStore: SettingsDataStore) {
 
-    private val responseAdapter by lazy { WebJson.moshi.adapter(SettingsResponseDto::class.java) }
-    private val updateAdapter by lazy { WebJson.moshi.adapter(SettingsUpdateRequestDto::class.java) }
-    private val successAdapter by lazy { WebJson.moshi.adapter(SuccessResponse::class.java) }
+    private val responseAdapter by lazy { AppJson.moshi.adapter(SettingsResponseDto::class.java) }
+    private val updateAdapter by lazy { AppJson.moshi.adapter(SettingsUpdateRequestDto::class.java) }
+    private val successAdapter by lazy { AppJson.moshi.adapter(SuccessResponse::class.java) }
 
     suspend fun get(): String {
         val store = settingsDataStore
@@ -86,50 +83,40 @@ class SettingsWebHandler(private val settingsDataStore: SettingsDataStore) {
                 ),
                 iso = cam.iso?.let { if (it > 0) it else null },
                 exposureTime = cam.exposureTime?.let { if (it > 0) it else null },
-                focusMode = runCatching { FocusMode.valueOf(cam.focusMode) }.getOrDefault(current.focusMode),
+                focusMode = parseEnum(cam.focusMode, current.focusMode),
                 focusDistance = cam.focusDistance?.coerceIn(0f, CameraSettings.FOCUS_DISTANCE_MAX),
-                whiteBalance = runCatching { WhiteBalance.valueOf(cam.whiteBalance) }.getOrDefault(current.whiteBalance),
+                whiteBalance = parseEnum(cam.whiteBalance, current.whiteBalance),
                 colorTemperature = cam.colorTemperature?.coerceIn(
                     CameraSettings.COLOR_TEMPERATURE_MIN,
                     CameraSettings.COLOR_TEMPERATURE_MAX,
                 ),
                 zoomRatio = cam.zoomRatio.toFloat().coerceIn(CameraSettings.ZOOM_RATIO_MIN, CameraSettings.ZOOM_RATIO_MAX),
                 frameRate = cam.frameRate.coerceIn(CameraSettings.FRAME_RATE_MIN, CameraSettings.FRAME_RATE_MAX),
-                resolution = runCatching { Resolution.valueOf(cam.resolution) }.getOrDefault(current.resolution),
+                resolution = parseEnum(cam.resolution, current.resolution),
                 stabilization = cam.stabilization,
-                hdrMode = runCatching { HdrMode.valueOf(cam.hdrMode) }.getOrDefault(current.hdrMode),
+                hdrMode = parseEnum(cam.hdrMode, current.hdrMode),
                 sceneMode = cam.sceneMode,
-                nightVisionMode = runCatching { NightVisionMode.valueOf(cam.nightVisionMode) }.getOrDefault(current.nightVisionMode),
+                nightVisionMode = parseEnum(cam.nightVisionMode, current.nightVisionMode),
             )
             settingsDataStore.saveSettings(newSettings)
         }
 
         request.streaming?.let { stream ->
-            if (stream.port in 1024..65535) {
-                settingsDataStore.saveStreamingPort(stream.port)
-            }
+            // Out-of-range numeric values are the Settings Store's clamp
+            // policy, not this handler's: every saver coerces on save.
+            settingsDataStore.saveStreamingPort(stream.port)
             settingsDataStore.saveWebStreamingEnabled(stream.webStreamingEnabled)
-            if (stream.jpegQuality > 0) {
-                settingsDataStore.saveJpegQuality(stream.jpegQuality)
-            }
+            settingsDataStore.saveJpegQuality(stream.jpegQuality)
             settingsDataStore.saveShowPreview(stream.showPreview)
             settingsDataStore.saveStreamAudioEnabled(stream.streamAudioEnabled)
-            if (stream.streamAudioBitrateKbps > 0) {
-                settingsDataStore.saveStreamAudioBitrateKbps(stream.streamAudioBitrateKbps)
-            }
-            if (stream.streamAudioChannels > 0) {
-                settingsDataStore.saveStreamAudioChannels(stream.streamAudioChannels)
-            }
+            settingsDataStore.saveStreamAudioBitrateKbps(stream.streamAudioBitrateKbps)
+            settingsDataStore.saveStreamAudioChannels(stream.streamAudioChannels)
             settingsDataStore.saveStreamAudioEchoCancellation(stream.streamAudioEchoCancellation)
             settingsDataStore.saveRecordingAudioEnabled(stream.recordingAudioEnabled)
             settingsDataStore.saveRtspEnabled(stream.rtspEnabled)
-            if (stream.rtspPort in 1024..65535) {
-                settingsDataStore.saveRtspPort(stream.rtspPort)
-            }
-            if (stream.rtspInputFormat.isNotBlank()) {
-                runCatching { RtspInputFormat.valueOf(stream.rtspInputFormat) }.getOrNull()
-                    ?.let { settingsDataStore.saveRtspInputFormat(it) }
-            }
+            settingsDataStore.saveRtspPort(stream.rtspPort)
+            parseEnumOrNull<RtspInputFormat>(stream.rtspInputFormat.takeIf { it.isNotBlank() })
+                ?.let { settingsDataStore.saveRtspInputFormat(it) }
             settingsDataStore.saveAdaptiveBitrateEnabled(stream.adaptiveBitrateEnabled)
             settingsDataStore.saveOverlaySettings(toOverlaySettings(stream, settingsDataStore.overlaySettings.value))
             settingsDataStore.saveWatchdogEnabled(stream.watchdogEnabled)
@@ -171,6 +158,8 @@ class SettingsWebHandler(private val settingsDataStore: SettingsDataStore) {
     )
 
     private fun toOverlaySettings(stream: StreamingSettingsDto, current: OverlaySettings): OverlaySettings {
+        // Pure DTO mapping only — numeric clamping is the Settings Store's
+        // (OverlaySettings.normalized runs on save).
         return OverlaySettings(
             enabled = stream.overlayEnabled,
             showTimestamp = stream.showTimestamp,
@@ -180,25 +169,25 @@ class SettingsWebHandler(private val settingsDataStore: SettingsDataStore) {
             showStatus = stream.showStatus,
             showCustomText = stream.showCustomText,
             customText = stream.customText,
-            position = runCatching { OverlayPosition.valueOf(stream.overlayPosition) }.getOrDefault(current.position),
-            fontSize = stream.overlayFontSize.coerceIn(8, 120),
+            position = parseEnum(stream.overlayPosition, current.position),
+            fontSize = stream.overlayFontSize,
             textColor = stream.overlayTextColor.takeIf { it.isNotBlank() } ?: current.textColor,
             backgroundColor = stream.overlayBackgroundColor.takeIf { it.isNotBlank() } ?: current.backgroundColor,
-            padding = stream.overlayPadding.coerceIn(0, 48),
-            lineHeight = stream.overlayLineHeight.coerceIn(0, 32),
+            padding = stream.overlayPadding,
+            lineHeight = stream.overlayLineHeight,
             maskingEnabled = stream.maskingEnabled,
             maskingZones = stream.maskingZones.map { dto ->
                 MaskingZone(
                     id = dto.id.takeIf { it.isNotBlank() } ?: java.util.UUID.randomUUID().toString(),
                     label = dto.label,
                     enabled = dto.enabled,
-                    type = runCatching { MaskingType.valueOf(dto.type) }.getOrDefault(MaskingType.BLACKOUT),
-                    x = dto.x.toFloat().coerceIn(0f, 1f),
-                    y = dto.y.toFloat().coerceIn(0f, 1f),
-                    width = dto.width.toFloat().coerceIn(0.01f, 1f),
-                    height = dto.height.toFloat().coerceIn(0.01f, 1f),
-                    pixelateSize = dto.pixelateSize.coerceIn(4, 64),
-                    blurRadius = dto.blurRadius.toFloat().coerceIn(1f, 50f),
+                    type = parseEnum(dto.type, MaskingType.BLACKOUT),
+                    x = dto.x.toFloat(),
+                    y = dto.y.toFloat(),
+                    width = dto.width.toFloat(),
+                    height = dto.height.toFloat(),
+                    pixelateSize = dto.pixelateSize,
+                    blurRadius = dto.blurRadius.toFloat(),
                 )
             },
         )

@@ -1,5 +1,6 @@
 package com.raulshma.lenscast.streaming.web
 
+import com.raulshma.lenscast.core.AppJson
 import com.raulshma.lenscast.streaming.StreamingManager
 import com.raulshma.lenscast.streaming.StreamingSession
 import com.raulshma.lenscast.streaming.model.StreamActionResponse
@@ -10,7 +11,7 @@ class StreamWebHandler(
     private val streamingSession: StreamingSession,
 ) {
 
-    private val actionAdapter by lazy { WebJson.moshi.adapter(StreamActionResponse::class.java) }
+    private val actionAdapter by lazy { AppJson.moshi.adapter(StreamActionResponse::class.java) }
 
     suspend fun startAll(): String {
         val success = streamingManager.startStreaming()

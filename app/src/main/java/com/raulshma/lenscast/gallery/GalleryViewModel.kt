@@ -91,7 +91,7 @@ class GalleryViewModel(
         if (ids.isEmpty()) return
         viewModelScope.launch {
             _batchDeleting.value = true
-            captureHistoryStore.deleteMediaBatch(ids)
+            captureHistoryStore.deleteAll(ids)
             _selectedIds.value = emptySet()
             _batchDeleting.value = false
         }

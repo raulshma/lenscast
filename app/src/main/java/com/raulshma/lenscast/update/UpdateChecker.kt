@@ -6,8 +6,7 @@ import android.util.Log
 import com.raulshma.lenscast.update.model.GitHubAsset
 import com.raulshma.lenscast.update.model.GitHubRelease
 import com.raulshma.lenscast.update.model.UpdateCheckResult
-import com.squareup.moshi.Moshi
-import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
+import com.raulshma.lenscast.core.AppJson
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.net.HttpURLConnection
@@ -23,14 +22,8 @@ class UpdateChecker(private val context: Context) {
         private const val READ_TIMEOUT_MS = 15_000
     }
 
-    private val moshi by lazy {
-        Moshi.Builder()
-            .addLast(KotlinJsonAdapterFactory())
-            .build()
-    }
-
     private val releaseAdapter by lazy {
-        moshi.adapter(GitHubRelease::class.java)
+        AppJson.moshi.adapter(GitHubRelease::class.java)
     }
 
     suspend fun checkForUpdate(): UpdateCheckResult = withContext(Dispatchers.IO) {
@@ -48,7 +41,7 @@ class UpdateChecker(private val context: Context) {
             Log.d(TAG, "Response code: $responseCode")
             if (responseCode == 403) {
                 Log.w(TAG, "GitHub API rate limited")
-                return@withContext UpdateCheckResult.Error("GitHub API rate limited. Try again later.")
+                return@withContext UpdateCheckResult.RateLimited
             }
             if (responseCode != 200) {
                 val errorBody = try {

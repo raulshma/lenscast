@@ -19,7 +19,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import java.io.ByteArrayOutputStream
 import java.util.concurrent.atomic.AtomicInteger
-import java.util.concurrent.atomic.AtomicLong
 
 /** One camera frame as delivered by the analysis pipeline. */
 class YuvFrame(
@@ -62,13 +61,19 @@ class FramePipeline(
     private val _processedFrames = MutableStateFlow(0)
     val processedFrames: StateFlow<Int> = _processedFrames
 
-    private val lastFrameTimeMs = AtomicLong(0L)
-
     @Volatile
-    private var minFrameIntervalMs = 1000L / StreamDefaults.STREAM_FPS
+    private var minFrameIntervalMs = FrameTiming.frameIntervalMs(StreamDefaults.STREAM_FPS)
 
     @Volatile
     private var jpegQuality = StreamDefaults.JPEG_QUALITY
+
+    // The pipeline's throttle accepts at exactly the resolved interval and
+    // stamps the reference time only for accepted frames (bursts measure
+    // against the last frame that actually flowed) — hence the 1.0 tolerance
+    // and clock-on-accept defaults.
+    private val throttle = FrameThrottle(
+        intervalMs = { qualityPolicy.resolveInterval(minFrameIntervalMs) },
+    )
 
     private val maxBufferSize = 4 * 1024 * 1024
     private var reusableBuffer = ByteArrayOutputStream(256 * 1024)
@@ -84,7 +89,7 @@ class FramePipeline(
     }
 
     fun setFrameRate(fps: Int) {
-        minFrameIntervalMs = if (fps > 0) 1000L / fps else 1000L / StreamDefaults.STREAM_FPS
+        minFrameIntervalMs = FrameTiming.frameIntervalMs(fps)
     }
 
     fun setJpegQuality(quality: Int) {
@@ -101,16 +106,10 @@ class FramePipeline(
         clientCount: Int,
     ): Boolean {
         val now = System.currentTimeMillis()
-        val elapsed = now - lastFrameTimeMs.get()
-
-        val interval = qualityPolicy.resolveInterval(minFrameIntervalMs)
-
-        if (elapsed < interval) {
+        if (!throttle.accept(now)) {
             droppedFrameCount.incrementAndGet()
             return false
         }
-
-        lastFrameTimeMs.set(now)
 
         // Quality resolves only for frames that pass the throttle: the
         // adaptive module's driven state must reflect flowing frames alone.

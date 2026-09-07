@@ -17,12 +17,14 @@ import com.raulshma.lenscast.camera.model.CameraState
 import com.raulshma.lenscast.camera.model.FocusMode
 import com.raulshma.lenscast.camera.model.HdrMode
 import com.raulshma.lenscast.camera.model.NightVisionMode
+import com.raulshma.lenscast.camera.model.QuickSettingType
 import com.raulshma.lenscast.camera.model.Resolution
 import com.raulshma.lenscast.camera.model.StreamStatus
 import com.raulshma.lenscast.camera.model.StreamStatusSnapshot
 import com.raulshma.lenscast.camera.model.WhiteBalance
 import com.raulshma.lenscast.core.ConnectivityMonitor
 import com.raulshma.lenscast.core.MicAccess
+import com.raulshma.lenscast.core.MicStartDecision
 import com.raulshma.lenscast.core.NetworkQualityMonitor
 import com.raulshma.lenscast.core.StreamWatchdog
 import com.raulshma.lenscast.core.ThermalMonitor
@@ -84,8 +86,6 @@ class CameraViewModel(
     val availableIsoRange: StateFlow<ClosedRange<Int>> = cameraService.availableIsoRange
     val availableZoomRange: StateFlow<ClosedFloatingPointRange<Float>> = cameraService.availableZoomRange
     val availableExposureRange: StateFlow<ClosedRange<Int>> = cameraService.availableExposureRange
-
-    private var currentPreviewView: PreviewView? = null
 
     // Recording truth lives in the app-scoped RecordingController; this
     // ViewModel only derives display state from it.
@@ -252,7 +252,6 @@ class CameraViewModel(
     }
 
     fun startPreview(previewView: PreviewView, lifecycleOwner: androidx.lifecycle.LifecycleOwner) {
-        currentPreviewView = previewView
         cameraService.setLifecycleOwner(lifecycleOwner)
         cameraService.startPreview(previewView)
         viewModelScope.launch {
@@ -261,17 +260,21 @@ class CameraViewModel(
     }
 
     fun stopPreview() {
-        currentPreviewView = null
         cameraService.stopPreview()
     }
 
+    // The service owns its own preview view; switching works headless too.
     fun switchCamera() {
-        val pv = currentPreviewView ?: return
-        cameraService.switchCamera(pv)
+        cameraService.switchCamera()
     }
 
     fun selectLens(index: Int) {
         cameraService.selectLens(index)
+    }
+
+    /** Normalized (0..1) preview tap coordinates; user-initiated metering. */
+    fun tapToFocus(x: Float, y: Float) {
+        cameraService.tapToFocus(x, y)
     }
 
     fun updateExposure(value: Int) {
@@ -314,6 +317,26 @@ class CameraViewModel(
         updateSettings { it.copy(nightVisionMode = NightVisionMode.valueOf(mode)) }
     }
 
+    /**
+     * The quick-setting sheet's single write entry: dispatches the typed
+     * editor value onto the per-field update path above (one
+     * CameraSettingsEditor, apply-then-persist).
+     */
+    fun updateQuickSetting(type: QuickSettingType, value: Any) {
+        when (type) {
+            QuickSettingType.EXPOSURE -> updateExposure((value as Number).toInt())
+            QuickSettingType.ISO -> updateIso(value as String)
+            QuickSettingType.WHITE_BALANCE -> updateWhiteBalance(value as String)
+            QuickSettingType.FOCUS -> updateFocusMode(value as String)
+            QuickSettingType.ZOOM -> updateZoom((value as Number).toFloat())
+            QuickSettingType.HDR -> updateHdrMode(value as String)
+            QuickSettingType.RESOLUTION -> updateResolution(value as String)
+            QuickSettingType.FRAME_RATE -> updateFrameRate((value as Number).toInt())
+            QuickSettingType.STABILIZATION -> updateStabilization(value as Boolean)
+            QuickSettingType.NIGHT_VISION -> updateNightVisionMode(value as String)
+        }
+    }
+
     fun togglePreview() {
         viewModelScope.launch {
             settingsDataStore.saveShowPreview(!showPreview.value)
@@ -347,12 +370,14 @@ class CameraViewModel(
         }
 
         refreshAudioPermission()
-        if (streamAudioEnabled.value && !_hasAudioPermission.value) {
-            Toast.makeText(
-                context,
-                MicAccess.degradedMessage("Streaming video"),
-                Toast.LENGTH_SHORT
-            ).show()
+        when (val decision = MicAccess.startDecision(
+            featureEnabled = streamAudioEnabled.value,
+            granted = _hasAudioPermission.value,
+            featureLabel = "Streaming video",
+        )) {
+            is MicStartDecision.Degrade ->
+                Toast.makeText(context, decision.warning, Toast.LENGTH_SHORT).show()
+            MicStartDecision.Proceed -> {}
         }
 
         val success = streamingManager.startWebStreaming()
@@ -461,12 +486,14 @@ class CameraViewModel(
             recordingController.stop()
         } else {
             refreshAudioPermission()
-            if (recordingAudioEnabled.value && !_hasAudioPermission.value) {
-                Toast.makeText(
-                    context,
-                    MicAccess.degradedMessage("Recording video"),
-                    Toast.LENGTH_SHORT
-                ).show()
+            when (val decision = MicAccess.startDecision(
+                featureEnabled = recordingAudioEnabled.value,
+                granted = _hasAudioPermission.value,
+                featureLabel = "Recording video",
+            )) {
+                is MicStartDecision.Degrade ->
+                    Toast.makeText(context, decision.warning, Toast.LENGTH_SHORT).show()
+                MicStartDecision.Proceed -> {}
             }
             recordingController.start(
                 com.raulshma.lenscast.capture.model.RecordingConfig(

@@ -17,6 +17,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import java.util.concurrent.atomic.AtomicInteger
+import com.raulshma.lenscast.core.WatchdogPolicy.RecoveryTier
 
 /**
  * StreamWatchdog — A coroutine-based health monitor that detects streaming failures
@@ -141,11 +142,7 @@ class StreamWatchdog(
                         break
                     }
 
-                    val recoveryTier = when {
-                        failures <= 2 -> RecoveryTier.SOFT
-                        failures <= 4 -> RecoveryTier.MEDIUM
-                        else -> RecoveryTier.HARD
-                    }
+                    val recoveryTier = WatchdogPolicy.tierFor(failures)
 
                     updateState(WatchdogStatus.RECOVERING)
                     val backoffMs = calculateBackoff(failures)
@@ -199,45 +196,33 @@ class StreamWatchdog(
 
     /**
      * Evaluates stream health. Returns a failure reason string if unhealthy, null if OK.
+     * The verdict and messages come from [WatchdogPolicy]; this method owns the
+     * live input collection and the frame-tracking side effects.
      */
     private fun checkStreamHealth(): String? {
-        // 1. Camera state check
         val cameraState = cameraService.cameraState.value
-        if (cameraState is CameraState.Error) {
-            return "Camera error: ${cameraState.message}"
+        val snapshot = WatchdogPolicy.HealthSnapshot(
+            cameraError = cameraState is CameraState.Error,
+            cameraErrorMessage = (cameraState as? CameraState.Error)?.message,
+            wasStreamingActive = wasStreamingActive,
+            serverRunning = streamingManager.isServerRunning.value,
+            liveStreaming = streamingManager.isLiveStreaming(),
+            clientCount = streamingManager.clientCount.value,
+            processedFrames = streamingManager.processedFrames.value,
+            lastProcessedFrameCount = lastProcessedFrameCount,
+            lastFrameCheckTimeMs = lastFrameCheckTimeMs,
+            nowMs = System.currentTimeMillis(),
+        )
+
+        val reason = WatchdogPolicy.evaluate(snapshot)
+        if (reason != null) {
+            return WatchdogPolicy.failureMessage(reason, snapshot)
         }
 
-        // 2. Streaming should be active but server isn't running
-        if (wasStreamingActive && !streamingManager.isServerRunning.value) {
-            return "Streaming server stopped unexpectedly"
+        WatchdogPolicy.updatedTracking(snapshot)?.let { tracking ->
+            lastProcessedFrameCount = tracking.processedFrameCount
+            lastFrameCheckTimeMs = tracking.frameCheckTimeMs
         }
-
-        // 3. Stream was active but is no longer live
-        if (wasStreamingActive && !streamingManager.isLiveStreaming()) {
-            return "Stream stopped unexpectedly"
-        }
-
-        // 4. Frame stall detection — only when clients are connected
-        if (streamingManager.clientCount.value > 0) {
-            val currentFrameCount = streamingManager.processedFrames.value
-            val now = System.currentTimeMillis()
-            val elapsed = now - lastFrameCheckTimeMs
-
-            if (elapsed >= FRAME_STALL_THRESHOLD_MS && currentFrameCount == lastProcessedFrameCount) {
-                return "Frame delivery stalled (no frames for ${elapsed / 1000}s)"
-            }
-
-            // Update tracking if frames are flowing
-            if (currentFrameCount != lastProcessedFrameCount) {
-                lastProcessedFrameCount = currentFrameCount
-                lastFrameCheckTimeMs = now
-            }
-        } else {
-            // No clients — reset frame tracking to avoid false positives once clients reconnect
-            lastProcessedFrameCount = streamingManager.processedFrames.value
-            lastFrameCheckTimeMs = System.currentTimeMillis()
-        }
-
         return null
     }
 
@@ -267,9 +252,9 @@ class StreamWatchdog(
         }
 
         // Wait a moment and check if frames start flowing again
-        delay(RECOVERY_VERIFICATION_DELAY_MS)
+        delay(WatchdogPolicy.RECOVERY_VERIFICATION_DELAY_MS)
         val framesBeforeWait = streamingManager.processedFrames.value
-        delay(RECOVERY_VERIFICATION_WINDOW_MS)
+        delay(WatchdogPolicy.RECOVERY_VERIFICATION_WINDOW_MS)
         val framesAfterWait = streamingManager.processedFrames.value
 
         val success = framesAfterWait > framesBeforeWait ||
@@ -315,7 +300,7 @@ class StreamWatchdog(
         }
 
         // Verify
-        delay(RECOVERY_VERIFICATION_DELAY_MS)
+        delay(WatchdogPolicy.RECOVERY_VERIFICATION_DELAY_MS)
         val isLive = streamingManager.isLiveStreaming()
 
         if (isLive) {
@@ -368,7 +353,7 @@ class StreamWatchdog(
         }
 
         // Verify with a longer window for hard recovery
-        delay(RECOVERY_VERIFICATION_DELAY_MS * 2)
+        delay(WatchdogPolicy.HARD_VERIFICATION_DELAY_MS)
         val isLive = streamingManager.isLiveStreaming()
         val cameraReady = cameraService.cameraState.value is CameraState.Ready
 
@@ -418,23 +403,14 @@ class StreamWatchdog(
         COOLDOWN,      // Waiting before next retry attempt
     }
 
-    private enum class RecoveryTier {
-        SOFT,   // Rebind use cases
-        MEDIUM, // Restart server + rebind
-        HARD,   // Full re-init
-    }
-
     companion object {
         private const val TAG = "StreamWatchdog"
 
         const val MIN_CHECK_INTERVAL_SECONDS = StreamDefaults.WATCHDOG_CHECK_INTERVAL_MIN_SECONDS
         const val MAX_CHECK_INTERVAL_SECONDS = StreamDefaults.WATCHDOG_CHECK_INTERVAL_MAX_SECONDS
 
-        private const val FRAME_STALL_THRESHOLD_MS = 15_000L
         private const val BASE_BACKOFF_MS = 2_000L
         private const val MAX_BACKOFF_MS = 60_000L
-        private const val RECOVERY_VERIFICATION_DELAY_MS = 2_000L
-        private const val RECOVERY_VERIFICATION_WINDOW_MS = 3_000L
 
         /** Pure exponential backoff with a 6-attempt doubling cap — exposed for tests. */
         fun backoffMs(attempt: Int): Long {

@@ -15,7 +15,9 @@ import com.raulshma.lenscast.camera.model.Resolution
 import com.raulshma.lenscast.camera.model.WhiteBalance
 import com.raulshma.lenscast.core.PowerManager
 import com.raulshma.lenscast.core.StreamDefaults
+import com.raulshma.lenscast.core.parseEnum
 import com.raulshma.lenscast.data.SettingsDataStore
+import com.raulshma.lenscast.core.StreamAuthCrypto
 import com.raulshma.lenscast.data.StreamAuthSettings
 import com.raulshma.lenscast.streaming.rtsp.RtspInputFormat
 import kotlinx.coroutines.flow.StateFlow
@@ -204,7 +206,7 @@ class SettingsViewModel(
     }
 
     fun updateRtspInputFormat(name: String) {
-        val format = runCatching { RtspInputFormat.valueOf(name) }.getOrDefault(RtspInputFormat.AUTO)
+        val format = parseEnum(name, RtspInputFormat.AUTO)
         viewModelScope.launch {
             settingsDataStore.saveRtspInputFormat(format)
         }
@@ -231,9 +233,9 @@ class SettingsViewModel(
     }
 
     fun updateAuthPassword(password: String) {
-        val hash = StreamAuthSettings.hashPassword(password)
+        val hash = StreamAuthCrypto.hashPassword(password)
         val username = authSettings.value.username
-        val digestHa1 = StreamAuthSettings.computeRtspDigestHa1(username, password)
+        val digestHa1 = StreamAuthCrypto.computeRtspDigestHa1(username, password)
         persistAuth(authSettings.value.copy(passwordHash = hash, rtspDigestHa1 = digestHa1))
     }
 

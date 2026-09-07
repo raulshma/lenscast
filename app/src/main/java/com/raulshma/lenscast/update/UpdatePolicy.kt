@@ -1,8 +1,22 @@
 package com.raulshma.lenscast.update
 
+import com.raulshma.lenscast.update.model.UpdateCheckResult
+
 /**
- * Pure update-check policy: version comparison, auto-check gating, and
- * dismissal checks. No Android dependencies — unit-tested on the JVM.
+ * What a caller should do after a completed update check: whether to surface
+ * the result to the user and whether the check counts (advancing the 24h
+ * auto-check clock). One decision for both the startup auto-check
+ * (MainApplication) and the manual check (UpdateViewModel).
+ */
+data class UpdateDecision(
+    val notify: Boolean,
+    val saveLastCheck: Boolean,
+)
+
+/**
+ * Pure update-check policy: version comparison, auto-check gating,
+ * post-check decisions, and dismissal checks. No Android dependencies —
+ * unit-tested on the JVM.
  *
  * Single owner of these decisions; [UpdateChecker], `MainApplication`, and
  * [UpdateViewModel] delegate instead of hand-rolling `trimStart('v')` and
@@ -60,4 +74,31 @@ object UpdatePolicy {
         if (dismissedVersion.isNullOrBlank()) return true
         return normalize(dismissedVersion) != normalize(remoteTag)
     }
+
+    /**
+     * The one post-check policy, encoding exactly what both callers did:
+     * a found update notifies unless the user dismissed that version (the
+     * check still counts), an up-to-date result is silent but counts, and
+     * RateLimited/Error are silent and do not count (the next check may run
+     * again before 24h).
+     */
+    fun shouldNotifyAfterCheck(result: UpdateCheckResult, dismissedVersion: String?): UpdateDecision =
+        when (result) {
+            is UpdateCheckResult.UpdateAvailable -> UpdateDecision(
+                notify = shouldNotify(dismissedVersion, result.release.tagName),
+                saveLastCheck = true,
+            )
+            is UpdateCheckResult.UpToDate -> UpdateDecision(
+                notify = false,
+                saveLastCheck = true,
+            )
+            is UpdateCheckResult.RateLimited -> UpdateDecision(
+                notify = false,
+                saveLastCheck = false,
+            )
+            is UpdateCheckResult.Error -> UpdateDecision(
+                notify = false,
+                saveLastCheck = false,
+            )
+        }
 }

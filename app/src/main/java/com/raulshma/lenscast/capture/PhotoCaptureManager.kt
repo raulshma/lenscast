@@ -9,6 +9,7 @@ import android.util.Log
 import androidx.camera.core.ImageCapture
 import androidx.camera.core.ImageCaptureException
 import androidx.core.content.ContextCompat
+import com.raulshma.lenscast.capture.model.CaptureMediaFormat
 import com.raulshma.lenscast.data.CaptureHistoryStore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
@@ -16,9 +17,7 @@ import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import java.io.File
-import java.text.SimpleDateFormat
 import java.util.Date
-import java.util.Locale
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
@@ -190,10 +189,10 @@ class PhotoCaptureManager(
             MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
             ContentValues().apply {
                 put(MediaStore.MediaColumns.DISPLAY_NAME, fileName)
-                put(MediaStore.MediaColumns.MIME_TYPE, "image/jpeg")
+                put(MediaStore.MediaColumns.MIME_TYPE, CaptureMediaFormat.MIME_PHOTO)
                 put(
                     MediaStore.MediaColumns.RELATIVE_PATH,
-                    Environment.DIRECTORY_PICTURES + "/$PHOTO_DIR_NAME",
+                    Environment.DIRECTORY_PICTURES + "/" + CaptureMediaFormat.PHOTO_DIR_NAME,
                 )
             },
         ).build()
@@ -227,7 +226,7 @@ class PhotoCaptureManager(
     private fun legacyFileDestination(fileName: String): PhotoDestination {
         val dir = File(
             Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES),
-            PHOTO_DIR_NAME,
+            CaptureMediaFormat.PHOTO_DIR_NAME,
         )
         if (!dir.exists()) dir.mkdirs()
         return FileDestination(File(dir, fileName))
@@ -244,7 +243,7 @@ class PhotoCaptureManager(
 
     private fun loadCapturedBytes(filePath: String): ByteArray? {
         return try {
-            if (filePath.startsWith("content://")) {
+            if (CaptureMediaFormat.isContentUri(filePath)) {
                 val uri = android.net.Uri.parse(filePath)
                 context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
             } else {
@@ -260,10 +259,7 @@ class PhotoCaptureManager(
         private const val TAG = "PhotoCaptureManager"
         private const val ACQUIRE_TIMEOUT_MS = 2_000L
         private const val SNAPSHOT_TIMEOUT_MS = 5_000L
-        private const val PHOTO_DIR_NAME = "LensCast"
 
-        private val DATE_FORMAT = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US)
-
-        internal fun generateFileName(): String = "IMG_${DATE_FORMAT.format(Date())}.jpg"
+        internal fun generateFileName(): String = MediaFileNaming.photoName(Date())
     }
 }

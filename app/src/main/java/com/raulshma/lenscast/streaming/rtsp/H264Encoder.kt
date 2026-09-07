@@ -6,6 +6,7 @@ import android.media.MediaFormat
 import android.os.Build
 import android.util.Log
 import com.raulshma.lenscast.core.StreamDefaults
+import com.raulshma.lenscast.core.YuvConverter
 import java.nio.ByteBuffer
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
@@ -62,9 +63,15 @@ class H264Encoder {
         return try {
             val codec = MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_VIDEO_AVC)
             val capabilities = codec.codecInfo.getCapabilitiesForType(MediaFormat.MIMETYPE_VIDEO_AVC)
-            val selected = chooseInputColorFormat(capabilities, preferredInputFormat)
-            inputColorFormat = selected.first
-            activeInputFormat = selected.second
+            val selected = EncoderFormatPolicy.choose(capabilities.colorFormats.toSet(), preferredInputFormat)
+            inputColorFormat = selected.colorFormat
+            activeInputFormat = selected.effectiveInputFormat
+            if (selected.fellBackToAuto) {
+                Log.w(
+                    TAG,
+                    "Requested input format $preferredInputFormat is not supported by codec. Falling back to ${selected.effectiveInputFormat}."
+                )
+            }
 
             val format = MediaFormat.createVideoFormat(
                 MediaFormat.MIMETYPE_VIDEO_AVC, width, height
@@ -336,116 +343,13 @@ class H264Encoder {
         return H264NalParser.stripStartCode(bytes)
     }
 
-    private fun chooseInputColorFormat(
-        capabilities: MediaCodecInfo.CodecCapabilities,
-        requestedInputFormat: RtspInputFormat,
-    ): Pair<Int, RtspInputFormat> {
-        val supported = capabilities.colorFormats.toSet()
-        fun autoChoice(): Pair<Int, RtspInputFormat>? {
-            val preferred = listOf(
-                MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420SemiPlanar,
-                MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420Planar,
-                MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420Flexible,
-                // Keep packed semi-planar as last resort. On some devices this format is
-                // ambiguously implemented and may behave like NV12/NV21 inconsistently.
-                MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420PackedSemiPlanar,
-            )
-            val color = preferred.firstOrNull { supported.contains(it) } ?: return null
-            return color to mapColorFormatToInputFormat(color)
-        }
-
-        val requested = when (requestedInputFormat) {
-            RtspInputFormat.AUTO -> autoChoice()
-            RtspInputFormat.NV21 -> {
-                val color = MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420PackedSemiPlanar
-                if (supported.contains(color)) color to RtspInputFormat.NV21 else null
-            }
-            RtspInputFormat.NV12 -> {
-                val color = MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420SemiPlanar
-                if (supported.contains(color)) color to RtspInputFormat.NV12 else null
-            }
-            RtspInputFormat.I420 -> {
-                val planar = MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420Planar
-                val flexible = MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420Flexible
-                when {
-                    supported.contains(planar) -> planar to RtspInputFormat.I420
-                    supported.contains(flexible) -> flexible to RtspInputFormat.I420
-                    else -> null
-                }
-            }
-        }
-
-        val selected = requested ?: autoChoice()
-        if (selected != null) {
-            if (requested == null && requestedInputFormat != RtspInputFormat.AUTO) {
-                Log.w(
-                    TAG,
-                    "Requested input format $requestedInputFormat is not supported by codec. Falling back to ${selected.second}."
-                )
-            }
-            return selected
-        }
-
-        return MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420SemiPlanar to RtspInputFormat.NV12
-    }
-
-    private fun mapColorFormatToInputFormat(colorFormat: Int): RtspInputFormat {
-        return when (colorFormat) {
-            // Treat packed semi-planar as NV12 for compatibility. In practice this avoids
-            // frequent magenta/green tint issues seen when assuming strict NV21 ordering.
-            MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420PackedSemiPlanar -> RtspInputFormat.NV12
-            MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420SemiPlanar -> RtspInputFormat.NV12
-            MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420Planar,
-            MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420Flexible -> RtspInputFormat.I420
-            else -> RtspInputFormat.NV12
-        }
-    }
-
     private fun convertInputFrame(nv21: ByteArray, width: Int, height: Int): ByteArray {
         return when (activeInputFormat) {
             RtspInputFormat.NV21 -> nv21
-            RtspInputFormat.NV12 -> nv21ToNv12(nv21, width, height)
-            RtspInputFormat.I420 -> nv21ToI420(nv21, width, height)
-            RtspInputFormat.AUTO -> nv21ToNv12(nv21, width, height)
+            RtspInputFormat.NV12 -> YuvConverter.nv21ToNv12(nv21, width, height)
+            RtspInputFormat.I420 -> YuvConverter.nv21ToI420(nv21, width, height)
+            RtspInputFormat.AUTO -> YuvConverter.nv21ToNv12(nv21, width, height)
         }
-    }
-
-    private fun nv21ToNv12(nv21: ByteArray, width: Int, height: Int): ByteArray {
-        val ySize = width * height
-        val nv12 = nv21.copyOf()
-
-        val uvStart = ySize
-        for (i in 0 until width * height / 2 step 2) {
-            val v = nv21[uvStart + i]
-            val u = nv21[uvStart + i + 1]
-            nv12[uvStart + i] = u
-            nv12[uvStart + i + 1] = v
-        }
-
-        return nv12
-    }
-
-    private fun nv21ToI420(nv21: ByteArray, width: Int, height: Int): ByteArray {
-        val ySize = width * height
-        val uvPlaneSize = ySize / 4
-        val i420 = ByteArray(ySize + uvPlaneSize * 2)
-
-        // Y plane
-        System.arraycopy(nv21, 0, i420, 0, ySize)
-
-        // U and V planar
-        var src = ySize
-        var uDst = ySize
-        var vDst = ySize + uvPlaneSize
-        while (src + 1 < nv21.size) {
-            val v = nv21[src]
-            val u = nv21[src + 1]
-            i420[uDst++] = u
-            i420[vDst++] = v
-            src += 2
-        }
-
-        return i420
     }
 
     companion object {

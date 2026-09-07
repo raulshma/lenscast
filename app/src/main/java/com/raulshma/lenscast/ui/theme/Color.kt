@@ -11,6 +11,8 @@ val LensBlue = Color(0xFF2196F3)
 val LensBlueDark = Color(0xFF1565C0)
 val LensBlueLight = Color(0xFFBBDEFB)
 val LensRed = Color(0xFFE53935)
+/** The darker "live" red the camera screen's recording/stream controls render in. */
+val RecordingRed = Color(0xFFD32F2F)
 val LensGreen = Color(0xFF43A047)
 val LensOrange = Color(0xFFFF9800)
 val LensWhite = Color(0xFFFFFFFF)

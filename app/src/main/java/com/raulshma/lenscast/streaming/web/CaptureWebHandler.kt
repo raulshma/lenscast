@@ -1,5 +1,6 @@
 package com.raulshma.lenscast.streaming.web
 
+import com.raulshma.lenscast.core.AppJson
 import android.util.Log
 import com.raulshma.lenscast.capture.PhotoCaptureManager
 import com.raulshma.lenscast.streaming.model.CaptureResponse
@@ -7,7 +8,7 @@ import com.raulshma.lenscast.streaming.model.CaptureResponse
 /** /api/capture — photo capture over the Web API, choreographed by PhotoCaptureManager. */
 class CaptureWebHandler(private val photoCaptureManager: PhotoCaptureManager) {
 
-    private val responseAdapter by lazy { WebJson.moshi.adapter(CaptureResponse::class.java) }
+    private val responseAdapter by lazy { AppJson.moshi.adapter(CaptureResponse::class.java) }
 
     suspend fun capturePhoto(): String {
         val fileName = photoCaptureManager.captureToGallery(

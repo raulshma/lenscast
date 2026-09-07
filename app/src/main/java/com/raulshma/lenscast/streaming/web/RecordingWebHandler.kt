@@ -1,5 +1,6 @@
 package com.raulshma.lenscast.streaming.web
 
+import com.raulshma.lenscast.core.AppJson
 import com.raulshma.lenscast.capture.RecordingClock
 import com.raulshma.lenscast.capture.RecordingController
 import com.raulshma.lenscast.capture.RecordingState
@@ -13,9 +14,9 @@ import com.raulshma.lenscast.streaming.model.SuccessResponse
  */
 class RecordingWebHandler(private val recordingController: RecordingController) {
 
-    private val statusAdapter by lazy { WebJson.moshi.adapter(RecordingStatusDto::class.java) }
-    private val configAdapter by lazy { WebJson.moshi.adapter(RecordingConfig::class.java) }
-    private val successAdapter by lazy { WebJson.moshi.adapter(SuccessResponse::class.java) }
+    private val statusAdapter by lazy { AppJson.moshi.adapter(RecordingStatusDto::class.java) }
+    private val configAdapter by lazy { AppJson.moshi.adapter(RecordingConfig::class.java) }
+    private val successAdapter by lazy { AppJson.moshi.adapter(SuccessResponse::class.java) }
 
     fun status(): String {
         val state = recordingController.state.value

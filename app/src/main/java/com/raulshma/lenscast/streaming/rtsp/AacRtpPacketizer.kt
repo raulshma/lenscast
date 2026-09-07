@@ -8,6 +8,8 @@ package com.raulshma.lenscast.streaming.rtsp
  *   - AU-headers-length (16 bits): 0x0010 = one 16-bit AU-header
  *   - AU-header (16 bits): upper 13 bits = AU-size, lower 3 bits = AU-index (0)
  *   - Access Unit Data: raw AAC bytes
+ *
+ * Sequence/SSRC state lives in a per-session [RtpStreamState].
  */
 class AacRtpPacketizer {
 
@@ -19,12 +21,9 @@ class AacRtpPacketizer {
         const val AU_HEADER_SECTION_SIZE = 4
     }
 
-    private var sequenceNumber = 0L
-    private val ssrc: Long = java.util.Random().nextLong()
+    private val streamState = RtpStreamState()
 
-    @Volatile
-    var currentSeq: Int = 0
-        private set
+    val currentSeq: Int get() = streamState.currentSeq
 
     fun packetize(aacAccessUnit: ByteArray, timestamp: Long): ByteArray {
         val auSize = aacAccessUnit.size
@@ -32,7 +31,13 @@ class AacRtpPacketizer {
         val packet = ByteArray(packetSize)
 
         // RTP header: marker bit always set (each packet = one complete AAC frame)
-        writeRtpHeader(packet, timestamp, marker = true)
+        val header = streamState.nextHeader(
+            timestamp = timestamp,
+            marker = true,
+            payloadType = PAYLOAD_TYPE,
+            payloadSize = AU_HEADER_SECTION_SIZE + auSize,
+        )
+        System.arraycopy(header, 0, packet, 0, RTP_HEADER_SIZE)
 
         // AU-headers-length: 16 bits, value 16 (= one AU-header of 16 bits)
         packet[RTP_HEADER_SIZE] = 0x00
@@ -46,28 +51,5 @@ class AacRtpPacketizer {
         System.arraycopy(aacAccessUnit, 0, packet, RTP_HEADER_SIZE + AU_HEADER_SECTION_SIZE, auSize)
 
         return packet
-    }
-
-    private fun writeRtpHeader(packet: ByteArray, timestamp: Long, marker: Boolean) {
-        packet[0] = 0x80.toByte() // V=2, P=0, X=0, CC=0
-
-        val mBit = if (marker) 0x80 else 0
-        packet[1] = (mBit or PAYLOAD_TYPE).toByte()
-
-        val seq = (sequenceNumber++ and 0xFFFF).toInt()
-        currentSeq = seq
-        packet[2] = (seq shr 8).toByte()
-        packet[3] = seq.toByte()
-
-        val ts = (timestamp and 0xFFFFFFFFL).toInt()
-        packet[4] = (ts ushr 24).toByte()
-        packet[5] = (ts ushr 16).toByte()
-        packet[6] = (ts ushr 8).toByte()
-        packet[7] = ts.toByte()
-
-        packet[8] = (ssrc ushr 24).toByte()
-        packet[9] = (ssrc ushr 16).toByte()
-        packet[10] = (ssrc ushr 8).toByte()
-        packet[11] = ssrc.toByte()
     }
 }

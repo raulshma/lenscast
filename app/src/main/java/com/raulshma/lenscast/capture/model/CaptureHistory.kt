@@ -33,7 +33,34 @@ data class RecordingConfig(
     val quality: RecordingQuality = RecordingQuality.HIGH,
     val includeAudio: Boolean = true,
     val startTimeMs: Long? = null,
-)
+) {
+    companion object {
+        // The bounded-recording ceilings the capture screen's sliders offer;
+        // the RecordingController's auto-stop/repeat policy consumes the
+        // values as configured, so the bounds live here next to the config.
+        const val MAX_DURATION_SECONDS = 3600L
+        const val MAX_REPEAT_SECONDS = 3600L
+
+        /**
+         * The next occurrence of the wall-clock [hour]:[minute] — today if
+         * that time has not passed [now] yet, otherwise tomorrow. The same
+         * calendar semantics the capture screen used inline: seconds zeroed,
+         * the day rolled over only when the target already lies in the past.
+         */
+        fun scheduledStartFor(hour: Int, minute: Int, now: Long): Long {
+            val calendar = java.util.Calendar.getInstance().apply {
+                timeInMillis = now
+                set(java.util.Calendar.HOUR_OF_DAY, hour)
+                set(java.util.Calendar.MINUTE, minute)
+                set(java.util.Calendar.SECOND, 0)
+                if (timeInMillis < now) {
+                    add(java.util.Calendar.DAY_OF_YEAR, 1)
+                }
+            }
+            return calendar.timeInMillis
+        }
+    }
+}
 
 enum class RecordingQuality {
     HIGH, MEDIUM, LOW

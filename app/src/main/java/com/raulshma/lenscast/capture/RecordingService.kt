@@ -17,13 +17,12 @@ import androidx.camera.video.VideoCapture
 import androidx.camera.video.VideoRecordEvent
 import androidx.core.content.ContextCompat
 import com.raulshma.lenscast.MainApplication
+import com.raulshma.lenscast.capture.model.CaptureMediaFormat
 import com.raulshma.lenscast.core.ForegroundNotifications
 import com.raulshma.lenscast.core.MicAccess
 import com.raulshma.lenscast.capture.model.RecordingConfig
 import com.raulshma.lenscast.capture.model.RecordingQuality
-import java.text.SimpleDateFormat
 import java.util.Date
-import java.util.Locale
 
 /**
  * The foreground service that holds the live recording. It owns no public
@@ -82,7 +81,7 @@ class RecordingService : Service() {
             if (audioEnabled) "Recording video and audio..." else "Recording video...",
         )
         val cameraService = app.cameraService
-        val fileName = "VID_${DATE_FORMAT.format(Date())}.mp4"
+        val fileName = MediaFileNaming.videoName(Date())
 
         try {
             if (audioEnabled) {
@@ -99,11 +98,11 @@ class RecordingService : Service() {
 
             val contentValues = ContentValues().apply {
                 put(MediaStore.MediaColumns.DISPLAY_NAME, fileName)
-                put(MediaStore.MediaColumns.MIME_TYPE, "video/mp4")
+                put(MediaStore.MediaColumns.MIME_TYPE, CaptureMediaFormat.MIME_VIDEO)
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                     put(
                         MediaStore.MediaColumns.RELATIVE_PATH,
-                        android.os.Environment.DIRECTORY_MOVIES + "/LensCast"
+                        android.os.Environment.DIRECTORY_MOVIES + "/" + CaptureMediaFormat.VIDEO_DIR_NAME
                     )
                 }
             }
@@ -278,6 +277,5 @@ class RecordingService : Service() {
         private const val CHANNEL_ID = "recording_channel"
         private const val NOTIFICATION_ID = 1001
         private const val TAG = "RecordingService"
-        private val DATE_FORMAT = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US)
     }
 }

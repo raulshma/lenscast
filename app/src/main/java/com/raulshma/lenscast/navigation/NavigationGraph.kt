@@ -26,6 +26,7 @@ import com.raulshma.lenscast.capture.CaptureScreen
 import com.raulshma.lenscast.gallery.GalleryScreen
 import com.raulshma.lenscast.gallery.GalleryViewModel
 import com.raulshma.lenscast.gallery.MediaViewerScreen
+import com.raulshma.lenscast.gallery.indexAfterDelete
 import com.raulshma.lenscast.settings.CameraSettingsScreen
 import com.raulshma.lenscast.settings.AppSettingsScreen
 import com.raulshma.lenscast.ui.animation.LocalAnimatedVisibilityScope
@@ -163,14 +164,12 @@ fun NavigationGraph() {
                             onNavigateBack = { navController.popBackStack() },
                             onDeleteCurrent = {
                                 val currentIdx = pagerState.currentPage
-                                val prevItem = allItems.getOrNull(currentIdx - 1)
-                                val nextItem = allItems.getOrNull(currentIdx + 1)
                                 currentItem?.id?.let { galleryViewModel.deleteItem(it) }
-                                val fallback = nextItem ?: prevItem
-                                if (fallback == null) {
+                                // Pure pager math: next page, else previous, else pop.
+                                val fallbackIndex = indexAfterDelete(currentIdx, allItems.size - 1)
+                                if (fallbackIndex == null) {
                                     navController.popBackStack()
                                 } else {
-                                    val fallbackIndex = if (nextItem != null) currentIdx else currentIdx - 1
                                     coroutineScope.launch { pagerState.animateScrollToPage(fallbackIndex) }
                                 }
                             },

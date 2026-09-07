@@ -19,6 +19,10 @@ object StreamDefaults {
     // Validation bounds. The store coerces persisted values into these;
     // StreamingManager, NetworkQualityMonitor and the Web API DTO mapping
     // coerce runtime values with the same pairs.
+    const val WEB_PORT_MIN = 1024
+    const val WEB_PORT_MAX = 65535
+    const val RTSP_PORT_MIN = 1024
+    const val RTSP_PORT_MAX = 65535
     const val JPEG_QUALITY_MIN = 10
     const val JPEG_QUALITY_MAX = 100
     const val ADAPTIVE_JPEG_QUALITY_MIN = 15

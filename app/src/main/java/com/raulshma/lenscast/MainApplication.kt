@@ -94,19 +94,14 @@ class MainApplication : Application(), SingletonImageLoader.Factory {
             val lastCheck = settings.updateLastCheckTime.first()
             if (!UpdatePolicy.shouldAutoCheck(lastCheck, enabled)) return@launch
 
-            when (val result = updateChecker.checkForUpdate()) {
-                is UpdateCheckResult.UpdateAvailable -> {
-                    val remoteVersion = UpdatePolicy.normalize(result.release.tagName)
-                    val dismissed = settings.updateDismissedVersion.first()
-                    if (UpdatePolicy.shouldNotify(dismissed, result.release.tagName)) {
-                        updateNotifier.showUpdateAvailable(remoteVersion)
-                    }
-                    settings.saveUpdateLastCheckTime(System.currentTimeMillis())
-                }
-                is com.raulshma.lenscast.update.model.UpdateCheckResult.UpToDate -> {
-                    settings.saveUpdateLastCheckTime(System.currentTimeMillis())
-                }
-                else -> { /* RateLimited or Error: silent */ }
+            val result = updateChecker.checkForUpdate()
+            val dismissed = settings.updateDismissedVersion.first()
+            val decision = UpdatePolicy.shouldNotifyAfterCheck(result, dismissed)
+            if (decision.saveLastCheck) {
+                settings.saveUpdateLastCheckTime(System.currentTimeMillis())
+            }
+            if (result is UpdateCheckResult.UpdateAvailable && decision.notify) {
+                updateNotifier.showUpdateAvailable(UpdatePolicy.normalize(result.release.tagName))
             }
         }
     }

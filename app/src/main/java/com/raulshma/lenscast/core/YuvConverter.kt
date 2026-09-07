@@ -189,4 +189,48 @@ object YuvConverter {
 
         return dst
     }
+
+    /**
+     * NV21 → NV12: reorders the interleaved UV plane from VU to UV on a copy.
+     * Moved here from H264Encoder — the encode-path pixel swaps live with the
+     * rest of the YUV knowledge.
+     */
+    fun nv21ToNv12(nv21: ByteArray, width: Int, height: Int): ByteArray {
+        val ySize = width * height
+        val nv12 = nv21.copyOf()
+
+        val uvStart = ySize
+        for (i in 0 until width * height / 2 step 2) {
+            val v = nv21[uvStart + i]
+            val u = nv21[uvStart + i + 1]
+            nv12[uvStart + i] = u
+            nv12[uvStart + i + 1] = v
+        }
+
+        return nv12
+    }
+
+    /** NV21 → I420: deinterleaves the VU pairs into separate U and V planes. */
+    fun nv21ToI420(nv21: ByteArray, width: Int, height: Int): ByteArray {
+        val ySize = width * height
+        val uvPlaneSize = ySize / 4
+        val i420 = ByteArray(ySize + uvPlaneSize * 2)
+
+        // Y plane
+        System.arraycopy(nv21, 0, i420, 0, ySize)
+
+        // U and V planar
+        var src = ySize
+        var uDst = ySize
+        var vDst = ySize + uvPlaneSize
+        while (src + 1 < nv21.size) {
+            val v = nv21[src]
+            val u = nv21[src + 1]
+            i420[uDst++] = u
+            i420[vDst++] = v
+            src += 2
+        }
+
+        return i420
+    }
 }

@@ -3,7 +3,6 @@ package com.raulshma.lenscast.streaming
 import android.util.Log
 import com.raulshma.lenscast.core.NetworkUtils
 import com.raulshma.lenscast.core.StreamAuthCrypto
-import com.raulshma.lenscast.data.StreamAuthSettings
 import java.net.URI
 import java.security.SecureRandom
 import java.util.concurrent.ConcurrentHashMap
@@ -79,7 +78,7 @@ class WebAuthGate {
                 attempt.count++
                 return LoginResult(success = false, error = "Invalid credentials")
             }
-            if (!StreamAuthSettings.verifyPassword(password, storedHash)) {
+            if (!StreamAuthCrypto.verifyPassword(password, storedHash)) {
                 attempt.count++
                 return LoginResult(success = false, error = "Invalid credentials")
             }

@@ -1,5 +1,8 @@
 package com.raulshma.lenscast.update
 
+import com.raulshma.lenscast.update.model.GitHubAsset
+import com.raulshma.lenscast.update.model.GitHubRelease
+import com.raulshma.lenscast.update.model.UpdateCheckResult
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -121,5 +124,73 @@ class UpdatePolicyTest {
         assertTrue(UpdatePolicy.shouldNotify(null, "v1.2.0"))
         assertTrue(UpdatePolicy.shouldNotify("", "v1.2.0"))
         assertTrue(UpdatePolicy.shouldNotify("   ", "v1.2.0"))
+    }
+
+    // shouldNotifyAfterCheck
+
+    private fun updateAvailable(tag: String = "v1.2.0") = UpdateCheckResult.UpdateAvailable(
+        release = GitHubRelease(
+            tagName = tag,
+            name = "Release $tag",
+            body = "notes",
+            htmlUrl = "https://example.invalid",
+            assets = listOf(GitHubAsset("app.apk", "https://example.invalid/app.apk", 1L)),
+        ),
+        apkAsset = GitHubAsset("app.apk", "https://example.invalid/app.apk", 1L),
+    )
+
+    @Test
+    fun `update available notifies and counts when not dismissed`() {
+        val decision = UpdatePolicy.shouldNotifyAfterCheck(updateAvailable(), dismissedVersion = null)
+        assertTrue(decision.notify)
+        assertTrue(decision.saveLastCheck)
+    }
+
+    @Test
+    fun `update available stays silent for the dismissed version but still counts`() {
+        val decision = UpdatePolicy.shouldNotifyAfterCheck(updateAvailable("v1.2.0"), dismissedVersion = "1.2.0")
+        assertFalse(decision.notify)
+        assertTrue(decision.saveLastCheck)
+    }
+
+    @Test
+    fun `update available notifies for a different dismissed version`() {
+        val decision = UpdatePolicy.shouldNotifyAfterCheck(updateAvailable("v1.3.0"), dismissedVersion = "1.2.0")
+        assertTrue(decision.notify)
+        assertTrue(decision.saveLastCheck)
+    }
+
+    @Test
+    fun `up to date is silent but counts`() {
+        val decision = UpdatePolicy.shouldNotifyAfterCheck(
+            UpdateCheckResult.UpToDate(remoteVersion = "1.0.0", localVersion = "1.0.0"),
+            dismissedVersion = null,
+        )
+        assertFalse(decision.notify)
+        assertTrue(decision.saveLastCheck)
+    }
+
+    @Test
+    fun `rate limited is silent and does not count`() {
+        val decision = UpdatePolicy.shouldNotifyAfterCheck(UpdateCheckResult.RateLimited, dismissedVersion = null)
+        assertFalse(decision.notify)
+        assertFalse(decision.saveLastCheck)
+    }
+
+    @Test
+    fun `rate limited stays silent even with a stale dismissal`() {
+        val decision = UpdatePolicy.shouldNotifyAfterCheck(UpdateCheckResult.RateLimited, dismissedVersion = "1.2.0")
+        assertFalse(decision.notify)
+        assertFalse(decision.saveLastCheck)
+    }
+
+    @Test
+    fun `error is silent and does not count`() {
+        val decision = UpdatePolicy.shouldNotifyAfterCheck(
+            UpdateCheckResult.Error("Server returned HTTP 500"),
+            dismissedVersion = null,
+        )
+        assertFalse(decision.notify)
+        assertFalse(decision.saveLastCheck)
     }
 }

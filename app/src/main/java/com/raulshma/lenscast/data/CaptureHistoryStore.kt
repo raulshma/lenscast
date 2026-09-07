@@ -4,14 +4,13 @@ import android.content.ContentUris
 import android.content.Context
 import android.net.Uri
 import android.os.Build
-import android.os.Environment
 import android.provider.MediaStore
 import android.util.Log
 import com.raulshma.lenscast.capture.model.CaptureHistory
+import com.raulshma.lenscast.capture.model.CaptureMediaFormat
 import com.raulshma.lenscast.capture.model.CaptureType
-import com.squareup.moshi.Moshi
+import com.raulshma.lenscast.core.AppJson
 import com.squareup.moshi.Types
-import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -23,14 +22,10 @@ import java.util.concurrent.Executors
 
 class CaptureHistoryStore(private val context: Context) {
 
-    private val moshi = Moshi.Builder()
-        .addLast(KotlinJsonAdapterFactory())
-        .build()
-
     private val listType = Types.newParameterizedType(
         MutableList::class.java, CaptureHistory::class.java
     )
-    private val adapter = moshi.adapter<List<CaptureHistory>>(listType)
+    private val adapter = AppJson.moshi.adapter<List<CaptureHistory>>(listType)
 
     private val historyFile = File(context.filesDir, "capture_history.json")
     private val ioExecutor = Executors.newSingleThreadExecutor { r ->
@@ -90,7 +85,7 @@ class CaptureHistoryStore(private val context: Context) {
     fun refreshFromMediaStore() {
         ioExecutor.execute {
             try {
-                val merged = mergeWithMediaStore(_history.value)
+                val merged = mergeWithDeviceMedia(_history.value, queryCapturedMedia())
                 if (merged != _history.value) {
                     _history.value = merged
                     save()
@@ -101,23 +96,26 @@ class CaptureHistoryStore(private val context: Context) {
         }
     }
 
+    /** Single-entry convenience over [deleteAll]. */
     fun deleteMedia(id: String) {
-        val entry = _history.value.find { it.id == id } ?: return
-        val deleted = deleteBackingMedia(entry.filePath)
-        if (deleted || !mediaExists(entry.filePath)) {
-            remove(id)
-        } else {
-            Log.w(TAG, "Failed to delete media for history entry ${entry.filePath}")
-        }
+        deleteAll(listOf(id))
     }
 
-    fun deleteMediaBatch(ids: List<String>): List<String> {
+    /**
+     * Deletes the backing media for every [id] that resolves to a history
+     * entry and returns the ids that were actually removed (backing media
+     * deleted, or already gone). The history is rewritten once, after the
+     * batch, when anything was removed.
+     */
+    fun deleteAll(ids: List<String>): List<String> {
         val deleted = mutableListOf<String>()
         for (id in ids) {
             val entry = _history.value.find { it.id == id } ?: continue
             val ok = deleteBackingMedia(entry.filePath)
             if (ok || !mediaExists(entry.filePath)) {
                 deleted.add(id)
+            } else {
+                Log.w(TAG, "Failed to delete media for history entry ${entry.filePath}")
             }
         }
         if (deleted.isNotEmpty()) {
@@ -169,35 +167,79 @@ class CaptureHistoryStore(private val context: Context) {
         )
     }
 
-    private fun mergeWithMediaStore(current: List<CaptureHistory>): List<CaptureHistory> {
-        val deviceMedia = queryCapturedMedia()
-        if (deviceMedia.isEmpty()) {
+    companion object {
+        private const val TAG = "CaptureHistoryStore"
+
+        /**
+         * The one field-wise merge policy: keep the richer entry. The incoming
+         * name wins unless blank, timestamps take the max, and zero size or
+         * duration never overwrites a real one.
+         */
+        internal fun mergeFields(existing: CaptureHistory, incoming: CaptureHistory): CaptureHistory =
+            existing.copy(
+                fileName = incoming.fileName.ifBlank { existing.fileName },
+                timestamp = maxOf(existing.timestamp, incoming.timestamp),
+                fileSizeBytes = incoming.fileSizeBytes.takeIf { it > 0 } ?: existing.fileSizeBytes,
+                durationMs = incoming.durationMs.takeIf { it > 0 } ?: existing.durationMs,
+            )
+
+        /**
+         * Pure merge of a new entry into the history list: dedupes by
+         * normalized file path (merging through [mergeFields]) and returns
+         * the list sorted newest-first. Visible for tests.
+         */
+        internal fun mergeEntry(
+            existing: List<CaptureHistory>,
+            entry: CaptureHistory,
+        ): List<CaptureHistory> {
+            val index = existing.indexOfFirst {
+                normalizePath(it.filePath) == normalizePath(entry.filePath)
+            }
+            val current = existing.toMutableList()
+
+            if (index >= 0) {
+                current[index] = mergeFields(current[index], entry)
+            } else {
+                current.add(0, entry)
+            }
+
             return current.sortedByDescending { it.timestamp }
         }
 
-        val deviceByPath = deviceMedia.associateBy { normalizePath(it.filePath) }
-        val merged = current.map { existing ->
-            val deviceMatch = deviceByPath[normalizePath(existing.filePath)]
-            if (deviceMatch == null) {
-                existing
-            } else {
-                existing.copy(
-                    fileName = deviceMatch.fileName.ifBlank { existing.fileName },
-                    timestamp = maxOf(existing.timestamp, deviceMatch.timestamp),
-                    fileSizeBytes = deviceMatch.fileSizeBytes.takeIf { it > 0 } ?: existing.fileSizeBytes,
-                    durationMs = deviceMatch.durationMs.takeIf { it > 0 } ?: existing.durationMs,
-                )
+        /**
+         * Pure reconciliation of the persisted history with the device's
+         * MediaStore entries: matched paths merge through [mergeFields]
+         * (existing entry upgraded from device media), unseen media is
+         * adopted with a fresh id, and the result is sorted newest-first.
+         * Visible for tests; the instance-side MediaStore cursor work is a
+         * thin adapter feeding this.
+         */
+        internal fun mergeWithDeviceMedia(
+            current: List<CaptureHistory>,
+            deviceMedia: List<CaptureHistory>,
+        ): List<CaptureHistory> {
+            if (deviceMedia.isEmpty()) {
+                return current.sortedByDescending { it.timestamp }
             }
-        }.toMutableList()
 
-        val existingPaths = merged.mapTo(mutableSetOf()) { normalizePath(it.filePath) }
-        deviceMedia.forEach { media ->
-            if (existingPaths.add(normalizePath(media.filePath))) {
-                merged.add(media.copy(id = UUID.randomUUID().toString()))
+            val deviceByPath = deviceMedia.associateBy { normalizePath(it.filePath) }
+            val merged = current.map { existing ->
+                deviceByPath[normalizePath(existing.filePath)]
+                    ?.let { mergeFields(existing, it) }
+                    ?: existing
+            }.toMutableList()
+
+            val existingPaths = merged.mapTo(mutableSetOf()) { normalizePath(it.filePath) }
+            deviceMedia.forEach { media ->
+                if (existingPaths.add(normalizePath(media.filePath))) {
+                    merged.add(media.copy(id = UUID.randomUUID().toString()))
+                }
             }
+
+            return merged.sortedByDescending { it.timestamp }
         }
 
-        return merged.sortedByDescending { it.timestamp }
+        private fun normalizePath(filePath: String): String = filePath.trim()
     }
 
     private fun queryCapturedMedia(): List<CaptureHistory> {
@@ -217,7 +259,7 @@ class CaptureHistoryStore(private val context: Context) {
                 MediaStore.MediaColumns.DATE_ADDED,
                 MediaStore.MediaColumns.RELATIVE_PATH,
             ),
-            folderPath = "${Environment.DIRECTORY_PICTURES}/LensCast/",
+            folderPath = CaptureMediaFormat.PHOTOS_RELATIVE_PATH,
             type = CaptureType.PHOTO,
         )
     }
@@ -234,7 +276,7 @@ class CaptureHistoryStore(private val context: Context) {
                 MediaStore.MediaColumns.RELATIVE_PATH,
                 MediaStore.Video.Media.DURATION,
             ),
-            folderPath = "${Environment.DIRECTORY_MOVIES}/LensCast/",
+            folderPath = CaptureMediaFormat.VIDEOS_RELATIVE_PATH,
             type = CaptureType.VIDEO,
         )
     }
@@ -357,39 +399,5 @@ class CaptureHistoryStore(private val context: Context) {
                 else -> File(filePath).exists()
             }
         }.getOrDefault(false)
-    }
-
-    companion object {
-        private const val TAG = "CaptureHistoryStore"
-
-        /**
-         * Pure merge of a new entry into the history list: dedupes by
-         * normalized file path (keeping the richer of the two entries) and
-         * returns the list sorted newest-first. Visible for tests.
-         */
-        internal fun mergeEntry(
-            existing: List<CaptureHistory>,
-            entry: CaptureHistory,
-        ): List<CaptureHistory> {
-            val index = existing.indexOfFirst {
-                normalizePath(it.filePath) == normalizePath(entry.filePath)
-            }
-            val current = existing.toMutableList()
-
-            if (index >= 0) {
-                current[index] = current[index].copy(
-                    fileName = entry.fileName,
-                    timestamp = maxOf(current[index].timestamp, entry.timestamp),
-                    fileSizeBytes = entry.fileSizeBytes.takeIf { it > 0 } ?: current[index].fileSizeBytes,
-                    durationMs = entry.durationMs.takeIf { it > 0 } ?: current[index].durationMs,
-                )
-            } else {
-                current.add(0, entry)
-            }
-
-            return current.sortedByDescending { it.timestamp }
-        }
-
-        private fun normalizePath(filePath: String): String = filePath.trim()
     }
 }
