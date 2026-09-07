@@ -1,46 +1,32 @@
 package com.raulshma.lenscast.streaming
 
 import android.content.Context
-import android.graphics.Bitmap
-import android.graphics.BitmapFactory
-import android.graphics.ImageFormat
-import android.graphics.Matrix
-import android.graphics.Rect
-import android.graphics.YuvImage
 import android.util.Log
 import com.raulshma.lenscast.camera.model.OverlaySettings
+import com.raulshma.lenscast.MainApplication
 import com.raulshma.lenscast.core.NetworkQualityMonitor
 import com.raulshma.lenscast.core.NetworkUtils
 import com.raulshma.lenscast.core.StreamDefaults
 import com.raulshma.lenscast.core.ThermalMonitor
 import com.raulshma.lenscast.data.StreamAuthSettings
+import com.raulshma.lenscast.streaming.web.ApiRouter
+import com.raulshma.lenscast.streaming.web.CaptureWebHandler
+import com.raulshma.lenscast.streaming.web.GalleryWebHandler
+import com.raulshma.lenscast.streaming.web.IntervalCaptureWebHandler
+import com.raulshma.lenscast.streaming.web.LensWebHandler
+import com.raulshma.lenscast.streaming.web.RecordingWebHandler
+import com.raulshma.lenscast.streaming.web.SettingsWebHandler
+import com.raulshma.lenscast.streaming.web.StatusWebHandler
+import com.raulshma.lenscast.streaming.web.StreamWebHandler
+import com.raulshma.lenscast.streaming.rtsp.RtspAuthSpec
+import com.raulshma.lenscast.streaming.rtsp.RtspConfig
 import com.raulshma.lenscast.streaming.rtsp.RtspInputFormat
 import com.raulshma.lenscast.streaming.rtsp.RtspServer
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.cancel
-import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.launch
-import java.io.ByteArrayOutputStream
 import java.io.InputStream
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
-import java.util.concurrent.atomic.AtomicLong
-
-sealed class FrameData {
-    data class YuvFrame(
-        val yuvData: ByteArray,
-        val width: Int,
-        val height: Int,
-        val rotation: Int,
-        val quality: Int,
-        val overlay: OverlaySettings,
-        val clientCount: Int,
-    ) : FrameData()
-}
 
 class StreamingManager(
     private val context: Context,
@@ -55,9 +41,10 @@ class StreamingManager(
     private var currentAuthSettings = StreamAuthSettings()
     @Volatile
     private var currentOverlaySettings = OverlaySettings()
-    val networkQualityMonitor = NetworkQualityMonitor()
+    private val networkQualityMonitor = NetworkQualityMonitor()
     private val adaptiveBitrateController = AdaptiveBitrateController(networkQualityMonitor)
-    private val apiController by lazy { WebApiController(context) }
+    private val framePipeline = FramePipeline(thermalMonitor, adaptiveBitrateController)
+    private val webApiStack: WebApiStack by lazy { buildWebApiStack() }
     private var server: StreamingServer = createServer(StreamDefaults.WEB_PORT)
     private val webStreamingActive = AtomicBoolean(false)
     private val rtspStreamingActive = AtomicBoolean(false)
@@ -73,33 +60,18 @@ class StreamingManager(
     private val rtspEnabled = AtomicBoolean(false)
     @Volatile
     private var currentRtspPort: Int = RtspServer.DEFAULT_PORT
+    // One retained config for the RTSP output; every RTSP setting lands here
+    // even while RTSP is not running, so the next start picks it all up.
     @Volatile
-    private var currentRtspInputFormat: RtspInputFormat = RtspInputFormat.AUTO
-    @Volatile
-    private var currentRtspFrameRate: Int = StreamDefaults.STREAM_FPS
+    private var rtspConfig = RtspConfig()
     private var rtspServer: RtspServer? = null
     @Volatile
     private var rtspAudioStream: InputStream? = null
 
-    private val lastFrameTimeMs = AtomicLong(0L)
-    private val minFrameIntervalMs = AtomicLong(1000L / StreamDefaults.STREAM_FPS)
-    private val maxBufferSize = 4 * 1024 * 1024
-    private var reusableBuffer = ByteArrayOutputStream(256 * 1024)
-    private var reusableYuvBuffer = ByteArrayOutputStream(256 * 1024)
-    private val bufferLock = Any()
     private var lastReportedClientCount = -1
 
-    private val frameQueueScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
-    private val frameQueue = Channel<FrameData>(capacity = Channel.CONFLATED)
-    private val droppedFrameCount = AtomicInteger(0)
-    private val processedFrameCount = AtomicInteger(0)
-
     init {
-        frameQueueScope.launch {
-            for (frame in frameQueue) {
-                processFrameInternal(frame)
-            }
-        }
+        framePipeline.setListener { jpeg -> server.updateFrame(jpeg) }
     }
 
     private val _isStreaming = MutableStateFlow(false)
@@ -135,15 +107,20 @@ class StreamingManager(
     private val _isRtspRunning = MutableStateFlow(false)
     val isRtspRunning: StateFlow<Boolean> = _isRtspRunning
 
-    private val _droppedFrames = MutableStateFlow(0)
-    val droppedFrames: StateFlow<Int> = _droppedFrames
+    val droppedFrames: StateFlow<Int> = framePipeline.droppedFrames
 
-    private val _processedFrames = MutableStateFlow(0)
-    val processedFrames: StateFlow<Int> = _processedFrames
+    val processedFrames: StateFlow<Int> = framePipeline.processedFrames
+
+    // One gate for the app's web server: owned here so sessions survive a
+    // server recreation (e.g. a port change).
+    private val webAuthGate = WebAuthGate()
 
     val adaptiveBitrateState: StateFlow<AdaptiveBitrateController.AdaptiveState> = adaptiveBitrateController.state
 
     fun getNetworkStatsSnapshot(): NetworkQualityMonitor.NetworkStatsSnapshot = networkQualityMonitor.getStatsSnapshot()
+
+    /** Per-client measured throughput/fps read seam for Web API handlers. */
+    fun getFramesPerSecond(clientId: String): Double = networkQualityMonitor.getFramesPerSecond(clientId)
 
     fun isLiveStreaming(): Boolean = webStreamingActive.get() || rtspStreamingActive.get()
 
@@ -295,139 +272,57 @@ class StreamingManager(
         Log.d(TAG, "RTSP streaming stopped")
     }
 
+    /**
+     * One camera frame fans out to every active output — the M-JPEG web
+     * pipeline and the RTSP encoder — mirroring [setFrameRate]'s internal
+     * fan-out. Each output no-ops while it is inactive.
+     */
     fun pushFrame(yuvData: ByteArray, width: Int, height: Int, rotation: Int = 0) {
+        pushFrameToWeb(yuvData, width, height, rotation)
+        pushFrameToRtsp(yuvData, width, height, rotation)
+    }
+
+    private fun pushFrameToWeb(yuvData: ByteArray, width: Int, height: Int, rotation: Int) {
         if (!webStreamingActive.get()) return
 
         val clientCount = server.getClientCount()
+        // Report before gating so the count falls back to 0 when the last
+        // client disconnects mid-stream.
+        if (clientCount != lastReportedClientCount) {
+            lastReportedClientCount = clientCount
+            _clientCount.value = clientCount
+        }
         if (clientCount == 0) return
 
-        val now = System.currentTimeMillis()
-        val elapsed = now - lastFrameTimeMs.get()
-
-        val baseInterval = minFrameIntervalMs.get()
-        val thermalAdjustedInterval = thermalMonitor.getAdjustedFrameDelay(baseInterval)
-        val adaptiveInterval = adaptiveBitrateController.getAdaptiveFrameInterval(baseInterval, thermalAdjustedInterval)
-
-        if (elapsed < adaptiveInterval) {
-            droppedFrameCount.incrementAndGet()
-            return
-        }
-
-        lastFrameTimeMs.set(now)
-
-        val baseQuality = jpegQuality.get()
-        val thermalAdjustedQuality = thermalMonitor.getAdjustedQuality(baseQuality)
-        val quality = adaptiveBitrateController.getAdaptiveQuality(baseQuality, thermalAdjustedQuality)
-
-        val frame = FrameData.YuvFrame(yuvData.copyOf(), width, height, rotation, quality, currentOverlaySettings, clientCount)
-        frameQueue.trySend(frame)
+        framePipeline.push(yuvData, width, height, rotation, currentOverlaySettings, clientCount)
     }
 
-    fun pushFrameToRtsp(yuvData: ByteArray, width: Int, height: Int, rotation: Int = 0) {
+    private fun pushFrameToRtsp(yuvData: ByteArray, width: Int, height: Int, rotation: Int) {
         if (!rtspStreamingActive.get()) return
         val rtsp = rtspServer ?: return
         rtsp.pushFrame(yuvData, width, height, rotation)
     }
 
-    private fun processFrameInternal(frame: FrameData) {
-        try {
-            when (frame) {
-                is FrameData.YuvFrame -> {
-                    var jpegData = yuvToJpeg(frame.yuvData, frame.width, frame.height, frame.quality, frame.rotation) ?: return
-
-                    if (frame.overlay.enabled) {
-                        val decoded = BitmapFactory.decodeByteArray(jpegData, 0, jpegData.size)
-                        if (decoded != null) {
-                            val withOverlay = StreamOverlayRenderer.applyOverlay(decoded, frame.overlay, frame.clientCount)
-                            if (withOverlay !== decoded) decoded.recycle()
-                            jpegData = bitmapToJpegReuse(withOverlay, frame.quality.coerceAtLeast(85))
-                            if (withOverlay !== decoded && withOverlay.isRecycled.not()) withOverlay.recycle()
-                        }
-                    }
-
-                    server.updateFrame(jpegData)
-                    processedFrameCount.incrementAndGet()
-
-                    if (frame.clientCount != lastReportedClientCount) {
-                        lastReportedClientCount = frame.clientCount
-                        _clientCount.value = frame.clientCount
-                    }
-                }
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "Error processing frame", e)
-            droppedFrameCount.incrementAndGet()
-        }
-
-        val dropped = droppedFrameCount.get()
-        val processed = processedFrameCount.get()
-        if (dropped != _droppedFrames.value && dropped % 30 == 0) {
-            _droppedFrames.value = dropped
-        }
-        if (processed != _processedFrames.value && processed % 30 == 0) {
-            _processedFrames.value = processed
-        }
-    }
-
-    private fun yuvToJpeg(yuvData: ByteArray, width: Int, height: Int, quality: Int, rotation: Int = 0): ByteArray? {
-        return try {
-            if (rotation != 0) {
-                val bitmap = yuvToRotatedBitmap(yuvData, width, height, quality, rotation) ?: return null
-                synchronized(bufferLock) {
-                    reusableBuffer.reset()
-                    bitmap.compress(Bitmap.CompressFormat.JPEG, quality, reusableBuffer)
-                    bitmap.recycle()
-                    val result = reusableBuffer.toByteArray()
-                    capBuffer(reusableBuffer)
-                    result
-                }
-            } else {
-                val yuvImage = YuvImage(yuvData, ImageFormat.NV21, width, height, null)
-                synchronized(bufferLock) {
-                    reusableBuffer.reset()
-                    yuvImage.compressToJpeg(Rect(0, 0, width, height), quality, reusableBuffer)
-                    val result = reusableBuffer.toByteArray()
-                    capBuffer(reusableBuffer)
-                    result
-                }
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "YUV to JPEG conversion failed", e)
-            null
-        }
-    }
-
-    private fun yuvToRotatedBitmap(yuvData: ByteArray, width: Int, height: Int, quality: Int, rotation: Int): Bitmap? {
-        return try {
-            val yuvImage = YuvImage(yuvData, ImageFormat.NV21, width, height, null)
-            val jpegData: ByteArray
-            synchronized(bufferLock) {
-                reusableYuvBuffer.reset()
-                yuvImage.compressToJpeg(Rect(0, 0, width, height), quality, reusableYuvBuffer)
-                jpegData = reusableYuvBuffer.toByteArray()
-                capBuffer(reusableYuvBuffer)
-            }
-            val bitmap = BitmapFactory.decodeByteArray(jpegData, 0, jpegData.size) ?: return null
-            val matrix = Matrix()
-            matrix.postRotate(rotation.toFloat())
-            val rotated = Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
-            if (rotated !== bitmap) bitmap.recycle()
-            rotated
-        } catch (e: Exception) {
-            Log.e(TAG, "YUV to rotated bitmap conversion failed", e)
-            null
-        }
-    }
-
     fun setJpegQuality(quality: Int) {
-        jpegQuality.set(quality.coerceIn(10, 100))
+        framePipeline.setJpegQuality(quality.coerceIn(StreamDefaults.JPEG_QUALITY_MIN, StreamDefaults.JPEG_QUALITY_MAX))
     }
 
-    fun setStreamFrameRate(fps: Int) {
-        minFrameIntervalMs.set(if (fps > 0) 1000L / fps else 1000L / StreamDefaults.STREAM_FPS)
+    /**
+     * One user-facing frame rate fans out to every subsystem that throttles or
+     * encodes by it: the M-JPEG frame interval, the adaptive-bitrate default,
+     * and the RTSP server.
+     */
+    fun setFrameRate(fps: Int) {
+        setStreamFrameRate(fps)
+        setAdaptiveDefaultFrameRate(fps)
+        setRtspFrameRate(fps)
     }
 
-    fun setAdaptiveDefaultFrameRate(fps: Int) {
+    private fun setStreamFrameRate(fps: Int) {
+        framePipeline.setFrameRate(fps)
+    }
+
+    private fun setAdaptiveDefaultFrameRate(fps: Int) {
         adaptiveBitrateController.setDefaultFrameRate(fps)
     }
 
@@ -454,14 +349,19 @@ class StreamingManager(
     }
 
     fun setStreamAudioBitrateKbps(bitrateKbps: Int) {
-        streamAudioBitrateKbps.set(bitrateKbps.coerceIn(MIN_AUDIO_BITRATE_KBPS, MAX_AUDIO_BITRATE_KBPS))
+        streamAudioBitrateKbps.set(
+            bitrateKbps.coerceIn(StreamDefaults.AUDIO_BITRATE_MIN_KBPS, StreamDefaults.AUDIO_BITRATE_MAX_KBPS)
+        )
         onWebAudioChanged()
+        rtspConfig = rtspConfig.copy(audioBitrateKbps = streamAudioBitrateKbps.get())
         // RTSP supports live bitrate updates; no restart needed.
-        onRtspAudioChanged(liveUpdate = { rtspServer?.setAudioBitrate(streamAudioBitrateKbps.get()) })
+        onRtspAudioChanged(liveUpdate = { rtspServer?.apply(rtspConfig) })
     }
 
     fun setStreamAudioChannels(channels: Int) {
-        streamAudioChannels.set(channels.coerceIn(MIN_AUDIO_CHANNELS, MAX_AUDIO_CHANNELS))
+        streamAudioChannels.set(
+            channels.coerceIn(StreamDefaults.AUDIO_CHANNELS_MIN, StreamDefaults.AUDIO_CHANNELS_MAX)
+        )
         onWebAudioChanged()
         // Channel count is an encoder config; RTSP restart required.
         onRtspAudioChanged()
@@ -538,8 +438,9 @@ class StreamingManager(
 
     fun updateAuthSettings(settings: StreamAuthSettings) {
         currentAuthSettings = settings
-        applyAuthSettings(server, settings)
-        applyRtspAuthSettings(rtspServer, settings)
+        applyAuthSettings(settings)
+        rtspConfig = rtspConfig.copy(auth = rtspAuthSpec(settings))
+        rtspServer?.apply(rtspConfig)
     }
 
     fun setOverlaySettings(settings: OverlaySettings) {
@@ -566,16 +467,16 @@ class StreamingManager(
     }
 
     fun setRtspInputFormat(format: RtspInputFormat) {
-        if (format == currentRtspInputFormat) return
-        currentRtspInputFormat = format
-        rtspServer?.setInputFormat(format)
+        if (format == rtspConfig.inputFormat) return
+        rtspConfig = rtspConfig.copy(inputFormat = format)
+        rtspServer?.apply(rtspConfig)
     }
 
-    fun setRtspFrameRate(fps: Int) {
-        // Retain even when RTSP is not running so the next start picks it up —
-        // every RTSP setting is retained, no silent drops.
-        currentRtspFrameRate = fps
-        rtspServer?.setFrameRate(fps)
+    private fun setRtspFrameRate(fps: Int) {
+        // Retained even when RTSP is not running — every RTSP setting is
+        // retained, no silent drops.
+        rtspConfig = rtspConfig.copy(videoFrameRate = fps)
+        rtspServer?.apply(rtspConfig)
     }
 
     fun setMdnsEnabled(enabled: Boolean) {
@@ -599,47 +500,54 @@ class StreamingManager(
     }
 
     private fun createServer(port: Int): StreamingServer {
-        return StreamingServer(port, context, audioStreamingManager, apiController).also {
-            it.networkQualityMonitor = networkQualityMonitor
-            applyAuthSettings(it, currentAuthSettings)
+        return StreamingServer(port, context, audioStreamingManager, webApiStack, networkQualityMonitor, webAuthGate).also {
+            applyAuthSettings(currentAuthSettings)
             it.setWebStreamingEnabled(webStreamingEnabled.get())
         }
     }
 
-    private fun applyAuthSettings(server: StreamingServer, settings: StreamAuthSettings) {
-        if (settings.enabled && settings.username.isNotEmpty() && settings.passwordHash.isNotEmpty()) {
-            server.authUsername = settings.username
-            server.authPasswordHash = settings.passwordHash
-        } else {
-            server.authUsername = null
-            server.authPasswordHash = null
-        }
-    }
-
-    private fun applyRtspAuthSettings(server: RtspServer?, settings: StreamAuthSettings) {
-        val target = server ?: return
-        target.setAuthSettings(
-            enabled = settings.enabled,
-            username = settings.username,
-            passwordHash = settings.passwordHash,
-            digestHa1 = settings.rtspDigestHa1,
+    /**
+     * Composition root for the Web API: one handler module per domain, each
+     * receiving only the services it needs. Evaluation is lazy — request-time
+     * only — so capturing `this` here is safe during construction.
+     */
+    private fun buildWebApiStack(): WebApiStack {
+        val app = context.applicationContext as MainApplication
+        val gallery = GalleryWebHandler(context, app.captureHistoryStore)
+        return WebApiStack(
+            router = ApiRouter(
+                settings = SettingsWebHandler(app.settingsDataStore),
+                status = StatusWebHandler(
+                    streamingManager = this,
+                    thermalMonitor = thermalMonitor,
+                    powerManager = app.powerManager,
+                    cameraService = app.cameraService,
+                    streamWatchdog = app.streamWatchdog,
+                    settingsDataStore = app.settingsDataStore,
+                ),
+                stream = StreamWebHandler(this, app.streamingSession),
+                capture = CaptureWebHandler(app.photoCaptureManager),
+                lens = LensWebHandler(app.cameraService),
+                interval = IntervalCaptureWebHandler(context),
+                recording = RecordingWebHandler(app.recordingController),
+                gallery = gallery,
+            ),
+            gallery = gallery,
+            capture = app.photoCaptureManager,
         )
     }
 
-    private fun bitmapToJpegReuse(bitmap: Bitmap, quality: Int): ByteArray {
-        synchronized(bufferLock) {
-            reusableBuffer.reset()
-            bitmap.compress(Bitmap.CompressFormat.JPEG, quality, reusableBuffer)
-            val result = reusableBuffer.toByteArray()
-            capBuffer(reusableBuffer)
-            return result
-        }
+    private fun applyAuthSettings(settings: StreamAuthSettings) {
+        webAuthGate.setCredentials(
+            if (settings.enabled) settings.username else null,
+            if (settings.enabled) settings.passwordHash else null,
+        )
     }
 
-    private fun capBuffer(buffer: ByteArrayOutputStream) {
-        if (buffer.size() > maxBufferSize) {
-            buffer.reset()
-        }
+    /** Null when auth is off or incomplete — the server treats null as "auth off". */
+    private fun rtspAuthSpec(settings: StreamAuthSettings): RtspAuthSpec? {
+        if (!settings.enabled || settings.username.isEmpty() || settings.passwordHash.isEmpty()) return null
+        return RtspAuthSpec(settings.username, settings.passwordHash, settings.rtspDigestHa1)
     }
 
     fun applyBatteryOptimization(result: com.raulshma.lenscast.core.BatteryOptimizationResult?) {
@@ -649,8 +557,7 @@ class StreamingManager(
     }
 
     fun release() {
-        frameQueueScope.cancel()
-        frameQueue.close()
+        framePipeline.release()
         audioStreamingManager.release()
         stopStreaming()
     }
@@ -684,37 +591,33 @@ class StreamingManager(
     private fun startRtspServer() {
         if (rtspServer != null) return
         val server = RtspServer(currentRtspPort)
-        applyRtspAuthSettings(server, currentAuthSettings)
-        server.setInputFormat(currentRtspInputFormat)
-        server.setFrameRate(currentRtspFrameRate)
 
-        // Configure audio for RTSP if enabled
-        val audioEnabled = streamAudioEnabled.get() && !recordingAudioCaptureActive
-        if (audioEnabled) {
+        val audioWanted = streamAudioEnabled.get() && !recordingAudioCaptureActive
+        var audioStream: java.io.InputStream? = null
+        if (audioWanted) {
             // Ensure audio capture is running
             if (!audioStreamingManager.isRunning()) {
                 audioStreamingManager.start(audioConfig())
             }
             if (audioStreamingManager.isRunning()) {
-                val audioStream = audioStreamingManager.openStream()
-                if (audioStream != null) {
-                    rtspAudioStream = audioStream
-                    server.setAudioEnabled(true)
-                    server.setAudioConfig(
-                        audioStreamingManager.getSampleRateHz(),
-                        audioStreamingManager.getChannelCount(),
-                        streamAudioBitrateKbps.get()
-                    )
-                    server.setAudioStream(audioStream)
-                }
+                audioStream = audioStreamingManager.openStream()
+                rtspAudioStream = audioStream
             }
         }
 
-        if (server.start()) {
+        rtspConfig = rtspConfig.copy(
+            audioEnabled = audioStream != null,
+            audioSampleRateHz = audioStreamingManager.getSampleRateHz(),
+            audioChannelCount = audioStreamingManager.getChannelCount(),
+            audioBitrateKbps = streamAudioBitrateKbps.get(),
+            auth = rtspAuthSpec(currentAuthSettings),
+        )
+
+        if (server.start(rtspConfig, audioStream)) {
             rtspServer = server
             _rtspUrl.value = buildRtspUrl()
             _isRtspRunning.value = true
-            Log.d(TAG, "RTSP server started on port $currentRtspPort (audio=${audioEnabled && rtspAudioStream != null})")
+            Log.d(TAG, "RTSP server started on port $currentRtspPort (audio=${audioStream != null})")
         } else {
             rtspAudioStream?.close()
             rtspAudioStream = null
@@ -738,9 +641,5 @@ class StreamingManager(
 
     companion object {
         private const val TAG = "StreamingManager"
-        private const val MIN_AUDIO_BITRATE_KBPS = 32
-        private const val MAX_AUDIO_BITRATE_KBPS = 320
-        private const val MIN_AUDIO_CHANNELS = 1
-        private const val MAX_AUDIO_CHANNELS = 2
     }
 }

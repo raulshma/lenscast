@@ -16,7 +16,7 @@ import java.util.Locale
 /**
  * Shared utility for photo capture and save logic.
  * Eliminates duplication across CameraViewModel, CaptureViewModel,
- * WebApiController, and IntervalCaptureWorker.
+ * PhotoCaptureManager, and IntervalCaptureWorker.
  */
 object PhotoCaptureHelper {
 

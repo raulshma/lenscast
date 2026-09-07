@@ -7,6 +7,8 @@ import coil3.SingletonImageLoader
 import coil3.request.crossfade
 import coil3.video.VideoFrameDecoder
 import com.raulshma.lenscast.camera.CameraService
+import com.raulshma.lenscast.capture.PhotoCaptureManager
+import com.raulshma.lenscast.capture.RecordingController
 import com.raulshma.lenscast.core.ConnectivityMonitor
 import com.raulshma.lenscast.core.PowerManager
 import com.raulshma.lenscast.core.StreamWatchdog
@@ -31,6 +33,10 @@ class MainApplication : Application(), SingletonImageLoader.Factory {
     val streamingManager: StreamingManager by lazy { StreamingManager(this, thermalMonitor) }
     val settingsDataStore: SettingsDataStore by lazy { SettingsDataStore(this) }
     val captureHistoryStore: CaptureHistoryStore by lazy { CaptureHistoryStore(this) }
+    val recordingController: RecordingController by lazy { RecordingController(this) }
+    val photoCaptureManager: PhotoCaptureManager by lazy {
+        PhotoCaptureManager(this, cameraService, captureHistoryStore)
+    }
     val powerManager: PowerManager by lazy { PowerManager(this) }
     val thermalMonitor: ThermalMonitor by lazy { ThermalMonitor(this) }
     val connectivityMonitor: ConnectivityMonitor by lazy { ConnectivityMonitor(this) }
@@ -55,7 +61,19 @@ class MainApplication : Application(), SingletonImageLoader.Factory {
         super.onCreate()
         connectivityMonitor.start()
         settingsApplier.start(appScope)
+        wireFramePump()
         initializeAutoUpdateCheck()
+    }
+
+    /**
+     * The frame pump is app-runtime composition, not screen state: camera
+     * frames must reach the streaming outputs even when no camera screen has
+     * composed (headless start via the Web API).
+     */
+    private fun wireFramePump() {
+        cameraService.setFrameListener { yuvData, width, height, rotation ->
+            streamingManager.pushFrame(yuvData, width, height, rotation)
+        }
     }
 
     override fun newImageLoader(context: Context): ImageLoader {

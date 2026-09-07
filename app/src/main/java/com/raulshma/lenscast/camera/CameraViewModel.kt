@@ -3,19 +3,14 @@ package com.raulshma.lenscast.camera
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
-import android.content.Intent
 import android.content.pm.PackageManager
 import android.util.Log
 import android.widget.Toast
-import androidx.camera.core.ImageCapture
-import androidx.camera.core.ImageCaptureException
 import androidx.camera.view.PreviewView
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
-import com.raulshma.lenscast.MainApplication
-import com.raulshma.lenscast.capture.PhotoCaptureHelper
 import com.raulshma.lenscast.camera.model.CameraLensInfo
 import com.raulshma.lenscast.camera.model.CameraSettings
 import com.raulshma.lenscast.camera.model.CameraState
@@ -26,6 +21,7 @@ import com.raulshma.lenscast.camera.model.Resolution
 import com.raulshma.lenscast.camera.model.StreamStatus
 import com.raulshma.lenscast.camera.model.WhiteBalance
 import com.raulshma.lenscast.core.ConnectivityMonitor
+import com.raulshma.lenscast.core.MicAccess
 import com.raulshma.lenscast.core.NetworkQualityMonitor
 import com.raulshma.lenscast.core.StreamWatchdog
 import com.raulshma.lenscast.core.ThermalMonitor
@@ -34,14 +30,12 @@ import com.raulshma.lenscast.data.SettingsDataStore
 import com.raulshma.lenscast.streaming.AdaptiveBitrateController
 import com.raulshma.lenscast.streaming.StreamingManager
 import com.raulshma.lenscast.streaming.StreamingSession
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
 class CameraViewModel(
@@ -53,10 +47,10 @@ class CameraViewModel(
     private val streamingSession: StreamingSession,
     streamWatchdog: StreamWatchdog,
     connectivityMonitor: ConnectivityMonitor,
-) : ViewModel() {
-    private val context: Context = context.applicationContext
-    private val app: MainApplication
-        get() = context as MainApplication
+    private val recordingController: com.raulshma.lenscast.capture.RecordingController,
+    private val photoCaptureManager: com.raulshma.lenscast.capture.PhotoCaptureManager,
+    ) : ViewModel() {
+        private val context: Context = context.applicationContext
 
     val watchdogState = streamWatchdog.state
 
@@ -71,7 +65,6 @@ class CameraViewModel(
     val cameraState: StateFlow<CameraState> = _cameraState.asStateFlow()
 
     val settings: StateFlow<CameraSettings> = settingsDataStore.settings
-        .stateIn(viewModelScope, SharingStarted.Eagerly, CameraSettings())
 
     private val _streamStatus = MutableStateFlow(StreamStatus())
     val streamStatus: StateFlow<StreamStatus> = _streamStatus.asStateFlow()
@@ -88,24 +81,26 @@ class CameraViewModel(
     val availableLenses: StateFlow<List<CameraLensInfo>> = cameraService.availableLenses
     val selectedLensIndex: StateFlow<Int> = cameraService.selectedLensIndex
     val availableIsoRange: StateFlow<ClosedRange<Int>> = cameraService.availableIsoRange
+    val availableZoomRange: StateFlow<ClosedFloatingPointRange<Float>> = cameraService.availableZoomRange
+    val availableExposureRange: StateFlow<ClosedRange<Int>> = cameraService.availableExposureRange
 
     private var currentPreviewView: PreviewView? = null
-    private val _isRecording = MutableStateFlow(false)
-    val isRecording: StateFlow<Boolean> = _isRecording.asStateFlow()
+
+    // Recording truth lives in the app-scoped RecordingController; this
+    // ViewModel only derives display state from it.
+    val recordingState: StateFlow<com.raulshma.lenscast.capture.RecordingState> =
+        recordingController.state
+
+    val isRecording: StateFlow<Boolean> = recordingController.isRecording
 
     private val _recordingElapsedSeconds = MutableStateFlow(0)
     val recordingElapsedSeconds: StateFlow<Int> = _recordingElapsedSeconds.asStateFlow()
-    private var recordingStartTimeMs: Long = 0L
-    private var recordingTimerJob: Job? = null
 
     val showPreview: StateFlow<Boolean> = settingsDataStore.showPreview
-        .stateIn(viewModelScope, SharingStarted.Eagerly, true)
 
     private val streamAudioEnabled: StateFlow<Boolean> = settingsDataStore.streamAudioEnabled
-        .stateIn(viewModelScope, SharingStarted.Eagerly, true)
 
     private val recordingAudioEnabled: StateFlow<Boolean> = settingsDataStore.recordingAudioEnabled
-        .stateIn(viewModelScope, SharingStarted.Eagerly, true)
 
     private val _connectionQualityStats = MutableStateFlow<NetworkQualityMonitor.NetworkStatsSnapshot?>(null)
     val connectionQualityStats: StateFlow<NetworkQualityMonitor.NetworkStatsSnapshot?> = _connectionQualityStats.asStateFlow()
@@ -167,11 +162,6 @@ class CameraViewModel(
             }.collect { }
         }
 
-        cameraService.setFrameListener { yuvData, width, height, rotation ->
-            streamingManager.pushFrame(yuvData, width, height, rotation)
-            streamingManager.pushFrameToRtsp(yuvData, width, height, rotation)
-        }
-
         // Optimized: Connection quality polling with early cancellation
         viewModelScope.launch {
             streamingManager.isStreaming.collect { isActive ->
@@ -182,6 +172,22 @@ class CameraViewModel(
                     }
                 } else {
                     _connectionQualityStats.value = null
+                }
+            }
+        }
+
+        // Elapsed-recording ticker: derived from the controller's state so the
+        // clock can't drift from the service's actual start time.
+        viewModelScope.launch {
+            recordingState.collectLatest { state ->
+                if (state is com.raulshma.lenscast.capture.RecordingState.Recording) {
+                    while (true) {
+                        _recordingElapsedSeconds.value =
+                            ((System.currentTimeMillis() - state.startedAtMs) / 1000).toInt()
+                        delay(1000)
+                    }
+                } else {
+                    _recordingElapsedSeconds.value = 0
                 }
             }
         }
@@ -323,9 +329,11 @@ class CameraViewModel(
         }
     }
 
-    fun toggleStreaming() {
-        toggleWebStreaming()
-    }
+    private val _lastServerError = MutableStateFlow<String?>(null)
+
+    /** One-shot failure report for server start; StreamStatus itself is derived truth.
+     *  Cleared by the next successful start — retrying is the natural dismiss. */
+    val lastServerError: StateFlow<String?> = _lastServerError.asStateFlow()
 
     fun toggleWebStreaming() {
         if (_streamStatus.value.isWebActive) stopWebStreaming() else startWebStreaming()
@@ -345,7 +353,7 @@ class CameraViewModel(
         if (streamAudioEnabled.value && !_hasAudioPermission.value) {
             Toast.makeText(
                 context,
-                "Microphone permission not granted. Streaming video without audio.",
+                MicAccess.degradedMessage("Streaming video"),
                 Toast.LENGTH_SHORT
             ).show()
         }
@@ -406,31 +414,19 @@ class CameraViewModel(
     }
 
     private fun startServer() {
-        val started = streamingManager.ensureServerRunning()
-        if (started) {
-            _streamStatus.value = _streamStatus.value.copy(
-                isServerRunning = true,
-                url = streamingManager.streamUrl.value,
-            )
+        // StreamStatus is derived truth from the StreamingManager flows — the
+        // combine collector re-emits it when the server state flips. Only the
+        // failure, which no flow carries, is reported separately.
+        if (!streamingManager.ensureServerRunning()) {
+            _lastServerError.value = "Failed to start server"
         } else {
-            _streamStatus.value = _streamStatus.value.copy(
-                isServerRunning = false,
-                url = "Failed to start server",
-            )
+            _lastServerError.value = null
         }
     }
 
     private fun stopServer() {
         streamingManager.stopStreaming()
         endSession()
-        _streamStatus.value = _streamStatus.value.copy(
-            isActive = false,
-            isServerRunning = false,
-            url = "",
-            clientCount = 0,
-            isAudioActive = false,
-            audioUrl = "",
-        )
     }
 
     fun copyStreamUrl() {
@@ -452,60 +448,34 @@ class CameraViewModel(
     }
 
     fun capturePhoto() {
-        val imageCapture = cameraService.acquirePhotoCapture() ?: return
-        val fileName = PhotoCaptureHelper.generateFileName()
-        PhotoCaptureHelper.takePhoto(
-            context, imageCapture, fileName,
-            onSaved = { filePath, fileSizeBytes ->
-                val entry = app.captureHistoryStore.createPhotoEntry(
-                    fileName = fileName,
-                    filePath = filePath,
-                    fileSizeBytes = fileSizeBytes,
-                )
-                app.captureHistoryStore.add(entry)
-                cameraService.releasePhotoCapture()
-            },
-            onError = { exception ->
-                Log.e(TAG, "Capture failed", exception)
-                cameraService.releasePhotoCapture()
-            },
+        val fileName = photoCaptureManager.captureToGallery(
+            onError = { exception -> Log.e(TAG, "Capture failed", exception) },
         )
+        if (fileName == null) {
+            Log.w(TAG, "capturePhoto: camera use case unavailable")
+        }
     }
 
     fun toggleRecording() {
-        val intent = Intent(context, com.raulshma.lenscast.capture.RecordingService::class.java)
-        if (_isRecording.value) {
-            intent.action = com.raulshma.lenscast.capture.RecordingService.ACTION_STOP
-            context.startService(intent)
-            _isRecording.value = false
-            recordingTimerJob?.cancel()
-            recordingTimerJob = null
-            _recordingElapsedSeconds.value = 0
+        val current = recordingState.value
+        if (current is com.raulshma.lenscast.capture.RecordingState.Recording ||
+            current is com.raulshma.lenscast.capture.RecordingState.Scheduled
+        ) {
+            recordingController.stop()
         } else {
             refreshAudioPermission()
             if (recordingAudioEnabled.value && !_hasAudioPermission.value) {
                 Toast.makeText(
                     context,
-                    "Microphone permission not granted. Recording video without audio.",
+                    MicAccess.degradedMessage("Recording video"),
                     Toast.LENGTH_SHORT
                 ).show()
             }
-            intent.action = com.raulshma.lenscast.capture.RecordingService.ACTION_START
-            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
-                context.startForegroundService(intent)
-            } else {
-                context.startService(intent)
-            }
-            _isRecording.value = true
-            recordingStartTimeMs = System.currentTimeMillis()
-            _recordingElapsedSeconds.value = 0
-            recordingTimerJob = viewModelScope.launch {
-                while (true) {
-                    delay(1000)
-                    _recordingElapsedSeconds.value =
-                        ((System.currentTimeMillis() - recordingStartTimeMs) / 1000).toInt()
-                }
-            }
+            recordingController.start(
+                com.raulshma.lenscast.capture.model.RecordingConfig(
+                    includeAudio = recordingAudioEnabled.value
+                )
+            )
         }
     }
 
@@ -518,12 +488,15 @@ class CameraViewModel(
         private val streamingSession: StreamingSession,
         private val streamWatchdog: StreamWatchdog,
         private val connectivityMonitor: ConnectivityMonitor,
+        private val recordingController: com.raulshma.lenscast.capture.RecordingController,
+        private val photoCaptureManager: com.raulshma.lenscast.capture.PhotoCaptureManager,
     ) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
         override fun <T : ViewModel> create(modelClass: Class<T>): T {
             return CameraViewModel(
                 context, cameraService, streamingManager, thermalMonitor,
-                settingsDataStore, streamingSession, streamWatchdog, connectivityMonitor
+                settingsDataStore, streamingSession, streamWatchdog, connectivityMonitor,
+                recordingController, photoCaptureManager
             ) as T
         }
     }
@@ -541,9 +514,6 @@ class CameraViewModel(
     }
 
     private fun refreshAudioPermission() {
-        _hasAudioPermission.value = ContextCompat.checkSelfPermission(
-            context,
-            android.Manifest.permission.RECORD_AUDIO
-        ) == PackageManager.PERMISSION_GRANTED
+        _hasAudioPermission.value = MicAccess.isGranted(context)
     }
 }

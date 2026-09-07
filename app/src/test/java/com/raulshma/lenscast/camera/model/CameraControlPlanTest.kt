@@ -1,0 +1,65 @@
+package com.raulshma.lenscast.camera.model
+
+import android.hardware.camera2.CaptureRequest
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
+import org.junit.Test
+
+class CameraControlPlanTest {
+
+    private val isoRange = 100..3200
+    private val exposureRange = 1L..1_000_000_000L
+
+    @Test
+    fun `auto settings keep AE on and scene disabled`() {
+        val plan = CameraControlPlan.from(CameraSettings(), isoRange, exposureRange)
+        assertEquals(CaptureRequest.CONTROL_AE_MODE_ON, plan.aeMode)
+        assertEquals(CaptureRequest.CONTROL_SCENE_MODE_DISABLED, plan.sceneMode)
+        assertEquals(24, plan.fpsLower)
+        assertEquals(24, plan.fpsUpper)
+        assertNull(plan.sensorSensitivity)
+        assertNull(plan.sensorExposureTimeNs)
+    }
+
+    @Test
+    fun `manual iso clamps to device range and defaults exposure to one frame period`() {
+        val settings = CameraSettings(iso = 999999, frameRate = 30)
+        val plan = CameraControlPlan.from(settings, isoRange, exposureRange)
+        assertEquals(3200, plan.sensorSensitivity)
+        assertEquals(1_000_000_000L / 30, plan.sensorExposureTimeNs)
+        assertEquals(CaptureRequest.CONTROL_AE_MODE_OFF, plan.aeMode)
+    }
+
+    @Test
+    fun `explicit exposure time passes through unclamped - only the default is clamped`() {
+        val settings = CameraSettings(exposureTime = 5_000_000_000L)
+        val plan = CameraControlPlan.from(settings, isoRange, 1_000L..100_000L)
+        assertEquals(5_000_000_000L, plan.sensorExposureTimeNs)
+    }
+
+    @Test
+    fun `night vision clamps fps and locks AE`() {
+        val settings = CameraSettings(frameRate = 60, nightVisionMode = NightVisionMode.ON)
+        val plan = CameraControlPlan.from(settings, isoRange, exposureRange)
+        assertEquals(10, plan.fpsLower)
+        assertEquals(15, plan.fpsUpper)
+        assertEquals(CaptureRequest.CONTROL_SCENE_MODE_NIGHT, plan.sceneMode)
+        assertFalse(plan.aeLock!!)
+    }
+
+    @Test
+    fun `manual focus maps to AF off with distance`() {
+        val settings = CameraSettings(focusMode = FocusMode.MANUAL, focusDistance = 5.5f)
+        val plan = CameraControlPlan.from(settings, isoRange, exposureRange)
+        assertEquals(CaptureRequest.CONTROL_AF_MODE_OFF, plan.afMode)
+        assertEquals(5.5f, plan.lensFocusDistance)
+    }
+
+    @Test
+    fun `hdr survives the night-vision-off scene reset`() {
+        val settings = CameraSettings(hdrMode = HdrMode.ON)
+        val plan = CameraControlPlan.from(settings, isoRange, exposureRange)
+        assertEquals(CaptureRequest.CONTROL_SCENE_MODE_HDR, plan.sceneMode)
+    }
+}

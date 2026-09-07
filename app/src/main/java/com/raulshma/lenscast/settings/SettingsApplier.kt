@@ -9,7 +9,6 @@ import com.raulshma.lenscast.streaming.rtsp.RtspInputFormat
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 
 /**
@@ -17,7 +16,7 @@ import kotlinx.coroutines.launch
  *
  * Every settings change goes through SettingsDataStore; this module watches the
  * store and applies new values to the StreamingManager, CameraService, and
- * StreamWatchdog. ViewModels and WebApiController write settings — nobody else
+ * StreamWatchdog. ViewModels and Web API handlers write settings — nobody else
  * applies them, so each persisted change is applied exactly once regardless of
  * how many screens or clients are alive.
  */
@@ -31,7 +30,7 @@ class SettingsApplier(
     fun start(scope: CoroutineScope) {
         // Camera settings
         scope.launch {
-            settingsDataStore.settings.distinctUntilChanged().collectLatest { saved ->
+            settingsDataStore.settings.collectLatest { saved ->
                 cameraService.applySettings(saved)
             }
         }
@@ -74,12 +73,11 @@ class SettingsApplier(
             }
         }
 
-        // Frame rate (M-JPEG streaming + RTSP + adaptive bitrate)
+        // Frame rate (M-JPEG streaming + RTSP + adaptive bitrate fan out
+        // inside the Streaming Manager)
         scope.launch {
             settingsDataStore.frameRate.collectLatest { fps ->
-                streamingManager.setStreamFrameRate(fps)
-                streamingManager.setAdaptiveDefaultFrameRate(fps)
-                streamingManager.setRtspFrameRate(fps)
+                streamingManager.setFrameRate(fps)
             }
         }
 

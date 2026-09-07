@@ -34,11 +34,13 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.raulshma.lenscast.MainApplication
+import com.raulshma.lenscast.camera.model.CameraSettings
 import com.raulshma.lenscast.camera.model.FocusMode
 import com.raulshma.lenscast.camera.model.HdrMode
 import com.raulshma.lenscast.camera.model.NightVisionMode
 import com.raulshma.lenscast.camera.model.Resolution
 import com.raulshma.lenscast.camera.model.WhiteBalance
+import com.raulshma.lenscast.camera.model.isoStops
 import com.raulshma.lenscast.ui.components.LensCastSectionCard
 import com.raulshma.lenscast.ui.components.LensCastTopBar
 
@@ -64,15 +66,7 @@ fun CameraSettingsScreen(
     val zoomRange by viewModel.availableZoomRange.collectAsState()
     val exposureRange by viewModel.availableExposureRange.collectAsState()
     val isoRange by viewModel.availableIsoRange.collectAsState()
-    val isoOptions = remember(isoRange) {
-        val stops = mutableListOf("Auto")
-        var value = 100
-        while (value <= isoRange.endInclusive) {
-            if (value >= isoRange.start) stops.add(value.toString())
-            value *= 2
-        }
-        stops
-    }
+    val isoOptions = remember(isoRange) { isoStops(isoRange) }
     val showPreview by viewModel.showPreview.collectAsState()
 
     Scaffold(
@@ -185,7 +179,7 @@ fun CameraSettingsScreen(
                     SliderSetting(
                         title = "Frame Rate",
                         value = settings.frameRate.toFloat(),
-                        range = 15f..60f,
+                        range = CameraSettings.FRAME_RATE_SLIDER_MIN.toFloat()..CameraSettings.FRAME_RATE_SLIDER_MAX.toFloat(),
                         onValueChange = { viewModel.updateFrameRate(it.toInt()) }
                     )
                     DropdownSetting(

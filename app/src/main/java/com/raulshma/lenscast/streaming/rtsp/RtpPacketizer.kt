@@ -1,10 +1,19 @@
 package com.raulshma.lenscast.streaming.rtsp
 
-object RtpPacketizer {
 
-    private const val RTP_HEADER_SIZE = 12
-    private const val MAX_PACKET_SIZE = 1400
-    private const val PAYLOAD_TYPE = 96
+/**
+ * RTP packetizer for H.264 NAL units (RFC 6184 FU-A + single NAL). Instance
+ * state — sequence number, SSRC, counters — is owned per [RtspServer] session;
+ * a fresh instance per start replaces the old global reset() ritual.
+ */
+class RtpPacketizer {
+
+    private companion object {
+        const val RTP_HEADER_SIZE = 12
+        const val MAX_PACKET_SIZE = 1400
+        const val PAYLOAD_TYPE = 96
+
+    }
 
     private var sequenceNumber = 0L
     private val ssrc: Long = java.util.Random().nextLong()
@@ -23,12 +32,6 @@ object RtpPacketizer {
     @Volatile
     var sentOctetCount: Long = 0
         private set
-
-    fun reset() {
-        sequenceNumber = 0L
-        sentPacketCount = 0
-        sentOctetCount = 0
-    }
 
     fun packetizeNalUnit(nalUnit: ByteArray, timestamp: Long, marker: Boolean): List<ByteArray> {
         if (nalUnit.isEmpty()) return emptyList()

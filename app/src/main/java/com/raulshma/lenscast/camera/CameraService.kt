@@ -28,9 +28,13 @@ import androidx.camera.camera2.interop.Camera2CameraControl
 import androidx.camera.camera2.interop.Camera2Interop
 import androidx.camera.camera2.interop.CaptureRequestOptions
 import androidx.camera.core.UseCase
+import androidx.camera.video.Recorder
+import androidx.camera.video.VideoCapture
 import com.raulshma.lenscast.camera.model.CameraLensInfo
 import com.raulshma.lenscast.camera.model.CameraSettings
+import com.raulshma.lenscast.camera.model.CameraControlPlan
 import com.raulshma.lenscast.camera.model.CameraState
+import com.raulshma.lenscast.core.YuvConverter
 import com.raulshma.lenscast.camera.model.FocusMode
 import com.raulshma.lenscast.camera.model.WhiteBalance
 import com.raulshma.lenscast.camera.model.HdrMode
@@ -134,8 +138,6 @@ class CameraService(private val context: Context) {
         Log.d(TAG, "Keep-alive ref count: $keepAliveRefCount")
     }
 
-    fun isKeepAliveActive(): Boolean = keepAliveRefCount > 0
-
     fun beginExclusiveSession() {
         exclusiveSessionRefCount++
         Log.d(TAG, "Exclusive camera session started (count=$exclusiveSessionRefCount)")
@@ -149,8 +151,6 @@ class CameraService(private val context: Context) {
     fun getEffectiveLifecycleOwner(): LifecycleOwner? {
         return if (keepAliveRefCount > 0) keepAliveLifecycle else lifecycleOwner
     }
-
-    fun getCurrentCameraSelector(): CameraSelector = currentCameraSelector
 
     fun tapToFocus(x: Float, y: Float) {
         val cam = camera ?: run {
@@ -409,7 +409,7 @@ class CameraService(private val context: Context) {
 
         val provider = ensureCameraProviderAvailable()
         Log.d(TAG, "rebindUseCases: provider=${provider != null}, refCount=$keepAliveRefCount, previewRequested=$previewRequested, lifecycleOwner=${lifecycleOwner != null}")
-        
+
         if (provider == null) {
             Log.w(TAG, "rebindUseCases: cameraProvider is null, cannot rebind")
             return
@@ -421,14 +421,69 @@ class CameraService(private val context: Context) {
             Log.d(TAG, "rebindUseCases: unbound camera because there is no active demand")
             return
         }
-        
-        val owner = if (keepAliveRefCount > 0) keepAliveLifecycle else lifecycleOwner
+
+        val owner = getEffectiveLifecycleOwner()
         if (owner == null) {
             Log.w(TAG, "rebindUseCases: no lifecycle owner available and no keep-alive, cannot rebind")
             return
         }
 
         bindUseCases(provider, owner)
+    }
+
+    /**
+     * Bind a recording [VideoCapture] alongside the current use-case set,
+     * trying progressively smaller combinations before falling back to the
+     * VideoCapture alone. The caller brackets the recording with
+     * [acquireKeepAlive]/[beginExclusiveSession]; [unbindRecording] restores
+     * the standard binding.
+     *
+     * This is the recording seam: callers never touch the provider, the
+     * getters, or the combination ladder directly.
+     */
+    fun bindRecording(videoCapture: VideoCapture<Recorder>): Boolean {
+        val provider = ensureCameraProviderAvailable() ?: run {
+            Log.w(TAG, "bindRecording: camera provider unavailable")
+            return false
+        }
+        val owner = getEffectiveLifecycleOwner()
+        if (owner == null) {
+            Log.w(TAG, "bindRecording: no lifecycle owner available and no keep-alive")
+            return false
+        }
+
+        val base = listOfNotNull(preview, imageCapture, imageAnalysis)
+        return try {
+            // No write-back: the preview-side fields must keep their values so
+            // [unbindRecording] can restore the standard binding.
+            bindLargestCompatible(provider, owner, base, extra = videoCapture, writeBack = false)
+            true
+        } catch (e: Exception) {
+            Log.e(TAG, "bindRecording: no compatible combination found", e)
+            false
+        }
+    }
+
+    /** Drop the recording binding and restore the standard use-case combination. */
+    fun unbindRecording() {
+        rebindUseCases()
+    }
+
+    private fun subsetsOf(items: List<UseCase>, size: Int): List<List<UseCase>> {
+        val result = mutableListOf<List<UseCase>>()
+        fun recurse(start: Int, current: MutableList<UseCase>) {
+            if (current.size == size) {
+                result += current.toList()
+                return
+            }
+            for (i in start..items.lastIndex) {
+                current += items[i]
+                recurse(i + 1, current)
+                current.removeAt(current.lastIndex)
+            }
+        }
+        recurse(0, mutableListOf())
+        return result
     }
 
     @androidx.camera.camera2.interop.ExperimentalCamera2Interop
@@ -443,7 +498,7 @@ class CameraService(private val context: Context) {
         previewRequested = true
         Log.d(TAG, "startPreview: requested with selector=$currentCameraSelector, resolution=$currentResolution")
 
-        val owner = if (keepAliveRefCount > 0) keepAliveLifecycle else lifecycleOwner
+        val owner = getEffectiveLifecycleOwner()
         if (owner == null) {
             Log.e(TAG, "startPreview: no lifecycle owner available")
             return
@@ -545,7 +600,13 @@ class CameraService(private val context: Context) {
         try {
             provider.unbindAll()
             try {
-                camera = bindBestAvailableCombination(provider, owner)
+                camera = bindLargestCompatible(
+                    provider,
+                    owner,
+                    base = listOfNotNull(preview, imageCapture, imageAnalysis),
+                    extra = null,
+                    writeBack = true,
+                )
             } catch (e: Exception) {
                 Log.e(TAG, "bindUseCases: failed to bind camera", e)
                 _cameraState.value = CameraState.Error("Failed to start camera: ${e.message}")
@@ -585,25 +646,32 @@ class CameraService(private val context: Context) {
         }
     }
 
-    private fun bindBestAvailableCombination(
+    /**
+     * Bind the largest compatible use-case combination, largest first: every
+     * subset of [base] (optionally plus [extra]), then — via the empty subset —
+     * [extra] alone. One ladder for preview-start and recording-start so both
+     * fall back identically on constraint-limited devices. [writeBack] updates
+     * the preview/capture/analysis fields from whatever actually bound;
+     * recording passes false so [unbindRecording] can restore the standard set.
+     */
+    private fun bindLargestCompatible(
         provider: ProcessCameraProvider,
         owner: LifecycleOwner,
+        base: List<UseCase>,
+        extra: UseCase?,
+        writeBack: Boolean,
     ): Camera {
-        val preferredCombinations = buildList<List<UseCase>> {
-            if (preview != null && imageCapture != null && imageAnalysis != null) {
-                add(listOf(preview!!, imageCapture!!, imageAnalysis!!))
-                add(listOf(preview!!, imageCapture!!))
-                add(listOf(preview!!, imageAnalysis!!))
+        val combinations = buildList<List<UseCase>> {
+            for (size in base.size downTo 0) {
+                subsetsOf(base, size).forEach { subset ->
+                    add(if (extra != null) subset + extra else subset)
+                }
             }
-            if (imageCapture != null && imageAnalysis != null) {
-                add(listOf(imageCapture!!, imageAnalysis!!))
-            }
-            imageCapture?.let { add(listOf(it)) }
-            imageAnalysis?.let { add(listOf(it)) }
         }
 
         var lastError: Exception? = null
-        preferredCombinations.forEach { useCases ->
+        for (useCases in combinations) {
+            if (useCases.isEmpty()) continue
             try {
                 provider.unbindAll()
                 val boundCamera = provider.bindToLifecycle(
@@ -612,20 +680,22 @@ class CameraService(private val context: Context) {
                     *useCases.toTypedArray()
                 )
 
-                preview = useCases.filterIsInstance<Preview>().firstOrNull()
-                imageCapture = useCases.filterIsInstance<ImageCapture>().firstOrNull()
-                imageAnalysis = useCases.filterIsInstance<ImageAnalysis>().firstOrNull()
+                if (writeBack) {
+                    preview = useCases.filterIsInstance<Preview>().firstOrNull()
+                    imageCapture = useCases.filterIsInstance<ImageCapture>().firstOrNull()
+                    imageAnalysis = useCases.filterIsInstance<ImageAnalysis>().firstOrNull()
+                }
 
                 Log.d(
                     TAG,
-                    "bindBestAvailableCombination: bound ${useCases.joinToString { it.javaClass.simpleName }}"
+                    "bindLargestCompatible: bound ${useCases.joinToString { it.javaClass.simpleName }}"
                 )
                 return boundCamera
             } catch (e: Exception) {
                 lastError = e
                 Log.w(
                     TAG,
-                    "bindBestAvailableCombination: failed for ${useCases.joinToString { it.javaClass.simpleName }}",
+                    "bindLargestCompatible: failed for ${useCases.joinToString { it.javaClass.simpleName }}",
                     e
                 )
             }
@@ -719,100 +789,23 @@ class CameraService(private val context: Context) {
         val yPlane = planes[0]
         val uPlane = planes[1]
         val vPlane = planes[2]
-
         val crop = image.cropRect
-        val width = crop.width()
-        val height = crop.height()
-        if (width <= 0 || height <= 0) return null
 
-        val ySize = width * height
-        val uvSize = ySize / 2
-        val nv21 = ByteArray(ySize + uvSize)
-
-        // Copy Y plane — use bulk get when pixelStride==1 for ~4x speedup
-        val yBuffer = yPlane.buffer.duplicate()
-        val yRowStride = yPlane.rowStride
-        val yPixelStride = yPlane.pixelStride
-        val yCropTop = crop.top
-        val yCropLeft = crop.left
-
-        if (yPixelStride == 1) {
-            // Fast path: bulk copy each row
-            var yOut = 0
-            for (row in 0 until height) {
-                yBuffer.position((row + yCropTop) * yRowStride + yCropLeft)
-                yBuffer.get(nv21, yOut, width)
-                yOut += width
-            }
-        } else {
-            // Slow path: per-pixel copy
-            var yOut = 0
-            for (row in 0 until height) {
-                var srcIndex = (row + yCropTop) * yRowStride + yCropLeft * yPixelStride
-                for (col in 0 until width) {
-                    nv21[yOut++] = yBuffer.get(srcIndex)
-                    srcIndex += yPixelStride
-                }
-            }
-        }
-
-        // Copy UV planes interleaved as VU (NV21)
-        val uBuffer = uPlane.buffer.duplicate()
-        val vBuffer = vPlane.buffer.duplicate()
-        val uRowStride = uPlane.rowStride
-        val vRowStride = vPlane.rowStride
-        val uPixelStride = uPlane.pixelStride
-        val vPixelStride = vPlane.pixelStride
-        val uvWidth = width / 2
-        val uvHeight = height / 2
-        val uvCropTop = crop.top / 2
-        val uvCropLeft = crop.left / 2
-        var uvPos = ySize
-
-        // Fast path: interleaved NV12/NV21 with pixelStride==2 and contiguous VU layout
-        if (vPixelStride == 2 && uPixelStride == 2 && vRowStride == uRowStride
-            && vBuffer.capacity() > 0
-        ) {
-            // Check if V and U planes are interleaved (common on modern devices)
-            val vStart = vPlane.buffer.position()
-            val uStart = uPlane.buffer.position()
-            // NV21: VU interleaved, V plane starts 1 byte before U
-            if (uStart - vStart == 1) {
-                // Fast path: the raw buffer IS NV21 interleaved, bulk copy per row
-                for (row in 0 until uvHeight) {
-                    val rowOffset = (row + uvCropTop) * vRowStride + uvCropLeft * vPixelStride
-                    vBuffer.position(rowOffset)
-                    vBuffer.get(nv21, uvPos, uvWidth * 2)
-                    uvPos += uvWidth * 2
-                }
-            } else {
-                // Per-pixel interleave
-                for (row in 0 until uvHeight) {
-                    var uIndex = (row + uvCropTop) * uRowStride + uvCropLeft * uPixelStride
-                    var vIndex = (row + uvCropTop) * vRowStride + uvCropLeft * vPixelStride
-                    for (col in 0 until uvWidth) {
-                        nv21[uvPos++] = vBuffer.get(vIndex)
-                        nv21[uvPos++] = uBuffer.get(uIndex)
-                        uIndex += uPixelStride
-                        vIndex += vPixelStride
-                    }
-                }
-            }
-        } else {
-            // Generic slow path
-            for (row in 0 until uvHeight) {
-                var uIndex = (row + uvCropTop) * uRowStride + uvCropLeft * uPixelStride
-                var vIndex = (row + uvCropTop) * vRowStride + uvCropLeft * vPixelStride
-                for (col in 0 until uvWidth) {
-                    nv21[uvPos++] = vBuffer.get(vIndex)
-                    nv21[uvPos++] = uBuffer.get(uIndex)
-                    uIndex += uPixelStride
-                    vIndex += vPixelStride
-                }
-            }
-        }
-
-        return nv21
+        return YuvConverter.yuvToNv21(
+            yBuffer = yPlane.buffer,
+            uBuffer = uPlane.buffer,
+            vBuffer = vPlane.buffer,
+            yRowStride = yPlane.rowStride,
+            yPixelStride = yPlane.pixelStride,
+            uRowStride = uPlane.rowStride,
+            uPixelStride = uPlane.pixelStride,
+            vRowStride = vPlane.rowStride,
+            vPixelStride = vPlane.pixelStride,
+            width = crop.width(),
+            height = crop.height(),
+            cropLeft = crop.left,
+            cropTop = crop.top,
+        )
     }
 
     private fun getStreamingAnalysisResolution(captureResolution: Size): Size {
@@ -912,96 +905,47 @@ class CameraService(private val context: Context) {
         try {
             val camera2Control = Camera2CameraControl.from(cam.cameraControl)
             val builder = CaptureRequestOptions.Builder()
-            
-            val fpsRange = Range(settings.frameRate, settings.frameRate)
-            builder.setCaptureRequestOption(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, fpsRange)
-            
-            if (settings.stabilization) {
+            // The decisions live in the pure, tested CameraControlPlan; this is
+            // translation only.
+            val plan = CameraControlPlan.from(settings, _availableIsoRange.value, sensorExposureTimeRange)
+
+            builder.setCaptureRequestOption(
+                CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE,
+                Range(plan.fpsLower, plan.fpsUpper)
+            )
+
+            if (plan.videoStabilizationOn) {
                 builder.setCaptureRequestOption(CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE, CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_ON)
-                builder.setCaptureRequestOption(CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE, CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE_ON)
             } else {
                 builder.setCaptureRequestOption(CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE, CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_OFF)
+            }
+            if (plan.opticalStabilizationOn) {
+                builder.setCaptureRequestOption(CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE, CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE_ON)
+            } else {
                 builder.setCaptureRequestOption(CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE, CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE_OFF)
             }
 
-            when (settings.hdrMode) {
-                HdrMode.ON -> builder.setCaptureRequestOption(CaptureRequest.CONTROL_SCENE_MODE, CaptureRequest.CONTROL_SCENE_MODE_HDR)
-                else -> { }
+            builder.setCaptureRequestOption(CaptureRequest.CONTROL_SCENE_MODE, plan.sceneMode)
+            builder.setCaptureRequestOption(CaptureRequest.CONTROL_AE_MODE, plan.aeMode)
+            plan.aeLock?.let {
+                builder.setCaptureRequestOption(CaptureRequest.CONTROL_AE_LOCK, it)
             }
+            plan.sensorSensitivity?.let {
+                builder.setCaptureRequestOption(CaptureRequest.SENSOR_SENSITIVITY, it)
+            }
+            plan.sensorExposureTimeNs?.let {
+                builder.setCaptureRequestOption(CaptureRequest.SENSOR_EXPOSURE_TIME, it)
+            }
+            builder.setCaptureRequestOption(CaptureRequest.CONTROL_AWB_MODE, plan.awbMode)
 
-            val hasManualExposure = settings.iso != null || settings.exposureTime != null
-
-            if (hasManualExposure) {
-                builder.setCaptureRequestOption(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_OFF)
-                settings.iso?.let { iso ->
-                    val clampedIso = iso.coerceIn(_availableIsoRange.value)
-                    builder.setCaptureRequestOption(CaptureRequest.SENSOR_SENSITIVITY, clampedIso)
-                }
-                val exposureTime = settings.exposureTime ?: run {
-                    // Default to 1/frameRate when ISO is set without explicit exposure time
-                    val defaultNs = 1_000_000_000L / settings.frameRate.coerceAtLeast(1)
-                    defaultNs.coerceIn(sensorExposureTimeRange.first, sensorExposureTimeRange.last)
-                }
-                builder.setCaptureRequestOption(CaptureRequest.SENSOR_EXPOSURE_TIME, exposureTime)
-            } else {
-                builder.setCaptureRequestOption(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON)
-            }
-            
-            when (settings.whiteBalance) {
-               WhiteBalance.AUTO -> builder.setCaptureRequestOption(CaptureRequest.CONTROL_AWB_MODE, CaptureRequest.CONTROL_AWB_MODE_AUTO)
-               WhiteBalance.DAYLIGHT -> builder.setCaptureRequestOption(CaptureRequest.CONTROL_AWB_MODE, CaptureRequest.CONTROL_AWB_MODE_DAYLIGHT)
-               WhiteBalance.CLOUDY -> builder.setCaptureRequestOption(CaptureRequest.CONTROL_AWB_MODE, CaptureRequest.CONTROL_AWB_MODE_CLOUDY_DAYLIGHT)
-               WhiteBalance.INDOOR -> builder.setCaptureRequestOption(CaptureRequest.CONTROL_AWB_MODE, CaptureRequest.CONTROL_AWB_MODE_INCANDESCENT)
-               WhiteBalance.FLUORESCENT -> builder.setCaptureRequestOption(CaptureRequest.CONTROL_AWB_MODE, CaptureRequest.CONTROL_AWB_MODE_FLUORESCENT)
-               WhiteBalance.MANUAL -> {
-                   builder.setCaptureRequestOption(CaptureRequest.CONTROL_AWB_MODE, CaptureRequest.CONTROL_AWB_MODE_OFF)
-               }
-            }
-            
-            if (settings.focusMode == FocusMode.MANUAL) {
-                builder.setCaptureRequestOption(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_OFF)
-                settings.focusDistance?.let {
+            if (plan.afMode != null) {
+                builder.setCaptureRequestOption(CaptureRequest.CONTROL_AF_MODE, plan.afMode)
+                plan.lensFocusDistance?.let {
                     builder.setCaptureRequestOption(CaptureRequest.LENS_FOCUS_DISTANCE, it)
                 }
             }
-            
-            settings.sceneMode?.toIntOrNull()?.let {
-                builder.setCaptureRequestOption(CaptureRequest.CONTROL_SCENE_MODE, it)
-            }
 
-            when (settings.nightVisionMode) {
-                NightVisionMode.ON -> {
-                    builder.setCaptureRequestOption(CaptureRequest.CONTROL_SCENE_MODE, CaptureRequest.CONTROL_SCENE_MODE_NIGHT)
-                    if (!hasManualExposure) {
-                        builder.setCaptureRequestOption(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON)
-                    }
-                    builder.setCaptureRequestOption(CaptureRequest.CONTROL_AE_LOCK, false)
-                    val nightFpsRange = Range(10, settings.frameRate.coerceAtMost(15))
-                    builder.setCaptureRequestOption(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, nightFpsRange)
-                    Log.d(TAG, "Night vision ON: scene=NIGHT, fps=$nightFpsRange")
-                }
-                NightVisionMode.AUTO -> {
-                    builder.setCaptureRequestOption(CaptureRequest.CONTROL_SCENE_MODE, CaptureRequest.CONTROL_SCENE_MODE_NIGHT_PORTRAIT)
-                    if (!hasManualExposure) {
-                        builder.setCaptureRequestOption(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON_AUTO_FLASH)
-                    }
-                    Log.d(TAG, "Night vision AUTO: scene=NIGHT_PORTRAIT, auto flash")
-                }
-                NightVisionMode.OFF -> {
-                    // Reset scene mode when disabling night vision
-                    // (only if not overridden by HDR or manual scene mode)
-                    if (settings.hdrMode != HdrMode.ON && settings.sceneMode == null) {
-                        builder.setCaptureRequestOption(CaptureRequest.CONTROL_SCENE_MODE, CaptureRequest.CONTROL_SCENE_MODE_DISABLED)
-                    }
-                    if (!hasManualExposure) {
-                        builder.setCaptureRequestOption(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON)
-                    }
-                    builder.setCaptureRequestOption(CaptureRequest.CONTROL_AE_LOCK, false)
-                }
-            }
-            
             camera2Control.setCaptureRequestOptions(builder.build())
-            
         } catch (e: Exception) {
             Log.w(TAG, "Advanced settings failed", e)
         }
@@ -1028,15 +972,6 @@ class CameraService(private val context: Context) {
             Log.d(TAG, "onActivityStop: detached preview surface for background operation")
         }
     }
-
-    fun isPreviewAvailable(): Boolean = isActivityForeground
-
-    fun getImageCapture(): ImageCapture? = imageCapture
-    fun getCamera(): Camera? = camera
-    fun getCameraProvider(): ProcessCameraProvider? = cameraProvider
-    fun getPreview(): Preview? = preview
-    fun getImageAnalysis(): ImageAnalysis? = imageAnalysis
-    fun getLifecycleOwner(): LifecycleOwner? = lifecycleOwner
 
     fun release() {
         cameraProvider?.unbindAll()

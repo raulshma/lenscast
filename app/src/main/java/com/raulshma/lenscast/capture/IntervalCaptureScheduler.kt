@@ -8,6 +8,8 @@ import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkInfo
 import androidx.work.WorkManager
 import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.map
 
 object IntervalCaptureScheduler {
 
@@ -15,7 +17,6 @@ object IntervalCaptureScheduler {
         context: Context,
         intervalSeconds: Long,
         totalCaptures: Int,
-        imageQuality: Int,
         flashMode: String = "OFF",
         completedCaptures: Int = 0,
     ) {
@@ -24,7 +25,6 @@ object IntervalCaptureScheduler {
             policy = ExistingWorkPolicy.REPLACE,
             intervalSeconds = intervalSeconds,
             totalCaptures = totalCaptures,
-            imageQuality = imageQuality,
             flashMode = flashMode,
             completedCaptures = completedCaptures,
             initialDelaySeconds = 0L,
@@ -35,7 +35,6 @@ object IntervalCaptureScheduler {
         context: Context,
         intervalSeconds: Long,
         totalCaptures: Int,
-        imageQuality: Int,
         flashMode: String = "OFF",
         completedCaptures: Int,
     ) {
@@ -44,7 +43,6 @@ object IntervalCaptureScheduler {
             policy = ExistingWorkPolicy.APPEND_OR_REPLACE,
             intervalSeconds = intervalSeconds,
             totalCaptures = totalCaptures,
-            imageQuality = imageQuality,
             flashMode = flashMode,
             completedCaptures = completedCaptures,
             initialDelaySeconds = intervalSeconds.coerceAtLeast(1L),
@@ -55,8 +53,25 @@ object IntervalCaptureScheduler {
         WorkManager.getInstance(context).cancelUniqueWork(WORK_NAME)
     }
 
+    /**
+     * Observable truth: WorkManager's own view of the unique work, as a cold
+     * flow. Screen ViewModels observe this instead of keeping optimistic
+     * copies of "is it running / how many captured".
+     */
+    fun observeStatus(context: Context): Flow<IntervalCaptureStatusSnapshot> {
+        return WorkManager.getInstance(context)
+            .getWorkInfosForUniqueWorkFlow(WORK_NAME)
+            .map(::snapshotOf)
+    }
+
+    /** One-shot variant for request/response callers (Web API status route). */
     fun getStatus(context: Context): IntervalCaptureStatusSnapshot {
-        val workInfos = WorkManager.getInstance(context).getWorkInfosForUniqueWork(WORK_NAME).get()
+        return snapshotOf(
+            WorkManager.getInstance(context).getWorkInfosForUniqueWork(WORK_NAME).get()
+        )
+    }
+
+    private fun snapshotOf(workInfos: List<WorkInfo>): IntervalCaptureStatusSnapshot {
         val completedCaptures = workInfos.maxOfOrNull(::extractCompletedCaptures) ?: 0
         val isRunning = workInfos.any { !it.state.isFinished }
         return IntervalCaptureStatusSnapshot(
@@ -70,7 +85,6 @@ object IntervalCaptureScheduler {
         policy: ExistingWorkPolicy,
         intervalSeconds: Long,
         totalCaptures: Int,
-        imageQuality: Int,
         flashMode: String,
         completedCaptures: Int,
         initialDelaySeconds: Long,
@@ -80,7 +94,6 @@ object IntervalCaptureScheduler {
                 Data.Builder()
                     .putLong(IntervalCaptureWorker.KEY_INTERVAL_SECONDS, intervalSeconds.coerceAtLeast(1L))
                     .putInt(IntervalCaptureWorker.KEY_TOTAL_CAPTURES, totalCaptures.coerceAtLeast(0))
-                    .putInt(IntervalCaptureWorker.KEY_IMAGE_QUALITY, imageQuality.coerceIn(10, 100))
                     .putString(IntervalCaptureWorker.KEY_FLASH_MODE, flashMode)
                     .putInt(
                         IntervalCaptureWorker.KEY_COMPLETED_CAPTURES,

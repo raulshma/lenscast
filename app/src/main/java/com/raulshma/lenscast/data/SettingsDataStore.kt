@@ -22,10 +22,16 @@ import com.raulshma.lenscast.camera.model.OverlayPosition
 import com.raulshma.lenscast.camera.model.OverlaySettings
 import com.raulshma.lenscast.camera.model.Resolution
 import com.raulshma.lenscast.camera.model.WhiteBalance
+import com.raulshma.lenscast.core.StreamAuthCrypto
 import com.raulshma.lenscast.core.StreamDefaults
 import com.raulshma.lenscast.streaming.rtsp.RtspInputFormat
-import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 import org.json.JSONArray
 import org.json.JSONObject
 import java.security.MessageDigest
@@ -44,7 +50,6 @@ data class StreamAuthSettings(
         private const val PBKDF2_ITERATIONS = 120_000
         private const val KEY_LENGTH_BITS = 256
         private const val SALT_LENGTH_BYTES = 16
-        private const val RTSP_DIGEST_REALM = "LensCast RTSP"
 
         fun hashPassword(password: String): String {
             if (password.isEmpty()) return ""
@@ -78,17 +83,11 @@ data class StreamAuthSettings(
         fun computeRtspDigestHa1(
             username: String,
             password: String,
-            realm: String = RTSP_DIGEST_REALM,
+            realm: String = StreamAuthCrypto.RTSP_DIGEST_REALM,
         ): String {
             if (username.isEmpty() || password.isEmpty()) return ""
             val input = "$username:$realm:$password"
-            return md5Hex(input)
-        }
-
-        private fun md5Hex(input: String): String {
-            val digest = MessageDigest.getInstance("MD5")
-            val bytes = digest.digest(input.toByteArray(Charsets.UTF_8))
-            return bytes.joinToString("") { "%02x".format(it) }
+            return StreamAuthCrypto.md5Hex(input)
         }
 
         private fun derivePassword(password: String, salt: ByteArray, iterations: Int): ByteArray {
@@ -110,7 +109,10 @@ data class StreamAuthSettings(
 
 private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "camera_settings")
 
-class SettingsDataStore(private val context: Context) {
+class SettingsDataStore(
+    private val context: Context,
+    private val shareInScope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
+) {
 
     private object Keys {
         val EXPOSURE_COMPENSATION = intPreferencesKey("exposure_compensation")
@@ -173,7 +175,16 @@ class SettingsDataStore(private val context: Context) {
         val UPDATE_DISMISSED_VERSION = stringPreferencesKey("update_dismissed_version")
     }
 
-    val settings: Flow<CameraSettings> = context.dataStore.data.map { prefs ->
+    // Every setting is shared exactly once, here. Consumers (SettingsViewModel,
+    // Web API handlers, SettingsApplier) read these StateFlows directly instead
+    // of re-wrapping the flows with hand-retyped initial values.
+    private fun <T> shared(
+        default: T,
+        transform: (Preferences) -> T,
+    ): StateFlow<T> = context.dataStore.data.map(transform)
+        .stateIn(shareInScope, SharingStarted.Eagerly, default)
+
+    val settings: StateFlow<CameraSettings> = shared(CameraSettings()) { prefs ->
         CameraSettings(
             exposureCompensation = prefs[Keys.EXPOSURE_COMPENSATION] ?: 0,
             iso = if (prefs[Keys.ISO_AUTO] == "false") prefs[Keys.ISO] else null,
@@ -212,47 +223,47 @@ class SettingsDataStore(private val context: Context) {
         )
     }
 
-    val streamingPort: Flow<Int> = context.dataStore.data.map { prefs ->
+    val streamingPort: StateFlow<Int> = shared(StreamDefaults.WEB_PORT) { prefs ->
         prefs[Keys.STREAMING_PORT] ?: StreamDefaults.WEB_PORT
     }
 
-    val frameRate: Flow<Int> = context.dataStore.data.map { prefs ->
+    val frameRate: StateFlow<Int> = shared(StreamDefaults.STREAM_FPS) { prefs ->
         prefs[Keys.FRAME_RATE] ?: StreamDefaults.STREAM_FPS
     }
 
-    val jpegQuality: Flow<Int> = context.dataStore.data.map { prefs ->
+    val jpegQuality: StateFlow<Int> = shared(StreamDefaults.JPEG_QUALITY) { prefs ->
         prefs[Keys.JPEG_QUALITY] ?: StreamDefaults.JPEG_QUALITY
     }
 
-    val showPreview: Flow<Boolean> = context.dataStore.data.map { prefs ->
+    val showPreview: StateFlow<Boolean> = shared(true) { prefs ->
         prefs[Keys.SHOW_PREVIEW] != "false"
     }
 
-    val streamAudioEnabled: Flow<Boolean> = context.dataStore.data.map { prefs ->
+    val streamAudioEnabled: StateFlow<Boolean> = shared(true) { prefs ->
         prefs[Keys.STREAM_AUDIO_ENABLED] != "false"
     }
 
-    val streamAudioBitrateKbps: Flow<Int> = context.dataStore.data.map { prefs ->
+    val streamAudioBitrateKbps: StateFlow<Int> = shared(StreamDefaults.AUDIO_BITRATE_KBPS) { prefs ->
         prefs[Keys.STREAM_AUDIO_BITRATE_KBPS] ?: StreamDefaults.AUDIO_BITRATE_KBPS
     }
 
-    val streamAudioChannels: Flow<Int> = context.dataStore.data.map { prefs ->
+    val streamAudioChannels: StateFlow<Int> = shared(StreamDefaults.AUDIO_CHANNELS) { prefs ->
         prefs[Keys.STREAM_AUDIO_CHANNELS] ?: StreamDefaults.AUDIO_CHANNELS
     }
 
-    val streamAudioEchoCancellation: Flow<Boolean> = context.dataStore.data.map { prefs ->
+    val streamAudioEchoCancellation: StateFlow<Boolean> = shared(true) { prefs ->
         prefs[Keys.STREAM_AUDIO_ECHO_CANCELLATION] != "false"
     }
 
-    val recordingAudioEnabled: Flow<Boolean> = context.dataStore.data.map { prefs ->
+    val recordingAudioEnabled: StateFlow<Boolean> = shared(true) { prefs ->
         prefs[Keys.RECORDING_AUDIO_ENABLED] != "false"
     }
 
-    val webStreamingEnabled: Flow<Boolean> = context.dataStore.data.map { prefs ->
+    val webStreamingEnabled: StateFlow<Boolean> = shared(true) { prefs ->
         prefs[Keys.WEB_STREAMING_ENABLED] != "false"
     }
 
-    val authSettings: Flow<StreamAuthSettings> = context.dataStore.data.map { prefs ->
+    val authSettings: StateFlow<StreamAuthSettings> = shared(StreamAuthSettings()) { prefs ->
         StreamAuthSettings(
             enabled = prefs[Keys.AUTH_ENABLED] == "true",
             username = prefs[Keys.AUTH_USERNAME] ?: "",
@@ -261,21 +272,88 @@ class SettingsDataStore(private val context: Context) {
         )
     }
 
-    val rtspEnabled: Flow<Boolean> = context.dataStore.data.map { prefs ->
+    val rtspEnabled: StateFlow<Boolean> = shared(false) { prefs ->
         prefs[Keys.RTSP_ENABLED] == "true"
     }
 
-    val rtspPort: Flow<Int> = context.dataStore.data.map { prefs ->
+    val rtspPort: StateFlow<Int> = shared(StreamDefaults.RTSP_PORT) { prefs ->
         prefs[Keys.RTSP_PORT] ?: StreamDefaults.RTSP_PORT
     }
 
-    val rtspInputFormat: Flow<RtspInputFormat> = context.dataStore.data.map { prefs ->
+    val rtspInputFormat: StateFlow<RtspInputFormat> = shared(RtspInputFormat.AUTO) { prefs ->
         val raw = prefs[Keys.RTSP_INPUT_FORMAT] ?: RtspInputFormat.AUTO.name
         try {
             RtspInputFormat.valueOf(raw)
         } catch (_: Exception) {
             RtspInputFormat.AUTO
         }
+    }
+
+    val adaptiveBitrateEnabled: StateFlow<Boolean> = shared(false) { prefs ->
+        prefs[Keys.ADAPTIVE_BITRATE_ENABLED] == "true"
+    }
+
+    val mdnsEnabled: StateFlow<Boolean> = shared(true) { prefs ->
+        prefs[Keys.MDNS_ENABLED] != "false"
+    }
+
+    val watchdogEnabled: StateFlow<Boolean> = shared(false) { prefs ->
+        prefs[Keys.WATCHDOG_ENABLED] == "true"
+    }
+
+    val watchdogMaxRetries: StateFlow<Int> = shared(StreamDefaults.WATCHDOG_MAX_RETRIES) { prefs ->
+        prefs[Keys.WATCHDOG_MAX_RETRIES] ?: StreamDefaults.WATCHDOG_MAX_RETRIES
+    }
+
+    val watchdogCheckIntervalSeconds: StateFlow<Int> = shared(StreamDefaults.WATCHDOG_CHECK_INTERVAL_SECONDS) { prefs ->
+        prefs[Keys.WATCHDOG_CHECK_INTERVAL_SECONDS] ?: StreamDefaults.WATCHDOG_CHECK_INTERVAL_SECONDS
+    }
+
+    val nightVisionMode: StateFlow<NightVisionMode> = shared(NightVisionMode.OFF) { prefs ->
+        val raw = prefs[Keys.NIGHT_VISION_MODE] ?: NightVisionMode.OFF.name
+        try {
+            NightVisionMode.valueOf(raw)
+        } catch (_: Exception) {
+            NightVisionMode.OFF
+        }
+    }
+
+    val overlaySettings: StateFlow<OverlaySettings> = shared(OverlaySettings.DEFAULT) { prefs ->
+        val defaults = OverlaySettings.DEFAULT
+        OverlaySettings(
+            enabled = prefs[Keys.OVERLAY_ENABLED] == "true",
+            showTimestamp = prefs[Keys.OVERLAY_SHOW_TIMESTAMP] != "false",
+            timestampFormat = prefs[Keys.OVERLAY_TIMESTAMP_FORMAT] ?: defaults.timestampFormat,
+            showBranding = prefs[Keys.OVERLAY_SHOW_BRANDING] == "true",
+            brandingText = prefs[Keys.OVERLAY_BRANDING_TEXT] ?: defaults.brandingText,
+            showStatus = prefs[Keys.OVERLAY_SHOW_STATUS] == "true",
+            showCustomText = prefs[Keys.OVERLAY_SHOW_CUSTOM_TEXT] == "true",
+            customText = prefs[Keys.OVERLAY_CUSTOM_TEXT] ?: defaults.customText,
+            position = try {
+                OverlayPosition.valueOf(prefs[Keys.OVERLAY_POSITION] ?: OverlayPosition.TOP_LEFT.name)
+            } catch (_: Exception) {
+                OverlayPosition.TOP_LEFT
+            },
+            fontSize = prefs[Keys.OVERLAY_FONT_SIZE] ?: defaults.fontSize,
+            textColor = prefs[Keys.OVERLAY_TEXT_COLOR] ?: defaults.textColor,
+            backgroundColor = prefs[Keys.OVERLAY_BG_COLOR] ?: defaults.backgroundColor,
+            padding = prefs[Keys.OVERLAY_PADDING] ?: defaults.padding,
+            lineHeight = prefs[Keys.OVERLAY_LINE_HEIGHT] ?: defaults.lineHeight,
+            maskingEnabled = prefs[Keys.MASKING_ENABLED] == "true",
+            maskingZones = parseMaskingZones(prefs[Keys.MASKING_ZONES]),
+        )
+    }
+
+    val updateAutoCheckEnabled: StateFlow<Boolean> = shared(true) { prefs ->
+        prefs[Keys.UPDATE_AUTO_CHECK_ENABLED] != "false"
+    }
+
+    val updateLastCheckTime: StateFlow<Long> = shared(0L) { prefs ->
+        prefs[Keys.UPDATE_LAST_CHECK_TIME] ?: 0L
+    }
+
+    val updateDismissedVersion: StateFlow<String> = shared("") { prefs ->
+        prefs[Keys.UPDATE_DISMISSED_VERSION] ?: ""
     }
 
     suspend fun saveSettings(settings: CameraSettings) {
@@ -347,13 +425,19 @@ class SettingsDataStore(private val context: Context) {
 
     suspend fun saveStreamAudioBitrateKbps(bitrateKbps: Int) {
         context.dataStore.edit { prefs ->
-            prefs[Keys.STREAM_AUDIO_BITRATE_KBPS] = bitrateKbps.coerceIn(32, 320)
+            prefs[Keys.STREAM_AUDIO_BITRATE_KBPS] = bitrateKbps.coerceIn(
+                StreamDefaults.AUDIO_BITRATE_MIN_KBPS,
+                StreamDefaults.AUDIO_BITRATE_MAX_KBPS,
+            )
         }
     }
 
     suspend fun saveStreamAudioChannels(channels: Int) {
         context.dataStore.edit { prefs ->
-            prefs[Keys.STREAM_AUDIO_CHANNELS] = channels.coerceIn(1, 2)
+            prefs[Keys.STREAM_AUDIO_CHANNELS] = channels.coerceIn(
+                StreamDefaults.AUDIO_CHANNELS_MIN,
+                StreamDefaults.AUDIO_CHANNELS_MAX,
+            )
         }
     }
 
@@ -408,30 +492,10 @@ class SettingsDataStore(private val context: Context) {
         }
     }
 
-    val adaptiveBitrateEnabled: Flow<Boolean> = context.dataStore.data.map { prefs ->
-        prefs[Keys.ADAPTIVE_BITRATE_ENABLED] == "true"
-    }
-
-    val mdnsEnabled: Flow<Boolean> = context.dataStore.data.map { prefs ->
-        prefs[Keys.MDNS_ENABLED] != "false"
-    }
-
     suspend fun saveAdaptiveBitrateEnabled(enabled: Boolean) {
         context.dataStore.edit { prefs ->
             prefs[Keys.ADAPTIVE_BITRATE_ENABLED] = if (enabled) "true" else "false"
         }
-    }
-
-    val watchdogEnabled: Flow<Boolean> = context.dataStore.data.map { prefs ->
-        prefs[Keys.WATCHDOG_ENABLED] == "true"
-    }
-
-    val watchdogMaxRetries: Flow<Int> = context.dataStore.data.map { prefs ->
-        prefs[Keys.WATCHDOG_MAX_RETRIES] ?: StreamDefaults.WATCHDOG_MAX_RETRIES
-    }
-
-    val watchdogCheckIntervalSeconds: Flow<Int> = context.dataStore.data.map { prefs ->
-        prefs[Keys.WATCHDOG_CHECK_INTERVAL_SECONDS] ?: StreamDefaults.WATCHDOG_CHECK_INTERVAL_SECONDS
     }
 
     suspend fun saveWatchdogEnabled(enabled: Boolean) {
@@ -442,13 +506,19 @@ class SettingsDataStore(private val context: Context) {
 
     suspend fun saveWatchdogMaxRetries(maxRetries: Int) {
         context.dataStore.edit { prefs ->
-            prefs[Keys.WATCHDOG_MAX_RETRIES] = maxRetries.coerceIn(1, 20)
+            prefs[Keys.WATCHDOG_MAX_RETRIES] = maxRetries.coerceIn(
+                StreamDefaults.WATCHDOG_MAX_RETRIES_MIN,
+                StreamDefaults.WATCHDOG_MAX_RETRIES_MAX,
+            )
         }
     }
 
     suspend fun saveWatchdogCheckIntervalSeconds(seconds: Int) {
         context.dataStore.edit { prefs ->
-            prefs[Keys.WATCHDOG_CHECK_INTERVAL_SECONDS] = seconds.coerceIn(3, 30)
+            prefs[Keys.WATCHDOG_CHECK_INTERVAL_SECONDS] = seconds.coerceIn(
+                StreamDefaults.WATCHDOG_CHECK_INTERVAL_MIN_SECONDS,
+                StreamDefaults.WATCHDOG_CHECK_INTERVAL_MAX_SECONDS,
+            )
         }
     }
 
@@ -458,44 +528,10 @@ class SettingsDataStore(private val context: Context) {
         }
     }
 
-    val nightVisionMode: Flow<NightVisionMode> = context.dataStore.data.map { prefs ->
-        val raw = prefs[Keys.NIGHT_VISION_MODE] ?: NightVisionMode.OFF.name
-        try {
-            NightVisionMode.valueOf(raw)
-        } catch (_: Exception) {
-            NightVisionMode.OFF
-        }
-    }
-
     suspend fun saveNightVisionMode(mode: NightVisionMode) {
         context.dataStore.edit { prefs ->
             prefs[Keys.NIGHT_VISION_MODE] = mode.name
         }
-    }
-
-    val overlaySettings: Flow<OverlaySettings> = context.dataStore.data.map { prefs ->
-        OverlaySettings(
-            enabled = prefs[Keys.OVERLAY_ENABLED] == "true",
-            showTimestamp = prefs[Keys.OVERLAY_SHOW_TIMESTAMP] != "false",
-            timestampFormat = prefs[Keys.OVERLAY_TIMESTAMP_FORMAT] ?: "yyyy-MM-dd HH:mm:ss",
-            showBranding = prefs[Keys.OVERLAY_SHOW_BRANDING] == "true",
-            brandingText = prefs[Keys.OVERLAY_BRANDING_TEXT] ?: "LensCast",
-            showStatus = prefs[Keys.OVERLAY_SHOW_STATUS] == "true",
-            showCustomText = prefs[Keys.OVERLAY_SHOW_CUSTOM_TEXT] == "true",
-            customText = prefs[Keys.OVERLAY_CUSTOM_TEXT] ?: "",
-            position = try {
-                OverlayPosition.valueOf(prefs[Keys.OVERLAY_POSITION] ?: OverlayPosition.TOP_LEFT.name)
-            } catch (_: Exception) {
-                OverlayPosition.TOP_LEFT
-            },
-            fontSize = prefs[Keys.OVERLAY_FONT_SIZE] ?: 28,
-            textColor = prefs[Keys.OVERLAY_TEXT_COLOR] ?: "#FFFFFF",
-            backgroundColor = prefs[Keys.OVERLAY_BG_COLOR] ?: "#80000000",
-            padding = prefs[Keys.OVERLAY_PADDING] ?: 8,
-            lineHeight = prefs[Keys.OVERLAY_LINE_HEIGHT] ?: 4,
-            maskingEnabled = prefs[Keys.MASKING_ENABLED] == "true",
-            maskingZones = parseMaskingZones(prefs[Keys.MASKING_ZONES]),
-        )
     }
 
     suspend fun saveOverlaySettings(settings: OverlaySettings) {
@@ -523,41 +559,30 @@ class SettingsDataStore(private val context: Context) {
         if (jsonString.isNullOrEmpty()) return emptyList()
         return try {
             val array = JSONArray(jsonString)
+            val defaults = MaskingZone.DEFAULT
             List(array.length()) { i ->
                 val obj = array.getJSONObject(i)
                 MaskingZone(
                     id = obj.optString("id", java.util.UUID.randomUUID().toString()),
-                    label = obj.optString("label", ""),
-                    enabled = obj.optBoolean("enabled", true),
+                    label = obj.optString("label", defaults.label),
+                    enabled = obj.optBoolean("enabled", defaults.enabled),
                     type = try {
                         MaskingType.valueOf(obj.optString("type", MaskingType.BLACKOUT.name))
                     } catch (_: Exception) {
                         MaskingType.BLACKOUT
                     },
-                    x = obj.optDouble("x", 0.0).toFloat(),
-                    y = obj.optDouble("y", 0.0).toFloat(),
-                    width = obj.optDouble("width", 0.2).toFloat(),
-                    height = obj.optDouble("height", 0.2).toFloat(),
-                    pixelateSize = obj.optInt("pixelateSize", 16),
-                    blurRadius = obj.optDouble("blurRadius", 10.0).toFloat(),
+                    x = obj.optDouble("x", defaults.x.toDouble()).toFloat(),
+                    y = obj.optDouble("y", defaults.y.toDouble()).toFloat(),
+                    width = obj.optDouble("width", defaults.width.toDouble()).toFloat(),
+                    height = obj.optDouble("height", defaults.height.toDouble()).toFloat(),
+                    pixelateSize = obj.optInt("pixelateSize", defaults.pixelateSize),
+                    blurRadius = obj.optDouble("blurRadius", defaults.blurRadius.toDouble()).toFloat(),
                 )
             }
         } catch (e: Exception) {
             Log.e("SettingsDataStore", "Failed to parse masking zones", e)
             emptyList()
         }
-    }
-
-    val updateAutoCheckEnabled: Flow<Boolean> = context.dataStore.data.map { prefs ->
-        prefs[Keys.UPDATE_AUTO_CHECK_ENABLED] != "false"
-    }
-
-    val updateLastCheckTime: Flow<Long> = context.dataStore.data.map { prefs ->
-        prefs[Keys.UPDATE_LAST_CHECK_TIME] ?: 0L
-    }
-
-    val updateDismissedVersion: Flow<String> = context.dataStore.data.map { prefs ->
-        prefs[Keys.UPDATE_DISMISSED_VERSION] ?: ""
     }
 
     suspend fun saveUpdateAutoCheckEnabled(enabled: Boolean) {

@@ -25,7 +25,7 @@ import java.util.concurrent.atomic.AtomicBoolean
  * battery optimization, camera keep-alive, foreground service and watchdog.
  *
  * One begin()/end() pair per session replaces the per-caller copies that used
- * to live in WebApiController, CameraViewModel and StreamWatchdog. begin() is
+ * to live in Web API callers, CameraViewModel and StreamWatchdog. begin() is
  * idempotent — an already-active session is left alone — and end() tears down
  * only when no stream is live, so overlapping web/app sessions are safe.
  * begin/end/recovery are serialized on a mutex: a begin racing an end can

@@ -3,18 +3,16 @@ package com.raulshma.lenscast.streaming
 import android.content.Context
 import android.util.Log
 import com.raulshma.lenscast.core.NetworkQualityMonitor
-import com.raulshma.lenscast.core.NetworkUtils
 import com.raulshma.lenscast.core.StreamDefaults
-import com.raulshma.lenscast.data.StreamAuthSettings
+import com.raulshma.lenscast.capture.PhotoCaptureManager
+import com.raulshma.lenscast.streaming.web.ApiMethod
+import com.raulshma.lenscast.streaming.web.ApiRequest
+import kotlinx.coroutines.runBlocking
 import fi.iki.elonen.NanoHTTPD
 import java.io.ByteArrayInputStream
 import java.io.InputStream
-import java.net.URI
 import java.net.URLDecoder
 import java.nio.charset.StandardCharsets
-import java.security.MessageDigest
-import java.security.SecureRandom
-import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicInteger
 
 class StreamingServer(
@@ -22,8 +20,12 @@ class StreamingServer(
     private val context: Context,
     private val audioStreamingManager: AudioStreamingManager,
     // Received at the seam, never manufactured here: the transport layer must
-    // not grow its own WebApiController (and its eager scope) per instance.
-    private val apiController: WebApiController,
+    // not grow its own Web API modules per instance.
+    private val webApi: WebApiStack,
+    private val networkQualityMonitor: NetworkQualityMonitor,
+    // Auth policy (sessions, rate limiting, CSRF) lives behind this seam; the
+    // transport only translates requests to it.
+    private val webAuthGate: WebAuthGate,
 ) : NanoHTTPD(port) {
 
     private val boundary = BOUNDARY_MARKER
@@ -34,28 +36,17 @@ class StreamingServer(
     private var latestFrameVersion = 0L
     private var isRunning = false
     @Volatile private var webStreamingEnabled = true
-    @Volatile var authUsername: String? = null
-    @Volatile var authPasswordHash: String? = null
 
     private val precomputedMjpegHeaderFirst = "--$boundary\r\nContent-Type: image/jpeg\r\nContent-Length: ".toByteArray()
     private val precomputedMjpegHeaderSubsequent = "\r\n--$boundary\r\nContent-Type: image/jpeg\r\nContent-Length: ".toByteArray()
     private val precomputedMjpegHeaderSuffix = "\r\n\r\n".toByteArray()
     private val precomputedMjpegFooter = "\r\n".toByteArray()
 
-    var networkQualityMonitor: NetworkQualityMonitor? = null
-
     private val assetCache = object : LinkedHashMap<String, Pair<ByteArray, String>>(16, 0.75f, true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Pair<ByteArray, String>>): Boolean {
             return size > MAX_CACHED_ASSETS
         }
     }
-
-    private val sessions = ConcurrentHashMap<String, Long>()
-    private val secureRandom = SecureRandom()
-
-    private data class AuthAttempt(var count: Int, var blockedUntil: Long)
-    private val authAttempts = ConcurrentHashMap<String, AuthAttempt>()
-    private val authAttemptsLock = Any()
 
     private val fallbackControlPageHtml = """
         <!DOCTYPE html>
@@ -93,7 +84,7 @@ class StreamingServer(
         val method = session.method
 
         if (uri == "/api/auth/status") {
-            val isAuthEnabled = authUsername != null && !authUsername.isNullOrEmpty() && authPasswordHash != null
+            val isAuthEnabled = webAuthGate.isEnabled
             return newFixedLengthResponse(
                 Response.Status.OK,
                 "application/json",
@@ -105,7 +96,7 @@ class StreamingServer(
         }
 
         if (uri == "/api/auth/login" && method == Method.POST) {
-            if (authUsername == null || authUsername.isNullOrEmpty() || authPasswordHash == null) {
+            if (!webAuthGate.isEnabled) {
                 return newFixedLengthResponse(
                     Response.Status.OK,
                     "application/json",
@@ -132,64 +123,31 @@ class StreamingServer(
                     Response.Status.BAD_REQUEST, "application/json", """{"error":"Invalid request"}"""
                 ).apply { addSecurityHeaders() }
             }
-            val clientIp = session.remoteIpAddress ?: "unknown"
-            val now = System.currentTimeMillis()
-
-            synchronized(authAttemptsLock) {
-                cleanupExpiredAuthAttempts(now)
-                val attempt = authAttempts.getOrPut(clientIp) { AuthAttempt(0, 0L) }
-                if (attempt.blockedUntil > now) {
-                    return newFixedLengthResponse(
-                        Response.Status.UNAUTHORIZED, "application/json",
-                        """{"error":"Too many attempts. Try again later."}"""
-                    ).apply { addSecurityHeaders() }
+            val result = webAuthGate.login(session.remoteIpAddress, loginBody.first, loginBody.second)
+            if (!result.success) {
+                val status = when (result.error) {
+                    "Auth not configured" -> Response.Status.INTERNAL_ERROR
+                    else -> Response.Status.UNAUTHORIZED
                 }
-                if (attempt.count >= MAX_AUTH_ATTEMPTS) {
-                    attempt.blockedUntil = now + AUTH_LOCKOUT_MS
-                    attempt.count = 0
-                    return newFixedLengthResponse(
-                        Response.Status.UNAUTHORIZED, "application/json",
-                        """{"error":"Too many attempts. Try again later."}"""
-                    ).apply { addSecurityHeaders() }
-                }
-                val storedUsername = authUsername
-                val storedHash = authPasswordHash
-                if (storedUsername == null || storedHash == null) {
-                    return newFixedLengthResponse(
-                        Response.Status.INTERNAL_ERROR, "application/json",
-                        """{"error":"Auth not configured"}"""
-                    ).apply { addSecurityHeaders() }
-                }
-                if (!constantTimeEquals(loginBody.first, storedUsername)) {
-                    attempt.count++
-                    return newFixedLengthResponse(
-                        Response.Status.UNAUTHORIZED, "application/json",
-                        """{"error":"Invalid credentials"}"""
-                    ).apply { addSecurityHeaders() }
-                }
-                if (!StreamAuthSettings.verifyPassword(loginBody.second, storedHash)) {
-                    attempt.count++
-                    return newFixedLengthResponse(
-                        Response.Status.UNAUTHORIZED, "application/json",
-                        """{"error":"Invalid credentials"}"""
-                    ).apply { addSecurityHeaders() }
-                }
-                attempt.count = 0
+                return newFixedLengthResponse(
+                    status, "application/json", """{"error":"${result.error}"}"""
+                ).apply { addSecurityHeaders() }
             }
-            val token = createSession()
             return newFixedLengthResponse(
                 Response.Status.OK, "application/json", """{"success":true}"""
             ).apply {
-                addHeader("Set-Cookie", "$COOKIE_NAME=$token; Path=$COOKIE_PATH; Max-Age=$SESSION_MAX_AGE_SEC; HttpOnly; SameSite=Lax")
+                addHeader(
+                    "Set-Cookie",
+                    "${WebAuthGate.COOKIE_NAME}=${result.token}; Path=${WebAuthGate.COOKIE_PATH}; " +
+                        "Max-Age=${WebAuthGate.SESSION_MAX_AGE_SEC}; HttpOnly; SameSite=Lax"
+                )
                 addHeader("Cache-Control", "no-store")
                 addSecurityHeaders()
             }
         }
 
         if (uri == "/api/auth/session" && method == Method.GET) {
-            val cookieHeader = session.headers["cookie"] ?: ""
-            val sessionToken = extractCookie(cookieHeader, COOKIE_NAME)
-            val isValid = sessionToken != null && validateSession(sessionToken)
+            val isValid = webAuthGate.authenticate(session.headers["cookie"])
             return newFixedLengthResponse(
                 Response.Status.OK, "application/json",
                 """{"authenticated":$isValid}"""
@@ -197,14 +155,19 @@ class StreamingServer(
         }
 
         if (uri == "/api/auth/logout" && method == Method.POST) {
-            if (!checkAuth(session)) {
+            if (!webAuthGate.authenticate(session.headers["cookie"])) {
                 return newFixedLengthResponse(
                     Response.Status.UNAUTHORIZED,
                     "application/json",
                     """{"error":"Authentication required"}"""
                 ).apply { addSecurityHeaders() }
             }
-            if (!isCsrfSafe(session)) {
+            if (!webAuthGate.isCsrfSafe(
+                    originHeader = session.headers["origin"] ?: session.headers["referer"],
+                    hasRequestedWithHeader = session.headers.containsKey("x-requested-with"),
+                    port = port,
+                )
+            ) {
                 return newFixedLengthResponse(
                     Response.Status.FORBIDDEN,
                     "application/json",
@@ -212,17 +175,16 @@ class StreamingServer(
                 ).apply { addSecurityHeaders() }
             }
 
-            val cookieHeader = session.headers["cookie"] ?: ""
-            val token = extractCookie(cookieHeader, COOKIE_NAME)
-            if (token != null) {
-                sessions.remove(token)
-            }
+            webAuthGate.logout(webAuthGate.tokenFromCookie(session.headers["cookie"]))
             return newFixedLengthResponse(
                 Response.Status.OK,
                 "application/json",
                 """{"success":true}"""
             ).apply {
-                addHeader("Set-Cookie", "$COOKIE_NAME=; Path=$COOKIE_PATH; Max-Age=0; HttpOnly; SameSite=Lax")
+                addHeader(
+                    "Set-Cookie",
+                    "${WebAuthGate.COOKIE_NAME}=; Path=${WebAuthGate.COOKIE_PATH}; Max-Age=0; HttpOnly; SameSite=Lax"
+                )
                 addHeader("Cache-Control", "no-store")
                 addSecurityHeaders()
             }
@@ -234,7 +196,7 @@ class StreamingServer(
             return serveStaticFile(uri)
         }
 
-        if (!checkAuth(session)) {
+        if (!webAuthGate.authenticate(session.headers["cookie"])) {
             return newFixedLengthResponse(
                 Response.Status.UNAUTHORIZED,
                 "application/json",
@@ -242,7 +204,12 @@ class StreamingServer(
             ).apply { addSecurityHeaders() }
         }
 
-        if (method != Method.GET && !isCsrfSafe(session)) {
+        if (method != Method.GET && !webAuthGate.isCsrfSafe(
+                originHeader = session.headers["origin"] ?: session.headers["referer"],
+                hasRequestedWithHeader = session.headers.containsKey("x-requested-with"),
+                port = port,
+            )
+        ) {
             return newFixedLengthResponse(
                 Response.Status.FORBIDDEN,
                 "application/json",
@@ -280,123 +247,7 @@ class StreamingServer(
         )
     }
 
-    private fun checkAuth(session: IHTTPSession): Boolean {
-        val username = authUsername ?: return true
-        val storedHash = authPasswordHash ?: return true
-        if (username.isEmpty()) return true
-
-        val cookieHeader = session.headers["cookie"] ?: ""
-        val sessionToken = extractCookie(cookieHeader, COOKIE_NAME)
-        if (sessionToken != null && validateSession(sessionToken)) {
-            return true
-        }
-
-        return false
-    }
-
-    private fun createSession(): String {
-        cleanExpiredSessions()
-        // Enforce maximum session count to prevent OOM via session flooding
-        if (sessions.size >= MAX_SESSIONS) {
-            // Evict oldest sessions beyond the cap
-            val sorted = sessions.entries.sortedBy { it.value }
-            val toRemove = sorted.take(sessions.size - MAX_SESSIONS + 1)
-            toRemove.forEach { sessions.remove(it.key) }
-        }
-        val bytes = ByteArray(SESSION_TOKEN_BYTES)
-        secureRandom.nextBytes(bytes)
-        val token = bytes.joinToString("") { "%02x".format(it) }
-        sessions[token] = System.currentTimeMillis() + SESSION_DURATION_MS
-        return token
-    }
-
-    private var lastSessionCleanupMillis = 0L
-
-    private fun cleanExpiredSessions() {
-        val now = System.currentTimeMillis()
-        if (now - lastSessionCleanupMillis < SESSION_CLEANUP_INTERVAL_MS && sessions.size < MAX_SESSIONS * 0.9) return
-        lastSessionCleanupMillis = now
-        sessions.entries.removeAll { now > it.value }
-    }
-
-    private fun cleanupExpiredAuthAttempts(now: Long) {
-        authAttempts.entries.removeAll { (_, attempt) ->
-            attempt.blockedUntil > 0 && now > attempt.blockedUntil + AUTH_LOCKOUT_MS * 2 && attempt.count == 0
-        }
-        if (authAttempts.size > MAX_AUTH_ATTEMPTS_TRACKED) {
-            val sorted = authAttempts.entries.sortedByDescending { it.value.blockedUntil }
-            sorted.take(authAttempts.size - MAX_AUTH_ATTEMPTS_TRACKED).forEach { authAttempts.remove(it.key) }
-        }
-    }
-
-    private fun validateSession(token: String): Boolean {
-        // Opportunistically clean expired sessions on each validation
-        cleanExpiredSessions()
-        val expiry = sessions[token] ?: return false
-        if (System.currentTimeMillis() > expiry) {
-            sessions.remove(token)
-            return false
-        }
-        return true
-    }
-
-    private fun extractCookie(cookieHeader: String, name: String): String? {
-        return cookieHeader.split(";")
-            .map { it.trim() }
-            .find { it.startsWith("$name=") }
-            ?.substring(name.length + 1)
-    }
-
-    /**
-     * Constant-time comparison that does not leak string length via timing.
-     * Uses MessageDigest.isEqual on SHA-256 hashes so both operands are always
-     * the same length regardless of input.
-     */
-    private fun constantTimeEquals(a: String, b: String): Boolean {
-        val digest = MessageDigest.getInstance("SHA-256")
-        val hashA = digest.digest(a.toByteArray(Charsets.UTF_8))
-        val hashB = digest.digest(b.toByteArray(Charsets.UTF_8))
-        return MessageDigest.isEqual(hashA, hashB)
-    }
-
-    /**
-     * CSRF protection for state-changing requests.
-     * Session-based requests must have a matching Origin/Referer or X-Requested-With header.
-     */
-    private fun isCsrfSafe(session: IHTTPSession): Boolean {
-        // Check for X-Requested-With header (sent by XHR/fetch)
-        if (session.headers.containsKey("x-requested-with")) return true
-
-        // Check Origin or Referer header matches this server using strict URI parsing
-        val originHeader = session.headers["origin"] ?: session.headers["referer"]
-        if (originHeader != null) {
-            val localIp = NetworkUtils.getLocalIpAddress()
-            val allowedOrigins = buildList {
-                add("http://localhost:$port")
-                add("http://127.0.0.1:$port")
-                if (localIp != null) add("http://$localIp:$port")
-            }
-            return try {
-                val requestUri = URI(originHeader)
-                val requestOrigin = "${requestUri.scheme}://${requestUri.host}:${requestUri.port}"
-                allowedOrigins.any { allowed ->
-                    val allowedUri = URI(allowed)
-                    val normalizedAllowed = "${allowedUri.scheme}://${allowedUri.host}:${allowedUri.port}"
-                    requestOrigin == normalizedAllowed
-                }
-            } catch (e: Exception) {
-                Log.w(TAG, "Failed to parse CSRF origin header: $originHeader", e)
-                false
-            }
-        }
-
-        // No recognized CSRF protection headers found
-        return false
-    }
-
     private fun handleApiRoute(uri: String, method: Method, session: IHTTPSession): Response {
-        val controller = apiController
-
         val body = readBody(session)
         if (body == null) {
             return newFixedLengthResponse(
@@ -405,54 +256,34 @@ class StreamingServer(
                 """{"error":"Request body too large (max ${MAX_BODY_BYTES / 1024 / 1024}MB)"}"""
             )
         }
-        val json = when {
-            method == Method.GET && uri == "/api/settings" -> controller.handleGetSettings()
-            method == Method.PUT && uri == "/api/settings" -> controller.handlePutSettings(body)
-            method == Method.POST && uri == "/api/settings" -> controller.handlePutSettings(body)
-            method == Method.GET && uri == "/api/status" -> controller.handleGetStatus()
-            method == Method.POST && uri == "/api/stream/start" -> controller.handleStartStream()
-            method == Method.POST && uri == "/api/stream/stop" -> controller.handleStopStream()
-            method == Method.POST && uri == "/api/stream/resume" -> controller.handleStartStream()
-            method == Method.POST && uri == "/api/stream/web/start" -> controller.handleStartWebStream()
-            method == Method.POST && uri == "/api/stream/web/stop" -> controller.handleStopWebStream()
-            method == Method.POST && uri == "/api/stream/rtsp/start" -> controller.handleStartRtspStream()
-            method == Method.POST && uri == "/api/stream/rtsp/stop" -> controller.handleStopRtspStream()
-            method == Method.POST && uri == "/api/capture" -> controller.handleCapture()
-            method == Method.GET && uri == "/api/camera/lenses" -> controller.handleGetLenses()
-            method == Method.PUT && uri == "/api/camera/lens" -> controller.handleSelectLens(body)
-            method == Method.POST && uri == "/api/camera/lens" -> controller.handleSelectLens(body)
-            method == Method.POST && uri == "/api/camera/focus" -> controller.handleTapFocus(body)
-            method == Method.GET && uri == "/api/capture/interval/status" -> controller.handleGetIntervalCaptureStatus()
-            method == Method.POST && uri == "/api/capture/interval/start" -> controller.handleStartIntervalCapture(body)
-            method == Method.POST && uri == "/api/capture/interval/stop" -> controller.handleStopIntervalCapture()
-            method == Method.GET && uri == "/api/recording/status" -> controller.handleGetRecordingStatus()
-            method == Method.POST && uri == "/api/recording/start" -> controller.handleStartRecording(body)
-            method == Method.POST && uri == "/api/recording/stop" -> controller.handleStopRecording()
-            method == Method.GET && uri == "/api/gallery" -> {
-                val type = session.parameters?.get("type")?.firstOrNull()
-                val page = session.parameters?.get("page")?.firstOrNull()?.toIntOrNull() ?: 0
-                val pageSize = session.parameters?.get("pageSize")?.firstOrNull()?.toIntOrNull() ?: 0
-                controller.handleGetGallery(type, page, pageSize)
-            }
-            uri.startsWith("/api/media/") && method == Method.DELETE -> {
-                val id = uri.removePrefix("/api/media/")
-                controller.handleDeleteMedia(id)
-            }
-            uri == "/api/media/batch-delete" && method == Method.POST -> {
-                controller.handleBatchDeleteMedia(body)
-            }
-            else -> null
-        }
 
-        return if (json != null) {
-            newFixedLengthResponse(Response.Status.OK, "application/json", json)
-        } else {
-            newFixedLengthResponse(
+        val apiMethod = when (method) {
+            Method.GET -> ApiMethod.GET
+            Method.PUT -> ApiMethod.PUT
+            Method.POST -> ApiMethod.POST
+            Method.DELETE -> ApiMethod.DELETE
+            // Unknown /api route with an unhandled method — same 404 the
+            // router returns, preserving the client's contract.
+            else -> return newFixedLengthResponse(
                 Response.Status.NOT_FOUND,
                 "application/json",
                 """{"error":"Not found"}"""
             )
         }
+        val query = session.parameters?.mapValues { it.value.firstOrNull() ?: "" } ?: emptyMap()
+
+        // The single place the transport blocks on a handler: this dedicated
+        // server thread awaits the suspend router instead of every handler
+        // runBlocking-ing its way to the Main dispatcher.
+        val response = runBlocking {
+            webApi.router.dispatch(ApiRequest(method = apiMethod, path = uri, body = body, query = query))
+        }
+
+        return newFixedLengthResponse(
+            Response.Status.lookup(response.httpStatus) ?: Response.Status.OK,
+            response.contentType,
+            response.body
+        )
     }
 
     private fun readBody(session: IHTTPSession): String? {
@@ -520,8 +351,6 @@ class StreamingServer(
     }
 
     private fun serveMediaFile(uri: String, session: IHTTPSession): Response {
-        val controller = apiController
-
         val path = uri.removePrefix("/api/media/")
         if (path.isEmpty()) {
             return newFixedLengthResponse(
@@ -533,7 +362,7 @@ class StreamingServer(
         // Handle /api/media/{id}/thumbnail
         if (path.endsWith("/thumbnail")) {
             val id = path.removeSuffix("/thumbnail")
-            val thumbnailBytes = controller.resolveVideoThumbnail(id)
+            val thumbnailBytes = webApi.gallery.resolveVideoThumbnail(id)
             return if (thumbnailBytes != null) {
                 newFixedLengthResponse(
                     Response.Status.OK, "image/jpeg",
@@ -543,9 +372,9 @@ class StreamingServer(
                 }
             } else {
                 // Fallback: try to serve the media file itself (for photos)
-                val resolved = controller.resolveMediaFile(id)
+                val resolved = webApi.gallery.resolveMediaFile(id)
                 if (resolved != null) {
-                    newChunkedResponse(Response.Status.OK, resolved.second, resolved.first)
+                    newChunkedResponse(Response.Status.OK, resolved.mimeType, resolved.stream)
                 } else {
                     newFixedLengthResponse(
                         Response.Status.NOT_FOUND, "application/json",
@@ -556,7 +385,7 @@ class StreamingServer(
         }
 
         val id = path
-        val resolved = controller.resolveMediaFile(id)
+        val resolved = webApi.gallery.resolveMediaFile(id)
         if (resolved == null) {
             return newFixedLengthResponse(
                 Response.Status.NOT_FOUND, "application/json",
@@ -564,16 +393,15 @@ class StreamingServer(
             )
         }
 
-        val (inputStream, mimeType, fileSize) = resolved
         val download = session.parameters?.containsKey("download") == true
 
         // For video files, support HTTP Range requests for proper playback
-        if (mimeType.startsWith("video/") && !download) {
+        if (resolved.mimeType.startsWith("video/") && !download) {
             val rangeHeader = session.headers["range"]
-            return serveVideoWithRange(inputStream, mimeType, fileSize, rangeHeader)
+            return serveVideoWithRange(resolved.stream, resolved.mimeType, resolved.fileSizeBytes, rangeHeader)
         }
 
-        val response = newChunkedResponse(Response.Status.OK, mimeType, inputStream)
+        val response = newChunkedResponse(Response.Status.OK, resolved.mimeType, resolved.stream)
         if (download) {
             response.addHeader("Content-Disposition", "attachment")
         }
@@ -670,7 +498,7 @@ class StreamingServer(
         val clientId = "mjpeg_${clientCounter.incrementAndGet()}"
         Log.d(TAG, "Client connected: $clientId. Total: $clientNum")
 
-        networkQualityMonitor?.registerClient(clientId)
+        networkQualityMonitor.registerClient(clientId)
 
         val stream = object : InputStream() {
             private var currentFrame: ByteArray? = null
@@ -741,7 +569,7 @@ class StreamingServer(
                         footerOffset >= precomputedMjpegFooter.size
                     ) {
                         val sendDuration = System.currentTimeMillis() - frameSendStartTime
-                        networkQualityMonitor?.recordFrameSent(
+                        networkQualityMonitor.recordFrameSent(
                             clientId = clientId,
                             frameSizeBytes = currentFrameTotalBytes,
                             sendDurationMs = sendDuration,
@@ -836,7 +664,7 @@ class StreamingServer(
             override fun close() {
                 closed = true
                 synchronized(frameLock) { frameLock.notifyAll() }
-                networkQualityMonitor?.unregisterClient(clientId)
+                networkQualityMonitor.unregisterClient(clientId)
                 val num = clientCount.decrementAndGet()
                 Log.d(TAG, "Client disconnected: $clientId. Total: $num")
             }
@@ -884,10 +712,9 @@ class StreamingServer(
         val saveToDisk = params.contains("save=1") || params.contains("save_to_disk=1")
 
         if (highRes) {
-            val controller = apiController
-
-            return when (val result = controller.handleHighResSnapshot(saveToDisk)) {
-                is WebApiController.SnapshotResult.Success -> {
+            val result = runBlocking { webApi.capture.captureSnapshot(saveToDisk) }
+            return when (result) {
+                is PhotoCaptureManager.SnapshotResult.Success -> {
                     newFixedLengthResponse(
                         Response.Status.OK, "image/jpeg",
                         ByteArrayInputStream(result.data), result.data.size.toLong()
@@ -900,7 +727,7 @@ class StreamingServer(
                         }
                     }
                 }
-                is WebApiController.SnapshotResult.Error -> {
+                is PhotoCaptureManager.SnapshotResult.Error -> {
                     newFixedLengthResponse(
                         Response.Status.INTERNAL_ERROR,
                         "application/json",
@@ -976,7 +803,8 @@ class StreamingServer(
         if (isRunning) {
             stop()
             isRunning = false
-            sessions.clear()
+            // Sessions live in the manager-owned WebAuthGate — they survive a
+            // server recreation (e.g. a port change) by design.
             Log.d(TAG, "Streaming server stopped")
         }
     }
@@ -984,17 +812,7 @@ class StreamingServer(
     companion object {
         private const val TAG = "StreamingServer"
         const val BOUNDARY_MARKER = "LensCastBoundary"
-        private const val SESSION_DURATION_MS = 24 * 60 * 60 * 1000L
-        private const val SESSION_CLEANUP_INTERVAL_MS = 60 * 1000L
-        private const val SESSION_MAX_AGE_SEC = 24 * 60 * 60
-        private const val MAX_SESSIONS = 1000
-        private const val SESSION_TOKEN_BYTES = 32
-        private const val COOKIE_NAME = "lenscast_session"
-        private const val COOKIE_PATH = "/"
         private const val MAX_BODY_BYTES = 1L * 1024 * 1024
-        private const val MAX_AUTH_ATTEMPTS = 10
-        private const val AUTH_LOCKOUT_MS = 60 * 1000L
-        private const val MAX_AUTH_ATTEMPTS_TRACKED = 500
         private const val MAX_CACHED_ASSETS = 50
     }
 }

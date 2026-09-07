@@ -127,6 +127,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.raulshma.lenscast.MainApplication
 import com.raulshma.lenscast.camera.model.CameraLensInfo
 import com.raulshma.lenscast.camera.model.CameraSettings
+import com.raulshma.lenscast.camera.model.isoStops
 import com.raulshma.lenscast.camera.model.CameraState
 import com.raulshma.lenscast.camera.model.FocusMode
 import com.raulshma.lenscast.camera.model.HdrMode
@@ -163,7 +164,8 @@ fun CameraScreen(
         factory = CameraViewModel.Factory(
             context, app.cameraService, app.streamingManager,
             app.thermalMonitor, app.settingsDataStore, app.streamingSession,
-            app.streamWatchdog, app.connectivityMonitor
+            app.streamWatchdog, app.connectivityMonitor, app.recordingController,
+            app.photoCaptureManager
         )
     )
 
@@ -281,10 +283,14 @@ fun CameraScreen(
 
             if (activeSetting != null) {
                 val isoRange by viewModel.availableIsoRange.collectAsState()
+                val zoomRange by viewModel.availableZoomRange.collectAsState()
+                val exposureRange by viewModel.availableExposureRange.collectAsState()
                 QuickSettingSheet(
                     type = activeSetting!!,
                     settings = settings,
-                    isoOptions = buildIsoOptions(isoRange),
+                    isoOptions = remember(isoRange) { isoStops(isoRange) },
+                    zoomRange = zoomRange,
+                    exposureRange = exposureRange,
                     sheetState = sheetState,
                     onDismiss = { activeSetting = null },
                     onUpdateExposure = { viewModel.updateExposure(it) },
@@ -340,6 +346,8 @@ private fun ImmersiveCameraView(
     onSelectLens: (Int) -> Unit,
     onPinchStateChange: (Boolean, Float) -> Unit,
 ) {
+    val lastServerError by viewModel.lastServerError.collectAsState()
+
     Box(modifier = Modifier.fillMaxSize()) {
         if (showPreview) {
             CameraPreview(
@@ -410,6 +418,7 @@ private fun ImmersiveCameraView(
             isRecording = isRecording,
             recordingElapsedSeconds = recordingElapsedSeconds,
             showPreview = showPreview,
+            lastServerError = lastServerError,
             onSwitchCamera = onSwitchCamera,
             onTogglePreview = onTogglePreview,
             onNavigateToGallery = onNavigateToGallery,
@@ -519,6 +528,7 @@ private fun CameraTopOverlay(
     isRecording: Boolean,
     recordingElapsedSeconds: Int,
     showPreview: Boolean,
+    lastServerError: String?,
     onSwitchCamera: () -> Unit,
     onTogglePreview: () -> Unit,
     onNavigateToGallery: () -> Unit,
@@ -560,6 +570,7 @@ private fun CameraTopOverlay(
         ) {
             ServerStatusButton(
                 streamStatus = streamStatus,
+                lastServerError = lastServerError,
                 onCopyUrl = onCopyStreamUrl,
                 onCopyRtspUrl = onCopyRtspUrl,
                 onToggleServer = onToggleServer,
@@ -1085,22 +1096,14 @@ private fun QuickSettingPill(
     }
 }
 
-private fun buildIsoOptions(isoRange: ClosedRange<Int>): List<String> {
-    val stops = mutableListOf("Auto")
-    var value = 100
-    while (value <= isoRange.endInclusive) {
-        if (value >= isoRange.start) stops.add(value.toString())
-        value *= 2
-    }
-    return stops
-}
-
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun QuickSettingSheet(
     type: QuickSettingType,
     settings: CameraSettings,
     isoOptions: List<String>,
+    zoomRange: ClosedFloatingPointRange<Float>,
+    exposureRange: ClosedRange<Int>,
     sheetState: androidx.compose.material3.SheetState,
     onDismiss: () -> Unit,
     onUpdateExposure: (Int) -> Unit,
@@ -1154,7 +1157,7 @@ private fun QuickSettingSheet(
             when (type) {
                 QuickSettingType.EXPOSURE -> ProSliderControl(
                     value = settings.exposureCompensation.toFloat(),
-                    range = -12f..12f,
+                    range = exposureRange.start.toFloat()..exposureRange.endInclusive.toFloat(),
                     label = "${settings.exposureCompensation}",
                     onValueChange = { onUpdateExposure(it.toInt()) }
                 )
@@ -1175,7 +1178,7 @@ private fun QuickSettingSheet(
                 )
                 QuickSettingType.ZOOM -> ProSliderControl(
                     value = settings.zoomRatio,
-                    range = 0.5f..10f,
+                    range = zoomRange,
                     label = "${String.format("%.1f", settings.zoomRatio)}x",
                     onValueChange = onUpdateZoom
                 )
@@ -1191,7 +1194,7 @@ private fun QuickSettingSheet(
                 )
                 QuickSettingType.FRAME_RATE -> ProSliderControl(
                     value = settings.frameRate.toFloat(),
-                    range = 15f..60f,
+                    range = CameraSettings.FRAME_RATE_SLIDER_MIN.toFloat()..CameraSettings.FRAME_RATE_SLIDER_MAX.toFloat(),
                     label = "${settings.frameRate} fps",
                     onValueChange = { onUpdateFrameRate(it.toInt()) }
                 )
@@ -1423,6 +1426,7 @@ private fun CameraPreview(
         }
     }
     val settings by viewModel.settings.collectAsState()
+    val zoomRange by viewModel.availableZoomRange.collectAsState()
 
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(previewView, lifecycleOwner) {
@@ -1443,7 +1447,7 @@ private fun CameraPreview(
                     detectTransformGestures { _, _, zoom, _ ->
                         if (zoom != 1f) {
                             val currentZoom = settings.zoomRatio
-                            val newZoom = (currentZoom * zoom).coerceIn(0.5f, 10f)
+                            val newZoom = (currentZoom * zoom).coerceIn(zoomRange.start, zoomRange.endInclusive)
                             if ((newZoom - currentZoom).absoluteValue > 0.01f) {
                                 viewModel.updateZoom(newZoom)
                                 onPinchStateChange(true, newZoom)
@@ -1682,6 +1686,7 @@ private fun RecordingIndicator(
 @Composable
 private fun ServerStatusButton(
     streamStatus: com.raulshma.lenscast.camera.model.StreamStatus,
+    lastServerError: String?,
     onCopyUrl: () -> Unit,
     onCopyRtspUrl: () -> Unit,
     onToggleServer: () -> Unit,
@@ -1737,6 +1742,14 @@ private fun ServerStatusButton(
                             )
                         }
                         Spacer(modifier = Modifier.height(2.dp))
+                        if (lastServerError != null) {
+                            Text(
+                                lastServerError,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.error,
+                            )
+                            Spacer(modifier = Modifier.height(2.dp))
+                        }
                         Text(
                             when {
                                 streamStatus.clientCount > 0 -> "${streamStatus.clientCount} viewer(s) connected"

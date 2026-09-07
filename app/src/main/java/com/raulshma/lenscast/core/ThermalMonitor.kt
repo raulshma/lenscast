@@ -4,6 +4,7 @@ import android.content.Context
 import android.os.Build
 import android.os.PowerManager
 import android.util.Log
+import com.raulshma.lenscast.core.StreamDefaults
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -118,7 +119,7 @@ class ThermalMonitor(private val context: Context) {
 
     fun getAdjustedQuality(baseQuality: Int): Int {
         return _throttlingResult.value.jpegQuality
-            .coerceIn(10, baseQuality)
+            .coerceIn(StreamDefaults.JPEG_QUALITY_MIN, baseQuality)
     }
 
     fun getAdjustedFrameDelay(baseIntervalMs: Long): Long {

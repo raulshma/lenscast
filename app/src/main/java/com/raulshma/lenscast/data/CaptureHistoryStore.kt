@@ -71,23 +71,7 @@ class CaptureHistoryStore(private val context: Context) {
     }
 
     fun add(entry: CaptureHistory) {
-        val existingIndex = _history.value.indexOfFirst {
-            normalizePath(it.filePath) == normalizePath(entry.filePath)
-        }
-        val current = _history.value.toMutableList()
-
-        if (existingIndex >= 0) {
-            current[existingIndex] = current[existingIndex].copy(
-                fileName = entry.fileName,
-                timestamp = maxOf(current[existingIndex].timestamp, entry.timestamp),
-                fileSizeBytes = entry.fileSizeBytes.takeIf { it > 0 } ?: current[existingIndex].fileSizeBytes,
-                durationMs = entry.durationMs.takeIf { it > 0 } ?: current[existingIndex].durationMs,
-            )
-        } else {
-            current.add(0, entry)
-        }
-
-        _history.value = current.sortedByDescending { it.timestamp }
+        _history.value = mergeEntry(_history.value, entry)
         save()
     }
 
@@ -375,9 +359,37 @@ class CaptureHistoryStore(private val context: Context) {
         }.getOrDefault(false)
     }
 
-    private fun normalizePath(filePath: String): String = filePath.trim()
-
     companion object {
         private const val TAG = "CaptureHistoryStore"
+
+        /**
+         * Pure merge of a new entry into the history list: dedupes by
+         * normalized file path (keeping the richer of the two entries) and
+         * returns the list sorted newest-first. Visible for tests.
+         */
+        internal fun mergeEntry(
+            existing: List<CaptureHistory>,
+            entry: CaptureHistory,
+        ): List<CaptureHistory> {
+            val index = existing.indexOfFirst {
+                normalizePath(it.filePath) == normalizePath(entry.filePath)
+            }
+            val current = existing.toMutableList()
+
+            if (index >= 0) {
+                current[index] = current[index].copy(
+                    fileName = entry.fileName,
+                    timestamp = maxOf(current[index].timestamp, entry.timestamp),
+                    fileSizeBytes = entry.fileSizeBytes.takeIf { it > 0 } ?: current[index].fileSizeBytes,
+                    durationMs = entry.durationMs.takeIf { it > 0 } ?: current[index].durationMs,
+                )
+            } else {
+                current.add(0, entry)
+            }
+
+            return current.sortedByDescending { it.timestamp }
+        }
+
+        private fun normalizePath(filePath: String): String = filePath.trim()
     }
 }

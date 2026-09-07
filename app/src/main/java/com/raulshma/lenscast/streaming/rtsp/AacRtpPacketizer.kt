@@ -9,13 +9,15 @@ package com.raulshma.lenscast.streaming.rtsp
  *   - AU-header (16 bits): upper 13 bits = AU-size, lower 3 bits = AU-index (0)
  *   - Access Unit Data: raw AAC bytes
  */
-object AacRtpPacketizer {
+class AacRtpPacketizer {
 
-    private const val RTP_HEADER_SIZE = 12
-    private const val PAYLOAD_TYPE = 97
+    private companion object {
+        const val RTP_HEADER_SIZE = 12
+        const val PAYLOAD_TYPE = 97
 
-    // AU header section: 2 bytes length + 2 bytes AU-header = 4 bytes
-    private const val AU_HEADER_SECTION_SIZE = 4
+        // AU header section: 2 bytes length + 2 bytes AU-header = 4 bytes
+        const val AU_HEADER_SECTION_SIZE = 4
+    }
 
     private var sequenceNumber = 0L
     private val ssrc: Long = java.util.Random().nextLong()
@@ -23,10 +25,6 @@ object AacRtpPacketizer {
     @Volatile
     var currentSeq: Int = 0
         private set
-
-    fun reset() {
-        sequenceNumber = 0L
-    }
 
     fun packetize(aacAccessUnit: ByteArray, timestamp: Long): ByteArray {
         val auSize = aacAccessUnit.size

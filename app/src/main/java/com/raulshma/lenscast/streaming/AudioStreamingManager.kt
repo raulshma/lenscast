@@ -1,18 +1,16 @@
 package com.raulshma.lenscast.streaming
 
-import android.Manifest
 import android.content.Context
-import android.content.pm.PackageManager
 import android.media.AudioAttributes
 import android.media.AudioFormat
 import android.media.AudioRecord
 import android.media.MediaRecorder
 import android.media.audiofx.AcousticEchoCanceler
 import android.media.audiofx.NoiseSuppressor
+import com.raulshma.lenscast.core.MicAccess
 import com.raulshma.lenscast.core.StreamDefaults
 import android.os.Process
 import android.util.Log
-import androidx.core.content.ContextCompat
 import java.io.InputStream
 import java.util.ArrayDeque
 import java.util.concurrent.ConcurrentHashMap
@@ -48,7 +46,7 @@ class AudioStreamingManager(private val context: Context) {
 
     fun start(config: Config = Config()): Boolean {
         if (isStreaming.get()) return true
-        if (!hasAudioPermission()) {
+        if (!MicAccess.isGranted(context)) {
             Log.w(TAG, "Microphone permission is not granted, skipping audio stream")
             return false
         }
@@ -98,13 +96,6 @@ class AudioStreamingManager(private val context: Context) {
 
     fun release() {
         stop()
-    }
-
-    private fun hasAudioPermission(): Boolean {
-        return ContextCompat.checkSelfPermission(
-            context,
-            Manifest.permission.RECORD_AUDIO
-        ) == PackageManager.PERMISSION_GRANTED
     }
 
     private fun resolveConfig(config: Config): ActiveConfig {

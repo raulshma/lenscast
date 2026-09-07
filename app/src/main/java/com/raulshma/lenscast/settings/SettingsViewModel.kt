@@ -18,10 +18,8 @@ import com.raulshma.lenscast.data.SettingsDataStore
 import com.raulshma.lenscast.data.StreamAuthSettings
 import com.raulshma.lenscast.streaming.rtsp.RtspInputFormat
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
 /**
@@ -36,50 +34,23 @@ class SettingsViewModel(
     private val powerManager: PowerManager? = null,
 ) : ViewModel() {
 
+    // Read-side settings come straight from the Settings Store's shared
+    // StateFlows — no per-ViewModel stateIn, no retyped defaults.
     val settings: StateFlow<CameraSettings> = settingsDataStore.settings
-        .stateIn(viewModelScope, SharingStarted.Eagerly, CameraSettings())
-
     val streamingPort: StateFlow<Int> = settingsDataStore.streamingPort
-        .stateIn(viewModelScope, SharingStarted.Eagerly, StreamDefaults.WEB_PORT)
-
     val webStreamingEnabled: StateFlow<Boolean> = settingsDataStore.webStreamingEnabled
-        .stateIn(viewModelScope, SharingStarted.Eagerly, true)
-
     val jpegQuality: StateFlow<Int> = settingsDataStore.jpegQuality
-        .stateIn(viewModelScope, SharingStarted.Eagerly, StreamDefaults.JPEG_QUALITY)
-
     val showPreview: StateFlow<Boolean> = settingsDataStore.showPreview
-        .stateIn(viewModelScope, SharingStarted.Eagerly, true)
-
     val streamAudioEnabled: StateFlow<Boolean> = settingsDataStore.streamAudioEnabled
-        .stateIn(viewModelScope, SharingStarted.Eagerly, true)
-
     val streamAudioBitrateKbps: StateFlow<Int> = settingsDataStore.streamAudioBitrateKbps
-        .stateIn(viewModelScope, SharingStarted.Eagerly, StreamDefaults.AUDIO_BITRATE_KBPS)
-
     val streamAudioChannels: StateFlow<Int> = settingsDataStore.streamAudioChannels
-        .stateIn(viewModelScope, SharingStarted.Eagerly, StreamDefaults.AUDIO_CHANNELS)
-
     val streamAudioEchoCancellation: StateFlow<Boolean> = settingsDataStore.streamAudioEchoCancellation
-        .stateIn(viewModelScope, SharingStarted.Eagerly, true)
-
     val recordingAudioEnabled: StateFlow<Boolean> = settingsDataStore.recordingAudioEnabled
-        .stateIn(viewModelScope, SharingStarted.Eagerly, true)
-
     val rtspEnabled: StateFlow<Boolean> = settingsDataStore.rtspEnabled
-        .stateIn(viewModelScope, SharingStarted.Eagerly, false)
-
     val rtspPort: StateFlow<Int> = settingsDataStore.rtspPort
-        .stateIn(viewModelScope, SharingStarted.Eagerly, StreamDefaults.RTSP_PORT)
-
     val rtspInputFormat: StateFlow<RtspInputFormat> = settingsDataStore.rtspInputFormat
-        .stateIn(viewModelScope, SharingStarted.Eagerly, RtspInputFormat.AUTO)
-
     val adaptiveBitrateEnabled: StateFlow<Boolean> = settingsDataStore.adaptiveBitrateEnabled
-        .stateIn(viewModelScope, SharingStarted.Eagerly, false)
-
     val mdnsEnabled: StateFlow<Boolean> = settingsDataStore.mdnsEnabled
-        .stateIn(viewModelScope, SharingStarted.Eagerly, true)
 
     // Auth credentials back the username text field directly, so this one flow
     // is kept writable: optimistic updates keep typing responsive.

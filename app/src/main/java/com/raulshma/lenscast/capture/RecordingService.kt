@@ -1,17 +1,9 @@
 package com.raulshma.lenscast.capture
 
-import android.Manifest
-import android.app.Notification
-import android.app.NotificationChannel
-import android.app.NotificationManager
-import androidx.core.app.NotificationCompat
-import android.app.PendingIntent
 import android.app.Service
 import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
-import android.content.pm.PackageManager
-import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
 import android.provider.MediaStore
@@ -25,48 +17,45 @@ import androidx.camera.video.VideoCapture
 import androidx.camera.video.VideoRecordEvent
 import androidx.core.content.ContextCompat
 import com.raulshma.lenscast.MainApplication
-import com.raulshma.lenscast.MainActivity
+import com.raulshma.lenscast.core.ForegroundNotifications
+import com.raulshma.lenscast.core.MicAccess
 import com.raulshma.lenscast.capture.model.RecordingConfig
 import com.raulshma.lenscast.capture.model.RecordingQuality
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
-import java.util.concurrent.atomic.AtomicBoolean
-import java.util.concurrent.atomic.AtomicLong
 
+/**
+ * The foreground service that holds the live recording. It owns no public
+ * state: every transition is reported to the app-scoped [RecordingController],
+ * which all consumers observe. Camera binding goes through
+ * CameraService's `bindRecording` seam — never through the provider directly.
+ */
 class RecordingService : Service() {
 
-    @Volatile
     private var isRecording = false
     private var startTimeMs: Long = 0
     private var recordingConfig: RecordingConfig? = null
-    @Volatile
     private var isFinalizingRecording = false
     private var capturedRecordingAudioExclusively = false
+    private var activeRecording: Recording? = null
 
-    private val moshi by lazy {
-        com.squareup.moshi.Moshi.Builder()
-            .addLast(com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory())
-            .build()
-    }
-    private val recordingConfigAdapter by lazy {
-        moshi.adapter(RecordingConfig::class.java)
-    }
+    private val app: MainApplication by lazy { applicationContext as MainApplication }
+    private val recordingController: RecordingController by lazy { app.recordingController }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onCreate() {
         super.onCreate()
-        createNotificationChannel()
+        ForegroundNotifications.createChannel(this, CHANNEL_ID, "Recording")
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             ACTION_START -> {
-                val configJson = intent.getStringExtra(EXTRA_CONFIG)
-                val config = if (configJson != null) {
-                    recordingConfigAdapter.fromJson(configJson)
-                } else null
+                val config = intent.getStringExtra(EXTRA_CONFIG)?.let { json ->
+                    runCatching { RecordingConfigJson.decode(json) }.getOrNull()
+                }
                 startRecording(config)
             }
             ACTION_STOP -> stopRecording()
@@ -75,17 +64,22 @@ class RecordingService : Service() {
     }
 
     private fun startRecording(config: RecordingConfig?) {
-        if (isRecording) return
+        // A start while the previous recording is still draining would
+        // overwrite activeRecording and lose the session when the pending
+        // Finalize fires — drop it instead (the repeat policy re-issues).
+        if (isRecording || isFinalizingRecording) return
         recordingConfig = config
         isFinalizingRecording = false
         startTimeMs = System.currentTimeMillis()
 
-        val app = applicationContext as MainApplication
         val shouldIncludeAudio = config?.includeAudio ?: true
-        val audioEnabled = shouldIncludeAudio && hasAudioPermission()
+        val audioEnabled = shouldIncludeAudio && MicAccess.isGranted(this)
 
-        val notification = buildNotification(
-            if (audioEnabled) "Recording video and audio..." else "Recording video..."
+        val notification = ForegroundNotifications.build(
+            this,
+            CHANNEL_ID,
+            "LensCast Recording",
+            if (audioEnabled) "Recording video and audio..." else "Recording video...",
         )
         val cameraService = app.cameraService
         val fileName = "VID_${DATE_FORMAT.format(Date())}.mp4"
@@ -96,14 +90,9 @@ class RecordingService : Service() {
                 capturedRecordingAudioExclusively = true
             }
 
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                startForeground(
-                    NOTIFICATION_ID, notification,
-                    foregroundServiceTypes(audioEnabled)
-                )
-            } else {
-                startForeground(NOTIFICATION_ID, notification)
-            }
+            ForegroundNotifications.startCameraForeground(
+                this, NOTIFICATION_ID, notification, audioEnabled
+            )
 
             cameraService.acquireKeepAlive()
             cameraService.beginExclusiveSession()
@@ -136,67 +125,10 @@ class RecordingService : Service() {
 
             val videoCapture = VideoCapture.withOutput(recorder)
 
-            val cameraProvider = cameraService.getCameraProvider() ?: run {
-                Log.e(TAG, "Camera provider not available")
+            if (!cameraService.bindRecording(videoCapture)) {
+                Log.e(TAG, "Could not bind camera for recording")
                 cleanupFailedStart()
                 return
-            }
-            val cameraSelector = cameraService.getCurrentCameraSelector()
-
-            cameraProvider.unbindAll()
-
-            val preview = if (cameraService.isPreviewAvailable()) cameraService.getPreview() else null
-            val imageCapture = cameraService.getImageCapture()
-            val imageAnalysis = cameraService.getImageAnalysis()
-
-            val lifecycleOwner = cameraService.getEffectiveLifecycleOwner()
-            if (lifecycleOwner == null) {
-                Log.e(TAG, "No lifecycle owner available for recording")
-                cleanupFailedStart()
-                return
-            }
-
-            try {
-                when {
-                    preview != null && imageCapture != null && imageAnalysis != null ->
-                        cameraProvider.bindToLifecycle(
-                            lifecycleOwner, cameraSelector,
-                            preview, imageCapture, imageAnalysis, videoCapture
-                        )
-                    preview != null && imageCapture != null ->
-                        cameraProvider.bindToLifecycle(
-                            lifecycleOwner, cameraSelector,
-                            preview, imageCapture, videoCapture
-                        )
-                    preview != null && imageAnalysis != null ->
-                        cameraProvider.bindToLifecycle(
-                            lifecycleOwner, cameraSelector,
-                            preview, imageAnalysis, videoCapture
-                        )
-                    preview != null ->
-                        cameraProvider.bindToLifecycle(
-                            lifecycleOwner, cameraSelector,
-                            preview, videoCapture
-                        )
-                    imageAnalysis != null ->
-                        cameraProvider.bindToLifecycle(
-                            lifecycleOwner, cameraSelector,
-                            imageAnalysis, videoCapture
-                        )
-                    else ->
-                        cameraProvider.bindToLifecycle(
-                            lifecycleOwner, cameraSelector,
-                            videoCapture
-                        )
-                }
-                Log.d(TAG, "Bound use cases for recording (streaming preserved if active)")
-            } catch (e: Exception) {
-                Log.w(TAG, "Failed to bind all use cases, trying with VideoCapture only", e)
-                cameraProvider.bindToLifecycle(
-                    lifecycleOwner,
-                    cameraSelector,
-                    videoCapture
-                )
             }
 
             var pendingRecording = videoCapture.output.prepareRecording(this, mediaStoreOutput)
@@ -208,9 +140,8 @@ class RecordingService : Service() {
                 .start(ContextCompat.getMainExecutor(this)) { event ->
                     when (event) {
                         is VideoRecordEvent.Start -> {
-                            serviceRecordingActive.set(true)
-                            serviceRecordingStartTimeMs.set(startTimeMs)
                             Log.d(TAG, "Recording started: $fileName")
+                            recordingController.onServiceStarted(startTimeMs, recordingConfig)
                         }
                         is VideoRecordEvent.Finalize -> {
                             val savedUri = event.outputResults.outputUri.takeIf {
@@ -253,7 +184,15 @@ class RecordingService : Service() {
     }
 
     private fun stopRecording() {
-        if (!isRecording || isFinalizingRecording) return
+        if (!isRecording || isFinalizingRecording) {
+            if (!isRecording) {
+                // Nothing live to drain. Report anyway so a stop aimed at a
+                // stale service instance can never wedge the controller in a
+                // non-Idle state.
+                recordingController.onServiceStopped()
+            }
+            return
+        }
         isRecording = false
         isFinalizingRecording = true
 
@@ -266,50 +205,44 @@ class RecordingService : Service() {
         val duration = System.currentTimeMillis() - startTimeMs
         Log.d(TAG, "Recording stopped. Duration: ${duration}ms")
 
+        recordingController.onServiceFinalizing()
         currentRecording.stop()
     }
 
     private fun finishRecordingSession() {
         activeRecording = null
         isFinalizingRecording = false
-        serviceRecordingActive.set(false)
-        serviceRecordingStartTimeMs.set(0L)
 
-        val app = applicationContext as MainApplication
-        releaseExclusiveRecordingAudio(app)
-        app.cameraService.endExclusiveSession()
-        app.cameraService.releaseKeepAlive()
-        app.cameraService.rebindUseCases()
+        val cameraService = app.cameraService
+        releaseExclusiveRecordingAudio()
+        cameraService.endExclusiveSession()
+        cameraService.releaseKeepAlive()
+        cameraService.unbindRecording()
+
+        recordingController.onServiceStopped()
 
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
     }
 
-    private fun cleanupFailedStart(uri: android.net.Uri? = null) {
+    private fun cleanupFailedStart() {
         activeRecording = null
         isRecording = false
         isFinalizingRecording = false
-        serviceRecordingActive.set(false)
-        serviceRecordingStartTimeMs.set(0L)
 
-        uri?.let {
-            runCatching {
-                contentResolver.delete(it, null, null)
-            }.onFailure { deleteError ->
-                Log.w(TAG, "Failed to clean up recording entry $it", deleteError)
-            }
-        }
+        val cameraService = app.cameraService
+        releaseExclusiveRecordingAudio()
+        cameraService.endExclusiveSession()
+        cameraService.releaseKeepAlive()
+        cameraService.unbindRecording()
 
-        val app = applicationContext as MainApplication
-        releaseExclusiveRecordingAudio(app)
-        app.cameraService.endExclusiveSession()
-        app.cameraService.releaseKeepAlive()
-        app.cameraService.rebindUseCases()
+        recordingController.onServiceStopped()
+
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
     }
 
-    private fun releaseExclusiveRecordingAudio(app: MainApplication) {
+    private fun releaseExclusiveRecordingAudio() {
         if (!capturedRecordingAudioExclusively) return
         capturedRecordingAudioExclusively = false
         app.streamingManager.setRecordingAudioCaptureActive(false)
@@ -338,48 +271,6 @@ class RecordingService : Service() {
         }.getOrDefault(0L)
     }
 
-    private fun buildNotification(message: String): Notification {
-        val pendingIntent = PendingIntent.getActivity(
-            this, 0,
-            Intent(this, MainActivity::class.java),
-            PendingIntent.FLAG_UPDATE_CURRENT or if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) PendingIntent.FLAG_IMMUTABLE else 0
-        )
-
-        return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("LensCast Recording")
-            .setContentText(message)
-            .setSmallIcon(android.R.drawable.ic_menu_camera)
-            .setContentIntent(pendingIntent)
-            .build()
-    }
-
-    private fun createNotificationChannel() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(
-                CHANNEL_ID,
-                "Recording",
-                NotificationManager.IMPORTANCE_LOW
-            )
-            val manager = getSystemService(NotificationManager::class.java)
-            manager.createNotificationChannel(channel)
-        }
-    }
-
-    private fun hasAudioPermission(): Boolean {
-        return ContextCompat.checkSelfPermission(
-            this,
-            Manifest.permission.RECORD_AUDIO
-        ) == PackageManager.PERMISSION_GRANTED
-    }
-
-    private fun foregroundServiceTypes(includeAudio: Boolean): Int {
-        var serviceTypes = ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA
-        if (includeAudio && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            serviceTypes = serviceTypes or ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
-        }
-        return serviceTypes
-    }
-
     companion object {
         const val ACTION_START = "com.raulshma.lenscast.START_RECORDING"
         const val ACTION_STOP = "com.raulshma.lenscast.STOP_RECORDING"
@@ -387,16 +278,6 @@ class RecordingService : Service() {
         private const val CHANNEL_ID = "recording_channel"
         private const val NOTIFICATION_ID = 1001
         private const val TAG = "RecordingService"
-        @Volatile
-        private var activeRecording: Recording? = null
-        private val serviceRecordingActive = AtomicBoolean(false)
-        private val serviceRecordingStartTimeMs = AtomicLong(0L)
         private val DATE_FORMAT = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US)
-
-        @JvmStatic
-        fun isRecordingActive(): Boolean = serviceRecordingActive.get()
-
-        @JvmStatic
-        fun recordingStartTimeMs(): Long = serviceRecordingStartTimeMs.get()
     }
 }

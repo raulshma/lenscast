@@ -26,7 +26,12 @@ data class MaskingZone(
     val height: Float = 0.2f,
     val pixelateSize: Int = 16,
     val blurRadius: Float = 10f,
-)
+) {
+    companion object {
+        /** Single source for the fallback values used when parsing persisted or wire data. */
+        val DEFAULT = MaskingZone()
+    }
+}
 
 data class OverlaySettings(
     val enabled: Boolean = false,
@@ -45,4 +50,9 @@ data class OverlaySettings(
     val lineHeight: Int = 4,
     val maskingEnabled: Boolean = false,
     val maskingZones: List<MaskingZone> = emptyList(),
-)
+) {
+    companion object {
+        /** Single source for the fallback values used when parsing persisted or wire data. */
+        val DEFAULT = OverlaySettings()
+    }
+}

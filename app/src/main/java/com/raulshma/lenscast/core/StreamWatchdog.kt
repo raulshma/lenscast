@@ -85,11 +85,14 @@ class StreamWatchdog(
     }
 
     fun setMaxRetries(value: Int) {
-        maxRetries = value.coerceIn(1, 20)
+        maxRetries = value.coerceIn(StreamDefaults.WATCHDOG_MAX_RETRIES_MIN, StreamDefaults.WATCHDOG_MAX_RETRIES_MAX)
     }
 
     fun setCheckIntervalSeconds(value: Int) {
-        checkIntervalSeconds = value.coerceIn(MIN_CHECK_INTERVAL_SECONDS, MAX_CHECK_INTERVAL_SECONDS)
+        checkIntervalSeconds = value.coerceIn(
+            StreamDefaults.WATCHDOG_CHECK_INTERVAL_MIN_SECONDS,
+            StreamDefaults.WATCHDOG_CHECK_INTERVAL_MAX_SECONDS,
+        )
     }
 
     /**
@@ -378,10 +381,7 @@ class StreamWatchdog(
 
     // ── Helpers ──
 
-    private fun calculateBackoff(attempt: Int): Long {
-        val backoff = BASE_BACKOFF_MS * (1L shl (attempt - 1).coerceAtMost(6))
-        return backoff.coerceAtMost(MAX_BACKOFF_MS)
-    }
+    private fun calculateBackoff(attempt: Int): Long = backoffMs(attempt)
 
     private fun updateState(status: WatchdogStatus? = null) {
         val currentStatus = status ?: when {
@@ -427,13 +427,19 @@ class StreamWatchdog(
     companion object {
         private const val TAG = "StreamWatchdog"
 
-        const val MIN_CHECK_INTERVAL_SECONDS = 3
-        const val MAX_CHECK_INTERVAL_SECONDS = 30
+        const val MIN_CHECK_INTERVAL_SECONDS = StreamDefaults.WATCHDOG_CHECK_INTERVAL_MIN_SECONDS
+        const val MAX_CHECK_INTERVAL_SECONDS = StreamDefaults.WATCHDOG_CHECK_INTERVAL_MAX_SECONDS
 
         private const val FRAME_STALL_THRESHOLD_MS = 15_000L
         private const val BASE_BACKOFF_MS = 2_000L
         private const val MAX_BACKOFF_MS = 60_000L
         private const val RECOVERY_VERIFICATION_DELAY_MS = 2_000L
         private const val RECOVERY_VERIFICATION_WINDOW_MS = 3_000L
+
+        /** Pure exponential backoff with a 6-attempt doubling cap — exposed for tests. */
+        fun backoffMs(attempt: Int): Long {
+            val backoff = BASE_BACKOFF_MS * (1L shl (attempt - 1).coerceAtMost(6))
+            return backoff.coerceAtMost(MAX_BACKOFF_MS)
+        }
     }
 }

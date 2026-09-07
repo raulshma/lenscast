@@ -110,6 +110,14 @@ android {
         compose = true
     }
 
+    testOptions {
+        unitTests {
+            // Plain-JVM unit tests hit android.util.Log in the streaming
+            // monitors; return defaults instead of throwing "not mocked".
+            isReturnDefaultValues = true
+        }
+    }
+
     splits {
         abi {
             isEnable = true

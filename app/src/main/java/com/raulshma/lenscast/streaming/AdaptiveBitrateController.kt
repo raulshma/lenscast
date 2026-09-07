@@ -138,11 +138,11 @@ class AdaptiveBitrateController(
     data class AdaptiveBitrateConfig(
         val enabledByDefault: Boolean = false,
         val defaultQuality: Int = StreamDefaults.JPEG_QUALITY,
-        val minQuality: Int = 15,
-        val maxQuality: Int = 95,
+        val minQuality: Int = StreamDefaults.ADAPTIVE_JPEG_QUALITY_MIN,
+        val maxQuality: Int = StreamDefaults.ADAPTIVE_JPEG_QUALITY_MAX,
         val defaultFrameIntervalMs: Long = 1000L / StreamDefaults.STREAM_FPS,
-        val minFps: Int = 3,
-        val maxFps: Int = 30,
+        val minFps: Int = StreamDefaults.ADAPTIVE_FPS_MIN,
+        val maxFps: Int = StreamDefaults.ADAPTIVE_FPS_MAX,
     )
 
     companion object {

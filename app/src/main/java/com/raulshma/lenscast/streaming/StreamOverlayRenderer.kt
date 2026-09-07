@@ -40,7 +40,6 @@ object StreamOverlayRenderer {
         bitmap: Bitmap,
         settings: OverlaySettings,
         clientCount: Int = 0,
-        isRecording: Boolean = false,
     ): Bitmap {
         if (!settings.enabled && !settings.maskingEnabled) return bitmap
 
@@ -58,7 +57,7 @@ object StreamOverlayRenderer {
             }
 
             if (settings.enabled) {
-                applyTextOverlay(canvas, settings, clientCount, isRecording, scale, fontSize, padding, lineHeight)
+                applyTextOverlay(canvas, settings, clientCount, scale, fontSize, padding, lineHeight)
             }
 
             mutableBitmap
@@ -174,13 +173,12 @@ object StreamOverlayRenderer {
         canvas: Canvas,
         settings: OverlaySettings,
         clientCount: Int,
-        isRecording: Boolean,
         scale: Float,
         fontSize: Int,
         padding: Int,
         lineHeight: Int,
     ) {
-        val lines = buildOverlayLines(settings, clientCount, isRecording)
+        val lines = buildOverlayLines(settings, clientCount)
         if (lines.isEmpty()) return
 
         textPaint.color = parseColor(settings.textColor, Color.WHITE)
@@ -235,7 +233,6 @@ object StreamOverlayRenderer {
     private fun buildOverlayLines(
         settings: OverlaySettings,
         clientCount: Int,
-        isRecording: Boolean,
     ): List<String> {
         val lines = mutableListOf<String>()
 
@@ -253,7 +250,6 @@ object StreamOverlayRenderer {
 
         if (settings.showStatus) {
             val statusParts = mutableListOf<String>()
-            if (isRecording) statusParts.add("REC")
             if (clientCount > 0) statusParts.add("${clientCount} viewer${if (clientCount != 1) "s" else ""}")
             if (statusParts.isNotEmpty()) lines.add(statusParts.joinToString("  "))
         }

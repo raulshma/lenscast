@@ -1,6 +1,8 @@
 package com.raulshma.lenscast.streaming.rtsp
 
 import android.util.Log
+import com.raulshma.lenscast.core.StreamAuthCrypto
+import com.raulshma.lenscast.core.YuvConverter
 import com.raulshma.lenscast.core.StreamDefaults
 import com.raulshma.lenscast.data.StreamAuthSettings
 import java.io.ByteArrayOutputStream
@@ -14,7 +16,6 @@ import java.net.Socket
 import java.net.SocketException
 import java.net.SocketTimeoutException
 import java.text.SimpleDateFormat
-import java.security.MessageDigest
 import java.security.SecureRandom
 import java.util.Date
 import java.util.Locale
@@ -32,38 +33,32 @@ class RtspServer(private val port: Int = DEFAULT_PORT) {
 
     private val encoder = H264Encoder()
     private val aacEncoder = AacEncoder()
-    @Volatile private var audioEnabled = false
-    private var audioSampleRateHz = 48000
-    private var audioChannelCount = StreamDefaults.AUDIO_CHANNELS
-    private var audioBitrateKbps = StreamDefaults.AUDIO_BITRATE_KBPS
+    // Fresh packetizers per start replace the old global reset() ritual.
+    private var videoPacketizer = RtpPacketizer()
+    private var audioPacketizer = AacRtpPacketizer()
     private var audioTimestamp: Long = 0
     private val audioTimestampIncrement: Long = 1024 // AAC-LC: 1024 samples per frame
 
     private val clients = ConcurrentHashMap<String, ClientSession>()
     private val sessionIdCounter = AtomicInteger(0)
 
-    @Volatile
-    private var authEnabled = false
-    @Volatile
-    private var authUsername: String? = null
-    @Volatile
-    private var authPasswordHash: String? = null
-    @Volatile
-    private var authDigestHa1: String? = null
-
     private val secureRandom = SecureRandom()
     private val digestNonces = ConcurrentHashMap<String, DigestNonceState>()
 
-    private var videoWidth = 1280
-    private var videoHeight = 720
-    private var videoBitrate = 2_000_000
-    private var videoFrameRate = StreamDefaults.STREAM_FPS
-    private var videoInputFormat = RtspInputFormat.AUTO
+    // One immutable config value replaces the old order-sensitive setter bag.
+    @Volatile
+    private var config = RtspConfig()
+
+    /** Auth spec when auth is on; null means auth is off. */
+    private val authSpec: RtspAuthSpec?
+        get() = config.auth
+
     private var lastRotation = 0
 
     private var rtpTimestamp: Long = 0
     private val timestampIncrement: Long
-        get() = if (videoFrameRate > 0) 90000L / videoFrameRate else 3750L
+        get() = if (config.videoFrameRate > 0) 90000L / config.videoFrameRate
+        else 90000L / StreamDefaults.STREAM_FPS
 
     private val lastFrameTime = AtomicLong(0)
 
@@ -76,15 +71,23 @@ class RtspServer(private val port: Int = DEFAULT_PORT) {
     @Volatile
     private var lastSenderReportTime = 0L
     private val minFrameIntervalMs: Long
-        get() = if (videoFrameRate > 0) 1000L / videoFrameRate else 42L
+        get() = if (config.videoFrameRate > 0) 1000L / config.videoFrameRate
+        else 1000L / StreamDefaults.STREAM_FPS
 
     private data class DigestNonceState(
         val expiresAtMs: Long,
         val ncTrack: ConcurrentHashMap<String, Long> = ConcurrentHashMap(),
     )
 
-    fun start(): Boolean {
+    /**
+     * Start with a complete [RtspConfig] — the old "configure via setters,
+     * then start" ordering contract is now enforced by construction.
+     * [audioStream] is the live AAC byte source for the audio track, if any.
+     */
+    fun start(initial: RtspConfig, audioStream: InputStream? = null): Boolean {
         if (running.getAndSet(true)) return true
+        config = normalize(initial)
+        if (audioStream != null) aacEncoder.setAudioStream(audioStream)
 
         return try {
             serverSocket = ServerSocket().apply {
@@ -96,10 +99,11 @@ class RtspServer(private val port: Int = DEFAULT_PORT) {
             lastSenderReportTime = 0L
             distributedAus.set(0)
             distributedPackets.set(0)
-            RtpPacketizer.reset()
+            videoPacketizer = RtpPacketizer()
+            audioPacketizer = AacRtpPacketizer()
 
-            encoder.configure(videoWidth, videoHeight, videoBitrate, videoFrameRate)
-            encoder.setInputFormat(videoInputFormat)
+            encoder.configure(config.videoWidth, config.videoHeight, config.videoBitrate, config.videoFrameRate)
+            encoder.setInputFormat(config.inputFormat)
             encoder.onEncodedFrame = { nalUnits ->
                 distributeEncodedFrame(nalUnits)
             }
@@ -115,15 +119,14 @@ class RtspServer(private val port: Int = DEFAULT_PORT) {
             // sprop-parameter-sets instead of an empty/degraded fmtp.
             encoder.submitBlackFrame()
 
-            if (audioEnabled) {
-                aacEncoder.configure(audioSampleRateHz, audioChannelCount, audioBitrateKbps)
+            if (config.audioEnabled) {
+                aacEncoder.configure(config.audioSampleRateHz, config.audioChannelCount, config.audioBitrateKbps)
                 aacEncoder.onEncodedFrame = { aacData, _ ->
                     distributeEncodedAudioFrame(aacData)
                 }
                 aacEncoder.start()
-                AacRtpPacketizer.reset()
                 audioTimestamp = 0
-                Log.d(TAG, "AAC audio enabled for RTSP: ${audioSampleRateHz}Hz, ${audioChannelCount}ch")
+                Log.d(TAG, "AAC audio enabled for RTSP: ${config.audioSampleRateHz}Hz, ${config.audioChannelCount}ch")
             }
 
             acceptThread = Thread({ acceptLoop() }, "RtspServer-Accept").apply {
@@ -151,7 +154,7 @@ class RtspServer(private val port: Int = DEFAULT_PORT) {
         Log.d(TAG, "RTSP server stopped; stop() called from: $caller")
 
         encoder.stop()
-        if (audioEnabled) {
+        if (config.audioEnabled) {
             aacEncoder.stop()
         }
 
@@ -194,18 +197,18 @@ class RtspServer(private val port: Int = DEFAULT_PORT) {
         if (rotation == 90 || rotation == 270) {
             effectiveWidth = height
             effectiveHeight = width
-            frameData = rotateNv21(yuvData, width, height, rotation)
+            frameData = YuvConverter.rotateNv21(yuvData, width, height, rotation)
         } else if (rotation == 180) {
             effectiveWidth = width
             effectiveHeight = height
-            frameData = rotateNv21(yuvData, width, height, rotation)
+            frameData = YuvConverter.rotateNv21(yuvData, width, height, rotation)
         } else {
             effectiveWidth = width
             effectiveHeight = height
             frameData = yuvData
         }
 
-        if (effectiveWidth != videoWidth || effectiveHeight != videoHeight || rotation != lastRotation) {
+        if (effectiveWidth != config.videoWidth || effectiveHeight != config.videoHeight || rotation != lastRotation) {
             lastRotation = rotation
             reconfigureEncoder(effectiveWidth, effectiveHeight)
         }
@@ -213,56 +216,41 @@ class RtspServer(private val port: Int = DEFAULT_PORT) {
         encoder.encodeFrame(frameData)
     }
 
-    fun setBitrate(bitrate: Int) {
-        videoBitrate = bitrate.coerceIn(500_000, 8_000_000)
-        encoder.setBitrate(videoBitrate)
-    }
+    /** Entry-point validation: fps/bitrate clamped to their StreamDefaults bounds. */
+    private fun normalize(config: RtspConfig): RtspConfig = config.copy(
+        videoFrameRate = config.videoFrameRate.coerceIn(StreamDefaults.RTSP_FPS_MIN, StreamDefaults.RTSP_FPS_MAX),
+        videoBitrate = config.videoBitrate.coerceIn(StreamDefaults.VIDEO_BITRATE_MIN, StreamDefaults.VIDEO_BITRATE_MAX),
+    )
 
-    fun setFrameRate(fps: Int) {
-        videoFrameRate = fps.coerceIn(1, 60)
-    }
-
-    fun setInputFormat(format: RtspInputFormat) {
-        if (videoInputFormat == format) return
-        videoInputFormat = format
-        encoder.setInputFormat(format)
-        if (running.get()) {
-            reconfigureEncoder(videoWidth, videoHeight)
+    /**
+     * Live-update with a new config. The per-setting semantics that used to be
+     * invisible at the call site live in one place now: bitrates hot-swap in
+     * the encoders, frame rate changes the RTP timestamp increment, a new
+     * input format reconfigures the encoder. Structural changes (audio
+     * on/off, channels, sample rate, auth) take effect via a server restart
+     * by the caller.
+     */
+    fun apply(update: RtspConfig) {
+        val old = config
+        config = normalize(update)
+        if (!running.get()) return
+        if (config.videoBitrate != old.videoBitrate) {
+            encoder.setBitrate(config.videoBitrate)
+        }
+        if (config.audioBitrateKbps != old.audioBitrateKbps) {
+            aacEncoder.setBitrate(config.audioBitrateKbps)
+        }
+        if (config.inputFormat != old.inputFormat) {
+            encoder.setInputFormat(config.inputFormat)
+            reconfigureEncoder(config.videoWidth, config.videoHeight)
         }
     }
 
-    fun setAudioEnabled(enabled: Boolean) {
-        audioEnabled = enabled
-    }
-
-    fun setAudioConfig(sampleRateHz: Int, channelCount: Int, bitrateKbps: Int) {
-        audioSampleRateHz = sampleRateHz
-        audioChannelCount = channelCount
-        audioBitrateKbps = bitrateKbps
-    }
-
-    fun setAudioStream(stream: InputStream?) {
-        aacEncoder.setAudioStream(stream)
-    }
-
-    fun setAudioBitrate(bitrateKbps: Int) {
-        audioBitrateKbps = bitrateKbps.coerceIn(32, 320)
-        aacEncoder.setBitrate(audioBitrateKbps)
-    }
-
-    fun setAuthSettings(enabled: Boolean, username: String?, passwordHash: String?, digestHa1: String?) {
-        authEnabled = enabled && !username.isNullOrBlank() && !passwordHash.isNullOrBlank()
-        authUsername = if (authEnabled) username else null
-        authPasswordHash = if (authEnabled) passwordHash else null
-        authDigestHa1 = if (authEnabled && !digestHa1.isNullOrBlank()) digestHa1.lowercase(Locale.US) else null
-    }
-
     private fun reconfigureEncoder(width: Int, height: Int) {
-        videoWidth = width
-        videoHeight = height
+        config = config.copy(videoWidth = width, videoHeight = height)
         encoder.stop()
-        encoder.configure(width, height, videoBitrate, videoFrameRate)
-        encoder.setInputFormat(videoInputFormat)
+        encoder.configure(width, height, config.videoBitrate, config.videoFrameRate)
+        encoder.setInputFormat(config.inputFormat)
         encoder.onEncodedFrame = { nalUnits ->
             distributeEncodedFrame(nalUnits)
         }
@@ -317,7 +305,7 @@ class RtspServer(private val port: Int = DEFAULT_PORT) {
                 if (senderReport != null) client.sendVideoRtcpPacket(senderReport)
                 for ((index, nalUnit) in nalUnits.withIndex()) {
                     val marker = index == nalUnits.lastIndex
-                    val packets = RtpPacketizer.packetizeNalUnit(nalUnit.data, rtpTimestamp, marker)
+                    val packets = videoPacketizer.packetizeNalUnit(nalUnit.data, rtpTimestamp, marker)
                     distributedPackets.addAndGet(packets.size.toLong())
                     for (packet in packets) {
                         client.sendRtpPacket(packet)
@@ -338,12 +326,12 @@ class RtspServer(private val port: Int = DEFAULT_PORT) {
         packet[1] = 200.toByte()  // PT=SR
         packet[2] = 0
         packet[3] = 6             // length in 32-bit words minus one
-        writeInt(packet, 4, RtpPacketizer.wireSsrc)
+        writeInt(packet, 4, videoPacketizer.wireSsrc)
         writeInt(packet, 8, ntpSeconds.toInt())
         writeInt(packet, 12, ntpFraction.toInt())
         writeInt(packet, 16, (rtpTimestamp and 0xFFFFFFFFL).toInt())
-        writeInt(packet, 20, (RtpPacketizer.sentPacketCount and 0xFFFFFFFFL).toInt())
-        writeInt(packet, 24, (RtpPacketizer.sentOctetCount and 0xFFFFFFFFL).toInt())
+        writeInt(packet, 20, (videoPacketizer.sentPacketCount and 0xFFFFFFFFL).toInt())
+        writeInt(packet, 24, (videoPacketizer.sentOctetCount and 0xFFFFFFFFL).toInt())
         return packet
     }
 
@@ -359,7 +347,7 @@ class RtspServer(private val port: Int = DEFAULT_PORT) {
 
         for (client in clients.values) {
             if (client.isPlaying && client.isAudioSetup) {
-                val packet = AacRtpPacketizer.packetize(aacData, audioTimestamp)
+                val packet = audioPacketizer.packetize(aacData, audioTimestamp)
                 client.sendAudioRtpPacket(packet)
             }
         }
@@ -432,89 +420,6 @@ class RtspServer(private val port: Int = DEFAULT_PORT) {
     fun getClientCount(): Int = clients.count { it.value.isPlaying }
 
     fun isRunning(): Boolean = running.get()
-
-    private fun rotateNv21(src: ByteArray, width: Int, height: Int, rotation: Int): ByteArray {
-        return when (rotation) {
-            180 -> rotateNv21_180(src, width, height)
-            90 -> rotateNv21_90(src, width, height)
-            270 -> rotateNv21_270(src, width, height)
-            else -> src
-        }
-    }
-
-    private fun rotateNv21_90(src: ByteArray, width: Int, height: Int): ByteArray {
-        val dstW = height
-        val dstH = width
-        val ySize = width * height
-        val dst = ByteArray(dstW * dstH * 3 / 2)
-
-        for (y in 0 until height) {
-            for (x in 0 until width) {
-                val dstX = dstW - 1 - y
-                val dstY = x
-                dst[dstY * dstW + dstX] = src[y * width + x]
-            }
-        }
-
-        val dstUvStart = ySize
-        for (y in 0 until height / 2) {
-            for (x in 0 until width / 2) {
-                val srcVIdx = ySize + y * width + x * 2
-                val srcUIdx = ySize + y * width + x * 2 + 1
-                val dstX = dstW / 2 - 1 - y
-                val dstY = x
-                val dstIdx = dstUvStart + dstY * dstW + dstX * 2
-                dst[dstIdx] = src[srcVIdx]
-                dst[dstIdx + 1] = src[srcUIdx]
-            }
-        }
-
-        return dst
-    }
-
-    private fun rotateNv21_270(src: ByteArray, width: Int, height: Int): ByteArray {
-        val dstW = height
-        val dstH = width
-        val ySize = width * height
-        val dst = ByteArray(dstW * dstH * 3 / 2)
-
-        for (y in 0 until height) {
-            for (x in 0 until width) {
-                dst[(width - 1 - x) * dstW + y] = src[y * width + x]
-            }
-        }
-
-        for (y in 0 until height / 2) {
-            for (x in 0 until width / 2) {
-                val srcVIdx = ySize + y * width + x * 2
-                val srcUIdx = ySize + y * width + x * 2 + 1
-                val dstX = y
-                val dstY = width / 2 - 1 - x
-                val dstIdx = ySize + dstY * dstW + dstX * 2
-                dst[dstIdx] = src[srcVIdx]
-                dst[dstIdx + 1] = src[srcUIdx]
-            }
-        }
-
-        return dst
-    }
-
-    private fun rotateNv21_180(src: ByteArray, width: Int, height: Int): ByteArray {
-        val ySize = width * height
-        val dst = ByteArray(ySize * 3 / 2)
-
-        for (i in 0 until ySize) {
-            dst[i] = src[ySize - 1 - i]
-        }
-
-        val uvSize = ySize / 2
-        for (i in 0 until uvSize step 2) {
-            dst[ySize + i] = src[ySize + uvSize - 2 - i]
-            dst[ySize + i + 1] = src[ySize + uvSize - 1 - i]
-        }
-
-        return dst
-    }
 
     private inner class ClientSession(
         private val socket: Socket,
@@ -725,7 +630,7 @@ class RtspServer(private val port: Int = DEFAULT_PORT) {
             }
 
             // Reject audio track if audio is not enabled
-            if (trackId == 1 && !audioEnabled) {
+            if (trackId == 1 && !config.audioEnabled) {
                 sendResponse(output, "404 Not Found")
                 return
             }
@@ -792,13 +697,13 @@ class RtspServer(private val port: Int = DEFAULT_PORT) {
 
             val rtpInfoParts = mutableListOf<String>()
             val streamBase = buildAbsoluteRtspUrl("/$DEFAULT_STREAM_PATH")
-            val nextSeq = (RtpPacketizer.currentSeq + 1) and 0xFFFF
+            val nextSeq = (videoPacketizer.currentSeq + 1) and 0xFFFF
             val nextRtpTime = (rtpTimestamp + timestampIncrement) and 0xFFFFFFFFL
             rtpInfoParts.add("url=$streamBase;seq=$nextSeq;rtptime=$nextRtpTime")
 
-            if (isAudioSetup && audioEnabled) {
+            if (isAudioSetup && config.audioEnabled) {
                 val audioUrl = buildAbsoluteRtspUrl("/$DEFAULT_STREAM_PATH/trackID=1")
-                rtpInfoParts.add("url=$audioUrl;seq=${AacRtpPacketizer.currentSeq};rtptime=$audioTimestamp")
+                rtpInfoParts.add("url=$audioUrl;seq=${audioPacketizer.currentSeq};rtptime=$audioTimestamp")
             }
 
             sendResponse(
@@ -830,20 +735,17 @@ class RtspServer(private val port: Int = DEFAULT_PORT) {
         }
 
         private fun requiresAuthentication(method: String): Boolean {
-            if (!authEnabled) return false
+            if (authSpec == null) return false
             return method != "OPTIONS"
         }
 
         private fun isAuthorized(headers: Map<String, String>, method: String, requestUri: String): Boolean {
-            if (!authEnabled) return true
-
-            val expectedUser = authUsername ?: return false
-            val expectedHash = authPasswordHash ?: return false
+            val auth = authSpec ?: return true
             val authHeader = headers["authorization"] ?: return false
 
             if (authHeader.startsWith("Digest ", ignoreCase = true)) {
-                val digestHa1 = authDigestHa1 ?: return false
-                return isAuthorizedDigest(authHeader, expectedUser, digestHa1, method, requestUri)
+                if (auth.digestHa1.isBlank()) return false
+                return isAuthorizedDigest(authHeader, auth.username, auth.digestHa1, method, requestUri)
             }
             if (!authHeader.startsWith("Basic ", ignoreCase = true)) return false
 
@@ -861,8 +763,8 @@ class RtspServer(private val port: Int = DEFAULT_PORT) {
             val providedUser = decoded.substring(0, separator)
             val providedPassword = decoded.substring(separator + 1)
 
-            if (!constantTimeEquals(providedUser, expectedUser)) return false
-            return StreamAuthSettings.verifyPassword(providedPassword, expectedHash)
+            if (!StreamAuthCrypto.constantTimeEquals(providedUser, auth.username)) return false
+            return StreamAuthSettings.verifyPassword(providedPassword, auth.passwordHash)
         }
 
         private fun isAuthorizedDigest(
@@ -884,21 +786,21 @@ class RtspServer(private val port: Int = DEFAULT_PORT) {
             val cnonce = params["cnonce"] ?: ""
             val opaque = params["opaque"] ?: ""
 
-            if (!constantTimeEquals(username, expectedUser)) return false
-            if (!constantTimeEquals(realm, AUTH_REALM)) return false
-            if (!constantTimeEquals(opaque, AUTH_OPAQUE)) return false
+            if (!StreamAuthCrypto.constantTimeEquals(username, expectedUser)) return false
+            if (!StreamAuthCrypto.constantTimeEquals(realm, AUTH_REALM)) return false
+            if (!StreamAuthCrypto.constantTimeEquals(opaque, AUTH_OPAQUE)) return false
             if (!isDigestUriMatch(uri, requestUri)) return false
             if (!validateDigestNonce(nonce, username, cnonce, nc, qop)) return false
 
-            val ha2 = md5Hex("$method:$uri")
+            val ha2 = StreamAuthCrypto.md5Hex("$method:$uri")
             val expectedResponse = if (!qop.isNullOrBlank()) {
                 if (cnonce.isBlank() || nc.isBlank()) return false
-                md5Hex("$digestHa1:$nonce:$nc:$cnonce:$qop:$ha2")
+                StreamAuthCrypto.md5Hex("$digestHa1:$nonce:$nc:$cnonce:$qop:$ha2")
             } else {
-                md5Hex("$digestHa1:$nonce:$ha2")
+                StreamAuthCrypto.md5Hex("$digestHa1:$nonce:$ha2")
             }
 
-            return constantTimeEquals(response, expectedResponse)
+            return StreamAuthCrypto.constantTimeEquals(response, expectedResponse)
         }
 
         private fun parseDigestParams(value: String): Map<String, String> {
@@ -974,30 +876,17 @@ class RtspServer(private val port: Int = DEFAULT_PORT) {
         private fun isDigestUriMatch(digestUri: String, requestUri: String): Boolean {
             val digestPath = normalizeRtspPath(extractRtspPath(digestUri))
             val requestPath = normalizeRtspPath(extractRtspPath(requestUri))
-            return constantTimeEquals(digestPath, requestPath)
-        }
-
-        private fun md5Hex(input: String): String {
-            val digest = MessageDigest.getInstance("MD5")
-            val bytes = digest.digest(input.toByteArray(Charsets.UTF_8))
-            return bytes.joinToString("") { "%02x".format(it) }
+            return StreamAuthCrypto.constantTimeEquals(digestPath, requestPath)
         }
 
         private fun sendUnauthorized(output: OutputStream) {
-            val digestChallenge = if (authDigestHa1 != null) {
+            val digestChallenge = if (authSpec?.digestHa1?.isNotBlank() == true) {
                 val nonce = createDigestNonce()
                 "Digest realm=\"$AUTH_REALM\", nonce=\"$nonce\", opaque=\"$AUTH_OPAQUE\", algorithm=MD5, qop=\"auth\""
             } else null
 
             val challenge = digestChallenge ?: "Basic realm=\"$AUTH_REALM\""
             sendResponse(output, "401 Unauthorized", mapOf("WWW-Authenticate" to challenge))
-        }
-
-        private fun constantTimeEquals(a: String, b: String): Boolean {
-            val digest = MessageDigest.getInstance("SHA-256")
-            val hashA = digest.digest(a.toByteArray(Charsets.UTF_8))
-            val hashB = digest.digest(b.toByteArray(Charsets.UTF_8))
-            return MessageDigest.isEqual(hashA, hashB)
         }
 
         private fun createDigestNonce(): String {
@@ -1212,20 +1101,20 @@ class RtspServer(private val port: Int = DEFAULT_PORT) {
                 appendLine("a=range:npt=0-")
                 appendLine("m=video 0 RTP/AVP 96")
                 appendLine("c=IN IP4 0.0.0.0")
-                appendLine("b=AS:${videoBitrate / 1000}")
+                appendLine("b=AS:${config.videoBitrate / 1000}")
                 appendLine("a=rtpmap:96 H264/90000")
                 appendLine("a=fmtp:96 $fmtp")
                 appendLine("a=control:$DEFAULT_STREAM_PATH")
 
-                if (audioEnabled) {
-                    val config = aacEncoder.audioSpecificConfig
-                    val configHex = config?.let {
+                if (this@RtspServer.config.audioEnabled) {
+                    val audioCfg = aacEncoder.audioSpecificConfig
+                    val configHex = audioCfg?.let {
                         "%02x%02x".format(it[0].toInt() and 0xFF, it[1].toInt() and 0xFF)
                     } ?: "1190" // fallback: AAC-LC 48kHz mono
 
                     appendLine("m=audio 0 RTP/AVP 97")
                     appendLine("c=IN IP4 0.0.0.0")
-                    appendLine("a=rtpmap:97 mpeg4-generic/${audioSampleRateHz}/${audioChannelCount}")
+                    appendLine("a=rtpmap:97 mpeg4-generic/${this@RtspServer.config.audioSampleRateHz}/${this@RtspServer.config.audioChannelCount}")
                     appendLine("a=fmtp:97 streamtype=5;profile-level-id=1;mode=AAC-hbr;sizelength=13;indexlength=3;indexdeltalength=3;config=$configHex")
                     appendLine("a=control:trackID=1")
                 }
@@ -1252,7 +1141,7 @@ class RtspServer(private val port: Int = DEFAULT_PORT) {
 
     companion object {
         private const val TAG = "RtspServer"
-        private const val AUTH_REALM = "LensCast RTSP"
+        private val AUTH_REALM = StreamAuthCrypto.RTSP_DIGEST_REALM
         private const val AUTH_OPAQUE = "lenscast-rtsp"
         const val DEFAULT_PORT = StreamDefaults.RTSP_PORT
         const val DEFAULT_STREAM_PATH = "stream"

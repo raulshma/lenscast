@@ -27,25 +27,14 @@ class UpdateViewModel(
     private val _updateState = MutableStateFlow<UpdateState>(UpdateState.Idle)
     val updateState: StateFlow<UpdateState> = _updateState.asStateFlow()
 
-    private val _autoCheckEnabled = MutableStateFlow(true)
-    val autoCheckEnabled: StateFlow<Boolean> = _autoCheckEnabled.asStateFlow()
-
-    private val _lastCheckTime = MutableStateFlow(0L)
-    val lastCheckTime: StateFlow<Long> = _lastCheckTime.asStateFlow()
+    // Store flows exposed directly — like every other ViewModel, no mirrors.
+    val autoCheckEnabled: StateFlow<Boolean> = settingsDataStore.updateAutoCheckEnabled
+    val lastCheckTime: StateFlow<Long> = settingsDataStore.updateLastCheckTime
 
     private var downloadJob: Job? = null
 
     companion object {
         private const val TAG = "UpdateViewModel"
-    }
-
-    init {
-        viewModelScope.launch {
-            settingsDataStore.updateAutoCheckEnabled.collect { _autoCheckEnabled.value = it }
-        }
-        viewModelScope.launch {
-            settingsDataStore.updateLastCheckTime.collect { _lastCheckTime.value = it }
-        }
     }
 
     fun checkForUpdate() {
@@ -56,7 +45,6 @@ class UpdateViewModel(
                     val remoteVersion = result.release.tagName.trimStart('v')
                     val dismissed = settingsDataStore.updateDismissedVersion.first()
                     settingsDataStore.saveUpdateLastCheckTime(System.currentTimeMillis())
-                    _lastCheckTime.value = System.currentTimeMillis()
 
                     if (dismissed == remoteVersion) {
                         Log.d(TAG, "Update $remoteVersion dismissed by user")
@@ -76,7 +64,6 @@ class UpdateViewModel(
                 is UpdateCheckResult.UpToDate -> {
                     Log.d(TAG, "App is up to date (local=${result.localVersion}, remote=${result.remoteVersion})")
                     settingsDataStore.saveUpdateLastCheckTime(System.currentTimeMillis())
-                    _lastCheckTime.value = System.currentTimeMillis()
                     _updateState.value = UpdateState.UpToDate(result.remoteVersion)
                 }
                 is UpdateCheckResult.RateLimited -> {
@@ -132,7 +119,6 @@ class UpdateViewModel(
     }
 
     fun setAutoCheckEnabled(enabled: Boolean) {
-        _autoCheckEnabled.value = enabled
         viewModelScope.launch {
             settingsDataStore.saveUpdateAutoCheckEnabled(enabled)
         }
@@ -140,17 +126,6 @@ class UpdateViewModel(
 
     fun clearError() {
         _updateState.value = UpdateState.Idle
-    }
-
-    fun autoCheckIfNeeded() {
-        viewModelScope.launch {
-            val enabled = settingsDataStore.updateAutoCheckEnabled.first()
-            if (!enabled) return@launch
-            val lastCheck = settingsDataStore.updateLastCheckTime.first()
-            val oneDayAgo = System.currentTimeMillis() - 24 * 60 * 60 * 1000L
-            if (lastCheck > oneDayAgo) return@launch
-            checkForUpdate()
-        }
     }
 
     class Factory(

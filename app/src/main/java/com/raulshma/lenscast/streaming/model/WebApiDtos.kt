@@ -1,5 +1,7 @@
 package com.raulshma.lenscast.streaming.model
 
+import com.raulshma.lenscast.camera.model.MaskingZone
+import com.raulshma.lenscast.camera.model.OverlaySettings
 import com.raulshma.lenscast.core.StreamDefaults
 
 /**
@@ -19,7 +21,7 @@ data class CameraSettingsDto(
     val whiteBalance: String = "AUTO",
     val colorTemperature: Int? = null,
     val zoomRatio: Double = 1.0,
-    val frameRate: Int = 24,
+    val frameRate: Int = StreamDefaults.STREAM_FPS,
     val resolution: String = "FHD_1080P",
     val stabilization: Boolean = true,
     val hdrMode: String = "OFF",
@@ -30,14 +32,14 @@ data class CameraSettingsDto(
 data class MaskingZoneDto(
     val id: String = "",
     val label: String = "",
-    val enabled: Boolean = true,
-    val type: String = "BLACKOUT",
-    val x: Double = 0.0,
-    val y: Double = 0.0,
-    val width: Double = 0.2,
-    val height: Double = 0.2,
-    val pixelateSize: Int = 16,
-    val blurRadius: Double = 10.0,
+    val enabled: Boolean = MaskingZone.DEFAULT.enabled,
+    val type: String = MaskingZone.DEFAULT.type.name,
+    val x: Double = MaskingZone.DEFAULT.x.toDouble(),
+    val y: Double = MaskingZone.DEFAULT.y.toDouble(),
+    val width: Double = MaskingZone.DEFAULT.width.toDouble(),
+    val height: Double = MaskingZone.DEFAULT.height.toDouble(),
+    val pixelateSize: Int = MaskingZone.DEFAULT.pixelateSize,
+    val blurRadius: Double = MaskingZone.DEFAULT.blurRadius.toDouble(),
 )
 
 data class StreamingSettingsDto(
@@ -54,20 +56,20 @@ data class StreamingSettingsDto(
     val rtspPort: Int = StreamDefaults.RTSP_PORT,
     val rtspInputFormat: String = "",
     val adaptiveBitrateEnabled: Boolean = false,
-    val overlayEnabled: Boolean = false,
-    val showTimestamp: Boolean = true,
-    val timestampFormat: String = "yyyy-MM-dd HH:mm:ss",
-    val showBranding: Boolean = false,
-    val brandingText: String = "LensCast",
-    val showStatus: Boolean = false,
-    val showCustomText: Boolean = false,
-    val customText: String = "",
-    val overlayPosition: String = "TOP_LEFT",
-    val overlayFontSize: Int = 28,
-    val overlayTextColor: String = "#FFFFFF",
-    val overlayBackgroundColor: String = "#80000000",
-    val overlayPadding: Int = 8,
-    val overlayLineHeight: Int = 4,
+    val overlayEnabled: Boolean = OverlaySettings.DEFAULT.enabled,
+    val showTimestamp: Boolean = OverlaySettings.DEFAULT.showTimestamp,
+    val timestampFormat: String = OverlaySettings.DEFAULT.timestampFormat,
+    val showBranding: Boolean = OverlaySettings.DEFAULT.showBranding,
+    val brandingText: String = OverlaySettings.DEFAULT.brandingText,
+    val showStatus: Boolean = OverlaySettings.DEFAULT.showStatus,
+    val showCustomText: Boolean = OverlaySettings.DEFAULT.showCustomText,
+    val customText: String = OverlaySettings.DEFAULT.customText,
+    val overlayPosition: String = OverlaySettings.DEFAULT.position.name,
+    val overlayFontSize: Int = OverlaySettings.DEFAULT.fontSize,
+    val overlayTextColor: String = OverlaySettings.DEFAULT.textColor,
+    val overlayBackgroundColor: String = OverlaySettings.DEFAULT.backgroundColor,
+    val overlayPadding: Int = OverlaySettings.DEFAULT.padding,
+    val overlayLineHeight: Int = OverlaySettings.DEFAULT.lineHeight,
     val maskingEnabled: Boolean = false,
     val maskingZones: List<MaskingZoneDto> = emptyList(),
     val watchdogEnabled: Boolean = false,

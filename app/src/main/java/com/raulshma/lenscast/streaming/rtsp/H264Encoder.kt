@@ -5,6 +5,7 @@ import android.media.MediaCodecInfo
 import android.media.MediaFormat
 import android.os.Build
 import android.util.Log
+import com.raulshma.lenscast.core.StreamDefaults
 import java.nio.ByteBuffer
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
@@ -16,10 +17,10 @@ class H264Encoder {
     private var outputThread: Thread? = null
     private val running = AtomicBoolean(false)
 
-    private var width = 1280
-    private var height = 720
-    private var bitrate = 2_000_000
-    private var frameRate = 24
+    private var width = StreamDefaults.RTSP_VIDEO_WIDTH
+    private var height = StreamDefaults.RTSP_VIDEO_HEIGHT
+    private var bitrate = StreamDefaults.RTSP_VIDEO_BITRATE
+    private var frameRate = StreamDefaults.STREAM_FPS
     private var preferredInputFormat = RtspInputFormat.AUTO
     private var activeInputFormat = RtspInputFormat.NV12
     private var inputColorFormat = MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420SemiPlanar
@@ -145,7 +146,7 @@ class H264Encoder {
     }
 
     fun setBitrate(newBitrate: Int) {
-        bitrate = newBitrate.coerceIn(500_000, 8_000_000)
+        bitrate = newBitrate.coerceIn(StreamDefaults.VIDEO_BITRATE_MIN, StreamDefaults.VIDEO_BITRATE_MAX)
         try {
             encoder?.let { codec ->
                 val params = android.os.Bundle().apply {

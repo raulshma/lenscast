@@ -170,8 +170,8 @@ class NetworkQualityMonitor {
 
     fun getAdaptiveQuality(baseQuality: Int, thermalAdjustedQuality: Int): Int {
         val level = getCachedQualityLevel()
-        val minQuality = 15
-        val maxQuality = baseQuality.coerceIn(10, 100)
+        val minQuality = StreamDefaults.ADAPTIVE_JPEG_QUALITY_MIN
+        val maxQuality = baseQuality.coerceIn(StreamDefaults.JPEG_QUALITY_MIN, StreamDefaults.JPEG_QUALITY_MAX)
 
         val networkFactor = when (level) {
             NetworkQualityLevel.EXCELLENT -> 1.0f

@@ -41,7 +41,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.raulshma.lenscast.MainApplication
-import com.raulshma.lenscast.capture.model.CaptureMode
 import com.raulshma.lenscast.capture.model.FlashMode
 import com.raulshma.lenscast.capture.model.RecordingConfig
 import com.raulshma.lenscast.capture.model.RecordingQuality
@@ -63,7 +62,8 @@ fun CaptureScreen(
     val app = context.applicationContext as MainApplication
     val viewModel: CaptureViewModel = viewModel(
         factory = CaptureViewModel.Factory(
-            context, app.cameraService, app.captureHistoryStore, app.settingsDataStore
+            context, app.captureHistoryStore, app.settingsDataStore,
+            app.recordingController, app.photoCaptureManager
         )
     )
 
@@ -143,26 +143,6 @@ fun CaptureScreen(
                         onValueChange = {
                             viewModel.updateIntervalConfig(
                                 intervalConfig.copy(totalCaptures = it.toInt())
-                            )
-                        }
-                    )
-                    SliderSetting(
-                        title = "JPEG Quality",
-                        value = intervalConfig.imageQuality.toFloat(),
-                        range = 10f..100f,
-                        onValueChange = {
-                            viewModel.updateIntervalConfig(
-                                intervalConfig.copy(imageQuality = it.toInt())
-                            )
-                        }
-                    )
-                    DropdownSetting(
-                        title = "Capture Mode",
-                        options = CaptureMode.entries.map { it.name },
-                        selected = intervalConfig.captureMode.name,
-                        onSelect = {
-                            viewModel.updateIntervalConfig(
-                                intervalConfig.copy(captureMode = CaptureMode.valueOf(it))
                             )
                         }
                     )

@@ -5,6 +5,7 @@ import android.media.MediaCodecInfo
 import android.media.MediaFormat
 import android.os.Process
 import android.util.Log
+import com.raulshma.lenscast.core.StreamDefaults
 import java.io.InputStream
 import java.nio.ByteBuffer
 import java.util.concurrent.atomic.AtomicBoolean
@@ -29,8 +30,11 @@ class AacEncoder {
 
     fun configure(sampleRateHz: Int, channelCount: Int, bitrateKbps: Int) {
         this.sampleRateHz = sampleRateHz
-        this.channelCount = channelCount.coerceIn(1, 2)
-        this.bitrate = (bitrateKbps * 1000).coerceIn(32_000, 320_000)
+        this.channelCount = channelCount.coerceIn(StreamDefaults.AUDIO_CHANNELS_MIN, StreamDefaults.AUDIO_CHANNELS_MAX)
+        this.bitrate = (bitrateKbps * 1000).coerceIn(
+            StreamDefaults.AUDIO_BITRATE_MIN_KBPS * 1000,
+            StreamDefaults.AUDIO_BITRATE_MAX_KBPS * 1000,
+        )
     }
 
     fun setAudioStream(stream: InputStream?) {
@@ -111,7 +115,10 @@ class AacEncoder {
     fun isRunning(): Boolean = running.get()
 
     fun setBitrate(newBitrateKbps: Int) {
-        bitrate = (newBitrateKbps * 1000).coerceIn(32_000, 320_000)
+        bitrate = (newBitrateKbps * 1000).coerceIn(
+            StreamDefaults.AUDIO_BITRATE_MIN_KBPS * 1000,
+            StreamDefaults.AUDIO_BITRATE_MAX_KBPS * 1000,
+        )
         // AAC encoder doesn't support dynamic bitrate changes via setParameters.
         // The new bitrate will take effect on next start().
         Log.d(TAG, "AAC bitrate set to ${bitrate}bps (effective on next start)")

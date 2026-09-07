@@ -1,17 +1,11 @@
 package com.raulshma.lenscast.streaming
 
-import android.app.Notification
-import android.app.NotificationChannel
-import android.app.NotificationManager
-import androidx.core.app.NotificationCompat
-import android.app.PendingIntent
 import android.app.Service
 import android.content.Intent
-import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
 import android.util.Log
-import com.raulshma.lenscast.MainActivity
+import com.raulshma.lenscast.core.ForegroundNotifications
 
 class StreamingService : Service() {
 
@@ -19,7 +13,7 @@ class StreamingService : Service() {
 
     override fun onCreate() {
         super.onCreate()
-        createNotificationChannel()
+        ForegroundNotifications.createChannel(this, CHANNEL_ID, "Streaming")
         Log.d(TAG, "StreamingService created")
     }
 
@@ -40,66 +34,23 @@ class StreamingService : Service() {
         } else {
             if (includeAudio) "Streaming camera feed with audio" else "Streaming camera feed"
         }
-        val notification = buildNotification(message)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            startForeground(
-                NOTIFICATION_ID, notification,
-                foregroundServiceTypes(includeAudio)
-            )
-        } else {
-            startForeground(NOTIFICATION_ID, notification)
-        }
+        showForeground(message, includeAudio)
         Log.d(TAG, "Streaming foreground service started")
     }
 
     private fun pauseStreamingForeground(url: String?) {
         val message = if (!url.isNullOrEmpty()) "Paused - $url" else "Streaming paused"
-        val notification = buildNotification(message)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            startForeground(
-                NOTIFICATION_ID, notification,
-                foregroundServiceTypes(includeAudio = false)
-            )
-        } else {
-            startForeground(NOTIFICATION_ID, notification)
-        }
+        showForeground(message, includeAudio = false)
         Log.d(TAG, "Streaming foreground service paused")
     }
 
-    private fun buildNotification(message: String): Notification {
-        val pendingIntent = PendingIntent.getActivity(
-            this, 0,
-            Intent(this, MainActivity::class.java),
-            PendingIntent.FLAG_UPDATE_CURRENT or if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) PendingIntent.FLAG_IMMUTABLE else 0
+    private fun showForeground(message: String, includeAudio: Boolean) {
+        val notification = ForegroundNotifications.build(
+            this, CHANNEL_ID, "LensCast Streaming", message, ongoing = true
         )
-
-        return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("LensCast Streaming")
-            .setContentText(message)
-            .setSmallIcon(android.R.drawable.ic_menu_camera)
-            .setOngoing(true)
-            .setContentIntent(pendingIntent)
-            .build()
-    }
-
-    private fun createNotificationChannel() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(
-                CHANNEL_ID,
-                "Streaming",
-                NotificationManager.IMPORTANCE_LOW
-            )
-            val manager = getSystemService(NotificationManager::class.java)
-            manager.createNotificationChannel(channel)
-        }
-    }
-
-    private fun foregroundServiceTypes(includeAudio: Boolean): Int {
-        var serviceTypes = ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA
-        if (includeAudio && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            serviceTypes = serviceTypes or ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
-        }
-        return serviceTypes
+        ForegroundNotifications.startCameraForeground(
+            this, NOTIFICATION_ID, notification, includeAudio
+        )
     }
 
     companion object {
