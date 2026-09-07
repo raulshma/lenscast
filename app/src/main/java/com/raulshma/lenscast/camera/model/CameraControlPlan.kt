@@ -4,9 +4,9 @@ import android.hardware.camera2.CaptureRequest
 
 /**
  * The CaptureRequest *decisions* — fps range, exposure, scene mode, white
- * balance, focus — computed from [CameraSettings] plus the device's live
- * ranges. Pure data + pure builder, so the ISO/fps/night-vision math is
- * unit-testable on the JVM; the service only translates this plan into
+ * balance, color temperature, focus — computed from [CameraSettings] plus the
+ * device's live ranges. Pure data + pure builder, so the ISO/fps/night-vision
+ * math is unit-testable on the JVM; the service only translates this plan into
  * [android.hardware.camera2.CaptureRequest] options.
  */
 data class CameraControlPlan(
@@ -25,6 +25,13 @@ data class CameraControlPlan(
     /** Null keeps the default continuous AF; MANUAL maps to AF off. */
     val afMode: Int?,
     val lensFocusDistance: Float?,
+    /**
+     * Manual white-balance color temperature in Kelvin, clamped to
+     * [CameraSettings.COLOR_TEMPERATURE_MIN]..[CameraSettings.COLOR_TEMPERATURE_MAX].
+     * Non-null only when [WhiteBalance.MANUAL] is selected and a temperature was
+     * provided; null otherwise (auto WB modes ignore any stored temperature).
+     */
+    val colorTemperatureKelvin: Int?,
 ) {
     companion object {
         fun from(
@@ -77,6 +84,16 @@ data class CameraControlPlan(
             }
             val lensFocusDistance = if (afMode != null) settings.focusDistance else null
 
+            val colorTemperatureKelvin =
+                if (settings.whiteBalance == WhiteBalance.MANUAL) {
+                    settings.colorTemperature?.coerceIn(
+                        CameraSettings.COLOR_TEMPERATURE_MIN,
+                        CameraSettings.COLOR_TEMPERATURE_MAX,
+                    )
+                } else {
+                    null
+                }
+
             settings.sceneMode?.toIntOrNull()?.let { sceneMode = it }
 
             return when (settings.nightVisionMode) {
@@ -97,6 +114,7 @@ data class CameraControlPlan(
                         awbMode = awbMode,
                         afMode = afMode,
                         lensFocusDistance = lensFocusDistance,
+                        colorTemperatureKelvin = colorTemperatureKelvin,
                     )
                 }
                 NightVisionMode.AUTO -> {
@@ -117,6 +135,7 @@ data class CameraControlPlan(
                         awbMode = awbMode,
                         afMode = afMode,
                         lensFocusDistance = lensFocusDistance,
+                        colorTemperatureKelvin = colorTemperatureKelvin,
                     )
                 }
                 NightVisionMode.OFF -> {
@@ -141,6 +160,7 @@ data class CameraControlPlan(
                         awbMode = awbMode,
                         afMode = afMode,
                         lensFocusDistance = lensFocusDistance,
+                        colorTemperatureKelvin = colorTemperatureKelvin,
                     )
                 }
             }

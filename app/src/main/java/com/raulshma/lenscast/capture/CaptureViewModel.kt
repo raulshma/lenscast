@@ -12,9 +12,11 @@ import com.raulshma.lenscast.core.MicAccess
 import com.raulshma.lenscast.data.SettingsDataStore
 import com.raulshma.lenscast.data.CaptureHistoryStore
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
 /**
@@ -34,15 +36,23 @@ class CaptureViewModel(
     private val _intervalConfig = MutableStateFlow(IntervalCaptureConfig())
     val intervalConfig: StateFlow<IntervalCaptureConfig> = _intervalConfig.asStateFlow()
 
-    private val _isIntervalRunning = MutableStateFlow(false)
-    val isIntervalRunning: StateFlow<Boolean> = _isIntervalRunning.asStateFlow()
+    // Interval-capture truth lives in WorkManager; derive directly from the
+    // scheduler's cold flow — no manual mirrors to drift.
+    private val intervalStatus: StateFlow<IntervalCaptureStatusSnapshot?> =
+        IntervalCaptureScheduler.observeStatus(context)
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(SUBSCRIBE_TIMEOUT_MS), null)
+
+    val isIntervalRunning: StateFlow<Boolean> = intervalStatus
+        .map { it?.isRunning == true }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(SUBSCRIBE_TIMEOUT_MS), false)
 
     val recordingState: StateFlow<RecordingState> = recordingController.state
 
     val isRecording: StateFlow<Boolean> = recordingController.isRecording
 
-    private val _captureCount = MutableStateFlow(0)
-    val captureCount: StateFlow<Int> = _captureCount.asStateFlow()
+    val captureCount: StateFlow<Int> = intervalStatus
+        .map { it?.completedCaptures ?: 0 }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(SUBSCRIBE_TIMEOUT_MS), 0)
 
     private val _recordingConfig = MutableStateFlow(RecordingConfig())
     val recordingConfig: StateFlow<RecordingConfig> = _recordingConfig.asStateFlow()
@@ -61,17 +71,11 @@ class CaptureViewModel(
     val scheduledStartTime: StateFlow<Long?> = _scheduledStartTime.asStateFlow()
 
     init {
+        // Keep the recording draft's includeAudio in sync with the persisted
+        // setting continuously; other user edits to the draft are preserved.
         viewModelScope.launch {
-            _recordingConfig.value = _recordingConfig.value.copy(
-                includeAudio = settingsDataStore.recordingAudioEnabled.first()
-            )
-        }
-        // Interval-capture truth lives in WorkManager; observe it instead of
-        // keeping optimistic copies.
-        viewModelScope.launch {
-            IntervalCaptureScheduler.observeStatus(context).collect { snapshot ->
-                _isIntervalRunning.value = snapshot.isRunning
-                _captureCount.value = snapshot.completedCaptures
+            settingsDataStore.recordingAudioEnabled.collect {
+                _recordingConfig.value = _recordingConfig.value.copy(includeAudio = it)
             }
         }
     }
@@ -175,5 +179,6 @@ class CaptureViewModel(
 
     companion object {
         private const val TAG = "CaptureViewModel"
+        private const val SUBSCRIBE_TIMEOUT_MS = 5000L
     }
 }

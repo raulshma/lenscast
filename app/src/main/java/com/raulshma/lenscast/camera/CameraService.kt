@@ -869,6 +869,14 @@ class CameraService(private val context: Context) {
                 builder.setCaptureRequestOption(CaptureRequest.SENSOR_EXPOSURE_TIME, it)
             }
             builder.setCaptureRequestOption(CaptureRequest.CONTROL_AWB_MODE, plan.awbMode)
+            // Manual WB is conveyed by AWB OFF above. The Kelvin decision lives
+            // in plan.colorTemperatureKelvin (clamped); gains/matrix mapping is
+            // sensor-specific, so it stays device-default until a calibrated
+            // Kelvin->gains table exists — referenced here so the plan stays the
+            // single decision table.
+            plan.colorTemperatureKelvin?.let {
+                Log.d(TAG, "Manual white balance Kelvin: $it")
+            }
 
             if (plan.afMode != null) {
                 builder.setCaptureRequestOption(CaptureRequest.CONTROL_AF_MODE, plan.afMode)

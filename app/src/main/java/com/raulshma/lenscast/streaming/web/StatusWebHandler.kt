@@ -6,13 +6,7 @@ import com.raulshma.lenscast.core.StreamWatchdog
 import com.raulshma.lenscast.core.ThermalMonitor
 import com.raulshma.lenscast.data.SettingsDataStore
 import com.raulshma.lenscast.streaming.StreamingManager
-import com.raulshma.lenscast.streaming.model.AdaptiveBitrateStatusDto
-import com.raulshma.lenscast.streaming.model.BatteryStatusDto
-import com.raulshma.lenscast.streaming.model.ClientConnectionDetailDto
-import com.raulshma.lenscast.streaming.model.ConnectionQualityStatusDto
 import com.raulshma.lenscast.streaming.model.StatusResponseDto
-import com.raulshma.lenscast.streaming.model.StreamingStatusDto
-import com.raulshma.lenscast.streaming.model.WatchdogStatusDto
 
 /** /api/status — aggregates live state from every runtime module into one DTO. */
 class StatusWebHandler(
@@ -28,56 +22,16 @@ class StatusWebHandler(
 
     suspend fun get(): String {
         val adaptiveState = streamingManager.adaptiveBitrateState.value
-        val adaptiveBitrateDto = if (adaptiveState.enabled) {
-            AdaptiveBitrateStatusDto(
-                enabled = adaptiveState.enabled,
-                qualityLevel = adaptiveState.qualityLevel.name,
-                currentQuality = adaptiveState.currentQuality,
-                targetQuality = adaptiveState.targetQuality,
-                currentFps = adaptiveState.currentFps,
-                targetFps = adaptiveState.targetFps,
-                estimatedBandwidthKbps = adaptiveState.estimatedBandwidthKbps,
-                minClientThroughputKbps = adaptiveState.minClientThroughputKbps,
-                activeClients = adaptiveState.activeClients,
-                adjustmentCount = adaptiveState.adjustmentCount,
-            )
-        } else {
-            null
-        }
-
         val networkStats = streamingManager.getNetworkStatsSnapshot()
-        val connectionQualityDto = if (streamingManager.isLiveStreaming()) {
-            ConnectionQualityStatusDto(
-                qualityLevel = networkStats.qualityLevel.name,
-                estimatedBandwidthKbps = networkStats.estimatedBandwidthKbps,
-                avgThroughputKbps = networkStats.avgThroughputKbps,
-                minThroughputKbps = networkStats.minThroughputKbps,
-                worstLatencyMs = networkStats.worstLatencyMs,
-                avgFrameSizeBytes = networkStats.avgFrameSizeBytes,
-                totalBytesSent = networkStats.totalBytesSent,
-                activeClients = networkStats.activeClients,
-                framesPerSecond = if (networkStats.activeClients > 0 && networkStats.clientDetails.isNotEmpty()) {
-                    streamingManager.getFramesPerSecond(networkStats.clientDetails.keys.first())
-                } else {
-                    0.0
-                },
-                clientDetails = networkStats.clientDetails.mapValues { (_, detail) ->
-                    ClientConnectionDetailDto(
-                        framesSent = detail.framesSent,
-                        bytesSent = detail.bytesSent,
-                        avgThroughputKbps = detail.avgThroughputKbps,
-                        lastFrameSizeBytes = detail.lastFrameSizeBytes,
-                        lastSendDurationMs = detail.lastSendDurationMs,
-                    )
-                },
-            )
+        val firstClientKey = networkStats.clientDetails.keys.firstOrNull()
+        val firstClientFps = if (networkStats.activeClients > 0 && firstClientKey != null) {
+            streamingManager.getFramesPerSecond(firstClientKey)
         } else {
-            null
+            0.0
         }
-
         val wdState = streamWatchdog.state.value
-        val response = StatusResponseDto(
-            streaming = StreamingStatusDto(
+        val response = StatusSnapshotBuilder.build(
+            streaming = StatusSnapshotBuilder.StreamingInputs(
                 isActive = streamingManager.isLiveStreaming(),
                 url = streamingManager.streamUrl.value,
                 webStreamingEnabled = settingsDataStore.webStreamingEnabled.value,
@@ -89,22 +43,54 @@ class StatusWebHandler(
                 rtspStreamingActive = streamingManager.isRtspRunning.value,
                 rtspUrl = streamingManager.rtspUrl.value,
             ),
-            thermal = thermalMonitor.thermalState.value.name,
-            camera = cameraService.cameraState.value.toString(),
-            battery = BatteryStatusDto(
+            thermal = StatusSnapshotBuilder.ThermalInputs(
+                cameraStateName = cameraService.cameraState.value.toString(),
+                thermalName = thermalMonitor.thermalState.value.name,
+            ),
+            battery = StatusSnapshotBuilder.BatteryInputs(
                 level = powerManager.batteryLevel.value,
                 isCharging = powerManager.isCharging.value,
                 isPowerSaveMode = powerManager.isPowerSaveMode.value,
             ),
-            adaptiveBitrate = adaptiveBitrateDto,
-            connectionQuality = connectionQualityDto,
-            watchdog = WatchdogStatusDto(
+            watchdog = StatusSnapshotBuilder.WatchdogInputs(
                 enabled = wdState.enabled,
-                status = wdState.status.name,
+                statusName = wdState.status.name,
                 consecutiveFailures = wdState.consecutiveFailures,
                 totalRecoveries = wdState.totalRecoveries,
                 lastRecoveryTimestamp = wdState.lastRecoveryTimestamp,
                 lastFailureReason = wdState.lastFailureReason,
+            ),
+            adaptive = StatusSnapshotBuilder.AdaptiveInputs(
+                enabled = adaptiveState.enabled,
+                qualityLevelName = adaptiveState.qualityLevel.name,
+                currentQuality = adaptiveState.currentQuality,
+                targetQuality = adaptiveState.targetQuality,
+                currentFps = adaptiveState.currentFps,
+                targetFps = adaptiveState.targetFps,
+                estimatedBandwidthKbps = adaptiveState.estimatedBandwidthKbps,
+                minClientThroughputKbps = adaptiveState.minClientThroughputKbps,
+                activeClients = adaptiveState.activeClients,
+                adjustmentCount = adaptiveState.adjustmentCount,
+            ),
+            network = StatusSnapshotBuilder.NetworkInputs(
+                qualityLevelName = networkStats.qualityLevel.name,
+                estimatedBandwidthKbps = networkStats.estimatedBandwidthKbps,
+                avgThroughputKbps = networkStats.avgThroughputKbps,
+                minThroughputKbps = networkStats.minThroughputKbps,
+                worstLatencyMs = networkStats.worstLatencyMs,
+                avgFrameSizeBytes = networkStats.avgFrameSizeBytes,
+                totalBytesSent = networkStats.totalBytesSent,
+                activeClients = networkStats.activeClients,
+                firstClientFps = firstClientFps,
+                clientDetails = networkStats.clientDetails.mapValues { (_, detail) ->
+                    StatusSnapshotBuilder.ClientDetailInputs(
+                        framesSent = detail.framesSent,
+                        bytesSent = detail.bytesSent,
+                        avgThroughputKbps = detail.avgThroughputKbps,
+                        lastFrameSizeBytes = detail.lastFrameSizeBytes,
+                        lastSendDurationMs = detail.lastSendDurationMs,
+                    )
+                },
             ),
         )
         return responseAdapter.toJson(response)

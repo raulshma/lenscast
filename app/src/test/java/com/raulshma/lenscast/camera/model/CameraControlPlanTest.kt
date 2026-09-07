@@ -62,4 +62,42 @@ class CameraControlPlanTest {
         val plan = CameraControlPlan.from(settings, isoRange, exposureRange)
         assertEquals(CaptureRequest.CONTROL_SCENE_MODE_HDR, plan.sceneMode)
     }
+
+    @Test
+    fun `manual white balance passes color temperature through`() {
+        val settings = CameraSettings(whiteBalance = WhiteBalance.MANUAL, colorTemperature = 5500)
+        val plan = CameraControlPlan.from(settings, isoRange, exposureRange)
+        assertEquals(CaptureRequest.CONTROL_AWB_MODE_OFF, plan.awbMode)
+        assertEquals(5500, plan.colorTemperatureKelvin)
+    }
+
+    @Test
+    fun `manual white balance clamps out-of-range color temperature`() {
+        val low = CameraControlPlan.from(
+            CameraSettings(whiteBalance = WhiteBalance.MANUAL, colorTemperature = 100),
+            isoRange,
+            exposureRange,
+        )
+        assertEquals(CameraSettings.COLOR_TEMPERATURE_MIN, low.colorTemperatureKelvin)
+
+        val high = CameraControlPlan.from(
+            CameraSettings(whiteBalance = WhiteBalance.MANUAL, colorTemperature = 99999),
+            isoRange,
+            exposureRange,
+        )
+        assertEquals(CameraSettings.COLOR_TEMPERATURE_MAX, high.colorTemperatureKelvin)
+    }
+
+    @Test
+    fun `non-manual white balance ignores stored color temperature`() {
+        val settings = CameraSettings(whiteBalance = WhiteBalance.AUTO, colorTemperature = 5500)
+        val plan = CameraControlPlan.from(settings, isoRange, exposureRange)
+        assertNull(plan.colorTemperatureKelvin)
+    }
+
+    @Test
+    fun `default settings carry no color temperature`() {
+        val plan = CameraControlPlan.from(CameraSettings(), isoRange, exposureRange)
+        assertNull(plan.colorTemperatureKelvin)
+    }
 }

@@ -77,12 +77,13 @@ object StreamOverlayRenderer {
         for (zone in zones) {
             if (!zone.enabled) continue
 
-            val left = (zone.x * bitmapWidth).toInt().coerceIn(0, bitmapWidth)
-            val top = (zone.y * bitmapHeight).toInt().coerceIn(0, bitmapHeight)
-            val right = ((zone.x + zone.width) * bitmapWidth).toInt().coerceIn(0, bitmapWidth)
-            val bottom = ((zone.y + zone.height) * bitmapHeight).toInt().coerceIn(0, bitmapHeight)
+            val rect = OverlayLayoutPolicy.zoneToPixels(zone, bitmapWidth, bitmapHeight)
+            if (rect.isEmpty) continue
 
-            if (right <= left || bottom <= top) continue
+            val left = rect.left
+            val top = rect.top
+            val right = rect.right
+            val bottom = rect.bottom
 
             when (zone.type) {
                 MaskingType.BLACKOUT -> {
@@ -114,9 +115,8 @@ object StreamOverlayRenderer {
         val regionHeight = bottom - top
         if (regionWidth <= 0 || regionHeight <= 0) return
 
-        val safePixelSize = pixelSize.coerceAtLeast(1)
-        val smallWidth = maxOf(1, regionWidth / safePixelSize)
-        val smallHeight = maxOf(1, regionHeight / safePixelSize)
+        val (smallWidth, smallHeight) =
+            OverlayLayoutPolicy.pixelateDownscale(regionWidth, regionHeight, pixelSize)
 
         try {
             val regionBitmap = Bitmap.createBitmap(sourceBitmap, left, top, regionWidth, regionHeight)
@@ -148,9 +148,8 @@ object StreamOverlayRenderer {
         val regionHeight = bottom - top
         if (regionWidth <= 0 || regionHeight <= 0) return
 
-        val scaleFactor = (1f / (radius * 0.5f)).coerceIn(0.05f, 0.5f)
-        val smallWidth = maxOf(1, (regionWidth * scaleFactor).toInt())
-        val smallHeight = maxOf(1, (regionHeight * scaleFactor).toInt())
+        val (smallWidth, smallHeight) =
+            OverlayLayoutPolicy.blurDownscale(regionWidth, regionHeight, radius)
 
         try {
             val regionBitmap = Bitmap.createBitmap(sourceBitmap, left, top, regionWidth, regionHeight)
@@ -303,6 +302,6 @@ object StreamOverlayRenderer {
     }
 
     private fun parseColor(hex: String, fallback: Int): Int {
-        return runCatching { Color.parseColor(hex) }.getOrDefault(fallback)
+        return OverlayLayoutPolicy.parseColorOrNull(hex)?.toInt() ?: fallback
     }
 }

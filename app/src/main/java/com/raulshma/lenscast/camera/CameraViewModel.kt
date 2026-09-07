@@ -36,6 +36,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 
 class CameraViewModel(
@@ -182,7 +183,7 @@ class CameraViewModel(
 
         // Optimized: Connection quality polling with early cancellation
         viewModelScope.launch {
-            streamingManager.isStreaming.collect { isActive ->
+            streamingManager.isStreaming.collectLatest { isActive ->
                 if (isActive) {
                     while (true) {
                         _connectionQualityStats.value = streamingManager.getNetworkStatsSnapshot()

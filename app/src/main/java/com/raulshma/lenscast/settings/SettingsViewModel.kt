@@ -18,9 +18,7 @@ import com.raulshma.lenscast.core.StreamDefaults
 import com.raulshma.lenscast.data.SettingsDataStore
 import com.raulshma.lenscast.data.StreamAuthSettings
 import com.raulshma.lenscast.streaming.rtsp.RtspInputFormat
-import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
 /**
@@ -53,10 +51,9 @@ class SettingsViewModel(
     val adaptiveBitrateEnabled: StateFlow<Boolean> = settingsDataStore.adaptiveBitrateEnabled
     val mdnsEnabled: StateFlow<Boolean> = settingsDataStore.mdnsEnabled
 
-    // Auth credentials back the username text field directly, so this one flow
-    // is kept writable: optimistic updates keep typing responsive.
-    private val _authSettings = MutableStateFlow(StreamAuthSettings())
-    val authSettings: StateFlow<StreamAuthSettings> = _authSettings.asStateFlow()
+    // Auth state comes straight from the Settings Store — no writable mirror.
+    // Typing responsiveness comes from the store flow re-emit on save.
+    val authSettings: StateFlow<StreamAuthSettings> = settingsDataStore.authSettings
 
     private val _isIgnoringBatteryOptimizations = mutableStateOf(false)
     val isIgnoringBatteryOptimizations = _isIgnoringBatteryOptimizations
@@ -73,11 +70,6 @@ class SettingsViewModel(
     )
 
     init {
-        viewModelScope.launch {
-            settingsDataStore.authSettings.collect { auth ->
-                _authSettings.value = auth
-            }
-        }
         refreshBatteryOptimizationStatus()
     }
 
@@ -231,18 +223,18 @@ class SettingsViewModel(
     }
 
     fun updateAuthEnabled(enabled: Boolean) {
-        persistAuth(_authSettings.value.copy(enabled = enabled))
+        persistAuth(authSettings.value.copy(enabled = enabled))
     }
 
     fun updateAuthUsername(username: String) {
-        persistAuth(_authSettings.value.copy(username = username, rtspDigestHa1 = ""))
+        persistAuth(authSettings.value.copy(username = username, rtspDigestHa1 = ""))
     }
 
     fun updateAuthPassword(password: String) {
         val hash = StreamAuthSettings.hashPassword(password)
-        val username = _authSettings.value.username
+        val username = authSettings.value.username
         val digestHa1 = StreamAuthSettings.computeRtspDigestHa1(username, password)
-        persistAuth(_authSettings.value.copy(passwordHash = hash, rtspDigestHa1 = digestHa1))
+        persistAuth(authSettings.value.copy(passwordHash = hash, rtspDigestHa1 = digestHa1))
     }
 
     fun resetToDefaults() {
@@ -258,7 +250,6 @@ class SettingsViewModel(
     }
 
     private fun persistAuth(newAuth: StreamAuthSettings) {
-        _authSettings.value = newAuth
         viewModelScope.launch {
             settingsDataStore.saveAuthSettings(newAuth)
         }

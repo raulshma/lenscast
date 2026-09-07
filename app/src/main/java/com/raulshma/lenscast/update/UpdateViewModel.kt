@@ -42,11 +42,11 @@ class UpdateViewModel(
             _updateState.value = UpdateState.Checking
             when (val result = updateChecker.checkForUpdate()) {
                 is UpdateCheckResult.UpdateAvailable -> {
-                    val remoteVersion = result.release.tagName.trimStart('v')
+                    val remoteVersion = UpdatePolicy.normalize(result.release.tagName)
                     val dismissed = settingsDataStore.updateDismissedVersion.first()
                     settingsDataStore.saveUpdateLastCheckTime(System.currentTimeMillis())
 
-                    if (dismissed == remoteVersion) {
+                    if (!UpdatePolicy.shouldNotify(dismissed, result.release.tagName)) {
                         Log.d(TAG, "Update $remoteVersion dismissed by user")
                         _updateState.value = UpdateState.UpToDate(remoteVersion)
                     } else {

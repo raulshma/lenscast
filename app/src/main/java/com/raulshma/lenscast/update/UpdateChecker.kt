@@ -70,9 +70,9 @@ class UpdateChecker(private val context: Context) {
                 ?: return@withContext UpdateCheckResult.Error("No APK found in release")
 
             val currentVersion = getAppVersionName()
-            val remoteVersion = release.tagName.trimStart('v')
-            Log.d(TAG, "Remote: $remoteVersion, Local: $currentVersion, isNewer: ${isNewerVersion(release.tagName, currentVersion)}")
-            if (!isNewerVersion(release.tagName, currentVersion)) {
+            val remoteVersion = UpdatePolicy.normalize(release.tagName)
+            Log.d(TAG, "Remote: $remoteVersion, Local: $currentVersion, isNewer: ${UpdatePolicy.isNewer(release.tagName, currentVersion)}")
+            if (!UpdatePolicy.isNewer(release.tagName, currentVersion)) {
                 return@withContext UpdateCheckResult.UpToDate(remoteVersion, currentVersion)
             }
 
@@ -101,20 +101,5 @@ class UpdateChecker(private val context: Context) {
         } catch (_: PackageManager.NameNotFoundException) {
             "0.0.0"
         }
-    }
-
-    private fun isNewerVersion(remoteTag: String, localVersion: String): Boolean {
-        val remote = remoteTag.trimStart('v')
-        val local = localVersion.trimStart('v')
-        val remoteParts = remote.split('.').mapNotNull { it.toIntOrNull() }
-        val localParts = local.split('.').mapNotNull { it.toIntOrNull() }
-        val maxLen = maxOf(remoteParts.size, localParts.size)
-        for (i in 0 until maxLen) {
-            val r = remoteParts.getOrElse(i) { 0 }
-            val l = localParts.getOrElse(i) { 0 }
-            if (r > l) return true
-            if (r < l) return false
-        }
-        return false
     }
 }

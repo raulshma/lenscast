@@ -149,10 +149,15 @@ with `acquireKeepAlive()` / `beginExclusiveSession()` and restore with
 
 ### Camera Control Plan
 **`camera/model/CameraControlPlan.kt`** — the CaptureRequest *decisions*
-(fps range, exposure, scene mode, white balance, focus) as pure data built
-from `CameraSettings` plus the device's live ranges. `CameraService` only
-translates the plan into `CaptureRequestOptions` — the ISO/fps/night-vision
-math is unit-tested on the JVM instead of hiding in the service.
+(fps range, exposure, scene mode, white balance, focus, color temperature) as
+pure data built from `CameraSettings` plus the device's live ranges.
+`CameraService` only translates the plan into `CaptureRequestOptions` — the
+ISO/fps/night-vision math is unit-tested on the JVM instead of hiding in the
+service. `colorTemperatureKelvin` carries the clamped MANUAL-WB decision
+(`COLOR_TEMPERATURE_MIN..MAX`, null unless white balance is MANUAL); manual
+mode is conveyed by AWB OFF and the Kelvin value is logged at apply time —
+per-sensor gains/matrix mapping stays device-default until a calibrated
+Kelvin→gains table exists.
 
 ### Lens Inventory
 **`camera/LensInventory.kt`** — the pure lens-inventory knowledge: focal
@@ -244,3 +249,25 @@ the RTSP server verifies against the same symbol — one literal, no drift.
 that wants audio but can't get it (CameraViewModel, CaptureViewModel,
 RecordingService, AudioStreamingManager) asks here instead of hand-rolling
 `checkSelfPermission` and re-copying the toast text.
+
+### Update Policy
+**`update/UpdatePolicy.kt`** — the pure update-check decisions: version
+`normalize`, numeric `isNewer` comparison, 24h `shouldAutoCheck` gate, and
+`shouldNotify` dismissal check. `UpdateChecker` (fetch + compare),
+`MainApplication` (startup auto-check), and `UpdateViewModel` (manual check)
+all delegate; none hand-roll `trimStart('v')` or timestamp math.
+
+### Overlay Layout Policy
+**`streaming/OverlayLayoutPolicy.kt`** — the pure overlay/masking math:
+`zoneToPixels` clipping, pixelate/blur downscale sizes, and hex color parsing.
+`StreamOverlayRenderer` keeps only the Bitmap/Canvas adapter work and
+delegates every number to the policy, so the privacy-critical rect math is
+JVM-tested without a device.
+
+### Status Snapshot Builder
+**`streaming/web/StatusSnapshotBuilder.kt`** — the pure `/api/status`
+aggregation: typed `StreamingInputs`/`ThermalInputs`/`BatteryInputs`/
+`WatchdogInputs`/`AdaptiveInputs`/`NetworkInputs` in, one
+`StatusResponseDto` out (adaptive null-when-disabled, connectionQuality
+null-when-idle, first-client fps). `StatusWebHandler` only collects flows and
+delegates — the dashboard/API mapping is tested without a manager.

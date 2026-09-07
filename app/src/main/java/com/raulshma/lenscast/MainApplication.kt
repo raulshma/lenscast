@@ -20,6 +20,7 @@ import com.raulshma.lenscast.streaming.StreamingManager
 import com.raulshma.lenscast.streaming.StreamingSession
 import com.raulshma.lenscast.update.UpdateChecker
 import com.raulshma.lenscast.update.UpdateNotifier
+import com.raulshma.lenscast.update.UpdatePolicy
 import com.raulshma.lenscast.update.model.UpdateCheckResult
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -90,16 +91,14 @@ class MainApplication : Application(), SingletonImageLoader.Factory {
             delay(3_000)
             val settings = settingsDataStore
             val enabled = settings.updateAutoCheckEnabled.first()
-            if (!enabled) return@launch
             val lastCheck = settings.updateLastCheckTime.first()
-            val oneDayAgo = System.currentTimeMillis() - 24 * 60 * 60 * 1000L
-            if (lastCheck > oneDayAgo) return@launch
+            if (!UpdatePolicy.shouldAutoCheck(lastCheck, enabled)) return@launch
 
             when (val result = updateChecker.checkForUpdate()) {
                 is UpdateCheckResult.UpdateAvailable -> {
-                    val remoteVersion = result.release.tagName.trimStart('v')
+                    val remoteVersion = UpdatePolicy.normalize(result.release.tagName)
                     val dismissed = settings.updateDismissedVersion.first()
-                    if (dismissed != remoteVersion) {
+                    if (UpdatePolicy.shouldNotify(dismissed, result.release.tagName)) {
                         updateNotifier.showUpdateAvailable(remoteVersion)
                     }
                     settings.saveUpdateLastCheckTime(System.currentTimeMillis())
