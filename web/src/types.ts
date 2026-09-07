@@ -4,13 +4,16 @@ export type Resolution = 'SD_480P' | 'HD_720P' | 'FHD_1080P' | 'QHD_1440P' | 'UH
 export type HdrMode = 'OFF' | 'ON' | 'AUTO'
 export type NightVisionMode = 'OFF' | 'AUTO' | 'ON'
 export type ThermalState = 'NORMAL' | 'LIGHT' | 'MODERATE' | 'SEVERE' | 'CRITICAL'
-export type CaptureMode = 'MINIMIZE_LATENCY' | 'MAXIMIZE_QUALITY'
 export type FlashMode = 'ON' | 'OFF' | 'AUTO'
 export type RecordingQuality = 'HIGH' | 'MEDIUM' | 'LOW'
 export type OverlayPosition = 'TOP_LEFT' | 'TOP_RIGHT' | 'BOTTOM_LEFT' | 'BOTTOM_RIGHT'
 export type MaskingType = 'BLACKOUT' | 'PIXELATE' | 'BLUR'
 export type RtspInputFormat = 'AUTO' | 'NV21' | 'NV12' | 'I420'
 
+// Stream auth contract: the web client sends the password as PLAINTEXT over
+// the wire (e.g. POST /api/auth/login {username, password}); the server never
+// stores or returns it — at rest it keeps only passwordHash and an RTSP
+// digest HA1, and verifies logins against the hash.
 export interface StreamAuthSettings {
   enabled: boolean
   username: string
@@ -60,8 +63,6 @@ export interface StreamingSettings {
   rtspEnabled: boolean
   rtspPort: number
   rtspInputFormat: RtspInputFormat
-  mdnsEnabled?: boolean
-  auth?: StreamAuthSettings
   adaptiveBitrateEnabled: boolean
   overlayEnabled: boolean
   showTimestamp: boolean
@@ -229,11 +230,6 @@ export const SCENE_MODE_OPTIONS = [
   { value: 'THEATRE', label: 'Theatre' },
 ]
 
-export const CAPTURE_MODE_LABELS: Record<CaptureMode, string> = {
-  MINIMIZE_LATENCY: 'Minimize Latency',
-  MAXIMIZE_QUALITY: 'Maximize Quality',
-}
-
 export const FLASH_MODE_LABELS: Record<FlashMode, string> = {
   OFF: 'Off',
   ON: 'On',
@@ -249,8 +245,6 @@ export const RECORDING_QUALITY_LABELS: Record<RecordingQuality, string> = {
 export interface IntervalCaptureConfig {
   intervalSeconds: number
   totalCaptures: number
-  imageQuality: number
-  captureMode: CaptureMode
   flashMode: FlashMode
 }
 
@@ -258,7 +252,6 @@ export interface RecordingConfig {
   durationSeconds: number
   repeatIntervalSeconds: number
   quality: RecordingQuality
-  maxFileSizeBytes: number
   includeAudio: boolean
   startTimeMs?: number | null
 }

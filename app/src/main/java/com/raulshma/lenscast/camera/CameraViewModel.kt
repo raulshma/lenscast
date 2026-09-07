@@ -11,17 +11,20 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
+import com.raulshma.lenscast.camera.model.CameraInitRetry
 import com.raulshma.lenscast.camera.model.CameraLensInfo
 import com.raulshma.lenscast.camera.model.CameraSettings
 import com.raulshma.lenscast.camera.model.CameraState
 import com.raulshma.lenscast.camera.model.QuickSettingCatalog
 import com.raulshma.lenscast.camera.model.QuickSettingEditorValue
 import com.raulshma.lenscast.camera.model.QuickSettingType
+import com.raulshma.lenscast.camera.model.RecordingToggle
 import com.raulshma.lenscast.camera.model.StreamKind
 import com.raulshma.lenscast.camera.model.StreamStartOutcome
 import com.raulshma.lenscast.camera.model.StreamStatus
 import com.raulshma.lenscast.camera.model.StreamStatusSnapshot
 import com.raulshma.lenscast.camera.model.StreamToggle
+import com.raulshma.lenscast.camera.model.stickyCameraState
 import com.raulshma.lenscast.core.ConnectivityMonitor
 import com.raulshma.lenscast.core.MicAccess
 import com.raulshma.lenscast.core.MicStartDecision
@@ -33,6 +36,7 @@ import com.raulshma.lenscast.data.SettingsDataStore
 import com.raulshma.lenscast.streaming.AdaptiveBitrateController
 import com.raulshma.lenscast.streaming.StreamingManager
 import com.raulshma.lenscast.streaming.StreamingSession
+import com.raulshma.lenscast.streaming.StreamingTransports
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -122,9 +126,10 @@ class CameraViewModel(
     init {
         viewModelScope.launch {
             cameraService.cameraState.collect { state ->
-                if (state != CameraState.Idle) {
-                    _cameraState.value = state
-                }
+                // Never regress to Idle: the service reports Idle whenever no
+                // camera session is live, and the screen keeps the state it
+                // already reached. The verdict is the shared stickyCameraState.
+                _cameraState.value = stickyCameraState(_cameraState.value, state)
             }
         }
         viewModelScope.launch {
@@ -242,10 +247,9 @@ class CameraViewModel(
     }
 
     private var retryCount = 0
-    private val maxRetries = 3
 
     fun retryCameraInit() {
-        if (retryCount < maxRetries) {
+        if (CameraInitRetry.shouldRetry(retryCount)) {
             retryCount++
             initializeCamera()
         }
@@ -314,24 +318,19 @@ class CameraViewModel(
 
     // One stream start/stop seam for both outputs and the server: the
     // gate → start → session begin → rollback ladder lives once in
-    // StreamToggle; this ViewModel only maps outcomes onto toasts.
+    // StreamToggle; this ViewModel only maps outcomes onto toasts. The
+    // transports are the shared StreamingTransports adapter over the manager
+    // (whose live flows are the gate source of truth) and the session — the
+    // same one the Web API Stream Handler toggles through.
+    private val streamTransports = StreamingTransports(streamingManager, streamingSession)
+
     private val streamToggle = StreamToggle(
-        transports = object : StreamToggle.Transports {
-            override val webEnabled: Boolean get() = streamingManager.isWebEnabled.value
-            override val rtspEnabled: Boolean get() = streamingManager.isRtspEnabled.value
-            override val webActive: Boolean get() = _streamStatus.value.isWebActive
-            override val rtspActive: Boolean get() = _streamStatus.value.isRtspActive
-            override fun startWeb(): Boolean = streamingManager.startWebStreaming()
-            override fun stopWeb() = streamingManager.stopWebStreaming()
-            override fun startRtsp(): Boolean = streamingManager.startRtspStreaming()
-            override fun stopRtsp() = streamingManager.stopRtspStreaming()
-            override fun stopServer() = streamingManager.stopStreaming()
-            override suspend fun beginSession() = streamingSession.begin()
-            override suspend fun endSession() = streamingSession.end()
-        },
+        transports = streamTransports,
         // The pre-start mic warn-and-degrade check — web only, exactly as
         // before the seam existed.
-        onBeforeStart = { kind -> if (kind == StreamKind.WEB) warnIfMicUnavailable() },
+        onBeforeStart = { kind ->
+            if (kind == StreamKind.WEB) consultMic(streamAudioEnabled.value, "Streaming video")
+        },
     )
 
     fun toggleWebStreaming() {
@@ -343,38 +342,57 @@ class CameraViewModel(
     }
 
     fun toggleServer() {
-        if (_streamStatus.value.isServerRunning) {
-            // Stopped outcome needs no user-facing report — the derived
-            // StreamStatus flips on its own.
-            viewModelScope.launch { streamToggle.stopServer() }
-        } else {
-            startServer()
+        viewModelScope.launch {
+            if (_streamStatus.value.isServerRunning) {
+                // Stopped outcome needs no user-facing report — the derived
+                // StreamStatus flips on its own.
+                streamToggle.stopServer()
+            } else {
+                startServer()
+            }
         }
     }
 
-    private fun startServer() {
+    private suspend fun startServer() {
         // StreamStatus is derived truth from the StreamingManager flows — the
         // combine collector re-emits it when the server state flips. Only the
-        // failure, which no flow carries, is reported separately.
+        // failure, which no flow carries, is reported separately. The server
+        // itself has no settings gate — the web/RTSP enables gate their own
+        // outputs inside the start — so its ladder is start → session begin →
+        // rollback, the same tail the Stream Toggle runs for an output: a
+        // session-begin failure rolls the server back so no live server
+        // survives without its session. That begin/rollback protection is the
+        // one intended behavior gain over the old direct
+        // ensureServerRunning() call.
         if (!streamingManager.ensureServerRunning()) {
-            _lastServerError.value = "Failed to start server"
-        } else {
+            _lastServerError.value = SERVER_START_FAILED
+            return
+        }
+        try {
+            streamTransports.beginSession()
             _lastServerError.value = null
+        } catch (e: Exception) {
+            Log.e(TAG, "Streaming session setup failed; server rolled back", e)
+            streamTransports.stopServer()
+            _lastServerError.value = SERVER_START_FAILED
         }
     }
 
-    // Mic warn-and-degrade before a web start: the same shared policy the
-    // recording start consults.
-    private fun warnIfMicUnavailable() {
+    // Mic warn-and-degrade before an audio-wanting start — the shared policy
+    // both the web stream start and the recording start consult: refresh the
+    // cached permission state, ask MicAccess, and surface a degrade as the
+    // shared warning. One ladder, parameterized by feature; no call site
+    // re-rolls the check or the toast text.
+    private fun consultMic(featureEnabled: Boolean, featureLabel: String): MicStartDecision {
         refreshAudioPermission()
-        when (val decision = MicAccess.startDecision(
-            featureEnabled = streamAudioEnabled.value,
+        return MicAccess.startDecision(
+            featureEnabled = featureEnabled,
             granted = _hasAudioPermission.value,
-            featureLabel = "Streaming video",
-        )) {
-            is MicStartDecision.Degrade ->
+            featureLabel = featureLabel,
+        ).also { decision ->
+            if (decision is MicStartDecision.Degrade) {
                 Toast.makeText(context, decision.warning, Toast.LENGTH_SHORT).show()
-            MicStartDecision.Proceed -> {}
+            }
         }
     }
 
@@ -398,22 +416,33 @@ class CameraViewModel(
         }
     }
 
-    fun copyStreamUrl() {
-        val url = _streamStatus.value.url.ifEmpty { streamingManager.streamUrl.value }
-        if (url.isNotEmpty()) {
+    // One clipboard+toast path for every copyable URL: derived-truth value
+    // first, raw flow as the empty fallback, per-URL label and message.
+    private fun copyUrlToClipboard(url: String, fallback: String, clipLabel: String, copiedMessage: String) {
+        val value = url.ifEmpty { fallback }
+        if (value.isNotEmpty()) {
             val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-            clipboard.setPrimaryClip(ClipData.newPlainText("Stream URL", url))
-            Toast.makeText(context, "Stream URL copied", Toast.LENGTH_SHORT).show()
+            clipboard.setPrimaryClip(ClipData.newPlainText(clipLabel, value))
+            Toast.makeText(context, copiedMessage, Toast.LENGTH_SHORT).show()
         }
     }
 
+    fun copyStreamUrl() {
+        copyUrlToClipboard(
+            url = _streamStatus.value.url,
+            fallback = streamingManager.streamUrl.value,
+            clipLabel = "Stream URL",
+            copiedMessage = "Stream URL copied",
+        )
+    }
+
     fun copyRtspUrl() {
-        val url = _streamStatus.value.rtspUrl.ifEmpty { streamingManager.rtspUrl.value }
-        if (url.isNotEmpty()) {
-            val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-            clipboard.setPrimaryClip(ClipData.newPlainText("RTSP URL", url))
-            Toast.makeText(context, "RTSP URL copied", Toast.LENGTH_SHORT).show()
-        }
+        copyUrlToClipboard(
+            url = _streamStatus.value.rtspUrl,
+            fallback = streamingManager.rtspUrl.value,
+            clipLabel = "RTSP URL",
+            copiedMessage = "RTSP URL copied",
+        )
     }
 
     fun capturePhoto() {
@@ -425,28 +454,20 @@ class CameraViewModel(
         }
     }
 
+    /**
+     * The record button: the stop-vs-start verdict and the start config are
+     * [RecordingToggle]'s; this ViewModel only executes the decision — the
+     * mic consult rides the toggle's pre-start hook, so a stop never
+     * refreshes permissions or warns.
+     */
     fun toggleRecording() {
-        val current = recordingState.value
-        if (current is com.raulshma.lenscast.capture.RecordingState.Recording ||
-            current is com.raulshma.lenscast.capture.RecordingState.Scheduled
-        ) {
-            recordingController.stop()
-        } else {
-            refreshAudioPermission()
-            when (val decision = MicAccess.startDecision(
-                featureEnabled = recordingAudioEnabled.value,
-                granted = _hasAudioPermission.value,
-                featureLabel = "Recording video",
-            )) {
-                is MicStartDecision.Degrade ->
-                    Toast.makeText(context, decision.warning, Toast.LENGTH_SHORT).show()
-                MicStartDecision.Proceed -> {}
-            }
-            recordingController.start(
-                com.raulshma.lenscast.capture.model.RecordingConfig(
-                    includeAudio = recordingAudioEnabled.value
-                )
-            )
+        when (val decision = RecordingToggle.decide(
+            currentState = recordingState.value,
+            audioWanted = recordingAudioEnabled.value,
+            onBeforeStart = { consultMic(recordingAudioEnabled.value, "Recording video") },
+        )) {
+            is RecordingToggle.ToggleDecision.Start -> recordingController.start(decision.config)
+            RecordingToggle.ToggleDecision.Stop -> recordingController.stop()
         }
     }
 
@@ -474,6 +495,9 @@ class CameraViewModel(
 
     companion object {
         private const val TAG = "CameraViewModel"
+
+        /** The one server-start failure wording (banner + rollback path). */
+        private const val SERVER_START_FAILED = "Failed to start server"
     }
 
     private fun refreshPermissions() {

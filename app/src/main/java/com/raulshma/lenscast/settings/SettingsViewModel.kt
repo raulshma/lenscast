@@ -8,13 +8,9 @@ import androidx.lifecycle.viewModelScope
 import com.raulshma.lenscast.camera.CameraService
 import com.raulshma.lenscast.camera.CameraSettingsEditor
 import com.raulshma.lenscast.camera.model.CameraSettings
-import com.raulshma.lenscast.camera.model.FocusMode
-import com.raulshma.lenscast.camera.model.HdrMode
-import com.raulshma.lenscast.camera.model.NightVisionMode
-import com.raulshma.lenscast.camera.model.Resolution
-import com.raulshma.lenscast.camera.model.WhiteBalance
+import com.raulshma.lenscast.camera.model.QuickSettingCatalog
+import com.raulshma.lenscast.camera.model.QuickSettingType
 import com.raulshma.lenscast.core.PowerManager
-import com.raulshma.lenscast.core.StreamDefaults
 import com.raulshma.lenscast.core.parseEnum
 import com.raulshma.lenscast.data.SettingsDataStore
 import com.raulshma.lenscast.core.StreamAuthCrypto
@@ -27,7 +23,9 @@ import kotlinx.coroutines.launch
  * Write-side settings interface for the settings screens. Persisted values are
  * exposed directly from the SettingsDataStore — the store is the single source
  * of truth and there is no mirror state to drift. Runtime application is owned
- * by SettingsApplier; this ViewModel only writes.
+ * by SettingsApplier; this ViewModel only writes. Camera settings funnel
+ * through the Quick Setting Catalog's write table via [updateQuickSetting];
+ * every other write is a one-line store save through [save].
  */
 class SettingsViewModel(
     private val cameraService: CameraService,
@@ -83,146 +81,71 @@ class SettingsViewModel(
         powerManager?.requestIgnoreBatteryOptimization(activity)
     }
 
-    fun updateExposure(value: Int) {
-        update { it.copy(exposureCompensation = value) }
+    // ── Camera settings writes ──
+    // One funnel onto the Quick Setting Catalog's write table through the
+    // persist-only CameraSettingsEditor. Focus distance, color temperature,
+    // and scene mode have no catalog row — their three writers stay explicit.
+
+    /**
+     * The settings screen's single camera-settings write entry, mirroring
+     * CameraViewModel.updateQuickSetting: the raw editor callback value is
+     * converted once onto the typed QuickSettingEditorValue per the
+     * descriptor's editor shape, then dispatched through the catalog's pure
+     * write transform onto the one CameraSettingsEditor path (persist-only;
+     * the Settings Applier applies).
+     */
+    fun updateQuickSetting(type: QuickSettingType, value: Any) {
+        val editorValue = QuickSettingCatalog.editorValueFor(type, value) ?: return
+        update { current -> QuickSettingCatalog.descriptorFor(type).write(current, editorValue) }
     }
 
-    fun updateIso(iso: Int?) {
-        update { it.copy(iso = iso) }
-    }
-
-    fun updateFocusMode(mode: String) {
-        update { it.copy(focusMode = FocusMode.valueOf(mode)) }
-    }
-
+    /** The manual-focus slider; the catalog's FOCUS row covers only the mode. */
     fun updateFocusDistance(distance: Float?) {
         update { it.copy(focusDistance = distance) }
     }
 
-    fun updateWhiteBalance(mode: String) {
-        update { it.copy(whiteBalance = WhiteBalance.valueOf(mode)) }
-    }
-
+    /** The manual white-balance Kelvin slider; the WHITE_BALANCE row covers only the mode. */
     fun updateColorTemperature(temp: Int?) {
         update { it.copy(colorTemperature = temp) }
     }
 
-    fun updateZoom(ratio: Float) {
-        update { it.copy(zoomRatio = ratio) }
-    }
-
-    fun updateResolution(name: String) {
-        update { it.copy(resolution = Resolution.valueOf(name)) }
-    }
-
-    fun updateFrameRate(rate: Int) {
-        update { it.copy(frameRate = rate) }
-    }
-
-    fun updateHdrMode(mode: String) {
-        update { it.copy(hdrMode = HdrMode.valueOf(mode)) }
-    }
-
-    fun updateIso(value: String) {
-        update { it.copy(iso = CameraSettingsEditor.parseIso(value)) }
-    }
-
-    fun updateStabilization(enabled: Boolean) {
-        update { it.copy(stabilization = enabled) }
-    }
-
+    /** The scene-mode dropdown; "OFF" clears the override (no catalog row). */
     fun updateSceneMode(mode: String) {
         update { it.copy(sceneMode = CameraSettingsEditor.parseSceneMode(mode)) }
     }
 
-    fun updateNightVisionMode(mode: String) {
-        update { it.copy(nightVisionMode = NightVisionMode.valueOf(mode)) }
+    // ── Streaming / app settings writes ──
+    // Plain store saves; the Settings Applier reacts to the flow.
+
+    fun updateStreamingPort(port: Int) = save { settingsDataStore.saveStreamingPort(port) }
+
+    fun updateWebStreamingEnabled(enabled: Boolean) = save { settingsDataStore.saveWebStreamingEnabled(enabled) }
+
+    fun updateJpegQuality(quality: Int) = save { settingsDataStore.saveJpegQuality(quality) }
+
+    fun updateShowPreview(show: Boolean) = save { settingsDataStore.saveShowPreview(show) }
+
+    fun updateStreamAudioEnabled(enabled: Boolean) = save { settingsDataStore.saveStreamAudioEnabled(enabled) }
+
+    fun updateStreamAudioBitrateKbps(bitrateKbps: Int) = save { settingsDataStore.saveStreamAudioBitrateKbps(bitrateKbps) }
+
+    fun updateStreamAudioChannels(channels: Int) = save { settingsDataStore.saveStreamAudioChannels(channels) }
+
+    fun updateStreamAudioEchoCancellation(enabled: Boolean) = save { settingsDataStore.saveStreamAudioEchoCancellation(enabled) }
+
+    fun updateRecordingAudioEnabled(enabled: Boolean) = save { settingsDataStore.saveRecordingAudioEnabled(enabled) }
+
+    fun updateRtspEnabled(enabled: Boolean) = save { settingsDataStore.saveRtspEnabled(enabled) }
+
+    fun updateRtspPort(port: Int) = save { settingsDataStore.saveRtspPort(port) }
+
+    fun updateRtspInputFormat(name: String) = save {
+        settingsDataStore.saveRtspInputFormat(parseEnum(name, RtspInputFormat.AUTO))
     }
 
-    fun updateStreamingPort(port: Int) {
-        viewModelScope.launch {
-            settingsDataStore.saveStreamingPort(port)
-        }
-    }
+    fun updateAdaptiveBitrateEnabled(enabled: Boolean) = save { settingsDataStore.saveAdaptiveBitrateEnabled(enabled) }
 
-    fun updateWebStreamingEnabled(enabled: Boolean) {
-        viewModelScope.launch {
-            settingsDataStore.saveWebStreamingEnabled(enabled)
-        }
-    }
-
-    fun updateJpegQuality(quality: Int) {
-        viewModelScope.launch {
-            settingsDataStore.saveJpegQuality(quality)
-        }
-    }
-
-    fun updateShowPreview(show: Boolean) {
-        viewModelScope.launch {
-            settingsDataStore.saveShowPreview(show)
-        }
-    }
-
-    fun updateStreamAudioEnabled(enabled: Boolean) {
-        viewModelScope.launch {
-            settingsDataStore.saveStreamAudioEnabled(enabled)
-        }
-    }
-
-    fun updateStreamAudioBitrateKbps(bitrateKbps: Int) {
-        viewModelScope.launch {
-            settingsDataStore.saveStreamAudioBitrateKbps(bitrateKbps)
-        }
-    }
-
-    fun updateStreamAudioChannels(channels: Int) {
-        viewModelScope.launch {
-            settingsDataStore.saveStreamAudioChannels(channels)
-        }
-    }
-
-    fun updateStreamAudioEchoCancellation(enabled: Boolean) {
-        viewModelScope.launch {
-            settingsDataStore.saveStreamAudioEchoCancellation(enabled)
-        }
-    }
-
-    fun updateRecordingAudioEnabled(enabled: Boolean) {
-        viewModelScope.launch {
-            settingsDataStore.saveRecordingAudioEnabled(enabled)
-        }
-    }
-
-    fun updateRtspEnabled(enabled: Boolean) {
-        viewModelScope.launch {
-            settingsDataStore.saveRtspEnabled(enabled)
-        }
-    }
-
-    fun updateRtspPort(port: Int) {
-        viewModelScope.launch {
-            settingsDataStore.saveRtspPort(port)
-        }
-    }
-
-    fun updateRtspInputFormat(name: String) {
-        val format = parseEnum(name, RtspInputFormat.AUTO)
-        viewModelScope.launch {
-            settingsDataStore.saveRtspInputFormat(format)
-        }
-    }
-
-    fun updateAdaptiveBitrateEnabled(enabled: Boolean) {
-        viewModelScope.launch {
-            settingsDataStore.saveAdaptiveBitrateEnabled(enabled)
-        }
-    }
-
-    fun updateMdnsEnabled(enabled: Boolean) {
-        viewModelScope.launch {
-            settingsDataStore.saveMdnsEnabled(enabled)
-        }
-    }
+    fun updateMdnsEnabled(enabled: Boolean) = save { settingsDataStore.saveMdnsEnabled(enabled) }
 
     fun updateAuthEnabled(enabled: Boolean) {
         persistAuth(authSettings.value.copy(enabled = enabled))
@@ -239,23 +162,17 @@ class SettingsViewModel(
         persistAuth(authSettings.value.copy(passwordHash = hash, rtspDigestHa1 = digestHa1))
     }
 
-    fun resetToDefaults() {
-        viewModelScope.launch {
-            settingsDataStore.saveSettings(CameraSettings())
-        }
+    fun resetToDefaults() = save { settingsDataStore.saveSettings(CameraSettings()) }
+
+    /** The one persist seam: every plain store write launches through here. */
+    private fun save(block: suspend () -> Unit) {
+        viewModelScope.launch { block() }
     }
 
-    private fun update(transform: (CameraSettings) -> CameraSettings) {
-        viewModelScope.launch {
-            settingsEditor.edit(transform)
-        }
-    }
+    /** The camera-settings funnel: persist-only through the editor (apply is the Settings Applier's). */
+    private fun update(transform: (CameraSettings) -> CameraSettings) = save { settingsEditor.edit(transform) }
 
-    private fun persistAuth(newAuth: StreamAuthSettings) {
-        viewModelScope.launch {
-            settingsDataStore.saveAuthSettings(newAuth)
-        }
-    }
+    private fun persistAuth(newAuth: StreamAuthSettings) = save { settingsDataStore.saveAuthSettings(newAuth) }
 
     class Factory(
         private val cameraService: CameraService,

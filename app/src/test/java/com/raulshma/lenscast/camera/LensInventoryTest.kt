@@ -96,4 +96,29 @@ class LensInventoryTest {
         assertEquals("Front", fallback[1].label)
         assertEquals(0, LensInventory.defaultBackIndex(fallback))
     }
+
+    @Test
+    fun `next index advances and wraps around the inventory`() {
+        assertEquals(1, LensInventory.nextIndex(0, 4))
+        assertEquals(3, LensInventory.nextIndex(2, 4))
+        assertEquals(0, LensInventory.nextIndex(3, 4))
+        // A single-lens inventory always cycles back to itself.
+        assertEquals(0, LensInventory.nextIndex(0, 1))
+    }
+
+    @Test
+    fun `empty-inventory fallback toggles front to back`() {
+        assertEquals(
+            CameraSelector.DEFAULT_BACK_CAMERA to false,
+            LensInventory.fallbackSelector(currentFront = true),
+        )
+    }
+
+    @Test
+    fun `empty-inventory fallback toggles back to front`() {
+        assertEquals(
+            CameraSelector.DEFAULT_FRONT_CAMERA to true,
+            LensInventory.fallbackSelector(currentFront = false),
+        )
+    }
 }

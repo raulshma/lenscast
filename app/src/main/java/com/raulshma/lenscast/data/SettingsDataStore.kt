@@ -21,10 +21,12 @@ import com.raulshma.lenscast.camera.model.OverlayPosition
 import com.raulshma.lenscast.camera.model.OverlaySettings
 import com.raulshma.lenscast.camera.model.Resolution
 import com.raulshma.lenscast.camera.model.WhiteBalance
+import com.raulshma.lenscast.core.AppJson
 import com.raulshma.lenscast.core.StreamAuthCrypto
 import com.raulshma.lenscast.core.StreamDefaults
 import com.raulshma.lenscast.core.parseEnum
 import com.raulshma.lenscast.streaming.rtsp.RtspInputFormat
+import com.squareup.moshi.Types
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -32,8 +34,6 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
-import org.json.JSONArray
-import org.json.JSONObject
 
 /**
  * Plain value type for stream-auth settings. All crypto decisions live in
@@ -130,9 +130,6 @@ internal val streamingPortPref = intPref(
     IntBounds(StreamDefaults.WEB_PORT_MIN, StreamDefaults.WEB_PORT_MAX),
 )
 
-/** No saver: the frame rate persists through [cameraSettingsPref]. */
-internal val frameRatePref = intPref(Keys.FRAME_RATE, StreamDefaults.STREAM_FPS)
-
 internal val jpegQualityPref = intPref(
     Keys.JPEG_QUALITY,
     StreamDefaults.JPEG_QUALITY,
@@ -216,8 +213,6 @@ internal val watchdogCheckIntervalSecondsPref = intPref(
         StreamDefaults.WATCHDOG_CHECK_INTERVAL_MAX_SECONDS,
     ),
 )
-
-internal val nightVisionModePref = enumPref(Keys.NIGHT_VISION_MODE, NightVisionMode.OFF)
 
 internal val overlaySettingsPref = SettingPref(
     default = OverlaySettings.DEFAULT,
@@ -334,24 +329,62 @@ private fun encodeOverlaySettings(prefs: MutablePreferences, settings: OverlaySe
     prefs[Keys.MASKING_ZONES] = serializeMaskingZones(normalized.maskingZones)
 }
 
-private fun parseMaskingZones(jsonString: String?): List<MaskingZone> {
+/**
+ * The persisted masking-zone JSON shape, behind [AppJson]'s one Moshi
+ * instance. The field names, types, and declaration order mirror the original
+ * hand-typed org.json writer byte for byte — they are frozen so
+ * previously persisted DataStore values keep decoding. Every field is
+ * nullable so an absent key can fold back to its documented per-field
+ * fallback exactly as the old `opt*` reads did (DEFAULT values, fresh UUID
+ * for an absent id) — never make these fields non-nullable, or old payloads
+ * with partial zones stop decoding.
+ */
+private data class MaskingZoneJson(
+    val id: String? = null,
+    val label: String? = null,
+    val enabled: Boolean? = null,
+    val type: String? = null,
+    val x: Double? = null,
+    val y: Double? = null,
+    val width: Double? = null,
+    val height: Double? = null,
+    val pixelateSize: Int? = null,
+    val blurRadius: Double? = null,
+)
+
+private val maskingZonesType = Types.newParameterizedType(
+    List::class.java,
+    MaskingZoneJson::class.java,
+)
+
+private val maskingZonesAdapter by lazy {
+    AppJson.moshi.adapter<List<MaskingZoneJson>>(maskingZonesType)
+}
+
+/**
+ * The masking-zone persistence codec. Decode is total: a null/empty string
+ * decodes to an empty list, any malformed payload logs and falls back to an
+ * empty list, and absent fields fold to their fallbacks. Internal so JVM
+ * tests can pin the persisted shape and the legacy/malformed handling
+ * without a Context or DataStore.
+ */
+internal fun parseMaskingZones(jsonString: String?): List<MaskingZone> {
     if (jsonString.isNullOrEmpty()) return emptyList()
     return try {
-        val array = JSONArray(jsonString)
         val defaults = MaskingZone.DEFAULT
-        List(array.length()) { i ->
-            val obj = array.getJSONObject(i)
+        val dtos = maskingZonesAdapter.fromJson(jsonString) ?: return emptyList()
+        dtos.map { dto ->
             MaskingZone(
-                id = obj.optString("id", java.util.UUID.randomUUID().toString()),
-                label = obj.optString("label", defaults.label),
-                enabled = obj.optBoolean("enabled", defaults.enabled),
-                type = parseEnum(obj.optString("type", MaskingType.BLACKOUT.name), MaskingType.BLACKOUT),
-                x = obj.optDouble("x", defaults.x.toDouble()).toFloat(),
-                y = obj.optDouble("y", defaults.y.toDouble()).toFloat(),
-                width = obj.optDouble("width", defaults.width.toDouble()).toFloat(),
-                height = obj.optDouble("height", defaults.height.toDouble()).toFloat(),
-                pixelateSize = obj.optInt("pixelateSize", defaults.pixelateSize),
-                blurRadius = obj.optDouble("blurRadius", defaults.blurRadius.toDouble()).toFloat(),
+                id = dto.id ?: java.util.UUID.randomUUID().toString(),
+                label = dto.label ?: defaults.label,
+                enabled = dto.enabled ?: defaults.enabled,
+                type = dto.type?.let { parseEnum(it, MaskingType.BLACKOUT) } ?: MaskingType.BLACKOUT,
+                x = (dto.x ?: defaults.x.toDouble()).toFloat(),
+                y = (dto.y ?: defaults.y.toDouble()).toFloat(),
+                width = (dto.width ?: defaults.width.toDouble()).toFloat(),
+                height = (dto.height ?: defaults.height.toDouble()).toFloat(),
+                pixelateSize = dto.pixelateSize ?: defaults.pixelateSize,
+                blurRadius = (dto.blurRadius ?: defaults.blurRadius.toDouble()).toFloat(),
             )
         }
     } catch (e: Exception) {
@@ -360,24 +393,23 @@ private fun parseMaskingZones(jsonString: String?): List<MaskingZone> {
     }
 }
 
-private fun serializeMaskingZones(zones: List<MaskingZone>): String {
+internal fun serializeMaskingZones(zones: List<MaskingZone>): String {
     return try {
-        val array = JSONArray()
-        for (zone in zones) {
-            val obj = JSONObject()
-            obj.put("id", zone.id)
-            obj.put("label", zone.label)
-            obj.put("enabled", zone.enabled)
-            obj.put("type", zone.type.name)
-            obj.put("x", zone.x.toDouble())
-            obj.put("y", zone.y.toDouble())
-            obj.put("width", zone.width.toDouble())
-            obj.put("height", zone.height.toDouble())
-            obj.put("pixelateSize", zone.pixelateSize)
-            obj.put("blurRadius", zone.blurRadius.toDouble())
-            array.put(obj)
+        val dtos = zones.map { zone ->
+            MaskingZoneJson(
+                id = zone.id,
+                label = zone.label,
+                enabled = zone.enabled,
+                type = zone.type.name,
+                x = zone.x.toDouble(),
+                y = zone.y.toDouble(),
+                width = zone.width.toDouble(),
+                height = zone.height.toDouble(),
+                pixelateSize = zone.pixelateSize,
+                blurRadius = zone.blurRadius.toDouble(),
+            )
         }
-        array.toString()
+        maskingZonesAdapter.toJson(dtos)
     } catch (e: Exception) {
         Log.e("SettingsDataStore", "Failed to serialize masking zones", e)
         "[]"
@@ -403,8 +435,6 @@ class SettingsDataStore(
     val settings: StateFlow<CameraSettings> = cameraSettingsPref.shared()
 
     val streamingPort: StateFlow<Int> = streamingPortPref.shared()
-
-    val frameRate: StateFlow<Int> = frameRatePref.shared()
 
     val jpegQuality: StateFlow<Int> = jpegQualityPref.shared()
 
@@ -439,8 +469,6 @@ class SettingsDataStore(
     val watchdogMaxRetries: StateFlow<Int> = watchdogMaxRetriesPref.shared()
 
     val watchdogCheckIntervalSeconds: StateFlow<Int> = watchdogCheckIntervalSecondsPref.shared()
-
-    val nightVisionMode: StateFlow<NightVisionMode> = nightVisionModePref.shared()
 
     val overlaySettings: StateFlow<OverlaySettings> = overlaySettingsPref.shared()
 
@@ -489,8 +517,6 @@ class SettingsDataStore(
         watchdogCheckIntervalSecondsPref.save(seconds)
 
     suspend fun saveMdnsEnabled(enabled: Boolean) = mdnsEnabledPref.save(enabled)
-
-    suspend fun saveNightVisionMode(mode: NightVisionMode) = nightVisionModePref.save(mode)
 
     suspend fun saveOverlaySettings(settings: OverlaySettings) = overlaySettingsPref.save(settings)
 

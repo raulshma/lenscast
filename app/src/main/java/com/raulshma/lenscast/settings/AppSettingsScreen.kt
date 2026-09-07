@@ -46,8 +46,24 @@ import com.raulshma.lenscast.streaming.rtsp.RtspInputFormat
 import com.raulshma.lenscast.update.UpdateViewModel
 import com.raulshma.lenscast.update.model.UpdateState
 import android.text.format.DateUtils
+import com.raulshma.lenscast.core.StreamDefaults
 import com.raulshma.lenscast.ui.components.LensCastSectionCard
 import com.raulshma.lenscast.ui.components.LensCastTopBar
+
+// Slider spans built FROM the Settings Store's StreamDefaults clamps — the
+// one home — so the UI always offers the full persisted range and can never
+// drift from the store's coercion (parity-pinned by AppSettingsRangesTest).
+internal val webPortSliderRange: ClosedFloatingPointRange<Float> =
+    StreamDefaults.WEB_PORT_MIN.toFloat()..StreamDefaults.WEB_PORT_MAX.toFloat()
+
+internal val jpegQualitySliderRange: ClosedFloatingPointRange<Float> =
+    StreamDefaults.JPEG_QUALITY_MIN.toFloat()..StreamDefaults.JPEG_QUALITY_MAX.toFloat()
+
+internal val rtspPortSliderRange: ClosedFloatingPointRange<Float> =
+    StreamDefaults.RTSP_PORT_MIN.toFloat()..StreamDefaults.RTSP_PORT_MAX.toFloat()
+
+internal val audioBitrateSliderRange: ClosedFloatingPointRange<Float> =
+    StreamDefaults.AUDIO_BITRATE_MIN_KBPS.toFloat()..StreamDefaults.AUDIO_BITRATE_MAX_KBPS.toFloat()
 
 @Composable
 fun AppSettingsScreen(
@@ -64,8 +80,8 @@ fun AppSettingsScreen(
     val updateViewModel: UpdateViewModel = viewModel(
         factory = UpdateViewModel.Factory(
             app.updateChecker,
-            com.raulshma.lenscast.update.UpdateDownloader(app),
-            com.raulshma.lenscast.update.UpdateInstaller(app),
+            app.updateDownloader,
+            app.updateInstaller,
             app.updateNotifier,
             app.settingsDataStore,
         )
@@ -268,13 +284,13 @@ fun AppSettingsScreen(
                     SliderSetting(
                         title = "Streaming Port",
                         value = streamingPort.toFloat(),
-                        range = 1024f..65535f,
+                        range = webPortSliderRange,
                         onValueChange = { viewModel.updateStreamingPort(it.toInt()) }
                     )
                     SliderSetting(
                         title = "JPEG Quality",
                         value = jpegQuality.toFloat(),
-                        range = 10f..100f,
+                        range = jpegQualitySliderRange,
                         onValueChange = { viewModel.updateJpegQuality(it.toInt()) }
                     )
                     SwitchSetting(
@@ -329,7 +345,7 @@ fun AppSettingsScreen(
                         SliderSetting(
                             title = "RTSP Port",
                             value = rtspPort.toFloat(),
-                            range = 1024f..65535f,
+                            range = rtspPortSliderRange,
                             onValueChange = { viewModel.updateRtspPort(it.toInt()) }
                         )
                         DropdownSetting(
@@ -357,7 +373,7 @@ fun AppSettingsScreen(
                     SliderSetting(
                         title = "Live Audio Bitrate (kbps)",
                         value = streamAudioBitrateKbps.toFloat(),
-                        range = 32f..320f,
+                        range = audioBitrateSliderRange,
                         onValueChange = { viewModel.updateStreamAudioBitrateKbps(it.toInt()) }
                     )
                     DropdownSetting(

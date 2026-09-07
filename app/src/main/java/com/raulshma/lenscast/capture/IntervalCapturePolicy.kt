@@ -6,12 +6,12 @@ import androidx.work.WorkInfo
 import java.util.Locale
 
 /**
- * The interval-capture policy: bounds, tick sequencing, flash mapping, and
- * status snapshots. Pure except for the WorkManager `Data`/`WorkInfo`
- * values it reads and writes — both constructible without a device, so the
- * whole module is testable through this one interface. The scheduler owns
- * enqueueing, the worker owns tick execution; neither holds policy
- * literals anymore.
+ * The interval-capture policy: bounds, tick sequencing, flash mapping,
+ * failure retries, and status snapshots. Pure except for the WorkManager
+ * `Data`/`WorkInfo` values it reads and writes — both constructible without
+ * a device, so the whole module is testable through this one interface. The
+ * scheduler owns enqueueing, the worker owns tick execution; neither holds
+ * policy literals anymore.
  */
 object IntervalCapturePolicy {
 
@@ -20,6 +20,13 @@ object IntervalCapturePolicy {
 
     /** The total-captures ceiling both entry paths (screen slider and Web API) clamp to. */
     const val TOTAL_CAPTURES_MAX = 1000
+
+    /**
+     * How many attempts one tick gets before the capture is skipped and the
+     * series moves on (the worker's runAttemptCount is 0-based, so this is
+     * the first execution plus [MAX_CAPTURE_ATTEMPTS] retries).
+     */
+    const val MAX_CAPTURE_ATTEMPTS = 3
 
     const val KEY_INTERVAL_SECONDS = "interval_seconds"
     const val KEY_TOTAL_CAPTURES = "total_captures"
@@ -86,6 +93,24 @@ object IntervalCapturePolicy {
 
     fun countCapture(tick: Tick): Tick =
         tick.copy(completedCaptures = tick.completedCaptures + 1)
+
+    /** What the worker does with a failed capture attempt. */
+    enum class RetryVerdict {
+        /** Fail the run so WorkManager re-runs this tick after its backoff. */
+        RETRY,
+        /** Skip this tick's capture and let the series continue at its next interval. */
+        GIVE_UP,
+    }
+
+    /**
+     * The failed-attempt verdict: retry with backoff until [MAX_CAPTURE_ATTEMPTS]
+     * attempts have run, then give the tick up. One ladder for every failure
+     * mode — in practice they are the same transient contention (e.g.
+     * RecordingService holding the exclusive camera session), so nothing
+     * earns a longer leash.
+     */
+    fun retryVerdict(attempt: Int): RetryVerdict =
+        if (attempt >= MAX_CAPTURE_ATTEMPTS) RetryVerdict.GIVE_UP else RetryVerdict.RETRY
 
     fun resolveFlashMode(flashMode: String): Int =
         when (flashMode.uppercase(Locale.US)) {

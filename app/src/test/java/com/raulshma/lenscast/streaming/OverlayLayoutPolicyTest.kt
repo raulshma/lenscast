@@ -1,6 +1,8 @@
 package com.raulshma.lenscast.streaming
 
 import com.raulshma.lenscast.camera.model.MaskingZone
+import com.raulshma.lenscast.camera.model.OverlayPosition
+import com.raulshma.lenscast.camera.model.OverlaySettings
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -8,6 +10,129 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class OverlayLayoutPolicyTest {
+
+    /** Overlay settings with every line source off; tests switch on what they exercise. */
+    private fun overlaySettings(
+        showTimestamp: Boolean = false,
+        showBranding: Boolean = false,
+        showStatus: Boolean = false,
+        showCustomText: Boolean = false,
+        brandingText: String = "LensCast",
+        customText: String = "custom line",
+    ) = OverlaySettings(
+        enabled = true,
+        showTimestamp = showTimestamp,
+        showBranding = showBranding,
+        showStatus = showStatus,
+        showCustomText = showCustomText,
+        brandingText = brandingText,
+        customText = customText,
+    )
+
+    private fun buildLines(
+        showTimestamp: Boolean = false,
+        showBranding: Boolean = false,
+        showStatus: Boolean = false,
+        clients: Int = 0,
+        showCustomText: Boolean = false,
+    ): List<String> = OverlayLayoutPolicy.buildOverlayLines(
+        overlaySettings(
+            showTimestamp = showTimestamp,
+            showBranding = showBranding,
+            showStatus = showStatus,
+            showCustomText = showCustomText,
+        ),
+        clients,
+        nowMs = 0L,
+    )
+
+    @Test
+    fun `timestamp toggles a non-blank line`() {
+        val withTimestamp = buildLines(showTimestamp = true)
+        assertEquals(1, withTimestamp.size)
+        assertTrue(withTimestamp.single().isNotBlank())
+        assertTrue(buildLines(showTimestamp = false).isEmpty())
+    }
+
+    @Test
+    fun `branding renders only when shown, and blank text renders nothing`() {
+        assertEquals(listOf("LensCast"), buildLines(showBranding = true))
+        assertEquals(
+            emptyList<String>(),
+            OverlayLayoutPolicy.buildOverlayLines(
+                overlaySettings(showBranding = true, brandingText = "   "),
+                clientCount = 0,
+                nowMs = 0L,
+            ),
+        )
+    }
+
+    @Test
+    fun `status line follows the client pluralization - zero clients hide it`() {
+        assertTrue(buildLines(showStatus = true, clients = 0).isEmpty())
+        assertEquals(listOf("1 viewer"), buildLines(showStatus = true, clients = 1))
+        assertEquals(listOf("2 viewers"), buildLines(showStatus = true, clients = 2))
+    }
+
+    @Test
+    fun `custom text renders only when shown, and blank text renders nothing`() {
+        assertEquals(listOf("custom line"), buildLines(showCustomText = true))
+        assertEquals(
+            emptyList<String>(),
+            OverlayLayoutPolicy.buildOverlayLines(
+                overlaySettings(showCustomText = true, customText = ""),
+                clientCount = 0,
+                nowMs = 0L,
+            ),
+        )
+    }
+
+    @Test
+    fun `all line sources stack in order timestamp branding status custom`() {
+        val lines = OverlayLayoutPolicy.buildOverlayLines(
+            overlaySettings(
+                showTimestamp = true,
+                showBranding = true,
+                showStatus = true,
+                showCustomText = true,
+            ),
+            clientCount = 2,
+            nowMs = 0L,
+        )
+        assertEquals(4, lines.size)
+        assertTrue(lines[0].isNotBlank()) // the timestamp
+        assertEquals("LensCast", lines[1])
+        assertEquals("2 viewers", lines[2])
+        assertEquals("custom line", lines[3])
+    }
+
+    @Test
+    fun `position maps each corner with the margin inset`() {
+        // 1000x500 frame, 200x100 overlay box, margin 16.
+        assertEquals(
+            PixelRect(16, 16, 216, 116),
+            OverlayLayoutPolicy.computeOverlayPosition(OverlayPosition.TOP_LEFT, 1000, 500, 200, 100),
+        )
+        assertEquals(
+            PixelRect(784, 16, 984, 116),
+            OverlayLayoutPolicy.computeOverlayPosition(OverlayPosition.TOP_RIGHT, 1000, 500, 200, 100),
+        )
+        assertEquals(
+            PixelRect(16, 384, 216, 484),
+            OverlayLayoutPolicy.computeOverlayPosition(OverlayPosition.BOTTOM_LEFT, 1000, 500, 200, 100),
+        )
+        assertEquals(
+            PixelRect(784, 384, 984, 484),
+            OverlayLayoutPolicy.computeOverlayPosition(OverlayPosition.BOTTOM_RIGHT, 1000, 500, 200, 100),
+        )
+        assertEquals(16, OverlayLayoutPolicy.OVERLAY_MARGIN_PX)
+    }
+
+    @Test
+    fun `an overlay larger than the frame keeps the unclamped corner math`() {
+        val rect = OverlayLayoutPolicy.computeOverlayPosition(OverlayPosition.BOTTOM_RIGHT, 100, 100, 200, 200)
+        assertEquals(PixelRect(-116, -116, 84, 84), rect)
+    }
 
     @Test
     fun `zone maps normally inside the frame`() {

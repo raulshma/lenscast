@@ -20,6 +20,8 @@ import com.raulshma.lenscast.streaming.StreamingManager
 import com.raulshma.lenscast.streaming.StreamingSession
 import com.raulshma.lenscast.update.UpdateChecker
 import com.raulshma.lenscast.update.UpdateCheckPipeline
+import com.raulshma.lenscast.update.UpdateDownloader
+import com.raulshma.lenscast.update.UpdateInstaller
 import com.raulshma.lenscast.update.UpdateNotifier
 import com.raulshma.lenscast.update.UpdatePolicy
 import kotlinx.coroutines.CoroutineScope
@@ -59,6 +61,11 @@ class MainApplication : Application(), SingletonImageLoader.Factory {
     val updateCheckPipeline: UpdateCheckPipeline by lazy {
         UpdateCheckPipeline.production(updateChecker, updateNotifier, settingsDataStore)
     }
+    // App-owned like the checker and notifier above, so the settings screen's
+    // ViewModel factory pulls every update collaborator off the Application
+    // instead of constructing per-composition adapters.
+    val updateDownloader: UpdateDownloader by lazy { UpdateDownloader(this) }
+    val updateInstaller: UpdateInstaller by lazy { UpdateInstaller(this) }
     private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
     override fun onCreate() {

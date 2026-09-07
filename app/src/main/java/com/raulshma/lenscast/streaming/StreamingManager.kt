@@ -8,6 +8,7 @@ import com.raulshma.lenscast.core.NetworkQualityMonitor
 import com.raulshma.lenscast.core.NetworkUtils
 import com.raulshma.lenscast.core.StreamDefaults
 import com.raulshma.lenscast.core.ThermalMonitor
+import com.raulshma.lenscast.data.SettingsDataStore
 import com.raulshma.lenscast.data.StreamAuthSettings
 import com.raulshma.lenscast.streaming.web.ApiRouter
 import com.raulshma.lenscast.streaming.web.CaptureWebHandler
@@ -33,6 +34,14 @@ class StreamingManager(
 
     private val audioStreamingManager = AudioStreamingManager(context)
 
+    // The store-backed auth settings the RTSP spec provider reads live: the
+    // Settings Applier saves there and applies through [updateAuthSettings],
+    // so no manager-side mirror is retained. Lazy like [buildWebApiStack] —
+    // the application object is only cast at use time.
+    private val authSettingsStore: SettingsDataStore by lazy {
+        (context.applicationContext as MainApplication).settingsDataStore
+    }
+
     // The RTSP output behind this manager's public surface: retained config,
     // server lifecycle, the restart-vs-apply choice, the audio-stream handle,
     // the URL, and the audio-wanted/mic-arbitration decision all live in the
@@ -40,7 +49,7 @@ class StreamingManager(
     private val rtspOutput = RtspOutput(
         audio = audioStreamingManager,
         audioConfig = ::audioConfig,
-        authSpec = { rtspAuthSpec(currentAuthSettings) },
+        authSpec = { rtspAuthSpec(authSettingsStore.authSettings.value) },
         releaseAudio = ::releaseRtspOwnedAudio,
         onStateChanged = { running, url ->
             _isRtspRunning.value = running
@@ -51,14 +60,19 @@ class StreamingManager(
     private val webStreamingEnabled = AtomicBoolean(true)
     private val mdnsEnabled = AtomicBoolean(true)
     @Volatile
-    private var currentAuthSettings = StreamAuthSettings()
-    @Volatile
     private var currentOverlaySettings = OverlaySettings()
     private val networkQualityMonitor = NetworkQualityMonitor()
     private val adaptiveBitrateController = AdaptiveBitrateController(networkQualityMonitor)
     private val qualityPolicy = StreamQualityPolicy(thermalMonitor, adaptiveBitrateController)
     private val framePipeline = FramePipeline(qualityPolicy)
     private val webApiStack: WebApiStack by lazy { buildWebApiStack() }
+
+    // One gate for the app's web server: owned here so sessions survive a
+    // server recreation (e.g. a port change). Declared before the first
+    // server — every StreamingServer receives this one shared instance at
+    // construction.
+    private val webAuthGate = WebAuthGate()
+
     private var server: StreamingServer = createServer(StreamDefaults.WEB_PORT)
     private val webStreamingActive = AtomicBoolean(false)
     private val jpegQuality = AtomicInteger(StreamDefaults.JPEG_QUALITY)
@@ -113,10 +127,6 @@ class StreamingManager(
 
     val processedFrames: StateFlow<Int> = framePipeline.processedFrames
 
-    // One gate for the app's web server: owned here so sessions survive a
-    // server recreation (e.g. a port change).
-    private val webAuthGate = WebAuthGate()
-
     val adaptiveBitrateState: StateFlow<AdaptiveBitrateController.AdaptiveState> = adaptiveBitrateController.state
 
     fun getNetworkStatsSnapshot(): NetworkQualityMonitor.NetworkStatsSnapshot = networkQualityMonitor.getStatsSnapshot()
@@ -125,8 +135,6 @@ class StreamingManager(
     fun getFramesPerSecond(clientId: String): Double = networkQualityMonitor.getFramesPerSecond(clientId)
 
     fun isLiveStreaming(): Boolean = webStreamingActive.get() || rtspOutput.isActive()
-
-    fun isWebStreamingEnabled(): Boolean = webStreamingEnabled.get()
 
     fun isWebStreamActive(): Boolean = webStreamingActive.get()
 
@@ -427,8 +435,13 @@ class StreamingManager(
     }
 
     fun updateAuthSettings(settings: StreamAuthSettings) {
-        currentAuthSettings = settings
-        applyAuthSettings(settings)
+        // The gate is the one live holder of the web credentials and is
+        // shared by every StreamingServer — there is nothing to re-apply on
+        // recreation.
+        webAuthGate.setCredentials(
+            if (settings.enabled) settings.username else null,
+            if (settings.enabled) settings.passwordHash else null,
+        )
         // The RTSP authorizer reads the (possibly restarted) auth spec live —
         // a hot-swap through the output, no restart owed.
         rtspOutput.setAuth()
@@ -476,8 +489,9 @@ class StreamingManager(
     }
 
     private fun createServer(port: Int): StreamingServer {
+        // Auth needs no re-application here: the filter reads the shared,
+        // manager-owned gate live, and the RTSP spec comes from a provider.
         return StreamingServer(port, context, audioStreamingManager, webApiStack, networkQualityMonitor, webAuthGate).also {
-            applyAuthSettings(currentAuthSettings)
             it.setWebStreamingEnabled(webStreamingEnabled.get())
         }
     }
@@ -510,13 +524,6 @@ class StreamingManager(
             ),
             gallery = gallery,
             capture = app.photoCaptureManager,
-        )
-    }
-
-    private fun applyAuthSettings(settings: StreamAuthSettings) {
-        webAuthGate.setCredentials(
-            if (settings.enabled) settings.username else null,
-            if (settings.enabled) settings.passwordHash else null,
         )
     }
 

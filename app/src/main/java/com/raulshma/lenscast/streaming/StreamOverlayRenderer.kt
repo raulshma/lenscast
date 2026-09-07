@@ -9,19 +9,13 @@ import android.graphics.RectF
 import android.util.Log
 import com.raulshma.lenscast.camera.model.MaskingType
 import com.raulshma.lenscast.camera.model.MaskingZone
-import com.raulshma.lenscast.camera.model.OverlayPosition
 import com.raulshma.lenscast.camera.model.OverlaySettings
-import java.text.SimpleDateFormat
-import java.util.Locale
 
 object StreamOverlayRenderer {
 
     private const val TAG = "StreamOverlayRenderer"
     private const val REFERENCE_WIDTH = 1920f
 
-    private val dateFormatCache = java.util.concurrent.ConcurrentHashMap<String, SimpleDateFormat>()
-
-    private val reusableDate = java.util.Date()
     private val reusableRect = android.graphics.Rect()
 
     // Reusable Paint objects to avoid per-frame allocations
@@ -177,7 +171,7 @@ object StreamOverlayRenderer {
         padding: Int,
         lineHeight: Int,
     ) {
-        val lines = buildOverlayLines(settings, clientCount)
+        val lines = OverlayLayoutPolicy.buildOverlayLines(settings, clientCount)
         if (lines.isEmpty()) return
 
         textPaint.color = parseColor(settings.textColor, Color.WHITE)
@@ -198,7 +192,7 @@ object StreamOverlayRenderer {
         totalHeight += padding * 2
         val bgWidth = maxWidth + padding * 2
 
-        val position = computeOverlayPosition(
+        val position = OverlayLayoutPolicy.computeOverlayPosition(
             settings.position,
             canvas.width,
             canvas.height,
@@ -226,78 +220,6 @@ object StreamOverlayRenderer {
                 canvas.drawText(line, (position.left + padding).toFloat(), y.toFloat(), textPaint)
                 y += lineHeight
             }
-        }
-    }
-
-    private fun buildOverlayLines(
-        settings: OverlaySettings,
-        clientCount: Int,
-    ): List<String> {
-        val lines = mutableListOf<String>()
-
-        if (settings.showTimestamp) {
-            val formatter = getDateFormat(settings.timestampFormat)
-            synchronized(reusableDate) {
-                reusableDate.time = System.currentTimeMillis()
-                lines.add(formatter.format(reusableDate))
-            }
-        }
-
-        if (settings.showBranding && settings.brandingText.isNotBlank()) {
-            lines.add(settings.brandingText)
-        }
-
-        if (settings.showStatus) {
-            val statusParts = mutableListOf<String>()
-            if (clientCount > 0) statusParts.add("${clientCount} viewer${if (clientCount != 1) "s" else ""}")
-            if (statusParts.isNotEmpty()) lines.add(statusParts.joinToString("  "))
-        }
-
-        if (settings.showCustomText && settings.customText.isNotBlank()) {
-            lines.add(settings.customText)
-        }
-
-        return lines
-    }
-
-    private fun getDateFormat(pattern: String): SimpleDateFormat {
-        return dateFormatCache.getOrPut(pattern) {
-            SimpleDateFormat(pattern, Locale.getDefault())
-        }
-    }
-
-    private fun computeOverlayPosition(
-        position: OverlayPosition,
-        bitmapWidth: Int,
-        bitmapHeight: Int,
-        overlayWidth: Int,
-        overlayHeight: Int,
-    ): android.graphics.Rect {
-        val margin = 16
-        return when (position) {
-            OverlayPosition.TOP_LEFT ->
-                android.graphics.Rect(margin, margin, margin + overlayWidth, margin + overlayHeight)
-            OverlayPosition.TOP_RIGHT ->
-                android.graphics.Rect(
-                    bitmapWidth - overlayWidth - margin,
-                    margin,
-                    bitmapWidth - margin,
-                    margin + overlayHeight,
-                )
-            OverlayPosition.BOTTOM_LEFT ->
-                android.graphics.Rect(
-                    margin,
-                    bitmapHeight - overlayHeight - margin,
-                    margin + overlayWidth,
-                    bitmapHeight - margin,
-                )
-            OverlayPosition.BOTTOM_RIGHT ->
-                android.graphics.Rect(
-                    bitmapWidth - overlayWidth - margin,
-                    bitmapHeight - overlayHeight - margin,
-                    bitmapWidth - margin,
-                    bitmapHeight - margin,
-                )
         }
     }
 

@@ -1,8 +1,14 @@
 package com.raulshma.lenscast.streaming
 
 import com.raulshma.lenscast.camera.model.MaskingZone
+import com.raulshma.lenscast.camera.model.OverlayPosition
+import com.raulshma.lenscast.camera.model.OverlaySettings
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+import java.util.concurrent.ConcurrentHashMap
 
-/** Pure pixel rect for masking zones. No Android types. */
+/** Pure pixel rect for masking zones and the overlay box. No Android types. */
 data class PixelRect(
     val left: Int,
     val top: Int,
@@ -15,7 +21,8 @@ data class PixelRect(
 
 /**
  * Pure overlay/masking math extracted verbatim from StreamOverlayRenderer.
- * Zero Android imports: kotlin.math + pure parsing only.
+ * Zero Android imports: kotlin.math, pure parsing, and java.text date
+ * formatting only.
  *
  * Degenerate-input guards (documented, covered by tests): zero-size bitmaps
  * yield an empty rect; non-positive blur radii floor to the 0.05 scale (the
@@ -24,6 +31,13 @@ data class PixelRect(
  * named colors) is null and the caller falls back.
  */
 object OverlayLayoutPolicy {
+
+    /** The text overlay box's inset from the frame edge, in pixels. */
+    const val OVERLAY_MARGIN_PX = 16
+
+    private val dateFormatCache = ConcurrentHashMap<String, SimpleDateFormat>()
+
+    private val reusableDate = Date()
 
     fun zoneToPixels(
         zone: MaskingZone,
@@ -36,6 +50,90 @@ object OverlayLayoutPolicy {
         val right = ((zone.x + zone.width) * bitmapWidth).toInt().coerceIn(0, bitmapWidth)
         val bottom = ((zone.y + zone.height) * bitmapHeight).toInt().coerceIn(0, bitmapHeight)
         return PixelRect(left, top, right, bottom)
+    }
+
+    /**
+     * Which lines the text overlay renders, top to bottom: timestamp,
+     * branding, status, custom text. Blank branding/custom text renders
+     * nothing even when switched on, and the status line appears only when
+     * clients are watching. The "N viewer(s)" pluralization here is the
+     * overlay-side twin — [com.raulshma.lenscast.camera.model.CameraDashboardPolicy]
+     * owns the dashboard's separate client pluralization, and the two must
+     * not be merged.
+     */
+    fun buildOverlayLines(
+        settings: OverlaySettings,
+        clientCount: Int,
+        nowMs: Long = System.currentTimeMillis(),
+    ): List<String> {
+        val lines = mutableListOf<String>()
+
+        if (settings.showTimestamp) {
+            val formatter = dateFormatCache.getOrPut(settings.timestampFormat) {
+                SimpleDateFormat(settings.timestampFormat, Locale.getDefault())
+            }
+            synchronized(reusableDate) {
+                reusableDate.time = nowMs
+                lines.add(formatter.format(reusableDate))
+            }
+        }
+
+        if (settings.showBranding && settings.brandingText.isNotBlank()) {
+            lines.add(settings.brandingText)
+        }
+
+        if (settings.showStatus) {
+            val statusParts = mutableListOf<String>()
+            if (clientCount > 0) statusParts.add("${clientCount} viewer${if (clientCount != 1) "s" else ""}")
+            if (statusParts.isNotEmpty()) lines.add(statusParts.joinToString("  "))
+        }
+
+        if (settings.showCustomText && settings.customText.isNotBlank()) {
+            lines.add(settings.customText)
+        }
+
+        return lines
+    }
+
+    /**
+     * The pure position→rect math for the text overlay box: each corner
+     * insets [OVERLAY_MARGIN_PX] from the frame edge. No clamping — an
+     * overlay larger than the frame produces negative origins, exactly like
+     * the inline version it replaced.
+     */
+    fun computeOverlayPosition(
+        position: OverlayPosition,
+        bitmapWidth: Int,
+        bitmapHeight: Int,
+        overlayWidth: Int,
+        overlayHeight: Int,
+    ): PixelRect {
+        val margin = OVERLAY_MARGIN_PX
+        return when (position) {
+            OverlayPosition.TOP_LEFT ->
+                PixelRect(margin, margin, margin + overlayWidth, margin + overlayHeight)
+            OverlayPosition.TOP_RIGHT ->
+                PixelRect(
+                    bitmapWidth - overlayWidth - margin,
+                    margin,
+                    bitmapWidth - margin,
+                    margin + overlayHeight,
+                )
+            OverlayPosition.BOTTOM_LEFT ->
+                PixelRect(
+                    margin,
+                    bitmapHeight - overlayHeight - margin,
+                    margin + overlayWidth,
+                    bitmapHeight - margin,
+                )
+            OverlayPosition.BOTTOM_RIGHT ->
+                PixelRect(
+                    bitmapWidth - overlayWidth - margin,
+                    bitmapHeight - overlayHeight - margin,
+                    bitmapWidth - margin,
+                    bitmapHeight - margin,
+                )
+        }
     }
 
     fun pixelateDownscale(

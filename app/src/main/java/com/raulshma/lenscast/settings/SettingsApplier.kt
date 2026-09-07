@@ -9,6 +9,8 @@ import com.raulshma.lenscast.streaming.rtsp.RtspInputFormat
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 
 /**
@@ -74,11 +76,17 @@ class SettingsApplier(
         }
 
         // Frame rate (M-JPEG streaming + RTSP + adaptive bitrate fan out
-        // inside the Streaming Manager)
+        // inside the Streaming Manager). Derived from the camera-settings
+        // flow — the frame rate persists only through that descriptor. The
+        // distinctUntilChanged keeps unrelated camera-settings changes from
+        // re-firing the runtime apply, matching the old dedicated flow's
+        // conflation; the initial emission is identical too (the flow's
+        // default and CameraSettings' default are both StreamDefaults.STREAM_FPS).
         scope.launch {
-            settingsDataStore.frameRate.collectLatest { fps ->
-                streamingManager.setFrameRate(fps)
-            }
+            settingsDataStore.settings.map { it.frameRate }.distinctUntilChanged()
+                .collectLatest { fps ->
+                    streamingManager.setFrameRate(fps)
+                }
         }
 
         // RTSP settings

@@ -1,6 +1,7 @@
 package com.raulshma.lenscast.capture
 
 import android.content.Context
+import androidx.work.BackoffPolicy
 import androidx.work.Constraints
 import androidx.work.ExistingWorkPolicy
 import androidx.work.OneTimeWorkRequestBuilder
@@ -74,6 +75,9 @@ object IntervalCaptureScheduler {
                     .setRequiresBatteryNotLow(false)
                     .build()
             )
+            // The worker's retry verdict rides on this: short and linear so a
+            // contended camera session clears within the interval, not after it.
+            .setBackoffCriteria(BackoffPolicy.LINEAR, BACKOFF_SECONDS, TimeUnit.SECONDS)
 
         if (initialDelaySeconds > 0) {
             requestBuilder.setInitialDelay(initialDelaySeconds, TimeUnit.SECONDS)
@@ -87,6 +91,9 @@ object IntervalCaptureScheduler {
     }
 
     const val WORK_NAME = "interval_capture"
+
+    /** Retry backoff for a tick whose capture failed (the policy's RETRY verdict). */
+    const val BACKOFF_SECONDS = 10L
 }
 
 typealias IntervalCaptureStatusSnapshot = IntervalCapturePolicy.StatusSnapshot

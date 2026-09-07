@@ -1,5 +1,6 @@
 package com.raulshma.lenscast.update
 
+import com.raulshma.lenscast.update.model.GitHubAsset
 import com.raulshma.lenscast.update.model.UpdateCheckResult
 
 /**
@@ -15,8 +16,8 @@ data class UpdateDecision(
 
 /**
  * Pure update-check policy: version comparison, auto-check gating,
- * post-check decisions, and dismissal checks. No Android dependencies —
- * unit-tested on the JVM.
+ * post-check decisions, dismissal checks, and the release-asset ladder
+ * ([selectApkAsset]). No Android dependencies — unit-tested on the JVM.
  *
  * Single owner of these decisions; [UpdateChecker], `MainApplication`, and
  * [UpdateViewModel] delegate instead of hand-rolling `trimStart('v')` and
@@ -73,6 +74,22 @@ object UpdatePolicy {
     fun shouldNotify(dismissedVersion: String?, remoteTag: String): Boolean {
         if (dismissedVersion.isNullOrBlank()) return true
         return normalize(dismissedVersion) != normalize(remoteTag)
+    }
+
+    /**
+     * The release-asset ladder: prefer a universal APK for ABI
+     * compatibility, else the first `.apk` asset — null when the release
+     * ships no APK. The extension match is exact-case; the universal
+     * match is not.
+     */
+    fun selectApkAsset(assets: List<GitHubAsset>): GitHubAsset? {
+        val universal = assets.firstOrNull {
+            it.name.endsWith(".apk") && it.name.contains("universal", ignoreCase = true)
+        }
+        if (universal != null) return universal
+
+        // Fallback to any APK
+        return assets.firstOrNull { it.name.endsWith(".apk") }
     }
 
     /**

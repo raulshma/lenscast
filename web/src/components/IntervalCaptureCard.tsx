@@ -1,7 +1,7 @@
 import { Show } from 'solid-js'
 import SettingsCard from './SettingsCard'
-import type { IntervalCaptureConfig, CaptureMode, FlashMode } from '../types'
-import { CAPTURE_MODE_LABELS, FLASH_MODE_LABELS } from '../types'
+import type { IntervalCaptureConfig, FlashMode } from '../types'
+import { FLASH_MODE_LABELS } from '../types'
 
 interface Props {
   intervalConfig: () => IntervalCaptureConfig
@@ -66,42 +66,6 @@ export default function IntervalCaptureCard(props: Props) {
           onInput={(e) => props.setIntervalConfig({ ...cfg(), totalCaptures: parseInt(e.currentTarget.value) })}
           disabled={props.intervalRunning()}
         />
-      </div>
-
-      {/* Image Quality */}
-      <div class="field-group">
-        <div class="field-row">
-          <span class="field-label">Image Quality</span>
-          <span class="field-value">{cfg().imageQuality}%</span>
-        </div>
-        <input
-          id="interval-quality-slider"
-          type="range"
-          class="custom-range"
-          min={10}
-          max={100}
-          value={cfg().imageQuality}
-          onInput={(e) => props.setIntervalConfig({ ...cfg(), imageQuality: parseInt(e.currentTarget.value) })}
-          disabled={props.intervalRunning()}
-        />
-      </div>
-
-      {/* Capture Mode */}
-      <div class="field-group">
-        <div class="field-row">
-          <span class="field-label">Capture Mode</span>
-        </div>
-        <select
-          id="interval-capture-mode"
-          class="field-select field-select-full"
-          value={cfg().captureMode}
-          onChange={(e) => props.setIntervalConfig({ ...cfg(), captureMode: e.currentTarget.value as CaptureMode })}
-          disabled={props.intervalRunning()}
-        >
-          {Object.entries(CAPTURE_MODE_LABELS).map(([k, v]) => (
-            <option value={k}>{v}</option>
-          ))}
-        </select>
       </div>
 
       {/* Flash Mode */}

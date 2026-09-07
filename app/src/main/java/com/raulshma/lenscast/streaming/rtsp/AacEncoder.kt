@@ -112,8 +112,6 @@ class AacEncoder {
         Log.d(TAG, "AAC encoder stopped")
     }
 
-    fun isRunning(): Boolean = running.get()
-
     fun setBitrate(newBitrateKbps: Int) {
         bitrate = (newBitrateKbps * 1000).coerceIn(
             StreamDefaults.AUDIO_BITRATE_MIN_KBPS * 1000,

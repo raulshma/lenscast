@@ -307,13 +307,13 @@ class RtspOutputTest {
         val server = h.startEnabled()
         h.authSpecs += RtspAuthSpec("u", "p", "h")
 
-        h.output.setFrameRate(24)
+        h.output.setFrameRate(30) // not the 24 fps default — a real diff
         h.output.setInputFormat(RtspInputFormat.I420)
         h.output.setAuth()
 
         assertEquals(1, h.servers.size) // no restart
         assertEquals(3, server.applyCalls.size)
-        assertEquals(24, server.applyCalls[0].videoFrameRate)
+        assertEquals(30, server.applyCalls[0].videoFrameRate)
         assertEquals(RtspInputFormat.I420, server.applyCalls[1].inputFormat)
         assertEquals("u", server.applyCalls[2].auth?.username)
     }
@@ -323,15 +323,76 @@ class RtspOutputTest {
         val h = Harness()
         h.authSpecs += RtspAuthSpec("u", "p", "h")
 
-        h.output.setFrameRate(24)
+        h.output.setFrameRate(30)
         h.output.setInputFormat(RtspInputFormat.NV21)
         h.output.setAuth()
 
         assertEquals(0, h.servers.size)
         val config = h.startEnabled().startCalls.single().first
-        assertEquals(24, config.videoFrameRate)
+        assertEquals(30, config.videoFrameRate)
         assertEquals(RtspInputFormat.NV21, config.inputFormat)
         assertEquals("u", config.auth?.username)
+    }
+
+    // ── the update() diff routing ──
+
+    @Test
+    fun `a video-bitrate-only change applies live while an audio-bitrate-only change restarts`() {
+        val h = Harness()
+        val server = h.startEnabled()
+
+        h.output.update { it.copy(videoBitrate = 4_000_000) }
+
+        // Video bitrate is HOT_SWAP: same server, one live apply.
+        assertEquals(1, h.servers.size)
+        assertEquals(1, server.applyCalls.size)
+        assertEquals(4_000_000, server.applyCalls.single().videoBitrate)
+
+        h.output.setAudioBitrate(96)
+
+        // Audio bitrate is NEEDS_RESTART: the ladder restarts a live, audio-wanted output.
+        assertEquals(2, h.servers.size)
+        assertEquals(96, h.servers[1].startCalls.single().first.audioBitrateKbps)
+    }
+
+    @Test
+    fun `input-format and frame-rate changes ride the diff into apply, not the restart path`() {
+        val h = Harness()
+        val server = h.startEnabled()
+
+        h.output.setInputFormat(RtspInputFormat.NV21)
+        h.output.setFrameRate(30)
+
+        assertEquals(1, h.servers.size)
+        assertEquals(2, server.applyCalls.size)
+        assertEquals(RtspInputFormat.NV21, server.applyCalls[0].inputFormat)
+        assertEquals(30, server.applyCalls[1].videoFrameRate)
+    }
+
+    @Test
+    fun `a change mixing hot-swap and restart fields takes the restart path only`() {
+        val h = Harness()
+        val server = h.startEnabled()
+
+        h.output.update { it.copy(inputFormat = RtspInputFormat.I420, audioBitrateKbps = 64) }
+
+        // Any NEEDS_RESTART field wins: restart with the new config, no live apply.
+        assertEquals(2, h.servers.size)
+        assertEquals(0, server.applyCalls.size)
+        val (config, _) = h.servers[1].startCalls.single()
+        assertEquals(64, config.audioBitrateKbps)
+        assertEquals(RtspInputFormat.I420, config.inputFormat)
+    }
+
+    @Test
+    fun `an update that changes nothing is a full no-op`() {
+        val h = Harness()
+        val server = h.startEnabled()
+
+        h.output.update { it }
+
+        assertEquals(1, h.servers.size)
+        assertEquals(0, server.applyCalls.size)
     }
 
     // ── port ──

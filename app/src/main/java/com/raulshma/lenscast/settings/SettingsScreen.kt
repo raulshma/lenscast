@@ -37,14 +37,32 @@ import com.raulshma.lenscast.MainApplication
 import com.raulshma.lenscast.camera.model.CameraDashboardPolicy
 import com.raulshma.lenscast.camera.model.CameraSettings
 import com.raulshma.lenscast.camera.model.FocusMode
-import com.raulshma.lenscast.camera.model.HdrMode
-import com.raulshma.lenscast.camera.model.NightVisionMode
 import com.raulshma.lenscast.camera.model.QuickSettingCatalog
-import com.raulshma.lenscast.camera.model.Resolution
+import com.raulshma.lenscast.camera.model.QuickSettingEditor
+import com.raulshma.lenscast.camera.model.QuickSettingRanges
+import com.raulshma.lenscast.camera.model.QuickSettingType
 import com.raulshma.lenscast.camera.model.WhiteBalance
-import com.raulshma.lenscast.camera.model.isoStops
+import com.raulshma.lenscast.camera.model.chipLabel
 import com.raulshma.lenscast.ui.components.LensCastSectionCard
 import com.raulshma.lenscast.ui.components.LensCastTopBar
+
+/**
+ * The settings screen's dropdown wiring, read off the Quick Setting Catalog's
+ * chips editors: the exact option list (and the exact selected-name string
+ * the catalog's write transform parses back) that the camera screen's sheet
+ * offers, resolved against the device's live ranges. Labels render through
+ * the catalog's default chip-label rule — the sheet's night-vision display
+ * names stay the camera screen's.
+ */
+internal fun chipOptions(type: QuickSettingType, ranges: QuickSettingRanges): List<String> =
+    chipsEditor(type).options(ranges)
+
+/** The catalog's selected-name for the current settings — what the write path parses back. */
+internal fun chipSelected(type: QuickSettingType, settings: CameraSettings): String =
+    chipsEditor(type).selected(settings)
+
+private fun chipsEditor(type: QuickSettingType): QuickSettingEditor.Chips =
+    QuickSettingCatalog.descriptorFor(type).editor as QuickSettingEditor.Chips
 
 @Composable
 fun CameraSettingsScreen(
@@ -68,7 +86,9 @@ fun CameraSettingsScreen(
     val zoomRange by viewModel.availableZoomRange.collectAsState()
     val exposureRange by viewModel.availableExposureRange.collectAsState()
     val isoRange by viewModel.availableIsoRange.collectAsState()
-    val isoOptions = remember(isoRange) { isoStops(isoRange) }
+    val deviceRanges = remember(isoRange, zoomRange, exposureRange) {
+        QuickSettingRanges(iso = isoRange, zoom = zoomRange, exposure = exposureRange)
+    }
     val showPreview by viewModel.showPreview.collectAsState()
 
     Scaffold(
@@ -107,13 +127,13 @@ fun CameraSettingsScreen(
                         title = "Exposure Compensation",
                         value = settings.exposureCompensation.toFloat(),
                         range = exposureRange.start.toFloat()..exposureRange.endInclusive.toFloat(),
-                        onValueChange = { viewModel.updateExposure(it.toInt()) }
+                        onValueChange = { viewModel.updateQuickSetting(QuickSettingType.EXPOSURE, it) }
                     )
                     DropdownSetting(
                         title = "ISO",
-                        options = isoOptions,
-                        selected = settings.iso?.toString() ?: "Auto",
-                        onSelect = { viewModel.updateIso(it) }
+                        options = chipOptions(QuickSettingType.ISO, deviceRanges),
+                        selected = chipSelected(QuickSettingType.ISO, settings),
+                        onSelect = { viewModel.updateQuickSetting(QuickSettingType.ISO, it) }
                     )
                 }
             }
@@ -122,9 +142,9 @@ fun CameraSettingsScreen(
                 SettingsSection(title = "Focus") {
                     DropdownSetting(
                         title = "Focus Mode",
-                        options = FocusMode.entries.map { it.name },
-                        selected = settings.focusMode.name,
-                        onSelect = { viewModel.updateFocusMode(it) }
+                        options = chipOptions(QuickSettingType.FOCUS, deviceRanges),
+                        selected = chipSelected(QuickSettingType.FOCUS, settings),
+                        onSelect = { viewModel.updateQuickSetting(QuickSettingType.FOCUS, it) }
                     )
                     if (settings.focusMode == FocusMode.MANUAL) {
                         SliderSetting(
@@ -141,9 +161,9 @@ fun CameraSettingsScreen(
                 SettingsSection(title = "White Balance") {
                     DropdownSetting(
                         title = "White Balance",
-                        options = WhiteBalance.entries.map { it.name },
-                        selected = settings.whiteBalance.name,
-                        onSelect = { viewModel.updateWhiteBalance(it) }
+                        options = chipOptions(QuickSettingType.WHITE_BALANCE, deviceRanges),
+                        selected = chipSelected(QuickSettingType.WHITE_BALANCE, settings),
+                        onSelect = { viewModel.updateQuickSetting(QuickSettingType.WHITE_BALANCE, it) }
                     )
                     if (settings.whiteBalance == WhiteBalance.MANUAL) {
                         SliderSetting(
@@ -162,7 +182,7 @@ fun CameraSettingsScreen(
                         title = "Zoom",
                         value = settings.zoomRatio,
                         range = zoomRange,
-                        onValueChange = { viewModel.updateZoom(it) }
+                        onValueChange = { viewModel.updateQuickSetting(QuickSettingType.ZOOM, it) }
                     )
                 }
             }
@@ -171,21 +191,21 @@ fun CameraSettingsScreen(
                 SettingsSection(title = "Capture") {
                     DropdownSetting(
                         title = "Resolution",
-                        options = Resolution.entries.map { it.name },
-                        selected = settings.resolution.name,
-                        onSelect = { viewModel.updateResolution(it) }
+                        options = chipOptions(QuickSettingType.RESOLUTION, deviceRanges),
+                        selected = chipSelected(QuickSettingType.RESOLUTION, settings),
+                        onSelect = { viewModel.updateQuickSetting(QuickSettingType.RESOLUTION, it) }
                     )
                     SliderSetting(
                         title = "Frame Rate",
                         value = settings.frameRate.toFloat(),
                         range = QuickSettingCatalog.frameRateRange(),
-                        onValueChange = { viewModel.updateFrameRate(it.toInt()) }
+                        onValueChange = { viewModel.updateQuickSetting(QuickSettingType.FRAME_RATE, it) }
                     )
                     DropdownSetting(
                         title = "HDR",
-                        options = HdrMode.entries.map { it.name },
-                        selected = settings.hdrMode.name,
-                        onSelect = { viewModel.updateHdrMode(it) }
+                        options = chipOptions(QuickSettingType.HDR, deviceRanges),
+                        selected = chipSelected(QuickSettingType.HDR, settings),
+                        onSelect = { viewModel.updateQuickSetting(QuickSettingType.HDR, it) }
                     )
                 }
             }
@@ -195,7 +215,7 @@ fun CameraSettingsScreen(
                     SwitchSetting(
                         title = "Image Stabilization",
                         checked = settings.stabilization,
-                        onCheckedChange = { viewModel.updateStabilization(it) }
+                        onCheckedChange = { viewModel.updateQuickSetting(QuickSettingType.STABILIZATION, it) }
                     )
                 }
             }
@@ -204,9 +224,9 @@ fun CameraSettingsScreen(
                 SettingsSection(title = "Night Vision / IR") {
                     DropdownSetting(
                         title = "Mode",
-                        options = NightVisionMode.entries.map { it.name },
-                        selected = settings.nightVisionMode.name,
-                        onSelect = { viewModel.updateNightVisionMode(it) }
+                        options = chipOptions(QuickSettingType.NIGHT_VISION, deviceRanges),
+                        selected = chipSelected(QuickSettingType.NIGHT_VISION, settings),
+                        onSelect = { viewModel.updateQuickSetting(QuickSettingType.NIGHT_VISION, it) }
                     )
                     Spacer(modifier = Modifier.height(8.dp))
                     Text(
@@ -298,7 +318,7 @@ fun DropdownSetting(
         ) {
             options.forEach { option ->
                 FilterChip(
-                    label = option.replace("_", " "),
+                    label = chipLabel(option),
                     selected = option == selected,
                     onClick = { onSelect(option) }
                 )

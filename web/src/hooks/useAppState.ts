@@ -5,7 +5,7 @@ import type {
   AllSettings, DeviceStatus, LensInfo, CameraSettings,
   FocusMode, WhiteBalance, Resolution, HdrMode,
   IntervalCaptureConfig, RecordingConfig,
-  CaptureMode, FlashMode, RecordingQuality,
+  FlashMode, RecordingQuality,
 } from '../types'
 
 export function useAppState() {
@@ -32,8 +32,7 @@ export function useAppState() {
 
   // ── Interval capture ──
   const [intervalConfig, setIntervalConfig] = createSignal<IntervalCaptureConfig>({
-    intervalSeconds: 5, totalCaptures: 100, imageQuality: 90,
-    captureMode: 'MINIMIZE_LATENCY', flashMode: 'OFF',
+    intervalSeconds: 5, totalCaptures: 100, flashMode: 'OFF',
   })
   const [intervalRunning, setIntervalRunning] = createSignal(false)
   const [intervalCompleted, setIntervalCompleted] = createSignal(0)
@@ -41,7 +40,7 @@ export function useAppState() {
   // ── Recording ──
   const [recordingConfig, setRecordingConfig] = createSignal<RecordingConfig>({
     durationSeconds: 0, repeatIntervalSeconds: 0,
-    quality: 'HIGH', maxFileSizeBytes: 0, includeAudio: true,
+    quality: 'HIGH', includeAudio: true,
   })
   const [isRecording, setIsRecording] = createSignal(false)
   const [recordingElapsed, setRecordingElapsed] = createSignal(0)

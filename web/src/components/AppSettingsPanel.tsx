@@ -102,20 +102,6 @@ export default function AppSettingsPanel(props: Props) {
           </div>
         </div>
 
-        <div class="field-group">
-          <div class="field-row field-row-toggle">
-            <span class="field-label">Network Discovery (mDNS)</span>
-            <label class="toggle-switch" for="mdns-toggle-app">
-              <input
-                id="mdns-toggle-app"
-                type="checkbox"
-                checked={s()?.streaming?.mdnsEnabled ?? true}
-                onChange={() => props.updateStreamingAndSave({ mdnsEnabled: !(s()?.streaming?.mdnsEnabled ?? true) })}
-              />
-              <span class="toggle-slider" />
-            </label>
-          </div>
-        </div>
       </SettingsCard>
 
       {/* Audio */}
@@ -285,67 +271,6 @@ export default function AppSettingsPanel(props: Props) {
               <option value="NV12">NV12</option>
               <option value="I420">I420</option>
             </select>
-          </div>
-        </Show>
-      </SettingsCard>
-
-      {/* Security */}
-      <SettingsCard
-        icon={
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-            <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
-            <path d="M7 11V7a5 5 0 0110 0v4" />
-          </svg>
-        }
-        title="Security"
-      >
-        <div class="field-group">
-          <div class="field-row field-row-toggle">
-            <span class="field-label">Stream Authentication</span>
-            <label class="toggle-switch" for="auth-toggle-app">
-              <input
-                id="auth-toggle-app"
-                type="checkbox"
-                checked={s()?.streaming?.auth?.enabled ?? false}
-                onChange={() => props.updateStreamingAndSave({ auth: { ...(s()?.streaming?.auth ?? { enabled: false, username: '', password: '' }), enabled: !(s()?.streaming?.auth?.enabled ?? false) } })}
-              />
-              <span class="toggle-slider" />
-            </label>
-          </div>
-        </div>
-
-        <Show when={s()?.streaming?.auth?.enabled}>
-          <div class="field-group">
-            <div class="field-row">
-              <span class="field-label">Username</span>
-            </div>
-            <input
-              id="auth-username-input-app"
-              type="text"
-              class="custom-input"
-              value={s()?.streaming?.auth?.username ?? ''}
-              onInput={(e) => {
-                props.updateStreamingAndSave({ auth: { ...(s()?.streaming?.auth ?? { enabled: true, username: '', password: '' }), username: e.currentTarget.value } })
-              }}
-            />
-          </div>
-
-          <div class="field-group">
-            <div class="field-row">
-              <span class="field-label">Password</span>
-            </div>
-            <input
-              id="auth-password-input-app"
-              type="password"
-              class="custom-input"
-              placeholder="Enter new password"
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && e.currentTarget.value) {
-                  props.updateStreamingAndSave({ auth: { ...(s()?.streaming?.auth ?? { enabled: true, username: '', password: '' }), password: e.currentTarget.value } })
-                  e.currentTarget.value = ''
-                }
-              }}
-            />
           </div>
         </Show>
       </SettingsCard>

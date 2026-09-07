@@ -71,7 +71,9 @@ class HttpAuthFilter(
         }
         val result = webAuthGate.login(remoteIp, credentials.username, credentials.password)
         if (!result.success) {
-            val status = if (result.error == "Auth not configured") 500 else 401
+            // The typed reason picks the status; the gate's message is the
+            // client's error payload, forwarded verbatim.
+            val status = if (result.failure == WebAuthGate.LoginFailure.NotConfigured) 500 else 401
             return HttpResult.jsonError(status, result.error.orEmpty())
         }
         return HttpResult(

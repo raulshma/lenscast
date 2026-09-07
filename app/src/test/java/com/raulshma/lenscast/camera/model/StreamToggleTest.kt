@@ -16,8 +16,11 @@ class StreamToggleTest {
         var startWebResult: Boolean = true,
         var startRtspResult: Boolean = true,
         var beginSessionError: Exception? = null,
+        /** How many of the first begin calls succeed when [beginSessionError] is set (default: none). */
+        var beginSuccessesBeforeError: Int = 0,
     ) : StreamToggle.Transports {
         val calls = mutableListOf<String>()
+        private var beginCalls = 0
 
         override fun startWeb(): Boolean {
             calls.add("startWeb")
@@ -49,7 +52,10 @@ class StreamToggleTest {
 
         override suspend fun beginSession() {
             calls.add("beginSession")
-            beginSessionError?.let { throw it }
+            beginCalls++
+            if (beginCalls > beginSuccessesBeforeError) {
+                beginSessionError?.let { throw it }
+            }
         }
 
         override suspend fun endSession() {
@@ -155,6 +161,121 @@ class StreamToggleTest {
         ).startWeb()
 
         assertEquals(listOf(StreamKind.WEB), hookCalls)
+    }
+
+    // ── the whole-server start ladder (startBoth) ──
+
+    @Test
+    fun `startBoth starts web then rtsp through the full ladder`() = runBlocking {
+        val transports = FakeTransports()
+        val (web, rtsp) = StreamToggle(transports).startBoth()
+
+        assertEquals(StreamStartOutcome.Started, web)
+        assertEquals(StreamStartOutcome.Started, rtsp)
+        assertEquals(
+            listOf("startWeb", "beginSession", "startRtsp", "beginSession"),
+            transports.calls,
+        )
+        assertTrue(transports.webActive)
+        assertTrue(transports.rtspActive)
+    }
+
+    @Test
+    fun `a failed rtsp start rolls the started web back per-output`() = runBlocking {
+        val transports = FakeTransports(startRtspResult = false)
+        val (web, rtsp) = StreamToggle(transports).startBoth()
+
+        assertEquals(StreamStartOutcome.Started, web)
+        assertEquals(StreamKind.RTSP, (rtsp as StreamStartOutcome.StartFailed).kind)
+        // The per-output rollback — web stop with session end, no server teardown.
+        assertEquals(
+            listOf("startWeb", "beginSession", "startRtsp", "stopWeb", "endSession"),
+            transports.calls,
+        )
+        assertEquals(false, transports.webActive)
+    }
+
+    @Test
+    fun `a gated rtsp does not roll the started web back`() = runBlocking {
+        val transports = FakeTransports(rtspEnabled = false)
+        val (web, rtsp) = StreamToggle(transports).startBoth()
+
+        assertEquals(StreamStartOutcome.Started, web)
+        assertEquals(StreamKind.RTSP, (rtsp as StreamStartOutcome.Disabled).kind)
+        // Disabled is a gate rejection, not a failure — the web stays up.
+        assertEquals(listOf("startWeb", "beginSession"), transports.calls)
+        assertTrue(transports.webActive)
+    }
+
+    @Test
+    fun `a failed web start skips rtsp and reports the failure`() = runBlocking {
+        val transports = FakeTransports(startWebResult = false)
+        val (web, rtsp) = StreamToggle(transports).startBoth()
+
+        assertEquals(StreamKind.WEB, (web as StreamStartOutcome.StartFailed).kind)
+        // The web start itself failed — rtsp is never attempted (same
+        // short-circuit as the failed session begin).
+        assertEquals(null, rtsp)
+        assertEquals(listOf("startWeb"), transports.calls)
+        assertEquals(false, transports.webActive)
+        assertEquals(false, transports.rtspActive)
+    }
+
+    @Test
+    fun `a failed web session begin skips rtsp and reports the rollback`() = runBlocking {
+        val failure = IllegalStateException("foreground service denied")
+        val transports = FakeTransports(beginSessionError = failure)
+        val (web, rtsp) = StreamToggle(transports).startBoth()
+
+        assertEquals(
+            StreamStartOutcome.BeginFailedRolledBack(StreamKind.WEB, failure),
+            web,
+        )
+        // The session is already known-broken — rtsp is never attempted.
+        assertEquals(null, rtsp)
+        assertEquals(listOf("startWeb", "beginSession", "stopWeb"), transports.calls)
+        assertEquals(false, transports.webActive)
+        assertEquals(false, transports.rtspActive)
+    }
+
+    @Test
+    fun `a failed rtsp session begin rolls both outputs back`() = runBlocking {
+        val failure = IllegalStateException("foreground service denied")
+        val transports = FakeTransports(
+            beginSessionError = failure,
+            beginSuccessesBeforeError = 1, // the web's begin succeeds; rtsp's throws
+        )
+        val (web, rtsp) = StreamToggle(transports).startBoth()
+
+        assertEquals(StreamStartOutcome.Started, web)
+        assertEquals(
+            StreamStartOutcome.BeginFailedRolledBack(StreamKind.RTSP, failure),
+            rtsp,
+        )
+        // rtsp is stopped by start()'s own rollback; the started web follows
+        // through the same per-output discipline — the server stays up.
+        assertEquals(
+            listOf(
+                "startWeb", "beginSession", "startRtsp", "beginSession",
+                "stopRtsp", "stopWeb", "endSession",
+            ),
+            transports.calls,
+        )
+        assertEquals(false, transports.webActive)
+        assertEquals(false, transports.rtspActive)
+    }
+
+    // ── start-failure verdict ──
+
+    @Test
+    fun `isStartFailure holds exactly for the failed-start outcomes`() {
+        assertTrue(StreamStartOutcome.StartFailed(StreamKind.WEB).isStartFailure)
+        assertTrue(
+            StreamStartOutcome.BeginFailedRolledBack(StreamKind.WEB, IllegalStateException()).isStartFailure
+        )
+        assertTrue(!StreamStartOutcome.Started.isStartFailure)
+        assertTrue(!StreamStartOutcome.Stopped.isStartFailure)
+        assertTrue(!StreamStartOutcome.Disabled(StreamKind.WEB).isStartFailure)
     }
 
     // ── outcome messages ──

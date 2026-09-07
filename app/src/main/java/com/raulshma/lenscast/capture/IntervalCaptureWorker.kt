@@ -18,7 +18,9 @@ import kotlin.coroutines.resume
  * One tick of interval capture. The photo choreography itself (acquire →
  * take → history → release) is [PhotoCaptureManager]'s; this worker only
  * sequences ticks, shows the progress notification, and schedules the next
- * tick.
+ * tick. Failed attempts consult [IntervalCapturePolicy.retryVerdict]: early
+ * attempts retry with WorkManager backoff, past the bound the tick is
+ * skipped and the series continues.
  */
 class IntervalCaptureWorker(
     context: Context,
@@ -60,11 +62,43 @@ class IntervalCaptureWorker(
                 }
                 Result.success(IntervalCapturePolicy.progressData(advanced.completedCaptures))
             } else {
-                Result.retry()
+                failedTick(tick, error = null)
             }
         } catch (e: Exception) {
             Log.e(TAG, "Interval capture failed", e)
-            Result.retry()
+            failedTick(tick, error = e)
+        }
+    }
+
+    /**
+     * A failed capture attempt. The series lives in the worker's own
+     * scheduling — each successful run enqueues the next tick — so a
+     * [IntervalCapturePolicy.RetryVerdict.GIVE_UP] must keep that chain alive:
+     * the tick is skipped (progress unchanged), the next tick is scheduled,
+     * and this run ends successfully, which also tears down its foreground
+     * notification. Retrying is WorkManager's job, backed by the scheduler's
+     * linear backoff criteria.
+     */
+    private suspend fun failedTick(
+        tick: IntervalCapturePolicy.Tick,
+        error: Exception?,
+    ): Result {
+        when (IntervalCapturePolicy.retryVerdict(runAttemptCount)) {
+            IntervalCapturePolicy.RetryVerdict.RETRY -> {
+                Log.w(TAG, "Capture attempt ${runAttemptCount + 1} failed; retrying with backoff", error)
+                return Result.retry()
+            }
+            IntervalCapturePolicy.RetryVerdict.GIVE_UP -> {
+                Log.w(TAG, "Capture still failing after ${runAttemptCount + 1} attempts; skipping this tick", error)
+                setProgress(IntervalCapturePolicy.progressData(tick.completedCaptures))
+                if (!isStopped) {
+                    IntervalCaptureScheduler.scheduleNext(
+                        context = applicationContext,
+                        tick = tick,
+                    )
+                }
+                return Result.success()
+            }
         }
     }
 

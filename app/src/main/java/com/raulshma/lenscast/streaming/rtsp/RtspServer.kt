@@ -225,12 +225,6 @@ class RtspServer(private val port: Int = DEFAULT_PORT) : RtspServerHandle {
         encoder.encodeFrame(frameData)
     }
 
-    /** Frames accepted onto the encoder path since start (mirrors the FramePipeline counter). */
-    fun acceptedFrameCount(): Long = acceptedFrames.get()
-
-    /** Frames dropped by the push throttle or a lagged encoder since start. */
-    fun droppedFrameCount(): Long = droppedFrames.get()
-
     /** Entry-point validation: fps/bitrate clamped to their StreamDefaults bounds. */
     private fun normalize(config: RtspConfig): RtspConfig = config.copy(
         videoFrameRate = config.videoFrameRate.coerceIn(StreamDefaults.RTSP_FPS_MIN, StreamDefaults.RTSP_FPS_MAX),
@@ -412,8 +406,6 @@ class RtspServer(private val port: Int = DEFAULT_PORT) : RtspServerHandle {
 
     fun getClientCount(): Int = clients.count { it.value.isPlaying }
 
-    fun isRunning(): Boolean = running.get()
-
     /**
      * One client connection: reads the wire (via [RtspWireReader]), parses
      * (via [RtspRequestParser]), authorizes (via [RtspSessionAuthorizer]),
@@ -439,7 +431,6 @@ class RtspServer(private val port: Int = DEFAULT_PORT) : RtspServerHandle {
             tracks[1] = TrackState(trackId = 1, rtpChannel = 2, rtcpChannel = 3)
         }
 
-        val isVideoSetup: Boolean get() = tracks[0]?.isSetup == true
         val isAudioSetup: Boolean get() = tracks[1]?.isSetup == true
 
         private val videoRtpChannel: Int get() = tracks[0]?.rtpChannel ?: 0

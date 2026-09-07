@@ -5,6 +5,7 @@ import android.content.Intent
 import android.os.Build
 import android.util.Log
 import com.raulshma.lenscast.capture.model.RecordingConfig
+import com.raulshma.lenscast.capture.model.RecordingDurationPolicy
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -72,7 +73,9 @@ class RecordingController(
     // landing between the auto-stop and the repeat arming would otherwise be
     // overridden by the restart. Also true (in [policyStopPending]) while the
     // service drains a policy-initiated stop, so an ordinary stop report
-    // doesn't cancel the armed repeat.
+    // doesn't cancel the armed repeat. The verdicts over these inputs live in
+    // [RecordingDurationPolicy]; the epochs and the flag are the bookkeeping
+    // that makes them sound.
     private var policyEpoch = 0
     private var policyStopPending = false
 
@@ -104,7 +107,9 @@ class RecordingController(
             if (_state.value is RecordingState.Scheduled) {
                 cancelScheduleLocked()
             }
-            // A user stop also kills the auto-stop/repeat cycle.
+            // A user stop also kills the auto-stop/repeat cycle — the one
+            // cause ([RecordingDurationPolicy.StopCause.USER]) no armed step
+            // survives, cancelled here rather than at the stop report.
             cancelDurationPolicyLocked()
         }
         // Always send the stop intent, even straight after a cancel: the
@@ -129,8 +134,8 @@ class RecordingController(
             durationJob?.cancel()
             durationJob = null
             _state.value = RecordingState.Recording(startedAtMs, config)
-            if (config != null && config.durationSeconds > 0) {
-                armDurationPolicyLocked(config, startedAtMs, policyEpoch)
+            if (RecordingDurationPolicy.shouldArm(config)) {
+                armDurationPolicyLocked(requireNotNull(config), startedAtMs, policyEpoch)
             }
         }
     }
@@ -143,15 +148,23 @@ class RecordingController(
      * (camera screen, capture screen, Web API) gets the same behavior and its
      * lifetime is the controller's, not a screen's. [epoch] is the value of
      * [policyEpoch] at arm time; every step re-checks it under [lock] so a
-     * user stop()/start() always wins.
+     * user stop()/start() always wins. The decisions are pure verdicts in
+     * [RecordingDurationPolicy]; this choreography (wait, lock, intents) is
+     * all that remains here.
      */
     private fun armDurationPolicyLocked(config: RecordingConfig, startedAtMs: Long, epoch: Int) {
         durationJob = scope.launch {
             val self = kotlin.coroutines.coroutineContext[Job]
-            val remainMs = config.durationSeconds * 1000 - (System.currentTimeMillis() - startedAtMs)
+            val remainMs = RecordingDurationPolicy.autoStopDelayMs(
+                config, startedAtMs, System.currentTimeMillis()
+            )
             if (remainMs > 0) delay(remainMs)
             synchronized(lock) {
-                if (durationJob !== self || policyEpoch != epoch) return@launch
+                if (!RecordingDurationPolicy.shouldFireAutoStop(
+                        autoStopJobIsCurrent = durationJob === self,
+                        epochUnchanged = policyEpoch == epoch,
+                    )
+                ) return@launch
                 durationJob = null
                 policyStopPending = true
             }
@@ -159,20 +172,25 @@ class RecordingController(
             // repeat follow-up survives.
             launchService(stopIntent(), foreground = false)
 
-            if (config.repeatIntervalSeconds > 0) {
-                synchronized(lock) {
-                    if (policyEpoch == epoch) {
-                        repeatJob?.cancel()
-                        repeatJob = scope.launch {
-                            val repeatSelf = kotlin.coroutines.coroutineContext[Job]
-                            delay(config.repeatIntervalSeconds * 1000)
-                            synchronized(lock) {
-                                val fire = repeatJob === repeatSelf && policyEpoch == epoch &&
-                                    _state.value is RecordingState.Idle
-                                if (fire) {
-                                    repeatJob = null
-                                    launchService(startIntent(config), foreground = true)
-                                }
+            synchronized(lock) {
+                if (RecordingDurationPolicy.shouldArmRepeatAfterAutoStop(
+                        config,
+                        epochUnchanged = policyEpoch == epoch,
+                    )
+                ) {
+                    repeatJob?.cancel()
+                    repeatJob = scope.launch {
+                        val repeatSelf = kotlin.coroutines.coroutineContext[Job]
+                        delay(RecordingDurationPolicy.repeatDelayMs(config))
+                        synchronized(lock) {
+                            val fire = RecordingDurationPolicy.shouldFireRepeat(
+                                repeatJobIsCurrent = repeatJob === repeatSelf,
+                                epochUnchanged = policyEpoch == epoch,
+                                stateIsIdle = _state.value is RecordingState.Idle,
+                            )
+                            if (fire) {
+                                repeatJob = null
+                                launchService(startIntent(config), foreground = true)
                             }
                         }
                     }
@@ -203,7 +221,16 @@ class RecordingController(
             scheduledJob = null
             durationJob?.cancel()
             durationJob = null
-            if (policyStopPending) {
+            // A policy-initiated stop marked itself in [policyStopPending]
+            // before sending its intent; every other stop report — a user
+            // stop already handled in [stop], an error, service death — is
+            // service-reported.
+            val cause = if (policyStopPending) {
+                RecordingDurationPolicy.StopCause.AUTO
+            } else {
+                RecordingDurationPolicy.StopCause.SERVICE_REPORTED
+            }
+            if (RecordingDurationPolicy.doesRepeatSurviveStop(cause)) {
                 policyStopPending = false
                 // repeatJob survives: it is waiting out the repeat gap after
                 // the policy's own auto-stop; it re-checks Idle and the epoch

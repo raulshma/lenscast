@@ -75,8 +75,6 @@ class ServiceDiscoveryManager(private val context: Context) {
         }
     }
 
-    fun isServiceActive(): Boolean = isRegistered.get()
-
     private fun makeUniqueServiceName(baseName: String): String {
         val deviceId = Build.MODEL.replace(Regex("[^a-zA-Z0-9-]"), "-").take(20)
         return "$baseName-$deviceId"
@@ -86,8 +84,5 @@ class ServiceDiscoveryManager(private val context: Context) {
         private const val TAG = "ServiceDiscoveryMgr"
         const val SERVICE_TYPE_HTTP = "_http._tcp."
         const val DEFAULT_SERVICE_NAME = "LensCast"
-        private const val TXT_KEY_DEVICE = "device"
-        private const val TXT_KEY_PATH = "path"
-        private const val TXT_VALUE_PATH = "/"
     }
 }

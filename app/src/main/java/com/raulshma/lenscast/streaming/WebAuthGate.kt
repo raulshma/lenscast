@@ -14,14 +14,35 @@ import java.util.concurrent.ConcurrentHashMap
  * without a live socket.
  *
  * Credentials arrive via [setCredentials]; null or blank username/hash means
- * auth is disabled and [authenticate] lets everything through.
+ * auth is disabled and [authenticate] lets everything through. Time reads go
+ * through the injected [clock] — the [com.raulshma.lenscast.streaming.rtsp.RtspSessionAuthorizer]
+ * seam — so the lockout window and the session expiry are JVM-tested without
+ * waiting.
  */
-class WebAuthGate {
+class WebAuthGate(
+    private val clock: () -> Long = System::currentTimeMillis,
+) {
 
+    /** The typed reason behind a failed login; the transport maps it to a status code. */
+    enum class LoginFailure {
+        /** No credentials configured — a server-side misconfiguration, not the client's fault. */
+        NotConfigured,
+        /** The client exhausted its attempts and is inside the lockout window. */
+        RateLimited,
+        /** Wrong username or wrong password. */
+        InvalidCredentials,
+    }
+
+    /**
+     * The login verdict. [error] is the client-facing message, forwarded
+     * verbatim by the transport; [failure] is the typed reason behind it
+     * (null on success) — and the single source [error] derives from.
+     */
     data class LoginResult(
         val success: Boolean,
         val token: String? = null,
         val error: String? = null,
+        val failure: LoginFailure? = null,
     )
 
     @Volatile
@@ -59,32 +80,51 @@ class WebAuthGate {
         val storedUsername = this.username
         val storedHash = this.passwordHash
         if (storedUsername == null || storedHash == null) {
-            return LoginResult(success = false, error = "Auth not configured")
+            return notConfigured()
         }
 
-        val now = System.currentTimeMillis()
+        val now = clock()
         synchronized(authAttemptsLock) {
             cleanupExpiredAuthAttempts(now)
             val attempt = authAttempts.getOrPut(clientIp ?: "unknown") { AuthAttempt(0, 0L) }
-            if (attempt.blockedUntil > now) {
-                return LoginResult(success = false, error = "Too many attempts. Try again later.")
-            }
+            if (attempt.blockedUntil > now) return rateLimited()
             if (attempt.count >= MAX_AUTH_ATTEMPTS) {
                 attempt.blockedUntil = now + AUTH_LOCKOUT_MS
                 attempt.count = 0
-                return LoginResult(success = false, error = "Too many attempts. Try again later.")
+                return rateLimited()
             }
             if (!StreamAuthCrypto.constantTimeEquals(username, storedUsername)) {
                 attempt.count++
-                return LoginResult(success = false, error = "Invalid credentials")
+                return invalidCredentials()
             }
             if (!StreamAuthCrypto.verifyPassword(password, storedHash)) {
                 attempt.count++
-                return LoginResult(success = false, error = "Invalid credentials")
+                return invalidCredentials()
             }
             attempt.count = 0
         }
         return LoginResult(success = true, token = createSession())
+    }
+
+    /** The failed-login results: the message is derived from the typed reason. */
+    private fun notConfigured(): LoginResult = failure(LoginFailure.NotConfigured)
+
+    private fun rateLimited(): LoginResult = failure(LoginFailure.RateLimited)
+
+    private fun invalidCredentials(): LoginResult = failure(LoginFailure.InvalidCredentials)
+
+    private fun failure(failure: LoginFailure): LoginResult =
+        LoginResult(
+            success = false,
+            error = messageFor(failure),
+            failure = failure,
+        )
+
+    /** The client-facing message for a failed login, single-homed per reason. */
+    private fun messageFor(failure: LoginFailure): String = when (failure) {
+        LoginFailure.NotConfigured -> "Auth not configured"
+        LoginFailure.RateLimited -> "Too many attempts. Try again later."
+        LoginFailure.InvalidCredentials -> "Invalid credentials"
     }
 
     fun logout(token: String?) {
@@ -133,10 +173,6 @@ class WebAuthGate {
             ?.substring(COOKIE_NAME.length + 1)
     }
 
-    fun clearSessions() {
-        sessions.clear()
-    }
-
     private fun createSession(): String {
         cleanExpiredSessions()
         // Enforce maximum session count to prevent OOM via session flooding
@@ -149,12 +185,12 @@ class WebAuthGate {
         val bytes = ByteArray(SESSION_TOKEN_BYTES)
         secureRandom.nextBytes(bytes)
         val token = bytes.joinToString("") { "%02x".format(it) }
-        sessions[token] = System.currentTimeMillis() + SESSION_DURATION_MS
+        sessions[token] = clock() + SESSION_DURATION_MS
         return token
     }
 
     private fun cleanExpiredSessions() {
-        val now = System.currentTimeMillis()
+        val now = clock()
         if (now - lastSessionCleanupMillis < SESSION_CLEANUP_INTERVAL_MS && sessions.size < MAX_SESSIONS * 0.9) return
         lastSessionCleanupMillis = now
         sessions.entries.removeAll { now > it.value }
@@ -164,7 +200,7 @@ class WebAuthGate {
         // Opportunistically clean expired sessions on each validation
         cleanExpiredSessions()
         val expiry = sessions[token] ?: return false
-        if (System.currentTimeMillis() > expiry) {
+        if (clock() > expiry) {
             sessions.remove(token)
             return false
         }

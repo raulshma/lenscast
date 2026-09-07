@@ -38,11 +38,16 @@ one internal `SettingPref` declaration (key, encode, decode, clamp) — the
 encode/decode conventions (including the default-true vs default-false
 boolean reads) and every numeric clamp through `StreamDefaults` live in the
 descriptor mechanism, JVM-tested for round-trip and bounds; saver clamping is
-the one home (watchdog setters no longer re-clamp). Overlay/masking saves go
+the one home (watchdog setters no longer re-clamp). One descriptor per key:
+the composite `cameraSettingsPref` owns frame rate and night-vision mode, and
+no second descriptor or dead pref trio survives over the same keys.
+Overlay/masking saves go
 through the pure
 `OverlaySettings.normalized` / `MaskingZone.normalized` — "persist a valid
 value" is the store's invariant, so ViewModels and the Web API Settings
-Handler write raw values and no caller pre-guards. Enum strings parse
+Handler write raw values and no caller pre-guards. Masking-zone lists
+serialize through App Json (a Moshi codec with the legacy org.json field
+names kept decode-compatible), not a second JSON stack. Enum strings parse
 through the one `core/EnumParsing.parseEnum(name, fallback)` with each
 site's fallback an explicit argument. Each setting is share-in'd exactly
 once, inside the store, and exposed as a `StateFlow` — ViewModels and Web
@@ -56,7 +61,10 @@ Stream Auth Crypto.
 start/stop/schedule choreography *and* of the bounded-recording policy: a
 config with `durationSeconds` auto-stops and optionally repeats, no matter
 which client started it (camera screen, capture screen, Web API) and
-independent of any screen's lifetime. Its `RecordingState` flow (Idle /
+independent of any screen's lifetime. The policy's verdicts (arm, auto-stop,
+repeat re-arm and fire, stop-survival) are the pure Recording Duration
+Policy, event-sequence-tested; the controller keeps the lock, jobs, epochs,
+and intent construction. Its `RecordingState` flow (Idle /
 Scheduled / Recording with startedAtMs, config, finalizing) is the only public
 truth about recording: CameraViewModel, CaptureViewModel, and the Web API
 Recording Handler all observe it, and none keep optimistic copies. The
@@ -86,11 +94,28 @@ writes and the store's queries can no longer drift.
 
 ### Scheduled Recording UI
 **`capture/ScheduledRecordingUi.kt`** — the pure state→UI mapping for the
-capture screen's schedule surface: the controller's `RecordingState` in, the
-"Start: HH:mm" label, the Schedule-vs-Start-Now verdict, and canCancel out.
-The screen renders from it and its trash button cancels through the
-Recording Controller — the old draft copy of the schedule (which let an
-armed job fire after "clear") is gone.
+capture screen's schedule surface, in two shapes: `scheduledUiModel(state)`
+(the controller's `RecordingState` → startAtMs / canCancel / isScheduled) and
+`scheduleRowUi(state, draftStartMs)` — the whole schedule row in one verdict:
+the "Start: HH:mm" label (the screen keeps no `SimpleDateFormat`), the
+armed-vs-draft merge (armed wins), trash-button canCancel, and the
+Schedule-vs-Start-Now button verdict. The screen renders the model's answers
+and its trash button cancels through the Recording Controller — the old draft
+copy of the schedule (which let an armed job fire after "clear") is gone.
+
+### Recording Duration Policy
+**`capture/model/RecordingDurationPolicy.kt`** — the pure decision core of
+the bounded-recording cycle: whether a config arms the policy at all
+(`shouldArm`), the auto-stop timing and its post-delay fire gate, the
+repeat re-arm verdict after an auto-stop, the repeat fire triple-check
+(superseded job / bumped epoch / not-Idle never restarts over a live
+recording), and `doesRepeatSurviveStop(cause)` — a stop report survives the
+armed repeat only when it is the policy's own AUTO stop, never a
+USER-initiated or externally-reported one. Recording Controller keeps the
+lock, the coroutine jobs, the epoch bookkeeping, and intent construction;
+every non-obvious conditional in its arm/stop paths consults this policy, so
+the user-stop vs auto-stop vs repeat-fire races are pinned by event-sequence
+JVM tests instead of living only in comments.
 
 ### Photo Capture
 **`capture/PhotoCaptureManager.kt`** — owns the photo choreography (acquire
@@ -163,7 +188,10 @@ one camera frame fans out internally via `pushFrame()` (web pipeline, RTSP
 encoder) — the frame listener is wired once at the composition root
 (`MainApplication.wireFramePump()`), never in a screen ViewModel. Stream-audio
 changes funnel through one internal policy: live-update when the running
-server supports it, restart when it doesn't. It is also the composition root
+server supports it, restart when it doesn't. Auth settings are read live
+wherever they're consumed — the Web Auth Gate reference and the RTSP
+auth-spec provider both read the applied value directly, so server
+recreation re-applies nothing. It is also the composition root
 that builds the Web API stack.
 
 ### Web API Handlers
@@ -181,7 +209,11 @@ snapshots) bypass the JSON router deliberately: the server serves them
 straight from `GalleryWebHandler`/PhotoCaptureManager. The four
 `/api/auth/*` routes are the one deliberate exception to the router seam:
 their cookie/non-200 contract differs from the JSON handlers, so
-`StreamingServer` translates them onto the Web Auth Gate directly.
+`StreamingServer` translates them onto the Web Auth Gate directly. The
+`web/src/types.ts` mirror of the DTO surface is hand-maintained in lockstep:
+fields the Kotlin side deletes are deleted from the client too (the web UI
+ships no control with no runtime effect), and the plaintext-password /
+hashed-at-rest contract is documented at the type.
 
 ### Gallery Page
 **`streaming/web/GalleryPage.kt`** — the pure `/api/gallery` pagination:
@@ -195,7 +227,14 @@ snapshot honestly (no token fire-and-forget refresh inside the request).
 tokens, rate-limited PBKDF2 login (`login`), request authorization
 (`authenticate`), CSRF origin checks (`isCsrfSafe`). Owned by the Streaming
 Manager so sessions survive a server recreation (e.g. a port change);
-`StreamingServer` only translates HTTP requests onto its interface.
+`StreamingServer` only translates HTTP requests onto its interface. Time
+flows through the injected `clock: () -> Long` (the Rtsp Session Authorizer's
+pattern), so the 60 s lockout and 24 h session expiry are JVM-tested;
+login failures carry a typed `LoginFailure` (NotConfigured / RateLimited /
+InvalidCredentials) and the Auth Filter maps reason → status — it never
+string-matches the human-readable message. Credentials are read live through
+the gate (the manager-owned reference *is* the provider); no auth snapshot is
+re-applied when the server is recreated.
 
 ### Frame Pipeline
 **`streaming/FramePipeline.kt`** — the web frame path: YUV in, overlaid JPEG
@@ -236,11 +275,16 @@ JVM-tested without a socket.
 ### RTSP Output
 **`streaming/RtspOutput.kt`** — the manager-side RTSP owner: retained
 `RtspConfig` while stopped, server lifecycle, the audio `InputStream` handle,
-the restart-vs-apply choice (through the diff verdict), URL building, and the
-audio-wanted/mic-arbitration decision. `StreamingManager` keeps its public
-surface (the Settings Applier's ~17 calls) and delegates — the manager
-retains fan-out and web/mDNS concerns the way `FramePipeline` absorbed the
-web frame path.
+URL building, and the audio-wanted/mic-arbitration decision. The
+restart-vs-apply choice has one routing point: an internal
+`update(trigger, transform)` lands the config change, diffs old vs new
+through `RtspConfigDiff`, and routes — any NeedsRestart field restarts,
+HotSwap-only changes go to `server.apply(config)` — with explicit triggers
+for the audio-track ladder (audio config restarts whenever the track is
+wanted) and for audio-wanted flips. The per-setting setters are one-line
+delegates over `update`; `StreamingManager` keeps its public surface (the
+Settings Applier's ~17 calls) and delegates — the manager retains fan-out and
+web/mDNS concerns the way `FramePipeline` absorbed the web frame path.
 
 ### AAC Format
 **`streaming/rtsp/AacFormat.kt`** — one home for the AAC stream's format
@@ -267,7 +311,13 @@ with `acquireKeepAlive()` / `beginExclusiveSession()` and restore with
 pure data built from `CameraSettings` plus the device's live ranges.
 `CameraService` only translates the plan into `CaptureRequestOptions` — the
 ISO/fps/night-vision math is unit-tested on the JVM instead of hiding in the
-service. `colorTemperatureKelvin` carries the clamped MANUAL-WB decision
+service. The plan also owns the exposure-index decision
+(`exposureIndex`: clamp to the live range, skip when unchanged) and the
+metering ladder (`meteringOnApply` / `meteringOnTap` returning a
+`MeteringDecision` — auto-cancel, plain, or none — with the 5-second
+auto-cancel constant named here); the service deduplicates all
+`FocusMeteringAction` construction behind that one translation.
+`colorTemperatureKelvin` carries the clamped MANUAL-WB decision
 (`COLOR_TEMPERATURE_MIN..MAX`, null unless white balance is MANUAL); manual
 mode is conveyed by AWB OFF and the Kelvin value is logged at apply time —
 per-sensor gains/matrix mapping stays device-default until a calibrated
@@ -288,23 +338,32 @@ camera-screen quick setting: pill label, sheet title, icon selector, editor
 shape (Toggle | Chips | Slider as functions of `CameraSettings` plus the
 device's `QuickSettingRanges`), and the write transform — a typed
 `QuickSettingEditorValue` in, updated `CameraSettings` out — so the catalog
-owns both the reads and the writes of every setting it describes. The
-horizontal bar and the sheet render from the catalog — CameraScreen keeps no
-per-control branches — SettingsScreen reuses the catalog's night-vision
-copy, slider ranges, and scene-mode options (the persistence bounds stay the
-one home; a parity test pins UI range == clamp), and
-`ZoomIndicator` calls the catalog's `zoomLabel` (Locale.US-pinned).
-Writes funnel through `CameraViewModel.updateQuickSetting(id, value)` onto
-the one `CameraSettingsEditor` path; no second write path exists and no
-`Any`-cast dispatch survives.
+owns both the reads and the writes of every setting it describes — for both
+screens: SettingsViewModel's camera-settings half has no per-field writers,
+it routes one `updateQuickSetting(type, value)` through the same
+`editorValueFor` + `descriptor.write` table, and SettingsScreen derives its
+dropdown options and labels from the descriptors (`chipLabel` is the one
+underscore→space rule). The horizontal bar and the sheet render from the
+catalog — CameraScreen keeps no per-control branches — SettingsScreen reuses
+the catalog's night-vision copy, slider ranges, and scene-mode options (the
+persistence bounds stay the one home; a parity test pins UI range == clamp),
+and `ZoomIndicator` calls the catalog's `zoomLabel` (Locale.US-pinned).
+Writes funnel through the one `CameraSettingsEditor` path; no second write
+table and no `Any`-cast dispatch survives.
 
 ### Camera Dashboard Policy
 **`camera/model/CameraDashboardPolicy.kt`** — the pure dashboard
 verdicts/formats the camera screen renders: the WiFi-banner message, server
-status tint/text ladders, thermal banner, network-quality badge, client
-pluralization, byte formatting, and the slider-endpoint trim. CameraScreen
-only maps the policy's answers onto composables — every ladder is
-JVM-tested, and no `String.format` without an explicit locale survives.
+status tint/text ladders, the stream-shutter button verdict
+(`StreamShutterVisual.of` — container tier, tint, icon-gating
+content-description, and click gate for the web/RTSP buttons, rendered by
+one `StreamShutterButton`), thermal banner, network-quality badge, client
+pluralization, byte formatting, the slider-endpoint trim, and the connection
+panel (`qualityIndicatorVisible`, `qualitySummary`, `connectionStatRows`,
+per-client header/rows — the panel renders policy-produced strings, so the
+KB-vs-formatBytes split is gone). CameraScreen only maps the policy's
+answers onto composables — every ladder is JVM-tested, and no
+`String.format` without an explicit locale survives.
 
 ### Stream Toggle
 **`camera/model/StreamToggle.kt`** — the single gate → start → session-begin
@@ -313,14 +372,32 @@ on/off. Returns a sealed `StreamStartOutcome` (Started | Disabled |
 StartFailed | BeginFailedRolledBack) so both clients — CameraViewModel
 (toasts) and the Web API Stream Handler (DTO mapping) — consume one set of
 failure semantics; a session-begin failure after a successful start rolls
-the stream back everywhere, not just on the web path.
+the stream back everywhere, not just on the web path. Its one `Transports`
+adapter is `streaming/StreamingTransports.kt`, built once over
+(StreamingManager, StreamingSession) with gate getters reading the manager's
+live flows — no client re-types the adapter and no gate reads a derived
+snapshot; the Stream Handler's start-all runs web+RTSP through the toggle's
+`startBoth` so the rollback discipline is single-homed. The record button's
+sibling verdict is Recording Toggle.
+
+### Recording Toggle
+**`camera/model/RecordingToggle.kt`** — the record button's verdict, the
+Stream Toggle's twin: `decide(currentState, audioWanted, onBeforeStart)`
+returns Start(config with includeAudio pre-resolved) or Stop over the
+Recording Controller's state, with the mic consult riding the pre-start hook.
+CameraViewModel executes the decision and keeps the wiring; the same file
+holds the two other camera-screen decisions as pure code — `stickyCameraState`
+(the never-regress-to-Idle filter over the service's camera-state flow) and
+`CameraInitRetry` (the bounded init retry budget).
 
 ### Resolution Apply Policy
 **`camera/model/ResolutionApplyPolicy.kt`** — the pure verdict on whether a
 resolution change rebinds now or defers to the next active session
-(`decide(demandActive, exclusiveActive, resolutionChanged)`); CameraService
-consults it at every former decision site and keeps only the pending field,
-the rebind call, and the resume hook.
+(`decide(demandActive, exclusiveActive, resolutionChanged)`), and the
+freedom predicate beneath it: `isCameraFree(demandActive, exclusiveActive)`
+is the one "camera is not busy" ladder, consulted by lens select, camera
+switch, and auto-recovery alike. CameraService keeps only the pending field,
+the rebind call, and the resume hook — no site re-derives the predicate.
 
 ### Frame Error Policy
 **`camera/model/FrameErrorPolicy.kt`** — the pure verdict on whether a
@@ -339,9 +416,10 @@ LensWebHandler entry point.
 ### Lens Inventory
 **`camera/LensInventory.kt`** — the pure lens-inventory knowledge: focal
 bands to labels (`Ultrawide`/`Wide`/`2x`…), OEM-duplicate removal, back-first
-ordering, the main-logical-back default index, and the enumeration-failure
-fallback pair. `CameraService` keeps the provider iteration and the Camera2
-reads and delegates every decision here. The combination ladder
+ordering, the main-logical-back default index, the enumeration-failure
+fallback pair, and the switch math (`nextIndex` cycle, `fallbackSelector`
+front/back fallback). `CameraService` keeps the provider iteration and the
+Camera2 reads and delegates every decision here. The combination ladder
 (`orderedCombinations`) and the 4:3-vs-16:9 analysis sizing stay in the
 service file as internal pure functions with their own tests — device-bound
 binding keeps no other home.
@@ -378,9 +456,11 @@ and `/api/status` display. Bandwidth numbers are measured client throughput —
 (hard restart choreography) when it stalls. Recovery re-attaches the environment
 through the Streaming Session's `refreshAfterRecovery()`. The decisions are
 the pure `WatchdogPolicy`: the SOFT/MEDIUM/HARD escalation ladder
-(`tierFor`), the stall verdict over a `HealthSnapshot` (`evaluate`), and the
-named verification windows; the coroutine loop keeps only timing and the
-recovery calls.
+(`tierFor`), the stall verdict over a `HealthSnapshot` (`evaluate`), the
+per-tier recovery-verification verdict (`verificationSuccess` — SOFT's
+frames-advanced-or-zero-clients, MEDIUM's isLive, HARD's isLive+cameraReady),
+and the named verification windows; the coroutine loop keeps only timing,
+the reads, and the recovery calls.
 
 ### Battery Quality Policy
 **`core/BatteryQualityPolicy.kt`** — the pure battery→quality ladder:
@@ -394,11 +474,14 @@ not cross-module config — locked by test.
 ### Interval Capture Policy
 **`capture/IntervalCapturePolicy.kt`** — the pure interval-capture policy:
 bounds (1–3600s), tick validation, first-vs-next delays, completion,
-flash mapping, progress data, and WorkManager status snapshots. The
-Scheduler only enqueues and the Worker only executes ticks; the Web API
-handler passes requests through untouched because the Scheduler clamps
-through the policy. The 3600s ceiling now covers the app screen too (it
-previously clamped only the Web API path).
+flash mapping, progress data, the bounded retry verdict
+(`retryVerdict(attempt, cause)` — at most `MAX_CAPTURE_ATTEMPTS` tries per
+tick, then the tick is skipped and the series continues), and WorkManager
+status snapshots. The Scheduler only enqueues (with the linear backoff
+criteria) and the Worker only executes ticks; the Web API handler passes
+requests through untouched because the Scheduler clamps through the policy.
+The 3600s ceiling now covers the app screen too (it previously clamped only
+the Web API path).
 
 ### Stream Quality Policy
 **`streaming/StreamQualityPolicy.kt`** — the single quality-resolution
@@ -454,9 +537,13 @@ the camera screen's ask-once permission prompt.
 **`gallery/GalleryPagerMath.kt`** — the media viewer pager's math as pure
 functions: `indexAfterDelete(currentIndex, sizeAfterDelete)` → the next
 page, the previous page at the end of the list, or null (pop back);
-`initialIndexFor(items, mediaId)` for opening on a tapped item;
-`clampedPage(current, size)` for the resync clamp. NavigationGraph's pager
-handler only resolves, deletes, and navigates.
+`initialIndexFor(items, mediaId)` for opening on a tapped item; and
+`viewerResyncTarget(items, mediaId, currentPage)` — the single resync
+verdict (known id pins its index, unknown id falls back to the
+indexAfterDelete neighbor rather than 0, empty list pops) that folds
+initial placement, list-shrink clamping, and the post-delete landing into
+one tested answer; NavigationGraph keeps one effect that consumes it and
+only resolves, deletes, and navigates.
 
 ### Viewer Zoom Policy
 **`gallery/ViewerZoomPolicy.kt`** — the media viewer's gesture policy, pure:
@@ -482,9 +569,11 @@ implementation, not copy-paste.
 ### Update Policy
 **`update/UpdatePolicy.kt`** — the pure update-check decisions: version
 `normalize`, numeric `isNewer` comparison, 24h `shouldAutoCheck` gate,
-`shouldNotify` dismissal check, and `shouldNotifyAfterCheck(result,
+`shouldNotify` dismissal check, `shouldNotifyAfterCheck(result,
 dismissedVersion)` — the one verdict on notify/saveLastCheck that both the
-startup auto-check and the manual ViewModel check consume. The checker's 403
+startup auto-check and the manual ViewModel check consume — and
+`selectApkAsset` (prefer the universal APK, else any APK), the release-asset
+ladder the network checker delegates to. The checker's 403
 path produces the real `UpdateCheckResult.RateLimited` (silent, like Error);
 no caller re-types the outcome choreography.
 
@@ -499,10 +588,15 @@ divergent copies.
 
 ### Overlay Layout Policy
 **`streaming/OverlayLayoutPolicy.kt`** — the pure overlay/masking math:
-`zoneToPixels` clipping, pixelate/blur downscale sizes, and hex color parsing.
+`zoneToPixels` clipping, pixelate/blur downscale sizes, hex color parsing,
+the overlay line selection (`buildOverlayLines` — timestamp, branding,
+status, and the overlay-side viewer pluralization), and the text-overlay
+position rect (`computeOverlayPosition` over the named
+`OVERLAY_MARGIN_PX`).
 `StreamOverlayRenderer` keeps only the Bitmap/Canvas adapter work and
-delegates every number to the policy, so the privacy-critical rect math is
-JVM-tested without a device.
+delegates every number — and every line decision — to the policy, so the
+privacy-critical rect math and the overlay text are JVM-tested without a
+device.
 
 ### Status Snapshot Builder
 **`streaming/web/StatusSnapshotBuilder.kt`** — the pure `/api/status`

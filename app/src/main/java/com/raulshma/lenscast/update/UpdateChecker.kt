@@ -3,7 +3,6 @@ package com.raulshma.lenscast.update
 import android.content.Context
 import android.content.pm.PackageManager
 import android.util.Log
-import com.raulshma.lenscast.update.model.GitHubAsset
 import com.raulshma.lenscast.update.model.GitHubRelease
 import com.raulshma.lenscast.update.model.UpdateCheckResult
 import com.raulshma.lenscast.core.AppJson
@@ -59,7 +58,7 @@ class UpdateChecker(private val context: Context) {
                 ?: return@withContext UpdateCheckResult.Error("Failed to parse release JSON")
 
             Log.d(TAG, "Latest release: ${release.tagName} with ${release.assets.size} assets")
-            val apkAsset = selectApkAsset(release.assets)
+            val apkAsset = UpdatePolicy.selectApkAsset(release.assets)
                 ?: return@withContext UpdateCheckResult.Error("No APK found in release")
 
             val currentVersion = getAppVersionName()
@@ -75,17 +74,6 @@ class UpdateChecker(private val context: Context) {
             Log.e(TAG, "Update check failed", e)
             UpdateCheckResult.Error(e.message ?: "Unknown error")
         }
-    }
-
-    private fun selectApkAsset(assets: List<GitHubAsset>): GitHubAsset? {
-        // Prefer universal APK for ABI compatibility
-        val universal = assets.firstOrNull {
-            it.name.endsWith(".apk") && it.name.contains("universal", ignoreCase = true)
-        }
-        if (universal != null) return universal
-
-        // Fallback to any APK
-        return assets.firstOrNull { it.name.endsWith(".apk") }
     }
 
     private fun getAppVersionName(): String {

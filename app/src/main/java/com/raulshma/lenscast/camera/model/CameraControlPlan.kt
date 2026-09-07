@@ -7,7 +7,10 @@ import android.hardware.camera2.CaptureRequest
  * balance, color temperature, focus — computed from [CameraSettings] plus the
  * device's live ranges. Pure data + pure builder, so the ISO/fps/night-vision
  * math is unit-testable on the JVM; the service only translates this plan into
- * [android.hardware.camera2.CaptureRequest] options.
+ * [android.hardware.camera2.CaptureRequest] options. The metering and
+ * exposure-index decisions ([meteringOnApply], [exposureIndex]) live here too,
+ * as pure data — the [FocusMeteringAction][androidx.camera.core.FocusMeteringAction]
+ * construction itself stays in the service.
  */
 data class CameraControlPlan(
     val fpsLower: Int,
@@ -33,7 +36,22 @@ data class CameraControlPlan(
      */
     val colorTemperatureKelvin: Int?,
 ) {
+    /** How a metering action should fire — the mode ladder in [meteringOnApply]. */
+    sealed interface MeteringDecision {
+        /** Meter, then auto-cancel after [METERING_AUTO_CANCEL_SECONDS]. */
+        data object AutoCancelMetering : MeteringDecision
+
+        /** Meter bare — it holds until the next metering replaces it. */
+        data object PlainMetering : MeteringDecision
+
+        /** Don't touch metering; MANUAL focus is driver-controlled. */
+        data object None : MeteringDecision
+    }
+
     companion object {
+        /** The auto-cancel window, in seconds, for deliberate metering. */
+        const val METERING_AUTO_CANCEL_SECONDS = 5L
+
         fun from(
             settings: CameraSettings,
             isoRange: ClosedRange<Int>,
@@ -165,5 +183,40 @@ data class CameraControlPlan(
                 }
             }
         }
+
+        /**
+         * The exposure-compensation decision: the persisted index clamped to
+         * the device's live range, or null when the device already sits on
+         * that index — re-writing the same index is skipped, not re-applied.
+         */
+        fun exposureIndex(
+            settings: CameraSettings,
+            rangeLower: Int,
+            rangeUpper: Int,
+            currentIndex: Int,
+        ): Int? {
+            val clamped = settings.exposureCompensation.coerceIn(rangeLower, rangeUpper)
+            return if (clamped != currentIndex) clamped else null
+        }
+
+        /**
+         * Which center AF/AE metering a settings apply fires, per focus mode:
+         * the continuous modes meter with the auto-cancel window, MANUAL
+         * leaves metering alone, everything else meters bare (it holds until
+         * replaced).
+         */
+        fun meteringOnApply(focusMode: FocusMode): MeteringDecision =
+            when (focusMode) {
+                FocusMode.CONTINUOUS_PICTURE, FocusMode.CONTINUOUS_VIDEO ->
+                    MeteringDecision.AutoCancelMetering
+                FocusMode.MANUAL -> MeteringDecision.None
+                else -> MeteringDecision.PlainMetering
+            }
+
+        /**
+         * A deliberate tap always meters with the auto-cancel window,
+         * whatever the focus mode.
+         */
+        fun meteringOnTap(): MeteringDecision = MeteringDecision.AutoCancelMetering
     }
 }

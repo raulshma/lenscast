@@ -8,6 +8,8 @@ import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.preferencesOf
 import androidx.datastore.preferences.core.stringPreferencesKey
 import com.raulshma.lenscast.camera.model.CameraSettings
+import com.raulshma.lenscast.camera.model.MaskingType
+import com.raulshma.lenscast.camera.model.MaskingZone
 import com.raulshma.lenscast.camera.model.NightVisionMode
 import com.raulshma.lenscast.camera.model.OverlaySettings
 import com.raulshma.lenscast.core.StreamDefaults
@@ -178,5 +180,64 @@ class SettingPrefTest {
     @Test
     fun `rtsp input format descriptor round trips`() {
         assertEquals(RtspInputFormat.AUTO, rtspInputFormatPref.decode(emptyPreferences()))
+    }
+
+    // ── Frame rate: one descriptor only ──
+
+    @Test
+    fun `frame rate persists through the camera settings descriptor`() {
+        // The former frameRatePref twin is gone; the one persisted home is
+        // the composite camera-settings decode, whose default is the
+        // STREAM_FPS the Applier's derived flow also starts from.
+        assertEquals(StreamDefaults.STREAM_FPS, cameraSettingsPref.decode(emptyPreferences()).frameRate)
+        assertEquals(60, cameraSettingsPref.roundTrip(CameraSettings(frameRate = 60)).frameRate)
+    }
+
+    // ── Masking zones through the overlay descriptor ──
+
+    @Test
+    fun `overlay settings descriptor round trips masking zones`() {
+        val zones = listOf(
+            MaskingZone(
+                id = "zone-1",
+                label = "Face",
+                type = MaskingType.PIXELATE,
+                x = 0.1f,
+                y = 0.25f,
+                width = 0.5f,
+                height = 0.75f,
+                pixelateSize = 32,
+                blurRadius = 12.5f,
+            ),
+            MaskingZone(id = "zone-2", label = "Plate", enabled = false, type = MaskingType.BLUR),
+        )
+        val settings = OverlaySettings(maskingEnabled = true, maskingZones = zones)
+        // The saver is the clamp owner: what comes back is the normalized
+        // input, zones included.
+        assertEquals(OverlaySettings.normalized(settings), overlaySettingsPref.roundTrip(settings))
+    }
+
+    @Test
+    fun `overlay settings saver clamps out-of-range masking zones`() {
+        val wild = OverlaySettings(
+            maskingEnabled = true,
+            maskingZones = listOf(
+                MaskingZone(
+                    x = -1f,
+                    y = 2f,
+                    width = 5f,
+                    height = 0f,
+                    pixelateSize = 999,
+                    blurRadius = 0.5f,
+                ),
+            ),
+        )
+        val zone = overlaySettingsPref.roundTrip(wild).maskingZones.single()
+        assertEquals(0f, zone.x)
+        assertEquals(1f, zone.y)
+        assertEquals(1f, zone.width)
+        assertEquals(0.01f, zone.height)
+        assertEquals(64, zone.pixelateSize)
+        assertEquals(1f, zone.blurRadius)
     }
 }

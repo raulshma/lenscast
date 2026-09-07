@@ -38,7 +38,6 @@ import com.raulshma.lenscast.camera.model.FocusApplyPolicy
 import com.raulshma.lenscast.camera.model.FrameErrorPolicy
 import com.raulshma.lenscast.camera.model.ResolutionApplyPolicy
 import com.raulshma.lenscast.core.YuvConverter
-import com.raulshma.lenscast.camera.model.FocusMode
 import com.raulshma.lenscast.camera.model.WhiteBalance
 import com.raulshma.lenscast.camera.model.HdrMode
 import com.raulshma.lenscast.camera.model.NightVisionMode
@@ -171,17 +170,40 @@ class CameraService(private val context: Context) {
             return
         }
         try {
-            val factory = SurfaceOrientedMeteringPointFactory(1f, 1f)
-            val point = factory.createPoint(x.coerceIn(0f, 1f), y.coerceIn(0f, 1f))
-            cam.cameraControl.startFocusAndMetering(
-                FocusMeteringAction.Builder(point)
-                    .setAutoCancelDuration(5, TimeUnit.SECONDS)
-                    .build()
-            )
+            startMetering(cam, x, y, CameraControlPlan.meteringOnTap())
             Log.d(TAG, "tapToFocus: x=$x, y=$y")
         } catch (e: Exception) {
             Log.w(TAG, "tapToFocus failed", e)
         }
+    }
+
+    /**
+     * The one MeteringDecision → CameraX translation, shared by tap-to-focus
+     * and the settings-apply metering: the plan owns which metering fires
+     * ([CameraControlPlan.meteringOnApply]/[CameraControlPlan.meteringOnTap]);
+     * this owns the [FocusMeteringAction] construction.
+     */
+    private fun startMetering(
+        cam: Camera,
+        x: Float,
+        y: Float,
+        decision: CameraControlPlan.MeteringDecision,
+    ) {
+        val factory = SurfaceOrientedMeteringPointFactory(1f, 1f)
+        val point = factory.createPoint(x.coerceIn(0f, 1f), y.coerceIn(0f, 1f))
+        val action = when (decision) {
+            CameraControlPlan.MeteringDecision.None -> return
+            CameraControlPlan.MeteringDecision.AutoCancelMetering ->
+                FocusMeteringAction.Builder(point)
+                    .setAutoCancelDuration(
+                        CameraControlPlan.METERING_AUTO_CANCEL_SECONDS,
+                        TimeUnit.SECONDS,
+                    )
+                    .build()
+            CameraControlPlan.MeteringDecision.PlainMetering ->
+                FocusMeteringAction.Builder(point).build()
+        }
+        cam.cameraControl.startFocusAndMetering(action)
     }
 
     fun setFrameListener(listener: ((ByteArray, Int, Int, Int) -> Unit)?) {
@@ -369,7 +391,14 @@ class CameraService(private val context: Context) {
         currentCameraSelector = lens.cameraSelector
         _isFrontCamera.value = lens.lensFacing == CameraSelector.LENS_FACING_FRONT
 
-        if (hasActiveCameraDemand() && exclusiveSessionRefCount == 0) {
+        // The freedom predicate (demand active, no exclusive session) is the
+        // pure ResolutionApplyPolicy's — same gate as rebind/switch/recover.
+        if (
+            ResolutionApplyPolicy.isCameraFree(
+                demandActive = hasActiveCameraDemand(),
+                exclusiveActive = exclusiveSessionRefCount > 0,
+            )
+        ) {
             rebindUseCases()
         } else {
             Log.d(TAG, "selectLens: selector updated; camera will switch on next active session")
@@ -679,17 +708,19 @@ class CameraService(private val context: Context) {
     fun switchCamera() {
         val lenses = _availableLenses.value
         if (lenses.isEmpty()) {
-            // Fallback to simple front/back toggle
-            currentCameraSelector = if (_isFrontCamera.value) {
-                CameraSelector.DEFAULT_BACK_CAMERA
-            } else {
-                CameraSelector.DEFAULT_FRONT_CAMERA
-            }
-            _isFrontCamera.value = !_isFrontCamera.value
+            // Fallback to simple front/back toggle — the pure LensInventory's.
+            val (selector, frontFacing) = LensInventory.fallbackSelector(_isFrontCamera.value)
+            currentCameraSelector = selector
+            _isFrontCamera.value = frontFacing
             val previewView = currentPreviewView
             if (previewView != null) {
                 startPreview(previewView)
-            } else if (hasActiveCameraDemand() && exclusiveSessionRefCount == 0) {
+            } else if (
+                ResolutionApplyPolicy.isCameraFree(
+                    demandActive = hasActiveCameraDemand(),
+                    exclusiveActive = exclusiveSessionRefCount > 0,
+                )
+            ) {
                 // Headless switch (preview hidden): just rebind to the new selector.
                 rebindUseCases()
             }
@@ -697,9 +728,7 @@ class CameraService(private val context: Context) {
         }
 
         // Cycle to next lens
-        val currentIndex = _selectedLensIndex.value
-        val nextIndex = (currentIndex + 1) % lenses.size
-        selectLens(nextIndex)
+        selectLens(LensInventory.nextIndex(_selectedLensIndex.value, lenses.size))
     }
 
     private val analysisExecutor by lazy {
@@ -746,7 +775,12 @@ class CameraService(private val context: Context) {
 
     private fun triggerAutoRecovery() {
         try {
-            if (hasActiveCameraDemand() && exclusiveSessionRefCount == 0) {
+            if (
+                ResolutionApplyPolicy.isCameraFree(
+                    demandActive = hasActiveCameraDemand(),
+                    exclusiveActive = exclusiveSessionRefCount > 0,
+                )
+            ) {
                 rebindUseCases()
                 Log.d(TAG, "Auto-recovery: rebind use cases attempted")
             }
@@ -842,12 +876,14 @@ class CameraService(private val context: Context) {
 
         try {
             val expState = cam.cameraInfo.exposureState
-            val lower = expState.exposureCompensationRange.lower
-            val upper = expState.exposureCompensationRange.upper
-            val value = settings.exposureCompensation.coerceIn(lower, upper)
-            if (value != expState.exposureCompensationIndex) {
-                cam.cameraControl.setExposureCompensationIndex(value)
-            }
+            // Clamp-and-skip is the plan's decision; null means the device
+            // already sits on the requested index.
+            CameraControlPlan.exposureIndex(
+                settings,
+                expState.exposureCompensationRange.lower,
+                expState.exposureCompensationRange.upper,
+                expState.exposureCompensationIndex,
+            )?.let { cam.cameraControl.setExposureCompensationIndex(it) }
         } catch (e: Exception) {
             Log.w(TAG, "Exposure compensation failed", e)
         }
@@ -855,26 +891,16 @@ class CameraService(private val context: Context) {
         // Center AF/AE metering only re-fires when the focus-relevant fields
         // moved (or after a fresh bind): a plain settings apply — every
         // slider tick reaches here twice — must not cancel a deliberate
-        // tap-to-focus. The pure decision lives in FocusApplyPolicy.
+        // tap-to-focus. The re-fire verdict lives in FocusApplyPolicy; which
+        // metering fires per focus mode lives in CameraControlPlan.
         if (forceFocusReapply || FocusApplyPolicy.needsReapply(lastFocusApplied, settings)) {
             try {
-                val factory = SurfaceOrientedMeteringPointFactory(1f, 1f)
-                val center = factory.createPoint(0.5f, 0.5f)
-                when (settings.focusMode) {
-                    FocusMode.CONTINUOUS_PICTURE, FocusMode.CONTINUOUS_VIDEO -> {
-                        cam.cameraControl.startFocusAndMetering(
-                            FocusMeteringAction.Builder(center)
-                                .setAutoCancelDuration(5, java.util.concurrent.TimeUnit.SECONDS)
-                                .build()
-                        )
-                    }
-                    FocusMode.MANUAL -> { }
-                    else -> {
-                        cam.cameraControl.startFocusAndMetering(
-                            FocusMeteringAction.Builder(center).build()
-                        )
-                    }
-                }
+                startMetering(
+                    cam,
+                    0.5f,
+                    0.5f,
+                    CameraControlPlan.meteringOnApply(settings.focusMode),
+                )
                 lastFocusApplied = settings
             } catch (e: Exception) {
                 Log.w(TAG, "Focus failed", e)

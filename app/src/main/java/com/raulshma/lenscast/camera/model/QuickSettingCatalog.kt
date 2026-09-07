@@ -51,7 +51,7 @@ sealed class QuickSettingEditor {
     data class Chips(
         val options: (QuickSettingRanges) -> List<String>,
         val selected: (CameraSettings) -> String,
-        val optionLabel: (String) -> String = { it.replace("_", " ") },
+        val optionLabel: (String) -> String = ::chipLabel,
     ) : QuickSettingEditor()
 
     data class Slider(
@@ -99,6 +99,13 @@ private fun sliderWrite(
     transform: (CameraSettings, Float) -> CameraSettings,
 ): (CameraSettings, QuickSettingEditorValue) -> CameraSettings =
     { settings, value -> transform(settings, (value as QuickSettingEditorValue.Slider).value) }
+
+/**
+ * The chip label for a raw option name — the one underscore→space rule,
+ * the [QuickSettingEditor.Chips] default optionLabel and the settings
+ * screen's chip renderer both label through.
+ */
+fun chipLabel(option: String): String = option.replace("_", " ")
 
 object QuickSettingCatalog {
 

@@ -112,6 +112,20 @@ class HttpAuthFilterTest {
     }
 
     @Test
+    fun `rate limited login is unauthorized with the lockout message`() {
+        val filter = HttpAuthFilter(enabledGate(), port = 8080)
+        val body = """{"username":"intruder","password":"nope"}""".toByteArray()
+        // Ten bad attempts fill the gate's budget; the eleventh is the lockout.
+        repeat(10) { filter.handleLogin("1.2.3.4", body.size, body) }
+        val result = filter.handleLogin("1.2.3.4", body.size, body)
+        assertEquals(401, result.statusCode)
+        assertEquals(
+            """{"error":"Too many attempts. Try again later."}""",
+            (result.body as HttpResult.ResponseBody.Text).text,
+        )
+    }
+
+    @Test
     fun `login tolerates whitespace and field order`() {
         val filter = HttpAuthFilter(enabledGate(), port = 8080)
         val body = """{ "password" : "nope" , "username" : "intruder" }""".toByteArray()

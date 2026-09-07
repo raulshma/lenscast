@@ -81,6 +81,29 @@ class IntervalCapturePolicyTest {
         assertEquals("ON", advanced.flashMode)
     }
 
+    // ── retryVerdict ──
+
+    @Test
+    fun `attempts below the bound retry`() {
+        for (attempt in 0 until IntervalCapturePolicy.MAX_CAPTURE_ATTEMPTS) {
+            assertEquals(
+                IntervalCapturePolicy.RetryVerdict.RETRY,
+                IntervalCapturePolicy.retryVerdict(attempt),
+            )
+        }
+        assertEquals(3, IntervalCapturePolicy.MAX_CAPTURE_ATTEMPTS)
+    }
+
+    @Test
+    fun `at the bound and beyond the tick gives up`() {
+        for (attempt in IntervalCapturePolicy.MAX_CAPTURE_ATTEMPTS..IntervalCapturePolicy.MAX_CAPTURE_ATTEMPTS + 5) {
+            assertEquals(
+                IntervalCapturePolicy.RetryVerdict.GIVE_UP,
+                IntervalCapturePolicy.retryVerdict(attempt),
+            )
+        }
+    }
+
     @Test
     fun `flash mapping is case-insensitive with off fallback`() {
         assertEquals(ImageCapture.FLASH_MODE_ON, IntervalCapturePolicy.resolveFlashMode("on"))

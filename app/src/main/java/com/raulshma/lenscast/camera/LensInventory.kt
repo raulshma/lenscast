@@ -5,7 +5,8 @@ import com.raulshma.lenscast.camera.model.CameraLensInfo
 
 /**
  * The lens-inventory knowledge: labels, OEM-duplicate removal, ordering,
- * the main-lens default, and the enumeration-failure fallback. Pure —
+ * the main-lens default, the switch-cycle index, the empty-inventory
+ * front/back toggle, and the enumeration-failure fallback. Pure —
  * the service keeps the provider iteration and the Camera2 reads, and
  * delegates every decision here, so lens behavior is testable without a
  * device.
@@ -48,6 +49,26 @@ object LensInventory {
     fun defaultBackIndex(sorted: List<CameraLensInfo>): Int =
         sorted.indexOfFirst { it.lensFacing == CameraSelector.LENS_FACING_BACK }
             .coerceAtLeast(0)
+
+    /**
+     * The next lens in the camera-switch cycle: one forward, wrapping to 0
+     * after the last entry. [size] must be non-empty — callers consult
+     * [fallbackSelector] first when the inventory is empty.
+     */
+    fun nextIndex(currentIndex: Int, size: Int): Int = (currentIndex + 1) % size
+
+    /**
+     * The empty-inventory fallback: a plain front/back toggle — currently
+     * front flips to the default back camera, anything else to the default
+     * front camera. Returns the selector to bind and the facing it
+     * represents.
+     */
+    fun fallbackSelector(currentFront: Boolean): Pair<CameraSelector, Boolean> =
+        if (currentFront) {
+            CameraSelector.DEFAULT_BACK_CAMERA to false
+        } else {
+            CameraSelector.DEFAULT_FRONT_CAMERA to true
+        }
 
     fun fallbackLenses(): List<CameraLensInfo> = listOf(
         CameraLensInfo(

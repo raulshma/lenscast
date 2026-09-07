@@ -13,7 +13,10 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.compose.NavHost
@@ -26,16 +29,15 @@ import com.raulshma.lenscast.capture.CaptureScreen
 import com.raulshma.lenscast.gallery.GalleryScreen
 import com.raulshma.lenscast.gallery.GalleryViewModel
 import com.raulshma.lenscast.gallery.MediaViewerScreen
-import com.raulshma.lenscast.gallery.clampedPage
 import com.raulshma.lenscast.gallery.indexAfterDelete
 import com.raulshma.lenscast.gallery.initialIndexFor
+import com.raulshma.lenscast.gallery.viewerResyncTarget
 import com.raulshma.lenscast.settings.CameraSettingsScreen
 import com.raulshma.lenscast.settings.AppSettingsScreen
 import com.raulshma.lenscast.ui.animation.LocalAnimatedVisibilityScope
 import com.raulshma.lenscast.ui.animation.LocalSharedTransitionScope
 import com.raulshma.lenscast.update.UpdateNotifier
 import androidx.compose.foundation.pager.rememberPagerState
-import kotlinx.coroutines.launch
 
 private const val ANIM_DURATION = 400
 
@@ -143,20 +145,26 @@ fun NavigationGraph() {
                         pageCount = { allItems.size },
                     )
 
+                    // The one resync verdict: pin to the routed id, clamp on a
+                    // shrunken list, or land on the delete-fallback neighbor
+                    // once the routed id left the list. The first resync of a
+                    // freshly opened viewer is the initial placement and jumps
+                    // instantly (the pager may have been created before the
+                    // list loaded); later resyncs — list changes and the
+                    // post-delete landing — animate.
+                    var placed by rememberSaveable { mutableStateOf(false) }
                     LaunchedEffect(allItems) {
-                        if (pagerState.pageCount > 0 && pagerState.currentPage != initialIndex && initialIndex < allItems.size) {
-                            pagerState.scrollToPage(initialIndex)
+                        viewerResyncTarget(allItems, mediaId, pagerState.currentPage)?.let { target ->
+                            if (placed) {
+                                pagerState.animateScrollToPage(target)
+                            } else {
+                                pagerState.scrollToPage(target)
+                            }
                         }
+                        if (allItems.isNotEmpty()) placed = true
                     }
 
                     val currentItem = allItems.getOrNull(pagerState.currentPage)
-                    val coroutineScope = rememberCoroutineScope()
-
-                    LaunchedEffect(allItems) {
-                        clampedPage(pagerState.currentPage, allItems.size)?.let { target ->
-                            pagerState.scrollToPage(target)
-                        }
-                    }
 
                     CompositionLocalProvider(LocalAnimatedVisibilityScope provides this@composable) {
                         MediaViewerScreen(
@@ -167,12 +175,11 @@ fun NavigationGraph() {
                             onDeleteCurrent = {
                                 val currentIdx = pagerState.currentPage
                                 currentItem?.id?.let { galleryViewModel.deleteItem(it) }
-                                // Pure pager math: next page, else previous, else pop.
-                                val fallbackIndex = indexAfterDelete(currentIdx, allItems.size - 1)
-                                if (fallbackIndex == null) {
+                                // The pager lands on the delete-fallback neighbor
+                                // through the resync effect; pop only when the
+                                // gallery is now empty.
+                                if (indexAfterDelete(currentIdx, allItems.size - 1) == null) {
                                     navController.popBackStack()
-                                } else {
-                                    coroutineScope.launch { pagerState.animateScrollToPage(fallbackIndex) }
                                 }
                             },
                         )

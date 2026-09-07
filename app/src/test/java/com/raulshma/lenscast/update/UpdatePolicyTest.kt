@@ -5,6 +5,7 @@ import com.raulshma.lenscast.update.model.GitHubRelease
 import com.raulshma.lenscast.update.model.UpdateCheckResult
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -124,6 +125,53 @@ class UpdatePolicyTest {
         assertTrue(UpdatePolicy.shouldNotify(null, "v1.2.0"))
         assertTrue(UpdatePolicy.shouldNotify("", "v1.2.0"))
         assertTrue(UpdatePolicy.shouldNotify("   ", "v1.2.0"))
+    }
+
+    // selectApkAsset
+
+    private fun asset(name: String) = GitHubAsset(name, "https://example.invalid/$name", 1L)
+
+    @Test
+    fun `a universal apk wins over the other apks`() {
+        val universal = asset("lenscast-2.0-universal.apk")
+        val chosen = UpdatePolicy.selectApkAsset(
+            listOf(asset("lenscast-2.0-arm64-v8a.apk"), universal, asset("notes.txt")),
+        )
+        assertEquals(universal, chosen)
+    }
+
+    @Test
+    fun `the universal match is case-insensitive`() {
+        val chosen = UpdatePolicy.selectApkAsset(listOf(asset("LensCast-Universal.apk")))
+        assertEquals("LensCast-Universal.apk", chosen?.name)
+    }
+
+    @Test
+    fun `any apk is the fallback when no universal ships`() {
+        val arm64 = asset("lenscast-arm64-v8a.apk")
+        val chosen = UpdatePolicy.selectApkAsset(listOf(asset("checksums.txt"), arm64))
+        assertEquals(arm64, chosen)
+    }
+
+    @Test
+    fun `non-apk assets never win`() {
+        assertNull(
+            UpdatePolicy.selectApkAsset(
+                listOf(asset("release-notes.txt"), asset("universal-blockmap.zip")),
+            )
+        )
+    }
+
+    @Test
+    fun `a release with no apk yields null`() {
+        assertNull(UpdatePolicy.selectApkAsset(emptyList()))
+    }
+
+    @Test
+    fun `the apk extension match is exact-case`() {
+        // Pinned: today's ladder matches ".apk" exactly, so an ".APK" asset
+        // is not picked up — loosening that is a deliberate policy change.
+        assertNull(UpdatePolicy.selectApkAsset(listOf(asset("lenscast-universal.APK"))))
     }
 
     // shouldNotifyAfterCheck

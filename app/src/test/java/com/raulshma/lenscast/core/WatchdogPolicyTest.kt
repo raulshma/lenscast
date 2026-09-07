@@ -1,6 +1,7 @@
 package com.raulshma.lenscast.core
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -234,5 +235,143 @@ class WatchdogPolicyTest {
         val stalled = snapshot(processedFrames = 130, lastProcessedFrameCount = 130)
         assertEquals(WatchdogPolicy.StallReason.FRAME_STALL, WatchdogPolicy.evaluate(stalled))
         assertNull(WatchdogPolicy.updatedTracking(stalled))
+    }
+
+    // ── verificationSuccess ──
+
+    @Test
+    fun `soft recovery succeeds when frames advanced across the window`() {
+        assertTrue(
+            WatchdogPolicy.verificationSuccess(
+                WatchdogPolicy.RecoveryTier.SOFT,
+                framesAdvanced = true,
+                clientCount = 1,
+                isLive = false,
+                cameraReady = false,
+            )
+        )
+    }
+
+    @Test
+    fun `soft recovery assumes success when no clients are connected to verify against`() {
+        assertTrue(
+            WatchdogPolicy.verificationSuccess(
+                WatchdogPolicy.RecoveryTier.SOFT,
+                framesAdvanced = false,
+                clientCount = 0,
+                isLive = false,
+                cameraReady = false,
+            )
+        )
+        // Advancing frames succeed with or without an audience.
+        assertTrue(
+            WatchdogPolicy.verificationSuccess(
+                WatchdogPolicy.RecoveryTier.SOFT,
+                framesAdvanced = true,
+                clientCount = 0,
+                isLive = false,
+                cameraReady = false,
+            )
+        )
+    }
+
+    @Test
+    fun `soft recovery fails when frames are stalled with clients connected`() {
+        assertFalse(
+            WatchdogPolicy.verificationSuccess(
+                WatchdogPolicy.RecoveryTier.SOFT,
+                framesAdvanced = false,
+                clientCount = 3,
+                isLive = false,
+                cameraReady = false,
+            )
+        )
+    }
+
+    @Test
+    fun `medium recovery succeeds only when the stream is live again`() {
+        assertTrue(
+            WatchdogPolicy.verificationSuccess(
+                WatchdogPolicy.RecoveryTier.MEDIUM,
+                framesAdvanced = false,
+                clientCount = 1,
+                isLive = true,
+                cameraReady = false,
+            )
+        )
+        assertFalse(
+            WatchdogPolicy.verificationSuccess(
+                WatchdogPolicy.RecoveryTier.MEDIUM,
+                framesAdvanced = false,
+                clientCount = 1,
+                isLive = false,
+                cameraReady = false,
+            )
+        )
+    }
+
+    @Test
+    fun `hard recovery needs the stream live and the camera ready`() {
+        assertTrue(
+            WatchdogPolicy.verificationSuccess(
+                WatchdogPolicy.RecoveryTier.HARD,
+                framesAdvanced = false,
+                clientCount = 1,
+                isLive = true,
+                cameraReady = true,
+            )
+        )
+        assertFalse(
+            WatchdogPolicy.verificationSuccess(
+                WatchdogPolicy.RecoveryTier.HARD,
+                framesAdvanced = false,
+                clientCount = 1,
+                isLive = true,
+                cameraReady = false,
+            )
+        )
+        assertFalse(
+            WatchdogPolicy.verificationSuccess(
+                WatchdogPolicy.RecoveryTier.HARD,
+                framesAdvanced = false,
+                clientCount = 1,
+                isLive = false,
+                cameraReady = true,
+            )
+        )
+    }
+
+    @Test
+    fun `unconsulted inputs never flip another tier's verdict`() {
+        // Clients alone pass neither MEDIUM nor HARD.
+        assertFalse(
+            WatchdogPolicy.verificationSuccess(
+                WatchdogPolicy.RecoveryTier.MEDIUM,
+                framesAdvanced = false,
+                clientCount = 5,
+                isLive = false,
+                cameraReady = false,
+            )
+        )
+        assertFalse(
+            WatchdogPolicy.verificationSuccess(
+                WatchdogPolicy.RecoveryTier.HARD,
+                framesAdvanced = false,
+                clientCount = 5,
+                isLive = false,
+                cameraReady = false,
+            )
+        )
+        // SOFT stays conservative without an observed frame advance: stalled
+        // frames with clients connected is not a recovery.
+        assertFalse(
+            WatchdogPolicy.verificationSuccess(
+                WatchdogPolicy.RecoveryTier.SOFT,
+                framesAdvanced = false,
+                clientCount = 1,
+                isLive = true,
+                cameraReady = false,
+            )
+        )
     }
 }

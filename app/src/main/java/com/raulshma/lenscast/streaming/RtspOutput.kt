@@ -4,6 +4,7 @@ import android.util.Log
 import com.raulshma.lenscast.core.NetworkUtils
 import com.raulshma.lenscast.streaming.rtsp.RtspAuthSpec
 import com.raulshma.lenscast.streaming.rtsp.RtspConfig
+import com.raulshma.lenscast.streaming.rtsp.RtspConfigDiff
 import com.raulshma.lenscast.streaming.rtsp.RtspInputFormat
 import com.raulshma.lenscast.streaming.rtsp.RtspServer
 import com.raulshma.lenscast.streaming.rtsp.RtspUriPolicy
@@ -45,23 +46,41 @@ internal interface RtspServerHandle {
 }
 
 /**
+ * How a settings change reaches a live output beyond what the diff verdict
+ * decides. [FROM_DIFF] is the default routing: NEEDS_RESTART fields restart
+ * through the audio ladder, HotSwap-only changes apply live, and a change
+ * to nothing does nothing. [AUDIO_LADDER] forces the restart ladder for
+ * changes no [RtspConfig] field carries or that must ladder even when the
+ * value did not move (the capture-side channel/echo settings, the audio
+ * bitrate). [WHILE_ACTIVE] restarts whenever the output is live — the
+ * stream-audio toggle's track-existence change is real whether it turns
+ * the track on or off.
+ */
+internal enum class RestartTrigger {
+    FROM_DIFF,
+    AUDIO_LADDER,
+    WHILE_ACTIVE,
+}
+
+/**
  * The RTSP output, pulled out of [StreamingManager]: the retained
  * [RtspConfig] (every setting lands here even while the output is stopped,
  * so the next start picks it all up), the server lifecycle with the
- * restart-vs-apply choice per change, the audio subscriber [InputStream]
- * handle, the stream URL, and the audio-wanted / mic-arbitration decision
- * (stream audio on and no recording capture claiming the microphone). The
- * manager keeps the public surface, the fan-out, and the web/mDNS concerns;
- * everything "the RTSP output" means sits behind this narrow interface.
- * Decisions are JVM-tested behind the [RtspAudioSource] / [RtspServerHandle]
- * seams.
+ * restart-vs-apply choice routed through one entry — [update] lands the
+ * change and lets the [RtspConfigDiff] scope tags decide — the audio
+ * subscriber [InputStream] handle, the stream URL, and the audio-wanted /
+ * mic-arbitration decision (stream audio on and no recording capture
+ * claiming the microphone). The manager keeps the public surface, the
+ * fan-out, and the web/mDNS concerns; everything "the RTSP output" means
+ * sits behind this narrow interface. Decisions are JVM-tested behind the
+ * [RtspAudioSource] / [RtspServerHandle] seams.
  *
  * Semantics carried over unchanged: audio bitrate, channel count, and echo
  * cancellation are start-only encoder settings (see
  * [com.raulshma.lenscast.streaming.rtsp.RtspConfigDiff]) — a live output
- * enforces them by restart; frame rate, input format, and auth hot-swap via
- * [RtspServerHandle.apply]; a port change restarts; recording start/stop
- * never restarts a running output.
+ * enforces them by the audio restart ladder; frame rate, input format, and
+ * auth hot-swap via [RtspServerHandle.apply]; a port change restarts;
+ * recording start/stop never restarts a running output.
  */
 internal class RtspOutput(
     private val audio: RtspAudioSource,
@@ -158,52 +177,51 @@ internal class RtspOutput(
 
     /** A new input format reconfigures the encoder inside the running server — hot-swap. */
     fun setInputFormat(format: RtspInputFormat) {
-        if (format == config.inputFormat) return
-        config = config.copy(inputFormat = format)
-        server?.apply(config)
+        update { it.copy(inputFormat = format) }
     }
 
     /** The frame rate reaches the RTP timestamp increment through the live config getter — hot-swap. */
     fun setFrameRate(fps: Int) {
-        config = config.copy(videoFrameRate = fps)
-        server?.apply(config)
+        update { it.copy(videoFrameRate = fps) }
     }
 
     /** The running server's authorizer reads the auth spec live — re-reads it here and hot-swaps. */
     fun setAuth() {
-        config = config.copy(auth = authSpec())
-        server?.apply(config)
+        update { it.copy(auth = authSpec()) }
     }
 
     /**
      * The audio bitrate: a NEEDS_RESTART change ([AacEncoder][com.raulshma.lenscast.streaming.rtsp.AacEncoder]
      * only reads it at its next start), so it is retained here and — while
      * the output is live with the audio track wanted — enforced by the
-     * audio restart ladder below. Applying it live would silently no-op.
+     * audio restart ladder. Applying it live would silently no-op. The
+     * ladder fires even when the value did not move, exactly like the
+     * hand-coded ladder it replaced.
      */
     fun setAudioBitrate(bitrateKbps: Int) {
-        config = config.copy(audioBitrateKbps = bitrateKbps)
-        restartIfAudioTrackWanted()
+        update(RestartTrigger.AUDIO_LADDER) { it.copy(audioBitrateKbps = bitrateKbps) }
     }
 
     /**
      * An audio-capture change the encoder only reads at start (channel
      * count, echo cancellation): the next start's capture config carries it,
-     * and a live output enforces it through the same restart ladder.
+     * and a live output enforces it through the same restart ladder. No
+     * [RtspConfig] field moves — the trigger forces the ladder.
      */
     fun restartForAudioConfigChange() {
-        restartIfAudioTrackWanted()
+        update(trigger = RestartTrigger.AUDIO_LADDER)
     }
 
     /**
      * The stream-audio toggle — the one audio change that restarts even when
-     * turning the track off, because the audio track changes either way.
+     * turning the track off, because the audio track changes either way. The
+     * flag is not a [RtspConfig] field (it resolves into the config at
+     * start), so the trigger restarts whenever the output is live, diff or
+     * not.
      */
     fun setAudioWanted(wanted: Boolean) {
         streamAudioEnabled = wanted
-        if (active.get()) {
-            restartServer()
-        }
+        update(trigger = RestartTrigger.WHILE_ACTIVE)
     }
 
     /**
@@ -213,6 +231,29 @@ internal class RtspOutput(
      */
     fun setRecordingCaptureActive(recording: Boolean) {
         recordingCaptureActive = recording
+    }
+
+    /**
+     * The one settings entry: land the transform on the retained config,
+     * then route by the [RtspConfigDiff] verdict — any NEEDS_RESTART field
+     * takes the audio restart ladder, HotSwap-only changes apply live, and
+     * an empty diff does nothing. The trigger overrides carry the two
+     * changes no single config field expresses (see [RestartTrigger]).
+     * [transform] sits last so setters can pass it as a trailing lambda.
+     */
+    internal fun update(
+        trigger: RestartTrigger = RestartTrigger.FROM_DIFF,
+        transform: (RtspConfig) -> RtspConfig = { it },
+    ) {
+        val old = config
+        config = transform(old)
+        val changed = RtspConfigDiff.of(old, config)
+        when {
+            trigger == RestartTrigger.WHILE_ACTIVE && active.get() -> restartServer()
+            trigger == RestartTrigger.AUDIO_LADDER || RtspConfigDiff.needsRestart(changed) ->
+                restartIfAudioTrackWanted()
+            changed.isNotEmpty() -> server?.apply(config)
+        }
     }
 
     /** The audio restart ladder: restart a live output only while the audio track matters to it. */

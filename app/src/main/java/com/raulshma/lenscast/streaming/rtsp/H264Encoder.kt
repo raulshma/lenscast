@@ -147,8 +147,6 @@ class H264Encoder {
         Log.d(TAG, "H264 encoder stopped (dropped $droppedFrames frames)")
     }
 
-    fun isRunning(): Boolean = running.get()
-
     fun isEncoderLagged(): Boolean {
         return pendingFrames.get() >= MAX_PENDING_FRAMES
     }

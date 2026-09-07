@@ -4,8 +4,9 @@ package com.raulshma.lenscast.core
  * Pure decisions for the Stream Watchdog: the recovery-tier ladder, the
  * stream-health evaluation over a [HealthSnapshot], the user-facing failure
  * strings, the frame-tracking bookkeeping a healthy check leaves behind, and
- * the recovery verification windows. The watchdog's coroutine loop keeps the
- * timing, the recovery calls, and the state; every decision delegates here.
+ * the recovery verification windows plus the per-tier verification verdicts
+ * ([verificationSuccess]). The watchdog's coroutine loop keeps the timing,
+ * the recovery calls, and the state; every decision delegates here.
  */
 object WatchdogPolicy {
 
@@ -18,6 +19,28 @@ object WatchdogPolicy {
     const val RECOVERY_VERIFICATION_WINDOW_MS = 3_000L
     /** Hard recovery re-initialized everything — give it twice the delay. */
     const val HARD_VERIFICATION_DELAY_MS = 2 * RECOVERY_VERIFICATION_DELAY_MS
+
+    /**
+     * The post-recovery verdict, per tier — what the watchdog's verification
+     * window is for:
+     * - SOFT: frames advanced across the observation window, or no clients
+     *   are connected to verify against (assume OK).
+     * - MEDIUM: the stream is live again.
+     * - HARD: the stream is live and the camera is Ready.
+     * Every call site passes every argument explicitly; a tier that doesn't
+     * consult an input ignores it.
+     */
+    fun verificationSuccess(
+        tier: RecoveryTier,
+        framesAdvanced: Boolean,
+        clientCount: Int,
+        isLive: Boolean,
+        cameraReady: Boolean,
+    ): Boolean = when (tier) {
+        RecoveryTier.SOFT -> framesAdvanced || clientCount == 0
+        RecoveryTier.MEDIUM -> isLive
+        RecoveryTier.HARD -> isLive && cameraReady
+    }
 
     enum class RecoveryTier {
         SOFT,   // Rebind use cases

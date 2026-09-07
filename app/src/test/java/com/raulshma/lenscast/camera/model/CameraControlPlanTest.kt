@@ -100,4 +100,107 @@ class CameraControlPlanTest {
         val plan = CameraControlPlan.from(CameraSettings(), isoRange, exposureRange)
         assertNull(plan.colorTemperatureKelvin)
     }
+
+    // ── the exposure-compensation decision ──
+
+    @Test
+    fun `exposure index passes through within the device range`() {
+        val index = CameraControlPlan.exposureIndex(
+            CameraSettings(exposureCompensation = 3),
+            rangeLower = -6,
+            rangeUpper = 6,
+            currentIndex = 0,
+        )
+        assertEquals(3, index)
+    }
+
+    @Test
+    fun `exposure index clamps to the device range`() {
+        val low = CameraControlPlan.exposureIndex(
+            CameraSettings(exposureCompensation = -12),
+            rangeLower = -6,
+            rangeUpper = 6,
+            currentIndex = 0,
+        )
+        assertEquals(-6, low)
+
+        val high = CameraControlPlan.exposureIndex(
+            CameraSettings(exposureCompensation = 12),
+            rangeLower = -6,
+            rangeUpper = 6,
+            currentIndex = 0,
+        )
+        assertEquals(6, high)
+    }
+
+    @Test
+    fun `exposure index skips when the device already applies it`() {
+        assertNull(
+            CameraControlPlan.exposureIndex(
+                CameraSettings(exposureCompensation = 2),
+                rangeLower = -6,
+                rangeUpper = 6,
+                currentIndex = 2,
+            ),
+        )
+    }
+
+    @Test
+    fun `clamped exposure equal to the current index still skips`() {
+        assertNull(
+            CameraControlPlan.exposureIndex(
+                CameraSettings(exposureCompensation = 9),
+                rangeLower = -6,
+                rangeUpper = 6,
+                currentIndex = 6,
+            ),
+        )
+    }
+
+    // ── the metering ladder ──
+
+    @Test
+    fun `continuous focus modes meter with the auto-cancel window`() {
+        assertEquals(
+            CameraControlPlan.MeteringDecision.AutoCancelMetering,
+            CameraControlPlan.meteringOnApply(FocusMode.CONTINUOUS_PICTURE),
+        )
+        assertEquals(
+            CameraControlPlan.MeteringDecision.AutoCancelMetering,
+            CameraControlPlan.meteringOnApply(FocusMode.CONTINUOUS_VIDEO),
+        )
+    }
+
+    @Test
+    fun `manual focus fires no metering`() {
+        assertEquals(
+            CameraControlPlan.MeteringDecision.None,
+            CameraControlPlan.meteringOnApply(FocusMode.MANUAL),
+        )
+    }
+
+    @Test
+    fun `remaining focus modes meter bare`() {
+        assertEquals(
+            CameraControlPlan.MeteringDecision.PlainMetering,
+            CameraControlPlan.meteringOnApply(FocusMode.AUTO),
+        )
+        assertEquals(
+            CameraControlPlan.MeteringDecision.PlainMetering,
+            CameraControlPlan.meteringOnApply(FocusMode.MACRO),
+        )
+    }
+
+    @Test
+    fun `a tap always meters with the auto-cancel window`() {
+        assertEquals(
+            CameraControlPlan.MeteringDecision.AutoCancelMetering,
+            CameraControlPlan.meteringOnTap(),
+        )
+    }
+
+    @Test
+    fun `the auto-cancel window is five seconds`() {
+        assertEquals(5L, CameraControlPlan.METERING_AUTO_CANCEL_SECONDS)
+    }
 }

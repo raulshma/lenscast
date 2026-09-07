@@ -58,22 +58,66 @@ class GalleryPagerMathTest {
         assertEquals(0, initialIndexFor(emptyList(), "missing"))
     }
 
-    // ── clampedPage ──
+    // ── viewerResyncTarget ──
 
     @Test
-    fun `in-range pages need no resync`() {
-        assertNull(clampedPage(current = 0, size = 3))
-        assertNull(clampedPage(current = 2, size = 3))
+    fun `initial open resyncs to the tapped item's index`() {
+        val items = listOf(item("a"), item("b"), item("c"))
+        assertEquals(1, viewerResyncTarget(items, "b", currentPage = 0))
+        assertEquals(2, viewerResyncTarget(items, "c", currentPage = 0))
+    }
+
+    @Test
+    fun `an unknown id on first placement stays on the first page`() {
+        // Stale-route fallback: the pager already sits on page 0, so no resync.
+        val items = listOf(item("a"), item("b"))
+        assertNull(viewerResyncTarget(items, "missing", currentPage = 0))
+        assertNull(viewerResyncTarget(emptyList(), "missing", currentPage = 0))
+    }
+
+    @Test
+    fun `a known id resyncs when the list shifted it`() {
+        // "d" sat at index 3; an earlier item left the list and slid it to 2.
+        val items = listOf(item("b"), item("c"), item("d"))
+        assertEquals(2, viewerResyncTarget(items, "d", currentPage = 3))
     }
 
     @Test
     fun `a page past the shrunken list resyncs to the last page`() {
-        assertEquals(2, clampedPage(current = 3, size = 3))
-        assertEquals(0, clampedPage(current = 5, size = 1))
+        val items = listOf(item("a"), item("b"), item("c"))
+        assertEquals(2, viewerResyncTarget(items, "missing", currentPage = 5))
+        assertEquals(0, viewerResyncTarget(listOf(item("a")), "missing", currentPage = 3))
     }
 
     @Test
-    fun `an empty list needs no resync - the viewer pops back instead`() {
-        assertNull(clampedPage(current = 0, size = 0))
+    fun `deleting the current item already sits on the next-page neighbor`() {
+        // Deleting index 2 of 5: the old index 3 slides into page 2 — no scroll.
+        val after = listOf(item("a"), item("b"), item("d"), item("e"))
+        assertNull(viewerResyncTarget(after, "c", currentPage = 2))
+    }
+
+    @Test
+    fun `deleting the first item stays on the new first page`() {
+        // Deleting index 0 of 3: the old index 1 slides into page 0.
+        val after = listOf(item("b"), item("c"))
+        assertNull(viewerResyncTarget(after, "a", currentPage = 0))
+    }
+
+    @Test
+    fun `deleting the last item resyncs to the previous page`() {
+        // Deleting index 4 of 5: page 4 no longer exists, fall back to 3.
+        val after = listOf(item("a"), item("b"), item("c"), item("d"))
+        assertEquals(3, viewerResyncTarget(after, "e", currentPage = 4))
+    }
+
+    @Test
+    fun `deleting the only item needs no resync - the viewer pops back`() {
+        assertNull(viewerResyncTarget(emptyList(), "a", currentPage = 0))
+    }
+
+    @Test
+    fun `no resync when the pager already sits on its target`() {
+        val items = listOf(item("a"), item("b"), item("c"))
+        assertNull(viewerResyncTarget(items, "b", currentPage = 1))
     }
 }

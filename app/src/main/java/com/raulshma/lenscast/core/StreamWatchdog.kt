@@ -146,10 +146,10 @@ class StreamWatchdog(
                     val recoveryTier = WatchdogPolicy.tierFor(failures)
 
                     updateState(WatchdogStatus.RECOVERING)
-                    val backoffMs = calculateBackoff(failures)
-                    Log.d(TAG, "Attempting $recoveryTier recovery (attempt $failures/$maxRetries, backoff ${backoffMs}ms)")
+                    val backoffDelayMs = backoffMs(failures)
+                    Log.d(TAG, "Attempting $recoveryTier recovery (attempt $failures/$maxRetries, backoff ${backoffDelayMs}ms)")
 
-                    delay(backoffMs)
+                    delay(backoffDelayMs)
 
                     val recovered = attemptRecovery(recoveryTier)
 
@@ -246,7 +246,12 @@ class StreamWatchdog(
         }
     }
 
-    /** Post-recovery health verification, per tier, with today's windows. */
+    /**
+     * Post-recovery health verification, per tier. The watchdog owns the
+     * timing — the tier's delay, plus SOFT's before/after frame reads across
+     * the observation window — and the verdict is
+     * [WatchdogPolicy.verificationSuccess].
+     */
     private suspend fun verifyRecovery(tier: RecoveryTier): Boolean = when (tier) {
         RecoveryTier.SOFT -> {
             // Wait a moment and check if frames start flowing again
@@ -255,8 +260,13 @@ class StreamWatchdog(
             delay(WatchdogPolicy.RECOVERY_VERIFICATION_WINDOW_MS)
             val framesAfterWait = streamingManager.processedFrames.value
 
-            val success = framesAfterWait > framesBeforeWait ||
-                    streamingManager.clientCount.value == 0 // No clients = can't verify, assume OK
+            val success = WatchdogPolicy.verificationSuccess(
+                tier = tier,
+                framesAdvanced = framesAfterWait > framesBeforeWait,
+                clientCount = streamingManager.clientCount.value,
+                isLive = streamingManager.isLiveStreaming(),
+                cameraReady = cameraService.cameraState.value is CameraState.Ready,
+            )
 
             if (success) {
                 Log.d(TAG, "Soft recovery succeeded (frames: $framesBeforeWait → $framesAfterWait)")
@@ -266,21 +276,31 @@ class StreamWatchdog(
 
         RecoveryTier.MEDIUM -> {
             delay(WatchdogPolicy.RECOVERY_VERIFICATION_DELAY_MS)
-            val isLive = streamingManager.isLiveStreaming()
+            val success = WatchdogPolicy.verificationSuccess(
+                tier = tier,
+                framesAdvanced = false,
+                clientCount = streamingManager.clientCount.value,
+                isLive = streamingManager.isLiveStreaming(),
+                cameraReady = cameraService.cameraState.value is CameraState.Ready,
+            )
 
-            if (isLive) {
+            if (success) {
                 Log.d(TAG, "Medium recovery succeeded")
             }
-            isLive
+            success
         }
 
         RecoveryTier.HARD -> {
             // Verify with a longer window for hard recovery
             delay(WatchdogPolicy.HARD_VERIFICATION_DELAY_MS)
-            val isLive = streamingManager.isLiveStreaming()
-            val cameraReady = cameraService.cameraState.value is CameraState.Ready
+            val success = WatchdogPolicy.verificationSuccess(
+                tier = tier,
+                framesAdvanced = false,
+                clientCount = streamingManager.clientCount.value,
+                isLive = streamingManager.isLiveStreaming(),
+                cameraReady = cameraService.cameraState.value is CameraState.Ready,
+            )
 
-            val success = isLive && cameraReady
             if (success) {
                 Log.d(TAG, "Hard recovery succeeded")
             }
@@ -289,8 +309,6 @@ class StreamWatchdog(
     }
 
     // ── Helpers ──
-
-    private fun calculateBackoff(attempt: Int): Long = backoffMs(attempt)
 
     private fun updateState(status: WatchdogStatus? = null) {
         val currentStatus = status ?: when {

@@ -77,6 +77,26 @@ class StreamToggle(
         return StreamStartOutcome.Stopped
     }
 
+    /**
+     * The whole-server start ladder: web then RTSP, each through the full
+     * [start] gate → begin → rollback discipline. A failed RTSP start after
+     * the web started rolls the web output back through the same per-output
+     * rollback — never the whole server. When the web start itself fails
+     * ([StreamStartOutcome.isStartFailure] — [StreamStartOutcome.StartFailed]
+     * or [StreamStartOutcome.BeginFailedRolledBack]), RTSP is not attempted
+     * (its session is already known-broken) and the RTSP outcome is null; a
+     * gated web ([StreamStartOutcome.Disabled]) still proceeds to RTSP.
+     */
+    suspend fun startBoth(): Pair<StreamStartOutcome, StreamStartOutcome?> {
+        val web = start(StreamKind.WEB)
+        if (web.isStartFailure) return web to null
+        val rtsp = start(StreamKind.RTSP)
+        if (web is StreamStartOutcome.Started && rtsp.isStartFailure) {
+            stopWeb()
+        }
+        return web to rtsp
+    }
+
     /** The gate → hook → start → begin → rollback ladder, shared by every consumer. */
     suspend fun start(kind: StreamKind): StreamStartOutcome {
         val enabled = when (kind) {
@@ -138,6 +158,10 @@ sealed class StreamStartOutcome {
      * back. Surfaces the failure instead of the old silent fire-and-forget.
      */
     data class BeginFailedRolledBack(val kind: StreamKind, val cause: Exception) : StreamStartOutcome()
+
+    /** True for the failed-start outcomes ([StartFailed], [BeginFailedRolledBack]) — a start attempt that left nothing live. Disabled is a gate rejection, not a failure. */
+    val isStartFailure: Boolean
+        get() = this is StartFailed || this is BeginFailedRolledBack
 
     companion object {
         /** The camera-screen toast for a gated output. */

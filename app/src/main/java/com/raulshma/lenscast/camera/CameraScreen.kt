@@ -496,7 +496,11 @@ private fun ImmersiveCameraView(
             )
         }
 
-        if (streamStatus.isActive && adaptiveBitrateState.enabled) {
+        if (CameraDashboardPolicy.qualityIndicatorVisible(
+                streamStatusActive = streamStatus.isActive,
+                adaptiveEnabled = adaptiveBitrateState.enabled,
+            )
+        ) {
             ConnectionQualityIndicator(
                 qualityLevel = adaptiveBitrateState.qualityLevel,
                 currentQuality = adaptiveBitrateState.currentQuality,
@@ -799,27 +803,15 @@ private fun ShutterRow(
                         animationSpec = tween(100)
                     )
                 ) {
-                    Surface(
-                        modifier = Modifier.size(52.dp),
-                        color = if (isWebStreaming) RecordingRed
-                        else if (isWebEnabled) OverlayLight
-                        else OverlayLight.copy(alpha = 0.45f),
-                        shape = CircleShape,
-                        onClick = {
-                            if (isWebEnabled) {
-                                onWebStreamToggle()
-                            }
-                        }
-                    ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Icon(
-                                imageVector = if (isWebStreaming) Icons.Default.Stop else Icons.Default.Wifi,
-                                contentDescription = if (isWebStreaming) "Stop web stream" else "Start web stream",
-                                tint = if (isWebEnabled || isWebStreaming) Color.White else Color.White.copy(alpha = 0.35f),
-                                modifier = Modifier.size(24.dp)
-                            )
-                        }
-                    }
+                    StreamShutterButton(
+                        visual = CameraDashboardPolicy.StreamShutterVisual.of(
+                            isStreaming = isWebStreaming,
+                            isEnabled = isWebEnabled,
+                            streamName = "web",
+                        ),
+                        icon = if (isWebStreaming) Icons.Default.Stop else Icons.Default.Wifi,
+                        onClick = onWebStreamToggle,
+                    )
                 }
 
                 androidx.compose.animation.AnimatedVisibility(
@@ -860,27 +852,15 @@ private fun ShutterRow(
                         animationSpec = tween(100)
                     )
                 ) {
-                    Surface(
-                        modifier = Modifier.size(52.dp),
-                        color = if (isRtspStreaming) RecordingRed
-                        else if (isRtspEnabled) OverlayLight
-                        else OverlayLight.copy(alpha = 0.45f),
-                        shape = CircleShape,
-                        onClick = {
-                            if (isRtspEnabled) {
-                                onRtspStreamToggle()
-                            }
-                        }
-                    ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Icon(
-                                imageVector = if (isRtspStreaming) Icons.Default.Stop else Icons.Default.Videocam,
-                                contentDescription = if (isRtspStreaming) "Stop RTSP stream" else "Start RTSP stream",
-                                tint = if (isRtspEnabled || isRtspStreaming) Color.White else Color.White.copy(alpha = 0.35f),
-                                modifier = Modifier.size(24.dp)
-                            )
-                        }
-                    }
+                    StreamShutterButton(
+                        visual = CameraDashboardPolicy.StreamShutterVisual.of(
+                            isStreaming = isRtspStreaming,
+                            isEnabled = isRtspEnabled,
+                            streamName = "RTSP",
+                        ),
+                        icon = if (isRtspStreaming) Icons.Default.Stop else Icons.Default.Videocam,
+                        onClick = onRtspStreamToggle,
+                    )
                 }
             }
 
@@ -906,6 +886,39 @@ private fun ShutterRow(
             ) {
                 ShutterButton(onClick = onCapture)
             }
+        }
+    }
+}
+
+@Composable
+private fun StreamShutterButton(
+    visual: CameraDashboardPolicy.StreamShutterVisual,
+    icon: ImageVector,
+    onClick: () -> Unit,
+) {
+    // The verdict and strings are the policy's; only the theme-adjacent
+    // container-color mapping stays here.
+    Surface(
+        modifier = Modifier.size(52.dp),
+        color = when (visual.container) {
+            CameraDashboardPolicy.StreamShutterContainer.RECORDING -> RecordingRed
+            CameraDashboardPolicy.StreamShutterContainer.ENABLED -> OverlayLight
+            CameraDashboardPolicy.StreamShutterContainer.DISABLED -> OverlayLight.copy(alpha = 0.45f)
+        },
+        shape = CircleShape,
+        onClick = {
+            if (visual.clickEnabled) {
+                onClick()
+            }
+        }
+    ) {
+        Box(contentAlignment = Alignment.Center) {
+            Icon(
+                imageVector = icon,
+                contentDescription = visual.contentDescription,
+                tint = visual.tint,
+                modifier = Modifier.size(24.dp)
+            )
         }
     }
 }
@@ -1829,7 +1842,7 @@ private fun ConnectionQualityIndicator(
                 }
                 Spacer(modifier = Modifier.height(2.dp))
                 Text(
-                    text = "${currentQuality}q ${currentFps}fps",
+                    text = CameraDashboardPolicy.qualitySummary(currentQuality, currentFps),
                     style = MaterialTheme.typography.labelSmall.copy(
                         fontFamily = FontFamily.Monospace,
                         color = Color.White.copy(alpha = 0.7f)
@@ -1868,13 +1881,12 @@ private fun ConnectionQualityIndicator(
                     )
                     Spacer(modifier = Modifier.height(6.dp))
                     ConnectionStatRow(label = "Quality", value = label, valueColor = dotColor)
-                    ConnectionStatRow(label = "Bandwidth", value = "${estimatedBandwidthKbps} kbps")
-                    ConnectionStatRow(label = "Min Throughput", value = "${stats.minThroughputKbps} kbps")
-                    ConnectionStatRow(label = "Avg Throughput", value = "${stats.avgThroughputKbps} kbps")
-                    ConnectionStatRow(label = "Latency", value = "${stats.worstLatencyMs} ms")
-                    ConnectionStatRow(label = "Avg Frame", value = "${stats.avgFrameSizeBytes / 1024} KB")
-                    ConnectionStatRow(label = "Clients", value = "${stats.activeClients}")
-                    ConnectionStatRow(label = "Total Sent", value = CameraDashboardPolicy.formatBytes(stats.totalBytesSent))
+                    CameraDashboardPolicy.connectionStatRows(
+                        estimatedBandwidthKbps = estimatedBandwidthKbps,
+                        stats = stats,
+                    ).forEach { row ->
+                        ConnectionStatRow(label = row.label, value = row.value)
+                    }
 
                     if (stats.clientDetails.isNotEmpty()) {
                         Spacer(modifier = Modifier.height(6.dp))
@@ -1888,16 +1900,15 @@ private fun ConnectionQualityIndicator(
                         Spacer(modifier = Modifier.height(4.dp))
                         stats.clientDetails.forEach { (clientId, detail) ->
                             Text(
-                                text = "Client ${clientId.take(8)}:",
+                                text = CameraDashboardPolicy.clientStatHeader(clientId),
                                 style = MaterialTheme.typography.labelSmall.copy(
                                     fontWeight = FontWeight.Medium,
                                     color = Color.White.copy(alpha = 0.7f)
                                 )
                             )
-                            ConnectionStatRow(label = "  Frames", value = "${detail.framesSent}")
-                            ConnectionStatRow(label = "  Throughput", value = "${detail.avgThroughputKbps} kbps")
-                            ConnectionStatRow(label = "  Latency", value = "${detail.lastSendDurationMs} ms")
-                            ConnectionStatRow(label = "  Frame Size", value = "${detail.lastFrameSizeBytes / 1024} KB")
+                            CameraDashboardPolicy.clientStatRows(detail).forEach { row ->
+                                ConnectionStatRow(label = row.label, value = row.value)
+                            }
                         }
                     }
                 }

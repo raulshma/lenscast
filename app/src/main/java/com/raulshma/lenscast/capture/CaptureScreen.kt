@@ -50,9 +50,6 @@ import com.raulshma.lenscast.settings.SettingsSection
 import com.raulshma.lenscast.settings.SliderSetting
 import com.raulshma.lenscast.settings.SwitchSetting
 import com.raulshma.lenscast.ui.components.LensCastTopBar
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
 
 @Composable
 fun CaptureScreen(
@@ -73,10 +70,11 @@ fun CaptureScreen(
     val recordingConfig by viewModel.recordingConfig.collectAsState()
     val recordingElapsedMs by viewModel.recordingElapsedMs.collectAsState()
     val recordingState by viewModel.recordingState.collectAsState()
-    // The armed schedule's truth is the controller's RecordingState; the
-    // config draft's startTimeMs is the picked-but-not-yet-armed input.
-    val scheduledUi = scheduledUiModel(recordingState)
-    val pendingStartMs = scheduledUi?.startAtMs ?: recordingConfig.startTimeMs
+    // The schedule row's whole truth is the pure model: the controller's
+    // RecordingState is the armed schedule, the config draft's startTimeMs
+    // the picked-but-not-yet-armed input — merged, labeled, and verdict-ed
+    // in one place.
+    val scheduleRow = scheduleRowUi(recordingState, recordingConfig.startTimeMs)
 
     Scaffold(
         topBar = {
@@ -267,13 +265,11 @@ fun CaptureScreen(
                                 modifier = Modifier.size(18.dp)
                             )
                             Text(
-                                pendingStartMs?.let {
-                                    "Start: ${SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(it))}"
-                                } ?: "Set Start Time",
+                                scheduleRow.label,
                                 modifier = Modifier.padding(start = 4.dp)
                             )
                         }
-                        if (scheduledUi?.canCancel == true || recordingConfig.startTimeMs != null) {
+                        if (scheduleRow.canCancel) {
                             IconButton(onClick = { viewModel.cancelScheduledRecording() }) {
                                 Icon(Icons.Default.Delete, contentDescription = "Clear schedule")
                             }
@@ -307,11 +303,7 @@ fun CaptureScreen(
                             ) {
                                 Icon(Icons.Default.Videocam, null, Modifier.size(18.dp))
                                 Text(
-                                    if (scheduledUi?.isScheduled == true || recordingConfig.startTimeMs != null) {
-                                        "Schedule"
-                                    } else {
-                                        "Start Now"
-                                    },
+                                    scheduleRow.buttonLabel,
                                     Modifier.padding(start = 8.dp)
                                 )
                             }
