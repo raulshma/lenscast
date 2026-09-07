@@ -9,7 +9,6 @@ import android.graphics.YuvImage
 import android.util.Log
 import com.raulshma.lenscast.camera.model.OverlaySettings
 import com.raulshma.lenscast.core.StreamDefaults
-import com.raulshma.lenscast.core.ThermalMonitor
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -41,8 +40,7 @@ class YuvFrame(
  * StreamingManager; the pixel work sits behind this small interface.
  */
 class FramePipeline(
-    private val thermalMonitor: ThermalMonitor,
-    private val adaptiveBitrateController: AdaptiveBitrateController,
+    private val qualityPolicy: StreamQualityPolicy,
 ) {
 
     /** Called on the pipeline worker with the JPEG for each processed frame. */
@@ -105,20 +103,18 @@ class FramePipeline(
         val now = System.currentTimeMillis()
         val elapsed = now - lastFrameTimeMs.get()
 
-        val baseInterval = minFrameIntervalMs
-        val thermalAdjustedInterval = thermalMonitor.getAdjustedFrameDelay(baseInterval)
-        val adaptiveInterval = adaptiveBitrateController.getAdaptiveFrameInterval(baseInterval, thermalAdjustedInterval)
+        val interval = qualityPolicy.resolveInterval(minFrameIntervalMs)
 
-        if (elapsed < adaptiveInterval) {
+        if (elapsed < interval) {
             droppedFrameCount.incrementAndGet()
             return false
         }
 
         lastFrameTimeMs.set(now)
 
-        val baseQuality = jpegQuality
-        val thermalAdjustedQuality = thermalMonitor.getAdjustedQuality(baseQuality)
-        val quality = adaptiveBitrateController.getAdaptiveQuality(baseQuality, thermalAdjustedQuality)
+        // Quality resolves only for frames that pass the throttle: the
+        // adaptive module's driven state must reflect flowing frames alone.
+        val quality = qualityPolicy.resolveQuality(jpegQuality)
 
         val queued = queue.trySend(YuvFrame(yuvData.copyOf(), width, height, rotation, quality, overlay, clientCount))
         if (queued.isFailure) {

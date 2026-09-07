@@ -21,7 +21,7 @@ import java.util.concurrent.atomic.AtomicInteger
 class AdaptiveBitrateController(
     private val networkMonitor: NetworkQualityMonitor,
     private val config: AdaptiveBitrateConfig = AdaptiveBitrateConfig(),
-) {
+) : NetworkAdjustmentSource {
 
     private val isEnabled = AtomicBoolean(config.enabledByDefault)
     private val adjustmentCount = AtomicInteger(0)
@@ -70,7 +70,7 @@ class AdaptiveBitrateController(
         publishState(force = true)
     }
 
-    fun getAdaptiveQuality(baseQuality: Int, thermalAdjustedQuality: Int): Int {
+    override fun getAdaptiveQuality(baseQuality: Int, thermalAdjustedQuality: Int): Int {
         val applied = if (!isEnabled.get()) {
             thermalAdjustedQuality
         } else {
@@ -81,7 +81,7 @@ class AdaptiveBitrateController(
         return applied
     }
 
-    fun getAdaptiveFrameInterval(baseIntervalMs: Long, thermalAdjustedIntervalMs: Long): Long {
+    override fun getAdaptiveFrameInterval(baseIntervalMs: Long, thermalAdjustedIntervalMs: Long): Long {
         val applied = if (!isEnabled.get()) {
             thermalAdjustedIntervalMs
         } else {

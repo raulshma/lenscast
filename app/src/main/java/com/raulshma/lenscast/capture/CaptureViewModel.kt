@@ -11,13 +11,10 @@ import com.raulshma.lenscast.capture.model.RecordingConfig
 import com.raulshma.lenscast.core.MicAccess
 import com.raulshma.lenscast.data.SettingsDataStore
 import com.raulshma.lenscast.data.CaptureHistoryStore
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 /**
@@ -50,8 +47,13 @@ class CaptureViewModel(
     private val _recordingConfig = MutableStateFlow(RecordingConfig())
     val recordingConfig: StateFlow<RecordingConfig> = _recordingConfig.asStateFlow()
 
-    private val _recordingElapsedMs = MutableStateFlow(0L)
-    val recordingElapsedMs: StateFlow<Long> = _recordingElapsedMs.asStateFlow()
+    // Same shared clock as the camera screen (500ms ticks here).
+    private val recordingClock = RecordingClock(
+        recordingState = recordingController.state,
+        scope = viewModelScope,
+        tickMs = 500L,
+    )
+    val recordingElapsedMs: StateFlow<Long> = recordingClock.elapsedMs
 
     // The scheduled-start time is this screen's input field; once a start is
     // handed to the controller, its Scheduled state is the truth.
@@ -70,20 +72,6 @@ class CaptureViewModel(
             IntervalCaptureScheduler.observeStatus(context).collect { snapshot ->
                 _isIntervalRunning.value = snapshot.isRunning
                 _captureCount.value = snapshot.completedCaptures
-            }
-        }
-        // Elapsed-recording ticker: derived from the controller's state so the
-        // clock can't drift from the service's actual start time.
-        viewModelScope.launch {
-            recordingState.collectLatest { state ->
-                if (state is RecordingState.Recording) {
-                    while (isActive) {
-                        _recordingElapsedMs.value = System.currentTimeMillis() - state.startedAtMs
-                        delay(500)
-                    }
-                } else {
-                    _recordingElapsedMs.value = 0L
-                }
             }
         }
     }

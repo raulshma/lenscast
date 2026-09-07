@@ -6,6 +6,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.raulshma.lenscast.camera.CameraService
+import com.raulshma.lenscast.camera.CameraSettingsEditor
 import com.raulshma.lenscast.camera.model.CameraSettings
 import com.raulshma.lenscast.camera.model.FocusMode
 import com.raulshma.lenscast.camera.model.HdrMode
@@ -63,6 +64,13 @@ class SettingsViewModel(
     val availableZoomRange: StateFlow<ClosedFloatingPointRange<Float>> = cameraService.availableZoomRange
     val availableExposureRange: StateFlow<ClosedRange<Int>> = cameraService.availableExposureRange
     val availableIsoRange: StateFlow<ClosedRange<Int>> = cameraService.availableIsoRange
+
+    // Same editor as the camera screen, persist-only: runtime application is
+    // the Settings Applier's. Field parsing stays shared through it.
+    private val settingsEditor = CameraSettingsEditor(
+        current = { settings.value },
+        persist = { settingsDataStore.saveSettings(it) },
+    )
 
     init {
         viewModelScope.launch {
@@ -122,8 +130,7 @@ class SettingsViewModel(
     }
 
     fun updateIso(value: String) {
-        val iso = if (value == "Auto") null else value.toIntOrNull()
-        update { it.copy(iso = iso) }
+        update { it.copy(iso = CameraSettingsEditor.parseIso(value)) }
     }
 
     fun updateStabilization(enabled: Boolean) {
@@ -131,8 +138,7 @@ class SettingsViewModel(
     }
 
     fun updateSceneMode(mode: String) {
-        val sceneMode = if (mode == "OFF") null else mode
-        update { it.copy(sceneMode = sceneMode) }
+        update { it.copy(sceneMode = CameraSettingsEditor.parseSceneMode(mode)) }
     }
 
     fun updateNightVisionMode(mode: String) {
@@ -247,7 +253,7 @@ class SettingsViewModel(
 
     private fun update(transform: (CameraSettings) -> CameraSettings) {
         viewModelScope.launch {
-            settingsDataStore.saveSettings(transform(settings.value))
+            settingsEditor.edit(transform)
         }
     }
 

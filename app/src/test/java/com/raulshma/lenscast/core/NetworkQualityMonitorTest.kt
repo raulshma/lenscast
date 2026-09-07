@@ -108,4 +108,23 @@ class NetworkQualityMonitorTest {
         assertEquals(0, snapshot.avgThroughputKbps)
         assertEquals(0, snapshot.estimatedBandwidthKbps)
     }
+
+    @Test
+    fun `idle ladder default and measured zero are the documented split`() {
+        val monitor = NetworkQualityMonitor()
+        // Display truth: nothing measured while idle.
+        assertEquals(0, monitor.getMeasuredBandwidthKbps())
+        // Ladder truth: the default-aware view keeps adapting while idle.
+        assertEquals(5000, monitor.getMinClientThroughputKbps())
+        assertEquals(5000, monitor.getAvgClientThroughputKbps())
+    }
+
+    @Test
+    fun `ladder and display agree once a client sends`() {
+        // 10_000 bytes * 8 bits in 10 ms = 8000 kbps measured.
+        val monitor = monitorWithClientSending(frameSizeBytes = 10_000, sendDurationMs = 10)
+        assertEquals(8000, monitor.getMinClientThroughputKbps())
+        assertEquals(8000, monitor.getAvgClientThroughputKbps())
+        assertEquals(8000, monitor.getMeasuredBandwidthKbps())
+    }
 }

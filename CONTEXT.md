@@ -60,7 +60,24 @@ Recording Controller. Camera binding goes through CameraService's
 use case → take photo → record in history → release). Interface: `captureToGallery()`
 (callback-based) and `captureSnapshot(saveToDisk)` (suspend, returns JPEG
 bytes). CameraViewModel, CaptureViewModel, and the Web API Capture Handler are
-one-call clients.
+one-call clients. The save destinations (MediaStore vs legacy file) live
+behind one internal `PhotoDestination` seam and one `takePictureAwait`
+primitive serving disk and memory; a single bounded Main-hop acquire seam
+serves both entry points.
+
+### Transport Responders
+**`streaming/HttpAuthFilter.kt`**, **`streaming/StaticAssetStore.kt`**,
+**`streaming/MjpegStreamPump.kt`**, **`streaming/MediaResponder.kt`** — the
+deep responders behind the Streaming Server's dispatch table. Each answers
+as `HttpResult` data (status, mime, headers, payload — with `jsonError` /
+`plainText` factories for the common shapes); the server only
+translates values onto NanoHTTPD responses and applies the security headers.
+The Auth Filter translates the four `/api/auth/` routes plus the
+authenticate-then-CSRF gate onto the Web Auth Gate; the Asset Store owns the
+LRU cache, `..`/NUL path rejection, mime table, and index-then-control-page
+fallback; the MJPEG Pump owns frame state, client bookkeeping, the enabled
+flag, and the multipart stream; the Media Responder owns gallery files with
+video ranges, snapshots, and the PCM audio stream.
 
 ### Streaming Manager
 **`streaming/StreamingManager.kt`** — owns live streaming runtime state (web
@@ -137,6 +154,36 @@ from `CameraSettings` plus the device's live ranges. `CameraService` only
 translates the plan into `CaptureRequestOptions` — the ISO/fps/night-vision
 math is unit-tested on the JVM instead of hiding in the service.
 
+### Lens Inventory
+**`camera/LensInventory.kt`** — the pure lens-inventory knowledge: focal
+bands to labels (`Ultrawide`/`Wide`/`2x`…), OEM-duplicate removal, back-first
+ordering, the main-logical-back default index, and the enumeration-failure
+fallback pair. `CameraService` keeps the provider iteration and the Camera2
+reads and delegates every decision here. The combination ladder
+(`orderedCombinations`) and the 4:3-vs-16:9 analysis sizing stay in the
+service file as internal pure functions with their own tests — device-bound
+binding keeps no other home.
+
+### Camera Settings Editor
+**`camera/CameraSettingsEditor.kt`** — the single camera-settings writer.
+`edit(transform)` applies immediately then persists (camera screen, for
+responsiveness — the Settings Applier re-applies idempotently) or persists
+only (settings screens — the Applier applies). Both ViewModels delegate;
+the `Auto`-ISO and `OFF`-scene-mode parsing lives here once. Wiring
+arrives as lambdas so the module never touches Android.
+
+### Recording Clock
+**`capture/RecordingClock.kt`** — the single recording clock. Derives
+millisecond and second flows from the Recording Controller's state (one
+ticker, configurable rate) for both screens; the Web API Recording Handler
+reads the same pure `elapsedMsSince` for its one-shot status. No screen
+keeps its own ticker anymore.
+
+### Stream Status Snapshot
+**`camera/model/StreamStatusSnapshot.kt`** — the pure dashboard snapshot:
+typed video/audio input groups in, one `StreamStatus` out. The camera
+screen's combines feed it; the `List<Any>`-plus-casts mapping is gone.
+
 ### Adaptive Bitrate Controller
 **`streaming/AdaptiveBitrateController.kt`** — the single adaptive-bitrate
 brain. The frame path (`getAdaptiveQuality`, `getAdaptiveFrameInterval`)
@@ -148,6 +195,26 @@ and `/api/status` display. Bandwidth numbers are measured client throughput —
 **`core/StreamWatchdog.kt`** — monitors a live stream and performs recovery
 (hard restart choreography) when it stalls. Recovery re-attaches the environment
 through the Streaming Session's `refreshAfterRecovery()`.
+
+### Interval Capture Policy
+**`capture/IntervalCapturePolicy.kt`** — the pure interval-capture policy:
+bounds (1–3600s), tick validation, first-vs-next delays, completion,
+flash mapping, progress data, and WorkManager status snapshots. The
+Scheduler only enqueues and the Worker only executes ticks; the Web API
+handler passes requests through untouched because the Scheduler clamps
+through the policy. The 3600s ceiling now covers the app screen too (it
+previously clamped only the Web API path).
+
+### Stream Quality Policy
+**`streaming/StreamQualityPolicy.kt`** — the single quality-resolution
+order for the frame path: the battery suggestion arrives as the base
+quality, thermal clamps it, the network ladder scales it, one
+`resolve()` per push. The sensor seams (`ThermalAdjustmentSource`,
+`NetworkAdjustmentSource`) are implemented by the Thermal Monitor and the
+Adaptive Bitrate Controller in production and by fakes in tests; the
+Frame Pipeline takes the policy instead of the two sensors. Display
+bandwidth stays 0-while-idle while the adaptation ladder keeps its
+default-aware view — the split is documented and locked by test.
 
 ### Connectivity Monitor
 **`core/ConnectivityMonitor.kt`** — app-scoped observer of Wi-Fi connectivity.

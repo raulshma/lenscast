@@ -19,6 +19,7 @@ import com.raulshma.lenscast.camera.model.HdrMode
 import com.raulshma.lenscast.camera.model.NightVisionMode
 import com.raulshma.lenscast.camera.model.Resolution
 import com.raulshma.lenscast.camera.model.StreamStatus
+import com.raulshma.lenscast.camera.model.StreamStatusSnapshot
 import com.raulshma.lenscast.camera.model.WhiteBalance
 import com.raulshma.lenscast.core.ConnectivityMonitor
 import com.raulshma.lenscast.core.MicAccess
@@ -34,7 +35,6 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
 
@@ -93,8 +93,21 @@ class CameraViewModel(
 
     val isRecording: StateFlow<Boolean> = recordingController.isRecording
 
-    private val _recordingElapsedSeconds = MutableStateFlow(0)
-    val recordingElapsedSeconds: StateFlow<Int> = _recordingElapsedSeconds.asStateFlow()
+    // One shared editor for camera-control writes: apply now for
+    // responsiveness, persist for the Settings Applier to re-apply.
+    private val settingsEditor = CameraSettingsEditor(
+        current = { settings.value },
+        persist = { settingsDataStore.saveSettings(it) },
+        apply = { cameraService.applySettings(it) },
+    )
+
+    // One shared clock over the controller's state (1s ticks, whole seconds).
+    private val recordingClock = com.raulshma.lenscast.capture.RecordingClock(
+        recordingState = recordingController.state,
+        scope = viewModelScope,
+        tickMs = 1000L,
+    )
+    val recordingElapsedSeconds: StateFlow<Int> = recordingClock.elapsedSeconds
 
     val showPreview: StateFlow<Boolean> = settingsDataStore.showPreview
 
@@ -119,7 +132,8 @@ class CameraViewModel(
             }
         }
 
-        // Combined: All streaming status updates using nested combines (Kotlin combine supports max 5 flows)
+        // Combined: all streaming status updates in typed combines,
+        // mapped through the shared snapshot builder — no untyped lists.
         viewModelScope.launch {
             val videoFlow = combine(
                 streamingManager.isStreaming,
@@ -127,8 +141,14 @@ class CameraViewModel(
                 streamingManager.isServerRunning,
                 streamingManager.streamUrl,
                 streamingManager.clientCount,
-            ) { isStreaming, isWebActive, isServerRunning, streamUrl, clientCount ->
-                listOf(isStreaming, isWebActive, isServerRunning, streamUrl, clientCount)
+            ) { isStreaming, isWebActive, isServerRunning, url, clientCount ->
+                StreamStatusSnapshot.VideoInputs(
+                    isStreaming = isStreaming,
+                    isWebActive = isWebActive,
+                    isServerRunning = isServerRunning,
+                    url = url,
+                    clientCount = clientCount,
+                )
             }
 
             val audioFlow = combine(
@@ -136,8 +156,13 @@ class CameraViewModel(
                 streamingManager.audioStreamUrl,
                 streamingManager.isRtspRunning,
                 streamingManager.rtspUrl,
-            ) { isAudioStreaming, audioUrl, isRtspRunning, rtspUrl ->
-                listOf(isAudioStreaming, audioUrl, isRtspRunning, rtspUrl)
+            ) { isAudioActive, audioUrl, isRtspActive, rtspUrl ->
+                StreamStatusSnapshot.AudioInputs(
+                    isAudioActive = isAudioActive,
+                    audioUrl = audioUrl,
+                    isRtspActive = isRtspActive,
+                    rtspUrl = rtspUrl,
+                )
             }
 
             combine(
@@ -146,16 +171,9 @@ class CameraViewModel(
                 streamingManager.isWebEnabled,
                 streamingManager.isRtspEnabled,
             ) { video, audio, isWebEnabled, isRtspEnabled ->
-                _streamStatus.value = StreamStatus(
-                    isActive = video[0] as Boolean,
-                    isWebActive = video[1] as Boolean,
-                    isServerRunning = video[2] as Boolean,
-                    url = video[3] as String,
-                    clientCount = video[4] as Int,
-                    isAudioActive = audio[0] as Boolean,
-                    audioUrl = audio[1] as String,
-                    isRtspActive = audio[2] as Boolean,
-                    rtspUrl = audio[3] as String,
+                _streamStatus.value = StreamStatusSnapshot.build(
+                    video = video,
+                    audio = audio,
                     isWebEnabled = isWebEnabled,
                     isRtspEnabled = isRtspEnabled,
                 )
@@ -172,22 +190,6 @@ class CameraViewModel(
                     }
                 } else {
                     _connectionQualityStats.value = null
-                }
-            }
-        }
-
-        // Elapsed-recording ticker: derived from the controller's state so the
-        // clock can't drift from the service's actual start time.
-        viewModelScope.launch {
-            recordingState.collectLatest { state ->
-                if (state is com.raulshma.lenscast.capture.RecordingState.Recording) {
-                    while (true) {
-                        _recordingElapsedSeconds.value =
-                            ((System.currentTimeMillis() - state.startedAtMs) / 1000).toInt()
-                        delay(1000)
-                    }
-                } else {
-                    _recordingElapsedSeconds.value = 0
                 }
             }
         }
@@ -276,8 +278,7 @@ class CameraViewModel(
     }
 
     fun updateIso(value: String) {
-        val iso = if (value == "Auto") null else value.toIntOrNull()
-        updateSettings { it.copy(iso = iso) }
+        updateSettings { it.copy(iso = CameraSettingsEditor.parseIso(value)) }
     }
 
     fun updateFocusMode(mode: String) {
@@ -319,13 +320,8 @@ class CameraViewModel(
     }
 
     private fun updateSettings(transform: (CameraSettings) -> CameraSettings) {
-        val newSettings = transform(settings.value)
-        // Gesture-driven camera controls apply immediately for responsiveness;
-        // SettingsApplier re-applies after persistence — applying camera controls
-        // is idempotent, so the overlap is harmless.
         viewModelScope.launch {
-            cameraService.applySettings(newSettings)
-            settingsDataStore.saveSettings(newSettings)
+            settingsEditor.edit(transform)
         }
     }
 

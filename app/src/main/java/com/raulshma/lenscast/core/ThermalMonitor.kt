@@ -5,12 +5,13 @@ import android.os.Build
 import android.os.PowerManager
 import android.util.Log
 import com.raulshma.lenscast.core.StreamDefaults
+import com.raulshma.lenscast.streaming.ThermalAdjustmentSource
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import java.util.concurrent.atomic.AtomicBoolean
 
-class ThermalMonitor(private val context: Context) {
+class ThermalMonitor(private val context: Context) : ThermalAdjustmentSource {
 
     private val _thermalState = MutableStateFlow(ThermalState.NORMAL)
     val thermalState: StateFlow<ThermalState> = _thermalState.asStateFlow()
@@ -117,12 +118,12 @@ class ThermalMonitor(private val context: Context) {
         }
     }
 
-    fun getAdjustedQuality(baseQuality: Int): Int {
+    override fun getAdjustedQuality(baseQuality: Int): Int {
         return _throttlingResult.value.jpegQuality
             .coerceIn(StreamDefaults.JPEG_QUALITY_MIN, baseQuality)
     }
 
-    fun getAdjustedFrameDelay(baseIntervalMs: Long): Long {
+    override fun getAdjustedFrameDelay(baseIntervalMs: Long): Long {
         val multiplier = _throttlingResult.value.frameRateMultiplier
         return if (multiplier <= 0f) Long.MAX_VALUE
         else (baseIntervalMs / multiplier).toLong()

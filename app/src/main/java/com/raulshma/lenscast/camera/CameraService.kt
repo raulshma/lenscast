@@ -242,7 +242,7 @@ class CameraService(private val context: Context) {
 
                     // Always add the logical camera FIRST
                     val logicalFocalLength = getFocalLength(camera2Info)
-                    val logicalLabel = buildCameraLabel(lensFacing, logicalFocalLength, cameraId)
+                    val logicalLabel = LensInventory.buildLabel(lensFacing, logicalFocalLength, cameraId)
                     val logicalSelector = buildCameraSelector(info)
 
                     val logicalCamInfo = CameraLensInfo(
@@ -264,7 +264,7 @@ class CameraService(private val context: Context) {
                             if (physId == cameraId) continue
 
                             val focalLength = getFocalLength(physCamera2Info)
-                            val label = buildCameraLabel(lensFacing, focalLength, physId)
+                            val label = LensInventory.buildLabel(lensFacing, focalLength, physId)
                             val selector = CameraSelector.Builder()
                                 .requireLensFacing(lensFacing)
                                 .setPhysicalCameraId(physId)
@@ -287,23 +287,16 @@ class CameraService(private val context: Context) {
                 }
             }
 
-            // Remove duplicated lenses that share the same focal length and facing (OEMs often duplicate them)
-            val distinctLenses = lenses.distinctBy { Pair(it.lensFacing, it.focalLength) }
-
-            // Sort: back cameras sorted by focal length (ascending), then front cameras
-            val sorted = distinctLenses.sortedWith(
-                compareBy<CameraLensInfo> { it.lensFacing != CameraSelector.LENS_FACING_BACK }
-                    .thenBy { it.focalLength }
-            )
+            // Inventory decisions (dedup, order, main-lens default) live in
+            // the tested LensInventory; the service only publishes them.
+            val sorted = LensInventory.sortLenses(LensInventory.deduplicate(lenses))
 
             _availableLenses.value = sorted
 
             // We MUST default to the MAIN logical back camera. Direct binding to physical
             // cameras on start causes black screen on many OEM drivers.
-            val logicalBackIndex = sorted.indexOfFirst {
-                it.lensFacing == CameraSelector.LENS_FACING_BACK && sorted.firstOrNull { l -> l.lensFacing == CameraSelector.LENS_FACING_BACK }?.id == it.id
-            }.coerceAtLeast(0)
-            
+            val logicalBackIndex = LensInventory.defaultBackIndex(sorted)
+
             _selectedLensIndex.value = logicalBackIndex
 
             if (sorted.isNotEmpty()) {
@@ -315,22 +308,7 @@ class CameraService(private val context: Context) {
         } catch (e: Exception) {
             Log.e(TAG, "Camera enumeration failed, falling back to default", e)
             // Fallback — create basic entries
-            _availableLenses.value = listOf(
-                CameraLensInfo(
-                    id = "0",
-                    label = "Back",
-                    lensFacing = CameraSelector.LENS_FACING_BACK,
-                    focalLength = 0f,
-                    cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA,
-                ),
-                CameraLensInfo(
-                    id = "1",
-                    label = "Front",
-                    lensFacing = CameraSelector.LENS_FACING_FRONT,
-                    focalLength = 0f,
-                    cameraSelector = CameraSelector.DEFAULT_FRONT_CAMERA,
-                )
-            )
+            _availableLenses.value = LensInventory.fallbackLenses()
             _selectedLensIndex.value = 0
         }
     }
@@ -344,22 +322,6 @@ class CameraService(private val context: Context) {
             focalLengths?.firstOrNull() ?: 0f
         } catch (e: Exception) {
             0f
-        }
-    }
-
-    private fun buildCameraLabel(lensFacing: Int, focalLength: Float, cameraId: String): String {
-        if (lensFacing == CameraSelector.LENS_FACING_FRONT) {
-            return "Front"
-        }
-        // Back camera label based on focal length ranges
-        return when {
-            focalLength <= 0f -> "Camera $cameraId"
-            focalLength < 2.5f -> "Ultrawide"
-            focalLength < 5f -> "Wide"
-            focalLength < 8f -> "2x"
-            focalLength < 15f -> "3x"
-            focalLength < 25f -> "5x"
-            else -> "${focalLength.toInt()}mm"
         }
     }
 
@@ -469,21 +431,14 @@ class CameraService(private val context: Context) {
         rebindUseCases()
     }
 
-    private fun subsetsOf(items: List<UseCase>, size: Int): List<List<UseCase>> {
-        val result = mutableListOf<List<UseCase>>()
-        fun recurse(start: Int, current: MutableList<UseCase>) {
-            if (current.size == size) {
-                result += current.toList()
-                return
-            }
-            for (i in start..items.lastIndex) {
-                current += items[i]
-                recurse(i + 1, current)
-                current.removeAt(current.lastIndex)
-            }
-        }
-        recurse(0, mutableListOf())
-        return result
+    private fun getStreamingAnalysisResolution(captureResolution: Size): Size {
+        val (width, height) = analysisSizeFor(
+            captureResolution.width,
+            captureResolution.height,
+            MAX_ANALYSIS_WIDTH,
+            MAX_ANALYSIS_HEIGHT,
+        )
+        return Size(width, height)
     }
 
     @androidx.camera.camera2.interop.ExperimentalCamera2Interop
@@ -661,13 +616,7 @@ class CameraService(private val context: Context) {
         extra: UseCase?,
         writeBack: Boolean,
     ): Camera {
-        val combinations = buildList<List<UseCase>> {
-            for (size in base.size downTo 0) {
-                subsetsOf(base, size).forEach { subset ->
-                    add(if (extra != null) subset + extra else subset)
-                }
-            }
-        }
+        val combinations = orderedCombinations(base, extra)
 
         var lastError: Exception? = null
         for (useCases in combinations) {
@@ -806,23 +755,6 @@ class CameraService(private val context: Context) {
             cropLeft = crop.left,
             cropTop = crop.top,
         )
-    }
-
-    private fun getStreamingAnalysisResolution(captureResolution: Size): Size {
-        if (captureResolution.width <= MAX_ANALYSIS_WIDTH &&
-            captureResolution.height <= MAX_ANALYSIS_HEIGHT
-        ) {
-            return captureResolution
-        }
-
-        val isFourThree = captureResolution.width * 3 >= captureResolution.height * 4 - 8 &&
-            captureResolution.width * 3 <= captureResolution.height * 4 + 8
-
-        return if (isFourThree) {
-            Size(960, 720)
-        } else {
-            Size(MAX_ANALYSIS_WIDTH, MAX_ANALYSIS_HEIGHT)
-        }
     }
 
     private var pendingResolution: Size? = null
@@ -989,8 +921,66 @@ class CameraService(private val context: Context) {
 
     companion object {
         private const val TAG = "CameraService"
-        private const val MAX_ANALYSIS_WIDTH = 1280
-        private const val MAX_ANALYSIS_HEIGHT = 720
+        internal const val MAX_ANALYSIS_WIDTH = 1280
+        internal const val MAX_ANALYSIS_HEIGHT = 720
         private const val MAX_CONSECUTIVE_FRAME_ERRORS = 10
+    }
+}
+
+/**
+ * The combination ladder, largest first: every subset of [base]
+ * (optionally plus [extra]). Shared by preview-start and recording-start
+ * so both fall back identically on constraint-limited devices. Pure list
+ * math — the provider interaction stays in [CameraService] — and tested
+ * directly.
+ */
+internal fun <T> orderedCombinations(base: List<T>, extra: T?): List<List<T>> =
+    buildList {
+        for (size in base.size downTo 0) {
+            subsetsOf(base, size).forEach { subset ->
+                add(if (extra != null) subset + extra else subset)
+            }
+        }
+    }
+
+internal fun <T> subsetsOf(items: List<T>, size: Int): List<List<T>> {
+    val result = mutableListOf<List<T>>()
+    fun recurse(start: Int, current: MutableList<T>) {
+        if (current.size == size) {
+            result += current.toList()
+            return
+        }
+        for (i in start..items.lastIndex) {
+            current += items[i]
+            recurse(i + 1, current)
+            current.removeAt(current.lastIndex)
+        }
+    }
+    recurse(0, mutableListOf())
+    return result
+}
+
+/**
+ * The streaming analysis size: small captures pass through, large 4:3
+ * captures drop to 960x720, everything else to the ceiling. Pure ints —
+ * the `Size` wrapping stays at the call site.
+ */
+internal fun analysisSizeFor(
+    captureWidth: Int,
+    captureHeight: Int,
+    maxWidth: Int,
+    maxHeight: Int,
+): Pair<Int, Int> {
+    if (captureWidth <= maxWidth && captureHeight <= maxHeight) {
+        return captureWidth to captureHeight
+    }
+
+    val isFourThree = captureWidth * 3 >= captureHeight * 4 - 8 &&
+        captureWidth * 3 <= captureHeight * 4 + 8
+
+    return if (isFourThree) {
+        960 to 720
+    } else {
+        maxWidth to maxHeight
     }
 }

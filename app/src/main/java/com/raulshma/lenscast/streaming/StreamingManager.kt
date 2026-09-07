@@ -43,7 +43,8 @@ class StreamingManager(
     private var currentOverlaySettings = OverlaySettings()
     private val networkQualityMonitor = NetworkQualityMonitor()
     private val adaptiveBitrateController = AdaptiveBitrateController(networkQualityMonitor)
-    private val framePipeline = FramePipeline(thermalMonitor, adaptiveBitrateController)
+    private val qualityPolicy = StreamQualityPolicy(thermalMonitor, adaptiveBitrateController)
+    private val framePipeline = FramePipeline(qualityPolicy)
     private val webApiStack: WebApiStack by lazy { buildWebApiStack() }
     private var server: StreamingServer = createServer(StreamDefaults.WEB_PORT)
     private val webStreamingActive = AtomicBoolean(false)
@@ -552,6 +553,8 @@ class StreamingManager(
 
     fun applyBatteryOptimization(result: com.raulshma.lenscast.core.BatteryOptimizationResult?) {
         if (result == null) return
+        // The battery suggestion becomes the policy's base quality — thermal
+        // still clamps it and the network ladder still scales it per push.
         setJpegQuality(result.suggestedJpegQuality)
         Log.d(TAG, "Battery optimization applied: quality=${result.suggestedJpegQuality} (${result.message})")
     }

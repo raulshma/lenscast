@@ -1,5 +1,6 @@
 package com.raulshma.lenscast.streaming.web
 
+import com.raulshma.lenscast.capture.RecordingClock
 import com.raulshma.lenscast.capture.RecordingController
 import com.raulshma.lenscast.capture.RecordingState
 import com.raulshma.lenscast.capture.model.RecordingConfig
@@ -21,7 +22,7 @@ class RecordingWebHandler(private val recordingController: RecordingController) 
         val dto = when (state) {
             is RecordingState.Recording -> RecordingStatusDto(
                 isRecording = true,
-                elapsedSeconds = ((System.currentTimeMillis() - state.startedAtMs) / 1000).toInt(),
+                elapsedSeconds = (RecordingClock.elapsedMsSince(state.startedAtMs) / 1000).toInt(),
                 isScheduled = false,
                 scheduledStartTimeMs = null,
             )

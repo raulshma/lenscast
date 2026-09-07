@@ -31,9 +31,11 @@ class IntervalCaptureWebHandler(private val context: Context) {
         val config = configAdapter.fromJson(if (body.isNotEmpty()) body else "{}")
             ?: IntervalCaptureConfig()
 
+        // Bounds live in the policy — the scheduler clamps through it, so
+        // the handler passes the request through untouched.
         IntervalCaptureScheduler.start(
             context = context,
-            intervalSeconds = config.intervalSeconds.coerceIn(1, 3600),
+            intervalSeconds = config.intervalSeconds,
             totalCaptures = config.totalCaptures,
             flashMode = config.flashMode.name,
             completedCaptures = 0,

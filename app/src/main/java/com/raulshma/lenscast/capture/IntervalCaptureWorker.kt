@@ -4,9 +4,7 @@ import android.content.Context
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.util.Log
-import androidx.camera.core.ImageCapture
 import androidx.work.CoroutineWorker
-import androidx.work.Data
 import androidx.work.ForegroundInfo
 import androidx.work.WorkerParameters
 import com.raulshma.lenscast.MainApplication
@@ -14,7 +12,6 @@ import com.raulshma.lenscast.core.ForegroundNotifications
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
-import java.util.Locale
 import kotlin.coroutines.resume
 
 /**
@@ -33,41 +30,35 @@ class IntervalCaptureWorker(
 
         if (isStopped) return Result.success()
 
-        val intervalSeconds = inputData.getLong(KEY_INTERVAL_SECONDS, 1L).coerceAtLeast(1L)
-        val totalCaptures = inputData.getInt(KEY_TOTAL_CAPTURES, 0)
-        val completed = inputData.getInt(KEY_COMPLETED_CAPTURES, 0)
-        val flashMode = inputData.getString(KEY_FLASH_MODE) ?: "OFF"
+        val tick = IntervalCapturePolicy.readTick(inputData)
 
         ForegroundNotifications.createChannel(applicationContext, CHANNEL_ID, "Interval Capture")
-        setForeground(createForegroundInfo(completed, totalCaptures))
+        setForeground(createForegroundInfo(tick.completedCaptures, tick.totalCaptures))
 
-        if (totalCaptures > 0 && completed >= totalCaptures) {
-            Log.d(TAG, "Interval capture complete: $completed/$totalCaptures")
-            return Result.success(progressData(completed))
+        if (IntervalCapturePolicy.isComplete(tick)) {
+            Log.d(TAG, "Interval capture complete: ${tick.completedCaptures}/${tick.totalCaptures}")
+            return Result.success(IntervalCapturePolicy.progressData(tick.completedCaptures))
         }
 
         return try {
-            val captured = captureImage(app, flashMode)
+            val captured = captureImage(app, tick.flashMode)
             if (captured) {
-                val newCompleted = completed + 1
-                setProgress(progressData(newCompleted))
-                Log.d(TAG, "Interval capture: $newCompleted/$totalCaptures")
+                val advanced = IntervalCapturePolicy.countCapture(tick)
+                setProgress(IntervalCapturePolicy.progressData(advanced.completedCaptures))
+                Log.d(TAG, "Interval capture: ${advanced.completedCaptures}/${advanced.totalCaptures}")
 
-                if (totalCaptures > 0 && newCompleted >= totalCaptures) {
+                if (IntervalCapturePolicy.isComplete(advanced)) {
                     Log.d(TAG, "All captures complete")
-                    return Result.success(progressData(newCompleted))
+                    return Result.success(IntervalCapturePolicy.progressData(advanced.completedCaptures))
                 }
 
                 if (!isStopped) {
                     IntervalCaptureScheduler.scheduleNext(
                         context = applicationContext,
-                        intervalSeconds = intervalSeconds,
-                        totalCaptures = totalCaptures,
-                        flashMode = flashMode,
-                        completedCaptures = newCompleted,
+                        tick = advanced,
                     )
                 }
-                Result.success(progressData(newCompleted))
+                Result.success(IntervalCapturePolicy.progressData(advanced.completedCaptures))
             } else {
                 Result.retry()
             }
@@ -81,7 +72,7 @@ class IntervalCaptureWorker(
         withContext(Dispatchers.Main) {
             suspendCancellableCoroutine { continuation ->
                 val fileName = app.photoCaptureManager.captureToGallery(
-                    flashMode = resolveFlashMode(flashMode),
+                    flashMode = IntervalCapturePolicy.resolveFlashMode(flashMode),
                     onSaved = { filePath, _ ->
                         Log.d(TAG, "Photo saved: $filePath")
                         continuation.resume(true)
@@ -124,26 +115,8 @@ class IntervalCaptureWorker(
     }
 
     companion object {
-        const val KEY_INTERVAL_SECONDS = "interval_seconds"
-        const val KEY_TOTAL_CAPTURES = "total_captures"
-        const val KEY_FLASH_MODE = "flash_mode"
-        const val KEY_COMPLETED_CAPTURES = "completed_captures"
-
         private const val TAG = "IntervalCapture"
         private const val CHANNEL_ID = "interval_capture_channel"
         private const val NOTIFICATION_ID = 1002
-
-        private fun resolveFlashMode(flashMode: String): Int =
-            when (flashMode.uppercase(Locale.US)) {
-                "ON" -> ImageCapture.FLASH_MODE_ON
-                "AUTO" -> ImageCapture.FLASH_MODE_AUTO
-                else -> ImageCapture.FLASH_MODE_OFF
-            }
-
-        private fun progressData(completedCaptures: Int): Data {
-            return Data.Builder()
-                .putInt(KEY_COMPLETED_CAPTURES, completedCaptures.coerceAtLeast(0))
-                .build()
-        }
     }
 }
