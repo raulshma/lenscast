@@ -104,6 +104,7 @@ object WsVideoProtocol {
         nalUnits.any { nalType(it) == NAL_IDR }
 
     /** Same verdict for encoder-emitted NAL units, keyed off the encoder's own flag. */
+    @JvmName("containsKeyframeEncoded")
     fun containsKeyframe(nalUnits: List<H264Encoder.EncodedNalUnit>): Boolean =
         nalUnits.any { it.isKeyFrame }
 
