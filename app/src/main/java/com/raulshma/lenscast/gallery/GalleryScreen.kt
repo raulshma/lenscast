@@ -136,6 +136,7 @@ fun GalleryScreen(
                 onFilterChanged = viewModel::setFilter,
                 overview = overview,
             )
+            StorageBarRow(store = app.captureHistoryStore)
 
             if (galleryItems.isEmpty()) {
                 GalleryEmptyState(

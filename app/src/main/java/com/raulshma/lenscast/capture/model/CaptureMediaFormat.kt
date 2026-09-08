@@ -40,4 +40,11 @@ object CaptureMediaFormat {
 
     /** True for MediaStore content URIs (vs file paths or file:// URIs). */
     fun isContentUri(path: String): Boolean = path.startsWith("content://")
+
+    /**
+     * The legacy file-system directory for on-disk video output (pre-Q
+     * writes), derived from the one folder name so a rename moves every
+     * producer.
+     */
+    fun videoDir(moviesRoot: java.io.File): java.io.File = java.io.File(moviesRoot, VIDEO_DIR_NAME)
 }

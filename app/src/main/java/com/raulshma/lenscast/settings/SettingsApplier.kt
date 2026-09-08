@@ -126,6 +126,14 @@ class SettingsApplier(
             }
         }
 
+        // Motion detection: persisted toggle → runtime detector. The settings
+        // screen writes the store; the Applier applies exactly once.
+        scope.launch {
+            settingsDataStore.motionDetectionEnabled.collectLatest { enabled ->
+                streamingManager.setMotionDetectionEnabled(enabled)
+            }
+        }
+
         // Watchdog settings
         scope.launch {
             combine(

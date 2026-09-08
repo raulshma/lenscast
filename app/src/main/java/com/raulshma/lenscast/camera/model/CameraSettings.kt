@@ -37,6 +37,7 @@ data class CameraSettings(
     val stabilization: Boolean = true,
     val hdrMode: HdrMode = HdrMode.OFF,
     val nightVisionMode: NightVisionMode = NightVisionMode.OFF,
+    val torchEnabled: Boolean = false,
 ) {
     companion object {
         // Persistence/validation bounds — the single home, referenced by the

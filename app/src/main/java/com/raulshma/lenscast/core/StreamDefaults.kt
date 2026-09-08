@@ -50,4 +50,13 @@ object StreamDefaults {
     const val RTSP_VIDEO_WIDTH = 1280
     const val RTSP_VIDEO_HEIGHT = 720
     const val RTSP_VIDEO_BITRATE = 2_000_000
+
+    // HTTP fan-out guard: one hotspot phone can't serve unlimited browsers.
+    const val MAX_HTTP_CLIENTS = 8
+
+    // Storage manager bounds.
+    const val STORAGE_QUOTA_MB_MIN = 100
+    const val STORAGE_QUOTA_MB_MAX = 32_768
+    const val STORAGE_QUOTA_MB_DEFAULT = 2048
+    const val STORAGE_LOW_SPACE_MIN_MB = 200
 }

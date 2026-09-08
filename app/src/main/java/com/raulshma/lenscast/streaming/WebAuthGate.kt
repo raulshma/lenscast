@@ -141,11 +141,16 @@ class WebAuthGate(
         if (hasRequestedWithHeader) return true
 
         if (originHeader != null) {
-            val localIp = NetworkUtils.getLocalIpAddress()
+            val localIps = try {
+                NetworkUtils.getAllLocalIpAddresses()
+            } catch (_: Exception) {
+                listOfNotNull(NetworkUtils.getLocalIpAddress())
+            }
             val allowedOrigins = buildList {
                 add("http://localhost:$port")
                 add("http://127.0.0.1:$port")
-                if (localIp != null) add("http://$localIp:$port")
+                add("http://[::1]:$port")
+                localIps.forEach { add("http://${NetworkUtils.formatHostForUrl(it)}:$port") }
             }
             return try {
                 val requestUri = URI(originHeader)

@@ -2,7 +2,7 @@ import { Show, createSignal, createMemo } from 'solid-js'
 import type { DeviceStatus, StreamingSettings } from '../types'
 import { useZoomable } from '../hooks/useZoomable'
 import ConnectionQualityIndicator from './ConnectionQualityIndicator'
-import { tapToFocus as apiTapToFocus } from '../api/client'
+import { tapToFocus as apiTapToFocus, setZoom as apiSetZoom, setTorch as apiSetTorch, pushTalkback } from '../api/client'
 import { API_DEFAULTS } from '../api/defaults'
 
 interface Props {
@@ -41,6 +41,10 @@ export default function StreamPreview(props: Props) {
 
   const [previewErrorCount, setPreviewErrorCount] = createSignal(0)
   const MAX_PREVIEW_ERRORS = 5
+  const [playerMode, setPlayerMode] = createSignal<'mjpeg' | 'hls'>('mjpeg')
+  const [zoomRatio, setZoomRatio] = createSignal(1)
+  const [torchOn, setTorchOn] = createSignal(false)
+  const [talking, setTalking] = createSignal(false)
 
   const handleStreamClick = async (e: MouseEvent) => {
     const container = e.currentTarget as HTMLElement
@@ -125,6 +129,17 @@ export default function StreamPreview(props: Props) {
         ref={zoom.containerRef}
       >
         {props.previewVisible() && webActive() ? (
+          <Show when={playerMode() === 'mjpeg'} fallback={
+            <video
+              class="preview-img zoomable-content"
+              src="/hls/playlist.m3u8"
+              controls
+              autoplay
+              muted
+              playsinline
+              style={{ width: '100%', 'background-color': '#000' }}
+            />
+          }>
           <img
             class="preview-img zoomable-content"
             src={`/stream?t=${props.streamNonce()}`}
@@ -157,6 +172,7 @@ export default function StreamPreview(props: Props) {
               transform: `scale(${zoom.scale()}) translate(${zoom.translateX()}px, ${zoom.translateY()}px)`,
             }}
           />
+          </Show>
         ) : (
           <div class="preview-placeholder">
             <div class="preview-placeholder-icon">
@@ -225,6 +241,13 @@ export default function StreamPreview(props: Props) {
       {/* Action Bar */}
       <div class="preview-actions">
         <div class="preview-actions-left">
+          <button
+            class="action-btn action-btn-ghost"
+            onClick={() => setPlayerMode(playerMode() === 'mjpeg' ? 'hls' : 'mjpeg')}
+            title="Toggle MJPEG / HLS player"
+          >
+            <span>{playerMode() === 'mjpeg' ? 'HLS' : 'MJPEG'}</span>
+          </button>
           <button
             id="capture-btn"
             class="action-btn action-btn-primary"
@@ -295,6 +318,86 @@ export default function StreamPreview(props: Props) {
             </svg>
             <span>Snap</span>
           </a>
+
+          <label class="action-btn action-btn-ghost" title="Remote zoom">
+            <span>{zoomRatio().toFixed(1)}x</span>
+            <input
+              type="range"
+              min="1"
+              max="8"
+              step="0.5"
+              value={zoomRatio()}
+              onInput={async (e) => {
+                const v = parseFloat(e.currentTarget.value)
+                setZoomRatio(v)
+                try {
+                  await apiSetZoom(v)
+                } catch (err) {
+                  console.error('Remote zoom failed:', err)
+                }
+              }}
+            />
+          </label>
+
+          <button
+            class="action-btn action-btn-ghost"
+            onClick={async () => {
+              const next = !torchOn()
+              setTorchOn(next)
+              try {
+                await apiSetTorch(next)
+              } catch (err) {
+                console.error('Torch failed:', err)
+                setTorchOn(!next)
+              }
+            }}
+            title="Toggle torch"
+          >
+            <span>{torchOn() ? 'Torch ON' : 'Torch'}</span>
+          </button>
+
+          <button
+            class="action-btn action-btn-ghost"
+            onPointerDown={async () => {
+              setTalking(true)
+              try {
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: { sampleRate: 16000, channelCount: 1 } })
+                const ctx = new AudioContext({ sampleRate: 16000 })
+                const src = ctx.createMediaStreamSource(stream)
+                const proc = ctx.createScriptProcessor(4096, 1, 1)
+                const chunks: ArrayBuffer[] = []
+                proc.onaudioprocess = (ev) => {
+                  const input = ev.inputBuffer.getChannelData(0)
+                  const pcm = new Int16Array(input.length)
+                  for (let i = 0; i < input.length; i++) pcm[i] = Math.max(-32768, Math.min(32767, input[i] * 32768))
+                  chunks.push(pcm.buffer.slice(0))
+                }
+                src.connect(proc)
+                proc.connect(ctx.destination)
+                setTimeout(async () => {
+                  src.disconnect()
+                  proc.disconnect()
+                  stream.getTracks().forEach((t) => t.stop())
+                  await ctx.close()
+                  const total = chunks.reduce((n, c) => n + c.byteLength, 0)
+                  const merged = new Uint8Array(total)
+                  let off = 0
+                  for (const c of chunks) {
+                    merged.set(new Uint8Array(c), off)
+                    off += c.byteLength
+                  }
+                  if (merged.byteLength > 0) await pushTalkback(merged.buffer)
+                  setTalking(false)
+                }, 1500)
+              } catch (err) {
+                console.error('Talkback failed:', err)
+                setTalking(false)
+              }
+            }}
+            title="Hold to talk (1.5s capture)"
+          >
+            <span>{talking() ? 'Talking…' : 'Talk'}</span>
+          </button>
         </div>
 
         <div class="preview-actions-right">

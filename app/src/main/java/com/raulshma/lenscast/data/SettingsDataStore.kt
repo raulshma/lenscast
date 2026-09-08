@@ -65,6 +65,7 @@ private object Keys {
     val FRAME_RATE = intPreferencesKey("frame_rate")
     val RESOLUTION = stringPreferencesKey("resolution")
     val STABILIZATION = stringPreferencesKey("stabilization")
+    val TORCH_ENABLED = stringPreferencesKey("torch_enabled")
     val HDR_MODE = stringPreferencesKey("hdr_mode")
     val SCENE_MODE = stringPreferencesKey("scene_mode")
     val STREAMING_PORT = intPreferencesKey("streaming_port")
@@ -85,6 +86,7 @@ private object Keys {
     val RTSP_INPUT_FORMAT = stringPreferencesKey("rtsp_input_format")
     val ADAPTIVE_BITRATE_ENABLED = stringPreferencesKey("adaptive_bitrate_enabled")
     val MDNS_ENABLED = stringPreferencesKey("mdns_enabled")
+    val MOTION_DETECTION_ENABLED = stringPreferencesKey("motion_detection_enabled")
     val NIGHT_VISION_MODE = stringPreferencesKey("night_vision_mode")
     val OVERLAY_ENABLED = stringPreferencesKey("overlay_enabled")
     val OVERLAY_SHOW_TIMESTAMP = stringPreferencesKey("overlay_show_timestamp")
@@ -197,6 +199,8 @@ internal val adaptiveBitrateEnabledPref = boolPref(Keys.ADAPTIVE_BITRATE_ENABLED
 
 internal val mdnsEnabledPref = boolPref(Keys.MDNS_ENABLED, defaultTrue = true)
 
+internal val motionDetectionEnabledPref = boolPref(Keys.MOTION_DETECTION_ENABLED, defaultTrue = false)
+
 internal val watchdogEnabledPref = boolPref(Keys.WATCHDOG_ENABLED, defaultTrue = false)
 
 internal val watchdogMaxRetriesPref = intPref(
@@ -242,6 +246,7 @@ private fun decodeCameraSettings(prefs: Preferences): CameraSettings = CameraSet
     hdrMode = parseEnum(prefs[Keys.HDR_MODE], HdrMode.OFF),
     sceneMode = prefs[Keys.SCENE_MODE],
     nightVisionMode = parseEnum(prefs[Keys.NIGHT_VISION_MODE], NightVisionMode.OFF),
+    torchEnabled = readBool(prefs, Keys.TORCH_ENABLED, defaultTrue = false),
 )
 
 private fun encodeCameraSettings(prefs: MutablePreferences, settings: CameraSettings) {
@@ -283,6 +288,7 @@ private fun encodeCameraSettings(prefs: MutablePreferences, settings: CameraSett
         prefs.remove(Keys.SCENE_MODE)
     }
     prefs[Keys.NIGHT_VISION_MODE] = settings.nightVisionMode.name
+    writeBool(prefs, Keys.TORCH_ENABLED, settings.torchEnabled)
 }
 
 private fun decodeOverlaySettings(prefs: Preferences): OverlaySettings {
@@ -464,6 +470,8 @@ class SettingsDataStore(
 
     val mdnsEnabled: StateFlow<Boolean> = mdnsEnabledPref.shared()
 
+    val motionDetectionEnabled: StateFlow<Boolean> = motionDetectionEnabledPref.shared()
+
     val watchdogEnabled: StateFlow<Boolean> = watchdogEnabledPref.shared()
 
     val watchdogMaxRetries: StateFlow<Int> = watchdogMaxRetriesPref.shared()
@@ -517,6 +525,8 @@ class SettingsDataStore(
         watchdogCheckIntervalSecondsPref.save(seconds)
 
     suspend fun saveMdnsEnabled(enabled: Boolean) = mdnsEnabledPref.save(enabled)
+
+    suspend fun saveMotionDetectionEnabled(enabled: Boolean) = motionDetectionEnabledPref.save(enabled)
 
     suspend fun saveOverlaySettings(settings: OverlaySettings) = overlaySettingsPref.save(settings)
 

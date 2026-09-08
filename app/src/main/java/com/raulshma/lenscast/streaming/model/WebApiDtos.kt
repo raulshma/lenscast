@@ -246,3 +246,17 @@ data class TapFocusRequest(
     val x: Double,
     val y: Double,
 )
+
+data class ZoomRequest(
+    val zoomRatio: Double? = null,
+    val ratio: Double? = null,
+)
+
+data class TorchRequest(val enabled: Boolean? = null)
+
+data class StreamClientsResponseDto(
+    val httpClients: List<String>,
+    val httpCount: Int,
+    val rtspCount: Int,
+    val maxHttp: Int = StreamDefaults.MAX_HTTP_CLIENTS,
+)

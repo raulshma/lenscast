@@ -62,6 +62,15 @@ internal enum class RestartTrigger {
     WHILE_ACTIVE,
 }
 
+/** Public health snapshot for the watchdog + dashboard (stable API). */
+data class RtspHealth(
+    val playingClients: Int = 0,
+    val totalClients: Int = 0,
+    val acceptedFrames: Long = 0L,
+    val droppedFrames: Long = 0L,
+    val healthy: Boolean = true,
+)
+
 /**
  * The RTSP output, pulled out of [StreamingManager]: the retained
  * [RtspConfig] (every setting lands here even while the output is stopped,
@@ -90,7 +99,8 @@ internal class RtspOutput(
     private val releaseAudio: () -> Unit,
     /** The running/URL mirror after every server transition, so the owner's state flows follow the output. */
     private val onStateChanged: (running: Boolean, url: String) -> Unit,
-    private val serverFactory: (port: Int) -> RtspServerHandle = { RtspServer(it) },
+    private val hlsSink: com.raulshma.lenscast.streaming.hls.HlsVideoSink? = com.raulshma.lenscast.streaming.hls.HlsManager,
+    private val serverFactory: (port: Int) -> RtspServerHandle = { port -> RtspServer(port, hlsSink) },
 ) {
 
     /** The output is switched on — start() while disabled refuses. */
@@ -140,8 +150,23 @@ internal class RtspOutput(
     /** True while a server instance is actually serving. */
     fun isRunning(): Boolean = server != null
 
+    /** RTSP health snapshot for the watchdog: playing/total clients + encoder counters. */
+    fun healthSnapshot(): RtspHealth {
+        val s = server as? RtspServer
+        return RtspHealth(
+            playingClients = s?.getClientCount() ?: 0,
+            totalClients = s?.getTotalClients() ?: 0,
+            acceptedFrames = s?.getAcceptedFrames() ?: 0L,
+            droppedFrames = s?.getDroppedFrames() ?: 0L,
+            healthy = s?.isHealthy() ?: (server != null),
+        )
+    }
+
     /** The stream URL, or "" while stopped. */
     fun url(): String = currentUrl
+
+    /** The configured port, retained even while stopped — the owner's mDNS/URL seam, no reflection. */
+    fun port(): Int = port
 
     // ── lifecycle ──
 

@@ -8,6 +8,8 @@ import com.raulshma.lenscast.streaming.HttpResult.ResponseBody
 import com.raulshma.lenscast.streaming.web.ApiMethod
 import com.raulshma.lenscast.streaming.web.ApiRequest
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.TimeoutCancellationException
 import fi.iki.elonen.NanoHTTPD
 import java.io.ByteArrayInputStream
 
@@ -35,7 +37,13 @@ class StreamingServer(
     private val authFilter = HttpAuthFilter(webAuthGate, port)
     private val assetStore = StaticAssetStore(context)
     private val mjpegPump = MjpegStreamPump(networkQualityMonitor, BOUNDARY_MARKER)
-    private val mediaResponder = MediaResponder(webApi.gallery, webApi.capture, audioStreamingManager)
+    private val mediaResponder = MediaResponder(
+        webApi.gallery,
+        webApi.capture,
+        audioStreamingManager,
+        com.raulshma.lenscast.streaming.hls.HlsManager,
+    )
+    private val audioManager = audioStreamingManager
 
     private var isRunning = false
 
@@ -44,6 +52,10 @@ class StreamingServer(
     fun setWebStreamingEnabled(enabled: Boolean) = mjpegPump.setEnabled(enabled)
 
     fun getClientCount(): Int = mjpegPump.getClientCount()
+
+    fun httpClientIds(): List<String> = mjpegPump.clientIds()
+
+    fun kickHttpClient(clientId: String): Boolean = mjpegPump.kickClient(clientId)
 
     override fun serve(session: IHTTPSession): Response {
         val uri = session.uri.substringBefore("?")
@@ -79,6 +91,26 @@ class StreamingServer(
             uri == "/stream" -> translate(mjpegPump.openStream())
             uri == "/audio" -> translate(
                 mediaResponder.serveAudio(mjpegPump.isEnabled()),
+            )
+            // Half-duplex talkback uplink: binary PCM16 mono bypasses the JSON router.
+            uri == "/api/audio/uplink" && method == Method.POST -> {
+                val pcm = readRequestBody(session, MAX_BODY_BYTES)
+                    ?: return translate(tooLargeResult(MAX_BODY_BYTES)).apply { addSecurityHeaders() }
+                val ok = try {
+                    audioManager.playUplink(pcm)
+                } catch (_: Exception) {
+                    false
+                }
+                translate(if (ok) HttpResult.jsonError(200, "Talkback played") else HttpResult.jsonError(503, "Speaker unavailable"))
+            }
+            uri == "/hls/playlist.m3u8" -> translate(
+                mediaResponder.serveHlsPlaylist(mjpegPump.isEnabled()),
+            )
+            uri.startsWith("/hls/seg") && uri.endsWith(".ts") -> translate(
+                mediaResponder.serveHlsSegment(
+                    name = uri.substringAfterLast("/"),
+                    enabled = mjpegPump.isEnabled(),
+                ),
             )
             uri.startsWith("/snapshot") -> translate(
                 mediaResponder.serveSnapshot(
@@ -191,10 +223,20 @@ class StreamingServer(
         val query = session.parameters?.mapValues { it.value.firstOrNull() ?: "" } ?: emptyMap()
 
         // The single place the transport blocks on a handler: this dedicated
-        // server thread awaits the suspend router instead of every handler
-        // runBlocking-ing its way to the Main dispatcher.
-        val response = runBlocking {
-            webApi.router.dispatch(ApiRequest(method = apiMethod, path = uri, body = body, query = query))
+        // server thread awaits the suspend router with a bounded timeout so a
+        // slow Capture/Gallery handler can't stall all /api/* workers.
+        val response = try {
+            runBlocking {
+                withTimeout(API_DISPATCH_TIMEOUT_MS) {
+                    webApi.router.dispatch(ApiRequest(method = apiMethod, path = uri, body = body, query = query))
+                }
+            }
+        } catch (_: TimeoutCancellationException) {
+            android.util.Log.w(TAG, "API dispatch timed out: $uri")
+            return translate(HttpResult.jsonError(504, "Handler timed out"))
+        } catch (e: Exception) {
+            android.util.Log.e(TAG, "API dispatch failed: $uri", e)
+            return translate(HttpResult.jsonError(500, "Internal handler error"))
         }
 
         return newFixedLengthResponse(
@@ -274,6 +316,8 @@ class StreamingServer(
         private const val TAG = "StreamingServer"
         const val BOUNDARY_MARKER = "LensCastBoundary"
         private const val MAX_BODY_BYTES = 1L * 1024 * 1024
+        /** Bounded wait for a suspend handler so one slow route can't wedge the NanoHTTPD pool. */
+        private const val API_DISPATCH_TIMEOUT_MS = 10_000L
 
         /**
          * The credential-body cap for the login route: the JSON login body is

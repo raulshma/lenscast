@@ -26,12 +26,12 @@ sealed class QuickSettingEditorValue {
     data class Slider(val value: Float) : QuickSettingEditorValue()
 }
 enum class QuickSettingType {
-    EXPOSURE, ISO, WHITE_BALANCE, FOCUS, ZOOM, HDR, RESOLUTION, FRAME_RATE, STABILIZATION, NIGHT_VISION
+    EXPOSURE, ISO, WHITE_BALANCE, FOCUS, ZOOM, HDR, RESOLUTION, FRAME_RATE, STABILIZATION, NIGHT_VISION, TORCH
 }
 
 /** Icon selector per control; mapped to material vectors at the UI seam. */
 enum class QuickSettingIcon {
-    EXPOSURE, ISO, WHITE_BALANCE, FOCUS, ZOOM, HDR, RESOLUTION, FRAME_RATE, STABILIZATION, NIGHT_VISION
+    EXPOSURE, ISO, WHITE_BALANCE, FOCUS, ZOOM, HDR, RESOLUTION, FRAME_RATE, STABILIZATION, NIGHT_VISION, TORCH
 }
 
 /** The device's live ranges, as far as the quick-setting editors need them. */
@@ -310,6 +310,19 @@ object QuickSettingCatalog {
                 settings.copy(nightVisionMode = NightVisionMode.valueOf(option))
             },
             description = { nightVisionDescription(it.nightVisionMode) },
+        ),
+        QuickSettingDescriptor(
+            type = QuickSettingType.TORCH,
+            icon = QuickSettingIcon.TORCH,
+            title = "Torch / Flashlight",
+            label = { if (it.torchEnabled) "ON" else "OFF" },
+            editor = QuickSettingEditor.Toggle(
+                title = "Torch",
+                checked = { it.torchEnabled },
+            ),
+            write = toggleWrite { settings, checked ->
+                settings.copy(torchEnabled = checked)
+            },
         ),
     )
 

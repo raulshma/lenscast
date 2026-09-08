@@ -15,4 +15,10 @@ object MediaFileNaming {
     fun photoName(now: Date): String = "IMG_${DATE_FORMAT.format(now)}.jpg"
 
     fun videoName(now: Date): String = "VID_${DATE_FORMAT.format(now)}.mp4"
+
+    /** Timelapse outputs share the video stamp with their own prefix. */
+    fun timelapseName(now: Date): String = "TIMELAPSE_${DATE_FORMAT.format(now)}.mp4"
+
+    /** Zero-padded staging name for decoded frames, Locale.US-pinned. */
+    fun timelapseFrameName(index: Int): String = String.format(Locale.US, "frame_%05d.jpg", index)
 }

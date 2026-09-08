@@ -76,6 +76,8 @@ class StreamWatchdog(
     @Volatile
     private var lastProcessedFrameCount = 0
     @Volatile
+    private var lastRtspAcceptedFrames = 0L
+    @Volatile
     private var lastFrameCheckTimeMs = 0L
     @Volatile
     private var lastRecoveryTimestamp = 0L
@@ -124,6 +126,7 @@ class StreamWatchdog(
 
         consecutiveFailures.set(0)
         lastProcessedFrameCount = streamingManager.processedFrames.value
+        lastRtspAcceptedFrames = streamingManager.getRtspHealth().acceptedFrames
         lastFrameCheckTimeMs = System.currentTimeMillis()
         wasStreamingActive = true
         lastFailureReason = null
@@ -175,6 +178,11 @@ class StreamWatchdog(
                             lastRecoveryTimestamp = System.currentTimeMillis()
                             consecutiveFailures.set(0)
                             lastProcessedFrameCount = streamingManager.processedFrames.value
+                            lastRtspAcceptedFrames = try {
+                                streamingManager.getRtspHealth().acceptedFrames
+                            } catch (_: Exception) {
+                                lastRtspAcceptedFrames
+                            }
                             lastFrameCheckTimeMs = System.currentTimeMillis()
                         } else {
                             Log.w(TAG, "$recoveryTier recovery failed")
@@ -229,6 +237,11 @@ class StreamWatchdog(
      */
     private fun checkStreamHealth(): String? {
         val cameraState = cameraService.cameraState.value
+        val rtsp = try {
+            streamingManager.getRtspHealth()
+        } catch (_: Exception) {
+            null
+        }
         val snapshot = WatchdogPolicy.HealthSnapshot(
             cameraError = cameraState is CameraState.Error,
             cameraErrorMessage = (cameraState as? CameraState.Error)?.message,
@@ -240,6 +253,11 @@ class StreamWatchdog(
             lastProcessedFrameCount = lastProcessedFrameCount,
             lastFrameCheckTimeMs = lastFrameCheckTimeMs,
             nowMs = System.currentTimeMillis(),
+            rtspActive = streamingManager.isRtspRunning.value,
+            rtspPlayingClients = rtsp?.playingClients ?: 0,
+            rtspHealthy = rtsp?.healthy ?: true,
+            rtspAcceptedFrames = rtsp?.acceptedFrames ?: 0L,
+            lastRtspAcceptedFrames = lastRtspAcceptedFrames,
         )
 
         val reason = WatchdogPolicy.evaluate(snapshot)
@@ -249,6 +267,7 @@ class StreamWatchdog(
 
         WatchdogPolicy.updatedTracking(snapshot)?.let { tracking ->
             lastProcessedFrameCount = tracking.processedFrameCount
+            lastRtspAcceptedFrames = snapshot.rtspAcceptedFrames
             lastFrameCheckTimeMs = tracking.frameCheckTimeMs
         }
         return null

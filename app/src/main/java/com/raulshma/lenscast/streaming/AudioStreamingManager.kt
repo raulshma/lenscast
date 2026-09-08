@@ -31,6 +31,9 @@ class AudioStreamingManager(private val context: Context) : RtspAudioSource {
     )
 
     private val isStreaming = AtomicBoolean(false)
+    private val isTalking = AtomicBoolean(false)
+    @Volatile private var talkUntilMs = 0L
+    @Volatile private var talkbackTrack: android.media.AudioTrack? = null
     private val subscribers = ConcurrentHashMap<Long, AudioSubscriberPipe>()
     private val nextSubscriberId = AtomicLong(1L)
 
@@ -200,11 +203,77 @@ class AudioStreamingManager(private val context: Context) : RtspAudioSource {
     }
 
     private fun publish(chunk: ByteArray) {
+        // Half-duplex talkback: while the phone speaker plays browser audio,
+        // drop mic chunks so the uplink doesn't echo back to the talker.
+        if (isTalking.get() && System.currentTimeMillis() < talkUntilMs) return
+        isTalking.set(false)
         val snapshot = subscribers.values.toList()
         snapshot.forEach { it.enqueue(chunk) }
     }
 
+    /**
+     * Push-to-talk uplink: browser PCM16 mono → phone speaker.
+     * Half-duplex: mic fan-out pauses for [holdMs] after each play.
+     */
+    fun playUplink(pcm16: ByteArray, sampleRateHz: Int = 16_000, holdMs: Long = 800): Boolean {
+        if (pcm16.isEmpty()) return false
+        return try {
+            isTalking.set(true)
+            talkUntilMs = System.currentTimeMillis() + holdMs
+            var track = talkbackTrack
+            val chMask = AudioFormat.CHANNEL_OUT_MONO
+            val minBuf = android.media.AudioTrack.getMinBufferSize(
+                sampleRateHz, chMask, AudioFormat.ENCODING_PCM_16BIT,
+            ).coerceAtLeast(pcm16.size)
+            if (track == null || track.state != android.media.AudioTrack.STATE_INITIALIZED || track.sampleRate != sampleRateHz) {
+                runCatching { track?.release() }
+                track = android.media.AudioTrack.Builder()
+                    .setAudioAttributes(
+                        AudioAttributes.Builder()
+                            .setUsage(AudioAttributes.USAGE_MEDIA)
+                            .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                            .build()
+                    )
+                    .setAudioFormat(
+                        AudioFormat.Builder()
+                            .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
+                            .setSampleRate(sampleRateHz)
+                            .setChannelMask(chMask)
+                            .build()
+                    )
+                    .setBufferSizeInBytes(minBuf)
+                    .setTransferMode(android.media.AudioTrack.MODE_STREAM)
+                    .build()
+                talkbackTrack = track
+            }
+            track!!.play()
+            var off = 0
+            while (off < pcm16.size) {
+                val n = track.write(pcm16, off, pcm16.size - off)
+                if (n <= 0) break
+                off += n
+            }
+            Log.d(TAG, "Talkback played ${pcm16.size}B @${sampleRateHz}Hz")
+            true
+        } catch (e: Exception) {
+            Log.w(TAG, "Talkback playback failed", e)
+            isTalking.set(false)
+            false
+        }
+    }
+
+    fun stopTalkback() {
+        isTalking.set(false)
+        runCatching { talkbackTrack?.pause() }
+        runCatching { talkbackTrack?.flush() }
+    }
+
     private fun cleanupRecorder() {
+        runCatching { talkbackTrack?.pause() }
+        runCatching { talkbackTrack?.flush() }
+        runCatching { talkbackTrack?.release() }
+        talkbackTrack = null
+        isTalking.set(false)
         runCatching { echoCanceler?.release() }
         echoCanceler = null
         runCatching { noiseSuppressor?.release() }

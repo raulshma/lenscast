@@ -4,10 +4,12 @@ import com.raulshma.lenscast.camera.model.StreamKind
 import com.raulshma.lenscast.camera.model.StreamStartOutcome
 import com.raulshma.lenscast.camera.model.StreamToggle
 import com.raulshma.lenscast.core.AppJson
+import com.raulshma.lenscast.core.StreamDefaults
 import com.raulshma.lenscast.streaming.StreamingManager
 import com.raulshma.lenscast.streaming.StreamingSession
 import com.raulshma.lenscast.streaming.StreamingTransports
 import com.raulshma.lenscast.streaming.model.StreamActionResponse
+import com.raulshma.lenscast.streaming.model.StreamClientsResponseDto
 
 /** /api/stream/... — live-stream lifecycle, delegating the start ladder and session choreography to the Stream Toggle. */
 class StreamWebHandler(
@@ -16,6 +18,7 @@ class StreamWebHandler(
 ) {
 
     private val actionAdapter by lazy { AppJson.moshi.adapter(StreamActionResponse::class.java) }
+    private val clientsAdapter by lazy { AppJson.moshi.adapter(StreamClientsResponseDto::class.java) }
 
     // The gate → start → session begin → rollback ladder is the Stream
     // Toggle's; the handler only maps outcomes onto the wire payloads. The
@@ -103,5 +106,23 @@ class StreamWebHandler(
         return actionAdapter.toJson(
             StreamActionResponse(success = true, isActive = streamingManager.isLiveStreaming())
         )
+    }
+
+    fun listClients(): String {
+        val info = streamingManager.getConnectInfo()
+        return clientsAdapter.toJson(
+            StreamClientsResponseDto(
+                httpClients = streamingManager.getHttpClientIds(),
+                httpCount = info.httpClients,
+                rtspCount = info.rtspClients,
+                maxHttp = StreamDefaults.MAX_HTTP_CLIENTS,
+            )
+        )
+    }
+
+    fun kickClient(id: String): String {
+        val ok = streamingManager.kickHttpClient(id)
+        if (!ok) throw IllegalArgumentException("Client not found: $id")
+        return actionAdapter.toJson(StreamActionResponse(success = true, isActive = streamingManager.isLiveStreaming()))
     }
 }

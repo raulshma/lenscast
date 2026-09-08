@@ -19,9 +19,11 @@ import com.raulshma.lenscast.streaming.web.RecordingWebHandler
 import com.raulshma.lenscast.streaming.web.SettingsWebHandler
 import com.raulshma.lenscast.streaming.web.StatusWebHandler
 import com.raulshma.lenscast.streaming.web.StreamWebHandler
+import com.raulshma.lenscast.streaming.hls.HlsManager
 import com.raulshma.lenscast.streaming.rtsp.RtspAuthSpec
 import com.raulshma.lenscast.streaming.rtsp.RtspConfigDiff
 import com.raulshma.lenscast.streaming.rtsp.RtspInputFormat
+import com.raulshma.lenscast.streaming.rtsp.RtspUriPolicy
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import java.util.concurrent.atomic.AtomicBoolean
@@ -130,6 +132,77 @@ class StreamingManager(
     val adaptiveBitrateState: StateFlow<AdaptiveBitrateController.AdaptiveState> = adaptiveBitrateController.state
 
     fun getNetworkStatsSnapshot(): NetworkQualityMonitor.NetworkStatsSnapshot = networkQualityMonitor.getStatsSnapshot()
+
+    /** RTSP health for the watchdog — playing clients + encoder counters. */
+    fun getRtspHealth(): RtspHealth = rtspOutput.healthSnapshot()
+
+    fun getRtspClientCount(): Int = getRtspHealth().playingClients
+
+    fun isRtspServerHealthy(): Boolean = if (rtspOutput.isActive()) getRtspHealth().healthy else true
+
+    /** Connect bundle for the native sheet + Web API: every URL a viewer can type or scan. */
+    fun getConnectInfo(): ConnectInfo {
+        val httpIp = NetworkUtils.getLocalIpAddress()
+        return ConnectInfo(
+            httpUrl = buildVideoUrl(),
+            audioUrl = _audioStreamUrl.value.ifBlank { buildAudioUrl() },
+            hlsUrl = NetworkUtils.getHlsPlaylistUrl(currentPort) ?: "http://localhost:$currentPort/hls/playlist.m3u8",
+            rtspUrl = rtspOutput.url().ifBlank {
+                val host = NetworkUtils.formatHostForUrl(httpIp ?: "localhost")
+                "rtsp://$host:${rtspOutput.port()}/${RtspUriPolicy.DEFAULT_STREAM_PATH}"
+            },
+            httpClients = try {
+                server.getClientCount()
+            } catch (_: Exception) {
+                _clientCount.value
+            },
+            rtspClients = getRtspClientCount(),
+        )
+    }
+
+    fun getHttpClientIds(): List<String> = try {
+        server.httpClientIds()
+    } catch (_: Exception) {
+        emptyList()
+    }
+
+    // ── Motion-event MVP: disabled by default, fed with sampled luma on push ──
+    private val motionDetector = com.raulshma.lenscast.capture.MotionDetector(
+        onMotion = { motionListener?.invoke(it) },
+    )
+    @Volatile private var motionListener: ((delta: Double) -> Unit)? = null
+
+    fun setMotionDetectionEnabled(on: Boolean) {
+        motionDetector.enabled = on
+        if (on) motionDetector.reset()
+    }
+
+    fun setMotionSensitivity(sensitivity01: Float) {
+        motionDetector.sensitivity = sensitivity01
+    }
+
+    fun setMotionListener(listener: ((delta: Double) -> Unit)?) {
+        motionListener = listener
+    }
+
+    /** True kick: closes the MJPEG stream so the socket drops. */
+    fun kickHttpClient(clientId: String): Boolean = try {
+        server.kickHttpClient(clientId)
+    } catch (_: Exception) {
+        false
+    }
+
+    data class ConnectInfo(
+        val httpUrl: String,
+        val audioUrl: String,
+        val hlsUrl: String,
+        val rtspUrl: String,
+        val httpClients: Int,
+        val rtspClients: Int,
+    )
+
+    /** True when thermal CRITICAL asks the frame path to pause encoding. */
+    fun isThermallyPaused(): Boolean = thermalMonitor.throttlingResult.value.shouldPause
 
     /** Per-client measured throughput/fps read seam for Web API handlers. */
     fun getFramesPerSecond(clientId: String): Double = networkQualityMonitor.getFramesPerSecond(clientId)
@@ -241,6 +314,8 @@ class StreamingManager(
             return false
         }
 
+        HlsManager.setEnabled(true)
+
         refreshAudioStreamingState()
         if (mdnsEnabled.get()) {
             registerMdnsService(currentPort)
@@ -254,6 +329,7 @@ class StreamingManager(
     fun stopWebStreaming() {
         if (!webStreamingActive.getAndSet(false)) return
         audioStreamingManager.stop()
+        HlsManager.setEnabled(false)
         clearWebAudioState()
         _streamUrl.value = ""
         _clientCount.value = 0
@@ -288,6 +364,14 @@ class StreamingManager(
      * fan-out. Each output no-ops while it is inactive.
      */
     fun pushFrame(yuvData: ByteArray, width: Int, height: Int, rotation: Int = 0) {
+        // Thermal CRITICAL pauses encoding on both outputs — the pipeline's
+        // Long.MAX_VALUE delay alone would stall MJPEG while RTSP kept burning CPU.
+        if (isThermallyPaused()) return
+        // Motion runs on sampled luma even with zero viewers (surveillance).
+        try {
+            motionDetector.feed(yuvData, width, height)
+        } catch (_: Exception) {
+        }
         pushFrameToWeb(yuvData, width, height, rotation)
         pushFrameToRtsp(yuvData, width, height, rotation)
     }
@@ -481,7 +565,14 @@ class StreamingManager(
     }
 
     private fun registerMdnsService(port: Int) {
-        serviceDiscoveryManager.registerService(port = port)
+        serviceDiscoveryManager.registerService(
+            port = port,
+            rtsp = ServiceDiscoveryManager.RtspAdvert(
+                port = rtspOutput.port(),
+                path = RtspUriPolicy.DEFAULT_STREAM_PATH,
+                authRequired = webAuthGate.isEnabled,
+            ),
+        )
     }
 
     private fun unregisterMdnsService() {

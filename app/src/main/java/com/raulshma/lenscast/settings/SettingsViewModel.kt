@@ -50,6 +50,7 @@ class SettingsViewModel(
     val rtspInputFormat: StateFlow<RtspInputFormat> = settingsDataStore.rtspInputFormat
     val adaptiveBitrateEnabled: StateFlow<Boolean> = settingsDataStore.adaptiveBitrateEnabled
     val mdnsEnabled: StateFlow<Boolean> = settingsDataStore.mdnsEnabled
+    val motionDetectionEnabled: StateFlow<Boolean> = settingsDataStore.motionDetectionEnabled
 
     // Auth state comes straight from the Settings Store — no writable mirror.
     // Typing responsiveness comes from the store flow re-emit on save.
@@ -146,6 +147,8 @@ class SettingsViewModel(
     fun updateAdaptiveBitrateEnabled(enabled: Boolean) = save { settingsDataStore.saveAdaptiveBitrateEnabled(enabled) }
 
     fun updateMdnsEnabled(enabled: Boolean) = save { settingsDataStore.saveMdnsEnabled(enabled) }
+
+    fun updateMotionDetectionEnabled(enabled: Boolean) = save { settingsDataStore.saveMotionDetectionEnabled(enabled) }
 
     fun updateAuthEnabled(enabled: Boolean) {
         persistAuth(authSettings.value.copy(enabled = enabled))

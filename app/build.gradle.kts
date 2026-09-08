@@ -230,6 +230,11 @@ dependencies {
     implementation(libs.coil.compose)
     implementation(libs.coil.video)
 
+    implementation(libs.media3.exoplayer)
+    implementation(libs.media3.ui)
+
+    implementation(libs.zxing.core)
+
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)

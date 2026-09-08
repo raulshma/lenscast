@@ -111,6 +111,67 @@ class CaptureViewModel(
         Log.d(TAG, "Interval capture stopped")
     }
 
+    private val _timelapseBusy = MutableStateFlow(false)
+    val timelapseBusy: StateFlow<Boolean> = _timelapseBusy.asStateFlow()
+    private val _timelapseMessage = MutableStateFlow<String?>(null)
+    val timelapseMessage: StateFlow<String?> = _timelapseMessage.asStateFlow()
+
+    /** Assemble the most recent interval photos into an MP4 timelapse. */
+    fun assembleTimelapse(lastN: Int = 100, fps: Int = 30) {
+        if (_timelapseBusy.value) return
+        _timelapseBusy.value = true
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            try {
+                val photos = TimelapseAssembler.selectSources(captureHistoryStore.history.value, lastN)
+                if (photos.size < TimelapseAssembler.MIN_SOURCES) {
+                    _timelapseMessage.value = "Need at least 10 photos (have ${photos.size})"
+                    return@launch
+                }
+                val resolver = CaptureMediaResolver(context.contentResolver)
+                val tmpDir = java.io.File(context.cacheDir, "timelapse_frames").apply { mkdirs() }
+                tmpDir.listFiles()?.forEach { it.delete() }
+                var idx = 0
+                for (entry in photos) {
+                    val bytes = try {
+                        resolver.openStream(entry.filePath)?.use { it.readBytes() }
+                    } catch (_: Exception) {
+                        null
+                    } ?: continue
+                    java.io.File(tmpDir, com.raulshma.lenscast.capture.MediaFileNaming.timelapseFrameName(idx++)).writeBytes(bytes)
+                }
+                if (idx < TimelapseAssembler.MIN_SOURCES) {
+                    _timelapseMessage.value = "Could not read frames (read $idx)"
+                    return@launch
+                }
+                val outName = com.raulshma.lenscast.capture.MediaFileNaming.timelapseName(java.util.Date())
+                val movies = android.os.Environment.getExternalStoragePublicDirectory(
+                    android.os.Environment.DIRECTORY_MOVIES
+                )
+                val dir = com.raulshma.lenscast.capture.model.CaptureMediaFormat.videoDir(movies).apply { mkdirs() }
+                val outFile = java.io.File(dir, outName)
+                val ok = TimelapseAssembler.assemble(tmpDir, outFile, fps)
+                if (ok) {
+                    captureHistoryStore.add(
+                        captureHistoryStore.createVideoEntry(
+                            fileName = outName,
+                            filePath = outFile.absolutePath,
+                            fileSizeBytes = outFile.length(),
+                            durationMs = (idx * 1000L / fps),
+                        )
+                    )
+                    _timelapseMessage.value = "Timelapse saved: $outName ($idx frames)"
+                } else {
+                    _timelapseMessage.value = "Timelapse failed"
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Timelapse failed", e)
+                _timelapseMessage.value = "Timelapse failed: ${e.message}"
+            } finally {
+                _timelapseBusy.value = false
+            }
+        }
+    }
+
     fun updateIntervalConfig(config: IntervalCaptureConfig) {
         _intervalConfig.value = config
     }

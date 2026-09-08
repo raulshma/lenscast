@@ -35,6 +35,7 @@ class ApiRouter(
         "/api/settings" -> ApiResponse.ok(settings.get())
         "/api/status" -> ApiResponse.ok(status.get())
         "/api/camera/lenses" -> ApiResponse.ok(lens.getLenses())
+        "/api/stream/clients" -> ApiResponse.ok(stream.listClients())
         "/api/capture/interval/status" -> ApiResponse.ok(interval.status())
         "/api/recording/status" -> ApiResponse.ok(recording.status())
         "/api/gallery" -> ApiResponse.ok(
@@ -58,6 +59,8 @@ class ApiRouter(
         "/api/capture" -> ApiResponse.ok(capture.capturePhoto())
         "/api/camera/lens" -> ApiResponse.ok(lens.selectLens(r.body))
         "/api/camera/focus" -> ApiResponse.ok(lens.tapFocus(r.body))
+        "/api/camera/zoom" -> ApiResponse.ok(lens.setZoom(r.body))
+        "/api/camera/torch" -> ApiResponse.ok(lens.setTorch(r.body))
         "/api/capture/interval/start" -> ApiResponse.ok(interval.start(r.body))
         "/api/capture/interval/stop" -> ApiResponse.ok(interval.stop())
         "/api/recording/start" -> ApiResponse.ok(recording.start(r.body))
@@ -67,6 +70,8 @@ class ApiRouter(
     }
 
     private suspend fun routeDelete(r: ApiRequest): ApiResponse? = when {
+        r.path.startsWith("/api/stream/clients/") ->
+            ApiResponse.ok(stream.kickClient(r.path.removePrefix("/api/stream/clients/")))
         r.path.startsWith("/api/media/") ->
             ApiResponse.ok(gallery.deleteMedia(r.path.removePrefix("/api/media/")))
         else -> null

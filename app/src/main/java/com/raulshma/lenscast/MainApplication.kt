@@ -88,6 +88,14 @@ class MainApplication : Application(), SingletonImageLoader.Factory {
         cameraService.setFrameListener { yuvData, width, height, rotation ->
             streamingManager.pushFrame(yuvData, width, height, rotation)
         }
+        // Motion-event MVP: auto-photo on motion (disabled by default; the
+        // capture screen owns the toggle via RecordingController-adjacent prefs).
+        streamingManager.setMotionListener { _ ->
+            try {
+                photoCaptureManager.captureToGallery()
+            } catch (_: Exception) {
+            }
+        }
     }
 
     override fun newImageLoader(context: Context): ImageLoader {

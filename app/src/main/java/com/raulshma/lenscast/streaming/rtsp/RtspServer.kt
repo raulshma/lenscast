@@ -26,7 +26,10 @@ import java.util.concurrent.atomic.AtomicLong
 
 // RtspServerHandle: the server-lifecycle seam [com.raulshma.lenscast.streaming.RtspOutput]
 // drives this class through; the method set is already this interface's shape.
-class RtspServer(private val port: Int = DEFAULT_PORT) : RtspServerHandle {
+class RtspServer(
+    private val port: Int = DEFAULT_PORT,
+    private val hlsVideoSink: com.raulshma.lenscast.streaming.hls.HlsVideoSink? = com.raulshma.lenscast.streaming.hls.HlsManager,
+) : RtspServerHandle {
 
     private var serverSocket: ServerSocket? = null
     private var acceptThread: Thread? = null
@@ -282,6 +285,11 @@ class RtspServer(private val port: Int = DEFAULT_PORT) : RtspServerHandle {
     private fun distributeEncodedFrame(nalUnits: List<H264Encoder.EncodedNalUnit>) {
         if (nalUnits.isEmpty()) return
 
+        // HLS tee: same AUs the RTP fan-out sends, no extra encode.
+        try {
+            hlsVideoSink?.feedVideo(nalUnits)
+        } catch (_: Exception) {
+        }
         rtpTimestamp += timestampIncrement
 
         if (nalUnits.any { it.isKeyFrame } && !firstKeyframeLogged) {
@@ -331,6 +339,10 @@ class RtspServer(private val port: Int = DEFAULT_PORT) : RtspServerHandle {
 
     private fun distributeEncodedAudioFrame(aacData: ByteArray) {
         audioTimestamp += AUDIO_TIMESTAMP_INCREMENT
+        try {
+            hlsVideoSink?.feedAudio(aacData)
+        } catch (_: Exception) {
+        }
 
         for (client in clients.values) {
             if (client.isPlaying && client.isAudioSetup) {
@@ -343,8 +355,22 @@ class RtspServer(private val port: Int = DEFAULT_PORT) : RtspServerHandle {
     private fun acceptLoop() {
         while (running.get()) {
             try {
-                serverSocket?.soTimeout = 2000
-                val socket = serverSocket?.accept() ?: break
+                val currentSocket = serverSocket
+                if (currentSocket == null || currentSocket.isClosed) {
+                    // Transient null during reopen — wait and retry instead of killing the loop.
+                    try {
+                        Thread.sleep(500)
+                    } catch (_: InterruptedException) {
+                        break
+                    }
+                    continue
+                }
+                currentSocket.soTimeout = 2000
+                val socket = try {
+                    currentSocket.accept()
+                } catch (_: SocketTimeoutException) {
+                    continue
+                }
 
                 if (clients.size >= MAX_CLIENTS) {
                     Log.w(TAG, "Rejecting client: max connections ($MAX_CLIENTS) reached")
@@ -378,26 +404,24 @@ class RtspServer(private val port: Int = DEFAULT_PORT) : RtspServerHandle {
                 }
             } catch (_: SocketTimeoutException) {
             } catch (_: SocketException) {
-                if (running.get()) {
-                    try {
-                        serverSocket?.close()
-                    } catch (_: Exception) {
-                    }
-                    serverSocket = null
-                    if (running.get()) {
-                        try {
-                            serverSocket = ServerSocket().apply {
-                                reuseAddress = true
-                                bind(InetSocketAddress(InetAddress.getByName("0.0.0.0"), port), 5)
-                            }
-                            Log.w(TAG, "Accept socket reopened after SocketException")
-                        } catch (e: Exception) {
-                            Log.e(TAG, "Failed to reopen server socket", e)
-                            running.set(false)
-                        }
-                    }
+                if (!running.get()) break
+                try {
+                    serverSocket?.close()
+                } catch (_: Exception) {
                 }
-                break
+                serverSocket = null
+                try {
+                    serverSocket = ServerSocket().apply {
+                        reuseAddress = true
+                        bind(InetSocketAddress(InetAddress.getByName("0.0.0.0"), port), 5)
+                    }
+                    Log.w(TAG, "Accept socket reopened after SocketException — resuming accept loop")
+                    continue
+                } catch (e: Exception) {
+                    Log.e(TAG, "Failed to reopen server socket", e)
+                    running.set(false)
+                    break
+                }
             } catch (e: Exception) {
                 if (running.get()) Log.e(TAG, "Accept error", e)
             }
@@ -405,6 +429,14 @@ class RtspServer(private val port: Int = DEFAULT_PORT) : RtspServerHandle {
     }
 
     fun getClientCount(): Int = clients.count { it.value.isPlaying }
+
+    fun getAcceptedFrames(): Long = acceptedFrames.get()
+
+    fun getDroppedFrames(): Long = droppedFrames.get()
+
+    fun getTotalClients(): Int = clients.size
+
+    fun isHealthy(): Boolean = running.get() && serverSocket?.isBound == true && serverSocket?.isClosed == false
 
     /**
      * One client connection: reads the wire (via [RtspWireReader]), parses

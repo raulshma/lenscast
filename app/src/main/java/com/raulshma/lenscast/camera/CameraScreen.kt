@@ -53,6 +53,7 @@ import androidx.compose.material.icons.filled.Collections
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Exposure
 import androidx.compose.material.icons.filled.FiberManualRecord
+import androidx.compose.material.icons.filled.FlashlightOn
 import androidx.compose.material.icons.filled.Flip
 import androidx.compose.material.icons.filled.Handyman
 import androidx.compose.material.icons.filled.HdrOn
@@ -156,6 +157,7 @@ private fun QuickSettingIcon.vector(): ImageVector = when (this) {
     QuickSettingIcon.FRAME_RATE -> Icons.Default.Speed
     QuickSettingIcon.STABILIZATION -> Icons.Default.Handyman
     QuickSettingIcon.NIGHT_VISION -> Icons.Default.NightsStay
+    QuickSettingIcon.TORCH -> Icons.Default.FlashlightOn
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -209,6 +211,7 @@ fun CameraScreen(
 
     var quickSettingsExpanded by remember { mutableStateOf(false) }
     var activeSetting by remember { mutableStateOf<QuickSettingType?>(null) }
+    var showConnectSheet by remember { mutableStateOf(false) }
     var isPinching by remember { mutableStateOf(false) }
     var pinchZoomRatio by remember { mutableFloatStateOf(1f) }
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
@@ -286,9 +289,24 @@ fun CameraScreen(
                 onNavigateToSettings = onNavigateToSettings,
                 onCopyStreamUrl = { viewModel.copyStreamUrl() },
                 onCopyRtspUrl = { viewModel.copyRtspUrl() },
+                onShowConnect = { showConnectSheet = true },
                 onToggleServer = { viewModel.toggleServer() },
                 onSelectLens = { viewModel.selectLens(it) },
             )
+
+            if (showConnectSheet) {
+                ModalBottomSheet(
+                    onDismissRequest = { showConnectSheet = false },
+                ) {
+                    val info = remember(showConnectSheet) { viewModel.getConnectInfo() }
+                    ConnectSheet(
+                        info = info,
+                        onCopyHttp = { viewModel.copyStreamUrl() },
+                        onCopyHls = { viewModel.copyHlsUrl() },
+                        onCopyRtsp = { viewModel.copyRtspUrl() },
+                    )
+                }
+            }
 
             if (activeSetting != null) {
                 val isoRange by viewModel.availableIsoRange.collectAsState()
@@ -344,6 +362,7 @@ private fun ImmersiveCameraView(
     onNavigateToSettings: () -> Unit,
     onCopyStreamUrl: () -> Unit,
     onCopyRtspUrl: () -> Unit,
+    onShowConnect: () -> Unit,
     onToggleServer: () -> Unit,
     onSelectLens: (Int) -> Unit,
     onPinchStateChange: (Boolean, Float) -> Unit,
@@ -429,6 +448,7 @@ private fun ImmersiveCameraView(
             onToggleQuickSettings = onToggleQuickSettings,
             onCopyStreamUrl = onCopyStreamUrl,
             onCopyRtspUrl = onCopyRtspUrl,
+            onShowConnect = onShowConnect,
             onToggleServer = onToggleServer,
             modifier = Modifier
                 .align(Alignment.TopStart)
@@ -542,6 +562,7 @@ private fun CameraTopOverlay(
     onToggleQuickSettings: () -> Unit,
     onCopyStreamUrl: () -> Unit,
     onCopyRtspUrl: () -> Unit,
+    onShowConnect: () -> Unit,
     onToggleServer: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -579,6 +600,11 @@ private fun CameraTopOverlay(
                 onCopyUrl = onCopyStreamUrl,
                 onCopyRtspUrl = onCopyRtspUrl,
                 onToggleServer = onToggleServer,
+            )
+            CameraControlButton(
+                icon = Icons.Default.ContentCopy,
+                contentDescription = "Connect — QR + URLs",
+                onClick = onShowConnect
             )
             CameraControlButton(
                 icon = if (showPreview) Icons.Default.Visibility else Icons.Default.VisibilityOff,

@@ -434,6 +434,19 @@ class CameraViewModel(
         )
     }
 
+    fun getConnectInfo(): com.raulshma.lenscast.streaming.StreamingManager.ConnectInfo =
+        streamingManager.getConnectInfo()
+
+    fun copyHlsUrl() {
+        val info = streamingManager.getConnectInfo()
+        copyUrlToClipboard(
+            url = info.hlsUrl,
+            fallback = info.hlsUrl,
+            clipLabel = "HLS URL",
+            copiedMessage = "HLS URL copied",
+        )
+    }
+
     fun capturePhoto() {
         val fileName = photoCaptureManager.captureToGallery(
             onError = { exception -> Log.e(TAG, "Capture failed", exception) },

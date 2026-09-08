@@ -187,6 +187,17 @@ fun CaptureScreen(
                             Text("Start Interval", modifier = Modifier.padding(start = 8.dp))
                         }
                     }
+                    Spacer(modifier = Modifier.height(8.dp))
+                    val timelapseBusy by viewModel.timelapseBusy.collectAsState()
+                    val timelapseMessage by viewModel.timelapseMessage.collectAsState()
+                    OutlinedButton(
+                        onClick = { viewModel.assembleTimelapse() },
+                        enabled = !timelapseBusy,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(if (timelapseBusy) "Assembling…" else "Assemble Timelapse (last 100 photos)")
+                    }
+                    timelapseMessage?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
                 }
             }
 

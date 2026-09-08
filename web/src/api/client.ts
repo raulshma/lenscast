@@ -211,3 +211,36 @@ export async function tapToFocus(x: number, y: number): Promise<{ success: boole
     body: JSON.stringify({ x, y }),
   })
 }
+
+export async function setZoom(zoomRatio: number): Promise<{ success: boolean; error?: string }> {
+  return requestJson('/api/camera/zoom', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ zoomRatio }),
+  })
+}
+
+export async function setTorch(enabled: boolean): Promise<{ success: boolean; error?: string }> {
+  return requestJson('/api/camera/torch', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ enabled }),
+  })
+}
+
+export async function listStreamClients(): Promise<{ httpClients: string[]; httpCount: number; rtspCount: number; maxHttp: number }> {
+  return requestJson('/api/stream/clients')
+}
+
+export async function kickStreamClient(id: string): Promise<{ success: boolean }> {
+  return requestJson(`/api/stream/clients/${encodeURIComponent(id)}`, { method: 'DELETE' })
+}
+
+export async function pushTalkback(pcm16: ArrayBuffer): Promise<void> {
+  await fetch('/api/audio/uplink', {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: { 'X-Requested-With': 'XMLHttpRequest', 'Content-Type': 'application/octet-stream' },
+    body: pcm16,
+  })
+}

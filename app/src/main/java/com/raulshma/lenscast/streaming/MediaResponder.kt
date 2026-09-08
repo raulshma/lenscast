@@ -3,6 +3,8 @@ package com.raulshma.lenscast.streaming
 import com.raulshma.lenscast.capture.PhotoCaptureManager
 import com.raulshma.lenscast.streaming.HttpResult.ResponseBody.Bytes
 import com.raulshma.lenscast.streaming.HttpResult.ResponseBody.Stream
+import com.raulshma.lenscast.streaming.hls.HlsManager
+import com.raulshma.lenscast.streaming.hls.HlsSegmentSource
 import com.raulshma.lenscast.streaming.web.GalleryWebHandler
 import kotlinx.coroutines.runBlocking
 import java.io.InputStream
@@ -18,6 +20,7 @@ class MediaResponder(
     private val gallery: GalleryWebHandler,
     private val capture: PhotoCaptureManager,
     private val audioStreamingManager: AudioStreamingManager,
+    private val hlsSegments: HlsSegmentSource = HlsManager,
 ) {
 
     fun serveMediaFile(
@@ -121,6 +124,33 @@ class MediaResponder(
         } else {
             HttpResult.plainText(404, "No frame available")
         }
+    }
+
+    fun serveHlsPlaylist(enabled: Boolean): HttpResult {
+        if (!enabled) return HttpResult.streamingDisabled()
+        if (!hlsSegments.hasSegments()) {
+            return HttpResult.plainText(503, "HLS starting — try again in a few seconds")
+        }
+        return HttpResult(
+            statusCode = 200,
+            mimeType = "application/vnd.apple.mpegurl",
+            body = Bytes(
+                hlsSegments.playlist().toByteArray(Charsets.UTF_8)
+            ),
+            headers = HttpResult.NO_STORE_HEADERS,
+        )
+    }
+
+    fun serveHlsSegment(name: String, enabled: Boolean): HttpResult {
+        if (!enabled) return HttpResult.streamingDisabled()
+        val bytes = hlsSegments.segment(name)
+            ?: return HttpResult.plainText(404, "Segment not found")
+        return HttpResult(
+            statusCode = 200,
+            mimeType = "video/mp2t",
+            body = Bytes(bytes),
+            headers = mapOf("Cache-Control" to "public, max-age=30"),
+        )
     }
 
     fun serveAudio(enabled: Boolean): HttpResult {

@@ -77,6 +77,7 @@ object WatchdogPolicy {
         SERVER_STOPPED,
         STREAM_STOPPED,
         FRAME_STALL,
+        RTSP_UNHEALTHY,
     }
 
     /** Everything [evaluate] needs — a snapshot of the watchdog's live inputs. */
@@ -91,6 +92,11 @@ object WatchdogPolicy {
         val lastProcessedFrameCount: Int,
         val lastFrameCheckTimeMs: Long,
         val nowMs: Long,
+        val rtspActive: Boolean = false,
+        val rtspPlayingClients: Int = 0,
+        val rtspHealthy: Boolean = true,
+        val rtspAcceptedFrames: Long = 0L,
+        val lastRtspAcceptedFrames: Long = 0L,
     )
 
     /** Escalation ladder: first two failures soft, next two medium, then hard. */
@@ -131,6 +137,17 @@ object WatchdogPolicy {
             return StallReason.FRAME_STALL
         }
 
+        // 5. RTSP-only health — catches an RTSP hang while MJPEG looks idle-healthy.
+        if (snapshot.rtspActive && !snapshot.rtspHealthy) {
+            return StallReason.RTSP_UNHEALTHY
+        }
+        if (snapshot.rtspActive && snapshot.rtspPlayingClients > 0 &&
+            snapshot.nowMs - snapshot.lastFrameCheckTimeMs >= FRAME_STALL_THRESHOLD_MS &&
+            snapshot.rtspAcceptedFrames == snapshot.lastRtspAcceptedFrames
+        ) {
+            return StallReason.RTSP_UNHEALTHY
+        }
+
         return null
     }
 
@@ -140,6 +157,7 @@ object WatchdogPolicy {
             StallReason.CAMERA_ERROR -> "Camera error: ${snapshot.cameraErrorMessage}"
             StallReason.SERVER_STOPPED -> "Streaming server stopped unexpectedly"
             StallReason.STREAM_STOPPED -> "Stream stopped unexpectedly"
+            StallReason.RTSP_UNHEALTHY -> "RTSP output unhealthy (no frames to ${snapshot.rtspPlayingClients} players)"
             StallReason.FRAME_STALL ->
                 "Frame delivery stalled (no frames for ${(snapshot.nowMs - snapshot.lastFrameCheckTimeMs) / 1000}s)"
         }

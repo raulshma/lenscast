@@ -2,6 +2,7 @@ package com.raulshma.lenscast.streaming
 
 import android.util.Log
 import com.raulshma.lenscast.core.NetworkQualityMonitor
+import com.raulshma.lenscast.core.StreamDefaults
 import com.raulshma.lenscast.streaming.HttpResult.ResponseBody.Stream
 import java.io.InputStream
 import java.util.concurrent.atomic.AtomicInteger
@@ -19,6 +20,7 @@ class MjpegStreamPump(
 
     private val clientCount = AtomicInteger(0)
     private val clientCounter = AtomicInteger(0)
+    private val liveStreams = java.util.concurrent.ConcurrentHashMap<String, MjpegInputStream>()
     @Volatile private var latestJpeg: ByteArray? = null
     private val frameLock = Object()
     private var latestFrameVersion = 0L
@@ -42,9 +44,27 @@ class MjpegStreamPump(
 
     fun getClientCount(): Int = clientCount.get()
 
-    fun openStream(): HttpResult {
+    /** Best-effort kick for the Web API: closing happens when the socket's stream closes. */
+    fun clientIds(): List<String> = liveStreams.keys().toList()
+
+    /** True kick: closes the stream so NanoHTTPD's write fails and the socket drops. */
+    fun kickClient(clientId: String): Boolean {
+        val stream = liveStreams[clientId] ?: return false
+        return try {
+            stream.close()
+            true
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    fun openStream(maxClients: Int = StreamDefaults.MAX_HTTP_CLIENTS): HttpResult {
         if (!enabled) {
             return HttpResult.streamingDisabled()
+        }
+        if (clientCount.get() >= maxClients) {
+            Log.w(TAG, "Rejecting MJPEG client: at cap ($maxClients)")
+            return HttpResult.jsonError(503, "Too many viewers (max $maxClients)")
         }
 
         val clientNum = clientCount.incrementAndGet()
@@ -53,12 +73,15 @@ class MjpegStreamPump(
 
         networkQualityMonitor.registerClient(clientId)
 
+        val stream = MjpegInputStream(clientId)
+        liveStreams[clientId] = stream
         return HttpResult(
             statusCode = 200,
             mimeType = "multipart/x-mixed-replace; boundary=$boundary",
-            body = Stream(MjpegInputStream(clientId), contentLength = null),
+            body = Stream(stream, contentLength = null),
             headers = HttpResult.NO_STORE_HEADERS + mapOf(
                 "X-Accel-Buffering" to "no",
+                "X-Client-Id" to clientId,
             ),
         )
     }
@@ -180,8 +203,9 @@ class MjpegStreamPump(
         override fun close() {
             closed = true
             synchronized(frameLock) { frameLock.notifyAll() }
+            liveStreams.remove(clientId)
             networkQualityMonitor.unregisterClient(clientId)
-            val num = clientCount.decrementAndGet()
+            val num = clientCount.decrementAndGet().coerceAtLeast(0)
             Log.d(TAG, "Client disconnected: $clientId. Total: $num")
         }
     }

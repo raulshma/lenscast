@@ -67,8 +67,34 @@ class CaptureHistoryStore(private val context: Context) {
 
     fun add(entry: CaptureHistory) {
         _history.value = mergeEntry(_history.value, entry)
+        enforceQuota()
         save()
     }
+
+    /** Storage manager: total bytes + quota verdicts, pure for tests. */
+    fun totalBytes(): Long = _history.value.sumOf { it.fileSizeBytes.coerceAtLeast(0) }
+
+    fun storageBar(quotaBytes: Long): StorageBar =
+        StorageManager.storageBar(totalBytes(), quotaBytes)
+
+    /** Guard before a capture: false when free space is below the safety floor. */
+    fun hasFreeSpace(minFreeBytes: Long = StorageManager.LOW_SPACE_FLOOR_BYTES): Boolean {
+        return try {
+            val free = context.filesDir.freeSpace + context.cacheDir.freeSpace
+            free >= minFreeBytes
+        } catch (_: Exception) {
+            true
+        }
+    }
+
+    /** Auto-delete-oldest until under quota; returns evicted ids. */
+    fun enforceQuota(quotaBytes: Long = StorageManager.DEFAULT_QUOTA_BYTES): List<String> {
+        val victims = StorageManager.evictionOrder(_history.value, totalBytes(), quotaBytes)
+        if (victims.isEmpty()) return emptyList()
+        return deleteAll(victims.map { it.id })
+    }
+
+    data class StorageBar(val usedBytes: Long, val quotaBytes: Long, val percent: Int)
 
     fun refreshFromMediaStore() {
         ioExecutor.execute {

@@ -177,6 +177,35 @@ class CameraService(private val context: Context) {
         }
     }
 
+    /** Remote PTZ/torch seam for the Web API: zoom clamps to the live device range. */
+    fun setZoomRatio(ratio: Float): Boolean {
+        val cam = camera ?: return false
+        return try {
+            val max = cam.cameraInfo.zoomState.value?.maxZoomRatio
+                ?: com.raulshma.lenscast.camera.model.CameraSettings.ZOOM_RATIO_MAX
+            cam.cameraControl.setZoomRatio(ratio.coerceIn(1f, max))
+            true
+        } catch (e: Exception) {
+            Log.w(TAG, "setZoomRatio failed", e)
+            false
+        }
+    }
+
+    fun setTorchEnabled(on: Boolean): Boolean {
+        val cam = camera ?: return false
+        return try {
+            if (!cam.cameraInfo.hasFlashUnit()) {
+                Log.w(TAG, "setTorchEnabled: no flash unit")
+                return false
+            }
+            cam.cameraControl.enableTorch(on)
+            true
+        } catch (e: Exception) {
+            Log.w(TAG, "setTorchEnabled failed", e)
+            false
+        }
+    }
+
     /**
      * The one MeteringDecision → CameraX translation, shared by tap-to-focus
      * and the settings-apply metering: the plan owns which metering fires
@@ -921,6 +950,14 @@ class CameraService(private val context: Context) {
             cam.cameraControl.setZoomRatio(settings.zoomRatio)
         } catch (e: Exception) {
             Log.w(TAG, "Zoom failed", e)
+        }
+
+        try {
+            if (cam.cameraInfo.hasFlashUnit()) {
+                cam.cameraControl.enableTorch(settings.torchEnabled)
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Torch failed", e)
         }
 
         try {

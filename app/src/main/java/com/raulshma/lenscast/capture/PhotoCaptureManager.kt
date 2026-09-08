@@ -199,8 +199,17 @@ class PhotoCaptureManager(
         override fun savedPath(output: ImageCapture.OutputFileResults): String =
             output.savedUri?.toString().orEmpty()
 
-        // MediaStore reports no size at save time — history records 0, as before.
-        override fun savedSize(output: ImageCapture.OutputFileResults): Long = 0L
+        // Query MediaStore SIZE post-save instead of recording 0 ("Unknown size").
+        override fun savedSize(output: ImageCapture.OutputFileResults): Long {
+            val uri = output.savedUri ?: return 0L
+            return try {
+                context.contentResolver.query(uri, arrayOf(MediaStore.MediaColumns.SIZE), null, null, null)?.use { c ->
+                    if (c.moveToFirst()) c.getLong(0) else 0L
+                } ?: 0L
+            } catch (_: Exception) {
+                0L
+            }
+        }
     }
 
     private class FileDestination(val file: File) : PhotoDestination {

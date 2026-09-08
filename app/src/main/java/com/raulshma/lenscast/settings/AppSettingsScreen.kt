@@ -114,6 +114,7 @@ fun AppSettingsScreen(
     val rtspInputFormat by viewModel.rtspInputFormat.collectAsState()
     val adaptiveBitrateEnabled by viewModel.adaptiveBitrateEnabled.collectAsState()
     val mdnsEnabled by viewModel.mdnsEnabled.collectAsState()
+    val motionDetectionEnabled by viewModel.motionDetectionEnabled.collectAsState()
     val isIgnoringBatteryOptimizations by viewModel.isIgnoringBatteryOptimizations
 
     val updateState by updateViewModel.updateState.collectAsState()
@@ -302,6 +303,13 @@ fun AppSettingsScreen(
                         title = "Network Discovery (mDNS)",
                         checked = mdnsEnabled,
                         onCheckedChange = { viewModel.updateMdnsEnabled(it) }
+                    )
+                    // Persisted toggle: the screen writes the store, the
+                    // Settings Applier applies it to the runtime detector.
+                    SwitchSetting(
+                        title = "Motion Detection (auto-photo)",
+                        checked = motionDetectionEnabled,
+                        onCheckedChange = { viewModel.updateMotionDetectionEnabled(it) }
                     )
                 }
             }

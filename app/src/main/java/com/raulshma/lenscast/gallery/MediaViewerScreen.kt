@@ -290,34 +290,38 @@ private fun PhotoViewer(
 
 @Composable
 private fun VideoViewer(filePath: String) {
+    val context = androidx.compose.ui.platform.LocalContext.current
     val resolved = resolveMediaModel(filePath)
-    var videoView: VideoView? by remember { mutableStateOf(null) }
-
-    DisposableEffect(videoView) {
-        onDispose { videoView?.stopPlayback() }
+    val exoPlayer = androidx.compose.runtime.remember {
+        androidx.media3.exoplayer.ExoPlayer.Builder(context).build().apply {
+            repeatMode = androidx.media3.common.Player.REPEAT_MODE_OFF
+        }
+    }
+    androidx.compose.runtime.DisposableEffect(resolved) {
+        val item = when (resolved) {
+            is android.net.Uri -> androidx.media3.common.MediaItem.fromUri(resolved)
+            is java.io.File -> androidx.media3.common.MediaItem.fromUri(android.net.Uri.fromFile(resolved))
+            else -> null
+        }
+        if (item != null) {
+            exoPlayer.setMediaItem(item)
+            exoPlayer.prepare()
+            exoPlayer.playWhenReady = true
+        }
+        onDispose { exoPlayer.stop() }
+    }
+    androidx.compose.runtime.DisposableEffect(Unit) {
+        onDispose { exoPlayer.release() }
     }
 
     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         if (resolved != null) {
             AndroidView(
                 modifier = Modifier.fillMaxSize(),
-                factory = { context ->
-                    FrameLayout(context).apply {
-                        val view = VideoView(context).also { videoView = it }
-                        view.layoutParams = FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
-                            gravity = Gravity.CENTER
-                        }
-                        val controls = MediaController(context).apply {
-                            setAnchorView(view)
-                            setMediaPlayer(view)
-                        }
-                        view.setMediaController(controls)
-                        when (resolved) {
-                            is android.net.Uri -> view.setVideoURI(resolved)
-                            is java.io.File -> view.setVideoPath(resolved.absolutePath)
-                        }
-                        view.setOnPreparedListener { it.setVideoScalingMode(android.media.MediaPlayer.VIDEO_SCALING_MODE_SCALE_TO_FIT); view.start() }
-                        addView(view)
+                factory = { ctx ->
+                    androidx.media3.ui.PlayerView(ctx).apply {
+                        player = exoPlayer
+                        useController = true
                     }
                 },
             )
