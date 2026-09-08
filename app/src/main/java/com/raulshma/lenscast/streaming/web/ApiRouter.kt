@@ -16,6 +16,8 @@ class ApiRouter(
     private val interval: IntervalCaptureWebHandler,
     private val recording: RecordingWebHandler,
     private val gallery: GalleryWebHandler,
+    private val deterrence: DeterrenceWebHandler,
+    private val auth: AuthWebHandler,
 ) {
 
     suspend fun dispatch(request: ApiRequest): ApiResponse = try {
@@ -45,6 +47,8 @@ class ApiRouter(
                 pageSize = r.query["pageSize"]?.toIntOrNull() ?: 0,
             )
         )
+        "/api/auth/config" -> ApiResponse.ok(auth.get())
+        "/api/auth/sessions" -> ApiResponse.ok(auth.listSessions())
         else -> null
     }
 
@@ -65,6 +69,8 @@ class ApiRouter(
         "/api/capture/interval/stop" -> ApiResponse.ok(interval.stop())
         "/api/recording/start" -> ApiResponse.ok(recording.start(r.body))
         "/api/recording/stop" -> ApiResponse.ok(recording.stop())
+        "/api/deterrence/siren" -> ApiResponse.ok(deterrence.setSiren(r.body))
+        "/api/auth/config" -> ApiResponse.ok(auth.put(r.body))
         "/api/media/batch-delete" -> ApiResponse.ok(gallery.batchDelete(r.body))
         else -> null
     }
@@ -72,6 +78,8 @@ class ApiRouter(
     private suspend fun routeDelete(r: ApiRequest): ApiResponse? = when {
         r.path.startsWith("/api/stream/clients/") ->
             ApiResponse.ok(stream.kickClient(r.path.removePrefix("/api/stream/clients/")))
+        r.path.startsWith("/api/auth/sessions/") ->
+            ApiResponse.ok(auth.revokeSession(r.path.removePrefix("/api/auth/sessions/")))
         r.path.startsWith("/api/media/") ->
             ApiResponse.ok(gallery.deleteMedia(r.path.removePrefix("/api/media/")))
         else -> null

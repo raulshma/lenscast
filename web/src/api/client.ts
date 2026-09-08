@@ -244,3 +244,11 @@ export async function pushTalkback(pcm16: ArrayBuffer): Promise<void> {
     body: pcm16,
   })
 }
+
+export async function setSiren(on: boolean): Promise<{ success: boolean }> {
+  return requestJson('/api/deterrence/siren', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ siren: on }),
+  })
+}

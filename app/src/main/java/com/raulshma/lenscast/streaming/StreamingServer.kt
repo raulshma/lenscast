@@ -12,6 +12,7 @@ import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.TimeoutCancellationException
 import fi.iki.elonen.NanoHTTPD
 import java.io.ByteArrayInputStream
+import javax.net.ssl.SSLServerSocketFactory
 
 /**
  * The HTTP transport: a thin dispatch table over deep responder modules.
@@ -32,9 +33,21 @@ class StreamingServer(
     // Auth policy (sessions, rate limiting, CSRF) lives behind this seam; the
     // transport only translates requests to it.
     webAuthGate: WebAuthGate,
+    // Non-null when the server should serve HTTPS (self-signed cert owned by
+    // TlsCertManager). Must be provided at construction: NanoHTTPD makes the
+    // server socket secure before start().
+    tlsServerSocketFactory: SSLServerSocketFactory? = null,
 ) : NanoHTTPD(port) {
 
-    private val authFilter = HttpAuthFilter(webAuthGate, port)
+    val isSecure: Boolean = tlsServerSocketFactory != null
+
+    init {
+        if (tlsServerSocketFactory != null) {
+            makeSecure(tlsServerSocketFactory, null)
+        }
+    }
+
+    private val authFilter = HttpAuthFilter(webAuthGate, port, scheme = if (tlsServerSocketFactory != null) "https" else "http")
     private val assetStore = StaticAssetStore(context)
     private val mjpegPump = MjpegStreamPump(networkQualityMonitor, BOUNDARY_MARKER)
     private val mediaResponder = MediaResponder(
@@ -44,6 +57,7 @@ class StreamingServer(
         com.raulshma.lenscast.streaming.hls.HlsManager,
     )
     private val audioManager = audioStreamingManager
+    private val sseStatusStream = SseStatusStream(webApi.status)
 
     private var isRunning = false
 
@@ -92,6 +106,16 @@ class StreamingServer(
             uri == "/audio" -> translate(
                 mediaResponder.serveAudio(mjpegPump.isEnabled()),
             )
+            // SSE status channel: push replaces the dashboard's 1s status poll.
+            uri == "/api/events" && method == Method.GET -> {
+                val stream = sseStatusStream.open()
+                    ?: return translate(HttpResult.jsonError(503, "Too many event streams"))
+                        .apply { addSecurityHeaders() }
+                val response = newChunkedResponse(Response.Status.OK, "text/event-stream", stream)
+                response.addHeader("Cache-Control", "no-store")
+                response.addHeader("X-Accel-Buffering", "no")
+                response
+            }
             // Half-duplex talkback uplink: binary PCM16 mono bypasses the JSON router.
             uri == "/api/audio/uplink" && method == Method.POST -> {
                 val pcm = readRequestBody(session, MAX_BODY_BYTES)

@@ -267,6 +267,7 @@ fun SliderSetting(
     value: Float,
     range: ClosedFloatingPointRange<Float>,
     onValueChange: (Float) -> Unit,
+    steps: Int = 0,
 ) {
     Column(modifier = Modifier.fillMaxWidth()) {
         Row(
@@ -289,6 +290,7 @@ fun SliderSetting(
             value = value,
             onValueChange = onValueChange,
             valueRange = range,
+            steps = steps,
             colors = SliderDefaults.colors(
                 activeTrackColor = MaterialTheme.colorScheme.primary
             )

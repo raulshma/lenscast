@@ -26,7 +26,10 @@ class UpdateDownloader(private val context: Context) {
         val connection = UpdateHttp.openConnection(downloadUrl, CONNECT_TIMEOUT_MS, READ_TIMEOUT_MS)
 
         try {
-            val contentLength = connection.contentLengthLong
+            // contentLength (Int, API 1) not contentLengthLong (API 24); an APK
+            // download never approaches the 2 GB Int ceiling and -1 still means
+            // "unknown", which the progress emission already handles.
+            val contentLength = connection.contentLength.toLong()
             connection.inputStream.buffered().use { input ->
                 targetFile.outputStream().buffered().use { output ->
                     val buffer = ByteArray(8192)

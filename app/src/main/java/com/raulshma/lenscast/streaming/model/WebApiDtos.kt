@@ -1,6 +1,7 @@
 package com.raulshma.lenscast.streaming.model
 
 import com.raulshma.lenscast.camera.model.MaskingZone
+import com.raulshma.lenscast.camera.model.MotionZone
 import com.raulshma.lenscast.camera.model.OverlaySettings
 import com.raulshma.lenscast.core.StreamDefaults
 
@@ -42,6 +43,16 @@ data class MaskingZoneDto(
     val blurRadius: Double = MaskingZone.DEFAULT.blurRadius.toDouble(),
 )
 
+data class MotionZoneDto(
+    val id: String = "",
+    val label: String = "",
+    val enabled: Boolean = MotionZone.DEFAULT.enabled,
+    val x: Double = MotionZone.DEFAULT.x.toDouble(),
+    val y: Double = MotionZone.DEFAULT.y.toDouble(),
+    val width: Double = MotionZone.DEFAULT.width.toDouble(),
+    val height: Double = MotionZone.DEFAULT.height.toDouble(),
+)
+
 data class StreamingSettingsDto(
     val port: Int = StreamDefaults.WEB_PORT,
     val webStreamingEnabled: Boolean = true,
@@ -75,6 +86,30 @@ data class StreamingSettingsDto(
     val watchdogEnabled: Boolean = false,
     val watchdogMaxRetries: Int = StreamDefaults.WATCHDOG_MAX_RETRIES,
     val watchdogCheckIntervalSeconds: Int = StreamDefaults.WATCHDOG_CHECK_INTERVAL_SECONDS,
+    val mdnsEnabled: Boolean = true,
+    val motionDetectionEnabled: Boolean = false,
+    val motionSensitivityPercent: Int = StreamDefaults.MOTION_SENSITIVITY_PERCENT_DEFAULT,
+    val motionZones: List<MotionZoneDto> = emptyList(),
+    val motionRecordingEnabled: Boolean = false,
+    val motionPostRollSeconds: Int = StreamDefaults.MOTION_POST_ROLL_SECONDS_DEFAULT,
+    val motionArmScheduleEnabled: Boolean = false,
+    val motionArmStartMinute: Int = StreamDefaults.MOTION_ARM_START_MINUTE_DEFAULT,
+    val motionArmEndMinute: Int = StreamDefaults.MOTION_ARM_END_MINUTE_DEFAULT,
+    val soundDetectionEnabled: Boolean = false,
+    val soundThresholdPercent: Int = StreamDefaults.SOUND_THRESHOLD_PERCENT_DEFAULT,
+    val webhookEnabled: Boolean = false,
+    val webhookUrl: String = "",
+    val backupEnabled: Boolean = false,
+    val backupWifiOnly: Boolean = true,
+    val backupWebdavUrl: String = "",
+    val backupWebdavUsername: String = "",
+    /**
+     * Write-only, like the stream-auth password: requests carry it, responses
+     * always serialize it blank — the stored secret never round-trips.
+     */
+    val backupWebdavPassword: String = "",
+    val httpsEnabled: Boolean = false,
+    val audioDeviceId: String = "",
 )
 
 data class SettingsResponseDto(

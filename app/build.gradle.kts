@@ -137,10 +137,28 @@ android {
         applicationId = "com.raulshma.lenscast"
         minSdk = 23
         targetSdk = 36
-        versionCode = 1
-        versionName = project.findProperty("versionName") as String? ?: "0.0.6"
+        // The in-app updater compares this value against the release channel;
+        // a property override (or the CI's tag-driven bump) keeps releases
+        // strictly increasing — F-Droid metadata requires it too.
+        versionCode = (project.findProperty("versionCode") as String?)?.toInt() ?: 7
+        versionName = project.findProperty("versionName") as String? ?: "0.0.7"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    }
+
+    // The `fdroid` flavor ships without the self-updater: F-Droid policy
+    // forbids both side-loading channels (REQUEST_INSTALL_PACKAGES) and
+    // app-managed updates. The `play`/`ci` default flavor keeps it.
+    flavorDimensions += "store"
+    productFlavors {
+        create("store") {
+            dimension = "store"
+            buildConfigField("boolean", "SELF_UPDATE", "true")
+        }
+        create("fdroid") {
+            dimension = "store"
+            buildConfigField("boolean", "SELF_UPDATE", "false")
+        }
     }
 
     buildTypes {
@@ -169,6 +187,7 @@ android {
     }
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 
     testOptions {
@@ -222,6 +241,7 @@ dependencies {
 
     implementation(libs.work.manager)
     implementation(libs.nanohttpd)
+    implementation(libs.nanohttpd.ws)
     implementation(libs.datastore.preferences)
     implementation(libs.coroutines.guava)
     implementation(libs.moshi)

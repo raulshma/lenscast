@@ -1,5 +1,6 @@
 package com.raulshma.lenscast.streaming
 
+import android.annotation.SuppressLint
 import android.content.Context
 import android.media.AudioAttributes
 import android.media.AudioFormat
@@ -7,6 +8,7 @@ import android.media.AudioRecord
 import android.media.MediaRecorder
 import android.media.audiofx.AcousticEchoCanceler
 import android.media.audiofx.NoiseSuppressor
+import android.os.Build
 import com.raulshma.lenscast.core.MicAccess
 import com.raulshma.lenscast.core.StreamDefaults
 import com.raulshma.lenscast.streaming.rtsp.AacFormat
@@ -52,6 +54,55 @@ class AudioStreamingManager(private val context: Context) : RtspAudioSource {
     @Volatile
     private var noiseSuppressor: NoiseSuppressor? = null
 
+    @Volatile
+    private var chunkListener: ((pcm16: ByteArray) -> Unit)? = null
+
+    /** Persisted mic selection: empty = the platform default. Applied live. */
+    @Volatile private var preferredDeviceId: String = ""
+
+    /** Input device list for pickers (id, human label, USB/BT/built-in). */
+    fun inputDevices(): List<Pair<Int, String>> {
+        val manager = context.getSystemService(Context.AUDIO_SERVICE) as? android.media.AudioManager ?: return emptyList()
+        return manager.getDevices(android.media.AudioManager.GET_DEVICES_INPUTS)
+            .filter { it.type != android.media.AudioDeviceInfo.TYPE_TELEPHONY }
+            .map { it.id to deviceLabel(it) }
+    }
+
+    /** AudioDeviceInfo.getAddress is API 28+; below P only the type label exists. */
+    private fun deviceLabel(device: android.media.AudioDeviceInfo): String {
+        val address = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) device.address else null
+        val typeLabel = deviceTypeLabel(device.type)
+        return if (address.isNullOrEmpty()) typeLabel else "$typeLabel ($address)"
+    }
+
+    private fun deviceTypeLabel(type: Int): String = when (type) {
+        android.media.AudioDeviceInfo.TYPE_BUILTIN_MIC -> "Built-in mic"
+        android.media.AudioDeviceInfo.TYPE_BLUETOOTH_SCO -> "Bluetooth (SCO)"
+        android.media.AudioDeviceInfo.TYPE_BLUETOOTH_A2DP -> "Bluetooth (A2DP)"
+        android.media.AudioDeviceInfo.TYPE_USB_DEVICE, android.media.AudioDeviceInfo.TYPE_USB_HEADSET -> "USB"
+        android.media.AudioDeviceInfo.TYPE_WIRED_HEADSET -> "Wired headset"
+        else -> "Input 0x" + Integer.toHexString(type)
+    }
+
+    fun setPreferredDeviceId(id: String) {
+        preferredDeviceId = id
+        applyPreferredDevice()
+    }
+
+    private fun applyPreferredDevice() {
+        val record = audioRecord ?: return
+        if (preferredDeviceId.isBlank()) {
+            record.preferredDevice = null
+            return
+        }
+        val manager = context.getSystemService(Context.AUDIO_SERVICE) as? android.media.AudioManager ?: return
+        val match = manager.getDevices(android.media.AudioManager.GET_DEVICES_INPUTS)
+            .firstOrNull { it.id.toString() == preferredDeviceId }
+        if (match != null) {
+            runCatching { record.preferredDevice = match }
+        }
+    }
+
     override fun start(config: Config): Boolean {
         if (isStreaming.get()) return true
         if (!MicAccess.isGranted(context)) {
@@ -67,6 +118,7 @@ class AudioStreamingManager(private val context: Context) : RtspAudioSource {
             audioRecord = recorder
             activeConfig = resolved
             isStreaming.set(true)
+            applyPreferredDevice()
             startReader(recorder, resolved)
 
             Log.d(TAG, "Audio streaming started: $resolved")
@@ -104,6 +156,11 @@ class AudioStreamingManager(private val context: Context) : RtspAudioSource {
 
     override fun getChannelCount(): Int = activeConfig.channelCount
 
+    /** Raw-chunk tap for downstream consumers (sound detection); audio path thread. */
+    fun setChunkListener(listener: ((pcm16: ByteArray) -> Unit)?) {
+        chunkListener = listener
+    }
+
     fun release() {
         stop()
     }
@@ -116,6 +173,9 @@ class AudioStreamingManager(private val context: Context) : RtspAudioSource {
         }
     }
 
+    // RECORD_AUDIO is granted by the camera screen before streaming can start;
+    // AudioRecord.Builder itself performs no permission preflight.
+    @SuppressLint("MissingPermission")
     private fun buildAudioRecord(config: AacFormat.ResolvedBuffers, echoCancellation: Boolean): AudioRecord {
         val audioSource = if (echoCancellation) {
             MediaRecorder.AudioSource.VOICE_COMMUNICATION
@@ -203,8 +263,13 @@ class AudioStreamingManager(private val context: Context) : RtspAudioSource {
     }
 
     private fun publish(chunk: ByteArray) {
-        // Half-duplex talkback: while the phone speaker plays browser audio,
-        // drop mic chunks so the uplink doesn't echo back to the talker.
+        // Sound detection taps the raw chunk before the talkback gate: an
+        // intruder's noise while a talkback clip plays is still an event.
+        chunkListener?.invoke(chunk)
+        // Half-duplex talkback: while the phone speaker plays browser audio
+        // (one-shot clip or a held PTT stream), drop mic chunks so the uplink
+        // doesn't echo back to the talker.
+        if (uplinkStreaming.get()) return
         if (isTalking.get() && System.currentTimeMillis() < talkUntilMs) return
         isTalking.set(false)
         val snapshot = subscribers.values.toList()
@@ -262,10 +327,75 @@ class AudioStreamingManager(private val context: Context) : RtspAudioSource {
         }
     }
 
+    /** True while a continuous PTT stream holds the speaker. */
+    fun uplinkStreamingActive(): Boolean = uplinkStreaming.get()
+
     fun stopTalkback() {
         isTalking.set(false)
         runCatching { talkbackTrack?.pause() }
         runCatching { talkbackTrack?.flush() }
+        uplinkStreaming.set(false)
+        runCatching { uplinkTrack?.pause() }
+        runCatching { uplinkTrack?.flush() }
+        runCatching { uplinkTrack?.release() }
+        uplinkTrack = null
+    }
+
+    // ── Continuous talkback stream (WebSocket PTT): PCM16 mono chunks in, ──
+    // ── speaker out, for as long as the button is held.                   ──
+    private val uplinkStreaming = AtomicBoolean(false)
+    @Volatile private var uplinkTrack: android.media.AudioTrack? = null
+
+    fun startUplinkStream(sampleRateHz: Int = 16_000): Boolean {
+        if (uplinkStreaming.get()) return true
+        return try {
+        val chMask = AudioFormat.CHANNEL_OUT_MONO
+        val minBuf = android.media.AudioTrack.getMinBufferSize(sampleRateHz, chMask, AudioFormat.ENCODING_PCM_16BIT)
+        val track = android.media.AudioTrack.Builder()
+            .setAudioAttributes(
+                AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_MEDIA)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                    .build()
+            )
+            .setAudioFormat(
+                AudioFormat.Builder()
+                    .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
+                    .setSampleRate(sampleRateHz)
+                    .setChannelMask(chMask)
+                    .build()
+            )
+            .setBufferSizeInBytes(minBuf)
+            .setTransferMode(android.media.AudioTrack.MODE_STREAM)
+            .build()
+        track.play()
+        uplinkTrack = track
+        uplinkStreaming.set(true)
+        true
+    } catch (e: Exception) {
+        Log.w(TAG, "Uplink stream start failed", e)
+        runCatching { uplinkTrack?.release() }
+        uplinkTrack = null
+        false
+        }
+    }
+
+    /** Blocks until [pcm16] is handed to the audio track; drops on error. */
+    fun writeUplinkStream(pcm16: ByteArray): Boolean {
+        val track = uplinkTrack ?: return false
+        return try {
+            var off = 0
+            while (off < pcm16.size) {
+                val n = track.write(pcm16, off, pcm16.size - off)
+                if (n <= 0) return false
+                off += n
+            }
+            true
+        } catch (e: Exception) {
+            Log.w(TAG, "Uplink stream write failed", e)
+            stopTalkback()
+            false
+        }
     }
 
     private fun cleanupRecorder() {

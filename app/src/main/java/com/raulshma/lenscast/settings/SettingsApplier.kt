@@ -45,6 +45,13 @@ class SettingsApplier(
             }
         }
 
+        // TLS mode: a stop → recreate → start cycle behind the manager's seam.
+        scope.launch {
+            settingsDataStore.httpsEnabled.collectLatest { enabled ->
+                streamingManager.setTlsEnabled(enabled)
+            }
+        }
+
         // All audio-related settings in one coroutine
         scope.launch {
             combine(
@@ -128,10 +135,40 @@ class SettingsApplier(
         }
 
         // Motion detection: persisted toggle → runtime detector. The settings
-        // screen writes the store; the Applier applies exactly once.
+        // screen writes the store; the Applier applies exactly once. Sensitivity
+        // arrives as a percent and scales to the detector's 0..1 ladder; zones
+        // narrow detection to their enabled rectangles.
         scope.launch {
-            settingsDataStore.motionDetectionEnabled.collectLatest { enabled ->
-                streamingManager.setMotionDetectionEnabled(enabled)
+            combine(
+                settingsDataStore.motionDetectionEnabled,
+                settingsDataStore.motionSensitivity,
+                settingsDataStore.motionZones,
+            ) { enabled, sensitivityPercent, zones ->
+                MotionSettings(enabled, sensitivityPercent, zones)
+            }.collectLatest { motion ->
+                streamingManager.setMotionDetectionEnabled(motion.enabled)
+                streamingManager.setMotionSensitivity(motion.sensitivityPercent / 100f)
+                streamingManager.setMotionZones(motion.zones)
+            }
+        }
+
+        // Preferred microphone: applied live to the capture record.
+        scope.launch {
+            settingsDataStore.audioDeviceId.collectLatest { id ->
+                streamingManager.setAudioDeviceId(id)
+            }
+        }
+
+        // Sound detection: threshold percent and toggle onto the audio-path
+        // detector; the events route back through the manager's listener seam.
+        scope.launch {
+            combine(
+                settingsDataStore.soundDetectionEnabled,
+                settingsDataStore.soundThresholdPercent,
+            ) { enabled, threshold ->
+                SoundSettings(enabled, threshold)
+            }.collectLatest { sound ->
+                streamingManager.setSoundDetection(sound.enabled, sound.thresholdPercent)
             }
         }
 
@@ -181,6 +218,17 @@ class SettingsApplier(
         val enabled: Boolean,
         val maxRetries: Int,
         val checkInterval: Int,
+    )
+
+    private data class MotionSettings(
+        val enabled: Boolean,
+        val sensitivityPercent: Int,
+        val zones: List<com.raulshma.lenscast.camera.model.MotionZone>,
+    )
+
+    private data class SoundSettings(
+        val enabled: Boolean,
+        val thresholdPercent: Int,
     )
 
     companion object {

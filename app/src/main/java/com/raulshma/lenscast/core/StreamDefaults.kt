@@ -59,4 +59,26 @@ object StreamDefaults {
     const val STORAGE_QUOTA_MB_MAX = 32_768
     const val STORAGE_QUOTA_MB_DEFAULT = 2048
     const val STORAGE_LOW_SPACE_MIN_MB = 200
+
+    // Motion & sound detection bounds. Sensitivity and sound threshold are
+    // persisted as percents (1..100); the Settings Applier converts to
+    // MotionDetector's 0..1 scale.
+    const val MOTION_SENSITIVITY_MIN = 1
+    const val MOTION_SENSITIVITY_MAX = 100
+    const val MOTION_SENSITIVITY_PERCENT_DEFAULT = 50
+    const val MOTION_POST_ROLL_MIN_SECONDS = 0
+    const val MOTION_POST_ROLL_MAX_SECONDS = 120
+    const val MOTION_POST_ROLL_SECONDS_DEFAULT = 10
+    const val MINUTES_PER_DAY = 1_440
+    const val MOTION_ARM_START_MINUTE_DEFAULT = 0
+    const val MOTION_ARM_END_MINUTE_DEFAULT = 1_439
+    const val SOUND_THRESHOLD_MIN = 1
+    const val SOUND_THRESHOLD_MAX = 100
+    const val SOUND_THRESHOLD_PERCENT_DEFAULT = 30
+
+    // Webhook notification bounds — a URL the notifier will actually POST to.
+    const val WEBHOOK_TIMEOUT_MS = 10_000
+
+    // HLS segment pacing.
+    const val HLS_SEGMENT_AUS = 48
 }

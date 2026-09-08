@@ -1,9 +1,10 @@
-import { Show, createSignal, createMemo } from 'solid-js'
+import { Show, createSignal, createMemo, createEffect, onCleanup } from 'solid-js'
 import type { DeviceStatus, StreamingSettings } from '../types'
 import { useZoomable } from '../hooks/useZoomable'
 import ConnectionQualityIndicator from './ConnectionQualityIndicator'
 import { tapToFocus as apiTapToFocus, setZoom as apiSetZoom, setTorch as apiSetTorch, pushTalkback } from '../api/client'
 import { API_DEFAULTS } from '../api/defaults'
+import { createH264Player, h264Supported, wsBaseUrl } from '../video/h264Player'
 
 interface Props {
   status: () => DeviceStatus | null
@@ -25,6 +26,49 @@ interface Props {
   overlaySettings: () => StreamingSettings | null
 }
 
+// The talkback mic tap. AudioWorklet (the modern replacement for the
+// deprecated ScriptProcessorNode) is served from a blob so the dashboard
+// needs no extra asset; browsers without worklet support take the legacy
+// processor. Either way the graph dead-ends in a zero-gain node — the mic
+// must never be monitored out loud.
+const PCM_TAP_WORKLET = `
+class PcmTap extends AudioWorkletProcessor {
+  process(inputs) {
+    const input = inputs[0]
+    if (input && input[0]) this.port.postMessage(input[0].slice(0))
+    return true
+  }
+}
+registerProcessor('pcm-tap', PcmTap)
+`
+
+async function tapPcm16(
+  ctx: AudioContext,
+  source: MediaStreamAudioSourceNode,
+  onChunk: (chunk: Float32Array) => void,
+): Promise<void> {
+  const sink = ctx.createGain()
+  sink.gain.value = 0
+  sink.connect(ctx.destination)
+  if (ctx.audioWorklet) {
+    const blobUrl = URL.createObjectURL(new Blob([PCM_TAP_WORKLET], { type: 'application/javascript' }))
+    try {
+      await ctx.audioWorklet.addModule(blobUrl)
+    } finally {
+      URL.revokeObjectURL(blobUrl)
+    }
+    const node = new AudioWorkletNode(ctx, 'pcm-tap')
+    node.port.onmessage = (ev) => onChunk(ev.data as Float32Array)
+    source.connect(node)
+    node.connect(sink)
+    return
+  }
+  const proc = ctx.createScriptProcessor(2048, 1, 1)
+  proc.onaudioprocess = (ev) => onChunk(ev.inputBuffer.getChannelData(0))
+  source.connect(proc)
+  proc.connect(sink)
+}
+
 export default function StreamPreview(props: Props) {
   const st = () => props.status()
   const isActive = () => !!st()?.streaming?.isActive
@@ -41,7 +85,26 @@ export default function StreamPreview(props: Props) {
 
   const [previewErrorCount, setPreviewErrorCount] = createSignal(0)
   const MAX_PREVIEW_ERRORS = 5
-  const [playerMode, setPlayerMode] = createSignal<'mjpeg' | 'hls'>('mjpeg')
+  const [playerMode, setPlayerMode] = createSignal<'h264' | 'mjpeg' | 'hls'>(
+    h264Supported() ? 'h264' : 'mjpeg',
+  )
+  const [h264Canvas, setH264Canvas] = createSignal<HTMLCanvasElement | null>(null)
+  const h264 = createH264Player({
+    onStatus: (s) => {
+      // Fall back to MJPEG when the WebSocket or decoder gives up repeatedly.
+      if (s === 'error') setPlayerMode('mjpeg')
+    },
+  })
+  createEffect(() => {
+    const target = h264Canvas()
+    const active = props.previewVisible() && webActive()
+    if (playerMode() === 'h264' && active && target) {
+      h264.start(target)
+    } else {
+      h264.stop()
+    }
+  })
+  onCleanup(() => h264.stop())
   const [zoomRatio, setZoomRatio] = createSignal(1)
   const [torchOn, setTorchOn] = createSignal(false)
   const [talking, setTalking] = createSignal(false)
@@ -121,6 +184,83 @@ export default function StreamPreview(props: Props) {
     return lines
   })
 
+  // ── Continuous push-to-talk: mic → PCM16 chunks → WS /ws/talkback. ──
+  // getUserMedia is secure-context-only, so on a plain-HTTP origin this
+  // cannot run; the legacy one-shot uplink below still covers the case the
+  // WS sidecar is down but the mic is up.
+  let pttCtx: AudioContext | null = null
+  let pttSocket: WebSocket | null = null
+  let pttStream: MediaStream | null = null
+
+  async function startPtt() {
+    try {
+      pttSocket = new WebSocket(`${wsBaseUrl()}/ws/talkback`)
+      pttSocket.binaryType = 'arraybuffer'
+      pttStream = await navigator.mediaDevices.getUserMedia({ audio: { sampleRate: 16000, channelCount: 1 } })
+      pttCtx = new AudioContext({ sampleRate: 16000 })
+      const source = pttCtx.createMediaStreamSource(pttStream)
+      await tapPcm16(pttCtx, source, (chunk) => {
+        if (!pttSocket || pttSocket.readyState !== WebSocket.OPEN) return
+        pttSocket.send(floatChunkToPcm16(chunk))
+      })
+    } catch (err) {
+      console.warn('PTT unavailable (mic or WS); falling back to one-shot capture', err)
+      // Legacy one-shot: 1.5s POST upload — no mic streaming required beyond
+      // the same getUserMedia this block already tried, so this only helps
+      // when the WS sidecar is down but the mic is up.
+      await stopPttCleanup()
+      const captured = await captureOneShotPcm()
+      if (captured) await pushTalkback(captured)
+      setTalking(false)
+    }
+  }
+
+  async function stopPtt() {
+    try {
+      pttSocket?.send('stop')
+    } catch { }
+    await stopPttCleanup()
+    setTalking(false)
+  }
+
+  async function stopPttCleanup() {
+    pttStream?.getTracks().forEach((t) => t.stop())
+    pttStream = null
+    if (pttCtx && pttCtx.state !== 'closed') await pttCtx.close().catch(() => {})
+    pttCtx = null
+    try { pttSocket?.close() } catch { }
+    pttSocket = null
+  }
+
+  function floatChunkToPcm16(input: Float32Array): ArrayBuffer {
+    const pcm = new Int16Array(input.length)
+    for (let i = 0; i < input.length; i++) pcm[i] = Math.max(-32768, Math.min(32767, input[i] * 32768))
+    return pcm.buffer
+  }
+
+  async function captureOneShotPcm(): Promise<ArrayBuffer | null> {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: { sampleRate: 16000, channelCount: 1 } })
+      const ctx = new AudioContext({ sampleRate: 16000 })
+      const src = ctx.createMediaStreamSource(stream)
+      const chunks: ArrayBuffer[] = []
+      await tapPcm16(ctx, src, (chunk) => chunks.push(floatChunkToPcm16(chunk).slice(0)))
+      await new Promise((r) => setTimeout(r, 1500))
+      stream.getTracks().forEach((t) => t.stop())
+      await ctx.close()
+      const total = chunks.reduce((n, c) => n + c.byteLength, 0)
+      const merged = new Uint8Array(total)
+      let off = 0
+      for (const c of chunks) {
+        merged.set(new Uint8Array(c), off)
+        off += c.byteLength
+      }
+      return merged.byteLength > 0 ? merged.buffer : null
+    } catch {
+      return null
+    }
+  }
+
   return (
     <section class="preview-section" id="preview-section">
       <div
@@ -129,17 +269,7 @@ export default function StreamPreview(props: Props) {
         ref={zoom.containerRef}
       >
         {props.previewVisible() && webActive() ? (
-          <Show when={playerMode() === 'mjpeg'} fallback={
-            <video
-              class="preview-img zoomable-content"
-              src="/hls/playlist.m3u8"
-              controls
-              autoplay
-              muted
-              playsinline
-              style={{ width: '100%', 'background-color': '#000' }}
-            />
-          }>
+          <Show when={playerMode() !== 'mjpeg'} fallback={
           <img
             class="preview-img zoomable-content"
             src={`/stream?t=${props.streamNonce()}`}
@@ -172,6 +302,24 @@ export default function StreamPreview(props: Props) {
               transform: `scale(${zoom.scale()}) translate(${zoom.translateX()}px, ${zoom.translateY()}px)`,
             }}
           />
+          }>
+          <Show when={playerMode() === 'h264'} fallback={
+            <video
+              class="preview-img zoomable-content"
+              src="/hls/playlist.m3u8"
+              controls
+              autoplay
+              muted
+              playsinline
+              style={{ width: '100%', 'background-color': '#000' }}
+            />
+          }>
+          <canvas
+            ref={(el) => setH264Canvas(el)}
+            class="preview-img zoomable-content"
+            style={{ width: '100%', 'background-color': '#000' }}
+          />
+          </Show>
           </Show>
         ) : (
           <div class="preview-placeholder">
@@ -310,7 +458,7 @@ export default function StreamPreview(props: Props) {
             </button>
           )}
 
-          <a id="snapshot-btn" class="action-btn action-btn-ghost" href="/snapshot?highres=1" target="_blank" rel="noopener noreferrer" title="Download High-Res Snapshot">
+          <a id="snapshot-btn" class="action-btn action-btn-ghost" href="/snapshot?highres=1&save=1" target="_blank" rel="noopener noreferrer" title="Download High-Res Snapshot">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" />
               <polyline points="7 10 12 15 17 10" />
@@ -361,40 +509,15 @@ export default function StreamPreview(props: Props) {
             onPointerDown={async () => {
               setTalking(true)
               try {
-                const stream = await navigator.mediaDevices.getUserMedia({ audio: { sampleRate: 16000, channelCount: 1 } })
-                const ctx = new AudioContext({ sampleRate: 16000 })
-                const src = ctx.createMediaStreamSource(stream)
-                const proc = ctx.createScriptProcessor(4096, 1, 1)
-                const chunks: ArrayBuffer[] = []
-                proc.onaudioprocess = (ev) => {
-                  const input = ev.inputBuffer.getChannelData(0)
-                  const pcm = new Int16Array(input.length)
-                  for (let i = 0; i < input.length; i++) pcm[i] = Math.max(-32768, Math.min(32767, input[i] * 32768))
-                  chunks.push(pcm.buffer.slice(0))
-                }
-                src.connect(proc)
-                proc.connect(ctx.destination)
-                setTimeout(async () => {
-                  src.disconnect()
-                  proc.disconnect()
-                  stream.getTracks().forEach((t) => t.stop())
-                  await ctx.close()
-                  const total = chunks.reduce((n, c) => n + c.byteLength, 0)
-                  const merged = new Uint8Array(total)
-                  let off = 0
-                  for (const c of chunks) {
-                    merged.set(new Uint8Array(c), off)
-                    off += c.byteLength
-                  }
-                  if (merged.byteLength > 0) await pushTalkback(merged.buffer)
-                  setTalking(false)
-                }, 1500)
+                await startPtt()
               } catch (err) {
                 console.error('Talkback failed:', err)
-                setTalking(false)
+                await stopPtt()
               }
             }}
-            title="Hold to talk (1.5s capture)"
+            onPointerUp={() => { void stopPtt() }}
+            onPointerLeave={() => { if (talking()) void stopPtt() }}
+            title="Hold to talk"
           >
             <span>{talking() ? 'Talking…' : 'Talk'}</span>
           </button>

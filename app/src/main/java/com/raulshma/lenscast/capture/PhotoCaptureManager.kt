@@ -247,6 +247,12 @@ class PhotoCaptureManager(
             fileSizeBytes = fileSizeBytes,
         )
         captureHistoryStore.add(entry)
+        enqueueBackup(filePath)
+    }
+
+    /** WebDAV backup, when enabled: one WorkManager request per capture. */
+    private fun enqueueBackup(filePath: String) {
+        runCatching { BackupWorker.enqueue(context, filePath) }
     }
 
     private fun loadCapturedBytes(filePath: String): ByteArray? {

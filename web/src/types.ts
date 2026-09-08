@@ -33,6 +33,16 @@ export interface MaskingZone {
   blurRadius: number
 }
 
+export interface MotionZone {
+  id: string
+  label: string
+  enabled: boolean
+  x: number
+  y: number
+  width: number
+  height: number
+}
+
 export interface CameraSettings {
   exposureCompensation: number
   iso: number | null
@@ -83,6 +93,26 @@ export interface StreamingSettings {
   watchdogEnabled: boolean
   watchdogMaxRetries: number
   watchdogCheckIntervalSeconds: number
+  mdnsEnabled: boolean
+  motionDetectionEnabled: boolean
+  motionSensitivityPercent: number
+  motionZones: MotionZone[]
+  motionRecordingEnabled: boolean
+  motionPostRollSeconds: number
+  motionArmScheduleEnabled: boolean
+  motionArmStartMinute: number
+  motionArmEndMinute: number
+  soundDetectionEnabled: boolean
+  soundThresholdPercent: number
+  webhookEnabled: boolean
+  webhookUrl: string
+  backupEnabled: boolean
+  backupWifiOnly: boolean
+  backupWebdavUrl: string
+  backupWebdavUsername: string
+  backupWebdavPassword: string
+  httpsEnabled: boolean
+  audioDeviceId: string
 }
 
 export interface AllSettings {

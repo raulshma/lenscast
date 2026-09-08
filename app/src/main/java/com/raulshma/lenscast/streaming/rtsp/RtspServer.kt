@@ -29,6 +29,7 @@ import java.util.concurrent.atomic.AtomicLong
 class RtspServer(
     private val port: Int = DEFAULT_PORT,
     private val hlsVideoSink: com.raulshma.lenscast.streaming.hls.HlsVideoSink? = com.raulshma.lenscast.streaming.hls.HlsManager,
+    private val extraVideoSink: ((List<H264Encoder.EncodedNalUnit>) -> Unit)? = null,
 ) : RtspServerHandle {
 
     private var serverSocket: ServerSocket? = null
@@ -288,6 +289,11 @@ class RtspServer(
         // HLS tee: same AUs the RTP fan-out sends, no extra encode.
         try {
             hlsVideoSink?.feedVideo(nalUnits)
+        } catch (_: Exception) {
+        }
+        // WebSocket tee (WebCodecs dashboard playback).
+        try {
+            extraVideoSink?.invoke(nalUnits)
         } catch (_: Exception) {
         }
         rtpTimestamp += timestampIncrement

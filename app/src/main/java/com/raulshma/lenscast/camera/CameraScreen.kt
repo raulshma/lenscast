@@ -132,6 +132,7 @@ import com.raulshma.lenscast.camera.model.QuickSettingRanges
 import com.raulshma.lenscast.camera.model.QuickSettingType
 import com.raulshma.lenscast.core.MicAccess
 import com.raulshma.lenscast.core.NetworkQualityMonitor.NetworkQualityLevel
+import com.raulshma.lenscast.core.StreamDefaults
 import com.raulshma.lenscast.core.ThermalState
 import com.raulshma.lenscast.gallery.formatDuration
 import com.raulshma.lenscast.ui.theme.LensOrange
@@ -299,11 +300,19 @@ fun CameraScreen(
                     onDismissRequest = { showConnectSheet = false },
                 ) {
                     val info = remember(showConnectSheet) { viewModel.getConnectInfo() }
+                    val tlsFingerprint = remember(showConnectSheet) {
+                        (context.applicationContext as MainApplication)
+                            .streamingManager.tlsCertificateFingerprint()
+                            .takeIf { info.httpUrl.startsWith("https://") }
+                    }
                     ConnectSheet(
                         info = info,
+                        currentPort = info.httpUrl.substringAfter(":", "").substringBefore("/")
+                            .toIntOrNull() ?: StreamDefaults.WEB_PORT,
                         onCopyHttp = { viewModel.copyStreamUrl() },
                         onCopyHls = { viewModel.copyHlsUrl() },
                         onCopyRtsp = { viewModel.copyRtspUrl() },
+                        tlsFingerprint = tlsFingerprint,
                     )
                 }
             }

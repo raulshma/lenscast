@@ -13,6 +13,7 @@ import com.raulshma.lenscast.streaming.HttpResult.ResponseBody.Text
 class HttpAuthFilter(
     private val webAuthGate: WebAuthGate,
     private val port: Int,
+    private val scheme: String = "http",
 ) {
 
     /** True for the login route, whose body the transport reads first. */
@@ -111,7 +112,7 @@ class HttpAuthFilter(
 
     fun isProtectedRoute(uri: String): Boolean =
         uri.startsWith("/api/") || uri == "/stream" || uri == "/audio" ||
-            uri.startsWith("/snapshot")
+            uri.startsWith("/snapshot") || uri.startsWith("/hls/")
 
     private fun handleLogout(headers: Map<String, String?>): HttpResult {
         if (!webAuthGate.authenticate(headers["cookie"])) {
@@ -138,6 +139,7 @@ class HttpAuthFilter(
             originHeader = headers["origin"] ?: headers["referer"],
             hasRequestedWithHeader = headers.containsKey("x-requested-with"),
             port = port,
+            scheme = scheme,
         )
 
     data class LoginCredentials(val username: String, val password: String)

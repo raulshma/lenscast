@@ -221,10 +221,18 @@ is `ApiRouter.dispatch(request): ApiResponse` — I/O-bound handlers suspend and
 are encoded in the 200 payload (the web client's contract); non-200 is
 reserved for routing/transport. Binary payloads (media streams, thumbnails,
 snapshots) bypass the JSON router deliberately: the server serves them
-straight from `GalleryWebHandler`/PhotoCaptureManager. The four
-`/api/auth/*` routes are the one deliberate exception to the router seam:
+straight from `GalleryWebHandler`/PhotoCaptureManager. The login/logout/
+session routes (`/api/auth/login`, `/api/auth/logout`, `/api/auth/status`,
+`/api/auth/session`) are the one deliberate exception to the router seam:
 their cookie/non-200 contract differs from the JSON handlers, so
 `StreamingServer` translates them onto the Web Auth Gate directly. The
+config/session-management routes (`/api/auth/config`, `/api/auth/sessions`)
+stay behind the router like every other JSON handler, as do the two deliberate
+binary-style bypasses `/api/events` (the SSE status stream's never-ending
+chunked response) and `/api/audio/uplink` (raw PCM16 body), which the server
+serves without JSON semantics. The WS sidecar (`streaming/ws/WsMediaServer`)
+handshakes through the same Web Auth Gate — auth on requires the session
+cookie, and a rejected handshake aborts the upgrade. The
 `web/src/types.ts` mirror of the DTO surface is hand-maintained in lockstep:
 fields the Kotlin side deletes are deleted from the client too (the web UI
 ships no control with no runtime effect), and the plaintext-password /
@@ -262,7 +270,10 @@ snapshot honestly (no token fire-and-forget refresh inside the request).
 **`streaming/WebAuthGate.kt`** — the auth policy for the web client: session
 tokens, rate-limited PBKDF2 login (`login`), request authorization
 (`authenticate`), CSRF origin checks (`isCsrfSafe`). Owned by the Streaming
-Manager so sessions survive a server recreation (e.g. a port change);
+Manager so sessions survive a server recreation (e.g. a port change), and
+mirrored through the `SessionPersistence` hook (`AuthSessionStore`, an
+atomic-write file in app-private `filesDir`) so they also survive an app
+restart — the gate reloads and re-prunes the map at construction;
 `StreamingServer` only translates HTTP requests onto its interface. Time
 flows through the injected `clock: () -> Long` (the Rtsp Session Authorizer's
 pattern), so the 60 s lockout and 24 h session expiry are JVM-tested;

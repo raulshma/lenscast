@@ -7,12 +7,15 @@ import coil3.SingletonImageLoader
 import coil3.request.crossfade
 import coil3.video.VideoFrameDecoder
 import com.raulshma.lenscast.camera.CameraService
+import com.raulshma.lenscast.capture.DetectionCoordinator
 import com.raulshma.lenscast.capture.PhotoCaptureManager
 import com.raulshma.lenscast.capture.RecordingController
 import com.raulshma.lenscast.core.ConnectivityMonitor
 import com.raulshma.lenscast.core.PowerManager
 import com.raulshma.lenscast.core.StreamWatchdog
 import com.raulshma.lenscast.core.ThermalMonitor
+import com.raulshma.lenscast.core.TlsCertManager
+import com.raulshma.lenscast.core.WebhookNotifier
 import com.raulshma.lenscast.data.CaptureHistoryStore
 import com.raulshma.lenscast.data.SettingsDataStore
 import com.raulshma.lenscast.settings.SettingsApplier
@@ -59,6 +62,15 @@ class MainApplication : Application(), SingletonImageLoader.Factory {
     val settingsApplier: SettingsApplier by lazy {
         SettingsApplier(settingsDataStore, cameraService, streamingManager, streamWatchdog)
     }
+    val webhookNotifier: WebhookNotifier by lazy {
+        WebhookNotifier(configProvider = {
+            settingsDataStore.webhookEnabled.value to settingsDataStore.webhookUrl.value
+        })
+    }
+    val detectionCoordinator: DetectionCoordinator by lazy {
+        DetectionCoordinator(settingsDataStore, recordingController, photoCaptureManager, webhookNotifier)
+    }
+    val tlsCertManager: TlsCertManager by lazy { TlsCertManager(this) }
     val updateChecker: UpdateChecker by lazy { UpdateChecker(this) }
     val updateNotifier: UpdateNotifier by lazy { UpdateNotifier(this) }
     val updateCheckPipeline: UpdateCheckPipeline by lazy {
@@ -88,12 +100,13 @@ class MainApplication : Application(), SingletonImageLoader.Factory {
         cameraService.setFrameListener { yuvData, width, height, rotation ->
             streamingManager.pushFrame(yuvData, width, height, rotation)
         }
-        // Motion-event MVP: auto-photo on motion (disabled by default; the
-        // capture screen owns the toggle via RecordingController-adjacent prefs).
-        streamingManager.setMotionListener { _ ->
-            try {
-                photoCaptureManager.captureToGallery()
-            } catch (_: Exception) {
+        // Detection events (motion + sound) dispatch through the coordinator:
+        // schedule arming, bounded motion recording or the legacy auto-photo,
+        // and the webhook — never a screen's lifetime.
+        streamingManager.setDetectionListener { type, value ->
+            when (type) {
+                DetectionCoordinator.EVENT_TYPE_MOTION -> detectionCoordinator.onMotion(value)
+                DetectionCoordinator.EVENT_TYPE_SOUND -> detectionCoordinator.onSound(value)
             }
         }
     }
@@ -113,6 +126,9 @@ class MainApplication : Application(), SingletonImageLoader.Factory {
      * with the manual check, and its outcome needs no UI on startup.
      */
     private fun initializeAutoUpdateCheck() {
+        // The fdroid flavor ships without the self-updater (F-Droid policy);
+        // its update surfaces are disabled at the composition root.
+        if (!com.raulshma.lenscast.BuildConfig.SELF_UPDATE) return
         appScope.launch {
             delay(3_000)
             val enabled = settingsDataStore.updateAutoCheckEnabled.first()

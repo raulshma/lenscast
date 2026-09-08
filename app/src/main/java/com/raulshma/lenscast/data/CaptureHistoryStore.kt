@@ -68,7 +68,21 @@ class CaptureHistoryStore(private val context: Context) {
     fun add(entry: CaptureHistory) {
         _history.value = mergeEntry(_history.value, entry)
         enforceQuota()
+        enforceLowSpaceFloor()
         save()
+    }
+
+    /**
+     * The low-disk watchdog, run after each capture: quota enforcement alone
+     * can leave the volume under its safety floor when a large capture lands
+     * on an already tight disk. Below [StorageManager.LOW_SPACE_FLOOR_BYTES]
+     * free, evict down to half the quota — the floor is the "stop storing"
+     * line, not a target.
+     */
+    private fun enforceLowSpaceFloor() {
+        if (!hasFreeSpace()) {
+            enforceQuota(quotaBytes = StorageManager.DEFAULT_QUOTA_BYTES / 2)
+        }
     }
 
     /** Storage manager: total bytes + quota verdicts, pure for tests. */

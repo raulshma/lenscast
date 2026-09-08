@@ -1,17 +1,18 @@
 package com.raulshma.lenscast.streaming.rtsp
 
+import com.raulshma.lenscast.core.Base64Codec
 import com.raulshma.lenscast.core.StreamAuthCrypto
 import java.security.SecureRandom
-import java.util.Base64
 import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
 
 /**
  * Owns RTSP request authorization: the Digest/Basic decision ladder, the
  * Digest nonce store (SecureRandom minting, TTL eviction, size cap, nc
- * monotonicity), and the 401 challenge header. Android-free — java.util.Base64
- * replaces android.util.Base64 with byte-identical encodings — so the
- * security behavior is JVM-tested.
+ * monotonicity), and the 401 challenge header. Android-free — the pure
+ * Base64Codec is byte- and strictness-identical to java.util.Base64 (an
+ * API 26+ class, and one whose android.util counterpart was lenient before
+ * that) — so the security behavior is JVM-tested.
  *
  * The auth spec arrives as a provider: [RtspServer] reads its config
  * dynamically per request (auth changes land via restart), while the nonce
@@ -67,12 +68,11 @@ class RtspSessionAuthorizer(
         val payload = authHeader.substringAfter(' ', "").trim()
         if (payload.isEmpty()) return false
 
-        val decoded = runCatching {
-            // Strict RFC 4648 decode — android.util.Base64.DEFAULT (the pre-port
-        // decoder) also rejected non-alphabet characters instead of skipping them.
-        val bytes = Base64.getDecoder().decode(payload)
-            String(bytes, Charsets.UTF_8)
-        }.getOrNull() ?: return false
+        // Strict RFC 4648 decode — Base64Codec rejects non-alphabet characters
+        // and malformed padding instead of skipping them, so a tampered or
+        // truncated header can never decode into credentials.
+        val decodedBytes = Base64Codec.decodeOrNull(payload) ?: return false
+        val decoded = String(decodedBytes, Charsets.UTF_8)
 
         val separator = decoded.indexOf(':')
         if (separator <= 0) return false
@@ -202,14 +202,19 @@ class RtspSessionAuthorizer(
         cleanExpiredDigestNonces()
         val bytes = ByteArray(DIGEST_NONCE_BYTES)
         secureRandom.nextBytes(bytes)
-        val nonce = Base64.getUrlEncoder().encodeToString(bytes)
+        val nonce = Base64Codec.encodeUrlSafe(bytes)
         digestNonces[nonce] = DigestNonceState(clock() + DIGEST_NONCE_TTL_MS)
         return nonce
     }
 
     private fun cleanExpiredDigestNonces() {
         val now = clock()
-        digestNonces.entries.removeIf { now > it.value.expiresAtMs }
+        // Iterator removal, not Collection.removeIf — that Map default method
+        // is API 24+ and this class must run on API 23.
+        val iterator = digestNonces.entries.iterator()
+        while (iterator.hasNext()) {
+            if (now > iterator.next().value.expiresAtMs) iterator.remove()
+        }
         if (digestNonces.size > MAX_DIGEST_NONCES) {
             val overflow = digestNonces.size - MAX_DIGEST_NONCES
             val keysToRemove = digestNonces.entries

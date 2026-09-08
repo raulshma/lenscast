@@ -5,6 +5,8 @@ import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
 import android.os.Build
+import android.Manifest
+import android.content.pm.PackageManager
 import android.os.IBinder
 import android.provider.MediaStore
 import android.util.Log
@@ -128,7 +130,12 @@ class RecordingService : Service() {
             }
 
             var pendingRecording = videoCapture.output.prepareRecording(this, mediaStoreOutput)
-            if (audioEnabled) {
+            // Degrade to video-only rather than throwing if RECORD_AUDIO was
+            // revoked between the camera screen's gate and the service start.
+            if (audioEnabled &&
+                ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) ==
+                PackageManager.PERMISSION_GRANTED
+            ) {
                 pendingRecording = pendingRecording.withAudioEnabled()
             }
 
@@ -154,6 +161,7 @@ class RecordingService : Service() {
                                     durationMs = duration,
                                 )
                                 app.captureHistoryStore.add(entry)
+                                BackupWorker.enqueue(applicationContext, entry.filePath)
                                 Log.d(TAG, "Recording saved: $fileName at $savedUri ($fileSizeBytes bytes)")
                             } else {
                                 Log.e(TAG, "Recording error: ${event.error}, uri=$savedUri")
@@ -234,7 +242,13 @@ class RecordingService : Service() {
 
         recordingController.onServiceStopped()
 
-        stopForeground(STOP_FOREGROUND_REMOVE)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            stopForeground(STOP_FOREGROUND_REMOVE)
+        } else {
+            // The boolean overload is the API-23 equivalent of REMOVE.
+            @Suppress("DEPRECATION")
+            stopForeground(true)
+        }
         stopSelf()
     }
 

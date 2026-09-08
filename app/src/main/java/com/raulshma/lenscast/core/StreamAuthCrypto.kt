@@ -2,9 +2,6 @@ package com.raulshma.lenscast.core
 
 import java.security.MessageDigest
 import java.security.SecureRandom
-import java.util.Base64
-import javax.crypto.SecretKeyFactory
-import javax.crypto.spec.PBEKeySpec
 
 /**
  * Single home for the stream-auth crypto primitives shared by the RTSP
@@ -13,10 +10,12 @@ import javax.crypto.spec.PBEKeySpec
  * consumer (challenge/verify in the RTSP server) reference — two literals
  * would drift silently and break Digest auth at runtime.
  *
- * Android-free by design: [java.util.Base64] replaces android.util.Base64
- * (NO_WRAP encode == [Base64.getEncoder], DEFAULT decode of our own NO_WRAP
- * values == [Base64.getDecoder]), so the password hash/verify path — including
- * the legacy SHA-256 migration branch — is JVM-tested.
+ * Android-free and minSdk-23-safe by design: [Base64Codec] and
+ * [Pbkdf2Sha256] are pure Kotlin byte-compatible replacements for
+ * java.util.Base64 and the platform's PBKDF2WithHmacSHA256 SecretKeyFactory
+ * (both API 26+), so the password hash/verify path — including the legacy
+ * SHA-256 migration branch — is JVM-tested and behaves identically on every
+ * API level.
  */
 object StreamAuthCrypto {
     const val RTSP_DIGEST_REALM = "LensCast RTSP"
@@ -49,8 +48,8 @@ object StreamAuthCrypto {
         if (password.isEmpty()) return ""
         val salt = ByteArray(SALT_LENGTH_BYTES).also { SecureRandom().nextBytes(it) }
         val derived = derivePassword(password, salt, PBKDF2_ITERATIONS)
-        val saltEncoded = Base64.getEncoder().encodeToString(salt)
-        val hashEncoded = Base64.getEncoder().encodeToString(derived)
+        val saltEncoded = Base64Codec.encode(salt)
+        val hashEncoded = Base64Codec.encode(derived)
         return "$HASH_PREFIX$$PBKDF2_ITERATIONS$$saltEncoded$$hashEncoded"
     }
 
@@ -74,8 +73,7 @@ object StreamAuthCrypto {
         val digest = MessageDigest.getInstance("SHA-256")
         val legacyHash = digest.digest(password.toByteArray(Charsets.UTF_8))
         val expectedLegacy = storedHash.toByteArray(Charsets.UTF_8)
-        val candidateLegacy = Base64.getEncoder().encodeToString(legacyHash)
-            .toByteArray(Charsets.UTF_8)
+        val candidateLegacy = Base64Codec.encode(legacyHash).toByteArray(Charsets.UTF_8)
         return MessageDigest.isEqual(candidateLegacy, expectedLegacy)
     }
 
@@ -89,17 +87,10 @@ object StreamAuthCrypto {
     }
 
     private fun derivePassword(password: String, salt: ByteArray, iterations: Int): ByteArray {
-        val spec = PBEKeySpec(password.toCharArray(), salt, iterations, KEY_LENGTH_BITS)
-        return try {
-            SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256")
-                .generateSecret(spec)
-                .encoded
-        } finally {
-            spec.clearPassword()
-        }
+        return Pbkdf2Sha256.derive(password, salt, iterations, KEY_LENGTH_BITS / 8)
     }
 
     private fun decodeBase64(value: String): ByteArray? {
-        return runCatching { Base64.getDecoder().decode(value) }.getOrNull()
+        return Base64Codec.decodeOrNull(value)
     }
 }

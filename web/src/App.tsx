@@ -5,6 +5,7 @@ import Navbar from './components/Navbar'
 import StreamPreview from './components/StreamPreview'
 import SettingsPanel from './components/SettingsPanel'
 import AppSettingsPanel from './components/AppSettingsPanel'
+import ClientsCard from './components/ClientsCard'
 import Gallery from './Gallery'
 import './App.css'
 
@@ -92,6 +93,7 @@ function App() {
                     updateStreamingDebounced={state.updateStreamingDebounced}
                     setRecordingConfigAudio={(v) => state.setRecordingConfig({ ...state.recordingConfig(), includeAudio: v })}
                   />
+                  <ClientsCard />
                 </Show>
               </main>
 

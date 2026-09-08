@@ -17,6 +17,7 @@ import com.raulshma.lenscast.camera.model.HdrMode
 import com.raulshma.lenscast.camera.model.NightVisionMode
 import com.raulshma.lenscast.camera.model.MaskingType
 import com.raulshma.lenscast.camera.model.MaskingZone
+import com.raulshma.lenscast.camera.model.MotionZone
 import com.raulshma.lenscast.camera.model.OverlayPosition
 import com.raulshma.lenscast.camera.model.OverlaySettings
 import com.raulshma.lenscast.camera.model.Resolution
@@ -110,6 +111,24 @@ private object Keys {
     val UPDATE_AUTO_CHECK_ENABLED = stringPreferencesKey("update_auto_check_enabled")
     val UPDATE_LAST_CHECK_TIME = longPreferencesKey("update_last_check_time")
     val UPDATE_DISMISSED_VERSION = stringPreferencesKey("update_dismissed_version")
+    val MOTION_SENSITIVITY = intPreferencesKey("motion_sensitivity_percent")
+    val MOTION_ZONES = stringPreferencesKey("motion_zones")
+    val MOTION_RECORDING_ENABLED = stringPreferencesKey("motion_recording_enabled")
+    val MOTION_POST_ROLL_SECONDS = intPreferencesKey("motion_post_roll_seconds")
+    val MOTION_ARM_SCHEDULE_ENABLED = stringPreferencesKey("motion_arm_schedule_enabled")
+    val MOTION_ARM_START_MINUTE = intPreferencesKey("motion_arm_start_minute")
+    val MOTION_ARM_END_MINUTE = intPreferencesKey("motion_arm_end_minute")
+    val SOUND_DETECTION_ENABLED = stringPreferencesKey("sound_detection_enabled")
+    val SOUND_THRESHOLD_PERCENT = intPreferencesKey("sound_threshold_percent")
+    val WEBHOOK_ENABLED = stringPreferencesKey("webhook_enabled")
+    val WEBHOOK_URL = stringPreferencesKey("webhook_url")
+    val BACKUP_ENABLED = stringPreferencesKey("backup_enabled")
+    val BACKUP_WIFI_ONLY = stringPreferencesKey("backup_wifi_only")
+    val BACKUP_WEBDAV_URL = stringPreferencesKey("backup_webdav_url")
+    val BACKUP_WEBDAV_USERNAME = stringPreferencesKey("backup_webdav_username")
+    val BACKUP_WEBDAV_PASSWORD = stringPreferencesKey("backup_webdav_password")
+    val HTTPS_ENABLED = stringPreferencesKey("https_enabled")
+    val AUDIO_DEVICE_ID = stringPreferencesKey("audio_device_id")
 }
 
 /**
@@ -200,6 +219,69 @@ internal val adaptiveBitrateEnabledPref = boolPref(Keys.ADAPTIVE_BITRATE_ENABLED
 internal val mdnsEnabledPref = boolPref(Keys.MDNS_ENABLED, defaultTrue = true)
 
 internal val motionDetectionEnabledPref = boolPref(Keys.MOTION_DETECTION_ENABLED, defaultTrue = false)
+
+internal val motionSensitivityPref = intPref(
+    Keys.MOTION_SENSITIVITY,
+    StreamDefaults.MOTION_SENSITIVITY_PERCENT_DEFAULT,
+    IntBounds(StreamDefaults.MOTION_SENSITIVITY_MIN, StreamDefaults.MOTION_SENSITIVITY_MAX),
+)
+
+internal val motionZonesPref = SettingPref(
+    default = emptyList<MotionZone>(),
+    decode = { prefs -> parseMotionZones(prefs[Keys.MOTION_ZONES]) },
+    encode = { prefs, zones ->
+        prefs[Keys.MOTION_ZONES] = serializeMotionZones(zones)
+    },
+)
+
+internal val motionRecordingEnabledPref = boolPref(Keys.MOTION_RECORDING_ENABLED, defaultTrue = false)
+
+internal val motionPostRollSecondsPref = intPref(
+    Keys.MOTION_POST_ROLL_SECONDS,
+    StreamDefaults.MOTION_POST_ROLL_SECONDS_DEFAULT,
+    IntBounds(StreamDefaults.MOTION_POST_ROLL_MIN_SECONDS, StreamDefaults.MOTION_POST_ROLL_MAX_SECONDS),
+)
+
+internal val motionArmScheduleEnabledPref = boolPref(Keys.MOTION_ARM_SCHEDULE_ENABLED, defaultTrue = false)
+
+internal val motionArmStartMinutePref = intPref(
+    Keys.MOTION_ARM_START_MINUTE,
+    StreamDefaults.MOTION_ARM_START_MINUTE_DEFAULT,
+    IntBounds(0, StreamDefaults.MINUTES_PER_DAY - 1),
+)
+
+internal val motionArmEndMinutePref = intPref(
+    Keys.MOTION_ARM_END_MINUTE,
+    StreamDefaults.MOTION_ARM_END_MINUTE_DEFAULT,
+    IntBounds(0, StreamDefaults.MINUTES_PER_DAY - 1),
+)
+
+internal val soundDetectionEnabledPref = boolPref(Keys.SOUND_DETECTION_ENABLED, defaultTrue = false)
+
+internal val soundThresholdPercentPref = intPref(
+    Keys.SOUND_THRESHOLD_PERCENT,
+    StreamDefaults.SOUND_THRESHOLD_PERCENT_DEFAULT,
+    IntBounds(StreamDefaults.SOUND_THRESHOLD_MIN, StreamDefaults.SOUND_THRESHOLD_MAX),
+)
+
+internal val webhookEnabledPref = boolPref(Keys.WEBHOOK_ENABLED, defaultTrue = false)
+
+internal val webhookUrlPref = stringPref(Keys.WEBHOOK_URL, "")
+
+internal val backupEnabledPref = boolPref(Keys.BACKUP_ENABLED, defaultTrue = false)
+
+internal val backupWifiOnlyPref = boolPref(Keys.BACKUP_WIFI_ONLY, defaultTrue = true)
+
+internal val backupWebdavUrlPref = stringPref(Keys.BACKUP_WEBDAV_URL, "")
+
+internal val backupWebdavUsernamePref = stringPref(Keys.BACKUP_WEBDAV_USERNAME, "")
+
+internal val backupWebdavPasswordPref = stringPref(Keys.BACKUP_WEBDAV_PASSWORD, "")
+
+internal val httpsEnabledPref = boolPref(Keys.HTTPS_ENABLED, defaultTrue = false)
+
+internal val audioDeviceIdPref = stringPref(Keys.AUDIO_DEVICE_ID, "")
+
 
 internal val watchdogEnabledPref = boolPref(Keys.WATCHDOG_ENABLED, defaultTrue = false)
 
@@ -422,6 +504,76 @@ internal fun serializeMaskingZones(zones: List<MaskingZone>): String {
     }
 }
 
+/**
+ * The persisted motion-zone JSON shape. New persistence (no legacy payload to
+ * stay decode-compatible with), but the same nullable-field + total-decode
+ * conventions as the masking codec, so a malformed payload degrades to an
+ * empty zone list instead of killing the whole store decode.
+ */
+private data class MotionZoneJson(
+    val id: String? = null,
+    val label: String? = null,
+    val enabled: Boolean? = null,
+    val x: Double? = null,
+    val y: Double? = null,
+    val width: Double? = null,
+    val height: Double? = null,
+)
+
+private val motionZonesType = Types.newParameterizedType(
+    List::class.java,
+    MotionZoneJson::class.java,
+)
+
+private val motionZonesAdapter by lazy {
+    AppJson.moshi.adapter<List<MotionZoneJson>>(motionZonesType)
+}
+
+internal fun parseMotionZones(jsonString: String?): List<MotionZone> {
+    if (jsonString.isNullOrEmpty()) return emptyList()
+    return try {
+        val defaults = MotionZone.DEFAULT
+        val dtos = motionZonesAdapter.fromJson(jsonString) ?: return emptyList()
+        dtos.map { dto ->
+            MotionZone.normalized(
+                MotionZone(
+                    id = dto.id ?: java.util.UUID.randomUUID().toString(),
+                    label = dto.label ?: defaults.label,
+                    enabled = dto.enabled ?: defaults.enabled,
+                    x = (dto.x ?: defaults.x.toDouble()).toFloat(),
+                    y = (dto.y ?: defaults.y.toDouble()).toFloat(),
+                    width = (dto.width ?: defaults.width.toDouble()).toFloat(),
+                    height = (dto.height ?: defaults.height.toDouble()).toFloat(),
+                ),
+            )
+        }
+    } catch (e: Exception) {
+        Log.e("SettingsDataStore", "Failed to parse motion zones", e)
+        emptyList()
+    }
+}
+
+internal fun serializeMotionZones(zones: List<MotionZone>): String {
+    return try {
+        val dtos = zones.map { zone ->
+            val normalized = MotionZone.normalized(zone)
+            MotionZoneJson(
+                id = normalized.id,
+                label = normalized.label,
+                enabled = normalized.enabled,
+                x = normalized.x.toDouble(),
+                y = normalized.y.toDouble(),
+                width = normalized.width.toDouble(),
+                height = normalized.height.toDouble(),
+            )
+        }
+        motionZonesAdapter.toJson(dtos)
+    } catch (e: Exception) {
+        Log.e("SettingsDataStore", "Failed to serialize motion zones", e)
+        "[]"
+    }
+}
+
 class SettingsDataStore(
     private val context: Context,
     private val shareInScope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
@@ -471,6 +623,43 @@ class SettingsDataStore(
     val mdnsEnabled: StateFlow<Boolean> = mdnsEnabledPref.shared()
 
     val motionDetectionEnabled: StateFlow<Boolean> = motionDetectionEnabledPref.shared()
+
+    val motionSensitivity: StateFlow<Int> = motionSensitivityPref.shared()
+
+    val motionZones: StateFlow<List<MotionZone>> = motionZonesPref.shared()
+
+    val motionRecordingEnabled: StateFlow<Boolean> = motionRecordingEnabledPref.shared()
+
+    val motionPostRollSeconds: StateFlow<Int> = motionPostRollSecondsPref.shared()
+
+    val motionArmScheduleEnabled: StateFlow<Boolean> = motionArmScheduleEnabledPref.shared()
+
+    val motionArmStartMinute: StateFlow<Int> = motionArmStartMinutePref.shared()
+
+    val motionArmEndMinute: StateFlow<Int> = motionArmEndMinutePref.shared()
+
+    val soundDetectionEnabled: StateFlow<Boolean> = soundDetectionEnabledPref.shared()
+
+    val soundThresholdPercent: StateFlow<Int> = soundThresholdPercentPref.shared()
+
+    val webhookEnabled: StateFlow<Boolean> = webhookEnabledPref.shared()
+
+    val webhookUrl: StateFlow<String> = webhookUrlPref.shared()
+
+    val backupEnabled: StateFlow<Boolean> = backupEnabledPref.shared()
+
+    val backupWifiOnly: StateFlow<Boolean> = backupWifiOnlyPref.shared()
+
+    val backupWebdavUrl: StateFlow<String> = backupWebdavUrlPref.shared()
+
+    val backupWebdavUsername: StateFlow<String> = backupWebdavUsernamePref.shared()
+
+    val backupWebdavPassword: StateFlow<String> = backupWebdavPasswordPref.shared()
+
+    val httpsEnabled: StateFlow<Boolean> = httpsEnabledPref.shared()
+
+    val audioDeviceId: StateFlow<String> = audioDeviceIdPref.shared()
+
 
     val watchdogEnabled: StateFlow<Boolean> = watchdogEnabledPref.shared()
 
@@ -527,6 +716,42 @@ class SettingsDataStore(
     suspend fun saveMdnsEnabled(enabled: Boolean) = mdnsEnabledPref.save(enabled)
 
     suspend fun saveMotionDetectionEnabled(enabled: Boolean) = motionDetectionEnabledPref.save(enabled)
+
+    suspend fun saveMotionSensitivity(percent: Int) = motionSensitivityPref.save(percent)
+
+    suspend fun saveMotionZones(zones: List<MotionZone>) = motionZonesPref.save(zones)
+
+    suspend fun saveMotionRecordingEnabled(enabled: Boolean) = motionRecordingEnabledPref.save(enabled)
+
+    suspend fun saveMotionPostRollSeconds(seconds: Int) = motionPostRollSecondsPref.save(seconds)
+
+    suspend fun saveMotionArmScheduleEnabled(enabled: Boolean) = motionArmScheduleEnabledPref.save(enabled)
+
+    suspend fun saveMotionArmStartMinute(minute: Int) = motionArmStartMinutePref.save(minute)
+
+    suspend fun saveMotionArmEndMinute(minute: Int) = motionArmEndMinutePref.save(minute)
+
+    suspend fun saveSoundDetectionEnabled(enabled: Boolean) = soundDetectionEnabledPref.save(enabled)
+
+    suspend fun saveSoundThresholdPercent(percent: Int) = soundThresholdPercentPref.save(percent)
+
+    suspend fun saveWebhookEnabled(enabled: Boolean) = webhookEnabledPref.save(enabled)
+
+    suspend fun saveWebhookUrl(url: String) = webhookUrlPref.save(url)
+
+    suspend fun saveBackupEnabled(enabled: Boolean) = backupEnabledPref.save(enabled)
+
+    suspend fun saveBackupWifiOnly(wifiOnly: Boolean) = backupWifiOnlyPref.save(wifiOnly)
+
+    suspend fun saveBackupWebdavUrl(url: String) = backupWebdavUrlPref.save(url)
+
+    suspend fun saveBackupWebdavUsername(username: String) = backupWebdavUsernamePref.save(username)
+
+    suspend fun saveBackupWebdavPassword(password: String) = backupWebdavPasswordPref.save(password)
+
+    suspend fun saveHttpsEnabled(enabled: Boolean) = httpsEnabledPref.save(enabled)
+
+    suspend fun saveAudioDeviceId(id: String) = audioDeviceIdPref.save(id)
 
     suspend fun saveOverlaySettings(settings: OverlaySettings) = overlaySettingsPref.save(settings)
 

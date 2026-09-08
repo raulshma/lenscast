@@ -256,6 +256,7 @@ class CameraViewModel(
         }
     }
 
+    @androidx.annotation.OptIn(androidx.camera.camera2.interop.ExperimentalCamera2Interop::class)
     fun startPreview(previewView: PreviewView, lifecycleOwner: androidx.lifecycle.LifecycleOwner) {
         cameraService.setLifecycleOwner(lifecycleOwner)
         cameraService.startPreview(previewView)

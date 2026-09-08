@@ -11,7 +11,9 @@ import com.raulshma.lenscast.core.ThermalMonitor
 import com.raulshma.lenscast.data.SettingsDataStore
 import com.raulshma.lenscast.data.StreamAuthSettings
 import com.raulshma.lenscast.streaming.web.ApiRouter
+import com.raulshma.lenscast.streaming.web.AuthWebHandler
 import com.raulshma.lenscast.streaming.web.CaptureWebHandler
+import com.raulshma.lenscast.streaming.web.DeterrenceWebHandler
 import com.raulshma.lenscast.streaming.web.GalleryWebHandler
 import com.raulshma.lenscast.streaming.web.IntervalCaptureWebHandler
 import com.raulshma.lenscast.streaming.web.LensWebHandler
@@ -44,6 +46,13 @@ class StreamingManager(
         (context.applicationContext as MainApplication).settingsDataStore
     }
 
+    // WebSocket sidecar for WebCodecs video + PTT talkback. The RTSP output
+    // receives its sink via a late-bound provider (the sink survives the
+    // server's start/stop cycles and re-attaches on each start).
+    @Volatile private var wsMediaServer: com.raulshma.lenscast.streaming.ws.WsMediaServer? = null
+    private val wsVideoSink: (List<com.raulshma.lenscast.streaming.rtsp.H264Encoder.EncodedNalUnit>) -> Unit = { nalUnits ->
+        wsMediaServer?.feedVideo(nalUnits)
+    }
     // The RTSP output behind this manager's public surface: retained config,
     // server lifecycle, the restart-vs-apply choice, the audio-stream handle,
     // the URL, and the audio-wanted/mic-arbitration decision all live in the
@@ -53,12 +62,15 @@ class StreamingManager(
         audioConfig = ::audioConfig,
         authSpec = { rtspAuthSpec(authSettingsStore.authSettings.value) },
         releaseAudio = ::releaseRtspOwnedAudio,
+        extraVideoSink = wsVideoSink,
         onStateChanged = { running, url ->
             _isRtspRunning.value = running
             _rtspUrl.value = url
         },
     )
     private val serviceDiscoveryManager = ServiceDiscoveryManager(context)
+    private val sirenPlayer = com.raulshma.lenscast.core.SirenPlayer()
+
     private val webStreamingEnabled = AtomicBoolean(true)
     private val mdnsEnabled = AtomicBoolean(true)
     @Volatile
@@ -70,10 +82,10 @@ class StreamingManager(
     private val webApiStack: WebApiStack by lazy { buildWebApiStack() }
 
     // One gate for the app's web server: owned here so sessions survive a
-    // server recreation (e.g. a port change). Declared before the first
-    // server — every StreamingServer receives this one shared instance at
-    // construction.
-    private val webAuthGate = WebAuthGate()
+    // server recreation (e.g. a port change) — and, via the file store, an
+    // app restart. Declared before the first server — every StreamingServer
+    // receives this one shared instance at construction.
+    private val webAuthGate = WebAuthGate(sessionPersistence = AuthSessionStore(context))
 
     private var server: StreamingServer = createServer(StreamDefaults.WEB_PORT)
     private val webStreamingActive = AtomicBoolean(false)
@@ -85,6 +97,11 @@ class StreamingManager(
     @Volatile
     private var recordingAudioCaptureActive = false
     private var currentPort: Int = StreamDefaults.WEB_PORT
+
+    // TLS mode: when on, the server socket is secure (self-signed cert owned
+    // by the app's TlsCertManager) and every URL the app hands out uses https.
+    @Volatile private var tlsEnabled = false
+    @Volatile private var tlsFingerprint = ""
 
     private var lastReportedClientCount = -1
 
@@ -155,7 +172,7 @@ class StreamingManager(
         return ConnectInfo(
             httpUrl = buildVideoUrl(),
             audioUrl = _audioStreamUrl.value.ifBlank { buildAudioUrl() },
-            hlsUrl = NetworkUtils.getHlsPlaylistUrl(currentPort) ?: "http://localhost:$currentPort/hls/playlist.m3u8",
+            hlsUrl = NetworkUtils.getHlsPlaylistUrl(currentPort) ?: "${if (tlsEnabled) "https" else "http"}://localhost:$currentPort/hls/playlist.m3u8",
             rtspUrl = rtspOutput.url().ifBlank {
                 val host = NetworkUtils.formatHostForUrl(httpIp ?: "localhost")
                 "rtsp://$host:${rtspOutput.port()}/${RtspUriPolicy.DEFAULT_STREAM_PATH}"
@@ -175,11 +192,22 @@ class StreamingManager(
         emptyList()
     }
 
-    // ── Motion-event MVP: disabled by default, fed with sampled luma on push ──
+    // ── Detection events: motion + sound funnel into one typed listener seam ──
     private val motionDetector = com.raulshma.lenscast.capture.MotionDetector(
-        onMotion = { motionListener?.invoke(it) },
+        onMotion = { delta ->
+            detectionListener?.invoke(com.raulshma.lenscast.capture.DetectionCoordinator.EVENT_TYPE_MOTION, delta)
+        },
     )
-    @Volatile private var motionListener: ((delta: Double) -> Unit)? = null
+    private val soundDetector = com.raulshma.lenscast.capture.SoundDetector(
+        listener = { rms ->
+            detectionListener?.invoke(com.raulshma.lenscast.capture.DetectionCoordinator.EVENT_TYPE_SOUND, rms)
+        },
+    )
+    @Volatile private var detectionListener: ((type: String, value: Double) -> Unit)? = null
+
+    init {
+        audioStreamingManager.setChunkListener { pcm16 -> soundDetector.feed(pcm16) }
+    }
 
     fun setMotionDetectionEnabled(on: Boolean) {
         motionDetector.enabled = on
@@ -190,8 +218,26 @@ class StreamingManager(
         motionDetector.sensitivity = sensitivity01
     }
 
-    fun setMotionListener(listener: ((delta: Double) -> Unit)?) {
-        motionListener = listener
+    fun setMotionZones(zones: List<com.raulshma.lenscast.camera.model.MotionZone>) {
+        motionDetector.zones = zones.filter { it.enabled }.map {
+            com.raulshma.lenscast.camera.model.MotionZone.normalized(it)
+        }
+    }
+
+    fun setAudioDeviceId(id: String) {
+        audioStreamingManager.setPreferredDeviceId(id)
+    }
+
+    fun audioInputDevices(): List<Pair<Int, String>> = audioStreamingManager.inputDevices()
+
+    fun setSoundDetection(enabled: Boolean, thresholdPercent: Int) {
+        soundDetector.enabled = enabled
+        soundDetector.thresholdPercent = thresholdPercent
+    }
+
+    /** One event vocabulary for motion and sound; wired once at the composition root. */
+    fun setDetectionListener(listener: ((type: String, value: Double) -> Unit)?) {
+        detectionListener = listener
     }
 
     /** True kick: closes the MJPEG stream so the socket drops. */
@@ -232,26 +278,37 @@ class StreamingManager(
             return
         }
         if (port != currentPort) {
-            val wasServerRunning = _isServerRunning.value
-            if (wasServerRunning) {
-                server.stopServer()
-                _isServerRunning.value = false
-            }
-            currentPort = port
-            server = createServer(port)
-            _streamUrl.value = buildVideoUrl()
-            if (_isAudioStreaming.value) {
-                _audioStreamUrl.value = buildAudioUrl()
-            }
-            if (wasServerRunning) {
-                val restarted = server.startServer()
-                _isServerRunning.value = restarted
-                if (!restarted) {
-                    Log.e(TAG, "Failed to restart streaming server on new port $port")
+            val restarted = recreateServerIfRunning {
+                currentPort = port
+                server = createServer(port)
+                _streamUrl.value = buildVideoUrl()
+                if (_isAudioStreaming.value) {
+                    _audioStreamUrl.value = buildAudioUrl()
                 }
+            }
+            if (restarted == false) {
+                Log.e(TAG, "Failed to restart streaming server on new port $port")
             }
             Log.d(TAG, "Streaming port set to $port")
         }
+    }
+
+    /**
+     * The stop → recreate → start cycle shared by port and TLS changes: only
+     * bounces the transport when it was already serving. Null means it was
+     * not running (nothing restarted); otherwise the restart outcome.
+     */
+    private inline fun recreateServerIfRunning(recreate: () -> Unit): Boolean? {
+        val wasRunning = _isServerRunning.value
+        if (wasRunning) {
+            stopTransport()
+            _isServerRunning.value = false
+        }
+        recreate()
+        if (!wasRunning) return null
+        val restarted = server.startServer()
+        _isServerRunning.value = restarted
+        return restarted
     }
 
     fun setAdaptiveBitrateEnabled(enabled: Boolean) {
@@ -271,12 +328,48 @@ class StreamingManager(
         if (!started) {
             return false
         }
+        startWsSidecar()
 
         _isServerRunning.value = true
         _streamUrl.value = buildVideoUrl()
         Log.d(TAG, "Streaming server ready at ${_streamUrl.value}")
         return true
     }
+
+    /** The WS sidecar rides the main server's lifecycle; failure is non-fatal. */
+    private fun startWsSidecar() {
+        if (wsMediaServer == null) {
+            val sidecar = com.raulshma.lenscast.streaming.ws.WsMediaServer(
+                currentPort + WS_PORT_OFFSET,
+                audioStreamingManager,
+                webAuthGate,
+            )
+            if (tlsEnabled) {
+                runCatching {
+                    val app = context.applicationContext as MainApplication
+                    sidecar.tlsServerSocketFactory = app.tlsCertManager.identity(localIpsSafe()).serverSocketFactory
+                }
+            }
+            wsMediaServer = sidecar
+        }
+        wsMediaServer?.startServer()
+    }
+
+    private fun stopWsSidecar() {
+        runCatching { wsMediaServer?.stopServer() }
+        wsMediaServer = null
+    }
+
+    /** One lever for "both transports stop": the HTTP server plus the WS sidecar riding its lifecycle. */
+    private fun stopTransport() {
+        server.stopServer()
+        stopWsSidecar()
+    }
+
+    /** Every LAN address, best effort — the TLS identity covers all of them, falling back to the single local one. */
+    private fun localIpsSafe(): List<String> =
+        runCatching { NetworkUtils.getAllLocalIpAddresses() }
+            .getOrDefault(listOfNotNull(NetworkUtils.getLocalIpAddress()))
 
     fun startStreaming(): Boolean {
         if (!webStreamingEnabled.get() && !rtspOutput.isEnabled()) {
@@ -298,7 +391,7 @@ class StreamingManager(
     fun stopStreaming() {
         stopWebStreaming()
         stopRtspStreaming()
-        server.stopServer()
+        stopTransport()
         unregisterMdnsService()
         _isServerRunning.value = false
         Log.d(TAG, "Streaming stopped")
@@ -643,10 +736,43 @@ class StreamingManager(
     private fun createServer(port: Int): StreamingServer {
         // Auth needs no re-application here: the filter reads the shared,
         // manager-owned gate live, and the RTSP spec comes from a provider.
-        return StreamingServer(port, context, audioStreamingManager, webApiStack, networkQualityMonitor, webAuthGate).also {
+        val factory = if (tlsEnabled) {
+            runCatching {
+                val app = context.applicationContext as MainApplication
+                app.tlsCertManager.identity(localIpsSafe())
+                    .also { tlsFingerprint = it.fingerprint }.serverSocketFactory
+            }.onFailure { Log.w(TAG, "TLS identity unavailable; serving plain HTTP", it) }
+                .getOrNull()
+                .also { if (it == null) tlsEnabled = false }
+        } else {
+            null
+        }
+        return StreamingServer(
+            port, context, audioStreamingManager, webApiStack, networkQualityMonitor, webAuthGate,
+            tlsServerSocketFactory = factory,
+        ).also {
             it.setWebStreamingEnabled(webStreamingEnabled.get())
         }
     }
+
+    /**
+     * Switch the server between plain HTTP and HTTPS (self-signed). Like a
+     * port change, this is a stop → recreate → start cycle; the shared auth
+     * gate survives, so dashboards stay logged in.
+     */
+    fun setTlsEnabled(enabled: Boolean) {
+        if (tlsEnabled == enabled) return
+        val restarted = recreateServerIfRunning {
+            tlsEnabled = enabled
+            server = createServer(currentPort)
+        }
+        if (restarted != null) {
+            Log.d(TAG, "TLS ${if (enabled) "enabled" else "disabled"}; server restart=$restarted")
+        }
+    }
+
+    fun tlsCertificateFingerprint(): String = tlsFingerprint
+
 
     /**
      * Composition root for the Web API: one handler module per domain, each
@@ -656,26 +782,34 @@ class StreamingManager(
     private fun buildWebApiStack(): WebApiStack {
         val app = context.applicationContext as MainApplication
         val gallery = GalleryWebHandler(context, app.captureHistoryStore)
+        val deterrence = DeterrenceWebHandler(sirenPlayer)
+        val authHandler = AuthWebHandler(app.settingsDataStore, webAuthGate)
+        val statusHandler = StatusWebHandler(
+            streamingManager = this,
+            thermalMonitor = thermalMonitor,
+            powerManager = app.powerManager,
+            cameraService = app.cameraService,
+            streamWatchdog = app.streamWatchdog,
+            settingsDataStore = app.settingsDataStore,
+        )
         return WebApiStack(
             router = ApiRouter(
                 settings = SettingsWebHandler(app.settingsDataStore),
-                status = StatusWebHandler(
-                    streamingManager = this,
-                    thermalMonitor = thermalMonitor,
-                    powerManager = app.powerManager,
-                    cameraService = app.cameraService,
-                    streamWatchdog = app.streamWatchdog,
-                    settingsDataStore = app.settingsDataStore,
-                ),
+                status = statusHandler,
                 stream = StreamWebHandler(this, app.streamingSession),
                 capture = CaptureWebHandler(app.photoCaptureManager),
                 lens = LensWebHandler(app.cameraService),
                 interval = IntervalCaptureWebHandler(context),
                 recording = RecordingWebHandler(app.recordingController),
                 gallery = gallery,
+                deterrence = deterrence,
+                auth = authHandler,
             ),
             gallery = gallery,
+            status = statusHandler,
             capture = app.photoCaptureManager,
+            deterrence = deterrence,
+            auth = authHandler,
         )
     }
 
@@ -713,11 +847,11 @@ class StreamingManager(
     }
 
     private fun buildVideoUrl(): String {
-        return NetworkUtils.getStreamingUrl(currentPort) ?: "http://localhost:$currentPort/stream"
+        return NetworkUtils.getStreamingUrl(currentPort) ?: "${if (tlsEnabled) "https" else "http"}://localhost:$currentPort/stream"
     }
 
     private fun buildAudioUrl(): String {
-        return NetworkUtils.getAudioUrl(currentPort) ?: "http://localhost:$currentPort/audio"
+        return NetworkUtils.getAudioUrl(currentPort) ?: "${if (tlsEnabled) "https" else "http"}://localhost:$currentPort/audio"
     }
 
     /**
@@ -734,5 +868,6 @@ class StreamingManager(
 
     companion object {
         private const val TAG = "StreamingManager"
+        private const val WS_PORT_OFFSET = 1
     }
 }

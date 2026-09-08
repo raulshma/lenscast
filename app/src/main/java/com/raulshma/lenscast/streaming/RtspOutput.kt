@@ -100,7 +100,8 @@ internal class RtspOutput(
     /** The running/URL mirror after every server transition, so the owner's state flows follow the output. */
     private val onStateChanged: (running: Boolean, url: String) -> Unit,
     private val hlsSink: com.raulshma.lenscast.streaming.hls.HlsVideoSink? = com.raulshma.lenscast.streaming.hls.HlsManager,
-    private val serverFactory: (port: Int) -> RtspServerHandle = { port -> RtspServer(port, hlsSink) },
+    private val extraVideoSink: ((List<com.raulshma.lenscast.streaming.rtsp.H264Encoder.EncodedNalUnit>) -> Unit)? = null,
+    private val serverFactory: (port: Int) -> RtspServerHandle = { port -> RtspServer(port, hlsSink, extraVideoSink) },
 ) {
 
     /** The output is switched on — start() while disabled refuses. */

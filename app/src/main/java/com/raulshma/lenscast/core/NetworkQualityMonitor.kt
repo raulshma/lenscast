@@ -14,9 +14,9 @@ class NetworkQualityMonitor {
     private var totalBytesSent = 0L
 
     fun registerClient(clientId: String) {
-        clientStats.compute(clientId) { _, existing ->
-            existing ?: ClientStats()
-        }
+        // putIfAbsent (API 9 via ConcurrentMap), not Map.compute — the default
+        // method is API 24+ and this monitor must run on API 23.
+        clientStats.putIfAbsent(clientId, ClientStats())
         _activeClients.set(clientStats.size)
         Log.d(TAG, "Client registered: $clientId, active: ${_activeClients.get()}")
     }

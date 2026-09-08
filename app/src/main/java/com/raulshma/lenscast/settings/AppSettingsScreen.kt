@@ -100,6 +100,7 @@ fun AppSettingsScreen(
     }
 
     val authSettings by viewModel.authSettings.collectAsState()
+    val httpsEnabled by viewModel.httpsEnabled.collectAsState()
     val streamingPort by viewModel.streamingPort.collectAsState()
     val webStreamingEnabled by viewModel.webStreamingEnabled.collectAsState()
     val jpegQuality by viewModel.jpegQuality.collectAsState()
@@ -114,7 +115,6 @@ fun AppSettingsScreen(
     val rtspInputFormat by viewModel.rtspInputFormat.collectAsState()
     val adaptiveBitrateEnabled by viewModel.adaptiveBitrateEnabled.collectAsState()
     val mdnsEnabled by viewModel.mdnsEnabled.collectAsState()
-    val motionDetectionEnabled by viewModel.motionDetectionEnabled.collectAsState()
     val isIgnoringBatteryOptimizations by viewModel.isIgnoringBatteryOptimizations
 
     val updateState by updateViewModel.updateState.collectAsState()
@@ -136,7 +136,7 @@ fun AppSettingsScreen(
             contentPadding = PaddingValues(16.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            item {
+            if (com.raulshma.lenscast.BuildConfig.SELF_UPDATE) item {
                 SettingsSection(title = "Updates") {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -304,14 +304,11 @@ fun AppSettingsScreen(
                         checked = mdnsEnabled,
                         onCheckedChange = { viewModel.updateMdnsEnabled(it) }
                     )
-                    // Persisted toggle: the screen writes the store, the
-                    // Settings Applier applies it to the runtime detector.
-                    SwitchSetting(
-                        title = "Motion Detection (auto-photo)",
-                        checked = motionDetectionEnabled,
-                        onCheckedChange = { viewModel.updateMotionDetectionEnabled(it) }
-                    )
                 }
+            }
+
+            item {
+                DetectionSettingsSection(viewModel)
             }
 
             item {
@@ -340,6 +337,14 @@ fun AppSettingsScreen(
                         )
                     }
                 }
+            }
+
+            item {
+                WatchdogSettingsSection(viewModel)
+            }
+
+            item {
+                BackupSettingsSection(viewModel)
             }
 
             item {
@@ -373,6 +378,21 @@ fun AppSettingsScreen(
                         checked = streamAudioEnabled,
                         onCheckedChange = { viewModel.updateStreamAudioEnabled(it) }
                     )
+                    // Preferred microphone: blank = platform default.
+                    val app = context.applicationContext as MainApplication
+                    val audioDevices = remember { app.streamingManager.audioInputDevices() }
+                    val selectedAudioDevice by viewModel.audioDeviceId.collectAsState()
+                    DropdownSetting(
+                        title = "Microphone",
+                        options = listOf("Default (auto)") + audioDevices.map { it.second },
+                        selected = audioDevices.firstOrNull { it.first.toString() == selectedAudioDevice }?.second
+                            ?: "Default (auto)",
+                        onSelect = { label ->
+                            viewModel.updateAudioDeviceId(
+                                audioDevices.firstOrNull { it.second == label }?.first?.toString() ?: ""
+                            )
+                        }
+                    )
                     SwitchSetting(
                         title = "Echo Cancellation & Noise Suppression",
                         checked = streamAudioEchoCancellation,
@@ -400,6 +420,11 @@ fun AppSettingsScreen(
 
             item {
                 SettingsSection(title = "Security") {
+                    SwitchSetting(
+                        title = "HTTPS (Self-Signed Certificate)",
+                        checked = httpsEnabled,
+                        onCheckedChange = { viewModel.updateHttpsEnabled(it) }
+                    )
                     SwitchSetting(
                         title = "Stream Authentication",
                         checked = authSettings.enabled,

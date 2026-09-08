@@ -6,10 +6,12 @@ import com.raulshma.lenscast.core.parseEnumOrNull
 import com.raulshma.lenscast.camera.model.CameraSettings
 import com.raulshma.lenscast.camera.model.MaskingType
 import com.raulshma.lenscast.camera.model.MaskingZone
+import com.raulshma.lenscast.camera.model.MotionZone
 import com.raulshma.lenscast.camera.model.OverlaySettings
 import com.raulshma.lenscast.data.SettingsDataStore
 import com.raulshma.lenscast.streaming.model.CameraSettingsDto
 import com.raulshma.lenscast.streaming.model.MaskingZoneDto
+import com.raulshma.lenscast.streaming.model.MotionZoneDto
 import com.raulshma.lenscast.streaming.model.SettingsResponseDto
 import com.raulshma.lenscast.streaming.model.SettingsUpdateRequestDto
 import com.raulshma.lenscast.streaming.model.StreamingSettingsDto
@@ -65,6 +67,28 @@ class SettingsWebHandler(private val settingsDataStore: SettingsDataStore) {
                 watchdogEnabled = store.watchdogEnabled.value,
                 watchdogMaxRetries = store.watchdogMaxRetries.value,
                 watchdogCheckIntervalSeconds = store.watchdogCheckIntervalSeconds.value,
+                mdnsEnabled = store.mdnsEnabled.value,
+                motionDetectionEnabled = store.motionDetectionEnabled.value,
+                motionSensitivityPercent = store.motionSensitivity.value,
+                motionZones = store.motionZones.value.map(::toMotionZoneDto),
+                motionRecordingEnabled = store.motionRecordingEnabled.value,
+                motionPostRollSeconds = store.motionPostRollSeconds.value,
+                motionArmScheduleEnabled = store.motionArmScheduleEnabled.value,
+                motionArmStartMinute = store.motionArmStartMinute.value,
+                motionArmEndMinute = store.motionArmEndMinute.value,
+                soundDetectionEnabled = store.soundDetectionEnabled.value,
+                soundThresholdPercent = store.soundThresholdPercent.value,
+                webhookEnabled = store.webhookEnabled.value,
+                webhookUrl = store.webhookUrl.value,
+                backupEnabled = store.backupEnabled.value,
+                backupWifiOnly = store.backupWifiOnly.value,
+                backupWebdavUrl = store.backupWebdavUrl.value,
+                backupWebdavUsername = store.backupWebdavUsername.value,
+                // Write-only, like the stream-auth password: blank in every
+                // response; an empty update keeps the stored secret.
+                backupWebdavPassword = "",
+                httpsEnabled = store.httpsEnabled.value,
+                audioDeviceId = store.audioDeviceId.value,
             ),
         )
         return responseAdapter.toJson(response)
@@ -122,6 +146,30 @@ class SettingsWebHandler(private val settingsDataStore: SettingsDataStore) {
             settingsDataStore.saveWatchdogEnabled(stream.watchdogEnabled)
             settingsDataStore.saveWatchdogMaxRetries(stream.watchdogMaxRetries)
             settingsDataStore.saveWatchdogCheckIntervalSeconds(stream.watchdogCheckIntervalSeconds)
+            settingsDataStore.saveMdnsEnabled(stream.mdnsEnabled)
+            settingsDataStore.saveMotionDetectionEnabled(stream.motionDetectionEnabled)
+            settingsDataStore.saveMotionSensitivity(stream.motionSensitivityPercent)
+            settingsDataStore.saveMotionZones(stream.motionZones.map { toMotionZone(it) })
+            settingsDataStore.saveMotionRecordingEnabled(stream.motionRecordingEnabled)
+            settingsDataStore.saveMotionPostRollSeconds(stream.motionPostRollSeconds)
+            settingsDataStore.saveMotionArmScheduleEnabled(stream.motionArmScheduleEnabled)
+            settingsDataStore.saveMotionArmStartMinute(stream.motionArmStartMinute)
+            settingsDataStore.saveMotionArmEndMinute(stream.motionArmEndMinute)
+            settingsDataStore.saveSoundDetectionEnabled(stream.soundDetectionEnabled)
+            settingsDataStore.saveSoundThresholdPercent(stream.soundThresholdPercent)
+            settingsDataStore.saveWebhookEnabled(stream.webhookEnabled)
+            settingsDataStore.saveWebhookUrl(stream.webhookUrl)
+            settingsDataStore.saveBackupEnabled(stream.backupEnabled)
+            settingsDataStore.saveBackupWifiOnly(stream.backupWifiOnly)
+            settingsDataStore.saveBackupWebdavUrl(stream.backupWebdavUrl)
+            settingsDataStore.saveBackupWebdavUsername(stream.backupWebdavUsername)
+            settingsDataStore.saveHttpsEnabled(stream.httpsEnabled)
+            settingsDataStore.saveAudioDeviceId(stream.audioDeviceId)
+            // An empty password on update means "keep the stored one" so the
+            // dashboard never needs to round-trip the secret.
+            if (stream.backupWebdavPassword.isNotEmpty()) {
+                settingsDataStore.saveBackupWebdavPassword(stream.backupWebdavPassword)
+            }
         }
 
         return successAdapter.toJson(SuccessResponse())
@@ -155,6 +203,26 @@ class SettingsWebHandler(private val settingsDataStore: SettingsDataStore) {
         height = zone.height.toDouble(),
         pixelateSize = zone.pixelateSize,
         blurRadius = zone.blurRadius.toDouble(),
+    )
+
+    private fun toMotionZoneDto(zone: MotionZone) = MotionZoneDto(
+        id = zone.id,
+        label = zone.label,
+        enabled = zone.enabled,
+        x = zone.x.toDouble(),
+        y = zone.y.toDouble(),
+        width = zone.width.toDouble(),
+        height = zone.height.toDouble(),
+    )
+
+    private fun toMotionZone(dto: MotionZoneDto) = MotionZone(
+        id = dto.id.takeIf { it.isNotBlank() } ?: java.util.UUID.randomUUID().toString(),
+        label = dto.label,
+        enabled = dto.enabled,
+        x = dto.x.toFloat(),
+        y = dto.y.toFloat(),
+        width = dto.width.toFloat(),
+        height = dto.height.toFloat(),
     )
 
     private fun toOverlaySettings(stream: StreamingSettingsDto, current: OverlaySettings): OverlaySettings {

@@ -10,20 +10,34 @@ import java.util.concurrent.atomic.AtomicLong
  * the sink seam and [MediaResponder] serves through the source seam, both
  * injected at construction; [StreamingManager] owns the lifecycle (reset on
  * start/stop) via [setEnabled].
+ *
+ * Presentation timestamps are anchored to the injected wall clock, not a fixed
+ * per-frame increment: the adaptive-bitrate controller changes the actual frame
+ * rate at runtime, so a fixed step (e.g. 90kHz/24) silently desyncs video from
+ * both the wall clock and the audio track. Anchoring both tracks to the same
+ * clock keeps A/V muxed and lets the adaptive frame rate ride through.
  */
 object HlsManager : HlsVideoSink, HlsSegmentSource {
     private const val TAG = "HlsManager"
     private const val MAX_SEGMENTS = 8
-    // ~48 AUs at 24fps ≈ 2s per segment.
+    // ~48 AUs at 24fps ≈ 2s per segment; EXTINF carries the real duration.
     private const val AUS_PER_SEGMENT = 48
+    private const val PTS_HZ = 90_000L
+
+    /** Injectable clock (elapsed-realtime ms) — tests drive PTS deterministically. */
+    internal var clockMs: () -> Long = { android.os.SystemClock.elapsedRealtime() }
+
+    class HlsSegment(val sequence: Long, val bytes: ByteArray, val durationSec: Double)
 
     private val lock = Any()
-    private val segments = ArrayDeque<Pair<Long, ByteArray>>()
+    private val segments = ArrayDeque<HlsSegment>()
     private val sequence = AtomicLong(0)
     private val pending = mutableListOf<ByteArray>()
+    private var pendingStartPts = -1L
+    private var lastVideoPts = -1L
     @Volatile private var enabled = false
-    @Volatile private var pts90k = 0L
-    @Volatile private var audioPts90k = 0L
+    @Volatile private var videoAnchorMs = -1L
+    @Volatile private var audioAnchorMs = -1L
 
     fun setEnabled(on: Boolean) {
         enabled = on
@@ -34,18 +48,22 @@ object HlsManager : HlsVideoSink, HlsSegmentSource {
         synchronized(lock) {
             segments.clear()
             pending.clear()
+            pendingStartPts = -1
+            lastVideoPts = -1
             sequence.set(0)
-            pts90k = 0
-            audioPts90k = 0
         }
+        videoAnchorMs = -1
+        audioAnchorMs = -1
         TsPacketizer.reset()
     }
 
     override fun feedAudio(aacData: ByteArray) {
         if (!enabled || aacData.isEmpty()) return
         try {
-            val ts = TsPacketizer.audioFrameToTs(aacData, audioPts90k)
-            audioPts90k += 1920 // 1024 samples @48kHz → 90kHz clock
+            val now = clockMs()
+            if (audioAnchorMs < 0) audioAnchorMs = now
+            val audioPts = (now - audioAnchorMs) * PTS_HZ / 1000
+            val ts = TsPacketizer.audioFrameToTs(aacData, audioPts)
             synchronized(lock) {
                 // Audio rides the current open segment so A/V stay muxed.
                 pending.add(ts)
@@ -58,18 +76,26 @@ object HlsManager : HlsVideoSink, HlsSegmentSource {
     override fun feedVideo(nalus: List<com.raulshma.lenscast.streaming.rtsp.H264Encoder.EncodedNalUnit>) {
         if (!enabled || nalus.isEmpty()) return
         try {
-            val raw = nalus.map { it.data }
-            val ts = TsPacketizer.videoAuToTs(raw, pts90k)
-            pts90k += 3750 // 90kHz / 24fps
+            val now = clockMs()
+            if (videoAnchorMs < 0) videoAnchorMs = now
+            // Strictly monotonic even if the clock steps back or two frames
+            // land inside the same millisecond.
+            val computed = (now - videoAnchorMs) * PTS_HZ / 1000
+            val pts = if (computed <= lastVideoPts) lastVideoPts + 1 else computed
+            lastVideoPts = pts
+            val ts = TsPacketizer.videoAuToTs(nalus.map { it.data }, pts)
             synchronized(lock) {
+                if (pendingStartPts < 0) pendingStartPts = pts
                 pending.add(ts)
                 if (pending.size >= AUS_PER_SEGMENT) {
                     val seq = sequence.incrementAndGet()
                     val combined = pending.fold(ByteArray(0)) { acc, b -> acc + b }
-                    segments.addLast(seq to combined)
+                    val durationSec = (pts - pendingStartPts).toDouble() / PTS_HZ
+                    segments.addLast(HlsSegment(seq, combined, durationSec))
                     while (segments.size > MAX_SEGMENTS) segments.removeFirst()
                     pending.clear()
-                    Log.d(TAG, "HLS segment $seq ready (${combined.size}B, window=${segments.size})")
+                    pendingStartPts = -1
+                    Log.d(TAG, "HLS segment $seq ready (${combined.size}B, ${String.format(java.util.Locale.US, "%.2f", durationSec)}s, window=${segments.size})")
                 }
             }
         } catch (e: Exception) {
@@ -78,11 +104,16 @@ object HlsManager : HlsVideoSink, HlsSegmentSource {
     }
 
     override fun playlist(): String = synchronized(lock) {
-        HlsPlaylist.build(segments.map { HlsPlaylist.segmentName(it.first) }, sequence.get())
+        val window = segments.toList().takeLast(HlsPlaylist.WINDOW_SEGMENTS)
+        HlsPlaylist.build(
+            segmentNames = window.map { HlsPlaylist.segmentName(it.sequence) },
+            sequence = sequence.get(),
+            segmentDurationsSec = window.map { it.durationSec },
+        )
     }
 
     override fun segment(name: String): ByteArray? = synchronized(lock) {
-        segments.firstOrNull { HlsPlaylist.segmentName(it.first) == name }?.second
+        segments.firstOrNull { HlsPlaylist.segmentName(it.sequence) == name }?.bytes
     }
 
     override fun hasSegments(): Boolean = synchronized(lock) { segments.isNotEmpty() }

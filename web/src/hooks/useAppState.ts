@@ -386,8 +386,25 @@ export function useAppState() {
 
     const streamingInactive = () => !status()?.streaming?.isActive
 
+    // SSE status push: when the channel is live it replaces the status poll
+    // lane entirely; the ladder lane stays armed as automatic fallback for
+    // browsers or clients where the stream is capped (503).
+    let eventSource: EventSource | null = null
+    try {
+      eventSource = new EventSource('/api/events')
+      eventSource.addEventListener('status', (ev) => {
+        try {
+          const parsed = JSON.parse((ev as MessageEvent).data)
+          setStatus(parsed)
+        } catch { }
+      })
+      onCleanup(() => eventSource?.close())
+    } catch {
+      eventSource = null
+    }
+
     const ladder = createPollLadder({
-      status: { everyTicks: 3 },
+      status: { everyTicks: 3, enabled: () => !sseHealthChecker() },
       recording: { everyTicks: 3 },
       intervalCapture: { everyTicks: 5 },
       settings: { everyTicks: 30, enabled: streamingInactive },
@@ -404,6 +421,13 @@ export function useAppState() {
       isVisible: () => !isPageHidden(),
       tickMs: 1000,
     })
+
+    // Track SSE liveness with a small grace: a closed stream re-arms the lane.
+    let sseAliveAt = 0
+    function sseHealthChecker(): boolean {
+      if (eventSource && eventSource.readyState === EventSource.OPEN) sseAliveAt = Date.now()
+      return Date.now() - sseAliveAt < 5_000
+    }
 
     ladder.start()
 

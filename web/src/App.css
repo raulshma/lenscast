@@ -1873,3 +1873,114 @@ html, body {
     padding: 8px;
   }
 }
+/* Connected Clients Card */
+.clients-count-row {
+  display: flex;
+  align-items: center;
+}
+
+.clients-count-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--lc-accent);
+  background: rgba(56, 189, 248, 0.08);
+  border: 1px solid rgba(56, 189, 248, 0.2);
+  border-radius: 999px;
+  padding: 3px 10px;
+}
+
+.clients-count-sep {
+  color: var(--lc-text-dim);
+  font-weight: 600;
+  margin-left: 2px;
+}
+
+.clients-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.client-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--lc-border);
+  border-radius: 8px;
+  padding: 6px 10px;
+}
+
+.client-id {
+  font-family: ui-monospace, monospace;
+  font-size: 11px;
+  color: var(--lc-text-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.client-kick-btn {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--lc-danger);
+  background: var(--lc-danger-bg);
+  border: 1px solid rgba(244, 63, 94, 0.2);
+  border-radius: 6px;
+  padding: 3px 10px;
+  cursor: pointer;
+  transition: filter 0.15s ease;
+}
+
+.client-kick-btn:hover:not(:disabled) {
+  filter: brightness(1.15);
+}
+
+.client-kick-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.client-kicked {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: var(--lc-success, #34d399);
+}
+
+.clients-cap-row {
+  font-size: 11px;
+  color: var(--lc-text-dim);
+}
+
+.clients-empty {
+  font-size: 12px;
+  color: var(--lc-text-dim);
+  padding: 6px 0;
+}
+
+/* Security card */
+.deterrence-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.motion-zone-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.field-input-full {
+  width: 100%;
+}

@@ -76,6 +76,26 @@ const STREAMING_KEYS = [
   'watchdogEnabled',
   'watchdogMaxRetries',
   'watchdogCheckIntervalSeconds',
+  'mdnsEnabled',
+  'motionDetectionEnabled',
+  'motionSensitivityPercent',
+  'motionZones',
+  'motionRecordingEnabled',
+  'motionPostRollSeconds',
+  'motionArmScheduleEnabled',
+  'motionArmStartMinute',
+  'motionArmEndMinute',
+  'soundDetectionEnabled',
+  'soundThresholdPercent',
+  'webhookEnabled',
+  'webhookUrl',
+  'backupEnabled',
+  'backupWifiOnly',
+  'backupWebdavUrl',
+  'backupWebdavUsername',
+  'backupWebdavPassword',
+  'httpsEnabled',
+  'audioDeviceId',
 ]
 
 describe('DTO contract fixtures', () => {
@@ -229,6 +249,29 @@ describe('API_DEFAULTS lockstep with the fixtures', () => {
     expect(streaming.watchdogEnabled).toBe(API_DEFAULTS.watchdogEnabled)
     expect(streaming.watchdogMaxRetries).toBe(API_DEFAULTS.watchdogMaxRetries)
     expect(streaming.watchdogCheckIntervalSeconds).toBe(API_DEFAULTS.watchdogCheckIntervalSeconds)
+  })
+
+  it('detection, webhook and backup fallbacks match the settings fixture defaults', () => {
+    expect(streaming.mdnsEnabled).toBe(API_DEFAULTS.mdnsEnabled)
+    expect(streaming.motionDetectionEnabled).toBe(API_DEFAULTS.motionDetectionEnabled)
+    expect(streaming.motionSensitivityPercent).toBe(API_DEFAULTS.motionSensitivityPercent)
+    expect(Array.isArray(streaming.motionZones)).toBe(true)
+    expect(streaming.motionRecordingEnabled).toBe(API_DEFAULTS.motionRecordingEnabled)
+    expect(streaming.motionPostRollSeconds).toBe(API_DEFAULTS.motionPostRollSeconds)
+    expect(streaming.motionArmScheduleEnabled).toBe(API_DEFAULTS.motionArmScheduleEnabled)
+    expect(streaming.motionArmStartMinute).toBe(API_DEFAULTS.motionArmStartMinute)
+    expect(streaming.motionArmEndMinute).toBe(API_DEFAULTS.motionArmEndMinute)
+    expect(streaming.soundDetectionEnabled).toBe(API_DEFAULTS.soundDetectionEnabled)
+    expect(streaming.soundThresholdPercent).toBe(API_DEFAULTS.soundThresholdPercent)
+    expect(streaming.webhookEnabled).toBe(API_DEFAULTS.webhookEnabled)
+    expect(streaming.webhookUrl).toBe(API_DEFAULTS.webhookUrl)
+    expect(streaming.backupEnabled).toBe(API_DEFAULTS.backupEnabled)
+    expect(streaming.backupWifiOnly).toBe(API_DEFAULTS.backupWifiOnly)
+    expect(streaming.backupWebdavUrl).toBe(API_DEFAULTS.backupWebdavUrl)
+    expect(streaming.backupWebdavUsername).toBe(API_DEFAULTS.backupWebdavUsername)
+    expect(streaming.backupWebdavPassword).toBe(API_DEFAULTS.backupWebdavPassword)
+    expect(streaming.httpsEnabled).toBe(API_DEFAULTS.httpsEnabled)
+    expect(streaming.audioDeviceId).toBe(API_DEFAULTS.audioDeviceId)
   })
 
   it('camera fallbacks match the settings fixture defaults', () => {

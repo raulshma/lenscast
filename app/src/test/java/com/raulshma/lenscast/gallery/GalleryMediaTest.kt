@@ -12,10 +12,13 @@ import java.time.ZoneId
 /**
  * The gallery's pure math: overview counts, day grouping with an injected
  * "today", and the byte/duration formatters — no Android dependencies.
+ * java.time is allowed here (JVM-only) and doubles as the oracle for the
+ * epoch-day arithmetic the main code can no longer use.
  */
 class GalleryMediaTest {
 
-    private val today: LocalDate = LocalDate.of(2026, 9, 7)
+    private val todayDate: LocalDate = LocalDate.of(2026, 9, 7)
+    private val today: Long = todayDate.toEpochDay()
 
     private fun atDay(day: LocalDate, plusMillis: Long = 0): Long =
         day.atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli() + plusMillis
@@ -40,10 +43,10 @@ class GalleryMediaTest {
     fun `overview counts photos, videos, bytes and distinct days`() {
         val overview = buildGalleryOverview(
             listOf(
-                item("a", atDay(today)),
-                item("b", atDay(today), type = CaptureType.VIDEO, sizeBytes = 50L),
-                item("c", atDay(today.minusDays(3))),
-                item("d", atDay(today.minusDays(3))),
+                item("a", atDay(todayDate)),
+                item("b", atDay(todayDate), type = CaptureType.VIDEO, sizeBytes = 50L),
+                item("c", atDay(todayDate.minusDays(3))),
+                item("d", atDay(todayDate.minusDays(3))),
             )
         )
         assertEquals(4, overview.totalCount)
@@ -56,7 +59,7 @@ class GalleryMediaTest {
     @Test
     fun `negative sizes never reduce the total`() {
         val overview = buildGalleryOverview(
-            listOf(item("a", atDay(today), sizeBytes = 100L), item("b", atDay(today), sizeBytes = -5L))
+            listOf(item("a", atDay(todayDate), sizeBytes = 100L), item("b", atDay(todayDate), sizeBytes = -5L))
         )
         assertEquals(100L, overview.totalBytes)
     }
@@ -67,29 +70,29 @@ class GalleryMediaTest {
     fun `sections group by day, newest first, items newest first within a day`() {
         val sections = buildGallerySections(
             listOf(
-                item("early", atDay(today, plusMillis = 1_000), sizeBytes = 2000L),
-                item("late", atDay(today, plusMillis = 2_000), sizeBytes = 1000L),
-                item("old", atDay(today.minusDays(9))),
+                item("early", atDay(todayDate, plusMillis = 1_000), sizeBytes = 2000L),
+                item("late", atDay(todayDate, plusMillis = 2_000), sizeBytes = 1000L),
+                item("old", atDay(todayDate.minusDays(9))),
             ),
-            today = today,
+            todayEpochDay = today,
         )
         assertEquals(2, sections.size)
         assertEquals("Today", sections[0].title)
         assertEquals(listOf("late", "early"), sections[0].items.map { it.id })
         assertEquals(2000L + 1000L + 100L, sections[0].totalBytes + sections[1].totalBytes)
-        assertEquals(today.toString(), sections[0].key)
+        assertEquals(todayDate.toString(), sections[0].key)
     }
 
     @Test
     fun `today and yesterday titles derive from the injected today`() {
         assertEquals("Today", formatGallerySectionTitle(today, today))
-        assertEquals("Yesterday", formatGallerySectionTitle(today.minusDays(1), today))
-        assertEquals("Today", formatGallerySectionTitle(LocalDate.of(2020, 1, 2), LocalDate.of(2020, 1, 2)))
+        assertEquals("Yesterday", formatGallerySectionTitle(today - 1, today))
+        assertEquals("Today", formatGallerySectionTitle(LocalDate.of(2020, 1, 2).toEpochDay(), LocalDate.of(2020, 1, 2).toEpochDay()))
     }
 
     @Test
     fun `older days fall back to the formatted date, never Today or Yesterday`() {
-        val title = formatGallerySectionTitle(today.minusDays(9), today)
+        val title = formatGallerySectionTitle(today - 9, today)
         assertNotEquals("Today", title)
         assertNotEquals("Yesterday", title)
         assertTrue(title.isNotBlank())

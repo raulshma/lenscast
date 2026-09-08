@@ -9,27 +9,29 @@ import com.raulshma.lenscast.capture.model.CaptureHistory
 import com.raulshma.lenscast.capture.model.CaptureMediaFormat
 import com.raulshma.lenscast.capture.model.CaptureType
 import java.io.File
-import java.time.Instant
-import java.time.LocalDate
-import java.time.ZoneId
-import java.time.format.DateTimeFormatter
-import java.time.format.FormatStyle
+import java.text.DateFormat
+import java.text.SimpleDateFormat
+import java.util.Date
 import java.util.Locale
+import java.util.TimeZone
 
-private val galleryDayFormatter: DateTimeFormatter = DateTimeFormatter.ofPattern(
-    "EEE, MMM d",
-    Locale.getDefault(),
-)
+// SimpleDateFormat is mutable, so one instance per thread replaces the shared
+// val a DateTimeFormatter allowed; gallery rendering is main-thread only.
+private class CachedFormat(private val newFormat: () -> DateFormat) : ThreadLocal<DateFormat>() {
+    override fun initialValue(): DateFormat = newFormat()
+}
 
-private val galleryTimeFormatter: DateTimeFormatter = DateTimeFormatter.ofPattern(
-    "h:mm a",
-    Locale.getDefault(),
-)
+private val galleryDayFormat = CachedFormat {
+    SimpleDateFormat("EEE, MMM d", Locale.getDefault())
+}
 
-private val viewerDateTimeFormatter: DateTimeFormatter = DateTimeFormatter.ofLocalizedDateTime(
-    FormatStyle.MEDIUM,
-    FormatStyle.SHORT,
-)
+private val galleryTimeFormat = CachedFormat {
+    SimpleDateFormat("h:mm a", Locale.getDefault())
+}
+
+private val viewerDateTimeFormat = CachedFormat {
+    DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT, Locale.getDefault())
+}
 
 data class GalleryOverview(
     val totalCount: Int,
@@ -47,28 +49,32 @@ data class GallerySection(
     val totalBytes: Long,
 )
 
-fun buildGalleryOverview(items: List<CaptureHistory>): GalleryOverview {
+fun buildGalleryOverview(
+    items: List<CaptureHistory>,
+    timeZone: TimeZone = TimeZone.getDefault(),
+): GalleryOverview {
     return GalleryOverview(
         totalCount = items.size,
         photoCount = items.count { it.type == CaptureType.PHOTO },
         videoCount = items.count { it.type == CaptureType.VIDEO },
         totalBytes = items.sumOf { it.fileSizeBytes.coerceAtLeast(0L) },
-        dayCount = items.mapTo(linkedSetOf()) { it.timestamp.toLocalDate() }.size,
+        dayCount = items.mapTo(linkedSetOf()) { GalleryDates.epochDayOf(it.timestamp, timeZone) }.size,
     )
 }
 
 fun buildGallerySections(
     items: List<CaptureHistory>,
-    today: LocalDate = LocalDate.now(),
+    todayEpochDay: Long = GalleryDates.todayEpochDay(),
+    timeZone: TimeZone = TimeZone.getDefault(),
 ): List<GallerySection> {
     return items
-        .groupBy { it.timestamp.toLocalDate() }
+        .groupBy { GalleryDates.epochDayOf(it.timestamp, timeZone) }
         .toSortedMap(compareByDescending { it })
         .map { (day, entries) ->
             GallerySection(
-                key = day.toString(),
-                title = formatGallerySectionTitle(day, today),
-                subtitle = galleryDayFormatter.format(day),
+                key = GalleryDates.isoDate(day),
+                title = formatGallerySectionTitle(day, todayEpochDay, timeZone),
+                subtitle = galleryDayFormat.get().format(Date(GalleryDates.dayStartMillis(day, timeZone))),
                 items = entries.sortedByDescending { it.timestamp },
                 totalBytes = entries.sumOf { it.fileSizeBytes.coerceAtLeast(0L) },
             )
@@ -153,23 +159,27 @@ fun formatDuration(durationMs: Long): String {
 }
 
 fun formatGalleryTime(timestamp: Long): String {
-    return galleryTimeFormatter.format(timestamp.toZonedDateTime())
+    return galleryTimeFormat.get().format(Date(timestamp))
 }
 
 fun formatViewerDateTime(timestamp: Long): String {
-    return viewerDateTimeFormatter.format(timestamp.toZonedDateTime())
+    return viewerDateTimeFormat.get().format(Date(timestamp))
 }
 
 /**
  * The section header for a capture day: Today / Yesterday relative to the
- * injected [today] (callers default to now, keeping call sites clean; tests
- * inject a fixed day), otherwise the formatted date.
+ * injected [todayEpochDay] (callers default to now, keeping call sites
+ * clean; tests inject a fixed day), otherwise the formatted date.
  */
-fun formatGallerySectionTitle(day: LocalDate, today: LocalDate = LocalDate.now()): String {
-    return when (day) {
-        today -> "Today"
-        today.minusDays(1) -> "Yesterday"
-        else -> galleryDayFormatter.format(day)
+fun formatGallerySectionTitle(
+    dayEpochDay: Long,
+    todayEpochDay: Long = GalleryDates.todayEpochDay(),
+    timeZone: TimeZone = TimeZone.getDefault(),
+): String {
+    return when (dayEpochDay) {
+        todayEpochDay -> "Today"
+        todayEpochDay - 1 -> "Yesterday"
+        else -> galleryDayFormat.get().format(Date(GalleryDates.dayStartMillis(dayEpochDay, timeZone)))
     }
 }
 
@@ -189,7 +199,3 @@ private fun resolveShareableUri(context: Context, item: CaptureHistory): Uri? {
         else -> null
     }
 }
-
-private fun Long.toLocalDate(): LocalDate = toZonedDateTime().toLocalDate()
-
-private fun Long.toZonedDateTime() = Instant.ofEpochMilli(this).atZone(ZoneId.systemDefault())

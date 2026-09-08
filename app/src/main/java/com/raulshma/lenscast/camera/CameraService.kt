@@ -33,6 +33,7 @@ import androidx.camera.video.VideoCapture
 import com.raulshma.lenscast.camera.model.CameraLensInfo
 import com.raulshma.lenscast.camera.model.CameraSettings
 import com.raulshma.lenscast.camera.model.CameraControlPlan
+import com.raulshma.lenscast.camera.model.KelvinGainsPolicy
 import com.raulshma.lenscast.camera.model.CameraState
 import com.raulshma.lenscast.camera.model.CameraSessionArbiter
 import com.raulshma.lenscast.camera.model.FocusApplyPolicy
@@ -49,8 +50,10 @@ import kotlinx.coroutines.guava.await
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.math.max
+import android.os.Build
 import java.util.concurrent.TimeUnit
 
+@androidx.annotation.OptIn(androidx.camera.camera2.interop.ExperimentalCamera2Interop::class)
 class CameraService(private val context: Context) {
 
     private class KeepAliveLifecycle : LifecycleOwner {
@@ -641,7 +644,9 @@ class CameraService(private val context: Context) {
             .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
 
         val selectedLens = _availableLenses.value.getOrNull(_selectedLensIndex.value)
-        if (selectedLens?.physicalCameraId != null) {
+        // setPhysicalCameraId is API 28+; below P the logical camera serves
+        // all use cases, which is the pre-multi-lens behavior anyway.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P && selectedLens?.physicalCameraId != null) {
             val physId = selectedLens.physicalCameraId
             Camera2Interop.Extender(previewBuilder).setPhysicalCameraId(physId)
             Camera2Interop.Extender(captureBuilder).setPhysicalCameraId(physId)
@@ -1028,13 +1033,31 @@ class CameraService(private val context: Context) {
                 builder.setCaptureRequestOption(CaptureRequest.SENSOR_EXPOSURE_TIME, it)
             }
             builder.setCaptureRequestOption(CaptureRequest.CONTROL_AWB_MODE, plan.awbMode)
-            // Manual WB is conveyed by AWB OFF above. The Kelvin decision lives
-            // in plan.colorTemperatureKelvin (clamped); gains/matrix mapping is
-            // sensor-specific, so it stays device-default until a calibrated
-            // Kelvin->gains table exists — referenced here so the plan stays the
-            // single decision table.
-            plan.colorTemperatureKelvin?.let {
-                Log.d(TAG, "Manual white balance Kelvin: $it")
+            // Manual WB is conveyed by AWB OFF above; the Kelvin value maps to
+            // sensor gains through the pure KelvinGainsPolicy (blackbody
+            // approximation) applied in TRANSFORM_MATRIX mode with an identity
+            // color transform, so the gains do the correction.
+            plan.colorTemperatureKelvin?.let { kelvin ->
+                val gains = KelvinGainsPolicy.gainsFor(kelvin)
+                builder.setCaptureRequestOption(
+                    CaptureRequest.COLOR_CORRECTION_MODE,
+                    CaptureRequest.COLOR_CORRECTION_MODE_TRANSFORM_MATRIX,
+                )
+                builder.setCaptureRequestOption(
+                    CaptureRequest.COLOR_CORRECTION_GAINS,
+                    android.hardware.camera2.params.RggbChannelVector(gains[0], gains[1], gains[2], gains[3]),
+                )
+                builder.setCaptureRequestOption(
+                    CaptureRequest.COLOR_CORRECTION_TRANSFORM,
+                    android.hardware.camera2.params.ColorSpaceTransform(
+                        arrayOf(
+                            android.util.Rational(1, 1), android.util.Rational(0, 1), android.util.Rational(0, 1),
+                            android.util.Rational(0, 1), android.util.Rational(1, 1), android.util.Rational(0, 1),
+                            android.util.Rational(0, 1), android.util.Rational(0, 1), android.util.Rational(1, 1),
+                        ),
+                    ),
+                )
+                Log.d(TAG, "Manual white balance Kelvin: $kelvin → gains ${gains.joinToString()}")
             }
 
             if (plan.afMode != null) {

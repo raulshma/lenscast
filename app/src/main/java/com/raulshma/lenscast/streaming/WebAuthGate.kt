@@ -17,11 +17,24 @@ import java.util.concurrent.ConcurrentHashMap
  * auth is disabled and [authenticate] lets everything through. Time reads go
  * through the injected [clock] — the [com.raulshma.lenscast.streaming.rtsp.RtspSessionAuthorizer]
  * seam — so the lockout window and the session expiry are JVM-tested without
- * waiting.
+ * waiting. Sessions survive process death through the optional
+ * [SessionPersistence] hook: when it is set, every session mutation is
+ * mirrored to it and the store is reloaded on construction.
  */
 class WebAuthGate(
     private val clock: () -> Long = System::currentTimeMillis,
+    private val sessionPersistence: SessionPersistence? = null,
 ) {
+
+    /**
+     * Durability hook for the session map (token → expiry epoch-ms). The
+     * tokens are secrets; implementations must keep them in app-private
+     * storage. Null (the default) keeps sessions in memory only.
+     */
+    interface SessionPersistence {
+        fun loadSessions(): Map<String, Long>
+        fun saveSessions(sessions: Map<String, Long>)
+    }
 
     /** The typed reason behind a failed login; the transport maps it to a status code. */
     enum class LoginFailure {
@@ -53,6 +66,21 @@ class WebAuthGate(
 
     private val sessions = ConcurrentHashMap<String, Long>()
     private val secureRandom = SecureRandom()
+
+    init {
+        // Reload persisted sessions, dropping anything already expired so a
+        // stale store cannot resurrect dead logins.
+        val restored = sessionPersistence?.loadSessions().orEmpty()
+        val now = clock()
+        restored.filterValues { it > now }.forEach { (token, expiry) -> sessions[token] = expiry }
+        if (sessions.isNotEmpty()) {
+            Log.d(TAG, "Restored ${sessions.size} persisted session(s)")
+        }
+    }
+
+    private fun persistSessions() {
+        sessionPersistence?.saveSessions(LinkedHashMap(sessions))
+    }
 
     private data class AuthAttempt(var count: Int, var blockedUntil: Long)
     private val authAttempts = ConcurrentHashMap<String, AuthAttempt>()
@@ -128,16 +156,48 @@ class WebAuthGate(
     }
 
     fun logout(token: String?) {
-        if (token != null) {
-            sessions.remove(token)
+        if (token != null && sessions.remove(token) != null) {
+            persistSessions()
         }
+    }
+
+    /** Session bookkeeping for the management surface; the token itself never leaves. */
+    data class SessionInfo(val tokenPrefix: String, val expiresAtMs: Long)
+
+    fun sessionsInfo(): List<SessionInfo> {
+        cleanExpiredSessions()
+        return sessions.entries
+            .sortedBy { it.value }
+            .map { SessionInfo(tokenPrefix = it.key.take(8), expiresAtMs = it.value) }
+    }
+
+    /** Revoke every session (e.g. after a credential rotation). */
+    fun revokeAllSessions() {
+        if (sessions.isNotEmpty()) {
+            sessions.clear()
+            persistSessions()
+        }
+    }
+
+    /** Revoke the session whose token starts with [prefix]; true when found. */
+    fun revokeSessionByPrefix(prefix: String): Boolean {
+        val match = sessions.keys.firstOrNull { it.startsWith(prefix) } ?: return false
+        sessions.remove(match)
+        persistSessions()
+        return true
     }
 
     /**
      * CSRF protection for state-changing requests: a recognized X-Requested-With
-     * header or an Origin/Referer matching this server's [port].
+     * header or an Origin/Referer matching this server's [port] and [scheme]
+     * (https when the TLS certificate is active).
      */
-    fun isCsrfSafe(originHeader: String?, hasRequestedWithHeader: Boolean, port: Int): Boolean {
+    fun isCsrfSafe(
+        originHeader: String?,
+        hasRequestedWithHeader: Boolean,
+        port: Int,
+        scheme: String = "http",
+    ): Boolean {
         if (hasRequestedWithHeader) return true
 
         if (originHeader != null) {
@@ -147,10 +207,10 @@ class WebAuthGate(
                 listOfNotNull(NetworkUtils.getLocalIpAddress())
             }
             val allowedOrigins = buildList {
-                add("http://localhost:$port")
-                add("http://127.0.0.1:$port")
-                add("http://[::1]:$port")
-                localIps.forEach { add("http://${NetworkUtils.formatHostForUrl(it)}:$port") }
+                add("$scheme://localhost:$port")
+                add("$scheme://127.0.0.1:$port")
+                add("$scheme://[::1]:$port")
+                localIps.forEach { add("$scheme://${NetworkUtils.formatHostForUrl(it)}:$port") }
             }
             return try {
                 val requestUri = URI(originHeader)
@@ -191,6 +251,7 @@ class WebAuthGate(
         secureRandom.nextBytes(bytes)
         val token = bytes.joinToString("") { "%02x".format(it) }
         sessions[token] = clock() + SESSION_DURATION_MS
+        persistSessions()
         return token
     }
 
@@ -198,7 +259,9 @@ class WebAuthGate(
         val now = clock()
         if (now - lastSessionCleanupMillis < SESSION_CLEANUP_INTERVAL_MS && sessions.size < MAX_SESSIONS * 0.9) return
         lastSessionCleanupMillis = now
-        sessions.entries.removeAll { now > it.value }
+        val expired = sessions.entries.filter { now > it.value }.map { it.key }
+        expired.forEach { sessions.remove(it) }
+        if (expired.isNotEmpty()) persistSessions()
     }
 
     private fun validateSession(token: String): Boolean {
@@ -207,6 +270,7 @@ class WebAuthGate(
         val expiry = sessions[token] ?: return false
         if (clock() > expiry) {
             sessions.remove(token)
+            persistSessions()
             return false
         }
         return true

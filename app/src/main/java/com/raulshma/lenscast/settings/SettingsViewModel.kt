@@ -51,6 +51,24 @@ class SettingsViewModel(
     val adaptiveBitrateEnabled: StateFlow<Boolean> = settingsDataStore.adaptiveBitrateEnabled
     val mdnsEnabled: StateFlow<Boolean> = settingsDataStore.mdnsEnabled
     val motionDetectionEnabled: StateFlow<Boolean> = settingsDataStore.motionDetectionEnabled
+    val motionSensitivityPercent: StateFlow<Int> = settingsDataStore.motionSensitivity
+    val motionRecordingEnabled: StateFlow<Boolean> = settingsDataStore.motionRecordingEnabled
+    val motionPostRollSeconds: StateFlow<Int> = settingsDataStore.motionPostRollSeconds
+    val motionArmScheduleEnabled: StateFlow<Boolean> = settingsDataStore.motionArmScheduleEnabled
+    val motionArmStartMinute: StateFlow<Int> = settingsDataStore.motionArmStartMinute
+    val motionArmEndMinute: StateFlow<Int> = settingsDataStore.motionArmEndMinute
+    val soundDetectionEnabled: StateFlow<Boolean> = settingsDataStore.soundDetectionEnabled
+    val soundThresholdPercent: StateFlow<Int> = settingsDataStore.soundThresholdPercent
+    val watchdogEnabled: StateFlow<Boolean> = settingsDataStore.watchdogEnabled
+    val watchdogMaxRetries: StateFlow<Int> = settingsDataStore.watchdogMaxRetries
+    val watchdogCheckIntervalSeconds: StateFlow<Int> = settingsDataStore.watchdogCheckIntervalSeconds
+    val backupEnabled: StateFlow<Boolean> = settingsDataStore.backupEnabled
+    val backupWifiOnly: StateFlow<Boolean> = settingsDataStore.backupWifiOnly
+    val backupWebdavUrl: StateFlow<String> = settingsDataStore.backupWebdavUrl
+    val backupWebdavUsername: StateFlow<String> = settingsDataStore.backupWebdavUsername
+    val backupWebdavPassword: StateFlow<String> = settingsDataStore.backupWebdavPassword
+    val httpsEnabled: StateFlow<Boolean> = settingsDataStore.httpsEnabled
+    val audioDeviceId: StateFlow<String> = settingsDataStore.audioDeviceId
 
     // Auth state comes straight from the Settings Store — no writable mirror.
     // Typing responsiveness comes from the store flow re-emit on save.
@@ -149,6 +167,44 @@ class SettingsViewModel(
     fun updateMdnsEnabled(enabled: Boolean) = save { settingsDataStore.saveMdnsEnabled(enabled) }
 
     fun updateMotionDetectionEnabled(enabled: Boolean) = save { settingsDataStore.saveMotionDetectionEnabled(enabled) }
+
+    fun updateMotionSensitivity(percent: Int) = save { settingsDataStore.saveMotionSensitivity(percent) }
+
+    fun updateMotionRecordingEnabled(enabled: Boolean) = save { settingsDataStore.saveMotionRecordingEnabled(enabled) }
+
+    fun updateMotionPostRollSeconds(seconds: Int) = save { settingsDataStore.saveMotionPostRollSeconds(seconds) }
+
+    fun updateMotionArmScheduleEnabled(enabled: Boolean) = save { settingsDataStore.saveMotionArmScheduleEnabled(enabled) }
+
+    fun updateMotionArmStartMinute(minute: Int) = save { settingsDataStore.saveMotionArmStartMinute(minute) }
+
+    fun updateMotionArmEndMinute(minute: Int) = save { settingsDataStore.saveMotionArmEndMinute(minute) }
+
+    fun updateSoundDetectionEnabled(enabled: Boolean) = save { settingsDataStore.saveSoundDetectionEnabled(enabled) }
+
+    fun updateSoundThresholdPercent(percent: Int) = save { settingsDataStore.saveSoundThresholdPercent(percent) }
+
+    fun updateWatchdogEnabled(enabled: Boolean) = save { settingsDataStore.saveWatchdogEnabled(enabled) }
+
+    fun updateWatchdogMaxRetries(retries: Int) = save { settingsDataStore.saveWatchdogMaxRetries(retries) }
+
+    fun updateWatchdogCheckIntervalSeconds(seconds: Int) = save { settingsDataStore.saveWatchdogCheckIntervalSeconds(seconds) }
+
+    fun updateBackupEnabled(enabled: Boolean) = save { settingsDataStore.saveBackupEnabled(enabled) }
+
+    fun updateBackupWifiOnly(wifiOnly: Boolean) = save { settingsDataStore.saveBackupWifiOnly(wifiOnly) }
+
+    fun updateBackupWebdavUrl(url: String) = save { settingsDataStore.saveBackupWebdavUrl(url) }
+
+    fun updateBackupWebdavUsername(username: String) = save { settingsDataStore.saveBackupWebdavUsername(username) }
+
+    fun updateHttpsEnabled(enabled: Boolean) = save { settingsDataStore.saveHttpsEnabled(enabled) }
+
+    fun updateAudioDeviceId(id: String) = save { settingsDataStore.saveAudioDeviceId(id) }
+
+    fun updateBackupWebdavPassword(password: String) {
+        if (password.isNotEmpty()) save { settingsDataStore.saveBackupWebdavPassword(password) }
+    }
 
     fun updateAuthEnabled(enabled: Boolean) {
         persistAuth(authSettings.value.copy(enabled = enabled))

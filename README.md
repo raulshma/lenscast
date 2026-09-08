@@ -11,7 +11,7 @@
 </div>
 
 <p align="center">
-  <img alt="API" src="https://img.shields.io/badge/Api%2023+-50f270?logo=android&logoColor=black&style=for-the-badge"/>
+  <img alt="API" src="https://img.shields.io/badge/Api%2026+-50f270?logo=android&logoColor=black&style=for-the-badge"/>
   <img alt="Kotlin" src="https://img.shields.io/badge/Kotlin-7F52FF?logo=kotlin&logoColor=white&style=for-the-badge"/>
   <img alt="Jetpack Compose" src="https://img.shields.io/badge/Jetpack%20Compose-4285F4?logo=jetpackcompose&logoColor=white&style=for-the-badge"/>
   <img alt="Material 3" src="https://custom-icon-badges.demolab.com/badge/material%20you-lightblue?style=for-the-badge&logoColor=333&logo=material-you"/>
@@ -52,6 +52,8 @@ LensCast is an Android camera application with live video/audio streaming to web
 - Color temperature adjustment (2000K–9000K) for manual white balance
 
 ### Live Streaming
+- HTTPS mode with a self-signed on-device certificate (fingerprint shown for one-tap verification) — encrypts streams and enables in-browser microphone talkback
+- Low-latency H.264 playback in the dashboard via WebCodecs over WebSocket (MJPEG stays as the universal fallback), plus HLS output for iOS/muxed A/V
 - Real-time M-JPEG video streaming to any web browser on the same WiFi network
 - RTSP streaming with H.264 video and AAC audio encoding for use with VLC, OBS, and other RTSP clients
 - Live audio streaming with configurable bitrate (32–320 kbps), channels (mono/stereo), and echo cancellation
@@ -72,10 +74,20 @@ LensCast is an Android camera application with live video/audio streaming to web
 - Privacy masking editor: create, position, resize, and configure masking zones (blackout/pixelate/blur)
 - Interval capture controls: interval, total captures, quality, capture mode, flash mode
 - Video recording controls with scheduled recording via time picker, quality presets, duration limits, and repeat intervals
+- Connected-clients panel with true socket kick, per-session stats, and remote credential rotation + session revocation
 - Connection quality indicator with real-time bandwidth, throughput, latency, and per-client stats
 - Remote media gallery with thumbnail grid, full-screen viewer, and file downloads
 - HTTP Basic Authentication login screen
 - Cinematic dark-themed glassmorphism design with micro-animations
+
+### Detection & Alerts
+- Motion detection with configurable sensitivity, detection zones, and an arm schedule (time-of-day window, midnight-wrapping)
+- Motion-triggered bounded recording with post-roll, or the legacy auto-photo mode
+- Sound detection with an RMS threshold
+- Webhook alerts (ntfy/Home Assistant/any JSON endpoint), remote siren and spotlight deterrence from the dashboard
+
+### Backup
+- Auto-upload new captures to any WebDAV collection (Nextcloud/self-hosted), with Wi-Fi-only mode and WorkManager-backed retries
 
 ### Capture
 - One-tap quick photo and video capture
@@ -125,7 +137,7 @@ LensCast is an Android camera application with live video/audio streaming to web
 
 ## Requirements
 
-- Android 8.0 (API 26) or later
+- Android 6.0 (API 23) or later
 - WiFi connection for streaming
 - Camera and microphone permissions
 - Node.js 20+ and npm (for building the web UI)
@@ -156,6 +168,9 @@ cd web && npm install && npm run build
 
 # 2. Build the Android APK
 ./gradlew assembleDebug
+
+# F-Droid flavor (no self-updater, no REQUEST_INSTALL_PACKAGES)
+./gradlew assembleFdroidDebug
 
 # Build a signed release APK (requires keystore environment variables)
 # KEYSTORE_PASSWORD, KEY_ALIAS, KEY_PASSWORD must be set

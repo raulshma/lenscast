@@ -1,6 +1,6 @@
 package com.raulshma.lenscast.streaming.rtsp
 
-import java.util.Base64
+import com.raulshma.lenscast.core.Base64Codec
 
 /**
  * Pure SDP generation for the RTSP DESCRIBE response — the buildSdp body,
@@ -22,8 +22,8 @@ object SdpBuilder {
         pps: ByteArray?,
         audioSpecificConfig: ByteArray?,
     ): String {
-        val spsBase64 = sps?.let { bytesToBase64(it) }
-        val ppsBase64 = pps?.let { bytesToBase64(it) }
+        val spsBase64 = sps?.let { Base64Codec.encode(it) }
+        val ppsBase64 = pps?.let { Base64Codec.encode(it) }
         val fmtp = H264NalParser.buildFmtp(
             H264NalParser.profileLevelId(sps),
             spsBase64,
@@ -63,9 +63,5 @@ object SdpBuilder {
                 appendLine("a=control:trackID=1")
             }
         }
-    }
-
-    private fun bytesToBase64(bytes: ByteArray): String {
-        return Base64.getEncoder().encodeToString(bytes)
     }
 }

@@ -190,29 +190,59 @@ class H264Encoder {
             )
         }
 
+        // The optional latency keys are public (API 24) but a minority of
+        // legacy encoders reject them outright at configure() — retry once
+        // without them rather than losing the encoder.
+        try {
+            codec.configureEncode(buildEncodeFormat(codec, selected, includeLatencyKeys = true))
+        } catch (e: Exception) {
+            Log.w(TAG, "Encoder rejected the latency keys; reconfiguring without them", e)
+            codec.configureEncode(buildEncodeFormat(codec, selected, includeLatencyKeys = false))
+        }
+    }
+
+    private fun buildEncodeFormat(
+        codec: CodecLike,
+        selected: EncoderFormatPolicy.SelectedFormat,
+        includeLatencyKeys: Boolean,
+    ): MediaFormat {
         val format = MediaFormat.createVideoFormat(
             MediaFormat.MIMETYPE_VIDEO_AVC, width, height
         ).apply {
             setInteger(MediaFormat.KEY_BIT_RATE, bitrate)
             setInteger(MediaFormat.KEY_FRAME_RATE, frameRate)
-            setInteger(MediaFormat.KEY_COLOR_FORMAT, inputColorFormat)
+            setInteger(MediaFormat.KEY_COLOR_FORMAT, selected.colorFormat)
             setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 2)
             setInteger(MediaFormat.KEY_MAX_B_FRAMES, 0)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                try {
-                    if (codec.isFeatureSupported(
-                            MediaFormat.MIMETYPE_VIDEO_AVC,
-                            MediaCodecInfo.CodecCapabilities.FEATURE_LowLatency
-                        )
-                    ) {
-                        setInteger(MediaFormat.KEY_LOW_LATENCY, 1)
-                    } else {
-                        Log.d(TAG, "Encoder does not support low-latency; configuring without it")
+            if (includeLatencyKeys) {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    try {
+                        if (codec.isFeatureSupported(
+                                MediaFormat.MIMETYPE_VIDEO_AVC,
+                                MediaCodecInfo.CodecCapabilities.FEATURE_LowLatency
+                            )
+                        ) {
+                            setInteger(MediaFormat.KEY_LOW_LATENCY, 1)
+                        } else {
+                            Log.d(TAG, "Encoder does not support low-latency; configuring without it")
+                        }
+                    } catch (_: Exception) {
+                        // Capability query failed: leave KEY_LOW_LATENCY unset rather than
+                        // risk configure() rejecting the format (legacy OMX encoders return
+                        // BAD_VALUE for unsupported keys instead of ignoring them).
                     }
+                }
+                // Public keys (API 23/24, minSdk 26): bound the encoder's internal
+                // reordering and spread intra-coding so mid-join clients reach a
+                // keyframe sooner after a packet-loss blip. Independent of the
+                // vendor FEATURE_LowLatency gate above.
+                try {
+                    setInteger(MediaFormat.KEY_LATENCY, 1)
                 } catch (_: Exception) {
-                    // Capability query failed: leave KEY_LOW_LATENCY unset rather than
-                    // risk configure() rejecting the format (legacy OMX encoders return
-                    // BAD_VALUE for unsupported keys instead of ignoring them).
+                }
+                try {
+                    setInteger(MediaFormat.KEY_INTRA_REFRESH_PERIOD, INTRA_REFRESH_PERIOD_FRAMES)
+                } catch (_: Exception) {
                 }
             }
             try {
@@ -220,8 +250,7 @@ class H264Encoder {
             } catch (_: Exception) {
             }
         }
-
-        codec.configureEncode(format)
+        return format
     }
 
     /**
@@ -293,5 +322,9 @@ class H264Encoder {
         // Encoder output typically lags input by 1-2 buffers; 6 allows transient
         // hiccups (reconfigure, HW contention) without starving the stream to zero.
         private const val MAX_PENDING_FRAMES = 6
+
+        // Intra-refresh at ~2s worth of frames keeps per-frame bandwidth flat
+        // (no keyframe spikes) while bounding recovery time.
+        private const val INTRA_REFRESH_PERIOD_FRAMES = StreamDefaults.STREAM_FPS * 2
     }
 }

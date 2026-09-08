@@ -46,6 +46,27 @@ export const API_DEFAULTS = {
   watchdogMaxRetries: 5,
   watchdogCheckIntervalSeconds: 5,
 
+  // Detection (motion/sound), discovery, webhook and backup settings
+  mdnsEnabled: true,
+  motionDetectionEnabled: false,
+  motionSensitivityPercent: 50,
+  motionRecordingEnabled: false,
+  motionPostRollSeconds: 10,
+  motionArmScheduleEnabled: false,
+  motionArmStartMinute: 0,
+  motionArmEndMinute: 1439,
+  soundDetectionEnabled: false,
+  soundThresholdPercent: 30,
+  webhookEnabled: false,
+  webhookUrl: '',
+  backupEnabled: false,
+  backupWifiOnly: true,
+  backupWebdavUrl: '',
+  backupWebdavUsername: '',
+  backupWebdavPassword: '',
+  httpsEnabled: false,
+  audioDeviceId: '',
+
   // Overlay block (OverlaySettings.DEFAULT, embedded in StreamingSettingsDto)
   overlayEnabled: false,
   overlayPosition: 'TOP_LEFT',

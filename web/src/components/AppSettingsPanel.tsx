@@ -2,6 +2,9 @@ import { Show } from 'solid-js'
 import type { AllSettings, RtspInputFormat } from '../types'
 import { API_DEFAULTS } from '../api/defaults'
 import SettingsCard from './SettingsCard'
+import SecurityCard from './SecurityCard'
+import BackupCard from './BackupCard'
+import AuthCard from './AuthCard'
 
 interface Props {
   settings: () => AllSettings | null
@@ -100,6 +103,25 @@ export default function AppSettingsPanel(props: Props) {
               />
               <span class="toggle-slider" />
             </label>
+          </div>
+        </div>
+
+        <div class="field-group">
+          <div class="field-row field-row-toggle">
+            <span class="field-label">mDNS Discovery</span>
+            <label class="toggle-switch" for="mdns-toggle-app">
+              <input
+                id="mdns-toggle-app"
+                type="checkbox"
+                checked={s()?.streaming?.mdnsEnabled ?? API_DEFAULTS.mdnsEnabled}
+                onChange={() => props.updateStreamingAndSave({ mdnsEnabled: !(s()?.streaming?.mdnsEnabled ?? API_DEFAULTS.mdnsEnabled) })}
+              />
+              <span class="toggle-slider" />
+            </label>
+          </div>
+          <div class="status-banner status-banner-info stream-mode-hint" role="note" aria-live="polite">
+            <span class="status-banner-dot" aria-hidden="true" />
+            <span>Advertises the stream on the local network so clients can discover it.</span>
           </div>
         </div>
 
@@ -208,6 +230,36 @@ export default function AppSettingsPanel(props: Props) {
         </div>
       </SettingsCard>
 
+      {/* HTTPS */}
+      <SettingsCard
+        icon={
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+            <rect x="3" y="11" width="18" height="11" rx="2" />
+            <path d="M7 11V7a5 5 0 0110 0v4" />
+          </svg>
+        }
+        title="HTTPS (TLS)"
+      >
+        <div class="field-group">
+          <div class="field-row field-row-toggle">
+            <span class="field-label">Serve Dashboard over HTTPS</span>
+            <label class="toggle-switch" for="https-toggle-app">
+              <input
+                id="https-toggle-app"
+                type="checkbox"
+                checked={s()?.streaming?.httpsEnabled ?? API_DEFAULTS.httpsEnabled}
+                onChange={() => props.updateStreamingAndSave({ httpsEnabled: !(s()?.streaming?.httpsEnabled ?? API_DEFAULTS.httpsEnabled) })}
+              />
+              <span class="toggle-slider" />
+            </label>
+          </div>
+          <div class="status-banner status-banner-info stream-mode-hint" role="note" aria-live="polite">
+            <span class="status-banner-dot" aria-hidden="true" />
+            <span>Self-signed certificate. Accept the browser warning once, then verify the fingerprint shown on the phone's Connect sheet. Enables encrypted streams and microphone talkback.</span>
+          </div>
+        </div>
+      </SettingsCard>
+
       {/* RTSP */}
       <SettingsCard
         icon={
@@ -275,6 +327,20 @@ export default function AppSettingsPanel(props: Props) {
           </div>
         </Show>
       </SettingsCard>
+
+      <SecurityCard
+        settings={props.settings}
+        updateStreamingAndSave={props.updateStreamingAndSave}
+        updateStreamingDebounced={props.updateStreamingDebounced}
+      />
+
+      <BackupCard
+        settings={props.settings}
+        updateStreamingAndSave={props.updateStreamingAndSave}
+        updateStreamingDebounced={props.updateStreamingDebounced}
+      />
+
+      <AuthCard />
     </section>
   )
 }
