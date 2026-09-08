@@ -43,14 +43,17 @@ class MainApplication : Application(), SingletonImageLoader.Factory {
     val powerManager: PowerManager by lazy { PowerManager(this) }
     val thermalMonitor: ThermalMonitor by lazy { ThermalMonitor(this) }
     val connectivityMonitor: ConnectivityMonitor by lazy { ConnectivityMonitor(this) }
-    // The watchdog and the session reference each other; both resolve lazily
-    // and neither touches the other during construction.
+    // Watchdog and session reference the manager and each other; every such
+    // edge is a provider resolved on first use. A direct reference would
+    // re-enter streamingManager's lazy initializer mid-construction (the
+    // manager builds the Web API stack, which builds the watchdog) and
+    // recurse until the heap dies at launch.
     val streamWatchdog: StreamWatchdog by lazy {
-        StreamWatchdog(cameraService, streamingManager, streamingSession)
+        StreamWatchdog(cameraService, { streamingManager }, streamingSession)
     }
     val streamingSession: StreamingSession by lazy {
         StreamingSession(
-            this, cameraService, streamingManager, powerManager, thermalMonitor,
+            this, cameraService, { streamingManager }, powerManager, thermalMonitor,
         ) { streamWatchdog }
     }
     val settingsApplier: SettingsApplier by lazy {

@@ -40,13 +40,18 @@ import java.util.concurrent.atomic.AtomicBoolean
 class StreamingSession(
     private val context: Context,
     private val cameraService: CameraService,
-    private val streamingManager: StreamingManager,
+    streamingManagerProvider: () -> StreamingManager,
     private val powerManager: PowerManager,
     private val thermalMonitor: ThermalMonitor,
     watchdogProvider: () -> StreamWatchdog,
 ) {
 
     private val streamWatchdog: StreamWatchdog by lazy(watchdogProvider)
+
+    // Provider, not a direct reference: the manager constructs the Web API
+    // stack (and through it this session) during its own lazy initialization,
+    // so touching the manager here would re-enter that initializer.
+    private val streamingManager: StreamingManager by lazy(streamingManagerProvider)
 
     private val active = AtomicBoolean(false)
     private val lifecycleMutex = Mutex()

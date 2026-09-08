@@ -38,9 +38,15 @@ import com.raulshma.lenscast.core.WatchdogPolicy.WatchdogStatus
  */
 class StreamWatchdog(
     private val cameraService: CameraService,
-    private val streamingManager: StreamingManager,
+    streamingManagerProvider: () -> StreamingManager,
     private val streamingSession: StreamingSession,
 ) {
+
+    // Resolved on first use, never during construction: the manager builds
+    // the Web API stack in its constructor, which constructs this watchdog,
+    // so a direct manager reference here would re-enter the manager's
+    // in-progress lazy initializer (recursion → OOM crash at launch).
+    private val streamingManager: StreamingManager by lazy(streamingManagerProvider)
 
     // ── Configuration ──
 
