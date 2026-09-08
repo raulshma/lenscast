@@ -13,7 +13,11 @@ the stream started; idempotent), `end()` (tears down only when no stream is
 live), and `recover(tier)` (watchdog recovery for every tier — SOFT rebinds,
 MEDIUM re-rolls the attach choreography, HARD does the full refresh — all
 through the session's bounded Main seams; the watchdog keeps only the tier
-decision, backoff, verification, and state publishing). Web API Stream
+decision, backoff, verification, and state publishing). `begin()` also carries
+the foreground-service microphone verdict (web audio live *or* the RTSP output
+live with its track wanted — an RTSP-only capture without the MICROPHONE type
+is silenced by the OS) and re-asserts it when a second output starts late.
+Web API Stream
 Handler, CameraViewModel, and StreamWatchdog are one-call clients — none of
 them hand-roll the choreography anymore.
 
@@ -314,8 +318,10 @@ through `RtspConfigDiff`, and routes — any NeedsRestart field restarts,
 HotSwap-only changes go to `server.apply(config)` — with explicit triggers
 for the audio-track ladder (audio config restarts whenever the track is
 wanted) and for audio-wanted flips. The per-setting setters are one-line
-delegates over `update`; `StreamingManager` keeps its public surface (the
-Settings Applier's ~17 calls) and delegates — the manager retains fan-out and
+delegates over `update`, plus the coalesced `setAudioConfig(wanted, bitrate)`
+single-restart entry the manager's audio snapshot routes through;
+`StreamingManager` keeps its public surface (the
+Settings Applier's audio write is one coalesced call) and delegates — the manager retains fan-out and
 web/mDNS concerns the way `FramePipeline` absorbed the web frame path.
 
 ### AAC Format
@@ -325,7 +331,9 @@ advance per audio AU, contract-pinned against `RtspServer`), PCM bytes per
 sample, the mic probe ladder with default from `StreamDefaults`,
 `resolveBuffers` (frame-aligned read chunk and record buffer sizing, the
 former `AudioStreamingManager` inline math), the AudioSpecificConfig bytes,
-and the SDP fallback hex derived rather than re-typed. Encoder, RTP clock,
+and the SDP fallback hex derived per call from the actual rate/channel count
+(`fallbackAscHex` — never a single historical literal, which advertised stereo
+for the mono default). Encoder, RTP clock,
 SDP, and mic capture reference the same symbols.
 
 ### Audio Subscriber Pipe

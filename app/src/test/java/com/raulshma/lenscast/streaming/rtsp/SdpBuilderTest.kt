@@ -119,7 +119,21 @@ class SdpBuilderTest {
     @Test
     fun `audio without an ASC falls back to the AAC-LC 48kHz mono config`() {
         val sdp = build(audioEnabled = true, asc = null)
-        assertTrue(sdp.contains("config=1190"))
+        assertTrue(sdp.contains("config=1188"))
+    }
+
+    @Test
+    fun `audio fallback ASC follows the configured rate and channel count`() {
+        // 44.1 kHz stereo: index 4, two channels → 0x12 0x10.
+        val sdp = build(audioEnabled = true, audioSampleRateHz = 44_100, audioChannelCount = 2, asc = null)
+        assertTrue(sdp.contains("config=1210"))
+        assertTrue(sdp.contains("a=rtpmap:97 mpeg4-generic/44100/2"))
+    }
+
+    @Test
+    fun `audio with a short ASC still falls back instead of crashing`() {
+        val sdp = build(audioEnabled = true, asc = byteArrayOf(0x11))
+        assertTrue(sdp.contains("config=1188"))
     }
 
     @Test

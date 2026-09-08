@@ -124,13 +124,19 @@ object AacFormat {
     }
 
     /**
-     * The SDP's fmtp `config=` fallback for when no live AudioSpecificConfig
-     * exists: the bytes SdpBuilder has always advertised (AAC-LC at the
-     * default rate, "1190") — derived here rather than re-typed, and pinned
-     * by test so the SDP output stays byte-identical.
+     * Hex rendering of raw AudioSpecificConfig bytes for the SDP fmtp
+     * `config=` parameter — one home so the live-ASC and fallback paths
+     * cannot format differently.
      */
-    val SDP_FALLBACK_ASC_HEX: String = audioSpecificConfigBytes(DEFAULT_SAMPLE_RATE_HZ, 2).toHex()
+    fun bytesToHex(bytes: ByteArray): String =
+        bytes.joinToString("") { "%02x".format(it.toInt() and 0xFF) }
 
-    private fun ByteArray.toHex(): String =
-        joinToString("") { "%02x".format(it.toInt() and 0xFF) }
+    /**
+     * The SDP's fmtp `config=` fallback for when no live AudioSpecificConfig
+     * exists: derived per call from the actual sample rate and channel count
+     * ([audioSpecificConfigBytes]), never a single historical literal — the
+     * old fixed "1190" advertised stereo while the default capture is mono.
+     */
+    fun fallbackAscHex(sampleRateHz: Int, channelCount: Int): String =
+        bytesToHex(audioSpecificConfigBytes(sampleRateHz, channelCount))
 }

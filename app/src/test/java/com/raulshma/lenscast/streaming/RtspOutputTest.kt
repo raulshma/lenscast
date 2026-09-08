@@ -288,6 +288,81 @@ class RtspOutputTest {
         assertEquals(1, h.audio.openStreamCalls) // no second open
     }
 
+    // ── the coalesced audio entry ──
+
+    @Test
+    fun `setAudioConfig with wanted flip and bitrate change restarts exactly once`() {
+        val h = Harness()
+        h.startEnabled()
+
+        h.output.setAudioConfig(false, 96)
+
+        assertEquals(2, h.servers.size) // one restart, not one per field
+        val (config, stream) = h.servers[1].startCalls.single()
+        assertFalse(config.audioEnabled)
+        assertEquals(96, config.audioBitrateKbps)
+        assertNull(stream)
+        assertEquals(1, h.audio.openStreamCalls) // no second open when turning off
+    }
+
+    @Test
+    fun `setAudioConfig with a bitrate-only change ladders like setAudioBitrate`() {
+        val h = Harness()
+        h.startEnabled()
+
+        h.output.setAudioConfig(true, 96)
+
+        assertEquals(2, h.servers.size)
+        assertEquals(96, h.servers[1].startCalls.single().first.audioBitrateKbps)
+    }
+
+    @Test
+    fun `setAudioConfig with identical values still ladders while live and wanted`() {
+        // The output cannot see capture-side changes (channels/echo live
+        // outside RtspConfig), so the ladder stays forced here — the
+        // no-op detection lives one layer up, in the manager's snapshot.
+        val h = Harness()
+        val server = h.startEnabled()
+
+        h.output.setAudioConfig(true, 128)
+
+        assertEquals(2, h.servers.size)
+        assertEquals(0, server.applyCalls.size)
+    }
+
+    @Test
+    fun `setAudioConfig while stopped just retains - no server yet`() {
+        val h = Harness()
+        h.output.setEnabled(true)
+
+        h.output.setAudioConfig(false, 96)
+
+        assertEquals(0, h.servers.size)
+        h.output.start()
+        val (config, stream) = h.servers.single().startCalls.single()
+        assertFalse(config.audioEnabled)
+        assertEquals(96, config.audioBitrateKbps)
+        assertNull(stream)
+    }
+
+    @Test
+    fun `isAudioWanted mirrors the toggle and the recording claim`() {
+        val h = Harness()
+        h.output.setEnabled(true)
+
+        assertTrue(h.output.isAudioWanted())
+
+        h.output.setAudioWanted(false)
+        assertFalse(h.output.isAudioWanted())
+
+        h.output.setAudioWanted(true)
+        h.output.setRecordingCaptureActive(true)
+        assertFalse(h.output.isAudioWanted())
+
+        h.output.setRecordingCaptureActive(false)
+        assertTrue(h.output.isAudioWanted())
+    }
+
     @Test
     fun `recording start and stop never restart a live output`() {
         val h = Harness()

@@ -156,7 +156,17 @@ class AacFormatTest {
     }
 
     @Test
-    fun `sdp fallback hex stays the historical 1190 bytes`() {
-        assertEquals("1190", AacFormat.SDP_FALLBACK_ASC_HEX)
+    fun `fallback asc hex derives from the actual rate and channel count`() {
+        // 48 kHz mono (the capture default) — the old hardcoded "1190" advertised stereo here.
+        assertEquals("1188", AacFormat.fallbackAscHex(48_000, 1))
+        assertEquals("1190", AacFormat.fallbackAscHex(48_000, 2))
+        // 44.1 kHz mono: index 4, no high bit → 0x12 0x08.
+        assertEquals("1208", AacFormat.fallbackAscHex(44_100, 1))
+    }
+
+    @Test
+    fun `bytesToHex renders unsigned lowercase pairs`() {
+        assertEquals("1188", AacFormat.bytesToHex(byteArrayOf(0x11, 0x88.toByte())))
+        assertEquals("00ff", AacFormat.bytesToHex(byteArrayOf(0x00, 0xFF.toByte())))
     }
 }

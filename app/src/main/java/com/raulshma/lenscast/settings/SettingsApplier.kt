@@ -55,10 +55,11 @@ class SettingsApplier(
             ) { enabled, bitrate, channels, echoCancellation ->
                 AudioSettings(enabled, bitrate, channels, echoCancellation)
             }.collectLatest { audio ->
-                streamingManager.setStreamAudioEnabled(audio.enabled)
-                streamingManager.setStreamAudioBitrateKbps(audio.bitrateKbps)
-                streamingManager.setStreamAudioChannels(audio.channels)
-                streamingManager.setStreamAudioEchoCancellation(audio.echoCancellation)
+                // One coalesced write: a single web-capture refresh and a
+                // single RTSP restart decision per emission, and a no-op when
+                // nothing moved — the old four-setter sequence restarted a
+                // live RTSP output up to four times per emission.
+                streamingManager.setAudioConfig(audio.enabled, audio.bitrateKbps, audio.channels, audio.echoCancellation)
             }
         }
 

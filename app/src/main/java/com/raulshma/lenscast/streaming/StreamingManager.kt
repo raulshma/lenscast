@@ -133,6 +133,15 @@ class StreamingManager(
 
     fun getNetworkStatsSnapshot(): NetworkQualityMonitor.NetworkStatsSnapshot = networkQualityMonitor.getStatsSnapshot()
 
+    /**
+     * True while the RTSP output is live with its audio track wanted (toggle
+     * on, mic not claimed by recording) — the RTSP half of the
+     * foreground-service microphone verdict. The web half is
+     * [isAudioStreaming]; either one capturing means the service must carry
+     * the MICROPHONE type.
+     */
+    fun isRtspAudioActive(): Boolean = rtspOutput.isActive() && rtspOutput.isAudioWanted()
+
     /** RTSP health for the watchdog — playing clients + encoder counters. */
     fun getRtspHealth(): RtspHealth = rtspOutput.healthSnapshot()
 
@@ -419,11 +428,62 @@ class StreamingManager(
         adaptiveBitrateController.setDefaultFrameRate(fps)
     }
 
+    /**
+     * Last audio config applied through [setAudioConfig] — the change
+     * detector that keeps a persisted-settings re-emission from churning the
+     * capture and restarting the RTSP output when nothing actually moved.
+     * Mirrors the [streamAudioEnabled]/bitrate/channels/echoCancellation
+     * atomics above, which stay the live source for [audioConfig].
+     */
+    private data class AppliedAudioConfig(
+        val enabled: Boolean,
+        val bitrateKbps: Int,
+        val channels: Int,
+        val echoCancellation: Boolean,
+    )
+
+    @Volatile
+    private var appliedAudioConfig = AppliedAudioConfig(
+        enabled = true,
+        bitrateKbps = StreamDefaults.AUDIO_BITRATE_KBPS,
+        channels = StreamDefaults.AUDIO_CHANNELS,
+        echoCancellation = true,
+    )
+
+    /**
+     * The coalesced stream-audio entry: one call lands
+     * enabled/bitrate/channels/echo, refreshes the web capture once, and
+     * routes a single restart decision through the RTSP output. No-op when
+     * nothing moved — the old four-setter sequence restarted a live output
+     * up to four times per settings emission and could wedge the native
+     * capture mid-storm (RTSP audio wedged silent with no error logged).
+     */
+    fun setAudioConfig(enabled: Boolean, bitrateKbps: Int, channels: Int, echoCancellation: Boolean) {
+        streamAudioEnabled.set(enabled)
+        val coercedBitrate = bitrateKbps.coerceIn(StreamDefaults.AUDIO_BITRATE_MIN_KBPS, StreamDefaults.AUDIO_BITRATE_MAX_KBPS)
+        streamAudioBitrateKbps.set(coercedBitrate)
+        val coercedChannels = channels.coerceIn(StreamDefaults.AUDIO_CHANNELS_MIN, StreamDefaults.AUDIO_CHANNELS_MAX)
+        streamAudioChannels.set(coercedChannels)
+        streamAudioEchoCancellation.set(echoCancellation)
+        val next = AppliedAudioConfig(enabled, coercedBitrate, coercedChannels, echoCancellation)
+        val prev = appliedAudioConfig
+        appliedAudioConfig = next
+        if (next == prev) return
+        onWebAudioChanged()
+        // One routing decision for the whole change (see
+        // [RtspOutput.setAudioConfig]): a wanted flip restarts whenever live,
+        // otherwise the audio restart ladder decides.
+        rtspOutput.setAudioConfig(enabled, coercedBitrate)
+    }
+
     fun setStreamAudioEnabled(enabled: Boolean) {
         streamAudioEnabled.set(enabled)
+        appliedAudioConfig = appliedAudioConfig.copy(enabled = enabled)
         onWebAudioChanged()
         // The one audio change that restarts even when turning the track
-        // off: a toggle changes the RTSP audio track either way.
+        // off: a toggle changes the RTSP audio track either way. Kept
+        // forceful (no change detection): the mic-permission-grant path calls
+        // this with an already-true value to pick the microphone back up.
         rtspOutput.setAudioWanted(enabled)
     }
 
@@ -447,17 +507,17 @@ class StreamingManager(
      * the change actually takes effect instead of doing nothing.
      */
     fun setStreamAudioBitrateKbps(bitrateKbps: Int) {
-        streamAudioBitrateKbps.set(
-            bitrateKbps.coerceIn(StreamDefaults.AUDIO_BITRATE_MIN_KBPS, StreamDefaults.AUDIO_BITRATE_MAX_KBPS)
-        )
+        val coerced = bitrateKbps.coerceIn(StreamDefaults.AUDIO_BITRATE_MIN_KBPS, StreamDefaults.AUDIO_BITRATE_MAX_KBPS)
+        streamAudioBitrateKbps.set(coerced)
+        appliedAudioConfig = appliedAudioConfig.copy(bitrateKbps = coerced)
         onWebAudioChanged()
         rtspOutput.setAudioBitrate(streamAudioBitrateKbps.get())
     }
 
     fun setStreamAudioChannels(channels: Int) {
-        streamAudioChannels.set(
-            channels.coerceIn(StreamDefaults.AUDIO_CHANNELS_MIN, StreamDefaults.AUDIO_CHANNELS_MAX)
-        )
+        val coerced = channels.coerceIn(StreamDefaults.AUDIO_CHANNELS_MIN, StreamDefaults.AUDIO_CHANNELS_MAX)
+        streamAudioChannels.set(coerced)
+        appliedAudioConfig = appliedAudioConfig.copy(channels = coerced)
         onWebAudioChanged()
         // Channel count is an encoder config the AAC encoder reads at start;
         // RTSP restart required.
@@ -466,6 +526,7 @@ class StreamingManager(
 
     fun setStreamAudioEchoCancellation(enabled: Boolean) {
         streamAudioEchoCancellation.set(enabled)
+        appliedAudioConfig = appliedAudioConfig.copy(echoCancellation = enabled)
         onWebAudioChanged()
         // Echo cancellation is an audio-capture config applied at capture
         // start; RTSP restart required.

@@ -259,6 +259,24 @@ internal class RtspOutput(
     }
 
     /**
+     * The coalesced audio entry — the one settings write that can move the
+     * wanted flag and the retained bitrate together. Lands both, then routes
+     * exactly once through [update]: a wanted flip restarts whenever the
+     * output is live (the audio track changes either way, like
+     * [setAudioWanted]); otherwise the audio restart ladder decides (like
+     * [setAudioBitrate] and [restartForAudioConfigChange] — a capture-side
+     * change the diff cannot see still ladders while the track is wanted).
+     * At most one restart per call, where the old per-setting sequence paid
+     * one restart per setter and could wedge the native capture mid-storm.
+     */
+    fun setAudioConfig(wanted: Boolean, bitrateKbps: Int) {
+        val wantedChanged = streamAudioEnabled != wanted
+        streamAudioEnabled = wanted
+        val trigger = if (wantedChanged) RestartTrigger.WHILE_ACTIVE else RestartTrigger.AUDIO_LADDER
+        update(trigger) { it.copy(audioBitrateKbps = bitrateKbps) }
+    }
+
+    /**
      * The one settings entry: land the transform on the retained config,
      * then route by the [RtspConfigDiff] verdict — any NEEDS_RESTART field
      * takes the audio restart ladder, HotSwap-only changes apply live, and
@@ -292,6 +310,14 @@ internal class RtspOutput(
 
     /** The mic-arbitration decision at start: stream audio on and no recording capture claiming the mic. */
     private fun audioWanted(): Boolean = streamAudioEnabled && !recordingCaptureActive
+
+    /**
+     * The live answer to the mic-arbitration decision above, for the
+     * foreground-service type derivation: the service must carry the
+     * MICROPHONE type whenever this output wants the mic, or the OS
+     * silences the capture (RTSP audio present but digitally silent).
+     */
+    fun isAudioWanted(): Boolean = audioWanted()
 
     private fun restartServer() {
         stopServer()

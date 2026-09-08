@@ -62,12 +62,22 @@ class StreamingSession(
 
     /**
      * Attach everything a live stream needs. Call once the stream started
-     * successfully; a no-op when a session is already active. On failure the
-     * partially-attached pieces are unwound before rethrowing.
+     * successfully. When a session is already active (a second output
+     * starting late) only the foreground-service type is re-asserted, so a
+     * newly audio-carrying output always runs under the MICROPHONE type. On
+     * failure the partially-attached pieces are unwound before rethrowing.
      */
     suspend fun begin() {
         lifecycleMutex.withLock {
-            if (active.get()) return
+            if (active.get()) {
+                // A second output started late (startBoth starts web, begins,
+                // then starts RTSP and begins again): re-assert the foreground
+                // service type so a newly audio-carrying output is never
+                // captured without the MICROPHONE type.
+                sendForegroundIntent(StreamingService.ACTION_START)
+                Log.d(TAG, "Streaming session foreground type re-asserted for late output start")
+                return
+            }
             active.set(true)
             var keepAliveAcquired = false
             var foregroundStarted = false
@@ -280,7 +290,13 @@ class StreamingSession(
             this.action = action
             putExtra(StreamingService.EXTRA_URL, streamingManager.streamUrl.value)
             if (action == StreamingService.ACTION_START) {
-                putExtra(StreamingService.EXTRA_AUDIO_ACTIVE, streamingManager.isAudioStreaming.value)
+                // Either live output capturing the mic needs the service's
+                // MICROPHONE type — the old web-only flag left RTSP-only
+                // streaming capturing without it, which the OS silences.
+                putExtra(
+                    StreamingService.EXTRA_AUDIO_ACTIVE,
+                    streamingManager.isAudioStreaming.value || streamingManager.isRtspAudioActive(),
+                )
             }
         }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && action == StreamingService.ACTION_START) {

@@ -47,9 +47,14 @@ object SdpBuilder {
             appendLine("a=control:${RtspUriPolicy.DEFAULT_STREAM_PATH}")
 
             if (audioEnabled) {
-                val configHex = audioSpecificConfig?.let {
-                    "%02x%02x".format(it[0].toInt() and 0xFF, it[1].toInt() and 0xFF)
-                } ?: AacFormat.SDP_FALLBACK_ASC_HEX
+                // No live ASC yet (DESCRIBE raced the encoder start): derive the
+                // fallback from the actual rate/channel count so a mono default
+                // never advertises the old hardcoded stereo bytes.
+                val configHex = if (audioSpecificConfig != null && audioSpecificConfig.size >= 2) {
+                    AacFormat.bytesToHex(audioSpecificConfig.copyOfRange(0, 2))
+                } else {
+                    AacFormat.fallbackAscHex(audioSampleRateHz, audioChannelCount)
+                }
 
                 appendLine("m=audio 0 RTP/AVP 97")
                 appendLine("c=IN IP4 0.0.0.0")
