@@ -1,5 +1,6 @@
 import SettingsCard from './SettingsCard'
 import type { AllSettings, CameraSettings } from '../types'
+import { API_DEFAULTS } from '../api/defaults'
 
 interface Props {
   settings: () => AllSettings | null
@@ -24,7 +25,7 @@ export default function ExposureCard(props: Props) {
       <div class="field-group">
         <div class="field-row">
           <span class="field-label">Compensation</span>
-          <span class="field-value">{s()?.camera?.exposureCompensation ?? 0}</span>
+          <span class="field-value">{s()?.camera?.exposureCompensation ?? API_DEFAULTS.cameraExposureCompensation}</span>
         </div>
         <input
           id="exposure-comp-slider"
@@ -32,7 +33,7 @@ export default function ExposureCard(props: Props) {
           class="custom-range"
           min={-12}
           max={12}
-          value={s()?.camera?.exposureCompensation ?? 0}
+          value={s()?.camera?.exposureCompensation ?? API_DEFAULTS.cameraExposureCompensation}
           onInput={(e) => props.updateCamera({ exposureCompensation: parseFloat(e.currentTarget.value) })}
         />
       </div>
@@ -51,7 +52,7 @@ export default function ExposureCard(props: Props) {
               if (e.currentTarget.value === 'auto') {
                 props.updateCamera({ iso: null })
               } else {
-                props.updateCamera({ iso: s()?.camera?.iso ?? 800 })
+                props.updateCamera({ iso: s()?.camera?.iso ?? API_DEFAULTS.cameraIso })
               }
             }}
           >
@@ -86,7 +87,7 @@ export default function ExposureCard(props: Props) {
               if (e.currentTarget.value === 'auto') {
                 props.updateCamera({ exposureTime: null })
               } else {
-                props.updateCamera({ exposureTime: s()?.camera?.exposureTime ?? 10000000 })
+                props.updateCamera({ exposureTime: s()?.camera?.exposureTime ?? API_DEFAULTS.cameraExposureTime })
               }
             }}
           >

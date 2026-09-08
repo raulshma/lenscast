@@ -1,6 +1,7 @@
 import SettingsCard from './SettingsCard'
 import type { AllSettings, CameraSettings, WhiteBalance } from '../types'
 import { WB_LABELS } from '../types'
+import { API_DEFAULTS } from '../api/defaults'
 
 interface Props {
   settings: () => AllSettings | null
@@ -27,7 +28,7 @@ export default function WhiteBalanceCard(props: Props) {
         <select
           id="wb-mode-select"
           class="field-select field-select-full"
-          value={s()?.camera?.whiteBalance ?? 'AUTO'}
+          value={s()?.camera?.whiteBalance ?? API_DEFAULTS.cameraWhiteBalance}
           onChange={(e) => props.updateCamera({ whiteBalance: e.currentTarget.value as WhiteBalance })}
         >
           {Object.entries(WB_LABELS).map(([k, v]) => (
@@ -40,7 +41,7 @@ export default function WhiteBalanceCard(props: Props) {
         <div class="field-group">
           <div class="field-row">
             <span class="field-label">Color Temperature</span>
-            <span class="field-value">{s()?.camera?.colorTemperature ?? 5500}K</span>
+            <span class="field-value">{s()?.camera?.colorTemperature ?? API_DEFAULTS.cameraColorTemperature}K</span>
           </div>
           <input
             id="color-temp-slider"
@@ -49,7 +50,7 @@ export default function WhiteBalanceCard(props: Props) {
             min={2000}
             max={9000}
             step={100}
-            value={s()?.camera?.colorTemperature ?? 5500}
+            value={s()?.camera?.colorTemperature ?? API_DEFAULTS.cameraColorTemperature}
             onInput={(e) => props.updateCamera({ colorTemperature: parseFloat(e.currentTarget.value) })}
           />
         </div>

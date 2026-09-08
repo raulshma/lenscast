@@ -13,10 +13,9 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.Saver
 import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.compose.NavHost
@@ -29,9 +28,9 @@ import com.raulshma.lenscast.capture.CaptureScreen
 import com.raulshma.lenscast.gallery.GalleryScreen
 import com.raulshma.lenscast.gallery.GalleryViewModel
 import com.raulshma.lenscast.gallery.MediaViewerScreen
-import com.raulshma.lenscast.gallery.indexAfterDelete
+import com.raulshma.lenscast.gallery.ViewerSync
+import com.raulshma.lenscast.gallery.ViewerSyncEffect
 import com.raulshma.lenscast.gallery.initialIndexFor
-import com.raulshma.lenscast.gallery.viewerResyncTarget
 import com.raulshma.lenscast.settings.CameraSettingsScreen
 import com.raulshma.lenscast.settings.AppSettingsScreen
 import com.raulshma.lenscast.ui.animation.LocalAnimatedVisibilityScope
@@ -40,6 +39,13 @@ import com.raulshma.lenscast.update.UpdateNotifier
 import androidx.compose.foundation.pager.rememberPagerState
 
 private const val ANIM_DURATION = 400
+
+// The viewer sync's placed flag stays saveable, as it was when it lived in
+// the viewer route as a bare flag.
+private val ViewerSyncSaver: Saver<ViewerSync, Boolean> = Saver(
+    save = { it.placed },
+    restore = { ViewerSync(it) },
+)
 
 @OptIn(ExperimentalSharedTransitionApi::class)
 @Composable
@@ -145,23 +151,19 @@ fun NavigationGraph() {
                         pageCount = { allItems.size },
                     )
 
-                    // The one resync verdict: pin to the routed id, clamp on a
-                    // shrunken list, or land on the delete-fallback neighbor
-                    // once the routed id left the list. The first resync of a
-                    // freshly opened viewer is the initial placement and jumps
-                    // instantly (the pager may have been created before the
-                    // list loaded); later resyncs — list changes and the
-                    // post-delete landing — animate.
-                    var placed by rememberSaveable { mutableStateOf(false) }
+                    // The resync choreography is ViewerSync's: it owns the
+                    // placed one-shot (first placement jumps, later resyncs
+                    // animate) and the delete-time pop verdict; this route
+                    // only executes the effects it returns.
+                    val viewerSync = rememberSaveable(saver = ViewerSyncSaver) { ViewerSync() }
                     LaunchedEffect(allItems) {
-                        viewerResyncTarget(allItems, mediaId, pagerState.currentPage)?.let { target ->
-                            if (placed) {
-                                pagerState.animateScrollToPage(target)
-                            } else {
-                                pagerState.scrollToPage(target)
+                        viewerSync.reduce(allItems, mediaId, pagerState.currentPage)?.let { effect ->
+                            when (effect) {
+                                is ViewerSyncEffect.JumpTo -> pagerState.scrollToPage(effect.index)
+                                is ViewerSyncEffect.AnimateTo -> pagerState.animateScrollToPage(effect.index)
+                                is ViewerSyncEffect.Pop -> navController.popBackStack()
                             }
                         }
-                        if (allItems.isNotEmpty()) placed = true
                     }
 
                     val currentItem = allItems.getOrNull(pagerState.currentPage)
@@ -178,7 +180,7 @@ fun NavigationGraph() {
                                 // The pager lands on the delete-fallback neighbor
                                 // through the resync effect; pop only when the
                                 // gallery is now empty.
-                                if (indexAfterDelete(currentIdx, allItems.size - 1) == null) {
+                                if (viewerSync.onDelete(currentIdx, allItems.size) == ViewerSyncEffect.Pop) {
                                     navController.popBackStack()
                                 }
                             },

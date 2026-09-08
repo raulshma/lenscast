@@ -374,4 +374,142 @@ class WatchdogPolicyTest {
             )
         )
     }
+
+    // ── verificationSpecFor ──
+
+    @Test
+    fun `soft verification waits the shared delay and measures frames across the window`() {
+        val spec = WatchdogPolicy.verificationSpecFor(WatchdogPolicy.RecoveryTier.SOFT)
+        assertEquals(WatchdogPolicy.RECOVERY_VERIFICATION_DELAY_MS, spec.delayMs)
+        assertTrue(spec.measureFrames)
+    }
+
+    @Test
+    fun `medium verification waits the shared delay without measuring frames`() {
+        val spec = WatchdogPolicy.verificationSpecFor(WatchdogPolicy.RecoveryTier.MEDIUM)
+        assertEquals(WatchdogPolicy.RECOVERY_VERIFICATION_DELAY_MS, spec.delayMs)
+        assertFalse(spec.measureFrames)
+    }
+
+    @Test
+    fun `hard verification waits the doubled delay without measuring frames`() {
+        val spec = WatchdogPolicy.verificationSpecFor(WatchdogPolicy.RecoveryTier.HARD)
+        assertEquals(WatchdogPolicy.HARD_VERIFICATION_DELAY_MS, spec.delayMs)
+        assertEquals(2 * WatchdogPolicy.RECOVERY_VERIFICATION_DELAY_MS, spec.delayMs)
+        assertFalse(spec.measureFrames)
+    }
+
+    // ── nextTick ──
+
+    @Test
+    fun `a clean healthy tick keeps the loop going without publishing`() {
+        val tick = WatchdogPolicy.nextTick(
+            failureReason = null,
+            consecutiveFailures = 0,
+            maxRetries = 5,
+        )
+        assertEquals(WatchdogPolicy.TickAction.CONTINUE, tick.action)
+        assertNull(tick.status)
+        assertNull(tick.tier)
+        assertEquals(0L, tick.backoffMs)
+    }
+
+    @Test
+    fun `a healthy check with failures on the books resets to monitoring`() {
+        val tick = WatchdogPolicy.nextTick(
+            failureReason = null,
+            consecutiveFailures = 3,
+            maxRetries = 5,
+        )
+        assertEquals(WatchdogPolicy.TickAction.RESET, tick.action)
+        assertEquals(WatchdogPolicy.WatchdogStatus.MONITORING, tick.status)
+        // Only the healthy-tick reset clears the exposed failure reason.
+        assertTrue(tick.clearsFailureReason)
+    }
+
+    @Test
+    fun `the first failure recovers soft in recovering state after one backoff step`() {
+        val tick = WatchdogPolicy.nextTick(
+            failureReason = "Stream stopped unexpectedly",
+            consecutiveFailures = 1,
+            maxRetries = 5,
+        )
+        assertEquals(WatchdogPolicy.TickAction.RECOVER, tick.action)
+        assertEquals(WatchdogPolicy.WatchdogStatus.RECOVERING, tick.status)
+        assertEquals(WatchdogPolicy.RecoveryTier.SOFT, tick.tier)
+        assertEquals(2_000L, tick.backoffMs)
+    }
+
+    @Test
+    fun `backoff grows per the exponential policy while the ladder escalates`() {
+        val expectedTiers = listOf(
+            WatchdogPolicy.RecoveryTier.SOFT,
+            WatchdogPolicy.RecoveryTier.SOFT,
+            WatchdogPolicy.RecoveryTier.MEDIUM,
+            WatchdogPolicy.RecoveryTier.MEDIUM,
+            WatchdogPolicy.RecoveryTier.HARD,
+        )
+        val expectedBackoffMs = listOf(2_000L, 4_000L, 8_000L, 16_000L, 32_000L)
+        expectedTiers.forEachIndexed { index, tier ->
+            val tick = WatchdogPolicy.nextTick(
+                failureReason = "Frame delivery stalled (no frames for 15s)",
+                consecutiveFailures = index + 1,
+                maxRetries = 5,
+            )
+            assertEquals(WatchdogPolicy.TickAction.RECOVER, tick.action)
+            assertEquals(tier, tick.tier)
+            assertEquals(expectedBackoffMs[index], tick.backoffMs)
+        }
+    }
+
+    @Test
+    fun `the failure at max retries still recovers hard`() {
+        val tick = WatchdogPolicy.nextTick(
+            failureReason = "Streaming server stopped unexpectedly",
+            consecutiveFailures = 5,
+            maxRetries = 5,
+        )
+        assertEquals(WatchdogPolicy.TickAction.RECOVER, tick.action)
+        assertEquals(WatchdogPolicy.RecoveryTier.HARD, tick.tier)
+        assertEquals(32_000L, tick.backoffMs)
+    }
+
+    @Test
+    fun `the failure past max retries fails the watchdog with nothing left to run`() {
+        val tick = WatchdogPolicy.nextTick(
+            failureReason = "Streaming server stopped unexpectedly",
+            consecutiveFailures = 6,
+            maxRetries = 5,
+        )
+        assertEquals(WatchdogPolicy.TickAction.FAIL, tick.action)
+        assertEquals(WatchdogPolicy.WatchdogStatus.FAILED, tick.status)
+        assertNull(tick.tier)
+        assertEquals(0L, tick.backoffMs)
+    }
+
+    @Test
+    fun `a held recovery resets the watchdog to monitoring without clearing the failure reason`() {
+        val tick = WatchdogPolicy.nextTick(
+            failureReason = "Frame delivery stalled (no frames for 15s)",
+            consecutiveFailures = 2,
+            maxRetries = 5,
+            recoverySucceeded = true,
+        )
+        assertEquals(WatchdogPolicy.TickAction.RESET, tick.action)
+        assertEquals(WatchdogPolicy.WatchdogStatus.MONITORING, tick.status)
+        // The last failure stays exposed until the next clean health check.
+        assertFalse(tick.clearsFailureReason)
+    }
+
+    @Test
+    fun `a failed recovery falls back to cooldown and keeps the failure count`() {
+        val tick = WatchdogPolicy.nextTick(
+            failureReason = "Frame delivery stalled (no frames for 15s)",
+            consecutiveFailures = 2,
+            maxRetries = 5,
+            recoverySucceeded = false,
+        )
+        assertEquals(WatchdogPolicy.TickAction.CONTINUE, tick.action)
+        assertEquals(WatchdogPolicy.WatchdogStatus.COOLDOWN, tick.status)
+    }
 }

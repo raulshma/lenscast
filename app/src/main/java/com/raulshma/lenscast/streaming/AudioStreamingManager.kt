@@ -13,13 +13,15 @@ import com.raulshma.lenscast.streaming.rtsp.AacFormat
 import android.os.Process
 import android.util.Log
 import java.io.InputStream
-import java.util.ArrayDeque
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 
 // RtspAudioSource: the mic-capture seam [RtspOutput] drives the RTSP audio
 // track through; the method set is already this interface's shape.
+// Per-subscriber backpressure (bounded drop-oldest queue, blocking
+// InputStream handoff, EOF after shutdown) lives in [AudioSubscriberPipe];
+// the manager keeps capture, effects, and the reader fan-out.
 class AudioStreamingManager(private val context: Context) : RtspAudioSource {
 
     data class Config(
@@ -29,7 +31,7 @@ class AudioStreamingManager(private val context: Context) : RtspAudioSource {
     )
 
     private val isStreaming = AtomicBoolean(false)
-    private val subscribers = ConcurrentHashMap<Long, AudioClientStream>()
+    private val subscribers = ConcurrentHashMap<Long, AudioSubscriberPipe>()
     private val nextSubscriberId = AtomicLong(1L)
 
     @Volatile
@@ -88,7 +90,9 @@ class AudioStreamingManager(private val context: Context) : RtspAudioSource {
     override fun openStream(): InputStream? {
         if (!isStreaming.get()) return null
         val subscriberId = nextSubscriberId.getAndIncrement()
-        return AudioClientStream(subscriberId).also { subscribers[subscriberId] = it }
+        val pipe = AudioSubscriberPipe(onClose = { subscribers.remove(subscriberId) })
+        subscribers[subscriberId] = pipe
+        return pipe
     }
 
     override fun isRunning(): Boolean = isStreaming.get()
@@ -214,88 +218,8 @@ class AudioStreamingManager(private val context: Context) : RtspAudioSource {
         audioRecord = null
     }
 
-    private inner class AudioClientStream(
-        private val subscriberId: Long,
-    ) : InputStream() {
-
-        private val lock = Object()
-        private val pendingChunks = ArrayDeque<ByteArray>()
-
-        private var currentChunk: ByteArray? = null
-        private var currentOffset = 0
-        private var closed = false
-
-        override fun read(): Int {
-            val singleByte = ByteArray(1)
-            val read = read(singleByte, 0, 1)
-            return if (read <= 0) -1 else singleByte[0].toInt() and 0xFF
-        }
-
-        override fun read(target: ByteArray, offset: Int, length: Int): Int {
-            if (offset < 0 || length < 0 || offset + length > target.size) {
-                throw IndexOutOfBoundsException()
-            }
-            if (length == 0) return 0
-
-            synchronized(lock) {
-                while (true) {
-                    val chunk = currentChunk
-                    if (chunk != null && currentOffset < chunk.size) {
-                        val toCopy = minOf(length, chunk.size - currentOffset)
-                        System.arraycopy(chunk, currentOffset, target, offset, toCopy)
-                        currentOffset += toCopy
-                        if (currentOffset >= chunk.size) {
-                            currentChunk = null
-                            currentOffset = 0
-                        }
-                        return toCopy
-                    }
-
-                    if (pendingChunks.isNotEmpty()) {
-                        currentChunk = pendingChunks.removeFirst()
-                        currentOffset = 0
-                        continue
-                    }
-
-                    if (closed || !isStreaming.get()) {
-                        return -1
-                    }
-
-                    lock.wait(20L)
-                }
-            }
-        }
-
-        fun enqueue(chunk: ByteArray) {
-            synchronized(lock) {
-                if (closed) return
-                while (pendingChunks.size >= MAX_PENDING_CHUNKS) {
-                    pendingChunks.removeFirst()
-                }
-                pendingChunks.addLast(chunk)
-                lock.notifyAll()
-            }
-        }
-
-        fun shutdown() {
-            synchronized(lock) {
-                closed = true
-                pendingChunks.clear()
-                currentChunk = null
-                currentOffset = 0
-                lock.notifyAll()
-            }
-        }
-
-        override fun close() {
-            subscribers.remove(subscriberId)
-            shutdown()
-        }
-    }
-
     companion object {
         private const val TAG = "AudioStreamingManager"
         private const val AUDIO_ENCODING = AudioFormat.ENCODING_PCM_16BIT
-        private const val MAX_PENDING_CHUNKS = 6
     }
 }

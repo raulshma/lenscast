@@ -3,6 +3,7 @@ import type { DeviceStatus, StreamingSettings } from '../types'
 import { useZoomable } from '../hooks/useZoomable'
 import ConnectionQualityIndicator from './ConnectionQualityIndicator'
 import { tapToFocus as apiTapToFocus } from '../api/client'
+import { API_DEFAULTS } from '../api/defaults'
 
 interface Props {
   status: () => DeviceStatus | null
@@ -27,10 +28,10 @@ interface Props {
 export default function StreamPreview(props: Props) {
   const st = () => props.status()
   const isActive = () => !!st()?.streaming?.isActive
-  const webStreamingEnabled = () => st()?.streaming?.webStreamingEnabled ?? true
-  const webActive = () => st()?.streaming?.webStreamingActive ?? false
-  const rtspEnabled = () => st()?.streaming?.rtspEnabled ?? false
-  const rtspActive = () => st()?.streaming?.rtspStreamingActive ?? false
+  const webStreamingEnabled = () => st()?.streaming?.webStreamingEnabled ?? API_DEFAULTS.webStreamingEnabled
+  const webActive = () => st()?.streaming?.webStreamingActive ?? API_DEFAULTS.webStreamingActive
+  const rtspEnabled = () => st()?.streaming?.rtspEnabled ?? API_DEFAULTS.rtspEnabled
+  const rtspActive = () => st()?.streaming?.rtspStreamingActive ?? API_DEFAULTS.rtspStreamingActive
 
   const [focusIndicator, setFocusIndicator] = createSignal<{ x: number; y: number; visible: boolean }>({
     x: 0,
@@ -64,13 +65,13 @@ export default function StreamPreview(props: Props) {
   })
 
   const overlay = () => props.overlaySettings()
-  const overlayEnabled = () => overlay()?.overlayEnabled ?? false
-  const overlayPosition = () => overlay()?.overlayPosition ?? 'TOP_LEFT'
-  const overlayTextColor = () => overlay()?.overlayTextColor ?? '#FFFFFF'
-  const overlayBgColor = () => overlay()?.overlayBackgroundColor ?? '#80000000'
-  const overlayFontSize = () => overlay()?.overlayFontSize ?? 28
-  const overlayPadding = () => overlay()?.overlayPadding ?? 8
-  const overlayLineHeight = () => overlay()?.overlayLineHeight ?? 4
+  const overlayEnabled = () => overlay()?.overlayEnabled ?? API_DEFAULTS.overlayEnabled
+  const overlayPosition = () => overlay()?.overlayPosition ?? API_DEFAULTS.overlayPosition
+  const overlayTextColor = () => overlay()?.overlayTextColor ?? API_DEFAULTS.overlayTextColor
+  const overlayBgColor = () => overlay()?.overlayBackgroundColor ?? API_DEFAULTS.overlayBackgroundColor
+  const overlayFontSize = () => overlay()?.overlayFontSize ?? API_DEFAULTS.overlayFontSize
+  const overlayPadding = () => overlay()?.overlayPadding ?? API_DEFAULTS.overlayPadding
+  const overlayLineHeight = () => overlay()?.overlayLineHeight ?? API_DEFAULTS.overlayLineHeight
 
   const positionStyles: Record<string, { top?: string; right?: string; bottom?: string; left?: string }> = {
     TOP_LEFT: { top: '12px', left: '12px' },
@@ -104,7 +105,7 @@ export default function StreamPreview(props: Props) {
     if (o.showStatus) {
       const statusParts: string[] = []
       if (props.isRecording()) statusParts.push('REC')
-      const clientCount = st()?.streaming?.clientCount ?? 0
+      const clientCount = st()?.streaming?.clientCount ?? API_DEFAULTS.clientCount
       if (clientCount > 0) statusParts.push(`${clientCount} viewer${clientCount !== 1 ? 's' : ''}`)
       if (statusParts.length > 0) lines.push(statusParts.join('  '))
     }

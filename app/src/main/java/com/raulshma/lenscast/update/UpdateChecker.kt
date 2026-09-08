@@ -8,8 +8,6 @@ import com.raulshma.lenscast.update.model.UpdateCheckResult
 import com.raulshma.lenscast.core.AppJson
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import java.net.HttpURLConnection
-import java.net.URL
 
 class UpdateChecker(private val context: Context) {
 
@@ -28,52 +26,55 @@ class UpdateChecker(private val context: Context) {
     suspend fun checkForUpdate(): UpdateCheckResult = withContext(Dispatchers.IO) {
         try {
             Log.d(TAG, "Checking for updates: $API_URL")
-            val connection = (URL(API_URL).openConnection() as HttpURLConnection).apply {
-                connectTimeout = CONNECT_TIMEOUT_MS
-                readTimeout = READ_TIMEOUT_MS
-                setRequestProperty("Accept", "application/vnd.github+json")
-                setRequestProperty("User-Agent", "LensCast")
-                instanceFollowRedirects = true
-            }
+            val connection = UpdateHttp.openConnection(API_URL, CONNECT_TIMEOUT_MS, READ_TIMEOUT_MS)
+                .apply { setRequestProperty("Accept", "application/vnd.github+json") }
 
             val responseCode = connection.responseCode
             Log.d(TAG, "Response code: $responseCode")
             if (responseCode == 403) {
                 Log.w(TAG, "GitHub API rate limited")
-                return@withContext UpdateCheckResult.RateLimited
+                return@withContext UpdateHttp.mapCheckOutcome(responseCode, parsed = null)
             }
             if (responseCode != 200) {
                 val errorBody = try {
                     connection.errorStream?.bufferedReader()?.use { it.readText() }
                 } catch (_: Exception) { null }
                 Log.e(TAG, "HTTP $responseCode: $errorBody")
-                return@withContext UpdateCheckResult.Error("Server returned HTTP $responseCode")
+                return@withContext UpdateHttp.mapCheckOutcome(responseCode, parsed = null)
             }
 
             val body = connection.inputStream.bufferedReader().use { it.readText() }
             connection.disconnect()
 
-            Log.d(TAG, "Parsing release JSON (${body.length} chars)")
-            val release = releaseAdapter.fromJson(body)
-                ?: return@withContext UpdateCheckResult.Error("Failed to parse release JSON")
-
-            Log.d(TAG, "Latest release: ${release.tagName} with ${release.assets.size} assets")
-            val apkAsset = UpdatePolicy.selectApkAsset(release.assets)
-                ?: return@withContext UpdateCheckResult.Error("No APK found in release")
-
-            val currentVersion = getAppVersionName()
-            val remoteVersion = UpdatePolicy.normalize(release.tagName)
-            Log.d(TAG, "Remote: $remoteVersion, Local: $currentVersion, isNewer: ${UpdatePolicy.isNewer(release.tagName, currentVersion)}")
-            if (!UpdatePolicy.isNewer(release.tagName, currentVersion)) {
-                return@withContext UpdateCheckResult.UpToDate(remoteVersion, currentVersion)
-            }
-
-            Log.d(TAG, "Update available: ${release.tagName}")
-            UpdateCheckResult.UpdateAvailable(release, apkAsset)
+            return@withContext UpdateHttp.mapCheckOutcome(responseCode, parsed = parseReleaseResult(body))
         } catch (e: Exception) {
             Log.e(TAG, "Update check failed", e)
             UpdateCheckResult.Error(e.message ?: "Unknown error")
         }
+    }
+
+    /**
+     * The release body parsed and wrapped the way a 200 reports it
+     * (UpToDate/UpdateAvailable/Error) — null when the body is not a release,
+     * which [UpdateHttp.mapCheckOutcome] turns into the parse-failure error.
+     */
+    private fun parseReleaseResult(body: String): UpdateCheckResult? {
+        Log.d(TAG, "Parsing release JSON (${body.length} chars)")
+        val release = releaseAdapter.fromJson(body) ?: return null
+
+        Log.d(TAG, "Latest release: ${release.tagName} with ${release.assets.size} assets")
+        val apkAsset = UpdatePolicy.selectApkAsset(release.assets)
+            ?: return UpdateCheckResult.Error("No APK found in release")
+
+        val currentVersion = getAppVersionName()
+        val remoteVersion = UpdatePolicy.normalize(release.tagName)
+        Log.d(TAG, "Remote: $remoteVersion, Local: $currentVersion, isNewer: ${UpdatePolicy.isNewer(release.tagName, currentVersion)}")
+        if (!UpdatePolicy.isNewer(release.tagName, currentVersion)) {
+            return UpdateCheckResult.UpToDate(remoteVersion, currentVersion)
+        }
+
+        Log.d(TAG, "Update available: ${release.tagName}")
+        return UpdateCheckResult.UpdateAvailable(release, apkAsset)
     }
 
     private fun getAppVersionName(): String {

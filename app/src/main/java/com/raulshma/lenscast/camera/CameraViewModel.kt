@@ -27,12 +27,13 @@ import com.raulshma.lenscast.camera.model.StreamToggle
 import com.raulshma.lenscast.camera.model.stickyCameraState
 import com.raulshma.lenscast.core.ConnectivityMonitor
 import com.raulshma.lenscast.core.MicAccess
-import com.raulshma.lenscast.core.MicStartDecision
+import com.raulshma.lenscast.core.MicGate
 import com.raulshma.lenscast.core.NetworkQualityMonitor
 import com.raulshma.lenscast.core.StreamWatchdog
 import com.raulshma.lenscast.core.ThermalMonitor
 import com.raulshma.lenscast.core.ThermalState
 import com.raulshma.lenscast.data.SettingsDataStore
+import com.raulshma.lenscast.capture.model.RecordingConfig
 import com.raulshma.lenscast.streaming.AdaptiveBitrateController
 import com.raulshma.lenscast.streaming.StreamingManager
 import com.raulshma.lenscast.streaming.StreamingSession
@@ -312,8 +313,9 @@ class CameraViewModel(
 
     private val _lastServerError = MutableStateFlow<String?>(null)
 
-    /** One-shot failure report for server start; StreamStatus itself is derived truth.
-     *  Cleared by the next successful start — retrying is the natural dismiss. */
+    /** The server-start failure line the server status panel renders — written
+     *  only by the stream outcome mapping below (no ladder sets it directly);
+     *  cleared by the next successful start — retrying is the natural dismiss. */
     val lastServerError: StateFlow<String?> = _lastServerError.asStateFlow()
 
     // One stream start/stop seam for both outputs and the server: the
@@ -324,12 +326,23 @@ class CameraViewModel(
     // same one the Web API Stream Handler toggles through.
     private val streamTransports = StreamingTransports(streamingManager, streamingSession)
 
+    // The mic warn-and-degrade gate both the stream pre-start hook and the
+    // recording toggle consult: refresh-then-cache — the refresh updates the
+    // screen's exposed audio-permission state, and the freshly refreshed
+    // value is what the consult reads. One ladder for every feature start.
+    private val micGate = MicGate(
+        context = context,
+        refreshGranted = { refreshAudioPermission(); _hasAudioPermission.value },
+    )
+
     private val streamToggle = StreamToggle(
         transports = streamTransports,
         // The pre-start mic warn-and-degrade check — web only, exactly as
         // before the seam existed.
         onBeforeStart = { kind ->
-            if (kind == StreamKind.WEB) consultMic(streamAudioEnabled.value, "Streaming video")
+            if (kind == StreamKind.WEB) {
+                micGate.consult(featureEnabled = streamAudioEnabled.value, featureLabel = "Streaming video")
+            }
         },
     )
 
@@ -348,71 +361,47 @@ class CameraViewModel(
                 // StreamStatus flips on its own.
                 streamToggle.stopServer()
             } else {
-                startServer()
-            }
-        }
-    }
-
-    private suspend fun startServer() {
-        // StreamStatus is derived truth from the StreamingManager flows — the
-        // combine collector re-emits it when the server state flips. Only the
-        // failure, which no flow carries, is reported separately. The server
-        // itself has no settings gate — the web/RTSP enables gate their own
-        // outputs inside the start — so its ladder is start → session begin →
-        // rollback, the same tail the Stream Toggle runs for an output: a
-        // session-begin failure rolls the server back so no live server
-        // survives without its session. That begin/rollback protection is the
-        // one intended behavior gain over the old direct
-        // ensureServerRunning() call.
-        if (!streamingManager.ensureServerRunning()) {
-            _lastServerError.value = SERVER_START_FAILED
-            return
-        }
-        try {
-            streamTransports.beginSession()
-            _lastServerError.value = null
-        } catch (e: Exception) {
-            Log.e(TAG, "Streaming session setup failed; server rolled back", e)
-            streamTransports.stopServer()
-            _lastServerError.value = SERVER_START_FAILED
-        }
-    }
-
-    // Mic warn-and-degrade before an audio-wanting start — the shared policy
-    // both the web stream start and the recording start consult: refresh the
-    // cached permission state, ask MicAccess, and surface a degrade as the
-    // shared warning. One ladder, parameterized by feature; no call site
-    // re-rolls the check or the toast text.
-    private fun consultMic(featureEnabled: Boolean, featureLabel: String): MicStartDecision {
-        refreshAudioPermission()
-        return MicAccess.startDecision(
-            featureEnabled = featureEnabled,
-            granted = _hasAudioPermission.value,
-            featureLabel = featureLabel,
-        ).also { decision ->
-            if (decision is MicStartDecision.Degrade) {
-                Toast.makeText(context, decision.warning, Toast.LENGTH_SHORT).show()
+                // The whole-server ladder is StreamToggle.startServer's
+                // (ensure server → session begin → rollback); the outcome
+                // rides the same mapping as the outputs'.
+                handleStreamOutcome(streamToggle.startServer())
             }
         }
     }
 
     private fun handleStreamOutcome(outcome: StreamStartOutcome) {
         when (outcome) {
-            StreamStartOutcome.Started, StreamStartOutcome.Stopped -> {}
+            // A successful start clears the panel's stale server-failure
+            // line; a stop leaves it alone (the old behavior) —
+            // StreamStatus itself is derived truth.
+            StreamStartOutcome.Started -> _lastServerError.value = null
+            StreamStartOutcome.Stopped -> Unit
             is StreamStartOutcome.Disabled ->
                 Toast.makeText(
                     context, StreamStartOutcome.disabledMessage(outcome.kind), Toast.LENGTH_SHORT
                 ).show()
             is StreamStartOutcome.StartFailed ->
-                Toast.makeText(
-                    context, StreamStartOutcome.startFailedMessage(outcome.kind), Toast.LENGTH_SHORT
-                ).show()
-            is StreamStartOutcome.BeginFailedRolledBack -> {
-                Log.e(TAG, "Streaming session setup failed; stream rolled back", outcome.cause)
-                Toast.makeText(
-                    context, StreamStartOutcome.startFailedMessage(outcome.kind), Toast.LENGTH_SHORT
-                ).show()
-            }
+                reportStartFailure(outcome.kind, cause = null)
+            is StreamStartOutcome.BeginFailedRolledBack ->
+                reportStartFailure(outcome.kind, outcome.cause)
+        }
+    }
+
+    // One failure surface per start kind, from the one outcome mapping: the
+    // outputs warn through the shared toast; the whole-server start (kind
+    // null) lands its message in the server status panel's failure line — no
+    // manager flow carries that failure, so it stays the one-shot state the
+    // next successful start clears.
+    private fun reportStartFailure(kind: StreamKind?, cause: Exception?) {
+        if (cause != null) {
+            val subject = if (kind == null) "server" else "stream"
+            Log.e(TAG, "Streaming session setup failed; $subject rolled back", cause)
+        }
+        val message = StreamStartOutcome.startFailedMessage(kind)
+        if (kind == null) {
+            _lastServerError.value = message
+        } else {
+            Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -457,14 +446,15 @@ class CameraViewModel(
     /**
      * The record button: the stop-vs-start verdict and the start config are
      * [RecordingToggle]'s; this ViewModel only executes the decision — the
-     * mic consult rides the toggle's pre-start hook, so a stop never
-     * refreshes permissions or warns.
+     * default config carries the audio setting, and the mic gate rides the
+     * toggle's pre-start hook, so a stop never refreshes permissions or
+     * warns.
      */
     fun toggleRecording() {
         when (val decision = RecordingToggle.decide(
             currentState = recordingState.value,
-            audioWanted = recordingAudioEnabled.value,
-            onBeforeStart = { consultMic(recordingAudioEnabled.value, "Recording video") },
+            startConfig = RecordingConfig(includeAudio = recordingAudioEnabled.value),
+            onBeforeStart = micGate.recordingConfigConsult(label = "Recording video"),
         )) {
             is RecordingToggle.ToggleDecision.Start -> recordingController.start(decision.config)
             RecordingToggle.ToggleDecision.Stop -> recordingController.stop()
@@ -495,9 +485,6 @@ class CameraViewModel(
 
     companion object {
         private const val TAG = "CameraViewModel"
-
-        /** The one server-start failure wording (banner + rollback path). */
-        private const val SERVER_START_FAILED = "Failed to start server"
     }
 
     private fun refreshPermissions() {

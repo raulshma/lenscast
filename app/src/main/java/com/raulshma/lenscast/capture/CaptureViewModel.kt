@@ -2,14 +2,13 @@ package com.raulshma.lenscast.capture
 
 import android.content.Context
 import android.util.Log
-import android.widget.Toast
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.raulshma.lenscast.capture.model.IntervalCaptureConfig
 import com.raulshma.lenscast.capture.model.RecordingConfig
-import com.raulshma.lenscast.core.MicAccess
-import com.raulshma.lenscast.core.MicStartDecision
+import com.raulshma.lenscast.camera.model.RecordingToggle
+import com.raulshma.lenscast.core.MicGate
 import com.raulshma.lenscast.data.SettingsDataStore
 import com.raulshma.lenscast.data.CaptureHistoryStore
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -33,6 +32,20 @@ class CaptureViewModel(
     private val photoCaptureManager: PhotoCaptureManager,
 ) : ViewModel() {
     private val context: Context = context.applicationContext
+
+    // The mic warn-and-degrade gate behind every recording start — the same
+    // gate the camera screen consults: one refresh-then-consult behavior,
+    // one warning wording, one toast sink.
+    private val micGate = MicGate(context)
+
+    /**
+     * The mic warn-and-degrade consult, shared by the toggle's pre-start
+     * hook and the schedule command: refresh-then-consult through the gate —
+     * a degrade warns through the shared sink and the start proceeds either
+     * way (warn-and-degrade is the mic policy; the service guards the live
+     * permission at record time).
+     */
+    private val consultMic = micGate.recordingConfigConsult(label = "Recording video")
 
     private val _intervalConfig = MutableStateFlow(IntervalCaptureConfig())
     val intervalConfig: StateFlow<IntervalCaptureConfig> = _intervalConfig.asStateFlow()
@@ -106,24 +119,33 @@ class CaptureViewModel(
         _recordingConfig.value = config
     }
 
+    /**
+     * The record button: the stop-vs-start verdict and the draft start
+     * config are [RecordingToggle]'s — the same decide the camera screen
+     * answers — and this ViewModel only executes the decision. The mic gate
+     * rides the toggle's pre-start hook, so a stop never refreshes
+     * permissions or warns.
+     */
     fun toggleRecording() {
-        if (recordingState.value is RecordingState.Recording ||
-            recordingState.value is RecordingState.Scheduled
-        ) {
-            stopRecording()
-        } else {
-            startRecordingWithConfig(_recordingConfig.value)
+        when (val decision = RecordingToggle.decide(
+            currentState = recordingState.value,
+            startConfig = _recordingConfig.value,
+            onBeforeStart = consultMic,
+        )) {
+            is RecordingToggle.ToggleDecision.Start -> startRecordingWithConfig(decision.config)
+            RecordingToggle.ToggleDecision.Stop -> stopRecording()
         }
     }
 
     fun startScheduledRecording() {
-        // Goes through the same path as an immediate start so the
+        // Goes through the same start path as an immediate start so the
         // max-duration/repeat policy is armed for scheduled recordings too —
         // the policy waits out the Scheduled phase itself. The picked time
         // rides in the config draft's `startTimeMs`; the controller turns a
         // future start into its Scheduled state, which becomes the only truth
-        // the screen renders.
-        startRecordingWithConfig(_recordingConfig.value)
+        // the screen renders. A schedule command is a start, not a toggle —
+        // the mic consult runs, but no stop verdict is asked.
+        startRecordingWithConfig(consultMic(_recordingConfig.value))
     }
 
     /**
@@ -136,24 +158,14 @@ class CaptureViewModel(
         _recordingConfig.value = _recordingConfig.value.copy(startTimeMs = null)
     }
 
+    /**
+     * Executes a decided start: the max-duration auto-stop and repeat policy
+     * is armed by the RecordingController itself, so it holds no matter
+     * which client started the recording and survives navigating away from
+     * this screen. A future `startTimeMs` in the config becomes the
+     * controller's Scheduled state.
+     */
     private fun startRecordingWithConfig(config: RecordingConfig) {
-        // Same decision as every other audio-wanting start: check the mic
-        // live, then warn-and-degrade through MicAccess if audio is wanted
-        // but unavailable.
-        when (val decision = MicAccess.startDecision(
-            featureEnabled = config.includeAudio,
-            granted = MicAccess.isGranted(context),
-            featureLabel = "Recording video",
-        )) {
-            is MicStartDecision.Degrade ->
-                Toast.makeText(context, decision.warning, Toast.LENGTH_SHORT).show()
-            MicStartDecision.Proceed -> {}
-        }
-        // The max-duration auto-stop and repeat policy is armed by the
-        // RecordingController itself, so it holds no matter which client
-        // started the recording and survives navigating away from this screen.
-        // A future `startTimeMs` in the config becomes the controller's
-        // Scheduled state.
         recordingController.start(config)
     }
 

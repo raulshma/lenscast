@@ -16,6 +16,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import java.util.concurrent.atomic.AtomicInteger
 import com.raulshma.lenscast.core.WatchdogPolicy.RecoveryTier
+import com.raulshma.lenscast.core.WatchdogPolicy.TickAction
+import com.raulshma.lenscast.core.WatchdogPolicy.WatchdogStatus
 
 /**
  * StreamWatchdog — A coroutine-based health monitor that detects streaming failures
@@ -27,8 +29,10 @@ import com.raulshma.lenscast.core.WatchdogPolicy.RecoveryTier
  *  2. MEDIUM — Restart streaming server + rebind camera
  *  3. HARD  — Full re-initialize: CameraService.initialize() → restart everything
  *
- * This class owns the monitoring loop: health checks ([WatchdogPolicy]), the
- * tier decision, backoff, verification delays, and state publishing.
+ * This class owns the monitoring loop: the timing, the live reads, the
+ * recovery calls, and state publishing. Every decision — health checks, the
+ * tick's escalation verdict, the tier ladder, backoff, verification
+ * windows — delegates to [WatchdogPolicy].
  *
  * The watchdog is disabled by default and must be explicitly enabled via settings.
  */
@@ -135,43 +139,60 @@ class StreamWatchdog(
                 if (failureReason != null) {
                     Log.w(TAG, "Health check failed: $failureReason")
                     lastFailureReason = failureReason
-                    val failures = consecutiveFailures.incrementAndGet()
+                    consecutiveFailures.incrementAndGet()
+                }
 
-                    if (failures > maxRetries) {
+                val tick = WatchdogPolicy.nextTick(
+                    failureReason = failureReason,
+                    consecutiveFailures = consecutiveFailures.get(),
+                    maxRetries = maxRetries,
+                )
+
+                when (tick.action) {
+                    TickAction.RECOVER -> tick.tier?.let { recoveryTier ->
+                        tick.status?.let(::updateState)
+                        Log.d(TAG, "Attempting $recoveryTier recovery (attempt ${consecutiveFailures.get()}/$maxRetries, backoff ${tick.backoffMs}ms)")
+
+                        delay(tick.backoffMs)
+
+                        val recovered = attemptRecovery(recoveryTier)
+                        val outcome = WatchdogPolicy.nextTick(
+                            failureReason = failureReason,
+                            consecutiveFailures = consecutiveFailures.get(),
+                            maxRetries = maxRetries,
+                            recoverySucceeded = recovered,
+                        )
+
+                        if (outcome.action == TickAction.RESET) {
+                            Log.d(TAG, "Recovery successful after $recoveryTier attempt")
+                            totalRecoveries.incrementAndGet()
+                            lastRecoveryTimestamp = System.currentTimeMillis()
+                            consecutiveFailures.set(0)
+                            lastProcessedFrameCount = streamingManager.processedFrames.value
+                            lastFrameCheckTimeMs = System.currentTimeMillis()
+                        } else {
+                            Log.w(TAG, "$recoveryTier recovery failed")
+                        }
+                        outcome.status?.let(::updateState)
+                    }
+
+                    TickAction.FAIL -> {
                         Log.e(TAG, "Max retries ($maxRetries) exhausted. Watchdog entering FAILED state.")
-                        updateState(WatchdogStatus.FAILED)
+                        tick.status?.let(::updateState)
                         break
                     }
 
-                    val recoveryTier = WatchdogPolicy.tierFor(failures)
-
-                    updateState(WatchdogStatus.RECOVERING)
-                    val backoffDelayMs = backoffMs(failures)
-                    Log.d(TAG, "Attempting $recoveryTier recovery (attempt $failures/$maxRetries, backoff ${backoffDelayMs}ms)")
-
-                    delay(backoffDelayMs)
-
-                    val recovered = attemptRecovery(recoveryTier)
-
-                    if (recovered) {
-                        Log.d(TAG, "Recovery successful after $recoveryTier attempt")
-                        totalRecoveries.incrementAndGet()
-                        lastRecoveryTimestamp = System.currentTimeMillis()
-                        consecutiveFailures.set(0)
-                        lastProcessedFrameCount = streamingManager.processedFrames.value
-                        lastFrameCheckTimeMs = System.currentTimeMillis()
-                        updateState(WatchdogStatus.MONITORING)
-                    } else {
-                        Log.w(TAG, "$recoveryTier recovery failed")
-                        updateState(WatchdogStatus.COOLDOWN)
-                    }
-                } else {
-                    // Healthy — reset failure tracking
-                    if (consecutiveFailures.get() > 0) {
+                    TickAction.RESET -> {
                         Log.d(TAG, "Stream healthy again, resetting failure count")
                         consecutiveFailures.set(0)
-                        lastFailureReason = null
-                        updateState(WatchdogStatus.MONITORING)
+                        if (tick.clearsFailureReason) {
+                            lastFailureReason = null
+                        }
+                        tick.status?.let(::updateState)
+                    }
+
+                    TickAction.CONTINUE -> {
+                        // Clean, healthy tick — nothing to publish.
                     }
                 }
             }
@@ -247,65 +268,38 @@ class StreamWatchdog(
     }
 
     /**
-     * Post-recovery health verification, per tier. The watchdog owns the
-     * timing — the tier's delay, plus SOFT's before/after frame reads across
-     * the observation window — and the verdict is
-     * [WatchdogPolicy.verificationSuccess].
+     * Post-recovery health verification — one parameterized pass over the
+     * tier's [WatchdogPolicy.verificationSpecFor] window: wait the spec's
+     * delay, measure the frame counters across the observation window only
+     * when the spec says so, and let [WatchdogPolicy.verificationSuccess]
+     * render the verdict.
      */
-    private suspend fun verifyRecovery(tier: RecoveryTier): Boolean = when (tier) {
-        RecoveryTier.SOFT -> {
-            // Wait a moment and check if frames start flowing again
-            delay(WatchdogPolicy.RECOVERY_VERIFICATION_DELAY_MS)
-            val framesBeforeWait = streamingManager.processedFrames.value
+    private suspend fun verifyRecovery(tier: RecoveryTier): Boolean {
+        val spec = WatchdogPolicy.verificationSpecFor(tier)
+
+        delay(spec.delayMs)
+        val framesBeforeWait = if (spec.measureFrames) streamingManager.processedFrames.value else 0
+        if (spec.measureFrames) {
             delay(WatchdogPolicy.RECOVERY_VERIFICATION_WINDOW_MS)
-            val framesAfterWait = streamingManager.processedFrames.value
-
-            val success = WatchdogPolicy.verificationSuccess(
-                tier = tier,
-                framesAdvanced = framesAfterWait > framesBeforeWait,
-                clientCount = streamingManager.clientCount.value,
-                isLive = streamingManager.isLiveStreaming(),
-                cameraReady = cameraService.cameraState.value is CameraState.Ready,
-            )
-
-            if (success) {
-                Log.d(TAG, "Soft recovery succeeded (frames: $framesBeforeWait → $framesAfterWait)")
-            }
-            success
         }
+        val framesAfterWait = if (spec.measureFrames) streamingManager.processedFrames.value else 0
 
-        RecoveryTier.MEDIUM -> {
-            delay(WatchdogPolicy.RECOVERY_VERIFICATION_DELAY_MS)
-            val success = WatchdogPolicy.verificationSuccess(
-                tier = tier,
-                framesAdvanced = false,
-                clientCount = streamingManager.clientCount.value,
-                isLive = streamingManager.isLiveStreaming(),
-                cameraReady = cameraService.cameraState.value is CameraState.Ready,
-            )
+        val success = WatchdogPolicy.verificationSuccess(
+            tier = tier,
+            framesAdvanced = spec.measureFrames && framesAfterWait > framesBeforeWait,
+            clientCount = streamingManager.clientCount.value,
+            isLive = streamingManager.isLiveStreaming(),
+            cameraReady = cameraService.cameraState.value is CameraState.Ready,
+        )
 
-            if (success) {
-                Log.d(TAG, "Medium recovery succeeded")
+        if (success) {
+            when (tier) {
+                RecoveryTier.SOFT -> Log.d(TAG, "Soft recovery succeeded (frames: $framesBeforeWait → $framesAfterWait)")
+                RecoveryTier.MEDIUM -> Log.d(TAG, "Medium recovery succeeded")
+                RecoveryTier.HARD -> Log.d(TAG, "Hard recovery succeeded")
             }
-            success
         }
-
-        RecoveryTier.HARD -> {
-            // Verify with a longer window for hard recovery
-            delay(WatchdogPolicy.HARD_VERIFICATION_DELAY_MS)
-            val success = WatchdogPolicy.verificationSuccess(
-                tier = tier,
-                framesAdvanced = false,
-                clientCount = streamingManager.clientCount.value,
-                isLive = streamingManager.isLiveStreaming(),
-                cameraReady = cameraService.cameraState.value is CameraState.Ready,
-            )
-
-            if (success) {
-                Log.d(TAG, "Hard recovery succeeded")
-            }
-            success
-        }
+        return success
     }
 
     // ── Helpers ──
@@ -337,27 +331,10 @@ class StreamWatchdog(
         val lastFailureReason: String? = null,
     )
 
-    enum class WatchdogStatus {
-        IDLE,          // Not monitoring (streaming not active or watchdog disabled)
-        MONITORING,    // Actively checking health
-        RECOVERING,    // Recovery in progress
-        FAILED,        // Max retries exhausted — operator intervention needed
-        COOLDOWN,      // Waiting before next retry attempt
-    }
-
     companion object {
         private const val TAG = "StreamWatchdog"
 
         const val MIN_CHECK_INTERVAL_SECONDS = StreamDefaults.WATCHDOG_CHECK_INTERVAL_MIN_SECONDS
         const val MAX_CHECK_INTERVAL_SECONDS = StreamDefaults.WATCHDOG_CHECK_INTERVAL_MAX_SECONDS
-
-        private const val BASE_BACKOFF_MS = 2_000L
-        private const val MAX_BACKOFF_MS = 60_000L
-
-        /** Pure exponential backoff with a 6-attempt doubling cap — exposed for tests. */
-        fun backoffMs(attempt: Int): Long {
-            val backoff = BASE_BACKOFF_MS * (1L shl (attempt - 1).coerceAtMost(6))
-            return backoff.coerceAtMost(MAX_BACKOFF_MS)
-        }
     }
 }

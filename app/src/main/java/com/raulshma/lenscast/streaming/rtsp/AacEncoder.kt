@@ -8,14 +8,10 @@ import android.util.Log
 import com.raulshma.lenscast.core.StreamDefaults
 import java.io.InputStream
 import java.nio.ByteBuffer
-import java.util.concurrent.atomic.AtomicBoolean
 
 class AacEncoder {
 
-    private var encoder: MediaCodec? = null
     private var inputThread: Thread? = null
-    private var outputThread: Thread? = null
-    private val running = AtomicBoolean(false)
 
     private var sampleRateHz = AacFormat.DEFAULT_SAMPLE_RATE_HZ
     private var channelCount = 1
@@ -27,6 +23,25 @@ class AacEncoder {
 
     @Volatile
     var onEncodedFrame: ((ByteArray, Long) -> Unit)? = null
+
+    // The MediaCodec lifecycle (running guard, start ladder, output-drain
+    // thread, teardown) lives in the shared harness. This class keeps the AAC
+    // format construction, the AudioSpecificConfig interpretation, and the
+    // PCM input feed, plugged into the harness below.
+    private val harness = MediaCodecEncoderHarness(
+        tag = TAG,
+        threadName = "AacEncoderOutput",
+        startedMessage = { "AAC encoder started: ${sampleRateHz}Hz, ${channelCount}ch, ${bitrate}bps" },
+        startFailureMessage = "Failed to start AAC encoder",
+        outputErrorMessage = "AAC encoder output error",
+        createCodec = {
+            audioSpecificConfig = null
+            MediaCodecAdapter(MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_AUDIO_AAC))
+        },
+        configureCodec = { configureCodec(it) },
+        onFormatChanged = { extractAudioSpecificConfig(it) },
+        onOutput = { outputBuffer, info -> onOutputBuffer(outputBuffer, info) },
+    )
 
     fun configure(sampleRateHz: Int, channelCount: Int, bitrateKbps: Int) {
         this.sampleRateHz = sampleRateHz
@@ -42,25 +57,9 @@ class AacEncoder {
     }
 
     fun start(): Boolean {
-        if (running.getAndSet(true)) return true
-        audioSpecificConfig = null
+        if (!harness.start()) return false
 
-        return try {
-            val codec = MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_AUDIO_AAC)
-
-            val format = MediaFormat.createAudioFormat(
-                MediaFormat.MIMETYPE_AUDIO_AAC, sampleRateHz, channelCount
-            ).apply {
-                setInteger(MediaFormat.KEY_BIT_RATE, bitrate)
-                setInteger(MediaFormat.KEY_AAC_PROFILE,
-                    MediaCodecInfo.CodecProfileLevel.AACObjectLC)
-                setInteger(MediaFormat.KEY_MAX_INPUT_SIZE, pcmFrameSizeBytes() * 2)
-            }
-
-            codec.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
-            codec.start()
-            encoder = codec
-
+        harness.activeCodec?.let { codec ->
             // Extract AudioSpecificConfig from output format
             extractAudioSpecificConfig(codec)
 
@@ -68,23 +67,13 @@ class AacEncoder {
                 isDaemon = true
                 start()
             }
-
-            outputThread = Thread({ drainOutput(codec) }, "AacEncoderOutput").apply {
-                isDaemon = true
-                start()
-            }
-
-            Log.d(TAG, "AAC encoder started: ${sampleRateHz}Hz, ${channelCount}ch, ${bitrate}bps")
-            true
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to start AAC encoder", e)
-            running.set(false)
-            false
         }
+
+        return true
     }
 
     fun stop() {
-        if (!running.getAndSet(false)) return
+        if (!harness.stop()) return
 
         audioStream = null
 
@@ -93,21 +82,6 @@ class AacEncoder {
         } catch (_: InterruptedException) {
         }
         inputThread = null
-
-        try {
-            outputThread?.join(3000)
-        } catch (_: InterruptedException) {
-        }
-        outputThread = null
-
-        try {
-            encoder?.apply {
-                stop()
-                release()
-            }
-        } catch (_: Exception) {
-        }
-        encoder = null
 
         Log.d(TAG, "AAC encoder stopped")
     }
@@ -122,9 +96,9 @@ class AacEncoder {
         Log.d(TAG, "AAC bitrate set to ${bitrate}bps (effective on next start)")
     }
 
-    private fun extractAudioSpecificConfig(codec: MediaCodec) {
+    private fun extractAudioSpecificConfig(codec: CodecLike) {
         try {
-            val format = codec.outputFormat
+            val format = codec.outputFormat()
             val csd0 = format.getByteBuffer("csd-0")
             if (csd0 != null) {
                 // csd-0 for AAC contains 2 bytes: AudioSpecificConfig
@@ -148,21 +122,21 @@ class AacEncoder {
     @Volatile
     private var audioStream: InputStream? = null
 
-    private fun feedInput(codec: MediaCodec) {
+    private fun feedInput(codec: CodecLike) {
         Process.setThreadPriority(Process.THREAD_PRIORITY_AUDIO)
         val frameSizeBytes = pcmFrameSizeBytes()
         val buffer = ByteArray(frameSizeBytes)
 
-        while (running.get()) {
+        while (harness.isRunning) {
             val stream = audioStream ?: break
 
             try {
                 var totalRead = 0
-                while (totalRead < frameSizeBytes && running.get()) {
+                while (totalRead < frameSizeBytes && harness.isRunning) {
                     val read = stream.read(buffer, totalRead, frameSizeBytes - totalRead)
                     if (read < 0) {
                         // End of stream
-                        running.set(false)
+                        harness.requestStop()
                         return
                     }
                     totalRead += read
@@ -187,46 +161,44 @@ class AacEncoder {
             } catch (e: InterruptedException) {
                 break
             } catch (_: Exception) {
-                if (running.get()) {
+                if (harness.isRunning) {
                     try { Thread.sleep(10) } catch (_: InterruptedException) { break }
                 }
             }
         }
     }
 
-    private fun drainOutput(codec: MediaCodec) {
-        val bufferInfo = MediaCodec.BufferInfo()
+    /**
+     * The AAC half of the harness's output contract: every non-config buffer
+     * with payload is one AAC access unit delivered to [onEncodedFrame].
+     */
+    private fun onOutputBuffer(outputBuffer: ByteBuffer, info: MediaCodecEncoderHarness.OutputInfo) {
+        if (info.size > 0 &&
+            info.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG == 0
+        ) {
+            val data = ByteArray(info.size)
+            outputBuffer.position(info.offset)
+            outputBuffer.get(data)
 
-        while (running.get()) {
-            try {
-                val outputBufferIndex = codec.dequeueOutputBuffer(bufferInfo, 10_000)
-
-                when {
-                    outputBufferIndex >= 0 -> {
-                        if (bufferInfo.size > 0 &&
-                            bufferInfo.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG == 0
-                        ) {
-                            val outputBuffer = codec.getOutputBuffer(outputBufferIndex) ?: continue
-                            val data = ByteArray(bufferInfo.size)
-                            outputBuffer.position(bufferInfo.offset)
-                            outputBuffer.get(data)
-
-                            onEncodedFrame?.invoke(data, bufferInfo.presentationTimeUs)
-                        }
-
-                        codec.releaseOutputBuffer(outputBufferIndex, false)
-                    }
-                    outputBufferIndex == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> {
-                        extractAudioSpecificConfig(codec)
-                    }
-                }
-            } catch (e: IllegalStateException) {
-                if (running.get()) Log.e(TAG, "AAC encoder output error", e)
-                break
-            } catch (_: Exception) {
-                break
-            }
+            onEncodedFrame?.invoke(data, info.presentationTimeUs)
         }
+    }
+
+    /**
+     * The AAC configuration between the harness's create and start steps:
+     * the audio MediaFormat, applied through the [CodecLike] seam.
+     */
+    private fun configureCodec(codec: CodecLike) {
+        val format = MediaFormat.createAudioFormat(
+            MediaFormat.MIMETYPE_AUDIO_AAC, sampleRateHz, channelCount
+        ).apply {
+            setInteger(MediaFormat.KEY_BIT_RATE, bitrate)
+            setInteger(MediaFormat.KEY_AAC_PROFILE,
+                MediaCodecInfo.CodecProfileLevel.AACObjectLC)
+            setInteger(MediaFormat.KEY_MAX_INPUT_SIZE, pcmFrameSizeBytes() * 2)
+        }
+
+        codec.configureEncode(format)
     }
 
     private fun ByteArray.toHexString(): String =

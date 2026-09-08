@@ -159,8 +159,19 @@ Capture Media Format's constants; persistence goes through App Json.
 H.264 encoder path: holds the latest SPS/PPS from both MediaCodec CSD
 sources (codec-config buffers and the output format's csd-0/csd-1) and owns
 the keyframe prepend decision in `assemble(nalUnits, isKeyFrame)`. Pure over
-ByteBuffers, so both CSD paths and the assembly are JVM-tested;
-`H264Encoder` keeps only MediaCodec lifecycle.
+ByteBuffers, so both CSD paths and the assembly are JVM-tested.
+
+### Media Codec Encoder Harness
+**`streaming/rtsp/MediaCodecEncoderHarness.kt`** — the one MediaCodec
+lifecycle behind both RTSP encoders: the running guard, the
+create→configure→start ladder, the output-drain thread (10 ms dequeue,
+format-changed and output callbacks), and the teardown (join, stop/release)
+with the exact exception ladder — all behind a thin `CodecLike` seam (the
+production adapter wraps MediaCodec), so the invariants — start idempotence,
+stop-after-failed-start safety, drain-exit classification, the original
+timings — are JVM-tested with a fake codec. `H264Encoder` and `AacEncoder`
+keep only their format construction, CSD interpretation, and input feeding;
+`RtspServer`'s call sites are unchanged.
 
 ### Transport Responders
 **`streaming/HttpAuthFilter.kt`**, **`streaming/StaticAssetStore.kt`**,
@@ -213,7 +224,28 @@ their cookie/non-200 contract differs from the JSON handlers, so
 `web/src/types.ts` mirror of the DTO surface is hand-maintained in lockstep:
 fields the Kotlin side deletes are deleted from the client too (the web UI
 ships no control with no runtime effect), and the plaintext-password /
-hashed-at-rest contract is documented at the type.
+hashed-at-rest contract is documented at the type. Lockstep is enforced, not
+just disciplined: representative Kotlin DTOs serialize through App Json into
+checked-in `web/contract/*.json` fixtures — `DtoContractFixtureTest` fails
+when a Kotlin DTO drifts from its fixture, and the web contract test fails
+when `types.ts` or the client's `API_DEFAULTS` drifts from the same fixtures
+— and `buildWebUi` runs `tsc --noEmit` + vitest before vite, so type errors
+and contract drift stop shipping inside the APK.
+
+### Web Client Core
+**`web/src/hooks/useAppState.ts`** — the one state hook over the Web API,
+composition only: signals, settings/save handlers, and the action pipeline
+(`runStreamAction` — one guarded call → error → nonce/preview/fetchStatus
+choreography behind all ten stream/interval/recording handlers, the RTSP
+pair's differences explicit options rather than omissions). The deep modules
+behind it: `web/src/hooks/pollLadder.ts` (the multi-rate, visibility-gated
+fetch scheduler as tested tick math) and `web/src/audio/LiveAudioPlayer.ts`
+(the PCM live-audio engine: int16 framing, jitter scheduling, 3-attempt
+reconnect — browser primitives injected, the pure parts
+vitest-tested). `web/src/api/defaults.ts` (`API_DEFAULTS`) is the single TS
+home for the Kotlin-default fallbacks every component used to re-type (a
+shipped `?? 80` vs the real JPEG default 70 was the drift class this
+deletes); the dead `StreamingCard.tsx` is deleted.
 
 ### Gallery Page
 **`streaming/web/GalleryPage.kt`** — the pure `/api/gallery` pagination:
@@ -296,6 +328,15 @@ former `AudioStreamingManager` inline math), the AudioSpecificConfig bytes,
 and the SDP fallback hex derived rather than re-typed. Encoder, RTP clock,
 SDP, and mic capture reference the same symbols.
 
+### Audio Subscriber Pipe
+**`streaming/AudioSubscriberPipe.kt`** — the RTSP audio track's backpressure
+contract as a pure module: `enqueue` (drop-oldest at the bounded capacity,
+default 6), a blocking `InputStream` read that hands chunks across, EOF after
+`shutdown`, and idempotent `close` (which runs the owner's deregister hook).
+AudioStreamingManager keeps AudioRecord construction, effect attach, and the
+reader thread; the drop-oldest / block-until-chunk / EOF semantics are
+JVM-tested instead of being device-only behavior.
+
 ### Camera Binding Seam
 **`camera/CameraService.kt` `bindRecording()` / `unbindRecording()`** — the
 recording entry point on the camera module. One shared ladder
@@ -377,15 +418,22 @@ adapter is `streaming/StreamingTransports.kt`, built once over
 (StreamingManager, StreamingSession) with gate getters reading the manager's
 live flows — no client re-types the adapter and no gate reads a derived
 snapshot; the Stream Handler's start-all runs web+RTSP through the toggle's
-`startBoth` so the rollback discipline is single-homed. The record button's
-sibling verdict is Recording Toggle.
+`startBoth` so the rollback discipline is single-homed, and `startServer`
+extends the same ladder to the whole-server toggle — CameraViewModel's server
+entry is one outcome-mapped call (a null-kind outcome is the server), and the
+old inline begin→rollback tail with its bespoke error string is gone. The
+record button's sibling verdict is Recording Toggle.
 
 ### Recording Toggle
 **`camera/model/RecordingToggle.kt`** — the record button's verdict, the
-Stream Toggle's twin: `decide(currentState, audioWanted, onBeforeStart)`
-returns Start(config with includeAudio pre-resolved) or Stop over the
-Recording Controller's state, with the mic consult riding the pre-start hook.
-CameraViewModel executes the decision and keeps the wiring; the same file
+Stream Toggle's twin: `decide(currentState, startConfig, onBeforeStart)`
+returns Start(the caller's config, includeAudio resolved by the pre-start
+hook) or Stop over the Recording Controller's state — the start payload is the
+caller's full `RecordingConfig`, so the camera screen passes its default and
+the capture screen its draft and both route through this one verdict (the
+capture screen's inline copy of the stop-vs-start rule is gone); stop never
+consults the hook. CameraViewModel and CaptureViewModel execute the decision
+and keep the wiring; the same file
 holds the two other camera-screen decisions as pure code — `stickyCameraState`
 (the never-regress-to-Idle filter over the service's camera-state flow) and
 `CameraInitRetry` (the bounded init retry budget).
@@ -398,6 +446,21 @@ freedom predicate beneath it: `isCameraFree(demandActive, exclusiveActive)`
 is the one "camera is not busy" ladder, consulted by lens select, camera
 switch, and auto-recovery alike. CameraService keeps only the pending field,
 the rebind call, and the resume hook — no site re-derives the predicate.
+
+### Camera Session Arbiter
+**`camera/model/CameraSessionArbiter.kt`** — the pure precedence verdict over
+the camera module's demand state: one immutable `CameraDemandState` snapshot
+(preview requested, keep-alive/exclusive refcounts, activity foreground,
+surface attached, pending resolution, trigger) in, one `CameraSessionAction`
+(Rebind / Unbind / DetachSurface / ApplyPendingResolution / Noop) out. Every
+CameraService lifecycle entry point mutates its fields as before, builds the
+snapshot, consults the arbiter once, and executes against CameraX — the gates
+that used to be re-derived per caller (and the exclusivity pre-check that ran
+outside the Resolution Apply Policy) are gone; `isCameraFree` still comes
+from ResolutionApplyPolicy. The resume path's known asymmetry (resume gates
+on `previewRequested` alone, so a keep-alive-only session with a pending
+resolution waits for the next flush) is preserved and pinned by test, not
+silently "fixed".
 
 ### Frame Error Policy
 **`camera/model/FrameErrorPolicy.kt`** — the pure verdict on whether a
@@ -459,8 +522,12 @@ the pure `WatchdogPolicy`: the SOFT/MEDIUM/HARD escalation ladder
 (`tierFor`), the stall verdict over a `HealthSnapshot` (`evaluate`), the
 per-tier recovery-verification verdict (`verificationSuccess` — SOFT's
 frames-advanced-or-zero-clients, MEDIUM's isLive, HARD's isLive+cameraReady),
-and the named verification windows; the coroutine loop keeps only timing,
-the reads, and the recovery calls.
+and the named verification windows. The loop itself executes a tested plan:
+`verificationSpecFor(tier)` (delay + whether frames are measured) collapses
+`verifyRecovery` into one parameterized pass, and `nextTick` is the one
+verdict (action, status, backoff) per health tick — backoff before the
+attempt, verification after, by construction — so the coroutine keeps only
+timing, the reads, and the recovery calls.
 
 ### Battery Quality Policy
 **`core/BatteryQualityPolicy.kt`** — the pure battery→quality ladder:
@@ -470,6 +537,17 @@ with charging beating doze beating low battery. `PowerManager` keeps the
 receivers, wake lock, and battery reads and delegates; the thresholds and
 tier qualities live here as named constants — this ladder's own knowledge,
 not cross-module config — locked by test.
+
+### Foreground Notifications
+**`core/ForegroundNotifications.kt`** — the one foreground-notification
+registry: named, distinct IDs (recording 1001, streaming 1002, update 1003,
+interval capture 1004 — the interval worker's old private 1002 collided with
+streaming's), the pure message builders (`streamingMessage`,
+`intervalCaptureMessage`), and both promotion variants — the Service
+`startForeground` path and the camera-typed WorkManager `ForegroundInfo`
+builder. StreamingService, RecordingService, IntervalCaptureWorker, and
+UpdateNotifier reference the registry; no private ID constant survives, so a
+new foreground owner cannot silently collide.
 
 ### Interval Capture Policy
 **`capture/IntervalCapturePolicy.kt`** — the pure interval-capture policy:
@@ -531,7 +609,10 @@ RecordingService, AudioStreamingManager) asks here instead of hand-rolling
 refresh their permission state and then consult the pure
 `startDecision(featureEnabled, granted, label)` — Proceed, or
 `Degrade(warning)` with the shared message — and `shouldAutoRequest` gates
-the camera screen's ask-once permission prompt.
+the camera screen's ask-once permission prompt. The consult rides one
+`core/MicGate` adapter (refresh-then-consult plus the one toast sink) shared
+by CameraViewModel, CaptureViewModel, and the Stream Toggle's pre-start hook —
+one implementation of "refresh, decide, warn-and-degrade", one wording home.
 
 ### Gallery Pager Math
 **`gallery/GalleryPagerMath.kt`** — the media viewer pager's math as pure
@@ -542,8 +623,11 @@ page, the previous page at the end of the list, or null (pop back);
 verdict (known id pins its index, unknown id falls back to the
 indexAfterDelete neighbor rather than 0, empty list pops) that folds
 initial placement, list-shrink clamping, and the post-delete landing into
-one tested answer; NavigationGraph keeps one effect that consumes it and
-only resolves, deletes, and navigates.
+one tested answer. The choreography *around* that effect — the placed
+one-shot, jump-vs-animate, pop-when-empty — is `gallery/ViewerSync.kt`, a
+pure state machine (`reduce` → JumpTo / AnimateTo / Pop) that NavigationGraph
+executes effect-by-effect; the delete-while-paging transitions are
+JVM-tested, not composable-embedded.
 
 ### Viewer Zoom Policy
 **`gallery/ViewerZoomPolicy.kt`** — the media viewer's gesture policy, pure:
@@ -585,6 +669,16 @@ the whole ladder is JVM-tested. Both callers — the startup auto-check
 (MainApplication keeps only the delay + `shouldAutoCheck` gate) and the
 settings-screen ViewModel — run the one pipeline instead of hand-rolling
 divergent copies.
+
+### Update Http
+**`update/UpdateHttp.kt`** — the update stack's transport seam:
+`mapCheckOutcome(statusCode, errorBody, parsed)` is the pure HTTP-outcome →
+`UpdateCheckResult` mapping (403 → RateLimited, other non-200 → Error,
+200-without-parse → Error), so the GitHub rate-limit path — the most likely
+real-world failure — is JVM-tested without a socket; `openConnection` /
+`applyDefaults` are the one connection factory (LensCast User-Agent,
+redirects, caller timeouts) that both the checker and the downloader build
+on, so the connection config cannot drift between them.
 
 ### Overlay Layout Policy
 **`streaming/OverlayLayoutPolicy.kt`** — the pure overlay/masking math:

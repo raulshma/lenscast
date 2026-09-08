@@ -10,12 +10,25 @@ import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.Build
 import androidx.core.app.NotificationCompat
+import androidx.work.ForegroundInfo
 
 /**
- * Shared scaffolding for the camera-related foreground services (streaming,
- * recording). Both services previously carried identical copies of this.
+ * The one foreground-notification registry: the notification IDs for every
+ * foreground producer (streaming, recording, interval capture, update) plus
+ * the shared notification scaffolding — channel creation, the standard
+ * builder, both camera promotion variants (Service.startForeground and
+ * WorkManager's ForegroundInfo), and the pure body-line decisions. The IDs
+ * live here so two producers can never claim the same slot (streaming and
+ * interval capture previously both used 1002 and replaced each other's
+ * notification when they ran concurrently).
  */
 object ForegroundNotifications {
+
+    // One distinct notification slot per foreground producer.
+    const val RECORDING_NOTIFICATION_ID = 1001
+    const val STREAMING_NOTIFICATION_ID = 1002
+    const val UPDATE_NOTIFICATION_ID = 1003
+    const val INTERVAL_CAPTURE_NOTIFICATION_ID = 1004
 
     fun createChannel(context: Context, channelId: String, channelName: String) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -52,6 +65,31 @@ object ForegroundNotifications {
     }
 
     /**
+     * The streaming notification's body line: names the stream URL when one
+     * was given, falls back to the generic feed line otherwise, and each
+     * variant gains the audio clause when the microphone is live.
+     */
+    fun streamingMessage(url: String?, includeAudio: Boolean): String =
+        if (!url.isNullOrEmpty()) {
+            if (includeAudio) "Streaming video and audio to $url" else "Streaming to $url"
+        } else {
+            if (includeAudio) "Streaming camera feed with audio" else "Streaming camera feed"
+        }
+
+    /**
+     * The interval-capture progress line: which photo of the series is being
+     * taken this tick ([completedCaptures] is the count already done, the
+     * notification shows the one in flight). Without a known total it stays
+     * generic.
+     */
+    fun intervalCaptureMessage(completedCaptures: Int, totalCaptures: Int): String =
+        if (totalCaptures > 0) {
+            "Capturing photo ${completedCaptures + 1} of $totalCaptures"
+        } else {
+            "Capturing interval photo"
+        }
+
+    /**
      * Promote to foreground with the CAMERA type, plus MICROPHONE when the
      * service captures audio (API 30+; typed startForeground needs API 29+).
      */
@@ -71,4 +109,23 @@ object ForegroundNotifications {
             service.startForeground(notificationId, notification)
         }
     }
+
+    /**
+     * The WorkManager twin of [startCameraForeground]: a camera-typed
+     * [ForegroundInfo] for Worker.setForeground on Q+, plain on older APIs.
+     * Workers here never capture audio, so no microphone type.
+     */
+    fun buildCameraForegroundInfo(
+        notificationId: Int,
+        notification: Notification,
+    ): ForegroundInfo =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            ForegroundInfo(
+                notificationId,
+                notification,
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA
+            )
+        } else {
+            ForegroundInfo(notificationId, notification)
+        }
 }

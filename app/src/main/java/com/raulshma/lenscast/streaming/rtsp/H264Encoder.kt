@@ -7,15 +7,11 @@ import android.os.Build
 import android.util.Log
 import com.raulshma.lenscast.core.StreamDefaults
 import com.raulshma.lenscast.core.YuvConverter
-import java.util.concurrent.atomic.AtomicBoolean
+import java.nio.ByteBuffer
 import java.util.concurrent.atomic.AtomicInteger
 
 @Suppress("DEPRECATION")
 class H264Encoder {
-
-    private var encoder: MediaCodec? = null
-    private var outputThread: Thread? = null
-    private val running = AtomicBoolean(false)
 
     private var width = StreamDefaults.RTSP_VIDEO_WIDTH
     private var height = StreamDefaults.RTSP_VIDEO_HEIGHT
@@ -35,8 +31,28 @@ class H264Encoder {
     data class EncodedNalUnit(val data: ByteArray, val isKeyFrame: Boolean)
 
     // The SPS/PPS state machine and the keyframe prepend decision live in
-    // the pure assembler; this class keeps the MediaCodec lifecycle.
+    // the pure assembler, and the MediaCodec lifecycle lives in the shared
+    // harness. This class keeps the H.264 format knowledge and CSD
+    // interpretation, plugged into the harness below.
     private val streamAssembler = H264StreamAssembler()
+
+    private val harness = MediaCodecEncoderHarness(
+        tag = TAG,
+        threadName = "H264EncoderOutput",
+        startedMessage = {
+            "H264 encoder started: ${width}x${height} @ ${frameRate}fps, ${bitrate}bps, colorFormat=$inputColorFormat, requestedInput=$preferredInputFormat, activeInput=$activeInputFormat"
+        },
+        startFailureMessage = "Failed to start H264 encoder",
+        outputErrorMessage = "Encoder output error",
+        createCodec = {
+            pendingFrames.set(0)
+            droppedFrames = 0
+            MediaCodecAdapter(MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_VIDEO_AVC))
+        },
+        configureCodec = { configureCodec(it) },
+        onFormatChanged = { onFormatChanged(it) },
+        onOutput = { outputBuffer, info -> onOutputBuffer(outputBuffer, info) },
+    )
 
     val sps: ByteArray?
         get() = streamAssembler.sps
@@ -55,93 +71,10 @@ class H264Encoder {
         preferredInputFormat = format
     }
 
-    fun start(): Boolean {
-        if (running.getAndSet(true)) return true
-        encoder = null
-        pendingFrames.set(0)
-        droppedFrames = 0
-
-        return try {
-            val codec = MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_VIDEO_AVC)
-            val capabilities = codec.codecInfo.getCapabilitiesForType(MediaFormat.MIMETYPE_VIDEO_AVC)
-            val selected = EncoderFormatPolicy.choose(capabilities.colorFormats.toSet(), preferredInputFormat)
-            inputColorFormat = selected.colorFormat
-            activeInputFormat = selected.effectiveInputFormat
-            if (selected.fellBackToAuto) {
-                Log.w(
-                    TAG,
-                    "Requested input format $preferredInputFormat is not supported by codec. Falling back to ${selected.effectiveInputFormat}."
-                )
-            }
-
-            val format = MediaFormat.createVideoFormat(
-                MediaFormat.MIMETYPE_VIDEO_AVC, width, height
-            ).apply {
-                setInteger(MediaFormat.KEY_BIT_RATE, bitrate)
-                setInteger(MediaFormat.KEY_FRAME_RATE, frameRate)
-                setInteger(MediaFormat.KEY_COLOR_FORMAT, inputColorFormat)
-                setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 2)
-                setInteger(MediaFormat.KEY_MAX_B_FRAMES, 0)
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                    try {
-                        if (capabilities.isFeatureSupported(
-                                MediaCodecInfo.CodecCapabilities.FEATURE_LowLatency
-                            )
-                        ) {
-                            setInteger(MediaFormat.KEY_LOW_LATENCY, 1)
-                        } else {
-                            Log.d(TAG, "Encoder does not support low-latency; configuring without it")
-                        }
-                    } catch (_: Exception) {
-                        // Capability query failed: leave KEY_LOW_LATENCY unset rather than
-                        // risk configure() rejecting the format (legacy OMX encoders return
-                        // BAD_VALUE for unsupported keys instead of ignoring them).
-                    }
-                }
-                try {
-                    setInteger(MediaFormat.KEY_PRIORITY, 0)
-                } catch (_: Exception) {
-                }
-            }
-
-            codec.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
-            codec.start()
-            encoder = codec
-
-            outputThread = Thread({ drainOutput(codec) }, "H264EncoderOutput").apply {
-                isDaemon = true
-                start()
-            }
-
-            Log.d(
-                TAG,
-                "H264 encoder started: ${width}x${height} @ ${frameRate}fps, ${bitrate}bps, colorFormat=$inputColorFormat, requestedInput=$preferredInputFormat, activeInput=$activeInputFormat"
-            )
-            true
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to start H264 encoder", e)
-            running.set(false)
-            false
-        }
-    }
+    fun start(): Boolean = harness.start()
 
     fun stop() {
-        if (!running.getAndSet(false)) return
-
-        try {
-            outputThread?.join(3000)
-        } catch (_: InterruptedException) {
-        }
-        outputThread = null
-
-        try {
-            encoder?.apply {
-                stop()
-                release()
-            }
-        } catch (_: Exception) {
-        }
-        encoder = null
+        if (!harness.stop()) return
         pendingFrames.set(0)
 
         Log.d(TAG, "H264 encoder stopped (dropped $droppedFrames frames)")
@@ -154,7 +87,7 @@ class H264Encoder {
     fun setBitrate(newBitrate: Int) {
         bitrate = newBitrate.coerceIn(StreamDefaults.VIDEO_BITRATE_MIN, StreamDefaults.VIDEO_BITRATE_MAX)
         try {
-            encoder?.let { codec ->
+            harness.activeCodec?.let { codec ->
                 val params = android.os.Bundle().apply {
                     putInt(MediaCodec.PARAMETER_KEY_VIDEO_BITRATE, bitrate)
                 }
@@ -168,7 +101,7 @@ class H264Encoder {
 
     fun requestKeyFrame() {
         try {
-            val codec = encoder ?: return
+            val codec = harness.activeCodec ?: return
             val params = android.os.Bundle().apply {
                 putInt(MediaCodec.PARAMETER_KEY_REQUEST_SYNC_FRAME, 0)
             }
@@ -192,8 +125,8 @@ class H264Encoder {
     }
 
     fun encodeFrame(nv21Data: ByteArray) {
-        val codec = encoder ?: return
-        if (!running.get()) return
+        val codec = harness.activeCodec ?: return
+        if (!harness.isRunning) return
 
         val pending = pendingFrames.getAndIncrement()
         if (pending >= MAX_PENDING_FRAMES) {
@@ -238,67 +171,104 @@ class H264Encoder {
         }
     }
 
-    private fun drainOutput(codec: MediaCodec) {
-        val bufferInfo = MediaCodec.BufferInfo()
+    /**
+     * The H.264 configuration between the harness's create and start steps:
+     * capability-driven color-format selection via [EncoderFormatPolicy] and
+     * the video MediaFormat, applied through the [CodecLike] seam.
+     */
+    private fun configureCodec(codec: CodecLike) {
+        val selected = EncoderFormatPolicy.choose(
+            codec.supportedColorFormats(MediaFormat.MIMETYPE_VIDEO_AVC),
+            preferredInputFormat,
+        )
+        inputColorFormat = selected.colorFormat
+        activeInputFormat = selected.effectiveInputFormat
+        if (selected.fellBackToAuto) {
+            Log.w(
+                TAG,
+                "Requested input format $preferredInputFormat is not supported by codec. Falling back to ${selected.effectiveInputFormat}."
+            )
+        }
 
-        while (running.get()) {
-            try {
-                val outputBufferIndex = codec.dequeueOutputBuffer(bufferInfo, 10_000)
-
-                when {
-                    outputBufferIndex >= 0 -> {
-                        val outputBuffer = codec.getOutputBuffer(outputBufferIndex) ?: continue
-
-                        if (bufferInfo.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG != 0) {
-                            streamAssembler.updateFromConfigBuffer(
-                                outputBuffer,
-                                bufferInfo.offset,
-                                bufferInfo.size,
-                            )
-                        }
-
-                        if (bufferInfo.size > 0 &&
-                            bufferInfo.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG == 0
-                        ) {
-                            val data = ByteArray(bufferInfo.size)
-                            outputBuffer.position(bufferInfo.offset)
-                            outputBuffer.get(data)
-
-                            val isKeyFrame = isKeyFrame(bufferInfo.flags)
-                            val nalUnits = extractNalUnits(data)
-
-                            if (nalUnits.isEmpty()) {
-                                codec.releaseOutputBuffer(outputBufferIndex, false)
-                                pendingFrames.decrementAndGet()
-                                continue
-                            }
-
-                            onEncodedFrame?.invoke(streamAssembler.assemble(nalUnits, isKeyFrame))
-                        }
-
-                        codec.releaseOutputBuffer(outputBufferIndex, false)
-                        pendingFrames.decrementAndGet()
+        val format = MediaFormat.createVideoFormat(
+            MediaFormat.MIMETYPE_VIDEO_AVC, width, height
+        ).apply {
+            setInteger(MediaFormat.KEY_BIT_RATE, bitrate)
+            setInteger(MediaFormat.KEY_FRAME_RATE, frameRate)
+            setInteger(MediaFormat.KEY_COLOR_FORMAT, inputColorFormat)
+            setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 2)
+            setInteger(MediaFormat.KEY_MAX_B_FRAMES, 0)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                try {
+                    if (codec.isFeatureSupported(
+                            MediaFormat.MIMETYPE_VIDEO_AVC,
+                            MediaCodecInfo.CodecCapabilities.FEATURE_LowLatency
+                        )
+                    ) {
+                        setInteger(MediaFormat.KEY_LOW_LATENCY, 1)
+                    } else {
+                        Log.d(TAG, "Encoder does not support low-latency; configuring without it")
                     }
-                    outputBufferIndex == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> {
-                        val format = codec.outputFormat
-                        Log.d(TAG, "Encoder format changed: $format")
-                        try {
-                            streamAssembler.updateFromFormat(
-                                csd0 = format.getByteBuffer("csd-0"),
-                                csd1 = format.getByteBuffer("csd-1"),
-                            )
-                            Log.d(TAG, "SPS/PPS extracted from format: sps=${sps?.size} pps=${pps?.size}")
-                        } catch (e: Exception) {
-                            Log.w(TAG, "Failed to extract SPS/PPS from format", e)
-                        }
-                    }
+                } catch (_: Exception) {
+                    // Capability query failed: leave KEY_LOW_LATENCY unset rather than
+                    // risk configure() rejecting the format (legacy OMX encoders return
+                    // BAD_VALUE for unsupported keys instead of ignoring them).
                 }
-            } catch (e: IllegalStateException) {
-                if (running.get()) Log.e(TAG, "Encoder output error", e)
-                break
-            } catch (_: Exception) {
-                break
             }
+            try {
+                setInteger(MediaFormat.KEY_PRIORITY, 0)
+            } catch (_: Exception) {
+            }
+        }
+
+        codec.configureEncode(format)
+    }
+
+    /**
+     * The H.264 half of the harness's output contract: codec-config buffers
+     * feed the assembler's CSD state, encoded frames are split into NAL units
+     * and assembled before the [onEncodedFrame] callback.
+     */
+    private fun onOutputBuffer(outputBuffer: ByteBuffer, info: MediaCodecEncoderHarness.OutputInfo) {
+        if (info.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG != 0) {
+            streamAssembler.updateFromConfigBuffer(
+                outputBuffer,
+                info.offset,
+                info.size,
+            )
+        }
+
+        if (info.size > 0 &&
+            info.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG == 0
+        ) {
+            val data = ByteArray(info.size)
+            outputBuffer.position(info.offset)
+            outputBuffer.get(data)
+
+            val nalUnits = extractNalUnits(data)
+
+            if (nalUnits.isEmpty()) {
+                pendingFrames.decrementAndGet()
+                return
+            }
+
+            onEncodedFrame?.invoke(streamAssembler.assemble(nalUnits, isKeyFrame(info.flags)))
+        }
+
+        pendingFrames.decrementAndGet()
+    }
+
+    private fun onFormatChanged(codec: CodecLike) {
+        val format = codec.outputFormat()
+        Log.d(TAG, "Encoder format changed: $format")
+        try {
+            streamAssembler.updateFromFormat(
+                csd0 = format.getByteBuffer("csd-0"),
+                csd1 = format.getByteBuffer("csd-1"),
+            )
+            Log.d(TAG, "SPS/PPS extracted from format: sps=${sps?.size} pps=${pps?.size}")
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to extract SPS/PPS from format", e)
         }
     }
 

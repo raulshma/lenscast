@@ -1,8 +1,6 @@
 package com.raulshma.lenscast.capture
 
 import android.content.Context
-import android.content.pm.ServiceInfo
-import android.os.Build
 import android.util.Log
 import androidx.work.CoroutineWorker
 import androidx.work.ForegroundInfo
@@ -124,33 +122,22 @@ class IntervalCaptureWorker(
         }
 
     private fun createForegroundInfo(completedCaptures: Int, totalCaptures: Int): ForegroundInfo {
-        val contentText = if (totalCaptures > 0) {
-            "Capturing photo ${completedCaptures + 1} of $totalCaptures"
-        } else {
-            "Capturing interval photo"
-        }
         val notification = ForegroundNotifications.build(
             applicationContext,
             CHANNEL_ID,
             "LensCast Interval Capture",
-            contentText,
+            ForegroundNotifications.intervalCaptureMessage(completedCaptures, totalCaptures),
             ongoing = true,
         )
 
-        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            ForegroundInfo(
-                NOTIFICATION_ID,
-                notification,
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA
-            )
-        } else {
-            ForegroundInfo(NOTIFICATION_ID, notification)
-        }
+        return ForegroundNotifications.buildCameraForegroundInfo(
+            ForegroundNotifications.INTERVAL_CAPTURE_NOTIFICATION_ID,
+            notification,
+        )
     }
 
     companion object {
         private const val TAG = "IntervalCapture"
         private const val CHANNEL_ID = "interval_capture_channel"
-        private const val NOTIFICATION_ID = 1002
     }
 }

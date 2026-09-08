@@ -1,0 +1,61 @@
+{
+  "streaming": {
+    "isActive": true,
+    "url": "http://192.168.1.10:8080/stream",
+    "webStreamingEnabled": true,
+    "webStreamingActive": true,
+    "clientCount": 2,
+    "audioEnabled": true,
+    "audioUrl": "http://192.168.1.10:8080/audio",
+    "rtspEnabled": true,
+    "rtspStreamingActive": true,
+    "rtspUrl": "rtsp://192.168.1.10:8554/live"
+  },
+  "thermal": "NORMAL",
+  "camera": "Ready",
+  "battery": {
+    "level": 87,
+    "isCharging": false,
+    "isPowerSaveMode": false
+  },
+  "adaptiveBitrate": {
+    "enabled": true,
+    "qualityLevel": "GOOD",
+    "currentQuality": 75,
+    "targetQuality": 80,
+    "currentFps": 24,
+    "targetFps": 30,
+    "estimatedBandwidthKbps": 4200,
+    "minClientThroughputKbps": 3500,
+    "activeClients": 2,
+    "adjustmentCount": 7
+  },
+  "connectionQuality": {
+    "qualityLevel": "GOOD",
+    "estimatedBandwidthKbps": 4200,
+    "avgThroughputKbps": 3900,
+    "minThroughputKbps": 3500,
+    "worstLatencyMs": 120,
+    "avgFrameSizeBytes": 45000,
+    "totalBytesSent": 104857600,
+    "activeClients": 2,
+    "framesPerSecond": 23.5,
+    "clientDetails": {
+      "192.168.1.50:51000": {
+        "framesSent": 12500,
+        "bytesSent": 52428800,
+        "avgThroughputKbps": 3900,
+        "lastFrameSizeBytes": 46000,
+        "lastSendDurationMs": 12
+      }
+    }
+  },
+  "watchdog": {
+    "enabled": true,
+    "status": "MONITORING",
+    "consecutiveFailures": 0,
+    "totalRecoveries": 3,
+    "lastRecoveryTimestamp": 1788825600000,
+    "lastFailureReason": "Encoder stalled; pipeline restarted"
+  }
+}

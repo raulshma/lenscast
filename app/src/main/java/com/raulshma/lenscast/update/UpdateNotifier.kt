@@ -8,12 +8,12 @@ import android.content.Intent
 import android.os.Build
 import androidx.core.app.NotificationCompat
 import com.raulshma.lenscast.MainActivity
+import com.raulshma.lenscast.core.ForegroundNotifications
 
 class UpdateNotifier(private val context: Context) {
 
     companion object {
         private const val CHANNEL_ID = "update_channel"
-        private const val NOTIFICATION_ID = 1003
         const val EXTRA_NAVIGATE_TO = "navigate_to"
     }
 
@@ -37,11 +37,11 @@ class UpdateNotifier(private val context: Context) {
             .setContentIntent(pendingIntent)
             .setAutoCancel(true)
             .build()
-        notificationManager.notify(NOTIFICATION_ID, notification)
+        notificationManager.notify(ForegroundNotifications.UPDATE_NOTIFICATION_ID, notification)
     }
 
     fun cancel() {
-        notificationManager.cancel(NOTIFICATION_ID)
+        notificationManager.cancel(ForegroundNotifications.UPDATE_NOTIFICATION_ID)
     }
 
     private fun createChannel() {

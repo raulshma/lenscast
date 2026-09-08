@@ -90,7 +90,7 @@ class RecordingService : Service() {
             }
 
             ForegroundNotifications.startCameraForeground(
-                this, NOTIFICATION_ID, notification, audioEnabled
+                this, ForegroundNotifications.RECORDING_NOTIFICATION_ID, notification, audioEnabled
             )
 
             cameraService.acquireKeepAlive()
@@ -272,7 +272,6 @@ class RecordingService : Service() {
         const val ACTION_STOP = "com.raulshma.lenscast.STOP_RECORDING"
         const val EXTRA_CONFIG = "recording_config"
         private const val CHANNEL_ID = "recording_channel"
-        private const val NOTIFICATION_ID = 1001
         private const val TAG = "RecordingService"
     }
 }

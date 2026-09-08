@@ -13,6 +13,10 @@ class StreamToggleTest {
         override var rtspEnabled: Boolean = true,
         override var webActive: Boolean = false,
         override var rtspActive: Boolean = false,
+        /** Whether the server would come up when asked (false = start failure). */
+        var ensureServerResult: Boolean = true,
+        /** Whether the server is already up — [ensureServerRunning] then starts nothing. */
+        var serverRunning: Boolean = false,
         var startWebResult: Boolean = true,
         var startRtspResult: Boolean = true,
         var beginSessionError: Exception? = null,
@@ -21,6 +25,19 @@ class StreamToggleTest {
     ) : StreamToggle.Transports {
         val calls = mutableListOf<String>()
         private var beginCalls = 0
+
+        /** How many actual server starts [ensureServerRunning] performed (0 when already up). */
+        var serverStarts = 0
+            private set
+
+        override fun ensureServerRunning(): Boolean {
+            calls.add("ensureServer")
+            if (serverRunning) return true
+            if (!ensureServerResult) return false
+            serverRunning = true
+            serverStarts++
+            return true
+        }
 
         override fun startWeb(): Boolean {
             calls.add("startWeb")
@@ -48,6 +65,7 @@ class StreamToggleTest {
             calls.add("stopServer")
             webActive = false
             rtspActive = false
+            serverRunning = false
         }
 
         override suspend fun beginSession() {
@@ -265,6 +283,57 @@ class StreamToggleTest {
         assertEquals(false, transports.rtspActive)
     }
 
+    // ── the whole-server start ladder (startServer) ──
+
+    @Test
+    fun `startServer ensures the server and begins the session`() = runBlocking {
+        val transports = FakeTransports()
+        val outcome = StreamToggle(transports).startServer()
+
+        assertEquals(StreamStartOutcome.Started, outcome)
+        assertEquals(listOf("ensureServer", "beginSession"), transports.calls)
+        assertEquals(1, transports.serverStarts)
+    }
+
+    @Test
+    fun `startServer on an already-running server starts nothing and still begins the session`() = runBlocking {
+        val transports = FakeTransports(serverRunning = true)
+        val outcome = StreamToggle(transports).startServer()
+
+        assertEquals(StreamStartOutcome.Started, outcome)
+        // No output start rides the server start, and the running server is
+        // not restarted.
+        assertEquals(listOf("ensureServer", "beginSession"), transports.calls)
+        assertEquals(0, transports.serverStarts)
+        assertEquals(false, transports.webActive)
+        assertEquals(false, transports.rtspActive)
+    }
+
+    @Test
+    fun `a failed server start reports StartFailed without a session begin`() = runBlocking {
+        val transports = FakeTransports(ensureServerResult = false)
+        val outcome = StreamToggle(transports).startServer()
+
+        assertEquals(StreamStartOutcome.StartFailed(kind = null), outcome)
+        assertEquals(listOf("ensureServer"), transports.calls)
+        assertEquals(false, transports.serverRunning)
+    }
+
+    @Test
+    fun `a failed server session begin rolls the whole server back`() = runBlocking {
+        val failure = IllegalStateException("foreground service denied")
+        val transports = FakeTransports(beginSessionError = failure)
+        val outcome = StreamToggle(transports).startServer()
+
+        assertEquals(StreamStartOutcome.BeginFailedRolledBack(kind = null, cause = failure), outcome)
+        // The rollback ladder: ensure → begin throws → stop the server; no
+        // live server survives without its session.
+        assertEquals(listOf("ensureServer", "beginSession", "stopServer"), transports.calls)
+        assertEquals(false, transports.serverRunning)
+        assertEquals(false, transports.webActive)
+        assertEquals(false, transports.rtspActive)
+    }
+
     // ── start-failure verdict ──
 
     @Test
@@ -286,5 +355,7 @@ class StreamToggleTest {
         assertEquals("RTSP streaming is disabled in settings.", StreamStartOutcome.disabledMessage(StreamKind.RTSP))
         assertEquals("Failed to start web streaming.", StreamStartOutcome.startFailedMessage(StreamKind.WEB))
         assertEquals("Failed to start RTSP streaming.", StreamStartOutcome.startFailedMessage(StreamKind.RTSP))
+        // The whole-server start (kind null) keeps its own wording.
+        assertEquals("Failed to start server", StreamStartOutcome.startFailedMessage(null))
     }
 }

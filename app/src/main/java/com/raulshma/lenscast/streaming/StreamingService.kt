@@ -29,11 +29,7 @@ class StreamingService : Service() {
     }
 
     private fun startStreamingForeground(url: String?, includeAudio: Boolean) {
-        val message = if (!url.isNullOrEmpty()) {
-            if (includeAudio) "Streaming video and audio to $url" else "Streaming to $url"
-        } else {
-            if (includeAudio) "Streaming camera feed with audio" else "Streaming camera feed"
-        }
+        val message = ForegroundNotifications.streamingMessage(url, includeAudio)
         showForeground(message, includeAudio)
         Log.d(TAG, "Streaming foreground service started")
     }
@@ -49,7 +45,7 @@ class StreamingService : Service() {
             this, CHANNEL_ID, "LensCast Streaming", message, ongoing = true
         )
         ForegroundNotifications.startCameraForeground(
-            this, NOTIFICATION_ID, notification, includeAudio
+            this, ForegroundNotifications.STREAMING_NOTIFICATION_ID, notification, includeAudio
         )
     }
 
@@ -59,7 +55,6 @@ class StreamingService : Service() {
         const val EXTRA_URL = "stream_url"
         const val EXTRA_AUDIO_ACTIVE = "stream_audio_active"
         private const val CHANNEL_ID = "streaming_channel"
-        private const val NOTIFICATION_ID = 1002
         private const val TAG = "StreamingService"
     }
 }

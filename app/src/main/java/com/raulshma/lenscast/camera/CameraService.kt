@@ -34,9 +34,9 @@ import com.raulshma.lenscast.camera.model.CameraLensInfo
 import com.raulshma.lenscast.camera.model.CameraSettings
 import com.raulshma.lenscast.camera.model.CameraControlPlan
 import com.raulshma.lenscast.camera.model.CameraState
+import com.raulshma.lenscast.camera.model.CameraSessionArbiter
 import com.raulshma.lenscast.camera.model.FocusApplyPolicy
 import com.raulshma.lenscast.camera.model.FrameErrorPolicy
-import com.raulshma.lenscast.camera.model.ResolutionApplyPolicy
 import com.raulshma.lenscast.core.YuvConverter
 import com.raulshma.lenscast.camera.model.WhiteBalance
 import com.raulshma.lenscast.camera.model.HdrMode
@@ -248,11 +248,28 @@ class CameraService(private val context: Context) {
         }
     }
 
-    private fun hasActiveCameraDemand(): Boolean = previewRequested || keepAliveRefCount > 0
-
     private fun shouldAttachPreview(): Boolean {
         return previewRequested && currentPreviewView != null && isActivityForeground
     }
+
+    /**
+     * The one snapshot of the demand/lifecycle heap the arbiter's verdicts
+     * read, built fresh at every entry point after its fields are mutated —
+     * the consult sees exactly the state the old inline gates re-assembled
+     * by hand from different subsets of these fields.
+     */
+    private fun demandState(
+        trigger: CameraSessionArbiter.Trigger,
+    ): CameraSessionArbiter.CameraDemandState =
+        CameraSessionArbiter.CameraDemandState(
+            previewRequested = previewRequested,
+            keepAliveRefCount = keepAliveRefCount,
+            exclusiveSessionRefCount = exclusiveSessionRefCount,
+            activityForeground = isActivityForeground,
+            previewSurfaceAttached = currentPreviewView != null,
+            resolutionChangePending = pendingResolution != null,
+            trigger = trigger,
+        )
 
     @androidx.camera.camera2.interop.ExperimentalCamera2Interop
     private fun enumerateCameras(provider: ProcessCameraProvider) {
@@ -391,26 +408,46 @@ class CameraService(private val context: Context) {
         currentCameraSelector = lens.cameraSelector
         _isFrontCamera.value = lens.lensFacing == CameraSelector.LENS_FACING_FRONT
 
-        // The freedom predicate (demand active, no exclusive session) is the
-        // pure ResolutionApplyPolicy's — same gate as rebind/switch/recover.
-        if (
-            ResolutionApplyPolicy.isCameraFree(
-                demandActive = hasActiveCameraDemand(),
-                exclusiveActive = exclusiveSessionRefCount > 0,
+        // One arbiter consult: rebind only while the camera is free (demand
+        // active, no exclusive session) — the same verdict as switch/recover;
+        // otherwise the selector lands on the next active session.
+        when (
+            val action = CameraSessionArbiter.decide(
+                demandState(CameraSessionArbiter.Trigger.RebindIfFree)
             )
         ) {
-            rebindUseCases()
-        } else {
-            Log.d(TAG, "selectLens: selector updated; camera will switch on next active session")
+            is CameraSessionArbiter.BindingAction -> executeBinding(action)
+            else -> Log.d(TAG, "selectLens: selector updated; camera will switch on next active session")
         }
     }
 
+    /**
+     * The shared binding entry: one arbiter consult over the current demand
+     * state, then the action — skip while an exclusive session holds the
+     * camera, unbind when no demand remains, bind into the effective owner
+     * otherwise. Callers that arrive through a freedom gate consult
+     * [CameraSessionArbiter] themselves and land in [executeBinding] directly.
+     */
     fun rebindUseCases() {
-        if (exclusiveSessionRefCount > 0) {
-            Log.d(TAG, "rebindUseCases: skipped while an exclusive session is active")
-            return
+        when (
+            val action = CameraSessionArbiter.decide(
+                demandState(CameraSessionArbiter.Trigger.RebindCheck)
+            )
+        ) {
+            CameraSessionArbiter.CameraSessionAction.Noop ->
+                Log.d(TAG, "rebindUseCases: skipped while an exclusive session is active")
+            is CameraSessionArbiter.BindingAction -> executeBinding(action)
+            else -> {}
         }
+    }
 
+    /**
+     * The one action → CameraX execution for the binding verdicts, shared by
+     * every gated entry point: ensure the provider — only actions that use it
+     * reach here, the same passes the old inline gates allowed through — then
+     * unbind or bind into the effective lifecycle owner.
+     */
+    private fun executeBinding(action: CameraSessionArbiter.BindingAction) {
         val provider = ensureCameraProviderAvailable()
         Log.d(TAG, "rebindUseCases: provider=${provider != null}, refCount=$keepAliveRefCount, previewRequested=$previewRequested, lifecycleOwner=${lifecycleOwner != null}")
 
@@ -419,20 +456,21 @@ class CameraService(private val context: Context) {
             return
         }
 
-        if (!hasActiveCameraDemand()) {
-            provider.unbindAll()
-            clearBoundUseCases()
-            Log.d(TAG, "rebindUseCases: unbound camera because there is no active demand")
-            return
+        when (action) {
+            CameraSessionArbiter.BindingAction.Unbind -> {
+                provider.unbindAll()
+                clearBoundUseCases()
+                Log.d(TAG, "rebindUseCases: unbound camera because there is no active demand")
+            }
+            CameraSessionArbiter.BindingAction.Rebind -> {
+                val owner = getEffectiveLifecycleOwner()
+                if (owner == null) {
+                    Log.w(TAG, "rebindUseCases: no lifecycle owner available and no keep-alive, cannot rebind")
+                    return
+                }
+                bindUseCases(provider, owner)
+            }
         }
-
-        val owner = getEffectiveLifecycleOwner()
-        if (owner == null) {
-            Log.w(TAG, "rebindUseCases: no lifecycle owner available and no keep-alive, cannot rebind")
-            return
-        }
-
-        bindUseCases(provider, owner)
     }
 
     /**
@@ -509,12 +547,19 @@ class CameraService(private val context: Context) {
         preview?.surfaceProvider = null
         currentPreviewView = null
 
-        if (exclusiveSessionRefCount > 0) {
-            Log.d(TAG, "stopPreview: preview released while exclusive session remains active")
-            return
+        // One consult on the post-stop state: the old exclusive-session early
+        // return is the arbiter's Noop now, and the no-demand unbind (or the
+        // keep-alive rebind) is its shared ladder.
+        when (
+            val action = CameraSessionArbiter.decide(
+                demandState(CameraSessionArbiter.Trigger.RebindCheck)
+            )
+        ) {
+            CameraSessionArbiter.CameraSessionAction.Noop ->
+                Log.d(TAG, "stopPreview: preview released while exclusive session remains active")
+            is CameraSessionArbiter.BindingAction -> executeBinding(action)
+            else -> {}
         }
-
-        rebindUseCases()
     }
 
     fun acquirePhotoCapture(): ImageCapture? {
@@ -715,14 +760,17 @@ class CameraService(private val context: Context) {
             val previewView = currentPreviewView
             if (previewView != null) {
                 startPreview(previewView)
-            } else if (
-                ResolutionApplyPolicy.isCameraFree(
-                    demandActive = hasActiveCameraDemand(),
-                    exclusiveActive = exclusiveSessionRefCount > 0,
-                )
-            ) {
-                // Headless switch (preview hidden): just rebind to the new selector.
-                rebindUseCases()
+            } else {
+                // Headless switch (preview hidden): rebind to the new selector
+                // only while the camera is free — one arbiter consult.
+                when (
+                    val action = CameraSessionArbiter.decide(
+                        demandState(CameraSessionArbiter.Trigger.RebindIfFree)
+                    )
+                ) {
+                    is CameraSessionArbiter.BindingAction -> executeBinding(action)
+                    else -> {}
+                }
             }
             return
         }
@@ -775,14 +823,16 @@ class CameraService(private val context: Context) {
 
     private fun triggerAutoRecovery() {
         try {
-            if (
-                ResolutionApplyPolicy.isCameraFree(
-                    demandActive = hasActiveCameraDemand(),
-                    exclusiveActive = exclusiveSessionRefCount > 0,
+            when (
+                val action = CameraSessionArbiter.decide(
+                    demandState(CameraSessionArbiter.Trigger.RebindIfFree)
                 )
             ) {
-                rebindUseCases()
-                Log.d(TAG, "Auto-recovery: rebind use cases attempted")
+                is CameraSessionArbiter.BindingAction -> {
+                    executeBinding(action)
+                    Log.d(TAG, "Auto-recovery: rebind use cases attempted")
+                }
+                else -> {}
             }
         } catch (e: Exception) {
             Log.e(TAG, "Auto-recovery: rebind failed", e)
@@ -824,21 +874,21 @@ class CameraService(private val context: Context) {
         activeSettings = settings
         if (settings.resolution.size != currentResolution) {
             currentResolution = settings.resolution.size
+            // One arbiter consult: rebind now while the camera is free, park
+            // the change otherwise (ResolutionApplyPolicy beneath it).
             when (
-                ResolutionApplyPolicy.decide(
-                    demandActive = hasActiveCameraDemand(),
-                    exclusiveActive = exclusiveSessionRefCount > 0,
-                    resolutionChanged = true,
+                val action = CameraSessionArbiter.decide(
+                    demandState(CameraSessionArbiter.Trigger.RebindIfFree)
                 )
             ) {
-                is ResolutionApplyPolicy.ResolutionDecision.RebindNow -> {
+                is CameraSessionArbiter.BindingAction -> {
                     withContext(Dispatchers.Main) {
-                        rebindUseCases()
+                        executeBinding(action)
                     }
                     applyCameraControls(settings, forceFocusReapply = false)
                     return
                 }
-                ResolutionApplyPolicy.ResolutionDecision.Defer -> {
+                else -> {
                     pendingResolution = settings.resolution.size
                     Log.d(TAG, "applySettings: deferring resolution change until next active session")
                 }
@@ -852,14 +902,13 @@ class CameraService(private val context: Context) {
         val res = pendingResolution ?: return
         pendingResolution = null
         currentResolution = res
-        if (
-            ResolutionApplyPolicy.decide(
-                demandActive = hasActiveCameraDemand(),
-                exclusiveActive = exclusiveSessionRefCount > 0,
-                resolutionChanged = true,
-            ) is ResolutionApplyPolicy.ResolutionDecision.RebindNow
+        when (
+            val action = CameraSessionArbiter.decide(
+                demandState(CameraSessionArbiter.Trigger.RebindIfFree)
+            )
         ) {
-            rebindUseCases()
+            is CameraSessionArbiter.BindingAction -> executeBinding(action)
+            else -> {}
         }
         Log.d(TAG, "applyPendingResolution: applied deferred resolution $res")
     }
@@ -968,34 +1017,42 @@ class CameraService(private val context: Context) {
 
     fun onActivityResume() {
         isActivityForeground = true
+        // One arbiter consult. Its demand input is previewRequested ALONE
+        // (see the arbiter) — keep-alive-only sessions are not restored here;
+        // that asymmetry is preserved, not fixed.
         when (
-            val decision = ResolutionApplyPolicy.decide(
-                demandActive = previewRequested,
-                exclusiveActive = exclusiveSessionRefCount > 0,
-                resolutionChanged = pendingResolution != null,
+            val action = CameraSessionArbiter.decide(
+                demandState(CameraSessionArbiter.Trigger.ActivityResumed)
             )
         ) {
-            is ResolutionApplyPolicy.ResolutionDecision.RebindNow -> {
-                if (decision.withResolutionChange) {
-                    applyPendingResolution()
-                } else {
-                    rebindUseCases()
-                }
+            CameraSessionArbiter.CameraSessionAction.ApplyPendingResolution -> {
+                applyPendingResolution()
                 Log.d(TAG, "onActivityResume: restored preview")
             }
-            ResolutionApplyPolicy.ResolutionDecision.Defer -> {}
+            is CameraSessionArbiter.BindingAction -> {
+                executeBinding(action)
+                Log.d(TAG, "onActivityResume: restored preview")
+            }
+            else -> {}
         }
     }
 
     fun onActivityStop() {
         isActivityForeground = false
-        if (currentPreviewView != null) {
-            preview?.surfaceProvider = null
-            Log.d(TAG, "onActivityStop: detached preview surface for background operation")
+        when (
+            CameraSessionArbiter.decide(demandState(CameraSessionArbiter.Trigger.ActivityStopping))
+        ) {
+            CameraSessionArbiter.CameraSessionAction.DetachSurface -> {
+                preview?.surfaceProvider = null
+                Log.d(TAG, "onActivityStop: detached preview surface for background operation")
+            }
+            else -> {}
         }
     }
 
     fun release() {
+        // Final teardown — device-bound bookkeeping, no gate to consult: no
+        // state exempts releasing the camera.
         cameraProvider?.unbindAll()
         cameraProvider = null
         clearBoundUseCases()

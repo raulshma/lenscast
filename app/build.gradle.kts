@@ -19,26 +19,33 @@ val installWebDeps by tasks.registering(Exec::class) {
     outputs.dir(file("${rootProject.projectDir}/web/node_modules"))
 }
 
-val buildWebUi by tasks.registering(Exec::class) {
-    description = "Builds the SolidJS web UI into Android assets"
+/**
+ * Registers one `npm run <script>` Exec task for the web UI, sharing the
+ * Windows cmd shim, the caching inputs, and the exit-code failure ladder.
+ */
+fun Project.npmScriptTask(
+    name: String,
+    script: String,
+    description: String,
+    dependsOnTask: TaskProvider<*>,
+    failureHeading: String,
+    failureCommand: String,
+    failureFooter: String,
+    configureCache: Exec.() -> Unit,
+): TaskProvider<Exec> = tasks.register(name, Exec::class) {
+    this.description = description
     group = "build"
 
-    dependsOn(installWebDeps)
+    dependsOn(dependsOnTask)
 
     workingDir = file("${rootProject.projectDir}/web")
     if (org.gradle.internal.os.OperatingSystem.current().isWindows) {
-        commandLine("cmd", "/c", "npm", "run", "build")
+        commandLine("cmd", "/c", "npm", "run", script)
     } else {
-        commandLine("npm", "run", "build")
+        commandLine("npm", "run", script)
     }
 
-    val webSrc = file("${rootProject.projectDir}/web/src")
-    val webPkg = file("${rootProject.projectDir}/web/package.json")
-    val webVite = file("${rootProject.projectDir}/web/vite.config.ts")
-    inputs.dir(webSrc)
-    inputs.file(webPkg)
-    inputs.file(webVite)
-    outputs.dir(file("src/main/assets/webui"))
+    configureCache()
 
     isIgnoreExitValue = true
 
@@ -47,14 +54,68 @@ val buildWebUi by tasks.registering(Exec::class) {
         if (result.exitValue != 0) {
             throw GradleException(
                 """
-                |Web UI build failed (exit code ${result.exitValue}).
+                |$failureHeading (exit code ${result.exitValue}).
                 |Make sure Node.js and npm are installed, then run:
-                |  cd web && npm install && npm run build
-                |Then rebuild the Android project.
+                |  cd web && $failureCommand
+                |$failureFooter
                 """.trimMargin()
             )
         }
     }
+}
+
+val checkWebUiTypes = npmScriptTask(
+    name = "checkWebUiTypes",
+    script = "typecheck",
+    description = "Type-checks the web UI TypeScript (tsc --noEmit); fails the build on error",
+    dependsOnTask = installWebDeps,
+    failureHeading = "Web UI typecheck failed",
+    failureCommand = "npm run typecheck",
+    failureFooter = "and fix the reported type errors before rebuilding.",
+) {
+    val webSrc = file("${rootProject.projectDir}/web/src")
+    val webContract = file("${rootProject.projectDir}/web/contract")
+    val webTsConfig = file("${rootProject.projectDir}/web/tsconfig.json")
+    inputs.dir(webSrc)
+    inputs.dir(webContract)
+    inputs.file(webTsConfig)
+    inputs.file(file("${rootProject.projectDir}/web/package.json"))
+}
+
+val testWebUi = npmScriptTask(
+    name = "testWebUi",
+    script = "test",
+    description = "Runs the web UI vitest suite (DTO contract fixtures + logic); fails the build on error",
+    dependsOnTask = checkWebUiTypes,
+    failureHeading = "Web UI tests failed",
+    failureCommand = "npm run test",
+    failureFooter = "and fix the reported failures before rebuilding.",
+) {
+    val webSrc = file("${rootProject.projectDir}/web/src")
+    val webContract = file("${rootProject.projectDir}/web/contract")
+    val webVitest = file("${rootProject.projectDir}/web/vitest.config.ts")
+    inputs.dir(webSrc)
+    inputs.dir(webContract)
+    inputs.file(webVitest)
+    inputs.file(file("${rootProject.projectDir}/web/package.json"))
+}
+
+val buildWebUi = npmScriptTask(
+    name = "buildWebUi",
+    script = "build",
+    description = "Builds the SolidJS web UI into Android assets",
+    dependsOnTask = testWebUi,
+    failureHeading = "Web UI build failed",
+    failureCommand = "npm install && npm run build",
+    failureFooter = "Then rebuild the Android project.",
+) {
+    val webSrc = file("${rootProject.projectDir}/web/src")
+    val webPkg = file("${rootProject.projectDir}/web/package.json")
+    val webVite = file("${rootProject.projectDir}/web/vite.config.ts")
+    inputs.dir(webSrc)
+    inputs.file(webPkg)
+    inputs.file(webVite)
+    outputs.dir(file("src/main/assets/webui"))
 }
 
 android {

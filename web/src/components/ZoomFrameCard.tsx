@@ -1,6 +1,7 @@
 import SettingsCard from './SettingsCard'
 import type { AllSettings, CameraSettings, Resolution } from '../types'
 import { RESOLUTION_LABELS, FRAME_RATE_OPTIONS } from '../types'
+import { API_DEFAULTS } from '../api/defaults'
 
 interface Props {
   settings: () => AllSettings | null
@@ -26,7 +27,7 @@ export default function ZoomFrameCard(props: Props) {
       <div class="field-group">
         <div class="field-row">
           <span class="field-label">Zoom</span>
-          <span class="field-value">{(s()?.camera?.zoomRatio ?? 1).toFixed(1)}x</span>
+          <span class="field-value">{(s()?.camera?.zoomRatio ?? API_DEFAULTS.cameraZoomRatio).toFixed(1)}x</span>
         </div>
         <input
           id="zoom-slider"
@@ -35,7 +36,7 @@ export default function ZoomFrameCard(props: Props) {
           min={1}
           max={10}
           step={0.1}
-          value={s()?.camera?.zoomRatio ?? 1}
+          value={s()?.camera?.zoomRatio ?? API_DEFAULTS.cameraZoomRatio}
           onInput={(e) => props.updateCamera({ zoomRatio: parseFloat(e.currentTarget.value) })}
         />
       </div>
@@ -48,7 +49,7 @@ export default function ZoomFrameCard(props: Props) {
         <select
           id="framerate-select"
           class="field-select field-select-full"
-          value={s()?.camera?.frameRate ?? 30}
+          value={s()?.camera?.frameRate ?? API_DEFAULTS.cameraFrameRate}
           onChange={(e) => props.updateCamera({ frameRate: parseInt(e.currentTarget.value) })}
         >
           {FRAME_RATE_OPTIONS.map((r) => (
@@ -65,7 +66,7 @@ export default function ZoomFrameCard(props: Props) {
         <select
           id="resolution-select"
           class="field-select field-select-full"
-          value={s()?.camera?.resolution ?? 'FHD_1080P'}
+          value={s()?.camera?.resolution ?? API_DEFAULTS.cameraResolution}
           onChange={(e) => props.updateCamera({ resolution: e.currentTarget.value as Resolution })}
         >
           {Object.entries(RESOLUTION_LABELS).map(([k, v]) => (

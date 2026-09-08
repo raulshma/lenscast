@@ -1,5 +1,6 @@
 import { Show } from 'solid-js'
 import type { AllSettings, CameraSettings, DeviceStatus, IntervalCaptureConfig, RecordingConfig, NightVisionMode } from '../types'
+import { API_DEFAULTS } from '../api/defaults'
 import LensSelector from './LensSelector'
 import ExposureCard from './ExposureCard'
 import FocusCard from './FocusCard'
@@ -100,7 +101,7 @@ export default function SettingsPanel(props: Props) {
         <ZoomFrameCard settings={props.settings} updateCamera={props.updateCamera} />
         <EffectsCard settings={props.settings} updateCamera={props.updateCamera} />
         <NightVisionCard
-          value={props.settings()?.camera?.nightVisionMode ?? 'OFF'}
+          value={props.settings()?.camera?.nightVisionMode ?? API_DEFAULTS.cameraNightVisionMode}
           onChange={(mode: NightVisionMode) => props.updateCamera({ nightVisionMode: mode })}
         />
         <Show when={props.settings()?.streaming}>

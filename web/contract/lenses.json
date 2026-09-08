@@ -1,0 +1,21 @@
+{
+  "lenses": [
+    {
+      "index": 0,
+      "id": "0",
+      "label": "Back Camera",
+      "focalLength": 5.4,
+      "isFront": false,
+      "selected": true
+    },
+    {
+      "index": 1,
+      "id": "1",
+      "label": "Front Camera",
+      "focalLength": 4.0,
+      "isFront": true,
+      "selected": false
+    }
+  ],
+  "selectedIndex": 0
+}

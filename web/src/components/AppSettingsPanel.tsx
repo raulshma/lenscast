@@ -1,5 +1,6 @@
 import { Show } from 'solid-js'
 import type { AllSettings, RtspInputFormat } from '../types'
+import { API_DEFAULTS } from '../api/defaults'
 import SettingsCard from './SettingsCard'
 
 interface Props {
@@ -11,7 +12,7 @@ interface Props {
 
 export default function AppSettingsPanel(props: Props) {
   const s = () => props.settings()
-  const webStreamingEnabled = () => s()?.streaming?.webStreamingEnabled ?? true
+  const webStreamingEnabled = () => s()?.streaming?.webStreamingEnabled ?? API_DEFAULTS.webStreamingEnabled
 
   return (
     <section class="settings-panel" id="app-settings-panel">
@@ -49,17 +50,17 @@ export default function AppSettingsPanel(props: Props) {
         <div class="field-group">
           <div class="field-row">
             <span class="field-label">JPEG Quality</span>
-            <span class="field-value">{s()?.streaming?.jpegQuality ?? 80}%</span>
+            <span class="field-value">{s()?.streaming?.jpegQuality ?? API_DEFAULTS.jpegQuality}%</span>
           </div>
           <input
             id="jpeg-quality-slider-app"
             type="range"
             class="custom-range"
-            min={10}
-            max={100}
+            min={API_DEFAULTS.jpegQualityMin}
+            max={API_DEFAULTS.jpegQualityMax}
             step={5}
             disabled={!webStreamingEnabled()}
-            value={s()?.streaming?.jpegQuality ?? 80}
+            value={s()?.streaming?.jpegQuality ?? API_DEFAULTS.jpegQuality}
             onInput={(e) => {
               const v = parseInt(e.currentTarget.value)
               props.updateStreamingDebounced({ jpegQuality: v })
@@ -74,8 +75,8 @@ export default function AppSettingsPanel(props: Props) {
               <input
                 id="adaptive-bitrate-toggle-app"
                 type="checkbox"
-                checked={s()?.streaming?.adaptiveBitrateEnabled ?? false}
-                onChange={() => props.updateStreamingAndSave({ adaptiveBitrateEnabled: !(s()?.streaming?.adaptiveBitrateEnabled ?? false) })}
+                checked={s()?.streaming?.adaptiveBitrateEnabled ?? API_DEFAULTS.adaptiveBitrateEnabled}
+                onChange={() => props.updateStreamingAndSave({ adaptiveBitrateEnabled: !(s()?.streaming?.adaptiveBitrateEnabled ?? API_DEFAULTS.adaptiveBitrateEnabled) })}
               />
               <span class="toggle-slider" />
             </label>
@@ -94,8 +95,8 @@ export default function AppSettingsPanel(props: Props) {
                 id="show-preview-toggle-app"
                 type="checkbox"
                 disabled={!webStreamingEnabled()}
-                checked={s()?.streaming?.showPreview ?? true}
-                onChange={() => props.updateStreamingAndSave({ showPreview: !(s()?.streaming?.showPreview ?? true) })}
+                checked={s()?.streaming?.showPreview ?? API_DEFAULTS.showPreview}
+                onChange={() => props.updateStreamingAndSave({ showPreview: !(s()?.streaming?.showPreview ?? API_DEFAULTS.showPreview) })}
               />
               <span class="toggle-slider" />
             </label>
@@ -123,8 +124,8 @@ export default function AppSettingsPanel(props: Props) {
                 id="stream-audio-toggle-app"
                 type="checkbox"
                 disabled={!webStreamingEnabled()}
-                checked={s()?.streaming?.streamAudioEnabled ?? true}
-                onChange={() => props.updateStreamingAndSave({ streamAudioEnabled: !(s()?.streaming?.streamAudioEnabled ?? true) })}
+                checked={s()?.streaming?.streamAudioEnabled ?? API_DEFAULTS.streamAudioEnabled}
+                onChange={() => props.updateStreamingAndSave({ streamAudioEnabled: !(s()?.streaming?.streamAudioEnabled ?? API_DEFAULTS.streamAudioEnabled) })}
               />
               <span class="toggle-slider" />
             </label>
@@ -139,8 +140,8 @@ export default function AppSettingsPanel(props: Props) {
                 id="echo-cancel-toggle-app"
                 type="checkbox"
                 disabled={!webStreamingEnabled()}
-                checked={s()?.streaming?.streamAudioEchoCancellation ?? true}
-                onChange={() => props.updateStreamingAndSave({ streamAudioEchoCancellation: !(s()?.streaming?.streamAudioEchoCancellation ?? true) })}
+                checked={s()?.streaming?.streamAudioEchoCancellation ?? API_DEFAULTS.streamAudioEchoCancellation}
+                onChange={() => props.updateStreamingAndSave({ streamAudioEchoCancellation: !(s()?.streaming?.streamAudioEchoCancellation ?? API_DEFAULTS.streamAudioEchoCancellation) })}
               />
               <span class="toggle-slider" />
             </label>
@@ -150,17 +151,17 @@ export default function AppSettingsPanel(props: Props) {
         <div class="field-group">
           <div class="field-row">
             <span class="field-label">Live Audio Bitrate</span>
-            <span class="field-value">{s()?.streaming?.streamAudioBitrateKbps ?? 128} kbps</span>
+            <span class="field-value">{s()?.streaming?.streamAudioBitrateKbps ?? API_DEFAULTS.streamAudioBitrateKbps} kbps</span>
           </div>
           <input
             id="audio-bitrate-slider-app"
             type="range"
             class="custom-range"
-            min={32}
-            max={320}
+            min={API_DEFAULTS.audioBitrateMinKbps}
+            max={API_DEFAULTS.audioBitrateMaxKbps}
             step={16}
             disabled={!webStreamingEnabled()}
-            value={s()?.streaming?.streamAudioBitrateKbps ?? 128}
+            value={s()?.streaming?.streamAudioBitrateKbps ?? API_DEFAULTS.streamAudioBitrateKbps}
             onInput={(e) => {
               const v = parseInt(e.currentTarget.value)
               props.updateStreamingDebounced({ streamAudioBitrateKbps: v })
@@ -176,7 +177,7 @@ export default function AppSettingsPanel(props: Props) {
             id="audio-channels-select-app"
             class="field-select field-select-full"
             disabled={!webStreamingEnabled()}
-            value={`${s()?.streaming?.streamAudioChannels ?? 1}`}
+            value={`${s()?.streaming?.streamAudioChannels ?? API_DEFAULTS.streamAudioChannels}`}
             onChange={(e) => {
               const v = parseInt(e.currentTarget.value)
               props.updateStreamingAndSave({ streamAudioChannels: v })
@@ -194,9 +195,9 @@ export default function AppSettingsPanel(props: Props) {
               <input
                 id="rec-audio-toggle-app"
                 type="checkbox"
-                checked={s()?.streaming?.recordingAudioEnabled ?? true}
+                checked={s()?.streaming?.recordingAudioEnabled ?? API_DEFAULTS.recordingAudioEnabled}
                 onChange={() => {
-                  const newVal = !(s()?.streaming?.recordingAudioEnabled ?? true)
+                  const newVal = !(s()?.streaming?.recordingAudioEnabled ?? API_DEFAULTS.recordingAudioEnabled)
                   props.updateStreamingAndSave({ recordingAudioEnabled: newVal })
                   props.setRecordingConfigAudio(newVal)
                 }}
@@ -225,8 +226,8 @@ export default function AppSettingsPanel(props: Props) {
               <input
                 id="rtsp-toggle-app"
                 type="checkbox"
-                checked={s()?.streaming?.rtspEnabled ?? false}
-                onChange={() => props.updateStreamingAndSave({ rtspEnabled: !(s()?.streaming?.rtspEnabled ?? false) })}
+                checked={s()?.streaming?.rtspEnabled ?? API_DEFAULTS.rtspEnabled}
+                onChange={() => props.updateStreamingAndSave({ rtspEnabled: !(s()?.streaming?.rtspEnabled ?? API_DEFAULTS.rtspEnabled) })}
               />
               <span class="toggle-slider" />
             </label>
@@ -237,16 +238,16 @@ export default function AppSettingsPanel(props: Props) {
           <div class="field-group">
             <div class="field-row">
               <span class="field-label">RTSP Port</span>
-              <span class="field-value">{s()?.streaming?.rtspPort ?? 8554}</span>
+              <span class="field-value">{s()?.streaming?.rtspPort ?? API_DEFAULTS.rtspPort}</span>
             </div>
             <input
               id="rtsp-port-slider-app"
               type="range"
               class="custom-range"
-              min={1024}
-              max={65535}
+              min={API_DEFAULTS.rtspPortMin}
+              max={API_DEFAULTS.rtspPortMax}
               step={1}
-              value={s()?.streaming?.rtspPort ?? 8554}
+              value={s()?.streaming?.rtspPort ?? API_DEFAULTS.rtspPort}
               onInput={(e) => {
                 const v = parseInt(e.currentTarget.value)
                 props.updateStreamingDebounced({ rtspPort: v })
@@ -261,7 +262,7 @@ export default function AppSettingsPanel(props: Props) {
             <select
               id="rtsp-format-select-app"
               class="field-select field-select-full"
-              value={s()?.streaming?.rtspInputFormat ?? 'AUTO'}
+              value={s()?.streaming?.rtspInputFormat ?? API_DEFAULTS.rtspInputFormat}
               onChange={(e) => {
                 props.updateStreamingAndSave({ rtspInputFormat: e.currentTarget.value as RtspInputFormat })
               }}

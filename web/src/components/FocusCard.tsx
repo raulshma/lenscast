@@ -1,6 +1,7 @@
 import SettingsCard from './SettingsCard'
 import type { AllSettings, CameraSettings, FocusMode } from '../types'
 import { FOCUS_MODE_LABELS } from '../types'
+import { API_DEFAULTS } from '../api/defaults'
 
 interface Props {
   settings: () => AllSettings | null
@@ -31,7 +32,7 @@ export default function FocusCard(props: Props) {
         <select
           id="focus-mode-select"
           class="field-select field-select-full"
-          value={s()?.camera?.focusMode ?? 'AUTO'}
+          value={s()?.camera?.focusMode ?? API_DEFAULTS.cameraFocusMode}
           onChange={(e) => props.updateCamera({ focusMode: e.currentTarget.value as FocusMode })}
         >
           {Object.entries(FOCUS_MODE_LABELS).map(([k, v]) => (
@@ -44,7 +45,7 @@ export default function FocusCard(props: Props) {
         <div class="field-group">
           <div class="field-row">
             <span class="field-label">Focus Distance</span>
-            <span class="field-value">{(s()?.camera?.focusDistance ?? 0).toFixed(1)}</span>
+            <span class="field-value">{(s()?.camera?.focusDistance ?? API_DEFAULTS.cameraFocusDistance).toFixed(1)}</span>
           </div>
           <input
             id="focus-distance-slider"
@@ -53,7 +54,7 @@ export default function FocusCard(props: Props) {
             min={0}
             max={10}
             step={0.1}
-            value={s()?.camera?.focusDistance ?? 0}
+            value={s()?.camera?.focusDistance ?? API_DEFAULTS.cameraFocusDistance}
             onInput={(e) => props.updateCamera({ focusDistance: parseFloat(e.currentTarget.value) })}
           />
         </div>

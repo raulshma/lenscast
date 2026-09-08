@@ -4,20 +4,21 @@ import com.raulshma.lenscast.capture.RecordingState
 import com.raulshma.lenscast.capture.model.RecordingConfig
 
 /**
- * The camera screen's record-button verdict — [StreamToggle]'s twin for the
- * recording output: the stop-vs-start decision over the Recording
- * Controller's state, plus the config a start carries. The decision is pure
- * — the ViewModel executes it (stop or start through the controller) and
- * wires the shared mic warn-and-degrade consult as the pre-start hook,
- * exactly as the Stream Toggle takes its `onBeforeStart`. A degrade never
- * blocks the start — warn-and-degrade is the mic policy — so the decision
- * has no blocked verdict.
+ * The record button's verdict — [StreamToggle]'s twin for the recording
+ * output: the stop-vs-start decision over the Recording Controller's state,
+ * plus the config a start carries. The decision is pure — the ViewModel
+ * executes it (stop or start through the controller), passes its start
+ * config (the camera screen's default, the capture screen's full draft) and
+ * wires the shared mic gate as the pre-start hook, exactly as the Stream
+ * Toggle takes its `onBeforeStart`. A degrade never blocks the start —
+ * warn-and-degrade is the mic policy — so the decision has no blocked
+ * verdict.
  */
 object RecordingToggle {
 
     /** What the record button should do right now. */
     sealed interface ToggleDecision {
-        /** Start now with this config; `includeAudio` is already resolved from the setting. */
+        /** Start now with this config — the [decide] startConfig as the pre-start hook returned it. */
         data class Start(val config: RecordingConfig) : ToggleDecision
 
         /** A recording (or a scheduled start) is live — stop it. */
@@ -27,19 +28,22 @@ object RecordingToggle {
     /**
      * The verdict: a live state ([RecordingState.Recording] or
      * [RecordingState.Scheduled]) stops; anything else starts, running
-     * [onBeforeStart] (the mic consult) first — on the start path only, so a
-     * stop never refreshes permissions or warns.
+     * [onBeforeStart] (the mic gate) on the start path only — a stop never
+     * refreshes permissions or warns. The hook receives the start config and
+     * returns the config the start carries, so one decide answers every
+     * caller: the camera screen passes a default config with the audio
+     * setting resolved, the capture screen passes its full draft (quality,
+     * duration, repeat, scheduled time).
      */
     fun decide(
         currentState: RecordingState,
-        audioWanted: Boolean,
-        onBeforeStart: () -> Unit = {},
+        startConfig: RecordingConfig,
+        onBeforeStart: (RecordingConfig) -> RecordingConfig = { it },
     ): ToggleDecision {
         if (currentState is RecordingState.Recording || currentState is RecordingState.Scheduled) {
             return ToggleDecision.Stop
         }
-        onBeforeStart()
-        return ToggleDecision.Start(RecordingConfig(includeAudio = audioWanted))
+        return ToggleDecision.Start(onBeforeStart(startConfig))
     }
 }
 

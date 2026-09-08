@@ -1,6 +1,7 @@
 import SettingsCard from './SettingsCard'
 import type { AllSettings, CameraSettings, HdrMode } from '../types'
 import { SCENE_MODE_OPTIONS, HDR_LABELS } from '../types'
+import { API_DEFAULTS } from '../api/defaults'
 
 interface Props {
   settings: () => AllSettings | null
@@ -29,7 +30,7 @@ export default function EffectsCard(props: Props) {
         <select
           id="scene-mode-select"
           class="field-select field-select-full"
-          value={s()?.camera?.sceneMode ?? ''}
+          value={s()?.camera?.sceneMode ?? API_DEFAULTS.cameraSceneMode}
           onChange={(e) => {
             const v = e.currentTarget.value
             props.updateCamera({ sceneMode: v === '' ? null : v })
@@ -49,8 +50,8 @@ export default function EffectsCard(props: Props) {
             <input
               id="stabilization-toggle"
               type="checkbox"
-              checked={s()?.camera?.stabilization ?? true}
-              onChange={() => props.updateCamera({ stabilization: !(s()?.camera?.stabilization ?? true) })}
+              checked={s()?.camera?.stabilization ?? API_DEFAULTS.cameraStabilization}
+              onChange={() => props.updateCamera({ stabilization: !(s()?.camera?.stabilization ?? API_DEFAULTS.cameraStabilization) })}
             />
             <span class="toggle-slider" />
           </label>
@@ -65,7 +66,7 @@ export default function EffectsCard(props: Props) {
         <select
           id="hdr-mode-select"
           class="field-select field-select-full"
-          value={s()?.camera?.hdrMode ?? 'OFF'}
+          value={s()?.camera?.hdrMode ?? API_DEFAULTS.cameraHdrMode}
           onChange={(e) => props.updateCamera({ hdrMode: e.currentTarget.value as HdrMode })}
         >
           {Object.entries(HDR_LABELS).map(([k, v]) => (

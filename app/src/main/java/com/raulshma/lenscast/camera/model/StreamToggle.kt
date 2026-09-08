@@ -6,7 +6,10 @@ package com.raulshma.lenscast.camera.model
  * its settings gate passes, and if the session choreography
  * ([Transports.beginSession] — foreground service, wake lock, camera
  * keep-alive) throws after a successful start, the just-started output is
- * rolled back so no orphaned live stream survives a failed session.
+ * rolled back so no orphaned live stream survives a failed session. The
+ * whole server runs the same tail through [startServer] — ensure server →
+ * session begin → rollback — with no settings gate, so no live server
+ * survives a failed session either.
  * Previously the web handler owned that ladder while the camera screen's
  * ViewModel fired the session begin fire-and-forget — a failed foreground
  * start there left the stream running with no session at all.
@@ -31,6 +34,9 @@ class StreamToggle(
         val rtspEnabled: Boolean
         val webActive: Boolean
         val rtspActive: Boolean
+
+        /** Ensures the streaming HTTP server is up (starting it when needed); false when it would not come up. */
+        fun ensureServerRunning(): Boolean
 
         fun startWeb(): Boolean
         fun stopWeb()
@@ -75,6 +81,29 @@ class StreamToggle(
         transports.stopServer()
         transports.endSession()
         return StreamStartOutcome.Stopped
+    }
+
+    /**
+     * The whole-server start ladder — no settings gate (the web/RTSP enables
+     * gate their own outputs inside [start], so the server itself is always
+     * startable): ensure the server is running, then attach the session. A
+     * begin failure rolls the server back so no live server survives without
+     * its session. The failure outcomes carry a null [StreamKind] — the
+     * server is no single output.
+     */
+    suspend fun startServer(): StreamStartOutcome {
+        if (!transports.ensureServerRunning()) {
+            return StreamStartOutcome.StartFailed(kind = null)
+        }
+        return try {
+            transports.beginSession()
+            StreamStartOutcome.Started
+        } catch (e: Exception) {
+            // Roll back the just-started server — never leave a live server
+            // without its session.
+            transports.stopServer()
+            StreamStartOutcome.BeginFailedRolledBack(kind = null, cause = e)
+        }
     }
 
     /**
@@ -150,14 +179,18 @@ sealed class StreamStartOutcome {
     /** The settings gate rejected the start; nothing was started. */
     data class Disabled(val kind: StreamKind) : StreamStartOutcome()
 
-    /** The start call itself failed; nothing was started. */
-    data class StartFailed(val kind: StreamKind) : StreamStartOutcome()
+    /**
+     * The start call itself failed; nothing was started. The kind is null
+     * for the whole-server start ([StreamToggle.startServer]).
+     */
+    data class StartFailed(val kind: StreamKind?) : StreamStartOutcome()
 
     /**
      * The stream started but the session begin threw; the stream was rolled
      * back. Surfaces the failure instead of the old silent fire-and-forget.
+     * The kind is null for the whole-server start ([StreamToggle.startServer]).
      */
-    data class BeginFailedRolledBack(val kind: StreamKind, val cause: Exception) : StreamStartOutcome()
+    data class BeginFailedRolledBack(val kind: StreamKind?, val cause: Exception) : StreamStartOutcome()
 
     /** True for the failed-start outcomes ([StartFailed], [BeginFailedRolledBack]) — a start attempt that left nothing live. Disabled is a gate rejection, not a failure. */
     val isStartFailure: Boolean
@@ -168,8 +201,12 @@ sealed class StreamStartOutcome {
         fun disabledMessage(kind: StreamKind): String =
             "${kind.displayName} streaming is disabled in settings."
 
-        /** The camera-screen toast for a failed (or rolled-back) start. */
-        fun startFailedMessage(kind: StreamKind): String =
-            "Failed to start ${kind.slug} streaming."
+        /**
+         * The camera-screen failure wording for a failed (or rolled-back)
+         * start — per-output for a stream kind, the one server-start wording
+         * for the whole-server start (kind null).
+         */
+        fun startFailedMessage(kind: StreamKind?): String =
+            if (kind == null) "Failed to start server" else "Failed to start ${kind.slug} streaming."
     }
 }

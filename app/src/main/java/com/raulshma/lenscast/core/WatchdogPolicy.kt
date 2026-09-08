@@ -3,10 +3,12 @@ package com.raulshma.lenscast.core
 /**
  * Pure decisions for the Stream Watchdog: the recovery-tier ladder, the
  * stream-health evaluation over a [HealthSnapshot], the user-facing failure
- * strings, the frame-tracking bookkeeping a healthy check leaves behind, and
- * the recovery verification windows plus the per-tier verification verdicts
- * ([verificationSuccess]). The watchdog's coroutine loop keeps the timing,
- * the recovery calls, and the state; every decision delegates here.
+ * strings, the frame-tracking bookkeeping a healthy check leaves behind, the
+ * recovery verification windows plus the per-tier verification verdicts and
+ * specs ([verificationSuccess], [verificationSpecFor]), and the monitor
+ * loop's tick verdict ([nextTick]) with the backoff it schedules. The
+ * watchdog's coroutine loop keeps the timing, the recovery calls, and the
+ * state; every decision delegates here.
  */
 object WatchdogPolicy {
 
@@ -19,6 +21,11 @@ object WatchdogPolicy {
     const val RECOVERY_VERIFICATION_WINDOW_MS = 3_000L
     /** Hard recovery re-initialized everything — give it twice the delay. */
     const val HARD_VERIFICATION_DELAY_MS = 2 * RECOVERY_VERIFICATION_DELAY_MS
+
+    /** Backoff before a recovery attempt starts here and doubles per failure. */
+    private const val BASE_BACKOFF_MS = 2_000L
+    /** The doubling backoff never waits longer than this. */
+    private const val MAX_BACKOFF_MS = 60_000L
 
     /**
      * The post-recovery verdict, per tier — what the watchdog's verification
@@ -40,6 +47,23 @@ object WatchdogPolicy {
         RecoveryTier.SOFT -> framesAdvanced || clientCount == 0
         RecoveryTier.MEDIUM -> isLive
         RecoveryTier.HARD -> isLive && cameraReady
+    }
+
+    /**
+     * The per-tier verification window: how long to wait after the recovery
+     * call before judging it, and whether the verdict reads the frame
+     * counters across an observation window ([RECOVERY_VERIFICATION_WINDOW_MS]).
+     */
+    data class VerificationSpec(
+        val delayMs: Long,
+        val measureFrames: Boolean,
+    )
+
+    /** The window the watchdog observes before rendering [verificationSuccess]'s verdict. */
+    fun verificationSpecFor(tier: RecoveryTier): VerificationSpec = when (tier) {
+        RecoveryTier.SOFT -> VerificationSpec(delayMs = RECOVERY_VERIFICATION_DELAY_MS, measureFrames = true)
+        RecoveryTier.MEDIUM -> VerificationSpec(delayMs = RECOVERY_VERIFICATION_DELAY_MS, measureFrames = false)
+        RecoveryTier.HARD -> VerificationSpec(delayMs = HARD_VERIFICATION_DELAY_MS, measureFrames = false)
     }
 
     enum class RecoveryTier {
@@ -142,5 +166,96 @@ object WatchdogPolicy {
             return FrameTracking(snapshot.processedFrames, snapshot.nowMs)
         }
         return null
+    }
+
+    /** The watchdog's published lifecycle statuses — the verdicts name them, the loop publishes them. */
+    enum class WatchdogStatus {
+        IDLE,          // Not monitoring (streaming not active or watchdog disabled)
+        MONITORING,    // Actively checking health
+        RECOVERING,    // Recovery in progress
+        FAILED,        // Max retries exhausted — operator intervention needed
+        COOLDOWN,      // Waiting before next retry attempt
+    }
+
+    /** What the monitor loop should do with a tick's [TickDecision]. */
+    enum class TickAction {
+        CONTINUE, // Keep the loop going; publish the decision's status if it has one
+        RESET,    // Zero the failure tracking — the stream is healthy or a recovery held
+        RECOVER,  // Run the decision's tier's recovery after its backoff delay
+        FAIL,     // Max retries exhausted — publish FAILED and stop the loop
+    }
+
+    /**
+     * The monitor loop's next move: the [TickAction] to perform, the
+     * [WatchdogStatus] to publish (null = publish nothing), the backoff to
+     * wait before a RECOVER, the tier to attempt, and whether a RESET also
+     * clears the exposed failure reason — true only for the healthy-tick
+     * reset, so a recovery-success RESET leaves the last failure visible
+     * until the next clean health check.
+     */
+    data class TickDecision(
+        val action: TickAction,
+        val status: WatchdogStatus?,
+        val backoffMs: Long = 0L,
+        val tier: RecoveryTier? = null,
+        val clearsFailureReason: Boolean = false,
+    )
+
+    /** Pure exponential backoff with a 6-attempt doubling cap — the wait before a recovery attempt. */
+    fun backoffMs(attempt: Int): Long {
+        val backoff = BASE_BACKOFF_MS * (1L shl (attempt - 1).coerceAtMost(6))
+        return backoff.coerceAtMost(MAX_BACKOFF_MS)
+    }
+
+    /**
+     * One verdict for the monitor loop's tick — the escalation choreography
+     * in data-in/data-out form. In execution order:
+     * - A health-check failure whose count (the loop increments before
+     *   asking) exceeds `maxRetries` fails the watchdog; within budget it
+     *   escalates — [tierFor] names the tier, [backoffMs] sizes the wait
+     *   before the attempt, and the status goes RECOVERING.
+     * - A healthy check with failures on the books resets to MONITORING and
+     *   clears the exposed failure reason; an already-clean check publishes
+     *   nothing.
+     * - When a recovery attempt has run this tick (`recoverySucceeded` is
+     *   non-null), its outcome is the verdict: success resets to MONITORING
+     *   (the failure reason stays on the books), failure falls back to
+     *   COOLDOWN — the other inputs are then ignored.
+     */
+    fun nextTick(
+        failureReason: String?,
+        consecutiveFailures: Int,
+        maxRetries: Int,
+        recoverySucceeded: Boolean? = null,
+    ): TickDecision {
+        // The recovery attempt's outcome, when one ran this tick, is the verdict.
+        if (recoverySucceeded != null) {
+            return if (recoverySucceeded) {
+                TickDecision(TickAction.RESET, WatchdogStatus.MONITORING)
+            } else {
+                TickDecision(TickAction.CONTINUE, WatchdogStatus.COOLDOWN)
+            }
+        }
+
+        // Healthy — reset only when failures are on the books.
+        if (failureReason == null) {
+            return if (consecutiveFailures > 0) {
+                TickDecision(TickAction.RESET, WatchdogStatus.MONITORING, clearsFailureReason = true)
+            } else {
+                TickDecision(TickAction.CONTINUE, null)
+            }
+        }
+
+        // Failure — max retries (counting this tick's) exhaust the watchdog.
+        if (consecutiveFailures > maxRetries) {
+            return TickDecision(TickAction.FAIL, WatchdogStatus.FAILED)
+        }
+
+        return TickDecision(
+            action = TickAction.RECOVER,
+            status = WatchdogStatus.RECOVERING,
+            backoffMs = backoffMs(consecutiveFailures),
+            tier = tierFor(consecutiveFailures),
+        )
     }
 }

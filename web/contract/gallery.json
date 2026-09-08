@@ -1,0 +1,28 @@
+{
+  "items": [
+    {
+      "id": "IMG_20260908_10153042.jpg",
+      "type": "PHOTO",
+      "fileName": "IMG_20260908_10153042.jpg",
+      "timestamp": 1788825600000,
+      "fileSizeBytes": 2458624,
+      "durationMs": 0,
+      "thumbnailUrl": "/api/media/IMG_20260908_10153042.jpg",
+      "downloadUrl": "/api/media/IMG_20260908_10153042.jpg?download=1"
+    },
+    {
+      "id": "VID_20260908_10201518.mp4",
+      "type": "VIDEO",
+      "fileName": "VID_20260908_10201518.mp4",
+      "timestamp": 1788825900000,
+      "fileSizeBytes": 52428800,
+      "durationMs": 15200,
+      "thumbnailUrl": "/api/media/VID_20260908_10201518.mp4/thumbnail",
+      "downloadUrl": "/api/media/VID_20260908_10201518.mp4?download=1"
+    }
+  ],
+  "total": 42,
+  "page": 0,
+  "pageSize": 50,
+  "hasMore": true
+}

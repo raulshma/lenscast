@@ -23,6 +23,7 @@ class StreamingTransports(
     override fun stopWeb() = streamingManager.stopWebStreaming()
     override fun startRtsp(): Boolean = streamingManager.startRtspStreaming()
     override fun stopRtsp() = streamingManager.stopRtspStreaming()
+    override fun ensureServerRunning(): Boolean = streamingManager.ensureServerRunning()
     override fun stopServer() = streamingManager.stopStreaming()
     override suspend fun beginSession() = streamingSession.begin()
     override suspend fun endSession() = streamingSession.end()

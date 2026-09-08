@@ -1,6 +1,7 @@
 import { Show } from 'solid-js'
 import SettingsCard from './SettingsCard'
 import type { AllSettings, DeviceStatus } from '../types'
+import { API_DEFAULTS } from '../api/defaults'
 
 interface Props {
   settings: () => AllSettings | null
@@ -20,7 +21,7 @@ const STATUS_LABELS: Record<string, { label: string; color: string }> = {
 export default function WatchdogCard(props: Props) {
   const s = () => props.settings()
   const wd = () => props.status()?.watchdog
-  const enabled = () => s()?.streaming?.watchdogEnabled ?? false
+  const enabled = () => s()?.streaming?.watchdogEnabled ?? API_DEFAULTS.watchdogEnabled
 
   const statusInfo = () => {
     const st = wd()?.status ?? 'IDLE'
@@ -68,16 +69,16 @@ export default function WatchdogCard(props: Props) {
         <div class="field-group">
           <div class="field-row">
             <span class="field-label">Max Recovery Attempts</span>
-            <span class="field-value">{s()?.streaming?.watchdogMaxRetries ?? 5}</span>
+            <span class="field-value">{s()?.streaming?.watchdogMaxRetries ?? API_DEFAULTS.watchdogMaxRetries}</span>
           </div>
           <input
             id="watchdog-max-retries-slider"
             type="range"
             class="custom-range"
-            min={1}
-            max={10}
+            min={API_DEFAULTS.watchdogMaxRetriesMin}
+            max={API_DEFAULTS.watchdogMaxRetriesMax}
             step={1}
-            value={s()?.streaming?.watchdogMaxRetries ?? 5}
+            value={s()?.streaming?.watchdogMaxRetries ?? API_DEFAULTS.watchdogMaxRetries}
             onInput={(e) => {
               const v = parseInt(e.currentTarget.value)
               props.updateStreamingDebounced({ watchdogMaxRetries: v })
@@ -89,16 +90,16 @@ export default function WatchdogCard(props: Props) {
         <div class="field-group">
           <div class="field-row">
             <span class="field-label">Health Check Interval</span>
-            <span class="field-value">{s()?.streaming?.watchdogCheckIntervalSeconds ?? 5}s</span>
+            <span class="field-value">{s()?.streaming?.watchdogCheckIntervalSeconds ?? API_DEFAULTS.watchdogCheckIntervalSeconds}s</span>
           </div>
           <input
             id="watchdog-check-interval-slider"
             type="range"
             class="custom-range"
-            min={3}
-            max={30}
+            min={API_DEFAULTS.watchdogCheckIntervalMinSeconds}
+            max={API_DEFAULTS.watchdogCheckIntervalMaxSeconds}
             step={1}
-            value={s()?.streaming?.watchdogCheckIntervalSeconds ?? 5}
+            value={s()?.streaming?.watchdogCheckIntervalSeconds ?? API_DEFAULTS.watchdogCheckIntervalSeconds}
             onInput={(e) => {
               const v = parseInt(e.currentTarget.value)
               props.updateStreamingDebounced({ watchdogCheckIntervalSeconds: v })

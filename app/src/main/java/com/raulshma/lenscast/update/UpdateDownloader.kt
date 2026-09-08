@@ -7,8 +7,6 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
 import java.io.File
-import java.net.HttpURLConnection
-import java.net.URL
 
 class UpdateDownloader(private val context: Context) {
 
@@ -25,7 +23,7 @@ class UpdateDownloader(private val context: Context) {
         updateDir.listFiles()?.forEach { it.delete() }
 
         val targetFile = File(updateDir, fileName)
-        val connection = createConnection(downloadUrl)
+        val connection = UpdateHttp.openConnection(downloadUrl, CONNECT_TIMEOUT_MS, READ_TIMEOUT_MS)
 
         try {
             val contentLength = connection.contentLengthLong
@@ -56,14 +54,5 @@ class UpdateDownloader(private val context: Context) {
 
     fun getDownloadedApk(): File? {
         return updateDir.listFiles()?.firstOrNull { it.name.endsWith(".apk") && it.length() > 0 }
-    }
-
-    private fun createConnection(url: String): HttpURLConnection {
-        return (URL(url).openConnection() as HttpURLConnection).apply {
-            connectTimeout = CONNECT_TIMEOUT_MS
-            readTimeout = READ_TIMEOUT_MS
-            setRequestProperty("User-Agent", "LensCast")
-            instanceFollowRedirects = true
-        }
     }
 }
