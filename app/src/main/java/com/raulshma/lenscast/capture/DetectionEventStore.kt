@@ -75,6 +75,13 @@ class DetectionEventStore private constructor(
 ) {
 
     private val lock = Any()
+
+    // Declared before [events]: load() runs in the events initializer, and a
+    // `by lazy` here would still be null at that point (declaration-order init).
+    private val listAdapter = AppJson.moshi.adapter<List<DetectionEvent>>(
+        Types.newParameterizedType(List::class.java, DetectionEvent::class.java),
+    )
+
     private var events: List<DetectionEvent> = load()
 
     private val _eventsFlow = MutableSharedFlow<DetectionEvent>(
@@ -147,12 +154,6 @@ class DetectionEventStore private constructor(
     private fun pruneRetentionLocked() {
         val kept = RetentionPolicy.pruneEntries(events, { it.timestampMs }, nowMs(), retentionDays())
         if (kept != null) events = kept
-    }
-
-    private val listAdapter by lazy {
-        AppJson.moshi.adapter<List<DetectionEvent>>(
-            Types.newParameterizedType(List::class.java, DetectionEvent::class.java),
-        )
     }
 
     private fun load(): List<DetectionEvent> = file.readJsonOrDefault(
