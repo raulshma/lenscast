@@ -2,6 +2,7 @@ package com.raulshma.lenscast.streaming.hls
 
 import com.raulshma.lenscast.streaming.rtsp.H264Encoder.EncodedNalUnit
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -97,5 +98,33 @@ class HlsManagerTest {
         val name = playlist.lineSequence().last { it.endsWith(".ts") }
         assertTrue(HlsManager.segment(name)!!.size > 0)
         assertEquals(null, HlsManager.segment("seg999999.ts"))
+    }
+
+    // ── demand: the encoded-stream policy's hlsRequested input ──
+
+    @Test
+    fun `a freshly enabled ring is hot and cools after the demand window`() {
+        // setUp enabled the ring: the pre-roll grace window starts now.
+        assertTrue(HlsManager.isHot())
+        nowMs += 16_000L
+        assertFalse(HlsManager.isHot())
+    }
+
+    @Test
+    fun `a playlist serve re-marks the ring hot until the window passes again`() {
+        nowMs += 16_000L
+        assertFalse(HlsManager.isHot())
+        HlsManager.playlist()
+        assertTrue(HlsManager.isHot())
+        nowMs += 10_000L
+        assertTrue(HlsManager.isHot())
+        nowMs += 6_000L
+        assertFalse(HlsManager.isHot())
+    }
+
+    @Test
+    fun `a disabled ring is never hot`() {
+        HlsManager.setEnabled(false)
+        assertFalse(HlsManager.isHot())
     }
 }

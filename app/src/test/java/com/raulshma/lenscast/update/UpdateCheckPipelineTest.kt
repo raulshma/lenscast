@@ -126,4 +126,24 @@ class UpdateCheckPipelineTest {
         assertEquals("2.0.0", notifier.shownVersion)
         assertFalse(notifier.shownVersion!!.startsWith("v"))
     }
+
+    @Test
+    fun `the asset digest rides the update available outcome`() = runBlocking {
+        val tagged = GitHubRelease(
+            tagName = "v1.2.0",
+            name = "Release v1.2.0",
+            body = "Notes",
+            htmlUrl = "https://example.com",
+            assets = listOf(
+                GitHubAsset("app-universal.apk", "https://example.com/app-universal.apk", 1024L, "sha256:abcd"),
+            ),
+        )
+        val outcome = pipeline(
+            UpdateCheckResult.UpdateAvailable(tagged, tagged.assets.first()),
+            FakeStore(),
+            FakeNotifier(),
+        ).runCheck() as UpdateCheckPipeline.UpdateOutcome.UpdateAvailable
+
+        assertEquals("sha256:abcd", outcome.digest)
+    }
 }

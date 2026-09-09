@@ -17,6 +17,10 @@ data class GitHubAsset(
     @param:Json(name = "name") val name: String,
     @param:Json(name = "browser_download_url") val browserDownloadUrl: String,
     @param:Json(name = "size") val size: Long,
+    // GitHub's release-asset digest, "sha256:<hex>". Absent on some
+    // releases — null means no integrity verification is possible (the
+    // install proceeds with a logged warning), never a failed one.
+    @param:Json(name = "digest") val digest: String? = null,
 )
 
 sealed interface UpdateState {
@@ -28,6 +32,8 @@ sealed interface UpdateState {
         val downloadUrl: String,
         val fileSizeBytes: Long,
         val fileName: String,
+        /** The release asset's "sha256:<hex>" digest; null when GitHub omits it. */
+        val digest: String? = null,
     ) : UpdateState
     data class UpToDate(val remoteVersion: String = "") : UpdateState
     data class Downloading(val progress: Float) : UpdateState

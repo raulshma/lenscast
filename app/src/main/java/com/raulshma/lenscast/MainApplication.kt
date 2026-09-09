@@ -7,7 +7,9 @@ import coil3.SingletonImageLoader
 import coil3.request.crossfade
 import coil3.video.VideoFrameDecoder
 import com.raulshma.lenscast.camera.CameraService
+import com.raulshma.lenscast.camera.model.StreamToggle
 import com.raulshma.lenscast.capture.DetectionCoordinator
+import com.raulshma.lenscast.capture.DetectionEventStore
 import com.raulshma.lenscast.capture.PhotoCaptureManager
 import com.raulshma.lenscast.capture.RecordingController
 import com.raulshma.lenscast.core.ConnectivityMonitor
@@ -19,8 +21,11 @@ import com.raulshma.lenscast.core.WebhookNotifier
 import com.raulshma.lenscast.data.CaptureHistoryStore
 import com.raulshma.lenscast.data.SettingsDataStore
 import com.raulshma.lenscast.settings.SettingsApplier
+import com.raulshma.lenscast.streaming.StreamStateJournal
+import com.raulshma.lenscast.streaming.StreamStateJournalWriter
 import com.raulshma.lenscast.streaming.StreamingManager
 import com.raulshma.lenscast.streaming.StreamingSession
+import com.raulshma.lenscast.streaming.StreamingTransports
 import com.raulshma.lenscast.update.UpdateChecker
 import com.raulshma.lenscast.update.UpdateCheckPipeline
 import com.raulshma.lenscast.update.UpdateDownloader
@@ -68,7 +73,15 @@ class MainApplication : Application(), SingletonImageLoader.Factory {
         })
     }
     val detectionCoordinator: DetectionCoordinator by lazy {
-        DetectionCoordinator(settingsDataStore, recordingController, photoCaptureManager, webhookNotifier)
+        DetectionCoordinator(
+            settingsDataStore = settingsDataStore,
+            recordingController = recordingController,
+            photoCaptureManager = photoCaptureManager,
+            webhookNotifier = webhookNotifier,
+            eventStore = detectionEventStore,
+            streamingManager = { streamingManager },
+            cameraService = { cameraService },
+        )
     }
     val tlsCertManager: TlsCertManager by lazy { TlsCertManager(this) }
     val updateChecker: UpdateChecker by lazy { UpdateChecker(this) }
@@ -81,6 +94,17 @@ class MainApplication : Application(), SingletonImageLoader.Factory {
     // instead of constructing per-composition adapters.
     val updateDownloader: UpdateDownloader by lazy { UpdateDownloader(this) }
     val updateInstaller: UpdateInstaller by lazy { UpdateInstaller(this) }
+    val streamStateJournal: StreamStateJournal by lazy { StreamStateJournal(this) }
+    // Process-singleton via [DetectionEventStore.get] — the writer (the
+    // coordinator) and the reader (the Web API handler) must share one
+    // in-memory list — owned here like every other collaborator.
+    val detectionEventStore: DetectionEventStore by lazy { DetectionEventStore.get(this) }
+    // One toggle over one transports adapter — the boot receiver and the
+    // quick-settings tile start/stop through the same ladder the camera
+    // screen and the Web API use, without re-typing the adapter.
+    val streamToggle: StreamToggle by lazy {
+        StreamToggle(StreamingTransports(streamingManager, streamingSession))
+    }
     private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
     override fun onCreate() {
@@ -88,7 +112,23 @@ class MainApplication : Application(), SingletonImageLoader.Factory {
         connectivityMonitor.start()
         settingsApplier.start(appScope)
         wireFramePump()
+        initializeStreamStateJournal()
         initializeAutoUpdateCheck()
+    }
+
+    /**
+     * Boot-resume journaling is app-runtime composition, not screen state: the
+     * journal must track the manager's live output flows even when no camera
+     * screen has composed (headless start via the Web API or the tile), so the
+     * boot receiver always reads the last observed stream state.
+     */
+    private fun initializeStreamStateJournal() {
+        StreamStateJournalWriter(
+            journal = streamStateJournal,
+            webActive = streamingManager.isWebStreamingActive,
+            rtspActive = streamingManager.isRtspRunning,
+            scope = appScope,
+        ).start()
     }
 
     /**

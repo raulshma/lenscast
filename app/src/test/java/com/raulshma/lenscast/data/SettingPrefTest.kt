@@ -160,6 +160,29 @@ class SettingPrefTest {
         assertEquals(30, watchdogCheckIntervalSecondsPref.roundTrip(120))
     }
 
+    @Test
+    fun `siren duration saver clamps to the siren bounds`() {
+        assertEquals(5, sirenDurationSecondsPref.roundTrip(0))
+        assertEquals(10, sirenDurationSecondsPref.roundTrip(StreamDefaults.SIREN_DURATION_SECONDS_DEFAULT))
+        assertEquals(60, sirenDurationSecondsPref.roundTrip(120))
+    }
+
+    @Test
+    fun `deterrence cooldown saver clamps to the cooldown bounds`() {
+        assertEquals(30, autoDeterrenceCooldownSecondsPref.roundTrip(0))
+        assertEquals(
+            StreamDefaults.AUTO_DETERRENCE_COOLDOWN_SECONDS_DEFAULT,
+            autoDeterrenceCooldownSecondsPref.roundTrip(StreamDefaults.AUTO_DETERRENCE_COOLDOWN_SECONDS_DEFAULT),
+        )
+        assertEquals(600, autoDeterrenceCooldownSecondsPref.roundTrip(10_000))
+    }
+
+    @Test
+    fun `webhook headers string pref round trips`() {
+        assertEquals("", webhookHeadersPref.decode(emptyPreferences()))
+        assertEquals("""{"X-Ok":"1"}""", webhookHeadersPref.roundTrip("""{"X-Ok":"1"}"""))
+    }
+
     // ── Composite descriptors keep their defaults ──
 
     @Test

@@ -2,11 +2,10 @@ package com.raulshma.lenscast.streaming.rtsp
 
 import android.util.Log
 import com.raulshma.lenscast.core.StreamDefaults
-import com.raulshma.lenscast.core.YuvConverter
-import com.raulshma.lenscast.streaming.FrameThrottle
+import com.raulshma.lenscast.streaming.EncodedSource
 import com.raulshma.lenscast.streaming.FrameTiming
+import com.raulshma.lenscast.streaming.RtspHealth
 import com.raulshma.lenscast.streaming.RtspServerHandle
-import java.io.InputStream
 import java.io.OutputStream
 import java.io.OutputStreamWriter
 import java.net.InetAddress
@@ -26,18 +25,19 @@ import java.util.concurrent.atomic.AtomicLong
 
 // RtspServerHandle: the server-lifecycle seam [com.raulshma.lenscast.streaming.RtspOutput]
 // drives this class through; the method set is already this interface's shape.
+// The H.264/AAC encoders live in the shared
+// [com.raulshma.lenscast.streaming.EncodedStreamHub]; this server is a sink
+// consumer of encoded access units ([feedVideo]/[feedAudio]) and reads the
+// encoder state for SDP through [EncodedSource].
 class RtspServer(
     private val port: Int = DEFAULT_PORT,
-    private val hlsVideoSink: com.raulshma.lenscast.streaming.hls.HlsVideoSink? = com.raulshma.lenscast.streaming.hls.HlsManager,
-    private val extraVideoSink: ((List<H264Encoder.EncodedNalUnit>) -> Unit)? = null,
+    private val encodedSource: EncodedSource,
 ) : RtspServerHandle {
 
     private var serverSocket: ServerSocket? = null
     private var acceptThread: Thread? = null
     private val running = AtomicBoolean(false)
 
-    private val encoder = H264Encoder()
-    private val aacEncoder = AacEncoder()
     // Fresh packetizers per start replace the old global reset() ritual.
     private var videoPacketizer = RtpPacketizer()
     private var audioPacketizer = AacRtpPacketizer()
@@ -56,8 +56,6 @@ class RtspServer(
     @Volatile
     private var config = RtspConfig()
 
-    private var lastRotation = 0
-
     private var rtpTimestamp: Long = 0
     private val timestampIncrement: Long
         get() = FrameTiming.rtpClockIncrement(config.videoFrameRate)
@@ -67,8 +65,9 @@ class RtspServer(
     private val distributedAus = AtomicLong(0)
     private val distributedPackets = AtomicLong(0)
 
-    // Frame counters for the push path, mirroring the FramePipeline pair:
-    // accepted = submitted to the encoder; dropped = throttle- or lag-rejected.
+    // AU counters for the encoded-feed path, mirroring the FramePipeline
+    // pair: accepted = AUs distributed from the encoded-stream hub; dropped
+    // = AUs that arrived while the server was not running.
     private val acceptedFrames = AtomicLong(0)
     private val droppedFrames = AtomicLong(0)
 
@@ -77,24 +76,16 @@ class RtspServer(
 
     @Volatile
     private var lastSenderReportTime = 0L
-    private val minFrameIntervalMs: Long
-        get() = FrameTiming.frameIntervalMs(config.videoFrameRate)
-
-    private val frameThrottle = FrameThrottle(
-        intervalMs = { minFrameIntervalMs },
-        tolerance = FrameThrottle.TOLERANCE,
-        updateClockOnReject = true,
-    )
 
     /**
      * Start with a complete [RtspConfig] — the old "configure via setters,
-     * then start" ordering contract is now enforced by construction.
-     * [audioStream] is the live AAC byte source for the audio track, if any.
+     * then start" ordering contract is now enforced by construction. The
+     * audio track arrives as AAC access units through [feedAudio] from the
+     * encoded-stream hub.
      */
-    override fun start(initial: RtspConfig, audioStream: InputStream?): Boolean {
+    override fun start(initial: RtspConfig): Boolean {
         if (running.getAndSet(true)) return true
         config = normalize(initial)
-        if (audioStream != null) aacEncoder.setAudioStream(audioStream)
 
         return try {
             serverSocket = ServerSocket().apply {
@@ -102,6 +93,7 @@ class RtspServer(
                 bind(InetSocketAddress(InetAddress.getByName("0.0.0.0"), port), 5)
             }
             rtpTimestamp = 0
+            audioTimestamp = 0
             firstKeyframeLogged = false
             lastSenderReportTime = 0L
             distributedAus.set(0)
@@ -110,33 +102,6 @@ class RtspServer(
             droppedFrames.set(0)
             videoPacketizer = RtpPacketizer()
             audioPacketizer = AacRtpPacketizer()
-
-            encoder.configure(config.videoWidth, config.videoHeight, config.videoBitrate, config.videoFrameRate)
-            encoder.setInputFormat(config.inputFormat)
-            encoder.onEncodedFrame = { nalUnits ->
-                distributeEncodedFrame(nalUnits)
-            }
-
-            if (!encoder.start()) {
-                running.set(false)
-                serverSocket?.close()
-                serverSocket = null
-                return false
-            }
-
-            // Force CSD emission so the first DESCRIBE can advertise real
-            // sprop-parameter-sets instead of an empty/degraded fmtp.
-            encoder.submitBlackFrame()
-
-            if (config.audioEnabled) {
-                aacEncoder.configure(config.audioSampleRateHz, config.audioChannelCount, config.audioBitrateKbps)
-                aacEncoder.onEncodedFrame = { aacData, _ ->
-                    distributeEncodedAudioFrame(aacData)
-                }
-                aacEncoder.start()
-                audioTimestamp = 0
-                Log.d(TAG, "AAC audio enabled for RTSP: ${config.audioSampleRateHz}Hz, ${config.audioChannelCount}ch")
-            }
 
             acceptThread = Thread({ acceptLoop() }, "RtspServer-Accept").apply {
                 isDaemon = true
@@ -162,11 +127,8 @@ class RtspServer(
         val caller = Throwable().stackTrace.drop(1).take(6).joinToString(" <- ")
         Log.d(TAG, "RTSP server stopped; stop() called from: $caller")
 
-        encoder.stop()
-        if (config.audioEnabled) {
-            aacEncoder.stop()
-        }
-
+        // Encoder teardown lives in the encoded-stream hub — this stop only
+        // ends the wire sessions.
         clients.values.forEach { it.close() }
         clients.clear()
 
@@ -185,50 +147,6 @@ class RtspServer(
         Log.d(TAG, "RTSP server stopped")
     }
 
-    override fun pushFrame(yuvData: ByteArray, width: Int, height: Int, rotation: Int) {
-        if (!running.get()) return
-
-        val playingClients = clients.count { it.value.isPlaying }
-        if (playingClients == 0) return
-
-        val now = System.currentTimeMillis()
-        if (!frameThrottle.accept(now)) {
-            droppedFrames.incrementAndGet()
-            return
-        }
-
-        if (encoder.isEncoderLagged()) {
-            droppedFrames.incrementAndGet()
-            return
-        }
-
-        val effectiveWidth: Int
-        val effectiveHeight: Int
-        val frameData: ByteArray
-
-        if (rotation == 90 || rotation == 270) {
-            effectiveWidth = height
-            effectiveHeight = width
-            frameData = YuvConverter.rotateNv21(yuvData, width, height, rotation)
-        } else if (rotation == 180) {
-            effectiveWidth = width
-            effectiveHeight = height
-            frameData = YuvConverter.rotateNv21(yuvData, width, height, rotation)
-        } else {
-            effectiveWidth = width
-            effectiveHeight = height
-            frameData = yuvData
-        }
-
-        if (effectiveWidth != config.videoWidth || effectiveHeight != config.videoHeight || rotation != lastRotation) {
-            lastRotation = rotation
-            reconfigureEncoder(effectiveWidth, effectiveHeight)
-        }
-
-        acceptedFrames.incrementAndGet()
-        encoder.encodeFrame(frameData)
-    }
-
     /** Entry-point validation: fps/bitrate clamped to their StreamDefaults bounds. */
     private fun normalize(config: RtspConfig): RtspConfig = config.copy(
         videoFrameRate = config.videoFrameRate.coerceIn(StreamDefaults.RTSP_FPS_MIN, StreamDefaults.RTSP_FPS_MAX),
@@ -236,66 +154,27 @@ class RtspServer(
     )
 
     /**
-     * Live-update with a new config. Which changed fields this can take in
-     * place is the [RtspConfigDiff] verdict's call: the video bitrate
-     * hot-swaps through the encoder, the frame rate reaches the RTP
-     * timestamp increment via the live config, a new input format
-     * reconfigures the encoder, and the authorizer reads the auth spec live.
-     * NEEDS_RESTART fields (audio bitrate, audio structure) do nothing here —
-     * they only become real when the caller restarts the server with the
-     * retained config.
+     * Live-update with a new config. The encoder-side hot-swaps (video
+     * bitrate, input format) live in the encoded-stream hub; this retained
+     * config drives the RTP timestamp increment, the SDP, and the audio
+     * track gate. NEEDS_RESTART fields stay the output's restart decision.
      */
     override fun apply(update: RtspConfig) {
-        val diff = RtspConfigDiff.of(config, normalize(update))
         config = normalize(update)
-        if (!running.get()) return
-        if (RtspField.VIDEO_BITRATE in diff) {
-            encoder.setBitrate(config.videoBitrate)
-        }
-        if (RtspField.INPUT_FORMAT in diff) {
-            encoder.setInputFormat(config.inputFormat)
-            reconfigureEncoder(config.videoWidth, config.videoHeight)
-        }
     }
 
-    private fun reconfigureEncoder(width: Int, height: Int) {
-        config = config.copy(videoWidth = width, videoHeight = height)
-        encoder.stop()
-        encoder.configure(width, height, config.videoBitrate, config.videoFrameRate)
-        encoder.setInputFormat(config.inputFormat)
-        encoder.onEncodedFrame = { nalUnits ->
-            distributeEncodedFrame(nalUnits)
+    /**
+     * One encoded H.264 access unit from the encoded-stream hub: the RTP
+     * fan-out (packetization, RTCP sender reports, per-client writes). The
+     * hub fans the same AUs out to HLS and WS video, so no tee lives here.
+     */
+    override fun feedVideo(nalUnits: List<H264Encoder.EncodedNalUnit>) {
+        if (!running.get()) {
+            droppedFrames.incrementAndGet()
+            return
         }
-        if (!encoder.start()) {
-            Log.e(TAG, "Encoder restart at ${width}x${height} failed; retrying once")
-            try {
-                Thread.sleep(100)
-            } catch (_: InterruptedException) {
-            }
-            if (!encoder.start()) {
-                // Encoder stays stopped: encodeFrame() no-ops safely, and the cached
-                // SPS/PPS keep serving SDP until a later reconfigure succeeds.
-                Log.e(TAG, "Encoder restart at ${width}x${height} failed permanently; frames skipped until next reconfigure")
-                return
-            }
-        }
-        encoder.submitBlackFrame()
-        Log.d(TAG, "Encoder reconfigured to ${width}x${height}")
-    }
-
-    private fun distributeEncodedFrame(nalUnits: List<H264Encoder.EncodedNalUnit>) {
         if (nalUnits.isEmpty()) return
 
-        // HLS tee: same AUs the RTP fan-out sends, no extra encode.
-        try {
-            hlsVideoSink?.feedVideo(nalUnits)
-        } catch (_: Exception) {
-        }
-        // WebSocket tee (WebCodecs dashboard playback).
-        try {
-            extraVideoSink?.invoke(nalUnits)
-        } catch (_: Exception) {
-        }
         rtpTimestamp += timestampIncrement
 
         if (nalUnits.any { it.isKeyFrame } && !firstKeyframeLogged) {
@@ -306,6 +185,7 @@ class RtspServer(
                     nalUnits.joinToString { "${H264NalParser.nalType(it.data)}:${it.data.size}" }
             )
         }
+        acceptedFrames.incrementAndGet()
 
         val auCount = distributedAus.incrementAndGet()
         if (auCount % 300L == 0L) {
@@ -343,12 +223,10 @@ class RtspServer(
         }
     }
 
-    private fun distributeEncodedAudioFrame(aacData: ByteArray) {
+    /** One encoded AAC access unit from the hub: the RTP audio fan-out. */
+    override fun feedAudio(aacData: ByteArray) {
+        if (!running.get()) return
         audioTimestamp += AUDIO_TIMESTAMP_INCREMENT
-        try {
-            hlsVideoSink?.feedAudio(aacData)
-        } catch (_: Exception) {
-        }
 
         for (client in clients.values) {
             if (client.isPlaying && client.isAudioSetup) {
@@ -434,15 +312,19 @@ class RtspServer(
         }
     }
 
-    fun getClientCount(): Int = clients.count { it.value.isPlaying }
+    private fun getClientCount(): Int = clients.count { it.value.isPlaying }
 
-    fun getAcceptedFrames(): Long = acceptedFrames.get()
+    private fun getTotalClients(): Int = clients.size
 
-    fun getDroppedFrames(): Long = droppedFrames.get()
+    private fun isHealthy(): Boolean = running.get() && serverSocket?.isBound == true && serverSocket?.isClosed == false
 
-    fun getTotalClients(): Int = clients.size
-
-    fun isHealthy(): Boolean = running.get() && serverSocket?.isBound == true && serverSocket?.isClosed == false
+    override fun health(): RtspHealth = RtspHealth(
+        playingClients = getClientCount(),
+        totalClients = getTotalClients(),
+        acceptedFrames = acceptedFrames.get(),
+        droppedFrames = droppedFrames.get(),
+        healthy = isHealthy(),
+    )
 
     /**
      * One client connection: reads the wire (via [RtspWireReader]), parses
@@ -599,9 +481,9 @@ class RtspServer(
                 audioEnabled = config.audioEnabled,
                 audioSampleRateHz = config.audioSampleRateHz,
                 audioChannelCount = config.audioChannelCount,
-                sps = encoder.sps,
-                pps = encoder.pps,
-                audioSpecificConfig = aacEncoder.audioSpecificConfig,
+                sps = encodedSource.sps,
+                pps = encodedSource.pps,
+                audioSpecificConfig = encodedSource.audioSpecificConfig,
             )
             sendResponse(
                 output, "200 OK", mapOf(
@@ -680,7 +562,7 @@ class RtspServer(
             state = SessionState.PLAYING
             isPlaying = true
 
-            encoder.requestKeyFrame()
+            encodedSource.requestKeyFrame()
 
             val streamBase = buildAbsoluteRtspUrl("/${RtspUriPolicy.DEFAULT_STREAM_PATH}")
             val nextSeq = (videoPacketizer.currentSeq + 1) and 0xFFFF

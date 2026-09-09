@@ -33,6 +33,28 @@ class StreamAuthCryptoTest {
         assertFalse(StreamAuthCrypto.constantTimeEquals("", "a"))
     }
 
+    // ── sha256Hex ──
+
+    @Test
+    fun `sha256Hex matches the published SHA-256 vectors`() {
+        assertEquals(
+            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            StreamAuthCrypto.sha256Hex(""),
+        )
+        assertEquals(
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+            StreamAuthCrypto.sha256Hex("abc"),
+        )
+    }
+
+    @Test
+    fun `sha256Hex is lowercase hex and differs per input`() {
+        val hex = StreamAuthCrypto.sha256Hex("lenscast-token")
+        assertEquals(64, hex.length)
+        assertEquals(hex, hex.lowercase())
+        assertNotEquals(StreamAuthCrypto.sha256Hex("token-1"), StreamAuthCrypto.sha256Hex("token-2"))
+    }
+
     // ── hashPassword / verifyPassword ──
 
     @Test

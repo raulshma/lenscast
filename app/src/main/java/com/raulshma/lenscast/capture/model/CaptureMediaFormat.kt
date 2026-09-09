@@ -38,6 +38,17 @@ object CaptureMediaFormat {
         CaptureType.VIDEO -> MIME_VIDEO
     }
 
+    /**
+     * The Content-Type for a capture filename as an upload part: photo and
+     * video extensions map to their mime, anything else rides octet-stream.
+     * The one sniff behind the WebDAV and Telegram uploaders.
+     */
+    fun contentTypeFor(fileName: String): String = when {
+        fileName.endsWith(".jpg", true) || fileName.endsWith(".jpeg", true) -> MIME_PHOTO
+        fileName.endsWith(".mp4", true) -> MIME_VIDEO
+        else -> "application/octet-stream"
+    }
+
     /** True for MediaStore content URIs (vs file paths or file:// URIs). */
     fun isContentUri(path: String): Boolean = path.startsWith("content://")
 

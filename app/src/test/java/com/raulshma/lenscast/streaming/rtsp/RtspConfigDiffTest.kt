@@ -49,7 +49,7 @@ class RtspConfigDiffTest {
     }
 
     @Test
-    fun `video bitrate is a hot swap`() {
+    fun `video bitrate hot-swaps - the hub applies it via live setParameters`() {
         val diff = RtspConfigDiff.of(base, base.copy(videoBitrate = 4_000_000))
         assertEquals(changed(RtspField.VIDEO_BITRATE), diff)
         assertFalse(RtspConfigDiff.needsRestart(diff))

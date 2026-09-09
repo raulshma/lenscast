@@ -69,6 +69,7 @@ class SettingsViewModel(
     val backupWebdavPassword: StateFlow<String> = settingsDataStore.backupWebdavPassword
     val httpsEnabled: StateFlow<Boolean> = settingsDataStore.httpsEnabled
     val audioDeviceId: StateFlow<String> = settingsDataStore.audioDeviceId
+    val resumeStreamsOnBoot: StateFlow<Boolean> = settingsDataStore.resumeStreamsOnBoot
 
     // Auth state comes straight from the Settings Store — no writable mirror.
     // Typing responsiveness comes from the store flow re-emit on save.
@@ -201,6 +202,8 @@ class SettingsViewModel(
     fun updateHttpsEnabled(enabled: Boolean) = save { settingsDataStore.saveHttpsEnabled(enabled) }
 
     fun updateAudioDeviceId(id: String) = save { settingsDataStore.saveAudioDeviceId(id) }
+
+    fun updateResumeStreamsOnBoot(enabled: Boolean) = save { settingsDataStore.saveResumeStreamsOnBoot(enabled) }
 
     fun updateBackupWebdavPassword(password: String) {
         if (password.isNotEmpty()) save { settingsDataStore.saveBackupWebdavPassword(password) }

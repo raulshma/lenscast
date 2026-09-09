@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   type AllSettings,
   type DeviceStatus,
+  type DetectionEventsResponse,
   type GalleryResponse,
   type IntervalCaptureStatus,
   type LensesResponse,
@@ -15,6 +16,7 @@ import galleryFixture from '../contract/gallery.json'
 import recordingStatusFixture from '../contract/recording-status.json'
 import lensesFixture from '../contract/lenses.json'
 import intervalCaptureStatusFixture from '../contract/interval-capture-status.json'
+import detectionEventsFixture from '../contract/detection-events.json'
 
 // The checked-in JSON files in web/contract/ are the shared DTO contract:
 // app's DtoContractFixtureTest serializes the Kotlin DTOs (through the
@@ -89,11 +91,22 @@ const STREAMING_KEYS = [
   'soundThresholdPercent',
   'webhookEnabled',
   'webhookUrl',
+  'webhookHeaders',
+  'autoSiren',
+  'autoTorch',
+  'sirenDurationSeconds',
+  'autoDeterrenceCooldownSeconds',
   'backupEnabled',
   'backupWifiOnly',
+  'backupTarget',
   'backupWebdavUrl',
   'backupWebdavUsername',
   'backupWebdavPassword',
+  'telegramChatId',
+  'telegramBotToken',
+  'apiTokenEnabled',
+  'apiTokenConfigured',
+  'apiToken',
   'httpsEnabled',
   'audioDeviceId',
 ]
@@ -213,6 +226,23 @@ describe('DTO contract fixtures', () => {
     const interval: IntervalCaptureStatus = intervalCaptureStatusFixture as IntervalCaptureStatus
     expectKeys(interval as unknown as Record<string, unknown>, ['isRunning', 'completedCaptures'])
   })
+
+  it('detection events fixture assigns to DetectionEventsResponse', () => {
+    const events: DetectionEventsResponse = detectionEventsFixture as DetectionEventsResponse
+    expectKeys(events as unknown as Record<string, unknown>, ['events', 'total'])
+    expect(events.events.length).toBeGreaterThan(0)
+    for (const event of events.events) {
+      expectKeys(event as unknown as Record<string, unknown>, [
+        'id',
+        'type',
+        'source',
+        'timestampMs',
+        'snapshotJpegBase64',
+        'dispatchedActions',
+      ])
+      expect(Array.isArray(event.dispatchedActions)).toBe(true)
+    }
+  })
 })
 
 describe('API_DEFAULTS lockstep with the fixtures', () => {
@@ -265,11 +295,22 @@ describe('API_DEFAULTS lockstep with the fixtures', () => {
     expect(streaming.soundThresholdPercent).toBe(API_DEFAULTS.soundThresholdPercent)
     expect(streaming.webhookEnabled).toBe(API_DEFAULTS.webhookEnabled)
     expect(streaming.webhookUrl).toBe(API_DEFAULTS.webhookUrl)
+    expect(streaming.webhookHeaders).toBe(API_DEFAULTS.webhookHeaders)
+    expect(streaming.autoSiren).toBe(API_DEFAULTS.autoSiren)
+    expect(streaming.autoTorch).toBe(API_DEFAULTS.autoTorch)
+    expect(streaming.sirenDurationSeconds).toBe(API_DEFAULTS.sirenDurationSeconds)
+    expect(streaming.autoDeterrenceCooldownSeconds).toBe(API_DEFAULTS.autoDeterrenceCooldownSeconds)
     expect(streaming.backupEnabled).toBe(API_DEFAULTS.backupEnabled)
     expect(streaming.backupWifiOnly).toBe(API_DEFAULTS.backupWifiOnly)
+    expect(streaming.backupTarget).toBe(API_DEFAULTS.backupTarget)
     expect(streaming.backupWebdavUrl).toBe(API_DEFAULTS.backupWebdavUrl)
     expect(streaming.backupWebdavUsername).toBe(API_DEFAULTS.backupWebdavUsername)
     expect(streaming.backupWebdavPassword).toBe(API_DEFAULTS.backupWebdavPassword)
+    expect(streaming.telegramChatId).toBe(API_DEFAULTS.telegramChatId)
+    expect(streaming.telegramBotToken).toBe(API_DEFAULTS.telegramBotToken)
+    expect(streaming.apiTokenEnabled).toBe(API_DEFAULTS.apiTokenEnabled)
+    expect(streaming.apiTokenConfigured).toBe(API_DEFAULTS.apiTokenConfigured)
+    expect(streaming.apiToken).toBe(API_DEFAULTS.apiToken)
     expect(streaming.httpsEnabled).toBe(API_DEFAULTS.httpsEnabled)
     expect(streaming.audioDeviceId).toBe(API_DEFAULTS.audioDeviceId)
   })
@@ -320,5 +361,15 @@ describe('API_DEFAULTS lockstep with the fixtures', () => {
     expect(API_DEFAULTS.rtspPortMax).toBe(65535)
     expect(streaming.rtspPort).toBeGreaterThanOrEqual(API_DEFAULTS.rtspPortMin)
     expect(streaming.rtspPort).toBeLessThanOrEqual(API_DEFAULTS.rtspPortMax)
+
+    expect(API_DEFAULTS.sirenDurationMinSeconds).toBe(5)
+    expect(API_DEFAULTS.sirenDurationMaxSeconds).toBe(60)
+    expect(streaming.sirenDurationSeconds).toBeGreaterThanOrEqual(API_DEFAULTS.sirenDurationMinSeconds)
+    expect(streaming.sirenDurationSeconds).toBeLessThanOrEqual(API_DEFAULTS.sirenDurationMaxSeconds)
+
+    expect(API_DEFAULTS.deterrenceCooldownMinSeconds).toBe(30)
+    expect(API_DEFAULTS.deterrenceCooldownMaxSeconds).toBe(600)
+    expect(streaming.autoDeterrenceCooldownSeconds).toBeGreaterThanOrEqual(API_DEFAULTS.deterrenceCooldownMinSeconds)
+    expect(streaming.autoDeterrenceCooldownSeconds).toBeLessThanOrEqual(API_DEFAULTS.deterrenceCooldownMaxSeconds)
   })
 })

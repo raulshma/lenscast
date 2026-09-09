@@ -13,6 +13,7 @@ import com.raulshma.lenscast.data.StreamAuthSettings
 import com.raulshma.lenscast.streaming.web.ApiRouter
 import com.raulshma.lenscast.streaming.web.AuthWebHandler
 import com.raulshma.lenscast.streaming.web.CaptureWebHandler
+import com.raulshma.lenscast.streaming.web.DetectionEventsWebHandler
 import com.raulshma.lenscast.streaming.web.DeterrenceWebHandler
 import com.raulshma.lenscast.streaming.web.GalleryWebHandler
 import com.raulshma.lenscast.streaming.web.IntervalCaptureWebHandler
@@ -25,6 +26,7 @@ import com.raulshma.lenscast.streaming.hls.HlsManager
 import com.raulshma.lenscast.streaming.rtsp.RtspAuthSpec
 import com.raulshma.lenscast.streaming.rtsp.RtspConfigDiff
 import com.raulshma.lenscast.streaming.rtsp.RtspInputFormat
+import com.raulshma.lenscast.streaming.rtsp.RtspServer
 import com.raulshma.lenscast.streaming.rtsp.RtspUriPolicy
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -46,27 +48,60 @@ class StreamingManager(
         (context.applicationContext as MainApplication).settingsDataStore
     }
 
-    // WebSocket sidecar for WebCodecs video + PTT talkback. The RTSP output
-    // receives its sink via a late-bound provider (the sink survives the
-    // server's start/stop cycles and re-attaches on each start).
+    // WebSocket sidecar for WebCodecs video + PTT talkback.
     @Volatile private var wsMediaServer: com.raulshma.lenscast.streaming.ws.WsMediaServer? = null
     private val wsVideoSink: (List<com.raulshma.lenscast.streaming.rtsp.H264Encoder.EncodedNalUnit>) -> Unit = { nalUnits ->
         wsMediaServer?.feedVideo(nalUnits)
     }
+
+    // The shared H.264/AAC encode pipeline: started whenever any encoded sink
+    // is active (RTSP output, HLS ring, WS video clients — the
+    // [EncodedStreamPolicy] verdict), and fanning its encoded access units
+    // out to every sink. Its rtsp sink forwards to whatever server instance
+    // the RTSP output currently holds, so the output stays a sink consumer —
+    // never the only encode trigger.
+    private val encodedHub: EncodedStreamHub = EncodedStreamHub(
+        policyInputs = ::encodedStreamInputs,
+        audio = audioStreamingManager,
+        audioConfig = ::audioConfig,
+        audioWanted = { streamAudioEnabled.get() && !recordingAudioCaptureActive },
+        audioBitrateKbps = { streamAudioBitrateKbps.get() },
+        rtspSink = object : EncodedSink {
+            override fun feedVideo(nalUnits: List<com.raulshma.lenscast.streaming.rtsp.H264Encoder.EncodedNalUnit>) {
+                rtspOutput.feedEncodedVideo(nalUnits)
+            }
+
+            override fun feedAudio(aacData: ByteArray) {
+                rtspOutput.feedEncodedAudio(aacData)
+            }
+        },
+        hlsSink = HlsManager,
+        wsVideoSink = wsVideoSink,
+    )
+
+    /** The sink-activity snapshot the hub's policy verdicts read. */
+    private fun encodedStreamInputs(): EncodedStreamPolicy.Inputs = EncodedStreamPolicy.Inputs(
+        webActive = webStreamingActive.get(),
+        rtspActive = rtspOutput.isActive(),
+        hlsRequested = HlsManager.isHot(),
+        wsVideoClients = wsMediaServer?.videoClientCount() ?: 0,
+    )
+
     // The RTSP output behind this manager's public surface: retained config,
     // server lifecycle, the restart-vs-apply choice, the audio-stream handle,
     // the URL, and the audio-wanted/mic-arbitration decision all live in the
     // deep module; this class keeps the fan-out and the web/mDNS concerns.
-    private val rtspOutput = RtspOutput(
+    private val rtspOutput: RtspOutput = RtspOutput(
         audio = audioStreamingManager,
         audioConfig = ::audioConfig,
         authSpec = { rtspAuthSpec(authSettingsStore.authSettings.value) },
         releaseAudio = ::releaseRtspOwnedAudio,
-        extraVideoSink = wsVideoSink,
+        onVideoBitrateChanged = encodedHub::setVideoBitrate,
         onStateChanged = { running, url ->
             _isRtspRunning.value = running
             _rtspUrl.value = url
         },
+        serverFactory = { port -> RtspServer(port, encodedHub) },
     )
     private val serviceDiscoveryManager = ServiceDiscoveryManager(context)
     private val sirenPlayer = com.raulshma.lenscast.core.SirenPlayer()
@@ -105,8 +140,26 @@ class StreamingManager(
 
     private var lastReportedClientCount = -1
 
+    // Detection-event snapshot source: the latest rendered M-JPEG frame,
+    // retained here because StreamingServer owns no latest-frame getter — the
+    // one frame DetectionCoordinator can reach without a fresh camera capture.
+    @Volatile private var latestWebJpeg: ByteArray? = null
+
     init {
-        framePipeline.setListener { jpeg -> server.updateFrame(jpeg) }
+        framePipeline.setListener { jpeg ->
+            latestWebJpeg = jpeg
+            server.updateFrame(jpeg)
+        }
+        // The gate reads the API-token settings live through this provider —
+        // no snapshot and no re-apply: a token (or the enable toggle) saved
+        // over /api/settings authorizes on the very next request. Installed
+        // at the composition root, which owns both the gate and the store.
+        webAuthGate.setApiTokenProvider {
+            WebAuthGate.ApiTokenConfig(
+                enabled = authSettingsStore.apiTokenEnabled.value,
+                hash = authSettingsStore.apiTokenHash.value,
+            )
+        }
     }
 
     private val _isStreaming = MutableStateFlow(false)
@@ -239,6 +292,12 @@ class StreamingManager(
     fun setDetectionListener(listener: ((type: String, value: Double) -> Unit)?) {
         detectionListener = listener
     }
+
+    /** The shared siren for the web toggle and detection automation — one audio owner. */
+    fun sirenController(): com.raulshma.lenscast.core.SirenPlayer = sirenPlayer
+
+    /** Latest rendered M-JPEG frame for detection-event snapshots; null before the first frame. */
+    fun latestWebFrame(): ByteArray? = latestWebJpeg
 
     /** True kick: closes the MJPEG stream so the socket drops. */
     fun kickHttpClient(clientId: String): Boolean = try {
@@ -419,6 +478,10 @@ class StreamingManager(
         HlsManager.setEnabled(true)
 
         refreshAudioStreamingState()
+        // The capture settle lands first, then the hub taps it for the AAC
+        // track — the hub's start runs the policy verdict immediately, so
+        // HLS/WS video have an encoded source before the first client asks.
+        encodedHub.refresh()
         if (mdnsEnabled.get()) {
             registerMdnsService(currentPort)
         }
@@ -432,6 +495,7 @@ class StreamingManager(
         if (!webStreamingActive.getAndSet(false)) return
         audioStreamingManager.stop()
         HlsManager.setEnabled(false)
+        encodedHub.refresh()
         clearWebAudioState()
         _streamUrl.value = ""
         _clientCount.value = 0
@@ -448,6 +512,7 @@ class StreamingManager(
         }
         if (rtspOutput.isActive()) return true
         rtspOutput.start()
+        encodedHub.refresh()
         updateStreamingState()
         Log.d(TAG, "RTSP streaming started")
         return true
@@ -456,18 +521,21 @@ class StreamingManager(
     fun stopRtspStreaming() {
         if (!rtspOutput.isActive()) return
         rtspOutput.stop()
+        encodedHub.refresh()
         updateStreamingState()
         Log.d(TAG, "RTSP streaming stopped")
     }
 
     /**
-     * One camera frame fans out to every active output — the M-JPEG web
-     * pipeline and the RTSP encoder — mirroring [setFrameRate]'s internal
-     * fan-out. Each output no-ops while it is inactive.
+     * One camera frame fans out to every consumer — the M-JPEG web pipeline
+     * and the shared encoded-stream hub (RTSP RTP, HLS, WS video). The web
+     * pipeline no-ops while inactive; the hub runs its policy verdict per
+     * frame and encodes only while some encoded sink is active.
      */
     fun pushFrame(yuvData: ByteArray, width: Int, height: Int, rotation: Int = 0) {
         // Thermal CRITICAL pauses encoding on both outputs — the pipeline's
-        // Long.MAX_VALUE delay alone would stall MJPEG while RTSP kept burning CPU.
+        // Long.MAX_VALUE delay alone would stall MJPEG while the encoded
+        // sinks kept burning CPU.
         if (isThermallyPaused()) return
         // Motion runs on sampled luma even with zero viewers (surveillance).
         try {
@@ -475,7 +543,7 @@ class StreamingManager(
         } catch (_: Exception) {
         }
         pushFrameToWeb(yuvData, width, height, rotation)
-        pushFrameToRtsp(yuvData, width, height, rotation)
+        encodedHub.pushFrame(yuvData, width, height, rotation)
     }
 
     private fun pushFrameToWeb(yuvData: ByteArray, width: Int, height: Int, rotation: Int) {
@@ -493,24 +561,21 @@ class StreamingManager(
         framePipeline.push(yuvData, width, height, rotation, currentOverlaySettings, clientCount)
     }
 
-    private fun pushFrameToRtsp(yuvData: ByteArray, width: Int, height: Int, rotation: Int) {
-        if (!rtspOutput.isActive()) return
-        rtspOutput.pushFrame(yuvData, width, height, rotation)
-    }
-
     fun setJpegQuality(quality: Int) {
         framePipeline.setJpegQuality(quality.coerceIn(StreamDefaults.JPEG_QUALITY_MIN, StreamDefaults.JPEG_QUALITY_MAX))
     }
 
     /**
-     * One user-facing frame rate fans out to every subsystem that throttles or
-     * encodes by it: the M-JPEG frame interval, the adaptive-bitrate default,
-     * and the RTSP output.
+     * One user-facing frame rate fans out to every subsystem that throttles
+     * or encodes by it: the M-JPEG frame interval, the adaptive-bitrate
+     * default, and the encoded-stream hub (RTP increment follows via the
+     * RTSP output's own retained config).
      */
     fun setFrameRate(fps: Int) {
         setStreamFrameRate(fps)
         setAdaptiveDefaultFrameRate(fps)
         rtspOutput.setFrameRate(fps)
+        encodedHub.setFrameRate(fps)
     }
 
     private fun setStreamFrameRate(fps: Int) {
@@ -704,6 +769,7 @@ class StreamingManager(
 
     fun setRtspInputFormat(format: RtspInputFormat) {
         rtspOutput.setInputFormat(format)
+        encodedHub.setInputFormat(format)
     }
 
     fun setMdnsEnabled(enabled: Boolean) {
@@ -749,6 +815,7 @@ class StreamingManager(
         }
         return StreamingServer(
             port, context, audioStreamingManager, webApiStack, networkQualityMonitor, webAuthGate,
+            encodedStreamActive = { encodedHub.isRunning() },
             tlsServerSocketFactory = factory,
         ).also {
             it.setWebStreamingEnabled(webStreamingEnabled.get())
@@ -783,6 +850,9 @@ class StreamingManager(
         val app = context.applicationContext as MainApplication
         val gallery = GalleryWebHandler(context, app.captureHistoryStore)
         val deterrence = DeterrenceWebHandler(sirenPlayer)
+        val detectionEvents = DetectionEventsWebHandler(
+            app.detectionEventStore,
+        )
         val authHandler = AuthWebHandler(app.settingsDataStore, webAuthGate)
         val statusHandler = StatusWebHandler(
             streamingManager = this,
@@ -803,6 +873,7 @@ class StreamingManager(
                 recording = RecordingWebHandler(app.recordingController),
                 gallery = gallery,
                 deterrence = deterrence,
+                detectionEvents = detectionEvents,
                 auth = authHandler,
             ),
             gallery = gallery,
@@ -829,6 +900,7 @@ class StreamingManager(
 
     fun release() {
         framePipeline.release()
+        encodedHub.stop()
         audioStreamingManager.release()
         stopStreaming()
     }

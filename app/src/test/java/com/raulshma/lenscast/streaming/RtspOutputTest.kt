@@ -1,12 +1,11 @@
 package com.raulshma.lenscast.streaming
 
+import com.raulshma.lenscast.streaming.rtsp.H264Encoder
 import com.raulshma.lenscast.streaming.rtsp.RtspAuthSpec
 import com.raulshma.lenscast.streaming.rtsp.RtspConfig
 import com.raulshma.lenscast.streaming.rtsp.RtspInputFormat
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
-import org.junit.Assert.assertNotNull
-import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.InputStream
@@ -53,14 +52,16 @@ class RtspOutputTest {
 
     /** Server fake: one per factory call, recording every call. */
     private class FakeServer : RtspServerHandle {
-        val startCalls = mutableListOf<Pair<RtspConfig, InputStream?>>()
+        val startCalls = mutableListOf<RtspConfig>()
         val applyCalls = mutableListOf<RtspConfig>()
-        val pushedFrames = mutableListOf<ByteArray>()
+        val fedVideo = mutableListOf<List<H264Encoder.EncodedNalUnit>>()
+        val fedAudio = mutableListOf<ByteArray>()
         var stopCalls = 0
         var startReturns = true
+        var healthy = true
 
-        override fun start(initial: RtspConfig, audioStream: InputStream?): Boolean {
-            startCalls += initial to audioStream
+        override fun start(initial: RtspConfig): Boolean {
+            startCalls += initial
             return startReturns
         }
 
@@ -72,9 +73,15 @@ class RtspOutputTest {
             applyCalls += config
         }
 
-        override fun pushFrame(yuvData: ByteArray, width: Int, height: Int, rotation: Int) {
-            pushedFrames += yuvData
+        override fun feedVideo(nalUnits: List<H264Encoder.EncodedNalUnit>) {
+            fedVideo += nalUnits
         }
+
+        override fun feedAudio(aacData: ByteArray) {
+            fedAudio += aacData
+        }
+
+        override fun health(): RtspHealth = RtspHealth(healthy = healthy)
     }
 
     private class Harness(
@@ -85,6 +92,7 @@ class RtspOutputTest {
         val factoryPorts = mutableListOf<Int>()
         val releaseCalls = mutableListOf<Unit>()
         val states = mutableListOf<Pair<Boolean, String>>()
+        val hubBitrateCalls = mutableListOf<Int>()
         var audioConfigCalls = 0
 
         val output = RtspOutput(
@@ -95,6 +103,7 @@ class RtspOutputTest {
             },
             authSpec = { authSpecs.lastOrNull() },
             releaseAudio = { releaseCalls += Unit },
+            onVideoBitrateChanged = { hubBitrateCalls += it },
             onStateChanged = { running, url -> states += running to url },
             serverFactory = { port ->
                 factoryPorts += port
@@ -120,9 +129,7 @@ class RtspOutputTest {
         assertEquals(1, h.audio.startCalls)
         assertEquals(1, h.audio.openStreamCalls)
         assertEquals(1, server.startCalls.size)
-        val (config, stream) = server.startCalls.single()
-        assertNotNull(stream)
-        assertTrue(config.audioEnabled)
+        assertTrue(server.startCalls.single().audioEnabled)
     }
 
     @Test
@@ -135,9 +142,7 @@ class RtspOutputTest {
 
         assertEquals(0, h.audio.startCalls)
         assertEquals(0, h.audio.openStreamCalls)
-        val (config, stream) = server.startCalls.single()
-        assertNull(stream)
-        assertFalse(config.audioEnabled)
+        assertFalse(server.startCalls.single().audioEnabled)
     }
 
     @Test
@@ -149,7 +154,7 @@ class RtspOutputTest {
         h.output.start()
 
         assertEquals(0, h.audio.startCalls)
-        assertFalse(h.servers.single().startCalls.single().first.audioEnabled)
+        assertFalse(h.servers.single().startCalls.single().audioEnabled)
     }
 
     @Test
@@ -173,7 +178,7 @@ class RtspOutputTest {
 
         val server = h.startEnabled()
 
-        val config = server.startCalls.single().first
+        val config = server.startCalls.single()
         assertEquals(44_100, config.audioSampleRateHz)
         assertEquals(2, config.audioChannelCount)
         assertEquals(spec, config.auth)
@@ -186,7 +191,7 @@ class RtspOutputTest {
         val h = Harness()
         h.output.setAudioBitrate(96)
 
-        val config = h.startEnabled().startCalls.single().first
+        val config = h.startEnabled().startCalls.single()
 
         assertEquals(96, config.audioBitrateKbps)
         // The capture config is fetched only when audio is actually wanted.
@@ -235,7 +240,7 @@ class RtspOutputTest {
 
         assertEquals(2, h.servers.size) // a fresh server instance per start
         assertEquals(1, first.stopCalls)
-        assertEquals(96, h.servers[1].startCalls.single().first.audioBitrateKbps)
+        assertEquals(96, h.servers[1].startCalls.single().audioBitrateKbps)
         assertTrue(h.output.isRunning())
     }
 
@@ -252,7 +257,7 @@ class RtspOutputTest {
         // Retained anyway — the next start picks it up.
         h.output.stop()
         h.output.start()
-        assertEquals(96, h.servers[1].startCalls.single().first.audioBitrateKbps)
+        assertEquals(96, h.servers[1].startCalls.single().audioBitrateKbps)
     }
 
     @Test
@@ -262,7 +267,7 @@ class RtspOutputTest {
         h.output.setAudioBitrate(96)
 
         assertEquals(0, h.servers.size)
-        assertEquals(96, h.startEnabled().startCalls.single().first.audioBitrateKbps)
+        assertEquals(96, h.startEnabled().startCalls.single().audioBitrateKbps)
     }
 
     @Test
@@ -284,7 +289,7 @@ class RtspOutputTest {
         h.output.setAudioWanted(false)
 
         assertEquals(2, h.servers.size)
-        assertFalse(h.servers[1].startCalls.single().first.audioEnabled)
+        assertFalse(h.servers[1].startCalls.single().audioEnabled)
         assertEquals(1, h.audio.openStreamCalls) // no second open
     }
 
@@ -298,10 +303,9 @@ class RtspOutputTest {
         h.output.setAudioConfig(false, 96)
 
         assertEquals(2, h.servers.size) // one restart, not one per field
-        val (config, stream) = h.servers[1].startCalls.single()
+        val config = h.servers[1].startCalls.single()
         assertFalse(config.audioEnabled)
         assertEquals(96, config.audioBitrateKbps)
-        assertNull(stream)
         assertEquals(1, h.audio.openStreamCalls) // no second open when turning off
     }
 
@@ -313,7 +317,7 @@ class RtspOutputTest {
         h.output.setAudioConfig(true, 96)
 
         assertEquals(2, h.servers.size)
-        assertEquals(96, h.servers[1].startCalls.single().first.audioBitrateKbps)
+        assertEquals(96, h.servers[1].startCalls.single().audioBitrateKbps)
     }
 
     @Test
@@ -339,10 +343,9 @@ class RtspOutputTest {
 
         assertEquals(0, h.servers.size)
         h.output.start()
-        val (config, stream) = h.servers.single().startCalls.single()
+        val config = h.servers.single().startCalls.single()
         assertFalse(config.audioEnabled)
         assertEquals(96, config.audioBitrateKbps)
-        assertNull(stream)
     }
 
     @Test
@@ -403,7 +406,7 @@ class RtspOutputTest {
         h.output.setAuth()
 
         assertEquals(0, h.servers.size)
-        val config = h.startEnabled().startCalls.single().first
+        val config = h.startEnabled().startCalls.single()
         assertEquals(30, config.videoFrameRate)
         assertEquals(RtspInputFormat.NV21, config.inputFormat)
         assertEquals("u", config.auth?.username)
@@ -412,22 +415,25 @@ class RtspOutputTest {
     // ── the update() diff routing ──
 
     @Test
-    fun `a video-bitrate-only change applies live while an audio-bitrate-only change restarts`() {
+    fun `a video-bitrate-only change hot-swaps while an audio-bitrate change ladders`() {
         val h = Harness()
-        val server = h.startEnabled()
+        h.startEnabled()
 
         h.output.update { it.copy(videoBitrate = 4_000_000) }
 
-        // Video bitrate is HOT_SWAP: same server, one live apply.
+        // Video bitrate is HOT_SWAP: the encoded-stream hub applies it live
+        // (setVideoBitrate → MediaCodec setParameters), and the output only
+        // refreshes the SDP's b=AS line through apply.
         assertEquals(1, h.servers.size)
-        assertEquals(1, server.applyCalls.size)
-        assertEquals(4_000_000, server.applyCalls.single().videoBitrate)
+        assertEquals(4_000_000, h.servers[0].applyCalls.single().videoBitrate)
+        assertEquals(listOf(4_000_000), h.hubBitrateCalls)
 
         h.output.setAudioBitrate(96)
 
-        // Audio bitrate is NEEDS_RESTART: the ladder restarts a live, audio-wanted output.
+        // Audio bitrate is NEEDS_RESTART — the AAC encoder only
+        // reads it at its next start.
         assertEquals(2, h.servers.size)
-        assertEquals(96, h.servers[1].startCalls.single().first.audioBitrateKbps)
+        assertEquals(96, h.servers[1].startCalls.single().audioBitrateKbps)
     }
 
     @Test
@@ -454,7 +460,7 @@ class RtspOutputTest {
         // Any NEEDS_RESTART field wins: restart with the new config, no live apply.
         assertEquals(2, h.servers.size)
         assertEquals(0, server.applyCalls.size)
-        val (config, _) = h.servers[1].startCalls.single()
+        val config = h.servers[1].startCalls.single()
         assertEquals(64, config.audioBitrateKbps)
         assertEquals(RtspInputFormat.I420, config.inputFormat)
     }
@@ -510,16 +516,34 @@ class RtspOutputTest {
     // ── lifecycle, state, and release ──
 
     @Test
-    fun `pushFrame reaches the running server and no-ops while stopped`() {
+    fun `encoded feeds reach the running server and no-op while stopped`() {
         val h = Harness()
         val server = h.startEnabled()
-        val frame = ByteArray(16)
 
-        h.output.pushFrame(frame, 640, 480, 90)
+        h.output.feedEncodedVideo(emptyList())
+        h.output.feedEncodedAudio(ByteArray(4))
+        assertEquals(1, server.fedVideo.size)
+        assertEquals(1, server.fedAudio.size)
+
         h.output.stop()
-        h.output.pushFrame(frame, 640, 480, 90)
+        h.output.feedEncodedVideo(emptyList())
+        h.output.feedEncodedAudio(ByteArray(4))
+        assertEquals(1, server.fedVideo.size)
+        assertEquals(1, server.fedAudio.size)
+    }
 
-        assertEquals(1, server.pushedFrames.size)
+    @Test
+    fun `healthSnapshot reports the live server verdict and not-running when stopped`() {
+        val h = Harness()
+        val server = h.startEnabled()
+
+        assertTrue(h.output.healthSnapshot().healthy)
+
+        server.healthy = false
+        assertFalse(h.output.healthSnapshot().healthy)
+
+        h.output.stop()
+        assertFalse(h.output.healthSnapshot().healthy)
     }
 
     @Test

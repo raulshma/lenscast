@@ -10,18 +10,22 @@ interface Props {
 }
 
 /**
- * WebDAV backup destination (Nextcloud/self-host friendly): new captures
- * upload to the configured collection. The password field is write-only —
- * an empty value keeps the stored secret, so it never round-trips the wire.
- * The field is bound to a local draft, not the server value: responses
- * always carry a blank password, and binding to them would wipe the input
- * mid-typing on the next settings refresh.
+ * Capture backup destinations: WebDAV (Nextcloud/self-host friendly) or
+ * Telegram (Bot API sendDocument). The target picker routes the worker; the
+ * unselected target's fields stay visible but disabled, never deleted. Both
+ * secret fields are write-only — an empty value keeps the stored secret, so
+ * neither ever round-trips the wire. Each is bound to a local draft, not the
+ * server value: responses always carry a blank secret, and binding to them
+ * would wipe the input mid-typing on the next settings refresh.
  */
 export default function BackupCard(props: Props) {
   const s = () => props.settings()
   const stream = () => s()?.streaming
   const backupOn = () => stream()?.backupEnabled ?? API_DEFAULTS.backupEnabled
+  const telegramSelected = () =>
+    (stream()?.backupTarget ?? API_DEFAULTS.backupTarget) === 'telegram'
   const [passwordDraft, setPasswordDraft] = createSignal('')
+  const [telegramTokenDraft, setTelegramTokenDraft] = createSignal('')
 
   return (
     <SettingsCard
@@ -32,7 +36,7 @@ export default function BackupCard(props: Props) {
           <line x1="12" y1="3" x2="12" y2="15" />
         </svg>
       }
-      title="Backup (WebDAV)"
+      title="Backup"
     >
       <div class="field-group">
         <div class="field-row field-row-toggle">
@@ -52,6 +56,28 @@ export default function BackupCard(props: Props) {
       <Show when={backupOn()}>
         <div class="field-group">
           <div class="field-row">
+            <span class="field-label">Target</span>
+          </div>
+          <div class="deterrence-row">
+            <button
+              type="button"
+              class={`action-btn ${!telegramSelected() ? 'action-btn-primary' : 'action-btn-ghost'}`}
+              onClick={() => props.updateStreamingAndSave({ backupTarget: 'webdav' })}
+            >
+              <span>WebDAV</span>
+            </button>
+            <button
+              type="button"
+              class={`action-btn ${telegramSelected() ? 'action-btn-primary' : 'action-btn-ghost'}`}
+              onClick={() => props.updateStreamingAndSave({ backupTarget: 'telegram' })}
+            >
+              <span>Telegram</span>
+            </button>
+          </div>
+        </div>
+
+        <div class="field-group">
+          <div class="field-row">
             <span class="field-label">WebDAV Collection URL</span>
           </div>
           <input
@@ -59,6 +85,7 @@ export default function BackupCard(props: Props) {
             type="url"
             class="field-input field-input-full"
             placeholder="https://cloud.example.com/remote.php/dav/files/user/LensCast"
+            disabled={telegramSelected()}
             value={stream()?.backupWebdavUrl ?? ''}
             onInput={(e) => props.updateStreamingDebounced({ backupWebdavUrl: e.currentTarget.value })}
           />
@@ -73,6 +100,7 @@ export default function BackupCard(props: Props) {
             type="text"
             class="field-input field-input-full"
             autocomplete="off"
+            disabled={telegramSelected()}
             value={stream()?.backupWebdavUsername ?? ''}
             onInput={(e) => props.updateStreamingDebounced({ backupWebdavUsername: e.currentTarget.value })}
           />
@@ -88,6 +116,7 @@ export default function BackupCard(props: Props) {
             class="field-input field-input-full"
             autocomplete="new-password"
             placeholder="(unchanged)"
+            disabled={telegramSelected()}
             value={passwordDraft()}
             onInput={(e) => {
               setPasswordDraft(e.currentTarget.value)
@@ -95,6 +124,41 @@ export default function BackupCard(props: Props) {
             }}
           />
         </div>
+
+        <Show when={telegramSelected()}>
+          <div class="field-group">
+            <div class="field-row">
+              <span class="field-label">Telegram Bot Token</span>
+            </div>
+            <input
+              id="backup-telegram-token"
+              type="password"
+              class="field-input field-input-full"
+              autocomplete="new-password"
+              placeholder="(unchanged) — from @BotFather"
+              value={telegramTokenDraft()}
+              onInput={(e) => {
+                setTelegramTokenDraft(e.currentTarget.value)
+                props.updateStreamingDebounced({ telegramBotToken: e.currentTarget.value })
+              }}
+            />
+          </div>
+
+          <div class="field-group">
+            <div class="field-row">
+              <span class="field-label">Telegram Chat ID</span>
+            </div>
+            <input
+              id="backup-telegram-chat"
+              type="text"
+              class="field-input field-input-full"
+              autocomplete="off"
+              placeholder="e.g. 123456789 (from @userinfobot)"
+              value={stream()?.telegramChatId ?? ''}
+              onInput={(e) => props.updateStreamingDebounced({ telegramChatId: e.currentTarget.value })}
+            />
+          </div>
+        </Show>
 
         <div class="field-group">
           <div class="field-row field-row-toggle">

@@ -219,4 +219,25 @@ class DtoContractFixtureTest {
             moshi.adapter(IntervalCaptureStatusDto::class.java).toJson(interval),
         )
     }
+
+    @Test
+    fun `detection events response matches the detection events fixture`() {
+        val events = DetectionEventsResponseDto(
+            events = listOf(
+                DetectionEventDto(
+                    id = "3f2b8c4e-1a5d-4e6f-9a7b-2c8d0e1f2a3b",
+                    type = "motion",
+                    source = "lenscast",
+                    timestampMs = 1_788_825_600_000,
+                    snapshotJpegBase64 = "/9j/4AAQSkZJRg==",
+                    dispatchedActions = listOf("recording", "webhook"),
+                ),
+            ),
+            total = 1,
+        )
+        assertMatchesFixture(
+            "detection-events.json",
+            moshi.adapter(DetectionEventsResponseDto::class.java).toJson(events),
+        )
+    }
 }

@@ -1,48 +1,109 @@
-import { createSignal, For, onCleanup, onMount, Show } from 'solid-js'
+import { createSignal, For, Show } from 'solid-js'
+import { createVisiblePoll } from '../hooks/visiblePoll'
 import SettingsCard from './SettingsCard'
-import { getAuthStatus, getSessionStatus, login } from '../api/client'
-
-interface SessionInfo {
-  tokenPrefix: string
-  expiresAtMs: number
-}
+import {
+  getAuthConfig,
+  getAuthSessions,
+  getSettings,
+  login,
+  revokeAuthSession,
+  saveStreamingPatch,
+  updateAuthConfig,
+} from '../api/client'
+import type { AuthSessionInfo } from '../api/client'
 
 /**
  * Remote credential rotation + session management. Talks to
  * /api/auth/config and /api/auth/sessions; an empty password keeps the
  * stored secret, and a rotated password revokes every session (this
  * browser included — you re-login immediately with the new one).
+ *
+ * Also the API-token surface: Generate mints a random token client-side
+ * (crypto.getRandomValues, 32 bytes, base64url), PUTs it once as the
+ * write-only `apiToken` field, and shows it exactly once — the server keeps
+ * only its SHA-256 hash. The token grants read-only GET/HEAD access for
+ * programmatic clients (Home Assistant, curl) via `Authorization: Bearer`
+ * or `X-Api-Token`.
  */
 export default function AuthCard() {
   const [enabled, setEnabled] = createSignal(false)
   const [username, setUsername] = createSignal('')
   const [password, setPassword] = createSignal('')
-  const [sessions, setSessions] = createSignal<SessionInfo[]>([])
+  const [sessions, setSessions] = createSignal<AuthSessionInfo[]>([])
   const [msg, setMsg] = createSignal('')
   const [busy, setBusy] = createSignal(false)
-
-  async function jsonFetch(input: string, init: RequestInit = {}): Promise<any> {
-    const response = await fetch(input, {
-      credentials: 'same-origin',
-      ...init,
-      headers: { 'X-Requested-With': 'XMLHttpRequest', ...(init.headers ?? {}) },
-    })
-    const body = await response.json().catch(() => null)
-    if (!response.ok) throw new Error(body?.error || `HTTP ${response.status}`)
-    return body
-  }
+  const [tokenEnabled, setTokenEnabled] = createSignal(false)
+  const [tokenConfigured, setTokenConfigured] = createSignal(false)
+  const [generatedToken, setGeneratedToken] = createSignal('')
+  const [tokenBusy, setTokenBusy] = createSignal(false)
+  const [tokenMsg, setTokenMsg] = createSignal('')
 
   async function refresh() {
-    if (typeof document !== 'undefined' && document.hidden) return
     try {
-      const sessionsBody = await jsonFetch('/api/auth/sessions')
+      const sessionsBody = await getAuthSessions()
       setSessions(sessionsBody.sessions ?? [])
-      const config = await jsonFetch('/api/auth/config')
+      const config = await getAuthConfig()
       setEnabled(config.enabled ?? false)
       setUsername(config.username ?? '')
+      const settings = await getSettings()
+      setTokenEnabled(settings.streaming?.apiTokenEnabled ?? false)
+      setTokenConfigured(settings.streaming?.apiTokenConfigured ?? false)
     } catch {
       // Auth endpoints may themselves 401 when auth is required but session
       // expired — the global auth flow handles that case.
+    }
+  }
+
+  function generateApiToken(): string {
+    const bytes = new Uint8Array(32)
+    crypto.getRandomValues(bytes)
+    let binary = ''
+    bytes.forEach((b) => {
+      binary += String.fromCharCode(b)
+    })
+    return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+  }
+
+  async function generateToken() {
+    if (tokenBusy()) return
+    setTokenBusy(true)
+    setTokenMsg('')
+    setGeneratedToken('')
+    try {
+      const token = generateApiToken()
+      await saveStreamingPatch({ apiToken: token, apiTokenEnabled: true })
+      // Shown exactly once — only the hash left the wire afterwards.
+      setGeneratedToken(token)
+      setTokenEnabled(true)
+      setTokenConfigured(true)
+    } catch (e: any) {
+      setTokenMsg(e?.message || 'Token update failed')
+    } finally {
+      setTokenBusy(false)
+    }
+  }
+
+  async function toggleTokenEnabled() {
+    if (tokenBusy()) return
+    setTokenBusy(true)
+    setTokenMsg('')
+    const next = !tokenEnabled()
+    try {
+      await saveStreamingPatch({ apiTokenEnabled: next })
+      setTokenEnabled(next)
+    } catch (e: any) {
+      setTokenMsg(e?.message || 'Token update failed')
+    } finally {
+      setTokenBusy(false)
+    }
+  }
+
+  async function copyToken() {
+    try {
+      await navigator.clipboard.writeText(generatedToken())
+      setTokenMsg('Copied to clipboard')
+    } catch {
+      setTokenMsg('Copy failed — select the text manually')
     }
   }
 
@@ -52,11 +113,7 @@ export default function AuthCard() {
     setMsg('')
     const enteredPassword = password()
     try {
-      await jsonFetch('/api/auth/config', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ enabled: enabled(), username: username(), password: enteredPassword }),
-      })
+      await updateAuthConfig({ enabled: enabled(), username: username(), password: enteredPassword })
       setMsg('Credentials updated')
       setPassword('')
       if (enteredPassword) {
@@ -73,16 +130,12 @@ export default function AuthCard() {
 
   async function revoke(prefix: string) {
     try {
-      await jsonFetch(`/api/auth/sessions/${encodeURIComponent(prefix)}`, { method: 'DELETE' })
+      await revokeAuthSession(prefix)
       await refresh()
     } catch { }
   }
 
-  onMount(() => {
-    void refresh()
-    const timer = setInterval(refresh, 10_000)
-    onCleanup(() => clearInterval(timer))
-  })
+  createVisiblePoll(refresh, 10_000)
 
   return (
     <SettingsCard
@@ -132,6 +185,51 @@ export default function AuthCard() {
           <Show when={msg()}>
             <span class="clients-cap-row">{msg()}</span>
           </Show>
+        </Show>
+      </div>
+
+      {/* API token (read-only programmatic access) */}
+      <div class="field-group">
+        <div class="field-row field-row-toggle">
+          <span class="field-label">API Token</span>
+          <label class="toggle-switch" for="api-token-toggle">
+            <input
+              id="api-token-toggle"
+              type="checkbox"
+              checked={tokenEnabled()}
+              onChange={() => void toggleTokenEnabled()}
+            />
+            <span class="toggle-slider" />
+          </label>
+        </div>
+        <div class="field-row">
+          <span class="field-label">Configured</span>
+          <span class="field-value">{tokenConfigured() ? 'Yes' : 'No'}</span>
+        </div>
+        <button type="button" class="action-btn action-btn-primary" disabled={tokenBusy()} onClick={() => void generateToken()}>
+          <span>{tokenBusy() ? 'Saving…' : 'Generate new token'}</span>
+        </button>
+        <Show when={generatedToken()}>
+          <input
+            id="api-token-reveal"
+            type="text"
+            class="field-input field-input-full"
+            readonly
+            value={generatedToken()}
+            onClick={(e) => e.currentTarget.select()}
+          />
+          <div class="deterrence-row">
+            <button type="button" class="action-btn action-btn-ghost" onClick={() => void copyToken()}>
+              <span>Copy</span>
+            </button>
+          </div>
+          <div class="status-banner status-banner-info stream-mode-hint" role="note">
+            <span class="status-banner-dot" aria-hidden="true" />
+            <span>Copy it now — it is shown only once. It grants read-only GET access (never /api/auth/*) for scripts via Authorization: Bearer or X-Api-Token.</span>
+          </div>
+        </Show>
+        <Show when={tokenMsg()}>
+          <span class="clients-cap-row">{tokenMsg()}</span>
         </Show>
       </div>
 

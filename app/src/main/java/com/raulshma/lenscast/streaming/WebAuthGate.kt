@@ -3,13 +3,15 @@ package com.raulshma.lenscast.streaming
 import android.util.Log
 import com.raulshma.lenscast.core.NetworkUtils
 import com.raulshma.lenscast.core.StreamAuthCrypto
+import com.raulshma.lenscast.core.toHexString
 import java.net.URI
 import java.security.SecureRandom
 import java.util.concurrent.ConcurrentHashMap
 
 /**
  * Owns the web-client auth policy: session tokens, login rate limiting, and
- * CSRF origin checks. The transport ([StreamingServer]) translates requests
+ * CSRF origin checks — plus the read-only API-token verdict for programmatic
+ * clients. The transport ([StreamingServer]) translates requests
  * to this small interface; the policy itself is reachable — and testable —
  * without a live socket.
  *
@@ -20,6 +22,11 @@ import java.util.concurrent.ConcurrentHashMap
  * waiting. Sessions survive process death through the optional
  * [SessionPersistence] hook: when it is set, every session mutation is
  * mirrored to it and the store is reloaded on construction.
+ *
+ * The API token is not a session: [authorizeApiToken] compares SHA-256 hex
+ * against the hash supplied by the live [tokenProvider] source — never a
+ * snapshot, so a token saved over /api/settings authorizes (or stops
+ * authorizing) on the very next request.
  */
 class WebAuthGate(
     private val clock: () -> Long = System::currentTimeMillis,
@@ -63,6 +70,52 @@ class WebAuthGate(
 
     @Volatile
     private var passwordHash: String? = null
+
+    /**
+     * The live API-token config source. Installed with [setApiTokenProvider]
+     * and re-runnable on every verdict, so the store's current value is what
+     * each request sees. Defaults to a disarmed config.
+     */
+    @Volatile
+    private var tokenProvider: () -> ApiTokenConfig = { ApiTokenConfig() }
+
+    /**
+     * The stored API-token state: whether the token path is armed and the
+     * SHA-256 hex hash of the token (never the token itself).
+     */
+    data class ApiTokenConfig(val enabled: Boolean = false, val hash: String = "")
+
+    /** Re-points the live config source (the one installer is StreamingManager, at the composition root). */
+    fun setApiTokenProvider(provider: () -> ApiTokenConfig) {
+        tokenProvider = provider
+    }
+
+    /**
+     * True when the token path is armed: presented token headers are then
+     * validated (and fail closed). While disarmed they are inert — the
+     * transport skips the token ladder, so a stale or garbage header never
+     * 401s a route that is public or cookie-checkable.
+     */
+    val isApiTokenArmed: Boolean
+        get() = tokenProvider().enabled
+
+    /**
+     * The API-token verdict, checked before the login/session path. True only
+     * when: the token is enabled, a hash is configured, [token] matches it
+     * (constant-time over the SHA-256 hex), [method] is GET or HEAD, and
+     * [path] is outside `/api/auth/` — a bearer token never mints sessions,
+     * rotates credentials, or logs out. Stateless: no session map entry, no
+     * rate-limit budget of its own beyond the comparison itself.
+     */
+    fun authorizeApiToken(token: String?, method: String, path: String): Boolean {
+        if (method != "GET" && method != "HEAD") return false
+        if (path.startsWith(API_TOKEN_DENIED_PATH_PREFIX)) return false
+        val config = tokenProvider()
+        if (!config.enabled) return false
+        if (config.hash.isBlank()) return false
+        if (token.isNullOrBlank()) return false
+        return StreamAuthCrypto.constantTimeEquals(StreamAuthCrypto.sha256Hex(token), config.hash)
+    }
 
     private val sessions = ConcurrentHashMap<String, Long>()
     private val secureRandom = SecureRandom()
@@ -249,7 +302,7 @@ class WebAuthGate(
         }
         val bytes = ByteArray(SESSION_TOKEN_BYTES)
         secureRandom.nextBytes(bytes)
-        val token = bytes.joinToString("") { "%02x".format(it) }
+        val token = bytes.toHexString()
         sessions[token] = clock() + SESSION_DURATION_MS
         persistSessions()
         return token
@@ -298,5 +351,8 @@ class WebAuthGate(
         private const val MAX_AUTH_ATTEMPTS = 10
         private const val AUTH_LOCKOUT_MS = 60 * 1000L
         private const val MAX_AUTH_ATTEMPTS_TRACKED = 500
+
+        /** Paths the API token can never touch — credentials and session control. */
+        private const val API_TOKEN_DENIED_PATH_PREFIX = "/api/auth/"
     }
 }

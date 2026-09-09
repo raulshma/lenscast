@@ -5,6 +5,8 @@ import ConnectionQualityIndicator from './ConnectionQualityIndicator'
 import { tapToFocus as apiTapToFocus, setZoom as apiSetZoom, setTorch as apiSetTorch, pushTalkback } from '../api/client'
 import { API_DEFAULTS } from '../api/defaults'
 import { createH264Player, h264Supported, wsBaseUrl } from '../video/h264Player'
+import { cyclePlayerMode, hlsSupported, nextPlayerMode, type PlayerMode } from '../video/playerLadder'
+import type Hls from 'hls.js'
 
 interface Props {
   status: () => DeviceStatus | null
@@ -85,14 +87,17 @@ export default function StreamPreview(props: Props) {
 
   const [previewErrorCount, setPreviewErrorCount] = createSignal(0)
   const MAX_PREVIEW_ERRORS = 5
-  const [playerMode, setPlayerMode] = createSignal<'h264' | 'mjpeg' | 'hls'>(
-    h264Supported() ? 'h264' : 'mjpeg',
+  const [playerMode, setPlayerMode] = createSignal<PlayerMode>(
+    nextPlayerMode('mjpeg', !h264Supported(), false, hlsSupported()),
   )
   const [h264Canvas, setH264Canvas] = createSignal<HTMLCanvasElement | null>(null)
   const h264 = createH264Player({
     onStatus: (s) => {
-      // Fall back to MJPEG when the WebSocket or decoder gives up repeatedly.
-      if (s === 'error') setPlayerMode('mjpeg')
+      // Fall down the ladder when the WebSocket or decoder gives up:
+      // MJPEG next, HLS beyond it if MJPEG is also out of play.
+      if (s === 'error' && playerMode() === 'h264') {
+        setPlayerMode(nextPlayerMode('h264', true, false, hlsSupported()))
+      }
     },
   })
   createEffect(() => {
@@ -105,6 +110,52 @@ export default function StreamPreview(props: Props) {
     }
   })
   onCleanup(() => h264.stop())
+
+  // ── HLS rung: native `<video>` on Safari/iOS, hls.js everywhere else. ──
+  const [hlsVideo, setHlsVideo] = createSignal<HTMLVideoElement | null>(null)
+  let hlsPlayer: Hls | null = null
+  function teardownHls() {
+    if (hlsPlayer) {
+      hlsPlayer.destroy()
+      hlsPlayer = null
+    }
+  }
+  createEffect(() => {
+    const el = hlsVideo()
+    if (playerMode() !== 'hls' || !el) {
+      teardownHls()
+      return
+    }
+    if (el.canPlayType('application/vnd.apple.mpegurl')) {
+      el.src = '/hls/playlist.m3u8'
+      void el.play().catch(() => { })
+      return
+    }
+    void import('hls.js').then(({ default: Hls }) => {
+      if (hlsVideo() !== el || playerMode() !== 'hls') return
+      hlsPlayer = new Hls({
+        lowLatencyMode: true,
+        enableWorker: true,
+        backBufferLength: 10,
+        // The server playlist is a 5x2s sliding window (~10s behind live,
+        // no LL-HLS parts): join 2 segments from the live edge and cap
+        // forward buffering instead of piling up the full window.
+        liveSyncDurationCount: 2,
+        maxBufferLength: 6,
+      })
+      hlsPlayer.on(Hls.Events.ERROR, (_event, data) => {
+        if (!data.fatal) return
+        teardownHls()
+        // Fatal: destroy and wrap to the top of the ladder (h264), which
+        // may well have recovered since it was skipped.
+        if (playerMode() === 'hls') setPlayerMode(cyclePlayerMode('hls'))
+      })
+      hlsPlayer.attachMedia(el)
+      hlsPlayer.loadSource('/hls/playlist.m3u8')
+    })
+  })
+  onCleanup(() => teardownHls())
+
   const [zoomRatio, setZoomRatio] = createSignal(1)
   const [torchOn, setTorchOn] = createSignal(false)
   const [talking, setTalking] = createSignal(false)
@@ -282,13 +333,23 @@ export default function StreamPreview(props: Props) {
               const count = previewErrorCount() + 1
               setPreviewErrorCount(count)
               if (count >= MAX_PREVIEW_ERRORS) {
-                // Auto-recover after a longer delay so the stream isn't permanently stuck
-                setTimeout(() => {
-                  setPreviewErrorCount(0)
+                // MJPEG used up its retries: drop down the ladder to HLS
+                // (muxed A/V). With no HLS rung available, keep the slow
+                // MJPEG auto-retry so the stream isn't permanently stuck.
+                const next = nextPlayerMode('mjpeg', true, true, hlsSupported())
+                setPreviewErrorCount(0)
+                if (next === 'mjpeg') {
+                  setTimeout(() => {
+                    if (isActive()) {
+                      props.setPreviewVisible(true)
+                    }
+                  }, 15_000)
+                } else if (playerMode() === 'mjpeg') {
+                  setPlayerMode(next)
                   if (isActive()) {
                     props.setPreviewVisible(true)
                   }
-                }, 15_000)
+                }
                 return
               }
               props.setPreviewVisible(false)
@@ -305,8 +366,8 @@ export default function StreamPreview(props: Props) {
           }>
           <Show when={playerMode() === 'h264'} fallback={
             <video
+              ref={(el) => setHlsVideo(el)}
               class="preview-img zoomable-content"
-              src="/hls/playlist.m3u8"
               controls
               autoplay
               muted
@@ -391,10 +452,10 @@ export default function StreamPreview(props: Props) {
         <div class="preview-actions-left">
           <button
             class="action-btn action-btn-ghost"
-            onClick={() => setPlayerMode(playerMode() === 'mjpeg' ? 'hls' : 'mjpeg')}
-            title="Toggle MJPEG / HLS player"
+            onClick={() => setPlayerMode(cyclePlayerMode(playerMode()))}
+            title="Cycle player (H.264 → MJPEG → HLS)"
           >
-            <span>{playerMode() === 'mjpeg' ? 'HLS' : 'MJPEG'}</span>
+            <span>{cyclePlayerMode(playerMode()).toUpperCase()}</span>
           </button>
           <button
             id="capture-btn"

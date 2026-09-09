@@ -5,7 +5,8 @@ import java.security.SecureRandom
 
 /**
  * Single home for the stream-auth crypto primitives shared by the RTSP
- * server, the web server, and the stored auth settings. The Digest realm is
+ * server, the web server, and the stored auth settings (including the
+ * SHA-256-hashed read-only API token). The Digest realm is
  * the one symbol both the HA1 producer (at settings-save time) and the HA1
  * consumer (challenge/verify in the RTSP server) reference — two literals
  * would drift silently and break Digest auth at runtime.
@@ -27,8 +28,13 @@ object StreamAuthCrypto {
 
     fun md5Hex(input: String): String {
         val digest = MessageDigest.getInstance("MD5")
-        val bytes = digest.digest(input.toByteArray(Charsets.UTF_8))
-        return bytes.joinToString("") { "%02x".format(it) }
+        return digest.digest(input.toByteArray(Charsets.UTF_8)).toHexString()
+    }
+
+    /** Lowercase hex SHA-256 of the UTF-8 input — the stored API-token format. */
+    fun sha256Hex(input: String): String {
+        val digest = MessageDigest.getInstance("SHA-256")
+        return digest.digest(input.toByteArray(Charsets.UTF_8)).toHexString()
     }
 
     /**
@@ -94,3 +100,10 @@ object StreamAuthCrypto {
         return Base64Codec.decodeOrNull(value)
     }
 }
+
+/**
+ * The one lowercase-hex byte encoding: session tokens, the API-token hash,
+ * update digests, and the Telegram multipart boundary all render through it,
+ * so the formatting cannot drift between sites.
+ */
+fun ByteArray.toHexString(): String = joinToString("") { "%02x".format(it) }

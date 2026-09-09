@@ -100,6 +100,54 @@ export async function updateSettings(settings: Partial<AllSettings>): Promise<{ 
   })
 }
 
+// Settings PUTs replace the whole streaming block, so every streaming save
+// merges the patch into a freshly fetched snapshot — a partial object would
+// reset the other fields to their defaults server-side. Two overlapping
+// saves must not interleave their GET-merge-PUT sequences (the later save's
+// snapshot would predate the earlier save's PUT and silently revert it), so
+// every patch rides one shared chain.
+let streamingSaveChain: Promise<unknown> = Promise.resolve()
+
+export function saveStreamingPatch(patch: Partial<AllSettings['streaming']>): Promise<void> {
+  const save = streamingSaveChain.then(async () => {
+    const current = await getSettings()
+    await updateSettings({ streaming: { ...current.streaming, ...patch } })
+  })
+  // A failed save must not poison the chain for later patches; the caller
+  // still sees the rejection through the returned promise.
+  streamingSaveChain = save.catch(() => undefined)
+  return save
+}
+
+export interface AuthSessionInfo {
+  tokenPrefix: string
+  expiresAtMs: number
+}
+
+export async function getAuthSessions(): Promise<{ sessions: AuthSessionInfo[] }> {
+  return requestJson('/api/auth/sessions')
+}
+
+export async function getAuthConfig(): Promise<{ enabled: boolean; username?: string }> {
+  return requestJson('/api/auth/config')
+}
+
+export async function updateAuthConfig(body: {
+  enabled: boolean
+  username: string
+  password?: string
+}): Promise<unknown> {
+  return requestJson('/api/auth/config', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+}
+
+export async function revokeAuthSession(prefix: string): Promise<void> {
+  await requestJson(`/api/auth/sessions/${encodeURIComponent(prefix)}`, { method: 'DELETE' })
+}
+
 export async function getStatus(): Promise<DeviceStatus> {
   return requestJson('/api/status')
 }
@@ -251,4 +299,16 @@ export async function setSiren(on: boolean): Promise<{ success: boolean }> {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ siren: on }),
   })
+}
+
+/** `limit` omitted or non-positive means the server's default page size. */
+export async function getDetectionEvents(limit?: number): Promise<import('../types').DetectionEventsResponse> {
+  const params = new URLSearchParams()
+  if (limit != null && limit > 0) params.set('limit', String(limit))
+  const url = params.toString() ? `/api/detection/events?${params.toString()}` : '/api/detection/events'
+  return requestJson(url)
+}
+
+export async function clearDetectionEvents(): Promise<{ success: boolean }> {
+  return requestJson('/api/detection/events', { method: 'DELETE' })
 }

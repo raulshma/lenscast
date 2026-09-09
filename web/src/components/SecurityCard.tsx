@@ -20,6 +20,27 @@ function minutesToLabel(minutes: number): string {
 }
 
 /**
+ * The webhook headers field is free text, but only a JSON object of
+ * string→string reaches the wire as headers — anything else degrades to no
+ * custom headers server-side. Returns the warning shown while the text does
+ * not parse, so the silent drop never comes as a surprise.
+ */
+function webhookHeadersWarning(value: string | undefined): string {
+  const text = value?.trim() ?? ''
+  if (!text) return ''
+  try {
+    const parsed: unknown = JSON.parse(text)
+    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return 'Not a JSON object — these headers will not be sent'
+    }
+    const invalid = Object.values(parsed as Record<string, unknown>).some((v) => typeof v !== 'string')
+    return invalid ? 'Header values must be strings — non-string values will not be sent' : ''
+  } catch {
+    return 'Invalid JSON — these headers will not be sent'
+  }
+}
+
+/**
  * Security camera surface: motion detection (zones + sensitivity + schedule +
  * recording trigger), sound detection, webhook alerting, and the deterrence
  * actions (siren + torch). The zone editor mirrors the privacy-masking card's
@@ -292,7 +313,84 @@ export default function SecurityCard(props: Props) {
             value={stream()?.webhookUrl ?? ''}
             onInput={(e) => props.updateStreamingDebounced({ webhookUrl: e.currentTarget.value })}
           />
+          <input
+            id="webhook-headers"
+            type="text"
+            class="field-input field-input-full"
+            placeholder='Custom headers as JSON, e.g. {"Authorization": "Bearer token"}'
+            value={stream()?.webhookHeaders ?? API_DEFAULTS.webhookHeaders}
+            onInput={(e) => props.updateStreamingDebounced({ webhookHeaders: e.currentTarget.value })}
+          />
+          <Show when={webhookHeadersWarning(stream()?.webhookHeaders)}>
+            {(warning) => (
+              <span class="clients-cap-row" role="alert">
+                {warning()}
+              </span>
+            )}
+          </Show>
         </Show>
+      </div>
+
+      {/* Deterrence automation */}
+      <div class="field-group">
+        <div class="field-row field-row-toggle">
+          <span class="field-label">Auto-Siren on Detection</span>
+          <label class="toggle-switch" for="auto-siren-toggle">
+            <input
+              id="auto-siren-toggle"
+              type="checkbox"
+              checked={stream()?.autoSiren ?? API_DEFAULTS.autoSiren}
+              onChange={() => props.updateStreamingAndSave({ autoSiren: !(stream()?.autoSiren ?? API_DEFAULTS.autoSiren) })}
+            />
+            <span class="toggle-slider" />
+          </label>
+        </div>
+        <Show when={stream()?.autoSiren ?? API_DEFAULTS.autoSiren}>
+          <div class="field-row">
+            <span class="field-label">Siren Duration</span>
+            <span class="field-value">{stream()?.sirenDurationSeconds ?? API_DEFAULTS.sirenDurationSeconds}s</span>
+          </div>
+          <input
+            id="siren-duration-slider"
+            type="range"
+            class="custom-range"
+            min={API_DEFAULTS.sirenDurationMinSeconds}
+            max={API_DEFAULTS.sirenDurationMaxSeconds}
+            step={1}
+            value={stream()?.sirenDurationSeconds ?? API_DEFAULTS.sirenDurationSeconds}
+            onInput={(e) => props.updateStreamingDebounced({ sirenDurationSeconds: parseInt(e.currentTarget.value) })}
+          />
+        </Show>
+        <div class="field-row field-row-toggle">
+          <span class="field-label">Auto-Light on Detection</span>
+          <label class="toggle-switch" for="auto-torch-toggle">
+            <input
+              id="auto-torch-toggle"
+              type="checkbox"
+              checked={stream()?.autoTorch ?? API_DEFAULTS.autoTorch}
+              onChange={() => props.updateStreamingAndSave({ autoTorch: !(stream()?.autoTorch ?? API_DEFAULTS.autoTorch) })}
+            />
+            <span class="toggle-slider" />
+          </label>
+        </div>
+        <div class="field-row">
+          <span class="field-label">Re-trigger Cooldown</span>
+          <span class="field-value">{stream()?.autoDeterrenceCooldownSeconds ?? API_DEFAULTS.autoDeterrenceCooldownSeconds}s</span>
+        </div>
+        <input
+          id="deterrence-cooldown-slider"
+          type="range"
+          class="custom-range"
+          min={API_DEFAULTS.deterrenceCooldownMinSeconds}
+          max={API_DEFAULTS.deterrenceCooldownMaxSeconds}
+          step={5}
+          value={stream()?.autoDeterrenceCooldownSeconds ?? API_DEFAULTS.autoDeterrenceCooldownSeconds}
+          onInput={(e) => props.updateStreamingDebounced({ autoDeterrenceCooldownSeconds: parseInt(e.currentTarget.value) })}
+        />
+        <div class="status-banner status-banner-info stream-mode-hint" role="note">
+          <span class="status-banner-dot" aria-hidden="true" />
+          <span>When armed detection fires, the siren and light trigger automatically — at most once per cooldown window.</span>
+        </div>
       </div>
 
       {/* Deterrence */}

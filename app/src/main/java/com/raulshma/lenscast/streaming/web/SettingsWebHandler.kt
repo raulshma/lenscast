@@ -1,6 +1,8 @@
 package com.raulshma.lenscast.streaming.web
 
 import com.raulshma.lenscast.core.AppJson
+import com.raulshma.lenscast.core.BackupTargetPolicy
+import com.raulshma.lenscast.core.StreamAuthCrypto
 import com.raulshma.lenscast.core.parseEnum
 import com.raulshma.lenscast.core.parseEnumOrNull
 import com.raulshma.lenscast.camera.model.CameraSettings
@@ -80,13 +82,27 @@ class SettingsWebHandler(private val settingsDataStore: SettingsDataStore) {
                 soundThresholdPercent = store.soundThresholdPercent.value,
                 webhookEnabled = store.webhookEnabled.value,
                 webhookUrl = store.webhookUrl.value,
+                webhookHeaders = store.webhookHeaders.value,
+                autoSiren = store.autoSiren.value,
+                autoTorch = store.autoTorch.value,
+                sirenDurationSeconds = store.sirenDurationSeconds.value,
+                autoDeterrenceCooldownSeconds = store.autoDeterrenceCooldownSeconds.value,
                 backupEnabled = store.backupEnabled.value,
                 backupWifiOnly = store.backupWifiOnly.value,
+                backupTarget = BackupTargetPolicy.parse(store.backupTarget.value).wireName,
                 backupWebdavUrl = store.backupWebdavUrl.value,
                 backupWebdavUsername = store.backupWebdavUsername.value,
                 // Write-only, like the stream-auth password: blank in every
                 // response; an empty update keeps the stored secret.
                 backupWebdavPassword = "",
+                telegramChatId = store.telegramChatId.value,
+                // Write-only, exactly like backupWebdavPassword.
+                telegramBotToken = "",
+                apiTokenEnabled = store.apiTokenEnabled.value,
+                apiTokenConfigured = store.apiTokenHash.value.isNotBlank(),
+                // Write-only plaintext: the stored value is the SHA-256 hex
+                // hash, and neither it nor the token ever round-trips.
+                apiToken = "",
                 httpsEnabled = store.httpsEnabled.value,
                 audioDeviceId = store.audioDeviceId.value,
             ),
@@ -159,16 +175,41 @@ class SettingsWebHandler(private val settingsDataStore: SettingsDataStore) {
             settingsDataStore.saveSoundThresholdPercent(stream.soundThresholdPercent)
             settingsDataStore.saveWebhookEnabled(stream.webhookEnabled)
             settingsDataStore.saveWebhookUrl(stream.webhookUrl)
+            settingsDataStore.saveWebhookHeaders(stream.webhookHeaders)
+            settingsDataStore.saveAutoSiren(stream.autoSiren)
+            settingsDataStore.saveAutoTorch(stream.autoTorch)
+            settingsDataStore.saveSirenDurationSeconds(stream.sirenDurationSeconds)
+            settingsDataStore.saveAutoDeterrenceCooldownSeconds(stream.autoDeterrenceCooldownSeconds)
             settingsDataStore.saveBackupEnabled(stream.backupEnabled)
             settingsDataStore.saveBackupWifiOnly(stream.backupWifiOnly)
+            settingsDataStore.saveBackupTarget(BackupTargetPolicy.parse(stream.backupTarget).wireName)
             settingsDataStore.saveBackupWebdavUrl(stream.backupWebdavUrl)
             settingsDataStore.saveBackupWebdavUsername(stream.backupWebdavUsername)
+            settingsDataStore.saveTelegramChatId(stream.telegramChatId)
             settingsDataStore.saveHttpsEnabled(stream.httpsEnabled)
             settingsDataStore.saveAudioDeviceId(stream.audioDeviceId)
             // An empty password on update means "keep the stored one" so the
             // dashboard never needs to round-trip the secret.
             if (stream.backupWebdavPassword.isNotEmpty()) {
                 settingsDataStore.saveBackupWebdavPassword(stream.backupWebdavPassword)
+            }
+            // Same write-only contract as the WebDAV password.
+            if (stream.telegramBotToken.isNotEmpty()) {
+                settingsDataStore.saveTelegramBotToken(stream.telegramBotToken)
+            }
+            // The token flag only turns on with a token in hand: an enable
+            // with no plaintext and no stored hash would arm the token path
+            // without a credential, so every presented token header would
+            // 401 (the gate fails closed on a blank hash). Disabling always
+            // goes through.
+            val tokenConfigured = stream.apiToken.isNotEmpty() ||
+                settingsDataStore.apiTokenHash.value.isNotBlank()
+            settingsDataStore.saveApiTokenEnabled(stream.apiTokenEnabled && tokenConfigured)
+            // A non-empty apiToken is the write-only plaintext: hash it here,
+            // store only the hash, and never hand either back over the wire.
+            // An empty value keeps the stored hash (disable via apiTokenEnabled).
+            if (stream.apiToken.isNotEmpty()) {
+                settingsDataStore.saveApiTokenHash(StreamAuthCrypto.sha256Hex(stream.apiToken))
             }
         }
 

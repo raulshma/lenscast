@@ -17,6 +17,7 @@ class ApiRouter(
     private val recording: RecordingWebHandler,
     private val gallery: GalleryWebHandler,
     private val deterrence: DeterrenceWebHandler,
+    private val detectionEvents: DetectionEventsWebHandler,
     private val auth: AuthWebHandler,
 ) {
 
@@ -47,6 +48,7 @@ class ApiRouter(
                 pageSize = r.query["pageSize"]?.toIntOrNull() ?: 0,
             )
         )
+        "/api/detection/events" -> ApiResponse.ok(detectionEvents.list(r.query["limit"]?.toIntOrNull()))
         "/api/auth/config" -> ApiResponse.ok(auth.get())
         "/api/auth/sessions" -> ApiResponse.ok(auth.listSessions())
         else -> null
@@ -76,6 +78,8 @@ class ApiRouter(
     }
 
     private suspend fun routeDelete(r: ApiRequest): ApiResponse? = when {
+        r.path == "/api/detection/events" ->
+            ApiResponse.ok(detectionEvents.clear())
         r.path.startsWith("/api/stream/clients/") ->
             ApiResponse.ok(stream.kickClient(r.path.removePrefix("/api/stream/clients/")))
         r.path.startsWith("/api/auth/sessions/") ->

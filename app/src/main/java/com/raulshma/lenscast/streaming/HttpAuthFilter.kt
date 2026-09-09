@@ -8,7 +8,8 @@ import com.raulshma.lenscast.streaming.HttpResult.ResponseBody.Text
  * decisions themselves stay behind the gate's seam; this module only maps
  * requests to gate calls and gate answers to status codes, bodies, and
  * cookie headers. The [StreamingServer] module reads the request body off
- * the socket and applies the security headers.
+ * the socket and applies the security headers. Protected routes accept either
+ * a session cookie or — first in the ladder — the read-only API token headers.
  */
 class HttpAuthFilter(
     private val webAuthGate: WebAuthGate,
@@ -91,7 +92,16 @@ class HttpAuthFilter(
     }
 
     /**
-     * The protected-route gate. Null when the request may proceed: the
+     * The protected-route gate. Null when the request may proceed. The ladder:
+     * when the token path is armed ([WebAuthGate.isApiTokenArmed]), a
+     * presented API token (`Authorization: Bearer` or `X-Api-Token`) is
+     * checked BEFORE the session path — a valid token authorizes without a
+     * session cookie, and an invalid one fails closed (401) rather than
+     * falling through to the cookie ladder. While the token setting is off,
+     * token headers are inert: the request continues on the public-or-cookie
+     * path exactly as if the header were absent. Token requests skip the CSRF
+     * origin check: they are header-authenticated, so there are no ambient
+     * cookie credentials for a cross-site page to forge. Without a token the
      * route is public, or the cookie authenticates and state-changing
      * methods pass the CSRF check.
      */
@@ -101,6 +111,13 @@ class HttpAuthFilter(
         headers: Map<String, String?>,
     ): HttpResult? {
         if (!isProtectedRoute(uri)) return null
+        val apiToken = apiTokenFrom(headers)
+        if (apiToken != null && webAuthGate.isApiTokenArmed) {
+            if (!webAuthGate.authorizeApiToken(apiToken, method, uri)) {
+                return HttpResult.jsonError(401, "Authentication required")
+            }
+            return null
+        }
         if (!webAuthGate.authenticate(headers["cookie"])) {
             return HttpResult.jsonError(401, "Authentication required")
         }
@@ -108,6 +125,23 @@ class HttpAuthFilter(
             return HttpResult.jsonError(403, "CSRF check failed")
         }
         return null
+    }
+
+    /**
+     * The presented API token, or null. `Authorization: Bearer <token>`
+     * (scheme case-insensitive per RFC 7235) wins, else the `X-Api-Token`
+     * header; a non-Bearer Authorization header (e.g. Basic) is not a token
+     * presentation and lets the caller continue on the cookie path.
+     */
+    internal fun apiTokenFrom(headers: Map<String, String?>): String? {
+        val authorization = headers["authorization"]?.trim()
+        if (!authorization.isNullOrEmpty()) {
+            val space = authorization.indexOf(' ')
+            if (space <= 0) return null
+            if (!authorization.substring(0, space).equals("Bearer", ignoreCase = true)) return null
+            return authorization.substring(space + 1).trim().takeIf { it.isNotEmpty() }
+        }
+        return headers["x-api-token"]?.trim()?.takeIf { it.isNotEmpty() }
     }
 
     fun isProtectedRoute(uri: String): Boolean =

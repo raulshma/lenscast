@@ -12,8 +12,10 @@ import java.util.Calendar
  * no BouncyCastle dependency (a multi-MB APK cost for one certificate).
  * The profile is fixed: RSA (the caller's [KeyPair]), SHA256withRSA, CN=
  * LensCast, serverAuth EKU, digitalSignature|keyEncipherment key usage,
- * CA:false, and a subjectAltName carrying the device's IPv4 addresses
- * (browsers match https URLs against SAN entries, not CN).
+ * CA:false, and a subjectAltName carrying DNS names (the caller's
+ * [dnsNames] — the fixed `lenscast.local` bookmarkable host) plus the
+ * device's IPv4 addresses (browsers match https URLs against SAN entries,
+ * not CN).
  *
  * JVM-tested: the produced bytes parse through the standard
  * [CertificateFactory] and the signature verifies against the key pair.
@@ -25,6 +27,7 @@ object SelfSignedCert {
         keyPair: KeyPair,
         subjectCn: String = "LensCast",
         ipAddresses: List<String>,
+        dnsNames: List<String> = emptyList(),
         validityDays: Int = 3650,
         notBefore: java.util.Date = java.util.Date(),
     ): ByteArray {
@@ -35,7 +38,7 @@ object SelfSignedCert {
         val notAfter = calendar.time
         val serial = BigInteger(63, java.security.SecureRandom()).abs().add(BigInteger.ONE)
 
-        val tbs = encodeTbs(keyPair, subjectCn, ipAddresses, serial, notBefore, notAfter)
+        val tbs = encodeTbs(keyPair, subjectCn, ipAddresses, dnsNames, serial, notBefore, notAfter)
         val signer = Signature.getInstance("SHA256withRSA")
         signer.initSign(keyPair.private)
         signer.update(tbs)
@@ -56,6 +59,7 @@ object SelfSignedCert {
         keyPair: KeyPair,
         cn: String,
         ips: List<String>,
+        dnsNames: List<String>,
         serial: BigInteger,
         notBefore: java.util.Date,
         notAfter: java.util.Date,
@@ -83,10 +87,15 @@ object SelfSignedCert {
                             sequence(oid(1, 3, 6, 1, 5, 5, 7, 3, 1)),
                         )
                     ) +
-                    // subjectAltName: IP addresses as [7] OCTET STRING entries
+                    // subjectAltName: DNS names as [2] IA5String entries plus
+                    // IP addresses as [7] OCTET STRING entries
                     sequence(
                         oid(2, 5, 29, 17) + octetString(
-                            sequence(ips.mapNotNull { ipToDer(it) }.toTypedArray().fold(ByteArray(0), ByteArray::plus)),
+                            sequence(
+                                (dnsNames.map { dnsNameDer(it) } + ips.mapNotNull { ipToDer(it) })
+                                    .toTypedArray()
+                                    .fold(ByteArray(0), ByteArray::plus),
+                            ),
                         )
                     ),
             ),
@@ -110,6 +119,13 @@ object SelfSignedCert {
         val bytes = parts.map { it.toIntOrNull() ?: return null }.map { it.toByte() }.toByteArray()
         return contextTag(0x87, bytes) // [7] IMPLICIT OCTET STRING (iPAddress)
     }
+
+    /**
+     * DER-encode a GeneralName dNSName: `[2]` context primitive over the
+     * host's ASCII (IA5String IMPLICIT) bytes. Public for tests.
+     */
+    fun dnsNameDer(host: String): ByteArray =
+        contextTag(0x82, host.toByteArray(Charsets.US_ASCII)) // [2] IMPLICIT IA5String (dNSName)
 
     // ── DER primitives ──
 

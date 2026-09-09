@@ -36,14 +36,18 @@ enum class RtspChangeScope {
 
 /**
  * One RTSP config field, tagged with the scope that makes its change real.
- * Ground truth: the H.264 encoder applies a new bitrate live via
- * `MediaCodec.setParameters`, while [AacEncoder.setBitrate] only stores an
- * audio-bitrate change until its next `start()` — hence the one NEEDS_RESTART
- * oddball. The frame rate flows into the RTP timestamp increment through the
- * live config getter (the encoder's own rate catches up at its next
- * reconfigure), dimensions ride the frame-path reconfigure, input-format
- * changes reconfigure inside [RtspServer.apply], and the authorizer reads the
- * auth spec live — all HOT_SWAP, and all restart-free today.
+ * Ground truth: [AacEncoder.setBitrate] only stores an audio-bitrate change
+ * until its next `start()` — hence the audio-bitrate NEEDS_RESTART entry.
+ * The H.264 encode bitrate is the encoded-stream hub's own (equal by
+ * default): a video-bitrate write fans out to
+ * [com.raulshma.lenscast.streaming.EncodedStreamHub.setVideoBitrate] — a
+ * live MediaCodec `setParameters`, the way frame rate and input format do —
+ * while the config's [RtspConfig.videoBitrate] feeds the SDP's `b=AS` line
+ * through the live config [RtspServer.apply] retains. Dimensions ride the
+ * frame-path reconfigure, input-format changes reconfigure in the hub, the
+ * frame rate flows into the RTP timestamp increment through the live config
+ * getter, and the authorizer reads the auth spec live — all HOT_SWAP,
+ * all restart-free.
  */
 enum class RtspField(val scope: RtspChangeScope) {
     VIDEO_WIDTH(RtspChangeScope.HOT_SWAP),

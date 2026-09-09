@@ -79,6 +79,20 @@ object StreamDefaults {
     // Webhook notification bounds — a URL the notifier will actually POST to.
     const val WEBHOOK_TIMEOUT_MS = 10_000
 
+    // Detection-event snapshot downscale: the MJPEG frame is re-encoded at a
+    // thumbnail size before it rides the event store and the webhook payload.
+    const val SNAPSHOT_TARGET_WIDTH_PX = 640
+    const val SNAPSHOT_JPEG_QUALITY = 60
+
+    // Deterrence automation bounds — auto-siren duration and the per-event
+    // cooldown that keeps a detection cluster from re-triggering constantly.
+    const val SIREN_DURATION_MIN_SECONDS = 5
+    const val SIREN_DURATION_MAX_SECONDS = 60
+    const val SIREN_DURATION_SECONDS_DEFAULT = 10
+    const val AUTO_DETERRENCE_COOLDOWN_MIN_SECONDS = 30
+    const val AUTO_DETERRENCE_COOLDOWN_MAX_SECONDS = 600
+    const val AUTO_DETERRENCE_COOLDOWN_SECONDS_DEFAULT = 60
+
     // HLS segment pacing.
     const val HLS_SEGMENT_AUS = 48
 }

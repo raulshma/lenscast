@@ -44,4 +44,22 @@ class StreamDefaultsBoundsTest {
         assertEquals(10, 0.coerceIn(StreamDefaults.JPEG_QUALITY_MIN, StreamDefaults.JPEG_QUALITY_MAX))
         assertEquals(100, 150.coerceIn(StreamDefaults.JPEG_QUALITY_MIN, StreamDefaults.JPEG_QUALITY_MAX))
     }
+
+    @Test
+    fun `deterrence bounds exist and contain their defaults`() {
+        assertEquals(5, StreamDefaults.SIREN_DURATION_MIN_SECONDS)
+        assertEquals(60, StreamDefaults.SIREN_DURATION_MAX_SECONDS)
+        assertEquals(
+            true,
+            StreamDefaults.SIREN_DURATION_SECONDS_DEFAULT in
+                StreamDefaults.SIREN_DURATION_MIN_SECONDS..StreamDefaults.SIREN_DURATION_MAX_SECONDS,
+        )
+        assertEquals(30, StreamDefaults.AUTO_DETERRENCE_COOLDOWN_MIN_SECONDS)
+        assertEquals(600, StreamDefaults.AUTO_DETERRENCE_COOLDOWN_MAX_SECONDS)
+        assertEquals(
+            true,
+            StreamDefaults.AUTO_DETERRENCE_COOLDOWN_SECONDS_DEFAULT in
+                StreamDefaults.AUTO_DETERRENCE_COOLDOWN_MIN_SECONDS..StreamDefaults.AUTO_DETERRENCE_COOLDOWN_MAX_SECONDS,
+        )
+    }
 }

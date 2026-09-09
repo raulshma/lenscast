@@ -14,12 +14,15 @@ import java.util.concurrent.CopyOnWriteArrayList
  *
  * Handshakes pass the same [WebAuthGate] as the HTTP surface: auth off lets
  * everything through, auth on requires the session cookie (SameSite=Lax
- * keeps a cross-site page's handshake from attaching it). A rejected
+ * keeps a cross-site page's handshake from attaching it). The handshake stays
+ * cookie-only by design — browsers cannot set `Authorization`/`X-Api-Token`
+ * headers on a WebSocket, so the read-only API-token path never applies to
+ * the WebSocket paths; programmatic consumers use the HTTP surface instead. A rejected
  * handshake throws, which aborts the upgrade with an HTTP error — no 101,
  * no media.
  *
- * Video frames arrive through [feedVideo], the second sink the RTSP output
- * fans out to alongside the HLS ring. Clients joining mid-stream receive the
+ * Video frames arrive through [feedVideo], one of the encoded-stream hub's
+ * sinks alongside the RTSP and HLS paths. Clients joining mid-stream receive the
  * cached parameter sets with their config message and wait for the next
  * keyframe, so no keyframe storms are requested from the encoder.
  */
@@ -54,6 +57,9 @@ class WsMediaServer(
             runCatching { client.sendFrame(wsFrame) }
         }
     }
+
+    /** Live /ws/video client count — the encoded-stream policy's WS input. */
+    fun videoClientCount(): Int = videoClients.size
 
     /**
      * Non-null when the dashboard runs HTTPS: the sidecar must serve wss,

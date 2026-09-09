@@ -12,6 +12,15 @@ class HttpAuthFilterTest {
     private fun enabledGate(): WebAuthGate =
         WebAuthGate().apply { setCredentials("admin", "bogus-hash") }
 
+    private val apiToken = "lenscast-api-token-3f9a"
+
+    private fun tokenGate(): WebAuthGate =
+        WebAuthGate().apply {
+            setApiTokenProvider {
+                WebAuthGate.ApiTokenConfig(enabled = true, hash = com.raulshma.lenscast.core.StreamAuthCrypto.sha256Hex(apiToken))
+            }
+        }
+
     // Routing
 
     @Test
@@ -232,5 +241,105 @@ class HttpAuthFilterTest {
         val parsed = HttpAuthFilter.parseLoginCredentials("{}".toByteArray())!!
         assertEquals("", parsed.username)
         assertEquals("", parsed.password)
+    }
+
+    // API token ladder (header extraction + authorize order)
+
+    @Test
+    fun `bearer header authorizes a GET without any session cookie`() {
+        val filter = HttpAuthFilter(tokenGate(), port = 8080)
+        val headers = mapOf("authorization" to "Bearer $apiToken")
+        assertNull(filter.authorize("GET", "/snapshot", headers))
+        assertNull(filter.authorize("GET", "/api/settings", headers))
+    }
+
+    @Test
+    fun `x-api-token header authorizes a GET too`() {
+        val filter = HttpAuthFilter(tokenGate(), port = 8080)
+        assertNull(filter.authorize("GET", "/snapshot", mapOf("x-api-token" to apiToken)))
+    }
+
+    @Test
+    fun `the bearer scheme is case-insensitive`() {
+        val filter = HttpAuthFilter(tokenGate(), port = 8080)
+        assertNull(filter.authorize("GET", "/snapshot", mapOf("authorization" to "bearer $apiToken")))
+        assertNull(filter.authorize("GET", "/snapshot", mapOf("authorization" to "BEARER $apiToken")))
+    }
+
+    @Test
+    fun `a valid token skips the csrf origin check`() {
+        val filter = HttpAuthFilter(tokenGate(), port = 8080)
+        // GET with a token and no requested-with/origin headers: allowed.
+        assertNull(filter.authorize("GET", "/api/settings", mapOf("authorization" to "Bearer $apiToken")))
+    }
+
+    @Test
+    fun `an invalid token fails closed even with no cookie`() {
+        val filter = HttpAuthFilter(tokenGate(), port = 8080)
+        val result = filter.authorize("GET", "/snapshot", mapOf("authorization" to "Bearer wrong"))!!
+        assertEquals(401, result.statusCode)
+    }
+
+    @Test
+    fun `a valid token on a state-changing method is denied by the gate`() {
+        val filter = HttpAuthFilter(tokenGate(), port = 8080)
+        val result = filter.authorize("POST", "/api/settings", mapOf("authorization" to "Bearer $apiToken"))!!
+        assertEquals(401, result.statusCode)
+    }
+
+    @Test
+    fun `a valid token never reaches the auth routes`() {
+        val filter = HttpAuthFilter(tokenGate(), port = 8080)
+        val result = filter.authorize("GET", "/api/auth/config", mapOf("authorization" to "Bearer $apiToken"))!!
+        assertEquals(401, result.statusCode)
+    }
+
+    @Test
+    fun `token header extraction picks bearer then x-api-token`() {
+        val filter = HttpAuthFilter(tokenGate(), port = 8080)
+        assertEquals(apiToken, filter.apiTokenFrom(mapOf("authorization" to "Bearer $apiToken")))
+        assertEquals(apiToken, filter.apiTokenFrom(mapOf("x-api-token" to "  $apiToken ")))
+        assertEquals(null, filter.apiTokenFrom(emptyMap()))
+        assertEquals(null, filter.apiTokenFrom(mapOf("authorization" to "Basic dXNlcjpwYXNz")))
+        assertEquals(null, filter.apiTokenFrom(mapOf("authorization" to "Bearer")))
+        assertEquals(null, filter.apiTokenFrom(mapOf("authorization" to "Bearer   ")))
+        assertEquals(null, filter.apiTokenFrom(mapOf("x-api-token" to "   ")))
+    }
+
+    // Token setting off: presented token headers are inert
+
+    @Test
+    fun `a token header is inert while the token setting is off`() {
+        // Auth disabled and token disarmed: a stale or garbage bearer header
+        // must never 401 a route that is simply public.
+        val filter = HttpAuthFilter(disabledGate(), port = 8080)
+        assertNull(filter.authorize("GET", "/snapshot", mapOf("authorization" to "Bearer stale-token")))
+        assertNull(filter.authorize("GET", "/snapshot", mapOf("x-api-token" to "stale-token")))
+    }
+
+    @Test
+    fun `a disarmed token header falls through to the cookie ladder`() {
+        val gate = WebAuthGate().apply {
+            setCredentials("admin", com.raulshma.lenscast.core.StreamAuthCrypto.hashPassword("s3cret"))
+            setApiTokenProvider { WebAuthGate.ApiTokenConfig(enabled = false, hash = "ignored") }
+        }
+        val filter = HttpAuthFilter(gate, port = 8080)
+        val cookie = loginCookie(gate)
+        // Reached the cookie ladder: the invalid token was not failed closed.
+        assertEquals(
+            401,
+            filter.authorize("GET", "/snapshot", mapOf("authorization" to "Bearer stale"))!!.statusCode,
+        )
+        val headers = mapOf(
+            "authorization" to "Bearer stale",
+            "cookie" to "${WebAuthGate.COOKIE_NAME}=$cookie",
+        )
+        assertNull(filter.authorize("GET", "/snapshot", headers))
+    }
+
+    private fun loginCookie(gate: WebAuthGate): String {
+        val result = gate.login("1.2.3.4", "admin", "s3cret")
+        assertTrue(result.success)
+        return result.token!!
     }
 }

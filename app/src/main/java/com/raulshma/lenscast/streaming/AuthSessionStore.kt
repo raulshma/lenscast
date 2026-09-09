@@ -1,61 +1,54 @@
 package com.raulshma.lenscast.streaming
 
 import android.content.Context
-import android.util.Log
-import org.json.JSONArray
-import org.json.JSONObject
+import com.raulshma.lenscast.core.AppJson
+import com.raulshma.lenscast.core.readJsonOrDefault
+import com.raulshma.lenscast.core.writeAtomicallyOrWarn
+import com.squareup.moshi.Types
 import java.io.File
+
+/**
+ * One persisted session: the token and its expiry epoch-ms. The `t`/`e` field
+ * names are the legacy org.json wire names, kept decode-compatible through the
+ * App Json migration.
+ */
+internal class AuthStoredSession(val t: String, val e: Long)
 
 /**
  * File-backed [WebAuthGate.SessionPersistence]: the session map survives
  * server recreations and process death, so a port/TLS change or an app
  * restart no longer logs every dashboard out. Tokens are secrets — the store
  * lives in app-private filesDir and is written atomically (tmp file +
- * rename), so a crash mid-write never corrupts the map.
+ * rename), so a crash mid-write never corrupts the map. Serialization goes
+ * through the one App Json Moshi instance.
  */
 class AuthSessionStore(context: Context) : WebAuthGate.SessionPersistence {
 
     private val file: File = File(File(context.filesDir, "auth"), "sessions.json")
 
-    override fun loadSessions(): Map<String, Long> = try {
-        if (!file.exists()) {
-            emptyMap()
-        } else {
-            val array = JSONArray(file.readText())
-            buildMap {
-                for (i in 0 until array.length()) {
-                    val entry = array.getJSONObject(i)
-                    put(entry.getString(KEY_TOKEN), entry.getLong(KEY_EXPIRY))
-                }
-            }
-        }
-    } catch (e: Exception) {
-        Log.w(TAG, "Failed to read persisted sessions; starting clean", e)
-        emptyMap()
+    private val listAdapter by lazy {
+        AppJson.moshi.adapter<List<AuthStoredSession>>(
+            Types.newParameterizedType(List::class.java, AuthStoredSession::class.java),
+        )
     }
 
+    // Session mutations arrive from Ktor server threads with no shared lock,
+    // and the atomic write uses a fixed `.tmp` name — concurrent saves could
+    // interleave and corrupt the file. One monitor serializes them.
+    @Synchronized
+    override fun loadSessions(): Map<String, Long> = file.readJsonOrDefault(
+        listAdapter,
+        emptyList(),
+        warn = "Failed to read persisted sessions; starting clean",
+    ).associate { it.t to it.e }
+
+    @Synchronized
     override fun saveSessions(sessions: Map<String, Long>) {
-        try {
-            file.parentFile?.mkdirs()
-            val array = JSONArray()
-            sessions.forEach { (token, expiry) ->
-                array.put(JSONObject().put(KEY_TOKEN, token).put(KEY_EXPIRY, expiry))
-            }
-            val tmp = File(file.parentFile, file.name + ".tmp")
-            tmp.writeText(array.toString())
-            if (!tmp.renameTo(file)) {
-                file.delete()
-                tmp.renameTo(file)
-            }
-        } catch (e: Exception) {
-            // Losing the persisted copy only means a re-login after restart.
-            Log.w(TAG, "Failed to persist sessions: ${e.message}")
-        }
-    }
-
-    companion object {
-        private const val TAG = "AuthSessionStore"
-        private const val KEY_TOKEN = "t"
-        private const val KEY_EXPIRY = "e"
+        // Losing the persisted copy only means a re-login after restart.
+        val wire = sessions.map { AuthStoredSession(it.key, it.value) }
+        file.writeAtomicallyOrWarn(
+            listAdapter.toJson(wire),
+            warn = "Failed to persist sessions",
+        )
     }
 }

@@ -55,6 +55,7 @@ class UpdateViewModel(
                         downloadUrl = outcome.downloadUrl,
                         fileSizeBytes = outcome.fileSizeBytes,
                         fileName = outcome.fileName,
+                        digest = outcome.digest,
                     )
                 }
                 is UpdateCheckPipeline.UpdateOutcome.UpToDate -> {
@@ -83,11 +84,29 @@ class UpdateViewModel(
                         _updateState.value = UpdateState.Downloading(progress)
                     }
                 val apkFile = updateDownloader.getDownloadedApk()
-                if (apkFile != null && apkFile.exists()) {
-                    _updateState.value = UpdateState.ReadyToInstall(apkFile.absolutePath)
-                } else {
+                if (apkFile == null || !apkFile.exists()) {
                     _updateState.value = UpdateState.Error("Download failed")
+                    return@launch
                 }
+                if (!UpdateIntegrity.sizeMatches(apkFile.length(), state.fileSizeBytes)) {
+                    Log.e(TAG, "Size mismatch: expected ${state.fileSizeBytes}, got ${apkFile.length()}")
+                    apkFile.delete()
+                    _updateState.value = UpdateState.Error("Downloaded update failed the size check")
+                    return@launch
+                }
+                when (UpdateIntegrity.verify(apkFile, state.digest)) {
+                    UpdateIntegrity.Verdict.Verified ->
+                        Log.d(TAG, "APK integrity verified")
+                    UpdateIntegrity.Verdict.NoDigestProvided ->
+                        Log.w(TAG, "Release shipped no sha256 digest; skipping integrity verification")
+                    UpdateIntegrity.Verdict.Mismatch -> {
+                        Log.e(TAG, "APK digest mismatch; deleting the partial download")
+                        apkFile.delete()
+                        _updateState.value = UpdateState.Error("Downloaded update failed the integrity check")
+                        return@launch
+                    }
+                }
+                _updateState.value = UpdateState.ReadyToInstall(apkFile.absolutePath)
             } catch (e: Exception) {
                 _updateState.value = UpdateState.Error(e.message ?: "Download failed")
             }

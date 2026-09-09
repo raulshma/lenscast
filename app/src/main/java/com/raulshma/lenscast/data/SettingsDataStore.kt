@@ -23,6 +23,7 @@ import com.raulshma.lenscast.camera.model.OverlaySettings
 import com.raulshma.lenscast.camera.model.Resolution
 import com.raulshma.lenscast.camera.model.WhiteBalance
 import com.raulshma.lenscast.core.AppJson
+import com.raulshma.lenscast.core.BackupTargetPolicy
 import com.raulshma.lenscast.core.StreamAuthCrypto
 import com.raulshma.lenscast.core.StreamDefaults
 import com.raulshma.lenscast.core.parseEnum
@@ -33,6 +34,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 
@@ -122,13 +124,24 @@ private object Keys {
     val SOUND_THRESHOLD_PERCENT = intPreferencesKey("sound_threshold_percent")
     val WEBHOOK_ENABLED = stringPreferencesKey("webhook_enabled")
     val WEBHOOK_URL = stringPreferencesKey("webhook_url")
+    val WEBHOOK_HEADERS = stringPreferencesKey("webhook_headers")
+    val AUTO_SIREN = stringPreferencesKey("auto_siren")
+    val AUTO_TORCH = stringPreferencesKey("auto_torch")
+    val SIREN_DURATION_SECONDS = intPreferencesKey("siren_duration_seconds")
+    val AUTO_DETERRENCE_COOLDOWN_SECONDS = intPreferencesKey("auto_deterrence_cooldown_seconds")
     val BACKUP_ENABLED = stringPreferencesKey("backup_enabled")
     val BACKUP_WIFI_ONLY = stringPreferencesKey("backup_wifi_only")
+    val BACKUP_TARGET = stringPreferencesKey("backup_target")
     val BACKUP_WEBDAV_URL = stringPreferencesKey("backup_webdav_url")
     val BACKUP_WEBDAV_USERNAME = stringPreferencesKey("backup_webdav_username")
     val BACKUP_WEBDAV_PASSWORD = stringPreferencesKey("backup_webdav_password")
+    val TELEGRAM_BOT_TOKEN = stringPreferencesKey("telegram_bot_token")
+    val TELEGRAM_CHAT_ID = stringPreferencesKey("telegram_chat_id")
+    val API_TOKEN_ENABLED = stringPreferencesKey("api_token_enabled")
+    val API_TOKEN_HASH = stringPreferencesKey("api_token_hash")
     val HTTPS_ENABLED = stringPreferencesKey("https_enabled")
     val AUDIO_DEVICE_ID = stringPreferencesKey("audio_device_id")
+    val RESUME_STREAMS_ON_BOOT = stringPreferencesKey("resume_streams_on_boot")
 }
 
 /**
@@ -268,9 +281,34 @@ internal val webhookEnabledPref = boolPref(Keys.WEBHOOK_ENABLED, defaultTrue = f
 
 internal val webhookUrlPref = stringPref(Keys.WEBHOOK_URL, "")
 
+/** Custom webhook POST headers as a JSON `{"Name": "value"}` map string. */
+internal val webhookHeadersPref = stringPref(Keys.WEBHOOK_HEADERS, "")
+
+internal val autoSirenPref = boolPref(Keys.AUTO_SIREN, defaultTrue = false)
+
+internal val autoTorchPref = boolPref(Keys.AUTO_TORCH, defaultTrue = false)
+
+internal val sirenDurationSecondsPref = intPref(
+    Keys.SIREN_DURATION_SECONDS,
+    StreamDefaults.SIREN_DURATION_SECONDS_DEFAULT,
+    IntBounds(StreamDefaults.SIREN_DURATION_MIN_SECONDS, StreamDefaults.SIREN_DURATION_MAX_SECONDS),
+)
+
+internal val autoDeterrenceCooldownSecondsPref = intPref(
+    Keys.AUTO_DETERRENCE_COOLDOWN_SECONDS,
+    StreamDefaults.AUTO_DETERRENCE_COOLDOWN_SECONDS_DEFAULT,
+    IntBounds(
+        StreamDefaults.AUTO_DETERRENCE_COOLDOWN_MIN_SECONDS,
+        StreamDefaults.AUTO_DETERRENCE_COOLDOWN_MAX_SECONDS,
+    ),
+)
+
 internal val backupEnabledPref = boolPref(Keys.BACKUP_ENABLED, defaultTrue = false)
 
 internal val backupWifiOnlyPref = boolPref(Keys.BACKUP_WIFI_ONLY, defaultTrue = true)
+
+/** `"webdav"` (default) or `"telegram"`; anything else decodes back to webdav at the policy. */
+internal val backupTargetPref = stringPref(Keys.BACKUP_TARGET, BackupTargetPolicy.DEFAULT_WIRE_NAME)
 
 internal val backupWebdavUrlPref = stringPref(Keys.BACKUP_WEBDAV_URL, "")
 
@@ -278,9 +316,21 @@ internal val backupWebdavUsernamePref = stringPref(Keys.BACKUP_WEBDAV_USERNAME, 
 
 internal val backupWebdavPasswordPref = stringPref(Keys.BACKUP_WEBDAV_PASSWORD, "")
 
+internal val telegramBotTokenPref = stringPref(Keys.TELEGRAM_BOT_TOKEN, "")
+
+internal val telegramChatIdPref = stringPref(Keys.TELEGRAM_CHAT_ID, "")
+
+/** Whether the read-only API token path is armed; the hash gates nothing while this is off. */
+internal val apiTokenEnabledPref = boolPref(Keys.API_TOKEN_ENABLED, defaultTrue = false)
+
+/** SHA-256 hex of the API token — the token itself is never persisted. */
+internal val apiTokenHashPref = stringPref(Keys.API_TOKEN_HASH, "")
+
 internal val httpsEnabledPref = boolPref(Keys.HTTPS_ENABLED, defaultTrue = false)
 
 internal val audioDeviceIdPref = stringPref(Keys.AUDIO_DEVICE_ID, "")
+
+internal val resumeStreamsOnBootPref = boolPref(Keys.RESUME_STREAMS_ON_BOOT, defaultTrue = false)
 
 
 internal val watchdogEnabledPref = boolPref(Keys.WATCHDOG_ENABLED, defaultTrue = false)
@@ -586,6 +636,15 @@ class SettingsDataStore(
     private fun <T> SettingPref<T>.shared(): StateFlow<T> = context.dataStore.data.map(decode)
         .stateIn(shareInScope, SharingStarted.Eagerly, default)
 
+    /**
+     * The current disk value of one setting, suspending until DataStore's
+     * first read lands. The shared StateFlows above start at the descriptor
+     * default, so an immediate `.value` read from a fresh process (the boot
+     * receiver) can race the disk — startup-critical reads go through here.
+     */
+    private suspend fun <T> SettingPref<T>.diskValue(): T =
+        context.dataStore.data.map(decode).first()
+
     private suspend fun <T> SettingPref<T>.save(value: T) {
         context.dataStore.edit { prefs -> encode(prefs, value) }
     }
@@ -646,9 +705,21 @@ class SettingsDataStore(
 
     val webhookUrl: StateFlow<String> = webhookUrlPref.shared()
 
+    val webhookHeaders: StateFlow<String> = webhookHeadersPref.shared()
+
+    val autoSiren: StateFlow<Boolean> = autoSirenPref.shared()
+
+    val autoTorch: StateFlow<Boolean> = autoTorchPref.shared()
+
+    val sirenDurationSeconds: StateFlow<Int> = sirenDurationSecondsPref.shared()
+
+    val autoDeterrenceCooldownSeconds: StateFlow<Int> = autoDeterrenceCooldownSecondsPref.shared()
+
     val backupEnabled: StateFlow<Boolean> = backupEnabledPref.shared()
 
     val backupWifiOnly: StateFlow<Boolean> = backupWifiOnlyPref.shared()
+
+    val backupTarget: StateFlow<String> = backupTargetPref.shared()
 
     val backupWebdavUrl: StateFlow<String> = backupWebdavUrlPref.shared()
 
@@ -656,9 +727,22 @@ class SettingsDataStore(
 
     val backupWebdavPassword: StateFlow<String> = backupWebdavPasswordPref.shared()
 
+    val telegramBotToken: StateFlow<String> = telegramBotTokenPref.shared()
+
+    val telegramChatId: StateFlow<String> = telegramChatIdPref.shared()
+
+    val apiTokenEnabled: StateFlow<Boolean> = apiTokenEnabledPref.shared()
+
+    val apiTokenHash: StateFlow<String> = apiTokenHashPref.shared()
+
     val httpsEnabled: StateFlow<Boolean> = httpsEnabledPref.shared()
 
     val audioDeviceId: StateFlow<String> = audioDeviceIdPref.shared()
+
+    val resumeStreamsOnBoot: StateFlow<Boolean> = resumeStreamsOnBootPref.shared()
+
+    /** Startup-critical: suspends on the disk value, immune to the flow's default-first race. */
+    suspend fun resumeStreamsOnBootNow(): Boolean = resumeStreamsOnBootPref.diskValue()
 
 
     val watchdogEnabled: StateFlow<Boolean> = watchdogEnabledPref.shared()
@@ -739,9 +823,22 @@ class SettingsDataStore(
 
     suspend fun saveWebhookUrl(url: String) = webhookUrlPref.save(url)
 
+    suspend fun saveWebhookHeaders(headersJson: String) = webhookHeadersPref.save(headersJson)
+
+    suspend fun saveAutoSiren(enabled: Boolean) = autoSirenPref.save(enabled)
+
+    suspend fun saveAutoTorch(enabled: Boolean) = autoTorchPref.save(enabled)
+
+    suspend fun saveSirenDurationSeconds(seconds: Int) = sirenDurationSecondsPref.save(seconds)
+
+    suspend fun saveAutoDeterrenceCooldownSeconds(seconds: Int) =
+        autoDeterrenceCooldownSecondsPref.save(seconds)
+
     suspend fun saveBackupEnabled(enabled: Boolean) = backupEnabledPref.save(enabled)
 
     suspend fun saveBackupWifiOnly(wifiOnly: Boolean) = backupWifiOnlyPref.save(wifiOnly)
+
+    suspend fun saveBackupTarget(target: String) = backupTargetPref.save(target)
 
     suspend fun saveBackupWebdavUrl(url: String) = backupWebdavUrlPref.save(url)
 
@@ -749,9 +846,19 @@ class SettingsDataStore(
 
     suspend fun saveBackupWebdavPassword(password: String) = backupWebdavPasswordPref.save(password)
 
+    suspend fun saveTelegramBotToken(token: String) = telegramBotTokenPref.save(token)
+
+    suspend fun saveTelegramChatId(chatId: String) = telegramChatIdPref.save(chatId)
+
+    suspend fun saveApiTokenEnabled(enabled: Boolean) = apiTokenEnabledPref.save(enabled)
+
+    suspend fun saveApiTokenHash(hash: String) = apiTokenHashPref.save(hash)
+
     suspend fun saveHttpsEnabled(enabled: Boolean) = httpsEnabledPref.save(enabled)
 
     suspend fun saveAudioDeviceId(id: String) = audioDeviceIdPref.save(id)
+
+    suspend fun saveResumeStreamsOnBoot(enabled: Boolean) = resumeStreamsOnBootPref.save(enabled)
 
     suspend fun saveOverlaySettings(settings: OverlaySettings) = overlaySettingsPref.save(settings)
 

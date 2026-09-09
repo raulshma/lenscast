@@ -2,9 +2,11 @@ package com.raulshma.lenscast.streaming
 
 import android.util.Log
 import com.raulshma.lenscast.core.NetworkUtils
+import com.raulshma.lenscast.streaming.rtsp.H264Encoder
 import com.raulshma.lenscast.streaming.rtsp.RtspAuthSpec
 import com.raulshma.lenscast.streaming.rtsp.RtspConfig
 import com.raulshma.lenscast.streaming.rtsp.RtspConfigDiff
+import com.raulshma.lenscast.streaming.rtsp.RtspField
 import com.raulshma.lenscast.streaming.rtsp.RtspInputFormat
 import com.raulshma.lenscast.streaming.rtsp.RtspServer
 import com.raulshma.lenscast.streaming.rtsp.RtspUriPolicy
@@ -36,13 +38,20 @@ internal interface RtspAudioSource {
  * it; JVM tests substitute a fake server that records the calls.
  */
 internal interface RtspServerHandle {
-    fun start(initial: RtspConfig, audioStream: InputStream?): Boolean
+    fun start(initial: RtspConfig): Boolean
 
     fun stop()
 
     fun apply(config: RtspConfig)
 
-    fun pushFrame(yuvData: ByteArray, width: Int, height: Int, rotation: Int)
+    /** One encoded H.264 access unit from the encoded-stream hub. */
+    fun feedVideo(nalUnits: List<H264Encoder.EncodedNalUnit>)
+
+    /** One AAC access unit from the encoded-stream hub. */
+    fun feedAudio(aacData: ByteArray)
+
+    /** The watchdog/dashboard health snapshot. */
+    fun health(): RtspHealth
 }
 
 /**
@@ -88,8 +97,10 @@ data class RtspHealth(
  * cancellation are start-only encoder settings (see
  * [com.raulshma.lenscast.streaming.rtsp.RtspConfigDiff]) — a live output
  * enforces them by the audio restart ladder; frame rate, input format, and
- * auth hot-swap via [RtspServerHandle.apply]; a port change restarts;
- * recording start/stop never restarts a running output.
+ * auth hot-swap via [RtspServerHandle.apply], and a video-bitrate change
+ * fans out to the encoded-stream hub (the encoder owner) through
+ * [onVideoBitrateChanged]; a port change restarts; recording start/stop
+ * never restarts a running output.
  */
 internal class RtspOutput(
     private val audio: RtspAudioSource,
@@ -99,9 +110,9 @@ internal class RtspOutput(
     private val releaseAudio: () -> Unit,
     /** The running/URL mirror after every server transition, so the owner's state flows follow the output. */
     private val onStateChanged: (running: Boolean, url: String) -> Unit,
-    private val hlsSink: com.raulshma.lenscast.streaming.hls.HlsVideoSink? = com.raulshma.lenscast.streaming.hls.HlsManager,
-    private val extraVideoSink: ((List<com.raulshma.lenscast.streaming.rtsp.H264Encoder.EncodedNalUnit>) -> Unit)? = null,
-    private val serverFactory: (port: Int) -> RtspServerHandle = { port -> RtspServer(port, hlsSink, extraVideoSink) },
+    /** The encoded-stream hub's live bitrate seam: the H.264 encoder is the hub's, so a bitrate change lands there, not in any server instance. */
+    private val onVideoBitrateChanged: (Int) -> Unit = {},
+    private val serverFactory: (port: Int) -> RtspServerHandle,
 ) {
 
     /** The output is switched on — start() while disabled refuses. */
@@ -152,16 +163,7 @@ internal class RtspOutput(
     fun isRunning(): Boolean = server != null
 
     /** RTSP health snapshot for the watchdog: playing/total clients + encoder counters. */
-    fun healthSnapshot(): RtspHealth {
-        val s = server as? RtspServer
-        return RtspHealth(
-            playingClients = s?.getClientCount() ?: 0,
-            totalClients = s?.getTotalClients() ?: 0,
-            acceptedFrames = s?.getAcceptedFrames() ?: 0L,
-            droppedFrames = s?.getDroppedFrames() ?: 0L,
-            healthy = s?.isHealthy() ?: (server != null),
-        )
-    }
+    fun healthSnapshot(): RtspHealth = server?.health() ?: RtspHealth(healthy = false)
 
     /** The stream URL, or "" while stopped. */
     fun url(): String = currentUrl
@@ -185,9 +187,17 @@ internal class RtspOutput(
         notifyState()
     }
 
-    /** One camera frame onto the encoder path; no-op while no server is serving. */
-    fun pushFrame(yuvData: ByteArray, width: Int, height: Int, rotation: Int) {
-        server?.pushFrame(yuvData, width, height, rotation)
+    /**
+     * The encoded-stream hub's video feed, forwarded to whatever server
+     * instance is live — the RTP half of the fan-out. No-op while stopped.
+     */
+    fun feedEncodedVideo(nalUnits: List<H264Encoder.EncodedNalUnit>) {
+        server?.feedVideo(nalUnits)
+    }
+
+    /** The hub's AAC feed, forwarded like [feedEncodedVideo]. */
+    fun feedEncodedAudio(aacData: ByteArray) {
+        server?.feedAudio(aacData)
     }
 
     // ── settings: the restart-vs-apply choice ──
@@ -298,6 +308,13 @@ internal class RtspOutput(
                 restartIfAudioTrackWanted()
             changed.isNotEmpty() -> server?.apply(config)
         }
+        // The H.264 encoder belongs to the encoded-stream hub, not to any
+        // server instance: every video-bitrate change lands there too — live
+        // via setParameters while the hub runs, retained for its next start
+        // otherwise. Any restart re-reads the retained config.
+        if (RtspField.VIDEO_BITRATE in changed) {
+            onVideoBitrateChanged(config.videoBitrate)
+        }
     }
 
     /** The audio restart ladder: restart a live output only while the audio track matters to it. */
@@ -353,7 +370,7 @@ internal class RtspOutput(
             auth = authSpec(),
         )
 
-        if (newServer.start(config, stream)) {
+        if (newServer.start(config)) {
             server = newServer
             currentUrl = buildUrl()
             Log.d(TAG, "RTSP server started on port $port (audio=${stream != null})")

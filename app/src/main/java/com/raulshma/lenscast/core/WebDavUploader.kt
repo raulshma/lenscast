@@ -1,7 +1,6 @@
 package com.raulshma.lenscast.core
 
 import android.util.Log
-import java.io.File
 import java.net.HttpURLConnection
 import java.net.URI
 import java.net.URL
@@ -21,15 +20,7 @@ class WebDavUploader(
     private val password: String,
 ) {
 
-    fun upload(file: File): Boolean = try {
-        mkdirs(directoryPath()) &&
-            putStream(collectionUrlFor(file.name).toString(), file.length(), file.inputStream(), contentTypesFor(file.name))
-    } catch (e: Exception) {
-        Log.w(TAG, "WebDAV upload failed for ${file.name}: ${e.message}")
-        false
-    }
-
-    /** Stream variant for MediaStore content URIs (recordings). */
+    /** Stream PUT for a capture source: the size is known via [openWithSize] before the open. */
     fun upload(fileName: String, sizeBytes: Long, input: java.io.InputStream): Boolean = try {
         mkdirs(directoryPath()) &&
             putStream(collectionUrlFor(fileName).toString(), sizeBytes, input, contentTypesFor(fileName))
@@ -114,14 +105,39 @@ class WebDavUploader(
         }
     }
 
-    internal fun contentTypesFor(name: String): String = when {
-        name.endsWith(".jpg", true) || name.endsWith(".jpeg", true) -> "image/jpeg"
-        name.endsWith(".mp4", true) -> "video/mp4"
-        else -> "application/octet-stream"
-    }
+    internal fun contentTypesFor(name: String): String =
+        com.raulshma.lenscast.capture.model.CaptureMediaFormat.contentTypeFor(name)
 
     companion object {
         private const val TAG = "WebDavUploader"
         private const val TIMEOUT_MS = 30_000
+    }
+}
+
+/**
+ * The WebDAV adapter over [BackupTargetUploader] — a thin translation of the
+ * worker's sealed source shapes onto [WebDavUploader]'s upload entry points
+ * through the shared [openWithSize] ladder. No retry, constraint, or Wi-Fi
+ * logic lives here; the worker owns those.
+ */
+class WebDavBackupTarget(private val uploader: WebDavUploader) : BackupTargetUploader {
+
+    override suspend fun upload(source: BackupUploadSource, remoteName: String): Boolean {
+        val (size, input) = source.openWithSize() ?: return false
+        return try {
+            uploader.upload(remoteName, size, input)
+        } catch (e: Exception) {
+            // Content resolution can throw (a revoked MediaStore grant, a
+            // deleted recording); a throw escaping here would surface to
+            // the worker as a permanent failure instead of a retry.
+            Log.w(TAG, "WebDAV backup of $remoteName failed: ${e.message}")
+            false
+        } finally {
+            runCatching { input.close() }
+        }
+    }
+
+    private companion object {
+        const val TAG = "WebDavBackupTarget"
     }
 }

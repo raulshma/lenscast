@@ -33,8 +33,12 @@ class StreamingServer(
     // Auth policy (sessions, rate limiting, CSRF) lives behind this seam; the
     // transport only translates requests to it.
     webAuthGate: WebAuthGate,
-    // Non-null when the server should serve HTTPS (self-signed cert owned by
-    // TlsCertManager). Must be provided at construction: NanoHTTPD makes the
+    // True while the encoded-stream hub feeds HLS/WS — drives HLS
+    // availability independent of the MJPEG pump's enabled flag, so HLS and
+    // the h264 player mode work in every configuration (RTSP-only included).
+    private val encodedStreamActive: () -> Boolean,
+    // Non-null when the server should serve HTTPS (self-signed cert owned
+    // by TlsCertManager). Must be provided at construction: NanoHTTPD makes the
     // server socket secure before start().
     tlsServerSocketFactory: SSLServerSocketFactory? = null,
 ) : NanoHTTPD(port) {
@@ -128,12 +132,12 @@ class StreamingServer(
                 translate(if (ok) HttpResult.jsonError(200, "Talkback played") else HttpResult.jsonError(503, "Speaker unavailable"))
             }
             uri == "/hls/playlist.m3u8" -> translate(
-                mediaResponder.serveHlsPlaylist(mjpegPump.isEnabled()),
+                mediaResponder.serveHlsPlaylist(encodedStreamActive()),
             )
             uri.startsWith("/hls/seg") && uri.endsWith(".ts") -> translate(
                 mediaResponder.serveHlsSegment(
                     name = uri.substringAfterLast("/"),
-                    enabled = mjpegPump.isEnabled(),
+                    enabled = encodedStreamActive(),
                 ),
             )
             uri.startsWith("/snapshot") -> translate(

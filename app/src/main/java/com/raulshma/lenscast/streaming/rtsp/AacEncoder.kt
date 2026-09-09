@@ -56,6 +56,9 @@ class AacEncoder {
         audioStream = stream
     }
 
+    /** True while the codec harness is live — the hub's audio re-attach probe. */
+    fun isRunning(): Boolean = harness.isRunning
+
     fun start(): Boolean {
         if (!harness.start()) return false
 

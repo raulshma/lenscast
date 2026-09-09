@@ -3,6 +3,7 @@ import type { AllSettings, RtspInputFormat } from '../types'
 import { API_DEFAULTS } from '../api/defaults'
 import SettingsCard from './SettingsCard'
 import SecurityCard from './SecurityCard'
+import EventFeed from './EventFeed'
 import BackupCard from './BackupCard'
 import AuthCard from './AuthCard'
 
@@ -333,6 +334,8 @@ export default function AppSettingsPanel(props: Props) {
         updateStreamingAndSave={props.updateStreamingAndSave}
         updateStreamingDebounced={props.updateStreamingDebounced}
       />
+
+      <EventFeed />
 
       <BackupCard
         settings={props.settings}

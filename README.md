@@ -53,7 +53,7 @@ LensCast is an Android camera application with live video/audio streaming to web
 
 ### Live Streaming
 - HTTPS mode with a self-signed on-device certificate (fingerprint shown for one-tap verification) — encrypts streams and enables in-browser microphone talkback
-- Low-latency H.264 playback in the dashboard via WebCodecs over WebSocket (MJPEG stays as the universal fallback), plus HLS output for iOS/muxed A/V
+- Low-latency H.264 playback in the dashboard via WebCodecs over WebSocket, with an automatic fallback ladder to MJPEG and then HLS (muxed A/V for iOS) — both fallback rungs are plain HTTP(S) requests (no WebSocket), so playback keeps working when WebSockets are blocked
 - Real-time M-JPEG video streaming to any web browser on the same WiFi network
 - RTSP streaming with H.264 video and AAC audio encoding for use with VLC, OBS, and other RTSP clients
 - Live audio streaming with configurable bitrate (32–320 kbps), channels (mono/stereo), and echo cancellation
@@ -64,6 +64,8 @@ LensCast is an Android camera application with live video/audio streaming to web
 - mDNS / NSD service discovery so clients can find the stream on the local network automatically
 - Network quality monitoring with per-client throughput tracking and quality level classification (Excellent → Critical)
 - Foreground service with persistent notification to keep streaming alive in the background
+- Resume streams on boot (when the setting is enabled) and a Quick Settings tile for unattended camera operation — the tile is a manual request and always starts, restoring the outputs the on-device journal last recorded
+- Optional read-only API token (Bearer / X-Api-Token header, GET/HEAD only) for programmatic clients like Home Assistant or curl
 
 ### Web UI (Remote Control Dashboard)
 - Full remote camera control dashboard built with SolidJS, Tailwind CSS v4, and DaisyUI
@@ -84,10 +86,15 @@ LensCast is an Android camera application with live video/audio streaming to web
 - Motion detection with configurable sensitivity, detection zones, and an arm schedule (time-of-day window, midnight-wrapping)
 - Motion-triggered bounded recording with post-roll, or the legacy auto-photo mode
 - Sound detection with an RMS threshold
-- Webhook alerts (ntfy/Home Assistant/any JSON endpoint), remote siren and spotlight deterrence from the dashboard
+- Webhook alerts (ntfy/Home Assistant/any JSON endpoint) with the trigger snapshot embedded in the JSON payload, custom headers, and automatic retries
+- On-device detection event log with a dashboard event feed (thumbnail, type, dispatched actions)
+- Automatic deterrence: optional siren and torch auto-trigger on detection, with a configurable cooldown — the siren auto-stops after its duration, while the torch stays on until turned off
 
 ### Backup
-- Auto-upload new captures to any WebDAV collection (Nextcloud/self-hosted), with Wi-Fi-only mode and WorkManager-backed retries
+- Auto-upload new captures to any WebDAV collection (Nextcloud/self-hosted) or Telegram chat (Bot API), with Wi-Fi-only mode and WorkManager-backed retries
+
+### Self-Update
+- In-app update check against GitHub releases with a SHA-256 digest + APK size integrity gate before install — verification is skipped (the update proceeds unverified) when a release omits the digest
 
 ### Capture
 - One-tap quick photo and video capture
@@ -117,6 +124,13 @@ LensCast is an Android camera application with live video/audio streaming to web
 - Automatic stream URL generation based on device local IP
 - Per-client connection statistics with throughput, latency, and frames-per-second tracking
 - HTTP Range request support for video file streaming in the web gallery
+
+---
+
+## Documentation
+
+- [Remote access](docs/remote-access.md) — viewing the stream outside your LAN (Tailscale, WireGuard, and why port forwarding is discouraged)
+- [NVR integration](docs/nvr-integration.md) — Home Assistant, VLC/ffmpeg, Frigate, and detection webhook recipes
 
 ---
 

@@ -116,6 +116,7 @@ fun AppSettingsScreen(
     val adaptiveBitrateEnabled by viewModel.adaptiveBitrateEnabled.collectAsState()
     val mdnsEnabled by viewModel.mdnsEnabled.collectAsState()
     val isIgnoringBatteryOptimizations by viewModel.isIgnoringBatteryOptimizations
+    val resumeStreamsOnBoot by viewModel.resumeStreamsOnBoot.collectAsState()
 
     val updateState by updateViewModel.updateState.collectAsState()
     val autoCheckEnabled by updateViewModel.autoCheckEnabled.collectAsState()
@@ -336,6 +337,11 @@ fun AppSettingsScreen(
                             onCheckedChange = { viewModel.requestIgnoreBatteryOptimization(activity) }
                         )
                     }
+                    SwitchSetting(
+                        title = "Resume Streams on Boot",
+                        checked = resumeStreamsOnBoot,
+                        onCheckedChange = { viewModel.updateResumeStreamsOnBoot(it) }
+                    )
                 }
             }
 

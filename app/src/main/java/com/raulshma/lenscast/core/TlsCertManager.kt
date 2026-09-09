@@ -17,7 +17,12 @@ import javax.net.ssl.SSLServerSocketFactory
  * The certificate is regenerated when absent, unverifiable, or when the
  * device's LAN addresses no longer appear in its subjectAltName — browsers
  * match https URLs against SAN entries, so a network move needs a new cert
- * and a one-tap browser exception.
+ * and a one-tap browser exception. Every served certificate also carries the
+ * fixed DNS SAN [STABLE_HOST] (`lenscast.local`), so bookmarks using that
+ * name keep validating wherever the network resolves it (LensCast does not
+ * advertise the name itself; see docs/remote-access.md); the Connect sheet
+ * (camera/, not owned here) shows the fingerprint, and this constant is the
+ * stable hostname surface.
  *
  * The user-facing trust model is QR/toe-print verification: [fingerprint]
  * is the SHA-256 digest of the DER certificate, shown on the Connect sheet.
@@ -69,7 +74,11 @@ class TlsCertManager(private val context: Context) {
                 ?.takeIf { cert -> currentIps.all { certificateIps(cert).contains(it) } }
         }
         val finalCert = certificate ?: run {
-            val created = SelfSignedCert.generate(keyPair, ipAddresses = currentIps)
+            val created = SelfSignedCert.generate(
+                keyPair,
+                ipAddresses = currentIps,
+                dnsNames = listOf(STABLE_HOST),
+            )
             certFile.writeBytes(created)
             SelfSignedCert.parse(created)
         }
@@ -139,6 +148,13 @@ class TlsCertManager(private val context: Context) {
         private const val TAG = "TlsCertManager"
         private const val KEYSTORE_TYPE = "PKCS12"
         private const val ALIAS = "lenscast"
+
+        /**
+         * The fixed DNS SAN every served certificate carries, so a
+         * `lenscast.local` bookmark keeps validating across the IP-driven
+         * certificate regenerations — wherever the network resolves the name.
+         */
+        const val STABLE_HOST = "lenscast.local"
 
         // PKCS12 requires a password; this constant only obfuscates it. The
         // actual protection boundary is the app-private filesDir sandbox —

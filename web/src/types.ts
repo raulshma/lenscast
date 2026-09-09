@@ -14,6 +14,14 @@ export type RtspInputFormat = 'AUTO' | 'NV21' | 'NV12' | 'I420'
 // the wire (e.g. POST /api/auth/login {username, password}); the server never
 // stores or returns it — at rest it keeps only passwordHash and an RTSP
 // digest HA1, and verifies logins against the hash.
+//
+// API token contract (same write-only pattern): the dashboard generates a
+// random token client-side and sends it ONCE as the write-only `apiToken`
+// field of StreamingSettings; the server stores only its SHA-256 hex hash and
+// never returns the token or the hash — responses carry `apiTokenEnabled` and
+// `apiTokenConfigured` instead. The token authorizes read-only GET/HEAD
+// requests (never /api/auth/*) via `Authorization: Bearer` or `X-Api-Token`.
+
 export interface StreamAuthSettings {
   enabled: boolean
   username: string
@@ -59,6 +67,9 @@ export interface CameraSettings {
   sceneMode: string | null
   nightVisionMode: NightVisionMode
 }
+
+// The backup destinations, matching the server's BackupTargetPolicy wire names.
+export type BackupTarget = 'webdav' | 'telegram'
 
 export interface StreamingSettings {
   port: number
@@ -106,11 +117,26 @@ export interface StreamingSettings {
   soundThresholdPercent: number
   webhookEnabled: boolean
   webhookUrl: string
+  /** Custom POST headers as a JSON `{"Name": "value"}` map string. */
+  webhookHeaders: string
+  autoSiren: boolean
+  autoTorch: boolean
+  sirenDurationSeconds: number
+  autoDeterrenceCooldownSeconds: number
   backupEnabled: boolean
   backupWifiOnly: boolean
+  backupTarget: BackupTarget
   backupWebdavUrl: string
   backupWebdavUsername: string
   backupWebdavPassword: string
+  telegramChatId: string
+  /** Write-only, like backupWebdavPassword: PUT carries it, responses are blank. */
+  telegramBotToken: string
+  apiTokenEnabled: boolean
+  /** True when a token hash is stored server-side; the secret never round-trips. */
+  apiTokenConfigured: boolean
+  /** Write-only plaintext token: hashed server-side on save, never returned. */
+  apiToken: string
   httpsEnabled: boolean
   audioDeviceId: string
 }
@@ -317,6 +343,22 @@ export interface GalleryResponse {
   page: number
   pageSize: number
   hasMore: boolean
+}
+
+export type DetectionEventType = 'motion' | 'sound'
+
+export interface DetectionEvent {
+  id: string
+  type: DetectionEventType
+  source: string
+  timestampMs: number
+  snapshotJpegBase64?: string | null
+  dispatchedActions: string[]
+}
+
+export interface DetectionEventsResponse {
+  events: DetectionEvent[]
+  total: number
 }
 
 export const OVERLAY_POSITION_LABELS: Record<OverlayPosition, string> = {

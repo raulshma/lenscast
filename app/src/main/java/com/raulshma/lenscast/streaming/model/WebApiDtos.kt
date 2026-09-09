@@ -3,6 +3,7 @@ package com.raulshma.lenscast.streaming.model
 import com.raulshma.lenscast.camera.model.MaskingZone
 import com.raulshma.lenscast.camera.model.MotionZone
 import com.raulshma.lenscast.camera.model.OverlaySettings
+import com.raulshma.lenscast.core.BackupTargetPolicy
 import com.raulshma.lenscast.core.StreamDefaults
 
 /**
@@ -99,8 +100,16 @@ data class StreamingSettingsDto(
     val soundThresholdPercent: Int = StreamDefaults.SOUND_THRESHOLD_PERCENT_DEFAULT,
     val webhookEnabled: Boolean = false,
     val webhookUrl: String = "",
+    /** Custom POST headers as a JSON `{"Name": "value"}` map string. */
+    val webhookHeaders: String = "",
+    val autoSiren: Boolean = false,
+    val autoTorch: Boolean = false,
+    val sirenDurationSeconds: Int = StreamDefaults.SIREN_DURATION_SECONDS_DEFAULT,
+    val autoDeterrenceCooldownSeconds: Int = StreamDefaults.AUTO_DETERRENCE_COOLDOWN_SECONDS_DEFAULT,
     val backupEnabled: Boolean = false,
     val backupWifiOnly: Boolean = true,
+    /** `"webdav"` or `"telegram"` — the BackupWorker's routing selection. */
+    val backupTarget: String = BackupTargetPolicy.DEFAULT_WIRE_NAME,
     val backupWebdavUrl: String = "",
     val backupWebdavUsername: String = "",
     /**
@@ -108,6 +117,22 @@ data class StreamingSettingsDto(
      * always serialize it blank — the stored secret never round-trips.
      */
     val backupWebdavPassword: String = "",
+    val telegramChatId: String = "",
+    /**
+     * Write-only, exactly like [backupWebdavPassword]: accepted on PUT, never
+     * serialized back out.
+     */
+    val telegramBotToken: String = "",
+    /** Whether the read-only API token path is armed. */
+    val apiTokenEnabled: Boolean = false,
+    /** True when a token hash is stored; the token and the hash never round-trip. */
+    val apiTokenConfigured: Boolean = false,
+    /**
+     * Write-only plaintext token: the dashboard generates it client-side and
+     * sends it once; the server stores only its SHA-256 hex hash and this
+     * field always serializes blank.
+     */
+    val apiToken: String = "",
     val httpsEnabled: Boolean = false,
     val audioDeviceId: String = "",
 )
@@ -294,4 +319,20 @@ data class StreamClientsResponseDto(
     val httpCount: Int,
     val rtspCount: Int,
     val maxHttp: Int = StreamDefaults.MAX_HTTP_CLIENTS,
+)
+
+// ── Detection Event DTOs ──
+
+data class DetectionEventDto(
+    val id: String,
+    val type: String,
+    val source: String,
+    val timestampMs: Long,
+    val snapshotJpegBase64: String? = null,
+    val dispatchedActions: List<String> = emptyList(),
+)
+
+data class DetectionEventsResponseDto(
+    val events: List<DetectionEventDto>,
+    val total: Int,
 )

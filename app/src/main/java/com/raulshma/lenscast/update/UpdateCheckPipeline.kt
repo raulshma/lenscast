@@ -33,6 +33,8 @@ class UpdateCheckPipeline(
             val downloadUrl: String,
             val fileSizeBytes: Long,
             val fileName: String,
+            /** The release asset's "sha256:<hex>" digest; null when GitHub omits it. */
+            val digest: String? = null,
             /** False when the user had dismissed this version. */
             val notified: Boolean,
         ) : UpdateOutcome
@@ -79,6 +81,7 @@ class UpdateCheckPipeline(
                         downloadUrl = result.apkAsset.browserDownloadUrl,
                         fileSizeBytes = result.apkAsset.size,
                         fileName = result.apkAsset.name,
+                        digest = result.apkAsset.digest,
                         notified = true,
                     )
                 } else {
