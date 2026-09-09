@@ -119,6 +119,9 @@ const STREAMING_KEYS = [
   'mqttPassword',
   'mqttTls',
   'mqttDiscoveryPrefix',
+  'mlModelState',
+  'mlModelProgress',
+  'mlModelError',
 ]
 
 describe('DTO contract fixtures', () => {
@@ -341,6 +344,9 @@ describe('API_DEFAULTS lockstep with the fixtures', () => {
     expect(streaming.rtspVideoCodec).toBe(API_DEFAULTS.rtspVideoCodec)
     expect(streaming.mlDetectionEnabled).toBe(API_DEFAULTS.mlDetectionEnabled)
     expect(streaming.mlMinScorePercent).toBe(API_DEFAULTS.mlMinScorePercent)
+    expect(streaming.mlModelState).toBe(API_DEFAULTS.mlModelState)
+    expect(streaming.mlModelProgress).toBe(API_DEFAULTS.mlModelProgress)
+    expect(streaming.mlModelError).toBe(API_DEFAULTS.mlModelError)
     expect(streaming.continuousRecording).toBe(API_DEFAULTS.continuousRecording)
     expect(streaming.continuousSegmentMinutes).toBe(API_DEFAULTS.continuousSegmentMinutes)
     expect(streaming.onvifEnabled).toBe(API_DEFAULTS.onvifEnabled)

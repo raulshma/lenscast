@@ -937,8 +937,9 @@ class StreamingManager(
         return WebApiStack(
             router = ApiRouter(
                 settings = SettingsWebHandler(
-                settingsDataStore = app.settingsDataStore,
-            ),
+                    settingsDataStore = app.settingsDataStore,
+                    detectionModelStore = app.detectionModelStore,
+                ),
                 status = statusHandler,
                 stream = StreamWebHandler(this, app.streamingSession),
                 capture = CaptureWebHandler(app.photoCaptureManager),

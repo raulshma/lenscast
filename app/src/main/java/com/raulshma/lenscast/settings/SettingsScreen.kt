@@ -74,7 +74,8 @@ fun CameraSettingsScreen(
     val app = context.applicationContext as MainApplication
     val viewModel: SettingsViewModel = viewModel(
         factory = SettingsViewModel.Factory(
-            app.cameraService, app.settingsDataStore, app.powerManager
+            app.cameraService, app.settingsDataStore, app.powerManager,
+            app.detectionModelStore,
         )
     )
 

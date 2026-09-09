@@ -3,7 +3,9 @@ package com.raulshma.lenscast.settings
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -16,6 +18,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.text.KeyboardActions
+import com.raulshma.lenscast.capture.ml.DetectionModelStore
 import com.raulshma.lenscast.core.StreamDefaults
 
 /**
@@ -36,6 +39,7 @@ fun DetectionSettingsSection(viewModel: SettingsViewModel) {
     val soundThreshold by viewModel.soundThresholdPercent.collectAsState()
     val mlEnabled by viewModel.mlDetectionEnabled.collectAsState()
     val mlMinScore by viewModel.mlMinScorePercent.collectAsState()
+    val modelState by viewModel.detectionModelState.collectAsState()
     val notificationEnabled by viewModel.detectionNotificationsEnabled.collectAsState()
     val tamperEnabled by viewModel.tamperDetectionEnabled.collectAsState()
 
@@ -133,8 +137,66 @@ fun DetectionSettingsSection(viewModel: SettingsViewModel) {
                 steps = StreamDefaultsRange.ML_SCORE_STEPS,
                 onValueChange = { viewModel.updateMlMinScorePercent(it.toInt()) }
             )
+            // The model ships outside the APK — this row is its only
+            // user-facing fetch control (the detection gate also auto-requests
+            // the download on the first gated motion event).
+            DetectionModelRow(
+                state = modelState,
+                onDownload = { viewModel.downloadDetectionModel() },
+            )
         }
     }
+}
+
+/**
+ * The on-demand detection model's status row: download when missing, progress
+ * while fetching, the reason + retry after a failure. Pure echo of
+ * [DetectionModelStore.State] — the store stays the single owner of the file.
+ */
+@Composable
+private fun DetectionModelRow(state: DetectionModelStore.State, onDownload: () -> Unit) {
+    Spacer(modifier = Modifier.height(4.dp))
+    when (state) {
+        is DetectionModelStore.State.NotDownloaded -> {
+            Text(
+                text = "Detection model not downloaded (${DetectionModelStore.DISPLAY_SIZE_MB}, " +
+                    "fetched once and kept in app storage)",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            OutlinedButton(onClick = onDownload) {
+                Text("Download model")
+            }
+        }
+        is DetectionModelStore.State.Downloading -> {
+            Text(
+                text = "Downloading detection model…",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            if (state.progress >= 0f) {
+                LinearProgressIndicator(progress = { state.progress })
+            } else {
+                LinearProgressIndicator()
+            }
+        }
+        is DetectionModelStore.State.Ready -> Text(
+            text = "Detection model ready (${DetectionModelStore.DISPLAY_SIZE_MB})",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        is DetectionModelStore.State.Failed -> {
+            Text(
+                text = "Detection model download failed: ${state.reason}",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error,
+            )
+            OutlinedButton(onClick = onDownload) {
+                Text("Retry download")
+            }
+        }
+    }
+    Spacer(modifier = Modifier.height(4.dp))
 }
 
 @Composable

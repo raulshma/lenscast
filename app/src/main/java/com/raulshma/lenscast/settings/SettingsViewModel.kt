@@ -12,6 +12,7 @@ import com.raulshma.lenscast.camera.model.QuickSettingCatalog
 import com.raulshma.lenscast.camera.model.QuickSettingType
 import com.raulshma.lenscast.core.PowerManager
 import com.raulshma.lenscast.core.parseEnum
+import com.raulshma.lenscast.capture.ml.DetectionModelStore
 import com.raulshma.lenscast.data.SettingsDataStore
 import com.raulshma.lenscast.core.StreamAuthCrypto
 import com.raulshma.lenscast.data.StreamAuthSettings
@@ -31,6 +32,8 @@ class SettingsViewModel(
     private val cameraService: CameraService,
     private val settingsDataStore: SettingsDataStore,
     private val powerManager: PowerManager? = null,
+    /** The on-demand ML model store; its download is the one non-setting action here. */
+    private val detectionModelStore: DetectionModelStore,
 ) : ViewModel() {
 
     // Read-side settings come straight from the Settings Store's shared
@@ -61,6 +64,10 @@ class SettingsViewModel(
     val soundThresholdPercent: StateFlow<Int> = settingsDataStore.soundThresholdPercent
     val mlDetectionEnabled: StateFlow<Boolean> = settingsDataStore.mlDetectionEnabled
     val mlMinScorePercent: StateFlow<Int> = settingsDataStore.mlMinScorePercent
+
+    // The detection model's download lifecycle, straight from the store.
+    val detectionModelState: StateFlow<DetectionModelStore.State> =
+        detectionModelStore.state
     val continuousRecording: StateFlow<Boolean> = settingsDataStore.continuousRecording
     val continuousSegmentMinutes: StateFlow<Int> = settingsDataStore.continuousSegmentMinutes
     val detectionNotificationsEnabled: StateFlow<Boolean> = settingsDataStore.detectionNotificationsEnabled
@@ -195,6 +202,15 @@ class SettingsViewModel(
 
     fun updateMlMinScorePercent(percent: Int) = save { settingsDataStore.saveMlMinScorePercent(percent) }
 
+    /**
+     * The one write here that is not a persisted setting: asks the model store
+     * to fetch the detection model (idempotent there — Ready/in-flight are
+     * no-ops). Progress lands on [detectionModelState].
+     */
+    fun downloadDetectionModel() {
+        detectionModelStore.requestDownload()
+    }
+
     fun updateContinuousRecording(enabled: Boolean) = save { settingsDataStore.saveContinuousRecording(enabled) }
 
     fun updateContinuousSegmentMinutes(minutes: Int) = save { settingsDataStore.saveContinuousSegmentMinutes(minutes) }
@@ -260,10 +276,11 @@ class SettingsViewModel(
         private val cameraService: CameraService,
         private val settingsDataStore: SettingsDataStore,
         private val powerManager: PowerManager? = null,
+        private val detectionModelStore: DetectionModelStore,
     ) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
         override fun <T : androidx.lifecycle.ViewModel> create(modelClass: Class<T>): T {
-            return SettingsViewModel(cameraService, settingsDataStore, powerManager) as T
+            return SettingsViewModel(cameraService, settingsDataStore, powerManager, detectionModelStore) as T
         }
     }
 }

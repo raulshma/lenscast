@@ -31,7 +31,8 @@ object UpdateIntegrity {
         data object Mismatch : Verdict
     }
 
-    private const val DIGEST_SCHEME = "sha256:"
+    /** The only digest scheme the verdict accepts — expected digests are composed as `[DIGEST_SCHEME]+hex`. */
+    const val DIGEST_SCHEME = "sha256:"
     private const val BUFFER_SIZE_BYTES = 8 * 1024
 
     /**

@@ -56,6 +56,7 @@ class ApiRouter(
 
     private suspend fun routeWrite(r: ApiRequest): ApiResponse? = when (r.path) {
         "/api/settings" -> ApiResponse.ok(settings.put(r.body))
+        "/api/settings/ml-model/download" -> ApiResponse.ok(settings.downloadModel())
         "/api/stream/start", "/api/stream/resume" -> ApiResponse.ok(stream.startAll())
         "/api/stream/stop" -> ApiResponse.ok(stream.stopAll())
         "/api/stream/web/start" -> ApiResponse.ok(stream.startWeb())

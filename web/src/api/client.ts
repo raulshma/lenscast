@@ -92,6 +92,10 @@ export async function getSettings(): Promise<AllSettings> {
   return requestJson('/api/settings')
 }
 
+export async function downloadDetectionModel(): Promise<{ success: boolean }> {
+  return requestJson('/api/settings/ml-model/download', { method: 'POST' })
+}
+
 export async function updateSettings(settings: Partial<AllSettings>): Promise<{ success: boolean; error?: string }> {
   return requestJson('/api/settings', {
     method: 'PUT',

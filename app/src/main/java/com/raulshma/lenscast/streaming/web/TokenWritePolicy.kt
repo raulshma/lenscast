@@ -30,6 +30,9 @@ object TokenWritePolicy {
         // Deterrence: the siren route plus the torch route the router registers
         "/api/deterrence/siren",
         "/api/camera/torch",
+        // Detection model fetch: a device-maintenance action in the siren/torch
+        // class — it changes no persisted setting and cannot disable anything.
+        "/api/settings/ml-model/download",
     )
 
     /** True when a POST carrying a valid API token may proceed to [path]. */

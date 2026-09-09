@@ -167,17 +167,60 @@ finalized clip (`clipMediaId`/`clipFileName`) back into the persisted event;
 while the continuous loop holds the recorder the clip start is skipped and
 the link fields stay null.
 
+### Detection Model Store
+**`capture/ml/DetectionModelStore.kt`** — the on-demand home of the ML
+detection model: the EfficientDet-Lite0 int8 tflite is *not* bundled in the
+APK; this store downloads it once on request into app-private `filesDir/models/`,
+hands the resolved file to the Object Detection Engine, and publishes the
+lifecycle (`NotDownloaded` / `Downloading(progress)` / `Ready(file)` /
+`Failed(reason)`) as a StateFlow for the settings screen's status row. One
+entry point, `requestDownload()`, is idempotent — Ready and in-flight models
+are never re-fetched, Failed always retries — and the integrity gate is
+fail-closed: the download lands in a `.part` file and must match both the
+exact expected byte length and the build-time-pinned SHA-256 digest (the
+update stack's `UpdateIntegrity` does the hashing and the constant-time
+compare) before an atomic same-directory rename installs it; anything else
+discards the partial file. The same gate re-runs at resolve time: an
+installed file that no longer matches is quarantined and the state demoted
+off Ready, so a model corrupted at rest re-downloads instead of wedging with
+an engine that cannot load it. The model's provenance (TensorFlow Hub source URL,
+Apache-2.0, 320x320 input) lives in the store's KDoc now that the bundled
+asset README is gone. Consumers: the coordinator's gate auto-requests the
+download on every gated motion event (idempotent in the store, so the first
+request after launch or failure is the one that fetches), the App Settings
+detection section renders the state and the manual Download/Retry button, and the engine reads
+`resolveModelFile()` per init attempt (disk, not state — the file outlives
+the process). The dashboard rides the same store: the settings DTO carries
+the response-only `mlModelState`/`mlModelProgress`/`mlModelError` fields
+(mapped through the store's `wireFields` into the named `ModelWireFields`,
+mirrored through the contract fixtures into types.ts and API_DEFAULTS), and
+`POST /api/settings/ml-model/download` — token-writable, in the siren/torch
+maintenance-action class — fires the same idempotent request; the
+SecurityCard renders the status row and the Download/Retry button. Because
+the download rides the settings payload with no SSE push of its own, the
+dashboard's settings poll runs at the slow cadence always (a download can
+also be auto-requested by the device, so it must be discoverable at any
+time) and a fast `modelDownload` lane takes the settings fetch over — the
+slow lane backs off — while the wire state is `downloading`, so the progress
+row moves even mid-stream.
+
 ### Object Detection Engine
 **`capture/ml/ObjectDetectionEngine.kt`**,
 **`capture/model/DetectionClassPolicy.kt`** — the model and policy halves of
 the ML motion gate. The engine is the LiteRT task-vision `ObjectDetector`
-over the bundled EfficientDet-Lite0 int8 model (`assets/models/`, see its
-README), loaded lazily on first gated motion event: the NV21 frame takes the
+over the EfficientDet-Lite0 int8 model (resolved per init attempt from the
+Detection Model Store — the model file is downloaded, not bundled), loaded
+lazily on first gated motion event: the NV21 frame takes the
 YuvImage→JPEG round-trip and a power-of-two downscale before the task
-library's own 320 px resize, and every failure mode (missing asset, broken
+library's own 320 px resize, and every failure mode (missing model, broken
 init, undecodable frame, inference error) maps to `Unavailable` — the
 engine never decides suppression, the caller owns the fail-open semantics.
-The policy is the pure COCO allow-list (person, common pets/livestock, road
+The init latch is the pure `DetectorInitGate`, and the missing-vs-broken
+distinction its API forces on the call sites is load-bearing: only
+`onInitFailure` latches (a present-but-broken model, a task-library rejection
+— process lifetime), and a *missing* model file never reaches it, so the
+download can land at any moment and the next classify retries. The policy is the pure
+COCO allow-list (person, common pets/livestock, road
 vehicles): `filter` returns the lowercase labels scoring at or above
 `mlMinScorePercent`, deduped, in allow-list order (person first) so the wire
 `labels` array is deterministic regardless of the detector's result
@@ -348,7 +391,8 @@ that builds the Web API stack.
 ### Web API Handlers
 **`streaming/web/`** — the JSON-in/JSON-out surface behind the streaming
 server's `/api/*` routes, split one handler per domain: `SettingsWebHandler`
-(DTO mapping), `StatusWebHandler` (status aggregation), `StreamWebHandler`
+(DTO mapping, plus the detection model's response-only status fields and its
+download route), `StatusWebHandler` (status aggregation), `StreamWebHandler`
 (lifecycle), `CaptureWebHandler`, `LensWebHandler`,
 `IntervalCaptureWebHandler`, `RecordingWebHandler` (observes the Recording
 Controller), `GalleryWebHandler` (media resolution/thumbnails),
@@ -430,7 +474,8 @@ re-applied when the server is recreated.
 ### Token Write Policy
 **`streaming/web/TokenWritePolicy.kt`** — the exact POST routes a valid API
 token may write (stream/web/RTSP start and stop, `/api/capture`, recording
-start and stop, siren, torch); every path outside the list stays read-only
+start and stop, siren, torch, the detection-model download); every path
+outside the list stays read-only
 for tokens, and the list deliberately contains no `/api/auth/` route, so a
 bearer token never mints sessions, rotates credentials, or logs out. The
 Web Auth Gate's token verdict consults it for the method check, and the

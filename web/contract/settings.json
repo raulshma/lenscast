@@ -94,6 +94,9 @@
     "eventRetentionDays": 0,
     "mlDetectionEnabled": false,
     "mlMinScorePercent": 60,
+    "mlModelState": "not_downloaded",
+    "mlModelProgress": -1.0,
+    "mlModelError": "",
     "continuousRecording": false,
     "continuousSegmentMinutes": 15,
     "onvifEnabled": false

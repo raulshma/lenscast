@@ -103,6 +103,11 @@ export const API_DEFAULTS = {
   // Detection suite extensions (StreamDefaults / StreamingSettingsDto)
   mlDetectionEnabled: false,
   mlMinScorePercent: 60,
+  mlModelState: 'not_downloaded',
+  mlModelProgress: -1,
+  mlModelError: '',
+  /** Human-facing model size for the Detection Model row (DetectionModelStore.DISPLAY_SIZE_MB). */
+  mlModelSizeLabel: '4.4 MB',
   mlMinScoreMinPercent: 10,
   mlMinScoreMaxPercent: 95,
   continuousRecording: false,

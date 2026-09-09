@@ -74,7 +74,9 @@ fun AppSettingsScreen(
     val app = context.applicationContext as MainApplication
     val viewModel: SettingsViewModel = viewModel(
         factory = SettingsViewModel.Factory(
-            app.cameraService, app.settingsDataStore, app.powerManager
+            app.cameraService, app.settingsDataStore, app.powerManager,
+            // The detection section surfaces the on-demand model download.
+            app.detectionModelStore,
         )
     )
     val updateViewModel: UpdateViewModel = viewModel(

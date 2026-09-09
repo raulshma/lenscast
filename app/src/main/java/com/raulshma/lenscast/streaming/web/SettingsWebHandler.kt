@@ -5,6 +5,7 @@ import com.raulshma.lenscast.core.BackupTargetPolicy
 import com.raulshma.lenscast.core.StreamAuthCrypto
 import com.raulshma.lenscast.core.parseEnum
 import com.raulshma.lenscast.core.parseEnumOrNull
+import com.raulshma.lenscast.capture.ml.DetectionModelStore
 import com.raulshma.lenscast.camera.model.CameraSettings
 import com.raulshma.lenscast.camera.model.MaskingType
 import com.raulshma.lenscast.camera.model.MaskingZone
@@ -34,6 +35,8 @@ import com.raulshma.lenscast.streaming.rtsp.RtspVideoCodec
  */
 class SettingsWebHandler(
     private val settingsDataStore: SettingsDataStore,
+    /** The on-demand model store; its state rides the settings response, its download the POST route. */
+    private val detectionModelStore: DetectionModelStore,
 ) {
 
     private val responseAdapter by lazy { AppJson.moshi.adapter(SettingsResponseDto::class.java) }
@@ -43,6 +46,8 @@ class SettingsWebHandler(
     suspend fun get(): String {
         val store = settingsDataStore
         val overlay = store.overlaySettings.value
+        // Response-only model facts: the store's published lifecycle.
+        val modelWire = DetectionModelStore.wireFields(detectionModelStore.state.value)
         val response = SettingsResponseDto(
             camera = toCameraDto(store.settings.value),
             streaming = StreamingSettingsDto(
@@ -130,6 +135,9 @@ class SettingsWebHandler(
                 eventRetentionDays = store.eventRetentionDays.value,
                 mlDetectionEnabled = store.mlDetectionEnabled.value,
                 mlMinScorePercent = store.mlMinScorePercent.value,
+                mlModelState = modelWire.state,
+                mlModelProgress = modelWire.progress,
+                mlModelError = modelWire.error,
                 continuousRecording = store.continuousRecording.value,
                 continuousSegmentMinutes = store.continuousSegmentMinutes.value,
                 onvifEnabled = store.onvifEnabled.value,
@@ -271,6 +279,17 @@ class SettingsWebHandler(
             }
         }
 
+        return successAdapter.toJson(SuccessResponse())
+    }
+
+    /**
+     * POST /api/settings/ml-model/download — asks the model store to fetch
+     * the detection model. Idempotent in the store (Ready and in-flight
+     * downloads are no-ops); the outcome surfaces on the next settings GET
+     * through `mlModelState`, never as this route's error.
+     */
+    suspend fun downloadModel(): String {
+        detectionModelStore.requestDownload()
         return successAdapter.toJson(SuccessResponse())
     }
 

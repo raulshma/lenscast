@@ -167,12 +167,21 @@ export interface StreamingSettings {
   mlDetectionEnabled: boolean
   /** Minimum ML confidence percent for a detected object to count. */
   mlMinScorePercent: number
+  /** Response-only: on-demand detection model state. */
+  mlModelState: MlModelState
+  /** Response-only: model download progress 0..1; -1 when none is running. */
+  mlModelProgress: number
+  /** Response-only: failure reason when mlModelState is "failed". */
+  mlModelError: string
   /** Continuous NVR-style loop recording (chained bounded segments). */
   continuousRecording: boolean
   continuousSegmentMinutes: number
   /** ONVIF Profile S device endpoint + WS-Discovery responder. */
   onvifEnabled: boolean
 }
+
+/** The DetectionModelStore wire names the settings DTO carries for mlModelState. */
+export type MlModelState = 'not_downloaded' | 'downloading' | 'ready' | 'failed'
 
 export interface AllSettings {
   camera: CameraSettings

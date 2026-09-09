@@ -373,6 +373,14 @@ export function useAppState() {
     refreshDashboard(true)
 
     const streamingInactive = () => !status()?.streaming?.isActive
+    // The model download rides the settings payload with no SSE push of its
+    // own, and a download can also be auto-requested by the device itself
+    // (the detection coordinator fetches on the first gated motion event).
+    // The settings lane therefore always polls at the slow cadence — so a
+    // download the dashboard never saw start still gets discovered — and
+    // once the wire state says `downloading`, the fast modelDownload lane
+    // takes the settings fetch over and the slow lane backs off.
+    const modelDownloading = () => settings()?.streaming?.mlModelState === 'downloading'
 
     // SSE status push: when the channel is live it replaces the status poll
     // lane entirely; the ladder lane stays armed as automatic fallback for
@@ -395,7 +403,8 @@ export function useAppState() {
       status: { everyTicks: 3, enabled: () => !sseHealthChecker() },
       recording: { everyTicks: 3 },
       intervalCapture: { everyTicks: 5 },
-      settings: { everyTicks: 30, enabled: streamingInactive },
+      settings: { everyTicks: 30, enabled: () => !modelDownloading() },
+      modelDownload: { everyTicks: 3, enabled: modelDownloading },
       lenses: { everyTicks: 30, enabled: streamingInactive },
     }, (key) => {
       switch (key) {
@@ -403,6 +412,7 @@ export function useAppState() {
         case 'recording': void fetchRecordingStatus(); break
         case 'intervalCapture': void fetchIntervalStatus(); break
         case 'settings': void fetchSettings(); break
+        case 'modelDownload': void fetchSettings(); break
         case 'lenses': void fetchLenses(); break
       }
     }, {

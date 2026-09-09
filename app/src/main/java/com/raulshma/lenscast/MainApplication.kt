@@ -14,6 +14,7 @@ import com.raulshma.lenscast.capture.DetectionNotifier
 import com.raulshma.lenscast.capture.PhotoCaptureManager
 import com.raulshma.lenscast.capture.RecordingController
 import com.raulshma.lenscast.capture.TamperMonitor
+import com.raulshma.lenscast.capture.ml.DetectionModelStore
 import com.raulshma.lenscast.core.ConnectivityMonitor
 import com.raulshma.lenscast.core.PowerManager
 import com.raulshma.lenscast.core.SirenAutoStop
@@ -131,6 +132,12 @@ class MainApplication : Application(), SingletonImageLoader.Factory {
     val detectionNotifier: DetectionNotifier by lazy {
         DetectionNotifier(this)
     }
+    // The ML detection model lives in app-private storage, not the APK; one
+    // store owns the download + integrity so the coordinator's gate and the
+    // settings screen share one state.
+    val detectionModelStore: DetectionModelStore by lazy {
+        DetectionModelStore(java.io.File(filesDir, DetectionModelStore.DEFAULT_DIR_NAME))
+    }
     val detectionCoordinator: DetectionCoordinator by lazy {
         DetectionCoordinator(
             settingsDataStore = settingsDataStore,
@@ -139,6 +146,7 @@ class MainApplication : Application(), SingletonImageLoader.Factory {
             webhookNotifier = webhookNotifier,
             eventStore = detectionEventStore,
             captureHistoryStore = captureHistoryStore,
+            detectionModelStore = detectionModelStore,
             streamingManager = { streamingManager },
             cameraService = { cameraService },
             mqttPublisher = { mqttAlertPublisher },

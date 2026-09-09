@@ -1,5 +1,6 @@
 package com.raulshma.lenscast.streaming.model
 
+import com.raulshma.lenscast.capture.ml.DetectionModelStore
 import com.raulshma.lenscast.camera.model.MaskingZone
 import com.raulshma.lenscast.camera.model.MotionZone
 import com.raulshma.lenscast.camera.model.OverlaySettings
@@ -166,6 +167,18 @@ data class StreamingSettingsDto(
     val mlDetectionEnabled: Boolean = false,
     /** Minimum ML confidence percent for a detected object to count. */
     val mlMinScorePercent: Int = StreamDefaults.ML_SCORE_PERCENT_DEFAULT,
+    /**
+     * Response-only: the on-demand detection model's state —
+     * `not_downloaded` | `downloading` | `ready` | `failed` (the
+     * DetectionModelStore wire names). Accepted-but-ignored on PUT; the
+     * dashboard cannot write the model's lifecycle, only request its
+     * download through the dedicated POST route.
+     */
+    val mlModelState: String = DetectionModelStore.STATE_NOT_DOWNLOADED,
+    /** Response-only: download progress 0..1; [DetectionModelStore.PROGRESS_NONE] when none is running. */
+    val mlModelProgress: Double = DetectionModelStore.PROGRESS_NONE,
+    /** Response-only: the failure reason when [mlModelState] is `failed`. */
+    val mlModelError: String = "",
     /** Continuous NVR-style loop recording (chained bounded segments). */
     val continuousRecording: Boolean = false,
     val continuousSegmentMinutes: Int = StreamDefaults.CONTINUOUS_SEGMENT_MINUTES_DEFAULT,

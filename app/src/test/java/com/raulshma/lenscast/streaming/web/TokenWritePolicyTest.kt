@@ -41,6 +41,11 @@ class TokenWritePolicyTest {
     }
 
     @Test
+    fun `the detection model download route is writable`() {
+        assertTrue(TokenWritePolicy.allowsPost("/api/settings/ml-model/download"))
+    }
+
+    @Test
     fun `settings and auth routes are never token-writable`() {
         assertFalse(TokenWritePolicy.allowsPost("/api/settings"))
         assertFalse(TokenWritePolicy.allowsPost("/api/auth/login"))
@@ -86,6 +91,7 @@ class TokenWritePolicyTest {
                 "/api/recording/stop",
                 "/api/deterrence/siren",
                 "/api/camera/torch",
+                "/api/settings/ml-model/download",
             ),
             TokenWritePolicy.TOKEN_WRITABLE_POST_ROUTES,
         )

@@ -3,7 +3,7 @@ import type { AllSettings, MotionZone } from '../types'
 import { API_DEFAULTS } from '../api/defaults'
 import SettingsCard from './SettingsCard'
 import ToggleRow from './ToggleRow'
-import { setSiren, setTorch } from '../api/client'
+import { downloadDetectionModel, setSiren, setTorch } from '../api/client'
 
 interface Props {
   settings: () => AllSettings | null
@@ -55,6 +55,16 @@ export default function SecurityCard(props: Props) {
   const [torchOn, setTorchOn] = createSignal(false)
   const [torchBusy, setTorchBusy] = createSignal(false)
 
+  // The one busy-guard choreography every action button here shares: a
+  // re-entrancy guard, the call, and a finally that always releases.
+  function runGuarded(busy: () => boolean, setBusy: (v: boolean) => void, action: () => Promise<unknown>) {
+    if (busy()) return
+    setBusy(true)
+    action()
+      .catch(() => {})
+      .finally(() => setBusy(false))
+  }
+
   const zones = () => stream()?.motionZones ?? []
   // One reader per toggled setting: the row's `checked`, its flip, and any
   // dependent <Show> all read the same server-or-default value.
@@ -69,25 +79,49 @@ export default function SecurityCard(props: Props) {
   const autoTorchOn = () => stream()?.autoTorch ?? API_DEFAULTS.autoTorch
   const mlOn = () => stream()?.mlDetectionEnabled ?? API_DEFAULTS.mlDetectionEnabled
   const continuousOn = () => stream()?.continuousRecording ?? API_DEFAULTS.continuousRecording
+  // The detection model ships outside the APK; these read the server's
+  // response-only model facts and the download button drives the POST route.
+  const mlModelState = () => stream()?.mlModelState ?? API_DEFAULTS.mlModelState
+  const mlModelProgress = () => stream()?.mlModelProgress ?? API_DEFAULTS.mlModelProgress
+  const mlModelError = () => stream()?.mlModelError ?? API_DEFAULTS.mlModelError
+  const [modelBusy, setModelBusy] = createSignal(false)
+
+  function downloadModel() {
+    runGuarded(modelBusy, setModelBusy, () => downloadDetectionModel())
+  }
+
+  /**
+   * One derived view of the model state: the status text, the download
+   * button's label/availability, and whether the failure reason row shows all
+   * discriminate the state once, here, so they can never disagree.
+   */
+  function mlModelView(): {
+    status: string
+    button: { label: string; disabled: boolean } | null
+    showError: boolean
+  } {
+    if (mlModelState() === 'ready') return { status: 'Ready', button: null, showError: false }
+    if (mlModelState() === 'downloading' || modelBusy()) {
+      const p = mlModelProgress()
+      return {
+        status: p >= 0 ? `Downloading ${Math.round(p * 100)}%` : 'Downloading…',
+        button: { label: 'Downloading…', disabled: true },
+        showError: mlModelState() === 'failed',
+      }
+    }
+    return mlModelState() === 'failed'
+      ? { status: 'Download failed', button: { label: 'Retry Download', disabled: false }, showError: true }
+      : { status: `Not downloaded (${API_DEFAULTS.mlModelSizeLabel})`, button: { label: 'Download Model', disabled: false }, showError: false }
+  }
 
   function toggleSiren() {
-    if (sirenBusy()) return
-    setSirenBusy(true)
     const next = !sirenOn()
-    setSiren(next)
-      .then(() => setSirenOn(next))
-      .catch(() => {})
-      .finally(() => setSirenBusy(false))
+    runGuarded(sirenBusy, setSirenBusy, () => setSiren(next).then(() => setSirenOn(next)))
   }
 
   function toggleTorch() {
-    if (torchBusy()) return
-    setTorchBusy(true)
     const next = !torchOn()
-    setTorch(next)
-      .then(() => setTorchOn(next))
-      .catch(() => {})
-      .finally(() => setTorchBusy(false))
+    runGuarded(torchBusy, setTorchBusy, () => setTorch(next).then(() => setTorchOn(next)))
   }
 
   function addZone() {
@@ -306,6 +340,28 @@ export default function SecurityCard(props: Props) {
           value={stream()?.mlMinScorePercent ?? API_DEFAULTS.mlMinScorePercent}
           onInput={(e) => props.updateStreamingDebounced({ mlMinScorePercent: parseInt(e.currentTarget.value) })}
         />
+        <div class="field-row">
+          <span class="field-label">Detection Model</span>
+          <span class="field-value">{mlModelView().status}</span>
+        </div>
+        <Show when={mlModelView().showError}>
+          <div class="field-row">
+            <span class="field-value">{mlModelError()}</span>
+          </div>
+        </Show>
+        <Show when={mlModelView().button}>
+          {(button) => (
+            <button
+              type="button"
+              class="action-btn action-btn-ghost"
+              id="ml-model-download"
+              disabled={button().disabled}
+              onClick={downloadModel}
+            >
+              {button().label}
+            </button>
+          )}
+        </Show>
       </div>
 
       {/* Continuous recording */}

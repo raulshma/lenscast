@@ -2,6 +2,7 @@ package com.raulshma.lenscast.capture
 
 import android.util.Log
 import com.raulshma.lenscast.capture.ml.AnalysisFrame
+import com.raulshma.lenscast.capture.ml.DetectionModelStore
 import com.raulshma.lenscast.capture.ml.ObjectDetectionEngine
 import com.raulshma.lenscast.capture.model.DetectionClassPolicy
 import com.raulshma.lenscast.camera.CameraService
@@ -59,6 +60,12 @@ class DetectionCoordinator(
     private val eventStore: DetectionEventStore,
     /** The capture history, consulted when a bounded motion recording finalizes so the event can link its clip. */
     private val captureHistoryStore: CaptureHistoryStore? = null,
+    /**
+     * The on-demand model store behind the ML gate: its gate auto-fetches the
+     * model on the first gated motion event and resolves the file per init
+     * attempt.
+     */
+    private val detectionModelStore: DetectionModelStore,
     private val streamingManager: () -> StreamingManager?,
     private val cameraService: () -> CameraService?,
     private val mqttPublisher: () -> MqttAlertPublisher? = { null },
@@ -82,9 +89,13 @@ class DetectionCoordinator(
     // classification never suppresses an alert, only a positive "no allowed
     // class" verdict does.
 
-    /** The engine is built on first gated motion event; asset load is lazy. */
+    /**
+     * The engine is built on first gated motion event; the model file (not
+     * bundled in the APK) is resolved through [DetectionModelStore] per init
+     * attempt, so a model downloaded later is picked up on the next event.
+     */
     private val mlEngine by lazy {
-        ObjectDetectionEngine(contextProvider = { streamingManager()?.appContext() })
+        ObjectDetectionEngine(modelFileProvider = { detectionModelStore.resolveModelFile() })
     }
 
     /** One inference at a time, off the frame path — the frame listener never blocks on the model. */
@@ -105,6 +116,11 @@ class DetectionCoordinator(
             onEvent(EventKind.MOTION, delta, zones)
             return
         }
+        // The model ships outside the APK: the first gated event after the
+        // feature (or the download) was requested fetches it. Idempotent in
+        // the store — no-op while Ready or already downloading — and the gate
+        // fail-opens until the model is in place.
+        detectionModelStore.requestDownload()
         submitMlClassification { suppressed, labels ->
             if (suppressed) {
                 Log.d(TAG, "Motion event suppressed by ML gate (no allowed class at/above threshold)")
