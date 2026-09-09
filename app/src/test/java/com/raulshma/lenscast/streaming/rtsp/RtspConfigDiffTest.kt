@@ -25,6 +25,7 @@ class RtspConfigDiffTest {
             videoBitrate = 3_000_000,
             videoFrameRate = 30,
             inputFormat = RtspInputFormat.I420,
+            videoCodec = RtspVideoCodec.H265,
             audioEnabled = true,
             audioSampleRateHz = 44_100,
             audioChannelCount = 2,
@@ -38,6 +39,7 @@ class RtspConfigDiffTest {
                 RtspField.VIDEO_BITRATE,
                 RtspField.VIDEO_FRAME_RATE,
                 RtspField.INPUT_FORMAT,
+                RtspField.VIDEO_CODEC,
                 RtspField.AUDIO_ENABLED,
                 RtspField.AUDIO_SAMPLE_RATE_HZ,
                 RtspField.AUDIO_CHANNEL_COUNT,
@@ -49,10 +51,37 @@ class RtspConfigDiffTest {
     }
 
     @Test
+    fun `video codec change needs a restart - encoder packetizer and sdp all move together`() {
+        val diff = RtspConfigDiff.of(base, base.copy(videoCodec = RtspVideoCodec.H265))
+        assertEquals(changed(RtspField.VIDEO_CODEC), diff)
+        assertTrue(RtspConfigDiff.needsRestart(diff))
+
+        // And back again.
+        val back = RtspConfigDiff.of(base.copy(videoCodec = RtspVideoCodec.H265), base)
+        assertEquals(changed(RtspField.VIDEO_CODEC), back)
+        assertTrue(RtspConfigDiff.needsRestart(back))
+    }
+
+    @Test
     fun `video bitrate hot-swaps - the hub applies it via live setParameters`() {
         val diff = RtspConfigDiff.of(base, base.copy(videoBitrate = 4_000_000))
         assertEquals(changed(RtspField.VIDEO_BITRATE), diff)
         assertFalse(RtspConfigDiff.needsRestart(diff))
+    }
+
+    @Test
+    fun `video width or height changes need a restart - encoder dimensions are fixed at configure`() {
+        val widthOnly = RtspConfigDiff.of(base, base.copy(videoWidth = 1920))
+        assertEquals(changed(RtspField.VIDEO_WIDTH), widthOnly)
+        assertTrue(RtspConfigDiff.needsRestart(widthOnly))
+
+        val heightOnly = RtspConfigDiff.of(base, base.copy(videoHeight = 1080))
+        assertEquals(changed(RtspField.VIDEO_HEIGHT), heightOnly)
+        assertTrue(RtspConfigDiff.needsRestart(heightOnly))
+
+        val both = RtspConfigDiff.of(base, base.copy(videoWidth = 640, videoHeight = 480))
+        assertEquals(changed(RtspField.VIDEO_WIDTH, RtspField.VIDEO_HEIGHT), both)
+        assertTrue(RtspConfigDiff.needsRestart(both))
     }
 
     @Test

@@ -73,6 +73,9 @@ and intent construction. Its `RecordingState` flow (Idle /
 Scheduled / Recording with startedAtMs, config, finalizing) is the only public
 truth about recording: CameraViewModel, CaptureViewModel, and the Web API
 Recording Handler all observe it, and none keep optimistic copies. The
+Continuous Recording Controller is one more client of the same public
+surface — it watches the state flow and starts/stops the loop through
+`start`/`stop` like any screen would. The
 RecordingService is the truth source — it reports transitions through the
 controller's `onService*` methods, and the controller owns intent construction
 and delay-until scheduling. `RecordingConfig`'s companion owns the
@@ -122,6 +125,64 @@ every non-obvious conditional in its arm/stop paths consults this policy, so
 the user-stop vs auto-stop vs repeat-fire races are pinned by event-sequence
 JVM tests instead of living only in comments.
 
+### Continuous Recording Policy
+**`capture/model/ContinuousRecordingPolicy.kt`** — the pure decisions behind
+NVR-style loop recording. Chaining is deliberately not re-implemented: the
+segment config (`segmentConfig`) sets `repeatIntervalSeconds > 0`, so the
+Recording Duration Policy's bounded+repeat machinery re-starts each segment,
+and this policy only decides the initial arm (feature on, controller Idle),
+the disable-time teardown (only a loop the controller armed goes down with
+the toggle — a user's own recording is never stopped by a setting flip), the
+5 s idle grace that separates a broken chain from the healthy one-second
+repeat gap, and the user-stop suppression model — a stop sets a
+suppressed-until stamp and arming stays blocked for the 60 s cooldown.
+
+### Continuous Recording Controller
+**`capture/ContinuousRecordingController.kt`** — keeps the loop alive over
+the Recording Controller's public API (no new service, no RecordingService
+contact), hosted at the Streaming Manager but owned by the capture module.
+It combines the store's continuous-recording preferences with the
+controller's `RecordingState` flow, treats any live recording as the loop
+(never double-starts over a user's own start), stops the loop when the
+toggle goes off, and repairs the chain when an Idle outlives the grace
+window — respecting the suppression cooldown before re-arming, with the
+re-arm verdicts re-read at fire time so a toggle flip or user start landing
+during the wait wins.
+
+### Detection Coordinator
+**`capture/DetectionCoordinator.kt`** — the single owner of the
+detection-event choreography: arm-schedule verdict, then dispatch — the
+bounded motion recording (started only from Idle) or the legacy auto-photo,
+the webhook/MQTT/local-notification fan-out, the auto-siren/auto-torch
+deterrence behind its cooldown, and the persisted event-log entry, all
+reading one event-moment stamp and id so every sink reports the same
+identity. Motion events additionally pass through the ML object-detection
+gate when `mlDetectionEnabled` is on: the triggering frame is classified
+off-path (one worker thread, at most one classification per second) and only
+a positive "no allowed class at/above the confidence floor" verdict
+suppresses the event — a busy, throttled, or failed classification is
+fail-open. Surviving events carry the class labels into every sink and watch
+the Recording Controller for the bounded recording they started, linking the
+finalized clip (`clipMediaId`/`clipFileName`) back into the persisted event;
+while the continuous loop holds the recorder the clip start is skipped and
+the link fields stay null.
+
+### Object Detection Engine
+**`capture/ml/ObjectDetectionEngine.kt`**,
+**`capture/model/DetectionClassPolicy.kt`** — the model and policy halves of
+the ML motion gate. The engine is the LiteRT task-vision `ObjectDetector`
+over the bundled EfficientDet-Lite0 int8 model (`assets/models/`, see its
+README), loaded lazily on first gated motion event: the NV21 frame takes the
+YuvImage→JPEG round-trip and a power-of-two downscale before the task
+library's own 320 px resize, and every failure mode (missing asset, broken
+init, undecodable frame, inference error) maps to `Unavailable` — the
+engine never decides suppression, the caller owns the fail-open semantics.
+The policy is the pure COCO allow-list (person, common pets/livestock, road
+vehicles): `filter` returns the lowercase labels scoring at or above
+`mlMinScorePercent`, deduped, in allow-list order (person first) so the wire
+`labels` array is deterministic regardless of the detector's result
+ordering; an empty result is the only suppression verdict.
+
 ### Photo Capture
 **`capture/PhotoCaptureManager.kt`** — owns the photo choreography (acquire
 use case → take photo → record in history → release). Interface: `captureToGallery()`
@@ -159,12 +220,43 @@ safer than the old unconditional overwrite). Deletion is one `deleteAll(ids)`
 with `deleteMedia(id)` as its single-id form. Folder queries reference
 Capture Media Format's constants; persistence goes through App Json.
 
+### Retention Policy
+**`data/RetentionPolicy.kt`** — the pure time-based retention verdicts for
+the capture history and the detection-event log: `cutoffMs` / `shouldDelete`
+/ `pruneEntries` over a window in days where 0 (and any negative) means
+"keep forever" and every verdict answers conservatively. `pruneEntries`
+returns null for "nothing changes" so a no-op sweep skips the persistence
+rewrite, and callers supply `nowMs`, so the ladder is JVM-tested.
+CaptureHistoryStore sweeps on open, after each append, and on every
+MediaStore refresh (victims through `StorageManager.retentionVictims`, so
+the files go with the entries); DetectionEventStore sweeps on open and after
+each append. Both windows live in the Settings Store
+(`captureRetentionDays` / `eventRetentionDays`); no caller re-derives a
+cutoff.
+
+### Encoded Stream Hub
+**`streaming/EncodedStreamHub.kt`** — the shared video/AAC encode pipeline:
+camera YUV in, encoded access units out to every registered sink — the RTSP
+server (RTP), the HLS ring, and the WS video path — with its start/stop
+decision the pure `EncodedStreamPolicy` verdict over sink activity. The
+codec seam is `RtspVideoCodec`: the hub lazily instantiates the H.264 or
+H.265 encoder (one per codec, cached across flips), reconfigures
+stop → new encoder → start on a codec change, and implements the
+codec-aware `EncodedSource` seam the RTSP server reads for its SDP and PLAY
+sync-frame requests (SPS/PPS of the active codec, VPS H.265-only, so an
+H.264 SDP can never see a stale VPS). The fan-out feeds all three sinks the
+same access units except under H.265, where the H.264-only HLS muxer and
+WS/WebCodecs path are gated off and only RTSP receives.
+
 ### H264 Stream Assembler
 **`streaming/rtsp/H264StreamAssembler.kt`** — the wire-format core of the
 H.264 encoder path: holds the latest SPS/PPS from both MediaCodec CSD
 sources (codec-config buffers and the output format's csd-0/csd-1) and owns
 the keyframe prepend decision in `assemble(nalUnits, isKeyFrame)`. Pure over
-ByteBuffers, so both CSD paths and the assembly are JVM-tested.
+ByteBuffers, so both CSD paths and the assembly are JVM-tested. The
+keyframe verdict fed in is the encoder's `BUFFER_FLAG_KEY_FRAME` flag ORed
+with `H264NalParser.containsIdr` (NAL type 5, in the parser — not here),
+because the flag alone is vendor-unreliable.
 
 ### Media Codec Encoder Harness
 **`streaming/rtsp/MediaCodecEncoderHarness.kt`** — the one MediaCodec
@@ -174,9 +266,23 @@ format-changed and output callbacks), and the teardown (join, stop/release)
 with the exact exception ladder — all behind a thin `CodecLike` seam (the
 production adapter wraps MediaCodec), so the invariants — start idempotence,
 stop-after-failed-start safety, drain-exit classification, the original
-timings — are JVM-tested with a fake codec. `H264Encoder` and `AacEncoder`
-keep only their format construction, CSD interpretation, and input feeding;
+timings — are JVM-tested with a fake codec. `H264Encoder`/`H265Encoder`
+keep only their codec knowledge (CSD interpretation, keyframe NAL verdict)
+behind the shared `MediaCodecVideoEncoder`, which rides this harness;
+`AacEncoder` keeps its format construction and input feeding;
 `RtspServer`'s call sites are unchanged.
+
+### Video Packetizers
+**`streaming/rtsp/RtpPacketizer.kt`** (RFC 6184),
+**`streaming/rtsp/H265RtpPacketizer.kt`** (RFC 7798 single NAL + FU) — the
+codec-neutral `VideoPacketizer` seam `RtspServer` fans access units through:
+per-start instances over the shared `RtpStreamState` header writer, with
+`packetizeAccessUnit` stamping every NAL unit of one frame with the same RTP
+timestamp and setting the marker bit on exactly the last packet of the
+access unit (per-NAL markers announce frame ends mid-AU, which strict
+depacketizers surface as corrupted frame boundaries). The server picks the
+implementation at start from the configured codec, so the fan-out and the
+RTCP counters stay codec-blind.
 
 ### Transport Responders
 **`streaming/HttpAuthFilter.kt`**, **`streaming/StaticAssetStore.kt`**,
@@ -191,6 +297,35 @@ LRU cache, `..`/NUL path rejection, mime table, and index-then-control-page
 fallback; the MJPEG Pump owns frame state, client bookkeeping, the enabled
 flag, and the multipart stream; the Media Responder owns gallery files with
 video ranges, snapshots, and the PCM audio stream.
+
+### ONVIF Device Service
+**`streaming/onvif/OnvifServer.kt`**, **`streaming/onvif/WsDiscoveryResponder.kt`**,
+**`streaming/onvif/OnvifResponses.kt`** — the ONVIF Profile S surface: SOAP
+over HTTP at `/onvif/device_service` on the web port (a StreamingServer
+dispatch branch ahead of the auth gate — unauthenticated by design, since
+LAN ONVIF clients cannot hold the web session cookie; the endpoint answers
+only static device metadata plus the stream/snapshot URIs, while RTSP keeps
+its own Digest/Basic and the snapshot route stays behind the web gate), plus
+the WS-Discovery UDP responder (239.255.255.250:3702, owning the app's one
+multicast lock, answering Probes with a rate-limited ProbeMatch). The XML
+builders are pure and JVM-tested; configuration arrives as live provider
+lambdas, so a port or resolution change needs no restart. The
+`onvifEnabled` toggle runs the responder lifecycle through the Settings
+Applier; the HTTP side is stateless.
+
+### SSE Detection Event Stream
+**`streaming/SseDetectionEventStream.kt`** — the GET
+`/api/detection/events/stream` channel: replays the latest 50 events as
+`data:` frames on connect (the same per-event JSON the polling GET returns),
+then pushes every newly recorded or clip-linked event live, emitting a
+`: ping` comment after each silent 15 s. Served by the StreamingServer
+outside the JSON router — the never-ending chunked shape of the `/api/events`
+status stream (`SseStatusStream`); both channels ride the shared SSE Client
+Pump (`streaming/SseClientPump.kt`): one writer thread per client, a
+whole-chunk queue, close on disconnect, a bounded lifetime and client cap
+(the transport answers 503 when full), and the retry/bye EventSource
+framing. The dashboard's `useEventStream` hook consumes it with a
+polling fallback.
 
 ### Streaming Manager
 **`streaming/StreamingManager.kt`** — owns live streaming runtime state (web
@@ -216,7 +351,10 @@ server's `/api/*` routes, split one handler per domain: `SettingsWebHandler`
 (DTO mapping), `StatusWebHandler` (status aggregation), `StreamWebHandler`
 (lifecycle), `CaptureWebHandler`, `LensWebHandler`,
 `IntervalCaptureWebHandler`, `RecordingWebHandler` (observes the Recording
-Controller), and `GalleryWebHandler` (media resolution/thumbnails). The seam
+Controller), `GalleryWebHandler` (media resolution/thumbnails),
+`DeterrenceWebHandler` (the siren route), `DetectionEventsWebHandler` (the
+event log's list/clear plus the per-event JSON the SSE stream reuses), and
+`AuthWebHandler` (the config/session-management JSON). The seam
 is `ApiRouter.dispatch(request): ApiResponse` — I/O-bound handlers suspend and
 `StreamingServer` awaits the router from its worker threads. Handler errors
 are encoded in the 200 payload (the web client's contract); non-200 is
@@ -228,9 +366,10 @@ session routes (`/api/auth/login`, `/api/auth/logout`, `/api/auth/status`,
 their cookie/non-200 contract differs from the JSON handlers, so
 `StreamingServer` translates them onto the Web Auth Gate directly. The
 config/session-management routes (`/api/auth/config`, `/api/auth/sessions`)
-stay behind the router like every other JSON handler, as do the two deliberate
+stay behind the router like every other JSON handler, as do the three deliberate
 binary-style bypasses `/api/events` (the SSE status stream's never-ending
-chunked response) and `/api/audio/uplink` (raw PCM16 body), which the server
+chunked response), `/api/detection/events/stream` (the detection-event SSE
+twin), and `/api/audio/uplink` (raw PCM16 body), which the server
 serves without JSON semantics. The WS sidecar (`streaming/ws/WsMediaServer`)
 handshakes through the same Web Auth Gate — auth on requires the session
 cookie, and a rejected handshake aborts the upgrade. The
@@ -270,7 +409,11 @@ snapshot honestly (no token fire-and-forget refresh inside the request).
 ### Web Auth Gate
 **`streaming/WebAuthGate.kt`** — the auth policy for the web client: session
 tokens, rate-limited PBKDF2 login (`login`), request authorization
-(`authenticate`), CSRF origin checks (`isCsrfSafe`). Owned by the Streaming
+(`authenticate`), CSRF origin checks (`isCsrfSafe`), and the stateless
+API-token verdict (`authorizeApiToken` — GET/HEAD anywhere protected, POST
+only on the exact routes Token Write Policy allows, never an `/api/auth/`
+route; while the token setting is off the verdict fails closed and the
+headers are inert). Owned by the Streaming
 Manager so sessions survive a server recreation (e.g. a port change), and
 mirrored through the `SessionPersistence` hook (`AuthSessionStore`, an
 atomic-write file in app-private `filesDir`) so they also survive an app
@@ -283,6 +426,17 @@ InvalidCredentials) and the Auth Filter maps reason → status — it never
 string-matches the human-readable message. Credentials are read live through
 the gate (the manager-owned reference *is* the provider); no auth snapshot is
 re-applied when the server is recreated.
+
+### Token Write Policy
+**`streaming/web/TokenWritePolicy.kt`** — the exact POST routes a valid API
+token may write (stream/web/RTSP start and stop, `/api/capture`, recording
+start and stop, siren, torch); every path outside the list stays read-only
+for tokens, and the list deliberately contains no `/api/auth/` route, so a
+bearer token never mints sessions, rotates credentials, or logs out. The
+Web Auth Gate's token verdict consults it for the method check, and the
+list is a deliberate subset of the ApiRouter's registered POST routes —
+every listed route is one the router registers, and a route the router does
+not register has no business being token-writable.
 
 ### Frame Pipeline
 **`streaming/FramePipeline.kt`** — the web frame path: YUV in, overlaid JPEG
@@ -297,8 +451,8 @@ derivations are `streaming/FrameTiming` (`effectiveFps` falls back to
 
 ### RTSP Server
 **`streaming/rtsp/RtspServer.kt`** — the RTSP output. Its interface is
-`start(config, audioStream)` / `apply(config)` / `pushFrame` / `stop`:
-`RtspConfig` is one immutable value (video, audio, auth), so the old
+`start(initial: RtspConfig)` / `apply(config)` / `feedVideo` / `feedAudio` /
+`stop`: `RtspConfig` is one immutable value (video, audio, auth), so the old
 order-sensitive setter bag is gone, and both entry points clamp the config to
 its `StreamDefaults` bounds (`normalize`). What `apply` does live vs what
 restarts is a pure verdict — `RtspConfig.diff(old, new)` classifies each
@@ -307,7 +461,11 @@ the encoder; audio bitrate does not, so it restarts) — the code, not a
 comment, owns the promise. Structural changes restart the server (StreamingManager's
 call). RTP sequence/SSRC state lives
 in per-start `RtpPacketizer`/`AacRtpPacketizer` instances — no global reset
-ritual — over the shared `RtpStreamState` header writer. YUV rotation and
+ritual — over the shared `RtpStreamState` header writer. The video fan-out
+is keyframe-gated per client: every PLAY (re)arms a per-client wait and
+requests a sync frame from the encoded source, and `acceptVideoAu` passes a
+client's first bytes only on the next keyframe AU — a mid-GOP join never
+receives P-frames it cannot decode. YUV rotation and
 conversion live in `core/YuvConverter`, encoder color-format selection in
 `EncoderFormatPolicy`; the session/track state machine stays here, but the
 protocol knowledge behind it is pure: `RtspRequest` (wire parsing),
@@ -335,6 +493,35 @@ single-restart entry the manager's audio snapshot routes through;
 `StreamingManager` keeps its public surface (the
 Settings Applier's audio write is one coalesced call) and delegates — the manager retains fan-out and
 web/mDNS concerns the way `FramePipeline` absorbed the web frame path.
+
+### RTSP Resolution
+**`streaming/rtsp/RtspResolution.kt`** — the RTSP output's resolution choices
+as the one pure wire-name → (width, height) mapper: 480p, 720p (the
+default), 1080p, with the tolerant `fromWireName` fallback-to-default
+decode. Persisted as `rtsp_resolution` and applied by the Settings Applier
+onto the encoded-stream hub's retained dimensions; a width/height change is
+NEEDS_RESTART because MediaCodec dimensions are set at `configure`. The
+entries deliberately do not use the camera `Resolution` enum — the RTSP
+output encodes a fixed-size stream of its own choosing, independent of the
+preview's capture resolution: incoming frames are aspect-filled onto the
+configured size (`YuvConverter.scaleNv21`), so the stream is exactly that
+size whatever the camera analysis produces.
+
+### RTSP Video Codec
+**`streaming/rtsp/RtspVideoCodec.kt`** — the wire name → codec mapper
+(`h264` default, `h265`) behind the encoded-stream hub's encoder selection,
+the server's packetizer choice, and the SDP's media line. The H.265 side is
+the HEVC stack: `streaming/rtsp/H265NalParser.kt` (the 2-byte-header NAL
+decode; IDR is types 19/20, CRA deliberately not a keyframe verdict),
+`streaming/rtsp/H265StreamAssembler.kt` (VPS/SPS/PPS from either CSD shape,
+the keyframe prepend decision),
+`streaming/rtsp/H265Encoder.kt` (the H264Encoder sibling over the shared
+`MediaCodecVideoEncoder` — intra-refresh suppressed for the same
+no-IDR-to-join reason), and
+the RFC 7798 packetizer under Video Packetizers. Persisted as
+`rtsp_video_codec`; the swap is NEEDS_RESTART. H.265 fans out to RTSP only —
+the HLS muxer and WS/WebCodecs video path stay H.264-only at the hub's
+fan-out gate.
 
 ### AAC Format
 **`streaming/rtsp/AacFormat.kt`** — one home for the AAC stream's format
@@ -609,6 +796,15 @@ ISO span, zoom, color temperature, frame rate) plus
 `effectiveZoomRange(deviceMaxZoom)` — the one clamp where the device's live
 zoom ceiling meets the persistence ceiling, so pinch and settings re-apply
 agree; the device's live ranges from CameraService always win at apply time.
+
+### Jpeg Downscaler
+**`core/JpegDownscaler.kt`** — the one JPEG downscale ladder behind every
+consumer that re-encodes a JPEG smaller: decode at the largest power-of-two
+sample still reaching the target, encode, and — while the caller's size gate
+fails — halve the decode and retry, so a busy frame ships a smaller image
+instead of no image; null on missing or undecodable input. Consumers: the
+detection-event snapshot encoder (the 40,000-character webhook/log cap) and
+the gallery photo thumbnails (512 px).
 
 ### Stream Auth Crypto
 **`core/StreamAuthCrypto.kt`** — the single home for the stream-auth

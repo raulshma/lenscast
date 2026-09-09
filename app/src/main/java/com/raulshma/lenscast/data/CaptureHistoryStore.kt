@@ -19,7 +19,15 @@ import java.io.File
 import java.util.UUID
 import java.util.concurrent.Executors
 
-class CaptureHistoryStore(private val context: Context) {
+class CaptureHistoryStore(
+    private val context: Context,
+    /**
+     * The live capture-retention window in days (0 = keep forever), read per
+     * sweep so a settings change takes effect on the next pass without
+     * re-creating the store.
+     */
+    private val retentionDays: () -> Int = { 0 },
+) {
 
     private val listType = Types.newParameterizedType(
         MutableList::class.java, CaptureHistory::class.java
@@ -37,6 +45,7 @@ class CaptureHistoryStore(private val context: Context) {
 
     init {
         load()
+        enforceRetention()
         refreshFromMediaStore()
     }
 
@@ -69,6 +78,7 @@ class CaptureHistoryStore(private val context: Context) {
         _history.value = mergeEntry(_history.value, entry)
         enforceQuota()
         enforceLowSpaceFloor()
+        enforceRetention()
         save()
     }
 
@@ -87,6 +97,19 @@ class CaptureHistoryStore(private val context: Context) {
 
     /** Storage manager: total bytes + quota verdicts, pure for tests. */
     fun totalBytes(): Long = _history.value.sumOf { it.fileSizeBytes.coerceAtLeast(0) }
+
+    /**
+     * The time-based retention sweep, run on store open, after each capture
+     * append, and on every MediaStore refresh (the app-start prune point).
+     * Victims come from [StorageManager.retentionVictims] over
+     * [RetentionPolicy]; a disabled window (0 days) is a no-op.
+     */
+    fun enforceRetention(nowMs: Long = System.currentTimeMillis()): List<String> {
+        val victims = StorageManager.retentionVictims(_history.value, nowMs, retentionDays())
+        if (victims.isEmpty()) return emptyList()
+        Log.d(TAG, "Retention: deleting ${victims.size} capture(s) older than ${retentionDays()} day(s)")
+        return deleteAll(victims.map { it.id })
+    }
 
     fun storageBar(quotaBytes: Long): StorageBar =
         StorageManager.storageBar(totalBytes(), quotaBytes)
@@ -118,6 +141,9 @@ class CaptureHistoryStore(private val context: Context) {
                     _history.value = merged
                     save()
                 }
+                // The MediaStore reconciliation is also the periodic prune
+                // point: aged-out entries lose their backing media here too.
+                enforceRetention()
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to refresh capture history from MediaStore", e)
             }

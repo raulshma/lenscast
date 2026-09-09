@@ -26,6 +26,12 @@ data class DetectionAlert(
     val kind: EventKind,
     val value: Double,
     val zones: List<String> = emptyList(),
+    /**
+     * ML class labels (person, dog, car...) attached by the object-detection
+     * gate; empty when the gate is off, unavailable, or the event never went
+     * through it.
+     */
+    val labels: List<String> = emptyList(),
     val batteryPercent: Int? = null,
     val snapshotJpegBase64: String? = null,
     val timestampMs: Long,
@@ -42,6 +48,8 @@ data class DetectionEventWire(
     val timestampMs: Long,
     val source: String,
     val zones: List<String>,
+    /** ML class labels from the object-detection gate; always present (`[]` like [zones]). */
+    val labels: List<String>,
     val batteryPercent: Int?,
     val snapshotJpeg: String?,
 ) {
@@ -59,6 +67,7 @@ data class DetectionEventWire(
                 timestampMs = alert.timestampMs,
                 source = SOURCE,
                 zones = alert.zones,
+                labels = alert.labels,
                 batteryPercent = alert.batteryPercent,
                 snapshotJpeg = alert.snapshotJpegBase64,
             )

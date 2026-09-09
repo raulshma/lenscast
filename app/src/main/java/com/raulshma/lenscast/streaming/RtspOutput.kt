@@ -1,15 +1,17 @@
 package com.raulshma.lenscast.streaming
 
+import com.raulshma.lenscast.streaming.rtsp.EncodedNalUnit
 import android.util.Log
 import com.raulshma.lenscast.core.NetworkUtils
-import com.raulshma.lenscast.streaming.rtsp.H264Encoder
 import com.raulshma.lenscast.streaming.rtsp.RtspAuthSpec
 import com.raulshma.lenscast.streaming.rtsp.RtspConfig
 import com.raulshma.lenscast.streaming.rtsp.RtspConfigDiff
 import com.raulshma.lenscast.streaming.rtsp.RtspField
 import com.raulshma.lenscast.streaming.rtsp.RtspInputFormat
+import com.raulshma.lenscast.streaming.rtsp.RtspResolution
 import com.raulshma.lenscast.streaming.rtsp.RtspServer
 import com.raulshma.lenscast.streaming.rtsp.RtspUriPolicy
+import com.raulshma.lenscast.streaming.rtsp.RtspVideoCodec
 import java.io.InputStream
 import java.util.concurrent.atomic.AtomicBoolean
 
@@ -45,7 +47,7 @@ internal interface RtspServerHandle {
     fun apply(config: RtspConfig)
 
     /** One encoded H.264 access unit from the encoded-stream hub. */
-    fun feedVideo(nalUnits: List<H264Encoder.EncodedNalUnit>)
+    fun feedVideo(nalUnits: List<EncodedNalUnit>)
 
     /** One AAC access unit from the encoded-stream hub. */
     fun feedAudio(aacData: ByteArray)
@@ -191,7 +193,7 @@ internal class RtspOutput(
      * The encoded-stream hub's video feed, forwarded to whatever server
      * instance is live — the RTP half of the fan-out. No-op while stopped.
      */
-    fun feedEncodedVideo(nalUnits: List<H264Encoder.EncodedNalUnit>) {
+    fun feedEncodedVideo(nalUnits: List<EncodedNalUnit>) {
         server?.feedVideo(nalUnits)
     }
 
@@ -219,6 +221,42 @@ internal class RtspOutput(
     /** The frame rate reaches the RTP timestamp increment through the live config getter — hot-swap. */
     fun setFrameRate(fps: Int) {
         update { it.copy(videoFrameRate = fps) }
+    }
+
+    /**
+     * A new RTSP resolution lands in the retained config (both video
+     * dimensions move together — they are one setting), and a live output
+     * restarts: an encoder dimension change is a NEEDS_RESTART verdict in
+     * [RtspConfigDiff] (MediaCodec dims are fixed at `configure`), so a
+     * hot-swap would silently keep the old size. While stopped the value is
+     * simply retained for the next start. A same-size call is a no-op, so a
+     * persisted-settings re-emission never churns a live output.
+     */
+    fun setResolution(resolution: RtspResolution) {
+        val unchanged = config.videoWidth == resolution.width && config.videoHeight == resolution.height
+        if (unchanged) return
+        update(RestartTrigger.WHILE_ACTIVE) {
+            it.copy(videoWidth = resolution.width, videoHeight = resolution.height)
+        }
+    }
+
+    /**
+     * The RTSP video codec, mirrored exactly on [setResolution]: the value
+     * lands in the retained config and a live output restarts — a codec swap
+     * is a NEEDS_RESTART verdict in [RtspConfigDiff] (the encode, the RTP
+     * packetizer, and the SDP all move together), and the WHILE_ACTIVE
+     * trigger restarts video-only outputs too, not just audio-wanted ones.
+     * While stopped the value is simply retained for the next start. A
+     * same-codec call is a no-op, so a settings re-emission never churns a
+     * live output. The encoded-stream hub reconfigures its own encoder
+     * separately (the manager fans the value out to both, like resolution).
+     */
+    fun setVideoCodec(codec: RtspVideoCodec) {
+        val unchanged = config.videoCodec == codec
+        if (unchanged) return
+        update(RestartTrigger.WHILE_ACTIVE) {
+            it.copy(videoCodec = codec)
+        }
     }
 
     /** The running server's authorizer reads the auth spec live — re-reads it here and hot-swaps. */

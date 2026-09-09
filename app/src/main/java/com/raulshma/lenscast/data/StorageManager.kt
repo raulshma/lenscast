@@ -35,4 +35,18 @@ object StorageManager {
         }
         return victims
     }
+
+    /**
+     * The capture-history victims of the time-based retention window, oldest
+     * first; empty when retention is off or nothing has aged out. Pure
+     * routing over [RetentionPolicy] so the store's deletion pass is pinned
+     * by the same JVM tests as the quota eviction order.
+     */
+    fun retentionVictims(
+        history: List<CaptureHistory>,
+        nowMs: Long,
+        retentionDays: Int,
+    ): List<CaptureHistory> =
+        history.filter { RetentionPolicy.shouldDelete(it.timestamp, nowMs, retentionDays) }
+            .sortedBy { it.timestamp }
 }

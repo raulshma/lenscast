@@ -1,5 +1,6 @@
 package com.raulshma.lenscast.streaming.ws
 
+import com.raulshma.lenscast.streaming.rtsp.EncodedNalUnit
 import android.util.Log
 import com.raulshma.lenscast.streaming.AudioStreamingManager
 import com.raulshma.lenscast.streaming.WebAuthGate
@@ -37,10 +38,10 @@ class WsMediaServer(
     @Volatile private var cachedPps: ByteArray? = null
 
     /** The fan-out sink; wired once by the Streaming Manager at the RTSP output. */
-    fun videoSink(): (List<com.raulshma.lenscast.streaming.rtsp.H264Encoder.EncodedNalUnit>) -> Unit =
+    fun videoSink(): (List<com.raulshma.lenscast.streaming.rtsp.EncodedNalUnit>) -> Unit =
         { nalUnits -> feedVideo(nalUnits) }
 
-    fun feedVideo(nalUnits: List<com.raulshma.lenscast.streaming.rtsp.H264Encoder.EncodedNalUnit>) {
+    fun feedVideo(nalUnits: List<com.raulshma.lenscast.streaming.rtsp.EncodedNalUnit>) {
         if (nalUnits.isEmpty()) return
         val raw = nalUnits.map { it.data }
         WsVideoProtocol.extractParameterSets(raw)?.let { (sps, pps) ->

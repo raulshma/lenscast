@@ -381,4 +381,95 @@ class YuvConverterTest {
         )
         assertArrayEquals(YuvConverter.rotateNv21(src, 4, 2, 270), threeTimes)
     }
+
+    // ── NV21 aspect-fill scale (the encode path's size fit) ──
+
+    @Test
+    fun `scale to the same size returns the source unchanged`() {
+        val src = patternNv21(8, 6)
+        org.junit.Assert.assertSame(src, YuvConverter.scaleNv21(src, 8, 6, 8, 6))
+    }
+
+    @Test
+    fun `degenerate dimensions return the source unchanged`() {
+        val src = patternNv21(8, 6)
+        org.junit.Assert.assertSame(src, YuvConverter.scaleNv21(src, 8, 6, 0, 6))
+        org.junit.Assert.assertSame(src, YuvConverter.scaleNv21(src, 0, 6, 8, 6))
+        org.junit.Assert.assertSame(src, YuvConverter.scaleNv21(src, 8, 6, 7, 6)) // odd target
+    }
+
+    @Test
+    fun `two by two to four by four doubles each source pixel and replicates chroma`() {
+        val width = 2
+        val height = 2
+        val src = ByteArray(width * height * 3 / 2)
+        src[0] = 1; src[1] = 2; src[2] = 3; src[3] = 4 // Y
+        src[4] = 77; src[5] = 78 // V, U
+
+        val out = YuvConverter.scaleNv21(src, width, height, 4, 4)
+
+        val expectedY = byteArrayOf(
+            1, 1, 2, 2,
+            1, 1, 2, 2,
+            3, 3, 4, 4,
+            3, 3, 4, 4,
+        )
+        for (i in expectedY.indices) {
+            assertEquals("Y $i", expectedY[i], out[i])
+        }
+        val expectedUv = byteArrayOf(77, 78, 77, 78, 77, 78, 77, 78)
+        for (i in expectedUv.indices) {
+            assertEquals("UV $i", expectedUv[i], out[16 + i])
+        }
+    }
+
+    @Test
+    fun `aspect fill center-crops the wider axis`() {
+        // 4x2 source into a square target: the height binds, so the visible
+        // window is the centered 2-wide band (columns 1 and 2).
+        val src = ByteArray(4 * 2 * 3 / 2)
+        val srcY = byteArrayOf(1, 2, 3, 4, 5, 6, 7, 8)
+        System.arraycopy(srcY, 0, src, 0, srcY.size)
+        src[8] = 100; src[9] = 101 // first VU pair
+        src[10] = 102; src[11] = 103 // second VU pair
+
+        val out = YuvConverter.scaleNv21(src, 4, 2, 2, 2)
+
+        val expectedY = byteArrayOf(2, 3, 6, 7)
+        for (i in expectedY.indices) {
+            assertEquals("Y $i", expectedY[i], out[i])
+        }
+        assertEquals(100.toByte(), out[4]) // V
+        assertEquals(101.toByte(), out[5]) // U
+    }
+
+    @Test
+    fun `same-aspect upscale samples every output pixel from the source lattice`() {
+        // 16:9 → 16:9: no crop, the direct out*src/out mapping, spot-checked.
+        val w = 8
+        val h = 4
+        val ow = 16
+        val oh = 8
+        val src = patternNv21(w, h)
+        val out = YuvConverter.scaleNv21(src, w, h, ow, oh)
+
+        assertEquals(ow * oh * 3 / 2, out.size)
+        for (y in intArrayOf(0, 3, 7)) {
+            for (x in intArrayOf(0, 5, 15)) {
+                val expected = src[(y * h / oh) * w + (x * w / ow)]
+                assertEquals("Y($x,$y)", expected, out[y * ow + x])
+            }
+        }
+    }
+
+    @Test
+    fun `encode-path resolution ladders produce the configured sizes`() {
+        val src = patternNv21(1280, 720)
+        val before = src.copyOf()
+        for (target in listOf(640 to 480, 1920 to 1080, 1280 to 720)) {
+            val out = YuvConverter.scaleNv21(src, 1280, 720, target.first, target.second)
+            assertEquals("$target size", target.first * target.second * 3 / 2, out.size)
+        }
+        assertArrayEquals("input must not be mutated", before, src)
+    }
 }

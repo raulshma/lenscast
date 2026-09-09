@@ -38,4 +38,26 @@ class StorageManagerTest {
         val bar = StorageManager.storageBar(250L, 1000L)
         assertEquals(25, bar.percent)
     }
+
+    // ── time-based retention ──
+
+    @Test
+    fun `retention victims are the entries older than the window - oldest first`() {
+        val now = 10_000_000L
+        val history = listOf(
+            entry("fresh", now - 1000L, 10L),
+            entry("aged", now - 8 * RetentionPolicy.MS_PER_DAY, 10L),
+            entry("ancient", now - 30 * RetentionPolicy.MS_PER_DAY, 10L),
+        )
+        val victims = StorageManager.retentionVictims(history, now, retentionDays = 7)
+        // Oldest first, and the fresh entry survives.
+        assertEquals(listOf("ancient", "aged"), victims.map { it.id })
+    }
+
+    @Test
+    fun `retention off is a no-op`() {
+        val now = 10_000_000L
+        val history = listOf(entry("ancient", 1L, 10L))
+        assertTrue(StorageManager.retentionVictims(history, now, retentionDays = 0).isEmpty())
+    }
 }

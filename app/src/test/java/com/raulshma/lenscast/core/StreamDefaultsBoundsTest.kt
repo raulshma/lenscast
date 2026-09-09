@@ -62,4 +62,11 @@ class StreamDefaultsBoundsTest {
                 StreamDefaults.AUTO_DETERRENCE_COOLDOWN_MIN_SECONDS..StreamDefaults.AUTO_DETERRENCE_COOLDOWN_MAX_SECONDS,
         )
     }
+
+    @Test
+    fun `retention bounds exist and the disabled sentinel sits at the floor`() {
+        assertEquals(0, StreamDefaults.RETENTION_DAYS_MIN)
+        assertEquals(365, StreamDefaults.RETENTION_DAYS_MAX)
+        assertEquals(0, StreamDefaults.RETENTION_DAYS_DISABLED)
+    }
 }

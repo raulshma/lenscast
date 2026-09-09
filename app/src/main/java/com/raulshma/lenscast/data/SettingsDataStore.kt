@@ -28,6 +28,8 @@ import com.raulshma.lenscast.core.StreamAuthCrypto
 import com.raulshma.lenscast.core.StreamDefaults
 import com.raulshma.lenscast.core.parseEnum
 import com.raulshma.lenscast.streaming.rtsp.RtspInputFormat
+import com.raulshma.lenscast.streaming.rtsp.RtspResolution
+import com.raulshma.lenscast.streaming.rtsp.RtspVideoCodec
 import com.squareup.moshi.Types
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -87,6 +89,8 @@ private object Keys {
     val RTSP_ENABLED = stringPreferencesKey("rtsp_enabled")
     val RTSP_PORT = intPreferencesKey("rtsp_port")
     val RTSP_INPUT_FORMAT = stringPreferencesKey("rtsp_input_format")
+    val RTSP_RESOLUTION = stringPreferencesKey("rtsp_resolution")
+    val RTSP_VIDEO_CODEC = stringPreferencesKey("rtsp_video_codec")
     val ADAPTIVE_BITRATE_ENABLED = stringPreferencesKey("adaptive_bitrate_enabled")
     val MDNS_ENABLED = stringPreferencesKey("mdns_enabled")
     val MOTION_DETECTION_ENABLED = stringPreferencesKey("motion_detection_enabled")
@@ -122,6 +126,11 @@ private object Keys {
     val MOTION_ARM_END_MINUTE = intPreferencesKey("motion_arm_end_minute")
     val SOUND_DETECTION_ENABLED = stringPreferencesKey("sound_detection_enabled")
     val SOUND_THRESHOLD_PERCENT = intPreferencesKey("sound_threshold_percent")
+    val ML_DETECTION_ENABLED = stringPreferencesKey("ml_detection_enabled")
+    val ML_MIN_SCORE_PERCENT = intPreferencesKey("ml_min_score_percent")
+    val CONTINUOUS_RECORDING = stringPreferencesKey("continuous_recording")
+    val CONTINUOUS_SEGMENT_MINUTES = intPreferencesKey("continuous_segment_minutes")
+    val ONVIF_ENABLED = stringPreferencesKey("onvif_enabled")
     val WEBHOOK_ENABLED = stringPreferencesKey("webhook_enabled")
     val WEBHOOK_URL = stringPreferencesKey("webhook_url")
     val WEBHOOK_HEADERS = stringPreferencesKey("webhook_headers")
@@ -151,6 +160,8 @@ private object Keys {
     val MQTT_PASSWORD = stringPreferencesKey("mqtt_password")
     val MQTT_TLS = stringPreferencesKey("mqtt_tls")
     val MQTT_DISCOVERY_PREFIX = stringPreferencesKey("mqtt_discovery_prefix")
+    val CAPTURE_RETENTION_DAYS = intPreferencesKey("capture_retention_days")
+    val EVENT_RETENTION_DAYS = intPreferencesKey("event_retention_days")
 }
 
 /**
@@ -236,6 +247,28 @@ internal val rtspPortPref = intPref(
 
 internal val rtspInputFormatPref = enumPref(Keys.RTSP_INPUT_FORMAT, RtspInputFormat.AUTO)
 
+/**
+ * The RTSP output resolution, stored as its wire name ("480p"/"720p"/"1080p");
+ * the decode folds an absent or unknown value back to the default through the
+ * pure [RtspResolution.fromWireName] mapper.
+ */
+internal val rtspResolutionPref = SettingPref(
+    default = RtspResolution.DEFAULT,
+    decode = { prefs -> RtspResolution.fromWireName(prefs[Keys.RTSP_RESOLUTION]) },
+    encode = { prefs, value -> prefs[Keys.RTSP_RESOLUTION] = value.wireName },
+)
+
+/**
+ * The RTSP output codec, stored as its wire name ("h264"/"h265"); the decode
+ * folds an absent or unknown value back to H.264 through
+ * [RtspVideoCodec.fromWireName]. HLS and WS stay H.264-only (see the hub).
+ */
+internal val rtspVideoCodecPref = SettingPref(
+    default = RtspVideoCodec.H264,
+    decode = { prefs -> RtspVideoCodec.fromWireName(prefs[Keys.RTSP_VIDEO_CODEC]) },
+    encode = { prefs, value -> prefs[Keys.RTSP_VIDEO_CODEC] = value.wireName },
+)
+
 internal val adaptiveBitrateEnabledPref = boolPref(Keys.ADAPTIVE_BITRATE_ENABLED, defaultTrue = false)
 
 internal val mdnsEnabledPref = boolPref(Keys.MDNS_ENABLED, defaultTrue = true)
@@ -285,6 +318,27 @@ internal val soundThresholdPercentPref = intPref(
     StreamDefaults.SOUND_THRESHOLD_PERCENT_DEFAULT,
     IntBounds(StreamDefaults.SOUND_THRESHOLD_MIN, StreamDefaults.SOUND_THRESHOLD_MAX),
 )
+
+/** ML object detection gate: motion still triggers, but alerts ride a class verdict. */
+internal val mlDetectionEnabledPref = boolPref(Keys.ML_DETECTION_ENABLED, defaultTrue = false)
+
+internal val mlMinScorePercentPref = intPref(
+    Keys.ML_MIN_SCORE_PERCENT,
+    StreamDefaults.ML_SCORE_PERCENT_DEFAULT,
+    IntBounds(StreamDefaults.ML_SCORE_MIN_PERCENT, StreamDefaults.ML_SCORE_MAX_PERCENT),
+)
+
+/** Continuous NVR-style loop recording: chained bounded segments while the camera is free. */
+internal val continuousRecordingPref = boolPref(Keys.CONTINUOUS_RECORDING, defaultTrue = false)
+
+internal val continuousSegmentMinutesPref = intPref(
+    Keys.CONTINUOUS_SEGMENT_MINUTES,
+    StreamDefaults.CONTINUOUS_SEGMENT_MINUTES_DEFAULT,
+    IntBounds(StreamDefaults.CONTINUOUS_SEGMENT_MIN_MINUTES, StreamDefaults.CONTINUOUS_SEGMENT_MAX_MINUTES),
+)
+
+/** ONVIF Profile S device endpoint + WS-Discovery responder. */
+internal val onvifEnabledPref = boolPref(Keys.ONVIF_ENABLED, defaultTrue = false)
 
 internal val webhookEnabledPref = boolPref(Keys.WEBHOOK_ENABLED, defaultTrue = false)
 
@@ -368,6 +422,20 @@ internal val mqttTlsPref = boolPref(Keys.MQTT_TLS, defaultTrue = false)
 internal val mqttDiscoveryPrefixPref = stringPref(Keys.MQTT_DISCOVERY_PREFIX, StreamDefaults.MQTT_DISCOVERY_PREFIX_DEFAULT) {
     it.trim().trimEnd('/')
 }
+
+/** Capture retention in days; 0 keeps captures forever. Clamped to 0..365. */
+internal val captureRetentionDaysPref = intPref(
+    Keys.CAPTURE_RETENTION_DAYS,
+    StreamDefaults.RETENTION_DAYS_DISABLED,
+    IntBounds(StreamDefaults.RETENTION_DAYS_MIN, StreamDefaults.RETENTION_DAYS_MAX),
+)
+
+/** Detection-event retention in days; 0 keeps events forever. Clamped to 0..365. */
+internal val eventRetentionDaysPref = intPref(
+    Keys.EVENT_RETENTION_DAYS,
+    StreamDefaults.RETENTION_DAYS_DISABLED,
+    IntBounds(StreamDefaults.RETENTION_DAYS_MIN, StreamDefaults.RETENTION_DAYS_MAX),
+)
 
 
 internal val watchdogEnabledPref = boolPref(Keys.WATCHDOG_ENABLED, defaultTrue = false)
@@ -714,6 +782,10 @@ class SettingsDataStore(
 
     val rtspInputFormat: StateFlow<RtspInputFormat> = rtspInputFormatPref.shared()
 
+    val rtspResolution: StateFlow<RtspResolution> = rtspResolutionPref.shared()
+
+    val rtspVideoCodec: StateFlow<RtspVideoCodec> = rtspVideoCodecPref.shared()
+
     val adaptiveBitrateEnabled: StateFlow<Boolean> = adaptiveBitrateEnabledPref.shared()
 
     val mdnsEnabled: StateFlow<Boolean> = mdnsEnabledPref.shared()
@@ -725,6 +797,16 @@ class SettingsDataStore(
     val motionZones: StateFlow<List<MotionZone>> = motionZonesPref.shared()
 
     val motionRecordingEnabled: StateFlow<Boolean> = motionRecordingEnabledPref.shared()
+
+    val mlDetectionEnabled: StateFlow<Boolean> = mlDetectionEnabledPref.shared()
+
+    val mlMinScorePercent: StateFlow<Int> = mlMinScorePercentPref.shared()
+
+    val continuousRecording: StateFlow<Boolean> = continuousRecordingPref.shared()
+
+    val continuousSegmentMinutes: StateFlow<Int> = continuousSegmentMinutesPref.shared()
+
+    val onvifEnabled: StateFlow<Boolean> = onvifEnabledPref.shared()
 
     val motionPostRollSeconds: StateFlow<Int> = motionPostRollSecondsPref.shared()
 
@@ -799,6 +881,10 @@ class SettingsDataStore(
 
     val mqttDiscoveryPrefix: StateFlow<String> = mqttDiscoveryPrefixPref.shared()
 
+    val captureRetentionDays: StateFlow<Int> = captureRetentionDaysPref.shared()
+
+    val eventRetentionDays: StateFlow<Int> = eventRetentionDaysPref.shared()
+
 
     val watchdogEnabled: StateFlow<Boolean> = watchdogEnabledPref.shared()
 
@@ -843,6 +929,10 @@ class SettingsDataStore(
 
     suspend fun saveRtspInputFormat(format: RtspInputFormat) = rtspInputFormatPref.save(format)
 
+    suspend fun saveRtspResolution(resolution: RtspResolution) = rtspResolutionPref.save(resolution)
+
+    suspend fun saveRtspVideoCodec(codec: RtspVideoCodec) = rtspVideoCodecPref.save(codec)
+
     suspend fun saveAdaptiveBitrateEnabled(enabled: Boolean) = adaptiveBitrateEnabledPref.save(enabled)
 
     suspend fun saveWatchdogEnabled(enabled: Boolean) = watchdogEnabledPref.save(enabled)
@@ -861,6 +951,16 @@ class SettingsDataStore(
     suspend fun saveMotionZones(zones: List<MotionZone>) = motionZonesPref.save(zones)
 
     suspend fun saveMotionRecordingEnabled(enabled: Boolean) = motionRecordingEnabledPref.save(enabled)
+
+    suspend fun saveMlDetectionEnabled(enabled: Boolean) = mlDetectionEnabledPref.save(enabled)
+
+    suspend fun saveMlMinScorePercent(percent: Int) = mlMinScorePercentPref.save(percent)
+
+    suspend fun saveContinuousRecording(enabled: Boolean) = continuousRecordingPref.save(enabled)
+
+    suspend fun saveContinuousSegmentMinutes(minutes: Int) = continuousSegmentMinutesPref.save(minutes)
+
+    suspend fun saveOnvifEnabled(enabled: Boolean) = onvifEnabledPref.save(enabled)
 
     suspend fun saveMotionPostRollSeconds(seconds: Int) = motionPostRollSecondsPref.save(seconds)
 
@@ -933,6 +1033,10 @@ class SettingsDataStore(
     suspend fun saveMqttTls(enabled: Boolean) = mqttTlsPref.save(enabled)
 
     suspend fun saveMqttDiscoveryPrefix(prefix: String) = mqttDiscoveryPrefixPref.save(prefix)
+
+    suspend fun saveCaptureRetentionDays(days: Int) = captureRetentionDaysPref.save(days)
+
+    suspend fun saveEventRetentionDays(days: Int) = eventRetentionDaysPref.save(days)
 
     suspend fun saveOverlaySettings(settings: OverlaySettings) = overlaySettingsPref.save(settings)
 

@@ -15,6 +15,7 @@ data class RtspConfig(
     val videoBitrate: Int = StreamDefaults.RTSP_VIDEO_BITRATE,
     val videoFrameRate: Int = StreamDefaults.STREAM_FPS,
     val inputFormat: RtspInputFormat = RtspInputFormat.AUTO,
+    val videoCodec: RtspVideoCodec = RtspVideoCodec.H264,
     val audioEnabled: Boolean = false,
     val audioSampleRateHz: Int = StreamDefaults.AUDIO_SAMPLE_RATE_HZ,
     val audioChannelCount: Int = StreamDefaults.AUDIO_CHANNELS,
@@ -37,24 +38,33 @@ enum class RtspChangeScope {
 /**
  * One RTSP config field, tagged with the scope that makes its change real.
  * Ground truth: [AacEncoder.setBitrate] only stores an audio-bitrate change
- * until its next `start()` — hence the audio-bitrate NEEDS_RESTART entry.
+ * until its next `start()` — hence the audio-bitrate NEEDS_RESTART entry —
+ * and an encoder dimension change requires a reconfigure (MediaCodec dims are
+ * set at `configure`), hence the width/height NEEDS_RESTART entries.
  * The H.264 encode bitrate is the encoded-stream hub's own (equal by
  * default): a video-bitrate write fans out to
  * [com.raulshma.lenscast.streaming.EncodedStreamHub.setVideoBitrate] — a
  * live MediaCodec `setParameters`, the way frame rate and input format do —
  * while the config's [RtspConfig.videoBitrate] feeds the SDP's `b=AS` line
- * through the live config [RtspServer.apply] retains. Dimensions ride the
- * frame-path reconfigure, input-format changes reconfigure in the hub, the
- * frame rate flows into the RTP timestamp increment through the live config
- * getter, and the authorizer reads the auth spec live — all HOT_SWAP,
- * all restart-free.
+ * through the live config [RtspServer.apply] retains. Input-format changes
+ * reconfigure in the hub, the frame rate flows into the RTP timestamp
+ * increment through the live config getter, and the authorizer reads the auth
+ * spec live — all HOT_SWAP, all restart-free.
  */
 enum class RtspField(val scope: RtspChangeScope) {
-    VIDEO_WIDTH(RtspChangeScope.HOT_SWAP),
-    VIDEO_HEIGHT(RtspChangeScope.HOT_SWAP),
+    VIDEO_WIDTH(RtspChangeScope.NEEDS_RESTART),
+    VIDEO_HEIGHT(RtspChangeScope.NEEDS_RESTART),
     VIDEO_BITRATE(RtspChangeScope.HOT_SWAP),
     VIDEO_FRAME_RATE(RtspChangeScope.HOT_SWAP),
     INPUT_FORMAT(RtspChangeScope.HOT_SWAP),
+    /**
+     * The codec swap replaces the encoder (the encoded-stream hub reconfigures
+     * stop → new encoder → start) and the RTP packetizer plus the SDP
+     * description — nothing about them hot-swaps, hence NEEDS_RESTART. The
+     * output routes it through the WHILE_ACTIVE trigger (like a resolution
+     * change) so video-only outputs restart too, not just audio-wanted ones.
+     */
+    VIDEO_CODEC(RtspChangeScope.NEEDS_RESTART),
     AUDIO_ENABLED(RtspChangeScope.NEEDS_RESTART),
     AUDIO_SAMPLE_RATE_HZ(RtspChangeScope.NEEDS_RESTART),
     AUDIO_CHANNEL_COUNT(RtspChangeScope.NEEDS_RESTART),
@@ -78,6 +88,7 @@ object RtspConfigDiff {
         if (old.videoBitrate != new.videoBitrate) changed += RtspField.VIDEO_BITRATE
         if (old.videoFrameRate != new.videoFrameRate) changed += RtspField.VIDEO_FRAME_RATE
         if (old.inputFormat != new.inputFormat) changed += RtspField.INPUT_FORMAT
+        if (old.videoCodec != new.videoCodec) changed += RtspField.VIDEO_CODEC
         if (old.audioEnabled != new.audioEnabled) changed += RtspField.AUDIO_ENABLED
         if (old.audioSampleRateHz != new.audioSampleRateHz) changed += RtspField.AUDIO_SAMPLE_RATE_HZ
         if (old.audioChannelCount != new.audioChannelCount) changed += RtspField.AUDIO_CHANNEL_COUNT

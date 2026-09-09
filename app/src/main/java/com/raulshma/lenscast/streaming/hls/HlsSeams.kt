@@ -1,5 +1,7 @@
 package com.raulshma.lenscast.streaming.hls
 
+import com.raulshma.lenscast.streaming.rtsp.EncodedNalUnit
+
 /**
  * The HLS seams behind the transport and encoder paths: the RTSP server feeds
  * encoded AUs through [HlsVideoSink] and the media responder serves segments
@@ -8,7 +10,7 @@ package com.raulshma.lenscast.streaming.hls
  * RtspServer/MediaResponder call sites.
  */
 interface HlsVideoSink {
-    fun feedVideo(nalus: List<com.raulshma.lenscast.streaming.rtsp.H264Encoder.EncodedNalUnit>)
+    fun feedVideo(nalus: List<EncodedNalUnit>)
 
     fun feedAudio(aacData: ByteArray)
 }

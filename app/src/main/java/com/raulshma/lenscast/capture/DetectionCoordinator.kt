@@ -1,20 +1,31 @@
 package com.raulshma.lenscast.capture
 
 import android.util.Log
+import com.raulshma.lenscast.capture.ml.AnalysisFrame
+import com.raulshma.lenscast.capture.ml.ObjectDetectionEngine
+import com.raulshma.lenscast.capture.model.DetectionClassPolicy
 import com.raulshma.lenscast.camera.CameraService
 import com.raulshma.lenscast.core.DetectionAlert
 import com.raulshma.lenscast.core.EventKind
+import com.raulshma.lenscast.core.JpegDownscaler
 import com.raulshma.lenscast.core.SirenAutoStop
+import com.raulshma.lenscast.core.StreamDefaults
 import com.raulshma.lenscast.core.WebhookNotifier
 import com.raulshma.lenscast.core.mqtt.MqttAlertPublisher
+import com.raulshma.lenscast.capture.model.CaptureType
 import com.raulshma.lenscast.capture.model.RecordingConfig
 import com.raulshma.lenscast.capture.model.RecordingQuality
+import com.raulshma.lenscast.data.CaptureHistoryStore
 import com.raulshma.lenscast.data.SettingsDataStore
 import com.raulshma.lenscast.streaming.StreamingManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
+import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.UUID
 
 /**
@@ -29,6 +40,12 @@ import java.util.UUID
  * arrive off the frame/audio paths, so the dispatch work runs on this
  * coordinator's own scope.
  *
+ * Motion events additionally pass through the ML object-detection gate when
+ * `mlDetectionEnabled` is on: the triggering frame is classified off-path
+ * (single worker, throttled) and an empty allowed-class verdict suppresses
+ * the event entirely — no alert, no recording, no log entry. Surviving
+ * events carry the detected class labels on the alert and the log entry.
+ *
  * The deterrence runtime (siren handle, torch control, latest web frame) is
  * not touched at composition — first touch is a detection event — so the
  * collaborators arrive as lazy provider lambdas wired by the composition
@@ -40,6 +57,8 @@ class DetectionCoordinator(
     private val photoCaptureManager: PhotoCaptureManager,
     private val webhookNotifier: WebhookNotifier,
     private val eventStore: DetectionEventStore,
+    /** The capture history, consulted when a bounded motion recording finalizes so the event can link its clip. */
+    private val captureHistoryStore: CaptureHistoryStore? = null,
     private val streamingManager: () -> StreamingManager?,
     private val cameraService: () -> CameraService?,
     private val mqttPublisher: () -> MqttAlertPublisher? = { null },
@@ -54,6 +73,47 @@ class DetectionCoordinator(
     @Volatile
     private var lastAutoDeterrenceMs = 0L
 
+    // ── ML object-detection gate ──
+    // When `mlDetectionEnabled` is on, a motion verdict no longer dispatches
+    // directly: the triggering frame is classified first (EfficientDet-Lite0
+    // through [ObjectDetectionEngine]) and only an allowed class at/above the
+    // confidence floor ([DetectionClassPolicy]) lets the event through. The
+    // gate is fail-open by design — a skipped, throttled, or failed
+    // classification never suppresses an alert, only a positive "no allowed
+    // class" verdict does.
+
+    /** The engine is built on first gated motion event; asset load is lazy. */
+    private val mlEngine by lazy {
+        ObjectDetectionEngine(contextProvider = { streamingManager()?.appContext() })
+    }
+
+    /** One inference at a time, off the frame path — the frame listener never blocks on the model. */
+    private val mlExecutor = Executors.newSingleThreadExecutor { runnable ->
+        Thread(runnable, "MlDetection").apply { isDaemon = true }
+    }
+
+    private val mlLock = Any()
+    private var mlLastSubmitMs = 0L
+    private val mlInferring = AtomicBoolean(false)
+
+    /** Motion event entry point (wired from StreamingManager's detector). */
+    fun onMotion(delta: Double, zones: List<String> = emptyList()) {
+        if (!settingsDataStore.mlDetectionEnabled.value || !motionArmedNow()) {
+            // Gate off (byte-identical legacy behavior) or the arm schedule is
+            // disarmed — onEvent will drop the dispatch anyway, so don't burn
+            // inference on it.
+            onEvent(EventKind.MOTION, delta, zones)
+            return
+        }
+        submitMlClassification { suppressed, labels ->
+            if (suppressed) {
+                Log.d(TAG, "Motion event suppressed by ML gate (no allowed class at/above threshold)")
+            } else {
+                onEvent(EventKind.MOTION, delta, zones, labels = labels)
+            }
+        }
+    }
+
     /** Serializes the decide-and-claim step of [runAutoDeterrence]. */
     private val deterrenceLock = Any()
 
@@ -64,12 +124,70 @@ class DetectionCoordinator(
         val claimedAtMs: Long,
     )
 
-    /** Motion event entry point (wired from StreamingManager's detector). */
-    fun onMotion(delta: Double, zones: List<String> = emptyList()) =
-        onEvent(EventKind.MOTION, delta, zones)
-
     /** Sound event entry point (wired from the audio reader's detector). */
     fun onSound(rmsPercent: Double) = onEvent(EventKind.SOUND, rmsPercent)
+
+    /**
+     * The motion arm-schedule verdict, consulted before the ML gate so a
+     * schedule-disarmed window costs no inference. [onEvent] re-derives it
+     * for the dispatch itself.
+     */
+    private fun motionArmedNow(): Boolean = MotionArmingPolicy.isArmed(
+        detectionEnabled = true,
+        scheduleEnabled = settingsDataStore.motionArmScheduleEnabled.value,
+        startMinute = settingsDataStore.motionArmStartMinute.value,
+        endMinute = settingsDataStore.motionArmEndMinute.value,
+        minuteOfDay = currentMinuteOfDay(),
+    )
+
+    /**
+     * Runs the ML gate for one motion verdict: at most one classification per
+     * [ML_MIN_INTERVAL_MS] and one in flight at a time — a burst event that
+     * arrives busy or throttled passes through unfiltered (fail-open), it is
+     * never suppressed without a verdict. The frame is copied here, on the
+     * motion call stack, before the bytes can be recycled; inference and the
+     * [onVerdict] callback run on the single ML worker. The callback receives
+     * `suppressed = true` only for a real classification whose allowed-class
+     * filter came back empty.
+     */
+    private fun submitMlClassification(onVerdict: (suppressed: Boolean, labels: List<String>) -> Unit) {
+        val snapshot: AnalysisFrame? = synchronized(mlLock) {
+            val now = nowMs()
+            val busy = mlInferring.get()
+            val throttled = now - mlLastSubmitMs < ML_MIN_INTERVAL_MS
+            val frame = if (busy || throttled) null else streamingManager()?.latestAnalysisFrame()
+            if (frame == null) {
+                null
+            } else {
+                mlLastSubmitMs = now
+                mlInferring.set(true)
+                // Defensive copy: the camera recycles the buffer as soon as
+                // the frame path returns.
+                AnalysisFrame(frame.nv21.copyOf(), frame.width, frame.height)
+            }
+        }
+        if (snapshot == null) {
+            onVerdict(false, emptyList())
+            return
+        }
+        mlExecutor.execute {
+            try {
+                val verdict = mlEngine.classify(snapshot)
+                when (verdict) {
+                    is ObjectDetectionEngine.Classification.Success -> {
+                        val labels = DetectionClassPolicy.filter(
+                            verdict.detections,
+                            settingsDataStore.mlMinScorePercent.value,
+                        )
+                        onVerdict(labels.isEmpty(), labels)
+                    }
+                    ObjectDetectionEngine.Classification.Unavailable -> onVerdict(false, emptyList())
+                }
+            } finally {
+                mlInferring.set(false)
+            }
+        }
+    }
 
     /**
      * Tamper event entry point (wired from [TamperMonitor]): a power cut on a
@@ -92,11 +210,15 @@ class DetectionCoordinator(
         value: Double,
         zones: List<String> = emptyList(),
         respectSchedule: Boolean = true,
+        /** ML class labels the object-detection gate attached (motion-gated events only). */
+        labels: List<String> = emptyList(),
     ) {
-        // One event-moment stamp: the alert (webhook + MQTT bodies) and the
-        // persisted log entry all read it, so every sink reports the same
-        // timestamp instead of each re-reading a clock at its own queue time.
+        // One event-moment stamp and one id: the alert (webhook + MQTT
+        // bodies), the persisted log entry, and the clip-linkage watcher all
+        // read them, so every sink reports the same identity instead of each
+        // minting its own.
         val eventTimeMs = nowMs()
+        val eventId = UUID.randomUUID().toString()
         val store = settingsDataStore
         val armed = !respectSchedule || MotionArmingPolicy.isArmed(
             detectionEnabled = true,
@@ -114,6 +236,11 @@ class DetectionCoordinator(
                 armed = armed,
                 recordingActive = recordingController.isRecording.value,
             )
+            // Continuous-recording interplay: while the NVR-style loop holds
+            // the recorder, `recordingActive` is true and the verdict is
+            // KEEP_ROLLING — the motion-triggered bounded clip is skipped and
+            // the event's clip link fields stay null. The event itself (and
+            // its alert fan-out) still fires and is still logged.
             when (action) {
                 DetectionEventPolicy.RecordingAction.START -> {
                     // Claimed only when the start command reached the
@@ -121,7 +248,14 @@ class DetectionCoordinator(
                     val started = runCatching { startBoundedRecording() }
                         .onFailure { Log.w(TAG, "Bounded recording start failed: ${it.message}") }
                         .isSuccess
-                    if (started) dispatchedActions.add(ACTION_RECORDING)
+                    if (started) {
+                        dispatchedActions.add(ACTION_RECORDING)
+                        // The event is already on disk when the clip link
+                        // lands: the watcher updates it once the recording
+                        // finalizes (the same post-event-update path other
+                        // sinks use), never blocks the dispatch.
+                        watchMotionClip(eventId, eventTimeMs)
+                    }
                 }
                 DetectionEventPolicy.RecordingAction.KEEP_ROLLING, DetectionEventPolicy.RecordingAction.NONE -> Unit
             }
@@ -150,6 +284,7 @@ class DetectionCoordinator(
                     kind = kind,
                     value = value,
                     zones = zones,
+                    labels = labels,
                     batteryPercent = batteryPercent(),
                     snapshotJpegBase64 = snapshot,
                     timestampMs = eventTimeMs,
@@ -178,13 +313,14 @@ class DetectionCoordinator(
                 runCatching {
                     eventStore.record(
                         DetectionEvent(
-                            id = UUID.randomUUID().toString(),
+                            id = eventId,
                             type = kind.wireName,
                             source = SOURCE,
                             timestampMs = eventTimeMs,
                             snapshotJpegBase64 = snapshot,
                             dispatchedActions = dispatchedActions.toList(),
                             zones = zones,
+                            labels = labels,
                         ),
                     )
                 }.onFailure { Log.w(TAG, "Event log write failed: ${it.message}") }
@@ -283,65 +419,70 @@ class DetectionCoordinator(
         )
     }
 
+    /**
+     * The event→clip linkage: watches the Recording Controller's state for the
+     * bounded recording this event just started, waits for it to finalize, and
+     * links the resulting clip (MediaStore id + file name, resolved from the
+     * capture history as the newest video recorded since the event) into the
+     * persisted event via [DetectionEventStore.updateEvent]. Every wait is
+     * bounded, so a start that never came live or a user stop costs one
+     * expiring watcher, never a leaked job — and the event stays honest,
+     * keeping null clip fields when no clip can be attributed.
+     */
+    private fun watchMotionClip(eventId: String, eventTimeMs: Long) {
+        val history = captureHistoryStore ?: return
+        scope.launch {
+            runCatching {
+                val recording = withTimeoutOrNull(CLIP_LINK_TIMEOUT_MS) {
+                    recordingController.state.first { it is RecordingState.Recording }
+                } as? RecordingState.Recording ?: return@launch
+                withTimeoutOrNull(CLIP_LINK_TIMEOUT_MS) {
+                    recordingController.state.first { it is RecordingState.Idle }
+                } ?: return@launch
+                // Upper bound: only clips recorded inside this bounded window
+                // qualify — a recording a user starts later must never be
+                // claimed as this event's clip.
+                val windowEndMs = nowMs() + CLIP_TIMESTAMP_SLACK_MS
+                history.history.value
+                    .filter {
+                        it.type == CaptureType.VIDEO &&
+                            it.timestamp >= recording.startedAtMs - CLIP_TIMESTAMP_SLACK_MS &&
+                            it.timestamp <= windowEndMs
+                    }
+                    .maxByOrNull { it.timestamp }
+            }.onSuccess { entry ->
+                val clip = entry ?: return@onSuccess
+                eventStore.updateEvent(eventId) { event ->
+                    event.copy(
+                        clipMediaId = DetectionEvent.clipMediaIdFromContentUri(clip.filePath),
+                        clipFileName = clip.fileName,
+                    )
+                }
+            }.onFailure { Log.w(TAG, "Clip linkage watch failed: ${it.message}") }
+        }
+    }
+
     private fun currentMinuteOfDay(): Int {
         val calendar = java.util.Calendar.getInstance().apply { timeInMillis = nowMs() }
         return calendar.get(java.util.Calendar.HOUR_OF_DAY) * 60 + calendar.get(java.util.Calendar.MINUTE)
     }
 
     /**
-     * Trigger-time snapshot: the latest M-JPEG frame re-encoded at the
-     * thumbnail size ([com.raulshma.lenscast.core.StreamDefaults.SNAPSHOT_TARGET_WIDTH_PX]
-     * wide, [com.raulshma.lenscast.core.StreamDefaults.SNAPSHOT_JPEG_QUALITY]),
-     * downscaled further until the encoding fits the log policy's size cap,
-     * then base64-encoded. Null when no frame was ever rendered or the frame
-     * cannot be decoded — the event logs fine without it.
+     * Trigger-time snapshot: the latest M-JPEG frame re-encoded at
+     * [com.raulshma.lenscast.core.StreamDefaults.SNAPSHOT_TARGET_WIDTH_PX]
+     * via the shared [JpegDownscaler] ladder — downscaled further until the
+     * encoding fits the log policy's size cap — then base64-encoded. Null
+     * when no frame was ever rendered or the frame cannot be decoded — the
+     * event logs fine without it.
      */
     private fun prepareSnapshotBase64(frame: ByteArray?): String? {
-        val bytes = downscaleJpeg(frame) ?: return null
-        if (!DetectionEventLogPolicy.acceptsSnapshot(bytes)) return null
+        val bytes = JpegDownscaler.downscale(
+            jpeg = frame,
+            targetMaxPx = StreamDefaults.SNAPSHOT_TARGET_WIDTH_PX,
+            quality = StreamDefaults.SNAPSHOT_JPEG_QUALITY,
+            accepts = DetectionEventLogPolicy::acceptsSnapshot,
+        ) ?: return null
         return java.util.Base64.getEncoder().encodeToString(bytes)
-    }
-
-    /**
-     * The thumbnail ladder: decode at the largest power-of-two sample
-     * that stays at or under the target width, encode, and — while the
-     * encoding still misses [DetectionEventLogPolicy]'s size gate —
-     * halve the size and retry. The gate decides the final size, so a
-     * busy scene ships a smaller thumbnail instead of no snapshot.
-     */
-    private fun downscaleJpeg(frame: ByteArray?): ByteArray? {
-        if (frame == null || frame.isEmpty()) return null
-        return try {
-            val bounds = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
-            android.graphics.BitmapFactory.decodeByteArray(frame, 0, frame.size, bounds)
-            if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
-            var sample = 1
-            while (bounds.outWidth / (sample * 2) >=
-                com.raulshma.lenscast.core.StreamDefaults.SNAPSHOT_TARGET_WIDTH_PX
-            ) {
-                sample *= 2
-            }
-            var bytes: ByteArray? = null
-            ladder@ while (sample <= MAX_DOWNSCALE_SAMPLE) {
-                val decoded = android.graphics.BitmapFactory.decodeByteArray(
-                    frame, 0, frame.size,
-                    android.graphics.BitmapFactory.Options().apply { inSampleSize = sample },
-                ) ?: break
-                val output = java.io.ByteArrayOutputStream()
-                decoded.compress(
-                    android.graphics.Bitmap.CompressFormat.JPEG,
-                    com.raulshma.lenscast.core.StreamDefaults.SNAPSHOT_JPEG_QUALITY,
-                    output,
-                )
-                decoded.recycle()
-                bytes = output.toByteArray()
-                if (DetectionEventLogPolicy.acceptsSnapshot(bytes)) break@ladder
-                sample *= 2
-            }
-            bytes
-        } catch (_: Exception) {
-            null
-        }
     }
 
     companion object {
@@ -349,8 +490,14 @@ class DetectionCoordinator(
         private const val SOURCE = "lenscast"
         private const val MIN_CLIP_SECONDS = 5
 
-        /** The thumbnail ladder's floor: at or under a 1/32-width decode the gate always passes, so stop. */
-        private const val MAX_DOWNSCALE_SAMPLE = 32
+        /** ML gate throttle: at most one classification per this interval. */
+        private const val ML_MIN_INTERVAL_MS = 1_000L
+
+        /** Bounded waits for the clip watcher: recording live, then finalizing. */
+        private const val CLIP_LINK_TIMEOUT_MS = 10 * 60 * 1000L
+
+        /** Clock-granularity slack when matching history entries to the recording's start stamp. */
+        private const val CLIP_TIMESTAMP_SLACK_MS = 1_000L
 
         /** Event-log names for the dispatched actions, surfaced in the web feed. */
         const val ACTION_RECORDING = "recording"

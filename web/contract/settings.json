@@ -28,6 +28,8 @@
     "rtspEnabled": false,
     "rtspPort": 8554,
     "rtspInputFormat": "AUTO",
+    "rtspResolution": "720p",
+    "rtspVideoCodec": "h264",
     "adaptiveBitrateEnabled": false,
     "overlayEnabled": false,
     "showTimestamp": true,
@@ -87,6 +89,13 @@
     "mqttUsername": "",
     "mqttPassword": "",
     "mqttTls": false,
-    "mqttDiscoveryPrefix": "homeassistant"
+    "mqttDiscoveryPrefix": "homeassistant",
+    "captureRetentionDays": 0,
+    "eventRetentionDays": 0,
+    "mlDetectionEnabled": false,
+    "mlMinScorePercent": 60,
+    "continuousRecording": false,
+    "continuousSegmentMinutes": 15,
+    "onvifEnabled": false
   }
 }

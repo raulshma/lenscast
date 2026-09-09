@@ -19,13 +19,22 @@ import com.raulshma.lenscast.streaming.model.SettingsUpdateRequestDto
 import com.raulshma.lenscast.streaming.model.StreamingSettingsDto
 import com.raulshma.lenscast.streaming.model.SuccessResponse
 import com.raulshma.lenscast.streaming.rtsp.RtspInputFormat
+import com.raulshma.lenscast.streaming.rtsp.RtspResolution
+import com.raulshma.lenscast.streaming.rtsp.RtspVideoCodec
 
 /**
  * /api/settings — JSON-in/JSON-out mapping between the Web API DTOs and the
  * Settings Store. This handler only *writes* settings; the Settings Applier
  * applies them to the runtime.
+ *
+ * The RTSP video codec rides the same store round-trip as every other
+ * setting: GET reads the persisted flow, PUT saves through its descriptor
+ * (an absent or unknown wire name is skipped), and the Settings Applier
+ * applies it to the manager through the restart ladder.
  */
-class SettingsWebHandler(private val settingsDataStore: SettingsDataStore) {
+class SettingsWebHandler(
+    private val settingsDataStore: SettingsDataStore,
+) {
 
     private val responseAdapter by lazy { AppJson.moshi.adapter(SettingsResponseDto::class.java) }
     private val updateAdapter by lazy { AppJson.moshi.adapter(SettingsUpdateRequestDto::class.java) }
@@ -49,6 +58,8 @@ class SettingsWebHandler(private val settingsDataStore: SettingsDataStore) {
                 rtspEnabled = store.rtspEnabled.value,
                 rtspPort = store.rtspPort.value,
                 rtspInputFormat = store.rtspInputFormat.value.name,
+                rtspResolution = store.rtspResolution.value.wireName,
+                rtspVideoCodec = store.rtspVideoCodec.value.wireName,
                 adaptiveBitrateEnabled = store.adaptiveBitrateEnabled.value,
                 overlayEnabled = overlay.enabled,
                 showTimestamp = overlay.showTimestamp,
@@ -115,6 +126,13 @@ class SettingsWebHandler(private val settingsDataStore: SettingsDataStore) {
                 mqttPassword = "",
                 mqttTls = store.mqttTls.value,
                 mqttDiscoveryPrefix = store.mqttDiscoveryPrefix.value,
+                captureRetentionDays = store.captureRetentionDays.value,
+                eventRetentionDays = store.eventRetentionDays.value,
+                mlDetectionEnabled = store.mlDetectionEnabled.value,
+                mlMinScorePercent = store.mlMinScorePercent.value,
+                continuousRecording = store.continuousRecording.value,
+                continuousSegmentMinutes = store.continuousSegmentMinutes.value,
+                onvifEnabled = store.onvifEnabled.value,
             ),
         )
         return responseAdapter.toJson(response)
@@ -167,6 +185,14 @@ class SettingsWebHandler(private val settingsDataStore: SettingsDataStore) {
             settingsDataStore.saveRtspPort(stream.rtspPort)
             parseEnumOrNull<RtspInputFormat>(stream.rtspInputFormat.takeIf { it.isNotBlank() })
                 ?.let { settingsDataStore.saveRtspInputFormat(it) }
+            // Same tolerant mapping as the input format: an absent or unknown
+            // resolution wire name is skipped, keeping the stored one.
+            RtspResolution.fromWireNameOrNull(stream.rtspResolution)
+                ?.let { settingsDataStore.saveRtspResolution(it) }
+            // Same tolerant mapping as the input format/resolution: an absent
+            // or unknown codec wire name is skipped, keeping the stored one.
+            RtspVideoCodec.fromWireNameOrNull(stream.rtspVideoCodec)
+                ?.let { settingsDataStore.saveRtspVideoCodec(it) }
             settingsDataStore.saveAdaptiveBitrateEnabled(stream.adaptiveBitrateEnabled)
             settingsDataStore.saveOverlaySettings(toOverlaySettings(stream, settingsDataStore.overlaySettings.value))
             settingsDataStore.saveWatchdogEnabled(stream.watchdogEnabled)
@@ -206,6 +232,15 @@ class SettingsWebHandler(private val settingsDataStore: SettingsDataStore) {
             settingsDataStore.saveMqttUsername(stream.mqttUsername)
             settingsDataStore.saveMqttTls(stream.mqttTls)
             settingsDataStore.saveMqttDiscoveryPrefix(stream.mqttDiscoveryPrefix)
+            // Retention windows clamp on save through their descriptors
+            // (0 = keep forever), like every other bounded numeric setting.
+            settingsDataStore.saveCaptureRetentionDays(stream.captureRetentionDays)
+            settingsDataStore.saveEventRetentionDays(stream.eventRetentionDays)
+            settingsDataStore.saveMlDetectionEnabled(stream.mlDetectionEnabled)
+            settingsDataStore.saveMlMinScorePercent(stream.mlMinScorePercent)
+            settingsDataStore.saveContinuousRecording(stream.continuousRecording)
+            settingsDataStore.saveContinuousSegmentMinutes(stream.continuousSegmentMinutes)
+            settingsDataStore.saveOnvifEnabled(stream.onvifEnabled)
             // Same write-only contract as the WebDAV password: an empty value
             // keeps the stored credential.
             if (stream.mqttPassword.isNotEmpty()) {

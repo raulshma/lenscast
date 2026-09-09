@@ -24,6 +24,7 @@ import com.raulshma.lenscast.core.WebhookNotifier
 import com.raulshma.lenscast.core.mqtt.MqttAlertPublisher
 import com.raulshma.lenscast.data.CaptureHistoryStore
 import com.raulshma.lenscast.data.SettingsDataStore
+import com.raulshma.lenscast.core.NetworkUtils
 import com.raulshma.lenscast.settings.SettingsApplier
 import com.raulshma.lenscast.streaming.StreamStateJournal
 import com.raulshma.lenscast.streaming.StreamStateJournalWriter
@@ -31,6 +32,7 @@ import com.raulshma.lenscast.streaming.StreamWidgetProvider
 import com.raulshma.lenscast.streaming.StreamingManager
 import com.raulshma.lenscast.streaming.StreamingSession
 import com.raulshma.lenscast.streaming.StreamingTransports
+import com.raulshma.lenscast.streaming.onvif.OnvifServer
 import com.raulshma.lenscast.update.UpdateChecker
 import com.raulshma.lenscast.update.UpdateCheckPipeline
 import com.raulshma.lenscast.update.UpdateDownloader
@@ -49,7 +51,9 @@ class MainApplication : Application(), SingletonImageLoader.Factory {
     val cameraService: CameraService by lazy { CameraService(this) }
     val streamingManager: StreamingManager by lazy { StreamingManager(this, thermalMonitor) }
     val settingsDataStore: SettingsDataStore by lazy { SettingsDataStore(this) }
-    val captureHistoryStore: CaptureHistoryStore by lazy { CaptureHistoryStore(this) }
+    val captureHistoryStore: CaptureHistoryStore by lazy {
+        CaptureHistoryStore(this, retentionDays = { settingsDataStore.captureRetentionDays.value })
+    }
     val recordingController: RecordingController by lazy { RecordingController(this) }
     val photoCaptureManager: PhotoCaptureManager by lazy {
         PhotoCaptureManager(this, cameraService, captureHistoryStore)
@@ -71,7 +75,31 @@ class MainApplication : Application(), SingletonImageLoader.Factory {
         ) { streamWatchdog }
     }
     val settingsApplier: SettingsApplier by lazy {
-        SettingsApplier(settingsDataStore, cameraService, streamingManager, streamWatchdog, mqttAlertPublisher)
+        SettingsApplier(settingsDataStore, cameraService, streamingManager, streamWatchdog, mqttAlertPublisher, onvifServer)
+    }
+    // The ONVIF device service reads its advertised values live per request
+    // (the same IP/URL sources the mDNS registration and the RTSP URL builder
+    // use), so only the firmware version and serial are fixed at construction.
+    // Composed before the applier runs and registered as the process default
+    // the streaming server's dispatch resolves.
+    val onvifServer: OnvifServer by lazy {
+        OnvifServer(
+            ipAddress = { NetworkUtils.getLocalIpAddress() },
+            rtspPort = { settingsDataStore.rtspPort.value },
+            webPort = { settingsDataStore.streamingPort.value },
+            audioEnabled = { settingsDataStore.streamAudioEnabled.value },
+            enabled = { settingsDataStore.onvifEnabled.value },
+            httpsEnabled = { settingsDataStore.httpsEnabled.value },
+            videoWidth = { settingsDataStore.rtspResolution.value.width },
+            videoHeight = { settingsDataStore.rtspResolution.value.height },
+            videoBitrate = { streamingManager.currentVideoBitrate() },
+            videoFps = { settingsDataStore.settings.value.frameRate },
+            videoCodec = { settingsDataStore.rtspVideoCodec.value },
+            firmwareVersion = com.raulshma.lenscast.BuildConfig.VERSION_NAME,
+            model = android.os.Build.MODEL?.ifBlank { null } ?: "LensCast",
+            serialNumber = deviceId(),
+            context = this,
+        ).also { OnvifServer.compose(it) }
     }
     val webhookNotifier: WebhookNotifier by lazy {
         WebhookNotifier(configProvider = {
@@ -110,6 +138,7 @@ class MainApplication : Application(), SingletonImageLoader.Factory {
             photoCaptureManager = photoCaptureManager,
             webhookNotifier = webhookNotifier,
             eventStore = detectionEventStore,
+            captureHistoryStore = captureHistoryStore,
             streamingManager = { streamingManager },
             cameraService = { cameraService },
             mqttPublisher = { mqttAlertPublisher },
@@ -139,8 +168,12 @@ class MainApplication : Application(), SingletonImageLoader.Factory {
     }
     // Process-singleton via [DetectionEventStore.get] — the writer (the
     // coordinator) and the reader (the Web API handler) must share one
-    // in-memory list — owned here like every other collaborator.
-    val detectionEventStore: DetectionEventStore by lazy { DetectionEventStore.get(this) }
+    // in-memory list — owned here like every other collaborator. The
+    // retention provider is read per sweep, so a settings change takes
+    // effect on the next open/append without re-creating the store.
+    val detectionEventStore: DetectionEventStore by lazy {
+        DetectionEventStore.get(this, retentionDays = { settingsDataStore.eventRetentionDays.value })
+    }
     // One toggle over one transports adapter — the boot receiver and the
     // quick-settings tile start/stop through the same ladder the camera
     // screen and the Web API use, without re-typing the adapter.

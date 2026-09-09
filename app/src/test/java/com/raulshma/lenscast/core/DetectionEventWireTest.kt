@@ -18,11 +18,12 @@ class DetectionEventWireTest {
         DetectionEventWire.encode(alert).toString(Charsets.UTF_8)
 
     @Test
-    fun `full motion event carries zone labels, battery and snapshot`() {
+    fun `full motion event carries zone labels, ml labels, battery and snapshot`() {
         val alert = DetectionAlert(
             kind = EventKind.MOTION,
             value = 12.34,
             zones = listOf("Doorway", "Porch"),
+            labels = listOf("person", "dog"),
             batteryPercent = 87,
             snapshotJpegBase64 = "aGVsbG8=",
             timestampMs = 1_725_800_000_000,
@@ -33,12 +34,13 @@ class DetectionEventWireTest {
         assertTrue(json.contains("\"timestampMs\":1725800000000"))
         assertTrue(json.contains("\"source\":\"lenscast\""))
         assertTrue(json.contains("\"zones\":[\"Doorway\",\"Porch\"]"))
+        assertTrue(json.contains("\"labels\":[\"person\",\"dog\"]"))
         assertTrue(json.contains("\"batteryPercent\":87"))
         assertTrue(json.contains("\"snapshotJpeg\":\"aGVsbG8=\""))
     }
 
     @Test
-    fun `non-motion event ships empty zones, not a missing field`() {
+    fun `non-motion event ships empty zones and labels, not missing fields`() {
         val alert = DetectionAlert(
             kind = EventKind.TAMPER,
             value = 87.0,
@@ -47,8 +49,10 @@ class DetectionEventWireTest {
         val json = encodeToJson(alert)
         assertTrue(json.contains("\"type\":\"tamper\""))
         // The doc promises `[]` for whole-frame or non-motion events, so
-        // automations can key on the field's presence unconditionally.
+        // automations can key on the field's presence unconditionally. The
+        // ML labels field behaves the same way: `[]` when the gate is off.
         assertTrue(json.contains("\"zones\":[]"))
+        assertTrue(json.contains("\"labels\":[]"))
     }
 
     @Test
@@ -71,6 +75,7 @@ class DetectionEventWireTest {
             kind = EventKind.MOTION,
             value = 1.0,
             zones = listOf("Doorway"),
+            labels = listOf("person"),
             batteryPercent = 50,
             snapshotJpegBase64 = "dg==",
             timestampMs = 0,
@@ -78,7 +83,7 @@ class DetectionEventWireTest {
         val adapter = AppJson.moshi.adapter(Map::class.java)
         val fields = adapter.fromJson(encodeToJson(alert))!!.keys
         assertEquals(
-            setOf("type", "value", "timestampMs", "source", "zones", "batteryPercent", "snapshotJpeg"),
+            setOf("type", "value", "timestampMs", "source", "zones", "labels", "batteryPercent", "snapshotJpeg"),
             fields,
         )
     }

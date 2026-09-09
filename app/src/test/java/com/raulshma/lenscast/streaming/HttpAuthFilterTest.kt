@@ -288,6 +288,13 @@ class HttpAuthFilterTest {
     }
 
     @Test
+    fun `a valid token writes the TokenWritePolicy POST routes without a session`() {
+        val filter = HttpAuthFilter(tokenGate(), port = 8080)
+        assertNull(filter.authorize("POST", "/api/recording/start", mapOf("authorization" to "Bearer $apiToken")))
+        assertNull(filter.authorize("POST", "/api/capture", mapOf("x-api-token" to apiToken)))
+    }
+
+    @Test
     fun `a valid token never reaches the auth routes`() {
         val filter = HttpAuthFilter(tokenGate(), port = 8080)
         val result = filter.authorize("GET", "/api/auth/config", mapOf("authorization" to "Bearer $apiToken"))!!

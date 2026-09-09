@@ -2,12 +2,47 @@ package com.raulshma.lenscast.streaming.rtsp
 
 
 /**
+ * The codec-neutral video RTP packetizer surface [RtspServer] fans access
+ * units through: [RtpPacketizer] for H.264 (RFC 6184), [H265RtpPacketizer]
+ * for H.265 (RFC 7798). The server picks the implementation at start from
+ * the configured codec, so the fan-out and the RTCP counters stay
+ * codec-blind.
+ */
+internal interface VideoPacketizer {
+    val currentSeq: Int
+
+    val wireSsrc: Int
+
+    val sentPacketCount: Long
+
+    val sentOctetCount: Long
+
+    /** Packetizes one NAL unit: single NAL packets or fragmentation units, codec-specific. */
+    fun packetizeNalUnit(nalUnit: ByteArray, timestamp: Long, marker: Boolean): List<ByteArray>
+
+    /**
+     * Packetizes one access unit — the codec-neutral AU discipline both
+     * RFCs share: every NAL unit of the frame carries the same [timestamp],
+     * and the marker bit lands on exactly one packet, the last of the AU.
+     * Per-NAL markers (the old behavior) announce frame ends mid-AU, which
+     * strict depacketizers surface as corrupted frame boundaries.
+     */
+    fun packetizeAccessUnit(nalUnits: List<ByteArray>, timestamp: Long): List<ByteArray> {
+        val packets = mutableListOf<ByteArray>()
+        for ((index, nalUnit) in nalUnits.withIndex()) {
+            packets.addAll(packetizeNalUnit(nalUnit, timestamp, marker = index == nalUnits.lastIndex))
+        }
+        return packets
+    }
+}
+
+/**
  * RTP packetizer for H.264 NAL units (RFC 6184 FU-A + single NAL). Instance
  * state — sequence number, SSRC, counters — lives in the per-session
  * [RtpStreamState]; a fresh instance per start replaces the old global
  * reset() ritual.
  */
-class RtpPacketizer {
+class RtpPacketizer : VideoPacketizer {
 
     private companion object {
         const val RTP_HEADER_SIZE = 12
@@ -18,16 +53,16 @@ class RtpPacketizer {
 
     private val streamState = RtpStreamState()
 
-    val currentSeq: Int get() = streamState.currentSeq
+    override val currentSeq: Int get() = streamState.currentSeq
 
     /** Low 32 bits of the random SSRC, as written on the wire. */
-    val wireSsrc: Int get() = streamState.wireSsrc
+    override val wireSsrc: Int get() = streamState.wireSsrc
 
-    val sentPacketCount: Long get() = streamState.sentPacketCount
+    override val sentPacketCount: Long get() = streamState.sentPacketCount
 
-    val sentOctetCount: Long get() = streamState.sentOctetCount
+    override val sentOctetCount: Long get() = streamState.sentOctetCount
 
-    fun packetizeNalUnit(nalUnit: ByteArray, timestamp: Long, marker: Boolean): List<ByteArray> {
+    override fun packetizeNalUnit(nalUnit: ByteArray, timestamp: Long, marker: Boolean): List<ByteArray> {
         if (nalUnit.isEmpty()) return emptyList()
         if (nalUnit.size <= MAX_PACKET_SIZE) {
             return listOf(createSingleNalPacket(nalUnit, timestamp, marker))

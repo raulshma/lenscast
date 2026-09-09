@@ -2075,6 +2075,270 @@ html, body {
   flex-shrink: 0;
 }
 
+/* Accent tint over the neutral zone chip for ML class labels. */
+.event-label-chip {
+  color: var(--lc-accent);
+  border-color: var(--lc-accent-dim);
+}
+
+/* Event stream connection pill (SSE live vs polling fallback). */
+.event-stream-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  border-radius: var(--lc-radius-full);
+  padding: 2px 10px;
+  flex-shrink: 0;
+  margin-left: auto;
+}
+
+.event-stream-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  flex-shrink: 0;
+}
+
+.event-stream-pill-live {
+  color: var(--lc-success);
+  background: var(--lc-success-bg);
+}
+
+.event-stream-pill-live .event-stream-dot {
+  animation: recording-pulse 1.5s ease-in-out infinite;
+}
+
+.event-stream-pill-polling {
+  color: var(--lc-warning);
+  background: var(--lc-warning-bg);
+}
+
+.event-stream-pill-connecting {
+  color: var(--lc-text-dim);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+/* Event → recorded clip link. */
+.event-clip-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--lc-accent);
+  background: var(--lc-accent-bg);
+  border-radius: var(--lc-radius-sm);
+  padding: 2px 8px;
+  margin-left: auto;
+  flex-shrink: 0;
+  text-decoration: none;
+}
+
+.event-clip-btn svg {
+  width: 9px;
+  height: 9px;
+}
+
+.event-clip-btn:hover {
+  filter: brightness(1.2);
+}
+
+/* Multi-camera tile grid (remote LensCast phones). */
+.multicam-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.multicam-tile {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px;
+  border: 1px solid var(--lc-border);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.03);
+  overflow: hidden;
+}
+
+.multicam-tile-offline {
+  border-color: var(--lc-danger-bg);
+}
+
+.multicam-tile-media {
+  position: relative;
+  aspect-ratio: 16 / 9;
+  border-radius: var(--lc-radius-sm);
+  overflow: hidden;
+  background: #000;
+}
+
+.multicam-tile-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.multicam-badge {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  padding: 2px 8px;
+  border-radius: var(--lc-radius-full);
+  backdrop-filter: blur(8px);
+}
+
+.multicam-badge-online {
+  color: var(--lc-success);
+  background: var(--lc-success-bg);
+}
+
+.multicam-badge-live {
+  color: #fff;
+  background: rgba(244, 63, 94, 0.85);
+}
+
+.multicam-badge-offline {
+  color: var(--lc-danger);
+  background: var(--lc-danger-bg);
+}
+
+.multicam-tile-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 28px;
+}
+
+.multicam-tile-name {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--lc-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.multicam-tile-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  flex-shrink: 0;
+}
+
+.multicam-mini-btn {
+  font-size: 10px;
+  font-weight: 600;
+  font-family: var(--lc-font);
+  color: var(--lc-text-muted);
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--lc-border);
+  border-radius: var(--lc-radius-sm);
+  padding: 2px 8px;
+  cursor: pointer;
+  text-decoration: none;
+  transition: color 0.15s ease, border-color 0.15s ease;
+}
+
+.multicam-mini-btn:hover {
+  color: var(--lc-text);
+  border-color: var(--lc-border-hover);
+}
+
+.multicam-mini-btn-danger:hover {
+  color: var(--lc-danger);
+  border-color: var(--lc-danger);
+}
+
+.multicam-offline-hint {
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--lc-text-dim);
+}
+
+.multicam-add-form {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.multicam-add-name {
+  flex: 0 1 160px;
+  min-width: 120px;
+}
+
+.multicam-add-url {
+  flex: 1 1 200px;
+  min-width: 160px;
+}
+
+.multicam-edit-form {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+}
+
+.multicam-edit-input {
+  font-size: 12px;
+  padding: 4px 8px;
+}
+
+.multicam-edit-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.multicam-form-error {
+  font-size: 11px;
+  color: var(--lc-danger);
+}
+
+/* Gallery capture-day sections. */
+.gallery-day-section {
+  padding-bottom: 4px;
+}
+
+.gallery-day-header {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 12px 16px 0;
+}
+
+.gallery-day-label {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--lc-text-secondary);
+}
+
+.gallery-day-count {
+  font-size: 11px;
+  color: var(--lc-text-dim);
+}
+
+.gallery-day-select {
+  max-width: 170px;
+  min-width: 120px;
+}
+
 .field-input-full {
   width: 100%;
 }

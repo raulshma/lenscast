@@ -104,4 +104,28 @@ class RtpPacketizerTest {
     fun `empty nal produces no packets`() {
                 assertTrue(packetizer.packetizeNalUnit(ByteArray(0), 0, true).isEmpty())
     }
+
+    @Test
+    fun `access unit marks exactly one packet - the last - regardless of nal count`() {
+        val nals = listOf(
+            ByteArray(100).also { it[0] = nalHeader(7).toByte() },
+            ByteArray(100).also { it[0] = nalHeader(8).toByte() },
+            ByteArray(100).also { it[0] = nalHeader(5).toByte() },
+        )
+        val packets = packetizer.packetizeAccessUnit(nals, 3750)
+        assertEquals(3, packets.size)
+        assertEquals(packets.last(), packets.single { (it[1].toInt() and 0x80) != 0 })
+        assertTrue(packets.take(2).none { (it[1].toInt() and 0x80) != 0 })
+    }
+
+    @Test
+    fun `access unit marks only final fragment of final nal when fragmented`() {
+        val nals = listOf(
+            ByteArray(3000).also { it[0] = nalHeader(5).toByte() },
+            ByteArray(100).also { it[0] = nalHeader(1).toByte() },
+        )
+        val packets = packetizer.packetizeAccessUnit(nals, 0)
+        assertTrue(packets.size > 2)
+        assertEquals(packets.last(), packets.single { (it[1].toInt() and 0x80) != 0 })
+    }
 }

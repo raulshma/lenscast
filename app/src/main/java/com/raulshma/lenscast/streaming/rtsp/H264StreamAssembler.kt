@@ -10,7 +10,7 @@ import java.nio.ByteBuffer
  * [updateFromFormat], and [assemble] owns the prepend-SPS/PPS-if-available
  * decision on keyframes lacking them. Pure Kotlin over plain [ByteBuffer]s
  * (no Android types), so both CSD paths and the assembly are JVM-tested;
- * [H264Encoder] keeps only MediaCodec lifecycle and delegates here.
+ * [MediaCodecVideoEncoder] keeps the shared MediaCodec body and delegates here.
  */
 class H264StreamAssembler {
 
@@ -61,23 +61,23 @@ class H264StreamAssembler {
      * sets already in the keyframe's band are NOT deduplicated — the wire
      * output matches what the encoder's inline logic produced.
      */
-    fun assemble(nalUnits: List<ByteArray>, isKeyFrame: Boolean): List<H264Encoder.EncodedNalUnit> {
+    fun assemble(nalUnits: List<ByteArray>, isKeyFrame: Boolean): List<EncodedNalUnit> {
         if (nalUnits.isEmpty()) return emptyList()
         if (!isKeyFrame) {
-            return nalUnits.map { H264Encoder.EncodedNalUnit(it, false) }
+            return nalUnits.map { EncodedNalUnit(it, false) }
         }
 
         val spsData = sps
         val ppsData = pps
         if (spsData == null || ppsData == null) {
-            return nalUnits.map { H264Encoder.EncodedNalUnit(it, true) }
+            return nalUnits.map { EncodedNalUnit(it, true) }
         }
 
         val allNals = mutableListOf(
-            H264Encoder.EncodedNalUnit(spsData, false),
-            H264Encoder.EncodedNalUnit(ppsData, false),
+            EncodedNalUnit(spsData, false),
+            EncodedNalUnit(ppsData, false),
         )
-        allNals.addAll(nalUnits.map { H264Encoder.EncodedNalUnit(it, true) })
+        allNals.addAll(nalUnits.map { EncodedNalUnit(it, true) })
         return allNals
     }
 

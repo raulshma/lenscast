@@ -67,6 +67,8 @@ export default function SecurityCard(props: Props) {
   const webhookOn = () => stream()?.webhookEnabled ?? API_DEFAULTS.webhookEnabled
   const autoSirenOn = () => stream()?.autoSiren ?? API_DEFAULTS.autoSiren
   const autoTorchOn = () => stream()?.autoTorch ?? API_DEFAULTS.autoTorch
+  const mlOn = () => stream()?.mlDetectionEnabled ?? API_DEFAULTS.mlDetectionEnabled
+  const continuousOn = () => stream()?.continuousRecording ?? API_DEFAULTS.continuousRecording
 
   function toggleSiren() {
     if (sirenBusy()) return
@@ -275,6 +277,64 @@ export default function SecurityCard(props: Props) {
             onInput={(e) => props.updateStreamingDebounced({ soundThresholdPercent: parseInt(e.currentTarget.value) })}
           />
         </Show>
+      </div>
+
+      {/* Object detection (ML) */}
+      <div class="field-group">
+        <ToggleRow
+          id="ml-detection-toggle"
+          label="Object Detection (ML)"
+          checked={mlOn()}
+          onToggle={() => props.updateStreamingAndSave({ mlDetectionEnabled: !mlOn() })}
+        />
+        <div class="status-banner status-banner-info stream-mode-hint" role="note" aria-live="polite">
+          <span class="status-banner-dot" aria-hidden="true" />
+          <span>Verifies motion with an on-device model (person, pet, vehicle); events without a matching object are suppressed.</span>
+        </div>
+        <div class="field-row">
+          <span class="field-label">Minimum Confidence</span>
+          <span class="field-value">{stream()?.mlMinScorePercent ?? API_DEFAULTS.mlMinScorePercent}%</span>
+        </div>
+        <input
+          id="ml-min-score-slider"
+          type="range"
+          class="custom-range"
+          min={API_DEFAULTS.mlMinScoreMinPercent}
+          max={API_DEFAULTS.mlMinScoreMaxPercent}
+          step={5}
+          disabled={!mlOn()}
+          value={stream()?.mlMinScorePercent ?? API_DEFAULTS.mlMinScorePercent}
+          onInput={(e) => props.updateStreamingDebounced({ mlMinScorePercent: parseInt(e.currentTarget.value) })}
+        />
+      </div>
+
+      {/* Continuous recording */}
+      <div class="field-group">
+        <ToggleRow
+          id="continuous-rec-toggle"
+          label="Continuous Recording"
+          checked={continuousOn()}
+          onToggle={() => props.updateStreamingAndSave({ continuousRecording: !continuousOn() })}
+        />
+        <div class="status-banner status-banner-info stream-mode-hint" role="note" aria-live="polite">
+          <span class="status-banner-dot" aria-hidden="true" />
+          <span>Records chained segments while the camera is idle; oldest segments age out with the capture retention window.</span>
+        </div>
+        <div class="field-row">
+          <span class="field-label">Segment Length</span>
+          <span class="field-value">{stream()?.continuousSegmentMinutes ?? API_DEFAULTS.continuousSegmentMinutes} min</span>
+        </div>
+        <input
+          id="continuous-segment-slider"
+          type="range"
+          class="custom-range"
+          min={API_DEFAULTS.continuousSegmentMinMinutes}
+          max={API_DEFAULTS.continuousSegmentMaxMinutes}
+          step={5}
+          disabled={!continuousOn()}
+          value={stream()?.continuousSegmentMinutes ?? API_DEFAULTS.continuousSegmentMinutes}
+          onInput={(e) => props.updateStreamingDebounced({ continuousSegmentMinutes: parseInt(e.currentTarget.value) })}
+        />
       </div>
 
       {/* On-device alerts and tamper */}

@@ -58,6 +58,7 @@ const STREAMING_KEYS = [
   'rtspEnabled',
   'rtspPort',
   'rtspInputFormat',
+  'rtspVideoCodec',
   'adaptiveBitrateEnabled',
   'overlayEnabled',
   'showTimestamp',
@@ -333,6 +334,35 @@ describe('API_DEFAULTS lockstep with the fixtures', () => {
     expect(streaming.mqttPassword).toBe(API_DEFAULTS.mqttPassword)
     expect(streaming.mqttTls).toBe(API_DEFAULTS.mqttTls)
     expect(streaming.mqttDiscoveryPrefix).toBe(API_DEFAULTS.mqttDiscoveryPrefix)
+  })
+
+  it('detection suite, retention and rtspResolution fallbacks match the settings fixture defaults', () => {
+    expect(streaming.rtspResolution).toBe(API_DEFAULTS.rtspResolution)
+    expect(streaming.rtspVideoCodec).toBe(API_DEFAULTS.rtspVideoCodec)
+    expect(streaming.mlDetectionEnabled).toBe(API_DEFAULTS.mlDetectionEnabled)
+    expect(streaming.mlMinScorePercent).toBe(API_DEFAULTS.mlMinScorePercent)
+    expect(streaming.continuousRecording).toBe(API_DEFAULTS.continuousRecording)
+    expect(streaming.continuousSegmentMinutes).toBe(API_DEFAULTS.continuousSegmentMinutes)
+    expect(streaming.onvifEnabled).toBe(API_DEFAULTS.onvifEnabled)
+    expect(streaming.captureRetentionDays).toBe(API_DEFAULTS.captureRetentionDays)
+    expect(streaming.eventRetentionDays).toBe(API_DEFAULTS.eventRetentionDays)
+  })
+
+  it('retention inputs share the 0–365 bound and contain their defaults', () => {
+    expect(API_DEFAULTS.retentionMinDays).toBe(0)
+    expect(API_DEFAULTS.retentionMaxDays).toBe(365)
+    expect(streaming.captureRetentionDays).toBeGreaterThanOrEqual(API_DEFAULTS.retentionMinDays)
+    expect(streaming.captureRetentionDays).toBeLessThanOrEqual(API_DEFAULTS.retentionMaxDays)
+    expect(streaming.eventRetentionDays).toBeGreaterThanOrEqual(API_DEFAULTS.retentionMinDays)
+    expect(streaming.eventRetentionDays).toBeLessThanOrEqual(API_DEFAULTS.retentionMaxDays)
+    expect(API_DEFAULTS.mlMinScoreMinPercent).toBe(10)
+    expect(API_DEFAULTS.mlMinScoreMaxPercent).toBe(95)
+    expect(streaming.mlMinScorePercent).toBeGreaterThanOrEqual(API_DEFAULTS.mlMinScoreMinPercent)
+    expect(streaming.mlMinScorePercent).toBeLessThanOrEqual(API_DEFAULTS.mlMinScoreMaxPercent)
+    expect(API_DEFAULTS.continuousSegmentMinMinutes).toBe(5)
+    expect(API_DEFAULTS.continuousSegmentMaxMinutes).toBe(60)
+    expect(streaming.continuousSegmentMinutes).toBeGreaterThanOrEqual(API_DEFAULTS.continuousSegmentMinMinutes)
+    expect(streaming.continuousSegmentMinutes).toBeLessThanOrEqual(API_DEFAULTS.continuousSegmentMaxMinutes)
   })
 
   it('camera fallbacks match the settings fixture defaults', () => {

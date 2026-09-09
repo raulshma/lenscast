@@ -9,7 +9,9 @@ import com.raulshma.lenscast.streaming.HttpResult.ResponseBody.Text
  * requests to gate calls and gate answers to status codes, bodies, and
  * cookie headers. The [StreamingServer] module reads the request body off
  * the socket and applies the security headers. Protected routes accept either
- * a session cookie or — first in the ladder — the read-only API token headers.
+ * a session cookie or — first in the ladder — the API token headers (GET/HEAD
+ * anywhere protected, POST on the TokenWritePolicy allow-list, decided by the
+ * gate).
  */
 class HttpAuthFilter(
     private val webAuthGate: WebAuthGate,

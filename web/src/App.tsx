@@ -6,6 +6,7 @@ import StreamPreview from './components/StreamPreview'
 import SettingsPanel from './components/SettingsPanel'
 import AppSettingsPanel from './components/AppSettingsPanel'
 import ClientsCard from './components/ClientsCard'
+import MultiCamCard from './components/MultiCamCard'
 import Gallery from './Gallery'
 import './App.css'
 
@@ -92,6 +93,7 @@ function App() {
                     setRecordingConfigAudio={(v) => state.setRecordingConfig({ ...state.recordingConfig(), includeAudio: v })}
                   />
                   <ClientsCard />
+                  <MultiCamCard />
                 </Show>
               </main>
 

@@ -1,9 +1,11 @@
 import { Show } from 'solid-js'
-import type { AllSettings, RtspInputFormat } from '../types'
+import type { AllSettings, RtspInputFormat, RtspResolution, RtspVideoCodec } from '../types'
 import { API_DEFAULTS } from '../api/defaults'
 import SettingsCard from './SettingsCard'
+import ToggleRow from './ToggleRow'
 import SecurityCard from './SecurityCard'
 import EventFeed from './EventFeed'
+import StorageCard from './StorageCard'
 import BackupCard from './BackupCard'
 import MqttCard from './MqttCard'
 import AuthCard from './AuthCard'
@@ -18,6 +20,7 @@ interface Props {
 export default function AppSettingsPanel(props: Props) {
   const s = () => props.settings()
   const webStreamingEnabled = () => s()?.streaming?.webStreamingEnabled ?? API_DEFAULTS.webStreamingEnabled
+  const rtspVideoCodec = () => s()?.streaming?.rtspVideoCodec ?? API_DEFAULTS.rtspVideoCodec
 
   return (
     <section class="settings-panel" id="app-settings-panel">
@@ -124,6 +127,19 @@ export default function AppSettingsPanel(props: Props) {
           <div class="status-banner status-banner-info stream-mode-hint" role="note" aria-live="polite">
             <span class="status-banner-dot" aria-hidden="true" />
             <span>Advertises the stream on the local network so clients can discover it.</span>
+          </div>
+        </div>
+
+        <div class="field-group">
+          <ToggleRow
+            id="onvif-toggle"
+            label="ONVIF (Profile S)"
+            checked={s()?.streaming?.onvifEnabled ?? API_DEFAULTS.onvifEnabled}
+            onToggle={() => props.updateStreamingAndSave({ onvifEnabled: !(s()?.streaming?.onvifEnabled ?? API_DEFAULTS.onvifEnabled) })}
+          />
+          <div class="status-banner status-banner-info stream-mode-hint" role="note" aria-live="polite">
+            <span class="status-banner-dot" aria-hidden="true" />
+            <span>WS-Discovery + device endpoint so NVRs (Home Assistant, tinyCam) can find this camera automatically.</span>
           </div>
         </div>
 
@@ -327,6 +343,44 @@ export default function AppSettingsPanel(props: Props) {
               <option value="I420">I420</option>
             </select>
           </div>
+
+          {/* Resolution applies with an RTSP restart — the running pipeline
+              keeps streaming at the previous size until it is restarted. */}
+          <div class="field-group">
+            <div class="field-row">
+              <span class="field-label" title="Applies with an RTSP restart">Resolution</span>
+            </div>
+            <select
+              id="rtsp-resolution-select-app"
+              class="field-select field-select-full"
+              title="Applies with an RTSP restart"
+              value={s()?.streaming?.rtspResolution ?? API_DEFAULTS.rtspResolution}
+              onChange={(e) => {
+                props.updateStreamingAndSave({ rtspResolution: e.currentTarget.value as RtspResolution })
+              }}
+            >
+              <option value="480p">480p</option>
+              <option value="720p">720p</option>
+              <option value="1080p">1080p</option>
+            </select>
+          </div>
+
+          <div class="field-group">
+            <div class="field-row">
+              <span class="field-label">Video Codec</span>
+            </div>
+            <select
+              id="rtsp-codec-select-app"
+              class="field-select field-select-full"
+              value={rtspVideoCodec()}
+              onChange={(e) => {
+                props.updateStreamingAndSave({ rtspVideoCodec: e.currentTarget.value as RtspVideoCodec })
+              }}
+            >
+              <option value="h264">H.264 (recommended)</option>
+              <option value="h265">H.265</option>
+            </select>
+          </div>
         </Show>
       </SettingsCard>
 
@@ -339,6 +393,12 @@ export default function AppSettingsPanel(props: Props) {
       <EventFeed />
 
       <BackupCard
+        settings={props.settings}
+        updateStreamingAndSave={props.updateStreamingAndSave}
+        updateStreamingDebounced={props.updateStreamingDebounced}
+      />
+
+      <StorageCard
         settings={props.settings}
         updateStreamingAndSave={props.updateStreamingAndSave}
         updateStreamingDebounced={props.updateStreamingDebounced}

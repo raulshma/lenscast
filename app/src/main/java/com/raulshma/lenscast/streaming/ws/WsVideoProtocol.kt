@@ -1,6 +1,6 @@
 package com.raulshma.lenscast.streaming.ws
 
-import com.raulshma.lenscast.streaming.rtsp.H264Encoder
+import com.raulshma.lenscast.streaming.rtsp.EncodedNalUnit
 
 /**
  * Pure wire-protocol math for the WebSocket H.264 path (JVM-tested):
@@ -105,7 +105,7 @@ object WsVideoProtocol {
 
     /** Same verdict for encoder-emitted NAL units, keyed off the encoder's own flag. */
     @JvmName("containsKeyframeEncoded")
-    fun containsKeyframe(nalUnits: List<H264Encoder.EncodedNalUnit>): Boolean =
+    fun containsKeyframe(nalUnits: List<EncodedNalUnit>): Boolean =
         nalUnits.any { it.isKeyFrame }
 
     fun envelope(magic: String, payload: ByteArray): ByteArray {

@@ -1,9 +1,10 @@
 package com.raulshma.lenscast.streaming
 
-import com.raulshma.lenscast.streaming.rtsp.H264Encoder
+import com.raulshma.lenscast.streaming.rtsp.EncodedNalUnit
 import com.raulshma.lenscast.streaming.rtsp.RtspAuthSpec
 import com.raulshma.lenscast.streaming.rtsp.RtspConfig
 import com.raulshma.lenscast.streaming.rtsp.RtspInputFormat
+import com.raulshma.lenscast.streaming.rtsp.RtspResolution
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -54,7 +55,7 @@ class RtspOutputTest {
     private class FakeServer : RtspServerHandle {
         val startCalls = mutableListOf<RtspConfig>()
         val applyCalls = mutableListOf<RtspConfig>()
-        val fedVideo = mutableListOf<List<H264Encoder.EncodedNalUnit>>()
+        val fedVideo = mutableListOf<List<EncodedNalUnit>>()
         val fedAudio = mutableListOf<ByteArray>()
         var stopCalls = 0
         var startReturns = true
@@ -73,7 +74,7 @@ class RtspOutputTest {
             applyCalls += config
         }
 
-        override fun feedVideo(nalUnits: List<H264Encoder.EncodedNalUnit>) {
+        override fun feedVideo(nalUnits: List<EncodedNalUnit>) {
             fedVideo += nalUnits
         }
 
@@ -471,6 +472,47 @@ class RtspOutputTest {
         val server = h.startEnabled()
 
         h.output.update { it }
+
+        assertEquals(1, h.servers.size)
+        assertEquals(0, server.applyCalls.size)
+    }
+
+    // ── resolution ──
+
+    @Test
+    fun `a resolution change restarts a live output with both dimensions`() {
+        val h = Harness()
+        h.startEnabled()
+
+        h.output.setResolution(RtspResolution.P1080)
+
+        // A dimension change is NEEDS_RESTART in the diff — it must not
+        // attempt a live apply.
+        assertEquals(2, h.servers.size)
+        val config = h.servers[1].startCalls.single()
+        assertEquals(1920, config.videoWidth)
+        assertEquals(1080, config.videoHeight)
+    }
+
+    @Test
+    fun `a resolution change while stopped is retained for the next start`() {
+        val h = Harness()
+        h.output.setEnabled(true)
+
+        h.output.setResolution(RtspResolution.P480)
+
+        assertEquals(0, h.servers.size)
+        val config = h.startEnabled().startCalls.single()
+        assertEquals(640, config.videoWidth)
+        assertEquals(480, config.videoHeight)
+    }
+
+    @Test
+    fun `a same-resolution call is a full no-op`() {
+        val h = Harness()
+        val server = h.startEnabled()
+
+        h.output.setResolution(RtspResolution.P720) // the config's default
 
         assertEquals(1, h.servers.size)
         assertEquals(0, server.applyCalls.size)

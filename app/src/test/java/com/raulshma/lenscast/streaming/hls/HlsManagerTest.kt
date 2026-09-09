@@ -1,6 +1,6 @@
 package com.raulshma.lenscast.streaming.hls
 
-import com.raulshma.lenscast.streaming.rtsp.H264Encoder.EncodedNalUnit
+import com.raulshma.lenscast.streaming.rtsp.EncodedNalUnit
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue

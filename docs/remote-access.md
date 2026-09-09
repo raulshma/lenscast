@@ -19,7 +19,7 @@ nowhere to bind and starts without WebSocket video or talkback.
 | Snapshot (JPEG frame) | 8080 | `http://PHONE_IP:8080/snapshot` | `https://PHONE_IP:8080/snapshot` |
 | HLS playlist | 8080 | `http://PHONE_IP:8080/hls/playlist.m3u8` | `https://PHONE_IP:8080/hls/playlist.m3u8` |
 | WebSocket sidecar (WebCodecs video / talkback) | 8081 (web port + 1) | `ws://PHONE_IP:8081` | `wss://PHONE_IP:8081` |
-| RTSP (H.264 + AAC) | 8554 | `rtsp://PHONE_IP:8554/stream` | `rtsp://PHONE_IP:8554/stream` (unchanged) |
+| RTSP (H.264/H.265 + AAC) | 8554 | `rtsp://PHONE_IP:8554/stream` | `rtsp://PHONE_IP:8554/stream` (unchanged) |
 
 Two toggles change how these URLs behave:
 
@@ -33,12 +33,15 @@ Two toggles change how these URLs behave:
   rate-limited. The RTSP server challenges with Digest (Basic is also
   accepted) using the same credentials. For scripted clients that cannot hold
   a cookie (curl one-liners, Home Assistant's `still_image_url`), the settings
-  can enable a read-only API token: send it as `Authorization: Bearer <token>`
-  or `X-Api-Token: <token>` and it authorizes read-only GET and HEAD requests
-  to the protected routes (never the auth routes, never writes, and never the
-  WebSocket paths — those stay cookie-session-only). Token requests skip the
-  cookie path's CSRF origin check: they are header-authenticated, so there is
-  nothing for a cross-site page to forge. While the token setting is off,
+  can enable an API token: send it as `Authorization: Bearer <token>` or
+  `X-Api-Token: <token>` and it authorizes GET and HEAD requests to the
+  protected routes plus POSTs on an explicit allow-list (stream, web-stream,
+  and RTSP start/stop, `/api/capture`, recording start/stop, the siren, and
+  the torch — the full list is in [NVR integration](nvr-integration.md)).
+  It never authorizes the auth/session routes, and never the WebSocket
+  paths — those stay cookie-session-only. Token requests skip the
+  cookie path's CSRF origin check: they are header-authenticated, so there
+  is nothing for a cross-site page to forge. While the token setting is off,
   token headers are ignored: protected routes behave exactly as if the header
   were absent.
 

@@ -132,4 +132,15 @@ class H264NalParserTest {
         assertEquals("packetization-mode=1;profile-level-id=42c01f", fmtp)
         assertTrue(!fmtp.endsWith(";"))
     }
+
+    @Test
+    fun `containsIdr detects idr slice among parameter sets and non-idr nals`() {
+        val sps = byteArrayOf(0x67, 0x64, 0x00, 0x1f)
+        val pps = byteArrayOf(0x68.toByte(), 0xa0.toByte())
+        val idr = byteArrayOf(0x65, 0x00, 0x01)
+        val nonIdr = byteArrayOf(0x41, 0x00, 0x02)
+        assertTrue(H264NalParser.containsIdr(listOf(sps, pps, idr)))
+        assertTrue(!H264NalParser.containsIdr(listOf(sps, pps, nonIdr)))
+        assertTrue(!H264NalParser.containsIdr(emptyList()))
+    }
 }

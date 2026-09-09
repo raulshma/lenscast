@@ -1,19 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?><!--
-   Sample data extraction rules file; uncomment and customize as necessary.
-   See https://developer.android.com/about/versions/12/backup-restore#xml-changes
-   for details.
+   Data extraction rules (API 31+). Excludes only what must never leave the
+   device: the auth session tokens and the detection-event log (its entries
+   embed base64 camera snapshots) — from both cloud backup and device-to-device
+   transfer. Everything else follows the platform default.
 -->
 <data-extraction-rules>
     <cloud-backup>
-        <!-- TODO: Use <include> and <exclude> to control what is backed up.
-        <include .../>
-        <exclude .../>
-        -->
+        <exclude domain="file" path="auth/sessions.json" />
+        <exclude domain="file" path="detection_events.json" />
     </cloud-backup>
-    <!--
     <device-transfer>
-        <include .../>
-        <exclude .../>
+        <exclude domain="file" path="auth/sessions.json" />
+        <exclude domain="file" path="detection_events.json" />
     </device-transfer>
-    -->
 </data-extraction-rules>

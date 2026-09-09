@@ -12,6 +12,11 @@ class SdpBuilderTest {
     private val sps = byteArrayOf(0x67, 0x42, 0xC0.toByte(), 0x1F, 0xD9.toByte())
     private val pps = byteArrayOf(0x68, 0xCE.toByte(), 0x38.toByte())
 
+    // H.265 parameter sets (2-byte headers: 0x40 = VPS type 32, 0x42 = SPS 33, 0x44 = PPS 34).
+    private val vps = byteArrayOf(0x40, 0x01, 0x0A)
+    private val h265Sps = byteArrayOf(0x42, 0x01, 0x0B)
+    private val h265Pps = byteArrayOf(0x44, 0x01, 0x0C)
+
     private fun b64(bytes: ByteArray) = Base64.getEncoder().encodeToString(bytes)
 
     private fun build(
@@ -24,9 +29,11 @@ class SdpBuilderTest {
         sps: ByteArray? = this.sps,
         pps: ByteArray? = this.pps,
         asc: ByteArray? = null,
+        codec: RtspVideoCodec = RtspVideoCodec.H264,
+        vps: ByteArray? = null,
     ) = SdpBuilder.build(
         sessionId, ip, videoBitrate, audioEnabled, audioSampleRateHz, audioChannelCount,
-        sps, pps, asc
+        sps, pps, asc, codec, vps
     )
 
     // ── video-only ──
@@ -140,6 +147,59 @@ class SdpBuilderTest {
     fun `audio rtpmap reflects the configured sample rate and channel count`() {
         val sdp = build(audioEnabled = true, audioSampleRateHz = 44_100, audioChannelCount = 2)
         assertTrue(sdp.contains("a=rtpmap:97 mpeg4-generic/44100/2"))
+    }
+
+    // ── H.265 ──
+
+    @Test
+    fun `h265 sdp advertises the hevc rtpmap and the sprop triple fmtp`() {
+        val sdp = build(
+            codec = RtspVideoCodec.H265,
+            sps = h265Sps,
+            pps = h265Pps,
+            vps = vps,
+        )
+
+        val videoLines = listOf(
+            "m=video 0 RTP/AVP 96",
+            "c=IN IP4 0.0.0.0",
+            "b=AS:2000",
+            "a=rtpmap:96 H265/90000",
+            "a=fmtp:96 sprop-vps=${b64(vps)};sprop-sps=${b64(h265Sps)};sprop-pps=${b64(h265Pps)}",
+            "a=control:stream",
+        )
+        val actual = sdp.trimEnd('\n').split('\n')
+        val videoStart = actual.indexOf("m=video 0 RTP/AVP 96")
+        assertTrue(videoStart > 0)
+        assertEquals(videoLines, actual.subList(videoStart, actual.size))
+        assertFalse(sdp.contains("H264"))
+        assertFalse(sdp.contains("sprop-parameter-sets"))
+    }
+
+    @Test
+    fun `h265 without learned parameter sets omits the fmtp line entirely`() {
+        val sdp = build(codec = RtspVideoCodec.H265, sps = null, pps = null, vps = null)
+
+        assertTrue(sdp.contains("a=rtpmap:96 H265/90000\n"))
+        assertFalse(sdp.contains("a=fmtp:96"))
+        assertFalse(sdp.contains(";;"))
+    }
+
+    @Test
+    fun `h265 with only some parameter sets omits fmtp rather than a partial sprop`() {
+        val sdp = build(codec = RtspVideoCodec.H265, sps = h265Sps, pps = h265Pps, vps = null)
+        assertFalse(sdp.contains("a=fmtp:96"))
+
+        val sdpNoPps = build(codec = RtspVideoCodec.H265, sps = h265Sps, pps = null, vps = vps)
+        assertFalse(sdpNoPps.contains("a=fmtp:96"))
+    }
+
+    @Test
+    fun `payload type stays 96 for h265`() {
+        val sdp = build(codec = RtspVideoCodec.H265, sps = h265Sps, pps = h265Pps, vps = vps)
+        assertTrue(sdp.contains("m=video 0 RTP/AVP 96"))
+        assertTrue(sdp.contains("a=rtpmap:96 H265/90000"))
+        assertTrue(sdp.contains("a=fmtp:96 "))
     }
 
     // ── session identity placement ──

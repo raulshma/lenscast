@@ -1,5 +1,6 @@
 package com.raulshma.lenscast.streaming.hls
 
+import com.raulshma.lenscast.streaming.rtsp.EncodedNalUnit
 import android.util.Log
 import java.util.ArrayDeque
 import java.util.concurrent.atomic.AtomicLong
@@ -102,7 +103,7 @@ object HlsManager : HlsVideoSink, HlsSegmentSource {
         }
     }
 
-    override fun feedVideo(nalus: List<com.raulshma.lenscast.streaming.rtsp.H264Encoder.EncodedNalUnit>) {
+    override fun feedVideo(nalus: List<com.raulshma.lenscast.streaming.rtsp.EncodedNalUnit>) {
         if (!enabled || nalus.isEmpty()) return
         try {
             val now = clockMs()

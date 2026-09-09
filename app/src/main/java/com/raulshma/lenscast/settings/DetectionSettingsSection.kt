@@ -3,6 +3,7 @@ package com.raulshma.lenscast.settings
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -33,6 +34,8 @@ fun DetectionSettingsSection(viewModel: SettingsViewModel) {
     val armEndMinute by viewModel.motionArmEndMinute.collectAsState()
     val soundEnabled by viewModel.soundDetectionEnabled.collectAsState()
     val soundThreshold by viewModel.soundThresholdPercent.collectAsState()
+    val mlEnabled by viewModel.mlDetectionEnabled.collectAsState()
+    val mlMinScore by viewModel.mlMinScorePercent.collectAsState()
     val notificationEnabled by viewModel.detectionNotificationsEnabled.collectAsState()
     val tamperEnabled by viewModel.tamperDetectionEnabled.collectAsState()
 
@@ -109,6 +112,28 @@ fun DetectionSettingsSection(viewModel: SettingsViewModel) {
             checked = tamperEnabled,
             onCheckedChange = { viewModel.updateTamperDetectionEnabled(it) }
         )
+        SwitchSetting(
+            title = "Object Detection (ML)",
+            checked = mlEnabled,
+            onCheckedChange = { viewModel.updateMlDetectionEnabled(it) }
+        )
+        if (mlEnabled) {
+            // Applies on top of motion detection: motion still arms the event;
+            // the on-device model decides whether it carries an allowed class.
+            Text(
+                text = "Applies on top of motion detection — alerts fire only when " +
+                    "a person, pet, or vehicle is detected in the frame",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            SliderSetting(
+                title = "Minimum Confidence (%)",
+                value = mlMinScore.toFloat(),
+                range = StreamDefaultsRange.ML_SCORE_PERCENT,
+                steps = StreamDefaultsRange.ML_SCORE_STEPS,
+                onValueChange = { viewModel.updateMlMinScorePercent(it.toInt()) }
+            )
+        }
     }
 }
 
@@ -213,4 +238,14 @@ internal object StreamDefaultsRange {
         StreamDefaults.WATCHDOG_MAX_RETRIES_MIN.toFloat()..StreamDefaults.WATCHDOG_MAX_RETRIES_MAX.toFloat()
     val WATCHDOG_INTERVAL =
         StreamDefaults.WATCHDOG_CHECK_INTERVAL_MIN_SECONDS.toFloat()..StreamDefaults.WATCHDOG_CHECK_INTERVAL_MAX_SECONDS.toFloat()
+    val ML_SCORE_PERCENT =
+        StreamDefaults.ML_SCORE_MIN_PERCENT.toFloat()..StreamDefaults.ML_SCORE_MAX_PERCENT.toFloat()
+    val CONTINUOUS_SEGMENT_MINUTES =
+        StreamDefaults.CONTINUOUS_SEGMENT_MIN_MINUTES.toFloat()..StreamDefaults.CONTINUOUS_SEGMENT_MAX_MINUTES.toFloat()
+
+    // Material3 `steps` counts the discrete points BETWEEN the endpoints, so
+    // a 5-unit slider step is (span / 5) - 1.
+    val ML_SCORE_STEPS = (StreamDefaults.ML_SCORE_MAX_PERCENT - StreamDefaults.ML_SCORE_MIN_PERCENT) / 5 - 1
+    val CONTINUOUS_SEGMENT_STEPS =
+        (StreamDefaults.CONTINUOUS_SEGMENT_MAX_MINUTES - StreamDefaults.CONTINUOUS_SEGMENT_MIN_MINUTES) / 5 - 1
 }

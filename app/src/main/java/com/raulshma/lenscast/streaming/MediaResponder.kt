@@ -33,10 +33,13 @@ class MediaResponder(
             return HttpResult.jsonError(400, "Missing media ID")
         }
 
-        // Handle /api/media/{id}/thumbnail
+        // Handle /api/media/{id}/thumbnail — videos through the retriever,
+        // photos through the shared JPEG downscale ladder; a full-size
+        // fallback keeps unknown media renderable.
         if (path.endsWith("/thumbnail")) {
             val id = path.removeSuffix("/thumbnail")
             val thumbnailBytes = gallery.resolveVideoThumbnail(id)
+                ?: gallery.resolvePhotoThumbnail(id)
             if (thumbnailBytes != null) {
                 return HttpResult(
                     statusCode = 200,
@@ -45,7 +48,7 @@ class MediaResponder(
                     headers = mapOf("Cache-Control" to "public, max-age=3600"),
                 )
             }
-            // Fallback: try to serve the media file itself (for photos)
+            // Fallback: try to serve the media file itself
             val resolved = gallery.resolveMediaFile(id)
             if (resolved != null) {
                 return HttpResult(

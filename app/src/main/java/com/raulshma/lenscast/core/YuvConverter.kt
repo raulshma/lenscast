@@ -191,6 +191,69 @@ object YuvConverter {
     }
 
     /**
+     * NV21 aspect-fill rescale for the encode paths: scales [src] so it
+     * covers the [outWidth]x[outHeight] target entirely (the larger per-axis
+     * scale factor wins) and center-crops the overflow on the other axis, so
+     * an encoder configured at a fixed size receives exactly that size no
+     * matter what analysis resolution the camera produces. Nearest-neighbor
+     * sampling; both dimensions must be even (NV21 chroma is 2x2 subsampled —
+     * every encode-path size is). Returns [src] unchanged when the sizes
+     * already match or a dimension is degenerate.
+     */
+    fun scaleNv21(src: ByteArray, width: Int, height: Int, outWidth: Int, outHeight: Int): ByteArray {
+        if (width == outWidth && height == outHeight) return src
+        if (width <= 0 || height <= 0 || outWidth <= 0 || outHeight <= 0 ||
+            width % 2 != 0 || height % 2 != 0 || outWidth % 2 != 0 || outHeight % 2 != 0
+        ) {
+            return src
+        }
+
+        val out = ByteArray(outWidth * outHeight * 3 / 2)
+
+        // The visible source window: scale-to-cover, centered. The binding
+        // axis is the one with the larger target/source ratio; the other axis
+        // keeps a narrower window that center-crops away.
+        val bindsX = outWidth.toLong() * height >= outHeight.toLong() * width
+        val winW = if (bindsX) width else outWidth * height / outHeight
+        val winH = if (bindsX) outHeight * width / outWidth else height
+        val winLeft = (width - winW) / 2
+        val winTop = (height - winH) / 2
+
+        for (outY in 0 until outHeight) {
+            val srcRow = (winTop + outY * winH / outHeight) * width + winLeft
+            val dstRow = outY * outWidth
+            for (outX in 0 until outWidth) {
+                out[dstRow + outX] = src[srcRow + outX * winW / outWidth]
+            }
+        }
+
+        // Chroma covers the luma window on its own halved lattice — derived
+        // FROM the luma window, never recomputed independently, so the color
+        // planes stay registered with the luma crop.
+        val cwOut = outWidth / 2
+        val chOut = outHeight / 2
+        val cLeft = winLeft / 2
+        val cTop = winTop / 2
+        val cW = (winLeft + winW + 1) / 2 - cLeft
+        val cH = (winTop + winH + 1) / 2 - cTop
+
+        val srcUvStart = width * height
+        val dstUvStart = outWidth * outHeight
+        for (cy in 0 until chOut) {
+            val srcCY = cTop + cy * cH / chOut
+            val dstRow = dstUvStart + cy * outWidth
+            for (cx in 0 until cwOut) {
+                val srcIdx = srcUvStart + srcCY * width + (cLeft + cx * cW / cwOut) * 2
+                val dstIdx = dstRow + cx * 2
+                out[dstIdx] = src[srcIdx]
+                out[dstIdx + 1] = src[srcIdx + 1]
+            }
+        }
+
+        return out
+    }
+
+    /**
      * NV21 → NV12: reorders the interleaved UV plane from VU to UV on a copy.
      * Moved here from H264Encoder — the encode-path pixel swaps live with the
      * rest of the YUV knowledge.

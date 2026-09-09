@@ -1,6 +1,15 @@
-import { createSignal, createEffect, For, Show, onCleanup } from 'solid-js'
+import { createSignal, createMemo, createEffect, For, Show, onCleanup } from 'solid-js'
 import * as api from './api/client'
 import type { GalleryItem, GalleryFilter } from './types'
+import { groupGalleryByDay, listCaptureDays } from './gallery/groupByDay'
+
+/**
+ * Full-size image source for the viewer — `url` is the full-res media route;
+ * `thumbnailUrl` stays the 512px grid thumbnail.
+ */
+function fullImageUrl(item: GalleryItem): string {
+  return item.url
+}
 
 function formatFileSize(bytes: number): string {
   if (bytes <= 0) return ''
@@ -41,7 +50,12 @@ export default function Gallery(props: { onClose: () => void }) {
   const [page, setPage] = createSignal(0)
   const [hasMore, setHasMore] = createSignal(false)
   const [totalItems, setTotalItems] = createSignal(0)
+  const [selectedDay, setSelectedDay] = createSignal('')
   const PAGE_SIZE = 50
+
+  // One memo per items() change; the day picker reads it from two places in
+  // the header JSX (the Show gate and the option list).
+  const captureDays = createMemo(() => listCaptureDays(items(), Date.now()))
 
   async function fetchGallery(resetPage = false) {
     if (resetPage) setPage(0)
@@ -72,6 +86,7 @@ export default function Gallery(props: { onClose: () => void }) {
 
   createEffect(() => {
     filter()
+    setSelectedDay('')
     fetchGallery(true)
   })
 
@@ -79,6 +94,13 @@ export default function Gallery(props: { onClose: () => void }) {
     page()
     if (page() > 0) fetchGallery()
   })
+
+  // Day sections for the grid, filtered to the date-jump selection if set.
+  const visibleDayGroups = () => {
+    const groups = groupGalleryByDay(items(), Date.now())
+    const selected = selectedDay()
+    return selected ? groups.filter((g) => g.key === selected) : groups
+  }
 
   function toggleSelectMode() {
     setSelectMode(!selectMode())
@@ -191,6 +213,19 @@ export default function Gallery(props: { onClose: () => void }) {
         </div>
         <div class="gallery-header-actions">
           <Show when={!selectMode()}>
+            <Show when={captureDays().length > 1}>
+              <select
+                class="field-select gallery-day-select"
+                title="Jump to capture day"
+                value={selectedDay()}
+                onChange={(e) => setSelectedDay(e.currentTarget.value)}
+              >
+                <option value="">All days</option>
+                <For each={captureDays()}>
+                  {(day) => <option value={day.key}>{day.label}</option>}
+                </For>
+              </select>
+            </Show>
             <div class="gallery-filters">
               <For each={[['ALL', 'All'], ['PHOTO', 'Photos'], ['VIDEO', 'Videos']] as [GalleryFilter, string][]}>
                 {([key, label]) => (
@@ -312,89 +347,99 @@ export default function Gallery(props: { onClose: () => void }) {
               <span style={{ 'font-size': '12px' }}>Photos and videos will appear here</span>
             </div>
           }>
-            <div class="gallery-grid">
-              <For each={items()}>
-                {(item) => (
-                  <div
-                    class="gallery-item"
-                    classList={{ 'gallery-item-selected': selectedIds().has(item.id) }}
-                    onClick={() => handleItemClick(item)}
-                    role="button"
-                    tabindex="0"
-                  >
-                    <div class="gallery-thumb">
-                      <Show when={selectMode()}>
-                        <div class="gallery-select-check" classList={{ 'gallery-select-check-on': selectedIds().has(item.id) }}>
-                          <Show when={selectedIds().has(item.id)}>
-                            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7" />
-                            </svg>
-                          </Show>
-                        </div>
-                      </Show>
-                      <Show when={item.type === 'PHOTO'} fallback={
-                        <div class="gallery-video-thumb">
-                          <img
-                            src={`${item.thumbnailUrl}?t=${item.timestamp}`}
-                            alt={item.fileName}
-                            loading="lazy"
-                            onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none' }}
-                          />
-                          <div class="gallery-video-overlay">
-                            <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
-                              <path d="M8 5v14l11-7z" />
-                            </svg>
-                            <span style={{ 'font-size': '11px', 'font-family': 'var(--lc-mono)' }}>{formatDuration(item.durationMs)}</span>
-                          </div>
-                        </div>
-                      }>
-                        <img src={item.thumbnailUrl} alt={item.fileName} loading="lazy" />
-                      </Show>
-                    </div>
-                    <div class="gallery-item-info">
-                      <span class="gallery-item-name">{item.fileName}</span>
-                      <div class="gallery-item-meta">
-                        <span>{formatDate(item.timestamp)}</span>
-                        <Show when={item.fileSizeBytes > 0}>
-                          <span>{formatFileSize(item.fileSizeBytes)}</span>
-                        </Show>
-                      </div>
-                    </div>
-                    <Show when={!selectMode()}>
-                      <div class="gallery-item-actions">
-                        <a
-                          class="gallery-action-btn"
-                          href={item.downloadUrl}
-                          download=""
-                          onClick={(e) => e.stopPropagation()}
-                          title="Download"
-                        >
-                          <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
-                            <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" />
-                            <polyline points="7 10 12 15 17 10" />
-                            <line x1="12" y1="15" x2="12" y2="3" />
-                          </svg>
-                        </a>
-                        <button
-                          class="gallery-action-btn gallery-action-btn-danger"
-                          onClick={(e) => handleDelete(item, e)}
-                          disabled={deleting() === item.id}
-                          title="Delete"
-                        >
-                          <Show when={deleting() === item.id} fallback={
-                            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
-                              <path d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                            </svg>
-                          }>
-                            <span class="btn-spinner" style={{ width: '12px', height: '12px' }} />
-                          </Show>
-                        </button>
-                      </div>
-                    </Show>
+            <For each={visibleDayGroups()}>
+              {(group) => (
+                <div class="gallery-day-section">
+                  <div class="gallery-day-header">
+                    <span class="gallery-day-label">{group.label}</span>
+                    <span class="gallery-day-count">{group.items.length} item{group.items.length === 1 ? '' : 's'}</span>
                   </div>
-                )}
-              </For>
-            </div>
+                  <div class="gallery-grid">
+                    <For each={group.items}>
+                      {(item) => (
+                        <div
+                          class="gallery-item"
+                          classList={{ 'gallery-item-selected': selectedIds().has(item.id) }}
+                          onClick={() => handleItemClick(item)}
+                          role="button"
+                          tabindex="0"
+                        >
+                          <div class="gallery-thumb">
+                            <Show when={selectMode()}>
+                              <div class="gallery-select-check" classList={{ 'gallery-select-check-on': selectedIds().has(item.id) }}>
+                                <Show when={selectedIds().has(item.id)}>
+                                  <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7" />
+                                  </svg>
+                                </Show>
+                              </div>
+                            </Show>
+                            <Show when={item.type === 'PHOTO'} fallback={
+                              <div class="gallery-video-thumb">
+                                <img
+                                  src={`${item.thumbnailUrl}?t=${item.timestamp}`}
+                                  alt={item.fileName}
+                                  loading="lazy"
+                                  onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none' }}
+                                />
+                                <div class="gallery-video-overlay">
+                                  <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
+                                    <path d="M8 5v14l11-7z" />
+                                  </svg>
+                                  <span style={{ 'font-size': '11px', 'font-family': 'var(--lc-mono)' }}>{formatDuration(item.durationMs)}</span>
+                                </div>
+                              </div>
+                            }>
+                              <img src={item.thumbnailUrl} alt={item.fileName} loading="lazy" />
+                            </Show>
+                          </div>
+                          <div class="gallery-item-info">
+                            <span class="gallery-item-name">{item.fileName}</span>
+                            <div class="gallery-item-meta">
+                              <span>{formatDate(item.timestamp)}</span>
+                              <Show when={item.fileSizeBytes > 0}>
+                                <span>{formatFileSize(item.fileSizeBytes)}</span>
+                              </Show>
+                            </div>
+                          </div>
+                          <Show when={!selectMode()}>
+                            <div class="gallery-item-actions">
+                              <a
+                                class="gallery-action-btn"
+                                href={item.downloadUrl}
+                                download=""
+                                onClick={(e) => e.stopPropagation()}
+                                title="Download"
+                              >
+                                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
+                                  <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" />
+                                  <polyline points="7 10 12 15 17 10" />
+                                  <line x1="12" y1="15" x2="12" y2="3" />
+                                </svg>
+                              </a>
+                              <button
+                                class="gallery-action-btn gallery-action-btn-danger"
+                                onClick={(e) => handleDelete(item, e)}
+                                disabled={deleting() === item.id}
+                                title="Delete"
+                              >
+                                <Show when={deleting() === item.id} fallback={
+                                  <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
+                                    <path d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                  </svg>
+                                }>
+                                  <span class="btn-spinner" style={{ width: '12px', height: '12px' }} />
+                                </Show>
+                              </button>
+                            </div>
+                          </Show>
+                        </div>
+                      )}
+                    </For>
+                  </div>
+                </div>
+              )}
+            </For>
             <Show when={hasMore()}>
               <div style={{ display: 'flex', 'justify-content': 'center', padding: '16px' }}>
                 <button class="btn btn-outline btn-sm" onClick={loadMore} disabled={loading()}>
@@ -438,7 +483,7 @@ export default function Gallery(props: { onClose: () => void }) {
                   />
                 </div>
               }>
-                <img src={item().thumbnailUrl} alt={item().fileName} class="gallery-viewer-media" />
+                <img src={fullImageUrl(item())} alt={item().fileName} class="gallery-viewer-media" />
               </Show>
             </div>
             <div class="gallery-viewer-bar" onClick={(e) => e.stopPropagation()}>

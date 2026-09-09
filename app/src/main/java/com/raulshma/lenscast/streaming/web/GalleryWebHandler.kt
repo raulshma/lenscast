@@ -5,9 +5,12 @@ import android.media.MediaMetadataRetriever
 import android.net.Uri
 import android.util.Log
 import com.raulshma.lenscast.capture.CaptureMediaResolver
+import com.raulshma.lenscast.capture.DetectionEvent
 import com.raulshma.lenscast.capture.model.CaptureMediaFormat
 import com.raulshma.lenscast.capture.model.CaptureType
 import com.raulshma.lenscast.core.AppJson
+import com.raulshma.lenscast.core.JpegDownscaler
+import com.raulshma.lenscast.core.StreamDefaults
 import com.raulshma.lenscast.data.CaptureHistoryStore
 import com.raulshma.lenscast.streaming.model.BatchDeleteRequest
 import com.raulshma.lenscast.streaming.model.BatchDeleteResponse
@@ -39,7 +42,6 @@ class GalleryWebHandler(
         val galleryPage = GalleryPage.of(captureHistoryStore.history.value, type, page, pageSize)
 
         val items = galleryPage.items.map { entry ->
-            val isVideo = entry.type == CaptureType.VIDEO
             GalleryItemDto(
                 id = entry.id,
                 type = entry.type.name,
@@ -47,7 +49,11 @@ class GalleryWebHandler(
                 timestamp = entry.timestamp,
                 fileSizeBytes = entry.fileSizeBytes,
                 durationMs = entry.durationMs,
-                thumbnailUrl = if (isVideo) "/api/media/${entry.id}/thumbnail" else "/api/media/${entry.id}",
+                // Both types serve a downscaled grid thumbnail; photos point
+                // `url` at the full-size route so the viewer can load the
+                // original while the grid uses the thumbnail.
+                thumbnailUrl = "/api/media/${entry.id}/thumbnail",
+                url = "/api/media/${entry.id}",
                 downloadUrl = "/api/media/${entry.id}?download=1",
             )
         }
@@ -88,7 +94,12 @@ class GalleryWebHandler(
 
     fun resolveMediaFile(id: String): ResolvedMedia? {
         val history = captureHistoryStore.history.value
-        val entry = history.find { it.id == id } ?: return null
+        // Two id spaces hit this route: the history UUID the gallery links
+        // use, and the MediaStore numeric id a detection event's clip link
+        // carries (`clipMediaId`). Either resolves to the same entry.
+        val entry = history.find { it.id == id }
+            ?: history.find { DetectionEvent.clipMediaIdFromContentUri(it.filePath)?.toString() == id }
+            ?: return null
         val mimeType = CaptureMediaFormat.mimeFor(entry.type)
         // The one scheme ladder: content URIs open through the resolver and
         // report the history-recorded size; file-backed paths open from disk
@@ -134,6 +145,31 @@ class GalleryWebHandler(
             Log.e(TAG, "Failed to generate video thumbnail for $id", e)
             null
         }
+    }
+
+    /**
+     * The photo thumbnail: the photo's bytes through the shared
+     * [JpegDownscaler] ladder at [StreamDefaults.PHOTO_THUMBNAIL_MAX_PX] —
+     * null for videos (the retriever owns those) and unreadable photos.
+     */
+    fun resolvePhotoThumbnail(id: String): ByteArray? {
+        val history = captureHistoryStore.history.value
+        val entry = history.find { it.id == id } ?: return null
+        if (entry.type != CaptureType.PHOTO) {
+            return null
+        }
+        val opened = mediaResolver.openMedia(entry.filePath, entry.fileSizeBytes) ?: return null
+        val bytes = try {
+            opened.stream.use { it.readBytes() }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to read photo for thumbnail $id", e)
+            return null
+        }
+        return JpegDownscaler.downscale(
+            jpeg = bytes,
+            targetMaxPx = StreamDefaults.PHOTO_THUMBNAIL_MAX_PX,
+            quality = StreamDefaults.PHOTO_THUMBNAIL_JPEG_QUALITY,
+        )
     }
 
     companion object {

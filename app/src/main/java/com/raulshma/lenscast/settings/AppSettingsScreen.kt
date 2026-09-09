@@ -117,6 +117,8 @@ fun AppSettingsScreen(
     val mdnsEnabled by viewModel.mdnsEnabled.collectAsState()
     val isIgnoringBatteryOptimizations by viewModel.isIgnoringBatteryOptimizations
     val resumeStreamsOnBoot by viewModel.resumeStreamsOnBoot.collectAsState()
+    val continuousRecording by viewModel.continuousRecording.collectAsState()
+    val continuousSegmentMinutes by viewModel.continuousSegmentMinutes.collectAsState()
 
     val updateState by updateViewModel.updateState.collectAsState()
     val autoCheckEnabled by updateViewModel.autoCheckEnabled.collectAsState()
@@ -310,6 +312,31 @@ fun AppSettingsScreen(
 
             item {
                 DetectionSettingsSection(viewModel)
+            }
+
+            item {
+                SettingsSection(title = "Recording") {
+                    SwitchSetting(
+                        title = "Continuous Recording",
+                        checked = continuousRecording,
+                        onCheckedChange = { viewModel.updateContinuousRecording(it) }
+                    )
+                    if (continuousRecording) {
+                        Text(
+                            text = "Records NVR-style loop segments back to back; " +
+                                "old segments age out through the capture-retention window",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        SliderSetting(
+                            title = "Segment Length (minutes)",
+                            value = continuousSegmentMinutes.toFloat(),
+                            range = StreamDefaultsRange.CONTINUOUS_SEGMENT_MINUTES,
+                            steps = StreamDefaultsRange.CONTINUOUS_SEGMENT_STEPS,
+                            onValueChange = { viewModel.updateContinuousSegmentMinutes(it.toInt()) }
+                        )
+                    }
+                }
             }
 
             item {

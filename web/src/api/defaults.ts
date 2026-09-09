@@ -28,6 +28,12 @@ export const API_DEFAULTS = {
   // The DTO default on the Kotlin side is '' (unset); 'AUTO' is the neutral
   // encoder-input value the web UI selects and sends.
   rtspInputFormat: 'AUTO',
+  // RTSP output resolution wire name (RtspResolution mapper). Applies only
+  // after an RTSP restart — the running pipeline keeps the old size.
+  rtspResolution: '720p',
+  // RTSP video codec wire name (RtspVideoCodec mapper). The swap restarts a
+  // live RTSP output; HLS/WebCodecs stay H.264-only until it flips back.
+  rtspVideoCodec: 'h264',
 
   // Slider bounds (StreamDefaults validation bounds)
   jpegQualityMin: 10,
@@ -93,6 +99,24 @@ export const API_DEFAULTS = {
   mqttPassword: '',
   mqttTls: false,
   mqttDiscoveryPrefix: 'homeassistant',
+
+  // Detection suite extensions (StreamDefaults / StreamingSettingsDto)
+  mlDetectionEnabled: false,
+  mlMinScorePercent: 60,
+  mlMinScoreMinPercent: 10,
+  mlMinScoreMaxPercent: 95,
+  continuousRecording: false,
+  continuousSegmentMinutes: 15,
+  continuousSegmentMinMinutes: 5,
+  continuousSegmentMaxMinutes: 60,
+  onvifEnabled: false,
+
+  // Retention windows in days; 0 keeps captures/events forever.
+  captureRetentionDays: 0,
+  eventRetentionDays: 0,
+  // Shared 0–365 bound for both retention number inputs (0 = forever).
+  retentionMinDays: 0,
+  retentionMaxDays: 365,
 
   // Overlay block (OverlaySettings.DEFAULT, embedded in StreamingSettingsDto)
   overlayEnabled: false,

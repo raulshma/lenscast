@@ -5,6 +5,8 @@ import com.raulshma.lenscast.camera.model.MotionZone
 import com.raulshma.lenscast.camera.model.OverlaySettings
 import com.raulshma.lenscast.core.BackupTargetPolicy
 import com.raulshma.lenscast.core.StreamDefaults
+import com.raulshma.lenscast.streaming.rtsp.RtspResolution
+import com.raulshma.lenscast.streaming.rtsp.RtspVideoCodec
 
 /**
  * Data Transfer Objects for the Web API.
@@ -67,6 +69,14 @@ data class StreamingSettingsDto(
     val rtspEnabled: Boolean = false,
     val rtspPort: Int = StreamDefaults.RTSP_PORT,
     val rtspInputFormat: String = "",
+    /** The RTSP output resolution wire name: "480p" | "720p" | "1080p". */
+    val rtspResolution: String = RtspResolution.DEFAULT_WIRE_NAME,
+    /**
+     * The RTSP video codec wire name: "h264" | "h265". Persisted as
+     * `rtsp_video_codec` and re-applied on process start; a live swap
+     * restarts the RTSP output via its NEEDS_RESTART ladder.
+     */
+    val rtspVideoCodec: String = RtspVideoCodec.DEFAULT_WIRE_NAME,
     val adaptiveBitrateEnabled: Boolean = false,
     val overlayEnabled: Boolean = OverlaySettings.DEFAULT.enabled,
     val showTimestamp: Boolean = OverlaySettings.DEFAULT.showTimestamp,
@@ -148,6 +158,19 @@ data class StreamingSettingsDto(
     val mqttPassword: String = "",
     val mqttTls: Boolean = false,
     val mqttDiscoveryPrefix: String = StreamDefaults.MQTT_DISCOVERY_PREFIX_DEFAULT,
+    /** Capture retention window in days; 0 keeps captures forever. */
+    val captureRetentionDays: Int = StreamDefaults.RETENTION_DAYS_DISABLED,
+    /** Detection-event retention window in days; 0 keeps events forever. */
+    val eventRetentionDays: Int = StreamDefaults.RETENTION_DAYS_DISABLED,
+    /** ML object-detection gate on top of motion detection. */
+    val mlDetectionEnabled: Boolean = false,
+    /** Minimum ML confidence percent for a detected object to count. */
+    val mlMinScorePercent: Int = StreamDefaults.ML_SCORE_PERCENT_DEFAULT,
+    /** Continuous NVR-style loop recording (chained bounded segments). */
+    val continuousRecording: Boolean = false,
+    val continuousSegmentMinutes: Int = StreamDefaults.CONTINUOUS_SEGMENT_MINUTES_DEFAULT,
+    /** ONVIF Profile S device endpoint + WS-Discovery responder. */
+    val onvifEnabled: Boolean = false,
 )
 
 data class SettingsResponseDto(
@@ -296,7 +319,10 @@ data class GalleryItemDto(
     val timestamp: Long,
     val fileSizeBytes: Long,
     val durationMs: Long,
+    /** Grid thumbnail: the downscaled photo route or the video frame route. */
     val thumbnailUrl: String,
+    /** The full-size media route — the viewer's source for photos. */
+    val url: String,
     val downloadUrl: String,
 )
 
@@ -345,6 +371,12 @@ data class DetectionEventDto(
     val dispatchedActions: List<String> = emptyList(),
     /** Labels of the motion zones that fired; empty for whole-frame or non-motion events. */
     val zones: List<String> = emptyList(),
+    /** ML class labels (person, dog, car...) attached by the object-detection gate; empty when the gate is off. */
+    val labels: List<String> = emptyList(),
+    /** MediaStore numeric id of the motion clip once its bounded recording finalized; null until (or unless) linked. */
+    val clipMediaId: Long? = null,
+    /** File name of the motion clip, linked together with [clipMediaId]. */
+    val clipFileName: String? = null,
 )
 
 data class DetectionEventsResponseDto(

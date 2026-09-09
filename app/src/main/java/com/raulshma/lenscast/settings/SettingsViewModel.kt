@@ -59,6 +59,10 @@ class SettingsViewModel(
     val motionArmEndMinute: StateFlow<Int> = settingsDataStore.motionArmEndMinute
     val soundDetectionEnabled: StateFlow<Boolean> = settingsDataStore.soundDetectionEnabled
     val soundThresholdPercent: StateFlow<Int> = settingsDataStore.soundThresholdPercent
+    val mlDetectionEnabled: StateFlow<Boolean> = settingsDataStore.mlDetectionEnabled
+    val mlMinScorePercent: StateFlow<Int> = settingsDataStore.mlMinScorePercent
+    val continuousRecording: StateFlow<Boolean> = settingsDataStore.continuousRecording
+    val continuousSegmentMinutes: StateFlow<Int> = settingsDataStore.continuousSegmentMinutes
     val detectionNotificationsEnabled: StateFlow<Boolean> = settingsDataStore.detectionNotificationsEnabled
     val tamperDetectionEnabled: StateFlow<Boolean> = settingsDataStore.tamperDetectionEnabled
     val watchdogEnabled: StateFlow<Boolean> = settingsDataStore.watchdogEnabled
@@ -186,6 +190,14 @@ class SettingsViewModel(
     fun updateSoundDetectionEnabled(enabled: Boolean) = save { settingsDataStore.saveSoundDetectionEnabled(enabled) }
 
     fun updateSoundThresholdPercent(percent: Int) = save { settingsDataStore.saveSoundThresholdPercent(percent) }
+
+    fun updateMlDetectionEnabled(enabled: Boolean) = save { settingsDataStore.saveMlDetectionEnabled(enabled) }
+
+    fun updateMlMinScorePercent(percent: Int) = save { settingsDataStore.saveMlMinScorePercent(percent) }
+
+    fun updateContinuousRecording(enabled: Boolean) = save { settingsDataStore.saveContinuousRecording(enabled) }
+
+    fun updateContinuousSegmentMinutes(minutes: Int) = save { settingsDataStore.saveContinuousSegmentMinutes(minutes) }
 
     fun updateDetectionNotificationsEnabled(enabled: Boolean) =
         save { settingsDataStore.saveDetectionNotificationsEnabled(enabled) }

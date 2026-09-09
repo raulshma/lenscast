@@ -6,7 +6,10 @@ import com.raulshma.lenscast.core.StreamWatchdog
 import com.raulshma.lenscast.core.mqtt.MqttAlertPublisher
 import com.raulshma.lenscast.data.SettingsDataStore
 import com.raulshma.lenscast.streaming.StreamingManager
+import com.raulshma.lenscast.streaming.onvif.OnvifServer
 import com.raulshma.lenscast.streaming.rtsp.RtspInputFormat
+import com.raulshma.lenscast.streaming.rtsp.RtspResolution
+import com.raulshma.lenscast.streaming.rtsp.RtspVideoCodec
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
@@ -30,6 +33,7 @@ class SettingsApplier(
     private val streamingManager: StreamingManager,
     private val streamWatchdog: StreamWatchdog,
     private val mqttAlertPublisher: MqttAlertPublisher,
+    private val onvifServer: OnvifServer,
 ) {
 
     fun start(scope: CoroutineScope) {
@@ -106,12 +110,16 @@ class SettingsApplier(
                 settingsDataStore.rtspEnabled,
                 settingsDataStore.rtspPort,
                 settingsDataStore.rtspInputFormat,
-            ) { enabled, port, format ->
-                RtspSettings(enabled, port, format)
+                settingsDataStore.rtspResolution,
+                settingsDataStore.rtspVideoCodec,
+            ) { enabled, port, format, resolution, codec ->
+                RtspSettings(enabled, port, format, resolution, codec)
             }.collectLatest { rtsp ->
                 streamingManager.setRtspEnabled(rtsp.enabled)
                 streamingManager.setRtspPort(rtsp.port)
                 streamingManager.setRtspInputFormat(rtsp.format)
+                streamingManager.setRtspResolution(rtsp.resolution)
+                streamingManager.setRtspVideoCodec(rtsp.codec)
             }
         }
 
@@ -214,6 +222,21 @@ class SettingsApplier(
             }
         }
 
+        // ONVIF: the enable flag runs the endpoint lifecycle rule — enabled
+        // starts the WS-Discovery responder (idempotent), disabled stops it.
+        // Everything else the endpoint advertises (URIs, ports, resolution,
+        // audio) is read live per request through the server's providers, so
+        // unlike MQTT no config change needs to re-run this rule.
+        scope.launch {
+            settingsDataStore.onvifEnabled.collectLatest { enabled ->
+                if (enabled) {
+                    onvifServer.start()
+                } else {
+                    onvifServer.stop()
+                }
+            }
+        }
+
         Log.d(TAG, "Settings applier started")
     }
 
@@ -233,6 +256,8 @@ class SettingsApplier(
         val enabled: Boolean,
         val port: Int,
         val format: RtspInputFormat,
+        val resolution: RtspResolution,
+        val codec: RtspVideoCodec,
     )
 
     private data class DiscoverySettings(

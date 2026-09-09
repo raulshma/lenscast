@@ -4,14 +4,16 @@ import android.util.Log
 import com.raulshma.lenscast.core.NetworkUtils
 import com.raulshma.lenscast.core.StreamAuthCrypto
 import com.raulshma.lenscast.core.toHexString
+import com.raulshma.lenscast.streaming.web.TokenWritePolicy
 import java.net.URI
 import java.security.SecureRandom
 import java.util.concurrent.ConcurrentHashMap
 
 /**
  * Owns the web-client auth policy: session tokens, login rate limiting, and
- * CSRF origin checks — plus the read-only API-token verdict for programmatic
- * clients. The transport ([StreamingServer]) translates requests
+ * CSRF origin checks — plus the API-token verdict for programmatic clients
+ * (GET/HEAD anywhere protected, POST only on [TokenWritePolicy]'s exact
+ * allow-list). The transport ([StreamingServer]) translates requests
  * to this small interface; the policy itself is reachable — and testable —
  * without a live socket.
  *
@@ -102,13 +104,17 @@ class WebAuthGate(
     /**
      * The API-token verdict, checked before the login/session path. True only
      * when: the token is enabled, a hash is configured, [token] matches it
-     * (constant-time over the SHA-256 hex), [method] is GET or HEAD, and
-     * [path] is outside `/api/auth/` — a bearer token never mints sessions,
-     * rotates credentials, or logs out. Stateless: no session map entry, no
-     * rate-limit budget of its own beyond the comparison itself.
+     * (constant-time over the SHA-256 hex), the method is GET/HEAD — or POST
+     * on exactly the routes [TokenWritePolicy] allows — and [path] is outside
+     * `/api/auth/`. A bearer token never mints sessions, rotates credentials,
+     * or logs out, and stays read-only everywhere the write policy does not
+     * name. Stateless: no session map entry, no rate-limit budget of its own
+     * beyond the comparison itself.
      */
     fun authorizeApiToken(token: String?, method: String, path: String): Boolean {
-        if (method != "GET" && method != "HEAD") return false
+        val methodAllowed = method == "GET" || method == "HEAD" ||
+            (method == "POST" && TokenWritePolicy.allowsPost(path))
+        if (!methodAllowed) return false
         if (path.startsWith(API_TOKEN_DENIED_PATH_PREFIX)) return false
         val config = tokenProvider()
         if (!config.enabled) return false

@@ -4,10 +4,10 @@ import com.raulshma.lenscast.core.Base64Codec
 
 /**
  * Pure SDP generation for the RTSP DESCRIBE response — the buildSdp body,
- * byte-identical. The server supplies the live encoder state (SPS/PPS, AAC
- * AudioSpecificConfig) plus the connection details; everything else — the
- * fmtp line, the AAC config hex with its [AacFormat] fallback, the line
- * order — is owned here so it is JVM-tested.
+ * byte-identical. The server supplies the live encoder state (the active
+ * codec's parameter sets, AAC AudioSpecificConfig) plus the connection
+ * details; everything else — the fmtp line, the AAC config hex with its
+ * [AacFormat] fallback, the line order — is owned here so it is JVM-tested.
  */
 object SdpBuilder {
 
@@ -21,14 +21,33 @@ object SdpBuilder {
         sps: ByteArray?,
         pps: ByteArray?,
         audioSpecificConfig: ByteArray?,
+        codec: RtspVideoCodec = RtspVideoCodec.H264,
+        vps: ByteArray? = null,
     ): String {
         val spsBase64 = sps?.let { Base64Codec.encode(it) }
         val ppsBase64 = pps?.let { Base64Codec.encode(it) }
-        val fmtp = H264NalParser.buildFmtp(
-            H264NalParser.profileLevelId(sps),
-            spsBase64,
-            ppsBase64
-        )
+        val videoLines = when (codec) {
+            RtspVideoCodec.H264 -> listOf(
+                "a=rtpmap:96 H264/90000",
+                "a=fmtp:96 " + H264NalParser.buildFmtp(
+                    H264NalParser.profileLevelId(sps),
+                    spsBase64,
+                    ppsBase64
+                ),
+            )
+            // RFC 7798 §7.1: the fmtp carries the base64 sprop triple. When
+            // the parameter sets are not learned yet the whole line is
+            // omitted — there is no other H.265 fmtp attribute to carry
+            // (H.264 keeps its line and drops only its sprop).
+            RtspVideoCodec.H265 -> buildList {
+                add("a=rtpmap:96 H265/90000")
+                H265NalParser.buildFmtp(
+                    vps?.let { Base64Codec.encode(it) },
+                    spsBase64,
+                    ppsBase64,
+                )?.let { add("a=fmtp:96 $it") }
+            }
+        }
 
         return buildString {
             appendLine("v=0")
@@ -42,8 +61,9 @@ object SdpBuilder {
             appendLine("m=video 0 RTP/AVP 96")
             appendLine("c=IN IP4 0.0.0.0")
             appendLine("b=AS:${videoBitrate / 1000}")
-            appendLine("a=rtpmap:96 H264/90000")
-            appendLine("a=fmtp:96 $fmtp")
+            for (line in videoLines) {
+                appendLine(line)
+            }
             appendLine("a=control:${RtspUriPolicy.DEFAULT_STREAM_PATH}")
 
             if (audioEnabled) {

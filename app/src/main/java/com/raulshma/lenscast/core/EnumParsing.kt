@@ -13,3 +13,12 @@ inline fun <reified T : Enum<T>> parseEnum(name: String?, fallback: T): T =
 /** The skip-save variant: null or unknown yields null, and the caller skips. */
 inline fun <reified T : Enum<T>> parseEnumOrNull(name: String?): T? =
     name?.let { runCatching { enumValueOf<T>(it) }.getOrNull() }
+
+/**
+ * The same tolerant convention for the mappings whose wire names are not
+ * their enum names (the RTSP codec and resolution choices): a null, blank,
+ * or unknown name yields null, a valid name decodes over the caller's
+ * explicit wire-name → value map.
+ */
+fun <T> parseWireNameOrNull(name: String?, map: Map<String, T>): T? =
+    name?.trim()?.takeIf { it.isNotEmpty() }?.let { map[it] }

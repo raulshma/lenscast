@@ -1,25 +1,38 @@
 package com.raulshma.lenscast.streaming
 
+import com.raulshma.lenscast.streaming.rtsp.EncodedNalUnit
 import android.util.Log
 import com.raulshma.lenscast.core.StreamDefaults
 import com.raulshma.lenscast.core.YuvConverter
 import com.raulshma.lenscast.streaming.hls.HlsVideoSink
 import com.raulshma.lenscast.streaming.rtsp.AacEncoder
 import com.raulshma.lenscast.streaming.rtsp.H264Encoder
+import com.raulshma.lenscast.streaming.rtsp.H265Encoder
 import com.raulshma.lenscast.streaming.rtsp.RtspInputFormat
+import com.raulshma.lenscast.streaming.rtsp.RtspVideoCodec
+import com.raulshma.lenscast.streaming.rtsp.VideoEncoder
 import java.io.InputStream
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 
 /**
  * The parameter-set seam the RTSP server consumes for its SDP and PLAY
- * keyframe requests: the live encoder state of the shared encode pipeline.
- * [EncodedStreamHub] implements it in production; JVM tests substitute fakes.
+ * keyframe requests: the live encoder state of the shared encode pipeline,
+ * made codec-aware — [videoCodec] names the active encoder, [sps]/[pps] are
+ * that codec's SPS/PPS (both codecs carry them), and [vps] is the H.265-only
+ * third parameter set (always null on H.264, so an H.264 SDP can never see a
+ * stale VPS). [EncodedStreamHub] implements it in production; JVM tests
+ * substitute fakes.
  */
 interface EncodedSource {
     val sps: ByteArray?
 
     val pps: ByteArray?
+
+    /** The active codec's H.265 VPS; always null under H.264. */
+    val vps: ByteArray?
+
+    val videoCodec: RtspVideoCodec
 
     val audioSpecificConfig: ByteArray?
 
@@ -34,13 +47,13 @@ interface EncodedSource {
  * consumer.
  */
 internal interface EncodedSink {
-    fun feedVideo(nalUnits: List<H264Encoder.EncodedNalUnit>)
+    fun feedVideo(nalUnits: List<EncodedNalUnit>)
 
     fun feedAudio(aacData: ByteArray)
 }
 
 /**
- * The shared H.264/AAC encode pipeline, decoupled from the RTSP server:
+ * The shared video/AAC encode pipeline, decoupled from the RTSP server:
  * camera YUV in, encoded access units out to every registered sink — the
  * RTSP server (RTP), the HLS ring, and the WS video path. Its start/stop
  * decision is the pure [EncodedStreamPolicy] verdict over sink activity, so
@@ -51,7 +64,17 @@ internal interface EncodedSink {
  *
  * The frame path is what [com.raulshma.lenscast.streaming.rtsp.RtspServer]
  * used to do inline: interval throttle, encoder-lag gating, NV21 rotation,
- * and the dimension-change encoder reconfigure.
+ * and the aspect-fill fit onto the configured encode size — the frames are
+ * scaled (never re-scaled dimensions) to [setVideoResolution]'s retained
+ * size, so the RTSP output's resolution choice is authoritative regardless
+ * of the camera's analysis resolution.
+ *
+ * The video codec ([RtspVideoCodec], persisted through the store and applied
+ * by the Settings Applier) selects which encoder is instantiated, lazily and
+ * one at a time; a codec change on a running pipeline reconfigures stop →
+ * (new) encoder → start + black frame. On H.265 the fan-out feeds the RTSP
+ * sink ONLY — the HLS TS muxer and the WS/WebCodecs video path are H.264-only and are gated
+ * off, so HLS/WS stay dark until the codec returns to H.264.
  */
 internal class EncodedStreamHub(
     private val policyInputs: () -> EncodedStreamPolicy.Inputs,
@@ -61,11 +84,21 @@ internal class EncodedStreamHub(
     private val audioBitrateKbps: () -> Int,
     private val rtspSink: EncodedSink,
     private val hlsSink: HlsVideoSink,
-    private val wsVideoSink: (List<H264Encoder.EncodedNalUnit>) -> Unit,
+    private val wsVideoSink: (List<EncodedNalUnit>) -> Unit,
 ) : EncodedSource {
 
-    private val encoder = H264Encoder()
     private val aacEncoder = AacEncoder()
+
+    // The video encoders, one per codec, created lazily and only for the
+    // active codec — an H.264-only deployment never constructs an H265Encoder
+    // (and vice versa). [activeEncoder] is whichever instance the current
+    // [videoCodec] selected; both holders survive so a codec flip back does
+    // not rebuild what it already built.
+    private var h264Encoder: VideoEncoder? = null
+    private var h265Encoder: VideoEncoder? = null
+
+    @Volatile
+    private var activeEncoder: VideoEncoder? = null
 
     private val running = AtomicBoolean(false)
     private val stateLock = Any()
@@ -86,7 +119,7 @@ internal class EncodedStreamHub(
     @Volatile private var videoBitrate = StreamDefaults.RTSP_VIDEO_BITRATE
     @Volatile private var frameRate = StreamDefaults.STREAM_FPS
     @Volatile private var inputFormat = RtspInputFormat.AUTO
-    @Volatile private var lastRotation = 0
+    @Volatile private var activeVideoCodec = RtspVideoCodec.H264
 
     @Volatile private var audioStream: InputStream? = null
     @Volatile private var configuredSampleRateHz = -1
@@ -100,9 +133,24 @@ internal class EncodedStreamHub(
     )
 
     init {
-        encoder.onEncodedFrame = { nalUnits -> fanOutVideo(nalUnits) }
         aacEncoder.onEncodedFrame = { aacData, _ -> fanOutAudio(aacData) }
     }
+
+    /**
+     * The active codec's encoder, created on first use and cached — the only
+     * place either MediaCodec video encoder is constructed. Must be called
+     * under [stateLock] (creation and wiring race with start/stop otherwise).
+     */
+    private fun encoderForLocked(codec: RtspVideoCodec): VideoEncoder = when (codec) {
+        RtspVideoCodec.H264 -> h264Encoder ?: H264Encoder().also {
+            it.onEncodedFrame = { units -> fanOutVideo(RtspVideoCodec.H264, units) }
+            h264Encoder = it
+        }
+        RtspVideoCodec.H265 -> h265Encoder ?: H265Encoder().also {
+            it.onEncodedFrame = { units -> fanOutVideo(RtspVideoCodec.H265, units) }
+            h265Encoder = it
+        }
+    } // [codec] is always the retained [activeVideoCodec]; the parameter keeps the helper honest.
 
     // ── lifecycle: the policy verdict, evaluated on demand ──
 
@@ -130,26 +178,29 @@ internal class EncodedStreamHub(
 
     private fun startLocked() {
         if (!running.get()) {
+            val encoder = encoderForLocked(activeVideoCodec)
             encoder.configure(videoWidth, videoHeight, videoBitrate, frameRate)
             encoder.setInputFormat(inputFormat)
             if (!encoder.start()) {
-                Log.e(TAG, "H.264 encoder failed to start; encoded sinks stay idle")
+                Log.e(TAG, "${activeVideoCodec.wireName.uppercase()} encoder failed to start; encoded sinks stay idle")
                 return
             }
+            activeEncoder = encoder
             // Force CSD emission so a freshly started pipeline advertises
-            // real SPS/PPS to DESCRIBE and mid-join WS clients immediately.
+            // real parameter sets (SPS/PPS, or VPS/SPS/PPS on H.265) to
+            // DESCRIBE and mid-join WS clients immediately.
             encoder.submitBlackFrame()
             running.set(true)
             acceptedFrames.set(0)
             droppedFrames.set(0)
-            Log.d(TAG, "Encoded stream started (rtsp/hls/ws sinks attached)")
+            Log.d(TAG, "Encoded stream started (${activeVideoCodec.wireName}; rtsp/hls/ws sinks attached)")
         }
         ensureAudioLocked()
     }
 
     private fun stopLocked() {
         if (running.getAndSet(false)) {
-            encoder.stop()
+            activeEncoder?.stop()
             Log.d(TAG, "Encoded stream stopped")
         }
         stopAudioLocked()
@@ -226,6 +277,7 @@ internal class EncodedStreamHub(
             return
         }
 
+        val encoder = activeEncoder ?: return
         if (encoder.isEncoderLagged()) {
             droppedFrames.incrementAndGet()
             return
@@ -233,7 +285,7 @@ internal class EncodedStreamHub(
 
         val effectiveWidth: Int
         val effectiveHeight: Int
-        val frameData: ByteArray
+        var frameData: ByteArray
 
         if (rotation == 90 || rotation == 270) {
             effectiveWidth = height
@@ -249,11 +301,15 @@ internal class EncodedStreamHub(
             frameData = yuvData
         }
 
-        if (effectiveWidth != videoWidth || effectiveHeight != videoHeight || rotation != lastRotation) {
-            synchronized(stateLock) {
-                lastRotation = rotation
-                reconfigureEncoderLocked(effectiveWidth, effectiveHeight)
-            }
+        if (effectiveWidth != videoWidth || effectiveHeight != videoHeight) {
+            // The hub encodes the CONFIGURED size, whatever the camera's
+            // analysis resolution is: the frame is aspect-filled (scaled to
+            // cover, center-cropped) onto videoWidth x videoHeight. A
+            // resolution-setting change therefore lands on the very next
+            // frame, and a preview-resolution change never rewrites the RTSP
+            // output's own size — the reconfigure is reserved for input
+            // format and codec changes.
+            frameData = YuvConverter.scaleNv21(frameData, effectiveWidth, effectiveHeight, videoWidth, videoHeight)
         }
 
         acceptedFrames.incrementAndGet()
@@ -269,8 +325,25 @@ internal class EncodedStreamHub(
     fun setVideoBitrate(bitrate: Int) {
         videoBitrate = bitrate.coerceIn(StreamDefaults.VIDEO_BITRATE_MIN, StreamDefaults.VIDEO_BITRATE_MAX)
         if (running.get()) {
-            encoder.setBitrate(videoBitrate)
+            activeEncoder?.setBitrate(videoBitrate)
         }
+    }
+
+    /** The live encoder target bitrate — the adaptive controller's current value, for surfaces that advertise it (ONVIF profiles). */
+    fun currentVideoBitrate(): Int = videoBitrate
+
+    /**
+     * The persisted RTSP resolution lands on the hub's retained dimensions —
+     * the size every incoming frame is aspect-filled onto ([YuvConverter.scaleNv21])
+     * and the encoder is configured at, independent of the camera's analysis
+     * resolution. While stopped this is simply the next `configure`; while
+     * running the very next pushed frame already carries the new size.
+     * MediaCodec has no live `setParameters` for dimensions, which is why the
+     * RTSP output still classifies a resolution change as NEEDS_RESTART.
+     */
+    fun setVideoResolution(width: Int, height: Int) {
+        videoWidth = width
+        videoHeight = height
     }
 
     /** A new input format reconfigures the running encoder — hot-swap with reconfigure. */
@@ -285,15 +358,40 @@ internal class EncodedStreamHub(
     }
 
     /**
-     * The dimension/input-format reconfigure, ported from the RTSP server's
-     * frame path: stop → configure → start, one retry, black frame for CSD.
-     * A permanent failure leaves the encoder stopped; encodeFrame no-ops
-     * safely until a later reconfigure succeeds.
+     * A codec change on a live pipeline reconfigures it: stop the current
+     * encoder, select (lazily creating) the new codec's encoder, configure,
+     * start, and kick it with a black frame for fresh CSD — the full
+     * [RtspVideoCodec] swap, since nothing about the encode or wire path
+     * hot-swaps across codecs. While stopped the value is simply retained
+     * for the next start. A same-codec call is a no-op, so a settings
+     * re-emission never churns a live pipeline.
+     */
+    fun setVideoCodec(codec: RtspVideoCodec) {
+        if (codec == activeVideoCodec) return
+        // The flip lands under the same lock as the reconfigure, so the old
+        // encoder's stop and the field other readers see are ordered. An AU
+        // drained mid-swap still carries its PRODUCING codec (the tagged
+        // fan-out in [encoderForLocked]), never the live field's.
+        synchronized(stateLock) {
+            activeVideoCodec = codec
+            if (running.get()) {
+                reconfigureEncoderLocked(videoWidth, videoHeight)
+            }
+        }
+    }
+
+    /**
+     * The dimension/input-format/codec reconfigure, ported from the RTSP
+     * server's frame path: stop → configure → start, one retry, black frame
+     * for CSD. Selects the encoder for the CURRENT codec, so a codec change
+     * lands here too. A permanent failure leaves the encoder stopped;
+     * encodeFrame no-ops safely until a later reconfigure succeeds.
      */
     private fun reconfigureEncoderLocked(width: Int, height: Int) {
         videoWidth = width
         videoHeight = height
-        encoder.stop()
+        activeEncoder?.stop()
+        val encoder = encoderForLocked(activeVideoCodec)
         encoder.configure(width, height, videoBitrate, frameRate)
         encoder.setInputFormat(inputFormat)
         if (!encoder.start()) {
@@ -307,17 +405,28 @@ internal class EncodedStreamHub(
                 return
             }
         }
+        activeEncoder = encoder
         encoder.submitBlackFrame()
-        Log.d(TAG, "Encoder reconfigured to ${width}x${height}")
+        Log.d(TAG, "Encoder reconfigured to ${width}x${height} (${activeVideoCodec.wireName})")
     }
 
     // ── fan-out ──
 
-    private fun fanOutVideo(nalUnits: List<H264Encoder.EncodedNalUnit>) {
+    /**
+     * The video fan-out. [producingCodec] is the codec that ENCODED these AUs,
+     * not the live configured codec — during a codec swap an in-flight drain
+     * must take the route of the encoder that produced it, or HEVC AUs would
+     * land in the H.264-only HLS muxer / WebCodecs path.
+     */
+    private fun fanOutVideo(producingCodec: RtspVideoCodec, nalUnits: List<EncodedNalUnit>) {
         if (nalUnits.isEmpty()) return
         fanOut("RTSP video") { rtspSink.feedVideo(nalUnits) }
-        fanOut("HLS video") { hlsSink.feedVideo(nalUnits) }
-        fanOut("WS video") { wsVideoSink(nalUnits) }
+        // HLS stays H.264-only: the TS muxer has no HEVC mapping, so H.265 AUs would corrupt segments.
+        // WS video stays H.264-only too: the WebCodecs decode path has no HEVC configuration yet.
+        if (producingCodec != RtspVideoCodec.H265) {
+            fanOut("HLS video") { hlsSink.feedVideo(nalUnits) }
+            fanOut("WS video") { wsVideoSink(nalUnits) }
+        }
     }
 
     private fun fanOutAudio(aacData: ByteArray) {
@@ -336,18 +445,30 @@ internal class EncodedStreamHub(
     }
 
     // ── EncodedSource: the RTSP server's SDP/keyframe seam ──
+    //
+    // sps/pps are the ACTIVE codec's SPS/PPS; vps is non-null only under
+    // H.265, so the H.264 SDP path can never observe a stale VPS. Before the
+    // first start (no encoder instantiated) everything answers null and
+    // requestKeyFrame no-ops — the same shape as a started-but-CSD-less
+    // encoder.
 
     override val sps: ByteArray?
-        get() = encoder.sps
+        get() = activeEncoder?.sps
 
     override val pps: ByteArray?
-        get() = encoder.pps
+        get() = activeEncoder?.pps
+
+    override val vps: ByteArray?
+        get() = activeEncoder?.vps
+
+    override val videoCodec: RtspVideoCodec
+        get() = activeVideoCodec
 
     override val audioSpecificConfig: ByteArray?
         get() = aacEncoder.audioSpecificConfig
 
     override fun requestKeyFrame() {
-        encoder.requestKeyFrame()
+        activeEncoder?.requestKeyFrame()
     }
 
     companion object {

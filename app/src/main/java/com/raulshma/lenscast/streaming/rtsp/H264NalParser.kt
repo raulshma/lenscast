@@ -96,6 +96,16 @@ object H264NalParser {
     fun nalType(nal: ByteArray): Int = if (nal.isEmpty()) -1 else nal[0].toInt() and 0x1F
 
     /**
+     * Whether any NAL unit in the access unit is an IDR slice (type 5). The
+     * authoritative keyframe verdict for the wire: MediaCodec's
+     * `BUFFER_FLAG_KEY_FRAME` is vendor-dependent and is not set by every
+     * encoder, so downstream consumers (RTP fan-out, HLS segment cutting,
+     * the WS join path) must not rely on the flag alone.
+     */
+    fun containsIdr(nalUnits: List<ByteArray>): Boolean =
+        nalUnits.any { nalType(it) == NAL_TYPE_IDR }
+
+    /**
      * Builds the H.264 `a=fmtp` value. Never emits a dangling `;`; omits
      * `sprop-parameter-sets` unless both parameter sets are available.
      */
@@ -117,4 +127,6 @@ object H264NalParser {
         }
         return "42c01f"
     }
+
+    private const val NAL_TYPE_IDR = 5
 }

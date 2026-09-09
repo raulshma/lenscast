@@ -3,6 +3,7 @@ package com.raulshma.lenscast.streaming
 import com.raulshma.lenscast.capture.PhotoCaptureManager
 import com.raulshma.lenscast.streaming.web.ApiRouter
 import com.raulshma.lenscast.streaming.web.AuthWebHandler
+import com.raulshma.lenscast.streaming.web.DetectionEventsWebHandler
 import com.raulshma.lenscast.streaming.web.DeterrenceWebHandler
 import com.raulshma.lenscast.streaming.web.GalleryWebHandler
 import com.raulshma.lenscast.streaming.web.StatusWebHandler
@@ -18,4 +19,5 @@ data class WebApiStack(
     val capture: PhotoCaptureManager,
     val deterrence: DeterrenceWebHandler,
     val auth: AuthWebHandler,
+    val detectionEvents: DetectionEventsWebHandler,
 )

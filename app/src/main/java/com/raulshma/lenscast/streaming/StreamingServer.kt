@@ -5,6 +5,7 @@ import android.util.Log
 import com.raulshma.lenscast.core.NetworkQualityMonitor
 import com.raulshma.lenscast.core.StreamDefaults
 import com.raulshma.lenscast.streaming.HttpResult.ResponseBody
+import com.raulshma.lenscast.streaming.onvif.OnvifServer
 import com.raulshma.lenscast.streaming.web.ApiMethod
 import com.raulshma.lenscast.streaming.web.ApiRequest
 import kotlinx.coroutines.runBlocking
@@ -41,6 +42,13 @@ class StreamingServer(
     // by TlsCertManager). Must be provided at construction: NanoHTTPD makes the
     // server socket secure before start().
     tlsServerSocketFactory: SSLServerSocketFactory? = null,
+    // ONVIF Profile S device service: composed in MainApplication (the MQTT
+    // publisher's pattern) because the manager that builds servers stays free
+    // of device-metadata concerns — the transport only translates
+    // /onvif/device_service requests onto it. The default resolves the
+    // composed process instance so the manager's construction site is
+    // untouched; tests inject their own instance here.
+    private val onvifServer: OnvifServer = OnvifServer.shared,
 ) : NanoHTTPD(port) {
 
     val isSecure: Boolean = tlsServerSocketFactory != null
@@ -62,6 +70,7 @@ class StreamingServer(
     )
     private val audioManager = audioStreamingManager
     private val sseStatusStream = SseStatusStream(webApi.status)
+    private val sseDetectionEventStream = SseDetectionEventStream(webApi.detectionEvents)
 
     private var isRunning = false
 
@@ -95,6 +104,15 @@ class StreamingServer(
             return translate(it).apply { addSecurityHeaders() }
         }
 
+        // ONVIF device service, served BEFORE the auth gate and without
+        // authentication by design: LAN ONVIF clients cannot hold the web
+        // session cookie. The endpoint exposes only static device metadata
+        // plus the stream/snapshot URIs — the RTSP stream keeps its own
+        // Digest/Basic auth, and the snapshot stays behind the web gate.
+        if (uri.startsWith(OnvifServer.DEVICE_SERVICE_PATH)) {
+            return serveOnvif(session)
+        }
+
         if (!authFilter.isProtectedRoute(uri)) {
             // Public static assets deliberately skip the security headers,
             // preserving the client's caching contract.
@@ -113,6 +131,19 @@ class StreamingServer(
             // SSE status channel: push replaces the dashboard's 1s status poll.
             uri == "/api/events" && method == Method.GET -> {
                 val stream = sseStatusStream.open()
+                    ?: return translate(HttpResult.jsonError(503, "Too many event streams"))
+                        .apply { addSecurityHeaders() }
+                val response = newChunkedResponse(Response.Status.OK, "text/event-stream", stream)
+                response.addHeader("Cache-Control", "no-store")
+                response.addHeader("X-Accel-Buffering", "no")
+                response
+            }
+            // SSE detection-event channel: the /api/detection/events poll's
+            // live twin — backlog replay then push, served outside the JSON
+            // router like every binary/never-ending response. The auth gate
+            // above is the identical /api/* ladder the poll rides.
+            uri == "/api/detection/events/stream" && method == Method.GET -> {
+                val stream = sseDetectionEventStream.open()
                     ?: return translate(HttpResult.jsonError(503, "Too many event streams"))
                         .apply { addSecurityHeaders() }
                 val response = newChunkedResponse(Response.Status.OK, "text/event-stream", stream)
@@ -160,6 +191,23 @@ class StreamingServer(
 
         response.addSecurityHeaders()
         return response
+    }
+
+    /**
+     * The ONVIF branch's whole body: read the (possibly absent) SOAP body,
+     * hand it to the injected service, and answer SOAP. A GET with no body
+     * still lands here — the service answers it with the
+     * GetSystemDateAndTime response (some clients probe that way, and it is
+     * harmless static metadata).
+     */
+    private fun serveOnvif(session: IHTTPSession): Response {
+        val body = readRequestBody(session, MAX_BODY_BYTES)
+            ?: return translate(tooLargeResult(MAX_BODY_BYTES)).apply { addSecurityHeaders() }
+        return newFixedLengthResponse(
+            Response.Status.OK,
+            ONVIF_CONTENT_TYPE,
+            onvifServer.handle(body.toString(Charsets.UTF_8)),
+        ).apply { addSecurityHeaders() }
     }
 
     private fun translate(result: HttpResult): Response {
@@ -344,6 +392,8 @@ class StreamingServer(
         private const val TAG = "StreamingServer"
         const val BOUNDARY_MARKER = "LensCastBoundary"
         private const val MAX_BODY_BYTES = 1L * 1024 * 1024
+        /** SOAP 1.2 over HTTP — the ONVIF transport's mandated content type. */
+        private const val ONVIF_CONTENT_TYPE = "application/soap+xml; charset=utf-8"
         /** Bounded wait for a suspend handler so one slow route can't wedge the NanoHTTPD pool. */
         private const val API_DISPATCH_TIMEOUT_MS = 10_000L
 

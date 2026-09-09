@@ -6,10 +6,11 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * The read-only API-token verdict ladder: enabled + configured hash +
- * constant-time SHA-256 match, GET/HEAD only, never on the auth routes. The
- * token provider is injected (and re-pointable) so the live-read contract is
- * tested without a store or a socket.
+ * The API-token verdict ladder: enabled + configured hash + constant-time
+ * SHA-256 match, GET/HEAD anywhere protected, POST only on the
+ * TokenWritePolicy allow-list, never on the auth routes. The token provider
+ * is injected (and re-pointable) so the live-read contract is tested without
+ * a store or a socket.
  */
 class WebAuthGateApiTokenTest {
 
@@ -46,6 +47,47 @@ class WebAuthGateApiTokenTest {
         assertFalse(g.authorizeApiToken(token, "POST", "/api/settings"))
         assertFalse(g.authorizeApiToken(token, "PUT", "/api/settings"))
         assertFalse(g.authorizeApiToken(token, "DELETE", "/api/media/x"))
+    }
+
+    // ── the write allow-list ──
+
+    @Test
+    fun `a valid token writes exactly the TokenWritePolicy POST routes`() {
+        val g = gate()
+        assertTrue(g.authorizeApiToken(token, "POST", "/api/stream/start"))
+        assertTrue(g.authorizeApiToken(token, "POST", "/api/stream/resume"))
+        assertTrue(g.authorizeApiToken(token, "POST", "/api/stream/stop"))
+        assertTrue(g.authorizeApiToken(token, "POST", "/api/stream/web/start"))
+        assertTrue(g.authorizeApiToken(token, "POST", "/api/stream/web/stop"))
+        assertTrue(g.authorizeApiToken(token, "POST", "/api/stream/rtsp/start"))
+        assertTrue(g.authorizeApiToken(token, "POST", "/api/stream/rtsp/stop"))
+        assertTrue(g.authorizeApiToken(token, "POST", "/api/capture"))
+        assertTrue(g.authorizeApiToken(token, "POST", "/api/recording/start"))
+        assertTrue(g.authorizeApiToken(token, "POST", "/api/recording/stop"))
+        assertTrue(g.authorizeApiToken(token, "POST", "/api/deterrence/siren"))
+        assertTrue(g.authorizeApiToken(token, "POST", "/api/camera/torch"))
+    }
+
+    @Test
+    fun `a POST outside the write allow-list is still denied`() {
+        val g = gate()
+        assertFalse(g.authorizeApiToken(token, "POST", "/api/settings"))
+        assertFalse(g.authorizeApiToken(token, "POST", "/api/camera/lens"))
+        assertFalse(g.authorizeApiToken(token, "POST", "/api/media/batch-delete"))
+    }
+
+    @Test
+    fun `auth routes are never token-writable even when listed`() {
+        val g = gate()
+        // Defense in depth: the denied-prefix check holds regardless of the
+        // allow-list's contents.
+        assertFalse(g.authorizeApiToken(token, "POST", "/api/auth/config"))
+        assertFalse(g.authorizeApiToken(token, "POST", "/api/auth/logout"))
+    }
+
+    @Test
+    fun `a wrong token cannot use the write allow-list`() {
+        assertFalse(gate().authorizeApiToken("wrong-token", "POST", "/api/recording/start"))
     }
 
     // ── path ladder ──

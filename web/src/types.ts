@@ -9,6 +9,11 @@ export type RecordingQuality = 'HIGH' | 'MEDIUM' | 'LOW'
 export type OverlayPosition = 'TOP_LEFT' | 'TOP_RIGHT' | 'BOTTOM_LEFT' | 'BOTTOM_RIGHT'
 export type MaskingType = 'BLACKOUT' | 'PIXELATE' | 'BLUR'
 export type RtspInputFormat = 'AUTO' | 'NV21' | 'NV12' | 'I420'
+/** The RTSP output resolution wire names, mirroring the server's RtspResolution mapper. */
+export type RtspResolution = '480p' | '720p' | '1080p'
+
+/** The RTSP output codec wire names, mirroring the server's RtspVideoCodec mapper. */
+export type RtspVideoCodec = 'h264' | 'h265'
 
 // Stream auth contract: the web client sends the password as PLAINTEXT over
 // the wire (e.g. POST /api/auth/login {username, password}); the server never
@@ -19,8 +24,10 @@ export type RtspInputFormat = 'AUTO' | 'NV21' | 'NV12' | 'I420'
 // random token client-side and sends it ONCE as the write-only `apiToken`
 // field of StreamingSettings; the server stores only its SHA-256 hex hash and
 // never returns the token or the hash — responses carry `apiTokenEnabled` and
-// `apiTokenConfigured` instead. The token authorizes read-only GET/HEAD
-// requests (never /api/auth/*) via `Authorization: Bearer` or `X-Api-Token`.
+// `apiTokenConfigured` instead. The token authorizes GET/HEAD requests and
+// POST on the server's fixed write allow-list (stream/recording start-stop,
+// photo capture, siren/torch deterrence — never /api/auth/*) via
+// `Authorization: Bearer` or `X-Api-Token`.
 
 export interface StreamAuthSettings {
   enabled: boolean
@@ -84,6 +91,9 @@ export interface StreamingSettings {
   rtspEnabled: boolean
   rtspPort: number
   rtspInputFormat: RtspInputFormat
+  rtspResolution: RtspResolution
+  /** RTSP output codec: 'h264' (default, full HLS/WebCodecs compatibility) or 'h265'. */
+  rtspVideoCodec: RtspVideoCodec
   adaptiveBitrateEnabled: boolean
   overlayEnabled: boolean
   showTimestamp: boolean
@@ -149,6 +159,19 @@ export interface StreamingSettings {
   mqttPassword: string
   mqttTls: boolean
   mqttDiscoveryPrefix: string
+  /** Capture retention window in days; 0 keeps captures forever. */
+  captureRetentionDays: number
+  /** Detection-event retention window in days; 0 keeps events forever. */
+  eventRetentionDays: number
+  /** ML object-detection gate on top of motion detection. */
+  mlDetectionEnabled: boolean
+  /** Minimum ML confidence percent for a detected object to count. */
+  mlMinScorePercent: number
+  /** Continuous NVR-style loop recording (chained bounded segments). */
+  continuousRecording: boolean
+  continuousSegmentMinutes: number
+  /** ONVIF Profile S device endpoint + WS-Discovery responder. */
+  onvifEnabled: boolean
 }
 
 export interface AllSettings {
@@ -344,6 +367,8 @@ export interface GalleryItem {
   fileSizeBytes: number
   durationMs: number
   thumbnailUrl: string
+  /** Full-size media route — the viewer's source for photos. */
+  url: string
   downloadUrl: string
 }
 
@@ -366,6 +391,12 @@ export interface DetectionEvent {
   dispatchedActions: string[]
   /** Labels of the motion zones that fired; empty for whole-frame or non-motion events. */
   zones: string[]
+  /** ML class labels (person, dog, car...) attached by the object-detection gate. */
+  labels?: string[]
+  /** MediaStore numeric id of the motion clip once its bounded recording finalized; absent until (or unless) linked. */
+  clipMediaId?: number | null
+  /** File name of the motion clip, linked together with clipMediaId. */
+  clipFileName?: string | null
 }
 
 export interface DetectionEventsResponse {

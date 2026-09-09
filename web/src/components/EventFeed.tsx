@@ -1,10 +1,19 @@
-import { createSignal, For, Show } from 'solid-js'
+import { For, Show } from 'solid-js'
 import type { DetectionEvent } from '../types'
-import { clearDetectionEvents, getDetectionEvents } from '../api/client'
-import { createVisiblePoll } from '../hooks/visiblePoll'
+import { useEventStream } from '../hooks/useEventStream'
 import SettingsCard from './SettingsCard'
 
-const POLL_INTERVAL_MS = 10_000
+function hasClip(event: DetectionEvent): boolean {
+  return event.clipMediaId != null
+}
+
+function clipFileName(event: DetectionEvent): string | null {
+  return event.clipFileName ?? null
+}
+
+function eventLabels(event: DetectionEvent): string[] {
+  return event.labels ?? []
+}
 
 function timeLabel(timestampMs: number): string {
   return new Date(timestampMs).toLocaleString(undefined, {
@@ -25,42 +34,25 @@ function actionLabel(action: string): string {
   }
 }
 
+function modeLabel(mode: 'connecting' | 'live' | 'polling'): string {
+  switch (mode) {
+    case 'live': return 'Live'
+    case 'polling': return 'Polling'
+    default: return 'Connecting'
+  }
+}
+
 /**
- * Recent detection events from GET /api/detection/events — newest first,
- * each with time, type badge, the snapshot taken at trigger time, and the
- * actions that were dispatched. Simple 10 s polling while the panel is
- * visible; the clear-all button deletes the whole log.
+ * Recent detection events, pushed live over SSE (GET
+ * /api/detection/events/stream) with automatic polling fallback — see
+ * useEventStream. Each row shows time, type badge, the snapshot taken at
+ * trigger time, dispatched actions, triggered zones / ML labels, and a link
+ * to the recorded clip when one exists. The gallery viewer lives inside the
+ * Gallery component (not reachable from here), so clips open the media
+ * route GET /api/media/{id} directly in a new tab.
  */
 export default function EventFeed() {
-  const [events, setEvents] = createSignal<DetectionEvent[]>([])
-  const [total, setTotal] = createSignal(0)
-  const [busy, setBusy] = createSignal(false)
-
-  async function refresh() {
-    try {
-      const result = await getDetectionEvents()
-      setEvents(result.events ?? [])
-      setTotal(result.total ?? 0)
-    } catch {
-      // Transient fetch errors just leave the current feed in place.
-    }
-  }
-
-  async function clearAll() {
-    if (busy()) return
-    setBusy(true)
-    try {
-      await clearDetectionEvents()
-      setEvents([])
-      setTotal(0)
-    } catch {
-      // Keep the feed as-is on failure.
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  createVisiblePoll(refresh, POLL_INTERVAL_MS)
+  const { events, mode, clear } = useEventStream()
 
   return (
     <SettingsCard
@@ -74,8 +66,20 @@ export default function EventFeed() {
     >
       <div class="field-group">
         <div class="field-row">
-          <span class="field-label">{total()} event{total() === 1 ? '' : 's'}</span>
-          <button type="button" class="action-btn action-btn-ghost" disabled={busy() || events().length === 0} onClick={clearAll}>
+          <span class="field-label">{events().length} event{events().length === 1 ? '' : 's'}</span>
+          <span
+            class="event-stream-pill"
+            classList={{
+              'event-stream-pill-live': mode() === 'live',
+              'event-stream-pill-polling': mode() === 'polling',
+              'event-stream-pill-connecting': mode() === 'connecting',
+            }}
+            title={mode() === 'live' ? 'Streaming events live' : 'Streaming unavailable — refreshing every 10 s'}
+          >
+            <span class="event-stream-dot" aria-hidden="true" />
+            <span>{modeLabel(mode())}</span>
+          </span>
+          <button type="button" class="action-btn action-btn-ghost" disabled={events().length === 0} onClick={clear}>
             <span>Clear all</span>
           </button>
         </div>
@@ -109,11 +113,28 @@ export default function EventFeed() {
                   <Show when={event.dispatchedActions.length > 0} fallback={<span class="event-feed-actions">No actions</span>}>
                     <span class="event-feed-actions">{event.dispatchedActions.map(actionLabel).join(' · ')}</span>
                   </Show>
+                  <Show when={hasClip(event)}>
+                    <a
+                      class="event-clip-btn"
+                      href={`/api/media/${event.clipMediaId}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      title={clipFileName(event) ?? 'Open the clip recorded for this event'}
+                    >
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <polygon points="5 3 19 12 5 21 5 3" />
+                      </svg>
+                      <span>View clip</span>
+                    </a>
+                  </Show>
                 </div>
-                <Show when={event.zones.length > 0}>
+                <Show when={event.zones.length > 0 || eventLabels(event).length > 0}>
                   <div class="event-feed-line">
                     <For each={event.zones}>
                       {(zone) => <span class="event-zone-chip">{zone}</span>}
+                    </For>
+                    <For each={eventLabels(event)}>
+                      {(label) => <span class="event-zone-chip event-label-chip">{label}</span>}
                     </For>
                   </div>
                 </Show>

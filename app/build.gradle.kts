@@ -240,6 +240,10 @@ dependencies {
     implementation(libs.camerax.video)
 
     implementation(libs.work.manager)
+    // LiteRT (TensorFlow Lite) Task Library for the ML object-detection gate
+    // (capture/ml/). Ships to BOTH store flavors — it is a plain library, not
+    // a Play-services dependency, so the fdroid flavor gains nothing proprietary.
+    implementation("org.tensorflow:tensorflow-lite-task-vision:0.4.4")
     implementation(libs.nanohttpd)
     implementation(libs.nanohttpd.ws)
     implementation(libs.datastore.preferences)

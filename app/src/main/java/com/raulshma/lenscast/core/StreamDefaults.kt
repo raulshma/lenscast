@@ -60,6 +60,13 @@ object StreamDefaults {
     const val STORAGE_QUOTA_MB_DEFAULT = 2048
     const val STORAGE_LOW_SPACE_MIN_MB = 200
 
+    // Time-based retention bounds, in days. 0 (the persisted default) means
+    // keep forever — the one sentinel [com.raulshma.lenscast.data.RetentionPolicy]
+    // folds into a null cutoff.
+    const val RETENTION_DAYS_MIN = 0
+    const val RETENTION_DAYS_MAX = 365
+    const val RETENTION_DAYS_DISABLED = 0
+
     // Motion & sound detection bounds. Sensitivity and sound threshold are
     // persisted as percents (1..100); the Settings Applier converts to
     // MotionDetector's 0..1 scale.
@@ -76,6 +83,20 @@ object StreamDefaults {
     const val SOUND_THRESHOLD_MAX = 100
     const val SOUND_THRESHOLD_PERCENT_DEFAULT = 30
 
+    // ML object detection (LiteRT EfficientDet-Lite0). Minimum confidence a
+    // detected object must reach before it counts toward an alert, persisted
+    // as a percent.
+    const val ML_SCORE_MIN_PERCENT = 10
+    const val ML_SCORE_MAX_PERCENT = 95
+    const val ML_SCORE_PERCENT_DEFAULT = 60
+
+    // Continuous (NVR-style) loop recording: chain bounded segments back to
+    // back while the camera is free; old segments age out through the
+    // capture-retention policy.
+    const val CONTINUOUS_SEGMENT_MIN_MINUTES = 5
+    const val CONTINUOUS_SEGMENT_MAX_MINUTES = 60
+    const val CONTINUOUS_SEGMENT_MINUTES_DEFAULT = 15
+
     // Webhook notification bounds — a URL the notifier will actually POST to.
     const val WEBHOOK_TIMEOUT_MS = 10_000
 
@@ -83,6 +104,11 @@ object StreamDefaults {
     // thumbnail size before it rides the event store and the webhook payload.
     const val SNAPSHOT_TARGET_WIDTH_PX = 640
     const val SNAPSHOT_JPEG_QUALITY = 60
+
+    // Gallery photo thumbnail: /api/media/{id}/thumbnail re-encodes the photo
+    // with its longest side at or under this many pixels.
+    const val PHOTO_THUMBNAIL_MAX_PX = 512
+    const val PHOTO_THUMBNAIL_JPEG_QUALITY = 75
 
     // Deterrence automation bounds — auto-siren duration and the per-event
     // cooldown that keeps a detection cluster from re-triggering constantly.

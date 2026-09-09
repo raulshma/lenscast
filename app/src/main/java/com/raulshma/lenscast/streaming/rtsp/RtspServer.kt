@@ -38,8 +38,11 @@ class RtspServer(
     private var acceptThread: Thread? = null
     private val running = AtomicBoolean(false)
 
-    // Fresh packetizers per start replace the old global reset() ritual.
-    private var videoPacketizer = RtpPacketizer()
+    // Fresh packetizers per start replace the old global reset() ritual. The
+    // video packetizer is picked per codec at start (RtpPacketizer for H.264,
+    // H265RtpPacketizer for H.265); behind the shared [VideoPacketizer] seam
+    // the fan-out and the RTCP counters stay codec-blind.
+    private var videoPacketizer: VideoPacketizer = RtpPacketizer()
     private var audioPacketizer = AacRtpPacketizer()
     private var audioTimestamp: Long = 0
 
@@ -100,7 +103,10 @@ class RtspServer(
             distributedPackets.set(0)
             acceptedFrames.set(0)
             droppedFrames.set(0)
-            videoPacketizer = RtpPacketizer()
+            videoPacketizer = when (config.videoCodec) {
+                RtspVideoCodec.H264 -> RtpPacketizer()
+                RtspVideoCodec.H265 -> H265RtpPacketizer()
+            }
             audioPacketizer = AacRtpPacketizer()
 
             acceptThread = Thread({ acceptLoop() }, "RtspServer-Accept").apply {
@@ -168,7 +174,7 @@ class RtspServer(
      * fan-out (packetization, RTCP sender reports, per-client writes). The
      * hub fans the same AUs out to HLS and WS video, so no tee lives here.
      */
-    override fun feedVideo(nalUnits: List<H264Encoder.EncodedNalUnit>) {
+    override fun feedVideo(nalUnits: List<EncodedNalUnit>) {
         if (!running.get()) {
             droppedFrames.incrementAndGet()
             return
@@ -179,10 +185,16 @@ class RtspServer(
 
         if (nalUnits.any { it.isKeyFrame } && !firstKeyframeLogged) {
             firstKeyframeLogged = true
+            // NAL-type decode differs per codec (1- vs 2-byte header); the
+            // diagnostic must read the active codec's layout.
+            val nalType: (ByteArray) -> Int = when (config.videoCodec) {
+                RtspVideoCodec.H264 -> H264NalParser::nalType
+                RtspVideoCodec.H265 -> H265NalParser::nalType
+            }
             Log.d(
                 TAG,
                 "First keyframe AU distributed: " +
-                    nalUnits.joinToString { "${H264NalParser.nalType(it.data)}:${it.data.size}" }
+                    nalUnits.joinToString { "${nalType(it.data)}:${it.data.size}" }
             )
         }
         acceptedFrames.incrementAndGet()
@@ -208,17 +220,18 @@ class RtspServer(
             null
         }
 
+        val isKeyframeAu = nalUnits.any { it.isKeyFrame }
+
         for (client in clients.values) {
-            if (client.isPlaying) {
-                if (senderReport != null) client.sendVideoRtcpPacket(senderReport)
-                for ((index, nalUnit) in nalUnits.withIndex()) {
-                    val marker = index == nalUnits.lastIndex
-                    val packets = videoPacketizer.packetizeNalUnit(nalUnit.data, rtpTimestamp, marker)
-                    distributedPackets.addAndGet(packets.size.toLong())
-                    for (packet in packets) {
-                        client.sendRtpPacket(packet)
-                    }
-                }
+            // Mid-join discipline: a client that reached PLAY mid-GOP waits
+            // for the next keyframe AU before its first byte — P-frames
+            // referencing unseen frames are undecodable filler.
+            if (!client.acceptVideoAu(isKeyframeAu)) continue
+            if (senderReport != null) client.sendVideoRtcpPacket(senderReport)
+            val packets = videoPacketizer.packetizeAccessUnit(nalUnits.map { it.data }, rtpTimestamp)
+            distributedPackets.addAndGet(packets.size.toLong())
+            for (packet in packets) {
+                client.sendRtpPacket(packet)
             }
         }
     }
@@ -361,6 +374,24 @@ class RtspServer(
         var isPlaying = false
             private set
 
+        /** Set at PLAY; cleared on the first keyframe AU that follows (see [acceptVideoAu]). */
+        private var awaitingKeyframe = true
+
+        /**
+         * The per-client video gate, run on every AU: false while the client
+         * must keep waiting for a keyframe (not playing, or joined mid-GOP),
+         * true on the client's first keyframe AU — which also clears the
+         * wait. Clients that TEARDOWN and re-PLAY re-arm it via [handlePlay].
+         */
+        fun acceptVideoAu(isKeyframeAu: Boolean): Boolean {
+            if (!isPlaying) return false
+            if (awaitingKeyframe) {
+                if (!isKeyframeAu) return false
+                awaitingKeyframe = false
+            }
+            return true
+        }
+
         private val outputStream: OutputStream?
             get() = try {
                 if (!socket.isClosed) socket.getOutputStream() else null
@@ -484,6 +515,8 @@ class RtspServer(
                 sps = encodedSource.sps,
                 pps = encodedSource.pps,
                 audioSpecificConfig = encodedSource.audioSpecificConfig,
+                codec = encodedSource.videoCodec,
+                vps = encodedSource.vps,
             )
             sendResponse(
                 output, "200 OK", mapOf(
@@ -561,7 +594,9 @@ class RtspServer(
 
             state = SessionState.PLAYING
             isPlaying = true
-
+            // Every PLAY (re)arms the keyframe wait, then forces a sync frame
+            // so a mid-GOP join resolves within one encoder GOP.
+            awaitingKeyframe = true
             encodedSource.requestKeyFrame()
 
             val streamBase = buildAbsoluteRtspUrl("/${RtspUriPolicy.DEFAULT_STREAM_PATH}")

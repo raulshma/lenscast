@@ -1,5 +1,6 @@
 package com.raulshma.lenscast.streaming
 
+import com.raulshma.lenscast.streaming.rtsp.EncodedNalUnit
 import android.content.Context
 import android.util.Log
 import com.raulshma.lenscast.camera.model.OverlaySettings
@@ -26,8 +27,10 @@ import com.raulshma.lenscast.streaming.hls.HlsManager
 import com.raulshma.lenscast.streaming.rtsp.RtspAuthSpec
 import com.raulshma.lenscast.streaming.rtsp.RtspConfigDiff
 import com.raulshma.lenscast.streaming.rtsp.RtspInputFormat
+import com.raulshma.lenscast.streaming.rtsp.RtspResolution
 import com.raulshma.lenscast.streaming.rtsp.RtspServer
 import com.raulshma.lenscast.streaming.rtsp.RtspUriPolicy
+import com.raulshma.lenscast.streaming.rtsp.RtspVideoCodec
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import java.util.concurrent.atomic.AtomicBoolean
@@ -50,7 +53,7 @@ class StreamingManager(
 
     // WebSocket sidecar for WebCodecs video + PTT talkback.
     @Volatile private var wsMediaServer: com.raulshma.lenscast.streaming.ws.WsMediaServer? = null
-    private val wsVideoSink: (List<com.raulshma.lenscast.streaming.rtsp.H264Encoder.EncodedNalUnit>) -> Unit = { nalUnits ->
+    private val wsVideoSink: (List<EncodedNalUnit>) -> Unit = { nalUnits ->
         wsMediaServer?.feedVideo(nalUnits)
     }
 
@@ -67,7 +70,7 @@ class StreamingManager(
         audioWanted = { streamAudioEnabled.get() && !recordingAudioCaptureActive },
         audioBitrateKbps = { streamAudioBitrateKbps.get() },
         rtspSink = object : EncodedSink {
-            override fun feedVideo(nalUnits: List<com.raulshma.lenscast.streaming.rtsp.H264Encoder.EncodedNalUnit>) {
+            override fun feedVideo(nalUnits: List<EncodedNalUnit>) {
                 rtspOutput.feedEncodedVideo(nalUnits)
             }
 
@@ -103,6 +106,7 @@ class StreamingManager(
         },
         serverFactory = { port -> RtspServer(port, encodedHub) },
     )
+
     private val serviceDiscoveryManager = ServiceDiscoveryManager(context)
     private val sirenPlayer = com.raulshma.lenscast.core.SirenPlayer()
 
@@ -255,8 +259,39 @@ class StreamingManager(
     @Volatile private var motionListener: ((delta: Double, zones: List<String>) -> Unit)? = null
     @Volatile private var soundListener: ((rmsPercent: Double) -> Unit)? = null
 
+    /**
+     * The newest camera frame, retained as the ML object-detection gate's
+     * analysis input. No copy: the gate consumes it synchronously inside the
+     * motion-verdict call stack ([pushFrame] → detector → listener →
+     * coordinator), copying before any async inference, so the buffer can
+     * never outlive the frame that produced it.
+     */
+    @Volatile private var latestAnalysisFrame: com.raulshma.lenscast.capture.ml.AnalysisFrame? = null
+
+    /** The frame the ML gate classifies; only meaningful on the motion-verdict call stack. */
+    fun latestAnalysisFrame(): com.raulshma.lenscast.capture.ml.AnalysisFrame? = latestAnalysisFrame
+
+    /** Application context for app-scoped collaborators resolved through the manager. */
+    fun appContext(): android.content.Context = context.applicationContext
+
+    /**
+     * Continuous NVR-style loop recording: hosted here (constructed + started
+     * at manager construction — the app-lifetime composition point) because
+     * the composition root's wiring is fixed; everything the loop decides
+     * lives in [com.raulshma.lenscast.capture.model.ContinuousRecordingPolicy]
+     * and the controller only observes the store plus the RecordingController.
+     */
+    private val continuousRecordingController: com.raulshma.lenscast.capture.ContinuousRecordingController by lazy {
+        val app = context.applicationContext as MainApplication
+        com.raulshma.lenscast.capture.ContinuousRecordingController(
+            settingsDataStore = app.settingsDataStore,
+            recordingController = app.recordingController,
+        )
+    }
+
     init {
         audioStreamingManager.setChunkListener { pcm16 -> soundDetector.feed(pcm16) }
+        continuousRecordingController.start()
     }
 
     fun setMotionDetectionEnabled(on: Boolean) {
@@ -539,6 +574,10 @@ class StreamingManager(
         // sinks kept burning CPU.
         if (isThermallyPaused()) return
         // Motion runs on sampled luma even with zero viewers (surveillance).
+        // The frame reference is freshened first so the ML gate (reached
+        // synchronously inside the detector's fire callback) reads exactly
+        // the frame that fired the verdict.
+        latestAnalysisFrame = com.raulshma.lenscast.capture.ml.AnalysisFrame(yuvData, width, height)
         try {
             motionDetector.feed(yuvData, width, height)
         } catch (_: Exception) {
@@ -773,6 +812,38 @@ class StreamingManager(
         encodedHub.setInputFormat(format)
     }
 
+    /**
+     * The persisted RTSP resolution fans out to both sides of the encoded
+     * path: the output's retained [com.raulshma.lenscast.streaming.rtsp.RtspConfig]
+     * (whose diff restarts a live server — a dimension change cannot hot-swap)
+     * and the hub's retained encoder dimensions for its next configure.
+     */
+    fun setRtspResolution(resolution: RtspResolution) {
+        rtspOutput.setResolution(resolution)
+        encodedHub.setVideoResolution(resolution.width, resolution.height)
+    }
+
+    /**
+     * Fans the RTSP video codec (H264/H265, persisted as `rtsp_video_codec`
+     * in [com.raulshma.lenscast.data.SettingsDataStore] and applied by the
+     * settings applier) out to the same two seams [setRtspResolution] fans
+     * resolution out to. Both sinks dedupe on their own live value, so a
+     * repeat apply with the same codec is a no-op. The output's retained
+     * [com.raulshma.lenscast.streaming.rtsp.RtspConfig] carries it (its diff
+     * classifies the swap NEEDS_RESTART, and a live output restarts via the
+     * WHILE_ACTIVE ladder — new SDP + packetizer); the encoded-stream hub
+     * reconfigures stop → (new codec's) encoder → start + black frame. On
+     * H265 the hub's fan-out feeds the RTSP sink only (HLS/WS stay
+     * H.264-only).
+     */
+    fun setRtspVideoCodec(codec: RtspVideoCodec) {
+        rtspOutput.setVideoCodec(codec)
+        encodedHub.setVideoCodec(codec)
+    }
+
+    /** The encoded pipeline's live target bitrate — the adaptive controller's current value, not the static default. */
+    fun currentVideoBitrate(): Int = encodedHub.currentVideoBitrate()
+
     fun setMdnsEnabled(enabled: Boolean) {
         val changed = mdnsEnabled.getAndSet(enabled) != enabled
         if (!changed) return
@@ -865,7 +936,9 @@ class StreamingManager(
         )
         return WebApiStack(
             router = ApiRouter(
-                settings = SettingsWebHandler(app.settingsDataStore),
+                settings = SettingsWebHandler(
+                settingsDataStore = app.settingsDataStore,
+            ),
                 status = statusHandler,
                 stream = StreamWebHandler(this, app.streamingSession),
                 capture = CaptureWebHandler(app.photoCaptureManager),
@@ -882,6 +955,7 @@ class StreamingManager(
             capture = app.photoCaptureManager,
             deterrence = deterrence,
             auth = authHandler,
+            detectionEvents = detectionEvents,
         )
     }
 
