@@ -19,6 +19,8 @@ function actionLabel(action: string): string {
     case 'webhook': return 'Webhook'
     case 'siren': return 'Siren'
     case 'torch': return 'Light'
+    case 'mqtt': return 'MQTT'
+    case 'notify': return 'Alert'
     default: return action
   }
 }
@@ -108,6 +110,13 @@ export default function EventFeed() {
                     <span class="event-feed-actions">{event.dispatchedActions.map(actionLabel).join(' · ')}</span>
                   </Show>
                 </div>
+                <Show when={event.zones.length > 0}>
+                  <div class="event-feed-line">
+                    <For each={event.zones}>
+                      {(zone) => <span class="event-zone-chip">{zone}</span>}
+                    </For>
+                  </div>
+                </Show>
               </div>
             </div>
           )}

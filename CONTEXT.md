@@ -24,7 +24,8 @@ them hand-roll the choreography anymore.
 ### Settings Applier
 **`settings/SettingsApplier.kt`** — the single owner of "persisted settings →
 runtime" application. It watches `SettingsDataStore` flows and applies new
-values to the StreamingManager, CameraService, and Stream Watchdog. Every other
+values to the StreamingManager, CameraService, Stream Watchdog, and the MQTT
+alert publisher's connection lifecycle. Every other
 module (ViewModels, Web API Settings Handler) only *writes* settings to the
 store; nobody else applies persisted settings. Direct runtime calls that are
 *not* settings changes (session begin/end via the Streaming Session, mic

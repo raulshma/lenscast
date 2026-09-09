@@ -84,6 +84,15 @@ export const API_DEFAULTS = {
   apiToken: '',
   httpsEnabled: false,
   audioDeviceId: '',
+  detectionNotificationsEnabled: true,
+  tamperDetectionEnabled: false,
+  mqttEnabled: false,
+  mqttBrokerHost: '',
+  mqttBrokerPort: 1883,
+  mqttUsername: '',
+  mqttPassword: '',
+  mqttTls: false,
+  mqttDiscoveryPrefix: 'homeassistant',
 
   // Overlay block (OverlaySettings.DEFAULT, embedded in StreamingSettingsDto)
   overlayEnabled: false,

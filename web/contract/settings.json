@@ -78,6 +78,15 @@
     "apiTokenConfigured": false,
     "apiToken": "",
     "httpsEnabled": false,
-    "audioDeviceId": ""
+    "audioDeviceId": "",
+    "detectionNotificationsEnabled": true,
+    "tamperDetectionEnabled": false,
+    "mqttEnabled": false,
+    "mqttBrokerHost": "",
+    "mqttBrokerPort": 1883,
+    "mqttUsername": "",
+    "mqttPassword": "",
+    "mqttTls": false,
+    "mqttDiscoveryPrefix": "homeassistant"
   }
 }

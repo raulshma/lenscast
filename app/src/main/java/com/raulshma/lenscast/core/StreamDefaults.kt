@@ -93,6 +93,16 @@ object StreamDefaults {
     const val AUTO_DETERRENCE_COOLDOWN_MAX_SECONDS = 600
     const val AUTO_DETERRENCE_COOLDOWN_SECONDS_DEFAULT = 60
 
+    // MQTT alert publishing — broker transport and the Home Assistant
+    // discovery prefix the entity configs publish under.
+    const val MQTT_PORT_DEFAULT = 1883
+    const val MQTT_PORT_MIN = 1
+    const val MQTT_PORT_MAX = 65535
+    const val MQTT_KEEPALIVE_SECONDS = 60
+    const val MQTT_CONNECT_TIMEOUT_MS = 10_000
+    const val MQTT_PUBLISH_ACK_TIMEOUT_MS = 5_000
+    const val MQTT_DISCOVERY_PREFIX_DEFAULT = "homeassistant"
+
     // HLS segment pacing.
     const val HLS_SEGMENT_AUS = 48
 }

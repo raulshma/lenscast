@@ -1,3 +1,8 @@
 <resources>
     <string name="app_name">LensCast</string>
+    <string name="automation_permission_label">control LensCast</string>
+    <string name="automation_permission_description">Allows the app to start or stop LensCast streaming, recording, photo capture, torch, and siren through automation broadcasts.</string>
+    <string name="widget_status_idle">Idle</string>
+    <string name="widget_start_stream">Start Stream</string>
+    <string name="widget_photo">Photo</string>
 </resources>

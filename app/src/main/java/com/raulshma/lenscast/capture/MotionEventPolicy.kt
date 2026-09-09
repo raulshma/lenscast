@@ -25,7 +25,13 @@ object MotionEventPolicy {
         SENSITIVITY_THRESHOLD_MAX -
             sensitivity01.coerceIn(0f, 1f) * (SENSITIVITY_THRESHOLD_MAX - SENSITIVITY_THRESHOLD_MIN)
 
-    data class Verdict(val fire: Boolean, val delta: Double)
+    /**
+     * [zones] lists the labels of enabled zones that contain at least one
+     * breached tile (delta ≥ threshold) — the per-zone attribution the event
+     * log, webhook, and MQTT payloads carry. Empty when no enabled zones are
+     * configured (whole-frame detection).
+     */
+    data class Verdict(val fire: Boolean, val delta: Double, val zones: List<String> = emptyList())
 
     fun evaluate(
         lastAvg: Double?,
@@ -46,6 +52,8 @@ object MotionEventPolicy {
      * luma delta across considered tiles — only tiles overlapping an enabled
      * [MotionZone] when zones exist, every tile otherwise. A single hot tile
      * inside a zone fires, which whole-frame averaging used to wash out.
+     * A zone counts as triggered when any tile overlapping it breaches the
+     * threshold, so fire with zones configured always attributes at least one.
      */
     fun evaluateGrid(
         lastGrid: DoubleArray?,
@@ -63,26 +71,38 @@ object MotionEventPolicy {
         val rows = GRID_ROWS
         // Every zone disabled behaves like no zones: the whole frame detects.
         val activeZones = zones.filter { it.enabled }
+        val zoneAware = activeZones.isNotEmpty()
         val tileW = 1f / cols
         val tileH = 1f / rows
         var maxDelta = 0.0
+        // Insertion-ordered: attribution follows tile scan order, so the wire
+        // payload is deterministic for a given frame.
+        val triggered = LinkedHashSet<String>()
         for (row in 0 until rows) {
             for (col in 0 until cols) {
                 val index = row * cols + col
                 if (index >= currentGrid.size) continue
-                if (activeZones.isNotEmpty()) {
-                    val sampleX = col * tileW
-                    val sampleY = row * tileH
-                    val considered = activeZones.any { zone ->
-                        MotionZone.overlapsSample(zone, sampleX, sampleY, tileW, tileH)
-                    }
-                    if (!considered) continue
-                }
                 val delta = kotlin.math.abs(currentGrid[index] - lastGrid[index])
+                if (zoneAware) {
+                    // Allocation-free overlap scan: this runs for every tile
+                    // of every frame, where a per-tile filter would allocate
+                    // a throwaway list at frame rate.
+                    var overlaps = false
+                    for (zone in activeZones) {
+                        if (MotionZone.overlapsSample(zone, col * tileW, row * tileH, tileW, tileH)) {
+                            overlaps = true
+                            if (delta >= threshold) triggered.add(zone.label)
+                        }
+                    }
+                    if (!overlaps) continue
+                }
                 if (delta > maxDelta) maxDelta = delta
             }
         }
-        return gate(maxDelta, nowMs, lastFireMs, threshold, cooldownMs)
+        val verdict = gate(maxDelta, nowMs, lastFireMs, threshold, cooldownMs)
+        // Attribution only rides a fired verdict: a cooldown-suppressed frame
+        // reports nothing, matching the KDoc contract.
+        return if (verdict.fire) verdict.copy(zones = triggered.toList()) else verdict
     }
 
     private fun gate(

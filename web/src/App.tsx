@@ -48,8 +48,6 @@ function App() {
                   liveAudioStatus={state.liveAudioStatus}
                   recordingTimer={state.recordingTimer}
                   handleCapture={state.handleCapture}
-                  handleStopStream={state.handleStopStream}
-                  handleResumeStream={state.handleResumeStream}
                   handleStartWebStream={state.handleStartWebStream}
                   handleStopWebStream={state.handleStopWebStream}
                   handleStartRtspStream={state.handleStartRtspStream}

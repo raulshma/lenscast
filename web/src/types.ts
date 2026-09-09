@@ -139,6 +139,16 @@ export interface StreamingSettings {
   apiToken: string
   httpsEnabled: boolean
   audioDeviceId: string
+  detectionNotificationsEnabled: boolean
+  tamperDetectionEnabled: boolean
+  mqttEnabled: boolean
+  mqttBrokerHost: string
+  mqttBrokerPort: number
+  mqttUsername: string
+  /** Write-only, like backupWebdavPassword: PUT carries it, responses are blank. */
+  mqttPassword: string
+  mqttTls: boolean
+  mqttDiscoveryPrefix: string
 }
 
 export interface AllSettings {
@@ -345,7 +355,7 @@ export interface GalleryResponse {
   hasMore: boolean
 }
 
-export type DetectionEventType = 'motion' | 'sound'
+export type DetectionEventType = 'motion' | 'sound' | 'tamper'
 
 export interface DetectionEvent {
   id: string
@@ -354,6 +364,8 @@ export interface DetectionEvent {
   timestampMs: number
   snapshotJpegBase64?: string | null
   dispatchedActions: string[]
+  /** Labels of the motion zones that fired; empty for whole-frame or non-motion events. */
+  zones: string[]
 }
 
 export interface DetectionEventsResponse {

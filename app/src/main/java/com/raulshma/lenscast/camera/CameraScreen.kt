@@ -1,8 +1,11 @@
 package com.raulshma.lenscast.camera
 
 import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
 import androidx.camera.view.PreviewView
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
@@ -146,6 +149,11 @@ private val OverlayLight = Color(0x80000000)
 private val TopGradientColor = Color(0x78000000)
 private val BottomGradientColor = Color(0x78000000)
 
+// One POST_NOTIFICATIONS ask per process: LaunchedEffect(Unit) re-runs on
+// every fresh composition (each navigation back), which would re-prompt
+// after a denial instead of the documented first-launch one-shot.
+private var notificationPermissionAsked = false
+
 /** The quick-setting controls' icon selectors, mapped to material vectors at this seam. */
 private fun QuickSettingIcon.vector(): ImageVector = when (this) {
     QuickSettingIcon.EXPOSURE -> Icons.Default.Exposure
@@ -205,6 +213,23 @@ fun CameraScreen(
         contract = ActivityResultContracts.RequestPermission()
     ) { granted ->
         viewModel.onAudioPermissionResult(granted)
+    }
+    // Detection alerts ride the same first-launch permission pass: a one-shot
+    // POST_NOTIFICATIONS ask on API 33+, silently skipped when already granted
+    // and asked once per process (notificationPermissionAsked guard above).
+    val notificationPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { }
+    LaunchedEffect(Unit) {
+        if (notificationPermissionAsked) return@LaunchedEffect
+        notificationPermissionAsked = true
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(
+                context, Manifest.permission.POST_NOTIFICATIONS,
+            ) != PackageManager.PERMISSION_GRANTED
+        ) {
+            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
     }
 
     val coroutineScope = rememberCoroutineScope()

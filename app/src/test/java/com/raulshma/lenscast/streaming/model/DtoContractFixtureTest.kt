@@ -231,6 +231,7 @@ class DtoContractFixtureTest {
                     timestampMs = 1_788_825_600_000,
                     snapshotJpegBase64 = "/9j/4AAQSkZJRg==",
                     dispatchedActions = listOf("recording", "webhook"),
+                    zones = listOf("Doorway"),
                 ),
             ),
             total = 1,

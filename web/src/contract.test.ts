@@ -109,6 +109,15 @@ const STREAMING_KEYS = [
   'apiToken',
   'httpsEnabled',
   'audioDeviceId',
+  'detectionNotificationsEnabled',
+  'tamperDetectionEnabled',
+  'mqttEnabled',
+  'mqttBrokerHost',
+  'mqttBrokerPort',
+  'mqttUsername',
+  'mqttPassword',
+  'mqttTls',
+  'mqttDiscoveryPrefix',
 ]
 
 describe('DTO contract fixtures', () => {
@@ -239,8 +248,10 @@ describe('DTO contract fixtures', () => {
         'timestampMs',
         'snapshotJpegBase64',
         'dispatchedActions',
+        'zones',
       ])
       expect(Array.isArray(event.dispatchedActions)).toBe(true)
+      expect(Array.isArray(event.zones)).toBe(true)
     }
   })
 })
@@ -313,6 +324,15 @@ describe('API_DEFAULTS lockstep with the fixtures', () => {
     expect(streaming.apiToken).toBe(API_DEFAULTS.apiToken)
     expect(streaming.httpsEnabled).toBe(API_DEFAULTS.httpsEnabled)
     expect(streaming.audioDeviceId).toBe(API_DEFAULTS.audioDeviceId)
+    expect(streaming.detectionNotificationsEnabled).toBe(API_DEFAULTS.detectionNotificationsEnabled)
+    expect(streaming.tamperDetectionEnabled).toBe(API_DEFAULTS.tamperDetectionEnabled)
+    expect(streaming.mqttEnabled).toBe(API_DEFAULTS.mqttEnabled)
+    expect(streaming.mqttBrokerHost).toBe(API_DEFAULTS.mqttBrokerHost)
+    expect(streaming.mqttBrokerPort).toBe(API_DEFAULTS.mqttBrokerPort)
+    expect(streaming.mqttUsername).toBe(API_DEFAULTS.mqttUsername)
+    expect(streaming.mqttPassword).toBe(API_DEFAULTS.mqttPassword)
+    expect(streaming.mqttTls).toBe(API_DEFAULTS.mqttTls)
+    expect(streaming.mqttDiscoveryPrefix).toBe(API_DEFAULTS.mqttDiscoveryPrefix)
   })
 
   it('camera fallbacks match the settings fixture defaults', () => {

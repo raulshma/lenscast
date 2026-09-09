@@ -142,6 +142,15 @@ private object Keys {
     val HTTPS_ENABLED = stringPreferencesKey("https_enabled")
     val AUDIO_DEVICE_ID = stringPreferencesKey("audio_device_id")
     val RESUME_STREAMS_ON_BOOT = stringPreferencesKey("resume_streams_on_boot")
+    val DETECTION_NOTIFICATIONS_ENABLED = stringPreferencesKey("detection_notifications_enabled")
+    val TAMPER_DETECTION_ENABLED = stringPreferencesKey("tamper_detection_enabled")
+    val MQTT_ENABLED = stringPreferencesKey("mqtt_enabled")
+    val MQTT_BROKER_HOST = stringPreferencesKey("mqtt_broker_host")
+    val MQTT_BROKER_PORT = intPreferencesKey("mqtt_broker_port")
+    val MQTT_USERNAME = stringPreferencesKey("mqtt_username")
+    val MQTT_PASSWORD = stringPreferencesKey("mqtt_password")
+    val MQTT_TLS = stringPreferencesKey("mqtt_tls")
+    val MQTT_DISCOVERY_PREFIX = stringPreferencesKey("mqtt_discovery_prefix")
 }
 
 /**
@@ -331,6 +340,34 @@ internal val httpsEnabledPref = boolPref(Keys.HTTPS_ENABLED, defaultTrue = false
 internal val audioDeviceIdPref = stringPref(Keys.AUDIO_DEVICE_ID, "")
 
 internal val resumeStreamsOnBootPref = boolPref(Keys.RESUME_STREAMS_ON_BOOT, defaultTrue = false)
+
+/** Local detection notifications: on by default — the channel is opt-out. */
+internal val detectionNotificationsEnabledPref =
+    boolPref(Keys.DETECTION_NOTIFICATIONS_ENABLED, defaultTrue = true)
+
+internal val tamperDetectionEnabledPref = boolPref(Keys.TAMPER_DETECTION_ENABLED, defaultTrue = false)
+
+internal val mqttEnabledPref = boolPref(Keys.MQTT_ENABLED, defaultTrue = false)
+
+internal val mqttBrokerHostPref = stringPref(Keys.MQTT_BROKER_HOST, "") { it.trim() }
+
+internal val mqttBrokerPortPref = intPref(
+    Keys.MQTT_BROKER_PORT,
+    StreamDefaults.MQTT_PORT_DEFAULT,
+    IntBounds(StreamDefaults.MQTT_PORT_MIN, StreamDefaults.MQTT_PORT_MAX),
+)
+
+internal val mqttUsernamePref = stringPref(Keys.MQTT_USERNAME, "")
+
+/** Stored raw like the WebDAV password; the wire contract keeps it write-only. */
+internal val mqttPasswordPref = stringPref(Keys.MQTT_PASSWORD, "")
+
+internal val mqttTlsPref = boolPref(Keys.MQTT_TLS, defaultTrue = false)
+
+/** The save-side normalization home: whitespace and trailing slashes never persist. */
+internal val mqttDiscoveryPrefixPref = stringPref(Keys.MQTT_DISCOVERY_PREFIX, StreamDefaults.MQTT_DISCOVERY_PREFIX_DEFAULT) {
+    it.trim().trimEnd('/')
+}
 
 
 internal val watchdogEnabledPref = boolPref(Keys.WATCHDOG_ENABLED, defaultTrue = false)
@@ -744,6 +781,24 @@ class SettingsDataStore(
     /** Startup-critical: suspends on the disk value, immune to the flow's default-first race. */
     suspend fun resumeStreamsOnBootNow(): Boolean = resumeStreamsOnBootPref.diskValue()
 
+    val detectionNotificationsEnabled: StateFlow<Boolean> = detectionNotificationsEnabledPref.shared()
+
+    val tamperDetectionEnabled: StateFlow<Boolean> = tamperDetectionEnabledPref.shared()
+
+    val mqttEnabled: StateFlow<Boolean> = mqttEnabledPref.shared()
+
+    val mqttBrokerHost: StateFlow<String> = mqttBrokerHostPref.shared()
+
+    val mqttBrokerPort: StateFlow<Int> = mqttBrokerPortPref.shared()
+
+    val mqttUsername: StateFlow<String> = mqttUsernamePref.shared()
+
+    val mqttPassword: StateFlow<String> = mqttPasswordPref.shared()
+
+    val mqttTls: StateFlow<Boolean> = mqttTlsPref.shared()
+
+    val mqttDiscoveryPrefix: StateFlow<String> = mqttDiscoveryPrefixPref.shared()
+
 
     val watchdogEnabled: StateFlow<Boolean> = watchdogEnabledPref.shared()
 
@@ -859,6 +914,25 @@ class SettingsDataStore(
     suspend fun saveAudioDeviceId(id: String) = audioDeviceIdPref.save(id)
 
     suspend fun saveResumeStreamsOnBoot(enabled: Boolean) = resumeStreamsOnBootPref.save(enabled)
+
+    suspend fun saveDetectionNotificationsEnabled(enabled: Boolean) =
+        detectionNotificationsEnabledPref.save(enabled)
+
+    suspend fun saveTamperDetectionEnabled(enabled: Boolean) = tamperDetectionEnabledPref.save(enabled)
+
+    suspend fun saveMqttEnabled(enabled: Boolean) = mqttEnabledPref.save(enabled)
+
+    suspend fun saveMqttBrokerHost(host: String) = mqttBrokerHostPref.save(host)
+
+    suspend fun saveMqttBrokerPort(port: Int) = mqttBrokerPortPref.save(port)
+
+    suspend fun saveMqttUsername(username: String) = mqttUsernamePref.save(username)
+
+    suspend fun saveMqttPassword(password: String) = mqttPasswordPref.save(password)
+
+    suspend fun saveMqttTls(enabled: Boolean) = mqttTlsPref.save(enabled)
+
+    suspend fun saveMqttDiscoveryPrefix(prefix: String) = mqttDiscoveryPrefixPref.save(prefix)
 
     suspend fun saveOverlaySettings(settings: OverlaySettings) = overlaySettingsPref.save(settings)
 

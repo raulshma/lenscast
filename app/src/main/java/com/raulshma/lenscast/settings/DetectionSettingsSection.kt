@@ -33,6 +33,8 @@ fun DetectionSettingsSection(viewModel: SettingsViewModel) {
     val armEndMinute by viewModel.motionArmEndMinute.collectAsState()
     val soundEnabled by viewModel.soundDetectionEnabled.collectAsState()
     val soundThreshold by viewModel.soundThresholdPercent.collectAsState()
+    val notificationEnabled by viewModel.detectionNotificationsEnabled.collectAsState()
+    val tamperEnabled by viewModel.tamperDetectionEnabled.collectAsState()
 
     SettingsSection(title = "Detection & Alerts") {
         // Persisted toggles: the screen writes the store, the Settings
@@ -97,6 +99,16 @@ fun DetectionSettingsSection(viewModel: SettingsViewModel) {
                 onValueChange = { viewModel.updateSoundThresholdPercent(it.toInt()) }
             )
         }
+        SwitchSetting(
+            title = "Local Alerts on Detection",
+            checked = notificationEnabled,
+            onCheckedChange = { viewModel.updateDetectionNotificationsEnabled(it) }
+        )
+        SwitchSetting(
+            title = "Tamper Detection (power cut)",
+            checked = tamperEnabled,
+            onCheckedChange = { viewModel.updateTamperDetectionEnabled(it) }
+        )
     }
 }
 

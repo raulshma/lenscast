@@ -84,11 +84,20 @@ LensCast is an Android camera application with live video/audio streaming to web
 
 ### Detection & Alerts
 - Motion detection with configurable sensitivity, detection zones, and an arm schedule (time-of-day window, midnight-wrapping)
+- Per-zone motion attribution: each event, webhook, and MQTT alert carries the labels of the zones that fired
 - Motion-triggered bounded recording with post-roll, or the legacy auto-photo mode
 - Sound detection with an RMS threshold
-- Webhook alerts (ntfy/Home Assistant/any JSON endpoint) with the trigger snapshot embedded in the JSON payload, custom headers, and automatic retries
+- Tamper detection: a power cut while streaming (a charging camera losing power) raises a tamper event — opt-in via the Tamper Detection toggle in Detection settings (off by default)
+- Local heads-up alerts per detection event with the trigger snapshot as the big picture (opt-out, runtime notification permission requested on first launch)
+- Webhook alerts (ntfy/Home Assistant/any JSON endpoint) with the trigger snapshot, triggered zone labels, and battery level embedded in the JSON payload, custom headers, and automatic retries
+- MQTT alert publishing to any broker with Home Assistant discovery: motion/sound/tamper appear as `binary_sensor` entities automatically, with retained availability and a last will (offline on ungraceful loss) — see [NVR integration](docs/nvr-integration.md)
 - On-device detection event log with a dashboard event feed (thumbnail, type, dispatched actions)
 - Automatic deterrence: optional siren and torch auto-trigger on detection, with a configurable cooldown — the siren auto-stops after its duration, while the torch stays on until turned off
+
+### Automation
+- Broadcast intents for automation apps, adb, and scripts: start/stop streaming, capture a photo, start/stop recording, set torch, set siren — `com.raulshma.lenscast.action.*`, see `automation/AutomationReceiver.kt`. Optional extras: `enabled` (boolean) makes SET_TORCH/SET_SIREN set an explicit on/off state instead of toggling, and `durationSeconds` (integer) bounds a START_RECORDING clip (0–3600) or auto-stops a SET_SIREN start (a new duration command re-arms the timer, extending a running siren)
+- The receiver is exported but permission-guarded: a sending app must declare `<uses-permission android:name="com.raulshma.lenscast.permission.AUTOMATION" />` — a `dangerous`-level permission, so a helper app must also request it at runtime (like camera access); it is not granted automatically at install. Senders that cannot hold permissions — Tasker/MacroDroid intent actions — can still reach it over adb (`adb shell am broadcast`, which sends as the exempt shell uid) or from a tiny helper app that declares and runtime-requests the permission
+- Home-screen widget with one-tap stream start/stop and photo capture, kept honest across tile and web toggles
 
 ### Backup
 - Auto-upload new captures to any WebDAV collection (Nextcloud/self-hosted) or Telegram chat (Bot API), with Wi-Fi-only mode and WorkManager-backed retries
@@ -225,7 +234,7 @@ A GitHub Actions workflow (`.github/workflows/release.yml`) automates release bu
 | `WAKE_LOCK` | Keeping the device awake during long sessions |
 | `REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` | Requesting Doze mode exemption |
 | `READ_MEDIA_IMAGES` / `READ_MEDIA_VIDEO` | Accessing captured media in gallery |
-| `POST_NOTIFICATIONS` | Foreground service notifications |
+| `POST_NOTIFICATIONS` | Foreground service notifications and local detection alerts |
 
 ---
 

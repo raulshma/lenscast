@@ -135,6 +135,19 @@ data class StreamingSettingsDto(
     val apiToken: String = "",
     val httpsEnabled: Boolean = false,
     val audioDeviceId: String = "",
+    val detectionNotificationsEnabled: Boolean = true,
+    val tamperDetectionEnabled: Boolean = false,
+    val mqttEnabled: Boolean = false,
+    val mqttBrokerHost: String = "",
+    val mqttBrokerPort: Int = StreamDefaults.MQTT_PORT_DEFAULT,
+    val mqttUsername: String = "",
+    /**
+     * Write-only, like [backupWebdavPassword]: accepted on PUT, always
+     * serialized blank in responses.
+     */
+    val mqttPassword: String = "",
+    val mqttTls: Boolean = false,
+    val mqttDiscoveryPrefix: String = StreamDefaults.MQTT_DISCOVERY_PREFIX_DEFAULT,
 )
 
 data class SettingsResponseDto(
@@ -330,6 +343,8 @@ data class DetectionEventDto(
     val timestampMs: Long,
     val snapshotJpegBase64: String? = null,
     val dispatchedActions: List<String> = emptyList(),
+    /** Labels of the motion zones that fired; empty for whole-frame or non-motion events. */
+    val zones: List<String> = emptyList(),
 )
 
 data class DetectionEventsResponseDto(

@@ -20,6 +20,8 @@ data class DetectionEvent(
     val timestampMs: Long,
     val snapshotJpegBase64: String? = null,
     val dispatchedActions: List<String> = emptyList(),
+    /** Labels of the motion zones that fired; empty for whole-frame or non-motion events. */
+    val zones: List<String> = emptyList(),
 )
 
 /**

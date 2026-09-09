@@ -59,6 +59,8 @@ class SettingsViewModel(
     val motionArmEndMinute: StateFlow<Int> = settingsDataStore.motionArmEndMinute
     val soundDetectionEnabled: StateFlow<Boolean> = settingsDataStore.soundDetectionEnabled
     val soundThresholdPercent: StateFlow<Int> = settingsDataStore.soundThresholdPercent
+    val detectionNotificationsEnabled: StateFlow<Boolean> = settingsDataStore.detectionNotificationsEnabled
+    val tamperDetectionEnabled: StateFlow<Boolean> = settingsDataStore.tamperDetectionEnabled
     val watchdogEnabled: StateFlow<Boolean> = settingsDataStore.watchdogEnabled
     val watchdogMaxRetries: StateFlow<Int> = settingsDataStore.watchdogMaxRetries
     val watchdogCheckIntervalSeconds: StateFlow<Int> = settingsDataStore.watchdogCheckIntervalSeconds
@@ -184,6 +186,12 @@ class SettingsViewModel(
     fun updateSoundDetectionEnabled(enabled: Boolean) = save { settingsDataStore.saveSoundDetectionEnabled(enabled) }
 
     fun updateSoundThresholdPercent(percent: Int) = save { settingsDataStore.saveSoundThresholdPercent(percent) }
+
+    fun updateDetectionNotificationsEnabled(enabled: Boolean) =
+        save { settingsDataStore.saveDetectionNotificationsEnabled(enabled) }
+
+    fun updateTamperDetectionEnabled(enabled: Boolean) =
+        save { settingsDataStore.saveTamperDetectionEnabled(enabled) }
 
     fun updateWatchdogEnabled(enabled: Boolean) = save { settingsDataStore.saveWatchdogEnabled(enabled) }
 

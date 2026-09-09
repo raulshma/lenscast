@@ -40,5 +40,6 @@ class DetectionEventsWebHandler(private val eventStore: DetectionEventStore) {
         timestampMs = event.timestampMs,
         snapshotJpegBase64 = event.snapshotJpegBase64,
         dispatchedActions = event.dispatchedActions,
+        zones = event.zones,
     )
 }

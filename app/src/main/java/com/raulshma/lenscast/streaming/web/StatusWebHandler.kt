@@ -49,8 +49,10 @@ class StatusWebHandler(
                 thermalName = thermalMonitor.thermalState.value.name,
             ),
             battery = StatusSnapshotBuilder.BatteryInputs(
-                level = powerManager.batteryLevel.value,
-                isCharging = powerManager.isCharging.value,
+                // Unknown level (first read pending) keeps the status DTO's
+                // non-null contract; only the event payload omits the field.
+                level = powerManager.batteryLevel.value ?: PowerManager.UNKNOWN_BATTERY_FALLBACK_PERCENT,
+                isCharging = powerManager.isChargingNow(),
                 isPowerSaveMode = powerManager.isPowerSaveMode.value,
             ),
             watchdog = StatusSnapshotBuilder.WatchdogInputs(

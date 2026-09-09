@@ -6,7 +6,8 @@
       "source": "lenscast",
       "timestampMs": 1788825600000,
       "snapshotJpegBase64": "/9j/4AAQSkZJRg==",
-      "dispatchedActions": ["recording", "webhook"]
+      "dispatchedActions": ["recording", "webhook"],
+      "zones": ["Doorway"]
     }
   ],
   "total": 1

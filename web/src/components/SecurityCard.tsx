@@ -2,6 +2,7 @@ import { createSignal, For, Show } from 'solid-js'
 import type { AllSettings, MotionZone } from '../types'
 import { API_DEFAULTS } from '../api/defaults'
 import SettingsCard from './SettingsCard'
+import ToggleRow from './ToggleRow'
 import { setSiren, setTorch } from '../api/client'
 
 interface Props {
@@ -55,7 +56,17 @@ export default function SecurityCard(props: Props) {
   const [torchBusy, setTorchBusy] = createSignal(false)
 
   const zones = () => stream()?.motionZones ?? []
+  // One reader per toggled setting: the row's `checked`, its flip, and any
+  // dependent <Show> all read the same server-or-default value.
   const motionOn = () => stream()?.motionDetectionEnabled ?? API_DEFAULTS.motionDetectionEnabled
+  const motionRecordingOn = () => stream()?.motionRecordingEnabled ?? API_DEFAULTS.motionRecordingEnabled
+  const armScheduleOn = () => stream()?.motionArmScheduleEnabled ?? API_DEFAULTS.motionArmScheduleEnabled
+  const soundOn = () => stream()?.soundDetectionEnabled ?? API_DEFAULTS.soundDetectionEnabled
+  const localAlertsOn = () => stream()?.detectionNotificationsEnabled ?? API_DEFAULTS.detectionNotificationsEnabled
+  const tamperOn = () => stream()?.tamperDetectionEnabled ?? API_DEFAULTS.tamperDetectionEnabled
+  const webhookOn = () => stream()?.webhookEnabled ?? API_DEFAULTS.webhookEnabled
+  const autoSirenOn = () => stream()?.autoSiren ?? API_DEFAULTS.autoSiren
+  const autoTorchOn = () => stream()?.autoTorch ?? API_DEFAULTS.autoTorch
 
   function toggleSiren() {
     if (sirenBusy()) return
@@ -112,18 +123,12 @@ export default function SecurityCard(props: Props) {
     >
       {/* Motion */}
       <div class="field-group">
-        <div class="field-row field-row-toggle">
-          <span class="field-label">Motion Detection</span>
-          <label class="toggle-switch" for="motion-toggle">
-            <input
-              id="motion-toggle"
-              type="checkbox"
-              checked={motionOn()}
-              onChange={() => props.updateStreamingAndSave({ motionDetectionEnabled: !motionOn() })}
-            />
-            <span class="toggle-slider" />
-          </label>
-        </div>
+        <ToggleRow
+          id="motion-toggle"
+          label="Motion Detection"
+          checked={motionOn()}
+          onToggle={() => props.updateStreamingAndSave({ motionDetectionEnabled: !motionOn() })}
+        />
       </div>
 
       <Show when={motionOn()}>
@@ -145,18 +150,12 @@ export default function SecurityCard(props: Props) {
         </div>
 
         <div class="field-group">
-          <div class="field-row field-row-toggle">
-            <span class="field-label">Record on Motion</span>
-            <label class="toggle-switch" for="motion-rec-toggle">
-              <input
-                id="motion-rec-toggle"
-                type="checkbox"
-                checked={stream()?.motionRecordingEnabled ?? API_DEFAULTS.motionRecordingEnabled}
-                onChange={() => props.updateStreamingAndSave({ motionRecordingEnabled: !(stream()?.motionRecordingEnabled ?? API_DEFAULTS.motionRecordingEnabled) })}
-              />
-              <span class="toggle-slider" />
-            </label>
-          </div>
+          <ToggleRow
+            id="motion-rec-toggle"
+            label="Record on Motion"
+            checked={motionRecordingOn()}
+            onToggle={() => props.updateStreamingAndSave({ motionRecordingEnabled: !motionRecordingOn() })}
+          />
           <div class="field-row">
             <span class="field-label">Post-roll</span>
             <span class="field-value">{stream()?.motionPostRollSeconds ?? API_DEFAULTS.motionPostRollSeconds}s</span>
@@ -175,19 +174,13 @@ export default function SecurityCard(props: Props) {
 
         {/* Arm schedule */}
         <div class="field-group">
-          <div class="field-row field-row-toggle">
-            <span class="field-label">Arm on Schedule</span>
-            <label class="toggle-switch" for="motion-schedule-toggle">
-              <input
-                id="motion-schedule-toggle"
-                type="checkbox"
-                checked={stream()?.motionArmScheduleEnabled ?? API_DEFAULTS.motionArmScheduleEnabled}
-                onChange={() => props.updateStreamingAndSave({ motionArmScheduleEnabled: !(stream()?.motionArmScheduleEnabled ?? API_DEFAULTS.motionArmScheduleEnabled) })}
-              />
-              <span class="toggle-slider" />
-            </label>
-          </div>
-          <Show when={stream()?.motionArmScheduleEnabled ?? API_DEFAULTS.motionArmScheduleEnabled}>
+          <ToggleRow
+            id="motion-schedule-toggle"
+            label="Arm on Schedule"
+            checked={armScheduleOn()}
+            onToggle={() => props.updateStreamingAndSave({ motionArmScheduleEnabled: !armScheduleOn() })}
+          />
+          <Show when={armScheduleOn()}>
             <div class="field-row">
               <span class="field-label">From</span>
               <span class="field-value">{minutesToLabel(stream()?.motionArmStartMinute ?? API_DEFAULTS.motionArmStartMinute)}</span>
@@ -260,19 +253,13 @@ export default function SecurityCard(props: Props) {
 
       {/* Sound */}
       <div class="field-group">
-        <div class="field-row field-row-toggle">
-          <span class="field-label">Sound Detection</span>
-          <label class="toggle-switch" for="sound-toggle">
-            <input
-              id="sound-toggle"
-              type="checkbox"
-              checked={stream()?.soundDetectionEnabled ?? API_DEFAULTS.soundDetectionEnabled}
-              onChange={() => props.updateStreamingAndSave({ soundDetectionEnabled: !(stream()?.soundDetectionEnabled ?? API_DEFAULTS.soundDetectionEnabled) })}
-            />
-            <span class="toggle-slider" />
-          </label>
-        </div>
-        <Show when={stream()?.soundDetectionEnabled ?? API_DEFAULTS.soundDetectionEnabled}>
+        <ToggleRow
+          id="sound-toggle"
+          label="Sound Detection"
+          checked={soundOn()}
+          onToggle={() => props.updateStreamingAndSave({ soundDetectionEnabled: !soundOn() })}
+        />
+        <Show when={soundOn()}>
           <div class="field-row">
             <span class="field-label">Trigger Threshold</span>
             <span class="field-value">{stream()?.soundThresholdPercent ?? API_DEFAULTS.soundThresholdPercent}%</span>
@@ -290,21 +277,31 @@ export default function SecurityCard(props: Props) {
         </Show>
       </div>
 
+      {/* On-device alerts and tamper */}
+      <div class="field-group">
+        <ToggleRow
+          id="local-alerts-toggle"
+          label="Local Alerts"
+          checked={localAlertsOn()}
+          onToggle={() => props.updateStreamingAndSave({ detectionNotificationsEnabled: !localAlertsOn() })}
+        />
+        <ToggleRow
+          id="tamper-toggle"
+          label="Tamper Detection"
+          checked={tamperOn()}
+          onToggle={() => props.updateStreamingAndSave({ tamperDetectionEnabled: !tamperOn() })}
+        />
+      </div>
+
       {/* Webhook alerts */}
       <div class="field-group">
-        <div class="field-row field-row-toggle">
-          <span class="field-label">Webhook Alerts</span>
-          <label class="toggle-switch" for="webhook-toggle">
-            <input
-              id="webhook-toggle"
-              type="checkbox"
-              checked={stream()?.webhookEnabled ?? API_DEFAULTS.webhookEnabled}
-              onChange={() => props.updateStreamingAndSave({ webhookEnabled: !(stream()?.webhookEnabled ?? API_DEFAULTS.webhookEnabled) })}
-            />
-            <span class="toggle-slider" />
-          </label>
-        </div>
-        <Show when={stream()?.webhookEnabled ?? API_DEFAULTS.webhookEnabled}>
+        <ToggleRow
+          id="webhook-toggle"
+          label="Webhook Alerts"
+          checked={webhookOn()}
+          onToggle={() => props.updateStreamingAndSave({ webhookEnabled: !webhookOn() })}
+        />
+        <Show when={webhookOn()}>
           <input
             id="webhook-url"
             type="url"
@@ -333,19 +330,13 @@ export default function SecurityCard(props: Props) {
 
       {/* Deterrence automation */}
       <div class="field-group">
-        <div class="field-row field-row-toggle">
-          <span class="field-label">Auto-Siren on Detection</span>
-          <label class="toggle-switch" for="auto-siren-toggle">
-            <input
-              id="auto-siren-toggle"
-              type="checkbox"
-              checked={stream()?.autoSiren ?? API_DEFAULTS.autoSiren}
-              onChange={() => props.updateStreamingAndSave({ autoSiren: !(stream()?.autoSiren ?? API_DEFAULTS.autoSiren) })}
-            />
-            <span class="toggle-slider" />
-          </label>
-        </div>
-        <Show when={stream()?.autoSiren ?? API_DEFAULTS.autoSiren}>
+        <ToggleRow
+          id="auto-siren-toggle"
+          label="Auto-Siren on Detection"
+          checked={autoSirenOn()}
+          onToggle={() => props.updateStreamingAndSave({ autoSiren: !autoSirenOn() })}
+        />
+        <Show when={autoSirenOn()}>
           <div class="field-row">
             <span class="field-label">Siren Duration</span>
             <span class="field-value">{stream()?.sirenDurationSeconds ?? API_DEFAULTS.sirenDurationSeconds}s</span>
@@ -361,18 +352,12 @@ export default function SecurityCard(props: Props) {
             onInput={(e) => props.updateStreamingDebounced({ sirenDurationSeconds: parseInt(e.currentTarget.value) })}
           />
         </Show>
-        <div class="field-row field-row-toggle">
-          <span class="field-label">Auto-Light on Detection</span>
-          <label class="toggle-switch" for="auto-torch-toggle">
-            <input
-              id="auto-torch-toggle"
-              type="checkbox"
-              checked={stream()?.autoTorch ?? API_DEFAULTS.autoTorch}
-              onChange={() => props.updateStreamingAndSave({ autoTorch: !(stream()?.autoTorch ?? API_DEFAULTS.autoTorch) })}
-            />
-            <span class="toggle-slider" />
-          </label>
-        </div>
+        <ToggleRow
+          id="auto-torch-toggle"
+          label="Auto-Light on Detection"
+          checked={autoTorchOn()}
+          onToggle={() => props.updateStreamingAndSave({ autoTorch: !autoTorchOn() })}
+        />
         <div class="field-row">
           <span class="field-label">Re-trigger Cooldown</span>
           <span class="field-value">{stream()?.autoDeterrenceCooldownSeconds ?? API_DEFAULTS.autoDeterrenceCooldownSeconds}s</span>

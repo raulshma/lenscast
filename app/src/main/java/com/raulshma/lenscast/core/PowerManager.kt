@@ -12,8 +12,12 @@ import android.os.Build
 import android.os.PowerManager as AndroidPowerManager
 import android.provider.Settings
 import android.util.Log
+import kotlinx.coroutines.channels.BufferOverflow
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 
 data class BatteryOptimizationResult(
@@ -33,14 +37,29 @@ class PowerManager(private val context: Context) {
     private var wakeLock: AndroidPowerManager.WakeLock? = null
     @Volatile private var wakeLockAcquired = false
 
-    private val _batteryLevel = MutableStateFlow(100)
-    val batteryLevel: StateFlow<Int> = _batteryLevel.asStateFlow()
+    // Null until the first battery read — the event payload omits the field
+    // for an unknown level rather than reporting a fabricated percent.
+    private val _batteryLevel = MutableStateFlow<Int?>(null)
+    val batteryLevel: StateFlow<Int?> = _batteryLevel.asStateFlow()
 
     private val _isPowerSaveMode = MutableStateFlow(false)
     val isPowerSaveMode: StateFlow<Boolean> = _isPowerSaveMode.asStateFlow()
 
-    private val _isCharging = MutableStateFlow(false)
-    val isCharging: StateFlow<Boolean> = _isCharging.asStateFlow()
+    // A buffered SharedFlow, not a StateFlow: StateFlow conflates, so a
+    // rapid connect→disconnect flip (flappy connector) would collapse to no
+    // net change and drop the tamper edge TamperMonitor exists to catch.
+    // Replay hands late collectors the current state; DROP_OLDEST keeps
+    // tryEmit (unusable-suspending from onReceive) infallible — a failed
+    // emit would drop the edge for every collector AND the replay cache.
+    private val _isCharging = MutableSharedFlow<Boolean>(
+        replay = 1,
+        extraBufferCapacity = 64,
+        onBufferOverflow = BufferOverflow.DROP_OLDEST,
+    )
+    val isCharging: SharedFlow<Boolean> = _isCharging.asSharedFlow()
+
+    /** Synchronous charging read for status snapshots; collectors use [isCharging]. */
+    fun isChargingNow(): Boolean = _isCharging.replayCache.firstOrNull() ?: false
 
     private val _optimizationResult = MutableStateFlow(
         BatteryOptimizationResult(
@@ -56,12 +75,12 @@ class PowerManager(private val context: Context) {
         override fun onReceive(context: Context?, intent: Intent?) {
             when (intent?.action) {
                 Intent.ACTION_POWER_CONNECTED -> {
-                    _isCharging.value = true
+                    _isCharging.tryEmit(true)
                     refreshOptimizationResult()
                     Log.d(TAG, "Power connected - restoring full quality")
                 }
                 Intent.ACTION_POWER_DISCONNECTED -> {
-                    _isCharging.value = false
+                    _isCharging.tryEmit(false)
                     refreshOptimizationResult()
                     Log.d(TAG, "Power disconnected - applying battery optimization")
                 }
@@ -184,24 +203,26 @@ class PowerManager(private val context: Context) {
     }
 
     fun refreshBatteryState() {
+        // getIntProperty reports Integer.MIN_VALUE when the level is unknown
+        // (no battery / not yet read) — surfaced as null, not a fake percent.
         val level = batteryManager.getIntProperty(
             android.os.BatteryManager.BATTERY_PROPERTY_CAPACITY
-        )
+        ).takeIf { it != Integer.MIN_VALUE }
         val powerSave = powerManager.isPowerSaveMode
         val charging = batteryManager.isCharging
 
         _batteryLevel.value = level
         _isPowerSaveMode.value = powerSave
-        _isCharging.value = charging
+        _isCharging.tryEmit(charging)
 
         refreshOptimizationResult()
     }
 
     private fun refreshOptimizationResult() {
         _optimizationResult.value = BatteryQualityPolicy.resolve(
-            batteryLevel = _batteryLevel.value,
+            batteryLevel = _batteryLevel.value ?: UNKNOWN_BATTERY_FALLBACK_PERCENT,
             isPowerSave = _isPowerSaveMode.value,
-            isCharging = _isCharging.value,
+            isCharging = isChargingNow(),
             inDoze = isDeviceInDozeMode(),
         )
     }
@@ -221,5 +242,14 @@ class PowerManager(private val context: Context) {
     companion object {
         private const val TAG = "PowerManager"
         private const val WAKELOCK_TIMEOUT_MS = 60 * 60 * 1000L
+
+        /**
+         * The percent a non-null surface reads while the real level is still
+         * unknown: the battery-quality policy and the status DTO keep their
+         * healthy default — a missing reading must not read as a critical
+         * battery. The event payload is not a non-null surface; it omits the
+         * field instead.
+         */
+        const val UNKNOWN_BATTERY_FALLBACK_PERCENT = 100
     }
 }

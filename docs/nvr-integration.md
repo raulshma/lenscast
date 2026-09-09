@@ -105,9 +105,11 @@ heats up.
 
 ## ntfy / webhooks
 
-When motion or sound detection fires (and the event is inside the arm
-schedule), LensCast POSTs JSON to the configured webhook URL
-(`webhookEnabled` / `webhookUrl` in streaming settings). Delivery retries up
+When a detection event fires, LensCast POSTs JSON to the configured webhook
+URL (`webhookEnabled` / `webhookUrl` in streaming settings). Motion and
+sound events are gated by the arm schedule; tamper (power disconnected
+while a stream is live) dispatches immediately, outside the schedule.
+Delivery retries up
 to three attempts with a linear backoff (2 s, then 4 s). The event feed's
 `webhook` badge records that a dispatch went out for the event; a delivery
 that exhausts the retry ladder surfaces as a device-log warning, not a feed
@@ -131,28 +133,33 @@ Payload shape (current fields):
   "value": 12.34,
   "timestampMs": 1725800000000,
   "source": "lenscast",
-  "snapshotJpeg": "<base64 JPEG, when the frame fits the 40 KB cap>"
+  "zones": ["Doorway"],
+  "batteryPercent": 87,
+  "snapshotJpeg": "<base64 JPEG, when the base64 text fits the 40,000-character cap (~30 KB of JPEG)>"
 }
 ```
 
-- `type` — `"motion"` or `"sound"`.
+- `type` — `"motion"`, `"sound"`, or `"tamper"` (power disconnected while a
+  stream is live).
 - `value` — the detector metric: frame delta for motion, RMS percent for
-  sound.
+  sound, battery percent for tamper (`0` when the level is unknown — the
+  field is always present; `batteryPercent` below is the one that omits).
 - `timestampMs` — epoch milliseconds at the event.
 - `source` — always `"lenscast"`.
-- `batteryPercent` — reserved and omitted on the wire (null fields are not
-  serialized) until detection events populate it.
+- `zones` — labels of the motion zones that fired; `[]` for whole-frame or
+  non-motion events, so automations can attribute motion to a named region.
+- `batteryPercent` — device battery level at trigger time (omitted when
+  unknown).
 - `snapshotJpeg` — base64-encoded downscaled JPEG (~640 px wide, quality 60)
-  grabbed from the live stream at trigger time. When the encoding misses the
-  40 KB cap, it is re-encoded at progressively halved decode sizes until it
+  grabbed from the live stream at trigger time. When the base64 text exceeds
+  the 40,000-character cap (~30 KB of JPEG), it is re-encoded at
+  progressively halved decode sizes until it
   fits (a busy scene ships a smaller thumbnail, never a truncated one);
   omitted when no frame is available or even the smallest decode exceeds the
   cap. Detection events
   are also kept in an on-device log served by `GET /api/detection/events`
   (clearable with `DELETE`), so the dashboard's event feed can show them
-  even without a webhook endpoint. Events recorded today always cover the
-  whole frame; per-zone attribution is future work — the feed and payload
-  carry no zone fields yet.
+  even without a webhook endpoint.
 
 Recipe — ntfy: point `webhookUrl` at a topic URL, e.g.
 `https://ntfy.example.com/lenscast`. The JSON body arrives as the message
@@ -174,3 +181,35 @@ automation:
           title: "LensCast {{ trigger.json.type }}"
           message: "value={{ trigger.json.value }}"
 ```
+
+## MQTT (Home Assistant discovery)
+
+When MQTT is enabled (`mqttEnabled` plus `mqttBrokerHost`/`mqttBrokerPort`,
+optionally `mqttUsername`, `mqttTls`, `mqttPassword` — write-only like the
+backup credentials; the credentials travel as a pair, since MQTT 3.1.1
+forbids a password without a username — and `mqttDiscoveryPrefix`, the HA
+discovery root, default `homeassistant`), LensCast connects to the broker
+(QoS 1 publishes, 60 s keepalive) and turns its detection events into Home
+Assistant `binary_sensor` entities via MQTT discovery:
+
+- Discovery configs (retained) are published under
+  `<discoveryPrefix>/binary_sensor/lenscast_<deviceId>_{motion,sound,tamper}/config`
+  — one sensor per kind, each with an `off_delay` that auto-resets the ON
+  pulse (30 s motion, 5 s sound, 60 s tamper).
+- Per event, the sensor's state topic receives an `ON` pulse and the event
+  topic `<discoveryPrefix>/lenscast/<deviceId>/event` receives the same JSON
+  payload as the webhook (zones and snapshot included).
+- Availability `<discoveryPrefix>/lenscast/<deviceId>/status` is retained
+  (`online`), with a retained `offline` last will — so a device that dies
+  without a goodbye shows unavailable in HA, and a broker restart replays
+  the true state. Turning MQTT off also publishes a retained `offline` and
+  clears the retained discovery configs (empty retained payloads) before
+  disconnecting, so the entities never outlive the setting; changing the
+  discovery prefix or broker clears the old configs the same way before
+  re-announcing under the new ones.
+
+`<deviceId>` is the install-scoped Android ID (a persisted random id on
+the rare install where ANDROID_ID is unreadable, so two such devices
+never share one MQTT client id). Enabling MQTT requires no
+extra apps: point it at any broker (Mosquitto, Home Assistant's built-in
+broker, a cloud broker) and the entities appear automatically.

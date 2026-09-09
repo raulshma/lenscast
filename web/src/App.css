@@ -2043,6 +2043,11 @@ html, body {
   background: rgba(52, 211, 153, 0.12);
 }
 
+.event-badge-tamper {
+  color: var(--lc-danger, #f43f5e);
+  background: rgba(244, 63, 94, 0.12);
+}
+
 .event-feed-time {
   font-size: 11px;
   font-family: ui-monospace, monospace;
@@ -2057,6 +2062,17 @@ html, body {
   text-transform: uppercase;
   letter-spacing: 0.5px;
   color: var(--lc-text-dim);
+}
+
+.event-zone-chip {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--lc-text-dim);
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--lc-border);
+  border-radius: 999px;
+  padding: 1px 8px;
+  flex-shrink: 0;
 }
 
 .field-input-full {

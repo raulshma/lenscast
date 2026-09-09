@@ -61,6 +61,62 @@ class MotionEventPolicyGridTest {
     }
 
     @Test
+    fun `firing zone is attributed by label`() {
+        val zones = listOf(
+            MotionZone(label = "Doorway", x = 0.75f, y = 0.75f, width = 0.25f, height = 0.25f, enabled = true),
+            MotionZone(label = "Window", x = 0f, y = 0f, width = 0.25f, height = 0.25f, enabled = true),
+        )
+        val verdict = MotionEventPolicy.evaluateGrid(
+            lastGrid = grid(), currentGrid = hotTile(cols - 1, rows - 1),
+            zones = zones, nowMs = 100_000, lastFireMs = 0,
+            framesSeen = MotionEventPolicy.WARMUP_FRAMES,
+        )
+        assertTrue(verdict.fire)
+        assertEquals(listOf("Doorway"), verdict.zones)
+    }
+
+    @Test
+    fun `two hot tiles attribute both zones`() {
+        val zones = listOf(
+            MotionZone(label = "Doorway", x = 0.75f, y = 0.75f, width = 0.25f, height = 0.25f, enabled = true),
+            MotionZone(label = "Window", x = 0f, y = 0f, width = 0.25f, height = 0.25f, enabled = true),
+        )
+        val current = hotTile(cols - 1, rows - 1).also { it[0] = 30.0 }
+        val verdict = MotionEventPolicy.evaluateGrid(
+            lastGrid = grid(), currentGrid = current,
+            zones = zones, nowMs = 100_000, lastFireMs = 0,
+            framesSeen = MotionEventPolicy.WARMUP_FRAMES,
+        )
+        assertTrue(verdict.fire)
+        // Order follows zone scan order (top-left tile first), not label order.
+        assertEquals(listOf("Window", "Doorway"), verdict.zones)
+    }
+
+    @Test
+    fun `whole-frame fire with no zones attributes nothing`() {
+        val verdict = MotionEventPolicy.evaluateGrid(
+            lastGrid = grid(), currentGrid = hotTile(3, 3),
+            zones = emptyList(), nowMs = 100_000, lastFireMs = 0,
+            framesSeen = MotionEventPolicy.WARMUP_FRAMES,
+        )
+        assertTrue(verdict.fire)
+        assertTrue(verdict.zones.isEmpty())
+    }
+
+    @Test
+    fun `sub-threshold breach attributes no zone even when a tile is warm`() {
+        val zones = listOf(MotionZone(label = "Window", x = 0f, y = 0f, width = 0.25f, height = 0.25f, enabled = true))
+        val verdict = MotionEventPolicy.evaluateGrid(
+            lastGrid = grid(), currentGrid = hotTile(0, 0, value = 16.0),
+            zones = zones, nowMs = 100_000, lastFireMs = 0,
+            threshold = 18.0, // delta 16 stays under the gate: no fire, no attribution
+            framesSeen = MotionEventPolicy.WARMUP_FRAMES,
+        )
+        assertFalse(verdict.fire)
+        assertTrue(verdict.zones.isEmpty())
+    }
+
+    @Test
     fun `disabled zones do not gate detection`() {
         val zones = listOf(MotionZone(x = 0f, y = 0f, width = 0.25f, height = 0.25f, enabled = false))
         val verdict = MotionEventPolicy.evaluateGrid(

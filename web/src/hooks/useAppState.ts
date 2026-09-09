@@ -287,18 +287,6 @@ export function useAppState() {
   }
 
   // ── Stream actions ──
-  function handleStopStream() {
-    return runStreamAction(api.stopStream, {
-      fallbackError: 'Failed to stop stream', previewTo: false, bumpNonce: true,
-    })
-  }
-
-  function handleResumeStream() {
-    return runStreamAction(api.startStream, {
-      fallbackError: 'Failed to resume stream', previewTo: true, bumpNonce: true,
-    })
-  }
-
   function handleStartWebStream() {
     return runStreamAction(api.startWebStream, {
       fallbackError: 'Failed to start web stream', previewTo: true, bumpNonce: true,
@@ -479,7 +467,6 @@ export function useAppState() {
     liveAudioStatus,
     // Actions
     handleCapture, handleSelectLens, handleResetDefaults,
-    handleStopStream, handleResumeStream,
     handleStartWebStream, handleStopWebStream,
     handleStartRtspStream, handleStopRtspStream,
     handleStartIntervalCapture, handleStopIntervalCapture,

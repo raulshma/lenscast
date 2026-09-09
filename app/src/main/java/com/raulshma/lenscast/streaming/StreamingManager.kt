@@ -245,18 +245,15 @@ class StreamingManager(
         emptyList()
     }
 
-    // ── Detection events: motion + sound funnel into one typed listener seam ──
+    // ── Detection events: each detector hands its event to its typed listener ──
     private val motionDetector = com.raulshma.lenscast.capture.MotionDetector(
-        onMotion = { delta ->
-            detectionListener?.invoke(com.raulshma.lenscast.capture.DetectionCoordinator.EVENT_TYPE_MOTION, delta)
-        },
+        onMotion = { delta, zones -> motionListener?.invoke(delta, zones) },
     )
     private val soundDetector = com.raulshma.lenscast.capture.SoundDetector(
-        listener = { rms ->
-            detectionListener?.invoke(com.raulshma.lenscast.capture.DetectionCoordinator.EVENT_TYPE_SOUND, rms)
-        },
+        listener = { rms -> soundListener?.invoke(rms) },
     )
-    @Volatile private var detectionListener: ((type: String, value: Double) -> Unit)? = null
+    @Volatile private var motionListener: ((delta: Double, zones: List<String>) -> Unit)? = null
+    @Volatile private var soundListener: ((rmsPercent: Double) -> Unit)? = null
 
     init {
         audioStreamingManager.setChunkListener { pcm16 -> soundDetector.feed(pcm16) }
@@ -288,9 +285,13 @@ class StreamingManager(
         soundDetector.thresholdPercent = thresholdPercent
     }
 
-    /** One event vocabulary for motion and sound; wired once at the composition root. */
-    fun setDetectionListener(listener: ((type: String, value: Double) -> Unit)?) {
-        detectionListener = listener
+    /** The detector seams; wired once at the composition root. */
+    fun setMotionListener(listener: ((delta: Double, zones: List<String>) -> Unit)?) {
+        motionListener = listener
+    }
+
+    fun setSoundListener(listener: ((rmsPercent: Double) -> Unit)?) {
+        soundListener = listener
     }
 
     /** The shared siren for the web toggle and detection automation — one audio owner. */

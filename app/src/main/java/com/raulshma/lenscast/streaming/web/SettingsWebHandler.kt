@@ -105,6 +105,16 @@ class SettingsWebHandler(private val settingsDataStore: SettingsDataStore) {
                 apiToken = "",
                 httpsEnabled = store.httpsEnabled.value,
                 audioDeviceId = store.audioDeviceId.value,
+                detectionNotificationsEnabled = store.detectionNotificationsEnabled.value,
+                tamperDetectionEnabled = store.tamperDetectionEnabled.value,
+                mqttEnabled = store.mqttEnabled.value,
+                mqttBrokerHost = store.mqttBrokerHost.value,
+                mqttBrokerPort = store.mqttBrokerPort.value,
+                mqttUsername = store.mqttUsername.value,
+                // Write-only, like backupWebdavPassword: blank in every response.
+                mqttPassword = "",
+                mqttTls = store.mqttTls.value,
+                mqttDiscoveryPrefix = store.mqttDiscoveryPrefix.value,
             ),
         )
         return responseAdapter.toJson(response)
@@ -188,6 +198,19 @@ class SettingsWebHandler(private val settingsDataStore: SettingsDataStore) {
             settingsDataStore.saveTelegramChatId(stream.telegramChatId)
             settingsDataStore.saveHttpsEnabled(stream.httpsEnabled)
             settingsDataStore.saveAudioDeviceId(stream.audioDeviceId)
+            settingsDataStore.saveDetectionNotificationsEnabled(stream.detectionNotificationsEnabled)
+            settingsDataStore.saveTamperDetectionEnabled(stream.tamperDetectionEnabled)
+            settingsDataStore.saveMqttEnabled(stream.mqttEnabled)
+            settingsDataStore.saveMqttBrokerHost(stream.mqttBrokerHost)
+            settingsDataStore.saveMqttBrokerPort(stream.mqttBrokerPort)
+            settingsDataStore.saveMqttUsername(stream.mqttUsername)
+            settingsDataStore.saveMqttTls(stream.mqttTls)
+            settingsDataStore.saveMqttDiscoveryPrefix(stream.mqttDiscoveryPrefix)
+            // Same write-only contract as the WebDAV password: an empty value
+            // keeps the stored credential.
+            if (stream.mqttPassword.isNotEmpty()) {
+                settingsDataStore.saveMqttPassword(stream.mqttPassword)
+            }
             // An empty password on update means "keep the stored one" so the
             // dashboard never needs to round-trip the secret.
             if (stream.backupWebdavPassword.isNotEmpty()) {

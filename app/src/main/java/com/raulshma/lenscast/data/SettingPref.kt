@@ -73,11 +73,15 @@ internal fun longPref(key: Preferences.Key<Long>, default: Long): SettingPref<Lo
     encode = { prefs, value -> prefs[key] = value },
 )
 
-/** String setting: absent decodes to [default]; stored raw. */
-internal fun stringPref(key: Preferences.Key<String>, default: String): SettingPref<String> = SettingPref(
+/** String setting: absent decodes to [default]; stored raw unless [normalize] is given. */
+internal fun stringPref(
+    key: Preferences.Key<String>,
+    default: String,
+    normalize: (String) -> String = { it },
+): SettingPref<String> = SettingPref(
     default = default,
     decode = { prefs -> prefs[key] ?: default },
-    encode = { prefs, value -> prefs[key] = value },
+    encode = { prefs, value -> prefs[key] = normalize(value) },
 )
 
 /**

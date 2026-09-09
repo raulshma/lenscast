@@ -15,6 +15,7 @@ import androidx.camera.core.ImageCapture
 import androidx.camera.core.ImageProxy
 import androidx.camera.core.Preview
 import androidx.camera.core.SurfaceOrientedMeteringPointFactory
+import androidx.camera.core.TorchState
 import androidx.camera.core.resolutionselector.ResolutionSelector
 import androidx.camera.core.resolutionselector.ResolutionStrategy
 import androidx.camera.lifecycle.ProcessCameraProvider
@@ -208,6 +209,9 @@ class CameraService(private val context: Context) {
             false
         }
     }
+
+    /** Toggle source of truth: the live CameraX torch, not the persisted setting (deterrence drives torch without persisting). */
+    fun isTorchOn(): Boolean = camera?.cameraInfo?.torchState?.value == TorchState.ON
 
     /**
      * The one MeteringDecision → CameraX translation, shared by tap-to-focus

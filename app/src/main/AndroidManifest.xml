@@ -24,6 +24,19 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.BIND_QUICK_SETTINGS_TILE" />
+    <uses-permission android:name="com.raulshma.lenscast.permission.AUTOMATION" />
+
+    <!--
+      Guards the exported AutomationReceiver, so arbitrary apps cannot drive
+      the camera, the recorder, or the siren. Dangerous level: a sender app
+      is granted it only after a runtime request (Android 6+), never at
+      install; adb sends as the exempt shell uid.
+    -->
+    <permission
+        android:name="com.raulshma.lenscast.permission.AUTOMATION"
+        android:label="@string/automation_permission_label"
+        android:description="@string/automation_permission_description"
+        android:protectionLevel="dangerous" />
 
     <application
         android:name=".MainApplication"
@@ -89,6 +102,46 @@
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
             </intent-filter>
+        </receiver>
+
+        <!--
+          External automation surface (Tasker/MacroDroid/adb). Exported, but
+          guarded by a dangerous custom permission (declared at manifest
+          level, above): an unguarded exported receiver would let any
+          installed app silently start the camera, trigger recordings, or
+          fire the siren. Automation senders declare
+          `<uses-permission android:name="com.raulshma.lenscast.permission.AUTOMATION" />`
+          (dangerous level, so a helper app must also request it at runtime,
+          like camera access — it is not granted at install);
+          adb sends as shell/root, which the system exempts. This app holds
+          its own declared permission for the widget's explicit broadcasts.
+        -->
+        <receiver
+            android:name=".automation.AutomationReceiver"
+            android:enabled="true"
+            android:exported="true"
+            android:permission="com.raulshma.lenscast.permission.AUTOMATION">
+            <intent-filter>
+                <action android:name="com.raulshma.lenscast.action.START_STREAM" />
+                <action android:name="com.raulshma.lenscast.action.STOP_STREAM" />
+                <action android:name="com.raulshma.lenscast.action.CAPTURE_PHOTO" />
+                <action android:name="com.raulshma.lenscast.action.START_RECORDING" />
+                <action android:name="com.raulshma.lenscast.action.STOP_RECORDING" />
+                <action android:name="com.raulshma.lenscast.action.SET_TORCH" />
+                <action android:name="com.raulshma.lenscast.action.SET_SIREN" />
+            </intent-filter>
+        </receiver>
+
+        <receiver
+            android:name=".streaming.StreamWidgetProvider"
+            android:enabled="true"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/stream_widget_info" />
         </receiver>
 
         <service

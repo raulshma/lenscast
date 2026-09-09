@@ -3,6 +3,7 @@ package com.raulshma.lenscast.settings
 import android.util.Log
 import com.raulshma.lenscast.camera.CameraService
 import com.raulshma.lenscast.core.StreamWatchdog
+import com.raulshma.lenscast.core.mqtt.MqttAlertPublisher
 import com.raulshma.lenscast.data.SettingsDataStore
 import com.raulshma.lenscast.streaming.StreamingManager
 import com.raulshma.lenscast.streaming.rtsp.RtspInputFormat
@@ -11,6 +12,7 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.merge
 import kotlinx.coroutines.launch
 
 /**
@@ -27,6 +29,7 @@ class SettingsApplier(
     private val cameraService: CameraService,
     private val streamingManager: StreamingManager,
     private val streamWatchdog: StreamWatchdog,
+    private val mqttAlertPublisher: MqttAlertPublisher,
 ) {
 
     fun start(scope: CoroutineScope) {
@@ -184,6 +187,30 @@ class SettingsApplier(
                 streamWatchdog.setEnabled(watchdog.enabled)
                 streamWatchdog.setMaxRetries(watchdog.maxRetries)
                 streamWatchdog.setCheckIntervalSeconds(watchdog.checkInterval)
+            }
+        }
+
+        // MQTT alerting: any MQTT setting change runs the connection
+        // lifecycle rule — enabled and hosted connects and announces
+        // (idempotent under an unchanged config; a changed one reconnects
+        // under it), disabled closes (a retained `offline` plus discovery
+        // clears, so the HA entities never outlive the setting). The
+        // per-dispatch config read stays the publisher's own live-read.
+        scope.launch {
+            merge(
+                settingsDataStore.mqttEnabled,
+                settingsDataStore.mqttBrokerHost,
+                settingsDataStore.mqttBrokerPort,
+                settingsDataStore.mqttUsername,
+                settingsDataStore.mqttPassword,
+                settingsDataStore.mqttTls,
+                settingsDataStore.mqttDiscoveryPrefix,
+            ).collect {
+                if (settingsDataStore.mqttEnabled.value) {
+                    mqttAlertPublisher.start()
+                } else {
+                    mqttAlertPublisher.close()
+                }
             }
         }
 

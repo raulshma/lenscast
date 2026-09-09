@@ -38,13 +38,6 @@ class WebhookNotifier(
         val queuedAtMs: Long,
     )
 
-    data class EventPayload(
-        val type: String,
-        val rmsOrDelta: Double,
-        val batteryPercent: Int? = null,
-        val snapshotJpegBase64: String? = null,
-    )
-
     /**
      * Queue the event for dispatch. True when a dispatch actually went out —
      * or waits in the single slot behind a live one — giving the caller (the
@@ -52,10 +45,10 @@ class WebhookNotifier(
      * log at dispatch time, not minutes earlier while a snapshot encodes.
      * False when the notifier no-ops: disabled, or a non-HTTP URL.
      */
-    fun notifyEvent(event: EventPayload, headers: Map<String, String> = emptyMap()): Boolean {
+    fun notifyEvent(alert: DetectionAlert, headers: Map<String, String> = emptyMap()): Boolean {
         val (enabled, url) = configProvider()
         if (!willDispatch(enabled, url)) return false
-        dispatch(PendingDispatch(url.trim(), buildBody(event), headers, clockMs()))
+        dispatch(PendingDispatch(url.trim(), buildBody(alert), headers, clockMs()))
         return true
     }
 
@@ -107,33 +100,8 @@ class WebhookNotifier(
         next
     }
 
-    private val bodyAdapter by lazy { AppJson.moshi.adapter(WireBody::class.java) }
-
-    private fun buildBody(event: EventPayload): ByteArray {
-        // Serialized through the one Moshi instance: locale-independent
-        // number formatting and real string escaping — hand-concatenation
-        // emitted invalid JSON under comma-decimal locales.
-        return bodyAdapter.toJson(
-            WireBody(
-                type = event.type,
-                value = event.rmsOrDelta,
-                timestampMs = clockMs(),
-                source = SOURCE,
-                batteryPercent = event.batteryPercent,
-                snapshotJpeg = event.snapshotJpegBase64,
-            ),
-        ).toByteArray(Charsets.UTF_8)
-    }
-
-    /** The wire shape: `value`/`timestampMs`/`source` naming over [EventPayload]'s detector-facing fields. */
-    private data class WireBody(
-        val type: String,
-        val value: Double,
-        val timestampMs: Long,
-        val source: String,
-        val batteryPercent: Int?,
-        val snapshotJpeg: String?,
-    )
+    private fun buildBody(alert: DetectionAlert): ByteArray =
+        DetectionEventWire.encode(alert)
 
     private fun post(url: String, body: ByteArray, headers: Map<String, String>): Int {
         val connection = (java.net.URI(url).toURL().openConnection() as java.net.HttpURLConnection).apply {
@@ -165,7 +133,6 @@ class WebhookNotifier(
 
     companion object {
         private const val TAG = "WebhookNotifier"
-        private const val SOURCE = "lenscast"
 
         private val headersAdapter by lazy {
             AppJson.moshi.adapter<Map<String, String>>(

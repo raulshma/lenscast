@@ -156,13 +156,6 @@ export async function capturePhoto(): Promise<{ success: boolean; fileName?: str
   return requestJson('/api/capture', { method: 'POST' })
 }
 
-export async function downloadHighResSnapshot(saveToDisk: boolean = false): Promise<string> {
-  const params = new URLSearchParams()
-  params.set('highres', '1')
-  if (saveToDisk) params.set('save', '1')
-  return `/snapshot?${params.toString()}`
-}
-
 export async function getLenses(): Promise<LensesResponse> {
   return requestJson('/api/camera/lenses')
 }
@@ -173,14 +166,6 @@ export async function selectLens(index: number): Promise<{ success: boolean }> {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ index }),
   })
-}
-
-export async function stopStream(): Promise<{ success: boolean; isActive?: boolean; error?: string }> {
-  return requestJson('/api/stream/stop', { method: 'POST' })
-}
-
-export async function startStream(): Promise<{ success: boolean; isActive?: boolean; url?: string; error?: string }> {
-  return requestJson('/api/stream/start', { method: 'POST' })
 }
 
 export async function startWebStream(): Promise<{ success: boolean; isActive?: boolean; url?: string; error?: string }> {

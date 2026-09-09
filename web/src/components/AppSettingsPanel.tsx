@@ -5,6 +5,7 @@ import SettingsCard from './SettingsCard'
 import SecurityCard from './SecurityCard'
 import EventFeed from './EventFeed'
 import BackupCard from './BackupCard'
+import MqttCard from './MqttCard'
 import AuthCard from './AuthCard'
 
 interface Props {
@@ -338,6 +339,12 @@ export default function AppSettingsPanel(props: Props) {
       <EventFeed />
 
       <BackupCard
+        settings={props.settings}
+        updateStreamingAndSave={props.updateStreamingAndSave}
+        updateStreamingDebounced={props.updateStreamingDebounced}
+      />
+
+      <MqttCard
         settings={props.settings}
         updateStreamingAndSave={props.updateStreamingAndSave}
         updateStreamingDebounced={props.updateStreamingDebounced}

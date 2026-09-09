@@ -1,12 +1,19 @@
 package com.raulshma.lenscast.capture
 
 import android.util.Log
+import com.raulshma.lenscast.camera.CameraService
+import com.raulshma.lenscast.core.DetectionAlert
+import com.raulshma.lenscast.core.EventKind
+import com.raulshma.lenscast.core.SirenAutoStop
 import com.raulshma.lenscast.core.WebhookNotifier
+import com.raulshma.lenscast.core.mqtt.MqttAlertPublisher
+import com.raulshma.lenscast.capture.model.RecordingConfig
+import com.raulshma.lenscast.capture.model.RecordingQuality
 import com.raulshma.lenscast.data.SettingsDataStore
+import com.raulshma.lenscast.streaming.StreamingManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.util.UUID
 
@@ -33,8 +40,12 @@ class DetectionCoordinator(
     private val photoCaptureManager: PhotoCaptureManager,
     private val webhookNotifier: WebhookNotifier,
     private val eventStore: DetectionEventStore,
-    private val streamingManager: () -> com.raulshma.lenscast.streaming.StreamingManager?,
-    private val cameraService: () -> com.raulshma.lenscast.camera.CameraService?,
+    private val streamingManager: () -> StreamingManager?,
+    private val cameraService: () -> CameraService?,
+    private val mqttPublisher: () -> MqttAlertPublisher? = { null },
+    private val detectionNotifier: () -> DetectionNotifier? = { null },
+    private val batteryPercent: () -> Int? = { null },
+    private val sirenAutoStop: SirenAutoStop,
     private val nowMs: () -> Long = System::currentTimeMillis,
     private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
 ) {
@@ -46,9 +57,6 @@ class DetectionCoordinator(
     /** Serializes the decide-and-claim step of [runAutoDeterrence]. */
     private val deterrenceLock = Any()
 
-    /** The scheduled auto-stop of the currently (or most recently) started siren. */
-    private var sirenStopJob: kotlinx.coroutines.Job? = null
-
     /** A cooldown claim in flight, kept so a nothing-fired dispatch can roll it back. */
     private class DeterrenceClaim(
         val verdict: DeterrenceAutomationPolicy.Verdict,
@@ -57,24 +65,50 @@ class DetectionCoordinator(
     )
 
     /** Motion event entry point (wired from StreamingManager's detector). */
-    fun onMotion(delta: Double) = onEvent(EVENT_TYPE_MOTION, delta)
+    fun onMotion(delta: Double, zones: List<String> = emptyList()) =
+        onEvent(EventKind.MOTION, delta, zones)
 
     /** Sound event entry point (wired from the audio reader's detector). */
-    fun onSound(rmsPercent: Double) = onEvent(EVENT_TYPE_SOUND, rmsPercent)
+    fun onSound(rmsPercent: Double) = onEvent(EventKind.SOUND, rmsPercent)
 
-    private fun onEvent(type: String, value: Double) {
+    /**
+     * Tamper event entry point (wired from [TamperMonitor]): a power cut on a
+     * live, charging camera. Tamper bypasses the arm schedule — that schedule
+     * is a motion concept, and yanked power is never "outside the window" —
+     * and triggers no motion recording or auto-photo; it still alerts
+     * everywhere and can fire the deterrence automation.
+     */
+    fun onTamper(batteryPercentValue: Int?) = onEvent(
+        EventKind.TAMPER,
+        // The metric column is non-null; an unknown level reads 0 there while
+        // the payload's batteryPercent field carries the honest omission.
+        batteryPercentValue?.toDouble() ?: 0.0,
+        zones = emptyList(),
+        respectSchedule = false,
+    )
+
+    private fun onEvent(
+        kind: EventKind,
+        value: Double,
+        zones: List<String> = emptyList(),
+        respectSchedule: Boolean = true,
+    ) {
+        // One event-moment stamp: the alert (webhook + MQTT bodies) and the
+        // persisted log entry all read it, so every sink reports the same
+        // timestamp instead of each re-reading a clock at its own queue time.
+        val eventTimeMs = nowMs()
         val store = settingsDataStore
-        val armed = MotionArmingPolicy.isArmed(
+        val armed = !respectSchedule || MotionArmingPolicy.isArmed(
             detectionEnabled = true,
             scheduleEnabled = store.motionArmScheduleEnabled.value,
             startMinute = store.motionArmStartMinute.value,
             endMinute = store.motionArmEndMinute.value,
             minuteOfDay = currentMinuteOfDay(),
         )
-        Log.d(TAG, "Detection event ($type=${String.format(java.util.Locale.US, "%.1f", value)}, armed=$armed)")
+        Log.d(TAG, "Detection event (${kind.wireName}=${String.format(java.util.Locale.US, "%.1f", value)}, zones=$zones, armed=$armed)")
 
         val dispatchedActions = mutableListOf<String>()
-        if (type == EVENT_TYPE_MOTION) {
+        if (kind == EventKind.MOTION) {
             val action = DetectionEventPolicy.recordingAction(
                 motionRecordingEnabled = store.motionRecordingEnabled.value,
                 armed = armed,
@@ -109,19 +143,35 @@ class DetectionCoordinator(
                         streamingManager()?.latestWebFrame(),
                     )
                 }.getOrNull()
+                // One alert shape feeds every sink — webhook, MQTT, local
+                // notification, and the persisted log entry all read the
+                // same event.
+                val alert = DetectionAlert(
+                    kind = kind,
+                    value = value,
+                    zones = zones,
+                    batteryPercent = batteryPercent(),
+                    snapshotJpegBase64 = snapshot,
+                    timestampMs = eventTimeMs,
+                )
                 // "Webhook" is claimed from the notifier's own go/no-go at
                 // dispatch time: the settings can flip while the snapshot
                 // encodes, and the log must follow the verdict the notifier
                 // actually acted on, not a pre-encode one.
                 val webhookDispatched = webhookNotifier.notifyEvent(
-                    WebhookNotifier.EventPayload(
-                        type = type,
-                        rmsOrDelta = value,
-                        snapshotJpegBase64 = snapshot,
-                    ),
+                    alert,
                     headers = WebhookNotifier.parseHeaders(store.webhookHeaders.value),
                 )
                 if (webhookDispatched) dispatchedActions.add(ACTION_WEBHOOK)
+                // Same claim contract as the webhook: the MQTT verdict is the
+                // publisher's own would-publish decision.
+                val mqttPublished = mqttPublisher()?.notifyEvent(alert) == true
+                if (mqttPublished) dispatchedActions.add(ACTION_MQTT)
+                // The local alert claims only when the platform accepted the
+                // post (the runtime permission gates it on API 33+).
+                val notified = store.detectionNotificationsEnabled.value &&
+                    detectionNotifier()?.notify(kind, zones, snapshot) == true
+                if (notified) dispatchedActions.add(ACTION_NOTIFY)
                 // The deterrence verdict lands before the log write so the
                 // recorded entry lists every action the event dispatched.
                 runAutoDeterrence(dispatchedActions)
@@ -129,11 +179,12 @@ class DetectionCoordinator(
                     eventStore.record(
                         DetectionEvent(
                             id = UUID.randomUUID().toString(),
-                            type = type,
+                            type = kind.wireName,
                             source = SOURCE,
-                            timestampMs = nowMs(),
+                            timestampMs = eventTimeMs,
                             snapshotJpegBase64 = snapshot,
                             dispatchedActions = dispatchedActions.toList(),
+                            zones = zones,
                         ),
                     )
                 }.onFailure { Log.w(TAG, "Event log write failed: ${it.message}") }
@@ -170,17 +221,12 @@ class DetectionCoordinator(
                     .onSuccess {
                         dispatchedActions.add(ACTION_SIREN)
                         deterred = true
-                        // Cancel any earlier auto-stop before scheduling this
-                        // one: the siren duration can outlive the cooldown, so
-                        // an uncancelled stop from an older dispatch would cut
-                        // the newer siren short.
-                        sirenStopJob?.cancel()
-                        sirenStopJob = scope.launch {
-                            delay(claim.verdict.sirenDurationMs)
-                            // SirenPlayer.stop() is always safe and no-ops when the
-                            // user already stopped it.
-                            siren.stop()
-                        }
+                        // The timer replaces (never stacks) per run: the siren
+                        // duration can outlive the cooldown, so an uncancelled
+                        // stop from an older dispatch would cut the newer
+                        // siren short. Concurrent dispatches are safe — the
+                        // timer serializes its own cancel/replace.
+                        sirenAutoStop.armAfterStart(claim.verdict.sirenDurationMs) { siren.stop() }
                     }
                     .onFailure { Log.w(TAG, "Auto-siren failed: ${it.message}") }
             }
@@ -228,10 +274,10 @@ class DetectionCoordinator(
         val postRoll = store.motionPostRollSeconds.value
         val duration = (if (postRoll < MIN_CLIP_SECONDS) MIN_CLIP_SECONDS else postRoll).toLong()
         recordingController.start(
-            com.raulshma.lenscast.capture.model.RecordingConfig(
+            RecordingConfig(
                 durationSeconds = duration,
                 repeatIntervalSeconds = 0,
-                quality = com.raulshma.lenscast.capture.model.RecordingQuality.HIGH,
+                quality = RecordingQuality.HIGH,
                 includeAudio = store.recordingAudioEnabled.value,
             ),
         )
@@ -301,8 +347,6 @@ class DetectionCoordinator(
     companion object {
         private const val TAG = "DetectionCoordinator"
         private const val SOURCE = "lenscast"
-        const val EVENT_TYPE_MOTION = "motion"
-        const val EVENT_TYPE_SOUND = "sound"
         private const val MIN_CLIP_SECONDS = 5
 
         /** The thumbnail ladder's floor: at or under a 1/32-width decode the gate always passes, so stop. */
@@ -312,6 +356,8 @@ class DetectionCoordinator(
         const val ACTION_RECORDING = "recording"
         const val ACTION_PHOTO = "photo"
         const val ACTION_WEBHOOK = "webhook"
+        const val ACTION_MQTT = "mqtt"
+        const val ACTION_NOTIFY = "notify"
         const val ACTION_SIREN = "siren"
         const val ACTION_TORCH = "torch"
     }

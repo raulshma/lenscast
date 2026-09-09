@@ -30,13 +30,26 @@ object ForegroundNotifications {
     const val UPDATE_NOTIFICATION_ID = 1003
     const val INTERVAL_CAPTURE_NOTIFICATION_ID = 1004
 
-    fun createChannel(context: Context, channelId: String, channelName: String) {
+    /**
+     * Detection-alert notifications live above every foreground slot and are
+     * sub-numbered per event type (motion/sound/tamper), so a burst of one
+     * kind replaces itself and never collides with a producer slot.
+     */
+    const val DETECTION_NOTIFICATION_BASE = 2000
+    const val DETECTION_MOTION_NOTIFICATION_ID = DETECTION_NOTIFICATION_BASE + 1
+    const val DETECTION_SOUND_NOTIFICATION_ID = DETECTION_NOTIFICATION_BASE + 2
+    const val DETECTION_TAMPER_NOTIFICATION_ID = DETECTION_NOTIFICATION_BASE + 3
+
+    fun createChannel(
+        context: Context,
+        channelId: String,
+        channelName: String,
+        importance: Int = NotificationManager.IMPORTANCE_LOW,
+        description: String? = null,
+    ) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(
-                channelId,
-                channelName,
-                NotificationManager.IMPORTANCE_LOW
-            )
+            val channel = NotificationChannel(channelId, channelName, importance)
+            description?.let { channel.description = it }
             context.getSystemService(NotificationManager::class.java)
                 .createNotificationChannel(channel)
         }

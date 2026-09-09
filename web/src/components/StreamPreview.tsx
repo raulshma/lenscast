@@ -18,8 +18,6 @@ interface Props {
   liveAudioStatus: () => 'idle' | 'connecting' | 'live' | 'error'
   recordingTimer: { formatElapsed: () => string }
   handleCapture: () => void
-  handleStopStream: () => void
-  handleResumeStream: () => void
   handleStartWebStream: () => void
   handleStopWebStream: () => void
   handleStartRtspStream: () => void
