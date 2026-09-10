@@ -1,0 +1,7 @@
+Fixed the startup crash affecting 0.1.0 releases (R8 stripped Moshi JSON
+adapters). New since 0.1.0: MQTT alerts and tamper detection, H.265 RTSP
+and ONVIF discovery, ML object detection with on-demand verified model,
+loop recording with retention, audit log, system diagnostics API,
+detection stats with CSV/JSON export, quiet hours, boot resume, Telegram
+and WebDAV backup, HTTPS/TLS mode, WebCodecs and HLS playback with
+talkback. F-Droid flavor ships without the self-updater.
