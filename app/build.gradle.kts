@@ -211,6 +211,13 @@ android {
         buildConfig = true
     }
 
+    // AGP embeds a Play-oriented dependency manifest in the APK signing
+    // block ("Dependency metadata"); F-Droid's scanner rejects it.
+    dependenciesInfo {
+        includeInApk = false
+        includeInBundle = false
+    }
+
     testOptions {
         unitTests {
             // Plain-JVM unit tests hit android.util.Log in the streaming
