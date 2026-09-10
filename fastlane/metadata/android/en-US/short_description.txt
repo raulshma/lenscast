@@ -1,0 +1,1 @@
+Turn your phone into a networked camera: web, MJPEG and RTSP streaming

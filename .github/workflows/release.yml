@@ -71,15 +71,24 @@ jobs:
 
           echo "Next tag computing to: $NEW_TAG"
           echo "Next APK version: $NEW_APK_VERSION"
+
+          # versionCode = major*1_000_000 + minor*1_000 + patch — must match
+          # app/build.gradle.kts and strictly increase every release (Play,
+          # in-app updater, F-Droid).
+          IFS='.' read -r vc_major vc_minor vc_patch <<< "$NEW_APK_VERSION"
+          VERSION_CODE=$((vc_major * 1000000 + vc_minor * 1000 + vc_patch))
+          echo "Next APK versionCode: $VERSION_CODE"
+
           echo "tag=$NEW_TAG" >> $GITHUB_OUTPUT
           echo "apk_version=$NEW_APK_VERSION" >> $GITHUB_OUTPUT
+          echo "version_code=$VERSION_CODE" >> $GITHUB_OUTPUT
 
       - name: Build Android App (Release)
         env:
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
-        run: ./gradlew assembleRelease -PversionName="${{ steps.version.outputs.apk_version }}"
+        run: ./gradlew assembleRelease -PversionName="${{ steps.version.outputs.apk_version }}" -PversionCode="${{ steps.version.outputs.version_code }}"
 
       - name: Rename APK Outputs
         run: |

@@ -9,11 +9,14 @@ val installWebDeps by tasks.registering(Exec::class) {
     group = "build"
 
     workingDir = file("${rootProject.projectDir}/web")
-    if (org.gradle.internal.os.OperatingSystem.current().isWindows) {
-        commandLine("cmd", "/c", "npm", "install")
+    // npm ci installs exactly the lockfile — the determinism F-Droid's
+    // build-from-source recipe needs (and local rebuilds benefit too).
+    val npmCommand = if (org.gradle.internal.os.OperatingSystem.current().isWindows) {
+        listOf("cmd", "/c", "npm", "ci", "--no-fund", "--no-audit")
     } else {
-        commandLine("npm", "install")
+        listOf("npm", "ci", "--no-fund", "--no-audit")
     }
+    commandLine(npmCommand)
 
     inputs.file(file("${rootProject.projectDir}/web/package.json"))
     inputs.file(file("${rootProject.projectDir}/web/package-lock.json"))
@@ -142,11 +145,17 @@ android {
         // the library — Android 6 runs the whole app minus the ML gate.
         minSdk = 23
         targetSdk = 36
-        // The in-app updater compares this value against the release channel;
-        // a property override (or the CI's tag-driven bump) keeps releases
-        // strictly increasing — F-Droid metadata requires it too.
-        versionCode = (project.findProperty("versionCode") as String?)?.toInt() ?: 7
-        versionName = project.findProperty("versionName") as String? ?: "0.0.7"
+        // The in-app updater compares versionName semantically; versionCode
+        // follows major*1_000_000 + minor*1_000 + patch so every release
+        // strictly increases — required by Play, the in-app updater's
+        // fallback check, and F-Droid metadata. CI passes both properties;
+        // the defaults must match the tagged release they ship in, because
+        // F-Droid builds the tag with plain `assembleFdroidRelease`.
+        // Literal-first so F-Droid's update checker (`versionCode = <int>`
+        // regex) can read it; CI overrides both via -P properties.
+        versionCode = 1002
+        project.findProperty("versionCode")?.let { versionCode = (it as String).toInt() }
+        versionName = project.findProperty("versionName") as String? ?: "0.1.2"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
@@ -212,7 +221,14 @@ android {
 
     splits {
         abi {
-            isEnable = true
+            // F-Droid must get exactly one universal APK per version — multiple
+            // APKs sharing a versionCode break fdroid packaging — so splits are
+            // disabled whenever a `fdroid`-flavored task is requested. The
+            // store channel keeps per-ABI APKs for smaller downloads.
+            val buildingFdroidFlavor = gradle.startParameter.taskNames.any {
+                it.contains("fdroid", ignoreCase = true)
+            }
+            isEnable = !buildingFdroidFlavor
             reset()
             include("armeabi-v7a", "arm64-v8a", "x86_64")
             isUniversalApk = true

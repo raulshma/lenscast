@@ -1,0 +1,4 @@
+First F-Droid release.
+• F-Droid build flavor without the in-app self-updater (updates come from F-Droid)
+• Deterministic web UI build (npm ci) and one universal APK per version
+• Dependency maintenance

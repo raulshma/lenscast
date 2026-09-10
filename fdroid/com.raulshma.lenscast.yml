@@ -1,0 +1,36 @@
+# fdroiddata recipe for LensCast.
+# Submit as metadata/com.raulshma.lenscast.yml in a merge request to
+# https://gitlab.com/fdroid/fdroiddata — see docs/fdroid.md for the full
+# submission walkthrough. Keep in sync with each release: add a Builds entry,
+# bump CurrentVersion/CurrentVersionCode, and re-copy fastlane changelogs.
+Categories:
+  - Multimedia
+License: GPL-3.0-only
+SourceCode: https://github.com/raulshma/lenscast
+IssueTracker: https://github.com/raulshma/lenscast/issues
+Changelog: https://github.com/raulshma/lenscast/releases
+WebSite: https://github.com/raulshma/lenscast
+Name: LensCast
+
+RepoType: git
+Repo: https://github.com/raulshma/lenscast.git
+
+Builds:
+  - versionName: 0.1.2
+    versionCode: 1002
+    commit: v0.1.2
+    gradle:
+      - fdroid
+    # ABI splits are disabled automatically for fdroid-flavor tasks
+    # (see app/build.gradle.kts), so this yields one universal APK.
+    output: app/build/outputs/apk/fdroid/release/app-fdroid-release.apk
+    # The build runs `npm ci && npm run build` for the bundled web UI via
+    # Gradle task dependencies; Node.js/npm are required on the build host.
+    # The optional ML model (Apache-2.0 EfficientDet-Lite0) is NOT bundled:
+    # users may download it at runtime from TensorFlow's official storage
+    # with a pinned SHA-256 (DetectionModelStore.kt).
+
+AutoUpdateMode: Version v%v
+UpdateCheckMode: Tags
+CurrentVersion: 0.1.2
+CurrentVersionCode: 1002

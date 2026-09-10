@@ -1,0 +1,30 @@
+LensCast turns your Android device into a networked camera station with professional controls, remote web access, interval photography, and scheduled recording.
+
+Camera
+• Live preview with a professional quick settings bar
+• Manual controls: exposure compensation, ISO, white balance, focus mode, zoom
+• Multi-lens support (ultra-wide, wide, telephoto) with runtime lens switching
+• HDR, image stabilization, resolution up to 4K, frame rate 15–60 fps
+• Photo capture and video recording
+• Night vision / IR mode, scene modes, manual focus distance, color temperature
+
+Live streaming
+• Real-time MJPEG video streaming to any web browser on the same network
+• Low-latency in-browser playback (WebCodecs over WebSocket) with automatic fallback to MJPEG and HLS
+• RTSP streaming with AAC audio and H.264/H.265 video at 480p/720p/1080p for VLC, OBS, and NVRs
+• ONVIF Profile S device service (off by default) so NVRs such as Home Assistant can discover the camera
+• HTTPS mode with a self-signed on-device certificate
+
+Web dashboard
+• Watch the live stream, browse and download photos and recordings
+• Full remote control of camera and stream settings
+• Optional password authentication
+
+Automation
+• Object detection gate (optional): the open-source EfficientDet-Lite0 model — Apache-2.0, downloaded on demand with a pinned SHA-256 from TensorFlow's official hosting — triggers MQTT alerts or recording when configured objects appear
+• Interval photography and scheduled or continuous recording
+• Quiet hours for notifications
+
+No ads, no tracking, no cloud. All processing stays on your device; the web dashboard is served by a built-in HTTP server on your local network.
+
+Note: the F-Droid build ships without the in-app self-updater; updates come from F-Droid.
