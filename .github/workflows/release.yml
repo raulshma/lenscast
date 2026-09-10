@@ -87,6 +87,9 @@ jobs:
           echo "tag=$NEW_TAG" >> $GITHUB_OUTPUT
           echo "apk_version=$NEW_APK_VERSION" >> $GITHUB_OUTPUT
           echo "version_base=$VERSION_BASE" >> $GITHUB_OUTPUT
+          # The fastlane changelog ships per versionCode; the x86_64 entry
+          # (abiIndex 3) is the release's canonical one for the notes.
+          echo "changelog_vercode=$((VERSION_BASE + 3))" >> $GITHUB_OUTPUT
 
       - name: Build Android App (Release, one APK per ABI)
         env:
@@ -117,5 +120,6 @@ jobs:
           tag_name: "${{ steps.version.outputs.tag }}"
           name: "Release ${{ steps.version.outputs.tag }}"
           files: lenscast-*.apk
+          body_path: fastlane/metadata/android/en-US/changelogs/${{ steps.version.outputs.changelog_vercode }}.txt
           draft: true
           generate_release_notes: true
