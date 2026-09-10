@@ -2,6 +2,7 @@ package com.raulshma.lenscast.update
 
 import android.content.Context
 import android.content.pm.PackageManager
+import android.os.Build
 import android.util.Log
 import com.raulshma.lenscast.update.model.GitHubRelease
 import com.raulshma.lenscast.update.model.UpdateCheckResult
@@ -63,7 +64,7 @@ class UpdateChecker(private val context: Context) {
         val release = releaseAdapter.fromJson(body) ?: return null
 
         Log.d(TAG, "Latest release: ${release.tagName} with ${release.assets.size} assets")
-        val apkAsset = UpdatePolicy.selectApkAsset(release.assets)
+        val apkAsset = UpdatePolicy.selectApkAsset(release.assets, Build.SUPPORTED_ABIS.toList())
             ?: return UpdateCheckResult.Error("No APK found in release")
 
         val currentVersion = getAppVersionName()

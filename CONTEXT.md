@@ -974,7 +974,8 @@ implementation, not copy-paste.
 `shouldNotify` dismissal check, `shouldNotifyAfterCheck(result,
 dismissedVersion)` — the one verdict on notify/saveLastCheck that both the
 startup auto-check and the manual ViewModel check consume — and
-`selectApkAsset` (prefer the universal APK, else any APK), the release-asset
+`selectApkAsset` (the APK for the device's best supported ABI, else the
+universal APK, else any APK), the release-asset
 ladder the network checker delegates to. The checker's 403
 path produces the real `UpdateCheckResult.RateLimited` (silent, like Error);
 no caller re-types the outcome choreography.

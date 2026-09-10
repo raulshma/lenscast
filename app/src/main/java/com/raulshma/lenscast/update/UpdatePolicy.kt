@@ -77,19 +77,23 @@ object UpdatePolicy {
     }
 
     /**
-     * The release-asset ladder: prefer a universal APK for ABI
-     * compatibility, else the first `.apk` asset — null when the release
-     * ships no APK. The extension match is exact-case; the universal
-     * match is not.
+     * The release-asset ladder: the APK built for the device's best
+     * supported ABI (per-ABI releases carry a lower versionCode on every
+     * other ABI, so a wrong-ABI pick reads as a downgrade and the installer
+     * rejects it), else a universal APK for ABI compatibility, else the
+     * first `.apk` asset — null when the release ships no APK. The
+     * extension match is exact-case; the universal and ABI matches are not.
+     * ABI names must match whole segments (`-<abi>-` or a `-<abi>.apk`
+     * suffix) so `x86` never matches an `x86_64` asset.
      */
-    fun selectApkAsset(assets: List<GitHubAsset>): GitHubAsset? {
-        val universal = assets.firstOrNull {
-            it.name.endsWith(".apk") && it.name.contains("universal", ignoreCase = true)
+    fun selectApkAsset(assets: List<GitHubAsset>, supportedAbis: List<String> = emptyList()): GitHubAsset? {
+        val apks = assets.filter { it.name.endsWith(".apk") }
+        for (abi in supportedAbis) {
+            apks.firstOrNull { it.name.contains("-$abi-", ignoreCase = true) || it.name.endsWith("-$abi.apk", ignoreCase = true) }
+                ?.let { return it }
         }
-        if (universal != null) return universal
-
-        // Fallback to any APK
-        return assets.firstOrNull { it.name.endsWith(".apk") }
+        return apks.firstOrNull { it.name.contains("universal", ignoreCase = true) }
+            ?: apks.firstOrNull()
     }
 
     /**

@@ -141,6 +141,51 @@ class UpdatePolicyTest {
     }
 
     @Test
+    fun `an apk for a supported abi wins over universal and other abis`() {
+        val arm64 = asset("lenscast-0.1.1-arm64-v8a-vc1012.apk")
+        val chosen = UpdatePolicy.selectApkAsset(
+            listOf(
+                asset("lenscast-0.1.1-armeabi-v7a-vc1011.apk"),
+                asset("lenscast-0.1.1-universal-vc1010.apk"),
+                arm64,
+            ),
+            supportedAbis = listOf("arm64-v8a", "armeabi-v7a"),
+        )
+        assertEquals(arm64, chosen)
+    }
+
+    @Test
+    fun `abi preference follows the supported list order, not asset order`() {
+        val arm64 = asset("lenscast-0.1.1-arm64-v8a-vc1012.apk")
+        val chosen = UpdatePolicy.selectApkAsset(
+            listOf(asset("lenscast-0.1.1-armeabi-v7a-vc1011.apk"), arm64),
+            supportedAbis = listOf("arm64-v8a", "armeabi-v7a"),
+        )
+        assertEquals(arm64, chosen)
+    }
+
+    @Test
+    fun `an abi-suffixed apk name also matches`() {
+        val chosen = UpdatePolicy.selectApkAsset(
+            listOf(asset("lenscast-2.0-x86_64.apk")),
+            supportedAbis = listOf("x86_64"),
+        )
+        assertEquals("lenscast-2.0-x86_64.apk", chosen?.name)
+    }
+
+    @Test
+    fun `x86 does not match an x86_64 asset`() {
+        val universal = asset("lenscast-0.1.1-universal-vc1010.apk")
+        val chosen = UpdatePolicy.selectApkAsset(
+            listOf(asset("lenscast-0.1.1-x86_64-vc1013.apk"), universal),
+            supportedAbis = listOf("x86"),
+        )
+        // No whole-segment "-x86-" match, so the ladder falls past the
+        // x86_64 asset to universal instead of an uninstallable APK.
+        assertEquals(universal, chosen)
+    }
+
+    @Test
     fun `the universal match is case-insensitive`() {
         val chosen = UpdatePolicy.selectApkAsset(listOf(asset("LensCast-Universal.apk")))
         assertEquals("LensCast-Universal.apk", chosen?.name)
