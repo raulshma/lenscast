@@ -84,7 +84,8 @@ jobs:
       - name: Rename APK Outputs
         run: |
           shopt -s nullglob
-          apks=(app/build/outputs/apk/release/*.apk)
+          # Product flavors (store/fdroid) land in apk/<flavor>/release/
+          apks=(app/build/outputs/apk/*/release/*.apk)
           if [ ${#apks[@]} -eq 0 ]; then
             echo "ERROR: No APK files found"
             exit 1
