@@ -155,7 +155,10 @@ android {
         // regex) can read it; CI overrides both via -P properties.
         versionCode = 1001
         project.findProperty("versionCode")?.let { versionCode = (it as String).toInt() }
-        versionName = project.findProperty("versionName") as String? ?: "0.1.1"
+        // Literal-first for the same reason: fdroidserver's checkupdates
+        // parser reads `versionName = <literal>` from this file.
+        versionName = "0.1.1"
+        project.findProperty("versionName")?.let { versionName = it as String }
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
@@ -186,16 +189,13 @@ android {
         release {
             isMinifyEnabled = true
             isShrinkResources = true
-            val releaseSigning = signingConfigs.getByName("release")
-            signingConfig = if (releaseSigning.storeFile != null &&
-                !releaseSigning.storePassword.isNullOrEmpty() &&
-                !releaseSigning.keyAlias.isNullOrEmpty() &&
-                !releaseSigning.keyPassword.isNullOrEmpty()
-            ) {
-                releaseSigning
-            } else {
-                signingConfigs.getByName("debug")
-            }
+            // Deliberately ONE line: fdroidserver's remove_signing_keys()
+            // patches this file, deleting the signingConfigs block above and
+            // every `signingConfig = ...` line. Patched builds then have no
+            // signing config (unsigned; fdroid re-signs) and this expression
+            // never evaluates. Unpatched, it picks the release keystore when
+            // the env vars are set, else the debug key.
+            signingConfig = signingConfigs.findByName("release")?.takeIf { s -> s.storeFile != null && !s.storePassword.isNullOrEmpty() && !s.keyAlias.isNullOrEmpty() && !s.keyPassword.isNullOrEmpty() } ?: signingConfigs.findByName("debug")
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
