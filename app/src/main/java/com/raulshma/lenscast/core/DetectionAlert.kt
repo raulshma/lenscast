@@ -1,5 +1,7 @@
 package com.raulshma.lenscast.core
 
+import com.squareup.moshi.JsonClass
+
 /**
  * The detection-event vocabulary every producer and sink shares: detectors
  * raise one of these, and every consumer (webhook, MQTT, local notification,
@@ -44,6 +46,7 @@ enum class EventKind(val wireName: String) {
  * persisted log) reads it, so webhook and MQTT bodies carry the identical
  * timestamp instead of each re-reading a clock at queue time.
  */
+@JsonClass(generateAdapter = true)
 data class DetectionAlert(
     val kind: EventKind,
     val value: Double,
@@ -64,6 +67,7 @@ data class DetectionAlert(
  * publish: one wire shape, serialized through App Json, so an NVR or
  * automation consuming either channel sees identical field names.
  */
+@JsonClass(generateAdapter = true)
 data class DetectionEventWire(
     val type: String,
     val value: Double,

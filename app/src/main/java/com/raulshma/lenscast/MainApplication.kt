@@ -144,6 +144,7 @@ class MainApplication : Application(), SingletonImageLoader.Factory {
     }
     val detectionCoordinator: DetectionCoordinator by lazy {
         DetectionCoordinator(
+            appContext = this,
             settingsDataStore = settingsDataStore,
             recordingController = recordingController,
             photoCaptureManager = photoCaptureManager,

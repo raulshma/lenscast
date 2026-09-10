@@ -1,5 +1,7 @@
 package com.raulshma.lenscast.core.mqtt
 
+import com.squareup.moshi.JsonClass
+
 import com.raulshma.lenscast.core.AppJson
 import com.raulshma.lenscast.core.EventKind
 import java.util.Locale
@@ -119,7 +121,8 @@ object MqttTopics {
     }
 
     /** The HA discovery wire shape (snake_case keys are the broker contract). */
-    private data class DiscoveryPayload(
+    @JsonClass(generateAdapter = true)
+    internal data class DiscoveryPayload(
         val name: String,
         val unique_id: String,
         val state_topic: String,
@@ -131,7 +134,8 @@ object MqttTopics {
         val device: DeviceInfo,
     )
 
-    private data class DeviceInfo(
+    @JsonClass(generateAdapter = true)
+    internal data class DeviceInfo(
         val identifiers: List<String>,
         val name: String,
         val model: String,

@@ -1,4 +1,5 @@
 package com.raulshma.lenscast.streaming
+import com.squareup.moshi.JsonClass
 
 import android.content.Context
 import com.raulshma.lenscast.core.AppJson
@@ -12,6 +13,7 @@ import java.io.File
  * names are the legacy org.json wire names, kept decode-compatible through the
  * App Json migration.
  */
+@JsonClass(generateAdapter = true)
 internal class AuthStoredSession(val t: String, val e: Long)
 
 /**

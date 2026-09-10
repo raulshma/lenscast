@@ -1,9 +1,12 @@
 package com.raulshma.lenscast.capture.model
 
+import com.squareup.moshi.JsonClass
+
 enum class CaptureType {
     PHOTO, VIDEO
 }
 
+@JsonClass(generateAdapter = true)
 data class CaptureHistory(
     val id: String,
     val type: CaptureType,
@@ -17,6 +20,7 @@ data class CaptureHistory(
 // Fields that never reached the worker (start/end windows, capture mode,
 // resolution, JPEG quality) were deleted: the UI must not advertise controls
 // with no runtime effect.
+@JsonClass(generateAdapter = true)
 data class IntervalCaptureConfig(
     val intervalSeconds: Long = 5,
     val totalCaptures: Int = 100,
@@ -27,6 +31,7 @@ enum class FlashMode {
     ON, OFF, AUTO
 }
 
+@JsonClass(generateAdapter = true)
 data class RecordingConfig(
     val durationSeconds: Long = 0,
     val repeatIntervalSeconds: Long = 0,

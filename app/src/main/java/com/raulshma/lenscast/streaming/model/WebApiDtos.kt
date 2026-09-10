@@ -1,4 +1,5 @@
 package com.raulshma.lenscast.streaming.model
+import com.squareup.moshi.JsonClass
 
 import com.raulshma.lenscast.capture.ml.DetectionModelStore
 import com.raulshma.lenscast.camera.model.MaskingZone
@@ -12,11 +13,12 @@ import com.raulshma.lenscast.streaming.rtsp.RtspVideoCodec
 /**
  * Data Transfer Objects for the Web API.
  * These replace manual JSONObject construction with type-safe Moshi serialization.
- * Uses KotlinJsonAdapterFactory (reflection-based) for adapter generation.
+ * Adapters are compile-time generated (moshi-kotlin-codegen) via @JsonClass.
  */
 
 // ── Settings DTOs ──
 
+@JsonClass(generateAdapter = true)
 data class CameraSettingsDto(
     val exposureCompensation: Int = 0,
     val iso: Int? = null,
@@ -34,6 +36,7 @@ data class CameraSettingsDto(
     val nightVisionMode: String = "OFF",
 )
 
+@JsonClass(generateAdapter = true)
 data class MaskingZoneDto(
     val id: String = "",
     val label: String = "",
@@ -47,6 +50,7 @@ data class MaskingZoneDto(
     val blurRadius: Double = MaskingZone.DEFAULT.blurRadius.toDouble(),
 )
 
+@JsonClass(generateAdapter = true)
 data class MotionZoneDto(
     val id: String = "",
     val label: String = "",
@@ -57,6 +61,7 @@ data class MotionZoneDto(
     val height: Double = MotionZone.DEFAULT.height.toDouble(),
 )
 
+@JsonClass(generateAdapter = true)
 data class StreamingSettingsDto(
     val port: Int = StreamDefaults.WEB_PORT,
     val webStreamingEnabled: Boolean = true,
@@ -216,11 +221,13 @@ data class StreamingSettingsDto(
     val onvifEnabled: Boolean = false,
 )
 
+@JsonClass(generateAdapter = true)
 data class SettingsResponseDto(
     val camera: CameraSettingsDto,
     val streaming: StreamingSettingsDto,
 )
 
+@JsonClass(generateAdapter = true)
 data class SettingsUpdateRequestDto(
     val camera: CameraSettingsDto? = null,
     val streaming: StreamingSettingsDto? = null,
@@ -232,6 +239,7 @@ data class SettingsUpdateRequestDto(
  * serializes them) plus the import-side identity fields. Import accepts this
  * envelope — or the bare settings document — and rejects unknown versions.
  */
+@JsonClass(generateAdapter = true)
 data class SettingsExportDto(
     val schemaVersion: Int = SETTINGS_SCHEMA_VERSION,
     val exportedAtMs: Long = 0,
@@ -247,6 +255,7 @@ data class SettingsExportDto(
 
 // ── Status DTOs ──
 
+@JsonClass(generateAdapter = true)
 data class StreamingStatusDto(
     val isActive: Boolean,
     val url: String,
@@ -260,12 +269,14 @@ data class StreamingStatusDto(
     val rtspUrl: String = "",
 )
 
+@JsonClass(generateAdapter = true)
 data class BatteryStatusDto(
     val level: Int,
     val isCharging: Boolean,
     val isPowerSaveMode: Boolean,
 )
 
+@JsonClass(generateAdapter = true)
 data class StatusResponseDto(
     val streaming: StreamingStatusDto,
     val thermal: String,
@@ -288,11 +299,13 @@ data class StatusResponseDto(
 )
 
 /** A device control range, min inclusive / max inclusive. */
+@JsonClass(generateAdapter = true)
 data class RangeDto(
     val min: Double,
     val max: Double,
 )
 
+@JsonClass(generateAdapter = true)
 data class WatchdogStatusDto(
     val enabled: Boolean,
     val status: String,
@@ -302,6 +315,7 @@ data class WatchdogStatusDto(
     val lastFailureReason: String?,
 )
 
+@JsonClass(generateAdapter = true)
 data class AdaptiveBitrateStatusDto(
     val enabled: Boolean,
     val qualityLevel: String,
@@ -315,6 +329,7 @@ data class AdaptiveBitrateStatusDto(
     val adjustmentCount: Int,
 )
 
+@JsonClass(generateAdapter = true)
 data class ConnectionQualityStatusDto(
     val qualityLevel: String,
     val estimatedBandwidthKbps: Int,
@@ -328,6 +343,7 @@ data class ConnectionQualityStatusDto(
     val clientDetails: Map<String, ClientConnectionDetailDto>,
 )
 
+@JsonClass(generateAdapter = true)
 data class ClientConnectionDetailDto(
     val framesSent: Long,
     val bytesSent: Long,
@@ -338,10 +354,13 @@ data class ClientConnectionDetailDto(
 
 // ── API Response DTOs ──
 
+@JsonClass(generateAdapter = true)
 data class SuccessResponse(val success: Boolean = true)
 
+@JsonClass(generateAdapter = true)
 data class ErrorResponse(val success: Boolean = false, val error: String)
 
+@JsonClass(generateAdapter = true)
 data class StreamActionResponse(
     val success: Boolean = true,
     val isActive: Boolean = false,
@@ -349,6 +368,7 @@ data class StreamActionResponse(
     val error: String? = null,
 )
 
+@JsonClass(generateAdapter = true)
 data class CaptureResponse(
     val success: Boolean = true,
     val fileName: String? = null,
@@ -357,6 +377,7 @@ data class CaptureResponse(
 
 // ── Lens DTOs ──
 
+@JsonClass(generateAdapter = true)
 data class LensDto(
     val index: Int,
     val id: String,
@@ -366,15 +387,18 @@ data class LensDto(
     val selected: Boolean,
 )
 
+@JsonClass(generateAdapter = true)
 data class LensesResponseDto(
     val lenses: List<LensDto>,
     val selectedIndex: Int,
 )
 
+@JsonClass(generateAdapter = true)
 data class LensSelectRequest(val index: Int)
 
 // ── Interval Capture DTOs ──
 
+@JsonClass(generateAdapter = true)
 data class IntervalCaptureStatusDto(
     val isRunning: Boolean,
     val completedCaptures: Int,
@@ -382,6 +406,7 @@ data class IntervalCaptureStatusDto(
 
 // ── Recording DTOs ──
 
+@JsonClass(generateAdapter = true)
 data class RecordingStatusDto(
     val isRecording: Boolean,
     val elapsedSeconds: Int,
@@ -391,6 +416,7 @@ data class RecordingStatusDto(
 
 // ── Gallery DTOs ──
 
+@JsonClass(generateAdapter = true)
 data class GalleryItemDto(
     val id: String,
     val type: String,
@@ -405,6 +431,7 @@ data class GalleryItemDto(
     val downloadUrl: String,
 )
 
+@JsonClass(generateAdapter = true)
 data class GalleryResponseDto(
     val items: List<GalleryItemDto>,
     val total: Int,
@@ -413,25 +440,31 @@ data class GalleryResponseDto(
     val hasMore: Boolean = false,
 )
 
+@JsonClass(generateAdapter = true)
 data class BatchDeleteRequest(val ids: List<String>)
 
+@JsonClass(generateAdapter = true)
 data class BatchDeleteResponse(
     val success: Boolean = true,
     val deleted: List<String>,
 )
 
+@JsonClass(generateAdapter = true)
 data class TapFocusRequest(
     val x: Double,
     val y: Double,
 )
 
+@JsonClass(generateAdapter = true)
 data class ZoomRequest(
     val zoomRatio: Double? = null,
     val ratio: Double? = null,
 )
 
+@JsonClass(generateAdapter = true)
 data class TorchRequest(val enabled: Boolean? = null)
 
+@JsonClass(generateAdapter = true)
 data class StreamClientsResponseDto(
     val httpClients: List<String>,
     val httpCount: Int,
@@ -441,6 +474,7 @@ data class StreamClientsResponseDto(
 
 // ── Detection Event DTOs ──
 
+@JsonClass(generateAdapter = true)
 data class DetectionEventDto(
     val id: String,
     val type: String,
@@ -458,6 +492,7 @@ data class DetectionEventDto(
     val clipFileName: String? = null,
 )
 
+@JsonClass(generateAdapter = true)
 data class DetectionEventsResponseDto(
     val events: List<DetectionEventDto>,
     val total: Int,
@@ -471,6 +506,7 @@ data class DetectionEventsResponseDto(
  * `webhook`, `mqtt`, `notify`), so the dashboard can show a per-channel
  * verdict instead of a bare success flag.
  */
+@JsonClass(generateAdapter = true)
 data class DetectionTestResponseDto(
     val success: Boolean = true,
     val dispatchedActions: List<String> = emptyList(),
@@ -479,6 +515,7 @@ data class DetectionTestResponseDto(
 // ── Audit Log DTOs ──
 
 /** One audited action: a write-route dispatch or a login outcome. */
+@JsonClass(generateAdapter = true)
 data class AuditEntryDto(
     val timestampMs: Long,
     /** The action verb — `"$method $path"` for a route dispatch, `login.success` / `login.failed`. */
@@ -489,6 +526,7 @@ data class AuditEntryDto(
     val outcome: String = "ok",
 )
 
+@JsonClass(generateAdapter = true)
 data class AuditLogResponseDto(
     val entries: List<AuditEntryDto>,
     val total: Int,
@@ -501,6 +539,7 @@ data class AuditLogResponseDto(
  * what device, for how long, and how the battery and storage are holding up.
  * Read-only; nothing here is writable.
  */
+@JsonClass(generateAdapter = true)
 data class SystemInfoResponseDto(
     val appVersion: String,
     val deviceModel: String,
@@ -516,6 +555,7 @@ data class SystemInfoResponseDto(
 )
 
 /** Battery facts beyond the status DTO's level/charging trio. */
+@JsonClass(generateAdapter = true)
 data class BatteryDetailDto(
     val level: Int,
     val isCharging: Boolean,
@@ -528,6 +568,7 @@ data class BatteryDetailDto(
 )
 
 /** App-volume storage facts: configured quota plus live volume usage. */
+@JsonClass(generateAdapter = true)
 data class StorageInfoDto(
     /** LensCast media bytes tracked by the capture history. */
     val usedBytes: Long,
@@ -546,6 +587,7 @@ data class StorageInfoDto(
  * per-type totals across three windows, a per-day series for the recent
  * stretch, and the most-fired zones/labels. Read-only.
  */
+@JsonClass(generateAdapter = true)
 data class DetectionStatsResponseDto(
     /** Event counts per wire-name type, per window. */
     val last24h: Map<String, Int>,
@@ -561,12 +603,14 @@ data class DetectionStatsResponseDto(
     val topLabels: List<LabeledCountDto>,
 )
 
+@JsonClass(generateAdapter = true)
 data class DailyCountDto(
     /** UTC day, "yyyy-MM-dd". */
     val day: String,
     val count: Int,
 )
 
+@JsonClass(generateAdapter = true)
 data class LabeledCountDto(
     val label: String,
     val count: Int,

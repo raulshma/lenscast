@@ -1,5 +1,7 @@
 package com.raulshma.lenscast.streaming.web
 
+import com.squareup.moshi.JsonClass
+
 import com.raulshma.lenscast.core.AppJson
 import com.raulshma.lenscast.core.StreamAuthCrypto
 import com.raulshma.lenscast.data.SettingsDataStore
@@ -88,13 +90,16 @@ class AuthWebHandler(
         return successAdapter.toJson(SuccessResponse(success = revoked))
     }
 
+    @JsonClass(generateAdapter = true)
     data class AuthConfigDto(
         val enabled: Boolean = false,
         val username: String = "",
         val password: String = "",
     )
 
+    @JsonClass(generateAdapter = true)
     data class SessionDto(val tokenPrefix: String, val expiresAtMs: Long)
 
+    @JsonClass(generateAdapter = true)
     data class SessionsResponseDto(val sessions: List<SessionDto>, val count: Int)
 }

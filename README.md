@@ -172,7 +172,7 @@ LensCast is an Android camera application with live video/audio streaming to web
 
 ## Requirements
 
-- Android 6.0 (API 23) or later
+- Android 6.0 (API 23) or later (ML object detection requires Android 7.0 / API 24+)
 - WiFi connection for streaming
 - Camera and microphone permissions
 - Node.js 20+ and npm (for building the web UI)

@@ -1,32 +1,36 @@
 package com.raulshma.lenscast.capture.ml
 
+import android.content.Context
 import android.graphics.BitmapFactory
 import android.graphics.ImageFormat
 import android.graphics.Rect
 import android.graphics.YuvImage
+import android.os.Build
 import android.util.Log
+import com.google.mediapipe.framework.image.BitmapImageBuilder
+import com.google.mediapipe.tasks.core.BaseOptions
+import com.google.mediapipe.tasks.vision.core.RunningMode
+import com.google.mediapipe.tasks.vision.objectdetector.ObjectDetector
 import com.raulshma.lenscast.capture.model.DetectionClassPolicy
-import org.tensorflow.lite.support.image.TensorImage
-import org.tensorflow.lite.task.core.BaseOptions
-import org.tensorflow.lite.task.vision.detector.ObjectDetector
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.FileNotFoundException
+import java.nio.ByteBuffer
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
- * The LiteRT (TensorFlow Lite Task Vision) object detector behind the ML
- * motion gate: EfficientDet-Lite0 int8 with COCO metadata, loaded lazily from
- * the on-demand downloaded model file ([DetectionModelStore], resolved
- * through [modelFileProvider]) on first use ([classify]). The model ships
- * outside the APK; a missing file is a *retryable* unavailability, not a
- * failure — the next classify after [DetectionModelStore.requestDownload]
- * lands finds and loads it.
+ * The MediaPipe Tasks object detector behind the ML motion gate:
+ * EfficientDet-Lite0 int8 with COCO metadata, loaded lazily from the on-demand
+ * downloaded model file ([DetectionModelStore], resolved through
+ * [modelFileProvider]) on first use ([classify]). The model ships outside the
+ * APK; a missing file is a *retryable* unavailability, not a failure — the
+ * next classify after [DetectionModelStore.requestDownload] lands finds and
+ * loads it.
  *
  * Input is the camera's NV21 frame: it takes the cheap YuvImage→JPEG
  * round-trip and a power-of-two downscale (long edge ≤
- * [MAX_ANALYSIS_EDGE_PX]) before the task library resizes to the model's own
- * 320x320 input. The round-trip exists because the task library consumes
+ * [MAX_ANALYSIS_EDGE_PX]) before MediaPipe resizes to the model's own
+ * 320x320 input. The round-trip exists because the task API consumes
  * bitmaps only, and the downscale keeps the decode — the expensive step —
  * off the full-resolution path.
  *
@@ -40,6 +44,8 @@ import java.util.concurrent.atomic.AtomicBoolean
  * [DetectionClassPolicy].
  */
 class ObjectDetectionEngine(
+    /** Application context; MediaPipe's task factory is context-based. */
+    private val context: Context,
     /**
      * Resolves the downloaded model file, or null while it is missing
      * (production: [DetectionModelStore.resolveModelFile]).
@@ -62,7 +68,17 @@ class ObjectDetectionEngine(
     private val initStarted = AtomicBoolean(false)
     private val lock = Any()
 
-    private var detector: org.tensorflow.lite.task.vision.detector.ObjectDetector? = null
+    /**
+     * MediaPipe Tasks Vision declares minSdk 24 (the manifest gate is
+     * overridden to keep the app on API 23): below Nougat the library must
+     * never be touched — class resolution or its native loader would throw
+     * past the fail-open catch ladders — so the engine reports the same
+     * [Classification.Unavailable] as a missing model and alerts pass
+     * through ungated.
+     */
+    private val mlSupported = Build.VERSION.SDK_INT >= Build.VERSION_CODES.N
+
+    private var detector: ObjectDetector? = null
     private val initGate = DetectorInitGate()
 
     @Volatile
@@ -84,18 +100,16 @@ class ObjectDetectionEngine(
             return Classification.Unavailable
         } ?: return Classification.Unavailable
         return try {
-            val tensorImage = TensorImage.fromBitmap(bitmap)
+            val mpImage = BitmapImageBuilder(bitmap).build()
             val detections = detector
-                .detect(
-                    tensorImage,
-                    org.tensorflow.lite.task.core.vision.ImageProcessingOptions.builder().build(),
-                )
-                .flatMap { it.categories }
-                .filter { !it.label.isNullOrBlank() }
+                .detect(mpImage)
+                .detections()
+                .flatMap { it.categories() }
+                .filter { !it.categoryName().isNullOrBlank() }
                 .map { category ->
                     DetectionClassPolicy.Detection(
-                        label = category.label.lowercase(),
-                        score = category.score,
+                        label = category.categoryName().lowercase(),
+                        score = category.score(),
                     )
                 }
             Classification.Success(detections)
@@ -116,7 +130,11 @@ class ObjectDetectionEngine(
         }
     }
 
-    private fun detectorOrNull(): org.tensorflow.lite.task.vision.detector.ObjectDetector? {
+    private fun detectorOrNull(): ObjectDetector? {
+        if (!mlSupported) {
+            warnOncePerMinute("ML detection unavailable before Android 7.0 (API 24); gate passes events through (fail-open)")
+            return null
+        }
         if (!initGate.canAttempt) return null
         synchronized(lock) {
             detector?.let { return it }
@@ -139,19 +157,14 @@ class ObjectDetectionEngine(
                 ObjectDetector.ObjectDetectorOptions
                     .builder()
                     .setBaseOptions(
-                        // CPU is the task library's default backend; the thread
-                        // count is the only knob we set.
                         BaseOptions.builder()
-                            .setNumThreads(NUM_THREADS)
+                            .setModelAssetBuffer(readModelBuffer(modelFile))
                             .build()
                     )
+                    .setRunningMode(RunningMode.IMAGE)
                     .setMaxResults(MAX_RESULTS)
                     .build()
-            val created = ObjectDetector
-                .createFromFileAndOptions(
-                    modelFile,
-                    options,
-                )
+            val created = ObjectDetector.createFromOptions(context, options)
             synchronized(lock) { detector = created }
             Log.i(TAG, "ML object detector ready (${modelFile.name})")
             created
@@ -167,6 +180,24 @@ class ObjectDetectionEngine(
             initGate.onInitFailure()
             warnOncePerMinute("ML object detector unavailable (${e.javaClass.simpleName}: ${e.message}); gate disabled")
             null
+        }
+    }
+
+    /**
+     * The model bytes as a direct [ByteBuffer] — MediaPipe retains the buffer
+     * for the detector's lifetime, so it must outlive this call and cannot be
+     * heap-array backed.
+     */
+    private fun readModelBuffer(modelFile: File): ByteBuffer {
+        modelFile.inputStream().use { input ->
+            val buffer = ByteBuffer.allocateDirect(modelFile.length().toInt())
+            val channel = java.nio.channels.Channels.newChannel(input)
+            while (buffer.hasRemaining()) {
+                if (channel.read(buffer) == -1) break
+            }
+            if (buffer.hasRemaining()) throw FileNotFoundException("$modelFile truncated")
+            buffer.rewind()
+            return buffer
         }
     }
 
@@ -194,7 +225,6 @@ class ObjectDetectionEngine(
     companion object {
         private const val TAG = "ObjectDetectionEngine"
 
-        private const val NUM_THREADS = 2
         private const val MAX_RESULTS = 8
         private const val JPEG_QUALITY = 80
 

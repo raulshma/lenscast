@@ -64,6 +64,56 @@ function failedResponse(status: number): Response {
   return { ok: false, status, headers: { get: () => null }, body: null } as unknown as Response
 }
 
+/**
+ * Response whose body delivers [chunks] then holds the read open — the shape
+ * of a live PCM stream that never ends.
+ */
+function heldOpenResponse(headers: Record<string, string>, chunks: Uint8Array[]): {
+  response: Response
+  deliver: (chunk: Uint8Array) => void
+} {
+  const pending: Array<(result: { done: boolean; value?: Uint8Array }) => void> = []
+  const queue: Uint8Array[] = chunks.slice()
+  const drained = () => queue.length > 0 ? Promise.resolve({ done: false, value: queue.shift() }) : new Promise((resolve) => pending.push(resolve))
+  const body = { getReader: () => ({ read: drained }) }
+  return {
+    response: { ok: true, status: 200, headers: { get: (name: string) => headers[name] ?? null }, body } as unknown as Response,
+    deliver: (chunk: Uint8Array) => {
+      const waiter = pending.shift()
+      if (waiter) waiter({ done: false, value: chunk })
+      else queue.push(chunk)
+    },
+  }
+}
+
+/** AudioContext shape of an autoplay-policy block: suspended, resume never settles. */
+function blockedAudioContext(currentTime = 10) {
+  const startedAt: number[] = []
+  let state: AudioContextState = 'suspended'
+  const ctx: AudioContextLike = {
+    currentTime,
+    get state() { return state },
+    destination: null,
+    resume: () => new Promise<void>(() => { }),
+    close: async () => { state = 'closed' },
+    createBuffer: (_channelCount, frameCount, sampleRate) => ({
+      duration: frameCount / sampleRate,
+      getChannelData: () => new Float32Array(frameCount),
+    }),
+    createBufferSource: () => ({
+      buffer: null,
+      connect: () => { },
+      start: (when?: number) => { if (when !== undefined) startedAt.push(when) },
+    }),
+  }
+  return {
+    ctx,
+    startedAt,
+    /** Simulates the browser unblocking on a user gesture. */
+    gestureUnblock: () => { state = 'running' },
+  }
+}
+
 const MONO_4800 = { 'X-Audio-Sample-Rate': '4800', 'X-Audio-Channels': '1' }
 
 describe('concatBytes', () => {
@@ -202,6 +252,92 @@ describe('createLiveAudioPlayer reconnect ladder', () => {
 
     expect(fetches).toBe(2)
     expect(statuses).toEqual(['idle', 'connecting', 'live', 'live', 'idle'])
+  })
+})
+
+describe('createLiveAudioPlayer autoplay-blocked context', () => {
+  const chunk = pcmBytes(100, -100, 200, -200)
+
+  it('reports blocked instead of hanging when resume never settles without a gesture', async () => {
+    const statuses: LiveAudioStatus[] = []
+    const gestures: Array<() => void> = []
+    const blocked = blockedAudioContext()
+    const held = heldOpenResponse(MONO_4800, [chunk])
+    const player = createLiveAudioPlayer({
+      onStatus: (s) => statuses.push(s),
+      fetchFn: async () => held.response,
+      createAudioContext: () => blocked.ctx,
+      delay: async () => { },
+      armUserGesture: (onGesture) => {
+        gestures.push(onGesture)
+        return () => { }
+      },
+    })
+
+    // The old code awaited resume() before 'live' — with a policy-suspended
+    // context that promise never settles and start() hangs on 'connecting'.
+    void player.start('/audio', 'k')
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    expect(statuses).toEqual(['idle', 'connecting', 'blocked'])
+    expect(gestures).toHaveLength(1)
+    // The blocked chunk is dropped, not scheduled on the frozen clock.
+    expect(blocked.startedAt).toEqual([])
+
+    await player.stop()
+  })
+
+  it('goes live from the next chunk after a user gesture unblocks the context', async () => {
+    const statuses: LiveAudioStatus[] = []
+    const gestures: Array<() => void> = []
+    let disposed = 0
+    const blocked = blockedAudioContext()
+    const held = heldOpenResponse(MONO_4800, [chunk])
+    const player = createLiveAudioPlayer({
+      onStatus: (s) => statuses.push(s),
+      fetchFn: async () => held.response,
+      createAudioContext: () => blocked.ctx,
+      delay: async () => { },
+      armUserGesture: (onGesture) => {
+        gestures.push(onGesture)
+        return () => { disposed += 1 }
+      },
+    })
+
+    void player.start('/audio', 'k')
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    expect(statuses).toEqual(['idle', 'connecting', 'blocked'])
+
+    blocked.gestureUnblock()
+    gestures[0]()
+    held.deliver(chunk)
+    await new Promise((resolve) => setTimeout(resolve, 10))
+
+    expect(statuses).toEqual(['idle', 'connecting', 'blocked', 'live'])
+    expect(blocked.startedAt).toHaveLength(1)
+    expect(blocked.startedAt[0]).toBeCloseTo(10.05, 6)
+    expect(disposed).toBe(1)
+
+    await player.stop()
+  })
+
+  it('disposes the gesture arm on stop', async () => {
+    let disposed = 0
+    const blocked = blockedAudioContext()
+    const held = heldOpenResponse(MONO_4800, [chunk])
+    const player = createLiveAudioPlayer({
+      onStatus: () => { },
+      fetchFn: async () => held.response,
+      createAudioContext: () => blocked.ctx,
+      delay: async () => { },
+      armUserGesture: () => () => { disposed += 1 },
+    })
+
+    void player.start('/audio', 'k')
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    expect(disposed).toBe(0)
+
+    await player.stop()
+    expect(disposed).toBe(1)
   })
 })
 

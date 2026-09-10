@@ -1,5 +1,6 @@
 package com.raulshma.lenscast.capture
 
+import android.content.Context
 import android.util.Log
 import com.raulshma.lenscast.capture.ml.AnalysisFrame
 import com.raulshma.lenscast.capture.ml.DetectionModelStore
@@ -61,6 +62,11 @@ class DetectionCoordinator(
     /** The capture history, consulted when a bounded motion recording finalizes so the event can link its clip. */
     private val captureHistoryStore: CaptureHistoryStore? = null,
     /**
+     * Application context for the ML engine — MediaPipe's task factory is
+     * context-based (unlike the old TFLite task library's file-based one).
+     */
+    private val appContext: Context,
+    /**
      * The on-demand model store behind the ML gate: its gate auto-fetches the
      * model on the first gated motion event and resolves the file per init
      * attempt.
@@ -95,7 +101,10 @@ class DetectionCoordinator(
      * attempt, so a model downloaded later is picked up on the next event.
      */
     private val mlEngine by lazy {
-        ObjectDetectionEngine(modelFileProvider = { detectionModelStore.resolveModelFile() })
+        ObjectDetectionEngine(
+            context = appContext,
+            modelFileProvider = { detectionModelStore.resolveModelFile() },
+        )
     }
 
     /** One inference at a time, off the frame path — the frame listener never blocks on the model. */

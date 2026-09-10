@@ -9,35 +9,21 @@
 -keepattributes SourceFile,LineNumberTable
 -renamesourcefileattribute SourceFile
 
-# CameraX
--keep class androidx.camera.** { *; }
+# CameraX — ships its own consumer rules; a broad manual keep here would
+# only block R8 from shrinking unused CameraX code.
 -dontwarn androidx.camera.**
 
-# NanoHTTPD
--keep class fi.iki.elonen.** { *; }
+# NanoHTTPD — plain direct-call library, no reflection on user classes;
+# R8 keeps everything transitively reachable from the service entry points.
 -dontwarn fi.iki.elonen.**
 
-# Moshi
--keep class com.squareup.moshi.** { *; }
+# Moshi — ships its own consumer rules; only the kotlin-reflect keeps below
+# (needed by KotlinJsonAdapterFactory) are app-supplied.
 -keep @com.squareup.moshi.JsonQualifier interface *
 -keepclassmembers @com.squareup.moshi.JsonClass class * extends java.lang.Enum {
     <fields>;
     **[] values();
 }
--keepclassmembers class com.squareup.moshi.** {
-    <init>(...);
-}
-
-# Coil
--keep class coil.** { *; }
--dontwarn coil.**
-
-# Coroutines
--keepnames class kotlinx.coroutines.internal.MainDispatcherFactory {}
--keepnames class kotlinx.coroutines.CoroutineExceptionHandler {}
-
-# DataStore
--keep class androidx.datastore.** { *; }
 
 # Keep ViewModel
 -keep class * extends androidx.lifecycle.ViewModel { <init>(...); }
@@ -73,31 +59,31 @@
     public static final android.os.Parcelable$Creator *;
 }
 
-# ── Kotlin reflection (needed by Moshi KotlinJsonAdapterFactory) ──
--keep class kotlin.Metadata { *; }
--keep class kotlin.reflect.** { *; }
--keep class kotlin.reflect.jvm.internal.** { *; }
--keep class kotlin.jvm.internal.** { *; }
+# ── Moshi codegen: adapters are resolved reflectively by class name ──
+-keepnames @com.squareup.moshi.JsonClass class *
+-keepnames class *JsonAdapter
 -keepattributes *Annotation*,Signature,EnclosingMethod,InnerClasses
 
-# ── Moshi Kotlin Adapter Factory ──
--keep class com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory { *; }
--keep class com.squareup.moshi.kotlin.reflect.** { *; }
--dontwarn com.squareup.moshi.kotlin.reflect.**
--dontwarn kotlin.reflect.jvm.internal.**
-
 # ── App model classes: Compose state, Moshi DTOs, enums ──
--keep class com.raulshma.lenscast.camera.model.** { *; }
--keep class com.raulshma.lenscast.capture.model.** { *; }
--keep class com.raulshma.lenscast.streaming.model.** { *; }
--keep class com.raulshma.lenscast.core.** { *; }
--keep class com.raulshma.lenscast.data.** { *; }
 -keep class com.raulshma.lenscast.gallery.GalleryFilter { *; }
 
 # ── WorkManager / Room (WorkDatabase_Impl) ──
 -keep class * extends androidx.room.RoomDatabase { *; }
 -keep class * extends androidx.work.impl.WorkDatabase { *; }
 -dontwarn androidx.work.impl.WorkDatabase_Impl
+
+# MediaPipe Tasks (ML object-detection gate). The AARs ship no consumer
+# rules: the native JNI layer resolves these classes and their members by
+# name when marshaling results, so shrinking/renaming breaks it at runtime.
+-keep class com.google.mediapipe.** { *; }
+-dontwarn com.google.mediapipe.**
+# Guava (via MediaPipe tasks-core) references compile-only annotations.
+-dontwarn com.google.errorprone.**
+-dontwarn org.checkerframework.**
+-dontwarn javax.annotation.**
+-dontwarn com.google.j2objc.**
+-dontwarn com.google.auto.value.**
+-dontwarn auto.value.**
 
 # ── Enum safety (valueOf / values) ──
 -keepclassmembers enum * {

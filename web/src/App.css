@@ -687,6 +687,12 @@ html, body {
   border-color: rgba(251, 191, 36, 0.2);
 }
 
+.audio-blocked {
+  color: var(--lc-warning);
+  border-color: rgba(251, 191, 36, 0.2);
+  background: var(--lc-warning-bg);
+}
+
 .audio-error {
   color: var(--lc-danger);
   border-color: rgba(244, 63, 94, 0.2);

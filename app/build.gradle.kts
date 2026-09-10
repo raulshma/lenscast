@@ -1,6 +1,7 @@
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
+    alias(libs.plugins.ksp)
 }
 
 val installWebDeps by tasks.registering(Exec::class) {
@@ -135,6 +136,10 @@ android {
 
     defaultConfig {
         applicationId = "com.raulshma.lenscast"
+        // 23 kept deliberately: MediaPipe Tasks Vision (the ML gate's 16 KB
+        // -aligned detector) declares minSdk 24, so the manifest gate is
+        // overridden (see AndroidManifest.xml) and the engine version-gates
+        // the library — Android 6 runs the whole app minus the ML gate.
         minSdk = 23
         targetSdk = 36
         // The in-app updater compares this value against the release channel;
@@ -144,6 +149,13 @@ android {
         versionName = project.findProperty("versionName") as String? ?: "0.0.7"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+        // x86 (32-bit) is excluded: no real device ships it, and the
+        // universal APK otherwise carries a ~15 MB MediaPipe .so for it.
+        // Emulators are covered by x86_64.
+        ndk {
+            abiFilters += listOf("armeabi-v7a", "arm64-v8a", "x86_64")
+        }
     }
 
     // The `fdroid` flavor ships without the self-updater: F-Droid policy
@@ -202,7 +214,7 @@ android {
         abi {
             isEnable = true
             reset()
-            include("armeabi-v7a", "arm64-v8a", "x86", "x86_64")
+            include("armeabi-v7a", "arm64-v8a", "x86_64")
             isUniversalApk = true
         }
     }
@@ -240,15 +252,18 @@ dependencies {
     implementation(libs.camerax.video)
 
     implementation(libs.work.manager)
-    // LiteRT (TensorFlow Lite) Task Library for the ML object-detection gate
-    // (capture/ml/). Ships to BOTH store flavors — it is a plain library, not
-    // a Play-services dependency, so the fdroid flavor gains nothing proprietary.
-    implementation("org.tensorflow:tensorflow-lite-task-vision:0.4.4")
+    // MediaPipe Tasks Vision for the ML object-detection gate (capture/ml/):
+    // the maintained successor to the TensorFlow Lite Task Library, which is
+    // frozen at 0.4.4 with native libs predating 16 KB page-size alignment
+    // (mandatory on Play for apps targeting API 35+). Plain library — no
+    // Play-services dependency — so the fdroid flavor gains nothing proprietary.
+    implementation("com.google.mediapipe:tasks-vision:1.0.0")
     implementation(libs.nanohttpd)
     implementation(libs.nanohttpd.ws)
     implementation(libs.datastore.preferences)
     implementation(libs.coroutines.guava)
     implementation(libs.moshi)
+    ksp(libs.moshi.codegen)
 
     implementation(libs.coil.base)
     implementation(libs.coil.compose)

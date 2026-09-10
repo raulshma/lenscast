@@ -1,5 +1,7 @@
 package com.raulshma.lenscast.streaming
 
+import com.squareup.moshi.JsonClass
+
 import android.content.Context
 import com.raulshma.lenscast.camera.model.StreamToggle
 import com.raulshma.lenscast.core.AppJson
@@ -21,6 +23,7 @@ class StreamStateJournal(private val file: File) {
     constructor(context: Context) : this(File(File(context.filesDir, DIRECTORY), FILE_NAME))
 
     /** Which outputs the user last left intentionally running. */
+    @JsonClass(generateAdapter = true)
     data class State(val web: Boolean = false, val rtsp: Boolean = false) {
         val anyLive: Boolean get() = web || rtsp
     }

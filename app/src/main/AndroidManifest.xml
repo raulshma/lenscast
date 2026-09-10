@@ -2,6 +2,16 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
+    <!--
+        MediaPipe Tasks Vision (the ML gate's 16 KB-aligned detector library)
+        declares minSdk 24. The app still supports API 23: the manifest gate is
+        overridden here and ObjectDetectionEngine version-gates every touch of
+        the library, so Android 6 devices run everything except the ML
+        detection gate (fail-open — alerts pass through). Do NOT remove the
+        runtime gate if removing this override.
+    -->
+    <uses-sdk tools:overrideLibrary="com.google.mediapipe.tasks.vision,com.google.mediapipe.tasks.core" />
+
     <uses-feature android:name="android.hardware.camera" android:required="true" />
 
     <uses-permission android:name="android.permission.CAMERA" />

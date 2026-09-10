@@ -1,5 +1,7 @@
 package com.raulshma.lenscast.streaming.web
 
+import com.squareup.moshi.JsonClass
+
 import com.raulshma.lenscast.core.AppJson
 import com.raulshma.lenscast.core.readJsonOrDefault
 import com.raulshma.lenscast.core.writeAtomicallyOrWarn
@@ -11,6 +13,7 @@ import java.io.File
  * auth outcome (`login.failed` from 192.168.1.20). Newest first, capped — the
  * same shape the detection event log popularized, minus the snapshots.
  */
+@JsonClass(generateAdapter = true)
 data class AuditEntry(
     val timestampMs: Long,
     /** `"$method $path"` for a route dispatch, `login.success` / `login.failed` for auth. */

@@ -1,5 +1,6 @@
 import { Show, createSignal, createMemo, createEffect, onCleanup } from 'solid-js'
 import type { DeviceStatus, StreamingSettings } from '../types'
+import type { LiveAudioStatus } from '../audio/LiveAudioPlayer'
 import { useZoomable } from '../hooks/useZoomable'
 import ConnectionQualityIndicator from './ConnectionQualityIndicator'
 import { tapToFocus as apiTapToFocus, setZoom as apiSetZoom, setTorch as apiSetTorch, pushTalkback } from '../api/client'
@@ -15,7 +16,7 @@ interface Props {
   streamActionLoading: () => boolean
   isRecording: () => boolean
   captureMsg: () => string
-  liveAudioStatus: () => 'idle' | 'connecting' | 'live' | 'error'
+  liveAudioStatus: () => LiveAudioStatus
   recordingTimer: { formatElapsed: () => string }
   handleCapture: () => void
   handleStartWebStream: () => void
@@ -615,6 +616,7 @@ export default function StreamPreview(props: Props) {
           <div class="audio-status-indicator" classList={{
             'audio-live': props.liveAudioStatus() === 'live',
             'audio-connecting': props.liveAudioStatus() === 'connecting',
+            'audio-blocked': props.liveAudioStatus() === 'blocked',
             'audio-error': props.liveAudioStatus() === 'error',
           }}>
             <svg class="audio-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -625,9 +627,10 @@ export default function StreamPreview(props: Props) {
             </svg>
             <span>
               {props.liveAudioStatus() === 'live' ? 'Audio Live' :
-                props.liveAudioStatus() === 'connecting' ? 'Connecting...' :
-                  props.liveAudioStatus() === 'error' ? 'Audio Error' :
-                    'Audio Idle'}
+                props.liveAudioStatus() === 'blocked' ? 'Tap anywhere to enable audio' :
+                  props.liveAudioStatus() === 'connecting' ? 'Connecting...' :
+                    props.liveAudioStatus() === 'error' ? 'Audio Error' :
+                      'Audio Idle'}
             </span>
           </div>
         </div>

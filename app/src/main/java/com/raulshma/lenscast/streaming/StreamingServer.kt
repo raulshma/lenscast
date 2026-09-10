@@ -77,6 +77,21 @@ class StreamingServer(
 
     fun updateFrame(jpegData: ByteArray) = mjpegPump.updateFrame(jpegData)
 
+    /**
+     * NanoHTTPD auto-gzips every text response when the client accepts
+     * gzip — a never-ending `text/event-stream` included. The gzip deflater
+     * buffers the small per-second SSE frames, so the browser's EventSource
+     * opens but never receives a complete event, freezing the dashboard at
+     * its load-time status (its poll fallback stays disarmed while the
+     * connection reports OPEN). SSE must stay uncompressed; the finite
+     * text and json bodies keep the default behavior.
+     */
+    override fun useGzipWhenAccepted(r: Response): Boolean {
+        val mime = r.mimeType ?: return false
+        if (mime.startsWith("text/event-stream")) return false
+        return super.useGzipWhenAccepted(r)
+    }
+
     fun setWebStreamingEnabled(enabled: Boolean) = mjpegPump.setEnabled(enabled)
 
     fun getClientCount(): Int = mjpegPump.getClientCount()

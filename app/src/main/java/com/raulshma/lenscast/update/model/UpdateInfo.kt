@@ -1,9 +1,12 @@
 package com.raulshma.lenscast.update.model
 
+import com.squareup.moshi.JsonClass
+
 import androidx.annotation.Keep
 import com.squareup.moshi.Json
 
 @Keep
+@JsonClass(generateAdapter = true)
 data class GitHubRelease(
     @param:Json(name = "tag_name") val tagName: String,
     @param:Json(name = "name") val name: String,
@@ -13,6 +16,7 @@ data class GitHubRelease(
 )
 
 @Keep
+@JsonClass(generateAdapter = true)
 data class GitHubAsset(
     @param:Json(name = "name") val name: String,
     @param:Json(name = "browser_download_url") val browserDownloadUrl: String,
@@ -26,6 +30,7 @@ data class GitHubAsset(
 sealed interface UpdateState {
     data object Idle : UpdateState
     data object Checking : UpdateState
+    @JsonClass(generateAdapter = true)
     data class UpdateAvailable(
         val version: String,
         val releaseNotes: String,
@@ -35,15 +40,22 @@ sealed interface UpdateState {
         /** The release asset's "sha256:<hex>" digest; null when GitHub omits it. */
         val digest: String? = null,
     ) : UpdateState
+    @JsonClass(generateAdapter = true)
     data class UpToDate(val remoteVersion: String = "") : UpdateState
+    @JsonClass(generateAdapter = true)
     data class Downloading(val progress: Float) : UpdateState
+    @JsonClass(generateAdapter = true)
     data class ReadyToInstall(val apkFilePath: String) : UpdateState
+    @JsonClass(generateAdapter = true)
     data class Error(val message: String) : UpdateState
 }
 
 sealed interface UpdateCheckResult {
+    @JsonClass(generateAdapter = true)
     data class UpdateAvailable(val release: GitHubRelease, val apkAsset: GitHubAsset) : UpdateCheckResult
+    @JsonClass(generateAdapter = true)
     data class UpToDate(val remoteVersion: String, val localVersion: String) : UpdateCheckResult
     data object RateLimited : UpdateCheckResult
+    @JsonClass(generateAdapter = true)
     data class Error(val message: String) : UpdateCheckResult
 }

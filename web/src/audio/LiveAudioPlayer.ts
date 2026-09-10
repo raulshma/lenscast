@@ -4,7 +4,12 @@
 // timers) are injectable so the framing math and reconnect ladder stay
 // unit-testable in a node environment.
 
-export type LiveAudioStatus = 'idle' | 'connecting' | 'live' | 'error'
+/**
+ * 'blocked' = the AudioContext is suspended by the browser's autoplay
+ * policy (no user gesture on the page yet): the stream is flowing, but
+ * playback starts only after the first tap/keypress.
+ */
+export type LiveAudioStatus = 'idle' | 'connecting' | 'live' | 'blocked' | 'error'
 
 export interface AudioBufferLike {
   duration: number
@@ -30,6 +35,13 @@ export interface AudioContextLike {
 
 const MAX_RECONNECT_ATTEMPTS = 3
 const RECONNECT_DELAY_MS = 2000
+
+// How long resume() gets to settle before the session is declared autoplay-
+// blocked. A gesture-carrying page resumes in milliseconds; a policy-suspended
+// context never settles, and the promise would hang `start()` forever.
+const RESUME_GRACE_MS = 400
+
+const GESTURE_EVENTS = ['pointerdown', 'keydown', 'touchstart'] as const
 
 // ── Pure pieces ──
 
@@ -107,6 +119,12 @@ export interface LiveAudioPlayerOptions {
   createAudioContext?: (sampleRate: number) => AudioContextLike | null
   /** Inter-reconnect sleeper; defaults to a setTimeout promise. */
   delay?: (ms: number) => Promise<void>
+  /**
+   * Arms a one-shot-ish user-gesture hook (any tap/keypress resumes a
+   * policy-suspended AudioContext); returns its disposer. Defaults to
+   * window capture listeners; injectable for tests.
+   */
+  armUserGesture?: (onGesture: () => void) => () => void
 }
 
 export interface LiveAudioPlayer {
@@ -130,12 +148,20 @@ const defaultFetch = (input: string, init: { cache: 'no-store'; signal: AbortSig
 
 const defaultDelay = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms))
 
+function defaultArmUserGesture(onGesture: () => void): () => void {
+  if (typeof window === 'undefined') return () => { }
+  const handler = () => onGesture()
+  GESTURE_EVENTS.forEach((event) => window.addEventListener(event, handler, { capture: true }))
+  return () => GESTURE_EVENTS.forEach((event) => window.removeEventListener(event, handler, { capture: true }))
+}
+
 export function createLiveAudioPlayer(options: LiveAudioPlayerOptions): LiveAudioPlayer {
   const {
     onStatus,
     fetchFn = defaultFetch,
     createAudioContext = constructDefaultAudioContext,
     delay = defaultDelay,
+    armUserGesture = defaultArmUserGesture,
   } = options
 
   let abortController: AbortController | null = null
@@ -144,6 +170,12 @@ export function createLiveAudioPlayer(options: LiveAudioPlayerOptions): LiveAudi
   let session = 0
   let currentKey = ''
   let bufferPool = createBufferPool()
+  let gestureDisposer: (() => void) | null = null
+
+  function disposeGestureArm() {
+    gestureDisposer?.()
+    gestureDisposer = null
+  }
 
   async function stop(resetKey = true) {
     if (resetKey) currentKey = ''
@@ -152,6 +184,7 @@ export function createLiveAudioPlayer(options: LiveAudioPlayerOptions): LiveAudi
     abortController = null
     playbackTime = 0
     bufferPool.clear()
+    disposeGestureArm()
     if (audioContext) {
       try { await audioContext.close() } catch { }
       audioContext = null
@@ -163,10 +196,36 @@ export function createLiveAudioPlayer(options: LiveAudioPlayerOptions): LiveAudi
     if (!audioContext || audioContext.state === 'closed') {
       audioContext = createAudioContext(sampleRate)
     }
-    if (audioContext && audioContext.state === 'suspended') {
-      try { await audioContext.resume() } catch { }
-    }
     return audioContext
+  }
+
+  /**
+   * State probe as its own function: narrowing from an earlier check must
+   * not survive the awaits in between (the race below can flip the state).
+   */
+  function isRunning(ctx: AudioContextLike): boolean {
+    return ctx.state === 'running'
+  }
+
+  /**
+   * Waits a bounded time for the context to run. A policy-suspended context's
+   * resume() never settles, so the race's losing arm (the delay) is the only
+   * way out — `false` means "autoplay-blocked, needs a user gesture".
+   */
+  async function waitUntilRunning(ctx: AudioContextLike): Promise<boolean> {
+    if (isRunning(ctx)) return true
+    try {
+      await Promise.race([ctx.resume().catch(() => { }), delay(RESUME_GRACE_MS)])
+    } catch { }
+    return isRunning(ctx)
+  }
+
+  /** Resumes a policy-suspended context on the first user gesture; the next streamed chunk flips the status. */
+  function armResumeOnUserGesture(ctx: AudioContextLike) {
+    disposeGestureArm()
+    gestureDisposer = armUserGesture(() => {
+      void ctx.resume().catch(() => { })
+    })
   }
 
   function schedulePcmChunk(ctx: AudioContextLike, pcmBytes: Uint8Array, sampleRate: number, channelCount: number) {
@@ -212,12 +271,19 @@ export function createLiveAudioPlayer(options: LiveAudioPlayerOptions): LiveAudi
         const ctx = await ensureAudioContext(sampleRate)
         if (!ctx) throw new Error('Web Audio not supported')
 
-        onStatus('live')
+        const running = await waitUntilRunning(ctx)
+        if (running) {
+          onStatus('live')
+        } else {
+          onStatus('blocked')
+          armResumeOnUserGesture(ctx)
+        }
         playbackTime = ctx.currentTime + 0.05
         reconnectAttempts = 0
 
         const reader = res.body.getReader()
         const framer = createPcmFramer(bytesPerFrame)
+        let announcedLive = running
 
         while (sessionId === session) {
           const { value, done } = await reader.read()
@@ -225,11 +291,22 @@ export function createLiveAudioPlayer(options: LiveAudioPlayerOptions): LiveAudi
           if (!value || value.length === 0) continue
 
           const aligned = framer.push(value)
-          if (aligned.length > 0) {
-            schedulePcmChunk(ctx, aligned, sampleRate, channelCount)
+          if (aligned.length === 0) continue
+          // A suspended clock is frozen: scheduling against it would stack
+          // every buffer on one instant and blast them all out on resume.
+          // Drop chunks instead — live audio joins at the live edge.
+          if (ctx.state !== 'running') continue
+
+          if (!announcedLive) {
+            announcedLive = true
+            disposeGestureArm()
+            onStatus('live')
+            playbackTime = ctx.currentTime + 0.05
           }
+          schedulePcmChunk(ctx, aligned, sampleRate, channelCount)
         }
 
+        disposeGestureArm()
         if (!controller.signal.aborted && sessionId === session) {
           onStatus('idle')
         }

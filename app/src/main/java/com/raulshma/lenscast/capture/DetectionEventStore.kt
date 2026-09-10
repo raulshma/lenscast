@@ -1,5 +1,7 @@
 package com.raulshma.lenscast.capture
 
+import com.squareup.moshi.JsonClass
+
 import android.content.Context
 import com.raulshma.lenscast.core.AppJson
 import com.raulshma.lenscast.core.StreamDefaults
@@ -20,6 +22,7 @@ import kotlinx.coroutines.flow.SharedFlow
  * `filesDir/detection_events.json`, newest first, capped by
  * [DetectionEventLogPolicy].
  */
+@JsonClass(generateAdapter = true)
 data class DetectionEvent(
     val id: String,
     val type: String,

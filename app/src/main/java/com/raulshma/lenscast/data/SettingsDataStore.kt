@@ -1,5 +1,7 @@
 package com.raulshma.lenscast.data
 
+import com.squareup.moshi.JsonClass
+
 import android.content.Context
 import android.util.Log
 import androidx.datastore.core.DataStore
@@ -45,6 +47,7 @@ import kotlinx.coroutines.flow.stateIn
  * [com.raulshma.lenscast.core.StreamAuthCrypto] — the single home the RTSP
  * server and the Web Auth Gate also verify through.
  */
+@JsonClass(generateAdapter = true)
 data class StreamAuthSettings(
     val enabled: Boolean = false,
     val username: String = "",
@@ -656,7 +659,8 @@ private fun encodeOverlaySettings(prefs: MutablePreferences, settings: OverlaySe
  * for an absent id) — never make these fields non-nullable, or old payloads
  * with partial zones stop decoding.
  */
-private data class MaskingZoneJson(
+@JsonClass(generateAdapter = true)
+internal data class MaskingZoneJson(
     val id: String? = null,
     val label: String? = null,
     val enabled: Boolean? = null,
@@ -739,7 +743,8 @@ internal fun serializeMaskingZones(zones: List<MaskingZone>): String {
  * conventions as the masking codec, so a malformed payload degrades to an
  * empty zone list instead of killing the whole store decode.
  */
-private data class MotionZoneJson(
+@JsonClass(generateAdapter = true)
+internal data class MotionZoneJson(
     val id: String? = null,
     val label: String? = null,
     val enabled: Boolean? = null,
