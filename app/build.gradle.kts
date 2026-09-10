@@ -145,15 +145,16 @@ android {
         // the library — Android 6 runs the whole app minus the ML gate.
         minSdk = 23
         targetSdk = 36
-        // The in-app updater compares versionName semantically; versionCode
-        // follows major*1_000_000 + minor*1_000 + patch so every release
-        // strictly increases — required by Play, the in-app updater's
-        // fallback check, and F-Droid metadata. CI passes both properties;
-        // the defaults must match the tagged release they ship in, because
-        // F-Droid builds the tag with plain `assembleFdroidRelease`.
-        // Literal-first so F-Droid's update checker (`versionCode = <int>`
-        // regex) can read it; CI overrides both via -P properties.
-        versionCode = 1001
+        // The in-app updater compares versionName semantically. versionCode
+        // = major*10_000 + minor*100 + patch*10 + abiIndex, abiIndex being
+        // armeabi-v7a=1, arm64-v8a=2, x86_64=3 — 0.1.1 ships 1011/1012/1013
+        // (one APK per ABI; F-Droid needs distinct codes per APK, and
+        // per-ABI APKs shrink downloads from 36 MB to ~9 MB). The literal
+        // below is the arm64 default for plain local builds; CI and the
+        // F-Droid recipe pass the full code via -PversionCode together with
+        // -PabiFilter. Literal-first so fdroidserver's checkupdates parser
+        // (reads `versionCode = <int>` from this file) keeps working.
+        versionCode = 1012
         project.findProperty("versionCode")?.let { versionCode = (it as String).toInt() }
         // Literal-first for the same reason: fdroidserver's checkupdates
         // parser reads `versionName = <literal>` from this file.
@@ -162,11 +163,13 @@ android {
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
-        // x86 (32-bit) is excluded: no real device ships it, and the
-        // universal APK otherwise carries a ~15 MB MediaPipe .so for it.
-        // Emulators are covered by x86_64.
+        // Without -PabiFilter a plain local build packages all three ABIs;
+        // release builds (CI and the F-Droid recipe) restrict to one ABI per
+        // invocation. x86 (32-bit) stays excluded: no real device ships it.
+        val abiFilter = project.findProperty("abiFilter") as String?
         ndk {
-            abiFilters += listOf("armeabi-v7a", "arm64-v8a", "x86_64")
+            abiFilters += abiFilter?.let { listOf(it) }
+                ?: listOf("armeabi-v7a", "arm64-v8a", "x86_64")
         }
     }
 
@@ -223,22 +226,6 @@ android {
             // Plain-JVM unit tests hit android.util.Log in the streaming
             // monitors; return defaults instead of throwing "not mocked".
             isReturnDefaultValues = true
-        }
-    }
-
-    splits {
-        abi {
-            // F-Droid must get exactly one universal APK per version — multiple
-            // APKs sharing a versionCode break fdroid packaging — so splits are
-            // disabled whenever a `fdroid`-flavored task is requested. The
-            // store channel keeps per-ABI APKs for smaller downloads.
-            val buildingFdroidFlavor = gradle.startParameter.taskNames.any {
-                it.contains("fdroid", ignoreCase = true)
-            }
-            isEnable = !buildingFdroidFlavor
-            reset()
-            include("armeabi-v7a", "arm64-v8a", "x86_64")
-            isUniversalApk = true
         }
     }
 }

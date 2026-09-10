@@ -76,38 +76,37 @@ jobs:
           echo "Next tag computing to: $NEW_TAG"
           echo "Next APK version: $NEW_APK_VERSION"
 
-          # versionCode = major*1_000_000 + minor*1_000 + patch — must match
-          # app/build.gradle.kts and strictly increase every release (Play,
-          # in-app updater, F-Droid).
+          # versionCode = major*10_000 + minor*100 + patch*10 + abiIndex
+          # (armeabi-v7a=1, arm64-v8a=2, x86_64=3; 0.1.2 -> 1021/1022/1023).
+          # Must match app/build.gradle.kts and strictly increase.
           IFS='.' read -r vc_major vc_minor vc_patch <<< "$NEW_APK_VERSION"
-          VERSION_CODE=$((vc_major * 1000000 + vc_minor * 1000 + vc_patch))
-          echo "Next APK versionCode: $VERSION_CODE"
+          VERSION_BASE=$((vc_major * 10000 + vc_minor * 100 + vc_patch * 10))
+          echo "versionCode base (abi index appended per ABI): $VERSION_BASE"
 
           echo "tag=$NEW_TAG" >> $GITHUB_OUTPUT
           echo "apk_version=$NEW_APK_VERSION" >> $GITHUB_OUTPUT
-          echo "version_code=$VERSION_CODE" >> $GITHUB_OUTPUT
+          echo "version_base=$VERSION_BASE" >> $GITHUB_OUTPUT
 
-      - name: Build Android App (Release)
+      - name: Build Android App (Release, one APK per ABI)
         env:
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
-        run: ./gradlew assembleRelease -PversionName="${{ steps.version.outputs.apk_version }}" -PversionCode="${{ steps.version.outputs.version_code }}"
-
-      - name: Rename APK Outputs
         run: |
+          abi_index() { case "$1" in armeabi-v7a) echo 1;; arm64-v8a) echo 2;; x86_64) echo 3;; esac; }
           shopt -s nullglob
-          # Product flavors (store/fdroid) land in apk/<flavor>/release/
-          apks=(app/build/outputs/apk/*/release/*.apk)
-          if [ ${#apks[@]} -eq 0 ]; then
-            echo "ERROR: No APK files found"
-            exit 1
-          fi
-          for apk in "${apks[@]}"; do
-            filename=$(basename "$apk")
-            new_filename="lenscast-${filename#app-}"
-            mv "$apk" "$new_filename"
+          mkdir -p out
+          for abi in armeabi-v7a arm64-v8a x86_64; do
+            VC=$((${{ steps.version.outputs.version_base }} + $(abi_index "$abi")))
+            echo "::group::Building $abi (versionCode $VC)"
+            ./gradlew assembleRelease -PversionName="${{ steps.version.outputs.apk_version }}" -PversionCode="$VC" -PabiFilter="$abi"
+            for apk in app/build/outputs/apk/*/release/app-*-release.apk; do
+              mv "$apk" "out/lenscast-${apk#*outputs/apk/}-${abi}-vc${VC}.apk"
+            done
+            echo "::endgroup::"
           done
+          mv out/*.apk .
+          rmdir out
 
       - name: Publish to GitHub Releases
         uses: softprops/action-gh-release@v2

@@ -14,7 +14,7 @@ Repo: https://github.com/raulshma/lenscast.git
 
 Builds:
   - versionName: 0.1.1
-    versionCode: 1001
+    versionCode: 1011
     commit: v0.1.1
     sudo:
       - curl -Lo node.tar.gz https://nodejs.org/dist/v22.23.2/node-v22.23.2-linux-x64.tar.gz
@@ -23,9 +23,42 @@ Builds:
       - tar xzf node.tar.gz --strip-components=1 -C /usr/local/
     gradle:
       - fdroid
+    gradleprops:
+      - abiFilter=armeabi-v7a
+      - versionCode=1011
+    output: app/build/outputs/apk/fdroid/release/app-fdroid-release.apk
+
+  - versionName: 0.1.1
+    versionCode: 1012
+    commit: v0.1.1
+    sudo:
+      - curl -Lo node.tar.gz https://nodejs.org/dist/v22.23.2/node-v22.23.2-linux-x64.tar.gz
+      - echo "b294a556e639d64338823920e5866c21c02741742d2e1529ee1a225c1ec9252a  node.tar.gz"
+        | sha256sum -c -
+      - tar xzf node.tar.gz --strip-components=1 -C /usr/local/
+    gradle:
+      - fdroid
+    gradleprops:
+      - abiFilter=arm64-v8a
+      - versionCode=1012
+    output: app/build/outputs/apk/fdroid/release/app-fdroid-release.apk
+
+  - versionName: 0.1.1
+    versionCode: 1013
+    commit: v0.1.1
+    sudo:
+      - curl -Lo node.tar.gz https://nodejs.org/dist/v22.23.2/node-v22.23.2-linux-x64.tar.gz
+      - echo "b294a556e639d64338823920e5866c21c02741742d2e1529ee1a225c1ec9252a  node.tar.gz"
+        | sha256sum -c -
+      - tar xzf node.tar.gz --strip-components=1 -C /usr/local/
+    gradle:
+      - fdroid
+    gradleprops:
+      - abiFilter=x86_64
+      - versionCode=1013
     output: app/build/outputs/apk/fdroid/release/app-fdroid-release.apk
 
 AutoUpdateMode: Version
 UpdateCheckMode: Tags
 CurrentVersion: 0.1.1
-CurrentVersionCode: 1001
+CurrentVersionCode: 1013
