@@ -76,11 +76,12 @@ jobs:
           echo "Next tag computing to: $NEW_TAG"
           echo "Next APK version: $NEW_APK_VERSION"
 
-          # versionCode = major*10_000 + minor*100 + patch*10 + abiIndex
-          # (armeabi-v7a=1, arm64-v8a=2, x86_64=3; 0.1.2 -> 1021/1022/1023).
-          # Must match app/build.gradle.kts and strictly increase.
+          # versionCode = major*10_000 + minor*1_000 + patch*10 + abiIndex
+          # (armeabi-v7a=1, arm64-v8a=2, x86_64=3; 0.1.2 -> 1021/1022/1023,
+          # 1.0.0 -> 10001/10002/10003). Must match app/build.gradle.kts,
+          # the fdroid recipe, and strictly increase.
           IFS='.' read -r vc_major vc_minor vc_patch <<< "$NEW_APK_VERSION"
-          VERSION_BASE=$((vc_major * 10000 + vc_minor * 100 + vc_patch * 10))
+          VERSION_BASE=$((vc_major * 10000 + vc_minor * 1000 + vc_patch * 10))
           echo "versionCode base (abi index appended per ABI): $VERSION_BASE"
 
           echo "tag=$NEW_TAG" >> $GITHUB_OUTPUT
@@ -94,15 +95,17 @@ jobs:
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: |
           abi_index() { case "$1" in armeabi-v7a) echo 1;; arm64-v8a) echo 2;; x86_64) echo 3;; esac; }
-          shopt -s nullglob
           mkdir -p out
           for abi in armeabi-v7a arm64-v8a x86_64; do
             VC=$((${{ steps.version.outputs.version_base }} + $(abi_index "$abi")))
-            echo "::group::Building $abi (versionCode $VC)"
-            ./gradlew assembleRelease -PversionName="${{ steps.version.outputs.apk_version }}" -PversionCode="$VC" -PabiFilter="$abi"
-            for apk in app/build/outputs/apk/*/release/app-*-release.apk; do
-              mv "$apk" "out/lenscast-${apk#*outputs/apk/}-${abi}-vc${VC}.apk"
-            done
+            echo "::group::Building store/$abi (versionCode $VC)"
+            # Store flavor only: it is the flavor GitHub users install. The
+            # fdroid flavor is built by F-Droid's own recipe; uploading it
+            # here would also give the in-app updater a no-updater APK to
+            # wrongly pick (assets sort fdroid-first).
+            ./gradlew assembleStoreRelease -PversionName="${{ steps.version.outputs.apk_version }}" -PversionCode="$VC" -PabiFilter="$abi"
+            mv app/build/outputs/apk/store/release/app-store-release.apk \
+              "out/lenscast-${{ steps.version.outputs.apk_version }}-${abi}-vc${VC}.apk"
             echo "::endgroup::"
           done
           mv out/*.apk .
@@ -114,4 +117,5 @@ jobs:
           tag_name: "${{ steps.version.outputs.tag }}"
           name: "Release ${{ steps.version.outputs.tag }}"
           files: lenscast-*.apk
+          draft: true
           generate_release_notes: true

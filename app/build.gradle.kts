@@ -136,7 +136,7 @@ android {
         minSdk = 23
         targetSdk = 36
         // The in-app updater compares versionName semantically. versionCode
-        // = major*10_000 + minor*100 + patch*10 + abiIndex, abiIndex being
+        // = major*10_000 + minor*1_000 + patch*10 + abiIndex, abiIndex being
         // armeabi-v7a=1, arm64-v8a=2, x86_64=3 — 0.1.1 ships 1011/1012/1013
         // (one APK per ABI; F-Droid needs distinct codes per APK, and
         // per-ABI APKs shrink downloads from 36 MB to ~9 MB). The literal
