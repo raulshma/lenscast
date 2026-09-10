@@ -153,8 +153,11 @@ android {
         // below is the arm64 default for plain local builds; CI and the
         // F-Droid recipe pass the full code via -PversionCode together with
         // -PabiFilter. Literal-first so fdroidserver's checkupdates parser
-        // (reads `versionCode = <int>` from this file) keeps working.
-        versionCode = 1012
+        // (reads `versionCode = <int>` from this file) keeps working. The
+        // literal is the x86_64 default (highest abiIndex = the code
+        // checkupdates expects to see as "current"); local plain builds
+        // package all three ABIs with it.
+        versionCode = 1013
         project.findProperty("versionCode")?.let { versionCode = (it as String).toInt() }
         // Literal-first for the same reason: fdroidserver's checkupdates
         // parser reads `versionName = <literal>` from this file.
