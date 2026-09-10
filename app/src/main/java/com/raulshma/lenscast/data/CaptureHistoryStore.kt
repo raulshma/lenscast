@@ -11,6 +11,7 @@ import com.raulshma.lenscast.capture.model.CaptureHistory
 import com.raulshma.lenscast.capture.model.CaptureMediaFormat
 import com.raulshma.lenscast.capture.model.CaptureType
 import com.raulshma.lenscast.core.AppJson
+import com.raulshma.lenscast.core.StreamDefaults
 import com.squareup.moshi.Types
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -27,6 +28,11 @@ class CaptureHistoryStore(
      * re-creating the store.
      */
     private val retentionDays: () -> Int = { 0 },
+    /**
+     * The live storage quota in MB, read per sweep — same live-read contract
+     * as [retentionDays]. The default is the store's historical fixed quota.
+     */
+    private val quotaMb: () -> Int = { StreamDefaults.STORAGE_QUOTA_MB_DEFAULT },
 ) {
 
     private val listType = Types.newParameterizedType(
@@ -83,6 +89,13 @@ class CaptureHistoryStore(
     }
 
     /**
+     * The configured quota in bytes — [StorageManager.quotaBytes] over the
+     * live MB provider, so every enforcement pass and the storage bar read
+     * the same setting.
+     */
+    fun quotaBytes(): Long = StorageManager.quotaBytes(quotaMb())
+
+    /**
      * The low-disk watchdog, run after each capture: quota enforcement alone
      * can leave the volume under its safety floor when a large capture lands
      * on an already tight disk. Below [StorageManager.LOW_SPACE_FLOOR_BYTES]
@@ -91,7 +104,7 @@ class CaptureHistoryStore(
      */
     private fun enforceLowSpaceFloor() {
         if (!hasFreeSpace()) {
-            enforceQuota(quotaBytes = StorageManager.DEFAULT_QUOTA_BYTES / 2)
+            enforceQuota(quotaBytes = quotaBytes() / 2)
         }
     }
 
@@ -111,8 +124,9 @@ class CaptureHistoryStore(
         return deleteAll(victims.map { it.id })
     }
 
-    fun storageBar(quotaBytes: Long): StorageBar =
-        StorageManager.storageBar(totalBytes(), quotaBytes)
+    /** The storage bar at the configured quota. */
+    fun storageBar(): StorageBar =
+        StorageManager.storageBar(totalBytes(), quotaBytes())
 
     /** Guard before a capture: false when free space is below the safety floor. */
     fun hasFreeSpace(minFreeBytes: Long = StorageManager.LOW_SPACE_FLOOR_BYTES): Boolean {
@@ -125,7 +139,7 @@ class CaptureHistoryStore(
     }
 
     /** Auto-delete-oldest until under quota; returns evicted ids. */
-    fun enforceQuota(quotaBytes: Long = StorageManager.DEFAULT_QUOTA_BYTES): List<String> {
+    fun enforceQuota(quotaBytes: Long = quotaBytes()): List<String> {
         val victims = StorageManager.evictionOrder(_history.value, totalBytes(), quotaBytes)
         if (victims.isEmpty()) return emptyList()
         return deleteAll(victims.map { it.id })

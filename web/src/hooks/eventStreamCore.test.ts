@@ -1,9 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import type { DetectionEvent } from '../types'
-import { createStreamFallback, eventKey, mergeEvents, parseEventData } from './eventStreamCore'
+import { collectLabels, createStreamFallback, eventKey, filterEvents, mergeEvents, parseEventData } from './eventStreamCore'
 
 function event(id: string, timestampMs: number): DetectionEvent {
   return { id, type: 'motion', source: 'test', timestampMs, dispatchedActions: [], zones: [] }
+}
+
+function labeledEvent(id: string, timestampMs: number, labels: string[]): DetectionEvent {
+  return { ...event(id, timestampMs), labels }
 }
 
 describe('parseEventData', () => {
@@ -59,6 +63,56 @@ describe('mergeEvents dedupe/cap', () => {
   it('replays keep their position when older than the live tail', () => {
     const merged = mergeEvents([event('live', 500)], [event('replayOld', 100), event('replayNew', 600)], 10)
     expect(merged.map((e) => e.id)).toEqual(['replayNew', 'live', 'replayOld'])
+  })
+})
+
+describe('filterEvents', () => {
+  const sample: DetectionEvent[] = [
+    labeledEvent('motion-a', 100, ['person', 'car']),
+    { ...event('sound-b', 200), type: 'sound' },
+    { ...event('tamper-c', 300), type: 'tamper', labels: ['person'] },
+  ]
+
+  it('keeps everything for the all/all-labels filter, preserving order', () => {
+    expect(filterEvents(sample, { type: 'all', label: null }).map((e) => e.id)).toEqual(['motion-a', 'sound-b', 'tamper-c'])
+  })
+
+  it('filters by type', () => {
+    expect(filterEvents(sample, { type: 'motion', label: null }).map((e) => e.id)).toEqual(['motion-a'])
+    expect(filterEvents(sample, { type: 'sound', label: null }).map((e) => e.id)).toEqual(['sound-b'])
+    expect(filterEvents(sample, { type: 'tamper', label: null }).map((e) => e.id)).toEqual(['tamper-c'])
+  })
+
+  it('filters by label across types and drops events without labels', () => {
+    expect(filterEvents(sample, { type: 'all', label: 'person' }).map((e) => e.id)).toEqual(['motion-a', 'tamper-c'])
+    expect(filterEvents(sample, { type: 'all', label: 'dog' })).toEqual([])
+  })
+
+  it('combines type and label filters', () => {
+    expect(filterEvents(sample, { type: 'tamper', label: 'person' }).map((e) => e.id)).toEqual(['tamper-c'])
+    expect(filterEvents(sample, { type: 'sound', label: 'person' })).toEqual([])
+  })
+
+  it('does not mutate the input list', () => {
+    const copy = [...sample]
+    filterEvents(sample, { type: 'sound', label: 'car' })
+    expect(sample).toEqual(copy)
+  })
+})
+
+describe('collectLabels', () => {
+  it('returns the sorted, deduped union of labels across events', () => {
+    const labels = collectLabels([
+      labeledEvent('a', 100, ['dog', 'person']),
+      labeledEvent('b', 200, ['person', 'car']),
+      labeledEvent('c', 300, ['dog']),
+    ])
+    expect(labels).toEqual(['car', 'dog', 'person'])
+  })
+
+  it('skips events without labels and handles an empty feed', () => {
+    expect(collectLabels([event('a', 100)])).toEqual([])
+    expect(collectLabels([])).toEqual([])
   })
 })
 

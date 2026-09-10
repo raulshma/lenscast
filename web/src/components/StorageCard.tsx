@@ -9,16 +9,23 @@ interface Props {
 }
 
 /**
- * Capture and detection-event retention windows, in days. 0 keeps everything;
- * items older than the window are deleted. Number inputs follow the MQTT
- * card's broker-port pattern: debounce-save while typing, only when the text
- * parses as an integer — the input's min/max stop the spinners but not
- * free-typed text, so the save clamps into [0, 365] explicitly.
+ * Capture and detection-event retention windows, in days, plus the storage
+ * quota in MB. 0 keeps everything; items older than the window are deleted,
+ * and media past the quota ages out oldest-first. Number inputs follow the
+ * MQTT card's broker-port pattern: debounce-save while typing, only when the
+ * text parses as an integer — the input's min/max stop the spinners but not
+ * free-typed text, so each save clamps explicitly.
  */
 function clampRetentionDays(raw: string): number | null {
   const v = parseInt(raw, 10)
   if (!Number.isFinite(v)) return null
   return Math.min(API_DEFAULTS.retentionMaxDays, Math.max(API_DEFAULTS.retentionMinDays, v))
+}
+
+function clampQuotaMb(raw: string): number | null {
+  const v = parseInt(raw, 10)
+  if (!Number.isFinite(v)) return null
+  return Math.min(API_DEFAULTS.storageQuotaMaxMb, Math.max(API_DEFAULTS.storageQuotaMinMb, v))
 }
 
 export default function StorageCard(props: Props) {
@@ -77,9 +84,29 @@ export default function StorageCard(props: Props) {
         />
       </div>
 
+      <div class="field-group">
+        <div class="field-row">
+          <span class="field-label">Storage Quota (MB)</span>
+          <span class="field-value">{stream()?.storageQuotaMb ?? API_DEFAULTS.storageQuotaMb}</span>
+        </div>
+        <input
+          id="storage-quota-mb"
+          type="number"
+          class="field-input field-input-full"
+          min={API_DEFAULTS.storageQuotaMinMb}
+          max={API_DEFAULTS.storageQuotaMaxMb}
+          step={100}
+          value={stream()?.storageQuotaMb ?? API_DEFAULTS.storageQuotaMb}
+          onInput={(e) => {
+            const v = clampQuotaMb(e.currentTarget.value)
+            if (v !== null) props.updateStreamingDebounced({ storageQuotaMb: v })
+          }}
+        />
+      </div>
+
       <div class="status-banner status-banner-info stream-mode-hint" role="note" aria-live="polite">
         <span class="status-banner-dot" aria-hidden="true" />
-        <span>0 keeps everything; oldest items are deleted beyond the window.</span>
+        <span>0 keeps everything; oldest items are deleted beyond the window. Past the quota, the oldest captures are removed automatically.</span>
       </div>
     </SettingsCard>
   )

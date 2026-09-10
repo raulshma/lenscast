@@ -41,8 +41,10 @@ class TokenWritePolicyTest {
     }
 
     @Test
-    fun `the detection model download route is writable`() {
+    fun `the detection model download and test-alert routes are writable`() {
         assertTrue(TokenWritePolicy.allowsPost("/api/settings/ml-model/download"))
+        // The test alert dispatches the alert sinks once; it persists nothing.
+        assertTrue(TokenWritePolicy.allowsPost("/api/detection/test"))
     }
 
     @Test
@@ -92,6 +94,7 @@ class TokenWritePolicyTest {
                 "/api/deterrence/siren",
                 "/api/camera/torch",
                 "/api/settings/ml-model/download",
+                "/api/detection/test",
             ),
             TokenWritePolicy.TOKEN_WRITABLE_POST_ROUTES,
         )

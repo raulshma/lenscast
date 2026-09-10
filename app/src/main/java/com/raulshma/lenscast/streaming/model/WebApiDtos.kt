@@ -107,8 +107,22 @@ data class StreamingSettingsDto(
     val motionArmScheduleEnabled: Boolean = false,
     val motionArmStartMinute: Int = StreamDefaults.MOTION_ARM_START_MINUTE_DEFAULT,
     val motionArmEndMinute: Int = StreamDefaults.MOTION_ARM_END_MINUTE_DEFAULT,
+    /**
+     * The arm schedule's day-of-week mask: bit 0 = Monday … bit 6 = Sunday
+     * (127 = every day, the default — the schedule stays time-of-day-only
+     * unless a day is explicitly cleared).
+     */
+    val motionArmDaysMask: Int = StreamDefaults.MOTION_ARM_DAYS_MASK_DEFAULT,
     val soundDetectionEnabled: Boolean = false,
     val soundThresholdPercent: Int = StreamDefaults.SOUND_THRESHOLD_PERCENT_DEFAULT,
+    /** Sound trigger threshold rides a tracked ambient noise floor (adaptive). */
+    val soundAdaptiveNoiseFloor: Boolean = false,
+    /** Sound events start a bounded clip (the motion post-roll duration). */
+    val soundRecordingEnabled: Boolean = false,
+    /** Minimum seconds between two motion events. */
+    val motionCooldownSeconds: Int = StreamDefaults.MOTION_COOLDOWN_SECONDS_DEFAULT,
+    /** Minimum seconds between two sound events. */
+    val soundCooldownSeconds: Int = StreamDefaults.SOUND_COOLDOWN_SECONDS_DEFAULT,
     val webhookEnabled: Boolean = false,
     val webhookUrl: String = "",
     /** Custom POST headers as a JSON `{"Name": "value"}` map string. */
@@ -147,6 +161,13 @@ data class StreamingSettingsDto(
     val httpsEnabled: Boolean = false,
     val audioDeviceId: String = "",
     val detectionNotificationsEnabled: Boolean = true,
+    /**
+     * Quiet hours for local detection alerts: heads-up notifications are
+     * held inside the window (webhook/MQTT keep firing). Defaults 22:00→07:00.
+     */
+    val alertQuietHoursEnabled: Boolean = false,
+    val alertQuietHoursStartMinute: Int = StreamDefaults.QUIET_HOURS_START_MINUTE_DEFAULT,
+    val alertQuietHoursEndMinute: Int = StreamDefaults.QUIET_HOURS_END_MINUTE_DEFAULT,
     val tamperDetectionEnabled: Boolean = false,
     val mqttEnabled: Boolean = false,
     val mqttBrokerHost: String = "",
@@ -163,10 +184,19 @@ data class StreamingSettingsDto(
     val captureRetentionDays: Int = StreamDefaults.RETENTION_DAYS_DISABLED,
     /** Detection-event retention window in days; 0 keeps events forever. */
     val eventRetentionDays: Int = StreamDefaults.RETENTION_DAYS_DISABLED,
+    /**
+     * The capture-history storage quota in MB (100 MB–32 GB): the oldest
+     * captures age out once LensCast's media passes it.
+     */
+    val storageQuotaMb: Int = StreamDefaults.STORAGE_QUOTA_MB_DEFAULT,
     /** ML object-detection gate on top of motion detection. */
     val mlDetectionEnabled: Boolean = false,
     /** Minimum ML confidence percent for a detected object to count. */
     val mlMinScorePercent: Int = StreamDefaults.ML_SCORE_PERCENT_DEFAULT,
+    /** ML gate class groups: which detected classes count toward an alert. */
+    val mlIncludePerson: Boolean = true,
+    val mlIncludePets: Boolean = true,
+    val mlIncludeVehicles: Boolean = true,
     /**
      * Response-only: the on-demand detection model's state —
      * `not_downloaded` | `downloading` | `ready` | `failed` (the
@@ -196,6 +226,25 @@ data class SettingsUpdateRequestDto(
     val streaming: StreamingSettingsDto? = null,
 )
 
+/**
+ * The versioned settings-export envelope behind GET /api/settings/export:
+ * the current settings document (secrets blanked, exactly as GET /api/settings
+ * serializes them) plus the import-side identity fields. Import accepts this
+ * envelope — or the bare settings document — and rejects unknown versions.
+ */
+data class SettingsExportDto(
+    val schemaVersion: Int = SETTINGS_SCHEMA_VERSION,
+    val exportedAtMs: Long = 0,
+    val app: String = APP_IDENTITY,
+    val settings: SettingsResponseDto? = null,
+) {
+    companion object {
+        /** Bumped only when the settings document's shape breaks decode compat. */
+        const val SETTINGS_SCHEMA_VERSION = 1
+        const val APP_IDENTITY = "lenscast"
+    }
+}
+
 // ── Status DTOs ──
 
 data class StreamingStatusDto(
@@ -222,9 +271,26 @@ data class StatusResponseDto(
     val thermal: String,
     val camera: String,
     val battery: BatteryStatusDto,
+    /** Live torch state, so the dashboard's toggles mirror the device instead of guessing. */
+    val torchOn: Boolean = false,
+    /** The persisted zoom ratio the camera is currently applying. */
+    val zoomRatio: Double = 1.0,
+    /** The selected lens's camera id and label; null before the lens enumeration lands. */
+    val lensId: String? = null,
+    val lensLabel: String? = null,
+    /** The device's live control ranges, so web sliders stop hardcoding bounds. */
+    val zoomRange: RangeDto? = null,
+    val exposureCompensationRange: RangeDto? = null,
+    val isoRange: RangeDto? = null,
     val adaptiveBitrate: AdaptiveBitrateStatusDto? = null,
     val connectionQuality: ConnectionQualityStatusDto? = null,
     val watchdog: WatchdogStatusDto? = null,
+)
+
+/** A device control range, min inclusive / max inclusive. */
+data class RangeDto(
+    val min: Double,
+    val max: Double,
 )
 
 data class WatchdogStatusDto(
@@ -395,4 +461,113 @@ data class DetectionEventDto(
 data class DetectionEventsResponseDto(
     val events: List<DetectionEventDto>,
     val total: Int,
+)
+
+// ── Detection Test-Alert DTOs ──
+
+/**
+ * The POST /api/detection/test answer: which alert sinks actually dispatched
+ * the synthetic test alert (the same action names the event log uses —
+ * `webhook`, `mqtt`, `notify`), so the dashboard can show a per-channel
+ * verdict instead of a bare success flag.
+ */
+data class DetectionTestResponseDto(
+    val success: Boolean = true,
+    val dispatchedActions: List<String> = emptyList(),
+)
+
+// ── Audit Log DTOs ──
+
+/** One audited action: a write-route dispatch or a login outcome. */
+data class AuditEntryDto(
+    val timestampMs: Long,
+    /** The action verb — `"$method $path"` for a route dispatch, `login.success` / `login.failed`. */
+    val action: String,
+    /** Human-readable context: the error message for failures, the remote address for logins. */
+    val detail: String = "",
+    /** `ok` or `error`. */
+    val outcome: String = "ok",
+)
+
+data class AuditLogResponseDto(
+    val entries: List<AuditEntryDto>,
+    val total: Int,
+)
+
+// ── System Info DTOs ──
+
+/**
+ * GET /api/system — the headless-triage snapshot: what build is running, on
+ * what device, for how long, and how the battery and storage are holding up.
+ * Read-only; nothing here is writable.
+ */
+data class SystemInfoResponseDto(
+    val appVersion: String,
+    val deviceModel: String,
+    val deviceManufacturer: String,
+    val androidVersion: String,
+    val sdkInt: Int,
+    /** Ms since the OS booted (elapsedRealtime) — the live session's age. */
+    val osUptimeMs: Long,
+    /** Ms since this process started; 0 when the platform cannot tell. */
+    val processUptimeMs: Long,
+    val battery: BatteryDetailDto,
+    val storage: StorageInfoDto,
+)
+
+/** Battery facts beyond the status DTO's level/charging trio. */
+data class BatteryDetailDto(
+    val level: Int,
+    val isCharging: Boolean,
+    /** Tenths of a degree Celsius, as the platform reports it; null when absent. */
+    val temperatureTenthsC: Int?,
+    /** Millivolts; null when absent. */
+    val voltageMillivolts: Int?,
+    /** The platform's health constant name ("good", "overheat", ...); null when unknown. */
+    val health: String?,
+)
+
+/** App-volume storage facts: configured quota plus live volume usage. */
+data class StorageInfoDto(
+    /** LensCast media bytes tracked by the capture history. */
+    val usedBytes: Long,
+    /** The configured capture quota in bytes. */
+    val quotaBytes: Long,
+    /** Free bytes on the app's storage volume. */
+    val freeBytes: Long,
+    /** Total bytes on the app's storage volume. */
+    val totalBytes: Long,
+)
+
+// ── Detection Stats DTOs ──
+
+/**
+ * GET /api/detection/stats — aggregate counts over the persisted event log:
+ * per-type totals across three windows, a per-day series for the recent
+ * stretch, and the most-fired zones/labels. Read-only.
+ */
+data class DetectionStatsResponseDto(
+    /** Event counts per wire-name type, per window. */
+    val last24h: Map<String, Int>,
+    val last7d: Map<String, Int>,
+    val allTime: Map<String, Int>,
+    /** Total events per UTC day ("yyyy-MM-dd"), oldest first, for the recent window. */
+    val perDay: List<DailyCountDto>,
+    /** Total events in the log right now (the store's capped list). */
+    val totalEvents: Int,
+    /** The most-fired motion-zone labels, most first. */
+    val topZones: List<LabeledCountDto>,
+    /** The most-seen ML class labels, most first. */
+    val topLabels: List<LabeledCountDto>,
+)
+
+data class DailyCountDto(
+    /** UTC day, "yyyy-MM-dd". */
+    val day: String,
+    val count: Int,
+)
+
+data class LabeledCountDto(
+    val label: String,
+    val count: Int,
 )

@@ -1,0 +1,8 @@
+{
+  "success": true,
+  "dispatchedActions": [
+    "webhook",
+    "mqtt",
+    "notify"
+  ]
+}

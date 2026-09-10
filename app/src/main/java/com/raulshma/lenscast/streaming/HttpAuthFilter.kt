@@ -123,7 +123,10 @@ class HttpAuthFilter(
         if (!webAuthGate.authenticate(headers["cookie"])) {
             return HttpResult.jsonError(401, "Authentication required")
         }
-        if (method != "GET" && !isCsrfSafe(headers)) {
+        // HEAD is bodyless and state-safe like GET: it rides the GET route
+        // (the server maps it before dispatch) and skips the CSRF origin
+        // check exactly as GET does.
+        if (method != "GET" && method != "HEAD" && !isCsrfSafe(headers)) {
             return HttpResult.jsonError(403, "CSRF check failed")
         }
         return null

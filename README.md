@@ -67,7 +67,7 @@ LensCast is an Android camera application with live video/audio streaming to web
 - Network quality monitoring with per-client throughput tracking and quality level classification (Excellent → Critical)
 - Foreground service with persistent notification to keep streaming alive in the background
 - Resume streams on boot (when the setting is enabled) and a Quick Settings tile for unattended camera operation — the tile is a manual request and always starts, restoring the outputs the on-device journal last recorded
-- Optional API token (Bearer / X-Api-Token header) for programmatic clients like Home Assistant or curl: read-only GET/HEAD on the protected routes plus POST on an explicit allow-list (stream/recording start and stop, photo capture, siren, torch) — auth and session-management routes are never token-writable
+- Optional API token (Bearer / X-Api-Token header) for programmatic clients like Home Assistant or curl: read-only GET/HEAD on the protected routes plus POST on an explicit allow-list (stream/web/RTSP start and stop, photo capture, recording start and stop, siren, torch, the ML-model download, and the detection-test alert) — auth and session-management routes are never token-writable
 
 ### Web UI (Remote Control Dashboard)
 - Full remote camera control dashboard built with SolidJS, Tailwind CSS v4, and DaisyUI
@@ -80,23 +80,26 @@ LensCast is an Android camera application with live video/audio streaming to web
 - Video recording controls with scheduled recording via time picker, quality presets, duration limits, and repeat intervals
 - Connected-clients panel with true socket kick, per-session stats, and remote credential rotation + session revocation
 - Connection quality indicator with real-time bandwidth, throughput, latency, and per-client stats
+- Connection-lost banner: shows once the status poll has failed several times in a row with the live event stream down, and clears on the next success or stream reopen
 - Remote media gallery with thumbnail grid, day-grouped sections with a date jump, full-resolution photo viewer, and file downloads
 - Multi-camera panel: watch several LensCast phones side by side — manually added camera URLs persist in the browser and render as snapshot/M-JPEG tiles
 - HTTP Basic Authentication login screen
 - Cinematic dark-themed glassmorphism design with micro-animations
 
 ### Detection & Alerts
-- Motion detection with configurable sensitivity, detection zones, and an arm schedule (time-of-day window, midnight-wrapping)
+- Motion detection with configurable sensitivity, detection zones, an arm schedule (time-of-day window, midnight-wrapping, plus a day-of-week mask — clear days to disarm them), and a per-event cooldown in seconds
 - Per-zone motion attribution: each event, webhook, and MQTT alert carries the labels of the zones that fired
 - Motion-triggered bounded recording with post-roll, or the legacy auto-photo mode
-- Object detection (ML): an on-device EfficientDet-Lite0 model (LiteRT task library, ~4.4 MB int8 model — not bundled in the APK; downloaded once on first use from the TensorFlow Hub source and SHA-256-verified into app storage) can gate motion events — when enabled, the triggering frame is classified and the event is suppressed unless a person, a common pet/livestock animal, or a road vehicle is detected at or above the confidence threshold (fail-open: a throttled or failed classification never suppresses an alert); detected labels ride the webhook/MQTT payloads, the event log, and the dashboard feed
+- Object detection (ML): an on-device EfficientDet-Lite0 model (LiteRT task library, ~4.4 MB int8 model — not bundled in the APK; downloaded once on first use from the TensorFlow Hub source and SHA-256-verified into app storage) can gate motion events — when enabled, the triggering frame is classified and the event is suppressed unless a person, a common pet/livestock animal, or a road vehicle is detected at or above the confidence threshold, with per-group toggles to narrow the gate to people, animals, and/or vehicles (fail-open: a throttled or failed classification never suppresses an alert); detected labels ride the webhook/MQTT payloads, the event log, and the dashboard feed
 - Continuous recording: an NVR-style loop of chained segments (5–60 minutes) riding the existing bounded-recording machinery; segments land in the gallery like any recording and age out via the capture retention window, a manual stop pauses the loop for 60 s, and motion-triggered clips are skipped while the loop is live (the events still fire and log, without a clip link)
-- Sound detection with an RMS threshold
+- Sound detection with an RMS threshold and its own per-event cooldown, plus an optional adaptive noise floor: the trigger rides above a slow moving average of the ambient level, so constant background noise (HVAC, traffic) neither masks real events nor trips the detector on its own — and an optional Record on Sound toggle starts a bounded clip (riding the motion post-roll duration) on each sound event
 - Tamper detection: a power cut while streaming (a charging camera losing power) raises a tamper event — opt-in via the Tamper Detection toggle in Detection settings (off by default)
-- Local heads-up alerts per detection event with the trigger snapshot as the big picture (opt-out, runtime notification permission requested on first launch)
+- Local heads-up alerts per detection event with the trigger snapshot as the big picture (opt-out, runtime notification permission requested on first launch), with optional quiet hours — notifications are held inside a scheduled window (webhooks, MQTT, recordings, and the event log keep firing)
 - Webhook alerts (ntfy/Home Assistant/any JSON endpoint) with the trigger snapshot, triggered zone and ML class labels, and battery level embedded in the JSON payload, custom headers, and automatic retries
 - MQTT alert publishing to any broker with Home Assistant discovery: motion/sound/tamper appear as `binary_sensor` entities automatically, with retained availability and a last will (offline on ungraceful loss) — see [NVR integration](docs/nvr-integration.md)
-- On-device detection event log with a live dashboard event feed (thumbnail, type, dispatched actions, zone/ML labels, and a link to the event's recorded clip) — pushed over server-sent events with an automatic polling fallback
+- On-device detection event log with a live dashboard event feed (thumbnail, type, dispatched actions, zone/ML labels, and a link to the event's recorded clip) — pushed over server-sent events with an automatic polling fallback, filterable by type in the API (`?type=`), and downloadable as CSV or JSON (`GET /api/detection/events/export?format=csv|json&type=`); CSV cells that begin with a formula trigger (`=`, `+`, `-`, `@`, tab) carry an apostrophe guard so spreadsheet apps never execute exported labels; the phone app gains its own Detection Events screen (tap a detection alert to open it)
+- Detection statistics at `GET /api/detection/stats`: per-type counts over 24 h / 7 d / all-time windows, a seven-day per-day series, and the most-fired zones and ML labels
+- Read-only diagnostics at `GET /api/system`: app version, device model, Android version, OS and process uptimes, battery detail (temperature, voltage, health), and storage usage against the configured quota
 - Automatic deterrence: optional siren and torch auto-trigger on detection, with a configurable cooldown — the siren auto-stops after its duration, while the torch stays on until turned off
 
 ### Automation
@@ -117,6 +120,7 @@ LensCast is an Android camera application with live video/audio streaming to web
 - Scheduled video recording with quality presets (High/Medium/Low), duration limits, repeat intervals, and optional audio
 - Capture history tracking persisted via DataStore
 - Time-based retention: optional capture and detection-event windows in days (0 = keep forever, else the oldest entries beyond the window are deleted) swept on startup, on every media refresh, and after every append
+- Storage quota: a configurable cap in MB (100 MB–32 GB, default 2 GB) on LensCast's media — the oldest captures are deleted automatically once the quota is exceeded, alongside a low-disk safety floor
 - Video recording as a foreground service for reliability
 
 ### Gallery

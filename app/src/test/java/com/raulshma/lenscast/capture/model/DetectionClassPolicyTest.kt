@@ -93,4 +93,58 @@ class DetectionClassPolicyTest {
         assertEquals("Person", DetectionClassPolicy.humanReadable("person"))
         assertEquals("Fire Hydrant", DetectionClassPolicy.humanReadable("fire hydrant"))
     }
+
+    @Test
+    fun `allow-list with every group on is the full list`() {
+        assertEquals(
+            DetectionClassPolicy.ALLOWED_CLASSES,
+            DetectionClassPolicy.allowList(includePerson = true, includePets = true, includeVehicles = true),
+        )
+    }
+
+    @Test
+    fun `allow-list keeps the canonical order for every combination`() {
+        assertEquals(
+            listOf("person"),
+            DetectionClassPolicy.allowList(includePerson = true, includePets = false, includeVehicles = false),
+        )
+        assertEquals(
+            listOf("cat", "dog", "bird", "horse", "sheep", "cow"),
+            DetectionClassPolicy.allowList(includePerson = false, includePets = true, includeVehicles = false),
+        )
+        assertEquals(
+            listOf("bicycle", "car", "motorcycle", "bus", "truck"),
+            DetectionClassPolicy.allowList(includePerson = false, includePets = false, includeVehicles = true),
+        )
+        assertEquals(
+            listOf("person", "cat", "dog", "bird", "horse", "sheep", "cow"),
+            DetectionClassPolicy.allowList(includePerson = true, includePets = true, includeVehicles = false),
+        )
+    }
+
+    @Test
+    fun `filter honors the restricted allow-list`() {
+        val detections = listOf(
+            DetectionClassPolicy.Detection("person", 0.9f),
+            DetectionClassPolicy.Detection("dog", 0.9f),
+        )
+        // Person-only: the dog never passes even at full confidence.
+        assertEquals(
+            listOf("person"),
+            DetectionClassPolicy.filter(
+                detections,
+                minScorePercent = 50,
+                allowedClasses = DetectionClassPolicy.allowList(true, false, false),
+            ),
+        )
+        // Pets-only: the person is filtered out instead.
+        assertEquals(
+            listOf("dog"),
+            DetectionClassPolicy.filter(
+                detections,
+                minScorePercent = 50,
+                allowedClasses = DetectionClassPolicy.allowList(false, true, false),
+            ),
+        )
+    }
 }

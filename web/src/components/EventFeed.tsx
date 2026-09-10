@@ -1,7 +1,16 @@
-import { For, Show } from 'solid-js'
-import type { DetectionEvent } from '../types'
+import { createSignal, For, Show } from 'solid-js'
+import type { DetectionEvent, DetectionEventType } from '../types'
 import { useEventStream } from '../hooks/useEventStream'
+import { detectionEventsExportUrl } from '../api/client'
+import { collectLabels, filterEvents, type EventFilter } from '../hooks/eventStreamCore'
 import SettingsCard from './SettingsCard'
+
+const TYPE_FILTERS: { value: EventFilter['type']; label: string }[] = [
+  { value: 'all', label: 'All' },
+  { value: 'motion', label: 'Motion' },
+  { value: 'sound', label: 'Sound' },
+  { value: 'tamper', label: 'Tamper' },
+]
 
 function hasClip(event: DetectionEvent): boolean {
   return event.clipMediaId != null
@@ -47,12 +56,24 @@ function modeLabel(mode: 'connecting' | 'live' | 'polling'): string {
  * /api/detection/events/stream) with automatic polling fallback — see
  * useEventStream. Each row shows time, type badge, the snapshot taken at
  * trigger time, dispatched actions, triggered zones / ML labels, and a link
- * to the recorded clip when one exists. The gallery viewer lives inside the
+ * to the recorded clip when one exists. A filter row (type chips + label
+ * chips over the union of known ML labels, pure logic in eventStreamCore's
+ * filterEvents) narrows the visible rows without dropping the buffer.
+ * The gallery viewer lives inside the
  * Gallery component (not reachable from here), so clips open the media
  * route GET /api/media/{id} directly in a new tab.
  */
 export default function EventFeed() {
   const { events, mode, clear } = useEventStream()
+  const [typeFilter, setTypeFilter] = createSignal<EventFilter['type']>('all')
+  const [labelFilter, setLabelFilter] = createSignal<string | null>(null)
+
+  // The export route's `type` param mirrors the feed's type chips ('all' sends none).
+  const exportFilter = (): DetectionEventType | undefined =>
+    typeFilter() === 'all' ? undefined : (typeFilter() as DetectionEventType)
+
+  const filteredEvents = () => filterEvents(events(), { type: typeFilter(), label: labelFilter() })
+  const knownLabels = () => collectLabels(events())
 
   return (
     <SettingsCard
@@ -79,22 +100,87 @@ export default function EventFeed() {
             <span class="event-stream-dot" aria-hidden="true" />
             <span>{modeLabel(mode())}</span>
           </span>
+          <a
+            class="action-btn action-btn-ghost"
+            href={detectionEventsExportUrl('csv', exportFilter())}
+            download="lenscast-events.csv"
+          >
+            <span>CSV</span>
+          </a>
+          <a
+            class="action-btn action-btn-ghost"
+            href={detectionEventsExportUrl('json', exportFilter())}
+            download="lenscast-events.json"
+          >
+            <span>JSON</span>
+          </a>
           <button type="button" class="action-btn action-btn-ghost" disabled={events().length === 0} onClick={clear}>
             <span>Clear all</span>
           </button>
         </div>
+
+        <Show when={events().length > 0}>
+          <div class="event-feed-filters">
+            <div class="gallery-filters" role="group" aria-label="Filter by event type">
+              <For each={TYPE_FILTERS}>
+                {({ value, label }) => (
+                  <button
+                    type="button"
+                    class="gallery-filter-btn"
+                    classList={{ 'gallery-filter-active': typeFilter() === value }}
+                    onClick={() => setTypeFilter(value)}
+                  >
+                    {label}
+                  </button>
+                )}
+              </For>
+            </div>
+            <div class="gallery-filters" role="group" aria-label="Filter by label">
+              <button
+                type="button"
+                class="gallery-filter-btn"
+                classList={{ 'gallery-filter-active': labelFilter() === null }}
+                onClick={() => setLabelFilter(null)}
+              >
+                All labels
+              </button>
+              <For each={knownLabels()}>
+                {(label) => (
+                  <button
+                    type="button"
+                    class="gallery-filter-btn"
+                    classList={{ 'gallery-filter-active': labelFilter() === label }}
+                    onClick={() => setLabelFilter(label)}
+                  >
+                    {label}
+                  </button>
+                )}
+              </For>
+            </div>
+          </div>
+        </Show>
       </div>
 
       <Show
-        when={events().length > 0}
+        when={filteredEvents().length > 0}
         fallback={
-          <div class="status-banner status-banner-info stream-mode-hint" role="note">
-            <span class="status-banner-dot" aria-hidden="true" />
-            <span>No detection events yet — armed motion and sound triggers land here.</span>
-          </div>
+          <Show
+            when={events().length > 0}
+            fallback={
+              <div class="status-banner status-banner-info stream-mode-hint" role="note">
+                <span class="status-banner-dot" aria-hidden="true" />
+                <span>No detection events yet — armed motion and sound triggers land here.</span>
+              </div>
+            }
+          >
+            <div class="status-banner status-banner-info stream-mode-hint" role="note">
+              <span class="status-banner-dot" aria-hidden="true" />
+              <span>No events match the current filters.</span>
+            </div>
+          </Show>
         }
       >
-        <For each={events()}>
+        <For each={filteredEvents()}>
           {(event) => (
             <div class="event-feed-row">
               <Show when={event.snapshotJpegBase64} fallback={<div class="event-thumb event-thumb-empty" aria-hidden="true" />}>

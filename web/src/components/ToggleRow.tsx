@@ -9,6 +9,8 @@ export default function ToggleRow(props: {
   label: string
   checked: boolean
   onToggle: () => void
+  /** Disabled switches render inert but keep their label contrast for context. */
+  disabled?: boolean
 }) {
   return (
     <div class="field-row field-row-toggle">
@@ -18,6 +20,7 @@ export default function ToggleRow(props: {
           id={props.id}
           type="checkbox"
           checked={props.checked}
+          disabled={props.disabled}
           onChange={props.onToggle}
         />
         <span class="toggle-slider" />

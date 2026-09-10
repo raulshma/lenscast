@@ -1,8 +1,10 @@
 package com.raulshma.lenscast.core.mqtt
 
 import com.raulshma.lenscast.core.AppJson
+import com.raulshma.lenscast.core.EventKind
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -147,5 +149,16 @@ class MqttAlertPublisherPolicyTest {
         )
         // The state base keeps the raw id — it is a topic path, not an entity id.
         assertEquals("ha/lenscast/a b/c/motion/state", odd.stateTopicFor(MqttTopics.SensorKind.MOTION))
+    }
+
+    @Test
+    fun `test alerts are publishable without a sensor`() {
+        // The three sensor kinds pulse their binary_sensor.
+        assertTrue(MqttTopics.SensorKind.isPublishable(EventKind.MOTION))
+        assertTrue(MqttTopics.SensorKind.isPublishable(EventKind.SOUND))
+        assertTrue(MqttTopics.SensorKind.isPublishable(EventKind.TAMPER))
+        // The test kind has no sensor entity but still publishes the event JSON.
+        assertTrue(MqttTopics.SensorKind.isPublishable(EventKind.TEST))
+        assertNull(MqttTopics.SensorKind.fromOrNull(EventKind.TEST))
     }
 }

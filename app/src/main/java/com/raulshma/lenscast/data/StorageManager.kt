@@ -8,7 +8,6 @@ import com.raulshma.lenscast.core.StreamDefaults
  * The store keeps persistence/deletion; this owns the numbers so they're JVM-tested.
  */
 object StorageManager {
-    const val DEFAULT_QUOTA_BYTES: Long = 2048L * 1024 * 1024
     const val LOW_SPACE_FLOOR_BYTES: Long = 200L * 1024 * 1024
 
     fun quotaBytes(quotaMb: Int): Long =

@@ -25,6 +25,8 @@ import com.raulshma.lenscast.MainApplication
 import com.raulshma.lenscast.MainActivity
 import com.raulshma.lenscast.camera.CameraScreen
 import com.raulshma.lenscast.capture.CaptureScreen
+import com.raulshma.lenscast.capture.DETECTION_EVENTS_ROUTE
+import com.raulshma.lenscast.capture.DetectionEventsScreen
 import com.raulshma.lenscast.gallery.GalleryScreen
 import com.raulshma.lenscast.gallery.GalleryViewModel
 import com.raulshma.lenscast.gallery.MediaViewerScreen
@@ -103,6 +105,7 @@ fun NavigationGraph() {
                     CompositionLocalProvider(LocalAnimatedVisibilityScope provides this@composable) {
                         AppSettingsScreen(
                             onNavigateBack = { navController.popBackStack() },
+                            onOpenEventLog = { navController.navigate(DETECTION_EVENTS_ROUTE) },
                         )
                     }
                 }
@@ -110,6 +113,14 @@ fun NavigationGraph() {
                 composable("capture") {
                     CompositionLocalProvider(LocalAnimatedVisibilityScope provides this@composable) {
                         CaptureScreen(
+                            onNavigateBack = { navController.popBackStack() },
+                        )
+                    }
+                }
+
+                composable(DETECTION_EVENTS_ROUTE) {
+                    CompositionLocalProvider(LocalAnimatedVisibilityScope provides this@composable) {
+                        DetectionEventsScreen(
                             onNavigateBack = { navController.popBackStack() },
                         )
                     }

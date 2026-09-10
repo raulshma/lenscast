@@ -1,0 +1,17 @@
+{
+  "entries": [
+    {
+      "timestampMs": 1788825600000,
+      "action": "PUT /api/settings",
+      "detail": "",
+      "outcome": "ok"
+    },
+    {
+      "timestampMs": 1788825540000,
+      "action": "login.failed",
+      "detail": "192.168.1.20",
+      "outcome": "error"
+    }
+  ],
+  "total": 2
+}

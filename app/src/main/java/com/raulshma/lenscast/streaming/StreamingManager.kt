@@ -12,9 +12,12 @@ import com.raulshma.lenscast.core.ThermalMonitor
 import com.raulshma.lenscast.data.SettingsDataStore
 import com.raulshma.lenscast.data.StreamAuthSettings
 import com.raulshma.lenscast.streaming.web.ApiRouter
+import com.raulshma.lenscast.streaming.web.AuditLog
+import com.raulshma.lenscast.streaming.web.AuditWebHandler
 import com.raulshma.lenscast.streaming.web.AuthWebHandler
 import com.raulshma.lenscast.streaming.web.CaptureWebHandler
 import com.raulshma.lenscast.streaming.web.DetectionEventsWebHandler
+import com.raulshma.lenscast.streaming.web.DetectionTestWebHandler
 import com.raulshma.lenscast.streaming.web.DeterrenceWebHandler
 import com.raulshma.lenscast.streaming.web.GalleryWebHandler
 import com.raulshma.lenscast.streaming.web.IntervalCaptureWebHandler
@@ -23,6 +26,7 @@ import com.raulshma.lenscast.streaming.web.RecordingWebHandler
 import com.raulshma.lenscast.streaming.web.SettingsWebHandler
 import com.raulshma.lenscast.streaming.web.StatusWebHandler
 import com.raulshma.lenscast.streaming.web.StreamWebHandler
+import com.raulshma.lenscast.streaming.web.SystemWebHandler
 import com.raulshma.lenscast.streaming.hls.HlsManager
 import com.raulshma.lenscast.streaming.rtsp.RtspAuthSpec
 import com.raulshma.lenscast.streaming.rtsp.RtspConfigDiff
@@ -303,6 +307,11 @@ class StreamingManager(
         motionDetector.sensitivity = sensitivity01
     }
 
+    /** The persisted motion-event cooldown, in seconds (the store clamps). */
+    fun setMotionCooldownSeconds(seconds: Int) {
+        motionDetector.cooldownMs = seconds * 1_000L
+    }
+
     fun setMotionZones(zones: List<com.raulshma.lenscast.camera.model.MotionZone>) {
         motionDetector.zones = zones.filter { it.enabled }.map {
             com.raulshma.lenscast.camera.model.MotionZone.normalized(it)
@@ -315,9 +324,19 @@ class StreamingManager(
 
     fun audioInputDevices(): List<Pair<Int, String>> = audioStreamingManager.inputDevices()
 
-    fun setSoundDetection(enabled: Boolean, thresholdPercent: Int) {
+    fun setSoundDetection(
+        enabled: Boolean,
+        thresholdPercent: Int,
+        adaptiveNoiseFloor: Boolean = soundDetector.adaptiveNoiseFloor,
+    ) {
         soundDetector.enabled = enabled
         soundDetector.thresholdPercent = thresholdPercent
+        soundDetector.adaptiveNoiseFloor = adaptiveNoiseFloor
+    }
+
+    /** The persisted sound-event cooldown, in seconds (the store clamps). */
+    fun setSoundCooldownSeconds(seconds: Int) {
+        soundDetector.cooldownMs = seconds * 1_000L
     }
 
     /** The detector seams; wired once at the composition root. */
@@ -926,6 +945,13 @@ class StreamingManager(
             app.detectionEventStore,
         )
         val authHandler = AuthWebHandler(app.settingsDataStore, webAuthGate)
+        val auditLog = AuditLog(
+            file = java.io.File(context.filesDir, AUDIT_LOG_FILE),
+        )
+        val auditHandler = AuditWebHandler(auditLog)
+        val detectionTest = DetectionTestWebHandler(
+            coordinator = { app.detectionCoordinator },
+        )
         val statusHandler = StatusWebHandler(
             streamingManager = this,
             thermalMonitor = thermalMonitor,
@@ -933,6 +959,11 @@ class StreamingManager(
             cameraService = app.cameraService,
             streamWatchdog = app.streamWatchdog,
             settingsDataStore = app.settingsDataStore,
+        )
+        val systemHandler = SystemWebHandler(
+            context = context,
+            powerManager = app.powerManager,
+            captureHistoryStore = app.captureHistoryStore,
         )
         return WebApiStack(
             router = ApiRouter(
@@ -950,6 +981,10 @@ class StreamingManager(
                 deterrence = deterrence,
                 detectionEvents = detectionEvents,
                 auth = authHandler,
+                audit = auditHandler,
+                detectionTest = detectionTest,
+                auditLog = auditLog,
+                system = systemHandler,
             ),
             gallery = gallery,
             status = statusHandler,
@@ -957,6 +992,10 @@ class StreamingManager(
             deterrence = deterrence,
             auth = authHandler,
             detectionEvents = detectionEvents,
+            audit = auditHandler,
+            auditLog = auditLog,
+            detectionTest = detectionTest,
+            system = systemHandler,
         )
     }
 
@@ -1017,5 +1056,8 @@ class StreamingManager(
     companion object {
         private const val TAG = "StreamingManager"
         private const val WS_PORT_OFFSET = 1
+
+        /** The Web API audit trail, inside app-private files. */
+        private const val AUDIT_LOG_FILE = "audit_log.json"
     }
 }

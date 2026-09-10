@@ -148,18 +148,21 @@ class SettingsApplier(
         // Motion detection: persisted toggle → runtime detector. The settings
         // screen writes the store; the Applier applies exactly once. Sensitivity
         // arrives as a percent and scales to the detector's 0..1 ladder; zones
-        // narrow detection to their enabled rectangles.
+        // narrow detection to their enabled rectangles; the cooldown seconds
+        // ride the detector's own minimum-between-events ladder.
         scope.launch {
             combine(
                 settingsDataStore.motionDetectionEnabled,
                 settingsDataStore.motionSensitivity,
                 settingsDataStore.motionZones,
-            ) { enabled, sensitivityPercent, zones ->
-                MotionSettings(enabled, sensitivityPercent, zones)
+                settingsDataStore.motionCooldownSeconds,
+            ) { enabled, sensitivityPercent, zones, cooldownSeconds ->
+                MotionSettings(enabled, sensitivityPercent, zones, cooldownSeconds)
             }.collectLatest { motion ->
                 streamingManager.setMotionDetectionEnabled(motion.enabled)
                 streamingManager.setMotionSensitivity(motion.sensitivityPercent / 100f)
                 streamingManager.setMotionZones(motion.zones)
+                streamingManager.setMotionCooldownSeconds(motion.cooldownSeconds)
             }
         }
 
@@ -176,10 +179,13 @@ class SettingsApplier(
             combine(
                 settingsDataStore.soundDetectionEnabled,
                 settingsDataStore.soundThresholdPercent,
-            ) { enabled, threshold ->
-                SoundSettings(enabled, threshold)
+                settingsDataStore.soundCooldownSeconds,
+                settingsDataStore.soundAdaptiveNoiseFloor,
+            ) { enabled, threshold, cooldownSeconds, adaptiveFloor ->
+                SoundSettings(enabled, threshold, cooldownSeconds, adaptiveFloor)
             }.collectLatest { sound ->
-                streamingManager.setSoundDetection(sound.enabled, sound.thresholdPercent)
+                streamingManager.setSoundDetection(sound.enabled, sound.thresholdPercent, sound.adaptiveFloor)
+                streamingManager.setSoundCooldownSeconds(sound.cooldownSeconds)
             }
         }
 
@@ -276,11 +282,14 @@ class SettingsApplier(
         val enabled: Boolean,
         val sensitivityPercent: Int,
         val zones: List<com.raulshma.lenscast.camera.model.MotionZone>,
+        val cooldownSeconds: Int,
     )
 
     private data class SoundSettings(
         val enabled: Boolean,
         val thresholdPercent: Int,
+        val cooldownSeconds: Int,
+        val adaptiveFloor: Boolean,
     )
 
     companion object {

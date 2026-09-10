@@ -15,6 +15,7 @@ import com.raulshma.lenscast.data.SettingsDataStore
 import com.raulshma.lenscast.streaming.model.CameraSettingsDto
 import com.raulshma.lenscast.streaming.model.MaskingZoneDto
 import com.raulshma.lenscast.streaming.model.MotionZoneDto
+import com.raulshma.lenscast.streaming.model.SettingsExportDto
 import com.raulshma.lenscast.streaming.model.SettingsResponseDto
 import com.raulshma.lenscast.streaming.model.SettingsUpdateRequestDto
 import com.raulshma.lenscast.streaming.model.StreamingSettingsDto
@@ -37,13 +38,64 @@ class SettingsWebHandler(
     private val settingsDataStore: SettingsDataStore,
     /** The on-demand model store; its state rides the settings response, its download the POST route. */
     private val detectionModelStore: DetectionModelStore,
+    /** The export envelope's timestamp source. */
+    private val nowMs: () -> Long = System::currentTimeMillis,
 ) {
 
     private val responseAdapter by lazy { AppJson.moshi.adapter(SettingsResponseDto::class.java) }
     private val updateAdapter by lazy { AppJson.moshi.adapter(SettingsUpdateRequestDto::class.java) }
+    private val exportAdapter by lazy { AppJson.moshi.adapter(SettingsExportDto::class.java) }
     private val successAdapter by lazy { AppJson.moshi.adapter(SuccessResponse::class.java) }
 
-    suspend fun get(): String {
+    suspend fun get(): String = responseAdapter.toJson(buildResponse())
+
+    /**
+     * GET /api/settings/export — the current settings document inside the
+     * versioned [SettingsExportDto] envelope, for downloading as a file and
+     * restoring via POST /api/settings/import on this or another device.
+     *
+     * What the export carries: exactly what GET /api/settings returns — the
+     * five write-only credentials (stream-auth password hash, WebDAV
+     * password, Telegram bot token, MQTT password, API token) are blank, but
+     * `webhookHeaders` is a user-authored header map that round-trips in
+     * full and frequently contains an Authorization header. The file is
+     * configuration, not a sanitized share artifact — treat it as such.
+     */
+    suspend fun export(): String =
+        exportAdapter.toJson(
+            SettingsExportDto(
+                exportedAtMs = nowMs(),
+                settings = buildResponse(),
+            ),
+        )
+
+    /**
+     * POST /api/settings/import — accepts a [SettingsExportDto] envelope (the
+     * export route's own shape, schema-version gated) or a bare settings
+     * update document, and applies it through the exact [put] path a
+     * dashboard save uses, so every clamp and write-only-secret rule holds
+     * identically. A bare document carries [SettingsUpdateRequestDto] PUT
+     * semantics: every field of a present section persists, including ones
+     * the document omits (which take their defaults) — the envelope is the
+     * lossless path and the one the dashboard's export button produces.
+     * Fails with an [IllegalArgumentException] (the router's error-payload
+     * shape) for unparseable bodies, unsupported schema versions, and
+     * documents with no settings at all.
+     */
+    suspend fun import(body: String): String {
+        val parsed = SettingsImportParser.parse(body)
+        val update = when (parsed) {
+            is SettingsImportParser.Parsed.Envelope -> {
+                val settings = requireNotNull(parsed.export.settings) { "Export envelope carries no settings" }
+                SettingsUpdateRequestDto(camera = settings.camera, streaming = settings.streaming)
+            }
+            is SettingsImportParser.Parsed.RawUpdate -> parsed.update
+        }
+        put(updateAdapter.toJson(update))
+        return successAdapter.toJson(SuccessResponse())
+    }
+
+    private suspend fun buildResponse(): SettingsResponseDto {
         val store = settingsDataStore
         val overlay = store.overlaySettings.value
         // Response-only model facts: the store's published lifecycle.
@@ -94,8 +146,13 @@ class SettingsWebHandler(
                 motionArmScheduleEnabled = store.motionArmScheduleEnabled.value,
                 motionArmStartMinute = store.motionArmStartMinute.value,
                 motionArmEndMinute = store.motionArmEndMinute.value,
+                motionArmDaysMask = store.motionArmDaysMask.value,
                 soundDetectionEnabled = store.soundDetectionEnabled.value,
                 soundThresholdPercent = store.soundThresholdPercent.value,
+                soundAdaptiveNoiseFloor = store.soundAdaptiveNoiseFloor.value,
+                soundRecordingEnabled = store.soundRecordingEnabled.value,
+                motionCooldownSeconds = store.motionCooldownSeconds.value,
+                soundCooldownSeconds = store.soundCooldownSeconds.value,
                 webhookEnabled = store.webhookEnabled.value,
                 webhookUrl = store.webhookUrl.value,
                 webhookHeaders = store.webhookHeaders.value,
@@ -122,6 +179,9 @@ class SettingsWebHandler(
                 httpsEnabled = store.httpsEnabled.value,
                 audioDeviceId = store.audioDeviceId.value,
                 detectionNotificationsEnabled = store.detectionNotificationsEnabled.value,
+                alertQuietHoursEnabled = store.alertQuietHoursEnabled.value,
+                alertQuietHoursStartMinute = store.alertQuietHoursStartMinute.value,
+                alertQuietHoursEndMinute = store.alertQuietHoursEndMinute.value,
                 tamperDetectionEnabled = store.tamperDetectionEnabled.value,
                 mqttEnabled = store.mqttEnabled.value,
                 mqttBrokerHost = store.mqttBrokerHost.value,
@@ -133,8 +193,12 @@ class SettingsWebHandler(
                 mqttDiscoveryPrefix = store.mqttDiscoveryPrefix.value,
                 captureRetentionDays = store.captureRetentionDays.value,
                 eventRetentionDays = store.eventRetentionDays.value,
+                storageQuotaMb = store.storageQuotaMb.value,
                 mlDetectionEnabled = store.mlDetectionEnabled.value,
                 mlMinScorePercent = store.mlMinScorePercent.value,
+                mlIncludePerson = store.mlIncludePerson.value,
+                mlIncludePets = store.mlIncludePets.value,
+                mlIncludeVehicles = store.mlIncludeVehicles.value,
                 mlModelState = modelWire.state,
                 mlModelProgress = modelWire.progress,
                 mlModelError = modelWire.error,
@@ -143,7 +207,7 @@ class SettingsWebHandler(
                 onvifEnabled = store.onvifEnabled.value,
             ),
         )
-        return responseAdapter.toJson(response)
+        return response
     }
 
     suspend fun put(body: String): String {
@@ -215,8 +279,13 @@ class SettingsWebHandler(
             settingsDataStore.saveMotionArmScheduleEnabled(stream.motionArmScheduleEnabled)
             settingsDataStore.saveMotionArmStartMinute(stream.motionArmStartMinute)
             settingsDataStore.saveMotionArmEndMinute(stream.motionArmEndMinute)
+            settingsDataStore.saveMotionArmDaysMask(stream.motionArmDaysMask)
             settingsDataStore.saveSoundDetectionEnabled(stream.soundDetectionEnabled)
             settingsDataStore.saveSoundThresholdPercent(stream.soundThresholdPercent)
+            settingsDataStore.saveSoundAdaptiveNoiseFloor(stream.soundAdaptiveNoiseFloor)
+            settingsDataStore.saveSoundRecordingEnabled(stream.soundRecordingEnabled)
+            settingsDataStore.saveMotionCooldownSeconds(stream.motionCooldownSeconds)
+            settingsDataStore.saveSoundCooldownSeconds(stream.soundCooldownSeconds)
             settingsDataStore.saveWebhookEnabled(stream.webhookEnabled)
             settingsDataStore.saveWebhookUrl(stream.webhookUrl)
             settingsDataStore.saveWebhookHeaders(stream.webhookHeaders)
@@ -233,6 +302,9 @@ class SettingsWebHandler(
             settingsDataStore.saveHttpsEnabled(stream.httpsEnabled)
             settingsDataStore.saveAudioDeviceId(stream.audioDeviceId)
             settingsDataStore.saveDetectionNotificationsEnabled(stream.detectionNotificationsEnabled)
+            settingsDataStore.saveAlertQuietHoursEnabled(stream.alertQuietHoursEnabled)
+            settingsDataStore.saveAlertQuietHoursStartMinute(stream.alertQuietHoursStartMinute)
+            settingsDataStore.saveAlertQuietHoursEndMinute(stream.alertQuietHoursEndMinute)
             settingsDataStore.saveTamperDetectionEnabled(stream.tamperDetectionEnabled)
             settingsDataStore.saveMqttEnabled(stream.mqttEnabled)
             settingsDataStore.saveMqttBrokerHost(stream.mqttBrokerHost)
@@ -244,8 +316,13 @@ class SettingsWebHandler(
             // (0 = keep forever), like every other bounded numeric setting.
             settingsDataStore.saveCaptureRetentionDays(stream.captureRetentionDays)
             settingsDataStore.saveEventRetentionDays(stream.eventRetentionDays)
+            // The storage quota clamps to its 100 MB–32 GB descriptor bounds.
+            settingsDataStore.saveStorageQuotaMb(stream.storageQuotaMb)
             settingsDataStore.saveMlDetectionEnabled(stream.mlDetectionEnabled)
             settingsDataStore.saveMlMinScorePercent(stream.mlMinScorePercent)
+            settingsDataStore.saveMlIncludePerson(stream.mlIncludePerson)
+            settingsDataStore.saveMlIncludePets(stream.mlIncludePets)
+            settingsDataStore.saveMlIncludeVehicles(stream.mlIncludeVehicles)
             settingsDataStore.saveContinuousRecording(stream.continuousRecording)
             settingsDataStore.saveContinuousSegmentMinutes(stream.continuousSegmentMinutes)
             settingsDataStore.saveOnvifEnabled(stream.onvifEnabled)
@@ -377,5 +454,48 @@ class SettingsWebHandler(
                 )
             },
         )
+    }
+}
+
+/**
+ * The pure import-body classifier behind POST /api/settings/import: an export
+ * envelope (validated against its schema version) or a bare settings update
+ * document — anything else is an [IllegalArgumentException] the router turns
+ * into the standard error payload. JVM-tested; no Android types.
+ */
+object SettingsImportParser {
+
+    sealed interface Parsed {
+        data class Envelope(val export: SettingsExportDto) : Parsed
+        data class RawUpdate(val update: SettingsUpdateRequestDto) : Parsed
+    }
+
+    private val envelopeAdapter by lazy { AppJson.moshi.adapter(SettingsExportDto::class.java) }
+    private val updateAdapter by lazy { AppJson.moshi.adapter(SettingsUpdateRequestDto::class.java) }
+
+    fun parse(body: String): Parsed {
+        // The envelope path first: an envelope always carries the version and
+        // app fields, so its presence (or a present-but-null settings doc,
+        // which the caller rejects) decides here.
+        val envelope = runCatching { envelopeAdapter.fromJson(body) }.getOrNull()
+        if (envelope != null && (envelope.settings != null || envelope.exportedAtMs != 0L || envelope.app != SettingsExportDto.APP_IDENTITY)) {
+            if (envelope.schemaVersion != SettingsExportDto.SETTINGS_SCHEMA_VERSION) {
+                throw IllegalArgumentException(
+                    "Unsupported settings schema version: ${envelope.schemaVersion} " +
+                        "(supported: ${SettingsExportDto.SETTINGS_SCHEMA_VERSION})",
+                )
+            }
+            return Parsed.Envelope(envelope)
+        }
+        // A bare settings document, or an envelope so bare it is
+        // indistinguishable from one (both fall through to the update parse).
+        // An update carrying no section at all is a no-op import, rejected —
+        // a "success" that changed nothing would be a lie.
+        val update = runCatching { updateAdapter.fromJson(body) }.getOrNull()
+            ?: throw IllegalArgumentException("Invalid settings JSON")
+        if (update.camera == null && update.streaming == null) {
+            throw IllegalArgumentException("No settings to import")
+        }
+        return Parsed.RawUpdate(update)
     }
 }

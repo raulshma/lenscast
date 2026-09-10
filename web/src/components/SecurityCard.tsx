@@ -1,9 +1,10 @@
 import { createSignal, For, Show } from 'solid-js'
 import type { AllSettings, MotionZone } from '../types'
 import { API_DEFAULTS } from '../api/defaults'
+import { ARM_DAY_LABELS, isDayArmed, toggleArmDayMask } from '../armDays'
 import SettingsCard from './SettingsCard'
 import ToggleRow from './ToggleRow'
-import { downloadDetectionModel, setSiren, setTorch } from '../api/client'
+import { downloadDetectionModel, sendTestAlert, setSiren, setTorch } from '../api/client'
 
 interface Props {
   settings: () => AllSettings | null
@@ -73,11 +74,24 @@ export default function SecurityCard(props: Props) {
   const armScheduleOn = () => stream()?.motionArmScheduleEnabled ?? API_DEFAULTS.motionArmScheduleEnabled
   const soundOn = () => stream()?.soundDetectionEnabled ?? API_DEFAULTS.soundDetectionEnabled
   const localAlertsOn = () => stream()?.detectionNotificationsEnabled ?? API_DEFAULTS.detectionNotificationsEnabled
+  const quietHoursOn = () => stream()?.alertQuietHoursEnabled ?? API_DEFAULTS.alertQuietHoursEnabled
+  // Day-of-week arm mask helpers: bit 0 = Monday … bit 6 = Sunday.
+  const armDaysMask = () => stream()?.motionArmDaysMask ?? API_DEFAULTS.motionArmDaysMask
+  const armedDayCount = () => ARM_DAY_LABELS.reduce((n, _, i) => n + (isDayArmed(armDaysMask(), i) ? 1 : 0), 0)
+
+  function toggleArmDay(isoDayIndex: number) {
+    const next = toggleArmDayMask(armDaysMask(), isoDayIndex)
+    if (next !== armDaysMask()) props.updateStreamingAndSave({ motionArmDaysMask: next })
+  }
   const tamperOn = () => stream()?.tamperDetectionEnabled ?? API_DEFAULTS.tamperDetectionEnabled
   const webhookOn = () => stream()?.webhookEnabled ?? API_DEFAULTS.webhookEnabled
   const autoSirenOn = () => stream()?.autoSiren ?? API_DEFAULTS.autoSiren
   const autoTorchOn = () => stream()?.autoTorch ?? API_DEFAULTS.autoTorch
   const mlOn = () => stream()?.mlDetectionEnabled ?? API_DEFAULTS.mlDetectionEnabled
+  const mlPersonOn = () => stream()?.mlIncludePerson ?? API_DEFAULTS.mlIncludePerson
+  const mlPetsOn = () => stream()?.mlIncludePets ?? API_DEFAULTS.mlIncludePets
+  const mlVehiclesOn = () => stream()?.mlIncludeVehicles ?? API_DEFAULTS.mlIncludeVehicles
+  const soundRecordingOn = () => stream()?.soundRecordingEnabled ?? API_DEFAULTS.soundRecordingEnabled
   const continuousOn = () => stream()?.continuousRecording ?? API_DEFAULTS.continuousRecording
   // The detection model ships outside the APK; these read the server's
   // response-only model facts and the download button drives the POST route.
@@ -85,6 +99,26 @@ export default function SecurityCard(props: Props) {
   const mlModelProgress = () => stream()?.mlModelProgress ?? API_DEFAULTS.mlModelProgress
   const mlModelError = () => stream()?.mlModelError ?? API_DEFAULTS.mlModelError
   const [modelBusy, setModelBusy] = createSignal(false)
+  const [testAlertBusy, setTestAlertBusy] = createSignal(false)
+  const [testAlertResult, setTestAlertResult] = createSignal('')
+
+  function sendTestAlertNow() {
+    if (testAlertBusy()) return
+    setTestAlertBusy(true)
+    setTestAlertResult('')
+    sendTestAlert()
+      .then((result) => {
+        setTestAlertResult(
+          result.success
+            ? result.dispatchedActions.length > 0
+              ? `Test alert sent via: ${result.dispatchedActions.join(', ')}`
+              : 'Test alert fired, but no alert channel is enabled'
+            : 'Test alert unavailable',
+        )
+      })
+      .catch(() => setTestAlertResult('Test alert failed'))
+      .finally(() => setTestAlertBusy(false))
+  }
 
   function downloadModel() {
     runGuarded(modelBusy, setModelBusy, () => downloadDetectionModel())
@@ -183,6 +217,20 @@ export default function SecurityCard(props: Props) {
             value={stream()?.motionSensitivityPercent ?? API_DEFAULTS.motionSensitivityPercent}
             onInput={(e) => props.updateStreamingDebounced({ motionSensitivityPercent: parseInt(e.currentTarget.value) })}
           />
+          <div class="field-row">
+            <span class="field-label">Event Cooldown</span>
+            <span class="field-value">{stream()?.motionCooldownSeconds ?? API_DEFAULTS.motionCooldownSeconds}s</span>
+          </div>
+          <input
+            id="motion-cooldown-slider"
+            type="range"
+            class="custom-range"
+            min={API_DEFAULTS.detectionCooldownMinSeconds}
+            max={API_DEFAULTS.detectionCooldownMaxSeconds}
+            step={1}
+            value={stream()?.motionCooldownSeconds ?? API_DEFAULTS.motionCooldownSeconds}
+            onInput={(e) => props.updateStreamingDebounced({ motionCooldownSeconds: parseInt(e.currentTarget.value) })}
+          />
         </div>
 
         <div class="field-group">
@@ -245,6 +293,24 @@ export default function SecurityCard(props: Props) {
               value={stream()?.motionArmEndMinute ?? API_DEFAULTS.motionArmEndMinute}
               onInput={(e) => props.updateStreamingDebounced({ motionArmEndMinute: parseInt(e.currentTarget.value) })}
             />
+            <div class="field-row">
+              <span class="field-label">Days</span>
+              <span class="field-value">{armedDayCount()}/7</span>
+            </div>
+            <div class="arm-days-row" role="group" aria-label="Arm on days">
+              <For each={ARM_DAY_LABELS}>
+                {(label, i) => (
+                  <button
+                    type="button"
+                    class="arm-day-chip"
+                    classList={{ active: isDayArmed(armDaysMask(), i()) }}
+                    onClick={() => toggleArmDay(i())}
+                  >
+                    {label}
+                  </button>
+                )}
+              </For>
+            </div>
           </Show>
         </div>
 
@@ -310,6 +376,47 @@ export default function SecurityCard(props: Props) {
             value={stream()?.soundThresholdPercent ?? API_DEFAULTS.soundThresholdPercent}
             onInput={(e) => props.updateStreamingDebounced({ soundThresholdPercent: parseInt(e.currentTarget.value) })}
           />
+          <ToggleRow
+            id="sound-adaptive-floor-toggle"
+            label="Adaptive Noise Floor"
+            checked={stream()?.soundAdaptiveNoiseFloor ?? API_DEFAULTS.soundAdaptiveNoiseFloor}
+            onToggle={() =>
+              props.updateStreamingAndSave({
+                soundAdaptiveNoiseFloor: !(stream()?.soundAdaptiveNoiseFloor ?? API_DEFAULTS.soundAdaptiveNoiseFloor),
+              })
+            }
+          />
+          <Show when={stream()?.soundAdaptiveNoiseFloor}>
+            <div class="stream-mode-hint" style="margin-top: -4px">
+              Trigger rides above the tracked ambient level — constant background noise neither masks events nor trips alone.
+            </div>
+          </Show>
+          <div class="field-row">
+            <span class="field-label">Event Cooldown</span>
+            <span class="field-value">{stream()?.soundCooldownSeconds ?? API_DEFAULTS.soundCooldownSeconds}s</span>
+          </div>
+          <input
+            id="sound-cooldown-slider"
+            type="range"
+            class="custom-range"
+            min={API_DEFAULTS.detectionCooldownMinSeconds}
+            max={API_DEFAULTS.detectionCooldownMaxSeconds}
+            step={1}
+            value={stream()?.soundCooldownSeconds ?? API_DEFAULTS.soundCooldownSeconds}
+            onInput={(e) => props.updateStreamingDebounced({ soundCooldownSeconds: parseInt(e.currentTarget.value) })}
+          />
+          <ToggleRow
+            id="sound-rec-toggle"
+            label="Record on Sound"
+            checked={soundRecordingOn()}
+            onToggle={() => props.updateStreamingAndSave({ soundRecordingEnabled: !soundRecordingOn() })}
+          />
+          <Show when={soundRecordingOn()}>
+            <div class="status-banner status-banner-info stream-mode-hint" role="note">
+              <span class="status-banner-dot" aria-hidden="true" />
+              <span>Sound events start a bounded clip using the motion post-roll duration.</span>
+            </div>
+          </Show>
         </Show>
       </div>
 
@@ -340,6 +447,32 @@ export default function SecurityCard(props: Props) {
           value={stream()?.mlMinScorePercent ?? API_DEFAULTS.mlMinScorePercent}
           onInput={(e) => props.updateStreamingDebounced({ mlMinScorePercent: parseInt(e.currentTarget.value) })}
         />
+        <div class="field-row">
+          <span class="field-label">Alert Classes</span>
+        </div>
+        <div class="field-group">
+          <ToggleRow
+            id="ml-person-toggle"
+            label="People"
+            checked={mlPersonOn()}
+            disabled={!mlOn()}
+            onToggle={() => props.updateStreamingAndSave({ mlIncludePerson: !mlPersonOn() })}
+          />
+          <ToggleRow
+            id="ml-pets-toggle"
+            label="Animals"
+            checked={mlPetsOn()}
+            disabled={!mlOn()}
+            onToggle={() => props.updateStreamingAndSave({ mlIncludePets: !mlPetsOn() })}
+          />
+          <ToggleRow
+            id="ml-vehicles-toggle"
+            label="Vehicles"
+            checked={mlVehiclesOn()}
+            disabled={!mlOn()}
+            onToggle={() => props.updateStreamingAndSave({ mlIncludeVehicles: !mlVehiclesOn() })}
+          />
+        </div>
         <div class="field-row">
           <span class="field-label">Detection Model</span>
           <span class="field-value">{mlModelView().status}</span>
@@ -401,6 +534,47 @@ export default function SecurityCard(props: Props) {
           checked={localAlertsOn()}
           onToggle={() => props.updateStreamingAndSave({ detectionNotificationsEnabled: !localAlertsOn() })}
         />
+        <Show when={localAlertsOn()}>
+          <ToggleRow
+            id="quiet-hours-toggle"
+            label="Quiet Hours"
+            checked={quietHoursOn()}
+            onToggle={() => props.updateStreamingAndSave({ alertQuietHoursEnabled: !quietHoursOn() })}
+          />
+          <Show when={quietHoursOn()}>
+            <div class="field-row">
+              <span class="field-label">Quiet From</span>
+              <span class="field-value">{minutesToLabel(stream()?.alertQuietHoursStartMinute ?? API_DEFAULTS.alertQuietHoursStartMinute)}</span>
+            </div>
+            <input
+              id="quiet-hours-start"
+              type="range"
+              class="custom-range"
+              min={0}
+              max={MINUTES_PER_DAY - 1}
+              step={15}
+              value={stream()?.alertQuietHoursStartMinute ?? API_DEFAULTS.alertQuietHoursStartMinute}
+              onInput={(e) => props.updateStreamingDebounced({ alertQuietHoursStartMinute: parseInt(e.currentTarget.value) })}
+            />
+            <div class="field-row">
+              <span class="field-label">Quiet Until</span>
+              <span class="field-value">{minutesToLabel(stream()?.alertQuietHoursEndMinute ?? API_DEFAULTS.alertQuietHoursEndMinute)}</span>
+            </div>
+            <input
+              id="quiet-hours-end"
+              type="range"
+              class="custom-range"
+              min={0}
+              max={MINUTES_PER_DAY - 1}
+              step={15}
+              value={stream()?.alertQuietHoursEndMinute ?? API_DEFAULTS.alertQuietHoursEndMinute}
+              onInput={(e) => props.updateStreamingDebounced({ alertQuietHoursEndMinute: parseInt(e.currentTarget.value) })}
+            />
+            <div class="stream-mode-hint" style="margin-top: -4px">
+              Notifications are held inside the window — webhooks, MQTT, recordings, and the event log keep firing.
+            </div>
+          </Show>
+        </Show>
         <ToggleRow
           id="tamper-toggle"
           label="Tamper Detection"
@@ -440,6 +614,20 @@ export default function SecurityCard(props: Props) {
                 {warning()}
               </span>
             )}
+          </Show>
+          <button
+            type="button"
+            class="action-btn action-btn-ghost"
+            id="send-test-alert"
+            disabled={testAlertBusy()}
+            onClick={sendTestAlertNow}
+          >
+            {testAlertBusy() ? 'Sending…' : 'Send Test Alert'}
+          </button>
+          <Show when={testAlertResult()}>
+            <span class="clients-cap-row" role="status" aria-live="polite">
+              {testAlertResult()}
+            </span>
           </Show>
         </Show>
       </div>

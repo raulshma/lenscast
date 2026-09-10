@@ -82,6 +82,13 @@ class DtoContractFixtureTest {
                 isCharging = false,
                 isPowerSaveMode = false,
             ),
+            torchOn = false,
+            zoomRatio = 1.75,
+            lensId = "0",
+            lensLabel = "Wide",
+            zoomRange = RangeDto(min = 1.0, max = 8.0),
+            exposureCompensationRange = RangeDto(min = -12.0, max = 12.0),
+            isoRange = RangeDto(min = 100.0, max = 3200.0),
             adaptiveBitrate = AdaptiveBitrateStatusDto(
                 enabled = true,
                 qualityLevel = "GOOD",
@@ -244,6 +251,118 @@ class DtoContractFixtureTest {
         assertMatchesFixture(
             "detection-events.json",
             moshi.adapter(DetectionEventsResponseDto::class.java).toJson(events),
+        )
+    }
+
+    @Test
+    fun `settings export matches the settings export fixture`() {
+        val export = SettingsExportDto(
+            exportedAtMs = 1_788_825_600_000,
+            settings = SettingsResponseDto(
+                camera = CameraSettingsDto().copy(
+                    iso = 800,
+                    exposureTime = 10_000_000L,
+                    focusDistance = 0f,
+                    colorTemperature = 5500,
+                    sceneMode = "",
+                ),
+                streaming = StreamingSettingsDto().copy(
+                    rtspInputFormat = "AUTO",
+                ),
+            ),
+        )
+        assertMatchesFixture(
+            "settings-export.json",
+            moshi.adapter(SettingsExportDto::class.java).toJson(export),
+        )
+    }
+
+    @Test
+    fun `audit log response matches the audit log fixture`() {
+        val audit = AuditLogResponseDto(
+            entries = listOf(
+                AuditEntryDto(
+                    timestampMs = 1_788_825_600_000,
+                    action = "PUT /api/settings",
+                    detail = "",
+                    outcome = "ok",
+                ),
+                AuditEntryDto(
+                    timestampMs = 1_788_825_540_000,
+                    action = "login.failed",
+                    detail = "192.168.1.20",
+                    outcome = "error",
+                ),
+            ),
+            total = 2,
+        )
+        assertMatchesFixture(
+            "audit-log.json",
+            moshi.adapter(AuditLogResponseDto::class.java).toJson(audit),
+        )
+    }
+
+    @Test
+    fun `detection test response matches the detection test fixture`() {
+        val test = DetectionTestResponseDto(
+            dispatchedActions = listOf("webhook", "mqtt", "notify"),
+        )
+        assertMatchesFixture(
+            "detection-test.json",
+            moshi.adapter(DetectionTestResponseDto::class.java).toJson(test),
+        )
+    }
+
+    @Test
+    fun `system info response matches the system fixture`() {
+        val system = SystemInfoResponseDto(
+            appVersion = "1.9.0",
+            deviceModel = "Pixel 8",
+            deviceManufacturer = "Google",
+            androidVersion = "15",
+            sdkInt = 35,
+            osUptimeMs = 86_400_000,
+            processUptimeMs = 3_600_000,
+            battery = BatteryDetailDto(
+                level = 76,
+                isCharging = true,
+                temperatureTenthsC = 295,
+                voltageMillivolts = 4350,
+                health = "good",
+            ),
+            storage = StorageInfoDto(
+                usedBytes = 1_073_741_824,
+                quotaBytes = 2_147_483_648,
+                freeBytes = 53_687_091_200,
+                totalBytes = 107_374_182_400,
+            ),
+        )
+        assertMatchesFixture(
+            "system.json",
+            moshi.adapter(SystemInfoResponseDto::class.java).toJson(system),
+        )
+    }
+
+    @Test
+    fun `detection stats response matches the detection stats fixture`() {
+        val stats = DetectionStatsResponseDto(
+            last24h = mapOf("motion" to 6, "sound" to 2),
+            last7d = mapOf("motion" to 21, "sound" to 8, "tamper" to 1),
+            allTime = mapOf("motion" to 90, "sound" to 30, "tamper" to 3),
+            perDay = listOf(
+                DailyCountDto("2026-09-09", 5),
+                DailyCountDto("2026-09-10", 3),
+            ),
+            totalEvents = 123,
+            topZones = listOf(LabeledCountDto("Driveway", 12)),
+            topLabels = listOf(
+                LabeledCountDto("person", 9),
+                LabeledCountDto("car", 4),
+            ),
+        )
+        assertMatchesFixture(
+            "detection-stats.json",
+            moshi.adapter(DetectionStatsResponseDto::class.java).toJson(stats),
         )
     }
 }

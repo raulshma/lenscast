@@ -163,6 +163,16 @@ class HttpAuthFilterTest {
     }
 
     @Test
+    fun `head rides get and skips the csrf check`() {
+        val filter = HttpAuthFilter(disabledGate(), port = 8080)
+        // No CSRF headers: HEAD is bodyless and state-safe like GET.
+        assertNull(filter.authorize("HEAD", "/api/status", emptyMap()))
+        // With a session (gate enabled) the same holds.
+        val enabled = HttpAuthFilter(enabledGate(), port = 8080)
+        assertEquals(401, enabled.authorize("HEAD", "/api/status", emptyMap())!!.statusCode)
+    }
+
+    @Test
     fun `requested-with header passes the csrf check`() {
         val filter = HttpAuthFilter(disabledGate(), port = 8080)
         val headers = mapOf("x-requested-with" to "XMLHttpRequest")

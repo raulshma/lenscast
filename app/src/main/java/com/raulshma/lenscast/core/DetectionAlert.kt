@@ -9,7 +9,29 @@ package com.raulshma.lenscast.core
 enum class EventKind(val wireName: String) {
     MOTION("motion"),
     SOUND("sound"),
-    TAMPER("tamper");
+    TAMPER("tamper"),
+
+    /**
+     * The dashboard's "send test alert" pseudo-kind: dispatched through the
+     * alert sinks (webhook, MQTT, local notification) to verify an
+     * integration end to end, but never recorded to the event log and never
+     * armed against the schedule, the ML gate, the deterrence automation, or
+     * quiet hours — the test exists to prove the sinks fire, so it posts
+     * even inside a quiet window.
+     */
+    TEST("test");
+
+    companion object {
+        private val byWireName: Map<String, EventKind> = entries.associateBy { it.wireName }
+
+        /**
+         * The tolerant wire-name decode (the event feed's `?type=` filter):
+         * a null, blank, or unknown name yields null, a valid wire name
+         * decodes — [parseWireNameOrNull]'s convention.
+         */
+        fun fromWireNameOrNull(name: String?): EventKind? =
+            parseWireNameOrNull(name, byWireName)
+    }
 }
 
 /**

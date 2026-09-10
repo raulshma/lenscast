@@ -6,9 +6,12 @@ import ToggleRow from './ToggleRow'
 import SecurityCard from './SecurityCard'
 import EventFeed from './EventFeed'
 import StorageCard from './StorageCard'
+import SystemPanel from './SystemPanel'
 import BackupCard from './BackupCard'
 import MqttCard from './MqttCard'
 import AuthCard from './AuthCard'
+import AuditCard from './AuditCard'
+import ConfigBackupCard from './ConfigBackupCard'
 
 interface Props {
   settings: () => AllSettings | null
@@ -404,6 +407,8 @@ export default function AppSettingsPanel(props: Props) {
         updateStreamingDebounced={props.updateStreamingDebounced}
       />
 
+      <SystemPanel />
+
       <MqttCard
         settings={props.settings}
         updateStreamingAndSave={props.updateStreamingAndSave}
@@ -411,6 +416,10 @@ export default function AppSettingsPanel(props: Props) {
       />
 
       <AuthCard />
+
+      <ConfigBackupCard />
+
+      <AuditCard />
     </section>
   )
 }

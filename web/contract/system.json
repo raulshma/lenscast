@@ -1,0 +1,22 @@
+{
+  "appVersion": "1.9.0",
+  "deviceModel": "Pixel 8",
+  "deviceManufacturer": "Google",
+  "androidVersion": "15",
+  "sdkInt": 35,
+  "osUptimeMs": 86400000,
+  "processUptimeMs": 3600000,
+  "battery": {
+    "level": 76,
+    "isCharging": true,
+    "temperatureTenthsC": 295,
+    "voltageMillivolts": 4350,
+    "health": "good"
+  },
+  "storage": {
+    "usedBytes": 1073741824,
+    "quotaBytes": 2147483648,
+    "freeBytes": 53687091200,
+    "totalBytes": 107374182400
+  }
+}

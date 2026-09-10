@@ -20,6 +20,9 @@ class MotionDetector(
     @Volatile var sensitivity: Float = 0.5f
     @Volatile var zones: List<MotionZone> = emptyList()
 
+    /** Minimum ms between two motion events; persisted via the settings store. */
+    @Volatile var cooldownMs: Long = MotionEventPolicy.DEFAULT_COOLDOWN_MS
+
     private var lastGrid: DoubleArray? = null
     private var lastFireMs = 0L
     private val framesSeen = AtomicLong(0)
@@ -38,6 +41,7 @@ class MotionDetector(
                 nowMs = nowMs,
                 lastFireMs = lastFireMs,
                 threshold = threshold(),
+                cooldownMs = cooldownMs,
                 framesSeen = seen,
             )
             lastGrid = grid

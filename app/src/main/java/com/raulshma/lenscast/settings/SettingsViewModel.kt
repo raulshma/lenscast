@@ -60,10 +60,21 @@ class SettingsViewModel(
     val motionArmScheduleEnabled: StateFlow<Boolean> = settingsDataStore.motionArmScheduleEnabled
     val motionArmStartMinute: StateFlow<Int> = settingsDataStore.motionArmStartMinute
     val motionArmEndMinute: StateFlow<Int> = settingsDataStore.motionArmEndMinute
+    val motionArmDaysMask: StateFlow<Int> = settingsDataStore.motionArmDaysMask
     val soundDetectionEnabled: StateFlow<Boolean> = settingsDataStore.soundDetectionEnabled
     val soundThresholdPercent: StateFlow<Int> = settingsDataStore.soundThresholdPercent
+    val soundAdaptiveNoiseFloor: StateFlow<Boolean> = settingsDataStore.soundAdaptiveNoiseFloor
+    val alertQuietHoursEnabled: StateFlow<Boolean> = settingsDataStore.alertQuietHoursEnabled
+    val alertQuietHoursStartMinute: StateFlow<Int> = settingsDataStore.alertQuietHoursStartMinute
+    val alertQuietHoursEndMinute: StateFlow<Int> = settingsDataStore.alertQuietHoursEndMinute
+    val soundRecordingEnabled: StateFlow<Boolean> = settingsDataStore.soundRecordingEnabled
+    val motionCooldownSeconds: StateFlow<Int> = settingsDataStore.motionCooldownSeconds
+    val soundCooldownSeconds: StateFlow<Int> = settingsDataStore.soundCooldownSeconds
     val mlDetectionEnabled: StateFlow<Boolean> = settingsDataStore.mlDetectionEnabled
     val mlMinScorePercent: StateFlow<Int> = settingsDataStore.mlMinScorePercent
+    val mlIncludePerson: StateFlow<Boolean> = settingsDataStore.mlIncludePerson
+    val mlIncludePets: StateFlow<Boolean> = settingsDataStore.mlIncludePets
+    val mlIncludeVehicles: StateFlow<Boolean> = settingsDataStore.mlIncludeVehicles
 
     // The detection model's download lifecycle, straight from the store.
     val detectionModelState: StateFlow<DetectionModelStore.State> =
@@ -80,6 +91,9 @@ class SettingsViewModel(
     val backupWebdavUrl: StateFlow<String> = settingsDataStore.backupWebdavUrl
     val backupWebdavUsername: StateFlow<String> = settingsDataStore.backupWebdavUsername
     val backupWebdavPassword: StateFlow<String> = settingsDataStore.backupWebdavPassword
+    val captureRetentionDays: StateFlow<Int> = settingsDataStore.captureRetentionDays
+    val eventRetentionDays: StateFlow<Int> = settingsDataStore.eventRetentionDays
+    val storageQuotaMb: StateFlow<Int> = settingsDataStore.storageQuotaMb
     val httpsEnabled: StateFlow<Boolean> = settingsDataStore.httpsEnabled
     val audioDeviceId: StateFlow<String> = settingsDataStore.audioDeviceId
     val resumeStreamsOnBoot: StateFlow<Boolean> = settingsDataStore.resumeStreamsOnBoot
@@ -194,13 +208,39 @@ class SettingsViewModel(
 
     fun updateMotionArmEndMinute(minute: Int) = save { settingsDataStore.saveMotionArmEndMinute(minute) }
 
+    fun updateMotionArmDaysMask(mask: Int) = save { settingsDataStore.saveMotionArmDaysMask(mask) }
+
     fun updateSoundDetectionEnabled(enabled: Boolean) = save { settingsDataStore.saveSoundDetectionEnabled(enabled) }
 
     fun updateSoundThresholdPercent(percent: Int) = save { settingsDataStore.saveSoundThresholdPercent(percent) }
 
+    fun updateSoundAdaptiveNoiseFloor(enabled: Boolean) =
+        save { settingsDataStore.saveSoundAdaptiveNoiseFloor(enabled) }
+
+    fun updateAlertQuietHoursEnabled(enabled: Boolean) =
+        save { settingsDataStore.saveAlertQuietHoursEnabled(enabled) }
+
+    fun updateAlertQuietHoursStartMinute(minute: Int) =
+        save { settingsDataStore.saveAlertQuietHoursStartMinute(minute) }
+
+    fun updateAlertQuietHoursEndMinute(minute: Int) =
+        save { settingsDataStore.saveAlertQuietHoursEndMinute(minute) }
+
+    fun updateSoundRecordingEnabled(enabled: Boolean) = save { settingsDataStore.saveSoundRecordingEnabled(enabled) }
+
+    fun updateMotionCooldownSeconds(seconds: Int) = save { settingsDataStore.saveMotionCooldownSeconds(seconds) }
+
+    fun updateSoundCooldownSeconds(seconds: Int) = save { settingsDataStore.saveSoundCooldownSeconds(seconds) }
+
     fun updateMlDetectionEnabled(enabled: Boolean) = save { settingsDataStore.saveMlDetectionEnabled(enabled) }
 
     fun updateMlMinScorePercent(percent: Int) = save { settingsDataStore.saveMlMinScorePercent(percent) }
+
+    fun updateMlIncludePerson(enabled: Boolean) = save { settingsDataStore.saveMlIncludePerson(enabled) }
+
+    fun updateMlIncludePets(enabled: Boolean) = save { settingsDataStore.saveMlIncludePets(enabled) }
+
+    fun updateMlIncludeVehicles(enabled: Boolean) = save { settingsDataStore.saveMlIncludeVehicles(enabled) }
 
     /**
      * The one write here that is not a persisted setting: asks the model store
@@ -240,6 +280,13 @@ class SettingsViewModel(
     fun updateAudioDeviceId(id: String) = save { settingsDataStore.saveAudioDeviceId(id) }
 
     fun updateResumeStreamsOnBoot(enabled: Boolean) = save { settingsDataStore.saveResumeStreamsOnBoot(enabled) }
+
+    fun updateCaptureRetentionDays(days: Int) = save { settingsDataStore.saveCaptureRetentionDays(days) }
+
+    fun updateEventRetentionDays(days: Int) = save { settingsDataStore.saveEventRetentionDays(days) }
+
+    fun updateStorageQuotaMb(quotaMb: Int) = save { settingsDataStore.saveStorageQuotaMb(quotaMb) }
+
 
     fun updateBackupWebdavPassword(password: String) {
         if (password.isNotEmpty()) save { settingsDataStore.saveBackupWebdavPassword(password) }

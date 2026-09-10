@@ -156,7 +156,9 @@ bounded motion recording (started only from Idle) or the legacy auto-photo,
 the webhook/MQTT/local-notification fan-out, the auto-siren/auto-torch
 deterrence behind its cooldown, and the persisted event-log entry, all
 reading one event-moment stamp and id so every sink reports the same
-identity. Motion events additionally pass through the ML object-detection
+identity. Sound events ride the same choreography behind their own persisted
+cooldown, with an opt-in bounded recording (`soundRecordingEnabled`, riding
+the motion post-roll duration). Motion events additionally pass through the ML object-detection
 gate when `mlDetectionEnabled` is on: the triggering frame is classified
 off-path (one worker thread, at most one classification per second) and only
 a positive "no allowed class at/above the confidence floor" verdict
@@ -224,7 +226,12 @@ COCO allow-list (person, common pets/livestock, road
 vehicles): `filter` returns the lowercase labels scoring at or above
 `mlMinScorePercent`, deduped, in allow-list order (person first) so the wire
 `labels` array is deterministic regardless of the detector's result
-ordering; an empty result is the only suppression verdict.
+ordering; an empty result is the only suppression verdict. The persisted
+per-group toggles (`mlIncludePerson`/`mlIncludePets`/`mlIncludeVehicles`)
+narrow the same list through `DetectionClassPolicy.allowList` — the
+person/pet/vehicle groups are the one source `ALLOWED_CLASSES` is built
+from, so every label belongs to a group and no un-grouped label can slip
+past a toggle.
 
 ### Photo Capture
 **`capture/PhotoCaptureManager.kt`** — owns the photo choreography (acquire
@@ -370,6 +377,17 @@ whole-chunk queue, close on disconnect, a bounded lifetime and client cap
 framing. The dashboard's `useEventStream` hook consumes it with a
 polling fallback.
 
+### Detection Events Screen
+**`capture/DetectionEventsScreen.kt`** — the on-device detection-event log,
+the app-side twin of the dashboard's event feed: a type-filtered
+(Motion/Sound/Tamper) newest-first list with the trigger snapshot, the
+dispatched actions, the zone/ML labels, and the linked clip's file name. It
+reads the shared Detection Event Store directly — live updates tail
+`eventsFlow`, and Clear goes through `store.clear()` on Dispatchers.IO like
+the web route's DELETE. It is the notification tap-through target
+(`DETECTION_EVENTS_ROUTE` in the Navigation Graph) and owns no copy of the
+event data.
+
 ### Streaming Manager
 **`streaming/StreamingManager.kt`** — owns live streaming runtime state (web
 MJPEG stream, RTSP server, audio streaming, mDNS). Its thermal monitor and its
@@ -392,13 +410,37 @@ that builds the Web API stack.
 **`streaming/web/`** — the JSON-in/JSON-out surface behind the streaming
 server's `/api/*` routes, split one handler per domain: `SettingsWebHandler`
 (DTO mapping, plus the detection model's response-only status fields and its
-download route), `StatusWebHandler` (status aggregation), `StreamWebHandler`
+download route, and the settings export/import pair — GET
+`/api/settings/export` wraps the GET shape in a versioned
+`SettingsExportDto` envelope, POST `/api/settings/import` validates the
+envelope through the pure `SettingsImportParser` and applies it through the
+same `put` path a dashboard save uses; the parser also accepts a bare
+settings update document with full PUT semantics — a present section
+persists wholesale, so the envelope remains the lossless path), `StatusWebHandler` (status
+aggregation, plus the live camera-control truth — torch, zoom, selected
+lens, and the device's real control ranges — so the dashboard mirrors the
+device instead of hardcoding bounds), `StreamWebHandler`
 (lifecycle), `CaptureWebHandler`, `LensWebHandler`,
 `IntervalCaptureWebHandler`, `RecordingWebHandler` (observes the Recording
 Controller), `GalleryWebHandler` (media resolution/thumbnails),
 `DeterrenceWebHandler` (the siren route), `DetectionEventsWebHandler` (the
-event log's list/clear plus the per-event JSON the SSE stream reuses), and
-`AuthWebHandler` (the config/session-management JSON). The seam
+event log's list/clear plus the per-event JSON the SSE stream reuses),
+`DetectionTestWebHandler` (POST `/api/detection/test` — one synthetic
+`EventKind.TEST` alert through the webhook/MQTT/notification sinks only;
+never logged to the event store, never armed against the schedule, the ML
+gate, deterrence, or quiet hours — the test exists to prove the sinks fire,
+so it posts even inside a quiet window; MQTT publishes the event JSON
+without a binary-sensor pulse since the test has no entity), and
+`AuthWebHandler` (the config/session-management JSON). The
+`AuditLog` (a capped, atomically-persisted `filesDir/audit_log.json` ring)
+is written from exactly two places — the ApiRouter (every POST/PUT/DELETE it
+answers, dispatched or unknown-route, success or error, as `"$method $path"`)
+and the StreamingServer
+(`login.success`/`login.failed` with the remote address, only while auth is
+armed) — and read through `AuditWebHandler` (GET/DELETE `/api/audit`; the
+router audits the clear itself, so a wiped trail reopens with
+`DELETE /api/audit` as its first entry — a cleared log reads as cleared);
+the audit never breaks the audited path. The seam
 is `ApiRouter.dispatch(request): ApiResponse` — I/O-bound handlers suspend and
 `StreamingServer` awaits the router from its worker threads. Handler errors
 are encoded in the 200 payload (the web client's contract); non-200 is
@@ -410,11 +452,12 @@ session routes (`/api/auth/login`, `/api/auth/logout`, `/api/auth/status`,
 their cookie/non-200 contract differs from the JSON handlers, so
 `StreamingServer` translates them onto the Web Auth Gate directly. The
 config/session-management routes (`/api/auth/config`, `/api/auth/sessions`)
-stay behind the router like every other JSON handler, as do the three deliberate
+stay behind the router like every other JSON handler, as do the four deliberate
 binary-style bypasses `/api/events` (the SSE status stream's never-ending
 chunked response), `/api/detection/events/stream` (the detection-event SSE
-twin), and `/api/audio/uplink` (raw PCM16 body), which the server
-serves without JSON semantics. The WS sidecar (`streaming/ws/WsMediaServer`)
+twin), `/api/audio/uplink` (raw PCM16 body), and the HEAD method (mapped onto
+the GET route, headers only, CSRF-safe like GET). The WS sidecar
+(`streaming/ws/WsMediaServer`)
 handshakes through the same Web Auth Gate — auth on requires the session
 cookie, and a rejected handshake aborts the upgrade. The
 `web/src/types.ts` mirror of the DTO surface is hand-maintained in lockstep:
@@ -441,7 +484,19 @@ reconnect — browser primitives injected, the pure parts
 vitest-tested). `web/src/api/defaults.ts` (`API_DEFAULTS`) is the single TS
 home for the Kotlin-default fallbacks every component used to re-type (a
 shipped `?? 80` vs the real JPEG default 70 was the drift class this
-deletes); the dead `StreamingCard.tsx` is deleted.
+deletes); the dead `StreamingCard.tsx` is deleted. The detection feed rides
+`web/src/hooks/eventStreamCore.ts` (the SSE-with-polling-fallback reducer
+the EventFeed and the connection-lost banner consume, vitest-tested), and
+the trend sparklines ride `web/src/hooks/useSignalHistory.ts` (a bounded
+sample window pushed from status payloads) behind `Sparkline.tsx`. Two
+small mirrors keep client verdicts from drifting server-side:
+`web/src/armDays.ts` re-states Motion Arming's day-mask bits and
+never-clear-last-day toggle (pinned by test against the Kotlin policy), and
+`web/src/format.ts` is the one byte formatter the connection panel and the
+diagnostics/system cards share. The newer dashboard cards — AuditCard (the
+audit trail), SystemPanel (the /api/system triage view), and ConfigBackupCard
+(the settings export/import pair) — are one-card clients of the same client
+API surface.
 
 ### Gallery Page
 **`streaming/web/GalleryPage.kt`** — the pure `/api/gallery` pagination:
@@ -474,7 +529,9 @@ re-applied when the server is recreated.
 ### Token Write Policy
 **`streaming/web/TokenWritePolicy.kt`** — the exact POST routes a valid API
 token may write (stream/web/RTSP start and stop, `/api/capture`, recording
-start and stop, siren, torch, the detection-model download); every path
+start and stop, siren, torch, the detection-model download, and the
+detection-test alert — each a device action that changes no persisted
+setting, and the test additionally persists no event); every path
 outside the list stays read-only
 for tokens, and the list deliberately contains no `/api/auth/` route, so a
 bearer token never mints sessions, rotates credentials, or logs out. The
@@ -960,3 +1017,64 @@ aggregation: typed `StreamingInputs`/`ThermalInputs`/`BatteryInputs`/
 `StatusResponseDto` out (adaptive null-when-disabled, connectionQuality
 null-when-idle, first-client fps). `StatusWebHandler` only collects flows and
 delegates — the dashboard/API mapping is tested without a manager.
+
+### Quiet Hours Policy
+**`capture/QuietHoursPolicy.kt`** — the pure quiet-hours verdict for local
+detection alerts: when the persisted window is enabled, the Detection
+Coordinator holds the heads-up notification for events inside it (the same
+midnight-wrapping minute-of-day semantics the arm schedule uses). Webhook,
+MQTT, recordings, and the event log are untouched — quiet hours silence the
+phone, not the integrations. The `notify` action only lands in the event log
+when a notification actually posted, so a quiet-held alert reads honestly.
+The dashboard's test alert is deliberately exempt — it exists to verify the
+notification sink, so it posts even inside the window.
+
+### Adaptive Noise Floor
+**`capture/SoundDetectionPolicy.kt` (`AdaptiveNoiseFloor`)** — the optional
+sound-trigger ladder: a slow asymmetric EMA of the measured RMS (rises at
+α=0.15, falls at α=0.02) and `effectiveThreshold` = max(user threshold,
+floor + 10%). A constant ambient neither masks real events nor trips the
+detector on its own; the slow fall keeps a sustained loud event from walking
+the floor up to self-suppression within its own duration, and the first
+sample anchors the floor outright (ramping from zero would trip the detector
+on any ambient louder than the user threshold while the floor converges).
+The toggle is persisted as `sound_adaptive_noise_floor` and
+applied by the Settings Applier alongside the threshold and the sound
+cooldown (motion and sound carry their own persisted cooldown settings).
+
+### Detection Stats Policy
+**`capture/DetectionStatsPolicy.kt`** — the pure aggregation behind GET
+`/api/detection/stats`: per-type counts over the 24 h / 7 d / all-time
+windows, a seven-day per-UTC-day series (zero days included, oldest first),
+and the top zone/ML labels. Caller-supplied clock, JVM-tested; the handler
+(`DetectionEventsWebHandler.stats`) only maps to the DTO. The event log's
+`limit`-style read gained a `type` filter at the same time
+(`GET /api/detection/events?type=` and the export route, with the feed's
+`total` counting the filtered set; the name decodes through
+`EventKind.fromWireNameOrNull` — an unknown `type` answers with the
+handler-error payload, never a silently empty feed), and `GET
+/api/detection/events/export` downloads the log as RFC-4180 CSV (default) or
+a bare JSON array — snapshots deliberately omitted. CSV cells that begin
+with a formula trigger (`=`, `+`, `-`, `@`, TAB) carry an apostrophe guard,
+so a user-authored zone or label like `=SUM(A1)` never executes as a
+formula when the export opens in a spreadsheet app.
+
+### System Info Endpoint
+**`streaming/web/SystemWebHandler.kt`** — the read-only GET `/api/system`
+triage snapshot: app version, device model/manufacturer, Android
+version/SDK, OS and process uptimes, extended battery facts (temperature,
+voltage, health off the sticky BATTERY_CHANGED intent; level/charging from
+the same PowerManager the status endpoint uses, so the two never disagree),
+and storage (capture bytes vs the configured quota plus StatFs volume
+free/total). Every read degrades to a safe value — a headless triage page
+must never 500.
+
+### Storage Quota
+**`data/CaptureHistoryStore.kt` (`quotaMb` provider)** — the once-hard-coded
+2 GB quota is now the persisted `storage_quota_mb` setting (100 MB–32 GB,
+clamped by its descriptor), read per enforcement pass the same live-read way
+as retention days. Every pass (append, low-disk floor, `enforceQuota`, the
+storage bar, `/api/system`) routes through `StorageManager.quotaBytes` over
+the live value — the default stays 2 GB, so existing installs behave
+identically until the knob is turned (in-app Storage section, web
+StorageCard).

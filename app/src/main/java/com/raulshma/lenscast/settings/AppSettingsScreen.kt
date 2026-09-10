@@ -65,9 +65,13 @@ internal val rtspPortSliderRange: ClosedFloatingPointRange<Float> =
 internal val audioBitrateSliderRange: ClosedFloatingPointRange<Float> =
     StreamDefaults.AUDIO_BITRATE_MIN_KBPS.toFloat()..StreamDefaults.AUDIO_BITRATE_MAX_KBPS.toFloat()
 
+internal val storageQuotaSliderRange: ClosedFloatingPointRange<Float> =
+    StreamDefaults.STORAGE_QUOTA_MB_MIN.toFloat()..StreamDefaults.STORAGE_QUOTA_MB_MAX.toFloat()
+
 @Composable
 fun AppSettingsScreen(
     onNavigateBack: () -> Unit,
+    onOpenEventLog: (() -> Unit)? = null,
 ) {
     val context = LocalContext.current
     val activity = context as ComponentActivity
@@ -121,6 +125,7 @@ fun AppSettingsScreen(
     val resumeStreamsOnBoot by viewModel.resumeStreamsOnBoot.collectAsState()
     val continuousRecording by viewModel.continuousRecording.collectAsState()
     val continuousSegmentMinutes by viewModel.continuousSegmentMinutes.collectAsState()
+    val storageQuotaMb by viewModel.storageQuotaMb.collectAsState()
 
     val updateState by updateViewModel.updateState.collectAsState()
     val autoCheckEnabled by updateViewModel.autoCheckEnabled.collectAsState()
@@ -313,7 +318,10 @@ fun AppSettingsScreen(
             }
 
             item {
-                DetectionSettingsSection(viewModel)
+                DetectionSettingsSection(
+                    viewModel,
+                    onOpenEventLog = onOpenEventLog,
+                )
             }
 
             item {
@@ -338,6 +346,24 @@ fun AppSettingsScreen(
                             onValueChange = { viewModel.updateContinuousSegmentMinutes(it.toInt()) }
                         )
                     }
+                }
+            }
+
+            item {
+                SettingsSection(title = "Storage") {
+                    SliderSetting(
+                        title = "Storage Quota (MB)",
+                        value = storageQuotaMb.toFloat(),
+                        range = storageQuotaSliderRange,
+                        steps = StreamDefaultsRange.STORAGE_QUOTA_STEPS,
+                        onValueChange = { viewModel.updateStorageQuotaMb(it.toInt()) }
+                    )
+                    Text(
+                        text = "Once LensCast media passes the quota, the oldest captures are " +
+                            "deleted automatically (100 MB – 32 GB)",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 }
             }
 

@@ -33,6 +33,9 @@ object TokenWritePolicy {
         // Detection model fetch: a device-maintenance action in the siren/torch
         // class — it changes no persisted setting and cannot disable anything.
         "/api/settings/ml-model/download",
+        // Test alert: fires the alert sinks once (webhook/MQTT/notification);
+        // it persists nothing, records no event, and cannot arm deterrence.
+        "/api/detection/test",
     )
 
     /** True when a POST carrying a valid API token may proceed to [path]. */

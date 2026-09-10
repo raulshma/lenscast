@@ -743,7 +743,7 @@ html, body {
   padding: 8px 16px;
   border: none;
   background: transparent;
-  color: var(--lc-text-secondary);
+  color: var(--lc-text-dim);
   font-size: 13px;
   font-weight: 500;
   border-radius: calc(var(--lc-radius) - 4px);
@@ -2326,7 +2326,7 @@ html, body {
 .gallery-day-label {
   font-size: 13px;
   font-weight: 700;
-  color: var(--lc-text-secondary);
+  color: var(--lc-text-dim);
 }
 
 .gallery-day-count {
@@ -2341,4 +2341,110 @@ html, body {
 
 .field-input-full {
   width: 100%;
+}
+
+/* ═══════════════════════════════════════════════
+   EVENT FEED FILTERS + CONNECTION-LOST BANNER
+   ═══════════════════════════════════════════════ */
+
+/* The feed reuses the gallery chip row; let long label lists wrap. */
+.event-feed-filters {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.event-feed-filters .gallery-filters {
+  flex-wrap: wrap;
+}
+
+/* Slim fixed strip over the top of the UI while the status lane is down.
+   Purely informational: it must never intercept clicks (pointer-events none). */
+.connection-lost-banner {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 5px 16px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--lc-danger);
+  background: var(--lc-danger-bg);
+  border-bottom: 1px solid rgba(244, 63, 94, 0.25);
+  backdrop-filter: blur(8px);
+  pointer-events: none;
+  animation: fade-in 0.3s ease;
+}
+
+.connection-lost-banner svg {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+}
+
+
+/* ── Audit log card ── */
+.audit-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.audit-badge {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  flex-shrink: 0;
+}
+
+.audit-badge-ok {
+  background: rgba(74, 222, 128, 0.15);
+  color: var(--lc-success, #4ade80);
+}
+
+.audit-badge-error {
+  background: rgba(248, 113, 113, 0.15);
+  color: var(--lc-danger, #f87171);
+}
+
+/* ═══════════════════════════════════════════════
+   ARM DAY CHIPS (day-of-week schedule mask)
+   ═══════════════════════════════════════════════ */
+.arm-days-row {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: 6px;
+}
+
+.arm-day-chip {
+  flex: 1 1 0;
+  min-width: 40px;
+  padding: 6px 0;
+  border-radius: 8px;
+  border: 1px solid var(--lc-surface-3);
+  background: var(--lc-surface-2);
+  color: var(--lc-text-dim);
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+
+.arm-day-chip:hover {
+  border-color: var(--lc-accent);
+}
+
+.arm-day-chip.active {
+  background: rgba(0, 212, 255, 0.14);
+  border-color: var(--lc-accent);
+  color: var(--lc-accent);
 }

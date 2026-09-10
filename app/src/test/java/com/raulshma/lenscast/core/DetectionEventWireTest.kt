@@ -2,6 +2,7 @@ package com.raulshma.lenscast.core
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -86,5 +87,20 @@ class DetectionEventWireTest {
             setOf("type", "value", "timestampMs", "source", "zones", "labels", "batteryPercent", "snapshotJpeg"),
             fields,
         )
+    }
+
+    @Test
+    fun `wire names decode to their kinds and unknown blank or cased names yield null`() {
+        // The event feed's ?type= filter decodes through this mapper — an
+        // unknown name must read as unknown (handler error), never silently
+        // as an empty feed.
+        assertEquals(EventKind.MOTION, EventKind.fromWireNameOrNull("motion"))
+        assertEquals(EventKind.SOUND, EventKind.fromWireNameOrNull("sound"))
+        assertEquals(EventKind.TAMPER, EventKind.fromWireNameOrNull("tamper"))
+        assertEquals(EventKind.TEST, EventKind.fromWireNameOrNull("test"))
+        assertNull(EventKind.fromWireNameOrNull("MOTION"))
+        assertNull(EventKind.fromWireNameOrNull("explosion"))
+        assertNull(EventKind.fromWireNameOrNull(" "))
+        assertNull(EventKind.fromWireNameOrNull(null))
     }
 }

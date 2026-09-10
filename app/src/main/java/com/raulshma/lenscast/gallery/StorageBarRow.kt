@@ -16,20 +16,16 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.raulshma.lenscast.data.CaptureHistoryStore
-import com.raulshma.lenscast.data.StorageManager
 import com.raulshma.lenscast.camera.model.CameraDashboardPolicy.formatBytes
 
 /**
- * Storage manager row: quota bar + free-space action.
- * Quota is the default 2GB; per-setting quota is a follow-up.
+ * Storage manager row: quota bar + free-space action, against the configured
+ * quota (the store reads the live storage-quota setting per call).
  */
 @Composable
 fun StorageBarRow(store: CaptureHistoryStore) {
     val history by store.history.collectAsState()
-    val bar = remember(history) {
-        val used = history.sumOf { it.fileSizeBytes.coerceAtLeast(0) }
-        StorageManager.storageBar(used, StorageManager.DEFAULT_QUOTA_BYTES)
-    }
+    val bar = remember(history) { store.storageBar() }
     Column(
         modifier = Modifier
             .fillMaxWidth()

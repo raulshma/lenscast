@@ -1,0 +1,43 @@
+{
+  "last24h": {
+    "motion": 6,
+    "sound": 2
+  },
+  "last7d": {
+    "motion": 21,
+    "sound": 8,
+    "tamper": 1
+  },
+  "allTime": {
+    "motion": 90,
+    "sound": 30,
+    "tamper": 3
+  },
+  "perDay": [
+    {
+      "day": "2026-09-09",
+      "count": 5
+    },
+    {
+      "day": "2026-09-10",
+      "count": 3
+    }
+  ],
+  "totalEvents": 123,
+  "topZones": [
+    {
+      "label": "Driveway",
+      "count": 12
+    }
+  ],
+  "topLabels": [
+    {
+      "label": "person",
+      "count": 9
+    },
+    {
+      "label": "car",
+      "count": 4
+    }
+  ]
+}

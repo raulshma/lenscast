@@ -136,12 +136,21 @@ class DetectionEventStore private constructor(
         updated?.let(_eventsFlow::tryEmit)
     }
 
-    /** Newest-first read, at most [limit] entries (clamped by the policy). */
-    fun events(limit: Int? = null): List<DetectionEvent> = synchronized(lock) {
-        DetectionEventLogPolicy.readNewestFirst(events, limit)
+    /**
+     * Newest-first read, at most [limit] entries (clamped by the policy),
+     * optionally narrowed to events whose wire-name [type] matches exactly
+     * ("motion"/"sound"/"tamper"). Null or blank reads unfiltered; an
+     * unknown type matches nothing — callers validate before they filter.
+     */
+    fun events(limit: Int? = null, type: String? = null): List<DetectionEvent> = synchronized(lock) {
+        val filtered = if (type.isNullOrBlank()) events else events.filter { it.type == type }
+        DetectionEventLogPolicy.readNewestFirst(filtered, limit)
     }
 
-    fun count(): Int = synchronized(lock) { events.size }
+    /** Entry count, narrowed by the same wire-name [type] filter [events] applies. */
+    fun count(type: String? = null): Int = synchronized(lock) {
+        if (type.isNullOrBlank()) events.size else events.count { it.type == type }
+    }
 
     fun clear() {
         synchronized(lock) {

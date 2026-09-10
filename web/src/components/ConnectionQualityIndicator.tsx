@@ -1,8 +1,12 @@
-import { createSignal, Show } from 'solid-js'
-import type { ConnectionQualityStatus } from '../types'
+import { createEffect, createSignal, Show } from 'solid-js'
+import type { ConnectionQualityStatus, DeviceStatus } from '../types'
+import { useSignalHistory } from '../hooks/useSignalHistory'
+import { formatBytes } from '../format'
+import Sparkline from './Sparkline'
 
 interface Props {
-  status: () => ConnectionQualityStatus | undefined
+  /** The full device status: connection quality drives the panel, battery feeds the trend sparkline. */
+  status: () => DeviceStatus | undefined
 }
 
 const QUALITY_COLORS: Record<string, { dot: string; bg: string }> = {
@@ -21,17 +25,10 @@ const QUALITY_LABELS: Record<string, string> = {
   CRITICAL: 'CRIT',
 }
 
-function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`
-  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
-  return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`
-}
-
 export default function ConnectionQualityIndicator(props: Props) {
   const [expanded, setExpanded] = createSignal(false)
 
-  const conn = () => props.status()
+  const conn = (): ConnectionQualityStatus | undefined => props.status()?.connectionQuality
   const safeNumber = (value: unknown, fallback = 0): number => {
     const n = typeof value === 'number' ? value : Number(value)
     return Number.isFinite(n) ? n : fallback
@@ -40,6 +37,29 @@ export default function ConnectionQualityIndicator(props: Props) {
   const qualityLevel = () => conn()?.qualityLevel ?? 'GOOD'
   const colors = () => QUALITY_COLORS[qualityLevel()] ?? QUALITY_COLORS.GOOD
   const label = () => QUALITY_LABELS[qualityLevel()] ?? 'N/A'
+
+  // Sparkline history: both series ride the status payloads the parent
+  // already pushes — bandwidth from the connection-quality block, battery
+  // from the device status. No extra fetch lane.
+  const bandwidthHistory = useSignalHistory()
+  const batteryHistory = useSignalHistory()
+
+  createEffect(() => {
+    const quality = props.status()?.connectionQuality
+    if (!quality) return
+    bandwidthHistory.push(safeNumber(quality.estimatedBandwidthKbps))
+  })
+
+  createEffect(() => {
+    const level = props.status()?.battery?.level
+    if (level == null) return
+    batteryHistory.push(safeNumber(level))
+  })
+
+  const lastBatteryPercent = () => {
+    const values = batteryHistory.values()
+    return values.length > 0 ? values[values.length - 1] : 0
+  }
 
   return (
     <div class="connection-quality-wrapper" style={{ position: 'relative' }}>
@@ -132,6 +152,45 @@ export default function ConnectionQualityIndicator(props: Props) {
             <CqStatRow label="Total Sent" value={formatBytes(safeNumber(conn()?.totalBytesSent))} />
           </div>
 
+          <Show when={bandwidthHistory.values().length > 1 || batteryHistory.values().length > 1}>
+            <div
+              style={{
+                'margin-top': '8px',
+                'padding-top': '8px',
+                'border-top': '1px solid rgba(255, 255, 255, 0.08)',
+              }}
+            >
+              <div
+                style={{
+                  'font-size': '10px',
+                  'font-weight': '600',
+                  color: 'rgba(255, 255, 255, 0.5)',
+                  'text-transform': 'uppercase',
+                  'letter-spacing': '0.5px',
+                  'margin-bottom': '6px',
+                }}
+              >
+                Trend
+              </div>
+              <div style={{ display: 'flex', 'flex-direction': 'column', gap: '6px' }}>
+                <CqSparklineRow
+                  label="Bandwidth"
+                  value={`${safeNumber(conn()?.estimatedBandwidthKbps)} kbps`}
+                  samples={bandwidthHistory.values()}
+                  color={colors().dot}
+                  title="Estimated bandwidth history (kbps)"
+                />
+                <CqSparklineRow
+                  label="Battery"
+                  value={`${lastBatteryPercent()}%`}
+                  samples={batteryHistory.values()}
+                  color="rgba(255, 255, 255, 0.6)"
+                  title="Battery level history (%)"
+                />
+              </div>
+            </div>
+          </Show>
+
           <Show when={Object.keys(clientDetails()).length > 0}>
             <div
               style={{
@@ -209,6 +268,37 @@ function CqStatRow(props: { label: string; value: string; valueColor?: string; c
         }}
       >
         {props.value}
+      </span>
+    </div>
+  )
+}
+
+function CqSparklineRow(props: { label: string; value: string; samples: number[]; color: string; title: string }) {
+  return (
+    <div style={{ display: 'flex', 'justify-content': 'space-between', 'align-items': 'center', gap: '8px' }}>
+      <div style={{ display: 'flex', 'flex-direction': 'column', gap: '1px' }}>
+        <span
+          style={{
+            'font-size': '10px',
+            'font-family': 'ui-monospace, monospace',
+            color: 'rgba(255, 255, 255, 0.45)',
+          }}
+        >
+          {props.label}
+        </span>
+        <span
+          style={{
+            'font-size': '10px',
+            'font-family': 'ui-monospace, monospace',
+            'font-weight': '500',
+            color: 'rgba(255, 255, 255, 0.85)',
+          }}
+        >
+          {props.value}
+        </span>
+      </div>
+      <span style={{ color: props.color, 'line-height': '0', 'flex-shrink': '0', display: 'inline-flex' }}>
+        <Sparkline samples={props.samples} title={props.title} />
       </span>
     </div>
   )

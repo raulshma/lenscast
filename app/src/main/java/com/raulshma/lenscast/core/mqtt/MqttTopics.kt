@@ -42,6 +42,16 @@ object MqttTopics {
             /** The sensor an event of [kind] publishes to; null when the kind has no sensor. */
             fun fromOrNull(kind: EventKind): SensorKind? =
                 entries.firstOrNull { it.eventKind == kind }
+
+            /**
+             * Whether a dispatch of [kind] publishes at all: the three sensor
+             * kinds pulse their `binary_sensor` and publish the event JSON;
+             * the test kind has no sensor (nothing to arm, no off-delay to
+             * simulate) but still publishes the event JSON only. Anything
+             * else has no honest wire representation and is skipped.
+             */
+            fun isPublishable(kind: EventKind): Boolean =
+                fromOrNull(kind) != null || kind == EventKind.TEST
         }
     }
 

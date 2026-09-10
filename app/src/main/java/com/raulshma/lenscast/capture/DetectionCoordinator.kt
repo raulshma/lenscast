@@ -154,6 +154,8 @@ class DetectionCoordinator(
         startMinute = settingsDataStore.motionArmStartMinute.value,
         endMinute = settingsDataStore.motionArmEndMinute.value,
         minuteOfDay = currentMinuteOfDay(),
+        daysMask = settingsDataStore.motionArmDaysMask.value,
+        isoDayIndex = currentIsoDayIndex(),
     )
 
     /**
@@ -194,6 +196,11 @@ class DetectionCoordinator(
                         val labels = DetectionClassPolicy.filter(
                             verdict.detections,
                             settingsDataStore.mlMinScorePercent.value,
+                            allowedClasses = DetectionClassPolicy.allowList(
+                                includePerson = settingsDataStore.mlIncludePerson.value,
+                                includePets = settingsDataStore.mlIncludePets.value,
+                                includeVehicles = settingsDataStore.mlIncludeVehicles.value,
+                            ),
                         )
                         onVerdict(labels.isEmpty(), labels)
                     }
@@ -221,6 +228,40 @@ class DetectionCoordinator(
         respectSchedule = false,
     )
 
+    /**
+     * The dashboard's "send test alert" dispatch: one synthetic [EventKind.TEST]
+     * alert through the alert sinks — webhook, MQTT, local notification — so a
+     * new integration can be verified end to end without waiting for a real
+     * event. Never recorded to the event log, never gated by the arm schedule
+     * or the ML gate, never fires the deterrence automation or a recording.
+     * Returns the sinks that actually dispatched (the same action names the
+     * event log uses), read from each sink's own go/no-go verdict.
+     */
+    suspend fun dispatchTestAlert(): List<String> {
+        val store = settingsDataStore
+        val dispatched = mutableListOf<String>()
+        val alert = DetectionAlert(
+            kind = EventKind.TEST,
+            value = 0.0,
+            timestampMs = nowMs(),
+            batteryPercent = batteryPercent(),
+            snapshotJpegBase64 = runCatching {
+                prepareSnapshotBase64(streamingManager()?.latestWebFrame())
+            }.getOrNull(),
+        )
+        val webhookDispatched = webhookNotifier.notifyEvent(
+            alert,
+            headers = WebhookNotifier.parseHeaders(store.webhookHeaders.value),
+        )
+        if (webhookDispatched) dispatched.add(ACTION_WEBHOOK)
+        if (mqttPublisher()?.notifyEvent(alert) == true) dispatched.add(ACTION_MQTT)
+        val notified = store.detectionNotificationsEnabled.value &&
+            detectionNotifier()?.notify(EventKind.TEST, emptyList(), alert.snapshotJpegBase64) == true
+        if (notified) dispatched.add(ACTION_NOTIFY)
+        Log.d(TAG, "Test alert dispatched: $dispatched")
+        return dispatched
+    }
+
     private fun onEvent(
         kind: EventKind,
         value: Double,
@@ -242,19 +283,24 @@ class DetectionCoordinator(
             startMinute = store.motionArmStartMinute.value,
             endMinute = store.motionArmEndMinute.value,
             minuteOfDay = currentMinuteOfDay(),
+            daysMask = store.motionArmDaysMask.value,
+            isoDayIndex = currentIsoDayIndex(),
         )
         Log.d(TAG, "Detection event (${kind.wireName}=${String.format(java.util.Locale.US, "%.1f", value)}, zones=$zones, armed=$armed)")
 
         val dispatchedActions = mutableListOf<String>()
-        if (kind == EventKind.MOTION) {
+        if (kind == EventKind.MOTION || kind == EventKind.SOUND) {
+            val isSound = kind == EventKind.SOUND
             val action = DetectionEventPolicy.recordingAction(
                 motionRecordingEnabled = store.motionRecordingEnabled.value,
                 armed = armed,
                 recordingActive = recordingController.isRecording.value,
+                soundRecordingEnabled = store.soundRecordingEnabled.value,
+                isSound = isSound,
             )
             // Continuous-recording interplay: while the NVR-style loop holds
             // the recorder, `recordingActive` is true and the verdict is
-            // KEEP_ROLLING — the motion-triggered bounded clip is skipped and
+            // KEEP_ROLLING — the event-triggered bounded clip is skipped and
             // the event's clip link fields stay null. The event itself (and
             // its alert fan-out) still fires and is still logged.
             when (action) {
@@ -278,6 +324,7 @@ class DetectionCoordinator(
             if (DetectionEventPolicy.shouldAutoPhoto(
                     motionRecordingEnabled = store.motionRecordingEnabled.value,
                     armed = armed,
+                    isSound = isSound,
                 )
             ) {
                 runCatching { photoCaptureManager.captureToGallery() }
@@ -319,8 +366,16 @@ class DetectionCoordinator(
                 val mqttPublished = mqttPublisher()?.notifyEvent(alert) == true
                 if (mqttPublished) dispatchedActions.add(ACTION_MQTT)
                 // The local alert claims only when the platform accepted the
-                // post (the runtime permission gates it on API 33+).
+                // post (the runtime permission gates it on API 33+). Quiet
+                // hours hold the notification only — webhook and MQTT above
+                // already dispatched, and the event still logs.
                 val notified = store.detectionNotificationsEnabled.value &&
+                    !QuietHoursPolicy.isQuiet(
+                        enabled = store.alertQuietHoursEnabled.value,
+                        startMinute = store.alertQuietHoursStartMinute.value,
+                        endMinute = store.alertQuietHoursEndMinute.value,
+                        minuteOfDay = currentMinuteOfDay(),
+                    ) &&
                     detectionNotifier()?.notify(kind, zones, snapshot) == true
                 if (notified) dispatchedActions.add(ACTION_NOTIFY)
                 // The deterrence verdict lands before the log write so the
@@ -481,6 +536,15 @@ class DetectionCoordinator(
     private fun currentMinuteOfDay(): Int {
         val calendar = java.util.Calendar.getInstance().apply { timeInMillis = nowMs() }
         return calendar.get(java.util.Calendar.HOUR_OF_DAY) * 60 + calendar.get(java.util.Calendar.MINUTE)
+    }
+
+    /**
+     * The ISO day index the arm-schedule mask bits reference (0 = Monday …
+     * 6 = Sunday), derived from Calendar's 1=Sunday..7=Saturday numbering.
+     */
+    private fun currentIsoDayIndex(): Int {
+        val calendar = java.util.Calendar.getInstance().apply { timeInMillis = nowMs() }
+        return (calendar.get(java.util.Calendar.DAY_OF_WEEK) + 5) % 7
     }
 
     /**

@@ -1,22 +1,32 @@
 import { describe, expect, it } from 'vitest'
 import {
   type AllSettings,
+  type AuditLogResponse,
+  type DetectionStats,
+  type DetectionTestResponse,
   type DeviceStatus,
   type DetectionEventsResponse,
   type GalleryResponse,
   type IntervalCaptureStatus,
   type LensesResponse,
   type RecordingStatus,
+  type SettingsExport,
+  type SystemInfo,
   FRAME_RATE_OPTIONS,
 } from './types'
 import { API_DEFAULTS } from './api/defaults'
 import settingsFixture from '../contract/settings.json'
+import settingsExportFixture from '../contract/settings-export.json'
 import statusFixture from '../contract/status.json'
 import galleryFixture from '../contract/gallery.json'
 import recordingStatusFixture from '../contract/recording-status.json'
 import lensesFixture from '../contract/lenses.json'
 import intervalCaptureStatusFixture from '../contract/interval-capture-status.json'
 import detectionEventsFixture from '../contract/detection-events.json'
+import detectionTestFixture from '../contract/detection-test.json'
+import auditLogFixture from '../contract/audit-log.json'
+import systemFixture from '../contract/system.json'
+import detectionStatsFixture from '../contract/detection-stats.json'
 
 // The checked-in JSON files in web/contract/ are the shared DTO contract:
 // app's DtoContractFixtureTest serializes the Kotlin DTOs (through the
@@ -88,8 +98,13 @@ const STREAMING_KEYS = [
   'motionArmScheduleEnabled',
   'motionArmStartMinute',
   'motionArmEndMinute',
+  'motionArmDaysMask',
   'soundDetectionEnabled',
   'soundThresholdPercent',
+  'soundAdaptiveNoiseFloor',
+  'soundRecordingEnabled',
+  'motionCooldownSeconds',
+  'soundCooldownSeconds',
   'webhookEnabled',
   'webhookUrl',
   'webhookHeaders',
@@ -111,6 +126,9 @@ const STREAMING_KEYS = [
   'httpsEnabled',
   'audioDeviceId',
   'detectionNotificationsEnabled',
+  'alertQuietHoursEnabled',
+  'alertQuietHoursStartMinute',
+  'alertQuietHoursEndMinute',
   'tamperDetectionEnabled',
   'mqttEnabled',
   'mqttBrokerHost',
@@ -122,6 +140,9 @@ const STREAMING_KEYS = [
   'mlModelState',
   'mlModelProgress',
   'mlModelError',
+  'mlIncludePerson',
+  'mlIncludePets',
+  'mlIncludeVehicles',
 ]
 
 describe('DTO contract fixtures', () => {
@@ -135,7 +156,19 @@ describe('DTO contract fixtures', () => {
 
   it('status fixture assigns to DeviceStatus', () => {
     const status: DeviceStatus = statusFixture as DeviceStatus
-    expectKeys(status as unknown as Record<string, unknown>, ['streaming', 'thermal', 'camera', 'battery'])
+    expectKeys(status as unknown as Record<string, unknown>, [
+      'streaming',
+      'thermal',
+      'camera',
+      'battery',
+      'torchOn',
+      'zoomRatio',
+      'lensId',
+      'lensLabel',
+      'zoomRange',
+      'exposureCompensationRange',
+      'isoRange',
+    ])
     expectKeys(status.streaming as unknown as Record<string, unknown>, [
       'isActive',
       'url',
@@ -258,6 +291,42 @@ describe('DTO contract fixtures', () => {
       expect(Array.isArray(event.zones)).toBe(true)
     }
   })
+
+  it('settings export fixture assigns to SettingsExport', () => {
+    const exportFile: SettingsExport = settingsExportFixture as SettingsExport
+    expectKeys(exportFile as unknown as Record<string, unknown>, [
+      'schemaVersion',
+      'exportedAtMs',
+      'app',
+      'settings',
+    ])
+    expect(exportFile.schemaVersion).toBe(1)
+    expect(exportFile.app).toBe('lenscast')
+    // The envelope's settings document is the same AllSettings shape the
+    // settings fixture pins.
+    const settings: AllSettings = exportFile.settings as AllSettings
+    expectKeys(settings as unknown as Record<string, unknown>, ['camera', 'streaming'])
+  })
+
+  it('detection test fixture assigns to DetectionTestResponse', () => {
+    const test: DetectionTestResponse = detectionTestFixture as DetectionTestResponse
+    expectKeys(test as unknown as Record<string, unknown>, ['success', 'dispatchedActions'])
+    expect(Array.isArray(test.dispatchedActions)).toBe(true)
+  })
+
+  it('audit log fixture assigns to AuditLogResponse', () => {
+    const audit: AuditLogResponse = auditLogFixture as AuditLogResponse
+    expectKeys(audit as unknown as Record<string, unknown>, ['entries', 'total'])
+    expect(audit.entries.length).toBeGreaterThan(0)
+    for (const entry of audit.entries) {
+      expectKeys(entry as unknown as Record<string, unknown>, [
+        'timestampMs',
+        'action',
+        'detail',
+        'outcome',
+      ])
+    }
+  })
 })
 
 describe('API_DEFAULTS lockstep with the fixtures', () => {
@@ -306,8 +375,13 @@ describe('API_DEFAULTS lockstep with the fixtures', () => {
     expect(streaming.motionArmScheduleEnabled).toBe(API_DEFAULTS.motionArmScheduleEnabled)
     expect(streaming.motionArmStartMinute).toBe(API_DEFAULTS.motionArmStartMinute)
     expect(streaming.motionArmEndMinute).toBe(API_DEFAULTS.motionArmEndMinute)
+    expect(streaming.motionArmDaysMask).toBe(API_DEFAULTS.motionArmDaysMask)
     expect(streaming.soundDetectionEnabled).toBe(API_DEFAULTS.soundDetectionEnabled)
     expect(streaming.soundThresholdPercent).toBe(API_DEFAULTS.soundThresholdPercent)
+    expect(streaming.soundAdaptiveNoiseFloor).toBe(API_DEFAULTS.soundAdaptiveNoiseFloor)
+    expect(streaming.soundRecordingEnabled).toBe(API_DEFAULTS.soundRecordingEnabled)
+    expect(streaming.motionCooldownSeconds).toBe(API_DEFAULTS.motionCooldownSeconds)
+    expect(streaming.soundCooldownSeconds).toBe(API_DEFAULTS.soundCooldownSeconds)
     expect(streaming.webhookEnabled).toBe(API_DEFAULTS.webhookEnabled)
     expect(streaming.webhookUrl).toBe(API_DEFAULTS.webhookUrl)
     expect(streaming.webhookHeaders).toBe(API_DEFAULTS.webhookHeaders)
@@ -329,6 +403,9 @@ describe('API_DEFAULTS lockstep with the fixtures', () => {
     expect(streaming.httpsEnabled).toBe(API_DEFAULTS.httpsEnabled)
     expect(streaming.audioDeviceId).toBe(API_DEFAULTS.audioDeviceId)
     expect(streaming.detectionNotificationsEnabled).toBe(API_DEFAULTS.detectionNotificationsEnabled)
+    expect(streaming.alertQuietHoursEnabled).toBe(API_DEFAULTS.alertQuietHoursEnabled)
+    expect(streaming.alertQuietHoursStartMinute).toBe(API_DEFAULTS.alertQuietHoursStartMinute)
+    expect(streaming.alertQuietHoursEndMinute).toBe(API_DEFAULTS.alertQuietHoursEndMinute)
     expect(streaming.tamperDetectionEnabled).toBe(API_DEFAULTS.tamperDetectionEnabled)
     expect(streaming.mqttEnabled).toBe(API_DEFAULTS.mqttEnabled)
     expect(streaming.mqttBrokerHost).toBe(API_DEFAULTS.mqttBrokerHost)
@@ -344,6 +421,9 @@ describe('API_DEFAULTS lockstep with the fixtures', () => {
     expect(streaming.rtspVideoCodec).toBe(API_DEFAULTS.rtspVideoCodec)
     expect(streaming.mlDetectionEnabled).toBe(API_DEFAULTS.mlDetectionEnabled)
     expect(streaming.mlMinScorePercent).toBe(API_DEFAULTS.mlMinScorePercent)
+    expect(streaming.mlIncludePerson).toBe(API_DEFAULTS.mlIncludePerson)
+    expect(streaming.mlIncludePets).toBe(API_DEFAULTS.mlIncludePets)
+    expect(streaming.mlIncludeVehicles).toBe(API_DEFAULTS.mlIncludeVehicles)
     expect(streaming.mlModelState).toBe(API_DEFAULTS.mlModelState)
     expect(streaming.mlModelProgress).toBe(API_DEFAULTS.mlModelProgress)
     expect(streaming.mlModelError).toBe(API_DEFAULTS.mlModelError)
@@ -352,6 +432,52 @@ describe('API_DEFAULTS lockstep with the fixtures', () => {
     expect(streaming.onvifEnabled).toBe(API_DEFAULTS.onvifEnabled)
     expect(streaming.captureRetentionDays).toBe(API_DEFAULTS.captureRetentionDays)
     expect(streaming.eventRetentionDays).toBe(API_DEFAULTS.eventRetentionDays)
+    expect(streaming.storageQuotaMb).toBe(API_DEFAULTS.storageQuotaMb)
+  })
+
+  it('system fixture assigns to SystemInfo', () => {
+    const system: SystemInfo = systemFixture as SystemInfo
+    expectKeys(system as unknown as Record<string, unknown>, [
+      'appVersion',
+      'deviceModel',
+      'deviceManufacturer',
+      'androidVersion',
+      'sdkInt',
+      'osUptimeMs',
+      'processUptimeMs',
+      'battery',
+      'storage',
+    ])
+    expectKeys(system.battery as unknown as Record<string, unknown>, [
+      'level',
+      'isCharging',
+      'temperatureTenthsC',
+      'voltageMillivolts',
+      'health',
+    ])
+    expectKeys(system.storage as unknown as Record<string, unknown>, [
+      'usedBytes',
+      'quotaBytes',
+      'freeBytes',
+      'totalBytes',
+    ])
+  })
+
+  it('detection stats fixture assigns to DetectionStats', () => {
+    const stats: DetectionStats = detectionStatsFixture as DetectionStats
+    expectKeys(stats as unknown as Record<string, unknown>, [
+      'last24h',
+      'last7d',
+      'allTime',
+      'perDay',
+      'totalEvents',
+      'topZones',
+      'topLabels',
+    ])
+    expect(stats.perDay.length).toBeGreaterThan(0)
+    for (const day of stats.perDay) {
+      expectKeys(day as unknown as Record<string, unknown>, ['day', 'count'])
+    }
   })
 
   it('retention inputs share the 0–365 bound and contain their defaults', () => {
@@ -361,6 +487,10 @@ describe('API_DEFAULTS lockstep with the fixtures', () => {
     expect(streaming.captureRetentionDays).toBeLessThanOrEqual(API_DEFAULTS.retentionMaxDays)
     expect(streaming.eventRetentionDays).toBeGreaterThanOrEqual(API_DEFAULTS.retentionMinDays)
     expect(streaming.eventRetentionDays).toBeLessThanOrEqual(API_DEFAULTS.retentionMaxDays)
+    expect(API_DEFAULTS.storageQuotaMinMb).toBe(100)
+    expect(API_DEFAULTS.storageQuotaMaxMb).toBe(32768)
+    expect(streaming.storageQuotaMb).toBeGreaterThanOrEqual(API_DEFAULTS.storageQuotaMinMb)
+    expect(streaming.storageQuotaMb).toBeLessThanOrEqual(API_DEFAULTS.storageQuotaMaxMb)
     expect(API_DEFAULTS.mlMinScoreMinPercent).toBe(10)
     expect(API_DEFAULTS.mlMinScoreMaxPercent).toBe(95)
     expect(streaming.mlMinScorePercent).toBeGreaterThanOrEqual(API_DEFAULTS.mlMinScoreMinPercent)
@@ -427,5 +557,12 @@ describe('API_DEFAULTS lockstep with the fixtures', () => {
     expect(API_DEFAULTS.deterrenceCooldownMaxSeconds).toBe(600)
     expect(streaming.autoDeterrenceCooldownSeconds).toBeGreaterThanOrEqual(API_DEFAULTS.deterrenceCooldownMinSeconds)
     expect(streaming.autoDeterrenceCooldownSeconds).toBeLessThanOrEqual(API_DEFAULTS.deterrenceCooldownMaxSeconds)
+
+    expect(API_DEFAULTS.detectionCooldownMinSeconds).toBe(1)
+    expect(API_DEFAULTS.detectionCooldownMaxSeconds).toBe(300)
+    expect(streaming.motionCooldownSeconds).toBeGreaterThanOrEqual(API_DEFAULTS.detectionCooldownMinSeconds)
+    expect(streaming.motionCooldownSeconds).toBeLessThanOrEqual(API_DEFAULTS.detectionCooldownMaxSeconds)
+    expect(streaming.soundCooldownSeconds).toBeGreaterThanOrEqual(API_DEFAULTS.detectionCooldownMinSeconds)
+    expect(streaming.soundCooldownSeconds).toBeLessThanOrEqual(API_DEFAULTS.detectionCooldownMaxSeconds)
   })
 })

@@ -79,9 +79,40 @@ object StreamDefaults {
     const val MINUTES_PER_DAY = 1_440
     const val MOTION_ARM_START_MINUTE_DEFAULT = 0
     const val MOTION_ARM_END_MINUTE_DEFAULT = 1_439
+
+    // Day-of-week arm schedule: one bit per ISO day index (bit 0 = Monday …
+    // bit 6 = Sunday), so 0b1111111 (127) arms every day — the persisted
+    // default, and the mask that keeps the schedule purely time-of-day.
+    const val MOTION_ARM_DAYS_MONDAY = 0
+    const val MOTION_ARM_DAYS_SUNDAY = 6
+    const val MOTION_ARM_DAYS_MASK_MIN = 1
+    const val MOTION_ARM_DAYS_MASK_MAX = 127
+    const val MOTION_ARM_DAYS_MASK_DEFAULT = 127
     const val SOUND_THRESHOLD_MIN = 1
     const val SOUND_THRESHOLD_MAX = 100
     const val SOUND_THRESHOLD_PERCENT_DEFAULT = 30
+
+    // Adaptive sound noise floor: the trigger threshold rides above a slow
+    // exponential moving average of the measured RMS, so a constant ambient
+    // (HVAC, traffic) stops masking or tripping the detector.
+    const val SOUND_ADAPTIVE_FLOOR_HEADROOM_PERCENT = 10.0
+
+    // Detection-alert quiet hours: local heads-up notifications are held
+    // inside this minute-of-day window (webhook/MQTT keep firing). Defaults
+    // 22:00 → 07:00; the wrap semantics mirror the arm schedule.
+    const val QUIET_HOURS_START_MINUTE_DEFAULT = 22 * 60
+    const val QUIET_HOURS_END_MINUTE_DEFAULT = 7 * 60
+
+
+    // Detection event cooldowns: the minimum seconds between two events of
+    // one kind. The motion/sound policies' DEFAULT_COOLDOWN_MS derives from
+    // these, so the persisted default and the runtime fallback are one value.
+    const val MOTION_COOLDOWN_MIN_SECONDS = 1
+    const val MOTION_COOLDOWN_MAX_SECONDS = 300
+    const val MOTION_COOLDOWN_SECONDS_DEFAULT = 10
+    const val SOUND_COOLDOWN_MIN_SECONDS = 1
+    const val SOUND_COOLDOWN_MAX_SECONDS = 300
+    const val SOUND_COOLDOWN_SECONDS_DEFAULT = 10
 
     // ML object detection (LiteRT EfficientDet-Lite0). Minimum confidence a
     // detected object must reach before it counts toward an alert, persisted

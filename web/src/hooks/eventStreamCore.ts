@@ -1,4 +1,4 @@
-import type { DetectionEvent } from '../types'
+import type { DetectionEvent, DetectionEventType } from '../types'
 
 // Pure parsing/scheduling core for the detection-event SSE stream — the
 // pollLadder pattern: no EventSource, timers, or Solid here, only injected
@@ -51,6 +51,35 @@ export function mergeEvents(existing: DetectionEvent[], incoming: DetectionEvent
     return eventKey(a).localeCompare(eventKey(b))
   })
   return merged.length > cap ? merged.slice(0, cap) : merged
+}
+
+/** The event-feed filter row: type chips + a single ML-label chip selection. */
+export interface EventFilter {
+  /** 'all' keeps every type; otherwise an exact DetectionEventType match. */
+  type: DetectionEventType | 'all'
+  /** Label to require on the event, or null for "all labels". */
+  label: string | null
+}
+
+/**
+ * Pure feed filter: keeps events matching both the type chip and the label
+ * chip. Events without labels drop out as soon as a label is selected.
+ */
+export function filterEvents(events: DetectionEvent[], filter: EventFilter): DetectionEvent[] {
+  return events.filter((event) => {
+    if (filter.type !== 'all' && event.type !== filter.type) return false
+    if (filter.label !== null && !(event.labels ?? []).includes(filter.label)) return false
+    return true
+  })
+}
+
+/** Sorted, deduped union of the ML labels across the given events. */
+export function collectLabels(events: DetectionEvent[]): string[] {
+  const labels = new Set<string>()
+  for (const event of events) {
+    for (const label of event.labels ?? []) labels.add(label)
+  }
+  return [...labels].sort((a, b) => a.localeCompare(b))
 }
 
 export type StreamFallbackState = 'live' | 'degraded'

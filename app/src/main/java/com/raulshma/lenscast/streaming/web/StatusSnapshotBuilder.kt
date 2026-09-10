@@ -4,6 +4,7 @@ import com.raulshma.lenscast.streaming.model.AdaptiveBitrateStatusDto
 import com.raulshma.lenscast.streaming.model.BatteryStatusDto
 import com.raulshma.lenscast.streaming.model.ClientConnectionDetailDto
 import com.raulshma.lenscast.streaming.model.ConnectionQualityStatusDto
+import com.raulshma.lenscast.streaming.model.RangeDto
 import com.raulshma.lenscast.streaming.model.StatusResponseDto
 import com.raulshma.lenscast.streaming.model.StreamingStatusDto
 import com.raulshma.lenscast.streaming.model.WatchdogStatusDto
@@ -37,6 +38,25 @@ object StatusSnapshotBuilder {
     data class ThermalInputs(
         val cameraStateName: String,
         val thermalName: String,
+    )
+
+    /**
+     * Live camera-control truth: what the device is actually doing (torch,
+     * zoom, selected lens) and the device's real control ranges, so the web
+     * sliders render reachable bounds instead of hardcoded ones. Null lens
+     * fields fold to the DTO's nulls; ranges arrive pre-clamped non-null.
+     */
+    data class CameraInputs(
+        val torchOn: Boolean,
+        val zoomRatio: Double,
+        val lensId: String?,
+        val lensLabel: String?,
+        val zoomMin: Double?,
+        val zoomMax: Double?,
+        val exposureCompensationMin: Int?,
+        val exposureCompensationMax: Int?,
+        val isoMin: Int?,
+        val isoMax: Int?,
     )
 
     data class BatteryInputs(
@@ -93,6 +113,7 @@ object StatusSnapshotBuilder {
         streaming: StreamingInputs,
         thermal: ThermalInputs,
         battery: BatteryInputs,
+        camera: CameraInputs? = null,
         watchdog: WatchdogInputs,
         adaptive: AdaptiveInputs,
         network: NetworkInputs,
@@ -163,6 +184,13 @@ object StatusSnapshotBuilder {
                 isCharging = battery.isCharging,
                 isPowerSaveMode = battery.isPowerSaveMode,
             ),
+            torchOn = camera?.torchOn ?: false,
+            zoomRatio = camera?.zoomRatio ?: 1.0,
+            lensId = camera?.lensId,
+            lensLabel = camera?.lensLabel,
+            zoomRange = camera?.let { range(it.zoomMin, it.zoomMax) },
+            exposureCompensationRange = camera?.let { range(it.exposureCompensationMin, it.exposureCompensationMax) },
+            isoRange = camera?.let { range(it.isoMin, it.isoMax) },
             adaptiveBitrate = adaptiveBitrateDto,
             connectionQuality = connectionQualityDto,
             watchdog = WatchdogStatusDto(
@@ -175,4 +203,8 @@ object StatusSnapshotBuilder {
             ),
         )
     }
+
+    /** The inclusive min/max pair as the wire range; null when either bound is unknown. */
+    private fun range(min: Number?, max: Number?): RangeDto? =
+        if (min != null && max != null) RangeDto(min = min.toDouble(), max = max.toDouble()) else null
 }

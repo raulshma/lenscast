@@ -13,26 +13,35 @@ object DetectionEventPolicy {
      * (auto-stops after the post-roll), starts only from Idle, and never
      * restarts over a live recording — restart churn would finalize an MP4
      * per event; a live clip simply keeps rolling through the event cluster.
+     * A sound event records only when [soundRecordingEnabled] is on, under
+     * the same bounded, never-restart-over-live rules.
      */
     fun recordingAction(
         motionRecordingEnabled: Boolean,
         armed: Boolean,
         recordingActive: Boolean,
-    ): RecordingAction = when {
-        !motionRecordingEnabled || !armed -> RecordingAction.NONE
-        recordingActive -> RecordingAction.KEEP_ROLLING
-        else -> RecordingAction.START
+        soundRecordingEnabled: Boolean = false,
+        isSound: Boolean = false,
+    ): RecordingAction {
+        val triggerEnabled = if (isSound) soundRecordingEnabled else motionRecordingEnabled
+        return when {
+            !triggerEnabled || !armed -> RecordingAction.NONE
+            recordingActive -> RecordingAction.KEEP_ROLLING
+            else -> RecordingAction.START
+        }
     }
 
     enum class RecordingAction { NONE, START, KEEP_ROLLING }
 
     /**
-     * Whether the legacy auto-photo fires for this event: only when motion
-     * recording is off (a photo mid-exclusive-recording bind is not
-     * schedulable) and the event is armed.
+     * Whether the legacy auto-photo fires for this event: motion only (a
+     * sound event has no frame to attribute), only when motion recording is
+     * off (a photo mid-exclusive-recording bind is not schedulable), and
+     * only when the event is armed.
      */
     fun shouldAutoPhoto(
         motionRecordingEnabled: Boolean,
         armed: Boolean,
-    ): Boolean = !motionRecordingEnabled && armed
+        isSound: Boolean = false,
+    ): Boolean = !isSound && !motionRecordingEnabled && armed
 }

@@ -55,6 +55,7 @@ class StatusWebHandler(
                 isCharging = powerManager.isChargingNow(),
                 isPowerSaveMode = powerManager.isPowerSaveMode.value,
             ),
+            camera = cameraInputs(),
             watchdog = StatusSnapshotBuilder.WatchdogInputs(
                 enabled = wdState.enabled,
                 statusName = wdState.status.name,
@@ -97,5 +98,33 @@ class StatusWebHandler(
             ),
         )
         return responseAdapter.toJson(response)
+    }
+
+    /**
+     * The live camera-control truth: the torch's real state (read off the
+     * active camera, not the persisted setting), the persisted zoom, the
+     * selected lens, and the device's live control ranges. Every read is
+     * defensive — before the first camera bind the lens list is empty and the
+     * ranges are at their defaults, and the status must still answer.
+     */
+    private fun cameraInputs(): StatusSnapshotBuilder.CameraInputs {
+        val lens = runCatching {
+            cameraService.availableLenses.value.getOrNull(cameraService.selectedLensIndex.value)
+        }.getOrNull()
+        val zoomRange = runCatching { cameraService.availableZoomRange.value }.getOrNull()
+        val exposureRange = runCatching { cameraService.availableExposureRange.value }.getOrNull()
+        val isoRange = runCatching { cameraService.availableIsoRange.value }.getOrNull()
+        return StatusSnapshotBuilder.CameraInputs(
+            torchOn = runCatching { cameraService.isTorchOn() }.getOrDefault(false),
+            zoomRatio = settingsDataStore.settings.value.zoomRatio.toDouble(),
+            lensId = lens?.id,
+            lensLabel = lens?.label,
+            zoomMin = zoomRange?.start?.toDouble(),
+            zoomMax = zoomRange?.endInclusive?.toDouble(),
+            exposureCompensationMin = exposureRange?.start,
+            exposureCompensationMax = exposureRange?.endInclusive,
+            isoMin = isoRange?.start,
+            isoMax = isoRange?.endInclusive,
+        )
     }
 }

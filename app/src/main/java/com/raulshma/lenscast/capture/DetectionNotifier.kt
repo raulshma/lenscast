@@ -42,6 +42,12 @@ class DetectionNotifier(private val context: Context) {
             context, 0,
             Intent(context, MainActivity::class.java).apply {
                 flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+                // Tapping a detection alert opens the event log directly —
+                // the same navigate-to extra the update notification rides.
+                putExtra(
+                    com.raulshma.lenscast.update.UpdateNotifier.EXTRA_NAVIGATE_TO,
+                    DETECTION_EVENTS_ROUTE,
+                )
             },
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
@@ -86,6 +92,7 @@ class DetectionNotifier(private val context: Context) {
         EventKind.MOTION -> ForegroundNotifications.DETECTION_MOTION_NOTIFICATION_ID
         EventKind.SOUND -> ForegroundNotifications.DETECTION_SOUND_NOTIFICATION_ID
         EventKind.TAMPER -> ForegroundNotifications.DETECTION_TAMPER_NOTIFICATION_ID
+        EventKind.TEST -> ForegroundNotifications.DETECTION_TEST_NOTIFICATION_ID
     }
 
     private fun createChannel() {

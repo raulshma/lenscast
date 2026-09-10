@@ -18,6 +18,22 @@
     "isCharging": false,
     "isPowerSaveMode": false
   },
+  "torchOn": false,
+  "zoomRatio": 1.75,
+  "lensId": "0",
+  "lensLabel": "Wide",
+  "zoomRange": {
+    "min": 1.0,
+    "max": 8.0
+  },
+  "exposureCompensationRange": {
+    "min": -12.0,
+    "max": 12.0
+  },
+  "isoRange": {
+    "min": 100.0,
+    "max": 3200.0
+  },
   "adaptiveBitrate": {
     "enabled": true,
     "qualityLevel": "GOOD",

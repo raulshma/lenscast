@@ -8,6 +8,7 @@ import com.raulshma.lenscast.streaming.HttpResult.ResponseBody
 import com.raulshma.lenscast.streaming.onvif.OnvifServer
 import com.raulshma.lenscast.streaming.web.ApiMethod
 import com.raulshma.lenscast.streaming.web.ApiRequest
+import com.raulshma.lenscast.streaming.web.AuditEntry
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.TimeoutCancellationException
@@ -33,7 +34,7 @@ class StreamingServer(
     networkQualityMonitor: NetworkQualityMonitor,
     // Auth policy (sessions, rate limiting, CSRF) lives behind this seam; the
     // transport only translates requests to it.
-    webAuthGate: WebAuthGate,
+    private val webAuthGate: WebAuthGate,
     // True while the encoded-stream hub feeds HLS/WS — drives HLS
     // availability independent of the MJPEG pump's enabled flag, so HLS and
     // the h264 player mode work in every configuration (RTSP-only included).
@@ -97,6 +98,15 @@ class StreamingServer(
                 contentLength = contentLength.toInt(),
                 body = body,
             )
+            // When auth is off the route short-circuits to 200 before any
+            // credential check — every scanner probe would otherwise write a
+            // false "login.success". Only real authentication attempts audit.
+            if (webAuthGate.isEnabled) {
+                auditAuthOutcome(
+                    succeeded = result.statusCode == 200,
+                    remoteIp = session.remoteIpAddress,
+                )
+            }
             return translate(result).apply { addSecurityHeaders() }
         }
 
@@ -287,8 +297,12 @@ class StreamingServer(
         val body = readRequestBody(session, MAX_BODY_BYTES)?.toString(Charsets.UTF_8)
             ?: return translate(tooLargeResult(MAX_BODY_BYTES))
 
+        // HEAD rides the GET route and answers headers only: monitoring
+        // clients (`curl -I`) and the token ladder's HEAD admission get a
+        // truthful status without the body.
+        val isHead = method == Method.HEAD
         val apiMethod = when (method) {
-            Method.GET -> ApiMethod.GET
+            Method.GET, Method.HEAD -> ApiMethod.GET
             Method.PUT -> ApiMethod.PUT
             Method.POST -> ApiMethod.POST
             Method.DELETE -> ApiMethod.DELETE
@@ -315,11 +329,36 @@ class StreamingServer(
             return translate(HttpResult.jsonError(500, "Internal handler error"))
         }
 
+        if (isHead) {
+            return newFixedLengthResponse(
+                Response.Status.lookup(response.httpStatus) ?: Response.Status.OK,
+                response.contentType,
+                "",
+            )
+        }
         return newFixedLengthResponse(
             Response.Status.lookup(response.httpStatus) ?: Response.Status.OK,
             response.contentType,
             response.body
         )
+    }
+
+    /**
+     * The login outcome's audit line, beside the router's route-dispatch
+     * entries: `login.success` / `login.failed` with the remote address, so
+     * credential-guessing attempts are visible in the trail a broken login
+     * would never reach. Auditing must never break login — failures are
+     * swallowed.
+     */
+    private fun auditAuthOutcome(succeeded: Boolean, remoteIp: String) {
+        runCatching {
+            webApi.auditLog.record(
+                action = if (succeeded) "login.success" else "login.failed",
+                detail = remoteIp,
+                outcome = if (succeeded) AuditEntry.OUTCOME_OK
+                else AuditEntry.OUTCOME_ERROR,
+            )
+        }
     }
 
     /** The 413 answer for a body beyond its route's cap — the one `{"error":…}` shape, via [HttpResult]. */

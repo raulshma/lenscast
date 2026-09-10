@@ -123,8 +123,22 @@ export interface StreamingSettings {
   motionArmScheduleEnabled: boolean
   motionArmStartMinute: number
   motionArmEndMinute: number
+  /**
+   * The arm schedule's day-of-week mask: bit 0 = Monday … bit 6 = Sunday
+   * (127 = every day, the default — the schedule stays time-of-day-only
+   * unless a day is explicitly cleared).
+   */
+  motionArmDaysMask: number
   soundDetectionEnabled: boolean
   soundThresholdPercent: number
+  /** Sound trigger threshold rides a tracked ambient noise floor (adaptive). */
+  soundAdaptiveNoiseFloor: boolean
+  /** Sound events start a bounded clip (the motion post-roll duration). */
+  soundRecordingEnabled: boolean
+  /** Minimum seconds between two motion events. */
+  motionCooldownSeconds: number
+  /** Minimum seconds between two sound events. */
+  soundCooldownSeconds: number
   webhookEnabled: boolean
   webhookUrl: string
   /** Custom POST headers as a JSON `{"Name": "value"}` map string. */
@@ -150,6 +164,13 @@ export interface StreamingSettings {
   httpsEnabled: boolean
   audioDeviceId: string
   detectionNotificationsEnabled: boolean
+  /**
+   * Quiet hours for local detection alerts: heads-up notifications are held
+   * inside the window (webhook/MQTT keep firing). Defaults 22:00→07:00.
+   */
+  alertQuietHoursEnabled: boolean
+  alertQuietHoursStartMinute: number
+  alertQuietHoursEndMinute: number
   tamperDetectionEnabled: boolean
   mqttEnabled: boolean
   mqttBrokerHost: string
@@ -163,10 +184,16 @@ export interface StreamingSettings {
   captureRetentionDays: number
   /** Detection-event retention window in days; 0 keeps events forever. */
   eventRetentionDays: number
+  /** The capture-history storage quota in MB (100 MB–32 GB); oldest captures age out past it. */
+  storageQuotaMb: number
   /** ML object-detection gate on top of motion detection. */
   mlDetectionEnabled: boolean
   /** Minimum ML confidence percent for a detected object to count. */
   mlMinScorePercent: number
+  /** ML gate class groups: which detected classes count toward an alert. */
+  mlIncludePerson: boolean
+  mlIncludePets: boolean
+  mlIncludeVehicles: boolean
   /** Response-only: on-demand detection model state. */
   mlModelState: MlModelState
   /** Response-only: model download progress 0..1; -1 when none is running. */
@@ -186,6 +213,12 @@ export type MlModelState = 'not_downloaded' | 'downloading' | 'ready' | 'failed'
 export interface AllSettings {
   camera: CameraSettings
   streaming: StreamingSettings
+}
+
+/** A device control range, min inclusive / max inclusive. */
+export interface ControlRange {
+  min: number
+  max: number
 }
 
 export interface DeviceStatus {
@@ -208,6 +241,17 @@ export interface DeviceStatus {
     isPowerSaveMode: boolean
   }
   camera: string
+  /** Live torch state, so dashboard toggles mirror the device. */
+  torchOn: boolean
+  /** The zoom ratio the camera is currently applying. */
+  zoomRatio: number
+  /** The selected lens; absent before the lens enumeration lands. */
+  lensId?: string
+  lensLabel?: string
+  /** The device's live control ranges, so sliders stop hardcoding bounds. */
+  zoomRange?: ControlRange
+  exposureCompensationRange?: ControlRange
+  isoRange?: ControlRange
   adaptiveBitrate?: {
     enabled: boolean
     qualityLevel: string
@@ -411,6 +455,83 @@ export interface DetectionEvent {
 export interface DetectionEventsResponse {
   events: DetectionEvent[]
   total: number
+}
+
+export interface DetectionTestResponse {
+  success: boolean
+  /** The alert sinks that actually dispatched the synthetic test alert. */
+  dispatchedActions: string[]
+}
+
+/** GET /api/system — the read-only diagnostics snapshot for a headless phone. */
+export interface SystemInfo {
+  appVersion: string
+  deviceModel: string
+  deviceManufacturer: string
+  androidVersion: string
+  sdkInt: number
+  /** Ms since the OS booted (elapsedRealtime). */
+  osUptimeMs: number
+  /** Ms since this process started; 0 when the platform cannot tell. */
+  processUptimeMs: number
+  battery: {
+    level: number
+    isCharging: boolean
+    /** Tenths of a degree Celsius; absent when the platform reports none. */
+    temperatureTenthsC?: number | null
+    voltageMillivolts?: number | null
+    health?: string | null
+  }
+  storage: {
+    usedBytes: number
+    quotaBytes: number
+    freeBytes: number
+    totalBytes: number
+  }
+}
+
+/** One per-UTC-day total in the detection stats series. */
+export interface DailyCount {
+  day: string
+  count: number
+}
+
+/** One zone/label count row in the detection stats. */
+export interface LabeledCount {
+  label: string
+  count: number
+}
+
+/** GET /api/detection/stats — aggregate counts over the persisted event log. */
+export interface DetectionStats {
+  last24h: Record<string, number>
+  last7d: Record<string, number>
+  allTime: Record<string, number>
+  perDay: DailyCount[]
+  totalEvents: number
+  topZones: LabeledCount[]
+  topLabels: LabeledCount[]
+}
+
+export interface AuditEntry {
+  timestampMs: number
+  /** `"POST /api/settings"`, `"login.failed"`, … */
+  action: string
+  detail: string
+  outcome: 'ok' | 'error'
+}
+
+export interface AuditLogResponse {
+  entries: AuditEntry[]
+  total: number
+}
+
+/** The versioned envelope GET /api/settings/export downloads; import takes it back. */
+export interface SettingsExport {
+  schemaVersion: number
+  exportedAtMs: number
+  app: string
+  settings: AllSettings | null
 }
 
 export const OVERLAY_POSITION_LABELS: Record<OverlayPosition, string> = {

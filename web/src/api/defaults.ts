@@ -61,8 +61,14 @@ export const API_DEFAULTS = {
   motionArmScheduleEnabled: false,
   motionArmStartMinute: 0,
   motionArmEndMinute: 1439,
+  /** Day-of-week arm mask: bit 0 = Monday … bit 6 = Sunday; 127 = every day. */
+  motionArmDaysMask: 127,
   soundDetectionEnabled: false,
   soundThresholdPercent: 30,
+  soundAdaptiveNoiseFloor: false,
+  soundRecordingEnabled: false,
+  motionCooldownSeconds: 10,
+  soundCooldownSeconds: 10,
   webhookEnabled: false,
   webhookUrl: '',
   webhookHeaders: '',
@@ -76,6 +82,10 @@ export const API_DEFAULTS = {
   sirenDurationMaxSeconds: 60,
   deterrenceCooldownMinSeconds: 30,
   deterrenceCooldownMaxSeconds: 600,
+
+  // Detection-event cooldown bounds in seconds (StreamDefaults validation bounds)
+  detectionCooldownMinSeconds: 1,
+  detectionCooldownMaxSeconds: 300,
 
   backupEnabled: false,
   backupWifiOnly: true,
@@ -91,6 +101,9 @@ export const API_DEFAULTS = {
   httpsEnabled: false,
   audioDeviceId: '',
   detectionNotificationsEnabled: true,
+  alertQuietHoursEnabled: false,
+  alertQuietHoursStartMinute: 1320,
+  alertQuietHoursEndMinute: 420,
   tamperDetectionEnabled: false,
   mqttEnabled: false,
   mqttBrokerHost: '',
@@ -103,6 +116,9 @@ export const API_DEFAULTS = {
   // Detection suite extensions (StreamDefaults / StreamingSettingsDto)
   mlDetectionEnabled: false,
   mlMinScorePercent: 60,
+  mlIncludePerson: true,
+  mlIncludePets: true,
+  mlIncludeVehicles: true,
   mlModelState: 'not_downloaded',
   mlModelProgress: -1,
   mlModelError: '',
@@ -122,6 +138,11 @@ export const API_DEFAULTS = {
   // Shared 0–365 bound for both retention number inputs (0 = forever).
   retentionMinDays: 0,
   retentionMaxDays: 365,
+
+  // Storage quota in MB and its slider bounds (StreamDefaults).
+  storageQuotaMb: 2048,
+  storageQuotaMinMb: 100,
+  storageQuotaMaxMb: 32768,
 
   // Overlay block (OverlaySettings.DEFAULT, embedded in StreamingSettingsDto)
   overlayEnabled: false,
@@ -143,6 +164,8 @@ export const API_DEFAULTS = {
   cameraWhiteBalance: 'AUTO',
   cameraColorTemperature: 5500,
   cameraZoomRatio: 1,
+  /** Zoom ceiling the device range is clamped to (CameraSettings.ZOOM_RATIO_MAX) — the slider bound before /api/status delivers zoomRange. */
+  cameraZoomMaxRatio: 10,
   // Known divergence: the Kotlin DTO default is StreamDefaults.STREAM_FPS (24)
   // while the web select historically falls back to 30; pinned by contract test.
   cameraFrameRate: 30,

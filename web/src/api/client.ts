@@ -1,4 +1,4 @@
-import type { AllSettings, DeviceStatus, LensesResponse } from '../types'
+import type { AllSettings, DetectionEventType, DeviceStatus, LensesResponse } from '../types'
 
 type JsonValue = Record<string, unknown> | unknown[] | string | number | boolean | null
 
@@ -290,14 +290,65 @@ export async function setSiren(on: boolean): Promise<{ success: boolean }> {
   })
 }
 
-/** `limit` omitted or non-positive means the server's default page size. */
-export async function getDetectionEvents(limit?: number): Promise<import('../types').DetectionEventsResponse> {
+/** `limit` omitted or non-positive means the server's default page size; `type` narrows to one wire-name kind. */
+export async function getDetectionEvents(
+  limit?: number,
+  type?: DetectionEventType,
+): Promise<import('../types').DetectionEventsResponse> {
   const params = new URLSearchParams()
   if (limit != null && limit > 0) params.set('limit', String(limit))
+  if (type) params.set('type', type)
   const url = params.toString() ? `/api/detection/events?${params.toString()}` : '/api/detection/events'
   return requestJson(url)
 }
 
 export async function clearDetectionEvents(): Promise<{ success: boolean }> {
   return requestJson('/api/detection/events', { method: 'DELETE' })
+}
+
+/** The event-log export URL: CSV by default, JSON on demand, snapshots omitted. */
+export function detectionEventsExportUrl(format: 'csv' | 'json' = 'csv', type?: DetectionEventType): string {
+  const params = new URLSearchParams({ format })
+  if (type) params.set('type', type)
+  return `/api/detection/events/export?${params.toString()}`
+}
+
+/** The read-only diagnostics snapshot: build, device, uptimes, battery, storage. */
+export async function getSystemInfo(): Promise<import('../types').SystemInfo> {
+  return requestJson('/api/system')
+}
+
+/** Fires one synthetic test alert through the real alert sinks (webhook, MQTT, notification). */
+export async function sendTestAlert(): Promise<import('../types').DetectionTestResponse> {
+  return requestJson('/api/detection/test', { method: 'POST' })
+}
+
+/** Downloads the versioned settings export envelope (secrets already blanked server-side). */
+export async function exportSettings(): Promise<import('../types').SettingsExport> {
+  return requestJson('/api/settings/export')
+}
+
+/**
+ * Uploads a previously exported settings file. The export envelope is the
+ * lossless path; a bare settings document gets full PUT semantics (omitted
+ * fields of a present section take their defaults).
+ */
+export async function importSettings(exported: unknown): Promise<{ success: boolean }> {
+  return requestJson('/api/settings/import', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(exported),
+  })
+}
+
+/** `limit` omitted or non-positive means the server's full trail. */
+export async function getAuditLog(limit?: number): Promise<import('../types').AuditLogResponse> {
+  const params = new URLSearchParams()
+  if (limit != null && limit > 0) params.set('limit', String(limit))
+  const url = params.toString() ? `/api/audit?${params.toString()}` : '/api/audit'
+  return requestJson(url)
+}
+
+export async function clearAuditLog(): Promise<{ success: boolean }> {
+  return requestJson('/api/audit', { method: 'DELETE' })
 }

@@ -53,7 +53,11 @@ class MainApplication : Application(), SingletonImageLoader.Factory {
     val streamingManager: StreamingManager by lazy { StreamingManager(this, thermalMonitor) }
     val settingsDataStore: SettingsDataStore by lazy { SettingsDataStore(this) }
     val captureHistoryStore: CaptureHistoryStore by lazy {
-        CaptureHistoryStore(this, retentionDays = { settingsDataStore.captureRetentionDays.value })
+        CaptureHistoryStore(
+            this,
+            retentionDays = { settingsDataStore.captureRetentionDays.value },
+            quotaMb = { settingsDataStore.storageQuotaMb.value },
+        )
     }
     val recordingController: RecordingController by lazy { RecordingController(this) }
     val photoCaptureManager: PhotoCaptureManager by lazy {

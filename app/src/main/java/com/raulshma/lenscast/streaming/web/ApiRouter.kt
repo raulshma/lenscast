@@ -19,13 +19,28 @@ class ApiRouter(
     private val deterrence: DeterrenceWebHandler,
     private val detectionEvents: DetectionEventsWebHandler,
     private val auth: AuthWebHandler,
+    private val audit: AuditWebHandler,
+    private val detectionTest: DetectionTestWebHandler,
+    /** The read-only /api/system diagnostics snapshot. */
+    private val system: SystemWebHandler,
+    /** The audit trail for mutating dispatches. */
+    private val auditLog: AuditLog,
 ) {
 
-    suspend fun dispatch(request: ApiRequest): ApiResponse = try {
-        route(request) ?: ApiResponse.notFound()
-    } catch (e: Exception) {
-        Log.e(TAG, "API request failed: ${request.method} ${request.path}", e)
-        ApiResponse.ok(ApiResponse.error(e))
+    suspend fun dispatch(request: ApiRequest): ApiResponse {
+        var failure: String? = null
+        val response = try {
+            route(request) ?: run {
+                failure = "not found"
+                ApiResponse.notFound()
+            }
+        } catch (e: Exception) {
+            failure = e.message?.take(200) ?: "internal error"
+            Log.e(TAG, "API request failed: ${request.method} ${request.path}", e)
+            ApiResponse.ok(ApiResponse.error(e))
+        }
+        auditDispatch(request, failure)
+        return response
     }
 
     private suspend fun route(r: ApiRequest): ApiResponse? = when (r.method) {
@@ -36,6 +51,7 @@ class ApiRouter(
 
     private suspend fun routeGet(r: ApiRequest): ApiResponse? = when (r.path) {
         "/api/settings" -> ApiResponse.ok(settings.get())
+        "/api/settings/export" -> ApiResponse.ok(settings.export())
         "/api/status" -> ApiResponse.ok(status.get())
         "/api/camera/lenses" -> ApiResponse.ok(lens.getLenses())
         "/api/stream/clients" -> ApiResponse.ok(stream.listClients())
@@ -48,7 +64,13 @@ class ApiRouter(
                 pageSize = r.query["pageSize"]?.toIntOrNull() ?: 0,
             )
         )
-        "/api/detection/events" -> ApiResponse.ok(detectionEvents.list(r.query["limit"]?.toIntOrNull()))
+        "/api/detection/events" -> ApiResponse.ok(
+            detectionEvents.list(r.query["limit"]?.toIntOrNull(), r.query["type"])
+        )
+        "/api/detection/events/export" -> detectionEvents.export(r.query["format"], r.query["type"])
+        "/api/detection/stats" -> ApiResponse.ok(detectionEvents.stats())
+        "/api/system" -> ApiResponse.ok(system.get())
+        "/api/audit" -> ApiResponse.ok(audit.list(r.query["limit"]?.toIntOrNull()))
         "/api/auth/config" -> ApiResponse.ok(auth.get())
         "/api/auth/sessions" -> ApiResponse.ok(auth.listSessions())
         else -> null
@@ -56,6 +78,7 @@ class ApiRouter(
 
     private suspend fun routeWrite(r: ApiRequest): ApiResponse? = when (r.path) {
         "/api/settings" -> ApiResponse.ok(settings.put(r.body))
+        "/api/settings/import" -> ApiResponse.ok(settings.import(r.body))
         "/api/settings/ml-model/download" -> ApiResponse.ok(settings.downloadModel())
         "/api/stream/start", "/api/stream/resume" -> ApiResponse.ok(stream.startAll())
         "/api/stream/stop" -> ApiResponse.ok(stream.stopAll())
@@ -73,6 +96,7 @@ class ApiRouter(
         "/api/recording/start" -> ApiResponse.ok(recording.start(r.body))
         "/api/recording/stop" -> ApiResponse.ok(recording.stop())
         "/api/deterrence/siren" -> ApiResponse.ok(deterrence.setSiren(r.body))
+        "/api/detection/test" -> ApiResponse.ok(detectionTest.test())
         "/api/auth/config" -> ApiResponse.ok(auth.put(r.body))
         "/api/media/batch-delete" -> ApiResponse.ok(gallery.batchDelete(r.body))
         else -> null
@@ -81,6 +105,7 @@ class ApiRouter(
     private suspend fun routeDelete(r: ApiRequest): ApiResponse? = when {
         r.path == "/api/detection/events" ->
             ApiResponse.ok(detectionEvents.clear())
+        r.path == "/api/audit" -> ApiResponse.ok(audit.clear())
         r.path.startsWith("/api/stream/clients/") ->
             ApiResponse.ok(stream.kickClient(r.path.removePrefix("/api/stream/clients/")))
         r.path.startsWith("/api/auth/sessions/") ->
@@ -88,6 +113,25 @@ class ApiRouter(
         r.path.startsWith("/api/media/") ->
             ApiResponse.ok(gallery.deleteMedia(r.path.removePrefix("/api/media/")))
         else -> null
+    }
+
+    /**
+     * The audit half of a mutating dispatch: every POST/PUT/DELETE this router
+     * answers — dispatched or unknown-route, success or handler error — lands
+     * in the trail as `"$method $path"`, the one place a config change from
+     * any client (dashboard, API token, automation) is visible. Failures
+     * carry the handler's message. Never let a broken audit write fail the
+     * audited request.
+     */
+    private fun auditDispatch(request: ApiRequest, failure: String?) {
+        if (request.method == ApiMethod.GET) return
+        runCatching {
+            auditLog.record(
+                action = "${request.method.name} ${request.path}",
+                detail = failure.orEmpty(),
+                outcome = if (failure == null) AuditEntry.OUTCOME_OK else AuditEntry.OUTCOME_ERROR,
+            )
+        }
     }
 
     companion object {

@@ -1,4 +1,4 @@
-import { createEffect, createSignal, onCleanup } from 'solid-js'
+import { createEffect, createMemo, createSignal, onCleanup } from 'solid-js'
 import * as api from '../api/client'
 import { createRecordingTimer } from '../RecordingTimer'
 import { createLiveAudioPlayer, type LiveAudioStatus } from '../audio/LiveAudioPlayer'
@@ -9,6 +9,9 @@ import type {
   IntervalCaptureConfig, RecordingConfig,
   FlashMode, RecordingQuality,
 } from '../types'
+
+/** Consecutive status-lane failures before the dashboard shows the connection-lost banner. */
+const CONNECTION_LOST_FAILURES = 3
 
 export function useAppState() {
   // ── Auth ──
@@ -31,6 +34,15 @@ export function useAppState() {
   const [streamActionLoading, setStreamActionLoading] = createSignal(false)
   const [streamNonce, setStreamNonce] = createSignal(0)
   const [showGallery, setShowGallery] = createSignal(false)
+
+  // ── Connection health ──
+  // The status lane fails when fetchStatus errors; the SSE lane reports its
+  // own openness. connectionLost is only true once the poll lane has failed
+  // several times in a row AND the SSE channel is not open — a single
+  // success (or a reopened stream) clears it again.
+  const [statusFailures, setStatusFailures] = createSignal(0)
+  const [sseConnected, setSseConnected] = createSignal(false)
+  const connectionLost = createMemo(() => statusFailures() >= CONNECTION_LOST_FAILURES && !sseConnected())
 
   // ── Interval capture ──
   const [intervalConfig, setIntervalConfig] = createSignal<IntervalCaptureConfig>({
@@ -159,6 +171,8 @@ export function useAppState() {
     setAuthenticated(false)
     setSettings(null)
     setStatus(null)
+    setStatusFailures(0)
+    setSseConnected(false)
   }
 
   // ── Data fetching ──
@@ -184,8 +198,13 @@ export function useAppState() {
     try {
       const s = await api.getStatus()
       setStatus(s)
+      setStatusFailures(0)
     } catch (e: any) {
-      if (isAuthError(e)) setAuthenticated(false)
+      if (isAuthError(e)) {
+        setAuthenticated(false)
+        return
+      }
+      setStatusFailures((n) => n + 1)
     }
   }
 
@@ -394,6 +413,10 @@ export function useAppState() {
           setStatus(parsed)
         } catch { }
       })
+      // Feed the connection-lost banner: the stream counts as connected from
+      // open until its next error (EventSource reconnects on its own).
+      eventSource.onopen = () => setSseConnected(true)
+      eventSource.onerror = () => setSseConnected(false)
       onCleanup(() => eventSource?.close())
     } catch {
       eventSource = null
@@ -464,6 +487,7 @@ export function useAppState() {
     // Core
     settings, status, lenses, error, captureMsg, saving,
     previewVisible, setPreviewVisible, streamActionLoading, streamNonce, showGallery, setShowGallery,
+    connectionLost,
     // Camera
     updateCamera,
     // Streaming

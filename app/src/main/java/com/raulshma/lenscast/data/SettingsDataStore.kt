@@ -124,8 +124,19 @@ private object Keys {
     val MOTION_ARM_SCHEDULE_ENABLED = stringPreferencesKey("motion_arm_schedule_enabled")
     val MOTION_ARM_START_MINUTE = intPreferencesKey("motion_arm_start_minute")
     val MOTION_ARM_END_MINUTE = intPreferencesKey("motion_arm_end_minute")
+    val MOTION_ARM_DAYS_MASK = intPreferencesKey("motion_arm_days_mask")
     val SOUND_DETECTION_ENABLED = stringPreferencesKey("sound_detection_enabled")
     val SOUND_THRESHOLD_PERCENT = intPreferencesKey("sound_threshold_percent")
+    val SOUND_ADAPTIVE_NOISE_FLOOR = stringPreferencesKey("sound_adaptive_noise_floor")
+    val ALERT_QUIET_HOURS_ENABLED = stringPreferencesKey("alert_quiet_hours_enabled")
+    val ALERT_QUIET_HOURS_START_MINUTE = intPreferencesKey("alert_quiet_hours_start_minute")
+    val ALERT_QUIET_HOURS_END_MINUTE = intPreferencesKey("alert_quiet_hours_end_minute")
+    val SOUND_RECORDING_ENABLED = stringPreferencesKey("sound_recording_enabled")
+    val MOTION_COOLDOWN_SECONDS = intPreferencesKey("motion_cooldown_seconds")
+    val SOUND_COOLDOWN_SECONDS = intPreferencesKey("sound_cooldown_seconds")
+    val ML_INCLUDE_PERSON = stringPreferencesKey("ml_include_person")
+    val ML_INCLUDE_PETS = stringPreferencesKey("ml_include_pets")
+    val ML_INCLUDE_VEHICLES = stringPreferencesKey("ml_include_vehicles")
     val ML_DETECTION_ENABLED = stringPreferencesKey("ml_detection_enabled")
     val ML_MIN_SCORE_PERCENT = intPreferencesKey("ml_min_score_percent")
     val CONTINUOUS_RECORDING = stringPreferencesKey("continuous_recording")
@@ -162,6 +173,7 @@ private object Keys {
     val MQTT_DISCOVERY_PREFIX = stringPreferencesKey("mqtt_discovery_prefix")
     val CAPTURE_RETENTION_DAYS = intPreferencesKey("capture_retention_days")
     val EVENT_RETENTION_DAYS = intPreferencesKey("event_retention_days")
+    val STORAGE_QUOTA_MB = intPreferencesKey("storage_quota_mb")
 }
 
 /**
@@ -311,6 +323,17 @@ internal val motionArmEndMinutePref = intPref(
     IntBounds(0, StreamDefaults.MINUTES_PER_DAY - 1),
 )
 
+/**
+ * The arm schedule's day-of-week mask: one bit per ISO day (bit 0 = Monday …
+ * bit 6 = Sunday). Clamped to at least one day armed — a zero mask would
+ * disarm the schedule silently, which the enabled toggle already expresses.
+ */
+internal val motionArmDaysMaskPref = intPref(
+    Keys.MOTION_ARM_DAYS_MASK,
+    StreamDefaults.MOTION_ARM_DAYS_MASK_DEFAULT,
+    IntBounds(StreamDefaults.MOTION_ARM_DAYS_MASK_MIN, StreamDefaults.MOTION_ARM_DAYS_MASK_MAX),
+)
+
 internal val soundDetectionEnabledPref = boolPref(Keys.SOUND_DETECTION_ENABLED, defaultTrue = false)
 
 internal val soundThresholdPercentPref = intPref(
@@ -318,6 +341,46 @@ internal val soundThresholdPercentPref = intPref(
     StreamDefaults.SOUND_THRESHOLD_PERCENT_DEFAULT,
     IntBounds(StreamDefaults.SOUND_THRESHOLD_MIN, StreamDefaults.SOUND_THRESHOLD_MAX),
 )
+
+/** Sound trigger threshold rides a tracked ambient noise floor (adaptive). */
+internal val soundAdaptiveNoiseFloorPref = boolPref(Keys.SOUND_ADAPTIVE_NOISE_FLOOR, defaultTrue = false)
+
+/** Local detection alerts are held inside the quiet-hours window. */
+internal val alertQuietHoursEnabledPref = boolPref(Keys.ALERT_QUIET_HOURS_ENABLED, defaultTrue = false)
+
+internal val alertQuietHoursStartMinutePref = intPref(
+    Keys.ALERT_QUIET_HOURS_START_MINUTE,
+    StreamDefaults.QUIET_HOURS_START_MINUTE_DEFAULT,
+    IntBounds(0, StreamDefaults.MINUTES_PER_DAY - 1),
+)
+
+internal val alertQuietHoursEndMinutePref = intPref(
+    Keys.ALERT_QUIET_HOURS_END_MINUTE,
+    StreamDefaults.QUIET_HOURS_END_MINUTE_DEFAULT,
+    IntBounds(0, StreamDefaults.MINUTES_PER_DAY - 1),
+)
+
+/** Sound events start a bounded clip (the motion post-roll duration) like motion does. */
+internal val soundRecordingEnabledPref = boolPref(Keys.SOUND_RECORDING_ENABLED, defaultTrue = false)
+
+internal val motionCooldownSecondsPref = intPref(
+    Keys.MOTION_COOLDOWN_SECONDS,
+    StreamDefaults.MOTION_COOLDOWN_SECONDS_DEFAULT,
+    IntBounds(StreamDefaults.MOTION_COOLDOWN_MIN_SECONDS, StreamDefaults.MOTION_COOLDOWN_MAX_SECONDS),
+)
+
+internal val soundCooldownSecondsPref = intPref(
+    Keys.SOUND_COOLDOWN_SECONDS,
+    StreamDefaults.SOUND_COOLDOWN_SECONDS_DEFAULT,
+    IntBounds(StreamDefaults.SOUND_COOLDOWN_MIN_SECONDS, StreamDefaults.SOUND_COOLDOWN_MAX_SECONDS),
+)
+
+/** ML gate class groups: which detected classes count toward an alert. All on by default. */
+internal val mlIncludePersonPref = boolPref(Keys.ML_INCLUDE_PERSON, defaultTrue = true)
+
+internal val mlIncludePetsPref = boolPref(Keys.ML_INCLUDE_PETS, defaultTrue = true)
+
+internal val mlIncludeVehiclesPref = boolPref(Keys.ML_INCLUDE_VEHICLES, defaultTrue = true)
 
 /** ML object detection gate: motion still triggers, but alerts ride a class verdict. */
 internal val mlDetectionEnabledPref = boolPref(Keys.ML_DETECTION_ENABLED, defaultTrue = false)
@@ -435,6 +498,17 @@ internal val eventRetentionDaysPref = intPref(
     Keys.EVENT_RETENTION_DAYS,
     StreamDefaults.RETENTION_DAYS_DISABLED,
     IntBounds(StreamDefaults.RETENTION_DAYS_MIN, StreamDefaults.RETENTION_DAYS_MAX),
+)
+
+/**
+ * The capture-history storage quota in MB: the oldest captures age out once
+ * LensCast's media passes it. 0 is not a valid quota (the clamp floor is the
+ * 100 MB minimum); "keep forever" is the retention-days setting's 0 sentinel.
+ */
+internal val storageQuotaMbPref = intPref(
+    Keys.STORAGE_QUOTA_MB,
+    StreamDefaults.STORAGE_QUOTA_MB_DEFAULT,
+    IntBounds(StreamDefaults.STORAGE_QUOTA_MB_MIN, StreamDefaults.STORAGE_QUOTA_MB_MAX),
 )
 
 
@@ -816,9 +890,31 @@ class SettingsDataStore(
 
     val motionArmEndMinute: StateFlow<Int> = motionArmEndMinutePref.shared()
 
+    val motionArmDaysMask: StateFlow<Int> = motionArmDaysMaskPref.shared()
+
     val soundDetectionEnabled: StateFlow<Boolean> = soundDetectionEnabledPref.shared()
 
     val soundThresholdPercent: StateFlow<Int> = soundThresholdPercentPref.shared()
+
+    val soundAdaptiveNoiseFloor: StateFlow<Boolean> = soundAdaptiveNoiseFloorPref.shared()
+
+    val alertQuietHoursEnabled: StateFlow<Boolean> = alertQuietHoursEnabledPref.shared()
+
+    val alertQuietHoursStartMinute: StateFlow<Int> = alertQuietHoursStartMinutePref.shared()
+
+    val alertQuietHoursEndMinute: StateFlow<Int> = alertQuietHoursEndMinutePref.shared()
+
+    val soundRecordingEnabled: StateFlow<Boolean> = soundRecordingEnabledPref.shared()
+
+    val motionCooldownSeconds: StateFlow<Int> = motionCooldownSecondsPref.shared()
+
+    val soundCooldownSeconds: StateFlow<Int> = soundCooldownSecondsPref.shared()
+
+    val mlIncludePerson: StateFlow<Boolean> = mlIncludePersonPref.shared()
+
+    val mlIncludePets: StateFlow<Boolean> = mlIncludePetsPref.shared()
+
+    val mlIncludeVehicles: StateFlow<Boolean> = mlIncludeVehiclesPref.shared()
 
     val webhookEnabled: StateFlow<Boolean> = webhookEnabledPref.shared()
 
@@ -884,6 +980,8 @@ class SettingsDataStore(
     val captureRetentionDays: StateFlow<Int> = captureRetentionDaysPref.shared()
 
     val eventRetentionDays: StateFlow<Int> = eventRetentionDaysPref.shared()
+
+    val storageQuotaMb: StateFlow<Int> = storageQuotaMbPref.shared()
 
 
     val watchdogEnabled: StateFlow<Boolean> = watchdogEnabledPref.shared()
@@ -970,9 +1068,31 @@ class SettingsDataStore(
 
     suspend fun saveMotionArmEndMinute(minute: Int) = motionArmEndMinutePref.save(minute)
 
+    suspend fun saveMotionArmDaysMask(mask: Int) = motionArmDaysMaskPref.save(mask)
+
     suspend fun saveSoundDetectionEnabled(enabled: Boolean) = soundDetectionEnabledPref.save(enabled)
 
     suspend fun saveSoundThresholdPercent(percent: Int) = soundThresholdPercentPref.save(percent)
+
+    suspend fun saveSoundAdaptiveNoiseFloor(enabled: Boolean) = soundAdaptiveNoiseFloorPref.save(enabled)
+
+    suspend fun saveAlertQuietHoursEnabled(enabled: Boolean) = alertQuietHoursEnabledPref.save(enabled)
+
+    suspend fun saveAlertQuietHoursStartMinute(minute: Int) = alertQuietHoursStartMinutePref.save(minute)
+
+    suspend fun saveAlertQuietHoursEndMinute(minute: Int) = alertQuietHoursEndMinutePref.save(minute)
+
+    suspend fun saveSoundRecordingEnabled(enabled: Boolean) = soundRecordingEnabledPref.save(enabled)
+
+    suspend fun saveMotionCooldownSeconds(seconds: Int) = motionCooldownSecondsPref.save(seconds)
+
+    suspend fun saveSoundCooldownSeconds(seconds: Int) = soundCooldownSecondsPref.save(seconds)
+
+    suspend fun saveMlIncludePerson(enabled: Boolean) = mlIncludePersonPref.save(enabled)
+
+    suspend fun saveMlIncludePets(enabled: Boolean) = mlIncludePetsPref.save(enabled)
+
+    suspend fun saveMlIncludeVehicles(enabled: Boolean) = mlIncludeVehiclesPref.save(enabled)
 
     suspend fun saveWebhookEnabled(enabled: Boolean) = webhookEnabledPref.save(enabled)
 
@@ -1037,6 +1157,8 @@ class SettingsDataStore(
     suspend fun saveCaptureRetentionDays(days: Int) = captureRetentionDaysPref.save(days)
 
     suspend fun saveEventRetentionDays(days: Int) = eventRetentionDaysPref.save(days)
+
+    suspend fun saveStorageQuotaMb(quotaMb: Int) = storageQuotaMbPref.save(quotaMb)
 
     suspend fun saveOverlaySettings(settings: OverlaySettings) = overlaySettingsPref.save(settings)
 

@@ -1,6 +1,7 @@
 package com.raulshma.lenscast.capture
 
 import com.raulshma.lenscast.camera.model.MotionZone
+import com.raulshma.lenscast.core.StreamDefaults
 
 /**
  * Pure motion-event policy: frame-luma delta → trigger verdict with cooldown.
@@ -10,7 +11,7 @@ object MotionEventPolicy {
     /** Mean-absolute luma delta (0-255) that counts as motion at default sensitivity. */
     const val DEFAULT_THRESHOLD = 12.0
     /** Minimum ms between two motion events. */
-    const val DEFAULT_COOLDOWN_MS = 10_000L
+    const val DEFAULT_COOLDOWN_MS = StreamDefaults.MOTION_COOLDOWN_SECONDS_DEFAULT * 1_000L
     /** Frames to skip after start before arming (exposure settles). */
     const val WARMUP_FRAMES = 10L
     /** Sensitivity ladder endpoints: 0 → MAX (deaf), 1 → MIN (eager). */

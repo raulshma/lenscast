@@ -168,6 +168,34 @@ class SettingPrefTest {
     }
 
     @Test
+    fun `arm days mask saver clamps to at least one armed day`() {
+        assertEquals(1, motionArmDaysMaskPref.roundTrip(0))
+        assertEquals(
+            StreamDefaults.MOTION_ARM_DAYS_MASK_DEFAULT,
+            motionArmDaysMaskPref.roundTrip(StreamDefaults.MOTION_ARM_DAYS_MASK_DEFAULT),
+        )
+        assertEquals(127, motionArmDaysMaskPref.roundTrip(500))
+    }
+
+    @Test
+    fun `quiet hours minute savers clamp to the minute-of-day bounds`() {
+        assertEquals(0, alertQuietHoursStartMinutePref.roundTrip(-30))
+        assertEquals(1439, alertQuietHoursStartMinutePref.roundTrip(2000))
+        assertEquals(0, alertQuietHoursEndMinutePref.roundTrip(-1))
+        assertEquals(1439, alertQuietHoursEndMinutePref.roundTrip(9999))
+    }
+
+    @Test
+    fun `storage quota saver clamps to the quota bounds`() {
+        assertEquals(100, storageQuotaMbPref.roundTrip(1))
+        assertEquals(
+            StreamDefaults.STORAGE_QUOTA_MB_DEFAULT,
+            storageQuotaMbPref.roundTrip(StreamDefaults.STORAGE_QUOTA_MB_DEFAULT),
+        )
+        assertEquals(32768, storageQuotaMbPref.roundTrip(1_000_000))
+    }
+
+    @Test
     fun `deterrence cooldown saver clamps to the cooldown bounds`() {
         assertEquals(30, autoDeterrenceCooldownSecondsPref.roundTrip(0))
         assertEquals(

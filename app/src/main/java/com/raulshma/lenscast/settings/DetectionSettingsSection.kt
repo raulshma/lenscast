@@ -1,5 +1,8 @@
 package com.raulshma.lenscast.settings
 
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -8,6 +11,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -18,6 +22,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.text.KeyboardActions
+import com.raulshma.lenscast.capture.MotionArmingPolicy
 import com.raulshma.lenscast.capture.ml.DetectionModelStore
 import com.raulshma.lenscast.core.StreamDefaults
 
@@ -27,7 +32,7 @@ import com.raulshma.lenscast.core.StreamDefaults
  * Settings Applier applies values to the runtime detectors.
  */
 @Composable
-fun DetectionSettingsSection(viewModel: SettingsViewModel) {
+fun DetectionSettingsSection(viewModel: SettingsViewModel, onOpenEventLog: (() -> Unit)? = null) {
     val motionDetectionEnabled by viewModel.motionDetectionEnabled.collectAsState()
     val motionSensitivity by viewModel.motionSensitivityPercent.collectAsState()
     val motionRecordingEnabled by viewModel.motionRecordingEnabled.collectAsState()
@@ -35,12 +40,23 @@ fun DetectionSettingsSection(viewModel: SettingsViewModel) {
     val armScheduleEnabled by viewModel.motionArmScheduleEnabled.collectAsState()
     val armStartMinute by viewModel.motionArmStartMinute.collectAsState()
     val armEndMinute by viewModel.motionArmEndMinute.collectAsState()
+    val armDaysMask by viewModel.motionArmDaysMask.collectAsState()
     val soundEnabled by viewModel.soundDetectionEnabled.collectAsState()
     val soundThreshold by viewModel.soundThresholdPercent.collectAsState()
+    val soundAdaptiveFloor by viewModel.soundAdaptiveNoiseFloor.collectAsState()
+    val soundRecordingEnabled by viewModel.soundRecordingEnabled.collectAsState()
+    val motionCooldown by viewModel.motionCooldownSeconds.collectAsState()
+    val soundCooldown by viewModel.soundCooldownSeconds.collectAsState()
     val mlEnabled by viewModel.mlDetectionEnabled.collectAsState()
     val mlMinScore by viewModel.mlMinScorePercent.collectAsState()
+    val mlPerson by viewModel.mlIncludePerson.collectAsState()
+    val mlPets by viewModel.mlIncludePets.collectAsState()
+    val mlVehicles by viewModel.mlIncludeVehicles.collectAsState()
     val modelState by viewModel.detectionModelState.collectAsState()
     val notificationEnabled by viewModel.detectionNotificationsEnabled.collectAsState()
+    val quietHoursEnabled by viewModel.alertQuietHoursEnabled.collectAsState()
+    val quietHoursStart by viewModel.alertQuietHoursStartMinute.collectAsState()
+    val quietHoursEnd by viewModel.alertQuietHoursEndMinute.collectAsState()
     val tamperEnabled by viewModel.tamperDetectionEnabled.collectAsState()
 
     SettingsSection(title = "Detection & Alerts") {
@@ -51,12 +67,23 @@ fun DetectionSettingsSection(viewModel: SettingsViewModel) {
             checked = motionDetectionEnabled,
             onCheckedChange = { viewModel.updateMotionDetectionEnabled(it) }
         )
+        if (onOpenEventLog != null) {
+            TextButton(onClick = onOpenEventLog) {
+                Text("Open Event Log")
+            }
+        }
         if (motionDetectionEnabled) {
             SliderSetting(
                 title = "Motion Sensitivity (%)",
                 value = motionSensitivity.toFloat(),
                 range = StreamDefaultsRange.MOTION_SENSITIVITY,
                 onValueChange = { viewModel.updateMotionSensitivity(it.toInt()) }
+            )
+            SliderSetting(
+                title = "Event Cooldown (seconds)",
+                value = motionCooldown.toFloat(),
+                range = StreamDefaultsRange.MOTION_COOLDOWN,
+                onValueChange = { viewModel.updateMotionCooldownSeconds(it.toInt()) }
             )
             SwitchSetting(
                 title = "Record on Motion",
@@ -91,6 +118,14 @@ fun DetectionSettingsSection(viewModel: SettingsViewModel) {
                     steps = 95,
                     onValueChange = { viewModel.updateMotionArmEndMinute(it.toInt()) }
                 )
+                ArmDayChips(
+                    daysMask = armDaysMask,
+                    onToggleDay = { isoDay ->
+                        viewModel.updateMotionArmDaysMask(
+                            MotionArmingPolicy.toggleDay(armDaysMask, isoDay),
+                        )
+                    }
+                )
             }
         }
         SwitchSetting(
@@ -105,12 +140,72 @@ fun DetectionSettingsSection(viewModel: SettingsViewModel) {
                 range = StreamDefaultsRange.SOUND_THRESHOLD,
                 onValueChange = { viewModel.updateSoundThresholdPercent(it.toInt()) }
             )
+            SwitchSetting(
+                title = "Adaptive Noise Floor",
+                checked = soundAdaptiveFloor,
+                onCheckedChange = { viewModel.updateSoundAdaptiveNoiseFloor(it) }
+            )
+            if (soundAdaptiveFloor) {
+                Text(
+                    text = "The trigger rides above a tracked ambient level, so a constant " +
+                        "background (HVAC, traffic) neither masks real events nor trips alone",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            SliderSetting(
+                title = "Event Cooldown (seconds)",
+                value = soundCooldown.toFloat(),
+                range = StreamDefaultsRange.SOUND_COOLDOWN,
+                onValueChange = { viewModel.updateSoundCooldownSeconds(it.toInt()) }
+            )
+            SwitchSetting(
+                title = "Record on Sound",
+                checked = soundRecordingEnabled,
+                onCheckedChange = { viewModel.updateSoundRecordingEnabled(it) }
+            )
+            if (soundRecordingEnabled) {
+                Text(
+                    text = "Sound events start a bounded clip using the motion post-roll duration",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
         }
         SwitchSetting(
             title = "Local Alerts on Detection",
             checked = notificationEnabled,
             onCheckedChange = { viewModel.updateDetectionNotificationsEnabled(it) }
         )
+        if (notificationEnabled) {
+            SwitchSetting(
+                title = "Quiet Hours",
+                checked = quietHoursEnabled,
+                onCheckedChange = { viewModel.updateAlertQuietHoursEnabled(it) }
+            )
+            if (quietHoursEnabled) {
+                Text(
+                    text = "Local notifications are held inside the window — webhooks, MQTT, " +
+                        "recordings, and the event log keep firing",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                SliderSetting(
+                    title = "Quiet From (minute of day)",
+                    value = quietHoursStart.toFloat(),
+                    range = StreamDefaultsRange.MINUTE_OF_DAY,
+                    steps = 95,
+                    onValueChange = { viewModel.updateAlertQuietHoursStartMinute(it.toInt()) }
+                )
+                SliderSetting(
+                    title = "Quiet Until (minute of day)",
+                    value = quietHoursEnd.toFloat(),
+                    range = StreamDefaultsRange.MINUTE_OF_DAY,
+                    steps = 95,
+                    onValueChange = { viewModel.updateAlertQuietHoursEndMinute(it.toInt()) }
+                )
+            }
+        }
         SwitchSetting(
             title = "Tamper Detection (power cut)",
             checked = tamperEnabled,
@@ -137,6 +232,21 @@ fun DetectionSettingsSection(viewModel: SettingsViewModel) {
                 steps = StreamDefaultsRange.ML_SCORE_STEPS,
                 onValueChange = { viewModel.updateMlMinScorePercent(it.toInt()) }
             )
+            SwitchSetting(
+                title = "Alert on People",
+                checked = mlPerson,
+                onCheckedChange = { viewModel.updateMlIncludePerson(it) }
+            )
+            SwitchSetting(
+                title = "Alert on Animals",
+                checked = mlPets,
+                onCheckedChange = { viewModel.updateMlIncludePets(it) }
+            )
+            SwitchSetting(
+                title = "Alert on Vehicles",
+                checked = mlVehicles,
+                onCheckedChange = { viewModel.updateMlIncludeVehicles(it) }
+            )
             // The model ships outside the APK — this row is its only
             // user-facing fetch control (the detection gate also auto-requests
             // the download on the first gated motion event).
@@ -144,6 +254,35 @@ fun DetectionSettingsSection(viewModel: SettingsViewModel) {
                 state = modelState,
                 onDownload = { viewModel.downloadDetectionModel() },
             )
+        }
+    }
+}
+
+/**
+ * The arm schedule's day-of-week chips: one chip per ISO day (Monday first),
+ * selected when its bit is set in the persisted mask. Toggling reports the
+ * ISO day index; the caller folds it into the mask.
+ */
+@Composable
+private fun ArmDayChips(daysMask: Int, onToggleDay: (isoDayIndex: Int) -> Unit) {
+    val labels = listOf("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Text(
+            text = "Arm on Days",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurface,
+        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            labels.forEachIndexed { index, label ->
+                FilterChip(
+                    label = label,
+                    selected = (daysMask and MotionArmingPolicy.dayBit(index)) != 0,
+                    onClick = { onToggleDay(index) }
+                )
+            }
         }
     }
 }
@@ -304,10 +443,18 @@ internal object StreamDefaultsRange {
         StreamDefaults.ML_SCORE_MIN_PERCENT.toFloat()..StreamDefaults.ML_SCORE_MAX_PERCENT.toFloat()
     val CONTINUOUS_SEGMENT_MINUTES =
         StreamDefaults.CONTINUOUS_SEGMENT_MIN_MINUTES.toFloat()..StreamDefaults.CONTINUOUS_SEGMENT_MAX_MINUTES.toFloat()
+    val MOTION_COOLDOWN =
+        StreamDefaults.MOTION_COOLDOWN_MIN_SECONDS.toFloat()..StreamDefaults.MOTION_COOLDOWN_MAX_SECONDS.toFloat()
+    val SOUND_COOLDOWN =
+        StreamDefaults.SOUND_COOLDOWN_MIN_SECONDS.toFloat()..StreamDefaults.SOUND_COOLDOWN_MAX_SECONDS.toFloat()
 
     // Material3 `steps` counts the discrete points BETWEEN the endpoints, so
     // a 5-unit slider step is (span / 5) - 1.
     val ML_SCORE_STEPS = (StreamDefaults.ML_SCORE_MAX_PERCENT - StreamDefaults.ML_SCORE_MIN_PERCENT) / 5 - 1
     val CONTINUOUS_SEGMENT_STEPS =
         (StreamDefaults.CONTINUOUS_SEGMENT_MAX_MINUTES - StreamDefaults.CONTINUOUS_SEGMENT_MIN_MINUTES) / 5 - 1
+
+    // Storage quota steps in 100 MB increments across the persisted span.
+    val STORAGE_QUOTA_STEPS =
+        (StreamDefaults.STORAGE_QUOTA_MB_MAX - StreamDefaults.STORAGE_QUOTA_MB_MIN) / 100 - 1
 }

@@ -4,6 +4,7 @@ import android.util.Log
 import com.raulshma.lenscast.core.AppJson
 import com.raulshma.lenscast.core.DetectionAlert
 import com.raulshma.lenscast.core.DetectionEventWire
+import com.raulshma.lenscast.core.EventKind
 
 /**
  * The MQTT half of the detection-event dispatch, beside [com.raulshma.lenscast.core.WebhookNotifier]:
@@ -122,14 +123,18 @@ class MqttAlertPublisher(
 
     private fun dispatch(alert: DetectionAlert, body: ByteArray, config: Config) {
         try {
-            val kind = MqttTopics.SensorKind.fromOrNull(alert.kind) ?: run {
+            val kind = MqttTopics.SensorKind.fromOrNull(alert.kind)
+            // The test alert has no binary_sensor entity by design (nothing to
+            // arm and no off-delay to simulate), so it publishes the event
+            // JSON only; a genuinely unknown kind is not publishable at all.
+            if (!MqttTopics.SensorKind.isPublishable(alert.kind)) {
                 Log.w(TAG, "MQTT dispatch skipped: unknown sensor kind ${alert.kind}")
                 return
             }
             ensureConnection(config)
             announceOnce(config)
             val topics = topicsFor(config)
-            client.publish(topics.stateTopicFor(kind), STATE_ON, qos = 1)
+            kind?.let { client.publish(topics.stateTopicFor(it), STATE_ON, qos = 1) }
             client.publish(topics.event, body, qos = 1)
         } catch (e: Exception) {
             logFailed("dispatch", config, e)

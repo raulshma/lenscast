@@ -158,6 +158,25 @@ export default function StreamPreview(props: Props) {
   const [torchOn, setTorchOn] = createSignal(false)
   const [talking, setTalking] = createSignal(false)
 
+  // Torch truth lives on the device: the status push is authoritative, and
+  // the local optimistic flip below only bridges the round-trip. This effect
+  // re-runs only when the status value itself changes, so a failed optimistic
+  // flip (rolled back locally) is never re-overwritten by a stale snapshot.
+  createEffect(() => {
+    const deviceTorch = st()?.torchOn
+    if (deviceTorch != null) setTorchOn(deviceTorch)
+  })
+
+  // Zoom mirrors the device the same way, but a focused slider belongs to an
+  // in-flight manual drag — never yank it from under the user's pointer.
+  const zoomMax = () => st()?.zoomRange?.max ?? API_DEFAULTS.cameraZoomMaxRatio
+  createEffect(() => {
+    const deviceZoom = st()?.zoomRatio
+    if (deviceZoom != null && document.activeElement?.id !== 'remote-zoom-slider') {
+      setZoomRatio(Math.min(deviceZoom, zoomMax()))
+    }
+  })
+
   const handleStreamClick = async (e: MouseEvent) => {
     const container = e.currentTarget as HTMLElement
     const rect = container.getBoundingClientRect()
@@ -421,7 +440,7 @@ export default function StreamPreview(props: Props) {
             right: '12px',
             'z-index': '10',
           }}>
-            <ConnectionQualityIndicator status={() => st()?.connectionQuality} />
+            <ConnectionQualityIndicator status={() => st() ?? undefined} />
           </div>
         </Show>
 
@@ -529,9 +548,10 @@ export default function StreamPreview(props: Props) {
           <label class="action-btn action-btn-ghost" title="Remote zoom">
             <span>{zoomRatio().toFixed(1)}x</span>
             <input
+              id="remote-zoom-slider"
               type="range"
               min="1"
-              max="8"
+              max={String(zoomMax())}
               step="0.5"
               value={zoomRatio()}
               onInput={async (e) => {
