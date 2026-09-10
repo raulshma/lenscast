@@ -153,9 +153,9 @@ android {
         // F-Droid builds the tag with plain `assembleFdroidRelease`.
         // Literal-first so F-Droid's update checker (`versionCode = <int>`
         // regex) can read it; CI overrides both via -P properties.
-        versionCode = 1002
+        versionCode = 1003
         project.findProperty("versionCode")?.let { versionCode = (it as String).toInt() }
-        versionName = project.findProperty("versionName") as String? ?: "0.1.2"
+        versionName = project.findProperty("versionName") as String? ?: "0.1.3"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 

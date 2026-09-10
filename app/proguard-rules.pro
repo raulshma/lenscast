@@ -59,9 +59,13 @@
     public static final android.os.Parcelable$Creator *;
 }
 
-# ── Moshi codegen: adapters are resolved reflectively by class name ──
+# ── Moshi codegen: adapters are resolved reflectively via Class.forName ──
+# Note: single `*` does not cross package separators in R8 — `**` is
+# required or the pattern matches nothing outside the default package.
+# The KSP-generated META-INF/proguard rules are NOT applied either: R8
+# only reads those from AAR dependencies, and this is an app module.
+-keep class **JsonAdapter { <init>(...); }
 -keepnames @com.squareup.moshi.JsonClass class *
--keepnames class *JsonAdapter
 -keepattributes *Annotation*,Signature,EnclosingMethod,InnerClasses
 
 # ── App model classes: Compose state, Moshi DTOs, enums ──
@@ -86,8 +90,10 @@
 -dontwarn auto.value.**
 
 # ── Enum safety (valueOf / values) ──
+# <fields> is load-bearing: Moshi's EnumJsonAdapter resolves JSON names to
+# enum constants via getField(name), so R8 must not rename constant fields.
 -keepclassmembers enum * {
-    **[] values();
-    public static **[] values();
     public static ** valueOf(java.lang.String);
+    public static **[] values();
+    <fields>;
 }
