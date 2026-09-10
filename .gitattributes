@@ -1,0 +1,12 @@
+* text=auto eol=lf
+*.png binary
+*.webp binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.jks binary
+*.keystore binary
+*.tflite binary
+*.jar binary
+*.so binary
