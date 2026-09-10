@@ -126,6 +126,16 @@ android {
     namespace = "com.raulshma.lenscast"
     compileSdk = 36
 
+    signingConfigs {
+        create("release") {
+            val keystorePath = rootProject.file("lenscast-release.jks")
+            val keystoreExists = keystorePath.exists()
+            storeFile = if (keystoreExists) keystorePath else null
+            storePassword = System.getenv("KEYSTORE_PASSWORD")
+            keyAlias = System.getenv("KEY_ALIAS")
+            keyPassword = System.getenv("KEY_PASSWORD")
+        }
+    }
 
     defaultConfig {
         applicationId = "com.raulshma.lenscast"
