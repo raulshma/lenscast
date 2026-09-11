@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- LensCast Wear: the launcher label doubles as the app description on
+     the watch app list, so it names the pairing explicitly. -->
+<resources>
+    <string name="app_name">LensCast Wear</string>
+</resources>

@@ -24,3 +24,7 @@ dependencyResolutionManagement {
 
 rootProject.name = "LensCast"
 include(":app")
+// Wear OS companion (watch-side remote control). Built like :app but ships
+// independently — the F-Droid recipe stays :app-only until the module has a
+// metadata entry.
+include(":wear")

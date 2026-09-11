@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The adaptive-icon backdrop: a near-black slate that reads as "camera
+     hardware" next to the white lens rings of ic_launcher_foreground. -->
+<resources>
+    <color name="ic_launcher_background">#10141A</color>
+</resources>
