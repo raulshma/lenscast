@@ -36,13 +36,17 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.raulshma.lenscast.MainApplication
+import com.raulshma.lenscast.R
 import com.raulshma.lenscast.streaming.rtsp.RtspInputFormat
+import com.raulshma.lenscast.streaming.rtmp.RtmpStatus
+import com.raulshma.lenscast.streaming.rtmp.RtmpUrl
 import com.raulshma.lenscast.update.UpdateViewModel
 import com.raulshma.lenscast.update.model.UpdateState
 import android.text.format.DateUtils
@@ -79,8 +83,9 @@ fun AppSettingsScreen(
     val viewModel: SettingsViewModel = viewModel(
         factory = SettingsViewModel.Factory(
             app.cameraService, app.settingsDataStore, app.powerManager,
-            // The detection section surfaces the on-demand model download.
+            // The detection section surfaces the on-demand model downloads.
             app.detectionModelStore,
+            app.audioModelStore,
         )
     )
     val updateViewModel: UpdateViewModel = viewModel(
@@ -119,13 +124,17 @@ fun AppSettingsScreen(
     val rtspEnabled by viewModel.rtspEnabled.collectAsState()
     val rtspPort by viewModel.rtspPort.collectAsState()
     val rtspInputFormat by viewModel.rtspInputFormat.collectAsState()
+    val rtmpEnabled by viewModel.rtmpEnabled.collectAsState()
+    val rtmpUrl by viewModel.rtmpUrl.collectAsState()
     val adaptiveBitrateEnabled by viewModel.adaptiveBitrateEnabled.collectAsState()
     val mdnsEnabled by viewModel.mdnsEnabled.collectAsState()
     val isIgnoringBatteryOptimizations by viewModel.isIgnoringBatteryOptimizations
     val resumeStreamsOnBoot by viewModel.resumeStreamsOnBoot.collectAsState()
     val continuousRecording by viewModel.continuousRecording.collectAsState()
     val continuousSegmentMinutes by viewModel.continuousSegmentMinutes.collectAsState()
+    val ecoIdleFpsEnabled by viewModel.ecoIdleFpsEnabled.collectAsState()
     val storageQuotaMb by viewModel.storageQuotaMb.collectAsState()
+    val mediaEncryptionEnabled by viewModel.mediaEncryptionEnabled.collectAsState()
 
     val updateState by updateViewModel.updateState.collectAsState()
     val autoCheckEnabled by updateViewModel.autoCheckEnabled.collectAsState()
@@ -134,7 +143,7 @@ fun AppSettingsScreen(
     Scaffold(
         topBar = {
             LensCastTopBar(
-                title = "App Settings",
+                title = stringResource(R.string.settings_app_title),
                 onNavigateBack = onNavigateBack,
             )
         }
@@ -147,14 +156,14 @@ fun AppSettingsScreen(
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             if (com.raulshma.lenscast.BuildConfig.SELF_UPDATE) item {
-                SettingsSection(title = "Updates") {
+                SettingsSection(title = stringResource(R.string.settings_section_updates)) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            text = "Current Version",
+                            text = stringResource(R.string.settings_current_version),
                             style = MaterialTheme.typography.bodyMedium,
                         )
                         Text(
@@ -167,14 +176,17 @@ fun AppSettingsScreen(
                     Spacer(modifier = Modifier.height(4.dp))
                     if (lastCheckTime > 0) {
                         Text(
-                            text = "Last checked: ${DateUtils.getRelativeTimeSpanString(lastCheckTime, System.currentTimeMillis(), DateUtils.MINUTE_IN_MILLIS)}",
+                            text = stringResource(
+                                R.string.settings_last_check,
+                                DateUtils.getRelativeTimeSpanString(lastCheckTime, System.currentTimeMillis(), DateUtils.MINUTE_IN_MILLIS)
+                            ),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
                     Spacer(modifier = Modifier.height(8.dp))
                     SwitchSetting(
-                        title = "Auto-check on App Start",
+                        title = stringResource(R.string.settings_auto_check),
                         checked = autoCheckEnabled,
                         onCheckedChange = { updateViewModel.setAutoCheckEnabled(it) }
                     )
@@ -185,12 +197,12 @@ fun AppSettingsScreen(
                                 onClick = { updateViewModel.checkForUpdate() },
                                 modifier = Modifier.fillMaxWidth()
                             ) {
-                                Text("Check for Updates")
+                                Text(stringResource(R.string.settings_check_updates))
                             }
                             if (state is UpdateState.UpToDate) {
                                 Spacer(modifier = Modifier.height(4.dp))
                                 Text(
-                                    text = "You're on the latest version (latest: ${state.remoteVersion})",
+                                    text = stringResource(R.string.settings_up_to_date, state.remoteVersion),
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.primary,
                                 )
@@ -199,11 +211,11 @@ fun AppSettingsScreen(
                         is UpdateState.Checking -> {
                             LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
                             Spacer(modifier = Modifier.height(4.dp))
-                            Text("Checking for updates...", style = MaterialTheme.typography.bodySmall)
+                            Text(stringResource(R.string.settings_checking), style = MaterialTheme.typography.bodySmall)
                         }
                         is UpdateState.UpdateAvailable -> {
                             Text(
-                                text = "Update ${state.version} available",
+                                text = stringResource(R.string.settings_update_available, state.version),
                                 style = MaterialTheme.typography.titleSmall,
                                 color = MaterialTheme.colorScheme.primary,
                             )
@@ -225,13 +237,13 @@ fun AppSettingsScreen(
                                     onClick = { updateViewModel.downloadUpdate() },
                                     modifier = Modifier.weight(1f)
                                 ) {
-                                    Text("Download")
+                                    Text(stringResource(R.string.settings_download))
                                 }
                                 OutlinedButton(
                                     onClick = { updateViewModel.dismissUpdate() },
                                     modifier = Modifier.weight(1f)
                                 ) {
-                                    Text("Dismiss")
+                                    Text(stringResource(R.string.settings_dismiss))
                                 }
                             }
                         }
@@ -242,7 +254,7 @@ fun AppSettingsScreen(
                             )
                             Spacer(modifier = Modifier.height(4.dp))
                             Text(
-                                text = "Downloading... ${(state.progress * 100).toInt()}%",
+                                text = stringResource(R.string.settings_downloading, (state.progress * 100).toInt()),
                                 style = MaterialTheme.typography.bodySmall,
                             )
                         }
@@ -251,7 +263,7 @@ fun AppSettingsScreen(
                                 onClick = { updateViewModel.installUpdate(activity) },
                                 modifier = Modifier.fillMaxWidth()
                             ) {
-                                Text("Install Update")
+                                Text(stringResource(R.string.settings_install_update))
                             }
                         }
                         is UpdateState.Error -> {
@@ -271,7 +283,7 @@ fun AppSettingsScreen(
                                 onClick = { updateViewModel.clearError(); updateViewModel.checkForUpdate() },
                                 modifier = Modifier.fillMaxWidth()
                             ) {
-                                Text("Retry")
+                                Text(stringResource(R.string.settings_retry))
                             }
                         }
                     }
@@ -286,31 +298,43 @@ fun AppSettingsScreen(
             }
 
             item {
-                SettingsSection(title = "Streaming") {
+                SettingsSection(title = stringResource(R.string.settings_section_streaming)) {
                     SwitchSetting(
-                        title = "Enable Web Streaming",
+                        title = stringResource(R.string.settings_enable_web_streaming),
                         checked = webStreamingEnabled,
                         onCheckedChange = { viewModel.updateWebStreamingEnabled(it) }
                     )
                     SliderSetting(
-                        title = "Streaming Port",
+                        title = stringResource(R.string.settings_streaming_port),
                         value = streamingPort.toFloat(),
                         range = webPortSliderRange,
                         onValueChange = { viewModel.updateStreamingPort(it.toInt()) }
                     )
                     SliderSetting(
-                        title = "JPEG Quality",
+                        title = stringResource(R.string.settings_jpeg_quality),
                         value = jpegQuality.toFloat(),
                         range = jpegQualitySliderRange,
                         onValueChange = { viewModel.updateJpegQuality(it.toInt()) }
                     )
                     SwitchSetting(
-                        title = "Adaptive Bitrate",
+                        title = stringResource(R.string.settings_adaptive_bitrate),
                         checked = adaptiveBitrateEnabled,
                         onCheckedChange = { viewModel.updateAdaptiveBitrateEnabled(it) }
                     )
                     SwitchSetting(
-                        title = "Network Discovery (mDNS)",
+                        title = stringResource(R.string.settings_eco_idle),
+                        checked = ecoIdleFpsEnabled,
+                        onCheckedChange = { viewModel.updateEcoIdleFpsEnabled(it) }
+                    )
+                    if (ecoIdleFpsEnabled) {
+                        Text(
+                            text = stringResource(R.string.settings_eco_idle_description),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    SwitchSetting(
+                        title = stringResource(R.string.settings_mdns),
                         checked = mdnsEnabled,
                         onCheckedChange = { viewModel.updateMdnsEnabled(it) }
                     )
@@ -325,21 +349,20 @@ fun AppSettingsScreen(
             }
 
             item {
-                SettingsSection(title = "Recording") {
+                SettingsSection(title = stringResource(R.string.settings_section_recording)) {
                     SwitchSetting(
-                        title = "Continuous Recording",
+                        title = stringResource(R.string.settings_continuous_recording),
                         checked = continuousRecording,
                         onCheckedChange = { viewModel.updateContinuousRecording(it) }
                     )
                     if (continuousRecording) {
                         Text(
-                            text = "Records NVR-style loop segments back to back; " +
-                                "old segments age out through the capture-retention window",
+                            text = stringResource(R.string.settings_continuous_recording_description),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                         SliderSetting(
-                            title = "Segment Length (minutes)",
+                            title = stringResource(R.string.settings_segment_length),
                             value = continuousSegmentMinutes.toFloat(),
                             range = StreamDefaultsRange.CONTINUOUS_SEGMENT_MINUTES,
                             steps = StreamDefaultsRange.CONTINUOUS_SEGMENT_STEPS,
@@ -350,17 +373,27 @@ fun AppSettingsScreen(
             }
 
             item {
-                SettingsSection(title = "Storage") {
+                SettingsSection(title = stringResource(R.string.settings_section_storage)) {
                     SliderSetting(
-                        title = "Storage Quota (MB)",
+                        title = stringResource(R.string.settings_storage_quota),
                         value = storageQuotaMb.toFloat(),
                         range = storageQuotaSliderRange,
                         steps = StreamDefaultsRange.STORAGE_QUOTA_STEPS,
                         onValueChange = { viewModel.updateStorageQuotaMb(it.toInt()) }
                     )
                     Text(
-                        text = "Once LensCast media passes the quota, the oldest captures are " +
-                            "deleted automatically (100 MB – 32 GB)",
+                        text = stringResource(R.string.settings_storage_quota_description),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    SwitchSetting(
+                        title = stringResource(R.string.settings_encrypt_captures),
+                        checked = mediaEncryptionEnabled,
+                        onCheckedChange = { viewModel.updateMediaEncryptionEnabled(it) }
+                    )
+                    Text(
+                        text = stringResource(R.string.settings_encrypt_captures_description),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -368,7 +401,7 @@ fun AppSettingsScreen(
             }
 
             item {
-                SettingsSection(title = "Background") {
+                SettingsSection(title = stringResource(R.string.settings_section_background)) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
@@ -376,12 +409,12 @@ fun AppSettingsScreen(
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
-                                text = "Disable Battery Optimization",
+                                text = stringResource(R.string.settings_disable_battery_opt),
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.onSurface,
                             )
                             Text(
-                                text = "Prevents the system from stopping the app in the background",
+                                text = stringResource(R.string.settings_disable_battery_opt_description),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
@@ -393,7 +426,7 @@ fun AppSettingsScreen(
                         )
                     }
                     SwitchSetting(
-                        title = "Resume Streams on Boot",
+                        title = stringResource(R.string.settings_resume_on_boot),
                         checked = resumeStreamsOnBoot,
                         onCheckedChange = { viewModel.updateResumeStreamsOnBoot(it) }
                     )
@@ -409,21 +442,21 @@ fun AppSettingsScreen(
             }
 
             item {
-                SettingsSection(title = "RTSP Stream") {
+                SettingsSection(title = stringResource(R.string.settings_section_rtsp)) {
                     SwitchSetting(
-                        title = "Enable RTSP Streaming",
+                        title = stringResource(R.string.settings_enable_rtsp),
                         checked = rtspEnabled,
                         onCheckedChange = { viewModel.updateRtspEnabled(it) }
                     )
                     if (rtspEnabled) {
                         SliderSetting(
-                            title = "RTSP Port",
+                            title = stringResource(R.string.settings_rtsp_port),
                             value = rtspPort.toFloat(),
                             range = rtspPortSliderRange,
                             onValueChange = { viewModel.updateRtspPort(it.toInt()) }
                         )
                         DropdownSetting(
-                            title = "RTSP Encoder Input Format",
+                            title = stringResource(R.string.settings_rtsp_input_format),
                             options = RtspInputFormat.entries.map { it.name },
                             selected = rtspInputFormat.name,
                             onSelect = { viewModel.updateRtspInputFormat(it) }
@@ -433,9 +466,62 @@ fun AppSettingsScreen(
             }
 
             item {
-                SettingsSection(title = "Audio") {
+                // The RTMP push output: the enable gate arms it, the URL is the
+                // push target (rtmp[s]://host/app/stream-key — the stream key
+                // rides the URL and is never displayed back), and the status
+                // line mirrors the publisher's live lifecycle, including the
+                // readable refusal/error text.
+                val rtmpStatus by app.streamingManager.rtmpStatus.collectAsState()
+                SettingsSection(title = stringResource(R.string.settings_section_rtmp)) {
                     SwitchSetting(
-                        title = "Include Audio in Live Stream",
+                        title = stringResource(R.string.settings_enable_rtmp),
+                        checked = rtmpEnabled,
+                        onCheckedChange = { viewModel.updateRtmpEnabled(it) }
+                    )
+                    if (rtmpEnabled) {
+                        OutlinedTextField(
+                            value = rtmpUrl,
+                            onValueChange = { viewModel.updateRtmpUrl(it) },
+                            label = { Text(stringResource(R.string.settings_rtmp_push_url)) },
+                            placeholder = { Text(stringResource(R.string.settings_rtmp_url_hint)) },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true
+                        )
+                        if (rtmpUrl.isNotBlank() && RtmpUrl.parse(rtmpUrl) == null) {
+                            Text(
+                                stringResource(R.string.settings_rtmp_url_invalid),
+                                color = MaterialTheme.colorScheme.error,
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                        }
+                        val statusText = when (val s = rtmpStatus) {
+                            is RtmpStatus.Error -> stringResource(
+                                R.string.settings_rtmp_status,
+                                stringResource(R.string.settings_rtmp_status_error, s.message)
+                            )
+                            else -> stringResource(R.string.settings_rtmp_status, s.wireName)
+                        }
+                        Text(
+                            statusText,
+                            color = if (rtmpStatus is RtmpStatus.Error) {
+                                MaterialTheme.colorScheme.error
+                            } else {
+                                MaterialTheme.colorScheme.onSurface
+                            },
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                        Text(
+                            stringResource(R.string.settings_rtmp_h264_note),
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
+                }
+            }
+
+            item {
+                SettingsSection(title = stringResource(R.string.settings_section_audio)) {
+                    SwitchSetting(
+                        title = stringResource(R.string.settings_stream_audio),
                         checked = streamAudioEnabled,
                         onCheckedChange = { viewModel.updateStreamAudioEnabled(it) }
                     )
@@ -443,11 +529,12 @@ fun AppSettingsScreen(
                     val app = context.applicationContext as MainApplication
                     val audioDevices = remember { app.streamingManager.audioInputDevices() }
                     val selectedAudioDevice by viewModel.audioDeviceId.collectAsState()
+                    val defaultAudioLabel = stringResource(R.string.settings_audio_default)
                     DropdownSetting(
-                        title = "Microphone",
-                        options = listOf("Default (auto)") + audioDevices.map { it.second },
+                        title = stringResource(R.string.settings_microphone),
+                        options = listOf(defaultAudioLabel) + audioDevices.map { it.second },
                         selected = audioDevices.firstOrNull { it.first.toString() == selectedAudioDevice }?.second
-                            ?: "Default (auto)",
+                            ?: defaultAudioLabel,
                         onSelect = { label ->
                             viewModel.updateAudioDeviceId(
                                 audioDevices.firstOrNull { it.second == label }?.first?.toString() ?: ""
@@ -455,24 +542,26 @@ fun AppSettingsScreen(
                         }
                     )
                     SwitchSetting(
-                        title = "Echo Cancellation & Noise Suppression",
+                        title = stringResource(R.string.settings_echo_cancellation),
                         checked = streamAudioEchoCancellation,
                         onCheckedChange = { viewModel.updateStreamAudioEchoCancellation(it) }
                     )
                     SliderSetting(
-                        title = "Live Audio Bitrate (kbps)",
+                        title = stringResource(R.string.settings_audio_bitrate),
                         value = streamAudioBitrateKbps.toFloat(),
                         range = audioBitrateSliderRange,
                         onValueChange = { viewModel.updateStreamAudioBitrateKbps(it.toInt()) }
                     )
+                    val monoLabel = stringResource(R.string.settings_mono)
+                    val stereoLabel = stringResource(R.string.settings_stereo)
                     DropdownSetting(
-                        title = "Live Audio Channels",
-                        options = listOf("Mono", "Stereo"),
-                        selected = if (streamAudioChannels == 2) "Stereo" else "Mono",
-                        onSelect = { viewModel.updateStreamAudioChannels(if (it == "Stereo") 2 else 1) }
+                        title = stringResource(R.string.settings_audio_channels),
+                        options = listOf(monoLabel, stereoLabel),
+                        selected = if (streamAudioChannels == 2) stereoLabel else monoLabel,
+                        onSelect = { viewModel.updateStreamAudioChannels(if (it == stereoLabel) 2 else 1) }
                     )
                     SwitchSetting(
-                        title = "Include Audio in Recordings",
+                        title = stringResource(R.string.settings_recording_audio),
                         checked = recordingAudioEnabled,
                         onCheckedChange = { viewModel.updateRecordingAudioEnabled(it) }
                     )
@@ -480,14 +569,14 @@ fun AppSettingsScreen(
             }
 
             item {
-                SettingsSection(title = "Security") {
+                SettingsSection(title = stringResource(R.string.settings_section_security)) {
                     SwitchSetting(
-                        title = "HTTPS (Self-Signed Certificate)",
+                        title = stringResource(R.string.settings_https),
                         checked = httpsEnabled,
                         onCheckedChange = { viewModel.updateHttpsEnabled(it) }
                     )
                     SwitchSetting(
-                        title = "Stream Authentication",
+                        title = stringResource(R.string.settings_stream_auth),
                         checked = authSettings.enabled,
                         onCheckedChange = { viewModel.updateAuthEnabled(it) }
                     )
@@ -495,7 +584,7 @@ fun AppSettingsScreen(
                         OutlinedTextField(
                             value = authSettings.username,
                             onValueChange = { viewModel.updateAuthUsername(it) },
-                            label = { Text("Username") },
+                            label = { Text(stringResource(R.string.settings_username)) },
                             modifier = Modifier.fillMaxWidth(),
                             singleLine = true
                         )
@@ -505,8 +594,8 @@ fun AppSettingsScreen(
                         OutlinedTextField(
                             value = passwordText,
                             onValueChange = { passwordText = it },
-                            label = { Text("Password") },
-                            placeholder = { Text("Enter new password") },
+                            label = { Text(stringResource(R.string.settings_password)) },
+                            placeholder = { Text(stringResource(R.string.settings_password_hint)) },
                             visualTransformation = PasswordVisualTransformation(),
                             modifier = Modifier.fillMaxWidth(),
                             singleLine = true,

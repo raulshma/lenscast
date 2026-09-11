@@ -1,6 +1,8 @@
 package com.raulshma.lenscast.settings
 
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.res.stringResource
+import com.raulshma.lenscast.R
 
 /**
  * The Display section shared by the camera settings screen and the app
@@ -14,9 +16,9 @@ fun DisplaySettingsSection(
     showPreview: Boolean,
     onTogglePreview: (Boolean) -> Unit,
 ) {
-    SettingsSection(title = "Display") {
+    SettingsSection(title = stringResource(R.string.settings_section_display)) {
         SwitchSetting(
-            title = "Show Camera Preview",
+            title = stringResource(R.string.settings_show_preview),
             checked = showPreview,
             onCheckedChange = onTogglePreview,
         )

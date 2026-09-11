@@ -35,9 +35,11 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.raulshma.lenscast.MainApplication
+import com.raulshma.lenscast.R
 import com.raulshma.lenscast.core.EventKind
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -78,7 +80,7 @@ fun DetectionEventsScreen(
     Scaffold(
         topBar = {
             LensCastTopBar(
-                title = "Detection Events",
+                title = stringResource(R.string.detection_title),
                 onNavigateBack = onNavigateBack,
             )
         },
@@ -96,10 +98,10 @@ fun DetectionEventsScreen(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 listOf(
-                    "All" to null,
-                    "Motion" to EventKind.MOTION.wireName,
-                    "Sound" to EventKind.SOUND.wireName,
-                    "Tamper" to EventKind.TAMPER.wireName,
+                    stringResource(R.string.detection_filter_all) to null,
+                    stringResource(R.string.detection_filter_motion) to EventKind.MOTION.wireName,
+                    stringResource(R.string.detection_filter_sound) to EventKind.SOUND.wireName,
+                    stringResource(R.string.detection_filter_tamper) to EventKind.TAMPER.wireName,
                 ).forEach { (label, kind) ->
                     Surface(
                         onClick = { filter = kind },
@@ -131,7 +133,7 @@ fun DetectionEventsScreen(
                         events = store.events()
                     }
                 }) {
-                    Text("Clear")
+                    Text(stringResource(R.string.detection_clear))
                 }
             }
 
@@ -140,7 +142,7 @@ fun DetectionEventsScreen(
             }
             if (filtered.isEmpty()) {
                 Text(
-                    text = "No detection events yet",
+                    text = stringResource(R.string.detection_empty),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(16.dp),
@@ -182,7 +184,7 @@ private fun DetectionEventRow(event: DetectionEvent) {
             if (bitmap != null) {
                 Image(
                     bitmap = bitmap.asImageBitmap(),
-                    contentDescription = "${event.type} snapshot",
+                    contentDescription = stringResource(R.string.detection_snapshot_cd, event.type),
                     modifier = Modifier
                         .size(width = 84.dp, height = 64.dp)
                         .clip(RoundedCornerShape(8.dp)),
@@ -207,7 +209,7 @@ private fun DetectionEventRow(event: DetectionEvent) {
                 )
                 if (event.zones.isNotEmpty()) {
                     Text(
-                        text = "Zones: ${event.zones.joinToString(", ")}",
+                        text = stringResource(R.string.detection_zones, event.zones.joinToString(", ")),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1,
@@ -216,7 +218,7 @@ private fun DetectionEventRow(event: DetectionEvent) {
                 }
                 if (event.labels.isNotEmpty()) {
                     Text(
-                        text = "ML: ${event.labels.joinToString(", ")}",
+                        text = stringResource(R.string.detection_ml_labels, event.labels.joinToString(", ")),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1,
@@ -225,7 +227,7 @@ private fun DetectionEventRow(event: DetectionEvent) {
                 }
                 if (event.dispatchedActions.isNotEmpty()) {
                     Text(
-                        text = "Actions: ${event.dispatchedActions.joinToString(", ")}",
+                        text = stringResource(R.string.detection_actions, event.dispatchedActions.joinToString(", ")),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1,
@@ -234,7 +236,7 @@ private fun DetectionEventRow(event: DetectionEvent) {
                 }
                 event.clipFileName?.let { clip ->
                     Text(
-                        text = "Clip: $clip",
+                        text = stringResource(R.string.detection_clip, clip),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.primary,
                         maxLines = 1,

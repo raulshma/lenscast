@@ -7,8 +7,10 @@ import com.raulshma.lenscast.camera.model.OverlaySettings
 import com.raulshma.lenscast.MainApplication
 import com.raulshma.lenscast.core.NetworkQualityMonitor
 import com.raulshma.lenscast.core.NetworkUtils
+import com.raulshma.lenscast.core.EcoIdlePolicy
 import com.raulshma.lenscast.core.StreamDefaults
 import com.raulshma.lenscast.core.ThermalMonitor
+import com.raulshma.lenscast.core.ThermalState
 import com.raulshma.lenscast.data.SettingsDataStore
 import com.raulshma.lenscast.data.StreamAuthSettings
 import com.raulshma.lenscast.streaming.web.ApiRouter
@@ -28,6 +30,9 @@ import com.raulshma.lenscast.streaming.web.StatusWebHandler
 import com.raulshma.lenscast.streaming.web.StreamWebHandler
 import com.raulshma.lenscast.streaming.web.SystemWebHandler
 import com.raulshma.lenscast.streaming.hls.HlsManager
+import com.raulshma.lenscast.streaming.rtmp.RtmpOutput
+import com.raulshma.lenscast.streaming.rtmp.RtmpPublisher
+import com.raulshma.lenscast.streaming.rtmp.RtmpStatus
 import com.raulshma.lenscast.streaming.rtsp.RtspAuthSpec
 import com.raulshma.lenscast.streaming.rtsp.RtspConfigDiff
 import com.raulshma.lenscast.streaming.rtsp.RtspInputFormat
@@ -35,7 +40,12 @@ import com.raulshma.lenscast.streaming.rtsp.RtspResolution
 import com.raulshma.lenscast.streaming.rtsp.RtspServer
 import com.raulshma.lenscast.streaming.rtsp.RtspUriPolicy
 import com.raulshma.lenscast.streaming.rtsp.RtspVideoCodec
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.StateFlow
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
@@ -62,8 +72,8 @@ class StreamingManager(
     }
 
     // The shared H.264/AAC encode pipeline: started whenever any encoded sink
-    // is active (RTSP output, HLS ring, WS video clients — the
-    // [EncodedStreamPolicy] verdict), and fanning its encoded access units
+    // is active (RTSP output, RTMP push output, HLS ring, WS video clients —
+    // the [EncodedStreamPolicy] verdict), and fanning its encoded access units
     // out to every sink. Its rtsp sink forwards to whatever server instance
     // the RTSP output currently holds, so the output stays a sink consumer —
     // never the only encode trigger.
@@ -71,7 +81,9 @@ class StreamingManager(
         policyInputs = ::encodedStreamInputs,
         audio = audioStreamingManager,
         audioConfig = ::audioConfig,
-        audioWanted = { streamAudioEnabled.get() && !recordingAudioCaptureActive },
+        // Eco idle counts as audio-not-wanted: with the mode dropped in there
+        // are no consumers by definition, so the hub stops the AAC encoder.
+        audioWanted = { streamAudioEnabled.get() && !recordingAudioCaptureActive && !ecoIdleActive },
         audioBitrateKbps = { streamAudioBitrateKbps.get() },
         rtspSink = object : EncodedSink {
             override fun feedVideo(nalUnits: List<EncodedNalUnit>) {
@@ -84,6 +96,15 @@ class StreamingManager(
         },
         hlsSink = HlsManager,
         wsVideoSink = wsVideoSink,
+        rtmpSink = object : EncodedSink {
+            override fun feedVideo(nalUnits: List<EncodedNalUnit>) {
+                rtmpOutput.feedEncodedVideo(nalUnits)
+            }
+
+            override fun feedAudio(aacData: ByteArray) {
+                rtmpOutput.feedEncodedAudio(aacData)
+            }
+        },
     )
 
     /** The sink-activity snapshot the hub's policy verdicts read. */
@@ -92,6 +113,7 @@ class StreamingManager(
         rtspActive = rtspOutput.isActive(),
         hlsRequested = HlsManager.isHot(),
         wsVideoClients = wsMediaServer?.videoClientCount() ?: 0,
+        rtmpActive = rtmpOutput.isActive(),
     )
 
     // The RTSP output behind this manager's public surface: retained config,
@@ -109,6 +131,18 @@ class StreamingManager(
             _rtspUrl.value = url
         },
         serverFactory = { port -> RtspServer(port, encodedHub) },
+    )
+
+    // The RTMP push output behind this manager's public surface: the retained
+    // URL, the enabled gate, the H.264-only validation ladder, and the
+    // publisher lifecycle all live in the deep module (the RtspOutput
+    // pattern); this class keeps the fan-out and the status mirror. Its sink
+    // receives the hub's H.264/AAC access units exactly like RTSP/HLS/WS —
+    // gated off under H.265 at the hub's fan-out.
+    private val rtmpOutput: RtmpOutput = RtmpOutput(
+        source = encodedHub,
+        onStatusChanged = { status -> _rtmpStatus.value = status },
+        publisherFactory = { url, onStatus -> RtmpPublisher(url, encodedHub, onStatus) },
     )
 
     private val serviceDiscoveryManager = ServiceDiscoveryManager(context)
@@ -152,6 +186,113 @@ class StreamingManager(
     // retained here because StreamingServer owns no latest-frame getter — the
     // one frame DetectionCoordinator can reach without a fresh camera capture.
     @Volatile private var latestWebJpeg: ByteArray? = null
+
+    // ── Eco idle-fps mode (battery-powered idle sessions) ──
+    // The persisted toggle arrives through [setEcoIdleFpsEnabled] (the
+    // Settings Applier); the verdicts are the pure
+    // [com.raulshma.lenscast.core.EcoIdlePolicy] over charging
+    // (PowerManager), consumer counts (MJPEG/RTSP/WS clients, HLS fetches,
+    // RTMP push), and thermal — evaluated on a short poll plus an immediate
+    // re-check whenever the toggle or the user frame rate moves. Eco only
+    // applies while thermal is NORMAL: thermal escalation always restores,
+    // so the two ladders never stack.
+
+    private val ecoIdleEnabled = AtomicBoolean(false)
+    @Volatile private var ecoIdleActive = false
+    @Volatile private var userFrameRate = StreamDefaults.STREAM_FPS
+    private var ecoIdleState = EcoIdlePolicy.State()
+    private val ecoIdleLock = Any()
+    private val ecoIdleMonitorStarted = AtomicBoolean(false)
+
+    /** The app-scoped PowerManager, resolved lazily like the auth settings store. */
+    private val powerDelegate: com.raulshma.lenscast.core.PowerManager by lazy {
+        (context.applicationContext as MainApplication).powerManager
+    }
+
+    /**
+     * The persisted eco toggle. Arms the poll loop once and re-evaluates
+     * immediately, so a disable lands on the next tick at the latest.
+     */
+    fun setEcoIdleFpsEnabled(enabled: Boolean) {
+        val changed = ecoIdleEnabled.getAndSet(enabled) != enabled
+        if (changed) {
+            Log.d(TAG, "Eco idle-fps mode ${if (enabled) "enabled" else "disabled"}")
+        }
+        startEcoIdleMonitorOnce()
+        evaluateEcoIdle(System.currentTimeMillis())
+    }
+
+    private fun startEcoIdleMonitorOnce() {
+        if (!ecoIdleMonitorStarted.compareAndSet(false, true)) return
+        CoroutineScope(SupervisorJob() + Dispatchers.Default).launch {
+            while (true) {
+                delay(EcoIdlePolicy.EVALUATION_INTERVAL_MS)
+                evaluateEcoIdle(System.currentTimeMillis())
+            }
+        }
+    }
+
+    /** One evaluation: policy verdict in, applied side effects out. */
+    private fun evaluateEcoIdle(nowMs: Long) {
+        synchronized(ecoIdleLock) {
+            val decision = EcoIdlePolicy.evaluate(
+                enabled = ecoIdleEnabled.get(),
+                charging = powerDelegate.isChargingNow(),
+                hasConsumers = liveConsumerCount() > 0,
+                thermalNormal = thermalMonitor.thermalState.value == ThermalState.NORMAL,
+                nowMs = nowMs,
+                state = ecoIdleState,
+            )
+            ecoIdleState = decision.nextState
+            when (decision.verdict) {
+                EcoIdlePolicy.Verdict.Drop -> {
+                    ecoIdleActive = true
+                    applyEffectiveFrameRate()
+                    // No consumers by definition: pause the live mic capture
+                    // and let the hub's audioWanted verdict stop the encoder.
+                    if (_isAudioStreaming.value) {
+                        audioStreamingManager.stop()
+                        clearWebAudioState()
+                    }
+                    encodedHub.refresh()
+                    Log.d(TAG, "Eco idle: dropped to ${EcoIdlePolicy.floorFps(userFrameRate)} fps (audio paused)")
+                }
+                EcoIdlePolicy.Verdict.Restore -> {
+                    if (ecoIdleActive) {
+                        ecoIdleActive = false
+                        applyEffectiveFrameRate()
+                        refreshAudioStreamingState()
+                        encodedHub.refresh()
+                        Log.d(TAG, "Eco idle: restored ${userFrameRate} fps")
+                    }
+                }
+                EcoIdlePolicy.Verdict.Hold -> Unit
+            }
+        }
+    }
+
+    /**
+     * Every live stream consumer the eco verdict must respect: MJPEG and WS
+     * clients, RTSP playing clients, HLS fetches (a hot ring means a player
+     * is pulling), and the RTMP push (its remote server is a consumer even
+     * though it never appears as a local client).
+     */
+    private fun liveConsumerCount(): Int {
+        val http = try {
+            server.getClientCount()
+        } catch (_: Exception) {
+            0
+        }
+        val rtsp = try {
+            getRtspClientCount()
+        } catch (_: Exception) {
+            0
+        }
+        val ws = wsMediaServer?.videoClientCount() ?: 0
+        val hls = if (HlsManager.isHot()) 1 else 0
+        val rtmp = if (rtmpOutput.isActive()) 1 else 0
+        return http + rtsp + ws + hls + rtmp
+    }
 
     init {
         framePipeline.setListener { jpeg ->
@@ -202,6 +343,13 @@ class StreamingManager(
 
     private val _isRtspRunning = MutableStateFlow(false)
     val isRtspRunning: StateFlow<Boolean> = _isRtspRunning
+
+    private val _isRtmpEnabled = MutableStateFlow(false)
+    val isRtmpEnabled: StateFlow<Boolean> = _isRtmpEnabled
+
+    /** The RTMP push output's lifecycle state — idle/connecting/connected/error(+message). */
+    private val _rtmpStatus = MutableStateFlow<RtmpStatus>(RtmpStatus.Idle)
+    val rtmpStatus: StateFlow<RtmpStatus> = _rtmpStatus
 
     val droppedFrames: StateFlow<Int> = framePipeline.droppedFrames
 
@@ -339,6 +487,30 @@ class StreamingManager(
         soundDetector.cooldownMs = seconds * 1_000L
     }
 
+    /**
+     * Installs the YAMNet classifier's tap on the sound detector's PCM feed
+     * (composition-root wiring, like the listener seams below); the detector
+     * owns the fail-open contract — the tap sees the same chunks, before the
+     * RMS gate, and can never affect or throw onto the audio path.
+     */
+    fun setSoundClassificationTap(tap: ((pcm16: ByteArray) -> Unit)?) {
+        soundDetector.audioTap = tap
+    }
+
+    /** The live mic-capture rate the PCM chunks carry (the classifier resamples from it). */
+    fun audioCaptureSampleRateHz(): Int = try {
+        audioStreamingManager.getSampleRateHz()
+    } catch (_: Exception) {
+        com.raulshma.lenscast.core.StreamDefaults.AUDIO_SAMPLE_RATE_HZ
+    }
+
+    /** The live mic-capture channel count the PCM chunks carry. */
+    fun audioCaptureChannelCount(): Int = try {
+        audioStreamingManager.getChannelCount()
+    } catch (_: Exception) {
+        1
+    }
+
     /** The detector seams; wired once at the composition root. */
     fun setMotionListener(listener: ((delta: Double, zones: List<String>) -> Unit)?) {
         motionListener = listener
@@ -376,12 +548,12 @@ class StreamingManager(
     /** Per-client measured throughput/fps read seam for Web API handlers. */
     fun getFramesPerSecond(clientId: String): Double = networkQualityMonitor.getFramesPerSecond(clientId)
 
-    fun isLiveStreaming(): Boolean = webStreamingActive.get() || rtspOutput.isActive()
+    fun isLiveStreaming(): Boolean = webStreamingActive.get() || rtspOutput.isActive() || rtmpOutput.isActive()
 
     fun isWebStreamActive(): Boolean = webStreamingActive.get()
 
     private fun updateStreamingState() {
-        val anyActive = webStreamingActive.get() || rtspOutput.isActive()
+        val anyActive = webStreamingActive.get() || rtspOutput.isActive() || rtmpOutput.isActive()
         _isStreaming.value = anyActive
         _isWebStreamingActive.value = webStreamingActive.get()
     }
@@ -486,8 +658,8 @@ class StreamingManager(
             .getOrDefault(listOfNotNull(NetworkUtils.getLocalIpAddress()))
 
     fun startStreaming(): Boolean {
-        if (!webStreamingEnabled.get() && !rtspOutput.isEnabled()) {
-            Log.w(TAG, "Cannot start streaming: both web and RTSP outputs are disabled")
+        if (!webStreamingEnabled.get() && !rtspOutput.isEnabled() && !rtmpOutput.isEnabled()) {
+            Log.w(TAG, "Cannot start streaming: web, RTSP, and RTMP outputs are all disabled")
             return false
         }
 
@@ -497,6 +669,9 @@ class StreamingManager(
         if (rtspOutput.isEnabled()) {
             startRtspStreaming()
         }
+        if (rtmpOutput.isEnabled()) {
+            startRtmpStreaming()
+        }
 
         Log.d(TAG, "Streaming started at ${_streamUrl.value}")
         return true
@@ -505,6 +680,7 @@ class StreamingManager(
     fun stopStreaming() {
         stopWebStreaming()
         stopRtspStreaming()
+        stopRtmpStreaming()
         stopTransport()
         unregisterMdnsService()
         _isServerRunning.value = false
@@ -514,6 +690,7 @@ class StreamingManager(
     fun pauseStreaming() {
         stopWebStreaming()
         stopRtspStreaming()
+        stopRtmpStreaming()
         Log.d(TAG, "Live streaming paused (server still running)")
     }
 
@@ -581,6 +758,72 @@ class StreamingManager(
         Log.d(TAG, "RTSP streaming stopped")
     }
 
+    // ── RTMP push output: the RtspOutput twins with an async connect ──
+
+    /**
+     * Starts the RTMP push output. The validation ladder (enabled gate, URL
+     * parse, H.264 codec) runs synchronously in the output and a refusal
+     * lands on [rtmpStatus] as an Error with the readable message; the
+     * connect itself is asynchronous (Connecting → Connected, auto-reconnect
+     * with capped backoff while active). False means refused — read
+     * [rtmpStatus] for the reason.
+     */
+    fun startRtmpStreaming(): Boolean {
+        if (!rtmpOutput.isEnabled()) {
+            Log.w(TAG, "Cannot start RTMP push: RTMP is disabled")
+            return false
+        }
+        if (rtmpOutput.isActive()) return true
+        when (rtmpOutput.start()) {
+            is RtmpOutput.StartResult.Started -> Unit
+            is RtmpOutput.StartResult.Rejected -> {
+                encodedHub.refresh()
+                updateStreamingState()
+                return false
+            }
+        }
+        encodedHub.refresh()
+        updateStreamingState()
+        Log.d(TAG, "RTMP push started")
+        return true
+    }
+
+    fun stopRtmpStreaming() {
+        if (!rtmpOutput.isActive()) return
+        rtmpOutput.stop()
+        encodedHub.refresh()
+        updateStreamingState()
+        Log.d(TAG, "RTMP push stopped")
+    }
+
+    /** True while the RTMP output is live with the stream-audio toggle on — the mic verdict's RTMP half. */
+    fun isRtmpAudioActive(): Boolean =
+        rtmpOutput.isActive() && streamAudioEnabled.get() && !recordingAudioCaptureActive
+
+    fun setRtmpEnabled(enabled: Boolean) {
+        if (!rtmpOutput.setEnabled(enabled)) return
+        _isRtmpEnabled.value = enabled
+        if (!enabled) {
+            stopRtmpStreaming()
+        }
+    }
+
+    /**
+     * The push URL from settings: lands in the output's retained value (so
+     * the next start picks them up), and a live output restarts on it through
+     * the output's own URL-change path.
+     */
+    fun setRtmpUrl(url: String) {
+        rtmpOutput.setUrl(url)
+    }
+
+    /**
+     * True while the RTMP push output is live — from a passing start until
+     * stop, including connecting/reconnecting gaps (the [rtmpStatus] carries
+     * which of the two is happening). The status snapshot's RTMP activity bit.
+     */
+    fun isRtmpActive(): Boolean = rtmpOutput.isActive()
+
     /**
      * One camera frame fans out to every consumer — the M-JPEG web pipeline
      * and the shared encoded-stream hub (RTSP RTP, HLS, WS video). The web
@@ -614,6 +857,11 @@ class StreamingManager(
         if (clientCount != lastReportedClientCount) {
             lastReportedClientCount = clientCount
             _clientCount.value = clientCount
+            // An MJPEG viewer arriving (or the last one leaving) is an eco
+            // verdict input — re-check now instead of waiting out the poll.
+            if (ecoIdleEnabled.get()) {
+                evaluateEcoIdle(System.currentTimeMillis())
+            }
         }
         if (clientCount == 0) return
 
@@ -628,9 +876,18 @@ class StreamingManager(
      * One user-facing frame rate fans out to every subsystem that throttles
      * or encodes by it: the M-JPEG frame interval, the adaptive-bitrate
      * default, and the encoded-stream hub (RTP increment follows via the
-     * RTSP output's own retained config).
+     * RTSP output's own retained config). The value is remembered as the
+     * user's rate — the eco idle mode overrides the *effective* rate
+     * ([applyEffectiveFrameRate]) without losing this one.
      */
     fun setFrameRate(fps: Int) {
+        userFrameRate = fps
+        applyEffectiveFrameRate()
+    }
+
+    /** The effective fan-out: the eco floor while eco idle is dropped in, else the user's rate. */
+    private fun applyEffectiveFrameRate() {
+        val fps = if (ecoIdleActive) EcoIdlePolicy.floorFps(userFrameRate) else userFrameRate
         setStreamFrameRate(fps)
         setAdaptiveDefaultFrameRate(fps)
         rtspOutput.setFrameRate(fps)
@@ -858,6 +1115,18 @@ class StreamingManager(
     fun setRtspVideoCodec(codec: RtspVideoCodec) {
         rtspOutput.setVideoCodec(codec)
         encodedHub.setVideoCodec(codec)
+        // RTMP has no H.265 mapping: a live push under a codec flip to H265
+        // goes dark silently otherwise — stop it with the readable reason.
+        // (A flip back to H264 needs no help; the user restarts the push.)
+        if (codec == RtspVideoCodec.H265 && rtmpOutput.isActive()) {
+            rtmpOutput.stop()
+            _rtmpStatus.value = RtmpStatus.Error(
+                "RTMP push stopped: the video codec changed to H.265, which RTMP cannot carry — " +
+                    "switch back to H.264 and restart the push",
+            )
+            encodedHub.refresh()
+            updateStreamingState()
+        }
     }
 
     /** The encoded pipeline's live target bitrate — the adaptive controller's current value, not the static default. */
@@ -970,6 +1239,7 @@ class StreamingManager(
                 settings = SettingsWebHandler(
                     settingsDataStore = app.settingsDataStore,
                     detectionModelStore = app.detectionModelStore,
+                    audioModelStore = app.audioModelStore,
                 ),
                 status = statusHandler,
                 stream = StreamWebHandler(this, app.streamingSession),
@@ -977,6 +1247,10 @@ class StreamingManager(
                 lens = LensWebHandler(app.cameraService),
                 interval = IntervalCaptureWebHandler(context),
                 recording = RecordingWebHandler(app.recordingController),
+                recordingSessions = com.raulshma.lenscast.streaming.web.RecordingSessionsWebHandler(
+                    captureHistoryStore = app.captureHistoryStore,
+                    eventStore = app.detectionEventStore,
+                ),
                 gallery = gallery,
                 deterrence = deterrence,
                 detectionEvents = detectionEvents,
@@ -1019,11 +1293,12 @@ class StreamingManager(
         audioStreamingManager.release()
         stopStreaming()
     }
-
     private fun refreshAudioStreamingState() {
         audioStreamingManager.stop()
 
-        if (!webStreamingActive.get() || !webStreamingEnabled.get() || !streamAudioEnabled.get() || recordingAudioCaptureActive) {
+        // Eco idle keeps the capture down: no consumers by definition, so the
+        // mic (and every AAC encoder fed from it) stays off until a restore.
+        if (!webStreamingActive.get() || !webStreamingEnabled.get() || !streamAudioEnabled.get() || recordingAudioCaptureActive || ecoIdleActive) {
             clearWebAudioState()
             return
         }

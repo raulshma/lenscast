@@ -64,7 +64,9 @@ class SystemWebHandler(
      * The battery's extended facts ride the BATTERY_CHANGED sticky intent —
      * the platform's one source for temperature, voltage, and health. Absent
      * extras stay null; the level/charging pair comes from the PowerManager
-     * so the two endpoints can never disagree.
+     * so the two endpoints can never disagree. The charge-life properties
+     * (counter, current, cycles) come from BatteryManager and stay null
+     * when the hardware does not report them.
      */
     private fun batteryDetail(): BatteryDetailDto {
         val intent: Intent? = runCatching {
@@ -78,7 +80,25 @@ class SystemWebHandler(
             temperatureTenthsC = intExtra(BatteryManager.EXTRA_TEMPERATURE),
             voltageMillivolts = intExtra(BatteryManager.EXTRA_VOLTAGE),
             health = batteryHealthName(intExtra(BatteryManager.EXTRA_HEALTH)),
+            batteryChargeCounterMah = batteryProperty(BatteryManager.BATTERY_PROPERTY_CHARGE_COUNTER)
+                ?.let { it / 1_000 }, // The platform reports microampere-hours; the wire unit is mAh.
+            batteryCurrentMicroAmps = batteryProperty(BatteryManager.BATTERY_PROPERTY_CURRENT_NOW),
+            batteryCycleCount = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                // The cycle-count property constant is hidden from the public
+                // SDK jar (BatteryManager, API 34+); the value is stable.
+                batteryProperty(5)
+            } else {
+                null
+            },
         )
+    }
+
+    /** One BatteryManager property; null when unsupported (the platform's MIN_VALUE answer). */
+    private fun batteryProperty(property: Int): Int? {
+        val manager = context.getSystemService(Context.BATTERY_SERVICE) as? BatteryManager ?: return null
+        return runCatching { manager.getIntProperty(property) }
+            .getOrNull()
+            ?.takeIf { it != Integer.MIN_VALUE }
     }
 
     private fun batteryHealthName(health: Int?): String? = when (health) {

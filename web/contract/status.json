@@ -9,7 +9,10 @@
     "audioUrl": "http://192.168.1.10:8080/audio",
     "rtspEnabled": true,
     "rtspStreamingActive": true,
-    "rtspUrl": "rtsp://192.168.1.10:8554/live"
+    "rtspUrl": "rtsp://192.168.1.10:8554/live",
+    "rtmpEnabled": false,
+    "rtmpActive": false,
+    "rtmpStatus": "idle"
   },
   "thermal": "NORMAL",
   "camera": "Ready",

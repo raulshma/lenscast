@@ -8,10 +8,13 @@ import androidx.lifecycle.viewModelScope
 import com.raulshma.lenscast.camera.CameraService
 import com.raulshma.lenscast.camera.CameraSettingsEditor
 import com.raulshma.lenscast.camera.model.CameraSettings
+import com.raulshma.lenscast.camera.model.GridStyle
+import com.raulshma.lenscast.camera.model.SelfTimerMode
 import com.raulshma.lenscast.camera.model.QuickSettingCatalog
 import com.raulshma.lenscast.camera.model.QuickSettingType
 import com.raulshma.lenscast.core.PowerManager
 import com.raulshma.lenscast.core.parseEnum
+import com.raulshma.lenscast.capture.ml.AudioModelStore
 import com.raulshma.lenscast.capture.ml.DetectionModelStore
 import com.raulshma.lenscast.data.SettingsDataStore
 import com.raulshma.lenscast.core.StreamAuthCrypto
@@ -34,6 +37,8 @@ class SettingsViewModel(
     private val powerManager: PowerManager? = null,
     /** The on-demand ML model store; its download is the one non-setting action here. */
     private val detectionModelStore: DetectionModelStore,
+    /** The on-demand YAMNet model store; same one non-setting action as above. */
+    private val audioModelStore: AudioModelStore,
 ) : ViewModel() {
 
     // Read-side settings come straight from the Settings Store's shared
@@ -43,6 +48,24 @@ class SettingsViewModel(
     val webStreamingEnabled: StateFlow<Boolean> = settingsDataStore.webStreamingEnabled
     val jpegQuality: StateFlow<Int> = settingsDataStore.jpegQuality
     val showPreview: StateFlow<Boolean> = settingsDataStore.showPreview
+
+    // ── Camera pro mode ──
+    // Viewfinder aids (grid, self-timer, spirit level), the pro-tools overlay
+    // toggles, the photo-capture quality/RAW knobs, and the EXIF geotag —
+    // all plain store flows with no ViewModel mirror.
+    val gridStyle: StateFlow<GridStyle> = settingsDataStore.gridStyle
+    val selfTimer: StateFlow<SelfTimerMode> = settingsDataStore.selfTimer
+    val spiritLevelEnabled: StateFlow<Boolean> = settingsDataStore.spiritLevelEnabled
+    val histogramEnabled: StateFlow<Boolean> = settingsDataStore.histogramEnabled
+    val zebrasEnabled: StateFlow<Boolean> = settingsDataStore.zebrasEnabled
+    val peakingEnabled: StateFlow<Boolean> = settingsDataStore.peakingEnabled
+    val photoJpegQuality: StateFlow<Int> = settingsDataStore.photoJpegQuality
+    val photoMaximizeQuality: StateFlow<Boolean> = settingsDataStore.photoMaximizeQuality
+    val rawCaptureEnabled: StateFlow<Boolean> = settingsDataStore.rawCaptureEnabled
+    val geotagEnabled: StateFlow<Boolean> = settingsDataStore.geotagEnabled
+
+    // The bound camera's live RAW verdict, for the RAW row's capability note.
+    val isRawCaptureSupported: StateFlow<Boolean> = cameraService.isRawCaptureSupported
     val streamAudioEnabled: StateFlow<Boolean> = settingsDataStore.streamAudioEnabled
     val streamAudioBitrateKbps: StateFlow<Int> = settingsDataStore.streamAudioBitrateKbps
     val streamAudioChannels: StateFlow<Int> = settingsDataStore.streamAudioChannels
@@ -51,6 +74,8 @@ class SettingsViewModel(
     val rtspEnabled: StateFlow<Boolean> = settingsDataStore.rtspEnabled
     val rtspPort: StateFlow<Int> = settingsDataStore.rtspPort
     val rtspInputFormat: StateFlow<RtspInputFormat> = settingsDataStore.rtspInputFormat
+    val rtmpEnabled: StateFlow<Boolean> = settingsDataStore.rtmpEnabled
+    val rtmpUrl: StateFlow<String> = settingsDataStore.rtmpUrl
     val adaptiveBitrateEnabled: StateFlow<Boolean> = settingsDataStore.adaptiveBitrateEnabled
     val mdnsEnabled: StateFlow<Boolean> = settingsDataStore.mdnsEnabled
     val motionDetectionEnabled: StateFlow<Boolean> = settingsDataStore.motionDetectionEnabled
@@ -75,12 +100,20 @@ class SettingsViewModel(
     val mlIncludePerson: StateFlow<Boolean> = settingsDataStore.mlIncludePerson
     val mlIncludePets: StateFlow<Boolean> = settingsDataStore.mlIncludePets
     val mlIncludeVehicles: StateFlow<Boolean> = settingsDataStore.mlIncludeVehicles
+    val soundClassificationEnabled: StateFlow<Boolean> = settingsDataStore.soundClassificationEnabled
+    val soundClassificationConfidencePercent: StateFlow<Int> = settingsDataStore.soundClassificationConfidencePercent
+    val soundClassificationAllowedClasses: StateFlow<Set<String>> = settingsDataStore.soundClassificationAllowedClasses
 
     // The detection model's download lifecycle, straight from the store.
     val detectionModelState: StateFlow<DetectionModelStore.State> =
         detectionModelStore.state
+
+    // The YAMNet audio model's download lifecycle, same contract.
+    val audioModelState: StateFlow<AudioModelStore.State> =
+        audioModelStore.state
     val continuousRecording: StateFlow<Boolean> = settingsDataStore.continuousRecording
     val continuousSegmentMinutes: StateFlow<Int> = settingsDataStore.continuousSegmentMinutes
+    val ecoIdleFpsEnabled: StateFlow<Boolean> = settingsDataStore.ecoIdleFpsEnabled
     val detectionNotificationsEnabled: StateFlow<Boolean> = settingsDataStore.detectionNotificationsEnabled
     val tamperDetectionEnabled: StateFlow<Boolean> = settingsDataStore.tamperDetectionEnabled
     val watchdogEnabled: StateFlow<Boolean> = settingsDataStore.watchdogEnabled
@@ -94,6 +127,7 @@ class SettingsViewModel(
     val captureRetentionDays: StateFlow<Int> = settingsDataStore.captureRetentionDays
     val eventRetentionDays: StateFlow<Int> = settingsDataStore.eventRetentionDays
     val storageQuotaMb: StateFlow<Int> = settingsDataStore.storageQuotaMb
+    val mediaEncryptionEnabled: StateFlow<Boolean> = settingsDataStore.mediaEncryptionEnabled
     val httpsEnabled: StateFlow<Boolean> = settingsDataStore.httpsEnabled
     val audioDeviceId: StateFlow<String> = settingsDataStore.audioDeviceId
     val resumeStreamsOnBoot: StateFlow<Boolean> = settingsDataStore.resumeStreamsOnBoot
@@ -170,6 +204,34 @@ class SettingsViewModel(
 
     fun updateJpegQuality(quality: Int) = save { settingsDataStore.saveJpegQuality(quality) }
 
+    // ── Camera pro mode writes ──
+    // Plain store saves; the Settings Applier carries the photo-capture
+    // config onto the camera, and the camera screen's ViewModel the rest.
+
+    fun updateGridStyle(name: String) = save {
+        settingsDataStore.saveGridStyle(parseEnum(name, GridStyle.OFF))
+    }
+
+    fun updateSelfTimer(name: String) = save {
+        settingsDataStore.saveSelfTimer(parseEnum(name, SelfTimerMode.OFF))
+    }
+
+    fun updateSpiritLevelEnabled(enabled: Boolean) = save { settingsDataStore.saveSpiritLevelEnabled(enabled) }
+
+    fun updateHistogramEnabled(enabled: Boolean) = save { settingsDataStore.saveHistogramEnabled(enabled) }
+
+    fun updateZebrasEnabled(enabled: Boolean) = save { settingsDataStore.saveZebrasEnabled(enabled) }
+
+    fun updatePeakingEnabled(enabled: Boolean) = save { settingsDataStore.savePeakingEnabled(enabled) }
+
+    fun updatePhotoJpegQuality(quality: Int) = save { settingsDataStore.savePhotoJpegQuality(quality) }
+
+    fun updatePhotoMaximizeQuality(enabled: Boolean) = save { settingsDataStore.savePhotoMaximizeQuality(enabled) }
+
+    fun updateRawCaptureEnabled(enabled: Boolean) = save { settingsDataStore.saveRawCaptureEnabled(enabled) }
+
+    fun updateGeotagEnabled(enabled: Boolean) = save { settingsDataStore.saveGeotagEnabled(enabled) }
+
     fun updateShowPreview(show: Boolean) = save { settingsDataStore.saveShowPreview(show) }
 
     fun updateStreamAudioEnabled(enabled: Boolean) = save { settingsDataStore.saveStreamAudioEnabled(enabled) }
@@ -189,6 +251,10 @@ class SettingsViewModel(
     fun updateRtspInputFormat(name: String) = save {
         settingsDataStore.saveRtspInputFormat(parseEnum(name, RtspInputFormat.AUTO))
     }
+
+    fun updateRtmpEnabled(enabled: Boolean) = save { settingsDataStore.saveRtmpEnabled(enabled) }
+
+    fun updateRtmpUrl(url: String) = save { settingsDataStore.saveRtmpUrl(url) }
 
     fun updateAdaptiveBitrateEnabled(enabled: Boolean) = save { settingsDataStore.saveAdaptiveBitrateEnabled(enabled) }
 
@@ -251,9 +317,25 @@ class SettingsViewModel(
         detectionModelStore.requestDownload()
     }
 
+    fun updateSoundClassificationEnabled(enabled: Boolean) =
+        save { settingsDataStore.saveSoundClassificationEnabled(enabled) }
+
+    fun updateSoundClassificationConfidencePercent(percent: Int) =
+        save { settingsDataStore.saveSoundClassificationConfidencePercent(percent) }
+
+    fun updateSoundClassificationAllowedClasses(classes: Set<String>) =
+        save { settingsDataStore.saveSoundClassificationAllowedClasses(classes) }
+
+    /** The YAMNet model fetch — same idempotent contract as the detection model's. */
+    fun downloadAudioModel() {
+        audioModelStore.requestDownload()
+    }
+
     fun updateContinuousRecording(enabled: Boolean) = save { settingsDataStore.saveContinuousRecording(enabled) }
 
     fun updateContinuousSegmentMinutes(minutes: Int) = save { settingsDataStore.saveContinuousSegmentMinutes(minutes) }
+
+    fun updateEcoIdleFpsEnabled(enabled: Boolean) = save { settingsDataStore.saveEcoIdleFpsEnabled(enabled) }
 
     fun updateDetectionNotificationsEnabled(enabled: Boolean) =
         save { settingsDataStore.saveDetectionNotificationsEnabled(enabled) }
@@ -286,6 +368,9 @@ class SettingsViewModel(
     fun updateEventRetentionDays(days: Int) = save { settingsDataStore.saveEventRetentionDays(days) }
 
     fun updateStorageQuotaMb(quotaMb: Int) = save { settingsDataStore.saveStorageQuotaMb(quotaMb) }
+
+    fun updateMediaEncryptionEnabled(enabled: Boolean) =
+        save { settingsDataStore.saveMediaEncryptionEnabled(enabled) }
 
 
     fun updateBackupWebdavPassword(password: String) {
@@ -324,10 +409,17 @@ class SettingsViewModel(
         private val settingsDataStore: SettingsDataStore,
         private val powerManager: PowerManager? = null,
         private val detectionModelStore: DetectionModelStore,
+        private val audioModelStore: AudioModelStore,
     ) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
         override fun <T : androidx.lifecycle.ViewModel> create(modelClass: Class<T>): T {
-            return SettingsViewModel(cameraService, settingsDataStore, powerManager, detectionModelStore) as T
+            return SettingsViewModel(
+                cameraService,
+                settingsDataStore,
+                powerManager,
+                detectionModelStore,
+                audioModelStore,
+            ) as T
         }
     }
 }

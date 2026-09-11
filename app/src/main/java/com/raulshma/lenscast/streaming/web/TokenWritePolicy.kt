@@ -22,6 +22,8 @@ object TokenWritePolicy {
         "/api/stream/web/stop",
         "/api/stream/rtsp/start",
         "/api/stream/rtsp/stop",
+        "/api/stream/rtmp/start",
+        "/api/stream/rtmp/stop",
         // Capture: the photo route exactly as the router registers it
         "/api/capture",
         // Recording lifecycle
@@ -33,6 +35,9 @@ object TokenWritePolicy {
         // Detection model fetch: a device-maintenance action in the siren/torch
         // class — it changes no persisted setting and cannot disable anything.
         "/api/settings/ml-model/download",
+        // Audio model fetch: the YAMNet twin of the detection model route —
+        // same device-maintenance class, same nothing-persisted contract.
+        "/api/settings/audio-model/download",
         // Test alert: fires the alert sinks once (webhook/MQTT/notification);
         // it persists nothing, records no event, and cannot arm deterrence.
         "/api/detection/test",

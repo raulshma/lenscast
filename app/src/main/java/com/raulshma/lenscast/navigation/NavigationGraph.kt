@@ -152,9 +152,11 @@ fun NavigationGraph() {
                 ) { backStackEntry ->
                     val mediaId = backStackEntry.arguments?.getString("mediaId") ?: ""
                     val galleryViewModel: GalleryViewModel = viewModel(
-                        factory = GalleryViewModel.Factory(app.captureHistoryStore)
+                        factory = GalleryViewModel.Factory(app.captureHistoryStore, app.decryptedPhotoCache)
                     )
                     val allItems by galleryViewModel.allItems.collectAsState()
+                    val decryptedPhotos by galleryViewModel.decryptedPhotos.collectAsState()
+                    val encryptedVideoIds by galleryViewModel.encryptedVideoIds.collectAsState()
 
                     val initialIndex = initialIndexFor(allItems, mediaId)
                     val pagerState = rememberPagerState(
@@ -185,6 +187,8 @@ fun NavigationGraph() {
                             initialMediaId = mediaId,
                             pagerState = pagerState,
                             onNavigateBack = { navController.popBackStack() },
+                            decryptedPhotos = decryptedPhotos,
+                            encryptedVideoIds = encryptedVideoIds,
                             onDeleteCurrent = {
                                 val currentIdx = pagerState.currentPage
                                 currentItem?.id?.let { galleryViewModel.deleteItem(it) }

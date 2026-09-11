@@ -5,6 +5,7 @@ import com.raulshma.lenscast.core.BackupTargetPolicy
 import com.raulshma.lenscast.core.StreamAuthCrypto
 import com.raulshma.lenscast.core.parseEnum
 import com.raulshma.lenscast.core.parseEnumOrNull
+import com.raulshma.lenscast.capture.ml.AudioModelStore
 import com.raulshma.lenscast.capture.ml.DetectionModelStore
 import com.raulshma.lenscast.camera.model.CameraSettings
 import com.raulshma.lenscast.camera.model.MaskingType
@@ -38,6 +39,8 @@ class SettingsWebHandler(
     private val settingsDataStore: SettingsDataStore,
     /** The on-demand model store; its state rides the settings response, its download the POST route. */
     private val detectionModelStore: DetectionModelStore,
+    /** The on-demand YAMNet model store; its download rides its own POST route (audio-model). */
+    private val audioModelStore: AudioModelStore,
     /** The export envelope's timestamp source. */
     private val nowMs: () -> Long = System::currentTimeMillis,
 ) {
@@ -153,6 +156,9 @@ class SettingsWebHandler(
                 soundRecordingEnabled = store.soundRecordingEnabled.value,
                 motionCooldownSeconds = store.motionCooldownSeconds.value,
                 soundCooldownSeconds = store.soundCooldownSeconds.value,
+                soundClassificationEnabled = store.soundClassificationEnabled.value,
+                soundClassificationConfidencePercent = store.soundClassificationConfidencePercent.value,
+                soundClassificationAllowedClasses = store.soundClassificationAllowedClasses.value.toList(),
                 webhookEnabled = store.webhookEnabled.value,
                 webhookUrl = store.webhookUrl.value,
                 webhookHeaders = store.webhookHeaders.value,
@@ -194,6 +200,7 @@ class SettingsWebHandler(
                 captureRetentionDays = store.captureRetentionDays.value,
                 eventRetentionDays = store.eventRetentionDays.value,
                 storageQuotaMb = store.storageQuotaMb.value,
+                mediaEncryptionEnabled = store.mediaEncryptionEnabled.value,
                 mlDetectionEnabled = store.mlDetectionEnabled.value,
                 mlMinScorePercent = store.mlMinScorePercent.value,
                 mlIncludePerson = store.mlIncludePerson.value,
@@ -205,6 +212,7 @@ class SettingsWebHandler(
                 continuousRecording = store.continuousRecording.value,
                 continuousSegmentMinutes = store.continuousSegmentMinutes.value,
                 onvifEnabled = store.onvifEnabled.value,
+                ecoIdleFpsEnabled = store.ecoIdleFpsEnabled.value,
             ),
         )
         return response
@@ -286,6 +294,14 @@ class SettingsWebHandler(
             settingsDataStore.saveSoundRecordingEnabled(stream.soundRecordingEnabled)
             settingsDataStore.saveMotionCooldownSeconds(stream.motionCooldownSeconds)
             settingsDataStore.saveSoundCooldownSeconds(stream.soundCooldownSeconds)
+            // The allow-list normalizes on save (unknown spellings drop out, an
+            // empty set folds back to the curated default), so a document that
+            // omits or empties the list can never widen or disarm the gate.
+            settingsDataStore.saveSoundClassificationEnabled(stream.soundClassificationEnabled)
+            settingsDataStore.saveSoundClassificationConfidencePercent(stream.soundClassificationConfidencePercent)
+            settingsDataStore.saveSoundClassificationAllowedClasses(
+                stream.soundClassificationAllowedClasses.toSet(),
+            )
             settingsDataStore.saveWebhookEnabled(stream.webhookEnabled)
             settingsDataStore.saveWebhookUrl(stream.webhookUrl)
             settingsDataStore.saveWebhookHeaders(stream.webhookHeaders)
@@ -318,6 +334,9 @@ class SettingsWebHandler(
             settingsDataStore.saveEventRetentionDays(stream.eventRetentionDays)
             // The storage quota clamps to its 100 MB–32 GB descriptor bounds.
             settingsDataStore.saveStorageQuotaMb(stream.storageQuotaMb)
+            // Opt-in, migration-free: existing media is never re-encrypted or
+            // decrypted — the resolver sniffs each file's header per read.
+            settingsDataStore.saveMediaEncryptionEnabled(stream.mediaEncryptionEnabled)
             settingsDataStore.saveMlDetectionEnabled(stream.mlDetectionEnabled)
             settingsDataStore.saveMlMinScorePercent(stream.mlMinScorePercent)
             settingsDataStore.saveMlIncludePerson(stream.mlIncludePerson)
@@ -326,6 +345,7 @@ class SettingsWebHandler(
             settingsDataStore.saveContinuousRecording(stream.continuousRecording)
             settingsDataStore.saveContinuousSegmentMinutes(stream.continuousSegmentMinutes)
             settingsDataStore.saveOnvifEnabled(stream.onvifEnabled)
+            settingsDataStore.saveEcoIdleFpsEnabled(stream.ecoIdleFpsEnabled)
             // Same write-only contract as the WebDAV password: an empty value
             // keeps the stored credential.
             if (stream.mqttPassword.isNotEmpty()) {
@@ -367,6 +387,17 @@ class SettingsWebHandler(
      */
     suspend fun downloadModel(): String {
         detectionModelStore.requestDownload()
+        return successAdapter.toJson(SuccessResponse())
+    }
+
+    /**
+     * POST /api/settings/audio-model/download — the audio twin of
+     * [downloadModel]: asks the YAMNet store to fetch the sound-classification
+     * model, idempotent there, outcome never this route's error (the in-app
+     * detection section's model row is the state surface).
+     */
+    suspend fun downloadAudioModel(): String {
+        audioModelStore.requestDownload()
         return successAdapter.toJson(SuccessResponse())
     }
 

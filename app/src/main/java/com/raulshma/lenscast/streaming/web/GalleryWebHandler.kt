@@ -36,7 +36,16 @@ class GalleryWebHandler(
     private val batchDeleteRequestAdapter by lazy { AppJson.moshi.adapter(BatchDeleteRequest::class.java) }
     private val batchDeleteResponseAdapter by lazy { AppJson.moshi.adapter(BatchDeleteResponse::class.java) }
     private val successAdapter by lazy { AppJson.moshi.adapter(SuccessResponse::class.java) }
-    private val mediaResolver = CaptureMediaResolver(context.contentResolver)
+
+    // Keyed with the app's media key so /api/media serves encrypted captures
+    // transparently (the same decrypt-on-read every in-app consumer uses).
+    private val mediaResolver = CaptureMediaResolver(
+        context.contentResolver,
+        (context.applicationContext as? com.raulshma.lenscast.MainApplication)?.mediaKeyProvider,
+    )
+
+    @Volatile
+    private var placeholderThumbnail: ByteArray? = null
 
     fun getGallery(type: String?, page: Int = 0, pageSize: Int = 0): String {
         val galleryPage = GalleryPage.of(captureHistoryStore.history.value, type, page, pageSize)
@@ -114,6 +123,15 @@ class GalleryWebHandler(
         if (entry.type != CaptureType.VIDEO) {
             return null
         }
+        // Encrypted-at-rest videos have no frameable bytes for the retriever
+        // (it needs real mp4 at rest; a decrypted stream cannot be handed to
+        // it) — the documented trade-off: while encryption is on, video
+        // thumbnails serve the generated filmstrip placeholder, on the web
+        // dashboard exactly like the in-app grid. Playback still decrypts
+        // through /api/media/{id}.
+        if (mediaResolver.isEncryptedAtRest(entry.filePath)) {
+            return placeholderThumbnail()
+        }
         // One ladder for the retriever's data source: scheme'd paths go
         // through their Uri, an existing plain file through its path, a
         // missing file yields no thumbnail.
@@ -170,6 +188,55 @@ class GalleryWebHandler(
             targetMaxPx = StreamDefaults.PHOTO_THUMBNAIL_MAX_PX,
             quality = StreamDefaults.PHOTO_THUMBNAIL_JPEG_QUALITY,
         )
+    }
+
+    /**
+     * The generated filmstrip placeholder for encrypted-at-rest video
+     * thumbnails: a dark frame with sprocket bars and a play glyph, rendered
+     * once and reused. Served as a real JPEG so the dashboard's `<img>`/video
+     * poster path renders it like any other thumbnail.
+     */
+    private fun placeholderThumbnail(): ByteArray {
+        placeholderThumbnail?.let { return it }
+        val width = StreamDefaults.PHOTO_THUMBNAIL_MAX_PX
+        val height = width * 9 / 16
+        val bitmap = android.graphics.Bitmap.createBitmap(width, height, android.graphics.Bitmap.Config.ARGB_8888)
+        val canvas = android.graphics.Canvas(bitmap)
+        canvas.drawColor(android.graphics.Color.rgb(18, 18, 22))
+        val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+            color = android.graphics.Color.argb(70, 255, 255, 255)
+        }
+        // The sprocket strip along the top and bottom edges.
+        val hole = width / 24f
+        val step = hole * 2.4f
+        var x = step / 2f
+        while (x + hole <= width) {
+            canvas.drawRoundRect(
+                x, height * 0.04f, x + hole, height * 0.04f + hole * 0.7f,
+                hole * 0.2f, hole * 0.2f, paint,
+            )
+            canvas.drawRoundRect(
+                x, height * 0.96f - hole * 0.7f, x + hole, height * 0.96f,
+                hole * 0.2f, hole * 0.2f, paint,
+            )
+            x += step
+        }
+        // The centered play glyph.
+        paint.color = android.graphics.Color.argb(160, 255, 255, 255)
+        val cx = width / 2f
+        val cy = height / 2f
+        val r = height / 6f
+        val triangle = android.graphics.Path().apply {
+            moveTo(cx - r * 0.6f, cy - r)
+            lineTo(cx - r * 0.6f, cy + r)
+            lineTo(cx + r, cy)
+            close()
+        }
+        canvas.drawPath(triangle, paint)
+        val stream = java.io.ByteArrayOutputStream()
+        bitmap.compress(android.graphics.Bitmap.CompressFormat.JPEG, 75, stream)
+        bitmap.recycle()
+        return stream.toByteArray().also { placeholderThumbnail = it }
     }
 
     companion object {

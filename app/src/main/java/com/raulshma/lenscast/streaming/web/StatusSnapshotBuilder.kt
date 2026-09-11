@@ -33,6 +33,11 @@ object StatusSnapshotBuilder {
         val rtspEnabled: Boolean,
         val rtspStreamingActive: Boolean,
         val rtspUrl: String,
+        /** The RTMP push output: enabled gate, live flag, lifecycle wire name, and error text. */
+        val rtmpEnabled: Boolean = false,
+        val rtmpActive: Boolean = false,
+        val rtmpStatus: String = "idle",
+        val rtmpError: String? = null,
     )
 
     data class ThermalInputs(
@@ -176,6 +181,10 @@ object StatusSnapshotBuilder {
                 rtspEnabled = streaming.rtspEnabled,
                 rtspStreamingActive = streaming.rtspStreamingActive,
                 rtspUrl = streaming.rtspUrl,
+                rtmpEnabled = streaming.rtmpEnabled,
+                rtmpActive = streaming.rtmpActive,
+                rtmpStatus = streaming.rtmpStatus,
+                rtmpError = streaming.rtmpError,
             ),
             thermal = thermal.thermalName,
             camera = thermal.cameraStateName,

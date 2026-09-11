@@ -12,11 +12,14 @@ import androidx.datastore.preferences.core.floatPreferencesKey
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
+import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.raulshma.lenscast.camera.model.CameraSettings
 import com.raulshma.lenscast.camera.model.FocusMode
+import com.raulshma.lenscast.camera.model.GridStyle
 import com.raulshma.lenscast.camera.model.HdrMode
 import com.raulshma.lenscast.camera.model.NightVisionMode
+import com.raulshma.lenscast.camera.model.SelfTimerMode
 import com.raulshma.lenscast.camera.model.MaskingType
 import com.raulshma.lenscast.camera.model.MaskingZone
 import com.raulshma.lenscast.camera.model.MotionZone
@@ -24,6 +27,8 @@ import com.raulshma.lenscast.camera.model.OverlayPosition
 import com.raulshma.lenscast.camera.model.OverlaySettings
 import com.raulshma.lenscast.camera.model.Resolution
 import com.raulshma.lenscast.camera.model.WhiteBalance
+import com.raulshma.lenscast.camera.model.PhotoCapturePlan
+import com.raulshma.lenscast.capture.model.SoundClassPolicy
 import com.raulshma.lenscast.core.AppJson
 import com.raulshma.lenscast.core.BackupTargetPolicy
 import com.raulshma.lenscast.core.StreamAuthCrypto
@@ -74,6 +79,16 @@ private object Keys {
     val RESOLUTION = stringPreferencesKey("resolution")
     val STABILIZATION = stringPreferencesKey("stabilization")
     val TORCH_ENABLED = stringPreferencesKey("torch_enabled")
+    val GRID_STYLE = stringPreferencesKey("grid_style")
+    val SELF_TIMER = stringPreferencesKey("self_timer")
+    val SPIRIT_LEVEL_ENABLED = stringPreferencesKey("spirit_level_enabled")
+    val HISTOGRAM_ENABLED = stringPreferencesKey("histogram_enabled")
+    val ZEBRAS_ENABLED = stringPreferencesKey("zebras_enabled")
+    val PEAKING_ENABLED = stringPreferencesKey("peaking_enabled")
+    val PHOTO_JPEG_QUALITY = intPreferencesKey("photo_jpeg_quality")
+    val PHOTO_MAXIMIZE_QUALITY = stringPreferencesKey("photo_maximize_quality")
+    val RAW_CAPTURE_ENABLED = stringPreferencesKey("raw_capture_enabled")
+    val GEOTAG_ENABLED = stringPreferencesKey("geotag_enabled")
     val HDR_MODE = stringPreferencesKey("hdr_mode")
     val SCENE_MODE = stringPreferencesKey("scene_mode")
     val STREAMING_PORT = intPreferencesKey("streaming_port")
@@ -94,6 +109,8 @@ private object Keys {
     val RTSP_INPUT_FORMAT = stringPreferencesKey("rtsp_input_format")
     val RTSP_RESOLUTION = stringPreferencesKey("rtsp_resolution")
     val RTSP_VIDEO_CODEC = stringPreferencesKey("rtsp_video_codec")
+    val RTMP_ENABLED = stringPreferencesKey("rtmp_enabled")
+    val RTMP_URL = stringPreferencesKey("rtmp_url")
     val ADAPTIVE_BITRATE_ENABLED = stringPreferencesKey("adaptive_bitrate_enabled")
     val MDNS_ENABLED = stringPreferencesKey("mdns_enabled")
     val MOTION_DETECTION_ENABLED = stringPreferencesKey("motion_detection_enabled")
@@ -142,9 +159,13 @@ private object Keys {
     val ML_INCLUDE_VEHICLES = stringPreferencesKey("ml_include_vehicles")
     val ML_DETECTION_ENABLED = stringPreferencesKey("ml_detection_enabled")
     val ML_MIN_SCORE_PERCENT = intPreferencesKey("ml_min_score_percent")
+    val SOUND_CLASSIFICATION_ENABLED = stringPreferencesKey("sound_classification_enabled")
+    val SOUND_CLASSIFICATION_CONFIDENCE_PERCENT = intPreferencesKey("sound_classification_confidence_percent")
+    val SOUND_CLASSIFICATION_ALLOWED_CLASSES = stringSetPreferencesKey("sound_classification_allowed_classes")
     val CONTINUOUS_RECORDING = stringPreferencesKey("continuous_recording")
     val CONTINUOUS_SEGMENT_MINUTES = intPreferencesKey("continuous_segment_minutes")
     val ONVIF_ENABLED = stringPreferencesKey("onvif_enabled")
+    val ECO_IDLE_FPS_ENABLED = stringPreferencesKey("eco_idle_fps_enabled")
     val WEBHOOK_ENABLED = stringPreferencesKey("webhook_enabled")
     val WEBHOOK_URL = stringPreferencesKey("webhook_url")
     val WEBHOOK_HEADERS = stringPreferencesKey("webhook_headers")
@@ -177,6 +198,7 @@ private object Keys {
     val CAPTURE_RETENTION_DAYS = intPreferencesKey("capture_retention_days")
     val EVENT_RETENTION_DAYS = intPreferencesKey("event_retention_days")
     val STORAGE_QUOTA_MB = intPreferencesKey("storage_quota_mb")
+    val MEDIA_ENCRYPTION_ENABLED = stringPreferencesKey("media_encryption_enabled")
 }
 
 /**
@@ -206,6 +228,53 @@ internal val jpegQualityPref = intPref(
 )
 
 internal val showPreviewPref = boolPref(Keys.SHOW_PREVIEW, defaultTrue = true)
+
+// ── Camera pro-mode settings ──
+// Viewfinder aids (grid, self-timer, spirit level) and the pro-tools
+// overlays (histogram, zebras, focus peaking) plus the photo-capture
+// quality/RAW/EXIF knobs — all camera-screen-facing, all default-off
+// (default-90 for the quality slider), persisted through their own
+// descriptors so the composite camera-settings decode stays untouched.
+
+/** The viewfinder grid overlay style. */
+internal val gridStylePref = enumPref(Keys.GRID_STYLE, GridStyle.OFF)
+
+/** The self-timer duration; OFF captures immediately. */
+internal val selfTimerPref = enumPref(Keys.SELF_TIMER, SelfTimerMode.OFF)
+
+/** The two-axis spirit-level overlay. */
+internal val spiritLevelEnabledPref = boolPref(Keys.SPIRIT_LEVEL_ENABLED, defaultTrue = false)
+
+/** Luma histogram overlay over the analysis frames. */
+internal val histogramEnabledPref = boolPref(Keys.HISTOGRAM_ENABLED, defaultTrue = false)
+
+/** Over/under-exposure zebra overlay over the analysis frames. */
+internal val zebrasEnabledPref = boolPref(Keys.ZEBRAS_ENABLED, defaultTrue = false)
+
+/** Focus-peaking (edge contrast) overlay over the analysis frames. */
+internal val peakingEnabledPref = boolPref(Keys.PEAKING_ENABLED, defaultTrue = false)
+
+/**
+ * The photo-capture JPEG encoder quality, clamped to the Photo Capture
+ * Plan's bounds (the one home for the 60–100 range and the 90 default).
+ */
+internal val photoJpegQualityPref = intPref(
+    Keys.PHOTO_JPEG_QUALITY,
+    PhotoCapturePlan.PHOTO_JPEG_QUALITY_DEFAULT,
+    IntBounds(PhotoCapturePlan.PHOTO_JPEG_QUALITY_MIN, PhotoCapturePlan.PHOTO_JPEG_QUALITY_MAX),
+)
+
+/** CAPTURE_MODE_MAXIMIZE_QUALITY vs MINIMIZE_LATENCY on the photo use case. */
+internal val photoMaximizeQualityPref = boolPref(Keys.PHOTO_MAXIMIZE_QUALITY, defaultTrue = false)
+
+/**
+ * Per-shot RAW+JPEG request; the CameraService folds it back to plain JPEG
+ * on devices without `OUTPUT_FORMAT_RAW_JPEG` support.
+ */
+internal val rawCaptureEnabledPref = boolPref(Keys.RAW_CAPTURE_ENABLED, defaultTrue = false)
+
+/** Opt-in GPS geotagging on captured photos (needs location permission). */
+internal val geotagEnabledPref = boolPref(Keys.GEOTAG_ENABLED, defaultTrue = false)
 
 internal val streamAudioEnabledPref = boolPref(Keys.STREAM_AUDIO_ENABLED, defaultTrue = true)
 
@@ -285,6 +354,21 @@ internal val rtspVideoCodecPref = SettingPref(
 )
 
 internal val adaptiveBitrateEnabledPref = boolPref(Keys.ADAPTIVE_BITRATE_ENABLED, defaultTrue = false)
+
+/**
+ * The RTMP push output (publish to an RTMP/RTMP(S) server), off by default.
+ * The URL itself carries the stream key (a credential), so it persists raw
+ * but never round-trips over the Web API — see [rtmpUrlPref].
+ */
+internal val rtmpEnabledPref = boolPref(Keys.RTMP_ENABLED, defaultTrue = false)
+
+/**
+ * The push target — `rtmp://[user:pass@]host[:port]/app/streamKey` (or
+ * `rtmps://…`). Trimmed on save like the MQTT host; validity is judged at
+ * start time by the output (a readable error beats silently "fixing" a URL
+ * the user mistyped).
+ */
+internal val rtmpUrlPref = stringPref(Keys.RTMP_URL, "") { it.trim() }
 
 internal val mdnsEnabledPref = boolPref(Keys.MDNS_ENABLED, defaultTrue = true)
 
@@ -394,6 +478,32 @@ internal val mlMinScorePercentPref = intPref(
     IntBounds(StreamDefaults.ML_SCORE_MIN_PERCENT, StreamDefaults.ML_SCORE_MAX_PERCENT),
 )
 
+/** YAMNet sound classification: annotate-only labels ride sound events. */
+internal val soundClassificationEnabledPref =
+    boolPref(Keys.SOUND_CLASSIFICATION_ENABLED, defaultTrue = false)
+
+internal val soundClassificationConfidencePercentPref = intPref(
+    Keys.SOUND_CLASSIFICATION_CONFIDENCE_PERCENT,
+    StreamDefaults.SOUND_CLASSIFICATION_PERCENT_DEFAULT,
+    IntBounds(StreamDefaults.SOUND_CLASSIFICATION_MIN_PERCENT, StreamDefaults.SOUND_CLASSIFICATION_MAX_PERCENT),
+)
+
+/**
+ * The user-narrowed YAMNet allow-list, stored as a string set. Both sides
+ * run through the policy's normalize (unknown spellings drop out; an empty
+ * set folds back to the curated default) — "persist a valid value" — so a
+ * restored backup can never widen or empty the gate.
+ */
+internal val soundClassificationAllowedClassesPref = SettingPref(
+    default = SoundClassPolicy.DEFAULT_ALLOWED_CLASSES,
+    decode = { prefs ->
+        SoundClassPolicy.normalizeAllowed(prefs[Keys.SOUND_CLASSIFICATION_ALLOWED_CLASSES] ?: emptySet())
+    },
+    encode = { prefs, value ->
+        prefs[Keys.SOUND_CLASSIFICATION_ALLOWED_CLASSES] = SoundClassPolicy.normalizeAllowed(value)
+    },
+)
+
 /** Continuous NVR-style loop recording: chained bounded segments while the camera is free. */
 internal val continuousRecordingPref = boolPref(Keys.CONTINUOUS_RECORDING, defaultTrue = false)
 
@@ -405,6 +515,13 @@ internal val continuousSegmentMinutesPref = intPref(
 
 /** ONVIF Profile S device endpoint + WS-Discovery responder. */
 internal val onvifEnabledPref = boolPref(Keys.ONVIF_ENABLED, defaultTrue = false)
+
+/**
+ * Eco idle-fps mode: while the device runs on battery with no stream
+ * consumers, drop the frame rate to the eco floor and pause live-audio
+ * encoding; restore on the first client, charger, or thermal event.
+ */
+internal val ecoIdleFpsEnabledPref = boolPref(Keys.ECO_IDLE_FPS_ENABLED, defaultTrue = false)
 
 internal val webhookEnabledPref = boolPref(Keys.WEBHOOK_ENABLED, defaultTrue = false)
 
@@ -513,6 +630,14 @@ internal val storageQuotaMbPref = intPref(
     StreamDefaults.STORAGE_QUOTA_MB_DEFAULT,
     IntBounds(StreamDefaults.STORAGE_QUOTA_MB_MIN, StreamDefaults.STORAGE_QUOTA_MB_MAX),
 )
+
+/**
+ * Opt-in media-at-rest encryption (AES-256-GCM per file, one Keystore key):
+ * default off, and deliberately migration-free — flipping it never
+ * re-encrypts or decrypts existing media, because the reader sniffs each
+ * file's magic header, so a mixed library stays readable in any direction.
+ */
+internal val mediaEncryptionEnabledPref = boolPref(Keys.MEDIA_ENCRYPTION_ENABLED, defaultTrue = false)
 
 
 internal val watchdogEnabledPref = boolPref(Keys.WATCHDOG_ENABLED, defaultTrue = false)
@@ -841,6 +966,28 @@ class SettingsDataStore(
 
     val showPreview: StateFlow<Boolean> = showPreviewPref.shared()
 
+    // ── Camera pro-mode settings ──
+
+    val gridStyle: StateFlow<GridStyle> = gridStylePref.shared()
+
+    val selfTimer: StateFlow<SelfTimerMode> = selfTimerPref.shared()
+
+    val spiritLevelEnabled: StateFlow<Boolean> = spiritLevelEnabledPref.shared()
+
+    val histogramEnabled: StateFlow<Boolean> = histogramEnabledPref.shared()
+
+    val zebrasEnabled: StateFlow<Boolean> = zebrasEnabledPref.shared()
+
+    val peakingEnabled: StateFlow<Boolean> = peakingEnabledPref.shared()
+
+    val photoJpegQuality: StateFlow<Int> = photoJpegQualityPref.shared()
+
+    val photoMaximizeQuality: StateFlow<Boolean> = photoMaximizeQualityPref.shared()
+
+    val rawCaptureEnabled: StateFlow<Boolean> = rawCaptureEnabledPref.shared()
+
+    val geotagEnabled: StateFlow<Boolean> = geotagEnabledPref.shared()
+
     val streamAudioEnabled: StateFlow<Boolean> = streamAudioEnabledPref.shared()
 
     val streamAudioBitrateKbps: StateFlow<Int> = streamAudioBitrateKbpsPref.shared()
@@ -865,6 +1012,10 @@ class SettingsDataStore(
 
     val rtspVideoCodec: StateFlow<RtspVideoCodec> = rtspVideoCodecPref.shared()
 
+    val rtmpEnabled: StateFlow<Boolean> = rtmpEnabledPref.shared()
+
+    val rtmpUrl: StateFlow<String> = rtmpUrlPref.shared()
+
     val adaptiveBitrateEnabled: StateFlow<Boolean> = adaptiveBitrateEnabledPref.shared()
 
     val mdnsEnabled: StateFlow<Boolean> = mdnsEnabledPref.shared()
@@ -886,6 +1037,8 @@ class SettingsDataStore(
     val continuousSegmentMinutes: StateFlow<Int> = continuousSegmentMinutesPref.shared()
 
     val onvifEnabled: StateFlow<Boolean> = onvifEnabledPref.shared()
+
+    val ecoIdleFpsEnabled: StateFlow<Boolean> = ecoIdleFpsEnabledPref.shared()
 
     val motionPostRollSeconds: StateFlow<Int> = motionPostRollSecondsPref.shared()
 
@@ -920,6 +1073,12 @@ class SettingsDataStore(
     val mlIncludePets: StateFlow<Boolean> = mlIncludePetsPref.shared()
 
     val mlIncludeVehicles: StateFlow<Boolean> = mlIncludeVehiclesPref.shared()
+
+    val soundClassificationEnabled: StateFlow<Boolean> = soundClassificationEnabledPref.shared()
+
+    val soundClassificationConfidencePercent: StateFlow<Int> = soundClassificationConfidencePercentPref.shared()
+
+    val soundClassificationAllowedClasses: StateFlow<Set<String>> = soundClassificationAllowedClassesPref.shared()
 
     val webhookEnabled: StateFlow<Boolean> = webhookEnabledPref.shared()
 
@@ -988,6 +1147,8 @@ class SettingsDataStore(
 
     val storageQuotaMb: StateFlow<Int> = storageQuotaMbPref.shared()
 
+    val mediaEncryptionEnabled: StateFlow<Boolean> = mediaEncryptionEnabledPref.shared()
+
 
     val watchdogEnabled: StateFlow<Boolean> = watchdogEnabledPref.shared()
 
@@ -1010,6 +1171,26 @@ class SettingsDataStore(
     suspend fun saveJpegQuality(quality: Int) = jpegQualityPref.save(quality)
 
     suspend fun saveShowPreview(show: Boolean) = showPreviewPref.save(show)
+
+    suspend fun saveGridStyle(style: GridStyle) = gridStylePref.save(style)
+
+    suspend fun saveSelfTimer(mode: SelfTimerMode) = selfTimerPref.save(mode)
+
+    suspend fun saveSpiritLevelEnabled(enabled: Boolean) = spiritLevelEnabledPref.save(enabled)
+
+    suspend fun saveHistogramEnabled(enabled: Boolean) = histogramEnabledPref.save(enabled)
+
+    suspend fun saveZebrasEnabled(enabled: Boolean) = zebrasEnabledPref.save(enabled)
+
+    suspend fun savePeakingEnabled(enabled: Boolean) = peakingEnabledPref.save(enabled)
+
+    suspend fun savePhotoJpegQuality(quality: Int) = photoJpegQualityPref.save(quality)
+
+    suspend fun savePhotoMaximizeQuality(enabled: Boolean) = photoMaximizeQualityPref.save(enabled)
+
+    suspend fun saveRawCaptureEnabled(enabled: Boolean) = rawCaptureEnabledPref.save(enabled)
+
+    suspend fun saveGeotagEnabled(enabled: Boolean) = geotagEnabledPref.save(enabled)
 
     suspend fun saveStreamAudioEnabled(enabled: Boolean) = streamAudioEnabledPref.save(enabled)
 
@@ -1035,6 +1216,10 @@ class SettingsDataStore(
     suspend fun saveRtspResolution(resolution: RtspResolution) = rtspResolutionPref.save(resolution)
 
     suspend fun saveRtspVideoCodec(codec: RtspVideoCodec) = rtspVideoCodecPref.save(codec)
+
+    suspend fun saveRtmpEnabled(enabled: Boolean) = rtmpEnabledPref.save(enabled)
+
+    suspend fun saveRtmpUrl(url: String) = rtmpUrlPref.save(url)
 
     suspend fun saveAdaptiveBitrateEnabled(enabled: Boolean) = adaptiveBitrateEnabledPref.save(enabled)
 
@@ -1064,6 +1249,8 @@ class SettingsDataStore(
     suspend fun saveContinuousSegmentMinutes(minutes: Int) = continuousSegmentMinutesPref.save(minutes)
 
     suspend fun saveOnvifEnabled(enabled: Boolean) = onvifEnabledPref.save(enabled)
+
+    suspend fun saveEcoIdleFpsEnabled(enabled: Boolean) = ecoIdleFpsEnabledPref.save(enabled)
 
     suspend fun saveMotionPostRollSeconds(seconds: Int) = motionPostRollSecondsPref.save(seconds)
 
@@ -1098,6 +1285,15 @@ class SettingsDataStore(
     suspend fun saveMlIncludePets(enabled: Boolean) = mlIncludePetsPref.save(enabled)
 
     suspend fun saveMlIncludeVehicles(enabled: Boolean) = mlIncludeVehiclesPref.save(enabled)
+
+    suspend fun saveSoundClassificationEnabled(enabled: Boolean) =
+        soundClassificationEnabledPref.save(enabled)
+
+    suspend fun saveSoundClassificationConfidencePercent(percent: Int) =
+        soundClassificationConfidencePercentPref.save(percent)
+
+    suspend fun saveSoundClassificationAllowedClasses(classes: Set<String>) =
+        soundClassificationAllowedClassesPref.save(classes)
 
     suspend fun saveWebhookEnabled(enabled: Boolean) = webhookEnabledPref.save(enabled)
 
@@ -1164,6 +1360,8 @@ class SettingsDataStore(
     suspend fun saveEventRetentionDays(days: Int) = eventRetentionDaysPref.save(days)
 
     suspend fun saveStorageQuotaMb(quotaMb: Int) = storageQuotaMbPref.save(quotaMb)
+
+    suspend fun saveMediaEncryptionEnabled(enabled: Boolean) = mediaEncryptionEnabledPref.save(enabled)
 
     suspend fun saveOverlaySettings(settings: OverlaySettings) = overlaySettingsPref.save(settings)
 

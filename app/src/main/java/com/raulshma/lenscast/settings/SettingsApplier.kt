@@ -2,6 +2,7 @@ package com.raulshma.lenscast.settings
 
 import android.util.Log
 import com.raulshma.lenscast.camera.CameraService
+import com.raulshma.lenscast.camera.model.PhotoCapturePlan
 import com.raulshma.lenscast.core.StreamWatchdog
 import com.raulshma.lenscast.core.mqtt.MqttAlertPublisher
 import com.raulshma.lenscast.data.SettingsDataStore
@@ -120,6 +121,40 @@ class SettingsApplier(
                 streamingManager.setRtspInputFormat(rtsp.format)
                 streamingManager.setRtspResolution(rtsp.resolution)
                 streamingManager.setRtspVideoCodec(rtsp.codec)
+            }
+        }
+
+        // RTMP push: the enable gate and the target URL run the output's own
+        // lifecycle rule — off stops a live push, a URL change restarts it
+        // through the output's URL-change path, and on simply arms it (the
+        // actual start is a user/API action, exactly like the RTSP gate).
+        scope.launch {
+            combine(
+                settingsDataStore.rtmpEnabled,
+                settingsDataStore.rtmpUrl,
+            ) { enabled, url ->
+                RtmpSettings(enabled, url)
+            }.collectLatest { rtmp ->
+                streamingManager.setRtmpUrl(rtmp.url)
+                streamingManager.setRtmpEnabled(rtmp.enabled)
+            }
+        }
+
+        // Photo capture quality/RAW: the three persisted knobs fold into the
+        // one immutable PhotoCaptureConfig the CameraService's ImageCapture
+        // builder consumes — the plan (not this applier) owns the quality
+        // clamp, the capture-mode choice, and the device RAW capability fold;
+        // a change that alters the bound builder triggers the service's own
+        // RebindIfFree rebind.
+        scope.launch {
+            combine(
+                settingsDataStore.photoJpegQuality,
+                settingsDataStore.photoMaximizeQuality,
+                settingsDataStore.rawCaptureEnabled,
+            ) { jpegQuality, maximizeQuality, rawRequested ->
+                PhotoCapturePlan.PhotoCaptureConfig(jpegQuality, maximizeQuality, rawRequested)
+            }.collectLatest { config ->
+                cameraService.applyPhotoCaptureConfig(config)
             }
         }
 
@@ -243,6 +278,15 @@ class SettingsApplier(
             }
         }
 
+        // Eco idle-fps mode: the persisted toggle lands on the manager, whose
+        // evaluation loop owns the client/charging/thermal verdicts (the pure
+        // EcoIdlePolicy) and the drop/restore application.
+        scope.launch {
+            settingsDataStore.ecoIdleFpsEnabled.collectLatest { enabled ->
+                streamingManager.setEcoIdleFpsEnabled(enabled)
+            }
+        }
+
         Log.d(TAG, "Settings applier started")
     }
 
@@ -264,6 +308,11 @@ class SettingsApplier(
         val format: RtspInputFormat,
         val resolution: RtspResolution,
         val codec: RtspVideoCodec,
+    )
+
+    private data class RtmpSettings(
+        val enabled: Boolean,
+        val url: String,
     )
 
     private data class DiscoverySettings(

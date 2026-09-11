@@ -18,19 +18,24 @@ interface BackupTargetUploader {
 }
 
 /**
- * The two source shapes the worker already handles, mirrored as data: a
- * captured file on disk, or a MediaStore `content://` recording plus the
- * resolver that opens it. [remoteName] is always the file's display name.
+ * The source shapes the worker handles, mirrored as data: a captured file on
+ * disk, a MediaStore `content://` recording plus the resolver that opens it,
+ * or an already-opened stream with its known size (the encrypted-at-rest
+ * path — the worker hands a decrypted stream plus the plaintext size, so no
+ * uploader ever sees ciphertext). [remoteName] is always the file's display
+ * name.
  */
 sealed interface BackupUploadSource {
     data class FileSource(val file: File) : BackupUploadSource
     data class ContentSource(val uri: Uri, val resolver: ContentResolver) : BackupUploadSource
+    /** A stream opened lazily (decryption included) plus its known byte size. */
+    data class StreamSource(val open: () -> InputStream?, val sizeBytes: Long) : BackupUploadSource
 }
 
 /**
  * The one size-probe-and-open ladder every uploader needs for framing its
  * fixed-length POST/PUT: best-effort byte size (−1 when unresolvable) plus
- * the opened stream, for both source shapes. Null when the source cannot be
+ * the opened stream, for all source shapes. Null when the source cannot be
  * opened at all — a revoked MediaStore grant, a deleted recording. One home,
  * so the transports cannot drift on how they measure and read a capture.
  */
@@ -40,5 +45,9 @@ fun BackupUploadSource.openWithSize(): Pair<Long, InputStream>? = when (this) {
         val size = resolver.openAssetFileDescriptor(uri, "r")?.use { it.length } ?: -1L
         val input = resolver.openInputStream(uri) ?: return null
         size to input
+    }
+    is BackupUploadSource.StreamSource -> {
+        val input = open() ?: return null
+        sizeBytes to input
     }
 }

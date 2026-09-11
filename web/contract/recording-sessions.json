@@ -1,0 +1,25 @@
+{
+  "sessions": [
+    {
+      "id": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+      "startMs": 1788796800000,
+      "endMs": 1788800400000,
+      "trigger": "manual",
+      "mediaId": "7c9e6679-7425-40de-944b-e07fc1f90ae7"
+    },
+    {
+      "id": "2f8a1c3d-5b6e-4a7c-9d0e-1f2a3b4c5d6e",
+      "startMs": 1788825600000,
+      "endMs": 1788826500000,
+      "trigger": "motion",
+      "mediaId": "2f8a1c3d-5b6e-4a7c-9d0e-1f2a3b4c5d6e"
+    },
+    {
+      "id": "9a8b7c6d-5e4f-4a3b-2c1d-0e9f8a7b6c5d",
+      "startMs": 1788850000000,
+      "endMs": 1788850060000,
+      "trigger": "sound",
+      "mediaId": "9a8b7c6d-5e4f-4a3b-2c1d-0e9f8a7b6c5d"
+    }
+  ]
+}

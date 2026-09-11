@@ -19,11 +19,15 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.text.KeyboardActions
+import com.raulshma.lenscast.R
 import com.raulshma.lenscast.capture.MotionArmingPolicy
+import com.raulshma.lenscast.capture.ml.AudioModelStore
 import com.raulshma.lenscast.capture.ml.DetectionModelStore
+import com.raulshma.lenscast.capture.model.SoundClassPolicy
 import com.raulshma.lenscast.core.StreamDefaults
 
 /**
@@ -45,6 +49,10 @@ fun DetectionSettingsSection(viewModel: SettingsViewModel, onOpenEventLog: (() -
     val soundThreshold by viewModel.soundThresholdPercent.collectAsState()
     val soundAdaptiveFloor by viewModel.soundAdaptiveNoiseFloor.collectAsState()
     val soundRecordingEnabled by viewModel.soundRecordingEnabled.collectAsState()
+    val soundClassificationEnabled by viewModel.soundClassificationEnabled.collectAsState()
+    val soundClassificationConfidence by viewModel.soundClassificationConfidencePercent.collectAsState()
+    val soundClassificationAllowed by viewModel.soundClassificationAllowedClasses.collectAsState()
+    val audioModelState by viewModel.audioModelState.collectAsState()
     val motionCooldown by viewModel.motionCooldownSeconds.collectAsState()
     val soundCooldown by viewModel.soundCooldownSeconds.collectAsState()
     val mlEnabled by viewModel.mlDetectionEnabled.collectAsState()
@@ -59,60 +67,60 @@ fun DetectionSettingsSection(viewModel: SettingsViewModel, onOpenEventLog: (() -
     val quietHoursEnd by viewModel.alertQuietHoursEndMinute.collectAsState()
     val tamperEnabled by viewModel.tamperDetectionEnabled.collectAsState()
 
-    SettingsSection(title = "Detection & Alerts") {
+    SettingsSection(title = stringResource(R.string.detection_section_title)) {
         // Persisted toggles: the screen writes the store, the Settings
         // Applier applies them to the runtime detectors.
         SwitchSetting(
-            title = "Motion Detection",
+            title = stringResource(R.string.detection_motion),
             checked = motionDetectionEnabled,
             onCheckedChange = { viewModel.updateMotionDetectionEnabled(it) }
         )
         if (onOpenEventLog != null) {
             TextButton(onClick = onOpenEventLog) {
-                Text("Open Event Log")
+                Text(stringResource(R.string.detection_open_event_log))
             }
         }
         if (motionDetectionEnabled) {
             SliderSetting(
-                title = "Motion Sensitivity (%)",
+                title = stringResource(R.string.detection_motion_sensitivity),
                 value = motionSensitivity.toFloat(),
                 range = StreamDefaultsRange.MOTION_SENSITIVITY,
                 onValueChange = { viewModel.updateMotionSensitivity(it.toInt()) }
             )
             SliderSetting(
-                title = "Event Cooldown (seconds)",
+                title = stringResource(R.string.detection_event_cooldown),
                 value = motionCooldown.toFloat(),
                 range = StreamDefaultsRange.MOTION_COOLDOWN,
                 onValueChange = { viewModel.updateMotionCooldownSeconds(it.toInt()) }
             )
             SwitchSetting(
-                title = "Record on Motion",
+                title = stringResource(R.string.detection_record_on_motion),
                 checked = motionRecordingEnabled,
                 onCheckedChange = { viewModel.updateMotionRecordingEnabled(it) }
             )
             if (motionRecordingEnabled) {
                 SliderSetting(
-                    title = "Post-roll (seconds)",
+                    title = stringResource(R.string.detection_post_roll),
                     value = motionPostRoll.toFloat(),
                     range = StreamDefaultsRange.MOTION_POST_ROLL,
                     onValueChange = { viewModel.updateMotionPostRollSeconds(it.toInt()) }
                 )
             }
             SwitchSetting(
-                title = "Arm on Schedule",
+                title = stringResource(R.string.detection_arm_on_schedule),
                 checked = armScheduleEnabled,
                 onCheckedChange = { viewModel.updateMotionArmScheduleEnabled(it) }
             )
             if (armScheduleEnabled) {
                 SliderSetting(
-                    title = "Arm From (minute of day)",
+                    title = stringResource(R.string.detection_arm_from),
                     value = armStartMinute.toFloat(),
                     range = StreamDefaultsRange.MINUTE_OF_DAY,
                     steps = 95,
                     onValueChange = { viewModel.updateMotionArmStartMinute(it.toInt()) }
                 )
                 SliderSetting(
-                    title = "Arm Until (minute of day)",
+                    title = stringResource(R.string.detection_arm_until),
                     value = armEndMinute.toFloat(),
                     range = StreamDefaultsRange.MINUTE_OF_DAY,
                     steps = 95,
@@ -129,76 +137,115 @@ fun DetectionSettingsSection(viewModel: SettingsViewModel, onOpenEventLog: (() -
             }
         }
         SwitchSetting(
-            title = "Sound Detection",
+            title = stringResource(R.string.detection_sound),
             checked = soundEnabled,
             onCheckedChange = { viewModel.updateSoundDetectionEnabled(it) }
         )
         if (soundEnabled) {
             SliderSetting(
-                title = "Sound Threshold (%)",
+                title = stringResource(R.string.detection_sound_threshold),
                 value = soundThreshold.toFloat(),
                 range = StreamDefaultsRange.SOUND_THRESHOLD,
                 onValueChange = { viewModel.updateSoundThresholdPercent(it.toInt()) }
             )
             SwitchSetting(
-                title = "Adaptive Noise Floor",
+                title = stringResource(R.string.detection_adaptive_noise_floor),
                 checked = soundAdaptiveFloor,
                 onCheckedChange = { viewModel.updateSoundAdaptiveNoiseFloor(it) }
             )
             if (soundAdaptiveFloor) {
                 Text(
-                    text = "The trigger rides above a tracked ambient level, so a constant " +
-                        "background (HVAC, traffic) neither masks real events nor trips alone",
+                    text = stringResource(R.string.detection_adaptive_noise_floor_description),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
             SliderSetting(
-                title = "Event Cooldown (seconds)",
+                title = stringResource(R.string.detection_event_cooldown),
                 value = soundCooldown.toFloat(),
                 range = StreamDefaultsRange.SOUND_COOLDOWN,
                 onValueChange = { viewModel.updateSoundCooldownSeconds(it.toInt()) }
             )
             SwitchSetting(
-                title = "Record on Sound",
+                title = stringResource(R.string.detection_record_on_sound),
                 checked = soundRecordingEnabled,
                 onCheckedChange = { viewModel.updateSoundRecordingEnabled(it) }
             )
             if (soundRecordingEnabled) {
                 Text(
-                    text = "Sound events start a bounded clip using the motion post-roll duration",
+                    text = stringResource(R.string.detection_record_on_sound_description),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
+            SwitchSetting(
+                title = stringResource(R.string.detection_sound_classification),
+                checked = soundClassificationEnabled,
+                onCheckedChange = { viewModel.updateSoundClassificationEnabled(it) }
+            )
+            if (soundClassificationEnabled) {
+                // Annotate-only: the RMS event always fires; classification
+                // labels it. Requires Android 7.0+ (API 24), like the ML gate.
+                Text(
+                    text = stringResource(R.string.detection_sound_classification_description),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                SliderSetting(
+                    title = stringResource(R.string.detection_min_confidence),
+                    value = soundClassificationConfidence.toFloat(),
+                    range = StreamDefaultsRange.SOUND_CLASSIFICATION,
+                    steps = StreamDefaultsRange.SOUND_CLASSIFICATION_STEPS,
+                    onValueChange = { viewModel.updateSoundClassificationConfidencePercent(it.toInt()) }
+                )
+                SoundClassChips(
+                    allowed = soundClassificationAllowed,
+                    onToggle = { label ->
+                        val next = if (label in soundClassificationAllowed) {
+                            soundClassificationAllowed - label
+                        } else {
+                            soundClassificationAllowed + label
+                        }
+                        // The store's descriptor folds an all-off save back to
+                        // the curated default, like the arm-schedule's day mask.
+                        viewModel.updateSoundClassificationAllowedClasses(next)
+                    }
+                )
+                // The YAMNet model ships outside the APK — this row is its only
+                // user-facing fetch control (the classifier's feed also
+                // auto-requests the download, throttled).
+                AudioModelRow(
+                    state = audioModelState,
+                    onDownload = { viewModel.downloadAudioModel() },
+                )
+            }
         }
         SwitchSetting(
-            title = "Local Alerts on Detection",
+            title = stringResource(R.string.detection_local_alerts),
             checked = notificationEnabled,
             onCheckedChange = { viewModel.updateDetectionNotificationsEnabled(it) }
         )
         if (notificationEnabled) {
             SwitchSetting(
-                title = "Quiet Hours",
+                title = stringResource(R.string.detection_quiet_hours),
                 checked = quietHoursEnabled,
                 onCheckedChange = { viewModel.updateAlertQuietHoursEnabled(it) }
             )
             if (quietHoursEnabled) {
                 Text(
-                    text = "Local notifications are held inside the window — webhooks, MQTT, " +
-                        "recordings, and the event log keep firing",
+                    text = stringResource(R.string.detection_quiet_hours_description),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 SliderSetting(
-                    title = "Quiet From (minute of day)",
+                    title = stringResource(R.string.detection_quiet_from),
                     value = quietHoursStart.toFloat(),
                     range = StreamDefaultsRange.MINUTE_OF_DAY,
                     steps = 95,
                     onValueChange = { viewModel.updateAlertQuietHoursStartMinute(it.toInt()) }
                 )
                 SliderSetting(
-                    title = "Quiet Until (minute of day)",
+                    title = stringResource(R.string.detection_quiet_until),
                     value = quietHoursEnd.toFloat(),
                     range = StreamDefaultsRange.MINUTE_OF_DAY,
                     steps = 95,
@@ -207,12 +254,12 @@ fun DetectionSettingsSection(viewModel: SettingsViewModel, onOpenEventLog: (() -
             }
         }
         SwitchSetting(
-            title = "Tamper Detection (power cut)",
+            title = stringResource(R.string.detection_tamper),
             checked = tamperEnabled,
             onCheckedChange = { viewModel.updateTamperDetectionEnabled(it) }
         )
         SwitchSetting(
-            title = "Object Detection (ML)",
+            title = stringResource(R.string.detection_ml),
             checked = mlEnabled,
             onCheckedChange = { viewModel.updateMlDetectionEnabled(it) }
         )
@@ -220,30 +267,29 @@ fun DetectionSettingsSection(viewModel: SettingsViewModel, onOpenEventLog: (() -
             // Applies on top of motion detection: motion still arms the event;
             // the on-device model decides whether it carries an allowed class.
             Text(
-                text = "Applies on top of motion detection — alerts fire only when " +
-                    "a person, pet, or vehicle is detected in the frame",
+                text = stringResource(R.string.detection_ml_description),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             SliderSetting(
-                title = "Minimum Confidence (%)",
+                title = stringResource(R.string.detection_min_confidence),
                 value = mlMinScore.toFloat(),
                 range = StreamDefaultsRange.ML_SCORE_PERCENT,
                 steps = StreamDefaultsRange.ML_SCORE_STEPS,
                 onValueChange = { viewModel.updateMlMinScorePercent(it.toInt()) }
             )
             SwitchSetting(
-                title = "Alert on People",
+                title = stringResource(R.string.detection_alert_people),
                 checked = mlPerson,
                 onCheckedChange = { viewModel.updateMlIncludePerson(it) }
             )
             SwitchSetting(
-                title = "Alert on Animals",
+                title = stringResource(R.string.detection_alert_animals),
                 checked = mlPets,
                 onCheckedChange = { viewModel.updateMlIncludePets(it) }
             )
             SwitchSetting(
-                title = "Alert on Vehicles",
+                title = stringResource(R.string.detection_alert_vehicles),
                 checked = mlVehicles,
                 onCheckedChange = { viewModel.updateMlIncludeVehicles(it) }
             )
@@ -265,10 +311,18 @@ fun DetectionSettingsSection(viewModel: SettingsViewModel, onOpenEventLog: (() -
  */
 @Composable
 private fun ArmDayChips(daysMask: Int, onToggleDay: (isoDayIndex: Int) -> Unit) {
-    val labels = listOf("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
+    val labels = listOf(
+        stringResource(R.string.detection_day_mon),
+        stringResource(R.string.detection_day_tue),
+        stringResource(R.string.detection_day_wed),
+        stringResource(R.string.detection_day_thu),
+        stringResource(R.string.detection_day_fri),
+        stringResource(R.string.detection_day_sat),
+        stringResource(R.string.detection_day_sun),
+    )
     Column(modifier = Modifier.fillMaxWidth()) {
         Text(
-            text = "Arm on Days",
+            text = stringResource(R.string.detection_arm_days),
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurface,
         )
@@ -288,6 +342,89 @@ private fun ArmDayChips(daysMask: Int, onToggleDay: (isoDayIndex: Int) -> Unit) 
 }
 
 /**
+ * The sound-classification allow-list chips: one per curated YAMNet class
+ * ([SoundClassPolicy.SECURITY_CLASSES] order), selected when persisted. The
+ * descriptor folds an all-off save back to the curated default, so the chips
+ * narrow, never disarm.
+ */
+@Composable
+private fun SoundClassChips(allowed: Set<String>, onToggle: (label: String) -> Unit) {
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Text(
+            text = stringResource(R.string.detection_sound_classes),
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurface,
+        )
+        // The curated list is long (18 chips); three per row keeps the section
+        // scannable without a second layout dependency.
+        SoundClassPolicy.SECURITY_CLASSES.chunked(StreamDefaultsRange.SOUND_CHIPS_PER_ROW).forEach { rowClasses ->
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                rowClasses.forEach { label ->
+                    FilterChip(
+                        label = SoundClassPolicy.humanReadable(label),
+                        selected = label in allowed,
+                        onClick = { onToggle(label) }
+                    )
+                }
+            }
+        }
+    }
+}
+
+/**
+ * The on-demand YAMNet model's status row — the audio twin of
+ * [DetectionModelRow]: download when missing, progress while fetching, the
+ * reason + retry after a failure. Pure echo of [AudioModelStore.State].
+ */
+@Composable
+private fun AudioModelRow(state: AudioModelStore.State, onDownload: () -> Unit) {
+    Spacer(modifier = Modifier.height(4.dp))
+    when (state) {
+        is AudioModelStore.State.NotDownloaded -> {
+            Text(
+                text = stringResource(R.string.detection_audio_model_not_downloaded, AudioModelStore.DISPLAY_SIZE_MB),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            OutlinedButton(onClick = onDownload) {
+                Text(stringResource(R.string.detection_model_download))
+            }
+        }
+        is AudioModelStore.State.Downloading -> {
+            Text(
+                text = stringResource(R.string.detection_audio_model_downloading),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            if (state.progress >= 0f) {
+                LinearProgressIndicator(progress = { state.progress })
+            } else {
+                LinearProgressIndicator()
+            }
+        }
+        is AudioModelStore.State.Ready -> Text(
+            text = stringResource(R.string.detection_audio_model_ready, AudioModelStore.DISPLAY_SIZE_MB),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        is AudioModelStore.State.Failed -> {
+            Text(
+                text = stringResource(R.string.detection_audio_model_failed, state.reason),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error,
+            )
+            OutlinedButton(onClick = onDownload) {
+                Text(stringResource(R.string.detection_model_retry))
+            }
+        }
+    }
+    Spacer(modifier = Modifier.height(4.dp))
+}
+
+/**
  * The on-demand detection model's status row: download when missing, progress
  * while fetching, the reason + retry after a failure. Pure echo of
  * [DetectionModelStore.State] — the store stays the single owner of the file.
@@ -298,18 +435,17 @@ private fun DetectionModelRow(state: DetectionModelStore.State, onDownload: () -
     when (state) {
         is DetectionModelStore.State.NotDownloaded -> {
             Text(
-                text = "Detection model not downloaded (${DetectionModelStore.DISPLAY_SIZE_MB}, " +
-                    "fetched once and kept in app storage)",
+                text = stringResource(R.string.detection_ml_model_not_downloaded, DetectionModelStore.DISPLAY_SIZE_MB),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             OutlinedButton(onClick = onDownload) {
-                Text("Download model")
+                Text(stringResource(R.string.detection_model_download))
             }
         }
         is DetectionModelStore.State.Downloading -> {
             Text(
-                text = "Downloading detection model…",
+                text = stringResource(R.string.detection_ml_model_downloading),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -320,18 +456,18 @@ private fun DetectionModelRow(state: DetectionModelStore.State, onDownload: () -
             }
         }
         is DetectionModelStore.State.Ready -> Text(
-            text = "Detection model ready (${DetectionModelStore.DISPLAY_SIZE_MB})",
+            text = stringResource(R.string.detection_ml_model_ready, DetectionModelStore.DISPLAY_SIZE_MB),
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         is DetectionModelStore.State.Failed -> {
             Text(
-                text = "Detection model download failed: ${state.reason}",
+                text = stringResource(R.string.detection_ml_model_failed, state.reason),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.error,
             )
             OutlinedButton(onClick = onDownload) {
-                Text("Retry download")
+                Text(stringResource(R.string.detection_model_retry))
             }
         }
     }
@@ -344,21 +480,21 @@ fun WatchdogSettingsSection(viewModel: SettingsViewModel) {
     val maxRetries by viewModel.watchdogMaxRetries.collectAsState()
     val checkInterval by viewModel.watchdogCheckIntervalSeconds.collectAsState()
 
-    SettingsSection(title = "Stream Watchdog") {
+    SettingsSection(title = stringResource(R.string.settings_section_watchdog)) {
         SwitchSetting(
-            title = "Enable Watchdog",
+            title = stringResource(R.string.settings_watchdog_enable),
             checked = watchdogEnabled,
             onCheckedChange = { viewModel.updateWatchdogEnabled(it) }
         )
         if (watchdogEnabled) {
             SliderSetting(
-                title = "Max Retries",
+                title = stringResource(R.string.settings_watchdog_max_retries),
                 value = maxRetries.toFloat(),
                 range = StreamDefaultsRange.WATCHDOG_RETRIES,
                 onValueChange = { viewModel.updateWatchdogMaxRetries(it.toInt()) }
             )
             SliderSetting(
-                title = "Check Interval (seconds)",
+                title = stringResource(R.string.settings_watchdog_interval),
                 value = checkInterval.toFloat(),
                 range = StreamDefaultsRange.WATCHDOG_INTERVAL,
                 onValueChange = { viewModel.updateWatchdogCheckIntervalSeconds(it.toInt()) }
@@ -374,9 +510,9 @@ fun BackupSettingsSection(viewModel: SettingsViewModel) {
     val url by viewModel.backupWebdavUrl.collectAsState()
     val username by viewModel.backupWebdavUsername.collectAsState()
 
-    SettingsSection(title = "Backup (WebDAV)") {
+    SettingsSection(title = stringResource(R.string.settings_section_backup)) {
         SwitchSetting(
-            title = "Auto-upload New Captures",
+            title = stringResource(R.string.settings_backup_auto_upload),
             checked = backupEnabled,
             onCheckedChange = { viewModel.updateBackupEnabled(it) }
         )
@@ -386,7 +522,7 @@ fun BackupSettingsSection(viewModel: SettingsViewModel) {
             OutlinedTextField(
                 value = url,
                 onValueChange = { viewModel.updateBackupWebdavUrl(it) },
-                label = { Text("WebDAV Collection URL") },
+                label = { Text(stringResource(R.string.settings_backup_url)) },
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true,
             )
@@ -394,7 +530,7 @@ fun BackupSettingsSection(viewModel: SettingsViewModel) {
             OutlinedTextField(
                 value = username,
                 onValueChange = { viewModel.updateBackupWebdavUsername(it) },
-                label = { Text("Username") },
+                label = { Text(stringResource(R.string.settings_username)) },
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true,
             )
@@ -403,7 +539,7 @@ fun BackupSettingsSection(viewModel: SettingsViewModel) {
             OutlinedTextField(
                 value = passwordText,
                 onValueChange = { passwordText = it },
-                label = { Text("Password (leave blank to keep)") },
+                label = { Text(stringResource(R.string.settings_backup_password)) },
                 visualTransformation = PasswordVisualTransformation(),
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true,
@@ -417,7 +553,7 @@ fun BackupSettingsSection(viewModel: SettingsViewModel) {
                 ),
             )
             SwitchSetting(
-                title = "Upload on Wi-Fi only",
+                title = stringResource(R.string.settings_backup_wifi_only),
                 checked = wifiOnly,
                 onCheckedChange = { viewModel.updateBackupWifiOnly(it) }
             )
@@ -441,6 +577,9 @@ internal object StreamDefaultsRange {
         StreamDefaults.WATCHDOG_CHECK_INTERVAL_MIN_SECONDS.toFloat()..StreamDefaults.WATCHDOG_CHECK_INTERVAL_MAX_SECONDS.toFloat()
     val ML_SCORE_PERCENT =
         StreamDefaults.ML_SCORE_MIN_PERCENT.toFloat()..StreamDefaults.ML_SCORE_MAX_PERCENT.toFloat()
+    val SOUND_CLASSIFICATION =
+        StreamDefaults.SOUND_CLASSIFICATION_MIN_PERCENT.toFloat()..
+            StreamDefaults.SOUND_CLASSIFICATION_MAX_PERCENT.toFloat()
     val CONTINUOUS_SEGMENT_MINUTES =
         StreamDefaults.CONTINUOUS_SEGMENT_MIN_MINUTES.toFloat()..StreamDefaults.CONTINUOUS_SEGMENT_MAX_MINUTES.toFloat()
     val MOTION_COOLDOWN =
@@ -453,6 +592,13 @@ internal object StreamDefaultsRange {
     val ML_SCORE_STEPS = (StreamDefaults.ML_SCORE_MAX_PERCENT - StreamDefaults.ML_SCORE_MIN_PERCENT) / 5 - 1
     val CONTINUOUS_SEGMENT_STEPS =
         (StreamDefaults.CONTINUOUS_SEGMENT_MAX_MINUTES - StreamDefaults.CONTINUOUS_SEGMENT_MIN_MINUTES) / 5 - 1
+
+    // Same 5-unit step as the ML score slider (same 10..95 span).
+    val SOUND_CLASSIFICATION_STEPS =
+        (StreamDefaults.SOUND_CLASSIFICATION_MAX_PERCENT - StreamDefaults.SOUND_CLASSIFICATION_MIN_PERCENT) / 5 - 1
+
+    /** How many allow-list chips render per row in the sound-classification section. */
+    const val SOUND_CHIPS_PER_ROW = 3
 
     // Storage quota steps in 100 MB increments across the persisted span.
     val STORAGE_QUOTA_STEPS =

@@ -17,6 +17,7 @@ class EncodedStreamPolicyTest {
                     rtspActive = true,
                     hlsRequested = false,
                     wsVideoClients = 0,
+                    rtmpActive = false,
                 )
             )
         )
@@ -31,6 +32,7 @@ class EncodedStreamPolicyTest {
                     rtspActive = false,
                     hlsRequested = true,
                     wsVideoClients = 0,
+                    rtmpActive = false,
                 )
             )
         )
@@ -45,6 +47,7 @@ class EncodedStreamPolicyTest {
                     rtspActive = false,
                     hlsRequested = false,
                     wsVideoClients = 1,
+                    rtmpActive = false,
                 )
             )
         )
@@ -59,6 +62,7 @@ class EncodedStreamPolicyTest {
                     rtspActive = false,
                     hlsRequested = false,
                     wsVideoClients = 3,
+                    rtmpActive = false,
                 )
             )
         )
@@ -73,6 +77,7 @@ class EncodedStreamPolicyTest {
                     rtspActive = false,
                     hlsRequested = false,
                     wsVideoClients = 0,
+                    rtmpActive = false,
                 )
             )
         )
@@ -87,6 +92,7 @@ class EncodedStreamPolicyTest {
                     rtspActive = false,
                     hlsRequested = false,
                     wsVideoClients = 0,
+                    rtmpActive = false,
                 )
             )
         )

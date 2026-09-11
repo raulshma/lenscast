@@ -41,10 +41,10 @@ interface EncodedSource {
 
 /**
  * The encoded-output seam: encoded H.264 and AAC access units as fanned out
- * by [EncodedStreamHub]. The RTSP output's forwarding sink answers it with
- * the RTP distribution path; the HLS ring and the WS video path receive the
- * same access units through their own sinks so a single encode serves every
- * consumer.
+ * by [EncodedStreamHub]. The RTSP output's forwarding sink answers it with the
+ * RTP distribution path; the HLS ring, the WS video path, and the RTMP push
+ * output receive the same access units through their own sinks so a single
+ * encode serves every consumer.
  */
 internal interface EncodedSink {
     fun feedVideo(nalUnits: List<EncodedNalUnit>)
@@ -55,12 +55,13 @@ internal interface EncodedSink {
 /**
  * The shared video/AAC encode pipeline, decoupled from the RTSP server:
  * camera YUV in, encoded access units out to every registered sink — the
- * RTSP server (RTP), the HLS ring, and the WS video path. Its start/stop
- * decision is the pure [EncodedStreamPolicy] verdict over sink activity, so
- * HLS and WS video keep a live encoded source even when the RTSP output is
- * off. The audio half taps the shared mic capture through a subscriber
- * stream and (re)attaches whenever the capture or the audio config moved —
- * the hub's version of the RTSP output's audio restart ladder.
+ * RTSP server (RTP), the HLS ring, the WS video path, and the RTMP push
+ * output. Its start/stop decision is the pure [EncodedStreamPolicy] verdict
+ * over sink activity, so HLS, WS video, and the RTMP push keep a live encoded
+ * source even when the RTSP output is off. The audio half taps the shared mic
+ * capture through a subscriber stream and (re)attaches whenever the capture
+ * or the audio config moved — the hub's version of the RTSP output's audio
+ * restart ladder.
  *
  * The frame path is what [com.raulshma.lenscast.streaming.rtsp.RtspServer]
  * used to do inline: interval throttle, encoder-lag gating, NV21 rotation,
@@ -73,8 +74,9 @@ internal interface EncodedSink {
  * by the Settings Applier) selects which encoder is instantiated, lazily and
  * one at a time; a codec change on a running pipeline reconfigures stop →
  * (new) encoder → start + black frame. On H.265 the fan-out feeds the RTSP
- * sink ONLY — the HLS TS muxer and the WS/WebCodecs video path are H.264-only and are gated
- * off, so HLS/WS stay dark until the codec returns to H.264.
+ * sink ONLY — the HLS TS muxer, the WS/WebCodecs video path, and the RTMP
+ * push output are H.264-only and are gated off, so HLS/WS/RTMP stay dark
+ * until the codec returns to H.264.
  */
 internal class EncodedStreamHub(
     private val policyInputs: () -> EncodedStreamPolicy.Inputs,
@@ -85,6 +87,7 @@ internal class EncodedStreamHub(
     private val rtspSink: EncodedSink,
     private val hlsSink: HlsVideoSink,
     private val wsVideoSink: (List<EncodedNalUnit>) -> Unit,
+    private val rtmpSink: EncodedSink,
 ) : EncodedSource {
 
     private val aacEncoder = AacEncoder()
@@ -423,9 +426,11 @@ internal class EncodedStreamHub(
         fanOut("RTSP video") { rtspSink.feedVideo(nalUnits) }
         // HLS stays H.264-only: the TS muxer has no HEVC mapping, so H.265 AUs would corrupt segments.
         // WS video stays H.264-only too: the WebCodecs decode path has no HEVC configuration yet.
+        // RTMP likewise has no standard H.265 mapping (the output refuses to start under H.265).
         if (producingCodec != RtspVideoCodec.H265) {
             fanOut("HLS video") { hlsSink.feedVideo(nalUnits) }
             fanOut("WS video") { wsVideoSink(nalUnits) }
+            fanOut("RTMP video") { rtmpSink.feedVideo(nalUnits) }
         }
     }
 
@@ -433,6 +438,7 @@ internal class EncodedStreamHub(
         if (aacData.isEmpty()) return
         fanOut("RTSP audio") { rtspSink.feedAudio(aacData) }
         fanOut("HLS audio") { hlsSink.feedAudio(aacData) }
+        fanOut("RTMP audio") { rtmpSink.feedAudio(aacData) }
     }
 
     /** One isolated sink delivery: a broken consumer must never starve the others. */

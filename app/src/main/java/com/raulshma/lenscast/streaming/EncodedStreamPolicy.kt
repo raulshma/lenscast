@@ -3,10 +3,10 @@ package com.raulshma.lenscast.streaming
 /**
  * The pure start/stop verdict for the shared H.264/AAC encode pipeline
  * ([EncodedStreamHub]): the pipeline runs whenever ANY encoded sink is
- * active — the RTSP output, a requested HLS ring, or WS video clients on a
- * live web output. This is the decision that used to live implicitly in
- * "pushFrameToRtsp no-ops unless the RTSP output is active", which left HLS
- * and WS video without a source whenever RTSP was off.
+ * active — the RTSP output, the RTMP push output, a requested HLS ring, or
+ * WS video clients on a live web output. This is the decision that used to
+ * live implicitly in "pushFrameToRtsp no-ops unless the RTSP output is
+ * active", which left HLS and WS video without a source whenever RTSP was off.
  */
 object EncodedStreamPolicy {
 
@@ -16,10 +16,13 @@ object EncodedStreamPolicy {
         val rtspActive: Boolean,
         val hlsRequested: Boolean,
         val wsVideoClients: Int,
+        /** The RTMP push output is live (connecting or connected) — its own encode trigger. */
+        val rtmpActive: Boolean,
     )
 
     fun shouldRun(inputs: Inputs): Boolean =
-        inputs.rtspActive || inputs.hlsRequested || (inputs.webActive && inputs.wsVideoClients > 0)
+        inputs.rtspActive || inputs.rtmpActive || inputs.hlsRequested ||
+            (inputs.webActive && inputs.wsVideoClients > 0)
 
     /**
      * The hub's audio (re)attach verdict: a capture that is running wins a

@@ -128,6 +128,16 @@ data class StreamingSettingsDto(
     val motionCooldownSeconds: Int = StreamDefaults.MOTION_COOLDOWN_SECONDS_DEFAULT,
     /** Minimum seconds between two sound events. */
     val soundCooldownSeconds: Int = StreamDefaults.SOUND_COOLDOWN_SECONDS_DEFAULT,
+    /** YAMNet sound classification on top of sound detection: annotate-only labels ride sound events. */
+    val soundClassificationEnabled: Boolean = false,
+    /** Minimum YAMNet confidence percent for a window's top label to count. */
+    val soundClassificationConfidencePercent: Int = StreamDefaults.SOUND_CLASSIFICATION_PERCENT_DEFAULT,
+    /**
+     * The user-narrowed YAMNet allow-list (exact AudioSet class names). An
+     * empty list folds back to the curated default on save ([com.raulshma.lenscast.capture.model.SoundClassPolicy]),
+     * so a document that omits the list never silently disarms the gate.
+     */
+    val soundClassificationAllowedClasses: List<String> = emptyList(),
     val webhookEnabled: Boolean = false,
     val webhookUrl: String = "",
     /** Custom POST headers as a JSON `{"Name": "value"}` map string. */
@@ -194,6 +204,13 @@ data class StreamingSettingsDto(
      * captures age out once LensCast's media passes it.
      */
     val storageQuotaMb: Int = StreamDefaults.STORAGE_QUOTA_MB_DEFAULT,
+    /**
+     * Opt-in media-at-rest encryption (AES-256-GCM per file, one Keystore
+     * key). Migration-free by design: flipping it never touches existing
+     * media — every reader sniffs the per-file header, so plaintext and
+     * encrypted captures coexist.
+     */
+    val mediaEncryptionEnabled: Boolean = false,
     /** ML object-detection gate on top of motion detection. */
     val mlDetectionEnabled: Boolean = false,
     /** Minimum ML confidence percent for a detected object to count. */
@@ -219,6 +236,14 @@ data class StreamingSettingsDto(
     val continuousSegmentMinutes: Int = StreamDefaults.CONTINUOUS_SEGMENT_MINUTES_DEFAULT,
     /** ONVIF Profile S device endpoint + WS-Discovery responder. */
     val onvifEnabled: Boolean = false,
+    /**
+     * Eco idle-fps mode: while the device is off charger, thermal is NORMAL,
+     * and no stream consumer is connected (no MJPEG/RTSP/WS clients, no HLS
+     * fetch, no RTMP push), the frame rate drops to the eco floor
+     * ([StreamDefaults.ECO_IDLE_FPS]) and live-audio encoding pauses; the
+     * first client, charger, or thermal event restores the full rate.
+     */
+    val ecoIdleFpsEnabled: Boolean = false,
 )
 
 @JsonClass(generateAdapter = true)
@@ -267,6 +292,12 @@ data class StreamingStatusDto(
     val rtspEnabled: Boolean = false,
     val rtspStreamingActive: Boolean = false,
     val rtspUrl: String = "",
+    /** The RTMP push output: enabled gate, live flag, and its lifecycle state. */
+    val rtmpEnabled: Boolean = false,
+    val rtmpActive: Boolean = false,
+    val rtmpStatus: String = "idle",
+    /** The readable reason while [rtmpStatus] is "error"; null otherwise. */
+    val rtmpError: String? = null,
 )
 
 @JsonClass(generateAdapter = true)
@@ -565,6 +596,24 @@ data class BatteryDetailDto(
     val voltageMillivolts: Int?,
     /** The platform's health constant name ("good", "overheat", ...); null when unknown. */
     val health: String?,
+    /**
+     * The battery charge counter (BATTERY_PROPERTY_CHARGE_COUNTER) in mAh;
+     * null when the device does not report it. Full-charge drift across
+     * months is the 24/7-device wear signal.
+     */
+    val batteryChargeCounterMah: Int? = null,
+    /**
+     * The instant battery current in microamperes
+     * (BATTERY_PROPERTY_CURRENT_NOW), signed as the platform reports it —
+     * the sign convention varies per device (negative usually charging);
+     * null when unsupported.
+     */
+    val batteryCurrentMicroAmps: Int? = null,
+    /**
+     * The charge-cycle count (BATTERY_PROPERTY_CYCLE_COUNT, API 34+); null
+     * below Android 14 or when the hardware does not track it.
+     */
+    val batteryCycleCount: Int? = null,
 )
 
 /** App-volume storage facts: configured quota plus live volume usage. */
@@ -578,6 +627,31 @@ data class StorageInfoDto(
     val freeBytes: Long,
     /** Total bytes on the app's storage volume. */
     val totalBytes: Long,
+)
+
+// ── Recording Session DTOs ──
+
+/**
+ * One NVR timeline session on GET /api/recordings/sessions: a video capture
+ * from the history with an inferred end and a reconstructed trigger. The
+ * trigger wire names are `manual` | `motion` | `sound` | `continuous` |
+ * `scheduled`; historical reconstruction only ever answers the first three —
+ * a capture produced by the continuous loop or a scheduled start is not
+ * recoverable and reads as `manual` unless a detection event overlaps.
+ */
+@JsonClass(generateAdapter = true)
+data class RecordingSessionDto(
+    val id: String,
+    val startMs: Long,
+    val endMs: Long,
+    val trigger: String,
+    /** The capture-history id behind the session; null when nothing is linked. */
+    val mediaId: String? = null,
+)
+
+@JsonClass(generateAdapter = true)
+data class RecordingSessionsResponseDto(
+    val sessions: List<RecordingSessionDto>,
 )
 
 // ── Detection Stats DTOs ──

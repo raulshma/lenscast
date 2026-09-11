@@ -329,6 +329,9 @@ class DtoContractFixtureTest {
                 temperatureTenthsC = 295,
                 voltageMillivolts = 4350,
                 health = "good",
+                batteryChargeCounterMah = 4_480,
+                batteryCurrentMicroAmps = -312_000,
+                batteryCycleCount = 212,
             ),
             storage = StorageInfoDto(
                 usedBytes = 1_073_741_824,
@@ -340,6 +343,39 @@ class DtoContractFixtureTest {
         assertMatchesFixture(
             "system.json",
             moshi.adapter(SystemInfoResponseDto::class.java).toJson(system),
+        )
+    }
+
+    @Test
+    fun `recording sessions response matches the recording sessions fixture`() {
+        val sessions = RecordingSessionsResponseDto(
+            sessions = listOf(
+                RecordingSessionDto(
+                    id = "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+                    startMs = 1_788_796_800_000,
+                    endMs = 1_788_800_400_000,
+                    trigger = "manual",
+                    mediaId = "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+                ),
+                RecordingSessionDto(
+                    id = "2f8a1c3d-5b6e-4a7c-9d0e-1f2a3b4c5d6e",
+                    startMs = 1_788_825_600_000,
+                    endMs = 1_788_826_500_000,
+                    trigger = "motion",
+                    mediaId = "2f8a1c3d-5b6e-4a7c-9d0e-1f2a3b4c5d6e",
+                ),
+                RecordingSessionDto(
+                    id = "9a8b7c6d-5e4f-4a3b-2c1d-0e9f8a7b6c5d",
+                    startMs = 1_788_850_000_000,
+                    endMs = 1_788_850_060_000,
+                    trigger = "sound",
+                    mediaId = "9a8b7c6d-5e4f-4a3b-2c1d-0e9f8a7b6c5d",
+                ),
+            ),
+        )
+        assertMatchesFixture(
+            "recording-sessions.json",
+            moshi.adapter(RecordingSessionsResponseDto::class.java).toJson(sessions),
         )
     }
 

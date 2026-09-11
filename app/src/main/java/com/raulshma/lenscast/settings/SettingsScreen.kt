@@ -1,5 +1,9 @@
 package com.raulshma.lenscast.settings
 
+import android.Manifest
+import android.content.pm.PackageManager
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.ComponentActivity
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -30,17 +34,23 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.raulshma.lenscast.MainApplication
+import com.raulshma.lenscast.R
 import com.raulshma.lenscast.camera.model.CameraDashboardPolicy
 import com.raulshma.lenscast.camera.model.CameraSettings
 import com.raulshma.lenscast.camera.model.FocusMode
+import com.raulshma.lenscast.camera.model.GridStyle
 import com.raulshma.lenscast.camera.model.QuickSettingCatalog
 import com.raulshma.lenscast.camera.model.QuickSettingEditor
 import com.raulshma.lenscast.camera.model.QuickSettingRanges
 import com.raulshma.lenscast.camera.model.QuickSettingType
+import com.raulshma.lenscast.camera.model.PhotoCapturePlan
+import com.raulshma.lenscast.camera.model.SelfTimerMode
 import com.raulshma.lenscast.camera.model.WhiteBalance
 import com.raulshma.lenscast.camera.model.chipLabel
 import com.raulshma.lenscast.ui.components.LensCastSectionCard
@@ -76,6 +86,7 @@ fun CameraSettingsScreen(
         factory = SettingsViewModel.Factory(
             app.cameraService, app.settingsDataStore, app.powerManager,
             app.detectionModelStore,
+            app.audioModelStore,
         )
     )
 
@@ -91,18 +102,36 @@ fun CameraSettingsScreen(
         QuickSettingRanges(iso = isoRange, zoom = zoomRange, exposure = exposureRange)
     }
     val showPreview by viewModel.showPreview.collectAsState()
+    val gridStyle by viewModel.gridStyle.collectAsState()
+    val selfTimer by viewModel.selfTimer.collectAsState()
+    val spiritLevelEnabled by viewModel.spiritLevelEnabled.collectAsState()
+    val histogramEnabled by viewModel.histogramEnabled.collectAsState()
+    val zebrasEnabled by viewModel.zebrasEnabled.collectAsState()
+    val peakingEnabled by viewModel.peakingEnabled.collectAsState()
+    val photoJpegQuality by viewModel.photoJpegQuality.collectAsState()
+    val photoMaximizeQuality by viewModel.photoMaximizeQuality.collectAsState()
+    val rawCaptureEnabled by viewModel.rawCaptureEnabled.collectAsState()
+    val rawCaptureSupported by viewModel.isRawCaptureSupported.collectAsState()
+    val geotagEnabled by viewModel.geotagEnabled.collectAsState()
+
+    // Opt-in GPS geotag: the runtime ask happens only on the setting's
+    // enable transition, never at launch — the same point-of-need pattern
+    // as the camera screen's first-launch POST_NOTIFICATIONS pass.
+    val locationPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { }
 
     Scaffold(
         topBar = {
             LensCastTopBar(
-                title = "Camera Settings",
+                title = stringResource(R.string.settings_camera_title),
                 onNavigateBack = onNavigateBack,
                 actions = {
                     TextButton(onClick = onNavigateToAppSettings) {
-                        Text("App Settings")
+                        Text(stringResource(R.string.settings_app_title))
                     }
                     TextButton(onClick = { viewModel.resetToDefaults() }) {
-                        Text("Reset", color = MaterialTheme.colorScheme.error)
+                        Text(stringResource(R.string.settings_reset), color = MaterialTheme.colorScheme.error)
                     }
                 },
             )
@@ -123,15 +152,15 @@ fun CameraSettingsScreen(
             }
 
             item {
-                SettingsSection(title = "Exposure") {
+                SettingsSection(title = stringResource(R.string.settings_section_exposure)) {
                     SliderSetting(
-                        title = "Exposure Compensation",
+                        title = stringResource(R.string.settings_exposure_compensation),
                         value = settings.exposureCompensation.toFloat(),
                         range = exposureRange.start.toFloat()..exposureRange.endInclusive.toFloat(),
                         onValueChange = { viewModel.updateQuickSetting(QuickSettingType.EXPOSURE, it) }
                     )
                     DropdownSetting(
-                        title = "ISO",
+                        title = stringResource(R.string.settings_iso),
                         options = chipOptions(QuickSettingType.ISO, deviceRanges),
                         selected = chipSelected(QuickSettingType.ISO, settings),
                         onSelect = { viewModel.updateQuickSetting(QuickSettingType.ISO, it) }
@@ -140,16 +169,16 @@ fun CameraSettingsScreen(
             }
 
             item {
-                SettingsSection(title = "Focus") {
+                SettingsSection(title = stringResource(R.string.settings_section_focus)) {
                     DropdownSetting(
-                        title = "Focus Mode",
+                        title = stringResource(R.string.settings_focus_mode),
                         options = chipOptions(QuickSettingType.FOCUS, deviceRanges),
                         selected = chipSelected(QuickSettingType.FOCUS, settings),
                         onSelect = { viewModel.updateQuickSetting(QuickSettingType.FOCUS, it) }
                     )
                     if (settings.focusMode == FocusMode.MANUAL) {
                         SliderSetting(
-                            title = "Focus Distance",
+                            title = stringResource(R.string.settings_focus_distance),
                             value = settings.focusDistance ?: 0f,
                             range = QuickSettingCatalog.focusDistanceRange(),
                             onValueChange = { viewModel.updateFocusDistance(it) }
@@ -159,16 +188,16 @@ fun CameraSettingsScreen(
             }
 
             item {
-                SettingsSection(title = "White Balance") {
+                SettingsSection(title = stringResource(R.string.settings_white_balance)) {
                     DropdownSetting(
-                        title = "White Balance",
+                        title = stringResource(R.string.settings_white_balance),
                         options = chipOptions(QuickSettingType.WHITE_BALANCE, deviceRanges),
                         selected = chipSelected(QuickSettingType.WHITE_BALANCE, settings),
                         onSelect = { viewModel.updateQuickSetting(QuickSettingType.WHITE_BALANCE, it) }
                     )
                     if (settings.whiteBalance == WhiteBalance.MANUAL) {
                         SliderSetting(
-                            title = "Color Temperature (K)",
+                            title = stringResource(R.string.settings_color_temperature),
                             value = (settings.colorTemperature ?: CameraSettings.DEFAULT_COLOR_TEMPERATURE_K).toFloat(),
                             range = QuickSettingCatalog.colorTemperatureRange(),
                             onValueChange = { viewModel.updateColorTemperature(it.toInt()) }
@@ -178,9 +207,9 @@ fun CameraSettingsScreen(
             }
 
             item {
-                SettingsSection(title = "Lens") {
+                SettingsSection(title = stringResource(R.string.settings_section_lens)) {
                     SliderSetting(
-                        title = "Zoom",
+                        title = stringResource(R.string.settings_zoom),
                         value = settings.zoomRatio,
                         range = zoomRange,
                         onValueChange = { viewModel.updateQuickSetting(QuickSettingType.ZOOM, it) }
@@ -189,21 +218,21 @@ fun CameraSettingsScreen(
             }
 
             item {
-                SettingsSection(title = "Capture") {
+                SettingsSection(title = stringResource(R.string.settings_section_capture)) {
                     DropdownSetting(
-                        title = "Resolution",
+                        title = stringResource(R.string.settings_resolution),
                         options = chipOptions(QuickSettingType.RESOLUTION, deviceRanges),
                         selected = chipSelected(QuickSettingType.RESOLUTION, settings),
                         onSelect = { viewModel.updateQuickSetting(QuickSettingType.RESOLUTION, it) }
                     )
                     SliderSetting(
-                        title = "Frame Rate",
+                        title = stringResource(R.string.settings_frame_rate),
                         value = settings.frameRate.toFloat(),
                         range = QuickSettingCatalog.frameRateRange(),
                         onValueChange = { viewModel.updateQuickSetting(QuickSettingType.FRAME_RATE, it) }
                     )
                     DropdownSetting(
-                        title = "HDR",
+                        title = stringResource(R.string.settings_hdr),
                         options = chipOptions(QuickSettingType.HDR, deviceRanges),
                         selected = chipSelected(QuickSettingType.HDR, settings),
                         onSelect = { viewModel.updateQuickSetting(QuickSettingType.HDR, it) }
@@ -212,9 +241,9 @@ fun CameraSettingsScreen(
             }
 
             item {
-                SettingsSection(title = "Video") {
+                SettingsSection(title = stringResource(R.string.settings_section_video)) {
                     SwitchSetting(
-                        title = "Image Stabilization",
+                        title = stringResource(R.string.settings_image_stabilization),
                         checked = settings.stabilization,
                         onCheckedChange = { viewModel.updateQuickSetting(QuickSettingType.STABILIZATION, it) }
                     )
@@ -222,9 +251,101 @@ fun CameraSettingsScreen(
             }
 
             item {
-                SettingsSection(title = "Night Vision / IR") {
+                SettingsSection(title = stringResource(R.string.settings_section_viewfinder_aids)) {
                     DropdownSetting(
-                        title = "Mode",
+                        title = stringResource(R.string.settings_grid_overlay),
+                        options = GridStyle.entries.map { it.name },
+                        selected = gridStyle.name,
+                        onSelect = { viewModel.updateGridStyle(it) }
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    DropdownSetting(
+                        title = stringResource(R.string.settings_self_timer),
+                        options = SelfTimerMode.entries.map { it.name },
+                        selected = selfTimer.name,
+                        onSelect = { viewModel.updateSelfTimer(it) }
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    SwitchSetting(
+                        title = stringResource(R.string.settings_spirit_level),
+                        checked = spiritLevelEnabled,
+                        onCheckedChange = { viewModel.updateSpiritLevelEnabled(it) }
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    SwitchSetting(
+                        title = stringResource(R.string.settings_histogram),
+                        checked = histogramEnabled,
+                        onCheckedChange = { viewModel.updateHistogramEnabled(it) }
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    SwitchSetting(
+                        title = stringResource(R.string.settings_exposure_zebras),
+                        checked = zebrasEnabled,
+                        onCheckedChange = { viewModel.updateZebrasEnabled(it) }
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    SwitchSetting(
+                        title = stringResource(R.string.settings_focus_peaking),
+                        checked = peakingEnabled,
+                        onCheckedChange = { viewModel.updatePeakingEnabled(it) }
+                    )
+                }
+            }
+
+            item {
+                SettingsSection(title = stringResource(R.string.settings_section_photo_capture)) {
+                    SliderSetting(
+                        title = stringResource(R.string.settings_jpeg_quality),
+                        value = photoJpegQuality.toFloat(),
+                        range = PhotoCapturePlan.PHOTO_JPEG_QUALITY_MIN.toFloat()..
+                                PhotoCapturePlan.PHOTO_JPEG_QUALITY_MAX.toFloat(),
+                        onValueChange = { viewModel.updatePhotoJpegQuality(it.toInt()) }
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    SwitchSetting(
+                        title = stringResource(R.string.settings_maximize_quality),
+                        checked = photoMaximizeQuality,
+                        onCheckedChange = { viewModel.updatePhotoMaximizeQuality(it) }
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    SwitchSetting(
+                        title = stringResource(R.string.settings_raw_jpeg),
+                        checked = rawCaptureEnabled,
+                        onCheckedChange = { viewModel.updateRawCaptureEnabled(it) }
+                    )
+                    if (rawCaptureEnabled && !rawCaptureSupported) {
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = stringResource(R.string.settings_raw_unsupported),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+                    SwitchSetting(
+                        title = stringResource(R.string.settings_gps_geotag),
+                        checked = geotagEnabled,
+                        onCheckedChange = { enabled ->
+                            // The ask rides the setting's first enable only;
+                            // a denied grant degrades to credit-only EXIF.
+                            if (enabled && ContextCompat.checkSelfPermission(
+                                    context, Manifest.permission.ACCESS_COARSE_LOCATION,
+                                ) != PackageManager.PERMISSION_GRANTED
+                            ) {
+                                locationPermissionLauncher.launch(
+                                    Manifest.permission.ACCESS_COARSE_LOCATION
+                                )
+                            }
+                            viewModel.updateGeotagEnabled(enabled)
+                        }
+                    )
+                }
+            }
+
+            item {
+                SettingsSection(title = stringResource(R.string.settings_section_night_vision)) {
+                    DropdownSetting(
+                        title = stringResource(R.string.settings_mode),
                         options = chipOptions(QuickSettingType.NIGHT_VISION, deviceRanges),
                         selected = chipSelected(QuickSettingType.NIGHT_VISION, settings),
                         onSelect = { viewModel.updateQuickSetting(QuickSettingType.NIGHT_VISION, it) }
@@ -239,9 +360,9 @@ fun CameraSettingsScreen(
             }
 
             item {
-                SettingsSection(title = "Scene") {
+                SettingsSection(title = stringResource(R.string.settings_section_scene)) {
                     DropdownSetting(
-                        title = "Scene Mode",
+                        title = stringResource(R.string.settings_scene_mode),
                         options = QuickSettingCatalog.sceneModeOptions,
                         selected = settings.sceneMode ?: "OFF",
                         onSelect = { viewModel.updateSceneMode(it) }

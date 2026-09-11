@@ -15,6 +15,8 @@ class ApiRouter(
     private val lens: LensWebHandler,
     private val interval: IntervalCaptureWebHandler,
     private val recording: RecordingWebHandler,
+    /** GET /api/recordings/sessions — the NVR day timeline. */
+    private val recordingSessions: RecordingSessionsWebHandler,
     private val gallery: GalleryWebHandler,
     private val deterrence: DeterrenceWebHandler,
     private val detectionEvents: DetectionEventsWebHandler,
@@ -57,6 +59,7 @@ class ApiRouter(
         "/api/stream/clients" -> ApiResponse.ok(stream.listClients())
         "/api/capture/interval/status" -> ApiResponse.ok(interval.status())
         "/api/recording/status" -> ApiResponse.ok(recording.status())
+        "/api/recordings/sessions" -> ApiResponse.ok(recordingSessions.sessions(r.query["day"]))
         "/api/gallery" -> ApiResponse.ok(
             gallery.getGallery(
                 type = r.query["type"],
@@ -80,12 +83,15 @@ class ApiRouter(
         "/api/settings" -> ApiResponse.ok(settings.put(r.body))
         "/api/settings/import" -> ApiResponse.ok(settings.import(r.body))
         "/api/settings/ml-model/download" -> ApiResponse.ok(settings.downloadModel())
+        "/api/settings/audio-model/download" -> ApiResponse.ok(settings.downloadAudioModel())
         "/api/stream/start", "/api/stream/resume" -> ApiResponse.ok(stream.startAll())
         "/api/stream/stop" -> ApiResponse.ok(stream.stopAll())
         "/api/stream/web/start" -> ApiResponse.ok(stream.startWeb())
         "/api/stream/web/stop" -> ApiResponse.ok(stream.stopWeb())
         "/api/stream/rtsp/start" -> ApiResponse.ok(stream.startRtsp())
         "/api/stream/rtsp/stop" -> ApiResponse.ok(stream.stopRtsp())
+        "/api/stream/rtmp/start" -> ApiResponse.ok(stream.startRtmp())
+        "/api/stream/rtmp/stop" -> ApiResponse.ok(stream.stopRtmp())
         "/api/capture" -> ApiResponse.ok(capture.capturePhoto())
         "/api/camera/lens" -> ApiResponse.ok(lens.selectLens(r.body))
         "/api/camera/focus" -> ApiResponse.ok(lens.tapFocus(r.body))

@@ -38,9 +38,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.raulshma.lenscast.MainApplication
+import com.raulshma.lenscast.R
 import com.raulshma.lenscast.capture.model.FlashMode
 import com.raulshma.lenscast.capture.model.RecordingConfig
 import com.raulshma.lenscast.capture.model.RecordingQuality
@@ -50,6 +52,9 @@ import com.raulshma.lenscast.settings.SettingsSection
 import com.raulshma.lenscast.settings.SliderSetting
 import com.raulshma.lenscast.settings.SwitchSetting
 import com.raulshma.lenscast.ui.components.LensCastTopBar
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 @Composable
 fun CaptureScreen(
@@ -75,10 +80,22 @@ fun CaptureScreen(
     // the picked-but-not-yet-armed input — merged, labeled, and verdict-ed
     // in one place.
     val scheduleRow = scheduleRowUi(recordingState, recordingConfig.startTimeMs)
+    // The pure model's labels are English constants (its output is asserted on
+    // by tests), so the screen maps them onto resources here; the armed start
+    // instant renders through the same HH:mm format the model used.
+    val schedulePickerLabel = scheduleRow.pendingStartMs?.let { pendingStartMs ->
+        stringResource(
+            R.string.capture_scheduled_start,
+            SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(pendingStartMs))
+        )
+    } ?: stringResource(R.string.capture_set_start_time)
+    val scheduleMainButtonLabel =
+        if (scheduleRow.buttonLabel == SCHEDULED_BUTTON_LABEL) stringResource(R.string.capture_schedule)
+        else stringResource(R.string.capture_start_now)
 
     Scaffold(
         topBar = {
-            LensCastTopBar(title = "Capture", onNavigateBack = onNavigateBack)
+            LensCastTopBar(title = stringResource(R.string.capture_title), onNavigateBack = onNavigateBack)
         }
     ) { padding ->
         LazyColumn(
@@ -89,7 +106,7 @@ fun CaptureScreen(
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             item {
-                SettingsSection(title = "Quick Capture") {
+                SettingsSection(title = stringResource(R.string.capture_section_quick)) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(12.dp)
@@ -103,7 +120,7 @@ fun CaptureScreen(
                                 contentDescription = null,
                                 modifier = Modifier.size(18.dp)
                             )
-                            Text("Photo", modifier = Modifier.padding(start = 8.dp))
+                            Text(stringResource(R.string.capture_photo), modifier = Modifier.padding(start = 8.dp))
                         }
                         Button(
                             onClick = { viewModel.toggleRecording() },
@@ -118,7 +135,8 @@ fun CaptureScreen(
                                 modifier = Modifier.size(18.dp)
                             )
                             Text(
-                                if (isRecording) "Stop" else "Record",
+                                if (isRecording) stringResource(R.string.capture_stop)
+                                else stringResource(R.string.capture_record),
                                 modifier = Modifier.padding(start = 8.dp)
                             )
                         }
@@ -127,9 +145,9 @@ fun CaptureScreen(
             }
 
             item {
-                SettingsSection(title = "Interval Photography") {
+                SettingsSection(title = stringResource(R.string.capture_section_interval)) {
                     SliderSetting(
-                        title = "Interval (seconds)",
+                        title = stringResource(R.string.capture_interval_seconds),
                         value = intervalConfig.intervalSeconds.toFloat(),
                         range = IntervalCapturePolicy.MIN_INTERVAL_SECONDS.toFloat()..IntervalCapturePolicy.MAX_INTERVAL_SECONDS.toFloat(),
                         onValueChange = {
@@ -139,7 +157,7 @@ fun CaptureScreen(
                         }
                     )
                     SliderSetting(
-                        title = "Total Captures",
+                        title = stringResource(R.string.capture_total_captures),
                         value = intervalConfig.totalCaptures.toFloat(),
                         range = 1f..IntervalCapturePolicy.TOTAL_CAPTURES_MAX.toFloat(),
                         onValueChange = {
@@ -149,7 +167,7 @@ fun CaptureScreen(
                         }
                     )
                     DropdownSetting(
-                        title = "Flash Mode",
+                        title = stringResource(R.string.capture_flash_mode),
                         options = FlashMode.entries.map { it.name },
                         selected = intervalConfig.flashMode.name,
                         onSelect = {
@@ -172,7 +190,7 @@ fun CaptureScreen(
                                 contentDescription = null,
                                 modifier = Modifier.size(18.dp)
                             )
-                            Text("Stop Interval", modifier = Modifier.padding(start = 8.dp))
+                            Text(stringResource(R.string.capture_stop_interval), modifier = Modifier.padding(start = 8.dp))
                         }
                     } else {
                         Button(
@@ -184,7 +202,7 @@ fun CaptureScreen(
                                 contentDescription = null,
                                 modifier = Modifier.size(18.dp)
                             )
-                            Text("Start Interval", modifier = Modifier.padding(start = 8.dp))
+                            Text(stringResource(R.string.capture_start_interval), modifier = Modifier.padding(start = 8.dp))
                         }
                     }
                     Spacer(modifier = Modifier.height(8.dp))
@@ -195,16 +213,19 @@ fun CaptureScreen(
                         enabled = !timelapseBusy,
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        Text(if (timelapseBusy) "Assembling…" else "Assemble Timelapse (last 100 photos)")
+                        Text(
+                            if (timelapseBusy) stringResource(R.string.capture_assembling)
+                            else stringResource(R.string.capture_assemble_timelapse)
+                        )
                     }
                     timelapseMessage?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
                 }
             }
 
             item {
-                SettingsSection(title = "Scheduled Recording") {
+                SettingsSection(title = stringResource(R.string.capture_section_scheduled)) {
                     SwitchSetting(
-                        title = "Include Audio",
+                        title = stringResource(R.string.capture_include_audio),
                         checked = recordingConfig.includeAudio,
                         onCheckedChange = {
                             viewModel.updateRecordingConfig(
@@ -213,7 +234,7 @@ fun CaptureScreen(
                         }
                     )
                     DropdownSetting(
-                        title = "Recording Quality",
+                        title = stringResource(R.string.capture_recording_quality),
                         options = RecordingQuality.entries.map { it.name },
                         selected = recordingConfig.quality.name,
                         onSelect = {
@@ -223,7 +244,7 @@ fun CaptureScreen(
                         }
                     )
                     SliderSetting(
-                        title = "Duration (seconds, 0 = unlimited)",
+                        title = stringResource(R.string.capture_duration),
                         value = recordingConfig.durationSeconds.toFloat(),
                         range = 0f..RecordingConfig.MAX_DURATION_SECONDS.toFloat(),
                         onValueChange = {
@@ -233,7 +254,7 @@ fun CaptureScreen(
                         }
                     )
                     SliderSetting(
-                        title = "Repeat Interval (seconds, 0 = no repeat)",
+                        title = stringResource(R.string.capture_repeat_interval),
                         value = recordingConfig.repeatIntervalSeconds.toFloat(),
                         range = 0f..RecordingConfig.MAX_REPEAT_SECONDS.toFloat(),
                         onValueChange = {
@@ -276,20 +297,20 @@ fun CaptureScreen(
                                 modifier = Modifier.size(18.dp)
                             )
                             Text(
-                                scheduleRow.label,
+                                schedulePickerLabel,
                                 modifier = Modifier.padding(start = 4.dp)
                             )
                         }
                         if (scheduleRow.canCancel) {
                             IconButton(onClick = { viewModel.cancelScheduledRecording() }) {
-                                Icon(Icons.Default.Delete, contentDescription = "Clear schedule")
+                                Icon(Icons.Default.Delete, contentDescription = stringResource(R.string.capture_clear_schedule_cd))
                             }
                         }
                     }
 
                     if (isRecording) {
                         Text(
-                            text = "Recording: ${formatDuration(recordingElapsedMs)}",
+                            text = stringResource(R.string.capture_recording_elapsed, formatDuration(recordingElapsedMs)),
                             style = MaterialTheme.typography.labelMedium,
                             color = MaterialTheme.colorScheme.error
                         )
@@ -301,7 +322,7 @@ fun CaptureScreen(
                             )
                         ) {
                             Icon(Icons.Default.Videocam, null, Modifier.size(18.dp))
-                            Text("Stop Recording", Modifier.padding(start = 8.dp))
+                            Text(stringResource(R.string.capture_stop_recording), Modifier.padding(start = 8.dp))
                         }
                     } else {
                         Row(
@@ -314,7 +335,7 @@ fun CaptureScreen(
                             ) {
                                 Icon(Icons.Default.Videocam, null, Modifier.size(18.dp))
                                 Text(
-                                    scheduleRow.buttonLabel,
+                                    scheduleMainButtonLabel,
                                     Modifier.padding(start = 8.dp)
                                 )
                             }
@@ -352,12 +373,12 @@ private fun ScheduleTimePickerDialog(
         onDismissRequest = onDismiss,
         confirmButton = {
             TextButton(onClick = { onConfirm(timePickerState.hour, timePickerState.minute) }) {
-                Text("OK")
+                Text(stringResource(R.string.capture_ok))
             }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) {
-                Text("Cancel")
+                Text(stringResource(R.string.capture_cancel))
             }
         },
         text = {

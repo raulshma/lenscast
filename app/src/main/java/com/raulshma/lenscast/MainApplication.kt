@@ -8,14 +8,21 @@ import coil3.request.crossfade
 import coil3.video.VideoFrameDecoder
 import com.raulshma.lenscast.camera.CameraService
 import com.raulshma.lenscast.camera.model.StreamToggle
+import com.raulshma.lenscast.capture.BackupWorker
+import com.raulshma.lenscast.capture.DecryptedPhotoCache
+import com.raulshma.lenscast.capture.CaptureMediaResolver
 import com.raulshma.lenscast.capture.DetectionCoordinator
 import com.raulshma.lenscast.capture.DetectionEventStore
 import com.raulshma.lenscast.capture.DetectionNotifier
 import com.raulshma.lenscast.capture.PhotoCaptureManager
 import com.raulshma.lenscast.capture.RecordingController
 import com.raulshma.lenscast.capture.TamperMonitor
+import com.raulshma.lenscast.capture.TamperResponsePolicy
+import com.raulshma.lenscast.capture.ml.AudioModelStore
 import com.raulshma.lenscast.capture.ml.DetectionModelStore
 import com.raulshma.lenscast.core.ConnectivityMonitor
+import com.raulshma.lenscast.core.KeystoreMediaKeyProvider
+import com.raulshma.lenscast.core.MediaCrypto
 import com.raulshma.lenscast.core.PowerManager
 import com.raulshma.lenscast.core.SirenAutoStop
 import com.raulshma.lenscast.core.StreamWatchdog
@@ -52,16 +59,35 @@ class MainApplication : Application(), SingletonImageLoader.Factory {
     val cameraService: CameraService by lazy { CameraService(this) }
     val streamingManager: StreamingManager by lazy { StreamingManager(this, thermalMonitor) }
     val settingsDataStore: SettingsDataStore by lazy { SettingsDataStore(this) }
+    // The single media-at-rest key (Android Keystore, generated once) behind
+    // the opt-in capture encryption; every encrypt/decrypt site resolves
+    // through this one provider.
+    val mediaKeyProvider: MediaCrypto.KeyProvider by lazy { KeystoreMediaKeyProvider() }
+    // The decrypted-photo cache the gallery's Coil loading rides when media
+    // encryption is on (photos only — videos play through the decrypting
+    // stream and preview as a placeholder).
+    val decryptedPhotoCache: DecryptedPhotoCache by lazy {
+        DecryptedPhotoCache(this, CaptureMediaResolver(contentResolver, mediaKeyProvider))
+    }
     val captureHistoryStore: CaptureHistoryStore by lazy {
         CaptureHistoryStore(
             this,
             retentionDays = { settingsDataStore.captureRetentionDays.value },
             quotaMb = { settingsDataStore.storageQuotaMb.value },
+            // A capture's decrypted-photo cache file dies with the capture —
+            // whatever removed it (manual, batch, retention, quota).
+            onEntriesDeleted = { deleted -> decryptedPhotoCache.deleteAll(deleted) },
         )
     }
     val recordingController: RecordingController by lazy { RecordingController(this) }
     val photoCaptureManager: PhotoCaptureManager by lazy {
-        PhotoCaptureManager(this, cameraService, captureHistoryStore)
+        PhotoCaptureManager(
+            this,
+            cameraService,
+            captureHistoryStore,
+            encryptionEnabled = { settingsDataStore.mediaEncryptionEnabled.value },
+            mediaKeyProvider = mediaKeyProvider,
+        )
     }
     val powerManager: PowerManager by lazy { PowerManager(this) }
     val thermalMonitor: ThermalMonitor by lazy { ThermalMonitor(this) }
@@ -142,6 +168,12 @@ class MainApplication : Application(), SingletonImageLoader.Factory {
     val detectionModelStore: DetectionModelStore by lazy {
         DetectionModelStore(java.io.File(filesDir, DetectionModelStore.DEFAULT_DIR_NAME))
     }
+    // The YAMNet audio-classification model: the same on-demand contract, one
+    // store per model — the coordinator's classifier and the settings row
+    // share this state.
+    val audioModelStore: AudioModelStore by lazy {
+        AudioModelStore(java.io.File(filesDir, AudioModelStore.DEFAULT_DIR_NAME))
+    }
     val detectionCoordinator: DetectionCoordinator by lazy {
         DetectionCoordinator(
             appContext = this,
@@ -152,6 +184,7 @@ class MainApplication : Application(), SingletonImageLoader.Factory {
             eventStore = detectionEventStore,
             captureHistoryStore = captureHistoryStore,
             detectionModelStore = detectionModelStore,
+            audioModelStore = audioModelStore,
             streamingManager = { streamingManager },
             cameraService = { cameraService },
             mqttPublisher = { mqttAlertPublisher },
@@ -254,6 +287,17 @@ class MainApplication : Application(), SingletonImageLoader.Factory {
         // screen's lifetime.
         streamingManager.setMotionListener { delta, zones -> detectionCoordinator.onMotion(delta, zones) }
         streamingManager.setSoundListener { rms -> detectionCoordinator.onSound(rms) }
+        // Sound classification rides the same audio chunks: the coordinator
+        // gates the feed on its own settings (feature + sound detection on)
+        // and the classifier runs off the audio path — annotate-only, never
+        // suppressing the RMS events above.
+        streamingManager.setSoundClassificationTap { pcm16 ->
+            detectionCoordinator.feedSoundClassification(
+                pcm16,
+                streamingManager.audioCaptureSampleRateHz(),
+                streamingManager.audioCaptureChannelCount(),
+            )
+        }
     }
 
     /**
@@ -262,6 +306,12 @@ class MainApplication : Application(), SingletonImageLoader.Factory {
      * streaming via the tile or the Web API). The monitor only fires when the
      * setting is on and a stream is live — those gates read live, so the
      * collect runs for the process lifetime and stays inert otherwise.
+     *
+     * The response beyond the alert fan-out is [TamperResponsePolicy]'s,
+     * executed here: flush the detection-event log to disk, and (when backup
+     * is armed) cancel-and-re-enqueue every pending capture backup as an
+     * expedited request that skips the Wi-Fi-only gate — the priority ladder
+     * for a camera that may never see power again.
      */
     private fun initializeTamperMonitor() {
         TamperMonitor(
@@ -269,9 +319,37 @@ class MainApplication : Application(), SingletonImageLoader.Factory {
             batteryPercent = { powerManager.batteryLevel.value },
             enabled = { settingsDataStore.tamperDetectionEnabled.value },
             isStreamActive = { streamingManager.isLiveStreaming() },
-            onTamper = { batteryPercentValue -> detectionCoordinator.onTamper(batteryPercentValue) },
+            onTamper = { batteryPercentValue -> runTamperResponse(batteryPercentValue) },
             scope = appScope,
         ).start()
+    }
+
+    private fun runTamperResponse(batteryPercentValue: Int?) {
+        val verdict = TamperResponsePolicy.decide(
+            backupEnabled = settingsDataStore.backupEnabled.value,
+        )
+        // The alert fan-out (webhook/MQTT/notification/deterrence + the event
+        // log entry) first — the response below preserves what it produces.
+        detectionCoordinator.onTamper(batteryPercentValue)
+        appScope.launch {
+            // The tamper event's own record persists inline; the flush is the
+            // guarantee that the log's whole current state is on disk before
+            // the power can die.
+            if (verdict.flushEventLog) {
+                runCatching { detectionEventStore.flush() }
+                    .onFailure { android.util.Log.w("MainApplication", "Event-log flush failed: ${it.message}") }
+            }
+            if (verdict.expediteBackup) {
+                runCatching {
+                    BackupWorker.expeditePending(
+                        this@MainApplication,
+                        captureHistoryStore.history.value.map { it.filePath },
+                    )
+                }.onFailure {
+                    android.util.Log.w("MainApplication", "Tamper backup expedite failed: ${it.message}")
+                }
+            }
+        }
     }
 
     /**

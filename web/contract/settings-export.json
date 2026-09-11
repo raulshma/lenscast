@@ -70,6 +70,9 @@
       "soundRecordingEnabled": false,
       "motionCooldownSeconds": 10,
       "soundCooldownSeconds": 10,
+      "soundClassificationEnabled": false,
+      "soundClassificationConfidencePercent": 60,
+      "soundClassificationAllowedClasses": [],
       "webhookEnabled": false,
       "webhookUrl": "",
       "webhookHeaders": "",
@@ -105,6 +108,7 @@
       "captureRetentionDays": 0,
       "eventRetentionDays": 0,
       "storageQuotaMb": 2048,
+      "mediaEncryptionEnabled": false,
       "mlDetectionEnabled": false,
       "mlMinScorePercent": 60,
       "mlIncludePerson": true,
@@ -115,7 +119,8 @@
       "mlModelError": "",
       "continuousRecording": false,
       "continuousSegmentMinutes": 15,
-      "onvifEnabled": false
+      "onvifEnabled": false,
+      "ecoIdleFpsEnabled": false
     }
   }
 }

@@ -29,6 +29,9 @@ object StreamDefaults {
     const val ADAPTIVE_JPEG_QUALITY_MAX = 95
     const val ADAPTIVE_FPS_MIN = 3
     const val ADAPTIVE_FPS_MAX = 30
+    // Eco idle-fps mode: the frame-rate floor while on battery with no stream
+    // consumers (clamped against ADAPTIVE_FPS_MIN and the user's own rate).
+    const val ECO_IDLE_FPS = 5
     const val AUDIO_BITRATE_MIN_KBPS = 32
     const val AUDIO_BITRATE_MAX_KBPS = 320
     const val AUDIO_CHANNELS_MIN = 1
@@ -120,6 +123,13 @@ object StreamDefaults {
     const val ML_SCORE_MIN_PERCENT = 10
     const val ML_SCORE_MAX_PERCENT = 95
     const val ML_SCORE_PERCENT_DEFAULT = 60
+
+    // Sound classification (YAMNet): minimum confidence a window's top label
+    // must reach before it annotates a sound event, persisted as a percent —
+    // the same span the ML score keeps.
+    const val SOUND_CLASSIFICATION_MIN_PERCENT = 10
+    const val SOUND_CLASSIFICATION_MAX_PERCENT = 95
+    const val SOUND_CLASSIFICATION_PERCENT_DEFAULT = 60
 
     // Continuous (NVR-style) loop recording: chain bounded segments back to
     // back while the camera is free; old segments age out through the

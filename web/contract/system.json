@@ -11,7 +11,10 @@
     "isCharging": true,
     "temperatureTenthsC": 295,
     "voltageMillivolts": 4350,
-    "health": "good"
+    "health": "good",
+    "batteryChargeCounterMah": 4480,
+    "batteryCurrentMicroAmps": -312000,
+    "batteryCycleCount": 212
   },
   "storage": {
     "usedBytes": 1073741824,

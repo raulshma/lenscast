@@ -6,6 +6,17 @@
   <meta name="description" content="LensCast — Remote camera control dashboard. Live stream, capture, and manage your Android camera from any browser." />
   <title>LensCast — Camera Control</title>
   <link rel="icon" type="image/svg+xml" href="/logo.svg" />
+  <!--
+    PWA installability. Deliberately NO service worker: LensCast is a live
+    streaming dashboard (MJPEG/HLS/WebSockets) and a cached shell would serve
+    stale UI or break stream reconnects — installability works from the
+    manifest alone. Chrome accepts the SVG logo as the install icon
+    (sizes "any", purpose "any"); iOS ignores apple-touch-icon in SVG but
+    degrades to the favicon/favicon-less tile.
+  -->
+  <link rel="manifest" href="/manifest.webmanifest" />
+  <meta name="theme-color" content="#0a0a0f" />
+  <link rel="apple-touch-icon" href="/logo.svg" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
