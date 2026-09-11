@@ -66,6 +66,7 @@ import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -73,6 +74,7 @@ import kotlinx.coroutines.launch
 import coil3.compose.AsyncImage
 import coil3.request.ImageRequest
 import coil3.request.crossfade
+import com.raulshma.lenscast.R
 import com.raulshma.lenscast.capture.model.CaptureHistory
 import com.raulshma.lenscast.capture.model.CaptureType
 import com.raulshma.lenscast.ui.animation.LocalAnimatedVisibilityScope
@@ -85,10 +87,14 @@ fun MediaViewerScreen(
     pagerState: PagerState,
     onDeleteCurrent: () -> Unit,
     onNavigateBack: () -> Unit,
+    /** Encrypted-at-rest photos' decrypted cache files, keyed by history id. */
+    decryptedPhotos: Map<String, java.io.File> = emptyMap(),
+    /** Encrypted-at-rest videos: played through the decrypting stream. */
+    encryptedVideoIds: Set<String> = emptySet(),
 ) {
     if (allItems.isEmpty()) {
         Box(modifier = Modifier.fillMaxSize().background(Color.Black), contentAlignment = Alignment.Center) {
-            Text("Media not found", style = MaterialTheme.typography.bodyLarge, color = Color.White)
+            Text(stringResource(R.string.gallery_media_not_found), style = MaterialTheme.typography.bodyLarge, color = Color.White)
         }
         return
     }
@@ -104,15 +110,15 @@ fun MediaViewerScreen(
     if (showDeleteDialog) {
         AlertDialog(
             onDismissRequest = { showDeleteDialog = false },
-            title = { Text("Delete") },
-            text = { Text("Delete \"${mediaItem.fileName}\"?") },
+            title = { Text(stringResource(R.string.gallery_delete)) },
+            text = { Text(stringResource(R.string.gallery_delete_item_message, mediaItem.fileName)) },
             confirmButton = {
                 TextButton(onClick = { showDeleteDialog = false; onDeleteCurrent() }) {
-                    Text("Delete", color = MaterialTheme.colorScheme.error)
+                    Text(stringResource(R.string.gallery_delete), color = MaterialTheme.colorScheme.error)
                 }
             },
             dismissButton = {
-                TextButton(onClick = { showDeleteDialog = false }) { Text("Cancel") }
+                TextButton(onClick = { showDeleteDialog = false }) { Text(stringResource(R.string.gallery_cancel)) }
             },
         )
     }
@@ -128,8 +134,12 @@ fun MediaViewerScreen(
                     filePath = item.filePath,
                     mediaId = item.id,
                     enableSharedElement = item.id == initialMediaId,
+                    decryptedModel = decryptedPhotos[item.id],
                 )
-                CaptureType.VIDEO -> VideoViewer(filePath = item.filePath)
+                CaptureType.VIDEO -> VideoViewer(
+                    filePath = item.filePath,
+                    encrypted = item.id in encryptedVideoIds,
+                )
             }
         }
 
@@ -146,24 +156,32 @@ fun MediaViewerScreen(
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     IconButton(onClick = onNavigateBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = Color.White)
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.nav_back), tint = Color.White)
                     }
                     Column(modifier = Modifier.padding(end = 8.dp)) {
                         Text(mediaItem.fileName, color = Color.White, style = MaterialTheme.typography.titleSmall, maxLines = 1)
-                        Text("${(currentIndex + 1).coerceAtLeast(1)} of ${allItems.size}", color = Color.White.copy(alpha = 0.75f), style = MaterialTheme.typography.labelSmall)
+                        Text(
+                            stringResource(
+                                R.string.gallery_viewer_position,
+                                (currentIndex + 1).coerceAtLeast(1),
+                                allItems.size
+                            ),
+                            color = Color.White.copy(alpha = 0.75f),
+                            style = MaterialTheme.typography.labelSmall
+                        )
                     }
                 }
                 IconButton(onClick = { detailsExpanded = !detailsExpanded }) {
-                    Icon(Icons.Default.Info, contentDescription = "Toggle details", tint = Color.White)
+                    Icon(Icons.Default.Info, contentDescription = stringResource(R.string.gallery_toggle_details_cd), tint = Color.White)
                 }
                 IconButton(onClick = { shareGalleryMedia(context, listOf(mediaItem)) }) {
-                    Icon(Icons.Default.Share, contentDescription = "Share", tint = Color.White)
+                    Icon(Icons.Default.Share, contentDescription = stringResource(R.string.gallery_share_cd), tint = Color.White)
                 }
                 IconButton(onClick = { openMediaExternal(context, mediaItem) }) {
-                    Icon(Icons.AutoMirrored.Filled.OpenInNew, contentDescription = "Open externally", tint = Color.White)
+                    Icon(Icons.AutoMirrored.Filled.OpenInNew, contentDescription = stringResource(R.string.gallery_open_externally_cd), tint = Color.White)
                 }
                 IconButton(onClick = { showDeleteDialog = true }) {
-                    Icon(Icons.Default.Delete, contentDescription = "Delete", tint = Color.White)
+                    Icon(Icons.Default.Delete, contentDescription = stringResource(R.string.gallery_delete_cd), tint = Color.White)
                 }
             }
         }
@@ -171,14 +189,14 @@ fun MediaViewerScreen(
         ViewerNavButton(
             visible = currentIndex > 0,
             icon = Icons.Default.ChevronLeft,
-            contentDescription = "Previous item",
+            contentDescription = stringResource(R.string.gallery_previous_item_cd),
             modifier = Modifier.align(Alignment.CenterStart).padding(start = 12.dp),
             onClick = { coroutineScope.launch { pagerState.animateScrollToPage(currentIndex - 1) } },
         )
         ViewerNavButton(
             visible = currentIndex < allItems.lastIndex,
             icon = Icons.Default.ChevronRight,
-            contentDescription = "Next item",
+            contentDescription = stringResource(R.string.gallery_next_item_cd),
             modifier = Modifier.align(Alignment.CenterEnd).padding(end = 12.dp),
             onClick = { coroutineScope.launch { pagerState.animateScrollToPage(currentIndex + 1) } },
         )
@@ -199,7 +217,13 @@ fun MediaViewerScreen(
                 Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text(formatViewerDateTime(mediaItem.timestamp), color = Color.White, style = MaterialTheme.typography.bodyMedium)
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        ViewerMetaChip(if (mediaItem.type == CaptureType.PHOTO) "Photo" else "Video")
+                        ViewerMetaChip(
+                            if (mediaItem.type == CaptureType.PHOTO) {
+                                stringResource(R.string.gallery_type_photo)
+                            } else {
+                                stringResource(R.string.gallery_type_video)
+                            }
+                        )
                         if (mediaItem.fileSizeBytes > 0) ViewerMetaChip(formatFileSize(mediaItem.fileSizeBytes))
                         if (mediaItem.type == CaptureType.VIDEO && mediaItem.durationMs > 0) ViewerMetaChip(formatDuration(mediaItem.durationMs))
                     }
@@ -215,6 +239,8 @@ private fun PhotoViewer(
     filePath: String,
     mediaId: String,
     enableSharedElement: Boolean,
+    /** The decrypted cache file, when the photo is encrypted at rest. */
+    decryptedModel: Any? = null,
 ) {
     val sharedTransitionScope = LocalSharedTransitionScope.current
     val animatedVisibilityScope = LocalAnimatedVisibilityScope.current
@@ -222,7 +248,7 @@ private fun PhotoViewer(
     var offsetX by remember { mutableFloatStateOf(0f) }
     var offsetY by remember { mutableFloatStateOf(0f) }
     var viewport by remember { mutableStateOf(IntSize.Zero) }
-    val imageModel = resolveMediaModel(filePath)
+    val imageModel = decryptedModel ?: resolveMediaModel(filePath)
 
     Box(
         modifier = Modifier
@@ -283,30 +309,54 @@ private fun PhotoViewer(
                 contentScale = ContentScale.Fit,
             )
         } else {
-            ViewerUnavailable(icon = Icons.Default.PhotoCamera, label = "Image not available")
+            ViewerUnavailable(icon = Icons.Default.PhotoCamera, label = stringResource(R.string.gallery_image_unavailable))
         }
     }
 }
 
 @Composable
-private fun VideoViewer(filePath: String) {
+private fun VideoViewer(filePath: String, encrypted: Boolean) {
     val context = androidx.compose.ui.platform.LocalContext.current
+    val app = context.applicationContext as com.raulshma.lenscast.MainApplication
     val resolved = resolveMediaModel(filePath)
     val exoPlayer = androidx.compose.runtime.remember {
         androidx.media3.exoplayer.ExoPlayer.Builder(context).build().apply {
             repeatMode = androidx.media3.common.Player.REPEAT_MODE_OFF
         }
     }
-    androidx.compose.runtime.DisposableEffect(resolved) {
-        val item = when (resolved) {
-            is android.net.Uri -> androidx.media3.common.MediaItem.fromUri(resolved)
-            is java.io.File -> androidx.media3.common.MediaItem.fromUri(android.net.Uri.fromFile(resolved))
-            else -> null
-        }
-        if (item != null) {
-            exoPlayer.setMediaItem(item)
-            exoPlayer.prepare()
-            exoPlayer.playWhenReady = true
+    androidx.compose.runtime.DisposableEffect(resolved, encrypted) {
+        when {
+            // Encrypted at rest: the media never exists as plaintext bytes the
+            // player could open, so playback rides the decrypting DataSource
+            // (seeks are sequential decrypt-and-discard — see the source).
+            encrypted -> {
+                val resolver = com.raulshma.lenscast.capture.CaptureMediaResolver(
+                    context.contentResolver,
+                    app.mediaKeyProvider,
+                )
+                val mediaSource = androidx.media3.exoplayer.source.DefaultMediaSourceFactory(
+                    DecryptingDataSourceFactory(resolver, filePath),
+                ).createMediaSource(
+                    androidx.media3.common.MediaItem.fromUri(
+                        android.net.Uri.parse("lenscast://decrypted/$filePath")
+                    ),
+                )
+                exoPlayer.setMediaSource(mediaSource)
+                exoPlayer.prepare()
+                exoPlayer.playWhenReady = true
+            }
+            resolved is android.net.Uri -> {
+                exoPlayer.setMediaItem(androidx.media3.common.MediaItem.fromUri(resolved))
+                exoPlayer.prepare()
+                exoPlayer.playWhenReady = true
+            }
+            resolved is java.io.File -> {
+                exoPlayer.setMediaItem(
+                    androidx.media3.common.MediaItem.fromUri(android.net.Uri.fromFile(resolved))
+                )
+                exoPlayer.prepare()
+                exoPlayer.playWhenReady = true
+            }
         }
         onDispose { exoPlayer.stop() }
     }
@@ -326,7 +376,7 @@ private fun VideoViewer(filePath: String) {
                 },
             )
         } else {
-            ViewerUnavailable(icon = Icons.Default.Videocam, label = "Video not available")
+            ViewerUnavailable(icon = Icons.Default.Videocam, label = stringResource(R.string.gallery_video_unavailable))
         }
     }
 }

@@ -162,6 +162,19 @@ class DetectionEventStore private constructor(
         }
     }
 
+    /**
+     * Forces the in-memory log's current state to disk, atomically. Every
+     * mutation already persists inline, so the ordinary cost is one extra
+     * identical write — the call exists for the tamper response, where the
+     * process's next act may be losing power and "the record call persists
+     * anyway" is a bet, not a guarantee.
+     */
+    fun flush() {
+        synchronized(lock) {
+            persistLocked()
+        }
+    }
+
     /** Drops window-aged events; caller holds [lock]. Only rewrites when something actually aged out. */
     private fun pruneRetentionLocked() {
         val kept = RetentionPolicy.pruneEntries(events, { it.timestampMs }, nowMs(), retentionDays())

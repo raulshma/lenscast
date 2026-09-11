@@ -25,14 +25,29 @@ import kotlin.coroutines.resumeWithException
  * Owns the photo-capture choreography: acquire the use case, take the photo,
  * record it in the capture history, release the use case. The camera screen,
  * the capture screen, and the Web API all go through this one interface.
+ *
+ * The write seam: with media encryption off, photos land in MediaStore
+ * directly (CameraX writes the plaintext). With [encryptionEnabled] on, the
+ * capture lands in a cacheDir temp file and [EncryptedMediaSink] streams it
+ * into the same MediaStore row encrypted — one seam per state, both served
+ * transparently by [CaptureMediaResolver] afterwards. Pre-Q devices keep the
+ * legacy public-folder file path in both modes (ciphertext in the shared
+ * Pictures folder would be unreadable noise to other apps).
  */
 class PhotoCaptureManager(
     private val context: Context,
     private val cameraService: com.raulshma.lenscast.camera.CameraService,
     private val captureHistoryStore: CaptureHistoryStore,
+    /** Live media-encryption gate, read per capture so a toggle needs no restart. */
+    private val encryptionEnabled: () -> Boolean = { false },
+    /** The key seam for the encrypted destination; required only while encrypting. */
+    private val mediaKeyProvider: com.raulshma.lenscast.core.MediaCrypto.KeyProvider? = null,
 ) {
 
-    private val mediaResolver = CaptureMediaResolver(context.contentResolver)
+    // Read-back goes through the same transparent decrypt as every other
+    // consumer, so a snapshot saved while encryption is on still returns
+    // plaintext JPEG bytes to the /snapshot route.
+    private val mediaResolver = CaptureMediaResolver(context.contentResolver, mediaKeyProvider)
 
     /**
      * Capture a photo into the gallery (MediaStore / Pictures/LensCast) and
@@ -151,18 +166,24 @@ class PhotoCaptureManager(
         destination: PhotoDestination,
     ): Pair<String, Long>? =
         withTimeoutOrNull(SNAPSHOT_TIMEOUT_MS) {
-            suspendCancellableCoroutine { cont ->
-                imageCapture.takePicture(
-                    destination.outputOptions,
-                    ContextCompat.getMainExecutor(context),
-                    takePictureCallback(
-                        destination,
-                        onSaved = { filePath, fileSizeBytes ->
-                            cont.resume(filePath to fileSizeBytes)
-                        },
-                        onError = { cont.resumeWithException(it) },
-                    ),
-                )
+            try {
+                suspendCancellableCoroutine { cont ->
+                    imageCapture.takePicture(
+                        destination.outputOptions,
+                        ContextCompat.getMainExecutor(context),
+                        takePictureCallback(
+                            destination,
+                            onSaved = { filePath, fileSizeBytes ->
+                                cont.resume(filePath to fileSizeBytes)
+                            },
+                            onError = { cont.resumeWithException(it) },
+                        ),
+                    )
+                }
+            } finally {
+                // The encrypted destination's temp file (and any later temp
+                // shape) dies with the attempt; a success already consumed it.
+                destination.cleanup()
             }
         }
 
@@ -175,7 +196,12 @@ class PhotoCaptureManager(
             onSaved(destination.savedPath(output), destination.savedSize(output))
         }
 
-        override fun onError(exception: ImageCaptureException) = onError(exception)
+        override fun onError(exception: ImageCaptureException) {
+            // Drop the encrypted path's temp file (no-op elsewhere) before
+            // the caller's error handler runs.
+            destination.cleanup()
+            onError(exception)
+        }
     }
 
     /** Where a photo lands, and how a saved result maps back to path + size. */
@@ -183,6 +209,9 @@ class PhotoCaptureManager(
         val outputOptions: ImageCapture.OutputFileOptions
         fun savedPath(output: ImageCapture.OutputFileResults): String
         fun savedSize(output: ImageCapture.OutputFileResults): Long
+
+        /** Frees any intermediate artifact (the encrypted path's temp file). */
+        fun cleanup() {}
     }
 
     private inner class MediaStoreDestination(fileName: String) : PhotoDestination {
@@ -224,11 +253,61 @@ class PhotoCaptureManager(
     }
 
     private fun destinationFor(fileName: String): PhotoDestination =
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            MediaStoreDestination(fileName)
-        } else {
-            legacyFileDestination(fileName)
+        when {
+            Build.VERSION.SDK_INT < Build.VERSION_CODES.Q -> legacyFileDestination(fileName)
+            encryptionEnabled() && mediaKeyProvider != null ->
+                EncryptedMediaStoreDestination(fileName)
+            else -> MediaStoreDestination(fileName)
         }
+
+    /**
+     * The encrypted variant of the MediaStore destination: CameraX writes the
+     * photo into a cacheDir temp file, and [savedPath] — the one post-save
+     * hook in the callback ladder — promotes it into MediaStore through the
+     * [EncryptedMediaSink]. A failed promotion returns a blank path (the
+     * history merge tolerates it, exactly like a provider rejection today).
+     */
+    private inner class EncryptedMediaStoreDestination(fileName: String) : PhotoDestination {
+        private val tempFile = File.createTempFile("lenscast_enc_", ".jpg", context.cacheDir)
+        private val values = ContentValues().apply {
+            put(MediaStore.MediaColumns.DISPLAY_NAME, fileName)
+            put(MediaStore.MediaColumns.MIME_TYPE, CaptureMediaFormat.MIME_PHOTO)
+            put(MediaStore.MediaColumns.RELATIVE_PATH, CaptureMediaFormat.PHOTOS_WRITE_RELATIVE_PATH)
+        }
+
+        @Volatile
+        private var promoted: EncryptedMediaSink.SavedMedia? = null
+
+        override val outputOptions: ImageCapture.OutputFileOptions =
+            ImageCapture.OutputFileOptions.Builder(tempFile).build()
+
+        override fun savedPath(output: ImageCapture.OutputFileResults): String {
+            promote()
+            return promoted?.uriString.orEmpty()
+        }
+
+        // The at-rest (ciphertext) size the row reports post-write.
+        override fun savedSize(output: ImageCapture.OutputFileResults): Long =
+            promoted?.storedSizeBytes ?: 0L
+
+        override fun cleanup() {
+            tempFile.delete()
+        }
+
+        private fun promote() {
+            if (promoted != null) return
+            val provider = mediaKeyProvider ?: return
+            val sink = EncryptedMediaSink(context.contentResolver, provider)
+            promoted = runCatching {
+                sink.writeFileToMediaStore(
+                    MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+                    values,
+                    tempFile,
+                )
+            }.getOrNull()
+            tempFile.delete()
+        }
+    }
 
     @Suppress("DEPRECATION")
     private fun legacyFileDestination(fileName: String): PhotoDestination {

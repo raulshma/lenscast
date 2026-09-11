@@ -26,9 +26,12 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.raulshma.lenscast.MainApplication
+import com.raulshma.lenscast.R
 import com.raulshma.lenscast.ui.components.LensCastTopBar
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -40,7 +43,7 @@ fun GalleryScreen(
     val context = LocalContext.current
     val app = context.applicationContext as MainApplication
     val viewModel: GalleryViewModel = viewModel(
-        factory = GalleryViewModel.Factory(app.captureHistoryStore)
+        factory = GalleryViewModel.Factory(app.captureHistoryStore, app.decryptedPhotoCache)
     )
 
     val allItems by viewModel.allItems.collectAsState()
@@ -49,6 +52,8 @@ fun GalleryScreen(
     val selectMode by viewModel.selectMode.collectAsState()
     val selectedIds by viewModel.selectedIds.collectAsState()
     val batchDeleting by viewModel.batchDeleting.collectAsState()
+    val decryptedPhotos by viewModel.decryptedPhotos.collectAsState()
+    val encryptedVideoIds by viewModel.encryptedVideoIds.collectAsState()
 
     val overview = remember(allItems) { buildGalleryOverview(allItems) }
     val sections = remember(galleryItems) { buildGallerySections(galleryItems) }
@@ -58,9 +63,9 @@ fun GalleryScreen(
     if (showBatchDeleteDialog) {
         AlertDialog(
             onDismissRequest = { showBatchDeleteDialog = false },
-            title = { Text("Delete selected") },
+            title = { Text(stringResource(R.string.gallery_delete_selected_title)) },
             text = {
-                Text("Delete ${selectedIds.size} selected item${if (selectedIds.size == 1) "" else "s"}?")
+                Text(pluralStringResource(R.plurals.gallery_delete_selected_message, selectedIds.size, selectedIds.size))
             },
             confirmButton = {
                 TextButton(
@@ -70,12 +75,12 @@ fun GalleryScreen(
                     },
                     enabled = !batchDeleting,
                 ) {
-                    Text("Delete", color = MaterialTheme.colorScheme.error)
+                    Text(stringResource(R.string.gallery_delete), color = MaterialTheme.colorScheme.error)
                 }
             },
             dismissButton = {
                 TextButton(onClick = { showBatchDeleteDialog = false }) {
-                    Text("Cancel")
+                    Text(stringResource(R.string.gallery_cancel))
                 }
             },
         )
@@ -93,7 +98,7 @@ fun GalleryScreen(
                 )
             } else {
                 LensCastTopBar(
-                    title = "Gallery",
+                    title = stringResource(R.string.gallery_title),
                     onNavigateBack = onNavigateBack,
                     actions = {
                         IconButton(
@@ -102,7 +107,7 @@ fun GalleryScreen(
                         ) {
                             Icon(
                                 Icons.Default.SelectAll,
-                                contentDescription = "Select media",
+                                contentDescription = stringResource(R.string.gallery_select_media_cd),
                             )
                         }
                     },
@@ -155,6 +160,8 @@ fun GalleryScreen(
                         if (!selectMode) viewModel.setSelectMode(true)
                         viewModel.toggleSelect(item.id)
                     },
+                    decryptedPhotos = decryptedPhotos,
+                    encryptedVideoIds = encryptedVideoIds,
                 )
             }
         }

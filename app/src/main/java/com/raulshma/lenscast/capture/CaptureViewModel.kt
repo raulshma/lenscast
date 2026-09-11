@@ -127,7 +127,12 @@ class CaptureViewModel(
                     _timelapseMessage.value = "Need at least 10 photos (have ${photos.size})"
                     return@launch
                 }
-                val resolver = CaptureMediaResolver(context.contentResolver)
+                // Keyed with the app's media key so encrypted-at-rest interval
+                // photos decrypt into timelapse frames like any other read.
+                val resolver = com.raulshma.lenscast.capture.CaptureMediaResolver(
+                    context.contentResolver,
+                    (context.applicationContext as? com.raulshma.lenscast.MainApplication)?.mediaKeyProvider,
+                )
                 val tmpDir = java.io.File(context.cacheDir, "timelapse_frames").apply { mkdirs() }
                 tmpDir.listFiles()?.forEach { it.delete() }
                 var idx = 0

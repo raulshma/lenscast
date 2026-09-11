@@ -117,7 +117,11 @@ fun shareGalleryMedia(context: Context, items: List<CaptureHistory>) {
     context.startActivity(
         Intent.createChooser(
             intent,
-            "Share ${items.size} item${if (items.size == 1) "" else "s"}",
+            context.resources.getQuantityString(
+                com.raulshma.lenscast.R.plurals.gallery_share_chooser,
+                items.size,
+                items.size
+            ),
         )
     )
 }
@@ -129,7 +133,12 @@ fun openMediaExternal(context: Context, item: CaptureHistory) {
         addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
     }
-    context.startActivity(Intent.createChooser(intent, "Open ${item.fileName}"))
+    context.startActivity(
+        Intent.createChooser(
+            intent,
+            context.getString(com.raulshma.lenscast.R.string.gallery_open_chooser, item.fileName)
+        )
+    )
 }
 
 fun formatFileSize(bytes: Long): String {

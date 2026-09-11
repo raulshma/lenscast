@@ -33,6 +33,12 @@ class CaptureHistoryStore(
      * as [retentionDays]. The default is the store's historical fixed quota.
      */
     private val quotaMb: () -> Int = { StreamDefaults.STORAGE_QUOTA_MB_DEFAULT },
+    /**
+     * Runs after every successful delete (manual, batch, retention sweep,
+     * quota eviction) with the removed entries — the decrypted-photo cache's
+     * cleanup hook, so a capture's cache file never outlives it.
+     */
+    private val onEntriesDeleted: (List<CaptureHistory>) -> Unit = {},
 ) {
 
     private val listType = Types.newParameterizedType(
@@ -190,8 +196,10 @@ class CaptureHistoryStore(
         }
         if (deleted.isNotEmpty()) {
             val idSet = deleted.toSet()
+            val removed = _history.value.filter { it.id in idSet }
             _history.value = _history.value.filterNot { it.id in idSet }
             save()
+            onEntriesDeleted(removed)
         }
         return deleted
     }

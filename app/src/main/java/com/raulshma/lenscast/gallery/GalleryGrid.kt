@@ -43,6 +43,8 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -50,6 +52,7 @@ import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import coil3.request.ImageRequest
 import coil3.request.crossfade
+import com.raulshma.lenscast.R
 import com.raulshma.lenscast.capture.model.CaptureHistory
 import com.raulshma.lenscast.capture.model.CaptureType
 import com.raulshma.lenscast.ui.animation.LocalAnimatedVisibilityScope
@@ -62,6 +65,10 @@ fun GalleryMediaGrid(
     selectedIds: Set<String>,
     onItemClick: (CaptureHistory) -> Unit,
     onItemLongClick: (CaptureHistory) -> Unit,
+    /** Encrypted-at-rest photos' decrypted cache files, keyed by history id. */
+    decryptedPhotos: Map<String, java.io.File> = emptyMap(),
+    /** Encrypted-at-rest videos: previewed as a placeholder (playback decrypts). */
+    encryptedVideoIds: Set<String> = emptySet(),
 ) {
     LazyVerticalGrid(
         columns = GridCells.Adaptive(minSize = 124.dp),
@@ -78,6 +85,8 @@ fun GalleryMediaGrid(
                     item = item,
                     selectMode = selectMode,
                     isSelected = item.id in selectedIds,
+                    decryptedModel = decryptedPhotos[item.id],
+                    showPlaceholder = item.type == CaptureType.VIDEO && item.id in encryptedVideoIds,
                     onClick = { onItemClick(item) },
                     onLongClick = { onItemLongClick(item) },
                 )
@@ -92,10 +101,26 @@ fun GalleryEmptyState(
     hasAnyMedia: Boolean,
 ) {
     val state = when {
-        !hasAnyMedia -> Triple("No media yet", "Captured photos and videos will appear here once you start shooting.", Icons.Default.PhotoLibrary)
-        currentFilter == GalleryFilter.PHOTOS -> Triple("No photos in this view", "Switch back to All to browse everything you've captured.", Icons.Default.Image)
-        currentFilter == GalleryFilter.VIDEOS -> Triple("No videos in this view", "Switch back to All to see the rest of your library.", Icons.Default.Movie)
-        else -> Triple("Nothing to show", "Your gallery is ready when new captures arrive.", Icons.Default.PhotoLibrary)
+        !hasAnyMedia -> Triple(
+            stringResource(R.string.gallery_empty_none_title),
+            stringResource(R.string.gallery_empty_none_body),
+            Icons.Default.PhotoLibrary
+        )
+        currentFilter == GalleryFilter.PHOTOS -> Triple(
+            stringResource(R.string.gallery_empty_photos_title),
+            stringResource(R.string.gallery_empty_photos_body),
+            Icons.Default.Image
+        )
+        currentFilter == GalleryFilter.VIDEOS -> Triple(
+            stringResource(R.string.gallery_empty_videos_title),
+            stringResource(R.string.gallery_empty_videos_body),
+            Icons.Default.Movie
+        )
+        else -> Triple(
+            stringResource(R.string.gallery_empty_other_title),
+            stringResource(R.string.gallery_empty_other_body),
+            Icons.Default.PhotoLibrary
+        )
     }
     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         Column(
@@ -126,7 +151,12 @@ private fun GallerySectionHeader(section: GallerySection) {
             Text(section.subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         Text(
-            text = "${section.items.size} item${if (section.items.size == 1) "" else "s"} • ${formatFileSize(section.totalBytes)}",
+            text = pluralStringResource(
+                R.plurals.gallery_section_item_count,
+                section.items.size,
+                section.items.size,
+                formatFileSize(section.totalBytes)
+            ),
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -141,6 +171,10 @@ private fun GalleryMediaCard(
     isSelected: Boolean,
     onClick: () -> Unit,
     onLongClick: () -> Unit,
+    /** Overrides the resolved model with a decrypted cache file when present. */
+    decryptedModel: Any? = null,
+    /** Forces the placeholder icon (encrypted video: no frameable bytes for Coil). */
+    showPlaceholder: Boolean = false,
 ) {
     val sharedTransitionScope = LocalSharedTransitionScope.current
     val animatedVisibilityScope = LocalAnimatedVisibilityScope.current
@@ -160,8 +194,8 @@ private fun GalleryMediaCard(
         shape = RoundedCornerShape(20.dp),
     ) {
         Box(modifier = Modifier.fillMaxSize()) {
-            val imageModel = resolveMediaModel(item.filePath)
-            if (imageModel != null) {
+            val imageModel = decryptedModel ?: resolveMediaModel(item.filePath)
+            if (imageModel != null && !showPlaceholder) {
                 AsyncImage(
                     model = ImageRequest.Builder(LocalContext.current).data(imageModel).crossfade(true).build(),
                     contentDescription = item.fileName,
@@ -210,7 +244,7 @@ private fun GalleryMediaCard(
                 if (!selectMode) {
                     Surface(modifier = Modifier.align(Alignment.Center).size(44.dp), color = Color.Black.copy(alpha = 0.58f), shape = CircleShape) {
                         Box(contentAlignment = Alignment.Center) {
-                            Icon(Icons.Default.PlayArrow, contentDescription = "Play video", tint = Color.White, modifier = Modifier.size(24.dp))
+                            Icon(Icons.Default.PlayArrow, contentDescription = stringResource(R.string.gallery_play_video_cd), tint = Color.White, modifier = Modifier.size(24.dp))
                         }
                     }
                 }
@@ -243,7 +277,15 @@ private fun GalleryTypeBadge(item: CaptureHistory, modifier: Modifier = Modifier
                 tint = Color.White,
                 modifier = Modifier.size(14.dp),
             )
-            Text(if (item.type == CaptureType.PHOTO) "Photo" else "Video", style = MaterialTheme.typography.labelSmall, color = Color.White)
+            Text(
+                if (item.type == CaptureType.PHOTO) {
+                    stringResource(R.string.gallery_type_photo)
+                } else {
+                    stringResource(R.string.gallery_type_video)
+                },
+                style = MaterialTheme.typography.labelSmall,
+                color = Color.White
+            )
         }
     }
 }
@@ -271,7 +313,7 @@ private fun GallerySelectionCheckbox(isSelected: Boolean, modifier: Modifier = M
     ) {
         if (isSelected) {
             Box(contentAlignment = Alignment.Center) {
-                Icon(Icons.Default.Check, contentDescription = "Selected", tint = MaterialTheme.colorScheme.onPrimary, modifier = Modifier.size(18.dp))
+                Icon(Icons.Default.Check, contentDescription = stringResource(R.string.gallery_selected_cd), tint = MaterialTheme.colorScheme.onPrimary, modifier = Modifier.size(18.dp))
             }
         }
     }

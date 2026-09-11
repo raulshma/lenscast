@@ -14,7 +14,9 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import com.raulshma.lenscast.R
 import com.raulshma.lenscast.data.CaptureHistoryStore
 import com.raulshma.lenscast.camera.model.CameraDashboardPolicy.formatBytes
 
@@ -37,11 +39,11 @@ fun StorageBarRow(store: CaptureHistoryStore) {
             horizontalArrangement = Arrangement.SpaceBetween,
         ) {
             Text(
-                "Storage: ${formatBytes(bar.usedBytes)} / ${formatBytes(bar.quotaBytes)}",
+                stringResource(R.string.gallery_storage_usage, formatBytes(bar.usedBytes), formatBytes(bar.quotaBytes)),
                 style = MaterialTheme.typography.bodySmall,
             )
             TextButton(onClick = { store.enforceQuota() }) {
-                Text("Free space")
+                Text(stringResource(R.string.gallery_free_space))
             }
         }
         LinearProgressIndicator(

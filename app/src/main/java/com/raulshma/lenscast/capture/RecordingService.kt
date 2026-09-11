@@ -24,6 +24,13 @@ import com.raulshma.lenscast.core.ForegroundNotifications
 import com.raulshma.lenscast.core.MicAccess
 import com.raulshma.lenscast.capture.model.RecordingConfig
 import com.raulshma.lenscast.capture.model.RecordingQuality
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.io.File
 import java.util.Date
 
 /**
@@ -31,6 +38,15 @@ import java.util.Date
  * state: every transition is reported to the app-scoped [RecordingController],
  * which all consumers observe. Camera binding goes through
  * CameraService's `bindRecording` seam — never through the provider directly.
+ *
+ * The write seam: plaintext recordings go straight to MediaStore through
+ * CameraX's [MediaStoreOutputOptions]. With media encryption on, the Recorder
+ * instead writes a temp file in cacheDir ([FileOutputOptions] — CameraX's
+ * recorder cannot write through an app-owned stream), and the Finalize path
+ * promotes it into MediaStore through the shared [EncryptedMediaSink] — the
+ * same seam photos use — before the history entry and the backup enqueue
+ * read the at-rest size. The extension stays `.mp4`; decryption is the
+ * resolver's job.
  */
 class RecordingService : Service() {
 
@@ -41,6 +57,12 @@ class RecordingService : Service() {
     private var capturedRecordingAudioExclusively = false
     private var activeRecording: Recording? = null
 
+    /** Drains the encrypted Finalize promotion off the main executor. */
+    private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    /** The encrypted path's in-flight CameraX temp output, if any. */
+    private var pendingTempFile: File? = null
+
     private val app: MainApplication by lazy { applicationContext as MainApplication }
     private val recordingController: RecordingController by lazy { app.recordingController }
 
@@ -49,6 +71,11 @@ class RecordingService : Service() {
     override fun onCreate() {
         super.onCreate()
         ForegroundNotifications.createChannel(this, CHANNEL_ID, "Recording")
+    }
+
+    override fun onDestroy() {
+        serviceScope.cancel()
+        super.onDestroy()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -106,10 +133,19 @@ class RecordingService : Service() {
                 }
             }
 
-            val mediaStoreOutput = MediaStoreOutputOptions
-                .Builder(contentResolver, MediaStore.Video.Media.EXTERNAL_CONTENT_URI)
-                .setContentValues(contentValues)
-                .build()
+            // The write seam: plaintext rides MediaStore directly; encryption
+            // rides a temp file promoted through the EncryptedMediaSink on
+            // Finalize (CameraX's recorder cannot write through an app-owned
+            // stream). A keyless encryption flip fails open to plaintext
+            // rather than losing the recording.
+            val encrypting = app.settingsDataStore.mediaEncryptionEnabled.value &&
+                app.mediaKeyProvider != null
+            val tempFile = if (encrypting) {
+                File.createTempFile("lenscast_enc_", ".mp4", cacheDir)
+            } else {
+                null
+            }
+            pendingTempFile = tempFile
 
             val quality = when (config?.quality ?: RecordingQuality.HIGH) {
                 RecordingQuality.HIGH -> Quality.HIGHEST
@@ -129,7 +165,23 @@ class RecordingService : Service() {
                 return
             }
 
-            var pendingRecording = videoCapture.output.prepareRecording(this, mediaStoreOutput)
+            // prepareRecording's two concrete OutputOptions overloads don't
+            // accept the if/else's common supertype, so the output choice and
+            // the prepare call stay in the same branch.
+            var pendingRecording = if (tempFile != null) {
+                videoCapture.output.prepareRecording(
+                    this,
+                    androidx.camera.video.FileOutputOptions.Builder(tempFile).build(),
+                )
+            } else {
+                videoCapture.output.prepareRecording(
+                    this,
+                    MediaStoreOutputOptions
+                        .Builder(contentResolver, MediaStore.Video.Media.EXTERNAL_CONTENT_URI)
+                        .setContentValues(contentValues)
+                        .build(),
+                )
+            }
             // Degrade to video-only rather than throwing if RECORD_AUDIO was
             // revoked between the camera screen's gate and the service start.
             if (audioEnabled &&
@@ -150,21 +202,56 @@ class RecordingService : Service() {
                             val savedUri = event.outputResults.outputUri.takeIf {
                                 it.toString().isNotBlank()
                             }
+                            // The duration is a Finalize-time fact; the
+                            // encrypted promotion below only spends IO time.
+                            val duration = System.currentTimeMillis() - startTimeMs
+                            pendingTempFile = null
 
-                            if (!event.hasError() && savedUri != null) {
-                                val duration = System.currentTimeMillis() - startTimeMs
-                                val fileSizeBytes = queryMediaSize(savedUri)
-                                val entry = app.captureHistoryStore.createVideoEntry(
-                                    fileName = fileName,
-                                    filePath = savedUri.toString(),
-                                    fileSizeBytes = fileSizeBytes,
-                                    durationMs = duration,
-                                )
-                                app.captureHistoryStore.add(entry)
-                                BackupWorker.enqueue(applicationContext, entry.filePath)
-                                Log.d(TAG, "Recording saved: $fileName at $savedUri ($fileSizeBytes bytes)")
+                            if (!event.hasError() && (savedUri != null || tempFile != null)) {
+                                serviceScope.launch {
+                                    val filePath: String
+                                    val fileSizeBytes: Long
+                                    if (tempFile != null) {
+                                        // One encrypt-on-write seam for both
+                                        // capture types: the temp recording
+                                        // streams into the new MediaStore row
+                                        // as ciphertext; any failure removes
+                                        // the row (a lost clip, never a broken
+                                        // one).
+                                        val saved = EncryptedMediaSink(
+                                            contentResolver,
+                                            app.mediaKeyProvider!!,
+                                        ).writeFileToMediaStore(
+                                            MediaStore.Video.Media.EXTERNAL_CONTENT_URI,
+                                            contentValues,
+                                            tempFile,
+                                        )
+                                        tempFile.delete()
+                                        if (saved == null) {
+                                            Log.e(TAG, "Encrypted recording promotion failed; clip discarded")
+                                            withContext(Dispatchers.Main) { finishRecordingSession() }
+                                            return@launch
+                                        }
+                                        filePath = saved.uriString
+                                        fileSizeBytes = saved.storedSizeBytes
+                                    } else {
+                                        filePath = savedUri!!.toString()
+                                        fileSizeBytes = queryMediaSize(savedUri)
+                                    }
+                                    val entry = app.captureHistoryStore.createVideoEntry(
+                                        fileName = fileName,
+                                        filePath = filePath,
+                                        fileSizeBytes = fileSizeBytes,
+                                        durationMs = duration,
+                                    )
+                                    app.captureHistoryStore.add(entry)
+                                    BackupWorker.enqueue(applicationContext, filePath)
+                                    Log.d(TAG, "Recording saved: $fileName at $filePath ($fileSizeBytes bytes)")
+                                    withContext(Dispatchers.Main) { finishRecordingSession() }
+                                }
                             } else {
                                 Log.e(TAG, "Recording error: ${event.error}, uri=$savedUri")
+                                tempFile?.delete()
                                 savedUri?.let { failedUri ->
                                     runCatching {
                                         contentResolver.delete(failedUri, null, null)
@@ -172,9 +259,8 @@ class RecordingService : Service() {
                                         Log.w(TAG, "Failed to clean up incomplete recording $failedUri", deleteError)
                                     }
                                 }
+                                finishRecordingSession()
                             }
-
-                            finishRecordingSession()
                         }
                     }
                 }
@@ -223,6 +309,9 @@ class RecordingService : Service() {
     private fun cleanupFailedStart() {
         isRecording = false
         isFinalizingRecording = false
+        // A failed start never promotes the encrypted temp output.
+        pendingTempFile?.delete()
+        pendingTempFile = null
         teardownSession()
     }
 

@@ -38,8 +38,11 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.raulshma.lenscast.R
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -54,13 +57,17 @@ fun GallerySelectModeTopBar(
     TopAppBar(
         title = {
             Text(
-                text = "${selectedCount.coerceAtMost(allCount)} of $allCount selected",
+                text = stringResource(
+                    R.string.gallery_selection_title,
+                    selectedCount.coerceAtMost(allCount),
+                    allCount
+                ),
                 fontWeight = FontWeight.SemiBold,
             )
         },
         navigationIcon = {
             IconButton(onClick = onExitSelectMode) {
-                Icon(Icons.Default.Deselect, contentDescription = "Exit selection mode")
+                Icon(Icons.Default.Deselect, contentDescription = stringResource(R.string.gallery_exit_selection_cd))
             }
         },
         actions = {
@@ -70,7 +77,11 @@ fun GallerySelectModeTopBar(
             ) {
                 Icon(
                     imageVector = if (allSelected) Icons.Default.Deselect else Icons.Default.SelectAll,
-                    contentDescription = if (allSelected) "Deselect all" else "Select all",
+                    contentDescription = if (allSelected) {
+                        stringResource(R.string.gallery_deselect_all_cd)
+                    } else {
+                        stringResource(R.string.gallery_select_all_cd)
+                    },
                 )
             }
         },
@@ -106,20 +117,24 @@ fun GallerySelectModeBottomBar(
         ) {
             Column {
                 Text(
-                    text = "$selectedCount selected",
+                    text = pluralStringResource(R.plurals.gallery_selected_count, selectedCount, selectedCount),
                     style = MaterialTheme.typography.titleSmall,
                     color = MaterialTheme.colorScheme.onSurface,
                     fontWeight = FontWeight.SemiBold,
                 )
                 Text(
-                    text = if (selectedCount == 0) "Choose items to share or delete" else "Batch actions are ready",
+                    text = if (selectedCount == 0) {
+                        stringResource(R.string.gallery_choose_items_hint)
+                    } else {
+                        stringResource(R.string.gallery_batch_ready)
+                    },
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 GalleryActionPill(
-                    label = "Share",
+                    label = stringResource(R.string.gallery_share),
                     icon = Icons.Default.Share,
                     enabled = selectedCount > 0,
                     destructive = false,
@@ -127,7 +142,11 @@ fun GallerySelectModeBottomBar(
                     onClick = onShareSelected,
                 )
                 GalleryActionPill(
-                    label = if (batchDeleting) "Deleting" else "Delete",
+                    label = if (batchDeleting) {
+                        stringResource(R.string.gallery_deleting)
+                    } else {
+                        stringResource(R.string.gallery_delete)
+                    },
                     icon = Icons.Default.Delete,
                     enabled = selectedCount > 0 && !batchDeleting,
                     destructive = true,
@@ -157,34 +176,40 @@ fun GalleryOverviewCard(
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text(
-                    text = "Your LensCast library",
+                    text = stringResource(R.string.gallery_library_title),
                     style = MaterialTheme.typography.titleMedium,
                     color = MaterialTheme.colorScheme.onSurface,
                     fontWeight = FontWeight.SemiBold,
                 )
                 Text(
                     text = if (overview.totalCount == 0) {
-                        "Captured photos and videos will appear here."
+                        stringResource(R.string.gallery_library_empty)
                     } else {
-                        "Showing $visibleCount of ${overview.totalCount} items across ${overview.dayCount} day${if (overview.dayCount == 1) "" else "s"}."
+                        pluralStringResource(
+                            R.plurals.gallery_library_summary,
+                            overview.dayCount,
+                            visibleCount,
+                            overview.totalCount,
+                            overview.dayCount
+                        )
                     },
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            GalleryStatTile("Photos", overview.photoCount.toString(), Icons.Default.Image)
-            GalleryStatTile("Videos", overview.videoCount.toString(), Icons.Default.Movie)
+            GalleryStatTile(stringResource(R.string.gallery_stat_photos), overview.photoCount.toString(), Icons.Default.Image)
+            GalleryStatTile(stringResource(R.string.gallery_stat_videos), overview.videoCount.toString(), Icons.Default.Movie)
             GalleryStatTile(
-                title = "Visible",
+                title = stringResource(R.string.gallery_stat_visible),
                 value = visibleCount.toString(),
                 icon = Icons.Default.PhotoLibrary,
                 supporting = formatFileSize(visibleBytes),
             )
             GalleryStatTile(
-                title = "Storage",
+                title = stringResource(R.string.gallery_stat_storage),
                 value = formatFileSize(overview.totalBytes),
                 icon = Icons.Default.Folder,
-                supporting = "In app library",
+                supporting = stringResource(R.string.gallery_stat_in_library),
             )
         }
     }
@@ -206,9 +231,9 @@ fun GalleryFilterRow(
     ) {
         GalleryFilter.entries.forEach { filter ->
             val label = when (filter) {
-                GalleryFilter.ALL -> "All (${overview.totalCount})"
-                GalleryFilter.PHOTOS -> "Photos (${overview.photoCount})"
-                GalleryFilter.VIDEOS -> "Videos (${overview.videoCount})"
+                GalleryFilter.ALL -> stringResource(R.string.gallery_filter_all, overview.totalCount)
+                GalleryFilter.PHOTOS -> stringResource(R.string.gallery_filter_photos, overview.photoCount)
+                GalleryFilter.VIDEOS -> stringResource(R.string.gallery_filter_videos, overview.videoCount)
             }
             FilterChip(
                 selected = currentFilter == filter,
