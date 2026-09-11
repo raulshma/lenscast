@@ -18,8 +18,12 @@ espressoCore = "3.7.0"
 coroutines = "1.10.2"
 moshi = "1.15.2"
 coil = "3.4.0"
-media3 = "1.5.1"
+media3 = "1.7.1"
 zxing = "3.5.3"
+streamWebrtc = "1.3.8"
+robolectric = "4.14.1"
+mockk = "1.13.16"
+turbine = "1.2.0"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -63,6 +67,13 @@ media3-exoplayer = { group = "androidx.media3", name = "media3-exoplayer", versi
 media3-ui = { group = "androidx.media3", name = "media3-ui", version.ref = "media3" }
 
 zxing-core = { group = "com.google.zxing", name = "core", version.ref = "zxing" }
+
+stream-webrtc-android = { group = "io.getstream", name = "stream-webrtc-android", version.ref = "streamWebrtc" }
+
+compose-ui-test = { group = "androidx.compose.ui", name = "ui-test-junit4" }
+robolectric = { group = "org.robolectric", name = "robolectric", version.ref = "robolectric" }
+mockk = { group = "io.mockk", name = "mockk", version.ref = "mockk" }
+turbine = { group = "app.cash.turbine", name = "turbine", version.ref = "turbine" }
 
 junit = { group = "junit", name = "junit", version.ref = "junit" }
 androidx-junit = { group = "androidx.test.ext", name = "junit", version.ref = "junitVersion" }

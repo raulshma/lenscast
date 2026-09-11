@@ -3,19 +3,26 @@
     xmlns:tools="http://schemas.android.com/tools">
 
     <!--
-        MediaPipe Tasks Vision (the ML gate's 16 KB-aligned detector library)
-        declares minSdk 24. The app still supports API 23: the manifest gate is
-        overridden here and ObjectDetectionEngine version-gates every touch of
-        the library, so Android 6 devices run everything except the ML
-        detection gate (fail-open — alerts pass through). Do NOT remove the
-        runtime gate if removing this override.
+        MediaPipe Tasks Vision and Audio (the ML gate's 16 KB-aligned detector
+        library and the YAMNet classifier) declare minSdk 24. The app still
+        supports API 23: the manifest gate is overridden here and
+        ObjectDetectionEngine / SoundClassificationEngine version-gate every
+        touch of the libraries, so Android 6 devices run everything except the
+        ML detection and sound-classification gates (fail-open — alerts pass
+        through). Do NOT remove the runtime gates if removing this override.
     -->
-    <uses-sdk tools:overrideLibrary="com.google.mediapipe.tasks.vision,com.google.mediapipe.tasks.core" />
+    <uses-sdk tools:overrideLibrary="com.google.mediapipe.tasks.vision,com.google.mediapipe.tasks.audio,com.google.mediapipe.tasks.core" />
 
     <uses-feature android:name="android.hardware.camera" android:required="true" />
 
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <!--
+      Opt-in photo geotagging only: requested at runtime the moment the EXIF
+      GPS setting is first enabled, never at launch. Coarse is sufficient —
+      a photo caption needs city-level accuracy, not navigation-grade.
+    -->
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"
         android:maxSdkVersion="28" />
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"

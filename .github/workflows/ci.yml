@@ -1,0 +1,65 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: web/package-lock.json
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v3
+
+      - name: Web UI — typecheck + unit tests
+        working-directory: web
+        run: |
+          npm ci
+          npm run typecheck
+          npm run test
+
+      - name: Android — JVM unit tests (store flavor)
+        run: ./gradlew :app:testStoreDebugUnitTest
+
+      - name: Android — JVM unit tests (fdroid flavor)
+        run: ./gradlew :app:testFdroidDebugUnitTest
+
+      - name: Android — debug build (store flavor)
+        run: ./gradlew :app:assembleStoreDebug
+
+      - name: Upload test reports
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-reports
+          path: |
+            app/build/reports/tests/**/*
+            app/build/outputs/apk/**/*
+          if-no-files-found: ignore

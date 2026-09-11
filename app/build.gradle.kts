@@ -273,6 +273,7 @@ dependencies {
     implementation(libs.camerax.lifecycle)
     implementation(libs.camerax.view)
     implementation(libs.camerax.video)
+    implementation(libs.camerax.extensions)
 
     implementation(libs.work.manager)
     // MediaPipe Tasks Vision for the ML object-detection gate (capture/ml/):
@@ -281,6 +282,10 @@ dependencies {
     // (mandatory on Play for apps targeting API 35+). Plain library — no
     // Play-services dependency — so the fdroid flavor gains nothing proprietary.
     implementation("com.google.mediapipe:tasks-vision:1.0.0")
+    // MediaPipe Tasks Audio for YAMNet sound-event classification (capture/ml/):
+    // same plain-library story as tasks-vision above — no Play-services
+    // dependency, fdroid-safe.
+    implementation("com.google.mediapipe:tasks-audio:1.0.0")
     implementation(libs.nanohttpd)
     implementation(libs.nanohttpd.ws)
     implementation(libs.datastore.preferences)
@@ -297,7 +302,15 @@ dependencies {
 
     implementation(libs.zxing.core)
 
+    // WebRTC stack for the WHIP egress (streaming/webrtc/): Stream's
+    // maintained Apache-2.0 build of libwebrtc (BSD upstream).
+    implementation(libs.stream.webrtc.android)
+
     testImplementation(libs.junit)
+    testImplementation(libs.mockk)
+    testImplementation(libs.turbine)
+    testImplementation(libs.robolectric)
+    testImplementation(libs.compose.ui.test)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
 }
