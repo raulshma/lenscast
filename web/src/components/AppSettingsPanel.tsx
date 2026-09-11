@@ -5,6 +5,8 @@ import SettingsCard from './SettingsCard'
 import ToggleRow from './ToggleRow'
 import SecurityCard from './SecurityCard'
 import EventFeed from './EventFeed'
+import DetectionStatsCard from './DetectionStatsCard'
+import RecordingTimeline from './RecordingTimeline'
 import StorageCard from './StorageCard'
 import SystemPanel from './SystemPanel'
 import BackupCard from './BackupCard'
@@ -395,6 +397,8 @@ export default function AppSettingsPanel(props: Props) {
 
       <EventFeed />
 
+      <DetectionStatsCard />
+
       <BackupCard
         settings={props.settings}
         updateStreamingAndSave={props.updateStreamingAndSave}
@@ -406,6 +410,8 @@ export default function AppSettingsPanel(props: Props) {
         updateStreamingAndSave={props.updateStreamingAndSave}
         updateStreamingDebounced={props.updateStreamingDebounced}
       />
+
+      <RecordingTimeline />
 
       <SystemPanel />
 

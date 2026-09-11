@@ -69,6 +69,9 @@ export const API_DEFAULTS = {
   soundRecordingEnabled: false,
   motionCooldownSeconds: 10,
   soundCooldownSeconds: 10,
+  soundClassificationEnabled: false,
+  soundClassificationConfidencePercent: 60,
+  soundClassificationAllowedClasses: [],
   webhookEnabled: false,
   webhookUrl: '',
   webhookHeaders: '',
@@ -131,6 +134,9 @@ export const API_DEFAULTS = {
   continuousSegmentMinMinutes: 5,
   continuousSegmentMaxMinutes: 60,
   onvifEnabled: false,
+  // Eco idle-fps mode: drop to the eco floor (StreamDefaults.ECO_IDLE_FPS = 5)
+  // while on battery with no stream consumers.
+  ecoIdleFpsEnabled: false,
 
   // Retention windows in days; 0 keeps captures/events forever.
   captureRetentionDays: 0,
@@ -143,6 +149,9 @@ export const API_DEFAULTS = {
   storageQuotaMb: 2048,
   storageQuotaMinMb: 100,
   storageQuotaMaxMb: 32768,
+
+  // Opt-in media-at-rest encryption (StreamingSettingsDto.mediaEncryptionEnabled).
+  mediaEncryptionEnabled: false,
 
   // Overlay block (OverlaySettings.DEFAULT, embedded in StreamingSettingsDto)
   overlayEnabled: false,

@@ -1,17 +1,19 @@
-import { createSignal, For, onCleanup, onMount, Show } from 'solid-js'
+import { createEffect, createSignal, For, onCleanup, onMount, Show } from 'solid-js'
 import SettingsCard from './SettingsCard'
+import {
+  type SavedCamera,
+  type TileMode,
+  nextGlobalMode,
+  normalizeMode,
+  parseCameras,
+  withMode,
+} from '../lib/multicamStorage'
 
 /**
  * Known limitation: browsers cannot browse mDNS (.local) names, so remote
  * camera URLs are manual entries — e.g. http://192.168.1.55:8080 (the URL
  * shown on each phone's Connect sheet).
  */
-
-interface SavedCamera {
-  id: string
-  name: string
-  baseUrl: string
-}
 
 // Remote LensCast routes (server-side: StreamingServer.kt). Plain <img> needs
 // no CORS, but both routes sit behind the camera's auth when enabled — see
@@ -22,7 +24,6 @@ const MJPEG_PATH = '/stream' // multipart/x-mixed-replace, rendered natively by 
 const STORAGE_KEY = 'lenscast.multicam.cameras'
 const SNAPSHOT_REFRESH_MS = 5000
 
-type TileMode = 'snapshot' | 'live'
 type TileStatus = 'loading' | 'online' | 'offline'
 
 function makeId(): string {
@@ -35,14 +36,7 @@ function loadCameras(): SavedCamera[] {
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
     if (!raw) return []
-    const parsed: unknown = JSON.parse(raw)
-    if (!Array.isArray(parsed)) return []
-    return parsed.filter((c): c is SavedCamera =>
-      c !== null && typeof c === 'object' &&
-      typeof (c as SavedCamera).id === 'string' &&
-      typeof (c as SavedCamera).name === 'string' &&
-      typeof (c as SavedCamera).baseUrl === 'string',
-    )
+    return parseCameras(JSON.parse(raw))
   } catch {
     return []
   }
@@ -78,22 +72,38 @@ function hostLabel(baseUrl: string): string {
 /**
  * One camera tile: name/online badge over a 5 s auto-refreshing snapshot,
  * with a live toggle that swaps the <img> to the MJPEG stream (browsers
- * render multipart streams natively). Errors mark the tile offline and hint
- * at auth: a remote with login enabled rejects credential-less image
- * requests — sign in on its dashboard once, or open it from here.
+ * render multipart streams natively). The chosen mode persists in
+ * localStorage per camera (additive `mode` field); a failing live stream
+ * falls back to snapshots for the session without overwriting the saved
+ * preference. Errors mark the tile offline and hint at auth: a remote with
+ * login enabled rejects credential-less image requests — sign in on its
+ * dashboard once, or open it from here.
  */
 function CameraTile(props: {
   camera: SavedCamera
   tick: () => number
   onRemove: (id: string) => void
-  onUpdate: (id: string, patch: { name?: string; baseUrl?: string }) => void
+  onUpdate: (id: string, patch: { name?: string; baseUrl?: string; mode?: TileMode }) => void
 }) {
-  const [mode, setMode] = createSignal<TileMode>('snapshot')
+  const [mode, setMode] = createSignal<TileMode>(normalizeMode(props.camera.mode))
+  const [liveBroken, setLiveBroken] = createSignal(false)
   const [status, setStatus] = createSignal<TileStatus>('loading')
   const [editing, setEditing] = createSignal(false)
   const [editName, setEditName] = createSignal(props.camera.name)
   const [editUrl, setEditUrl] = createSignal(props.camera.baseUrl)
   const [editError, setEditError] = createSignal('')
+
+  // Follow persisted-mode changes arriving from outside the tile ("Live
+  // all"); an effect with the previous value keeps a transient snapshot
+  // fallback (liveBroken) from being clobbered by unrelated re-renders.
+  createEffect((prev: TileMode | undefined) => {
+    const persisted = normalizeMode(props.camera.mode)
+    if (prev !== undefined && persisted !== prev) {
+      setMode(persisted)
+      setLiveBroken(false)
+    }
+    return persisted
+  })
 
   const imageUrl = () => mode() === 'live'
     ? `${props.camera.baseUrl}${MJPEG_PATH}`
@@ -119,6 +129,14 @@ function CameraTile(props: {
     setEditing(false)
   }
 
+  function toggleMode() {
+    const next: TileMode = mode() === 'snapshot' ? 'live' : 'snapshot'
+    setStatus('loading')
+    setLiveBroken(false)
+    setMode(next)
+    props.onUpdate(props.camera.id, { mode: next })
+  }
+
   return (
     <div class="multicam-tile" classList={{ 'multicam-tile-offline': status() === 'offline' }}>
       <div class="multicam-tile-media">
@@ -127,7 +145,17 @@ function CameraTile(props: {
           alt={`${props.camera.name} preview`}
           src={imageUrl()}
           loading="lazy"
-          onError={() => setStatus('offline')}
+          onError={() => {
+            // The MJPEG rung is best-effort: when it fails, retry via the
+            // snapshot rung this session; only a failing snapshot marks the
+            // tile offline.
+            if (mode() === 'live' && !liveBroken()) {
+              setLiveBroken(true)
+              setMode('snapshot')
+              return
+            }
+            setStatus('offline')
+          }}
           onLoad={() => setStatus('online')}
         />
         <span
@@ -174,10 +202,7 @@ function CameraTile(props: {
               type="button"
               class="multicam-mini-btn"
               title={mode() === 'snapshot' ? 'Switch to the live MJPEG stream' : 'Back to 5 s snapshots'}
-              onClick={() => {
-                setStatus('loading')
-                setMode(mode() === 'snapshot' ? 'live' : 'snapshot')
-              }}
+              onClick={toggleMode}
             >
               {mode() === 'snapshot' ? 'Live' : 'Snapshots'}
             </button>
@@ -216,9 +241,11 @@ function CameraTile(props: {
 
 /**
  * Lightweight multi-camera MVP for several LensCast phones: user-added
- * {id, name, baseUrl} entries persisted in localStorage, rendered as a tile
- * grid of snapshots with a live toggle. Only <img> requests are made toward
- * the remote cameras (no cross-origin JSON fetches, no credential access).
+ * {id, name, baseUrl, mode?} entries persisted in localStorage (shape kept
+ * additive — older saves without `mode` keep loading), rendered as a tile
+ * grid of snapshots or live MJPEG streams with per-tile toggles plus a
+ * global "Live all" switch. Only <img> requests are made toward the remote
+ * cameras (no cross-origin JSON fetches, no credential access).
  */
 export default function MultiCamCard() {
   const [cameras, setCameras] = createSignal<SavedCamera[]>([])
@@ -281,6 +308,15 @@ export default function MultiCamCard() {
       <div class="field-group">
         <div class="field-row">
           <span class="field-label">{cameras().length} camera{cameras().length === 1 ? '' : 's'}</span>
+          <button
+            type="button"
+            class="action-btn action-btn-ghost"
+            disabled={cameras().length === 0}
+            title="Switch every tile between the live MJPEG stream and 5 s snapshots"
+            onClick={() => update((current) => withMode(current, nextGlobalMode(current)))}
+          >
+            <span>{nextGlobalMode(cameras()) === 'live' ? 'Live all' : 'Snapshots all'}</span>
+          </button>
         </div>
         <div class="status-banner status-banner-info stream-mode-hint" role="note">
           <span class="status-banner-dot" aria-hidden="true" />

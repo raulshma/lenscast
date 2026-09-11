@@ -1,6 +1,7 @@
 import { Show } from 'solid-js'
 import type { DeviceStatus } from '../types'
 import { API_DEFAULTS } from '../api/defaults'
+import type { ThemeMode } from '../hooks/useTheme'
 
 interface Props {
   status: () => DeviceStatus | null
@@ -8,6 +9,8 @@ interface Props {
   authRequired: () => boolean
   handleLogout: () => void
   setShowGallery: (v: boolean) => void
+  theme: () => ThemeMode
+  toggleTheme: () => void
 }
 
 export default function Navbar(props: Props) {
@@ -70,6 +73,30 @@ export default function Navbar(props: Props) {
           </svg>
           <span>{st()?.streaming?.clientCount ?? API_DEFAULTS.clientCount}</span>
         </div>
+
+        {/* Theme */}
+        <button
+          id="theme-toggle-btn"
+          class="navbar-icon-btn"
+          onClick={props.toggleTheme}
+          title={props.theme() === 'light' ? 'Switch to dark theme' : 'Switch to light theme'}
+        >
+          <Show
+            when={props.theme() === 'light'}
+            fallback={
+              /* Sun: click for light mode */
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                <circle cx="12" cy="12" r="4" />
+                <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41" />
+              </svg>
+            }
+          >
+            {/* Moon: click for dark mode */}
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+              <path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z" />
+            </svg>
+          </Show>
+        </button>
 
         {/* Gallery */}
         <button id="gallery-btn" class="navbar-icon-btn" onClick={() => props.setShowGallery(true)} title="Gallery">

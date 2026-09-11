@@ -1,11 +1,39 @@
+import { createMemo, createResource, Show } from 'solid-js'
 import type { AllSettings } from '../types'
 import { API_DEFAULTS } from '../api/defaults'
+import { getGallery, getSystemInfo } from '../api/client'
+import { forecastStorage, type StorageForecast } from '../lib/storageForecast'
+import { formatBytes } from '../format'
 import SettingsCard from './SettingsCard'
 
 interface Props {
   settings: () => AllSettings | null
   updateStreamingAndSave: (patch: Partial<AllSettings['streaming']>) => void
   updateStreamingDebounced: (patch: Partial<AllSettings['streaming']>) => void
+}
+
+/** Page size for the forecast's gallery probes — matches Gallery's grid page. */
+const FORECAST_PAGE_SIZE = 50
+
+/** The oldest and newest retained capture timestamps, from the gallery's newest-first pages. */
+interface CaptureEdges {
+  oldestMs: number | null
+  newestMs: number | null
+}
+
+async function fetchCaptureEdges(): Promise<CaptureEdges> {
+  // Newest edge from page 0; the oldest needs the last page when one exists.
+  const first = await getGallery(undefined, 0, FORECAST_PAGE_SIZE)
+  const stamps = first.items.map((i) => i.timestamp)
+  if (stamps.length === 0) return { oldestMs: null, newestMs: null }
+  const newestMs = Math.max(...stamps)
+  if (!first.hasMore) return { oldestMs: Math.min(...stamps), newestMs }
+  const lastPage = Math.max(0, Math.floor((first.total - 1) / FORECAST_PAGE_SIZE))
+  const last = lastPage === 0 ? first : await getGallery(undefined, lastPage, FORECAST_PAGE_SIZE)
+  const lastStamps = last.items.map((i) => i.timestamp)
+  return lastStamps.length === 0
+    ? { oldestMs: Math.min(...stamps), newestMs }
+    : { oldestMs: Math.min(...lastStamps), newestMs }
 }
 
 /**
@@ -15,6 +43,11 @@ interface Props {
  * MQTT card's broker-port pattern: debounce-save while typing, only when the
  * text parses as an integer — the input's min/max stop the spinners but not
  * free-typed text, so each save clamps explicitly.
+ *
+ * Below the inputs, a best-effort "days until quota" forecast averages the
+ * daily growth (used bytes from /api/system spread over the oldest→newest
+ * capture span from /api/gallery — pure math in lib/storageForecast, which
+ * also decides when the data is too thin to show a number).
  */
 function clampRetentionDays(raw: string): number | null {
   const v = parseInt(raw, 10)
@@ -31,6 +64,23 @@ function clampQuotaMb(raw: string): number | null {
 export default function StorageCard(props: Props) {
   const s = () => props.settings()
   const stream = () => s()?.streaming
+
+  const [system] = createResource(() => getSystemInfo())
+  const [edges] = createResource(() => fetchCaptureEdges())
+
+  // Null (any fetch failure, empty gallery, <2 days of history, zero usage)
+  // simply hides the line — a made-up estimate is worse than none.
+  const forecast = createMemo<StorageForecast | null>(() => {
+    const sys = system()
+    const cap = edges()
+    if (!sys || !cap || cap.oldestMs === null || cap.newestMs === null) return null
+    return forecastStorage({
+      oldestCaptureMs: cap.oldestMs,
+      newestCaptureMs: cap.newestMs,
+      usedBytes: sys.storage.usedBytes,
+      quotaBytes: sys.storage.quotaBytes,
+    })
+  })
 
   return (
     <SettingsCard
@@ -103,6 +153,24 @@ export default function StorageCard(props: Props) {
           }}
         />
       </div>
+
+      <Show when={forecast()}>
+        {(f) => (
+          <div class="field-group">
+            <div class="field-row">
+              <span class="field-label" title="Average daily growth over the retained capture history">Storage Forecast</span>
+              <span class="field-value">≈ {f().daysRemaining} day{f().daysRemaining === 1 ? '' : 's'} until quota</span>
+            </div>
+            <div class="status-banner status-banner-info stream-mode-hint" role="note">
+              <span class="status-banner-dot" aria-hidden="true" />
+              <span>
+                {formatBytes(f().bytesPerDay)}/day over {Math.round(f().daysSpanned)} day{Math.round(f().daysSpanned) === 1 ? '' : 's'} of captures —
+                the quota is not a hard stop: past it, the oldest captures age out automatically.
+              </span>
+            </div>
+          </div>
+        )}
+      </Show>
 
       <div class="status-banner status-banner-info stream-mode-hint" role="note" aria-live="polite">
         <span class="status-banner-dot" aria-hidden="true" />

@@ -2454,3 +2454,293 @@ html, body {
   border-color: var(--lc-accent);
   color: var(--lc-accent);
 }
+
+/* ═══════════════════════════════════════════════
+   DETECTION STATISTICS CARD
+   ═══════════════════════════════════════════════ */
+.stats-bars {
+  display: flex;
+  align-items: stretch;
+  gap: 6px;
+  height: 96px;
+  padding-top: 4px;
+}
+
+.stats-bar-col {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+
+.stats-bar {
+  width: 100%;
+  max-width: 34px;
+  min-height: 2px;
+  border-radius: 4px 4px 2px 2px;
+  background: linear-gradient(180deg, var(--lc-accent), var(--lc-accent-dim));
+  margin-top: auto;
+  transition: height 0.25s ease;
+}
+
+.stats-bar-count {
+  font-size: 10px;
+  font-family: var(--lc-mono);
+  color: var(--lc-text-dim);
+  min-height: 12px;
+  line-height: 12px;
+}
+
+.stats-bar-label {
+  font-size: 10px;
+  color: var(--lc-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+/* Top zones / ML labels side by side, stacking on narrow cards. */
+.stats-top-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+  align-items: start;
+}
+
+.stats-top-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+/* ═══════════════════════════════════════════════
+   RECORDING TIMELINE (NVR day view)
+   ═══════════════════════════════════════════════ */
+.timeline-day-picker {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.timeline-day-btn {
+  width: 26px;
+  height: 26px;
+  border-radius: var(--lc-radius-sm);
+  border: 1px solid var(--lc-border);
+  background: var(--lc-surface-2);
+  color: var(--lc-text-dim);
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.timeline-day-btn:hover:not(:disabled) {
+  border-color: var(--lc-accent);
+  color: var(--lc-accent);
+}
+
+.timeline-day-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.timeline-day-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--lc-text);
+  min-width: 90px;
+  text-align: center;
+}
+
+.timeline-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--lc-text-dim);
+}
+
+.timeline-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.timeline-legend-swatch {
+  width: 10px;
+  height: 8px;
+  border-radius: 2px;
+  background: currentColor;
+  flex-shrink: 0;
+}
+
+.timeline-marker-swatch {
+  width: 6px;
+  height: 10px;
+  border-radius: 1px;
+  background: var(--lc-text-dim);
+}
+
+.timeline-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 2px 2px;
+}
+
+/* The 24h track: hourly gridlines behind the session bars. */
+.timeline-track {
+  position: relative;
+  background:
+    repeating-linear-gradient(
+      to right,
+      transparent 0,
+      transparent calc(100% / 24 - 1px),
+      var(--lc-border) calc(100% / 24 - 1px),
+      var(--lc-border) calc(100% / 24)
+    ),
+    var(--lc-surface-2);
+  border: 1px solid var(--lc-border);
+  border-radius: var(--lc-radius-sm);
+  overflow: hidden;
+}
+
+.timeline-segment {
+  position: absolute;
+  bottom: calc(var(--timeline-lane, 0) * 14px + 3px);
+  height: 11px;
+  min-width: 2px;
+  border-radius: 3px;
+  opacity: 0.9;
+}
+
+.timeline-segment-link {
+  cursor: pointer;
+}
+
+.timeline-segment-link:hover {
+  opacity: 1;
+  filter: brightness(1.25);
+}
+
+/* Per-trigger colors, mirroring the detection badges: motion amber, sound
+   green, manual blue, continuous cyan, scheduled violet. */
+.timeline-trigger-manual {
+  background: var(--lc-info);
+}
+
+.timeline-trigger-motion {
+  background: var(--lc-warning);
+}
+
+.timeline-trigger-sound {
+  background: var(--lc-success);
+}
+
+.timeline-trigger-continuous {
+  background: var(--lc-accent);
+}
+
+.timeline-trigger-scheduled {
+  background: #a78bfa;
+}
+
+/* Detection-event marker strip under the track, colored by event type. */
+.timeline-markers {
+  position: relative;
+  height: 12px;
+}
+
+.timeline-marker {
+  position: absolute;
+  top: 0;
+  width: 3px;
+  height: 100%;
+  border-radius: 1px;
+  transform: translateX(-1.5px);
+}
+
+.timeline-marker-motion {
+  background: var(--lc-warning);
+}
+
+.timeline-marker-sound {
+  background: var(--lc-success);
+}
+
+.timeline-marker-tamper {
+  background: var(--lc-danger);
+}
+
+.timeline-ticks {
+  position: relative;
+  height: 14px;
+  font-size: 9px;
+  font-family: var(--lc-mono);
+  color: var(--lc-text-muted);
+}
+
+.timeline-tick {
+  position: absolute;
+  top: 0;
+  transform: translateX(-50%);
+}
+
+.timeline-tick:first-child {
+  transform: none;
+}
+
+.timeline-tick:last-child {
+  transform: translateX(-100%);
+}
+
+/* ═══════════════════════════════════════════════
+   LIGHT THEME (best-effort, purely additive)
+   ═══════════════════════════════════════════════ */
+/* Dark stays the default: it is the plain :root block above and this
+   override only ever matches <html data-theme="light"> (set by the navbar
+   toggle, see hooks/useTheme). Nothing above is modified, so a user who
+   never toggles (and has no light-OS preference) renders byte-identical.
+   TODO(light): a few hardcoded rgba(255,255,255,…) chip/pill washes and the
+   gallery/viewer overlays stay tuned for dark; they are harmless low-alpha
+   washes on light surfaces, so they are left alone rather than half-fixed. */
+[data-theme="light"] {
+  /* Surfaces */
+  --lc-bg: #f2f3f9;
+  --lc-surface: #ffffff;
+  --lc-surface-2: #edeff6;
+  --lc-surface-3: #e2e5f0;
+  --lc-border: rgba(18, 22, 48, 0.1);
+  --lc-border-hover: rgba(18, 22, 48, 0.2);
+
+  /* Accent — dimmed from the neon cyan for contrast on white */
+  --lc-accent: #0089bd;
+  --lc-accent-dim: #006e99;
+  --lc-accent-glow: rgba(0, 137, 189, 0.18);
+  --lc-accent-bg: rgba(0, 137, 189, 0.08);
+
+  /* Semantic — same hues, darker stops for light backgrounds */
+  --lc-success: #0f9d6d;
+  --lc-success-bg: rgba(15, 157, 109, 0.1);
+  --lc-warning: #b45309;
+  --lc-warning-bg: rgba(180, 83, 9, 0.1);
+  --lc-danger: #dc2743;
+  --lc-danger-bg: rgba(220, 39, 67, 0.09);
+  --lc-info: #2563eb;
+  --lc-info-bg: rgba(37, 99, 235, 0.09);
+
+  /* Text */
+  --lc-text: #191c2e;
+  --lc-text-dim: rgba(25, 28, 46, 0.62);
+  --lc-text-muted: rgba(25, 28, 46, 0.42);
+
+  /* Shadows — light surfaces need far less lift */
+  --lc-shadow: 0 2px 12px rgba(18, 22, 48, 0.08);
+  --lc-shadow-lg: 0 8px 32px rgba(18, 22, 48, 0.12);
+  --lc-glow-accent: 0 0 20px rgba(0, 137, 189, 0.15);
+}

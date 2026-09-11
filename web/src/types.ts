@@ -139,6 +139,12 @@ export interface StreamingSettings {
   motionCooldownSeconds: number
   /** Minimum seconds between two sound events. */
   soundCooldownSeconds: number
+  /** YAMNet sound classification on top of sound detection: annotate-only labels ride sound events. */
+  soundClassificationEnabled: boolean
+  /** Minimum YAMNet confidence percent for a window's top label to count. */
+  soundClassificationConfidencePercent: number
+  /** The user-narrowed YAMNet allow-list (exact AudioSet class names). */
+  soundClassificationAllowedClasses: string[]
   webhookEnabled: boolean
   webhookUrl: string
   /** Custom POST headers as a JSON `{"Name": "value"}` map string. */
@@ -186,6 +192,13 @@ export interface StreamingSettings {
   eventRetentionDays: number
   /** The capture-history storage quota in MB (100 MB–32 GB); oldest captures age out past it. */
   storageQuotaMb: number
+  /**
+   * Opt-in media-at-rest encryption (AES-256-GCM per file, one Keystore key).
+   * Migration-free by design: flipping it never touches existing media — every
+   * reader sniffs the per-file header, so plaintext and encrypted captures
+   * coexist.
+   */
+  mediaEncryptionEnabled: boolean
   /** ML object-detection gate on top of motion detection. */
   mlDetectionEnabled: boolean
   /** Minimum ML confidence percent for a detected object to count. */
@@ -205,6 +218,12 @@ export interface StreamingSettings {
   continuousSegmentMinutes: number
   /** ONVIF Profile S device endpoint + WS-Discovery responder. */
   onvifEnabled: boolean
+  /**
+   * Eco idle-fps mode: while off charger, thermal NORMAL, and no stream
+   * consumer connected, the frame rate drops to the eco floor and live-audio
+   * encoding pauses; the first client, charger, or thermal event restores.
+   */
+  ecoIdleFpsEnabled: boolean
 }
 
 /** The DetectionModelStore wire names the settings DTO carries for mlModelState. */
@@ -233,6 +252,11 @@ export interface DeviceStatus {
     rtspEnabled: boolean
     rtspStreamingActive: boolean
     rtspUrl: string
+    /** The RTMP push output; absent on older devices (pre-RTMP firmware). */
+    rtmpEnabled?: boolean
+    rtmpActive?: boolean
+    rtmpStatus?: 'idle' | 'connecting' | 'connected' | 'error'
+    rtmpError?: string | null
   }
   thermal: ThermalState
   battery: {
@@ -481,6 +505,12 @@ export interface SystemInfo {
     temperatureTenthsC?: number | null
     voltageMillivolts?: number | null
     health?: string | null
+    /** Charge counter in mAh (BatteryManager CHARGE_COUNTER); absent when the device does not report it. */
+    batteryChargeCounterMah?: number
+    /** Instant current in µA (CURRENT_NOW), signed as the platform reports it; absent when unsupported. */
+    batteryCurrentMicroAmps?: number
+    /** Charge-cycle count (API 34+); absent below Android 14 or when the hardware does not track it. */
+    batteryCycleCount?: number
   }
   storage: {
     usedBytes: number
@@ -511,6 +541,24 @@ export interface DetectionStats {
   totalEvents: number
   topZones: LabeledCount[]
   topLabels: LabeledCount[]
+}
+
+/** The recording-session trigger wire names on GET /api/recordings/sessions. */
+export type RecordingTrigger = 'manual' | 'motion' | 'sound' | 'continuous' | 'scheduled'
+
+/** One NVR recording session overlapping the requested day; `endMs` may sit past midnight for cross-day sessions. */
+export interface RecordingSession {
+  id: string
+  startMs: number
+  endMs: number
+  trigger: RecordingTrigger
+  /** MediaStore id of the finalized clip; null while (or if) none is linked. */
+  mediaId: string | null
+}
+
+/** GET /api/recordings/sessions?day=YYYY-MM-DD — the day's recording sessions. */
+export interface RecordingSessionsResponse {
+  sessions: RecordingSession[]
 }
 
 export interface AuditEntry {

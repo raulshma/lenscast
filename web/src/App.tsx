@@ -1,5 +1,6 @@
 import { ErrorBoundary, Show } from 'solid-js'
 import { useAppState } from './hooks/useAppState'
+import { useTheme } from './hooks/useTheme'
 import LoginScreen from './components/LoginScreen'
 import Navbar from './components/Navbar'
 import StreamPreview from './components/StreamPreview'
@@ -12,6 +13,7 @@ import './App.css'
 
 function App() {
   const state = useAppState()
+  const { theme, toggleTheme } = useTheme()
 
   return (
     <div class="app">
@@ -36,6 +38,8 @@ function App() {
                 authRequired={state.authRequired}
                 handleLogout={state.handleLogout}
                 setShowGallery={state.setShowGallery}
+                theme={theme}
+                toggleTheme={toggleTheme}
               />
 
               <Show when={state.connectionLost()}>

@@ -9,6 +9,7 @@ import {
   type GalleryResponse,
   type IntervalCaptureStatus,
   type LensesResponse,
+  type RecordingSessionsResponse,
   type RecordingStatus,
   type SettingsExport,
   type SystemInfo,
@@ -20,6 +21,7 @@ import settingsExportFixture from '../contract/settings-export.json'
 import statusFixture from '../contract/status.json'
 import galleryFixture from '../contract/gallery.json'
 import recordingStatusFixture from '../contract/recording-status.json'
+import recordingSessionsFixture from '../contract/recording-sessions.json'
 import lensesFixture from '../contract/lenses.json'
 import intervalCaptureStatusFixture from '../contract/interval-capture-status.json'
 import detectionEventsFixture from '../contract/detection-events.json'
@@ -105,6 +107,10 @@ const STREAMING_KEYS = [
   'soundRecordingEnabled',
   'motionCooldownSeconds',
   'soundCooldownSeconds',
+  'soundClassificationEnabled',
+  'soundClassificationConfidencePercent',
+  'soundClassificationAllowedClasses',
+  'ecoIdleFpsEnabled',
   'webhookEnabled',
   'webhookUrl',
   'webhookHeaders',
@@ -143,6 +149,8 @@ const STREAMING_KEYS = [
   'mlIncludePerson',
   'mlIncludePets',
   'mlIncludeVehicles',
+  'storageQuotaMb',
+  'mediaEncryptionEnabled',
 ]
 
 describe('DTO contract fixtures', () => {
@@ -250,6 +258,22 @@ describe('DTO contract fixtures', () => {
       'isScheduled',
       'scheduledStartTimeMs',
     ])
+  })
+
+  it('recording sessions fixture assigns to RecordingSessionsResponse', () => {
+    const sessions: RecordingSessionsResponse = recordingSessionsFixture as RecordingSessionsResponse
+    expectKeys(sessions as unknown as Record<string, unknown>, ['sessions'])
+    expect(sessions.sessions.length).toBeGreaterThan(0)
+    for (const session of sessions.sessions) {
+      expectKeys(session as unknown as Record<string, unknown>, [
+        'id',
+        'startMs',
+        'endMs',
+        'trigger',
+        'mediaId',
+      ])
+      expect(session.endMs).toBeGreaterThan(session.startMs)
+    }
   })
 
   it('lenses fixture assigns to LensesResponse', () => {
@@ -382,6 +406,9 @@ describe('API_DEFAULTS lockstep with the fixtures', () => {
     expect(streaming.soundRecordingEnabled).toBe(API_DEFAULTS.soundRecordingEnabled)
     expect(streaming.motionCooldownSeconds).toBe(API_DEFAULTS.motionCooldownSeconds)
     expect(streaming.soundCooldownSeconds).toBe(API_DEFAULTS.soundCooldownSeconds)
+    expect(streaming.soundClassificationEnabled).toBe(API_DEFAULTS.soundClassificationEnabled)
+    expect(streaming.soundClassificationConfidencePercent).toBe(API_DEFAULTS.soundClassificationConfidencePercent)
+    expect(streaming.soundClassificationAllowedClasses).toEqual(API_DEFAULTS.soundClassificationAllowedClasses)
     expect(streaming.webhookEnabled).toBe(API_DEFAULTS.webhookEnabled)
     expect(streaming.webhookUrl).toBe(API_DEFAULTS.webhookUrl)
     expect(streaming.webhookHeaders).toBe(API_DEFAULTS.webhookHeaders)
@@ -430,9 +457,11 @@ describe('API_DEFAULTS lockstep with the fixtures', () => {
     expect(streaming.continuousRecording).toBe(API_DEFAULTS.continuousRecording)
     expect(streaming.continuousSegmentMinutes).toBe(API_DEFAULTS.continuousSegmentMinutes)
     expect(streaming.onvifEnabled).toBe(API_DEFAULTS.onvifEnabled)
+    expect(streaming.ecoIdleFpsEnabled).toBe(API_DEFAULTS.ecoIdleFpsEnabled)
     expect(streaming.captureRetentionDays).toBe(API_DEFAULTS.captureRetentionDays)
     expect(streaming.eventRetentionDays).toBe(API_DEFAULTS.eventRetentionDays)
     expect(streaming.storageQuotaMb).toBe(API_DEFAULTS.storageQuotaMb)
+    expect(streaming.mediaEncryptionEnabled).toBe(API_DEFAULTS.mediaEncryptionEnabled)
   })
 
   it('system fixture assigns to SystemInfo', () => {
@@ -454,6 +483,9 @@ describe('API_DEFAULTS lockstep with the fixtures', () => {
       'temperatureTenthsC',
       'voltageMillivolts',
       'health',
+      'batteryChargeCounterMah',
+      'batteryCurrentMicroAmps',
+      'batteryCycleCount',
     ])
     expectKeys(system.storage as unknown as Record<string, unknown>, [
       'usedBytes',

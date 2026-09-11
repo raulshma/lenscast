@@ -306,6 +306,21 @@ export async function clearDetectionEvents(): Promise<{ success: boolean }> {
   return requestJson('/api/detection/events', { method: 'DELETE' })
 }
 
+/** GET /api/detection/stats — aggregate counts (windows, per-day series, top zones/labels) over the persisted event log. */
+export async function getDetectionStats(): Promise<import('../types').DetectionStats> {
+  return requestJson('/api/detection/stats')
+}
+
+/**
+ * GET /api/recordings/sessions?day=YYYY-MM-DD — the NVR day timeline. The
+ * Android endpoint lands separately, so callers must tolerate failures
+ * (404 today) and degrade to an empty "no session data" state.
+ */
+export async function getRecordingSessions(day: string): Promise<import('../types').RecordingSessionsResponse> {
+  const params = new URLSearchParams({ day })
+  return requestJson(`/api/recordings/sessions?${params.toString()}`)
+}
+
 /** The event-log export URL: CSV by default, JSON on demand, snapshots omitted. */
 export function detectionEventsExportUrl(format: 'csv' | 'json' = 'csv', type?: DetectionEventType): string {
   const params = new URLSearchParams({ format })
