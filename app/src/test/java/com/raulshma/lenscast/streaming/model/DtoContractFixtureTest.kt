@@ -1,6 +1,7 @@
 package com.raulshma.lenscast.streaming.model
 
 import com.raulshma.lenscast.core.AppJson
+import com.raulshma.lenscast.streaming.web.AuthWebHandler
 import com.squareup.moshi.Types
 import org.junit.Assert.assertEquals
 import org.junit.Test
@@ -274,6 +275,23 @@ class DtoContractFixtureTest {
         assertMatchesFixture(
             "settings-export.json",
             moshi.adapter(SettingsExportDto::class.java).toJson(export),
+        )
+    }
+
+    @Test
+    fun `auth config response matches the auth config fixture`() {
+        val config = AuthWebHandler.AuthConfigDto(
+            enabled = true,
+            username = "dash",
+            password = "",
+            viewerEnabled = true,
+            viewerUsername = "viewer",
+            viewerPassword = "",
+            viewerConfigured = true,
+        )
+        assertMatchesFixture(
+            "auth-config.json",
+            moshi.adapter(AuthWebHandler.AuthConfigDto::class.java).toJson(config),
         )
     }
 

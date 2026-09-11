@@ -63,7 +63,7 @@ function modeLabel(mode: 'connecting' | 'live' | 'polling'): string {
  * Gallery component (not reachable from here), so clips open the media
  * route GET /api/media/{id} directly in a new tab.
  */
-export default function EventFeed() {
+export default function EventFeed(props: { readOnly?: () => boolean } = {}) {
   const { events, mode, clear } = useEventStream()
   const [typeFilter, setTypeFilter] = createSignal<EventFilter['type']>('all')
   const [labelFilter, setLabelFilter] = createSignal<string | null>(null)
@@ -114,9 +114,11 @@ export default function EventFeed() {
           >
             <span>JSON</span>
           </a>
-          <button type="button" class="action-btn action-btn-ghost" disabled={events().length === 0} onClick={clear}>
-            <span>Clear all</span>
-          </button>
+          <Show when={props.readOnly?.() !== true}>
+            <button type="button" class="action-btn action-btn-ghost" disabled={events().length === 0} onClick={clear}>
+              <span>Clear all</span>
+            </button>
+          </Show>
         </div>
 
         <Show when={events().length > 0}>

@@ -29,12 +29,18 @@ interface Props {
   handleStopWhip: () => void
   handleStartRtmp: () => void
   handleStopRtmp: () => void
+  /** True for a viewer-role session: the admin-only cards render nothing. */
+  readOnly?: () => boolean
 }
 
 export default function AppSettingsPanel(props: Props) {
   const s = () => props.settings()
   const webStreamingEnabled = () => s()?.streaming?.webStreamingEnabled ?? API_DEFAULTS.webStreamingEnabled
   const rtspVideoCodec = () => s()?.streaming?.rtspVideoCodec ?? API_DEFAULTS.rtspVideoCodec
+  // A viewer session hides the admin-only surfaces entirely; the remaining
+  // write controls stay on the banner + 403 path (the server answers
+  // "Admin access required" and the global error handling surfaces it).
+  const isAdmin = () => !props.readOnly?.()
 
   return (
     <section class="settings-panel" id="app-settings-panel">
@@ -424,7 +430,7 @@ export default function AppSettingsPanel(props: Props) {
         updateStreamingDebounced={props.updateStreamingDebounced}
       />
 
-      <EventFeed />
+      <EventFeed readOnly={props.readOnly} />
 
       <DetectionStatsCard />
 
@@ -452,11 +458,13 @@ export default function AppSettingsPanel(props: Props) {
 
       <PushCard settings={props.settings} updateStreamingAndSave={props.updateStreamingAndSave} />
 
-      <AuthCard />
+      <Show when={isAdmin()}>
+        <AuthCard />
 
-      <ConfigBackupCard />
+        <ConfigBackupCard />
 
-      <AuditCard />
+        <AuditCard />
+      </Show>
     </section>
   )
 }

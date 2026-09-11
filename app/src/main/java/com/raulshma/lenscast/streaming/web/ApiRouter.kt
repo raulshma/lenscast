@@ -76,7 +76,9 @@ class ApiRouter(
         "/api/detection/stats" -> ApiResponse.ok(detectionEvents.stats())
         "/api/system" -> ApiResponse.ok(system.get())
         "/api/audit" -> ApiResponse.ok(audit.list(r.query["limit"]?.toIntOrNull()))
-        "/api/auth/config" -> ApiResponse.ok(auth.get())
+        // The config read is role-aware: viewer sessions get the redacted view
+        // (the filter already 403s them; this is defense in depth at the DTO).
+        "/api/auth/config" -> ApiResponse.ok(auth.get(r.sessionRole))
         "/api/auth/sessions" -> ApiResponse.ok(auth.listSessions())
         "/api/push/vapid-public" -> ApiResponse.ok(push.vapidPublicKey())
         "/api/push/subscriptions" -> ApiResponse.ok(push.list())

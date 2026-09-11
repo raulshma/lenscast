@@ -13,9 +13,11 @@ interface ClientSummary {
  * Live viewer list with kick. The backend already exposed
  * GET/DELETE /api/stream/clients; this is its missing surface.
  * Self-polls on a visibility-gated 3s cadence so the list stays
- * honest without touching the main status ladder.
+ * honest without touching the main status ladder. A viewer-role
+ * session sees the list but the kick buttons are disabled — the list
+ * itself is a read.
  */
-export default function ClientsCard() {
+export default function ClientsCard(props: { readOnly?: () => boolean } = {}) {
   const [clients, setClients] = createSignal<ClientSummary | null>(null)
   const [error, setError] = createSignal('')
   const [kicking, setKicking] = createSignal('')
@@ -95,7 +97,8 @@ export default function ClientsCard() {
                     <button
                       type="button"
                       class="client-kick-btn"
-                      disabled={kicking() !== ''}
+                      disabled={kicking() !== '' || props.readOnly?.() === true}
+                      title={props.readOnly?.() === true ? 'Read-only session' : undefined}
                       onClick={() => void handleKick(id)}
                     >
                       {kicking() === id ? 'Kicking…' : 'Kick'}

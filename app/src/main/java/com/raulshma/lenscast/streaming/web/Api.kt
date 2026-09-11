@@ -1,6 +1,7 @@
 package com.raulshma.lenscast.streaming.web
 
 import com.raulshma.lenscast.core.AppJson
+import com.raulshma.lenscast.streaming.SessionRole
 import com.raulshma.lenscast.streaming.model.ErrorResponse
 
 /** HTTP methods the Web API router understands — transport-agnostic on purpose. */
@@ -9,12 +10,16 @@ enum class ApiMethod { GET, PUT, POST, DELETE }
 /**
  * Everything a handler needs to know about a request. Transport details
  * (nanohttpd sessions, headers, streaming bodies) stay in StreamingServer.
+ * [sessionRole] is the authenticated caller's role — ADMIN for API-token and
+ * auth-off requests, since a token holder is admin and the role gate runs
+ * only on the cookie path.
  */
 data class ApiRequest(
     val method: ApiMethod,
     val path: String,
     val body: String = "",
     val query: Map<String, String> = emptyMap(),
+    val sessionRole: SessionRole = SessionRole.ADMIN,
 )
 
 /**

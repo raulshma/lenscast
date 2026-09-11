@@ -18,6 +18,11 @@ import type { AuthSessionInfo } from '../api/client'
  * stored secret, and a rotated password revokes every session (this
  * browser included — you re-login immediately with the new one).
  *
+ * Also the optional viewer-access section: a second credential pair whose
+ * sessions are read-only (enforced server-side by RoleGatePolicy). The
+ * viewer password field is write-only — "(unchanged)" keeps the stored
+ * hash — and a viewer change revokes only viewer sessions.
+ *
  * Also the API-token surface: Generate mints a random token client-side
  * (crypto.getRandomValues, 32 bytes, base64url), PUTs it once as the
  * write-only `apiToken` field, and shows it exactly once — the server keeps
@@ -29,9 +34,17 @@ export default function AuthCard() {
   const [enabled, setEnabled] = createSignal(false)
   const [username, setUsername] = createSignal('')
   const [password, setPassword] = createSignal('')
+  const [viewerEnabled, setViewerEnabled] = createSignal(false)
+  const [viewerUsername, setViewerUsername] = createSignal('')
+  // Write-only draft, exactly like the MQTT password field: the server keeps
+  // the stored hash until a non-empty value is sent, so the field binds to a
+  // local draft only and never to the secret.
+  const [viewerPasswordDraft, setViewerPasswordDraft] = createSignal('')
   const [sessions, setSessions] = createSignal<AuthSessionInfo[]>([])
   const [msg, setMsg] = createSignal('')
   const [busy, setBusy] = createSignal(false)
+  const [viewerBusy, setViewerBusy] = createSignal(false)
+  const [viewerMsg, setViewerMsg] = createSignal('')
   const [tokenEnabled, setTokenEnabled] = createSignal(false)
   const [tokenConfigured, setTokenConfigured] = createSignal(false)
   const [generatedToken, setGeneratedToken] = createSignal('')
@@ -45,6 +58,8 @@ export default function AuthCard() {
       const config = await getAuthConfig()
       setEnabled(config.enabled ?? false)
       setUsername(config.username ?? '')
+      setViewerEnabled(config.viewerEnabled ?? false)
+      setViewerUsername(config.viewerUsername ?? '')
       const settings = await getSettings()
       setTokenEnabled(settings.streaming?.apiTokenEnabled ?? false)
       setTokenConfigured(settings.streaming?.apiTokenConfigured ?? false)
@@ -135,6 +150,35 @@ export default function AuthCard() {
     } catch { }
   }
 
+  // The viewer save always carries the admin section too (the PUT replaces
+  // the whole config): the admin password stays empty (= unchanged), and the
+  // admin fields are whatever the card currently shows. A viewer change —
+  // username edit, password set/rotate, enable/disable — revokes only the
+  // viewer sessions, so this admin session survives and no re-login is owed.
+  async function applyViewer() {
+    if (viewerBusy()) return
+    setViewerBusy(true)
+    setViewerMsg('')
+    const enteredPassword = viewerPasswordDraft()
+    try {
+      await updateAuthConfig({
+        enabled: enabled(),
+        username: username(),
+        password: '',
+        viewerEnabled: viewerEnabled(),
+        viewerUsername: viewerUsername(),
+        viewerPassword: enteredPassword,
+      })
+      setViewerMsg('Viewer access updated')
+      setViewerPasswordDraft('')
+      await refresh()
+    } catch (e: any) {
+      setViewerMsg(e?.message || 'Update failed')
+    } finally {
+      setViewerBusy(false)
+    }
+  }
+
   createVisiblePoll(refresh, 10_000)
 
   return (
@@ -185,6 +229,52 @@ export default function AuthCard() {
           <Show when={msg()}>
             <span class="clients-cap-row">{msg()}</span>
           </Show>
+        </Show>
+      </div>
+
+      {/* Viewer access (optional read-only role) */}
+      <div class="field-group">
+        <div class="field-row field-row-toggle">
+          <span class="field-label">Viewer Access</span>
+          <label class="toggle-switch" for="viewer-enabled-toggle">
+            <input
+              id="viewer-enabled-toggle"
+              type="checkbox"
+              checked={viewerEnabled()}
+              onChange={() => setViewerEnabled(!viewerEnabled())}
+            />
+            <span class="toggle-slider" />
+          </label>
+        </div>
+        <Show when={viewerEnabled()}>
+          <input
+            id="viewer-username"
+            type="text"
+            class="field-input field-input-full"
+            placeholder="Viewer username"
+            autocomplete="off"
+            value={viewerUsername()}
+            onInput={(e) => setViewerUsername(e.currentTarget.value)}
+          />
+          <input
+            id="viewer-password"
+            type="password"
+            class="field-input field-input-full"
+            placeholder="(unchanged)"
+            autocomplete="new-password"
+            value={viewerPasswordDraft()}
+            onInput={(e) => setViewerPasswordDraft(e.currentTarget.value)}
+          />
+          <button type="button" class="action-btn action-btn-primary" disabled={viewerBusy()} onClick={() => void applyViewer()}>
+            <span>{viewerBusy() ? 'Saving…' : 'Save viewer access'}</span>
+          </button>
+        </Show>
+        <div class="status-banner status-banner-info stream-mode-hint" role="note">
+          <span class="status-banner-dot" aria-hidden="true" />
+          <span>A viewer signs in with their own username and gets read-only access: live view, gallery and status — no settings, captures, or deletions. Changing or disabling viewer access signs out viewer sessions only.</span>
+        </div>
+        <Show when={viewerMsg()}>
+          <span class="clients-cap-row">{viewerMsg()}</span>
         </Show>
       </div>
 
@@ -242,7 +332,7 @@ export default function AuthCard() {
             {(session) => (
               <li class="client-row">
                 <span class="client-id" title={session.tokenPrefix}>
-                  session {session.tokenPrefix}… · expires {new Date(session.expiresAtMs).toLocaleTimeString()}
+                  session {session.tokenPrefix}…{session.role === 'viewer' ? ' · viewer' : ''} · expires {new Date(session.expiresAtMs).toLocaleTimeString()}
                 </span>
                 <button type="button" class="client-kick-btn" onClick={() => void revoke(session.tokenPrefix)}>
                   Revoke

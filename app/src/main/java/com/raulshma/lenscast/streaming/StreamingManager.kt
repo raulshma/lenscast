@@ -1204,11 +1204,12 @@ class StreamingManager(
     fun updateAuthSettings(settings: StreamAuthSettings) {
         // The gate is the one live holder of the web credentials and is
         // shared by every StreamingServer — there is nothing to re-apply on
-        // recreation.
+        // recreation. The viewer pair rides the same live swap.
         webAuthGate.setCredentials(
             if (settings.enabled) settings.username else null,
             if (settings.enabled) settings.passwordHash else null,
         )
+        webAuthGate.setViewerCredentials(settings.viewerUsername, settings.viewerPasswordHash)
         // The RTSP authorizer reads the (possibly restarted) auth spec live —
         // a hot-swap through the output, no restart owed.
         rtspOutput.setAuth()

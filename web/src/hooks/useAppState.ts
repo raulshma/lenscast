@@ -7,7 +7,7 @@ import type {
   AllSettings, DeviceStatus, LensInfo, CameraSettings,
   FocusMode, WhiteBalance, Resolution, HdrMode,
   IntervalCaptureConfig, RecordingConfig,
-  FlashMode, RecordingQuality,
+  FlashMode, RecordingQuality, SessionRole,
 } from '../types'
 
 /** Consecutive status-lane failures before the dashboard shows the connection-lost banner. */
@@ -18,6 +18,12 @@ export function useAppState() {
   const [authChecked, setAuthChecked] = createSignal(false)
   const [authRequired, setAuthRequired] = createSignal(false)
   const [authenticated, setAuthenticated] = createSignal(false)
+  // The signed-in session's role: admin by default (auth off, pre-role
+  // servers), viewer for the read-only pair. Server-derived on every
+  // load/login — auth state itself is never persisted client-side (the
+  // httpOnly cookie is the store), so the role follows the same pattern.
+  const [sessionRole, setSessionRole] = createSignal<SessionRole>('admin')
+  const isViewer = createMemo(() => authenticated() && sessionRole() === 'viewer')
   const [loginUser, setLoginUser] = createSignal('')
   const [loginPass, setLoginPass] = createSignal('')
   const [loginError, setLoginError] = createSignal('')
@@ -134,18 +140,22 @@ export function useAppState() {
       if (!authStatus.required) {
         setAuthRequired(false)
         setAuthenticated(true)
+        setSessionRole('admin')
       } else {
         setAuthRequired(true)
         try {
           const session = await api.getSessionStatus()
           setAuthenticated(session.authenticated)
+          setSessionRole(session.role ?? 'admin')
         } catch {
           setAuthenticated(false)
+          setSessionRole('admin')
         }
       }
     } catch {
       setAuthRequired(false)
       setAuthenticated(true)
+      setSessionRole('admin')
     } finally {
       setAuthChecked(true)
     }
@@ -157,8 +167,9 @@ export function useAppState() {
     setLoginLoading(true)
     setLoginError('')
     try {
-      await api.login(loginUser(), loginPass())
+      const result = await api.login(loginUser(), loginPass())
       setAuthenticated(true)
+      setSessionRole(result.role ?? 'admin')
     } catch (e: any) {
       setLoginError(e.message || 'Login failed')
     } finally {
@@ -169,6 +180,7 @@ export function useAppState() {
   async function handleLogout() {
     try { await api.logout() } catch { }
     setAuthenticated(false)
+    setSessionRole('admin')
     setSettings(null)
     setStatus(null)
     setStatusFailures(0)
@@ -510,7 +522,8 @@ export function useAppState() {
 
   return {
     // Auth
-    authChecked, authRequired, authenticated, loginUser, setLoginUser, loginPass, setLoginPass,
+    authChecked, authRequired, authenticated, sessionRole, isViewer,
+    loginUser, setLoginUser, loginPass, setLoginPass,
     loginError, loginLoading, handleLogin, handleLogout,
     // Core
     settings, status, lenses, error, captureMsg, saving,

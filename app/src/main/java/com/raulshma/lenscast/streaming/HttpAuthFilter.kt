@@ -1,6 +1,9 @@
 package com.raulshma.lenscast.streaming
 
 import com.raulshma.lenscast.streaming.HttpResult.ResponseBody.Text
+import com.raulshma.lenscast.streaming.web.AuditEntry
+import com.raulshma.lenscast.streaming.web.AuditLog
+import com.raulshma.lenscast.streaming.web.RoleGatePolicy
 
 /**
  * The HTTP translation of the [WebAuthGate] policy: the four `/api/auth/`
@@ -11,12 +14,17 @@ import com.raulshma.lenscast.streaming.HttpResult.ResponseBody.Text
  * the socket and applies the security headers. Protected routes accept either
  * a session cookie or — first in the ladder — the API token headers (GET/HEAD
  * anywhere protected, POST on the TokenWritePolicy allow-list, decided by the
- * gate).
+ * gate). A viewer-role session additionally passes [RoleGatePolicy]: its
+ * DENY answers 403 with the standard error envelope and lands in the audit
+ * trail (per event, like `login.failed`; the log's entry cap is the spam
+ * bound, matching the existing convention).
  */
 class HttpAuthFilter(
     private val webAuthGate: WebAuthGate,
     private val port: Int,
     private val scheme: String = "http",
+    /** Set in production (StreamingServer) so role denials are audited; tests may omit it. */
+    private val auditLog: AuditLog? = null,
 ) {
 
     /** True for the login route, whose body the transport reads first. */
@@ -38,12 +46,23 @@ class HttpAuthFilter(
             body = Text("""{"required":${webAuthGate.isEnabled}}"""),
             headers = NO_STORE,
         )
-        uri == "/api/auth/session" && method == "GET" -> HttpResult(
-            statusCode = 200,
-            mimeType = "application/json",
-            body = Text("""{"authenticated":${webAuthGate.authenticate(headers["cookie"])}}"""),
-            headers = NO_STORE,
-        )
+        uri == "/api/auth/session" && method == "GET" -> {
+            val authenticated = webAuthGate.authenticate(headers["cookie"])
+            // The role rides the self-check answer so a viewer dashboard can
+            // render its read-only state on load without a second round trip.
+            HttpResult(
+                statusCode = 200,
+                mimeType = "application/json",
+                body = Text(
+                    if (authenticated) {
+                        """{"authenticated":true,"role":"${webAuthGate.sessionRoleFor(headers["cookie"]).wireName}"}"""
+                    } else {
+                        """{"authenticated":false}"""
+                    },
+                ),
+                headers = NO_STORE,
+            )
+        }
         uri == "/api/auth/logout" && method == "POST" -> handleLogout(headers)
         else -> null
     }
@@ -83,7 +102,9 @@ class HttpAuthFilter(
         return HttpResult(
             statusCode = 200,
             mimeType = "application/json",
-            body = Text("""{"success":true}"""),
+            // The role rides the success answer so the dashboard can render
+            // its read-only state immediately after sign-in.
+            body = Text("""{"success":true,"role":"${result.role.wireName}"}"""),
             headers = NO_STORE + (
                 "Set-Cookie" to
                     "${WebAuthGate.COOKIE_NAME}=${result.token}; " +
@@ -105,7 +126,11 @@ class HttpAuthFilter(
      * origin check: they are header-authenticated, so there are no ambient
      * cookie credentials for a cross-site page to forge. Without a token the
      * route is public, or the cookie authenticates and state-changing
-     * methods pass the CSRF check.
+     * methods pass the CSRF check. A cookie that authenticates as a
+     * viewer-role session additionally passes the [RoleGatePolicy]: DENY
+     * answers 403 (the standard error envelope) and is audited. The logout,
+     * session, and status auth routes are answered before this ladder runs;
+     * they are viewer-allowed self checks by policy.
      */
     fun authorize(
         method: String,
@@ -128,6 +153,18 @@ class HttpAuthFilter(
         // check exactly as GET does.
         if (method != "GET" && method != "HEAD" && !isCsrfSafe(headers)) {
             return HttpResult.jsonError(403, "CSRF check failed")
+        }
+        if (webAuthGate.sessionRoleFor(headers["cookie"]) == SessionRole.VIEWER &&
+            RoleGatePolicy.decide(SessionRole.VIEWER, method, uri) == RoleGatePolicy.Verdict.DENY
+        ) {
+            runCatching {
+                auditLog?.record(
+                    action = "access.denied",
+                    detail = "$method $uri",
+                    outcome = AuditEntry.OUTCOME_ERROR,
+                )
+            }
+            return HttpResult.jsonError(403, "Admin access required")
         }
         return null
     }

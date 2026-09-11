@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   type AllSettings,
   type AuditLogResponse,
+  type AuthConfig,
   type DetectionStats,
   type DetectionTestResponse,
   type DeviceStatus,
@@ -11,6 +12,7 @@ import {
   type LensesResponse,
   type RecordingSessionsResponse,
   type RecordingStatus,
+  type SessionRole,
   type SettingsExport,
   type SystemInfo,
   FRAME_RATE_OPTIONS,
@@ -27,6 +29,7 @@ import intervalCaptureStatusFixture from '../contract/interval-capture-status.js
 import detectionEventsFixture from '../contract/detection-events.json'
 import detectionTestFixture from '../contract/detection-test.json'
 import auditLogFixture from '../contract/audit-log.json'
+import authConfigFixture from '../contract/auth-config.json'
 import systemFixture from '../contract/system.json'
 import detectionStatsFixture from '../contract/detection-stats.json'
 
@@ -343,6 +346,24 @@ describe('DTO contract fixtures', () => {
     const test: DetectionTestResponse = detectionTestFixture as DetectionTestResponse
     expectKeys(test as unknown as Record<string, unknown>, ['success', 'dispatchedActions'])
     expect(Array.isArray(test.dispatchedActions)).toBe(true)
+  })
+
+  it('auth config fixture assigns to AuthConfig', () => {
+    const config: AuthConfig = authConfigFixture as AuthConfig
+    expectKeys(config as unknown as Record<string, unknown>, [
+      'enabled',
+      'username',
+      'password',
+      'viewerEnabled',
+      'viewerUsername',
+      'viewerPassword',
+      'viewerConfigured',
+    ])
+    // Write-only secrets: the wire never carries a password.
+    expect(config.password).toBe('')
+    expect(config.viewerPassword).toBe('')
+    const role: SessionRole = 'admin'
+    expect(['admin', 'viewer']).toContain(role)
   })
 
   it('audit log fixture assigns to AuditLogResponse', () => {

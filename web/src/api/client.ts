@@ -1,4 +1,4 @@
-import type { AllSettings, DetectionEventType, DeviceStatus, LensesResponse } from '../types'
+import type { AllSettings, AuthConfig, DetectionEventType, DeviceStatus, LensesResponse, SessionRole } from '../types'
 
 type JsonValue = Record<string, unknown> | unknown[] | string | number | boolean | null
 
@@ -72,7 +72,9 @@ export async function getAuthStatus(): Promise<{ required: boolean }> {
   return requestJson('/api/auth/status')
 }
 
-export async function login(username: string, password: string): Promise<{ success: boolean; required?: boolean }> {
+// The success answer carries the session's role ("admin" | "viewer") so the
+// dashboard can render its read-only state immediately after sign-in.
+export async function login(username: string, password: string): Promise<{ success: boolean; required?: boolean; role?: SessionRole }> {
   return requestJson('/api/auth/login', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -80,7 +82,7 @@ export async function login(username: string, password: string): Promise<{ succe
   })
 }
 
-export async function getSessionStatus(): Promise<{ authenticated: boolean }> {
+export async function getSessionStatus(): Promise<{ authenticated: boolean; role?: SessionRole }> {
   return requestJson('/api/auth/session')
 }
 
@@ -126,13 +128,15 @@ export function saveStreamingPatch(patch: Partial<AllSettings['streaming']>): Pr
 export interface AuthSessionInfo {
   tokenPrefix: string
   expiresAtMs: number
+  /** `"admin"` | `"viewer"`; absent in pre-role responses — treated as admin. */
+  role?: SessionRole
 }
 
 export async function getAuthSessions(): Promise<{ sessions: AuthSessionInfo[] }> {
   return requestJson('/api/auth/sessions')
 }
 
-export async function getAuthConfig(): Promise<{ enabled: boolean; username?: string }> {
+export async function getAuthConfig(): Promise<AuthConfig> {
   return requestJson('/api/auth/config')
 }
 
@@ -140,6 +144,9 @@ export async function updateAuthConfig(body: {
   enabled: boolean
   username: string
   password?: string
+  viewerEnabled?: boolean
+  viewerUsername?: string | null
+  viewerPassword?: string
 }): Promise<unknown> {
   return requestJson('/api/auth/config', {
     method: 'PUT',

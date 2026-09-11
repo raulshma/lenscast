@@ -603,6 +603,24 @@ export interface AuditEntry {
   outcome: 'ok' | 'error'
 }
 
+/** The role a web session was minted with; viewer is the read-only pair. */
+export type SessionRole = 'admin' | 'viewer'
+
+/**
+ * GET /api/auth/config. The `username` field is the admin username and is
+ * only populated for admin sessions — viewer sessions get the redacted view
+ * (`username` omitted, their own `viewerUsername` visible).
+ */
+export interface AuthConfig {
+  enabled: boolean
+  username?: string
+  password?: string
+  viewerEnabled?: boolean
+  viewerUsername?: string | null
+  viewerPassword?: string
+  viewerConfigured: boolean
+}
+
 export interface AuditLogResponse {
   entries: AuditEntry[]
   total: number

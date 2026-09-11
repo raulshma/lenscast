@@ -18,14 +18,18 @@ import java.util.concurrent.ConcurrentHashMap
  * without a live socket.
  *
  * Credentials arrive via [setCredentials]; null or blank username/hash means
- * auth is disabled and [authenticate] lets everything through. Time reads go
+ * auth is disabled and [authenticate] lets everything through. The optional
+ * read-only viewer pair arrives via [setViewerCredentials] and rides the same
+ * pipeline — [login] accepts either pair and the minted session carries the
+ * matching [SessionRole]. Time reads go
  * through the injected [clock] — the [com.raulshma.lenscast.streaming.rtsp.RtspSessionAuthorizer]
  * seam — so the lockout window and the session expiry are JVM-tested without
  * waiting. Sessions survive process death through the optional
  * [SessionPersistence] hook: when it is set, every session mutation is
  * mirrored to it and the store is reloaded on construction.
  *
- * The API token is not a session: [authorizeApiToken] compares SHA-256 hex
+ * The API token is not a session and always speaks admin: [authorizeApiToken]
+ * compares SHA-256 hex
  * against the hash supplied by the live [tokenProvider] source — never a
  * snapshot, so a token saved over /api/settings authorizes (or stops
  * authorizing) on the very next request.
@@ -36,14 +40,17 @@ class WebAuthGate(
 ) {
 
     /**
-     * Durability hook for the session map (token → expiry epoch-ms). The
-     * tokens are secrets; implementations must keep them in app-private
-     * storage. Null (the default) keeps sessions in memory only.
+     * Durability hook for the session map (token → record). The tokens are
+     * secrets; implementations must keep them in app-private storage. Null
+     * (the default) keeps sessions in memory only.
      */
     interface SessionPersistence {
-        fun loadSessions(): Map<String, Long>
-        fun saveSessions(sessions: Map<String, Long>)
+        fun loadSessions(): Map<String, StoredSession>
+        fun saveSessions(sessions: Map<String, StoredSession>)
     }
+
+    /** One live session: when it expires and which role it speaks for. */
+    data class StoredSession(val expiresAtMs: Long, val role: SessionRole)
 
     /** The typed reason behind a failed login; the transport maps it to a status code. */
     enum class LoginFailure {
@@ -59,12 +66,15 @@ class WebAuthGate(
      * The login verdict. [error] is the client-facing message, forwarded
      * verbatim by the transport; [failure] is the typed reason behind it
      * (null on success) — and the single source [error] derives from.
+     * [role] is the credential pair that matched (always ADMIN on the
+     * pre-viewer code paths; check [success] first).
      */
     data class LoginResult(
         val success: Boolean,
         val token: String? = null,
         val error: String? = null,
         val failure: LoginFailure? = null,
+        val role: SessionRole = SessionRole.ADMIN,
     )
 
     @Volatile
@@ -72,6 +82,12 @@ class WebAuthGate(
 
     @Volatile
     private var passwordHash: String? = null
+
+    @Volatile
+    private var viewerUsername: String? = null
+
+    @Volatile
+    private var viewerPasswordHash: String? = null
 
     /**
      * The live API-token config source. Installed with [setApiTokenProvider]
@@ -123,7 +139,7 @@ class WebAuthGate(
         return StreamAuthCrypto.constantTimeEquals(StreamAuthCrypto.sha256Hex(token), config.hash)
     }
 
-    private val sessions = ConcurrentHashMap<String, Long>()
+    private val sessions = ConcurrentHashMap<String, StoredSession>()
     private val secureRandom = SecureRandom()
 
     init {
@@ -131,7 +147,7 @@ class WebAuthGate(
         // stale store cannot resurrect dead logins.
         val restored = sessionPersistence?.loadSessions().orEmpty()
         val now = clock()
-        restored.filterValues { it > now }.forEach { (token, expiry) -> sessions[token] = expiry }
+        restored.filterValues { it.expiresAtMs > now }.forEach { (token, record) -> sessions[token] = record }
         if (sessions.isNotEmpty()) {
             Log.d(TAG, "Restored ${sessions.size} persisted session(s)")
         }
@@ -154,6 +170,20 @@ class WebAuthGate(
         this.passwordHash = if (passwordHash.isNullOrBlank()) null else passwordHash
     }
 
+    /**
+     * The optional read-only viewer pair; blank values clear it. Same blanking
+     * convention as [setCredentials] — null on either side means no viewer
+     * access, and the pair is only ever set/cleared together by the handler.
+     */
+    fun setViewerCredentials(username: String?, passwordHash: String?) {
+        this.viewerUsername = if (username.isNullOrBlank()) null else username
+        this.viewerPasswordHash = if (passwordHash.isNullOrBlank()) null else passwordHash
+    }
+
+    /** True when a usable viewer pair is configured. */
+    val isViewerConfigured: Boolean
+        get() = !viewerUsername.isNullOrBlank() && viewerPasswordHash != null
+
     /** True when the request may proceed: auth off, or a valid session cookie. */
     fun authenticate(cookieHeader: String?): Boolean {
         // setCredentials blanks empty values to null, so non-null means enabled.
@@ -162,16 +192,35 @@ class WebAuthGate(
         return validateSession(token)
     }
 
-    /** Rate-limited, constant-time credential check; mints a session on success. */
+    /**
+     * The role behind the cookie: the session record's role, ADMIN when auth
+     * is off. Only meaningful after [authenticate] returned true — an unknown
+     * cookie folds to ADMIN here because the caller has already rejected it.
+     */
+    fun sessionRoleFor(cookieHeader: String?): SessionRole {
+        if (username == null) return SessionRole.ADMIN
+        val token = tokenFromCookie(cookieHeader) ?: return SessionRole.ADMIN
+        return sessions[token]?.role ?: SessionRole.ADMIN
+    }
+
+    /**
+     * Rate-limited, constant-time credential check; mints a session on
+     * success. The ladder tries the admin pair first, then the viewer pair —
+     * a viewer-username miss falls through to the identical
+     * invalid-credentials answer, so a wrong password never reveals which
+     * usernames exist.
+     */
     fun login(clientIp: String?, username: String, password: String): LoginResult {
         val storedUsername = this.username
         val storedHash = this.passwordHash
         if (storedUsername == null || storedHash == null) {
             return notConfigured()
         }
+        val storedViewerUsername = this.viewerUsername
+        val storedViewerHash = this.viewerPasswordHash
 
         val now = clock()
-        synchronized(authAttemptsLock) {
+        val matchedRole: SessionRole = synchronized(authAttemptsLock) {
             cleanupExpiredAuthAttempts(now)
             val attempt = authAttempts.getOrPut(clientIp ?: "unknown") { AuthAttempt(0, 0L) }
             if (attempt.blockedUntil > now) return rateLimited()
@@ -180,17 +229,22 @@ class WebAuthGate(
                 attempt.count = 0
                 return rateLimited()
             }
-            if (!StreamAuthCrypto.constantTimeEquals(username, storedUsername)) {
-                attempt.count++
-                return invalidCredentials()
+            val matched = when {
+                StreamAuthCrypto.constantTimeEquals(username, storedUsername) &&
+                    StreamAuthCrypto.verifyPassword(password, storedHash) -> SessionRole.ADMIN
+                storedViewerUsername != null && storedViewerHash != null &&
+                    StreamAuthCrypto.constantTimeEquals(username, storedViewerUsername) &&
+                    StreamAuthCrypto.verifyPassword(password, storedViewerHash) -> SessionRole.VIEWER
+                else -> null
             }
-            if (!StreamAuthCrypto.verifyPassword(password, storedHash)) {
+            if (matched == null) {
                 attempt.count++
                 return invalidCredentials()
             }
             attempt.count = 0
+            matched
         }
-        return LoginResult(success = true, token = createSession())
+        return LoginResult(success = true, token = createSession(matchedRole), role = matchedRole)
     }
 
     /** The failed-login results: the message is derived from the typed reason. */
@@ -221,19 +275,32 @@ class WebAuthGate(
     }
 
     /** Session bookkeeping for the management surface; the token itself never leaves. */
-    data class SessionInfo(val tokenPrefix: String, val expiresAtMs: Long)
+    data class SessionInfo(val tokenPrefix: String, val expiresAtMs: Long, val role: SessionRole = SessionRole.ADMIN)
 
     fun sessionsInfo(): List<SessionInfo> {
         cleanExpiredSessions()
         return sessions.entries
-            .sortedBy { it.value }
-            .map { SessionInfo(tokenPrefix = it.key.take(8), expiresAtMs = it.value) }
+            .sortedBy { it.value.expiresAtMs }
+            .map { SessionInfo(tokenPrefix = it.key.take(8), expiresAtMs = it.value.expiresAtMs, role = it.value.role) }
     }
 
-    /** Revoke every session (e.g. after a credential rotation). */
+    /** Revoke every session (e.g. after an admin credential rotation). */
     fun revokeAllSessions() {
         if (sessions.isNotEmpty()) {
             sessions.clear()
+            persistSessions()
+        }
+    }
+
+    /**
+     * Revoke only the viewer-role sessions — the twin of [revokeAllSessions]
+     * for viewer-credential rotation, so admin browsers stay signed in when
+     * the viewer pair changes.
+     */
+    fun revokeViewerSessions() {
+        val viewerTokens = sessions.entries.filter { it.value.role == SessionRole.VIEWER }.map { it.key }
+        if (viewerTokens.isNotEmpty()) {
+            viewerTokens.forEach { sessions.remove(it) }
             persistSessions()
         }
     }
@@ -297,19 +364,19 @@ class WebAuthGate(
             ?.substring(COOKIE_NAME.length + 1)
     }
 
-    private fun createSession(): String {
+    private fun createSession(role: SessionRole): String {
         cleanExpiredSessions()
         // Enforce maximum session count to prevent OOM via session flooding
         if (sessions.size >= MAX_SESSIONS) {
             // Evict oldest sessions beyond the cap
-            val sorted = sessions.entries.sortedBy { it.value }
+            val sorted = sessions.entries.sortedBy { it.value.expiresAtMs }
             val toRemove = sorted.take(sessions.size - MAX_SESSIONS + 1)
             toRemove.forEach { sessions.remove(it.key) }
         }
         val bytes = ByteArray(SESSION_TOKEN_BYTES)
         secureRandom.nextBytes(bytes)
         val token = bytes.toHexString()
-        sessions[token] = clock() + SESSION_DURATION_MS
+        sessions[token] = StoredSession(clock() + SESSION_DURATION_MS, role)
         persistSessions()
         return token
     }
@@ -318,7 +385,7 @@ class WebAuthGate(
         val now = clock()
         if (now - lastSessionCleanupMillis < SESSION_CLEANUP_INTERVAL_MS && sessions.size < MAX_SESSIONS * 0.9) return
         lastSessionCleanupMillis = now
-        val expired = sessions.entries.filter { now > it.value }.map { it.key }
+        val expired = sessions.entries.filter { now > it.value.expiresAtMs }.map { it.key }
         expired.forEach { sessions.remove(it) }
         if (expired.isNotEmpty()) persistSessions()
     }
@@ -326,8 +393,8 @@ class WebAuthGate(
     private fun validateSession(token: String): Boolean {
         // Opportunistically clean expired sessions on each validation
         cleanExpiredSessions()
-        val expiry = sessions[token] ?: return false
-        if (clock() > expiry) {
+        val record = sessions[token] ?: return false
+        if (clock() > record.expiresAtMs) {
             sessions.remove(token)
             persistSessions()
             return false

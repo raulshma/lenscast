@@ -359,4 +359,142 @@ class HttpAuthFilterTest {
         assertTrue(result.success)
         return result.token!!
     }
+
+    // ── viewer sessions: role-bearing answers + the role gate ──
+
+    private fun viewerGate(): WebAuthGate =
+        WebAuthGate().apply {
+            setCredentials("admin", com.raulshma.lenscast.core.StreamAuthCrypto.hashPassword("admin-pw"))
+            setViewerCredentials("door", com.raulshma.lenscast.core.StreamAuthCrypto.hashPassword("viewer-pw"))
+        }
+
+    private fun adminGate(): WebAuthGate =
+        WebAuthGate().apply {
+            setCredentials("admin", com.raulshma.lenscast.core.StreamAuthCrypto.hashPassword("admin-pw"))
+        }
+
+    private fun cookieFor(token: String) = "cookie" to "${WebAuthGate.COOKIE_NAME}=$token"
+
+    @Test
+    fun `a successful login answers with the session role`() {
+        val filter = HttpAuthFilter(adminGate(), port = 8080)
+        val body = """{"username":"admin","password":"admin-pw"}""".toByteArray()
+        val result = filter.handleLogin("1.2.3.4", body.size, body)
+        assertEquals("""{"success":true,"role":"admin"}""", (result.body as HttpResult.ResponseBody.Text).text)
+    }
+
+    @Test
+    fun `a viewer login answers with the viewer role and its session authenticates`() {
+        val gate = viewerGate()
+        val filter = HttpAuthFilter(gate, port = 8080)
+        val body = """{"username":"door","password":"viewer-pw"}""".toByteArray()
+        val result = filter.handleLogin("1.2.3.4", body.size, body)
+        assertEquals("""{"success":true,"role":"viewer"}""", (result.body as HttpResult.ResponseBody.Text).text)
+        // The minted cookie authenticates reads exactly like an admin's.
+        val cookie = (result.headers["Set-Cookie"]!!)
+            .substringAfter("${WebAuthGate.COOKIE_NAME}=")
+            .substringBefore(';')
+        assertNull(filter.authorize("GET", "/api/settings", mapOf(cookieFor(cookie))))
+    }
+
+    @Test
+    fun `the session self check carries the role`() {
+        val gate = viewerGate()
+        val filter = HttpAuthFilter(gate, port = 8080)
+        val adminCookie = cookieFor(gate.login("1.2.3.4", "admin", "admin-pw").token!!)
+        assertEquals(
+            """{"authenticated":true,"role":"admin"}""",
+            (filter.handleBodylessAuthRoute("GET", "/api/auth/session", mapOf(adminCookie))!!.body as HttpResult.ResponseBody.Text).text,
+        )
+        val viewerCookie = cookieFor(gate.login("1.2.3.4", "door", "viewer-pw").token!!)
+        assertEquals(
+            """{"authenticated":true,"role":"viewer"}""",
+            (filter.handleBodylessAuthRoute("GET", "/api/auth/session", mapOf(viewerCookie))!!.body as HttpResult.ResponseBody.Text).text,
+        )
+        assertEquals(
+            """{"authenticated":false}""",
+            (filter.handleBodylessAuthRoute("GET", "/api/auth/session", emptyMap())!!.body as HttpResult.ResponseBody.Text).text,
+        )
+    }
+
+    @Test
+    fun `a viewer session may read api routes and transports`() {
+        val gate = viewerGate()
+        val filter = HttpAuthFilter(gate, port = 8080)
+        val viewer = mapOf(cookieFor(gate.login("1.2.3.4", "door", "viewer-pw").token!!))
+        assertNull(filter.authorize("GET", "/api/settings", viewer))
+        assertNull(filter.authorize("GET", "/api/status", viewer))
+        assertNull(filter.authorize("GET", "/stream", viewer))
+        assertNull(filter.authorize("GET", "/hls/playlist.m3u8", viewer))
+    }
+
+    @Test
+    fun `a viewer session is denied the three admin-only reads with 403`() {
+        val gate = viewerGate()
+        val filter = HttpAuthFilter(gate, port = 8080)
+        val viewer = mapOf(cookieFor(gate.login("1.2.3.4", "door", "viewer-pw").token!!))
+        for (path in listOf("/api/auth/config", "/api/auth/sessions", "/api/audit")) {
+            val result = filter.authorize("GET", path, viewer)!!
+            assertEquals("viewer GET $path", 403, result.statusCode)
+            assertEquals(
+                """{"error":"Admin access required"}""",
+                (result.body as HttpResult.ResponseBody.Text).text,
+            )
+        }
+    }
+
+    @Test
+    fun `a viewer session is denied every write except logout and talkback`() {
+        val gate = viewerGate()
+        val filter = HttpAuthFilter(gate, port = 8080)
+        val viewerCookie = cookieFor(gate.login("1.2.3.4", "door", "viewer-pw").token!!)
+        // CSRF-covered writes (the dashboard's own X-Requested-With): still denied.
+        val covered = mapOf(viewerCookie, "x-requested-with" to "XMLHttpRequest")
+        for ((method, path) in listOf(
+            "POST" to "/api/settings",
+            "PUT" to "/api/settings",
+            "POST" to "/api/capture",
+            "DELETE" to "/api/media/IMG_1.jpg",
+            "DELETE" to "/api/stream/clients/1.2.3.4:5000",
+            "POST" to "/api/audio/uplink-evil", // not the talkback route
+        )) {
+            val result = filter.authorize(method, path, covered)!!
+            assertEquals("viewer $method $path", 403, result.statusCode)
+        }
+        // The talkback uplink is viewer-allowed (doorbell intercom use).
+        assertNull(filter.authorize("POST", "/api/audio/uplink", covered))
+        // Logout never reaches authorize (handled bodyless); a viewer's cookie
+        // passes its own authenticate+CSRF ladder.
+        val result = filter.handleBodylessAuthRoute("POST", "/api/auth/logout", covered)!!
+        assertEquals(200, result.statusCode)
+    }
+
+    @Test
+    fun `an admin session keeps everything the role gate allows today`() {
+        val gate = viewerGate()
+        val filter = HttpAuthFilter(gate, port = 8080)
+        val admin = mapOf(
+            cookieFor(gate.login("1.2.3.4", "admin", "admin-pw").token!!),
+            "x-requested-with" to "XMLHttpRequest",
+        )
+        assertNull(filter.authorize("GET", "/api/auth/config", admin))
+        assertNull(filter.authorize("GET", "/api/audit", admin))
+        assertNull(filter.authorize("POST", "/api/settings", admin))
+    }
+
+    @Test
+    fun `a role denial is audited exactly once and an allow is not`() {
+        val auditLog = io.mockk.mockk<com.raulshma.lenscast.streaming.web.AuditLog>(relaxed = true)
+        val gate = viewerGate()
+        val filter = HttpAuthFilter(gate, port = 8080, auditLog = auditLog)
+        val viewer = mapOf(cookieFor(gate.login("1.2.3.4", "door", "viewer-pw").token!!))
+        filter.authorize("GET", "/api/auth/config", viewer)
+        io.mockk.verify(exactly = 1) {
+            auditLog.record("access.denied", "GET /api/auth/config", "error")
+        }
+        filter.authorize("GET", "/api/settings", viewer)
+        io.mockk.verify(exactly = 1) {
+            auditLog.record(any(), any(), any())
+        }
+    }
 }

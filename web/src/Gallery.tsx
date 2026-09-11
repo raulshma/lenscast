@@ -36,7 +36,9 @@ function formatDuration(ms: number): string {
   return `${min}:${sec.toString().padStart(2, '0')}`
 }
 
-export default function Gallery(props: { onClose: () => void }) {
+export default function Gallery(props: { onClose: () => void; readOnly?: () => boolean }) {
+  // A viewer-role session hides the delete controls; downloads (reads) stay.
+  const canDelete = () => props.readOnly?.() !== true
   const [filter, setFilter] = createSignal<GalleryFilter>('ALL')
   const [items, setItems] = createSignal<GalleryItem[]>([])
   const [loading, setLoading] = createSignal(true)
@@ -294,24 +296,26 @@ export default function Gallery(props: { onClose: () => void }) {
               </svg>
               <span>Download</span>
             </button>
-            <button
-              class="action-btn"
-              style={{ color: 'var(--lc-danger)', 'border-color': 'rgba(244, 63, 94, 0.3)' }}
-              onClick={handleBatchDelete}
-              disabled={selectedCount() === 0 || batchDeleting()}
-            >
-              <Show when={batchDeleting()} fallback={
-                <>
-                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                  </svg>
-                  <span>Delete</span>
-                </>
-              }>
-                <span class="btn-spinner" />
-                <span>Deleting...</span>
-              </Show>
-            </button>
+            <Show when={canDelete()}>
+              <button
+                class="action-btn"
+                style={{ color: 'var(--lc-danger)', 'border-color': 'rgba(244, 63, 94, 0.3)' }}
+                onClick={handleBatchDelete}
+                disabled={selectedCount() === 0 || batchDeleting()}
+              >
+                <Show when={batchDeleting()} fallback={
+                  <>
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                    </svg>
+                    <span>Delete</span>
+                  </>
+                }>
+                  <span class="btn-spinner" />
+                  <span>Deleting...</span>
+                </Show>
+              </button>
+            </Show>
             <button class="navbar-icon-btn" onClick={toggleSelectMode} title="Cancel">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <path d="M18 6L6 18M6 6l12 12" />
@@ -417,20 +421,22 @@ export default function Gallery(props: { onClose: () => void }) {
                                   <line x1="12" y1="15" x2="12" y2="3" />
                                 </svg>
                               </a>
-                              <button
-                                class="gallery-action-btn gallery-action-btn-danger"
-                                onClick={(e) => handleDelete(item, e)}
-                                disabled={deleting() === item.id}
-                                title="Delete"
-                              >
-                                <Show when={deleting() === item.id} fallback={
-                                  <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
-                                    <path d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                                  </svg>
-                                }>
-                                  <span class="btn-spinner" style={{ width: '12px', height: '12px' }} />
-                                </Show>
-                              </button>
+                              <Show when={canDelete()}>
+                                <button
+                                  class="gallery-action-btn gallery-action-btn-danger"
+                                  onClick={(e) => handleDelete(item, e)}
+                                  disabled={deleting() === item.id}
+                                  title="Delete"
+                                >
+                                  <Show when={deleting() === item.id} fallback={
+                                    <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
+                                      <path d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                    </svg>
+                                  }>
+                                    <span class="btn-spinner" style={{ width: '12px', height: '12px' }} />
+                                  </Show>
+                                </button>
+                              </Show>
                             </div>
                           </Show>
                         </div>
@@ -500,13 +506,15 @@ export default function Gallery(props: { onClose: () => void }) {
                   </svg>
                   <span>Download</span>
                 </a>
-                <button
-                  class="action-btn"
-                  style={{ color: 'var(--lc-danger)', 'border-color': 'rgba(244, 63, 94, 0.3)' }}
-                  onClick={() => handleDelete(item(), new Event('click'))}
-                >
-                  <span>Delete</span>
-                </button>
+                <Show when={canDelete()}>
+                  <button
+                    class="action-btn"
+                    style={{ color: 'var(--lc-danger)', 'border-color': 'rgba(244, 63, 94, 0.3)' }}
+                    onClick={() => handleDelete(item(), new Event('click'))}
+                  >
+                    <span>Delete</span>
+                  </button>
+                </Show>
                 <button class="navbar-icon-btn" onClick={() => setViewer(null)}>
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     <path d="M18 6L6 18M6 6l12 12" />

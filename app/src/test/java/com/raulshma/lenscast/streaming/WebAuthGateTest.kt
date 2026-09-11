@@ -39,12 +39,6 @@ class WebAuthGateTest {
         }
     }
 
-    companion object {
-        private const val USER = "admin"
-        private const val PASSWORD = "correct horse battery staple"
-        private const val CLIENT_IP = "10.0.0.7"
-    }
-
     // ── login ──
 
     @Test
@@ -201,5 +195,126 @@ class WebAuthGateTest {
     fun `no origin and no requested-with header is not csrf safe`() {
         val gate = gate()
         assertFalse(gate.isCsrfSafe(originHeader = null, hasRequestedWithHeader = false, port = 8080))
+    }
+
+    // ── viewer roles (login ladder, sessions, targeted revocation) ──
+
+    private fun gateWithViewer(
+        user: String = USER,
+        password: String = PASSWORD,
+        viewerUser: String? = VIEWER_USER,
+        viewerPass: String? = VIEWER_PASSWORD,
+    ): WebAuthGate = WebAuthGate(clock = { nowMs }).apply {
+        setCredentials(user, StreamAuthCrypto.hashPassword(password))
+        if (viewerUser != null && viewerPass != null) {
+            setViewerCredentials(viewerUser, StreamAuthCrypto.hashPassword(viewerPass))
+        }
+    }
+
+    @Test
+    fun `admin credentials mint an admin session`() {
+        val gate = gateWithViewer()
+        val result = gate.loginAs()
+        assertTrue(result.success)
+        assertEquals(SessionRole.ADMIN, result.role)
+        assertEquals(SessionRole.ADMIN, gate.sessionRoleFor(cookie(result.token!!)))
+    }
+
+    @Test
+    fun `viewer credentials mint a viewer session`() {
+        val gate = gateWithViewer()
+        val result = gate.login(CLIENT_IP, VIEWER_USER, VIEWER_PASSWORD)
+        assertTrue(result.success)
+        assertEquals(SessionRole.VIEWER, result.role)
+        assertTrue(gate.authenticate(cookie(result.token!!)))
+        assertEquals(SessionRole.VIEWER, gate.sessionRoleFor(cookie(result.token!!)))
+    }
+
+    @Test
+    fun `viewer password with the admin username fails like any other wrong password`() {
+        val gate = gateWithViewer()
+        val result = gate.loginAs(pass = VIEWER_PASSWORD)
+        assertFalse(result.success)
+        assertNull(result.token)
+        assertEquals(WebAuthGate.LoginFailure.InvalidCredentials, result.failure)
+        assertEquals("Invalid credentials", result.error)
+    }
+
+    @Test
+    fun `both-wrong and admin-username-viewer-password failures are identical`() {
+        val gate = gateWithViewer()
+        val bothWrong = gate.loginAs(user = "intruder", pass = "nope")
+        val viewerPassAdminUser = gate.loginAs(pass = VIEWER_PASSWORD)
+        assertEquals(bothWrong.failure, viewerPassAdminUser.failure)
+        assertEquals(bothWrong.error, viewerPassAdminUser.error)
+        assertEquals(bothWrong.success, viewerPassAdminUser.success)
+    }
+
+    @Test
+    fun `viewer credentials without a configured viewer pair fail as invalid`() {
+        val gate = gateWithViewer(viewerUser = null, viewerPass = null)
+        val result = gate.login(CLIENT_IP, VIEWER_USER, VIEWER_PASSWORD)
+        assertFalse(result.success)
+        assertEquals("Invalid credentials", result.error)
+        assertEquals(WebAuthGate.LoginFailure.InvalidCredentials, result.failure)
+        assertFalse(gate.isViewerConfigured)
+    }
+
+    @Test
+    fun `the login ladder shares one rate-limit budget per ip`() {
+        val gate = gateWithViewer()
+        // Ten bad viewer attempts exhaust the budget...
+        repeat(10) {
+            assertEquals(
+                WebAuthGate.LoginFailure.InvalidCredentials,
+                gate.login(CLIENT_IP, VIEWER_USER, "wrong-$it").failure,
+            )
+        }
+        // ...and even the correct admin password is then locked out.
+        assertEquals(WebAuthGate.LoginFailure.RateLimited, gate.loginAs().failure)
+    }
+
+    @Test
+    fun `revoking viewer sessions leaves admin sessions signed in`() {
+        val gate = gateWithViewer()
+        val adminToken = gate.loginAs().token!!
+        val viewerToken = gate.login(CLIENT_IP, VIEWER_USER, VIEWER_PASSWORD).token!!
+        gate.revokeViewerSessions()
+        assertTrue(gate.authenticate(cookie(adminToken)))
+        assertFalse(gate.authenticate(cookie(viewerToken)))
+    }
+
+    @Test
+    fun `revoking viewer sessions with none present is a harmless no-op`() {
+        val gate = gateWithViewer()
+        val adminToken = gate.loginAs().token!!
+        gate.revokeViewerSessions()
+        assertTrue(gate.authenticate(cookie(adminToken)))
+    }
+
+    @Test
+    fun `sessions info carries the role of each session`() {
+        val gate = gateWithViewer()
+        gate.loginAs()
+        gate.login(CLIENT_IP, VIEWER_USER, VIEWER_PASSWORD)
+        val roles = gate.sessionsInfo().map { it.role }.sortedBy { it.wireName }
+        assertEquals(listOf(SessionRole.ADMIN, SessionRole.VIEWER), roles)
+    }
+
+    @Test
+    fun `clearing viewer credentials stops viewer logins but keeps admin`() {
+        val gate = gateWithViewer()
+        gate.setViewerCredentials(null, null)
+        assertFalse(gate.isViewerConfigured)
+        assertEquals(WebAuthGate.LoginFailure.InvalidCredentials, gate.login(CLIENT_IP, VIEWER_USER, VIEWER_PASSWORD).failure)
+        assertTrue(gate.loginAs().success)
+    }
+
+    companion object {
+        private const val USER = "admin"
+        private const val PASSWORD = "correct horse battery staple"
+        private const val VIEWER_USER = "doorbell"
+        private const val VIEWER_PASSWORD = "peek viewer pass"
+        private const val CLIENT_IP = "10.0.0.7"
     }
 }

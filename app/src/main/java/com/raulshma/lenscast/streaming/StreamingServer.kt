@@ -60,7 +60,12 @@ class StreamingServer(
         }
     }
 
-    private val authFilter = HttpAuthFilter(webAuthGate, port, scheme = if (tlsServerSocketFactory != null) "https" else "http")
+    private val authFilter = HttpAuthFilter(
+        webAuthGate,
+        port,
+        scheme = if (tlsServerSocketFactory != null) "https" else "http",
+        auditLog = webApi.auditLog,
+    )
     private val assetStore = StaticAssetStore(context)
     private val mjpegPump = MjpegStreamPump(networkQualityMonitor, BOUNDARY_MARKER)
     private val mediaResponder = MediaResponder(
@@ -329,11 +334,18 @@ class StreamingServer(
 
         // The single place the transport blocks on a handler: this dedicated
         // server thread awaits the suspend router with a bounded timeout so a
-        // slow Capture/Gallery handler can't stall all /api/* workers.
+        // slow Capture/Gallery handler can't stall all /api/* workers. The
+        // caller's role rides the request (ADMIN for token-authorized calls —
+        // the token path above never carries a session — and the cookie
+        // session's role otherwise; the role gate already rejected viewers
+        // past their allowance before dispatch).
+        val sessionRole = webAuthGate.sessionRoleFor(session.headers["cookie"])
         val response = try {
             runBlocking {
                 withTimeout(API_DISPATCH_TIMEOUT_MS) {
-                    webApi.router.dispatch(ApiRequest(method = apiMethod, path = uri, body = body, query = query))
+                    webApi.router.dispatch(
+                        ApiRequest(method = apiMethod, path = uri, body = body, query = query, sessionRole = sessionRole),
+                    )
                 }
             }
         } catch (_: TimeoutCancellationException) {

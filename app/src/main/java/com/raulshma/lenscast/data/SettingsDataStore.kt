@@ -51,6 +51,10 @@ import kotlinx.coroutines.flow.stateIn
  * Plain value type for stream-auth settings. All crypto decisions live in
  * [com.raulshma.lenscast.core.StreamAuthCrypto] — the single home the RTSP
  * server and the Web Auth Gate also verify through.
+ *
+ * The optional viewer pair is null when no read-only viewer access is
+ * configured; both fields are set/cleared together by the auth handler. The
+ * viewer hash rides the same PBKDF2 pipeline as the admin hash.
  */
 @JsonClass(generateAdapter = true)
 data class StreamAuthSettings(
@@ -58,6 +62,8 @@ data class StreamAuthSettings(
     val username: String = "",
     val passwordHash: String = "",
     val rtspDigestHa1: String = "",
+    val viewerUsername: String? = null,
+    val viewerPasswordHash: String? = null,
 )
 
 private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "camera_settings")
@@ -103,6 +109,8 @@ private object Keys {
     val AUTH_USERNAME = stringPreferencesKey("auth_username")
     val AUTH_PASSWORD_HASH = stringPreferencesKey("auth_password_hash")
     val AUTH_RTSP_DIGEST_HA1 = stringPreferencesKey("auth_rtsp_digest_ha1")
+    val AUTH_VIEWER_USERNAME = stringPreferencesKey("auth_viewer_username")
+    val AUTH_VIEWER_PASSWORD_HASH = stringPreferencesKey("auth_viewer_password_hash")
     val SHOW_PREVIEW = stringPreferencesKey("show_preview")
     val RTSP_ENABLED = stringPreferencesKey("rtsp_enabled")
     val RTSP_PORT = intPreferencesKey("rtsp_port")
@@ -311,6 +319,8 @@ internal val authSettingsPref = SettingPref(
             username = prefs[Keys.AUTH_USERNAME] ?: "",
             passwordHash = prefs[Keys.AUTH_PASSWORD_HASH] ?: "",
             rtspDigestHa1 = prefs[Keys.AUTH_RTSP_DIGEST_HA1] ?: "",
+            viewerUsername = prefs[Keys.AUTH_VIEWER_USERNAME],
+            viewerPasswordHash = prefs[Keys.AUTH_VIEWER_PASSWORD_HASH],
         )
     },
     encode = { prefs, settings ->
@@ -323,6 +333,15 @@ internal val authSettingsPref = SettingPref(
             prefs[Keys.AUTH_RTSP_DIGEST_HA1] = settings.rtspDigestHa1
         } else {
             prefs.remove(Keys.AUTH_RTSP_DIGEST_HA1)
+        }
+        // The viewer pair is stored only when both halves exist; clearing
+        // either one clears both (the handler keeps them set/cleared together).
+        if (!settings.viewerUsername.isNullOrEmpty() && !settings.viewerPasswordHash.isNullOrEmpty()) {
+            prefs[Keys.AUTH_VIEWER_USERNAME] = settings.viewerUsername
+            prefs[Keys.AUTH_VIEWER_PASSWORD_HASH] = settings.viewerPasswordHash
+        } else {
+            prefs.remove(Keys.AUTH_VIEWER_USERNAME)
+            prefs.remove(Keys.AUTH_VIEWER_PASSWORD_HASH)
         }
     },
 )
