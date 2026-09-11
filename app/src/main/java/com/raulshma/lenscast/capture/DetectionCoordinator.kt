@@ -3,9 +3,13 @@ package com.raulshma.lenscast.capture
 import android.content.Context
 import android.util.Log
 import com.raulshma.lenscast.capture.ml.AnalysisFrame
+import com.raulshma.lenscast.capture.ml.AudioModelStore
 import com.raulshma.lenscast.capture.ml.DetectionModelStore
 import com.raulshma.lenscast.capture.ml.ObjectDetectionEngine
+import com.raulshma.lenscast.capture.ml.SoundClassificationEngine
 import com.raulshma.lenscast.capture.model.DetectionClassPolicy
+import com.raulshma.lenscast.capture.model.SoundClassPolicy
+import com.raulshma.lenscast.capture.model.SoundLabelTracker
 import com.raulshma.lenscast.camera.CameraService
 import com.raulshma.lenscast.core.DetectionAlert
 import com.raulshma.lenscast.core.EventKind
@@ -48,6 +52,13 @@ import java.util.UUID
  * the event entirely — no alert, no recording, no log entry. Surviving
  * events carry the detected class labels on the alert and the log entry.
  *
+ * Sound events ride the same `labels` field through YAMNet classification
+ * when `soundClassificationEnabled` is on — annotate-only by design: the
+ * same PCM the RMS detector consumes feeds the classifier off-path, its
+ * window labels pass the pure SoundClassPolicy gate, and a missing model,
+ * API < 24, error, or empty verdict never suppresses or delays the RMS
+ * event; it just ships unlabeled.
+ *
  * The deterrence runtime (siren handle, torch control, latest web frame) is
  * not touched at composition — first touch is a detection event — so the
  * collaborators arrive as lazy provider lambdas wired by the composition
@@ -72,6 +83,12 @@ class DetectionCoordinator(
      * attempt.
      */
     private val detectionModelStore: DetectionModelStore,
+    /**
+     * The on-demand home of the YAMNet classifier behind sound
+     * classification: same auto-fetch/resolve contract as the ML gate's
+     * store, one store per model.
+     */
+    private val audioModelStore: AudioModelStore,
     private val streamingManager: () -> StreamingManager?,
     private val cameraService: () -> CameraService?,
     private val mqttPublisher: () -> MqttAlertPublisher? = { null },
@@ -149,8 +166,113 @@ class DetectionCoordinator(
         val claimedAtMs: Long,
     )
 
-    /** Sound event entry point (wired from the audio reader's detector). */
-    fun onSound(rmsPercent: Double) = onEvent(EventKind.SOUND, rmsPercent)
+    // ── YAMNet sound classification (annotate-only) ──
+    // When `soundClassificationEnabled` is on (and sound detection itself
+    // armed — classification only annotates the events the RMS detector
+    // fires), the same PCM the detector consumes also feeds the YAMNet
+    // engine: every 0.96 s window's top-1 passes the pure SoundClassPolicy
+    // gate (confidence + allow-list) into the SoundLabelTracker, and the
+    // tracker's winning labels ride the sound event's payload — the same
+    // `labels` field the ML gate's class names ride. Classification NEVER
+    // suppresses an RMS event: any error, missing model, API < 24, or busy
+    // worker simply ships the event unlabeled (fail-open, annotate-only).
+
+    /**
+     * Built on first fed audio chunk while enabled; the YAMNet file (not
+     * bundled) resolves through [AudioModelStore] per init attempt, so a
+     * download landing later is picked up by the next window.
+     */
+    private val soundClassifier by lazy {
+        SoundClassificationEngine(
+            context = appContext,
+            modelFileProvider = { audioModelStore.resolveModelFile() },
+        ) { label, scorePercent -> onSoundWindow(label, scorePercent) }
+    }
+
+    /** The label-stability state behind [onSound]'s payload labels. */
+    private val soundLabelTracker = SoundLabelTracker()
+
+    /** Serializes the audio-model auto-request throttle's decide-and-claim. */
+    private val audioModelRequestLock = Any()
+    private var lastAudioModelRequestMs = 0L
+
+    /**
+     * Audio entry point for classification (wired from StreamingManager's
+     * chunk tap, audio reader thread). Cheap when the feature is off — one
+     * flow read — and fail-open by contract: nothing here may throw onto the
+     * audio path or delay it.
+     */
+    fun feedSoundClassification(pcm16: ByteArray, sampleRateHz: Int, channelCount: Int) {
+        // No sound detector, no sound events — and without events,
+        // classification is pure CPU burn.
+        if (!settingsDataStore.soundClassificationEnabled.value ||
+            !settingsDataStore.soundDetectionEnabled.value
+        ) {
+            return
+        }
+        requestAudioModelDownloadIfNeeded()
+        try {
+            soundClassifier.feed(pcm16, sampleRateHz, channelCount)
+        } catch (_: Exception) {
+            // Never onto the audio path.
+        }
+    }
+
+    /**
+     * One completed YAMNet window, on the classifier worker: the raw top-1
+     * through the policy gate, then into the tracker. Reads the settings
+     * live, like the ML gate does per verdict.
+     */
+    private fun onSoundWindow(label: String?, scorePercent: Float) {
+        try {
+            val qualified = SoundClassPolicy.windowLabel(
+                topLabel = label,
+                scorePercent = scorePercent,
+                minConfidencePercent = settingsDataStore.soundClassificationConfidencePercent.value,
+                allowedClasses = SoundClassPolicy.normalizeAllowed(
+                    settingsDataStore.soundClassificationAllowedClasses.value,
+                ),
+            )
+            soundLabelTracker.onWindow(qualified, nowMs())
+        } catch (_: Exception) {
+            // Fail-open: a dropped window never blocks anything.
+        }
+    }
+
+    /**
+     * The store's auto-fetch, throttled: the ML gate asks per gated *event*,
+     * but audio chunks arrive ~50×/s and an unthrottled ask on a persistent
+     * network failure would retry-storm. One attempt per interval at most;
+     * manual retries (settings row, web route) bypass this entirely.
+     */
+    private fun requestAudioModelDownloadIfNeeded() {
+        synchronized(audioModelRequestLock) {
+            val now = nowMs()
+            if (now - lastAudioModelRequestMs < AUDIO_MODEL_REQUEST_INTERVAL_MS) return
+            lastAudioModelRequestMs = now
+        }
+        audioModelStore.requestDownload()
+    }
+
+    /**
+     * Sound event entry point (wired from the audio reader's detector). When
+     * classification is enabled, the tracker's winning labels ride the same
+     * `labels` field ML class names ride — never suppressing the RMS event:
+     * an empty verdict (feature off, model missing, nothing qualified) is the
+     * plain unlabeled sound event.
+     */
+    fun onSound(rmsPercent: Double) {
+        val labels = if (settingsDataStore.soundClassificationEnabled.value) {
+            try {
+                soundLabelTracker.winningLabels(nowMs())
+            } catch (_: Exception) {
+                emptyList()
+            }
+        } else {
+            emptyList()
+        }
+        onEvent(EventKind.SOUND, rmsPercent, labels = labels)
+    }
 
     /**
      * The motion arm-schedule verdict, consulted before the ML gate so a
@@ -581,6 +703,9 @@ class DetectionCoordinator(
 
         /** ML gate throttle: at most one classification per this interval. */
         private const val ML_MIN_INTERVAL_MS = 1_000L
+
+        /** Audio-model auto-request throttle; manual retries bypass it. */
+        private const val AUDIO_MODEL_REQUEST_INTERVAL_MS = 60_000L
 
         /** Bounded waits for the clip watcher: recording live, then finalizing. */
         private const val CLIP_LINK_TIMEOUT_MS = 10 * 60 * 1000L

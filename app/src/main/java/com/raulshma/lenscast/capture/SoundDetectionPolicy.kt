@@ -133,6 +133,15 @@ class SoundDetector(
     @Volatile var cooldownMs: Long = SoundDetectionPolicy.DEFAULT_COOLDOWN_MS
 
     /**
+     * Optional tap for the YAMNet sound classifier: the same PCM16 chunks,
+     * handed over *before* the detector's own gate so classification runs
+     * whether or not a window trips the RMS threshold. Fail-open by contract
+     * — the tap must never throw onto the audio reader thread, and whatever
+     * it does can never affect the RMS verdict below.
+     */
+    @Volatile var audioTap: ((pcm16: ByteArray) -> Unit)? = null
+
+    /**
      * Whether the trigger threshold rides the tracked ambient noise floor.
      * Flipping the toggle re-anchors the floor: a floor tracked during an
      * earlier enabled period is stale by the time the feature comes back,
@@ -152,6 +161,10 @@ class SoundDetector(
     private var noiseFloor = AdaptiveNoiseFloor()
 
     fun feed(pcm16: ByteArray, nowMs: Long = System.currentTimeMillis()) {
+        // The classifier's tap is not gated by the detector's enable/threshold
+        // arming: it owns its own enable (the classification setting), and a
+        // throw from it must never take the RMS path down.
+        audioTap?.let { tap -> runCatching { tap(pcm16) } }
         if (!enabled || thresholdPercent <= 0) return
         try {
             val rms = SoundDetectionPolicy.rmsPercent(pcm16)
