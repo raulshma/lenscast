@@ -145,23 +145,33 @@ android {
         // the library — Android 6 runs the whole app minus the ML gate.
         minSdk = 23
         targetSdk = 36
-        // The in-app updater compares versionName semantically. versionCode
-        // = major*10_000 + minor*1_000 + patch*10 + abiIndex, abiIndex being
-        // armeabi-v7a=1, arm64-v8a=2, x86_64=3 — 0.1.1 ships 1011/1012/1013
-        // (one APK per ABI; F-Droid needs distinct codes per APK, and
-        // per-ABI APKs shrink downloads from 36 MB to ~9 MB). The literal
-        // below is the arm64 default for plain local builds; CI and the
-        // F-Droid recipe pass the full code via -PversionCode together with
-        // -PabiFilter. Literal-first so fdroidserver's checkupdates parser
-        // (reads `versionCode = <int>` from this file) keeps working. The
-        // literal is the x86_64 default (highest abiIndex = the code
-        // checkupdates expects to see as "current"); local plain builds
-        // package all three ABIs with it.
-        versionCode = 1013
-        project.findProperty("versionCode")?.let { versionCode = (it as String).toInt() }
+        // versionCode = major*10_000 + minor*1_000 + patch*10 + abiIndex,
+        // abiIndex being armeabi-v7a=1, arm64-v8a=2, x86_64=3 — 0.1.2 ships
+        // 1021/1022/1023 (one APK per ABI; F-Droid needs distinct codes per
+        // APK, and per-ABI APKs shrink downloads from 36 MB to ~9 MB). The
+        // in-app updater compares versionName semantically.
+        //
+        // CI passes the full code explicitly via -PversionCode together
+        // with -PabiFilter. Without -PversionCode the code is derived from
+        // -PabiFilter — which is how the F-Droid recipe builds, so the
+        // recipe pins no version in gradleprops (pinning there would break
+        // fdroidserver's auto-update). Literal-first so checkupdates'
+        // parser (reads `versionCode = <int>` from this file) keeps
+        // working; the literal is the x86_64 default (highest abiIndex =
+        // the code checkupdates expects as "current"), and prop-less local
+        // builds (all three ABIs) use it as-is.
+        versionCode = 1023
+        val propVersionCode = project.findProperty("versionCode")?.toString()?.toInt()
+        val abiOffset = when (project.findProperty("abiFilter")) {
+            "armeabi-v7a" -> 2
+            "arm64-v8a" -> 1
+            // x86_64 and prop-less local builds keep the literal above.
+            else -> 0
+        }
+        versionCode = propVersionCode ?: (1023 - abiOffset)
         // Literal-first for the same reason: fdroidserver's checkupdates
         // parser reads `versionName = <literal>` from this file.
-        versionName = "0.1.1"
+        versionName = "0.1.2"
         project.findProperty("versionName")?.let { versionName = it as String }
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"

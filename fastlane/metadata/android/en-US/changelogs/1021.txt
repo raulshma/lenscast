@@ -1,0 +1,4 @@
+Maintenance release for F-Droid inclusion — no user-facing changes:
+• Per-ABI version codes are now derived at build time, enabling F-Droid auto-updates
+• F-Droid flavor still ships without the in-app self-updater
+Everything else identical to 0.1.1.

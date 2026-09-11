@@ -13,52 +13,50 @@ RepoType: git
 Repo: https://github.com/raulshma/lenscast.git
 
 Builds:
-  - versionName: 0.1.1
-    versionCode: 1011
-    commit: v0.1.1
+  - versionName: 0.1.2
+    versionCode: 1021
+    commit: v0.1.2
     sudo:
-      - curl -Lo node.tar.gz https://nodejs.org/dist/v22.23.2/node-v22.23.2-linux-x64.tar.gz
-      - echo "b294a556e639d64338823920e5866c21c02741742d2e1529ee1a225c1ec9252a  node.tar.gz"
-        | sha256sum -c -
-      - tar xzf node.tar.gz --strip-components=1 -C /usr/local/
+      - echo "deb https://deb.debian.org/debian forky main" > /etc/apt/sources.list.d/forky.list
+      - apt-get update
+      - apt-get install -y -t forky npm
     gradle:
       - fdroid
     output: app/build/outputs/apk/fdroid/release/app-fdroid-release.apk
     gradleprops:
       - abiFilter=armeabi-v7a
-      - versionCode=1011
 
-  - versionName: 0.1.1
-    versionCode: 1012
-    commit: v0.1.1
+  - versionName: 0.1.2
+    versionCode: 1022
+    commit: v0.1.2
     sudo:
-      - curl -Lo node.tar.gz https://nodejs.org/dist/v22.23.2/node-v22.23.2-linux-x64.tar.gz
-      - echo "b294a556e639d64338823920e5866c21c02741742d2e1529ee1a225c1ec9252a  node.tar.gz"
-        | sha256sum -c -
-      - tar xzf node.tar.gz --strip-components=1 -C /usr/local/
+      - echo "deb https://deb.debian.org/debian forky main" > /etc/apt/sources.list.d/forky.list
+      - apt-get update
+      - apt-get install -y -t forky npm
     gradle:
       - fdroid
     output: app/build/outputs/apk/fdroid/release/app-fdroid-release.apk
     gradleprops:
       - abiFilter=arm64-v8a
-      - versionCode=1012
 
-  - versionName: 0.1.1
-    versionCode: 1013
-    commit: v0.1.1
+  - versionName: 0.1.2
+    versionCode: 1023
+    commit: v0.1.2
     sudo:
-      - curl -Lo node.tar.gz https://nodejs.org/dist/v22.23.2/node-v22.23.2-linux-x64.tar.gz
-      - echo "b294a556e639d64338823920e5866c21c02741742d2e1529ee1a225c1ec9252a  node.tar.gz"
-        | sha256sum -c -
-      - tar xzf node.tar.gz --strip-components=1 -C /usr/local/
+      - echo "deb https://deb.debian.org/debian forky main" > /etc/apt/sources.list.d/forky.list
+      - apt-get update
+      - apt-get install -y -t forky npm
     gradle:
       - fdroid
     output: app/build/outputs/apk/fdroid/release/app-fdroid-release.apk
     gradleprops:
       - abiFilter=x86_64
-      - versionCode=1013
 
 AutoUpdateMode: Version
 UpdateCheckMode: Tags
-CurrentVersion: 0.1.1
-CurrentVersionCode: 1013
+VercodeOperation:
+  - '%c - 2'
+  - '%c - 1'
+  - '%c'
+CurrentVersion: 0.1.2
+CurrentVersionCode: 1023
