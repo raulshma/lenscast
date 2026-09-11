@@ -1043,6 +1043,33 @@ The toggle is persisted as `sound_adaptive_noise_floor` and
 applied by the Settings Applier alongside the threshold and the sound
 cooldown (motion and sound carry their own persisted cooldown settings).
 
+### Recording Session Index
+**`capture/model/RecordingSessionIndex.kt`** — the pure grouping/classification
+behind GET `GET /api/recordings/sessions?day=YYYY-MM-DD`: the requested local
+day's video captures as NVR timeline sessions. Ends are inferred (persisted
+duration → next capture's start, capped → 60 s fallback) and triggers are
+reconstructed from the persisted detection events — `motion`/`sound` when an
+event overlaps the capture window (small lead tolerance), `manual` otherwise;
+continuous/scheduled origins are deliberately not recoverable from history.
+The handler (`streaming/web/RecordingSessionsWebHandler`) only joins
+CaptureHistoryStore + DetectionEventStore and serializes; day parsing
+degrades a missing/invalid `day` to today. JVM-tested; contract-pinned by
+`web/contract/recording-sessions.json`.
+
+### Eco Idle Policy
+**`core/EcoIdlePolicy.kt`** — the pure decision core behind the eco idle-fps
+mode (`ecoIdleFpsEnabled`, default off): when the toggle is on, the device is
+off charger, no stream consumer is connected (MJPEG/RTSP/WS clients, HLS
+fetches, RTMP push), and thermal is NORMAL, the effective frame rate drops to
+`StreamDefaults.ECO_IDLE_FPS` and live-audio encoding pauses; any consumer,
+charger, or thermal event restores the full rate immediately. Priority is
+explicit — eco applies only while thermal is NORMAL, so the ladders never
+stack. Anti-thrash: the idle conditions must hold `IDLE_STABLE_MS` before the
+first drop and a `RESTORE_COOLDOWN_MS` window after each restore blocks the
+next one. StreamingManager hosts the poll loop and applied side effects
+(frame-rate fan-out re-applied over the remembered user rate, audio refresh);
+verdicts are JVM-tested.
+
 ### Detection Stats Policy
 **`capture/DetectionStatsPolicy.kt`** — the pure aggregation behind GET
 `/api/detection/stats`: per-type counts over the 24 h / 7 d / all-time

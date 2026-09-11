@@ -140,6 +140,41 @@ The writable set is exactly: `/api/stream/start`, `/api/stream/resume`,
 Everything else stays read-only for tokens, and no `/api/auth/` route is
 ever token-writable.
 
+## Recording timeline (NVR day view)
+
+`GET /api/recordings/sessions?day=YYYY-MM-DD` returns the requested local
+day's video captures as an NVR timeline — the shape the built-in dashboard's
+recording timeline consumes, and a natural feed for a home-automation
+day-view card:
+
+```json
+{
+  "sessions": [
+    {
+      "id": "7c9e6679-…",
+      "startMs": 1788796800000,
+      "endMs": 1788800400000,
+      "trigger": "manual",
+      "mediaId": "7c9e6679-…"
+    }
+  ]
+}
+```
+
+- `day` uses the device's local timezone; a missing or invalid value answers
+  today. Sessions are the day's video captures (start inside the day; an
+  `endMs` may sit past midnight).
+- `trigger` is one of `manual`, `motion`, `sound`, `continuous`,
+  `scheduled` — but reconstruction from history can only ever answer the
+  first three: `motion`/`sound` when a persisted detection event overlaps
+  the capture window (a small lead tolerance before the start is allowed),
+  `manual` otherwise. A capture actually produced by the continuous loop or
+  a scheduled start is indistinguishable from a manual one after the fact.
+- `endMs` is inferred: the capture's own duration when known, else the start
+  of the next capture (capped at one hour), else start + 60 s.
+- `mediaId` is the capture-history id; the clip itself is downloadable
+  through the media routes (`/api/media/…`).
+
 ## VLC / ffmpeg
 
 ```bash

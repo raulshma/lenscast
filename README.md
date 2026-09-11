@@ -50,6 +50,9 @@ LensCast is an Android camera application with live video/audio streaming to web
 - Scene modes (Face Detection, Night, HDR, Sunset, Fireworks, Action, Portrait, and more)
 - Focus distance control for manual focus mode
 - Color temperature adjustment (2000K–9000K) for manual white balance
+- Viewfinder aids: composition grid lines (3×3 / 4×4 / golden ratio), a two-axis spirit level (green when near-level), a self-timer (3 s / 10 s, tap-to-cancel), and pro tools computed from the live analysis stream — luma histogram, over/under-exposure zebras, and focus peaking
+- Photo capture quality: JPEG quality setting (60–100) with a maximize-quality capture mode, RAW+JPEG (DNG) capture on cameras that support it (per-shot toggle, fail-closed on capability check), and opt-in EXIF tagging — GPS geotag (runtime location permission requested only when the setting is first enabled) plus artist/comment metadata
+- Localized UI: the app screens ship in English, German, and Spanish
 
 ### Live Streaming
 - HTTPS mode with a self-signed on-device certificate (fingerprint shown for one-tap verification) — encrypts streams and enables in-browser microphone talkback
@@ -57,6 +60,7 @@ LensCast is an Android camera application with live video/audio streaming to web
 - Real-time M-JPEG video streaming to any web browser on the same WiFi network
 - RTSP streaming with AAC audio and H.264 or H.265 video (H.264 is the default; the HLS and WebCodecs playback paths stay H.264-only) at 480p/720p/1080p, for use with VLC, OBS, NVRs, and other RTSP clients
 - Mid-GOP RTSP joins: every PLAY re-arms a per-client keyframe wait and requests a sync frame, so a client that connects late starts decoding at the next IDR frame instead of choking on orphaned P-frames
+- RTMP push publishing (off by default): pushes the same H.264/AAC encode to an RTMP or RTMP(S) server — YouTube, Twitch, nginx-rtmp, or any media server — configured with a `rtmp://[user:pass@]host[:port]/app/stream-key` URL, with a capped-backoff auto-reconnect while enabled, a status line (idle/connecting/connected/error) on the device status snapshot, `/api/stream/rtmp/start|stop` routes, and a clean FCUnpublish/DeleteStream close; H.264 only (H.265 has no standard RTMP mapping and the push refuses to start under it), see [RTMP push](docs/rtmp.md)
 - ONVIF Profile S device service (off by default): WS-Discovery answers probes on UDP 239.255.255.250:3702 and a SOAP endpoint at `/onvif/device_service` serves the standard device/media queries, so ONVIF NVRs such as Home Assistant can discover the camera automatically — unauthenticated by design (LAN device metadata and stream URIs only; RTSP keeps its own auth), see [NVR integration](docs/nvr-integration.md)
 - Live audio streaming with configurable bitrate (32–320 kbps), channels (mono/stereo), and echo cancellation
 - Adaptive bitrate control that dynamically adjusts JPEG quality and frame rate based on network quality and thermal state
@@ -67,7 +71,7 @@ LensCast is an Android camera application with live video/audio streaming to web
 - Network quality monitoring with per-client throughput tracking and quality level classification (Excellent → Critical)
 - Foreground service with persistent notification to keep streaming alive in the background
 - Resume streams on boot (when the setting is enabled) and a Quick Settings tile for unattended camera operation — the tile is a manual request and always starts, restoring the outputs the on-device journal last recorded
-- Optional API token (Bearer / X-Api-Token header) for programmatic clients like Home Assistant or curl: read-only GET/HEAD on the protected routes plus POST on an explicit allow-list (stream/web/RTSP start and stop, photo capture, recording start and stop, siren, torch, the ML-model download, and the detection-test alert) — auth and session-management routes are never token-writable
+- Optional API token (Bearer / X-Api-Token header) for programmatic clients like Home Assistant or curl: read-only GET/HEAD on the protected routes plus POST on an explicit allow-list (stream/web/RTSP/RTMP start and stop, photo capture, recording start and stop, siren, torch, the ML-model and audio-model downloads, and the detection-test alert) — auth and session-management routes are never token-writable
 
 ### Web UI (Remote Control Dashboard)
 - Full remote camera control dashboard built with SolidJS, Tailwind CSS v4, and DaisyUI
@@ -82,7 +86,11 @@ LensCast is an Android camera application with live video/audio streaming to web
 - Connection quality indicator with real-time bandwidth, throughput, latency, and per-client stats
 - Connection-lost banner: shows once the status poll has failed several times in a row with the live event stream down, and clears on the next success or stream reopen
 - Remote media gallery with thumbnail grid, day-grouped sections with a date jump, full-resolution photo viewer, and file downloads
-- Multi-camera panel: watch several LensCast phones side by side — manually added camera URLs persist in the browser and render as snapshot/M-JPEG tiles
+- Recording timeline: an NVR-style day timeline of recording sessions fed by `GET /api/recordings/sessions?day=YYYY-MM-DD`, with motion/sound triggers marked and each session linking to its clip in the gallery
+- Detection statistics card: windowed counts (24 h / 7 d / all-time), a seven-day per-day bar chart, and the most-fired zones and ML labels, rendered from `GET /api/detection/stats`
+- Multi-camera panel: watch several LensCast phones side by side — manually added camera URLs persist in the browser and render as snapshot or live M-JPEG tiles (per-tile and one-tap "live all" toggles, with automatic snapshot fallback on stream errors)
+- Installable PWA (web app manifest with theme colors and icons) and a light/dark theme toggle that follows the OS preference by default
+- Storage forecast: a days-until-quota estimate computed from capture history growth against the configured storage quota, shown only when enough history exists
 - HTTP Basic Authentication login screen
 - Cinematic dark-themed glassmorphism design with micro-animations
 
@@ -93,12 +101,14 @@ LensCast is an Android camera application with live video/audio streaming to web
 - Object detection (ML): an on-device EfficientDet-Lite0 model (LiteRT task library, ~4.4 MB int8 model — not bundled in the APK; downloaded once on first use from the TensorFlow Hub source and SHA-256-verified into app storage) can gate motion events — when enabled, the triggering frame is classified and the event is suppressed unless a person, a common pet/livestock animal, or a road vehicle is detected at or above the confidence threshold, with per-group toggles to narrow the gate to people, animals, and/or vehicles (fail-open: a throttled or failed classification never suppresses an alert); detected labels ride the webhook/MQTT payloads, the event log, and the dashboard feed
 - Continuous recording: an NVR-style loop of chained segments (5–60 minutes) riding the existing bounded-recording machinery; segments land in the gallery like any recording and age out via the capture retention window, a manual stop pauses the loop for 60 s, and motion-triggered clips are skipped while the loop is live (the events still fire and log, without a clip link)
 - Sound detection with an RMS threshold and its own per-event cooldown, plus an optional adaptive noise floor: the trigger rides above a slow moving average of the ambient level, so constant background noise (HVAC, traffic) neither masks real events nor trips the detector on its own — and an optional Record on Sound toggle starts a bounded clip (riding the motion post-roll duration) on each sound event
-- Tamper detection: a power cut while streaming (a charging camera losing power) raises a tamper event — opt-in via the Tamper Detection toggle in Detection settings (off by default)
+- Sound classification (YAMNet, opt-in): an on-device audio classifier (MediaPipe tasks-audio, ~3.9 MB model — not bundled in the APK; downloaded once on first use from the TensorFlow Hub source and SHA-256-verified into app storage) labels the audio around each sound event (smoke alarm, siren, dog bark, breaking glass, gunshot, speech…) and the class labels ride the webhook/MQTT payloads, the event log, and the dashboard feed like the ML object labels do — annotate-only by design (classification never suppresses or delays the RMS event; a missing model, an API-24- device, or a failed window just ships the event unlabeled), with a confidence threshold and a user-narrowable allow-list of security-relevant classes, plus label-stability and cooldown logic so a chirping smoke alarm retriggers sanely; requires Android 7.0+ (API 24), like the ML object gate
+- Tamper detection: a power cut while streaming (a charging camera losing power) raises a tamper event — opt-in via the Tamper Detection toggle in Detection settings (off by default); the tamper response also preserves evidence — the detection-event log is flushed to disk immediately and, when backup is armed, every pending un-uploaded capture's backup is re-queued as an expedited WorkManager request that skips Wi-Fi-only mode (the camera may never see power — or Wi-Fi — again)
 - Local heads-up alerts per detection event with the trigger snapshot as the big picture (opt-out, runtime notification permission requested on first launch), with optional quiet hours — notifications are held inside a scheduled window (webhooks, MQTT, recordings, and the event log keep firing)
 - Webhook alerts (ntfy/Home Assistant/any JSON endpoint) with the trigger snapshot, triggered zone and ML class labels, and battery level embedded in the JSON payload, custom headers, and automatic retries
 - MQTT alert publishing to any broker with Home Assistant discovery: motion/sound/tamper appear as `binary_sensor` entities automatically, with retained availability and a last will (offline on ungraceful loss) — see [NVR integration](docs/nvr-integration.md)
 - On-device detection event log with a live dashboard event feed (thumbnail, type, dispatched actions, zone/ML labels, and a link to the event's recorded clip) — pushed over server-sent events with an automatic polling fallback, filterable by type in the API (`?type=`), and downloadable as CSV or JSON (`GET /api/detection/events/export?format=csv|json&type=`); CSV cells that begin with a formula trigger (`=`, `+`, `-`, `@`, tab) carry an apostrophe guard so spreadsheet apps never execute exported labels; the phone app gains its own Detection Events screen (tap a detection alert to open it)
 - Detection statistics at `GET /api/detection/stats`: per-type counts over 24 h / 7 d / all-time windows, a seven-day per-day series, and the most-fired zones and ML labels
+- Recording-session timeline at `GET /api/recordings/sessions?day=YYYY-MM-DD`: the requested local day's video captures as NVR sessions with an inferred end (known duration, else the next capture's gap, else a 60 s bar) and a reconstructed trigger — `motion`/`sound` when a detection event overlaps the capture window, `manual` otherwise (continuous/scheduled origins are not recoverable historically); a missing or invalid day answers today
 - Read-only diagnostics at `GET /api/system`: app version, device model, Android version, OS and process uptimes, battery detail (temperature, voltage, health), and storage usage against the configured quota
 - Automatic deterrence: optional siren and torch auto-trigger on detection, with a configurable cooldown — the siren auto-stops after its duration, while the torch stays on until turned off
 
@@ -121,6 +131,7 @@ LensCast is an Android camera application with live video/audio streaming to web
 - Capture history tracking persisted via DataStore
 - Time-based retention: optional capture and detection-event windows in days (0 = keep forever, else the oldest entries beyond the window are deleted) swept on startup, on every media refresh, and after every append
 - Storage quota: a configurable cap in MB (100 MB–32 GB, default 2 GB) on LensCast's media — the oldest captures are deleted automatically once the quota is exceeded, alongside a low-disk safety floor
+- Media encryption at rest (opt-in, off by default): new photos and videos are encrypted per file with AES-256-GCM under a single hardware-backed Android Keystore key (random nonce per file, `LCE1` magic header, real `.jpg`/`.mp4` names kept). Migration-free by design — flipping the toggle never re-encrypts or decrypts existing media, because every reader sniffs the per-file header, so plaintext and encrypted captures coexist and decrypt transparently in the app gallery, the web dashboard, and `/api/media`. Documented trade-offs: while enabled, video thumbnails show a placeholder (the thumbnail decoder needs real mp4 bytes at rest — playback still works through the decrypting stream, in-app and over the web API), photos are served from a decrypted cache file for Coil, and backups upload the *decrypted* capture so the remote copy is readable evidence
 - Video recording as a foreground service for reliability
 
 ### Gallery
@@ -135,6 +146,8 @@ LensCast is an Android camera application with live video/audio streaming to web
 ### Monitoring & Power Management
 - Device thermal state monitoring (Normal → Critical) with automatic quality and frame rate adaptation
 - Battery level monitoring with tiered optimization: auto-reduces quality, bitrate, and resolution as battery drops
+- Eco idle-fps mode (opt-in, `ecoIdleFpsEnabled`): while on battery, thermal is normal, and no stream consumer is connected, the frame rate drops to a low idle floor and live-audio encoding pauses — the first viewer, charger, or thermal event restores the full rate (with a cooldown so flapping clients can't thrash)
+- Charge diagnostics for 24/7 devices: `GET /api/system` battery detail also carries the charge counter (mAh), the signed instant current (µA), and — on Android 14+ — the charge-cycle count, when the hardware reports them
 - Power save mode detection and Doze mode awareness
 - Wake lock management for long-duration streaming and recording sessions
 - Battery optimization exemption request for uninterrupted background operation
@@ -151,6 +164,8 @@ LensCast is an Android camera application with live video/audio streaming to web
 
 - [Remote access](docs/remote-access.md) — viewing the stream outside your LAN (Tailscale, WireGuard, and why port forwarding is discouraged)
 - [NVR integration](docs/nvr-integration.md) — Home Assistant (generic camera + ONVIF), VLC/ffmpeg, Frigate, and detection webhook recipes
+- [RTMP push](docs/rtmp.md) — push-publishing the stream to YouTube, Twitch, nginx-rtmp, and other RTMP(S) servers
+- [Wear companion](wear/README.md) — the Wear OS module: watch-side stream toggle, photo capture, and snapshot view over the LAN API
 
 ---
 
@@ -161,8 +176,9 @@ LensCast is an Android camera application with live video/audio streaming to web
 - CameraX (camera2 backend), WorkManager, DataStore Preferences, NanoHTTPD
 - MVVM architecture with Kotlin Coroutines and StateFlow
 - Moshi for JSON serialization, Coil for image/video loading
-- Custom RTSP server with H.264/H.265/AAC RTP packetization
-- LiteRT (TensorFlow Lite task-vision) for on-device object detection
+- Custom RTSP server with H.264/H.265/AAC RTP packetization, plus a hand-rolled RTMP push publisher
+- LiteRT (TensorFlow Lite task-vision) for on-device object detection; MediaPipe tasks-audio for YAMNet sound classification
+- Wear OS companion module (:wear, Compose for Wear OS) talking to the same LAN HTTP API
 
 **Web UI**
 - SolidJS, Tailwind CSS v4, DaisyUI v5, Vite, TypeScript
@@ -226,6 +242,8 @@ The Vite dev server proxies `/api`, `/stream`, `/audio`, and `/snapshot` request
 
 ## CI/CD
 
+A CI workflow (`.github/workflows/ci.yml`) runs on every push to main and every pull request: web UI typecheck + vitest, JVM unit tests for both flavors, and a store-flavor debug build.
+
 A GitHub Actions workflow (`.github/workflows/release.yml`) automates release builds:
 - Triggers on pushes to `v*` or `release/**` branches, or via manual dispatch
 - Builds the **store flavor** (with the in-app updater) as one signed APK per ABI (`armeabi-v7a`, `arm64-v8a`, `x86_64`) with distinct `versionCode`s (`major*10000 + minor*1000 + patch*10 + abiIndex`); the `fdroid` flavor is built by F-Droid's own recipe, not shipped here
@@ -248,6 +266,7 @@ A GitHub Actions workflow (`.github/workflows/release.yml`) automates release bu
 | `REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` | Requesting Doze mode exemption |
 | `READ_MEDIA_IMAGES` / `READ_MEDIA_VIDEO` | Accessing captured media in gallery |
 | `POST_NOTIFICATIONS` | Foreground service notifications and local detection alerts |
+| `ACCESS_COARSE_LOCATION` | Optional EXIF GPS geotagging of photos (runtime-requested only when the setting is first enabled) |
 
 ---
 
@@ -256,24 +275,27 @@ A GitHub Actions workflow (`.github/workflows/release.yml`) automates release bu
 ```
 app/src/main/java/com/raulshma/lenscast/
 ├── camera/          Camera preview, controls, CameraX integration, and lens management
-│   └── model/       Camera settings, state, overlay settings, and lens info models
+│   └── model/       Camera settings, state, overlay/pro-tools/self-timer policies, and lens info models
 ├── capture/         Photo/video capture, interval scheduling, recording service
-│   ├── ml/          On-device ML object detection (LiteRT)
+│   ├── ml/          On-device ML object detection (LiteRT) and YAMNet sound classification
 │   └── model/       Capture history and recording/detection policy models
 ├── gallery/         Media gallery grid, viewer with pager, and media management
 ├── streaming/       HTTP server, MJPEG/audio/RTSP streaming, web API controller
 │   ├── model/       Web API DTOs
 │   ├── onvif/       ONVIF Profile S device service and WS-Discovery responder
+│   ├── rtmp/        RTMP push publisher (AMF0, chunk protocol, FLV media tags)
 │   └── rtsp/        RTSP server, H.264/H.265 encoders, AAC encoder, RTP packetizers
 ├── settings/        Camera settings and app settings screens with ViewModels
 ├── navigation/      Compose navigation graph with shared element transitions
-├── core/            Power management, thermal monitoring, network monitoring
+├── core/            Power management, thermal monitoring, network monitoring, media crypto
 ├── data/            DataStore settings persistence, capture history store
 └── ui/              Theme, shared components, and animation utilities
 
+wear/                Wear OS companion module (watch-side remote control)
 web/                 SolidJS web UI for remote control
 ├── src/
 │   ├── components/  Dashboard components (stream, settings, overlay, gallery, etc.)
+│   ├── lib/         Pure dashboard logic (timeline math, stats mapping, forecasts)
 │   ├── api/         HTTP API client
 │   ├── hooks/       Application state management and utilities
 │   └── types.ts     TypeScript type definitions and constants
