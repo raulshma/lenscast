@@ -1,0 +1,433 @@
+<resources>
+    <!-- ── Устаревшие строки app/автоматизации/виджета ── -->
+    <string name="automation_permission_label">управлять LensCast</string>
+    <string name="automation_permission_description">Позволяет приложению запускать и останавливать трансляцию, запись, фотосъёмку, фонарик и сирену LensCast через широковещательные команды автоматизации.</string>
+    <string name="widget_status_idle">Ожидание</string>
+    <string name="widget_start_stream">Начать трансляцию</string>
+    <string name="widget_photo">Фото</string>
+
+    <!-- ── Навигация ── -->
+    <string name="nav_back">Назад</string>
+
+    <!-- ── Экран камеры ── -->
+    <string name="camera_preview_hidden">Предпросмотр скрыт</string>
+    <string name="camera_switch_camera_cd">Переключить камеру</string>
+    <string name="camera_connect_cd">Подключение — QR + URL</string>
+    <string name="camera_hide_preview_cd">Скрыть предпросмотр</string>
+    <string name="camera_show_preview_cd">Показать предпросмотр</string>
+    <string name="camera_gallery_cd">Галерея</string>
+    <string name="camera_more_options_cd">Другие параметры</string>
+    <string name="camera_menu_camera_controls">Управление камерой</string>
+    <string name="camera_menu_capture_tools">Инструменты съёмки</string>
+    <string name="camera_menu_settings">Настройки</string>
+    <string name="camera_collapse_quick_settings_cd">Свернуть быстрые настройки</string>
+    <string name="camera_stop_recording_cd">Остановить запись</string>
+    <string name="camera_record_video_cd">Записать видео</string>
+    <string name="camera_capture_photo_cd">Сделать фото</string>
+    <string name="camera_permission_title">Требуется доступ к камере</string>
+    <string name="camera_permission_rationale">LensCast нужен доступ к камере для живого предпросмотра и к микрофону для трансляции и записи звука.</string>
+    <string name="camera_permission_grant">Предоставить разрешение</string>
+    <string name="camera_initializing">Инициализация камеры…</string>
+    <string name="camera_error_title">Ошибка камеры</string>
+    <string name="camera_retry">Повторить</string>
+    <string name="camera_server_status_cd">Состояние веб-сервера</string>
+    <string name="camera_web_server_title">Веб-сервер</string>
+    <string name="camera_server_offline">Сервер отключён</string>
+    <string name="camera_copy_url">Скопировать URL</string>
+    <string name="camera_rtsp_stream_title">RTSP-поток</string>
+    <string name="camera_copy_rtsp_url">Скопировать URL RTSP</string>
+    <string name="camera_turn_server_off">Выключить сервер</string>
+    <string name="camera_turn_server_on">Включить сервер</string>
+    <string name="camera_connection_quality_title">Качество соединения</string>
+    <string name="camera_quality_label">Качество</string>
+    <string name="camera_per_client_stats">Статистика по клиентам</string>
+
+    <!-- ── Панель подключения ── -->
+    <string name="camera_connect_title">Подключиться к этой камере</string>
+    <string name="camera_qr_code_cd">QR-код для %1$s</string>
+    <string name="camera_connect_browser_mjpeg">Браузер (MJPEG)</string>
+    <string name="camera_connect_browser_hls">Браузер (HLS)</string>
+    <string name="camera_connect_vlc_obs">VLC / OBS (RTSP)</string>
+    <string name="camera_copy">Копировать</string>
+    <string name="camera_connect_cert_fingerprint">Отпечаток сертификата (SHA-256):\n%1$s</string>
+    <string name="camera_connect_usb_instructions">USB (без Wi-Fi): подключите кабель и выполните\n  adb forward tcp:%1$d tcp:%1$d\nзатем откройте http://localhost:%1$d на компьютере. mDNS: LensCast._http._tcp + LensCast-RTSP._rtsp._tcp. Лимит: %2$d HTTP-зрителей.</string>
+    <plurals name="camera_viewers_watching">
+        <item quantity="one">%d смотрит</item>
+        <item quantity="few">%d смотрят</item>
+        <item quantity="many">%d смотрят</item>
+        <item quantity="other">%d смотрит</item>
+    </plurals>
+
+    <!-- ── Экран съёмки ── -->
+    <string name="capture_title">Съёмка</string>
+    <string name="capture_section_quick">Быстрая съёмка</string>
+    <string name="capture_photo">Фото</string>
+    <string name="capture_stop">Стоп</string>
+    <string name="capture_record">Записать</string>
+    <string name="capture_section_interval">Интервальная съёмка</string>
+    <string name="capture_interval_seconds">Интервал (в секундах)</string>
+    <string name="capture_total_captures">Общее число снимков</string>
+    <string name="capture_flash_mode">Режим вспышки</string>
+    <string name="capture_stop_interval">Остановить интервал</string>
+    <string name="capture_start_interval">Запустить интервал</string>
+    <string name="capture_assembling">Сборка…</string>
+    <string name="capture_assemble_timelapse">Собрать таймлапс (последние 100 фото)</string>
+    <string name="capture_section_scheduled">Запись по расписанию</string>
+    <string name="capture_include_audio">Записывать звук</string>
+    <string name="capture_recording_quality">Качество записи</string>
+    <string name="capture_duration">Длительность (в секундах, 0 = без ограничения)</string>
+    <string name="capture_repeat_interval">Интервал повтора (в секундах, 0 = без повтора)</string>
+    <string name="capture_clear_schedule_cd">Очистить расписание</string>
+    <string name="capture_recording_elapsed">Запись: %1$s</string>
+    <string name="capture_stop_recording">Остановить запись</string>
+    <string name="capture_set_start_time">Задать время начала</string>
+    <string name="capture_schedule">Запланировать</string>
+    <string name="capture_start_now">Начать сейчас</string>
+    <string name="capture_scheduled_start">Начало: %1$s</string>
+    <string name="capture_ok">ОК</string>
+    <string name="capture_cancel">Отмена</string>
+
+    <!-- ── Экран событий детекции ── -->
+    <string name="detection_title">События детекции</string>
+    <string name="detection_filter_all">Все</string>
+    <string name="detection_filter_motion">Движение</string>
+    <string name="detection_filter_sound">Звук</string>
+    <string name="detection_filter_tamper">Саботаж</string>
+    <string name="detection_clear">Очистить</string>
+    <string name="detection_empty">Событий детекции пока нет</string>
+    <string name="detection_snapshot_cd">Снимок: %1$s</string>
+    <string name="detection_zones">Зоны: %1$s</string>
+    <string name="detection_ml_labels">ML: %1$s</string>
+    <string name="detection_actions">Действия: %1$s</string>
+    <string name="detection_clip">Клип: %1$s</string>
+
+    <!-- ── Экраны галереи ── -->
+    <string name="gallery_title">Галерея</string>
+    <string name="gallery_select_media_cd">Выбрать медиафайлы</string>
+    <string name="gallery_delete_selected_title">Удалить выбранное</string>
+    <plurals name="gallery_delete_selected_message">
+        <item quantity="one">Удалить %d выбранный элемент?</item>
+        <item quantity="few">Удалить %d выбранных элемента?</item>
+        <item quantity="many">Удалить %d выбранных элементов?</item>
+        <item quantity="other">Удалить %d выбранных элементов?</item>
+    </plurals>
+    <string name="gallery_delete">Удалить</string>
+    <string name="gallery_cancel">Отмена</string>
+    <string name="gallery_selection_title">Выбрано %1$d из %2$d</string>
+    <string name="gallery_exit_selection_cd">Выйти из режима выбора</string>
+    <string name="gallery_deselect_all_cd">Снять выделение</string>
+    <string name="gallery_select_all_cd">Выбрать все</string>
+    <plurals name="gallery_selected_count">
+        <item quantity="one">Выбран %d</item>
+        <item quantity="few">Выбрано %d</item>
+        <item quantity="many">Выбрано %d</item>
+        <item quantity="other">Выбрано %d</item>
+    </plurals>
+    <string name="gallery_choose_items_hint">Выберите элементы, чтобы поделиться или удалить</string>
+    <string name="gallery_batch_ready">Групповые действия готовы</string>
+    <string name="gallery_share">Поделиться</string>
+    <string name="gallery_deleting">Удаление</string>
+    <string name="gallery_library_title">Ваша библиотека LensCast</string>
+    <string name="gallery_library_empty">Снятые фото и видео появятся здесь.</string>
+    <plurals name="gallery_library_summary">
+        <item quantity="one">Показано %1$d из %2$d элементов за %3$d день.</item>
+        <item quantity="few">Показано %1$d из %2$d элементов за %3$d дня.</item>
+        <item quantity="many">Показано %1$d из %2$d элементов за %3$d дней.</item>
+        <item quantity="other">Показано %1$d из %2$d элементов за %3$d дней.</item>
+    </plurals>
+    <string name="gallery_stat_photos">Фото</string>
+    <string name="gallery_stat_videos">Видео</string>
+    <string name="gallery_stat_visible">Видимые</string>
+    <string name="gallery_stat_storage">Хранилище</string>
+    <string name="gallery_stat_in_library">В библиотеке приложения</string>
+    <string name="gallery_filter_all">Все (%1$d)</string>
+    <string name="gallery_filter_photos">Фото (%1$d)</string>
+    <string name="gallery_filter_videos">Видео (%1$d)</string>
+    <string name="gallery_empty_none_title">Медиафайлов пока нет</string>
+    <string name="gallery_empty_none_body">Снятые фото и видео появятся здесь, когда вы начнёте съёмку.</string>
+    <string name="gallery_empty_photos_title">В этой подборке нет фото</string>
+    <string name="gallery_empty_photos_body">Вернитесь к «Все», чтобы просмотреть всё снятое.</string>
+    <string name="gallery_empty_videos_title">В этой подборке нет видео</string>
+    <string name="gallery_empty_videos_body">Вернитесь к «Все», чтобы увидеть остальную часть библиотеки.</string>
+    <string name="gallery_empty_other_title">Нечего показать</string>
+    <string name="gallery_empty_other_body">Галерея будет готова, когда появятся новые снимки.</string>
+    <plurals name="gallery_section_item_count">
+        <item quantity="one">%1$d элемент • %2$s</item>
+        <item quantity="few">%1$d элемента • %2$s</item>
+        <item quantity="many">%1$d элементов • %2$s</item>
+        <item quantity="other">%1$d элементов • %2$s</item>
+    </plurals>
+    <string name="gallery_play_video_cd">Воспроизвести видео</string>
+    <string name="gallery_type_photo">Фото</string>
+    <string name="gallery_type_video">Видео</string>
+    <string name="gallery_selected_cd">Выбрано</string>
+    <string name="gallery_storage_usage">Хранилище: %1$s / %2$s</string>
+    <string name="gallery_free_space">Свободное место</string>
+    <string name="gallery_media_not_found">Медиафайл не найден</string>
+    <string name="gallery_delete_item_message">Удалить \"%1$s\"?</string>
+    <string name="gallery_viewer_position">%1$d из %2$d</string>
+    <string name="gallery_toggle_details_cd">Показать или скрыть подробности</string>
+    <string name="gallery_share_cd">Поделиться</string>
+    <string name="gallery_open_externally_cd">Открыть в другом приложении</string>
+    <string name="gallery_delete_cd">Удалить</string>
+    <string name="gallery_previous_item_cd">Предыдущий элемент</string>
+    <string name="gallery_next_item_cd">Следующий элемент</string>
+    <string name="gallery_image_unavailable">Изображение недоступно</string>
+    <string name="gallery_video_unavailable">Видео недоступно</string>
+    <!-- Заголовки разделов и маркер неизвестного размера локализуются
+         на уровне экрана; чистые форматтеры GalleryMedia.kt продолжают
+         возвращать стабильные английские маркеры. -->
+    <string name="gallery_section_today">Сегодня</string>
+    <string name="gallery_section_yesterday">Вчера</string>
+    <string name="gallery_unknown_size">Размер неизвестен</string>
+    <plurals name="gallery_share_chooser">
+        <item quantity="one">Поделиться %d элементом</item>
+        <item quantity="few">Поделиться %d элементами</item>
+        <item quantity="many">Поделиться %d элементами</item>
+        <item quantity="other">Поделиться %d элементами</item>
+    </plurals>
+    <string name="gallery_open_chooser">Открыть %1$s</string>
+
+    <!-- ── Экран настроек камеры ── -->
+    <string name="settings_camera_title">Настройки камеры</string>
+    <string name="settings_reset">Сброс</string>
+    <string name="settings_section_exposure">Экспозиция</string>
+    <string name="settings_exposure_compensation">Компенсация экспозиции</string>
+    <string name="settings_iso">ISO</string>
+    <string name="settings_section_focus">Фокусировка</string>
+    <string name="settings_focus_mode">Режим фокусировки</string>
+    <string name="settings_focus_distance">Дистанция фокусировки</string>
+    <string name="settings_white_balance">Баланс белого</string>
+    <string name="settings_color_temperature">Цветовая температура (K)</string>
+    <string name="settings_section_lens">Объектив</string>
+    <string name="settings_zoom">Зум</string>
+    <string name="settings_section_capture">Съёмка</string>
+    <string name="settings_resolution">Разрешение</string>
+    <string name="settings_frame_rate">Частота кадров</string>
+    <string name="settings_hdr">HDR</string>
+    <string name="settings_section_video">Видео</string>
+    <string name="settings_image_stabilization">Стабилизация изображения</string>
+    <string name="settings_section_viewfinder_aids">Вспомогательные элементы видоискателя</string>
+    <string name="settings_grid_overlay">Сетка</string>
+    <string name="settings_self_timer">Таймер спуска</string>
+    <string name="settings_spirit_level">Пузырьковый уровень</string>
+    <string name="settings_histogram">Гистограмма</string>
+    <string name="settings_exposure_zebras">Зебры экспозиции</string>
+    <string name="settings_focus_peaking">Резкость (пикинг)</string>
+    <string name="settings_section_photo_capture">Фотосъёмка</string>
+    <string name="settings_jpeg_quality">Качество JPEG</string>
+    <string name="settings_maximize_quality">Максимальное качество</string>
+    <string name="settings_raw_jpeg">Съёмка RAW+JPEG</string>
+    <string name="settings_raw_unsupported">Эта камера не поддерживает RAW+JPEG; снимки сохраняются в JPEG.</string>
+    <string name="settings_gps_geotag">Геометки GPS (EXIF)</string>
+    <string name="settings_section_night_vision">Ночное зрение / ИК</string>
+    <string name="settings_mode">Режим</string>
+    <string name="settings_section_scene">Сцена</string>
+    <string name="settings_scene_mode">Режим сцены</string>
+
+    <!-- ── Отображаемые имена wire-значений ──
+         Локализованные подписи для значений протоколов/перечислений,
+         которые показывают выпадающие списки настроек. Сами wire-значения
+         (enums CameraSettings, GridStyle, SelfTimerMode, RtspInputFormat,
+         режимы сцены) — ключи хранения и записи и не меняются; всё
+         несопоставленное на уровне экрана откатывается к правилу
+         «подчёркивание в пробел» из каталога. -->
+    <string name="option_auto">Авто</string>
+    <string name="option_off">Выкл.</string>
+    <string name="option_on">Вкл.</string>
+    <string name="option_manual">Ручной</string>
+    <string name="option_macro">Макро</string>
+    <string name="option_continuous_picture">Непрерывный (фото)</string>
+    <string name="option_continuous_video">Непрерывный (видео)</string>
+    <string name="option_daylight">Дневной свет</string>
+    <string name="option_cloudy">Облачно</string>
+    <string name="option_indoor">В помещении</string>
+    <string name="option_fluorescent">Люминесцентная лампа</string>
+    <string name="option_sd_480p">SD 480p</string>
+    <string name="option_hd_720p">HD 720p</string>
+    <string name="option_fhd_1080p">Full HD 1080p</string>
+    <string name="option_qhd_1440p">QHD 1440p</string>
+    <string name="option_uhd_4k">4K UHD</string>
+    <string name="option_grid_3x3">3 × 3</string>
+    <string name="option_grid_4x4">4 × 4</string>
+    <string name="option_golden_ratio">Золотое сечение</string>
+    <string name="option_s3">3 с</string>
+    <string name="option_s10">10 с</string>
+    <string name="option_face_detection">Распознавание лиц</string>
+    <string name="option_night">Ночь</string>
+    <string name="option_hdr">HDR</string>
+    <string name="option_sunset">Закат</string>
+    <string name="option_fireworks">Фейерверк</string>
+
+    <!-- ── Экран настроек приложения ── -->
+    <string name="settings_app_title">Настройки приложения</string>
+    <string name="settings_section_updates">Обновления</string>
+    <string name="settings_current_version">Текущая версия</string>
+    <string name="settings_last_check">Последняя проверка: %1$s</string>
+    <string name="settings_auto_check">Проверять автоматически при запуске</string>
+    <string name="settings_check_updates">Проверить обновления</string>
+    <string name="settings_up_to_date">У вас установлена последняя версия (последняя: %1$s)</string>
+    <string name="settings_checking">Проверка обновлений...</string>
+    <string name="settings_update_available">Доступно обновление %1$s</string>
+    <string name="settings_download">Скачать</string>
+    <string name="settings_dismiss">Скрыть</string>
+    <string name="settings_downloading">Скачивание... %1$d%%</string>
+    <string name="settings_install_update">Установить обновление</string>
+    <string name="settings_retry">Повторить</string>
+    <string name="settings_section_display">Экран</string>
+    <string name="settings_show_preview">Показывать предпросмотр камеры</string>
+    <string name="settings_section_streaming">Трансляция</string>
+    <string name="settings_enable_web_streaming">Включить веб-трансляцию</string>
+    <string name="settings_streaming_port">Порт трансляции</string>
+    <string name="settings_adaptive_bitrate">Адаптивный битрейт</string>
+    <string name="settings_eco_idle">Эко-режим ожидания (батарея)</string>
+    <string name="settings_eco_idle_description">При работе от батареи без зрителей снижает частоту кадров потока до низкой и приостанавливает звук; нормальный режим восстанавливается при первом зрителе, подключении зарядки или тепловом событии</string>
+    <string name="settings_mdns">Обнаружение в сети (mDNS)</string>
+    <string name="settings_section_recording">Запись</string>
+    <string name="settings_continuous_recording">Непрерывная запись</string>
+    <string name="settings_continuous_recording_description">Ведёт кольцевые сегменты записи один за другим, как NVR; старые сегменты удаляются по истечении окна хранения снимков</string>
+    <string name="settings_segment_length">Длина сегмента (в минутах)</string>
+    <string name="settings_section_storage">Хранилище</string>
+    <string name="settings_storage_quota">Квота хранилища (МБ)</string>
+    <string name="settings_storage_quota_description">Когда медиафайлы LensCast превышают квоту, самые старые снимки удаляются автоматически (100 МБ – 32 ГБ)</string>
+    <string name="settings_encrypt_captures">Шифровать снимки при хранении</string>
+    <string name="settings_encrypt_captures_description">Шифрует новые фото и видео алгоритмом AES-256-GCM под ключом, защищённым на аппаратном уровне. Существующие снимки в любом случае остаются читаемыми; пока включено, вместо миниатюр видео показывается заполнитель (воспроизведение работает), а резервные копии загружаются в расшифрованном виде</string>
+    <string name="settings_section_background">Фоновая работа</string>
+    <string name="settings_disable_battery_opt">Отключить оптимизацию батареи</string>
+    <string name="settings_disable_battery_opt_description">Не даёт системе останавливать приложение в фоне</string>
+    <string name="settings_resume_on_boot">Возобновлять трансляции после перезагрузки</string>
+    <string name="settings_section_rtsp">RTSP-поток</string>
+    <string name="settings_enable_rtsp">Включить RTSP-трансляцию</string>
+    <string name="settings_rtsp_port">Порт RTSP</string>
+    <string name="settings_rtsp_input_format">Формат входных данных кодировщика RTSP</string>
+    <string name="settings_section_rtmp">RTMP-публикация</string>
+    <string name="settings_enable_rtmp">Включить RTMP-публикацию</string>
+    <string name="settings_rtmp_push_url">URL публикации</string>
+    <string name="settings_rtmp_url_invalid">Непригодный URL публикации — ожидается rtmp://host/app/stream-key (или rtmps://…)</string>
+    <string name="settings_rtmp_status">Состояние: %1$s</string>
+    <string name="settings_rtmp_status_error">ошибка — %1$s</string>
+    <!-- Отображаемые имена wireNames RtmpStatus (idle/connecting/
+         connected); состояние ошибки уже несёт свой читаемый текст. -->
+    <string name="settings_rtmp_status_idle">Ожидание</string>
+    <string name="settings_rtmp_status_connecting">Подключение…</string>
+    <string name="settings_rtmp_status_connected">Подключено</string>
+    <string name="settings_rtmp_h264_note">Видео должно быть в H.264 (видеокодек RTSP); ключ потока остаётся в URL на этом устройстве</string>
+    <string name="settings_section_whip">WHIP-публикация (WebRTC)</string>
+    <string name="settings_enable_whip">Включить WHIP-публикацию</string>
+    <string name="settings_whip_url">Конечная точка WHIP</string>
+    <string name="settings_whip_url_invalid">Непригодная конечная точка WHIP — ожидается http(s)://host[:port]/endpoint</string>
+    <string name="settings_whip_token">Токен Bearer</string>
+    <string name="settings_whip_token_hint">Вставьте для замены — пустое поле оставит текущий токен</string>
+    <string name="settings_whip_stun">Сервер STUN</string>
+    <string name="settings_whip_stun_hint">host[:port] — пусто означает только локальную сеть</string>
+    <string name="settings_whip_status">Состояние: %1$s</string>
+    <string name="settings_whip_status_error">ошибка — %1$s</string>
+    <!-- Отображаемые имена wireNames WhipStatus (idle/connecting/
+         connected); состояние ошибки уже несёт свой читаемый текст. -->
+    <string name="settings_whip_status_idle">Ожидание</string>
+    <string name="settings_whip_status_connecting">Подключение…</string>
+    <string name="settings_whip_status_connected">Подключено</string>
+    <string name="settings_whip_note">Видео кодируется с отвода камеры независимо от кодека RTSP; звук записывается отдельным захватом микрофона, только пока микрофон свободен; конечные точки https используют системные хранилища доверия</string>
+    <string name="settings_section_audio">Звук</string>
+    <string name="settings_stream_audio">Включать звук в трансляцию</string>
+    <string name="settings_microphone">Микрофон</string>
+    <string name="settings_audio_default">По умолчанию (авто)</string>
+    <string name="settings_echo_cancellation">Эхоподавление &amp; шумоподавление</string>
+    <string name="settings_audio_bitrate">Битрейт звука в прямом эфире (kbps)</string>
+    <string name="settings_audio_channels">Каналы звука в прямом эфире</string>
+    <string name="settings_mono">Моно</string>
+    <string name="settings_stereo">Стерео</string>
+    <string name="settings_recording_audio">Включать звук в записи</string>
+    <string name="settings_section_security">Безопасность</string>
+    <string name="settings_https">HTTPS (самоподписанный сертификат)</string>
+    <string name="settings_stream_auth">Аутентификация трансляции</string>
+    <string name="settings_username">Имя пользователя</string>
+    <string name="settings_password">Пароль</string>
+    <string name="settings_password_hint">Введите новый пароль</string>
+
+    <!-- ── Настройки детекции и оповещений ── -->
+    <string name="detection_section_title">Детекция &amp; оповещения</string>
+    <string name="detection_open_event_log">Открыть журнал событий</string>
+    <string name="detection_motion">Детекция движения</string>
+    <string name="detection_motion_sensitivity">Чувствительность (%)</string>
+    <string name="detection_event_cooldown">Пауза между событиями (в секундах)</string>
+    <string name="detection_record_on_motion">Записывать при движении</string>
+    <string name="detection_post_roll">Пост-ролл (в секундах)</string>
+    <string name="detection_arm_on_schedule">Охрана по расписанию</string>
+    <string name="detection_arm_from">Охрана с (минута дня)</string>
+    <string name="detection_arm_until">Охрана до (минута дня)</string>
+    <string name="detection_arm_days">Дни охраны</string>
+    <string name="detection_day_mon">пн</string>
+    <string name="detection_day_tue">вт</string>
+    <string name="detection_day_wed">ср</string>
+    <string name="detection_day_thu">чт</string>
+    <string name="detection_day_fri">пт</string>
+    <string name="detection_day_sat">сб</string>
+    <string name="detection_day_sun">вс</string>
+    <string name="detection_sound">Детекция звука</string>
+    <string name="detection_sound_threshold">Порог звука (%)</string>
+    <string name="detection_adaptive_noise_floor">Адаптивный уровень шума</string>
+    <string name="detection_adaptive_noise_floor_description">Порог срабатывания поддерживается выше отслеживаемого уровня окружающего шума, поэтому постоянный фон (вентиляция, уличный шум) не маскирует реальные события и сам по себе не срабатывает</string>
+    <string name="detection_record_on_sound">Записывать при звуке</string>
+    <string name="detection_record_on_sound_description">Звуковые события запускают клип ограниченной длины, используя длительность пост-ролла движения</string>
+    <string name="detection_sound_classification">Классификация звуков (YAMNet)</string>
+    <string name="detection_sound_classification_description">Работает поверх детекции звука — модель YAMNet классифицирует аудио вокруг каждого события, а метки классов (дымовой извещатель, лай собаки, стекло, сирена…) передаются с оповещением, вебхуком, MQTT и журналом событий. Никогда не подавляет само событие и недоступна до Android 7.0 (API 24)</string>
+    <string name="detection_min_confidence">Минимальная достоверность (%)</string>
+    <string name="detection_sound_classes">Классы, помечающие события</string>
+    <!-- Отображаемые имена чипов классов YAMNet, сопоставленные с
+         курируемыми wire-метками из SoundClassPolicy.SECURITY_CLASSES.
+         Wire-метки (точное написание AudioSet) остаются ключами
+         хранения и полезной нагрузки и никогда не локализуются. -->
+    <string name="sound_class_speech">Речь</string>
+    <string name="sound_class_shout">Крик</string>
+    <string name="sound_class_screaming">Вопли</string>
+    <string name="sound_class_yell">Громкий крик</string>
+    <string name="sound_class_wail_moan">Вой, стоны</string>
+    <string name="sound_class_dog">Собака</string>
+    <string name="sound_class_bark">Лай собаки</string>
+    <string name="sound_class_knock">Стук в дверь</string>
+    <string name="sound_class_doorbell">Дверной звонок</string>
+    <string name="sound_class_glass">Стекло</string>
+    <string name="sound_class_shatter">Разбитое стекло</string>
+    <string name="sound_class_alarm">Тревога</string>
+    <string name="sound_class_smoke_detector">Дымовой извещатель</string>
+    <string name="sound_class_fire_alarm">Пожарная сигнализация</string>
+    <string name="sound_class_siren">Сирена</string>
+    <string name="sound_class_gunshot">Выстрел</string>
+    <string name="sound_class_cap_gun">Пистолет с пистонами</string>
+    <string name="sound_class_engine_starting">Запуск двигателя</string>
+    <string name="detection_local_alerts">Локальные оповещения при детекции</string>
+    <string name="detection_quiet_hours">Часы тишины</string>
+    <string name="detection_quiet_hours_description">Локальные уведомления задерживаются внутри окна — вебхуки, MQTT, записи и журнал событий продолжают работать</string>
+    <string name="detection_quiet_from">Тишина с (минута дня)</string>
+    <string name="detection_quiet_until">Тишина до (минута дня)</string>
+    <string name="detection_tamper">Детекция саботажа (отключение питания)</string>
+    <string name="detection_ml">Детекция объектов (ML)</string>
+    <string name="detection_ml_description">Работает поверх детекции движения — оповещения срабатывают, только когда в кадре обнаружен человек, животное или транспортное средство</string>
+    <string name="detection_alert_people">Оповещать о людях</string>
+    <string name="detection_alert_animals">Оповещать о животных</string>
+    <string name="detection_alert_vehicles">Оповещать о транспорте</string>
+    <string name="detection_audio_model_not_downloaded">Модель классификации звука не скачана (%1$s, скачивается один раз и хранится в памяти приложения)</string>
+    <string name="detection_audio_model_downloading">Скачивание модели классификации звука…</string>
+    <string name="detection_audio_model_ready">Модель классификации звука готова (%1$s)</string>
+    <string name="detection_audio_model_failed">Не удалось скачать модель классификации звука: %1$s</string>
+    <string name="detection_ml_model_not_downloaded">Модель детекции не скачана (%1$s, скачивается один раз и хранится в памяти приложения)</string>
+    <string name="detection_ml_model_downloading">Скачивание модели детекции…</string>
+    <string name="detection_ml_model_ready">Модель детекции готова (%1$s)</string>
+    <string name="detection_ml_model_failed">Не удалось скачать модель детекции: %1$s</string>
+    <string name="detection_model_download">Скачать модель</string>
+    <string name="detection_model_retry">Повторить скачивание</string>
+
+    <!-- ── Настройки наблюдателя ── -->
+    <string name="settings_section_watchdog">Контроль потока</string>
+    <string name="settings_watchdog_enable">Включить контроль</string>
+    <string name="settings_watchdog_max_retries">Макс. число повторов</string>
+    <string name="settings_watchdog_interval">Интервал проверки (в секундах)</string>
+
+    <!-- ── Настройки резервного копирования ── -->
+    <string name="settings_section_backup">Резервное копирование (WebDAV)</string>
+    <string name="settings_backup_auto_upload">Автоматически загружать новые снимки</string>
+    <string name="settings_backup_url">URL коллекции WebDAV</string>
+    <string name="settings_backup_password">Пароль (оставьте пустым, чтобы не менять)</string>
+    <string name="settings_backup_wifi_only">Загружать только по Wi-Fi</string>
+</resources>
