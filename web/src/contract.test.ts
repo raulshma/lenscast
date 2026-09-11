@@ -71,6 +71,8 @@ const STREAMING_KEYS = [
   'rtspPort',
   'rtspInputFormat',
   'rtspVideoCodec',
+  'rtmpEnabled',
+  'rtmpUrl',
   'whipEnabled',
   'whipUrl',
   'whipToken',
@@ -147,6 +149,7 @@ const STREAMING_KEYS = [
   'mqttPassword',
   'mqttTls',
   'mqttDiscoveryPrefix',
+  'pushEnabled',
   'mlModelState',
   'mlModelProgress',
   'mlModelError',
@@ -375,6 +378,9 @@ describe('API_DEFAULTS lockstep with the fixtures', () => {
     expect(streaming.rtspEnabled).toBe(API_DEFAULTS.rtspEnabled)
     expect(streaming.rtspPort).toBe(API_DEFAULTS.rtspPort)
     expect(streaming.rtspInputFormat).toBe(API_DEFAULTS.rtspInputFormat)
+    // RTMP push: the push URL round-trips raw (judged at start time, not saved).
+    expect(streaming.rtmpEnabled).toBe(API_DEFAULTS.rtmpEnabled)
+    expect(streaming.rtmpUrl).toBe(API_DEFAULTS.rtmpUrl)
     // WHIP push: the endpoint round-trips, the token is write-only (always
     // blank in responses), and the STUN default matches StreamDefaults.
     expect(streaming.whipEnabled).toBe(API_DEFAULTS.whipEnabled)
@@ -451,6 +457,7 @@ describe('API_DEFAULTS lockstep with the fixtures', () => {
     expect(streaming.mqttPassword).toBe(API_DEFAULTS.mqttPassword)
     expect(streaming.mqttTls).toBe(API_DEFAULTS.mqttTls)
     expect(streaming.mqttDiscoveryPrefix).toBe(API_DEFAULTS.mqttDiscoveryPrefix)
+    expect(streaming.pushEnabled).toBe(API_DEFAULTS.pushEnabled)
   })
 
   it('detection suite, retention and rtspResolution fallbacks match the settings fixture defaults', () => {

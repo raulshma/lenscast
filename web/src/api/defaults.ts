@@ -34,6 +34,10 @@ export const API_DEFAULTS = {
   // RTSP video codec wire name (RtspVideoCodec mapper). The swap restarts a
   // live RTSP output; HLS/WebCodecs stay H.264-only until it flips back.
   rtspVideoCodec: 'h264',
+  // RTMP push output (StreamingSettingsDto). The push URL round-trips raw;
+  // the server's RtmpUrl.parse judges it at start time.
+  rtmpEnabled: false,
+  rtmpUrl: '',
   // WHIP push output (StreamingSettingsDto / StreamDefaults.WHIP_STUN_SERVER).
   // whipToken is write-only: the dashboard sends it once, responses are blank.
   whipEnabled: false,
@@ -121,6 +125,10 @@ export const API_DEFAULTS = {
   mqttPassword: '',
   mqttTls: false,
   mqttDiscoveryPrefix: 'homeassistant',
+
+  // Web Push alerts (StreamingSettingsDto.pushEnabled): the phone-side
+  // master gate. Subscriptions are browser-session state via /api/push.
+  pushEnabled: false,
 
   // Detection suite extensions (StreamDefaults / StreamingSettingsDto)
   mlDetectionEnabled: false,

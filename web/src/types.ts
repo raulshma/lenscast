@@ -95,9 +95,17 @@ export interface StreamingSettings {
   /** RTSP output codec: 'h264' (default, full HLS/WebCodecs compatibility) or 'h265'. */
   rtspVideoCodec: RtspVideoCodec
   /**
-   * The WHIP push output (WebRTC-HTTP egress, RFC 9725). Unlike the RTMP push
-   * URL it round-trips over the Web API — the endpoint carries no embedded
-   * secret; the bearer token rides whipToken.
+   * The RTMP push output (publish to an RTMP/RTMPS server). The push URL
+   * round-trips raw — the server judges it (scheme, host, H.264 codec) at
+   * start time, not on save.
+   */
+  rtmpEnabled: boolean
+  /** The push target: `rtmp(s)://[user:pass@]host[:port]/app/streamKey`. */
+  rtmpUrl: string
+  /**
+   * The WHIP push output (WebRTC-HTTP egress, RFC 9725). Like the RTMP push
+   * URL it round-trips over the Web API, but the endpoint carries no
+   * embedded secret; the bearer token rides whipToken.
    */
   whipEnabled: boolean
   /** The WHIP endpoint: `http(s)://[user:pass@]host[:port]/endpoint`. */
@@ -201,6 +209,12 @@ export interface StreamingSettings {
   mqttPassword: string
   mqttTls: boolean
   mqttDiscoveryPrefix: string
+  /**
+   * Web Push alerts to subscribed browsers (RFC 8291/8292): the master gate
+   * on the phone's push dispatches. Subscriptions are browser-session state
+   * through the /api/push routes, never part of this settings document.
+   */
+  pushEnabled: boolean
   /** Capture retention window in days; 0 keeps captures forever. */
   captureRetentionDays: number
   /** Detection-event retention window in days; 0 keeps events forever. */

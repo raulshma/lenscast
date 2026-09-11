@@ -45,6 +45,12 @@ object TokenWritePolicy {
         "/api/detection/test",
     )
 
+    // Deliberately absent: every /api/push route. Web Push subscriptions are
+    // browser-session state — the POST body is the subscribing browser's own
+    // service-worker key material, and a subscription is only useful to the
+    // browser that minted it. They ride the session-cookie + CSRF ladder and
+    // are never token-writable.
+
     /** True when a POST carrying a valid API token may proceed to [path]. */
     fun allowsPost(path: String): Boolean = path in TOKEN_WRITABLE_POST_ROUTES
 }

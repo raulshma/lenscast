@@ -199,6 +199,17 @@ export async function stopWhip(): Promise<{ success: boolean; isActive?: boolean
   return requestJson('/api/stream/whip/stop', { method: 'POST' })
 }
 
+// RTMP push: the WHIP pair's shape — the start response carries no URL since
+// the push target embeds the stream key, and a refused start leaves the
+// readable reason on the RTMP status rather than this payload.
+export async function startRtmp(): Promise<{ success: boolean; isActive?: boolean; error?: string }> {
+  return requestJson('/api/stream/rtmp/start', { method: 'POST' })
+}
+
+export async function stopRtmp(): Promise<{ success: boolean; isActive?: boolean; error?: string }> {
+  return requestJson('/api/stream/rtmp/stop', { method: 'POST' })
+}
+
 export async function getIntervalCaptureStatus(): Promise<import('../types').IntervalCaptureStatus> {
   return requestJson('/api/capture/interval/status')
 }
@@ -377,4 +388,39 @@ export async function getAuditLog(limit?: number): Promise<import('../types').Au
 
 export async function clearAuditLog(): Promise<{ success: boolean }> {
   return requestJson('/api/audit', { method: 'DELETE' })
+}
+
+// ── Web Push (browser subscriptions; the phone publishes to them) ──
+
+/** The VAPID server key: base64url, 65-byte uncompressed P-256 point — the subscription's applicationServerKey. */
+export async function getVapidPublicKey(): Promise<{ publicKey: string }> {
+  return requestJson('/api/push/vapid-public')
+}
+
+export interface PushSubscriptionInfo {
+  endpoint: string
+  createdAtMs: number
+}
+
+/** GET /api/push/subscriptions — stored endpoints, key material redacted server-side. */
+export async function listPushSubscriptions(): Promise<{ subscriptions: PushSubscriptionInfo[]; count: number }> {
+  return requestJson('/api/push/subscriptions')
+}
+
+/**
+ * POST /api/push/subscriptions — this browser's PushSubscription, flattened
+ * to its endpoint and key material. Session-only by server design.
+ */
+export async function subscribePush(body: { endpoint: string; p256dh: string; auth: string }): Promise<{ success: boolean }> {
+  return requestJson('/api/push/subscriptions', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+}
+
+/** DELETE /api/push/subscriptions?endpoint=… — unsubscribe after (or without) an unsubscribe() on the browser side. */
+export async function deletePushSubscription(endpoint: string): Promise<{ success: boolean }> {
+  const params = new URLSearchParams({ endpoint })
+  return requestJson(`/api/push/subscriptions?${params.toString()}`, { method: 'DELETE' })
 }

@@ -25,6 +25,8 @@ class ApiRouter(
     private val detectionTest: DetectionTestWebHandler,
     /** The read-only /api/system diagnostics snapshot. */
     private val system: SystemWebHandler,
+    /** The /api/push Web Push subscription routes (session-only). */
+    private val push: PushWebHandler,
     /** The audit trail for mutating dispatches. */
     private val auditLog: AuditLog,
 ) {
@@ -76,6 +78,8 @@ class ApiRouter(
         "/api/audit" -> ApiResponse.ok(audit.list(r.query["limit"]?.toIntOrNull()))
         "/api/auth/config" -> ApiResponse.ok(auth.get())
         "/api/auth/sessions" -> ApiResponse.ok(auth.listSessions())
+        "/api/push/vapid-public" -> ApiResponse.ok(push.vapidPublicKey())
+        "/api/push/subscriptions" -> ApiResponse.ok(push.list())
         else -> null
     }
 
@@ -107,6 +111,7 @@ class ApiRouter(
         "/api/detection/test" -> ApiResponse.ok(detectionTest.test())
         "/api/auth/config" -> ApiResponse.ok(auth.put(r.body))
         "/api/media/batch-delete" -> ApiResponse.ok(gallery.batchDelete(r.body))
+        "/api/push/subscriptions" -> ApiResponse.ok(push.subscribe(r.body))
         else -> null
     }
 
@@ -114,6 +119,8 @@ class ApiRouter(
         r.path == "/api/detection/events" ->
             ApiResponse.ok(detectionEvents.clear())
         r.path == "/api/audit" -> ApiResponse.ok(audit.clear())
+        r.path == "/api/push/subscriptions" ->
+            ApiResponse.ok(push.unsubscribe(r.query["endpoint"]))
         r.path.startsWith("/api/stream/clients/") ->
             ApiResponse.ok(stream.kickClient(r.path.removePrefix("/api/stream/clients/")))
         r.path.startsWith("/api/auth/sessions/") ->

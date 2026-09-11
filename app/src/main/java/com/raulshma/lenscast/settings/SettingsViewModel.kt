@@ -121,6 +121,7 @@ class SettingsViewModel(
     val ecoIdleFpsEnabled: StateFlow<Boolean> = settingsDataStore.ecoIdleFpsEnabled
     val detectionNotificationsEnabled: StateFlow<Boolean> = settingsDataStore.detectionNotificationsEnabled
     val tamperDetectionEnabled: StateFlow<Boolean> = settingsDataStore.tamperDetectionEnabled
+    val pushEnabled: StateFlow<Boolean> = settingsDataStore.pushEnabled
     val watchdogEnabled: StateFlow<Boolean> = settingsDataStore.watchdogEnabled
     val watchdogMaxRetries: StateFlow<Int> = settingsDataStore.watchdogMaxRetries
     val watchdogCheckIntervalSeconds: StateFlow<Int> = settingsDataStore.watchdogCheckIntervalSeconds
@@ -358,6 +359,9 @@ class SettingsViewModel(
 
     fun updateTamperDetectionEnabled(enabled: Boolean) =
         save { settingsDataStore.saveTamperDetectionEnabled(enabled) }
+
+    fun updatePushEnabled(enabled: Boolean) =
+        save { settingsDataStore.savePushEnabled(enabled) }
 
     fun updateWatchdogEnabled(enabled: Boolean) = save { settingsDataStore.saveWatchdogEnabled(enabled) }
 

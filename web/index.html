@@ -7,12 +7,17 @@
   <title>LensCast — Camera Control</title>
   <link rel="icon" type="image/svg+xml" href="/logo.svg" />
   <!--
-    PWA installability. Deliberately NO service worker: LensCast is a live
-    streaming dashboard (MJPEG/HLS/WebSockets) and a cached shell would serve
-    stale UI or break stream reconnects — installability works from the
-    manifest alone. Chrome accepts the SVG logo as the install icon
-    (sizes "any", purpose "any"); iOS ignores apple-touch-icon in SVG but
-    degrades to the favicon/favicon-less tile.
+    PWA installability + Web Push. There is NO app-shell service worker on
+    purpose: LensCast is a live streaming dashboard (MJPEG/HLS/WebSockets) and
+    a cached shell would serve stale UI or break stream reconnects —
+    installability works from the manifest alone. The one exception is
+    /push-sw.js (from public/), registered on demand by the Web Push card:
+    a minimal, cache-free worker that only surfaces encrypted detection-alert
+    pushes (RFC 8291/VAPID from the phone) as notifications. Chrome accepts
+    the SVG logo as the install icon (sizes "any", purpose "any"); iOS
+    ignores apple-touch-icon in SVG but degrades to the favicon/favicon-less
+    tile, and iOS cannot receive these pushes (no Web Push outside home-screen
+    web apps on that platform).
   -->
   <link rel="manifest" href="/manifest.webmanifest" />
   <meta name="theme-color" content="#0a0a0f" />

@@ -1,10 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?><!--
    Full-backup content rules (ignored on API 31+, which uses
    data_extraction_rules.xml). Excludes only what must never leave the
-   device: the auth session tokens and the detection-event log (its entries
-   embed base64 camera snapshots).
+   device: the auth session tokens, the detection-event log (its entries
+   embed base64 camera snapshots), and the Web Push subscription store
+   (endpoint + key material are deliver-to addresses).
 -->
 <full-backup-content>
     <exclude domain="file" path="auth/sessions.json" />
     <exclude domain="file" path="detection_events.json" />
+    <exclude domain="file" path="push_subscriptions.json" />
 </full-backup-content>

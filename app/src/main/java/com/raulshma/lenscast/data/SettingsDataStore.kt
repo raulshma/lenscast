@@ -199,6 +199,8 @@ private object Keys {
     val MQTT_PASSWORD = stringPreferencesKey("mqtt_password")
     val MQTT_TLS = stringPreferencesKey("mqtt_tls")
     val MQTT_DISCOVERY_PREFIX = stringPreferencesKey("mqtt_discovery_prefix")
+    val PUSH_ENABLED = stringPreferencesKey("push_enabled")
+    val PUSH_VAPID_SUBJECT = stringPreferencesKey("push_vapid_subject")
     val CAPTURE_RETENTION_DAYS = intPreferencesKey("capture_retention_days")
     val EVENT_RETENTION_DAYS = intPreferencesKey("event_retention_days")
     val STORAGE_QUOTA_MB = intPreferencesKey("storage_quota_mb")
@@ -636,6 +638,23 @@ internal val mqttTlsPref = boolPref(Keys.MQTT_TLS, defaultTrue = false)
 /** The save-side normalization home: whitespace and trailing slashes never persist. */
 internal val mqttDiscoveryPrefixPref = stringPref(Keys.MQTT_DISCOVERY_PREFIX, StreamDefaults.MQTT_DISCOVERY_PREFIX_DEFAULT) {
     it.trim().trimEnd('/')
+}
+
+/** Web Push alerts to subscribed browsers: the phone-side master gate, off by default. */
+internal val pushEnabledPref = boolPref(Keys.PUSH_ENABLED, defaultTrue = false)
+
+/**
+ * The RFC 8292 `sub` contact — a mailto: URI carried in every VAPID JWT. A
+ * device-local setting (push services may use it to contact the operator);
+ * it does not round-trip over the Web API, like the update-check settings.
+ */
+internal val pushVapidSubjectPref = stringPref(Keys.PUSH_VAPID_SUBJECT, StreamDefaults.PUSH_VAPID_SUBJECT_DEFAULT) {
+    val trimmed = it.trim()
+    if (trimmed.isEmpty() || !(trimmed.startsWith("mailto:") || trimmed.startsWith("https:"))) {
+        StreamDefaults.PUSH_VAPID_SUBJECT_DEFAULT
+    } else {
+        trimmed
+    }
 }
 
 /** Capture retention in days; 0 keeps captures forever. Clamped to 0..365. */
@@ -1181,6 +1200,10 @@ class SettingsDataStore(
 
     val mqttDiscoveryPrefix: StateFlow<String> = mqttDiscoveryPrefixPref.shared()
 
+    val pushEnabled: StateFlow<Boolean> = pushEnabledPref.shared()
+
+    val pushVapidSubject: StateFlow<String> = pushVapidSubjectPref.shared()
+
     val captureRetentionDays: StateFlow<Int> = captureRetentionDaysPref.shared()
 
     val eventRetentionDays: StateFlow<Int> = eventRetentionDaysPref.shared()
@@ -1402,6 +1425,8 @@ class SettingsDataStore(
     suspend fun saveMqttTls(enabled: Boolean) = mqttTlsPref.save(enabled)
 
     suspend fun saveMqttDiscoveryPrefix(prefix: String) = mqttDiscoveryPrefixPref.save(prefix)
+
+    suspend fun savePushEnabled(enabled: Boolean) = pushEnabledPref.save(enabled)
 
     suspend fun saveCaptureRetentionDays(days: Int) = captureRetentionDaysPref.save(days)
 

@@ -110,6 +110,8 @@ function App() {
                     setRecordingConfigAudio={(v) => state.setRecordingConfig({ ...state.recordingConfig(), includeAudio: v })}
                     handleStartWhip={state.handleStartWhip}
                     handleStopWhip={state.handleStopWhip}
+                    handleStartRtmp={state.handleStartRtmp}
+                    handleStopRtmp={state.handleStopRtmp}
                   />
                   <ClientsCard />
                   <MultiCamCard />

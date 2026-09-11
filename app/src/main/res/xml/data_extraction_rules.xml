@@ -1,16 +1,20 @@
 <?xml version="1.0" encoding="utf-8"?><!--
    Data extraction rules (API 31+). Excludes only what must never leave the
-   device: the auth session tokens and the detection-event log (its entries
-   embed base64 camera snapshots) — from both cloud backup and device-to-device
-   transfer. Everything else follows the platform default.
+   device: the auth session tokens, the detection-event log (its entries
+   embed base64 camera snapshots), and the Web Push subscription store (its
+   endpoint + key-material rows are deliver-to addresses for the phone's
+   push identity) — from both cloud backup and device-to-device transfer.
+   Everything else follows the platform default.
 -->
 <data-extraction-rules>
     <cloud-backup>
         <exclude domain="file" path="auth/sessions.json" />
         <exclude domain="file" path="detection_events.json" />
+        <exclude domain="file" path="push_subscriptions.json" />
     </cloud-backup>
     <device-transfer>
         <exclude domain="file" path="auth/sessions.json" />
         <exclude domain="file" path="detection_events.json" />
+        <exclude domain="file" path="push_subscriptions.json" />
     </device-transfer>
 </data-extraction-rules>

@@ -153,7 +153,7 @@ during the wait wins.
 **`capture/DetectionCoordinator.kt`** — the single owner of the
 detection-event choreography: arm-schedule verdict, then dispatch — the
 bounded motion recording (started only from Idle) or the legacy auto-photo,
-the webhook/MQTT/local-notification fan-out, the auto-siren/auto-torch
+the webhook/MQTT/Web-Push/local-notification fan-out, the auto-siren/auto-torch
 deterrence behind its cooldown, and the persisted event-log entry, all
 reading one event-moment stamp and id so every sink reports the same
 identity. Sound events ride the same choreography behind their own persisted
@@ -406,6 +406,22 @@ auth-spec provider both read the applied value directly, so server
 recreation re-applies nothing. It is also the composition root
 that builds the Web API stack.
 
+### Web Push
+**`core/push/`** — the phone-as-publisher half of Web Push, all
+javax.crypto/java.security (no new dependencies). `VapidKeys` owns the
+persistent P-256 identity (a load-once app-private key file — Keystore-backed
+EC keys can't do ECDH below API 31); `PushEncryption` is the pure RFC 8291
+`aes128gcm` payload ladder (ephemeral ECDH + HKDF-SHA256, 0x02 padding
+delimiter, the ephemeral public key riding the header's keyid) plus the RFC
+8292 VAPID signer (compact JWT, ES256 raw r‖s, `vapid t=…,k=…`);
+`PushSubscriptionStore` persists the browser subscriptions to
+`filesDir/push_subscriptions.json` (cloud-backup/device-transfer excluded,
+like the auth sessions) with endpoint dedupe and 404/410 pruning;
+`WebPushSender` is the fail-open sink beside the webhook/MQTT publishers —
+one daemon worker, one encrypted POST per subscription
+(`TTL`/`Urgency` headers, the live `pushEnabled` + `pushVapidSubject`
+settings read per dispatch), failures logged and never thrown.
+
 ### Web API Handlers
 **`streaming/web/`** — the JSON-in/JSON-out surface behind the streaming
 server's `/api/*` routes, split one handler per domain: `SettingsWebHandler`
@@ -426,12 +442,17 @@ Controller), `GalleryWebHandler` (media resolution/thumbnails),
 `DeterrenceWebHandler` (the siren route), `DetectionEventsWebHandler` (the
 event log's list/clear plus the per-event JSON the SSE stream reuses),
 `DetectionTestWebHandler` (POST `/api/detection/test` — one synthetic
-`EventKind.TEST` alert through the webhook/MQTT/notification sinks only;
+`EventKind.TEST` alert through the webhook/MQTT/Web-Push/notification sinks
+only;
 never logged to the event store, never armed against the schedule, the ML
 gate, deterrence, or quiet hours — the test exists to prove the sinks fire,
 so it posts even inside a quiet window; MQTT publishes the event JSON
 without a binary-sensor pulse since the test has no entity), and
-`AuthWebHandler` (the config/session-management JSON). The
+`AuthWebHandler` (the config/session-management JSON), and
+`PushWebHandler` (the session-only `/api/push` trio — the VAPID public key,
+the endpoint list with `p256dh`/`auth` redacted, and subscribe/unsubscribe;
+deliberately absent from the token allow-list because a subscription is
+browser-session state, not an automation API). The
 `AuditLog` (a capped, atomically-persisted `filesDir/audit_log.json` ring)
 is written from exactly two places — the ApiRouter (every POST/PUT/DELETE it
 answers, dispatched or unknown-route, success or error, as `"$method $path"`)
@@ -533,8 +554,10 @@ start and stop, siren, torch, the detection-model download, and the
 detection-test alert — each a device action that changes no persisted
 setting, and the test additionally persists no event); every path
 outside the list stays read-only
-for tokens, and the list deliberately contains no `/api/auth/` route, so a
-bearer token never mints sessions, rotates credentials, or logs out. The
+for tokens, and the list deliberately contains no `/api/auth/` route and no
+`/api/push/` route, so a bearer token never mints sessions, rotates
+credentials, logs out, or registers a browser push subscription (that is
+browser-session state, not an automation API). The
 Web Auth Gate's token verdict consults it for the method check, and the
 list is a deliberate subset of the ApiRouter's registered POST routes —
 every listed route is one the router registers, and a route the router does

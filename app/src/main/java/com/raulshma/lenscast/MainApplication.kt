@@ -162,6 +162,31 @@ class MainApplication : Application(), SingletonImageLoader.Factory {
     val detectionNotifier: DetectionNotifier by lazy {
         DetectionNotifier(this)
     }
+    // The VAPID identity for Web Push: one persistent P-256 pair, load-once
+    // like the TLS identity — a rotated key silently orphans every browser
+    // subscription bound to the old public key.
+    val vapidKeys: com.raulshma.lenscast.core.push.VapidKeys by lazy {
+        com.raulshma.lenscast.core.push.VapidKeys.loadOrCreate(
+            com.raulshma.lenscast.core.push.VapidKeys.keyFile(this),
+        )
+    }
+    val pushSubscriptionStore: com.raulshma.lenscast.core.push.PushSubscriptionStore by lazy {
+        com.raulshma.lenscast.core.push.PushSubscriptionStore(this)
+    }
+    // The Web Push alert sink reads its config live per dispatch (the same
+    // live-read contract as the webhook and MQTT above).
+    val webPushSender: com.raulshma.lenscast.core.push.WebPushSender by lazy {
+        com.raulshma.lenscast.core.push.WebPushSender(
+            configProvider = {
+                com.raulshma.lenscast.core.push.WebPushSender.Config(
+                    enabled = settingsDataStore.pushEnabled.value,
+                    subject = settingsDataStore.pushVapidSubject.value,
+                )
+            },
+            store = pushSubscriptionStore,
+            vapidKeys = vapidKeys,
+        )
+    }
     // The ML detection model lives in app-private storage, not the APK; one
     // store owns the download + integrity so the coordinator's gate and the
     // settings screen share one state.
@@ -188,6 +213,7 @@ class MainApplication : Application(), SingletonImageLoader.Factory {
             streamingManager = { streamingManager },
             cameraService = { cameraService },
             mqttPublisher = { mqttAlertPublisher },
+            webPushSender = { webPushSender },
             detectionNotifier = { detectionNotifier },
             batteryPercent = { powerManager.batteryLevel.value },
             sirenAutoStop = sirenAutoStop,
@@ -283,8 +309,8 @@ class MainApplication : Application(), SingletonImageLoader.Factory {
         }
         // Detection events (motion + sound) dispatch through the coordinator:
         // schedule arming, bounded motion recording or the legacy auto-photo,
-        // and the alert fan-out (webhook, MQTT, local notification) — never a
-        // screen's lifetime.
+        // and the alert fan-out (webhook, MQTT, Web Push, local notification)
+        // — never a screen's lifetime.
         streamingManager.setMotionListener { delta, zones -> detectionCoordinator.onMotion(delta, zones) }
         streamingManager.setSoundListener { rms -> detectionCoordinator.onSound(rms) }
         // Sound classification rides the same audio chunks: the coordinator

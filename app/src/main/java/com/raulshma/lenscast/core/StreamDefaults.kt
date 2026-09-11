@@ -170,6 +170,12 @@ object StreamDefaults {
     const val MQTT_PUBLISH_ACK_TIMEOUT_MS = 5_000
     const val MQTT_DISCOVERY_PREFIX_DEFAULT = "homeassistant"
 
+    // Web Push alerts (core/push/): the RFC 8292 `sub` contact carried in
+    // every VAPID JWT — a mailto: or https: URI the push services can use to
+    // reach the operator. The persisted setting normalizes back to this
+    // default when blank or malformed.
+    const val PUSH_VAPID_SUBJECT_DEFAULT = "mailto:lenscast@localhost"
+
     // HLS segment pacing.
     const val HLS_SEGMENT_AUS = 48
 

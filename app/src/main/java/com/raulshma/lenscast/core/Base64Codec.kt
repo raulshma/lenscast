@@ -29,7 +29,17 @@ object Base64Codec {
      * Strict standard-alphabet decode — [java.util.Base64.getDecoder]
      * semantics; null where that decoder would throw.
      */
-    fun decodeOrNull(value: String): ByteArray? {
+    fun decodeOrNull(value: String): ByteArray? = decodeWith(value, STANDARD_ALPHABET)
+
+    /**
+     * Strict URL-safe-alphabet decode — [java.util.Base64.getUrlDecoder]
+     * semantics (padding optional); null where that decoder would throw.
+     * The WebPush surfaces (VAPID JWT segments, subscription `p256dh`/`auth`)
+     * are base64url per RFC 7515/8291, so their readers use this.
+     */
+    fun decodeUrlSafeOrNull(value: String): ByteArray? = decodeWith(value, URL_SAFE_ALPHABET)
+
+    private fun decodeWith(value: String, alphabet: String): ByteArray? {
         var dataEnd = value.length
         while (dataEnd > 0 && value[dataEnd - 1] == '=') dataEnd--
         val padding = value.length - dataEnd
@@ -42,7 +52,7 @@ object Base64Codec {
             padding > 0 && padding != 4 - dataEnd % 4 -> null
             // A dangling 6-bit unit cannot encode whole bytes.
             padding == 0 && dataEnd % 4 == 1 -> null
-            else -> decodeData(value, dataEnd)
+            else -> decodeData(value, dataEnd, alphabet)
         }
     }
 
@@ -77,7 +87,7 @@ object Base64Codec {
         return out.toString()
     }
 
-    private fun decodeData(value: String, dataEnd: Int): ByteArray? {
+    private fun decodeData(value: String, dataEnd: Int, alphabet: String): ByteArray? {
         val out = ByteArray((dataEnd / 4) * 3 + when (dataEnd % 4) {
             2 -> 1
             3 -> 2
@@ -87,7 +97,7 @@ object Base64Codec {
         var word = 0
         var sextets = 0
         for (i in 0 until dataEnd) {
-            val sextet = decodeChar(value[i])
+            val sextet = decodeChar(value[i], alphabet)
             if (sextet < 0) {
                 // Covers '=' in the middle and every non-alphabet character,
                 // including whitespace that lenient decoders would skip.
@@ -113,12 +123,11 @@ object Base64Codec {
         return out
     }
 
-    private fun decodeChar(c: Char): Int = when (c) {
-        in 'A'..'Z' -> c - 'A'
-        in 'a'..'z' -> c - 'a' + 26
-        in '0'..'9' -> c - '0' + 52
-        '+' -> 62
-        '/' -> 63
-        else -> -1
+    private fun decodeChar(c: Char, alphabet: String): Int {
+        val index = when (c) {
+            '=' -> -1
+            else -> alphabet.indexOf(c)
+        }
+        return index
     }
 }

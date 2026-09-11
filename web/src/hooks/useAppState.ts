@@ -344,6 +344,20 @@ export function useAppState() {
     })
   }
 
+  // RTMP push opts out of preview/nonce handling exactly like the WHIP pair:
+  // the push egress never touches the local preview player.
+  function handleStartRtmp() {
+    return runStreamAction(api.startRtmp, {
+      fallbackError: 'Failed to start RTMP push', previewTo: null, bumpNonce: false,
+    })
+  }
+
+  function handleStopRtmp() {
+    return runStreamAction(api.stopRtmp, {
+      fallbackError: 'Failed to stop RTMP push', previewTo: null, bumpNonce: false,
+    })
+  }
+
   // ── Interval capture / recording actions ──
   function handleStartIntervalCapture() {
     return runResultAction(
@@ -518,6 +532,7 @@ export function useAppState() {
     handleStartWebStream, handleStopWebStream,
     handleStartRtspStream, handleStopRtspStream,
     handleStartWhip, handleStopWhip,
+    handleStartRtmp, handleStopRtmp,
     handleStartIntervalCapture, handleStopIntervalCapture,
     handleStartRecording, handleStopRecording,
     // Tabs

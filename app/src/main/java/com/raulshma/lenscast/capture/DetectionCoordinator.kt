@@ -38,13 +38,13 @@ import java.util.UUID
  * Single owner of the detection-event choreography: a motion or sound event
  * is armed against the schedule, then dispatched — a bounded motion recording
  * (started only from Idle), the legacy auto-photo when recording-trigger mode
- * is off, the webhook notification (custom headers + snapshot), the
- * persisted event-log entry, and the optional auto-siren/auto-torch
- * deterrence. The verdicts are [DetectionEventPolicy]'s and
- * [DeterrenceAutomationPolicy]'s; this module keeps the store reads, the
- * recording controller handle, the cooldown clock, and the dispatch. Events
- * arrive off the frame/audio paths, so the dispatch work runs on this
- * coordinator's own scope.
+ * is off, the webhook notification (custom headers + snapshot), the Web Push
+ * notification to subscribed browsers, the persisted event-log entry, and
+ * the optional auto-siren/auto-torch deterrence. The verdicts are
+ * [DetectionEventPolicy]'s and [DeterrenceAutomationPolicy]'s; this module
+ * keeps the store reads, the recording controller handle, the cooldown clock,
+ * and the dispatch. Events arrive off the frame/audio paths, so the dispatch
+ * work runs on this coordinator's own scope.
  *
  * Motion events additionally pass through the ML object-detection gate when
  * `mlDetectionEnabled` is on: the triggering frame is classified off-path
@@ -92,6 +92,7 @@ class DetectionCoordinator(
     private val streamingManager: () -> StreamingManager?,
     private val cameraService: () -> CameraService?,
     private val mqttPublisher: () -> MqttAlertPublisher? = { null },
+    private val webPushSender: () -> com.raulshma.lenscast.core.push.WebPushSender? = { null },
     private val detectionNotifier: () -> DetectionNotifier? = { null },
     private val batteryPercent: () -> Int? = { null },
     private val sirenAutoStop: SirenAutoStop,
@@ -361,12 +362,13 @@ class DetectionCoordinator(
 
     /**
      * The dashboard's "send test alert" dispatch: one synthetic [EventKind.TEST]
-     * alert through the alert sinks — webhook, MQTT, local notification — so a
-     * new integration can be verified end to end without waiting for a real
-     * event. Never recorded to the event log, never gated by the arm schedule
-     * or the ML gate, never fires the deterrence automation or a recording.
-     * Returns the sinks that actually dispatched (the same action names the
-     * event log uses), read from each sink's own go/no-go verdict.
+     * alert through the alert sinks — webhook, MQTT, Web Push, local
+     * notification — so a new integration can be verified end to end without
+     * waiting for a real event. Never recorded to the event log, never gated
+     * by the arm schedule or the ML gate, never fires the deterrence
+     * automation or a recording. Returns the sinks that actually dispatched
+     * (the same action names the event log uses), read from each sink's own
+     * go/no-go verdict.
      */
     suspend fun dispatchTestAlert(): List<String> {
         val store = settingsDataStore
@@ -386,6 +388,10 @@ class DetectionCoordinator(
         )
         if (webhookDispatched) dispatched.add(ACTION_WEBHOOK)
         if (mqttPublisher()?.notifyEvent(alert) == true) dispatched.add(ACTION_MQTT)
+        // Same claim contract: push fires only when the toggle is on and at
+        // least one browser is subscribed (the verdict is the sender's own).
+        val pushed = webPushSender()?.notifyEvent(alert, eventId = null, clipAvailable = false) == true
+        if (pushed) dispatched.add(ACTION_PUSH)
         val notified = store.detectionNotificationsEnabled.value &&
             detectionNotifier()?.notify(EventKind.TEST, emptyList(), alert.snapshotJpegBase64) == true
         if (notified) dispatched.add(ACTION_NOTIFY)
@@ -496,6 +502,17 @@ class DetectionCoordinator(
                 // publisher's own would-publish decision.
                 val mqttPublished = mqttPublisher()?.notifyEvent(alert) == true
                 if (mqttPublished) dispatchedActions.add(ACTION_MQTT)
+                // The Web Push sink rides the same verdict contract: "push"
+                // is claimed when the toggle is on and at least one browser
+                // subscription received a dispatch. One encrypted RFC 8291
+                // payload goes to every stored endpoint; failures log and
+                // never touch the rest of the fan-out.
+                val pushed = webPushSender()?.notifyEvent(
+                    alert,
+                    eventId = eventId,
+                    clipAvailable = dispatchedActions.contains(ACTION_RECORDING),
+                ) == true
+                if (pushed) dispatchedActions.add(ACTION_PUSH)
                 // The local alert claims only when the platform accepted the
                 // post (the runtime permission gates it on API 33+). Quiet
                 // hours hold the notification only — webhook and MQTT above
@@ -718,6 +735,7 @@ class DetectionCoordinator(
         const val ACTION_PHOTO = "photo"
         const val ACTION_WEBHOOK = "webhook"
         const val ACTION_MQTT = "mqtt"
+        const val ACTION_PUSH = "push"
         const val ACTION_NOTIFY = "notify"
         const val ACTION_SIREN = "siren"
         const val ACTION_TORCH = "torch"

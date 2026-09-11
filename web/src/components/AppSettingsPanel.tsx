@@ -11,7 +11,9 @@ import StorageCard from './StorageCard'
 import SystemPanel from './SystemPanel'
 import BackupCard from './BackupCard'
 import MqttCard from './MqttCard'
+import PushCard from './PushCard'
 import WhipCard from './WhipCard'
+import RtmpCard from './RtmpCard'
 import AuthCard from './AuthCard'
 import AuditCard from './AuditCard'
 import ConfigBackupCard from './ConfigBackupCard'
@@ -25,6 +27,8 @@ interface Props {
   setRecordingConfigAudio: (v: boolean) => void
   handleStartWhip: () => void
   handleStopWhip: () => void
+  handleStartRtmp: () => void
+  handleStopRtmp: () => void
 }
 
 export default function AppSettingsPanel(props: Props) {
@@ -404,6 +408,16 @@ export default function AppSettingsPanel(props: Props) {
         handleStopWhip={props.handleStopWhip}
       />
 
+      <RtmpCard
+        settings={props.settings}
+        status={props.status}
+        streamActionLoading={props.streamActionLoading}
+        updateStreamingAndSave={props.updateStreamingAndSave}
+        updateStreamingDebounced={props.updateStreamingDebounced}
+        handleStartRtmp={props.handleStartRtmp}
+        handleStopRtmp={props.handleStopRtmp}
+      />
+
       <SecurityCard
         settings={props.settings}
         updateStreamingAndSave={props.updateStreamingAndSave}
@@ -435,6 +449,8 @@ export default function AppSettingsPanel(props: Props) {
         updateStreamingAndSave={props.updateStreamingAndSave}
         updateStreamingDebounced={props.updateStreamingDebounced}
       />
+
+      <PushCard settings={props.settings} updateStreamingAndSave={props.updateStreamingAndSave} />
 
       <AuthCard />
 

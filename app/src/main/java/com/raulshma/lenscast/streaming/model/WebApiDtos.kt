@@ -84,9 +84,18 @@ data class StreamingSettingsDto(
      */
     val rtspVideoCodec: String = RtspVideoCodec.DEFAULT_WIRE_NAME,
     /**
+     * The RTMP push output (publish to an RTMP/RTMPS server), off by default.
+     * Unlike the WHIP bearer token the push URL round-trips over the Web API
+     * raw: validity is judged at start time by RtmpUrl.parse (scheme + host +
+     * H.264 codec), a readable error beats silently "fixing" a pasted target.
+     */
+    val rtmpEnabled: Boolean = false,
+    /** The push target: `rtmp(s)://[user:pass@]host[:port]/app/streamKey`. */
+    val rtmpUrl: String = "",
+    /**
      * The WHIP push output (WebRTC-HTTP egress, RFC 9725), off by default.
-     * Unlike the RTMP push URL it round-trips over the Web API — the endpoint
-     * carries no embedded secret; the bearer token rides [whipToken].
+     * Like the RTMP push URL it round-trips over the Web API, but the
+     * endpoint carries no embedded secret; the bearer token rides [whipToken].
      */
     val whipEnabled: Boolean = false,
     /** The WHIP endpoint: `http(s)://[user:pass@]host[:port]/endpoint`. */
@@ -214,6 +223,13 @@ data class StreamingSettingsDto(
     val mqttPassword: String = "",
     val mqttTls: Boolean = false,
     val mqttDiscoveryPrefix: String = StreamDefaults.MQTT_DISCOVERY_PREFIX_DEFAULT,
+    /**
+     * Web Push alerts to subscribed browsers (RFC 8291/8292): the master
+     * gate on the phone's push dispatches. Subscriptions themselves are
+     * browser-session state managed through the /api/push routes, not this
+     * settings document.
+     */
+    val pushEnabled: Boolean = false,
     /** Capture retention window in days; 0 keeps captures forever. */
     val captureRetentionDays: Int = StreamDefaults.RETENTION_DAYS_DISABLED,
     /** Detection-event retention window in days; 0 keeps events forever. */
@@ -677,6 +693,36 @@ data class RecordingSessionDto(
 @JsonClass(generateAdapter = true)
 data class RecordingSessionsResponseDto(
     val sessions: List<RecordingSessionDto>,
+)
+
+// ── Web Push DTOs ──
+
+/**
+ * GET /api/push/vapid-public — the VAPID server key for Web Push: the
+ * 65-byte uncompressed P-256 point, base64url (the exact form the browser's
+ * `pushManager.subscribe({ applicationServerKey })` consumes). Public by
+ * design — it is a key, not a secret.
+ */
+@JsonClass(generateAdapter = true)
+data class VapidPublicKeyDto(
+    val publicKey: String,
+)
+
+/**
+ * One stored browser push endpoint on GET /api/push/subscriptions, key
+ * material redacted (`p256dh`/`auth` never leave the device): the list
+ * exists for the dashboard's count/readout, not for redistribution.
+ */
+@JsonClass(generateAdapter = true)
+data class PushSubscriptionDto(
+    val endpoint: String,
+    val createdAtMs: Long,
+)
+
+@JsonClass(generateAdapter = true)
+data class PushSubscriptionsResponseDto(
+    val subscriptions: List<PushSubscriptionDto>,
+    val count: Int,
 )
 
 // ── Detection Stats DTOs ──

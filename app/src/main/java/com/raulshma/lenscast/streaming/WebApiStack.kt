@@ -9,6 +9,7 @@ import com.raulshma.lenscast.streaming.web.DetectionEventsWebHandler
 import com.raulshma.lenscast.streaming.web.DetectionTestWebHandler
 import com.raulshma.lenscast.streaming.web.DeterrenceWebHandler
 import com.raulshma.lenscast.streaming.web.GalleryWebHandler
+import com.raulshma.lenscast.streaming.web.PushWebHandler
 import com.raulshma.lenscast.streaming.web.StatusWebHandler
 import com.raulshma.lenscast.streaming.web.SystemWebHandler
 
@@ -29,4 +30,5 @@ data class WebApiStack(
     val auditLog: AuditLog,
     val detectionTest: DetectionTestWebHandler,
     val system: SystemWebHandler,
+    val push: PushWebHandler,
 )

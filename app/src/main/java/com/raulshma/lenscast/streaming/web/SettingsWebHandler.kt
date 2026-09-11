@@ -121,6 +121,8 @@ class SettingsWebHandler(
                 rtspInputFormat = store.rtspInputFormat.value.name,
                 rtspResolution = store.rtspResolution.value.wireName,
                 rtspVideoCodec = store.rtspVideoCodec.value.wireName,
+                rtmpEnabled = store.rtmpEnabled.value,
+                rtmpUrl = store.rtmpUrl.value,
                 whipEnabled = store.whipEnabled.value,
                 whipUrl = store.whipUrl.value,
                 // Write-only, like mqttPassword: blank in every response.
@@ -203,6 +205,7 @@ class SettingsWebHandler(
                 mqttPassword = "",
                 mqttTls = store.mqttTls.value,
                 mqttDiscoveryPrefix = store.mqttDiscoveryPrefix.value,
+                pushEnabled = store.pushEnabled.value,
                 captureRetentionDays = store.captureRetentionDays.value,
                 eventRetentionDays = store.eventRetentionDays.value,
                 storageQuotaMb = store.storageQuotaMb.value,
@@ -279,6 +282,11 @@ class SettingsWebHandler(
             // or unknown codec wire name is skipped, keeping the stored one.
             RtspVideoCodec.fromWireNameOrNull(stream.rtspVideoCodec)
                 ?.let { settingsDataStore.saveRtspVideoCodec(it) }
+            // RTMP push: the URL round-trips raw — validity is judged at
+            // start time by RtmpUrl.parse (plus the H.264 codec gate), the
+            // same policy as the WHIP endpoint below.
+            settingsDataStore.saveRtmpEnabled(stream.rtmpEnabled)
+            settingsDataStore.saveRtmpUrl(stream.rtmpUrl)
             // WHIP push: endpoint/STUN round-trip; validity is judged at
             // start time by the output (a readable error beats silently
             // "fixing" a URL the user mistyped).
@@ -340,6 +348,10 @@ class SettingsWebHandler(
             settingsDataStore.saveMqttUsername(stream.mqttUsername)
             settingsDataStore.saveMqttTls(stream.mqttTls)
             settingsDataStore.saveMqttDiscoveryPrefix(stream.mqttDiscoveryPrefix)
+            // Web Push: the master gate rides the standard round-trip; the
+            // subscriptions themselves are browser-session state through the
+            // /api/push routes, never this document.
+            settingsDataStore.savePushEnabled(stream.pushEnabled)
             // Retention windows clamp on save through their descriptors
             // (0 = keep forever), like every other bounded numeric setting.
             settingsDataStore.saveCaptureRetentionDays(stream.captureRetentionDays)

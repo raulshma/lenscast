@@ -392,6 +392,8 @@
     <string name="detection_quiet_from">Quiet From (minute of day)</string>
     <string name="detection_quiet_until">Quiet Until (minute of day)</string>
     <string name="detection_tamper">Tamper Detection (power cut)</string>
+    <string name="detection_push">Web Push Alerts</string>
+    <string name="detection_push_description">Sends encrypted push notifications to dashboards subscribed from the web UI\'s Web Push card — the browser shows them even with the tab closed (HTTPS dashboard mode)</string>
     <string name="detection_ml">Object Detection (ML)</string>
     <string name="detection_ml_description">Applies on top of motion detection — alerts fire only when a person, pet, or vehicle is detected in the frame</string>
     <string name="detection_alert_people">Alert on People</string>
