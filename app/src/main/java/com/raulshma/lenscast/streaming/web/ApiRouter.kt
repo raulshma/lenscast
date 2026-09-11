@@ -92,6 +92,8 @@ class ApiRouter(
         "/api/stream/rtsp/stop" -> ApiResponse.ok(stream.stopRtsp())
         "/api/stream/rtmp/start" -> ApiResponse.ok(stream.startRtmp())
         "/api/stream/rtmp/stop" -> ApiResponse.ok(stream.stopRtmp())
+        "/api/stream/whip/start" -> ApiResponse.ok(stream.startWhip())
+        "/api/stream/whip/stop" -> ApiResponse.ok(stream.stopWhip())
         "/api/capture" -> ApiResponse.ok(capture.capturePhoto())
         "/api/camera/lens" -> ApiResponse.ok(lens.selectLens(r.body))
         "/api/camera/focus" -> ApiResponse.ok(lens.tapFocus(r.body))

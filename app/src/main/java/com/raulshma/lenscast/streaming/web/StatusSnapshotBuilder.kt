@@ -38,6 +38,11 @@ object StatusSnapshotBuilder {
         val rtmpActive: Boolean = false,
         val rtmpStatus: String = "idle",
         val rtmpError: String? = null,
+        /** The WHIP push output: enabled gate, live flag, lifecycle wire name, and error text. */
+        val whipEnabled: Boolean = false,
+        val whipActive: Boolean = false,
+        val whipStatus: String = "idle",
+        val whipError: String? = null,
     )
 
     data class ThermalInputs(
@@ -185,6 +190,10 @@ object StatusSnapshotBuilder {
                 rtmpActive = streaming.rtmpActive,
                 rtmpStatus = streaming.rtmpStatus,
                 rtmpError = streaming.rtmpError,
+                whipEnabled = streaming.whipEnabled,
+                whipActive = streaming.whipActive,
+                whipStatus = streaming.whipStatus,
+                whipError = streaming.whipError,
             ),
             thermal = thermal.thermalName,
             camera = thermal.cameraStateName,

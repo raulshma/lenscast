@@ -235,4 +235,45 @@ class StatusSnapshotBuilderTest {
             response.streaming.rtmpError,
         )
     }
+
+    @Test
+    fun `whip defaults fold to disabled idle with no error`() {
+        val response = StatusSnapshotBuilder.build(
+            streaming = streaming(active = true),
+            thermal = thermal(),
+            battery = battery(),
+            watchdog = watchdog(),
+            adaptive = adaptive(enabled = true),
+            network = network(),
+        )
+
+        assertEquals(false, response.streaming.whipEnabled)
+        assertEquals(false, response.streaming.whipActive)
+        assertEquals("idle", response.streaming.whipStatus)
+        assertNull(response.streaming.whipError)
+    }
+
+    @Test
+    fun `whip live state and error text pass through`() {
+        val response = StatusSnapshotBuilder.build(
+            streaming = streaming(
+                active = true,
+            ).copy(
+                whipEnabled = true,
+                whipActive = true,
+                whipStatus = "error",
+                whipError = "WHIP server answered 401 to the offer",
+            ),
+            thermal = thermal(),
+            battery = battery(),
+            watchdog = watchdog(),
+            adaptive = adaptive(enabled = true),
+            network = network(),
+        )
+
+        assertEquals(true, response.streaming.whipEnabled)
+        assertEquals(true, response.streaming.whipActive)
+        assertEquals("error", response.streaming.whipStatus)
+        assertEquals("WHIP server answered 401 to the offer", response.streaming.whipError)
+    }
 }

@@ -109,6 +109,46 @@ class StreamWebHandler(
 
     suspend fun stopRtmp(): String = stopOutput { streamingManager.stopRtmpStreaming() }
 
+    /**
+     * Starts the WHIP push output — the RTMP route's twin with the same
+     * asynchronous-connect twist: [StreamingManager.startWhipStreaming] true
+     * means "started and connecting/connected" while false means the
+     * synchronous validation ladder refused (disabled or an unusable URL —
+     * no codec gate, libwebrtc encodes its own H.264); the readable reason is
+     * already on the WHIP status, and the response carries the generic
+     * failure. A passing start attaches the streaming session exactly like
+     * the other outputs, rolling the push back when the session begin
+     * throws. The response carries no URL: the endpoint is the device's
+     * configured publish resource, not something a viewer opens.
+     */
+    suspend fun startWhip(): String {
+        if (!streamingManager.isWhipEnabled.value) {
+            return actionAdapter.toJson(
+                StreamActionResponse(success = false, error = "WHIP push is disabled"),
+            )
+        }
+        if (!streamingManager.startWhipStreaming()) {
+            return actionAdapter.toJson(
+                StreamActionResponse(
+                    success = false,
+                    error = "Failed to start WHIP push — see the WHIP status for the reason",
+                ),
+            )
+        }
+        return try {
+            streamingSession.begin()
+            actionAdapter.toJson(
+                StreamActionResponse(success = true, isActive = streamingManager.isLiveStreaming()),
+            )
+        } catch (e: Exception) {
+            // Roll the just-started push back — never a live push without its session.
+            streamingManager.stopWhipStreaming()
+            throw e
+        }
+    }
+
+    suspend fun stopWhip(): String = stopOutput { streamingManager.stopWhipStreaming() }
+
     suspend fun stopAll(): String {
         streamingManager.pauseStreaming()
         streamingSession.end()

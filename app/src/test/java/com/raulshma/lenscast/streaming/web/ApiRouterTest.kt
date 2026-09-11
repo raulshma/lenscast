@@ -155,6 +155,15 @@ class ApiRouterTest {
     }
 
     @Test
+    fun `the whip lifecycle routes dispatch to the whip handlers`() {
+        coEvery { stream.startWhip() } returns """{"whip":"started"}"""
+        coEvery { stream.stopWhip() } returns """{"whip":"stopped"}"""
+
+        assertEquals("""{"whip":"started"}""", dispatch(ApiRequest(ApiMethod.POST, "/api/stream/whip/start")).body)
+        assertEquals("""{"whip":"stopped"}""", dispatch(ApiRequest(ApiMethod.POST, "/api/stream/whip/stop")).body)
+    }
+
+    @Test
     fun `the web and rtsp output lifecycles dispatch to their own handlers`() {
         coEvery { stream.startWeb() } returns """{"web":"started"}"""
         coEvery { stream.stopWeb() } returns """{"web":"stopped"}"""

@@ -111,6 +111,10 @@ private object Keys {
     val RTSP_VIDEO_CODEC = stringPreferencesKey("rtsp_video_codec")
     val RTMP_ENABLED = stringPreferencesKey("rtmp_enabled")
     val RTMP_URL = stringPreferencesKey("rtmp_url")
+    val WHIP_ENABLED = stringPreferencesKey("whip_enabled")
+    val WHIP_URL = stringPreferencesKey("whip_url")
+    val WHIP_TOKEN = stringPreferencesKey("whip_token")
+    val WHIP_STUN_SERVER = stringPreferencesKey("whip_stun_server")
     val ADAPTIVE_BITRATE_ENABLED = stringPreferencesKey("adaptive_bitrate_enabled")
     val MDNS_ENABLED = stringPreferencesKey("mdns_enabled")
     val MOTION_DETECTION_ENABLED = stringPreferencesKey("motion_detection_enabled")
@@ -369,6 +373,34 @@ internal val rtmpEnabledPref = boolPref(Keys.RTMP_ENABLED, defaultTrue = false)
  * the user mistyped).
  */
 internal val rtmpUrlPref = stringPref(Keys.RTMP_URL, "") { it.trim() }
+
+/**
+ * The WHIP push output (WebRTC-HTTP egress, RFC 9725), off by default.
+ * The endpoint URL carries no embedded secret (auth rides the separate
+ * token), so unlike the RTMP push URL it round-trips over the Web API;
+ * the token is write-only — see [whipTokenPref].
+ */
+internal val whipEnabledPref = boolPref(Keys.WHIP_ENABLED, defaultTrue = false)
+
+/**
+ * The WHIP endpoint — `http(s)://[user:pass@]host[:port]/endpoint`. Trimmed
+ * on save like the MQTT host; validity is judged at start time by the output
+ * (a readable error beats silently "fixing" a URL the user mistyped).
+ */
+internal val whipUrlPref = stringPref(Keys.WHIP_URL, "") { it.trim() }
+
+/**
+ * The WHIP bearer token — write-only exactly like the MQTT password:
+ * accepted on PUT, persisted raw, never serialized back out in a response.
+ */
+internal val whipTokenPref = stringPref(Keys.WHIP_TOKEN, "") { it.trim() }
+
+/**
+ * The one STUN server for one-shot ICE gathering, `host[:port]`. The default
+ * is Google's public resolver; a blank setting means no iceServers at all —
+ * host candidates only, i.e. LAN-only reachability.
+ */
+internal val whipStunServerPref = stringPref(Keys.WHIP_STUN_SERVER, StreamDefaults.WHIP_STUN_SERVER) { it.trim() }
 
 internal val mdnsEnabledPref = boolPref(Keys.MDNS_ENABLED, defaultTrue = true)
 
@@ -1016,6 +1048,14 @@ class SettingsDataStore(
 
     val rtmpUrl: StateFlow<String> = rtmpUrlPref.shared()
 
+    val whipEnabled: StateFlow<Boolean> = whipEnabledPref.shared()
+
+    val whipUrl: StateFlow<String> = whipUrlPref.shared()
+
+    val whipToken: StateFlow<String> = whipTokenPref.shared()
+
+    val whipStunServer: StateFlow<String> = whipStunServerPref.shared()
+
     val adaptiveBitrateEnabled: StateFlow<Boolean> = adaptiveBitrateEnabledPref.shared()
 
     val mdnsEnabled: StateFlow<Boolean> = mdnsEnabledPref.shared()
@@ -1220,6 +1260,14 @@ class SettingsDataStore(
     suspend fun saveRtmpEnabled(enabled: Boolean) = rtmpEnabledPref.save(enabled)
 
     suspend fun saveRtmpUrl(url: String) = rtmpUrlPref.save(url)
+
+    suspend fun saveWhipEnabled(enabled: Boolean) = whipEnabledPref.save(enabled)
+
+    suspend fun saveWhipUrl(url: String) = whipUrlPref.save(url)
+
+    suspend fun saveWhipToken(token: String) = whipTokenPref.save(token)
+
+    suspend fun saveWhipStunServer(server: String) = whipStunServerPref.save(server)
 
     suspend fun saveAdaptiveBitrateEnabled(enabled: Boolean) = adaptiveBitrateEnabledPref.save(enabled)
 

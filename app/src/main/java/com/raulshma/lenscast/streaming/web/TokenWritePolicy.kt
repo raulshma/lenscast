@@ -24,6 +24,8 @@ object TokenWritePolicy {
         "/api/stream/rtsp/stop",
         "/api/stream/rtmp/start",
         "/api/stream/rtmp/stop",
+        "/api/stream/whip/start",
+        "/api/stream/whip/stop",
         // Capture: the photo route exactly as the router registers it
         "/api/capture",
         // Recording lifecycle

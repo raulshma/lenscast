@@ -94,6 +94,21 @@ export interface StreamingSettings {
   rtspResolution: RtspResolution
   /** RTSP output codec: 'h264' (default, full HLS/WebCodecs compatibility) or 'h265'. */
   rtspVideoCodec: RtspVideoCodec
+  /**
+   * The WHIP push output (WebRTC-HTTP egress, RFC 9725). Unlike the RTMP push
+   * URL it round-trips over the Web API — the endpoint carries no embedded
+   * secret; the bearer token rides whipToken.
+   */
+  whipEnabled: boolean
+  /** The WHIP endpoint: `http(s)://[user:pass@]host[:port]/endpoint`. */
+  whipUrl: string
+  /** Write-only, like mqttPassword: PUT carries it, responses are blank. */
+  whipToken: string
+  /**
+   * The one STUN server for one-shot ICE gathering (`host[:port]`); blank
+   * means no iceServers — host candidates only, i.e. LAN-only reachability.
+   */
+  whipStunServer: string
   adaptiveBitrateEnabled: boolean
   overlayEnabled: boolean
   showTimestamp: boolean
@@ -257,6 +272,11 @@ export interface DeviceStatus {
     rtmpActive?: boolean
     rtmpStatus?: 'idle' | 'connecting' | 'connected' | 'error'
     rtmpError?: string | null
+    /** The WHIP push output; absent on older devices (pre-WHIP firmware). */
+    whipEnabled?: boolean
+    whipActive?: boolean
+    whipStatus?: 'idle' | 'connecting' | 'connected' | 'error'
+    whipError?: string | null
   }
   thermal: ThermalState
   battery: {

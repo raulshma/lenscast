@@ -172,4 +172,11 @@ object StreamDefaults {
 
     // HLS segment pacing.
     const val HLS_SEGMENT_AUS = 48
+
+    // WHIP push (streaming/whip/): the default STUN server (blank setting =
+    // no iceServers, host candidates only, LAN-only reachability) and the
+    // dedicated audio capture's rate — libwebrtc encodes it as 16 kHz mono
+    // Opus at its default ~32 kbps mono bitrate.
+    const val WHIP_STUN_SERVER = "stun.l.google.com:19302"
+    const val WHIP_AUDIO_SAMPLE_RATE_HZ = 16_000
 }

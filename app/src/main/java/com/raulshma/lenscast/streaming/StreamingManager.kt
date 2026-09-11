@@ -33,6 +33,9 @@ import com.raulshma.lenscast.streaming.hls.HlsManager
 import com.raulshma.lenscast.streaming.rtmp.RtmpOutput
 import com.raulshma.lenscast.streaming.rtmp.RtmpPublisher
 import com.raulshma.lenscast.streaming.rtmp.RtmpStatus
+import com.raulshma.lenscast.streaming.whip.WhipOutput
+import com.raulshma.lenscast.streaming.whip.WhipPublisher
+import com.raulshma.lenscast.streaming.whip.WhipStatus
 import com.raulshma.lenscast.streaming.rtsp.RtspAuthSpec
 import com.raulshma.lenscast.streaming.rtsp.RtspConfigDiff
 import com.raulshma.lenscast.streaming.rtsp.RtspInputFormat
@@ -143,6 +146,22 @@ class StreamingManager(
         source = encodedHub,
         onStatusChanged = { status -> _rtmpStatus.value = status },
         publisherFactory = { url, onStatus -> RtmpPublisher(url, encodedHub, onStatus) },
+    )
+
+    // The WHIP push output behind this manager's public surface: the retained
+    // endpoint/token/STUN, the enabled gate, and the publisher lifecycle live
+    // in the deep module (the RtmpOutput pattern). Unlike RTMP it does not
+    // consume the encoded hub — libwebrtc encodes its own H.264 from the same
+    // NV21 analysis tap the manager fans out in [pushFrame] — so its only
+    // runtime couplings here are the frame feed, the fps fan-out, the status
+    // mirror, and the mic-arbitration verdict evaluated at publisher
+    // construction (audio on only when the shared capture is free).
+    private val whipOutput: WhipOutput = WhipOutput(
+        audioAllowed = ::whipAudioAllowed,
+        onStatusChanged = { status -> _whipStatus.value = status },
+        publisherFactory = { url, token, stunServer, audioAllowed, onStatus ->
+            WhipPublisher(context, url, token, stunServer, audioAllowed, onStatus)
+        },
     )
 
     private val serviceDiscoveryManager = ServiceDiscoveryManager(context)
@@ -274,8 +293,8 @@ class StreamingManager(
     /**
      * Every live stream consumer the eco verdict must respect: MJPEG and WS
      * clients, RTSP playing clients, HLS fetches (a hot ring means a player
-     * is pulling), and the RTMP push (its remote server is a consumer even
-     * though it never appears as a local client).
+     * is pulling), and the RTMP and WHIP pushes (their remote servers are
+     * consumers even though they never appear as local clients).
      */
     private fun liveConsumerCount(): Int {
         val http = try {
@@ -291,7 +310,8 @@ class StreamingManager(
         val ws = wsMediaServer?.videoClientCount() ?: 0
         val hls = if (HlsManager.isHot()) 1 else 0
         val rtmp = if (rtmpOutput.isActive()) 1 else 0
-        return http + rtsp + ws + hls + rtmp
+        val whip = if (whipOutput.isActive()) 1 else 0
+        return http + rtsp + ws + hls + rtmp + whip
     }
 
     init {
@@ -350,6 +370,13 @@ class StreamingManager(
     /** The RTMP push output's lifecycle state — idle/connecting/connected/error(+message). */
     private val _rtmpStatus = MutableStateFlow<RtmpStatus>(RtmpStatus.Idle)
     val rtmpStatus: StateFlow<RtmpStatus> = _rtmpStatus
+
+    private val _isWhipEnabled = MutableStateFlow(false)
+    val isWhipEnabled: StateFlow<Boolean> = _isWhipEnabled
+
+    /** The WHIP push output's lifecycle state — idle/connecting/connected/error(+message). */
+    private val _whipStatus = MutableStateFlow<WhipStatus>(WhipStatus.Idle)
+    val whipStatus: StateFlow<WhipStatus> = _whipStatus
 
     val droppedFrames: StateFlow<Int> = framePipeline.droppedFrames
 
@@ -548,12 +575,14 @@ class StreamingManager(
     /** Per-client measured throughput/fps read seam for Web API handlers. */
     fun getFramesPerSecond(clientId: String): Double = networkQualityMonitor.getFramesPerSecond(clientId)
 
-    fun isLiveStreaming(): Boolean = webStreamingActive.get() || rtspOutput.isActive() || rtmpOutput.isActive()
+    fun isLiveStreaming(): Boolean =
+        webStreamingActive.get() || rtspOutput.isActive() || rtmpOutput.isActive() || whipOutput.isActive()
 
     fun isWebStreamActive(): Boolean = webStreamingActive.get()
 
     private fun updateStreamingState() {
-        val anyActive = webStreamingActive.get() || rtspOutput.isActive() || rtmpOutput.isActive()
+        val anyActive =
+            webStreamingActive.get() || rtspOutput.isActive() || rtmpOutput.isActive() || whipOutput.isActive()
         _isStreaming.value = anyActive
         _isWebStreamingActive.value = webStreamingActive.get()
     }
@@ -658,8 +687,8 @@ class StreamingManager(
             .getOrDefault(listOfNotNull(NetworkUtils.getLocalIpAddress()))
 
     fun startStreaming(): Boolean {
-        if (!webStreamingEnabled.get() && !rtspOutput.isEnabled() && !rtmpOutput.isEnabled()) {
-            Log.w(TAG, "Cannot start streaming: web, RTSP, and RTMP outputs are all disabled")
+        if (!webStreamingEnabled.get() && !rtspOutput.isEnabled() && !rtmpOutput.isEnabled() && !whipOutput.isEnabled()) {
+            Log.w(TAG, "Cannot start streaming: web, RTSP, RTMP, and WHIP outputs are all disabled")
             return false
         }
 
@@ -672,6 +701,9 @@ class StreamingManager(
         if (rtmpOutput.isEnabled()) {
             startRtmpStreaming()
         }
+        if (whipOutput.isEnabled()) {
+            startWhipStreaming()
+        }
 
         Log.d(TAG, "Streaming started at ${_streamUrl.value}")
         return true
@@ -681,6 +713,7 @@ class StreamingManager(
         stopWebStreaming()
         stopRtspStreaming()
         stopRtmpStreaming()
+        stopWhipStreaming()
         stopTransport()
         unregisterMdnsService()
         _isServerRunning.value = false
@@ -691,6 +724,7 @@ class StreamingManager(
         stopWebStreaming()
         stopRtspStreaming()
         stopRtmpStreaming()
+        stopWhipStreaming()
         Log.d(TAG, "Live streaming paused (server still running)")
     }
 
@@ -824,11 +858,110 @@ class StreamingManager(
      */
     fun isRtmpActive(): Boolean = rtmpOutput.isActive()
 
+    // ── WHIP push output: the RTMP twins, on the NV21 analysis tap ──
+
     /**
-     * One camera frame fans out to every consumer — the M-JPEG web pipeline
-     * and the shared encoded-stream hub (RTSP RTP, HLS, WS video). The web
-     * pipeline no-ops while inactive; the hub runs its policy verdict per
-     * frame and encodes only while some encoded sink is active.
+     * Starts the WHIP push output. The validation ladder (enabled gate, URL
+     * parse — no codec gate, libwebrtc encodes its own H.264) runs
+     * synchronously in the output and a refusal lands on [whipStatus] as an
+     * Error with the readable message; the session itself is asynchronous
+     * (Connecting → Connected, auto-reconnect with capped backoff while
+     * active). False means refused — read [whipStatus] for the reason.
+     */
+    fun startWhipStreaming(): Boolean {
+        if (!whipOutput.isEnabled()) {
+            Log.w(TAG, "Cannot start WHIP push: WHIP is disabled")
+            return false
+        }
+        if (whipOutput.isActive()) return true
+        when (whipOutput.start()) {
+            is WhipOutput.StartResult.Started -> Unit
+            is WhipOutput.StartResult.Rejected -> {
+                updateStreamingState()
+                return false
+            }
+        }
+        updateStreamingState()
+        Log.d(TAG, "WHIP push started")
+        return true
+    }
+
+    fun stopWhipStreaming() {
+        if (!whipOutput.isActive()) return
+        whipOutput.stop()
+        updateStreamingState()
+        Log.d(TAG, "WHIP push stopped")
+    }
+
+    /**
+     * True while the WHIP push output is live — from a passing start until
+     * stop, including connecting/reconnecting gaps (the [whipStatus] carries
+     * which of the two is happening). The status snapshot's WHIP activity bit.
+     */
+    fun isWhipActive(): Boolean = whipOutput.isActive()
+
+    /** True while the WHIP output is live with the stream-audio toggle on — the mic verdict's WHIP half. */
+    fun isWhipAudioActive(): Boolean = whipOutput.isActive() && whipAudioAllowed()
+
+    fun setWhipEnabled(enabled: Boolean) {
+        if (!whipOutput.setEnabled(enabled)) return
+        _isWhipEnabled.value = enabled
+        if (!enabled) {
+            stopWhipStreaming()
+        }
+    }
+
+    /**
+     * The endpoint/token/STUN from settings: land in the output's retained
+     * values (so the next start picks them up), and a live output restarts
+     * through its own config-change path — the publisher's connect parameters
+     * are per-attempt, so nothing can hot-swap.
+     */
+    fun setWhipUrl(url: String) {
+        whipOutput.setUrl(url)
+    }
+
+    fun setWhipToken(token: String) {
+        whipOutput.setToken(token)
+    }
+
+    fun setWhipStunServer(server: String) {
+        whipOutput.setStunServer(server)
+    }
+
+    /**
+     * The mic-arbitration verdict the WHIP publisher is built with: audio on
+     * only when the stream-audio toggle is on, no recording capture, no eco
+     * idle, and the shared live capture (web talkback, RTSP/RTMP audio) is not
+     * already running — the WHIP publisher owns a dedicated AudioRecord, so a
+     * busy shared capture means it runs video-only. Evaluated at
+     * publisher-construction time; the output re-arbitrates on every (re)start.
+     */
+    private fun whipAudioAllowed(): Boolean =
+        streamAudioEnabled.get() &&
+            !recordingAudioCaptureActive &&
+            !ecoIdleActive &&
+            !audioStreamingManager.isRunning()
+
+    /**
+     * Re-evaluates the WHIP audio verdict after one of its inputs moved: a
+     * live output whose verdict flipped restarts so the next session drops or
+     * picks the audio track up. Called from the mutation sites
+     * ([setStreamAudioEnabled], [setAudioConfig],
+     * [setRecordingAudioCaptureActive]) with the verdict read beforehand.
+     */
+    private fun rearmWhipAudioArbitration(verdictBefore: Boolean) {
+        if (whipAudioAllowed() != verdictBefore) {
+            whipOutput.onMicVerdictChanged()
+        }
+    }
+
+    /**
+     * One camera frame fans out to every consumer — the M-JPEG web pipeline,
+     * the shared encoded-stream hub (RTSP RTP, HLS, WS video), and the WHIP
+     * push's libwebrtc video source. The web pipeline no-ops while inactive;
+     * the hub runs its policy verdict per frame and encodes only while some
+     * encoded sink is active; the WHIP publisher no-ops while stopped.
      */
     fun pushFrame(yuvData: ByteArray, width: Int, height: Int, rotation: Int = 0) {
         // Thermal CRITICAL pauses encoding on both outputs — the pipeline's
@@ -846,6 +979,9 @@ class StreamingManager(
         }
         pushFrameToWeb(yuvData, width, height, rotation)
         encodedHub.pushFrame(yuvData, width, height, rotation)
+        // The WHIP publisher taps the same NV21 analysis frame (it encodes its
+        // own H.264 from it) and no-ops internally while stopped.
+        whipOutput.feedVideoFrame(yuvData, width, height, rotation)
     }
 
     private fun pushFrameToWeb(yuvData: ByteArray, width: Int, height: Int, rotation: Int) {
@@ -892,6 +1028,7 @@ class StreamingManager(
         setAdaptiveDefaultFrameRate(fps)
         rtspOutput.setFrameRate(fps)
         encodedHub.setFrameRate(fps)
+        whipOutput.setFrameRate(fps)
     }
 
     private fun setStreamFrameRate(fps: Int) {
@@ -933,6 +1070,7 @@ class StreamingManager(
      * capture mid-storm (RTSP audio wedged silent with no error logged).
      */
     fun setAudioConfig(enabled: Boolean, bitrateKbps: Int, channels: Int, echoCancellation: Boolean) {
+        val whipVerdictBefore = whipAudioAllowed()
         streamAudioEnabled.set(enabled)
         val coercedBitrate = bitrateKbps.coerceIn(StreamDefaults.AUDIO_BITRATE_MIN_KBPS, StreamDefaults.AUDIO_BITRATE_MAX_KBPS)
         streamAudioBitrateKbps.set(coercedBitrate)
@@ -948,9 +1086,13 @@ class StreamingManager(
         // [RtspOutput.setAudioConfig]): a wanted flip restarts whenever live,
         // otherwise the audio restart ladder decides.
         rtspOutput.setAudioConfig(enabled, coercedBitrate)
+        // The enable bit is the only part of this config the WHIP audio
+        // verdict reads — re-arbitrate a live push around it.
+        rearmWhipAudioArbitration(whipVerdictBefore)
     }
 
     fun setStreamAudioEnabled(enabled: Boolean) {
+        val whipVerdictBefore = whipAudioAllowed()
         streamAudioEnabled.set(enabled)
         appliedAudioConfig = appliedAudioConfig.copy(enabled = enabled)
         onWebAudioChanged()
@@ -959,6 +1101,7 @@ class StreamingManager(
         // forceful (no change detection): the mic-permission-grant path calls
         // this with an already-true value to pick the microphone back up.
         rtspOutput.setAudioWanted(enabled)
+        rearmWhipAudioArbitration(whipVerdictBefore)
     }
 
     fun setWebStreamingEnabled(enabled: Boolean) {
@@ -1032,10 +1175,14 @@ class StreamingManager(
 
     fun setRecordingAudioCaptureActive(active: Boolean) {
         val wasActive = recordingAudioCaptureActive
+        val whipVerdictBefore = whipAudioAllowed()
         recordingAudioCaptureActive = active
         // The RTSP output's mic-arbitration input: while recording captures,
         // its next start opens no audio track.
         rtspOutput.setRecordingCaptureActive(active)
+        // The WHIP twin: a live push whose verdict flipped restarts video-only
+        // (or with audio back) from its next session.
+        rearmWhipAudioArbitration(whipVerdictBefore)
 
         when {
             active && !wasActive -> {

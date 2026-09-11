@@ -83,6 +83,25 @@ data class StreamingSettingsDto(
      * restarts the RTSP output via its NEEDS_RESTART ladder.
      */
     val rtspVideoCodec: String = RtspVideoCodec.DEFAULT_WIRE_NAME,
+    /**
+     * The WHIP push output (WebRTC-HTTP egress, RFC 9725), off by default.
+     * Unlike the RTMP push URL it round-trips over the Web API — the endpoint
+     * carries no embedded secret; the bearer token rides [whipToken].
+     */
+    val whipEnabled: Boolean = false,
+    /** The WHIP endpoint: `http(s)://[user:pass@]host[:port]/endpoint`. */
+    val whipUrl: String = "",
+    /**
+     * Write-only, like [mqttPassword]: the WHIP bearer token is accepted on
+     * PUT, persisted raw, and always serialized blank in responses.
+     */
+    val whipToken: String = "",
+    /**
+     * The one STUN server for one-shot ICE gathering, `host[:port]` (the
+     * default is Google's public resolver); blank means no iceServers — host
+     * candidates only, i.e. LAN-only reachability.
+     */
+    val whipStunServer: String = StreamDefaults.WHIP_STUN_SERVER,
     val adaptiveBitrateEnabled: Boolean = false,
     val overlayEnabled: Boolean = OverlaySettings.DEFAULT.enabled,
     val showTimestamp: Boolean = OverlaySettings.DEFAULT.showTimestamp,
@@ -298,6 +317,12 @@ data class StreamingStatusDto(
     val rtmpStatus: String = "idle",
     /** The readable reason while [rtmpStatus] is "error"; null otherwise. */
     val rtmpError: String? = null,
+    /** The WHIP push output: enabled gate, live flag, and its lifecycle state. */
+    val whipEnabled: Boolean = false,
+    val whipActive: Boolean = false,
+    val whipStatus: String = "idle",
+    /** The readable reason while [whipStatus] is "error"; null otherwise. */
+    val whipError: String? = null,
 )
 
 @JsonClass(generateAdapter = true)

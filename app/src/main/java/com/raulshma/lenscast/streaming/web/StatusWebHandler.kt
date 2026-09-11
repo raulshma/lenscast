@@ -9,6 +9,7 @@ import com.raulshma.lenscast.data.SettingsDataStore
 import com.raulshma.lenscast.streaming.StreamingManager
 import com.raulshma.lenscast.streaming.model.StatusResponseDto
 import com.raulshma.lenscast.streaming.rtmp.RtmpStatus
+import com.raulshma.lenscast.streaming.whip.WhipStatus
 
 /** /api/status — aggregates live state from every runtime module into one DTO. */
 class StatusWebHandler(
@@ -48,6 +49,10 @@ class StatusWebHandler(
                 rtmpActive = streamingManager.isRtmpActive(),
                 rtmpStatus = streamingManager.rtmpStatus.value.wireName,
                 rtmpError = (streamingManager.rtmpStatus.value as? RtmpStatus.Error)?.message,
+                whipEnabled = streamingManager.isWhipEnabled.value,
+                whipActive = streamingManager.isWhipActive(),
+                whipStatus = streamingManager.whipStatus.value.wireName,
+                whipError = (streamingManager.whipStatus.value as? WhipStatus.Error)?.message,
             ),
             thermal = StatusSnapshotBuilder.ThermalInputs(
                 cameraStateName = cameraService.cameraState.value.toString(),

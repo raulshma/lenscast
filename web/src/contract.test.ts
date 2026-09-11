@@ -71,6 +71,10 @@ const STREAMING_KEYS = [
   'rtspPort',
   'rtspInputFormat',
   'rtspVideoCodec',
+  'whipEnabled',
+  'whipUrl',
+  'whipToken',
+  'whipStunServer',
   'adaptiveBitrateEnabled',
   'overlayEnabled',
   'showTimestamp',
@@ -371,6 +375,12 @@ describe('API_DEFAULTS lockstep with the fixtures', () => {
     expect(streaming.rtspEnabled).toBe(API_DEFAULTS.rtspEnabled)
     expect(streaming.rtspPort).toBe(API_DEFAULTS.rtspPort)
     expect(streaming.rtspInputFormat).toBe(API_DEFAULTS.rtspInputFormat)
+    // WHIP push: the endpoint round-trips, the token is write-only (always
+    // blank in responses), and the STUN default matches StreamDefaults.
+    expect(streaming.whipEnabled).toBe(API_DEFAULTS.whipEnabled)
+    expect(streaming.whipUrl).toBe(API_DEFAULTS.whipUrl)
+    expect(streaming.whipToken).toBe(API_DEFAULTS.whipToken)
+    expect(streaming.whipStunServer).toBe(API_DEFAULTS.whipStunServer)
   })
 
   it('overlay fallbacks match the settings fixture defaults', () => {

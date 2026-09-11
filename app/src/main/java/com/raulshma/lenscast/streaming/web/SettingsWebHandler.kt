@@ -58,11 +58,12 @@ class SettingsWebHandler(
      * restoring via POST /api/settings/import on this or another device.
      *
      * What the export carries: exactly what GET /api/settings returns — the
-     * five write-only credentials (stream-auth password hash, WebDAV
-     * password, Telegram bot token, MQTT password, API token) are blank, but
-     * `webhookHeaders` is a user-authored header map that round-trips in
-     * full and frequently contains an Authorization header. The file is
-     * configuration, not a sanitized share artifact — treat it as such.
+     * write-only credentials (stream-auth password hash, WebDAV password,
+     * Telegram bot token, MQTT password, WHIP bearer token, API token) are
+     * blank, but `webhookHeaders` is a user-authored header map that
+     * round-trips in full and frequently contains an Authorization header.
+     * The file is configuration, not a sanitized share artifact — treat it
+     * as such.
      */
     suspend fun export(): String =
         exportAdapter.toJson(
@@ -120,6 +121,11 @@ class SettingsWebHandler(
                 rtspInputFormat = store.rtspInputFormat.value.name,
                 rtspResolution = store.rtspResolution.value.wireName,
                 rtspVideoCodec = store.rtspVideoCodec.value.wireName,
+                whipEnabled = store.whipEnabled.value,
+                whipUrl = store.whipUrl.value,
+                // Write-only, like mqttPassword: blank in every response.
+                whipToken = "",
+                whipStunServer = store.whipStunServer.value,
                 adaptiveBitrateEnabled = store.adaptiveBitrateEnabled.value,
                 overlayEnabled = overlay.enabled,
                 showTimestamp = overlay.showTimestamp,
@@ -273,6 +279,12 @@ class SettingsWebHandler(
             // or unknown codec wire name is skipped, keeping the stored one.
             RtspVideoCodec.fromWireNameOrNull(stream.rtspVideoCodec)
                 ?.let { settingsDataStore.saveRtspVideoCodec(it) }
+            // WHIP push: endpoint/STUN round-trip; validity is judged at
+            // start time by the output (a readable error beats silently
+            // "fixing" a URL the user mistyped).
+            settingsDataStore.saveWhipEnabled(stream.whipEnabled)
+            settingsDataStore.saveWhipUrl(stream.whipUrl)
+            settingsDataStore.saveWhipStunServer(stream.whipStunServer)
             settingsDataStore.saveAdaptiveBitrateEnabled(stream.adaptiveBitrateEnabled)
             settingsDataStore.saveOverlaySettings(toOverlaySettings(stream, settingsDataStore.overlaySettings.value))
             settingsDataStore.saveWatchdogEnabled(stream.watchdogEnabled)
@@ -350,6 +362,11 @@ class SettingsWebHandler(
             // keeps the stored credential.
             if (stream.mqttPassword.isNotEmpty()) {
                 settingsDataStore.saveMqttPassword(stream.mqttPassword)
+            }
+            // Same write-only contract as the MQTT password: an empty value
+            // keeps the stored WHIP bearer token.
+            if (stream.whipToken.isNotEmpty()) {
+                settingsDataStore.saveWhipToken(stream.whipToken)
             }
             // An empty password on update means "keep the stored one" so the
             // dashboard never needs to round-trip the secret.

@@ -293,12 +293,14 @@ class StreamingSession(
                 // Either live output capturing the mic needs the service's
                 // MICROPHONE type — the old web-only flag left RTSP-only
                 // streaming capturing without it, which the OS silences. The
-                // RTMP push taps the same AAC path, so it counts the same way.
+                // RTMP push taps the same AAC path and the WHIP push owns its
+                // dedicated AudioRecord, so both count the same way.
                 putExtra(
                     StreamingService.EXTRA_AUDIO_ACTIVE,
                     streamingManager.isAudioStreaming.value ||
                         streamingManager.isRtspAudioActive() ||
-                        streamingManager.isRtmpAudioActive(),
+                        streamingManager.isRtmpAudioActive() ||
+                        streamingManager.isWhipAudioActive(),
                 )
             }
         }

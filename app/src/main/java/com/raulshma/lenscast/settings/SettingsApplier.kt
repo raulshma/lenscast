@@ -140,6 +140,26 @@ class SettingsApplier(
             }
         }
 
+        // WHIP push: the same lifecycle rule as the RTMP push — the enable
+        // gate arms it, and any endpoint/token/STUN change restarts a live
+        // output through its own config-change paths (the publisher's
+        // connect parameters are per-attempt, so nothing can hot-swap).
+        scope.launch {
+            combine(
+                settingsDataStore.whipEnabled,
+                settingsDataStore.whipUrl,
+                settingsDataStore.whipToken,
+                settingsDataStore.whipStunServer,
+            ) { enabled, url, token, stunServer ->
+                WhipSettings(enabled, url, token, stunServer)
+            }.collectLatest { whip ->
+                streamingManager.setWhipUrl(whip.url)
+                streamingManager.setWhipToken(whip.token)
+                streamingManager.setWhipStunServer(whip.stunServer)
+                streamingManager.setWhipEnabled(whip.enabled)
+            }
+        }
+
         // Photo capture quality/RAW: the three persisted knobs fold into the
         // one immutable PhotoCaptureConfig the CameraService's ImageCapture
         // builder consumes — the plan (not this applier) owns the quality
@@ -313,6 +333,13 @@ class SettingsApplier(
     private data class RtmpSettings(
         val enabled: Boolean,
         val url: String,
+    )
+
+    private data class WhipSettings(
+        val enabled: Boolean,
+        val url: String,
+        val token: String,
+        val stunServer: String,
     )
 
     private data class DiscoverySettings(

@@ -76,6 +76,11 @@ class SettingsViewModel(
     val rtspInputFormat: StateFlow<RtspInputFormat> = settingsDataStore.rtspInputFormat
     val rtmpEnabled: StateFlow<Boolean> = settingsDataStore.rtmpEnabled
     val rtmpUrl: StateFlow<String> = settingsDataStore.rtmpUrl
+    // The WHIP bearer token has no read-side flow: it is write-only, the
+    // screen types into local state and the store never echoes it back.
+    val whipEnabled: StateFlow<Boolean> = settingsDataStore.whipEnabled
+    val whipUrl: StateFlow<String> = settingsDataStore.whipUrl
+    val whipStunServer: StateFlow<String> = settingsDataStore.whipStunServer
     val adaptiveBitrateEnabled: StateFlow<Boolean> = settingsDataStore.adaptiveBitrateEnabled
     val mdnsEnabled: StateFlow<Boolean> = settingsDataStore.mdnsEnabled
     val motionDetectionEnabled: StateFlow<Boolean> = settingsDataStore.motionDetectionEnabled
@@ -255,6 +260,17 @@ class SettingsViewModel(
     fun updateRtmpEnabled(enabled: Boolean) = save { settingsDataStore.saveRtmpEnabled(enabled) }
 
     fun updateRtmpUrl(url: String) = save { settingsDataStore.saveRtmpUrl(url) }
+
+    fun updateWhipEnabled(enabled: Boolean) = save { settingsDataStore.saveWhipEnabled(enabled) }
+
+    fun updateWhipUrl(url: String) = save { settingsDataStore.saveWhipUrl(url) }
+
+    /** Write-only like the stream-auth password: an empty field keeps the stored token. */
+    fun updateWhipToken(token: String) {
+        if (token.isNotEmpty()) save { settingsDataStore.saveWhipToken(token) }
+    }
+
+    fun updateWhipStunServer(server: String) = save { settingsDataStore.saveWhipStunServer(server) }
 
     fun updateAdaptiveBitrateEnabled(enabled: Boolean) = save { settingsDataStore.saveAdaptiveBitrateEnabled(enabled) }
 

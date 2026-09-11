@@ -12,7 +12,10 @@
     "rtspUrl": "rtsp://192.168.1.10:8554/live",
     "rtmpEnabled": false,
     "rtmpActive": false,
-    "rtmpStatus": "idle"
+    "rtmpStatus": "idle",
+    "whipEnabled": false,
+    "whipActive": false,
+    "whipStatus": "idle"
   },
   "thermal": "NORMAL",
   "camera": "Ready",

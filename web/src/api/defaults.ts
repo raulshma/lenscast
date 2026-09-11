@@ -34,6 +34,12 @@ export const API_DEFAULTS = {
   // RTSP video codec wire name (RtspVideoCodec mapper). The swap restarts a
   // live RTSP output; HLS/WebCodecs stay H.264-only until it flips back.
   rtspVideoCodec: 'h264',
+  // WHIP push output (StreamingSettingsDto / StreamDefaults.WHIP_STUN_SERVER).
+  // whipToken is write-only: the dashboard sends it once, responses are blank.
+  whipEnabled: false,
+  whipUrl: '',
+  whipToken: '',
+  whipStunServer: 'stun.l.google.com:19302',
 
   // Slider bounds (StreamDefaults validation bounds)
   jpegQualityMin: 10,
