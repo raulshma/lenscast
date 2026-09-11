@@ -434,6 +434,12 @@ class RtspServer(
                     lastActivity = System.currentTimeMillis()
 
                     if (line.isNotEmpty()) {
+                        // Hostile-input bound: header lines without a terminating
+                        // blank line otherwise accumulate until the heap dies.
+                        if (requestLines.size >= MAX_REQUEST_LINES) {
+                            Log.d(TAG, "Client $sessionId sent too many header lines; dropping")
+                            break
+                        }
                         requestLines.add(line)
                     } else if (requestLines.isNotEmpty()) {
                         val contentLength = RtspRequestParser.extractContentLength(requestLines)
@@ -751,6 +757,10 @@ class RtspServer(
         private const val SESSION_TIMEOUT_MS = 65_000L
         private const val SESSION_TIMEOUT_HEADER_SECONDS = 60L
         private const val RTCP_SR_INTERVAL_MS = 5_000L
+
+        // Header lines buffered per request before the connection is dropped —
+        // generous against every real request, hostile-input bound otherwise.
+        private const val MAX_REQUEST_LINES = 64
 
         /**
          * RTP timestamp advance per audio access unit. Internal so the contract

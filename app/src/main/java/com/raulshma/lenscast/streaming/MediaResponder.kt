@@ -227,21 +227,33 @@ class MediaResponder(
 
         /**
          * The `bytes=start-end` decision. Null means "serve full content":
-         * no header, a foreign unit, or a spec without a dash.
+         * no header, a foreign unit, or a spec without a dash. Every returned
+         * pair satisfies 0 <= start <= end <= max(totalSize-1, 0) — a hostile
+         * header (`bytes=999999999999-`, `bytes=5-2`, negatives) clamps into
+         * range instead of producing a negative body length downstream.
          */
         internal fun resolveRange(rangeHeader: String?, totalSize: Long): ResolvedRange? {
             if (rangeHeader != null && rangeHeader.startsWith("bytes=")) {
+                // An empty file has no range worth slicing — full content (0
+                // bytes) is the only sane answer, and it keeps maxEnd >= 0 so
+                // the clamps below can never see an inverted range.
+                if (totalSize <= 0L) return null
                 val rangeSpec = rangeHeader.removePrefix("bytes=").trim()
                 val dashIdx = rangeSpec.indexOf('-')
                 if (dashIdx >= 0) {
                     val startStr = rangeSpec.substring(0, dashIdx).trim()
                     val endStr = rangeSpec.substring(dashIdx + 1).trim()
-                    val start = if (startStr.isNotEmpty()) startStr.toLongOrNull() ?: 0L else 0L
+                    val maxEnd = totalSize - 1
+                    val start = if (startStr.isNotEmpty()) {
+                        (startStr.toLongOrNull() ?: 0L).coerceIn(0L, maxEnd)
+                    } else {
+                        0L
+                    }
                     val end = if (endStr.isNotEmpty()) {
-                        (endStr.toLongOrNull() ?: (totalSize - 1)).coerceAtMost(totalSize - 1)
+                        (endStr.toLongOrNull() ?: maxEnd).coerceIn(start, maxEnd)
                     } else {
                         // Limit chunk size to 2MB to avoid excessive memory use
-                        (start + MAX_CHUNK_BYTES - 1).coerceAtMost(totalSize - 1)
+                        (start + MAX_CHUNK_BYTES - 1).coerceAtMost(maxEnd)
                     }
                     return ResolvedRange(start, end)
                 }

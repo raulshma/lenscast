@@ -70,11 +70,15 @@ object WsDiscoveryProbeParser {
         MESSAGE_ID_REGEX.find(datagram)?.groupValues?.get(1)?.takeIf { it.isNotBlank() }
 
     // Any-prefix or default-ns Probe element followed by whitespace or '>'.
-    private val PROBE_REGEX = Regex("<(?:[A-Za-z_][\\w.-]*:)?Probe[\\s>]")
+    // Possessive `*+` (same trick as OnvifRequestParser): ':' and the Probe
+    // literal can only match at the end of the maximal [\w.-] run, so the
+    // greedy backtracking was pure waste — and a hostile 64 KB datagram of
+    // one long word made every scan position re-walk it.
+    private val PROBE_REGEX = Regex("<(?:[A-Za-z_][\\w.-]*+:)?Probe[\\s>]")
 
     // MessageId capitalisation varies too; the value is always a urn:uuid here.
     private val MESSAGE_ID_REGEX = Regex(
-        "<(?:[A-Za-z_][\\w.-]*:)?MessageID>\\s*(urn:uuid:[^<\\s]+)",
+        "<(?:[A-Za-z_][\\w.-]*+:)?MessageID>\\s*(urn:uuid:[^<\\s]+)",
         RegexOption.IGNORE_CASE,
     )
 }

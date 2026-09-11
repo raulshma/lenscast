@@ -49,10 +49,11 @@ object RtspUriPolicy {
         val path = normalizedPath(requestUri)
         // Aggregate or stream path defaults to video (track 0)
         if (path == "/$DEFAULT_STREAM_PATH" || path == "/") return 0
-        // Explicit trackID matching
+        // Explicit trackID matching — toIntOrNull, never toInt: a hostile
+        // SETUP `.../trackID=99999999999999` is a 404, not a dead session.
         val trackMatch = Regex("""/trackID=(\d+)$""", RegexOption.IGNORE_CASE).find(path)
         if (trackMatch != null) {
-            val id = trackMatch.groupValues[1].toInt()
+            val id = trackMatch.groupValues[1].toIntOrNull() ?: return null
             return if (id == 0 || id == 1) id else null
         }
         return null

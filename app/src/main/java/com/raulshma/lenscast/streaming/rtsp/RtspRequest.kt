@@ -80,9 +80,21 @@ object RtspRequestParser {
 class RtspWireReader(private val input: InputStream) {
 
     /**
+     * The longest line [readLine] will buffer. Legit RTSP request lines and
+     * headers (long Digest Authorization values included) sit well under it;
+     * a hostile client streaming gigabytes with no LF was an unbounded
+     * ByteArrayOutputStream — a remote OOM. An over-long line returns null,
+     * the same "drop this connection" verdict as EOF.
+     */
+    private companion object {
+        const val MAX_LINE_BYTES = 8192
+    }
+
+    /**
      * Reads one CRLF/CRLF-less terminated line, having already consumed
-     * [firstByte] from the stream. Null on EOF mid-line; an empty string is a
-     * valid result (the blank line ending a request's header block).
+     * [firstByte] from the stream. Null on EOF mid-line or when the line
+     * exceeds [MAX_LINE_BYTES]; an empty string is a valid result (the blank
+     * line ending a request's header block).
      */
     fun readLine(firstByte: Int): String? {
         val lineBuffer = ByteArrayOutputStream(128)
@@ -95,6 +107,7 @@ class RtspWireReader(private val input: InputStream) {
             }
             if (current != '\r'.code) {
                 lineBuffer.write(current)
+                if (lineBuffer.size() > MAX_LINE_BYTES) return null
             }
             current = input.read()
         }

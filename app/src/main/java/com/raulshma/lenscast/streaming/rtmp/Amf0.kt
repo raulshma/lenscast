@@ -49,6 +49,15 @@ object Amf0 {
     private const val MARKER_LONG_STRING = 0x0C
     private const val MARKER_OBJECT_END = 0x09
 
+    /**
+     * The deepest object/array nesting a decode will walk. Real AMF0 commands
+     * nest a handful of levels; `decodeObject → decodeValue` is mutual
+     * recursion, so without a floor a 300 KB `03 00 00`-per-level body is a
+     * remote StackOverflowError. Breaching it is a decode error, like a
+     * truncation.
+     */
+    private const val MAX_DEPTH = 100
+
     /** The whole command payload: every value back to back. */
     fun encode(values: List<AmfValue>): ByteArray {
         val out = ByteArrayOutputStream(64)
@@ -124,8 +133,13 @@ object Amf0 {
 
     private data class Decoded(val value: AmfValue, val next: Int)
 
-    private fun decodeValue(bytes: ByteArray, start: Int): Decoded {
+    private fun decodeValue(bytes: ByteArray, start: Int, depth: Int = 0): Decoded {
         requireRemaining(bytes, start, 1)
+        // N nested containers reach depth N-1 here, so >= rejects nesting
+        // beyond MAX_DEPTH levels exactly.
+        if (depth >= MAX_DEPTH) {
+            throw AmfDecodeException("AMF0 nesting deeper than $MAX_DEPTH at offset $start")
+        }
         val marker = bytes[start].toInt() and 0xFF
         var cursor = start + 1
         return when (marker) {
@@ -153,11 +167,11 @@ object Amf0 {
                 requireRemaining(bytes, cursor, length)
                 Decoded(AmfValue.Str(String(bytes, cursor, length, Charsets.UTF_8)), cursor + length)
             }
-            MARKER_OBJECT -> decodeObject(bytes, cursor)
+            MARKER_OBJECT -> decodeObject(bytes, cursor, depth)
             MARKER_ECMA_ARRAY -> {
                 // u32 count, then object entries until the end marker — read as Obj.
                 requireRemaining(bytes, cursor, 4)
-                decodeObject(bytes, cursor + 4)
+                decodeObject(bytes, cursor + 4, depth)
             }
             MARKER_NULL -> Decoded(AmfValue.Null, cursor)
             MARKER_UNDEFINED -> Decoded(AmfValue.Undefined, cursor)
@@ -165,7 +179,7 @@ object Amf0 {
         }
     }
 
-    private fun decodeObject(bytes: ByteArray, start: Int): Decoded {
+    private fun decodeObject(bytes: ByteArray, start: Int, depth: Int): Decoded {
         val entries = mutableListOf<Pair<String, AmfValue>>()
         var cursor = start
         while (true) {
@@ -181,7 +195,7 @@ object Amf0 {
                 return Decoded(AmfValue.Obj(entries), cursor + 3)
             }
             val (key, afterKey) = decodeShortString(bytes, cursor)
-            val decoded = decodeValue(bytes, afterKey)
+            val decoded = decodeValue(bytes, afterKey, depth + 1)
             entries.add(key to decoded.value)
             cursor = decoded.next
         }
@@ -206,8 +220,10 @@ object Amf0 {
 
     private fun requireRemaining(bytes: ByteArray, offset: Int, count: Int) {
         // count < 0 covers a u32 length that overflowed Int (a hostile
-        // long-string/ecma count) — a decode error, not an index bomb.
-        if (count < 0 || offset + count > bytes.size) {
+        // long-string/ecma count) — a decode error, not an index bomb. The sum
+        // is Long so a near-MaxInt length plus its offset cannot wrap past the
+        // bounds check into a StringIndexOutOfBounds.
+        if (count < 0 || offset.toLong() + count > bytes.size) {
             throw AmfDecodeException("Truncated AMF0 payload: need $count bytes at offset $offset of ${bytes.size}")
         }
     }

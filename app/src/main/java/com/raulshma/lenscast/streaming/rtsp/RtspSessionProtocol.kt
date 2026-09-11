@@ -44,11 +44,18 @@ object RtspSessionProtocol {
         }
         val match = Regex("interleaved=(\\d+)-(\\d+)", RegexOption.IGNORE_CASE).find(header)
             ?: return TransportVerdict.Interleaved(channels = null)
+        // `(\d+)` matches values past Int range ("interleaved=99999999999999-0"
+        // crashed the parse with NumberFormatException) and channel numbers
+        // ride one wire byte, so anything unparseable or outside 0..255 falls
+        // back to the caller's defaults instead of blowing up or corrupting
+        // the `$` framing.
+        val rtp = match.groupValues[1].toIntOrNull()
+        val rtcp = match.groupValues[2].toIntOrNull()
+        if (rtp == null || rtcp == null || rtp !in 0..255 || rtcp !in 0..255) {
+            return TransportVerdict.Interleaved(channels = null)
+        }
         return TransportVerdict.Interleaved(
-            InterleavedChannels(
-                rtp = match.groupValues[1].toInt(),
-                rtcp = match.groupValues[2].toInt(),
-            )
+            InterleavedChannels(rtp = rtp, rtcp = rtcp),
         )
     }
 

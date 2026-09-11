@@ -49,13 +49,18 @@ object WsVideoProtocol {
      */
     fun annexBToAvcc(data: ByteArray): ByteArray = nalUnitsToAvcc(splitAnnexB(data))
 
-    /** The avcC (DecoderConfigurationRecord) bytes for a given SPS/PPS. */
+    /**
+     * The avcC (DecoderConfigurationRecord) bytes for a given SPS/PPS. The
+     * SPS header bytes are indexed defensively: a start-code-free NAL of
+     * fewer than 4 bytes typed SPS by its first byte would otherwise be an
+     * ArrayIndexOutOfBounds inside the WS fan-out.
+     */
     fun avcC(sps: ByteArray, pps: ByteArray): ByteArray {
         val out = java.io.ByteArrayOutputStream(16 + sps.size + pps.size)
         out.write(1) // configurationVersion
-        out.write(sps[1].toInt()) // AVCProfileIndication
-        out.write(sps[2].toInt()) // profile_compatibility
-        out.write(sps[3].toInt()) // AVCLevelIndication
+        out.write(sps.getOrElse(1) { 66.toByte() }.toInt()) // AVCProfileIndication (66 = baseline fallback)
+        out.write(sps.getOrElse(2) { 0.toByte() }.toInt()) // profile_compatibility
+        out.write(sps.getOrElse(3) { 30.toByte() }.toInt()) // AVCLevelIndication (30 = level 3.0 fallback)
         out.write(0xFF) // 111111 + lengthSizeMinusOne=3 (4-byte lengths)
         out.write(0xE1) // 111 + numOfSequenceParameterSets=1
         writeNal(out, sps)

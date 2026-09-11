@@ -47,7 +47,7 @@ class RtmpChunkReader(
     private var bufferLen = 0
 
     fun setChunkSize(size: Int) {
-        require(size in 1..0xFFFFFF) { "Chunk size out of range: $size" }
+        require(size in 1..RtmpChunkProtocol.MAX_CHUNK_SIZE) { "Chunk size out of range: $size" }
         chunkSize = size
     }
 
@@ -107,7 +107,18 @@ class RtmpChunkReader(
             }
             else -> csid = rawCsid
         }
-        val state = states.getOrPut(csid) { MessageState() }
+        val state = if (states.containsKey(csid)) {
+            states.getValue(csid)
+        } else {
+            // Hostile-input bound: a peer minting message state per fresh csid
+            // (two header bytes each) gets dropped instead of growing the map.
+            if (states.size >= RtmpChunkProtocol.MAX_CHUNK_STREAMS) {
+                throw RtmpChunkProtocolException(
+                    "Chunk stream $csid exceeds the ${RtmpChunkProtocol.MAX_CHUNK_STREAMS}-stream cap"
+                )
+            }
+            states.getOrPut(csid) { MessageState() }
+        }
 
         when (fmt) {
             0 -> {
@@ -130,11 +141,15 @@ class RtmpChunkReader(
                 }
                 state.timestamp = ts
                 state.delta = -1
+                requireMessageLength(length)
                 state.length = length
                 state.type = type
                 state.streamId = streamId
                 state.payloadSoFar = 0
-                state.payload = if (length > 0) ByteArray(length) else ByteArray(0)
+                // Payload memory is claimed as bytes actually arrive
+                // ([appendPayload] grows geometrically), never up front — a
+                // hostile header cannot mint a 16 MB allocation with 12 bytes.
+                state.payload = ByteArray(0)
             }
             1 -> {
                 if (bufferLen < cursor + 7) return null
@@ -152,10 +167,11 @@ class RtmpChunkReader(
                 }
                 state.timestamp += delta
                 state.delta = delta
+                requireMessageLength(length)
                 state.length = length
                 state.type = type
                 state.payloadSoFar = 0
-                state.payload = if (length > 0) ByteArray(length) else ByteArray(0)
+                state.payload = ByteArray(0)
             }
             2 -> {
                 if (bufferLen < cursor + 3) return null
@@ -172,7 +188,7 @@ class RtmpChunkReader(
                 state.timestamp += delta
                 state.delta = delta
                 state.payloadSoFar = 0
-                state.payload = if (state.length > 0) ByteArray(state.length) else ByteArray(0)
+                state.payload = ByteArray(0)
             }
             3 -> {
                 // A fmt3 chunk with no preceding header for its csid is a
@@ -200,7 +216,7 @@ class RtmpChunkReader(
                 }
                 if (!continuing) {
                     state.payloadSoFar = 0
-                    state.payload = if (state.length > 0) ByteArray(state.length) else ByteArray(0)
+                    state.payload = ByteArray(0)
                 }
             }
         }
@@ -208,14 +224,37 @@ class RtmpChunkReader(
     }
 
     private fun emit(state: MessageState) {
-        onMessage(state.type, state.streamId, state.timestamp, state.payload)
+        // Geometric growth can overshoot [length] by up to 2×; consumers decode
+        // the whole array, so hand over exactly the message's declared bytes.
+        val payload = if (state.payload.size == state.length) {
+            state.payload
+        } else {
+            state.payload.copyOf(state.length)
+        }
+        onMessage(state.type, state.streamId, state.timestamp, payload)
         state.payload = ByteArray(0)
         state.payloadSoFar = 0
     }
 
+    /** Rejects a declared message length past [RtmpChunkProtocol.MAX_MESSAGE_LENGTH_BYTES] — fail loud, don't pre-allocate. */
+    private fun requireMessageLength(length: Int) {
+        if (length > RtmpChunkProtocol.MAX_MESSAGE_LENGTH_BYTES) {
+            throw RtmpChunkProtocolException(
+                "Message length $length exceeds the ${RtmpChunkProtocol.MAX_MESSAGE_LENGTH_BYTES}-byte cap"
+            )
+        }
+    }
+
     private fun appendPayload(state: MessageState, src: ByteArray, offset: Int, count: Int) {
         if (state.payload.size < state.payloadSoFar + count) {
-            state.payload = state.payload.copyOf(state.payloadSoFar + count)
+            // Geometric growth capped at the message-length bound: buffered
+            // memory stays within 2× the bytes actually received, so a declared
+            // length alone can never drive the allocation.
+            val grown = minOf(
+                maxOf(state.payloadSoFar + count, state.payload.size * 2),
+                RtmpChunkProtocol.MAX_MESSAGE_LENGTH_BYTES,
+            )
+            state.payload = state.payload.copyOf(grown)
         }
         System.arraycopy(src, offset, state.payload, state.payloadSoFar, count)
         state.payloadSoFar += count

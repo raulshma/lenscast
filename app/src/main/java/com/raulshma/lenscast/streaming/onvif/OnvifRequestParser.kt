@@ -33,14 +33,21 @@ object OnvifRequestParser {
         return child.groupValues[1].ifBlank { child.groupValues[2] }.ifBlank { null }
     }
 
-    /** Body open tag with any prefix; captures everything up to its closing tag. */
+    /**
+     * Body open tag with any prefix; captures everything up to its closing tag.
+     * The `*+` possessive quantifiers are a ReDoS bound, not a semantic
+     * choice: `[\w.-]` never matches `:` or `>` and `[^>]` never matches `>`,
+     * so the greedy backtracking they eliminate could only ever fail — but a
+     * hostile 1 MB garbage body (the transport's cap) made every scan position
+     * re-walk the whole prefix run, ~10^12 steps of CPU wedge per request.
+     */
     private val BODY_REGEX = Regex(
-        "<(?:[A-Za-z_][\\w.-]*:)?Body[^>]*>(.*?)</(?:[A-Za-z_][\\w.-]*:)?Body>",
+        "<(?:[A-Za-z_][\\w.-]*+:)?Body[^>]*+>(.*?)</(?:[A-Za-z_][\\w.-]*+:)?Body>",
         setOf(RegexOption.DOT_MATCHES_ALL, RegexOption.IGNORE_CASE),
     )
 
     /** `<prefix:LocalName` or `<LocalName` — captures the local-name. */
     private val FIRST_CHILD_REGEX = Regex(
-        "<[A-Za-z_][\\w.-]*:([A-Za-z_][\\w.-]*)|<([A-Za-z_][\\w.-]*)",
+        "<[A-Za-z_][\\w.-]*+:([A-Za-z_][\\w.-]*+)|<([A-Za-z_][\\w.-]*+)",
     )
 }

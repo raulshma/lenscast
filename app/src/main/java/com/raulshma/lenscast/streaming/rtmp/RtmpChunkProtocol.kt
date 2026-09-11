@@ -50,4 +50,35 @@ object RtmpChunkProtocol {
 
     /** The outgoing size the publisher announces — one video AU spans a bounded number of chunks. */
     const val PUBLISHER_OUT_CHUNK_SIZE = 4096
+
+    // ── hostile-input bounds (the read side's fail-loud limits) ──
+
+    /**
+     * The largest message length the reader accepts from the wire. The u24
+     * length field already caps a single message at 16 MB; a phone has no
+     * reason to receive command/media messages anywhere near that, and one
+     * 16 MB header per chunk stream × 65 599 chunk streams was a remote
+     * OOM dial. Generous against every legitimate peer message, small
+     * against a heap.
+     */
+    const val MAX_MESSAGE_LENGTH_BYTES = 0x100000 // 1 MiB
+
+    /**
+     * How many distinct chunk streams the reader tracks at once. The protocol
+     * allows 65 599, this publisher's peers use 2-6; a hostile peer minting
+     * per-csid message state by the tens of thousands gets dropped instead.
+     */
+    const val MAX_CHUNK_STREAMS = 32
+
+    /** The chunk-size values [RtmpChunkReader.setChunkSize] accepts (the u24 field's range). */
+    const val MAX_CHUNK_SIZE = 0xFFFFFF
 }
+
+/**
+ * The reader's declared failure: a wire stream that violates the chunk
+ * protocol's bounds (oversized message length, chunk-stream exhaustion).
+ * Callers treat it exactly like [RtmpPublishException] — the attempt fails,
+ * the connection drops — never an index bomb, negative-size allocation, or
+ * an unchecked throw from deep inside the parse loop.
+ */
+class RtmpChunkProtocolException(message: String) : Exception(message)

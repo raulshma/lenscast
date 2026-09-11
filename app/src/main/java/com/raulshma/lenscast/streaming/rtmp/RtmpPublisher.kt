@@ -375,7 +375,13 @@ internal class RtmpPublisher(
         val reader = chunkReader ?: return
         when (typeId) {
             RtmpChunkProtocol.TYPE_SET_CHUNK_SIZE -> {
-                if (payload.size >= 4) reader.setChunkSize(readInt32(payload, 0) and 0x7FFFFFFF)
+                if (payload.size >= 4) {
+                    val size = readInt32(payload, 0) and 0x7FFFFFFF
+                    // Bounds guard, not a precondition: a hostile server's
+                    // Set Chunk Size of 0 (or above the u24 wire max) must be
+                    // ignored, not thrown out of the middle of reader.feed().
+                    if (size in 1..RtmpChunkProtocol.MAX_CHUNK_SIZE) reader.setChunkSize(size)
+                }
             }
             RtmpChunkProtocol.TYPE_WINDOW_ACK_SIZE -> {
                 if (payload.size >= 4) ackWindowBytes = readInt32(payload, 0)
