@@ -113,14 +113,26 @@ class CaptureMediaResolver(
      * open time), file-backed paths report the actual file length. When the
      * media is encrypted at rest, the stored size is the ciphertext length
      * and the reported size is the plaintext the stream will actually yield.
+     * The at-rest verdict rides the same header sniff the decrypt wrap
+     * already did — one open, one read.
      */
     fun openMedia(path: String, recordedSizeBytes: Long): OpenedMedia? {
-        val stream = openDecryptedStream(path) ?: return null
+        val raw = openRawStream(path) ?: return null
+        val stream: InputStream
+        val encrypted: Boolean
+        try {
+            val verdict = decryptWrapVerdict(path, raw)
+            stream = verdict.first
+            encrypted = verdict.second
+        } catch (_: Exception) {
+            runCatching { raw.close() }
+            return null
+        }
         val storedSize = when (classify(path)) {
             PathKind.CONTENT_URI -> recordedSizeBytes
             PathKind.FILE_URI, PathKind.PLAIN_PATH -> fileOf(path)?.length() ?: recordedSizeBytes
         }
-        val sizeBytes = if (isEncryptedAtRest(path)) {
+        val sizeBytes = if (encrypted) {
             MediaCrypto.plaintextSize(storedSize)
         } else {
             storedSize
@@ -144,17 +156,25 @@ class CaptureMediaResolver(
      * (throwing when no key provider is wired — ciphertext is never served),
      * and re-attaches the consumed bytes to plaintext media.
      */
-    private fun decryptWrap(path: String, raw: InputStream): InputStream {
+    private fun decryptWrap(path: String, raw: InputStream): InputStream =
+        decryptWrapVerdict(path, raw).first
+
+    /**
+     * [decryptWrap]'s verdict shape: the (possibly decrypting) stream plus
+     * the at-rest verdict the header sniff already established — the size
+     * mapper needs it without re-opening the file for a second sniff.
+     */
+    private fun decryptWrapVerdict(path: String, raw: InputStream): Pair<InputStream, Boolean> {
         val header = ByteArray(MediaCrypto.HEADER_SIZE_BYTES)
         val read = readFully(raw, header)
         if (!MediaCrypto.isEncryptedHeader(header)) {
             // Plaintext (or too small to be ours): the sniffed bytes are real
             // media bytes — put them back in front of the remainder.
-            return SequenceInputStream(ByteArrayInputStream(header, 0, read), raw)
+            return SequenceInputStream(ByteArrayInputStream(header, 0, read), raw) to false
         }
         val provider = keyProvider
             ?: throw IllegalStateException("Encrypted media but no key provider wired for $path")
-        return MediaCrypto.decryptFrom(provider.getOrCreateKey(), header.copyOf(read), raw)
+        return MediaCrypto.decryptFrom(provider.getOrCreateKey(), header.copyOf(read), raw) to true
     }
 
     // ── Existence and deletion ──

@@ -206,6 +206,22 @@ time) and a fast `modelDownload` lane takes the settings fetch over — the
 slow lane backs off — while the wire state is `downloading`, so the progress
 row moves even mid-stream.
 
+### Sound Classification
+**`capture/ml/AudioModelStore.kt` + the sound-classification engine** —
+YAMNet, the audio twin of the object gate: the store runs the exact
+DetectionModelStore lifecycle for the ~3.9 MB tflite (on-demand download
+with a digest gate and quarantine-at-resolve, idempotent requestDownload —
+one class per model so each engine, settings row, and download route reads
+its own state), and the engine annotates each RMS sound event with class
+labels (521 AudioSet classes, 16 kHz mono input, 0.96 s windows;
+`YamnetLabels` is the single index→name mapping). Annotate-only by design:
+classification never suppresses or delays the RMS event — a missing model,
+an API-24- device, or a failed window ships the event unlabeled — with a
+confidence threshold, a user-narrowable allow-list of security-relevant
+classes, and label-stability/cooldown logic; the labels ride the
+webhook/MQTT payloads, the event log, and the dashboard feed like the ML
+object labels.
+
 ### Object Detection Engine
 **`capture/ml/ObjectDetectionEngine.kt`**,
 **`capture/model/DetectionClassPolicy.kt`** — the model and policy halves of
@@ -284,19 +300,36 @@ each append. Both windows live in the Settings Store
 (`captureRetentionDays` / `eventRetentionDays`); no caller re-derives a
 cutoff.
 
+### Media Encryption at Rest
+**`core/MediaCrypto.kt` + `capture/EncryptedMediaSink.kt`** — opt-in
+(default-off), migration-free per-file encryption: one AES-256-GCM blob per
+capture under a single hardware-backed Keystore key, at-rest format
+`"LCE1" | nonce(12) | ciphertext+tag`, with the real `.jpg`/`.mp4` names
+kept. `EncryptedMediaSink` is the one encrypt-on-write seam (both
+producers — photos and recordings — funnel through it, and a failed write
+deletes the row so MediaStore never holds a half-written capture), and the
+Capture Media Resolver's header sniff is the one decrypt-on-read path, so
+plaintext and ciphertext coexist forever and the toggle never migrates
+anything. Documented trade-offs while enabled: video thumbnails show a
+placeholder (the thumbnail decoder needs real mp4 bytes at rest), photos
+are served from a decrypted cache file for Coil, and backups upload the
+*decrypted* capture so the remote copy is readable evidence.
+
 ### Encoded Stream Hub
 **`streaming/EncodedStreamHub.kt`** — the shared video/AAC encode pipeline:
 camera YUV in, encoded access units out to every registered sink — the RTSP
-server (RTP), the HLS ring, and the WS video path — with its start/stop
-decision the pure `EncodedStreamPolicy` verdict over sink activity. The
+server (RTP), the HLS ring, the WS video path, and the RTMP push — with its
+start/stop decision the pure `EncodedStreamPolicy` verdict over sink
+activity. The
 codec seam is `RtspVideoCodec`: the hub lazily instantiates the H.264 or
 H.265 encoder (one per codec, cached across flips), reconfigures
 stop → new encoder → start on a codec change, and implements the
 codec-aware `EncodedSource` seam the RTSP server reads for its SDP and PLAY
 sync-frame requests (SPS/PPS of the active codec, VPS H.265-only, so an
-H.264 SDP can never see a stale VPS). The fan-out feeds all three sinks the
-same access units except under H.265, where the H.264-only HLS muxer and
-WS/WebCodecs path are gated off and only RTSP receives.
+H.264 SDP can never see a stale VPS). The fan-out feeds all four sinks the
+same access units except under H.265, where the H.264-only HLS muxer,
+WS/WebCodecs path, and RTMP push are gated off (the RTMP start ladder
+refuses an H.265 codec outright) and only RTSP receives.
 
 ### H264 Stream Assembler
 **`streaming/rtsp/H264StreamAssembler.kt`** — the wire-format core of the
@@ -454,11 +487,14 @@ the endpoint list with `p256dh`/`auth` redacted, and subscribe/unsubscribe;
 deliberately absent from the token allow-list because a subscription is
 browser-session state, not an automation API). The
 `AuditLog` (a capped, atomically-persisted `filesDir/audit_log.json` ring)
-is written from exactly two places — the ApiRouter (every POST/PUT/DELETE it
-answers, dispatched or unknown-route, success or error, as `"$method $path"`)
-and the StreamingServer
+is written from exactly three places — the ApiRouter (every POST/PUT/DELETE it
+answers, dispatched or unknown-route, success or error, as `"$method $path"`),
+the StreamingServer
 (`login.success`/`login.failed` with the remote address, only while auth is
-armed) — and read through `AuditWebHandler` (GET/DELETE `/api/audit`; the
+armed), and the HttpAuthFilter (`access.denied` with the method and URI when
+the viewer-role Role Gate refuses a request — the denial the filter answers
+403 is the one audited path outside the router seam) — and read through
+`AuditWebHandler` (GET/DELETE `/api/audit`; the
 router audits the clear itself, so a wiped trail reopens with
 `DELETE /api/audit` as its first entry — a cleared log reads as cleared);
 the audit never breaks the audited path. The seam
@@ -546,6 +582,20 @@ InvalidCredentials) and the Auth Filter maps reason → status — it never
 string-matches the human-readable message. Credentials are read live through
 the gate (the manager-owned reference *is* the provider); no auth snapshot is
 re-applied when the server is recreated.
+
+### Viewer Role Gate
+**`streaming/web/RoleGatePolicy.kt`** — the pure viewer-verdict matrix
+behind `HttpAuthFilter`'s role gate: ADMIN (and the API token, and
+auth-off) allows everything; a VIEWER session reads everything except the
+three admin-only GETs (`/api/auth/config`, `/api/auth/sessions`,
+`/api/audit`) and writes nothing except its own logout and the talkback
+uplink (`/api/audio/uplink` — the doorbell-intercom use; the WS twin
+`/ws/talkback` rides the sidecar's cookie gate with no role by the same
+decision). Every denial the filter answers 403 is audited as
+`access.denied` — the one audited path outside the router seam. Credentials
+are the optional second pair on the Web Auth Gate (`setViewerCredentials`);
+sessions carry their role, and the token path never mints sessions so it
+has no viewer form.
 
 ### Token Write Policy
 **`streaming/web/TokenWritePolicy.kt`** — the exact POST routes a valid API
@@ -647,6 +697,34 @@ the RFC 7798 packetizer under Video Packetizers. Persisted as
 `rtsp_video_codec`; the swap is NEEDS_RESTART. H.265 fans out to RTSP only —
 the HLS muxer and WS/WebCodecs video path stay H.264-only at the hub's
 fan-out gate.
+
+### RTMP Push Output
+**`streaming/rtmp/`** — `RtspOutput`'s push twin: `RtmpOutput` owns the
+retained URL (settings land even while the output is stopped, so the next
+start picks them up), the enabled gate, the start-time validation ladder
+(a usable URL parsed by the pure `RtmpUrl`, plus the H.264 codec — H.265
+has no standard RTMP mapping, so a push under it is refused with a
+readable error), and the publisher lifecycle with restart-on-URL-change;
+`RtmpPublisher` speaks the wire protocol (handshake, AMF0 connect with
+tcUrl/userinfo credentials, FLV-tagged audio/video chunks, the
+FCUnpublish + deleteStream clean close) with a capped-backoff
+auto-reconnect while enabled. The URL is a write-only credential over the
+Web API (the stream key is its last path segment), and a portless
+authority defaults to 1935 for `rtmp` and 443 for `rtmps`. StreamingManager
+keeps the public surface and the hub fan-out.
+
+### WHIP Push Output
+**`streaming/whip/`** — `RtmpOutput`'s WebRTC twin (RFC 9725): `WhipOutput`
+owns the retained endpoint/token/STUN settings, the enabled gate, and the
+start-time validation ladder (enabled + a usable URL parsed by the pure
+`WhipUrl` — no codec gate, because libwebrtc encodes its own H.264 from the
+NV21 analysis tap, independent of the RTSP codec). The publisher is one
+WHIP session: ICE one-shot with a ~3 s gather cap (blank STUN = host
+candidates only, LAN reach), SDP offer/answer against the endpoint with
+the optional bearer token, a DELETE teardown of the session resource, and
+the status mirrored onto the snapshot exactly like RTMP's. The endpoint
+carries no embedded secret so it round-trips; the token is write-only like
+every other credential.
 
 ### AAC Format
 **`streaming/rtsp/AacFormat.kt`** — one home for the AAC stream's format
@@ -1129,3 +1207,12 @@ storage bar, `/api/system`) routes through `StorageManager.quotaBytes` over
 the live value — the default stays 2 GB, so existing installs behave
 identically until the knob is turned (in-app Storage section, web
 StorageCard).
+
+### Wear Companion
+**`wear/`** — the Wear OS remote, deliberately zero-coupled from `:app`: it
+talks to the phone over the same Web API (`WearApiClient` with the pure
+`WearRequestUrls` path builder, org.json for its own decoding — no App Json
+or any app-module dependency by design, keeping the wear APK minimal and
+its manifest INTERNET-only), `WearRemoteController` drives the
+stream/recording lifecycle actions, and `WearSettingsStore` holds the phone
+base URL and credentials locally on the watch.

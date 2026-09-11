@@ -34,7 +34,7 @@ through the settings store):
 
 ```
 rtmp://host[:port]/app/streamKey
-rtmps://host[:port]/app/streamKey          # TLS (the default port is 1935)
+rtmps://host[:port]/app/streamKey          # TLS (default port 443; plain rtmp is 1935)
 rtmp://user:pass@host[:port]/app/streamKey # optional credentials on the connect command
 ```
 

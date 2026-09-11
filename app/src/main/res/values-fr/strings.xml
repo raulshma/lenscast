@@ -390,6 +390,8 @@
     <string name="detection_quiet_from">Silence à partir de (minute du jour)</string>
     <string name="detection_quiet_until">Silence jusqu\'à (minute du jour)</string>
     <string name="detection_tamper">Détection de sabotage (coupure d\'alimentation)</string>
+    <string name="detection_push">Alertes Web Push</string>
+    <string name="detection_push_description">Envoie des notifications push chiffrées aux tableaux de bord abonnés depuis la carte Web Push de l\'interface web — le navigateur les affiche même onglet fermé (mode tableau de bord HTTPS)</string>
     <string name="detection_ml">Détection d\'objets (ML)</string>
     <string name="detection_ml_description">S\'applique en plus de la détection de mouvement — les alertes ne se déclenchent que si une personne, un animal ou un véhicule est détecté dans l\'image</string>
     <string name="detection_alert_people">Alerter sur les personnes</string>

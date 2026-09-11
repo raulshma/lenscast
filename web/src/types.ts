@@ -95,17 +95,21 @@ export interface StreamingSettings {
   /** RTSP output codec: 'h264' (default, full HLS/WebCodecs compatibility) or 'h265'. */
   rtspVideoCodec: RtspVideoCodec
   /**
-   * The RTMP push output (publish to an RTMP/RTMPS server). The push URL
-   * round-trips raw — the server judges it (scheme, host, H.264 codec) at
-   * start time, not on save.
+   * The RTMP push output (publish to an RTMP/RTMPS server). The server
+   * judges the push URL (scheme, host, H.264 codec) at start time, not on
+   * save.
    */
   rtmpEnabled: boolean
-  /** The push target: `rtmp(s)://[user:pass@]host[:port]/app/streamKey`. */
+  /**
+   * The push target: `rtmp(s)://[user:pass@]host[:port]/app/streamKey`.
+   * Write-only, like whipToken: the URL embeds the stream key, so PUT
+   * carries it and responses are blank (an empty PUT keeps the stored one).
+   */
   rtmpUrl: string
   /**
-   * The WHIP push output (WebRTC-HTTP egress, RFC 9725). Like the RTMP push
-   * URL it round-trips over the Web API, but the endpoint carries no
-   * embedded secret; the bearer token rides whipToken.
+   * The WHIP push output (WebRTC-HTTP egress, RFC 9725). The endpoint
+   * round-trips over the Web API and carries no embedded secret; the
+   * bearer token rides whipToken.
    */
   whipEnabled: boolean
   /** The WHIP endpoint: `http(s)://[user:pass@]host[:port]/endpoint`. */

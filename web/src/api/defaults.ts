@@ -34,8 +34,9 @@ export const API_DEFAULTS = {
   // RTSP video codec wire name (RtspVideoCodec mapper). The swap restarts a
   // live RTSP output; HLS/WebCodecs stay H.264-only until it flips back.
   rtspVideoCodec: 'h264',
-  // RTMP push output (StreamingSettingsDto). The push URL round-trips raw;
-  // the server's RtmpUrl.parse judges it at start time.
+  // RTMP push output (StreamingSettingsDto). rtmpUrl is write-only like
+  // whipToken (the stream key is embedded in it): sent once, blank in every
+  // response; the server's RtmpUrl.parse judges it at start time.
   rtmpEnabled: false,
   rtmpUrl: '',
   // WHIP push output (StreamingSettingsDto / StreamDefaults.WHIP_STUN_SERVER).

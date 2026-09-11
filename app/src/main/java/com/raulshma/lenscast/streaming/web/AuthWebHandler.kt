@@ -36,25 +36,14 @@ class AuthWebHandler(
         val auth = settingsDataStore.authSettings.value
         val viewerConfigured = !auth.viewerUsername.isNullOrEmpty() && !auth.viewerPasswordHash.isNullOrEmpty()
         return configAdapter.toJson(
-            if (callerRole == SessionRole.VIEWER) {
-                AuthConfigDto(
-                    enabled = auth.enabled,
-                    username = "",
-                    password = "",
-                    viewerEnabled = viewerConfigured,
-                    viewerUsername = auth.viewerUsername,
-                    viewerConfigured = viewerConfigured,
-                )
-            } else {
-                AuthConfigDto(
-                    enabled = auth.enabled,
-                    username = auth.username,
-                    password = "",
-                    viewerEnabled = viewerConfigured,
-                    viewerUsername = auth.viewerUsername,
-                    viewerConfigured = viewerConfigured,
-                )
-            },
+            AuthConfigDto(
+                enabled = auth.enabled,
+                username = if (callerRole == SessionRole.VIEWER) "" else auth.username,
+                password = "",
+                viewerEnabled = viewerConfigured,
+                viewerUsername = auth.viewerUsername,
+                viewerConfigured = viewerConfigured,
+            ),
         )
     }
 

@@ -59,7 +59,8 @@ class SettingsWebHandler(
      *
      * What the export carries: exactly what GET /api/settings returns — the
      * write-only credentials (stream-auth password hash, WebDAV password,
-     * Telegram bot token, MQTT password, WHIP bearer token, API token) are
+     * Telegram bot token, MQTT password, WHIP bearer token, API token, and
+     * the RTMP push URL, whose stream key is embedded in it) are
      * blank, but `webhookHeaders` is a user-authored header map that
      * round-trips in full and frequently contains an Authorization header.
      * The file is configuration, not a sanitized share artifact — treat it
@@ -122,7 +123,9 @@ class SettingsWebHandler(
                 rtspResolution = store.rtspResolution.value.wireName,
                 rtspVideoCodec = store.rtspVideoCodec.value.wireName,
                 rtmpEnabled = store.rtmpEnabled.value,
-                rtmpUrl = store.rtmpUrl.value,
+                // Write-only, like whipToken: the URL embeds the stream key,
+                // a credential that never round-trips (see docs/rtmp.md).
+                rtmpUrl = "",
                 whipEnabled = store.whipEnabled.value,
                 whipUrl = store.whipUrl.value,
                 // Write-only, like mqttPassword: blank in every response.
@@ -282,11 +285,14 @@ class SettingsWebHandler(
             // or unknown codec wire name is skipped, keeping the stored one.
             RtspVideoCodec.fromWireNameOrNull(stream.rtspVideoCodec)
                 ?.let { settingsDataStore.saveRtspVideoCodec(it) }
-            // RTMP push: the URL round-trips raw — validity is judged at
-            // start time by RtmpUrl.parse (plus the H.264 codec gate), the
-            // same policy as the WHIP endpoint below.
             settingsDataStore.saveRtmpEnabled(stream.rtmpEnabled)
-            settingsDataStore.saveRtmpUrl(stream.rtmpUrl)
+            // RTMP push: write-only like the WHIP token below — the URL
+            // embeds the stream key, so responses never carry it and an
+            // empty update keeps the stored one. A presented value is judged
+            // at start time by RtmpUrl.parse (plus the H.264 codec gate).
+            if (stream.rtmpUrl.isNotEmpty()) {
+                settingsDataStore.saveRtmpUrl(stream.rtmpUrl)
+            }
             // WHIP push: endpoint/STUN round-trip; validity is judged at
             // start time by the output (a readable error beats silently
             // "fixing" a URL the user mistyped).

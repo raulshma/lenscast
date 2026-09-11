@@ -1,4 +1,4 @@
-import { Show } from 'solid-js'
+import { Show, createSignal } from 'solid-js'
 import type { AllSettings, DeviceStatus } from '../types'
 import { API_DEFAULTS } from '../api/defaults'
 import SettingsCard from './SettingsCard'
@@ -18,11 +18,12 @@ interface Props {
 /**
  * RTMP Push (publish to an RTMP/RTMPS server): pushes the live feed to an
  * RTMP ingest (MediaMTX, nginx-rtmp, YouTube…), independent of the Web
- * Stream and RTSP outputs. Unlike the WHIP bearer token the push URL
- * round-trips over the Web API (stream key embedded), so the input binds
- * straight to the server value — the live hint below only checks scheme +
- * host; the server's RtmpUrl.parse has the final word at start time, where
- * the H.264-only gate also refuses an H.265 RTSP codec. The status line and
+ * Stream and RTSP outputs. Like the WHIP bearer token the push URL is
+ * write-only (the stream key is embedded in it): responses never carry it,
+ * the input binds to a local draft, and an empty save keeps the stored one —
+ * the live hint below only checks scheme + host on what was typed; the
+ * server's RtmpUrl.parse has the final word at start time, where the
+ * H.264-only gate also refuses an H.265 RTSP codec. The status line and
  * Start/Stop buttons ride the status snapshot (rtmpActive/rtmpStatus/
  * rtmpError) and the shared stream-action pipeline, exactly like the WHIP
  * and RTSP pairs.
@@ -31,8 +32,10 @@ export default function RtmpCard(props: Props) {
   const s = () => props.settings()
   const stream = () => s()?.streaming
   const rtmpOn = () => stream()?.rtmpEnabled ?? API_DEFAULTS.rtmpEnabled
-  const rtmpUrl = () => stream()?.rtmpUrl ?? API_DEFAULTS.rtmpUrl
   const rtmpActive = () => props.status()?.streaming?.rtmpActive ?? false
+  // The write-only draft: the stored URL never echoes back, so the field
+  // starts blank ("(unchanged)" placeholder) like the WHIP token field.
+  const [urlDraft, setUrlDraft] = createSignal('')
 
   const statusView = () =>
     rtmpStatusView({
@@ -40,7 +43,7 @@ export default function RtmpCard(props: Props) {
       active: rtmpActive(),
       error: props.status()?.streaming?.rtmpError,
     })
-  const urlField = () => rtmpUrlField(rtmpUrl())
+  const urlField = () => rtmpUrlField(urlDraft())
 
   return (
     <SettingsCard
@@ -78,12 +81,15 @@ export default function RtmpCard(props: Props) {
           </div>
           <input
             id="rtmp-url"
-            type="text"
+            type="password"
             class="field-input field-input-full"
-            autocomplete="off"
-            placeholder="rtmp://ingest.example.com/live/stream-key"
-            value={rtmpUrl()}
-            onInput={(e) => props.updateStreamingDebounced({ rtmpUrl: e.currentTarget.value })}
+            autocomplete="new-password"
+            placeholder="(unchanged) rtmp://ingest.example.com/live/stream-key"
+            value={urlDraft()}
+            onInput={(e) => {
+              setUrlDraft(e.currentTarget.value)
+              props.updateStreamingDebounced({ rtmpUrl: e.currentTarget.value })
+            }}
           />
           <div
             class={`status-banner status-banner-${urlField().invalid ? 'error' : 'info'} stream-mode-hint`}
@@ -125,9 +131,10 @@ export default function RtmpCard(props: Props) {
               class="card-btn card-btn-primary"
               onClick={props.handleStartRtmp}
               // The server refuses a start when the push is disabled or the
-              // URL is unusable — gate on both so the reason never has to
-              // round-trip.
-              disabled={props.streamActionLoading() || !rtmpOn() || !urlField().valid}
+              // stored URL is unusable — the field is write-only (blank
+              // never means unconfigured), so only the toggle gates here and
+              // a refusal lands on the status line with its readable reason.
+              disabled={props.streamActionLoading() || !rtmpOn()}
             >
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <polygon points="5 3 19 12 5 21 5 3" />

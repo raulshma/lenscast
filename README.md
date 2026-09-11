@@ -52,7 +52,7 @@ LensCast is an Android camera application with live video/audio streaming to web
 - Color temperature adjustment (2000K–9000K) for manual white balance
 - Viewfinder aids: composition grid lines (3×3 / 4×4 / golden ratio), a two-axis spirit level (green when near-level), a self-timer (3 s / 10 s, tap-to-cancel), and pro tools computed from the live analysis stream — luma histogram, over/under-exposure zebras, and focus peaking
 - Photo capture quality: JPEG quality setting (60–100) with a maximize-quality capture mode, RAW+JPEG (DNG) capture on cameras that support it (per-shot toggle, fail-closed on capability check), and opt-in EXIF tagging — GPS geotag (runtime location permission requested only when the setting is first enabled) plus artist/comment metadata
-- Localized UI: the app screens ship in English, German, and Spanish
+- Localized UI: the app screens ship in English, German, Spanish, French, Russian, Simplified Chinese, and Brazilian Portuguese
 
 ### Live Streaming
 - HTTPS mode with a self-signed on-device certificate (fingerprint shown for one-tap verification) — encrypts streams and enables in-browser microphone talkback
@@ -93,6 +93,7 @@ LensCast is an Android camera application with live video/audio streaming to web
 - Installable PWA (web app manifest with theme colors and icons) and a light/dark theme toggle that follows the OS preference by default
 - Storage forecast: a days-until-quota estimate computed from capture history growth against the configured storage quota, shown only when enough history exists
 - HTTP Basic Authentication login screen
+- Optional read-only viewer role: a second username/password pair (configured with the main credentials) logs family/guests into a read-only dashboard — live streams, media, timeline, and status are viewable, while every write (settings, capture, recording, stream control) is refused; the only viewer-writable routes are their own logout and the talkback pair (`/api/audio/uplink` and its WebSocket twin `/ws/talkback` — the doorbell-intercom use), and each HTTP denial lands on the audit trail as `access.denied`
 - Cinematic dark-themed glassmorphism design with micro-animations
 
 ### Detection & Alerts

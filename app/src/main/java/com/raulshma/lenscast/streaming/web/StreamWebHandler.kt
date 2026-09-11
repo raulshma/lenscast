@@ -70,82 +70,35 @@ class StreamWebHandler(
     suspend fun stopRtsp(): String = stopOutput { streamingManager.stopRtspStreaming() }
 
     /**
-     * Starts the RTMP push output — the RTSP route's twin with one twist: the
-     * connect is asynchronous, so [StreamingManager.startRtmpStreaming] true
-     * means "started and connecting/connected" while false means the
-     * synchronous validation ladder refused (disabled, unusable URL, or the
-     * H.265 codec) — the readable reason is already on the RTMP status, and
-     * the response carries the generic failure. A passing start attaches the
-     * streaming session exactly like the other outputs, rolling the push back
-     * when the session begin throws. The response carries no URL: the push
-     * target embeds the stream key, a credential that never round-trips over
-     * the Web API.
+     * Starts the RTMP push output through the shared push ladder
+     * ([startPushOutput]) — false from [StreamingManager.startRtmpStreaming]
+     * means the synchronous validation ladder refused (disabled, unusable
+     * URL, or the H.265 codec); the readable reason is already on the RTMP
+     * status, and the response carries the generic failure.
      */
-    suspend fun startRtmp(): String {
-        if (!streamingManager.isRtmpEnabled.value) {
-            return actionAdapter.toJson(
-                StreamActionResponse(success = false, error = "RTMP push is disabled"),
-            )
-        }
-        if (!streamingManager.startRtmpStreaming()) {
-            return actionAdapter.toJson(
-                StreamActionResponse(
-                    success = false,
-                    error = "Failed to start RTMP push — see the RTMP status for the reason",
-                ),
-            )
-        }
-        return try {
-            streamingSession.begin()
-            actionAdapter.toJson(
-                StreamActionResponse(success = true, isActive = streamingManager.isLiveStreaming()),
-            )
-        } catch (e: Exception) {
-            // Roll the just-started push back — never a live push without its session.
-            streamingManager.stopRtmpStreaming()
-            throw e
-        }
-    }
+    suspend fun startRtmp(): String = startPushOutput(
+        name = "RTMP",
+        enabled = { streamingManager.isRtmpEnabled.value },
+        start = { streamingManager.startRtmpStreaming() },
+        stop = { streamingManager.stopRtmpStreaming() },
+    )
 
     suspend fun stopRtmp(): String = stopOutput { streamingManager.stopRtmpStreaming() }
 
     /**
-     * Starts the WHIP push output — the RTMP route's twin with the same
-     * asynchronous-connect twist: [StreamingManager.startWhipStreaming] true
-     * means "started and connecting/connected" while false means the
-     * synchronous validation ladder refused (disabled or an unusable URL —
-     * no codec gate, libwebrtc encodes its own H.264); the readable reason is
-     * already on the WHIP status, and the response carries the generic
-     * failure. A passing start attaches the streaming session exactly like
-     * the other outputs, rolling the push back when the session begin
-     * throws. The response carries no URL: the endpoint is the device's
-     * configured publish resource, not something a viewer opens.
+     * Starts the WHIP push output through the shared push ladder
+     * ([startPushOutput]) — false from [StreamingManager.startWhipStreaming]
+     * means the synchronous validation ladder refused (disabled or an
+     * unusable URL — no codec gate, libwebrtc encodes its own H.264); the
+     * readable reason is already on the WHIP status, and the response
+     * carries the generic failure.
      */
-    suspend fun startWhip(): String {
-        if (!streamingManager.isWhipEnabled.value) {
-            return actionAdapter.toJson(
-                StreamActionResponse(success = false, error = "WHIP push is disabled"),
-            )
-        }
-        if (!streamingManager.startWhipStreaming()) {
-            return actionAdapter.toJson(
-                StreamActionResponse(
-                    success = false,
-                    error = "Failed to start WHIP push — see the WHIP status for the reason",
-                ),
-            )
-        }
-        return try {
-            streamingSession.begin()
-            actionAdapter.toJson(
-                StreamActionResponse(success = true, isActive = streamingManager.isLiveStreaming()),
-            )
-        } catch (e: Exception) {
-            // Roll the just-started push back — never a live push without its session.
-            streamingManager.stopWhipStreaming()
-            throw e
-        }
-    }
+    suspend fun startWhip(): String = startPushOutput(
+        name = "WHIP",
+        enabled = { streamingManager.isWhipEnabled.value },
+        start = { streamingManager.startWhipStreaming() },
+        stop = { streamingManager.stopWhipStreaming() },
+    )
 
     suspend fun stopWhip(): String = stopOutput { streamingManager.stopWhipStreaming() }
 
@@ -179,6 +132,47 @@ class StreamWebHandler(
             // toggle already rolled it back; rethrow so the transport reports.
             is StreamStartOutcome.BeginFailedRolledBack -> throw outcome.cause
         }
+
+    /**
+     * The one push-output start ladder the RTMP and WHIP routes share: the
+     * enabled gate, the synchronous refusal verdict (the connect itself is
+     * asynchronous — a false [start] means the output's validation ladder
+     * refused, with the readable reason already on its status), the session
+     * attach, and the per-output rollback when the attach throws. The
+     * response carries no URL for either push: the RTMP target embeds the
+     * stream key and the WHIP endpoint is the device's own publish
+     * resource — neither round-trips over the Web API.
+     */
+    private suspend fun startPushOutput(
+        name: String,
+        enabled: () -> Boolean,
+        start: () -> Boolean,
+        stop: () -> Unit,
+    ): String {
+        if (!enabled()) {
+            return actionAdapter.toJson(
+                StreamActionResponse(success = false, error = "$name push is disabled"),
+            )
+        }
+        if (!start()) {
+            return actionAdapter.toJson(
+                StreamActionResponse(
+                    success = false,
+                    error = "Failed to start $name push — see the $name status for the reason",
+                ),
+            )
+        }
+        return try {
+            streamingSession.begin()
+            actionAdapter.toJson(
+                StreamActionResponse(success = true, isActive = streamingManager.isLiveStreaming()),
+            )
+        } catch (e: Exception) {
+            // Roll the just-started push back — never a live push without its session.
+            stop()
+            throw e
+        }
+    }
 
     private suspend fun stopOutput(stop: () -> Unit): String {
         stop()

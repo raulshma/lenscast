@@ -25,7 +25,19 @@ class RtmpUrlTest {
     fun `parses rtmps as secure`() {
         val url = RtmpUrl.parse("rtmps://example.com/live/key")!!
         assertEquals(true, url.secure)
+        assertEquals(443, url.port)
         assertEquals("rtmps://example.com/live", url.tcUrl)
+        // The TLS default is 443 (1935 is the plaintext one), so a portless
+        // rtmps authority dials 443 and hides it from hostAndPort/tcUrl.
+        assertEquals("example.com", url.hostAndPort)
+    }
+
+    @Test
+    fun `an explicit rtmps port lands and a non-default port is shown`() {
+        val explicit = RtmpUrl.parse("rtmps://example.com:1935/live/key")!!
+        assertEquals(1935, explicit.port)
+        assertEquals("example.com:1935", explicit.hostAndPort)
+        assertEquals("rtmps://example.com:1935/live", explicit.tcUrl)
     }
 
     @Test

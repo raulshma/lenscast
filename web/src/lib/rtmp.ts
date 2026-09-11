@@ -59,14 +59,15 @@ const RTMP_SCHEME = /^rtmps?:\/\//i
  * The push-target field's hint/validation state. Client-side the check is
  * intentionally shallow — scheme plus a non-empty host — because the
  * server's authoritative RtmpUrl.parse runs at start time; a blank value is
- * not flagged as an error (the field simply starts empty), it just keeps
- * Start disabled.
+ * not flagged as an error: the field is write-only (the stream key is
+ * embedded in the URL, so responses never carry it) and starts blank
+ * whether or not the device holds a stored URL.
  */
 export function rtmpUrlField(value: string): RtmpUrlFieldView {
   const trimmed = value.trim()
   if (!trimmed) {
     return {
-      hint: 'Paste the push target from your streaming server, e.g. rtmp://ingest.example.com/live/stream-key.',
+      hint: 'Paste the push target from your streaming server, e.g. rtmp://ingest.example.com/live/stream-key — saved once, never echoed back.',
       invalid: false,
       valid: false,
     }

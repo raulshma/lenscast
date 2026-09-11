@@ -134,11 +134,17 @@ curl -X POST -H "$TOKEN" -H "Content-Type: application/json" \
 
 The writable set is exactly: `/api/stream/start`, `/api/stream/resume`,
 `/api/stream/stop`, `/api/stream/web/start`, `/api/stream/web/stop`,
-`/api/stream/rtsp/start`, `/api/stream/rtsp/stop`, `/api/capture`,
+`/api/stream/rtsp/start`, `/api/stream/rtsp/stop`,
+`/api/stream/rtmp/start`, `/api/stream/rtmp/stop`,
+`/api/stream/whip/start`, `/api/stream/whip/stop`, `/api/capture`,
 `/api/recording/start`, `/api/recording/stop`, `/api/deterrence/siren`,
-`/api/camera/torch`.
-Everything else stays read-only for tokens, and no `/api/auth/` route is
-ever token-writable.
+`/api/camera/torch`, `/api/settings/ml-model/download`,
+`/api/settings/audio-model/download`, and `/api/detection/test` (the model
+downloads and the test alert are device-maintenance actions that persist no
+setting — see [RTMP push](rtmp.md) for the push routes).
+Everything else stays read-only for tokens (Web Push subscriptions
+deliberately included — they are browser-session state), and no `/api/auth/`
+route is ever token-writable.
 
 ## Recording timeline (NVR day view)
 

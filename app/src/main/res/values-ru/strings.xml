@@ -402,6 +402,8 @@
     <string name="detection_quiet_from">Тишина с (минута дня)</string>
     <string name="detection_quiet_until">Тишина до (минута дня)</string>
     <string name="detection_tamper">Детекция саботажа (отключение питания)</string>
+    <string name="detection_push">Web Push-уведомления</string>
+    <string name="detection_push_description">Отправляет зашифрованные push-уведомления на дашборды, подписанные из карточки Web Push веб-интерфейса — браузер показывает их даже с закрытой вкладкой (режим дашборда по HTTPS)</string>
     <string name="detection_ml">Детекция объектов (ML)</string>
     <string name="detection_ml_description">Работает поверх детекции движения — оповещения срабатывают, только когда в кадре обнаружен человек, животное или транспортное средство</string>
     <string name="detection_alert_people">Оповещать о людях</string>

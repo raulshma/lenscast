@@ -389,6 +389,8 @@
     <string name="detection_quiet_from">Ruhe ab (Minute des Tages)</string>
     <string name="detection_quiet_until">Ruhe bis (Minute des Tages)</string>
     <string name="detection_tamper">Manipulationserkennung (Stromausfall)</string>
+    <string name="detection_push">Web-Push-Benachrichtigungen</string>
+    <string name="detection_push_description">Sendet verschlüsselte Push-Benachrichtigungen an Dashboards, die über die Web-Push-Karte der Web-Oberfläche abonniert wurden — der Browser zeigt sie auch bei geschlossenem Tab an (HTTPS-Dashboard-Modus)</string>
     <string name="detection_ml">Objekterkennung (ML)</string>
     <string name="detection_ml_description">Setzt auf der Bewegungserkennung auf — Alarme feuern nur, wenn eine Person, ein Haustier oder ein Fahrzeug im Bild erkannt wird</string>
     <string name="detection_alert_people">Alarm bei Personen</string>

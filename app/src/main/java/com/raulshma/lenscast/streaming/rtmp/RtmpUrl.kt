@@ -4,7 +4,8 @@ package com.raulshma.lenscast.streaming.rtmp
  * The RTMP push endpoint parsed out of its URL — the one pure mapper between
  * what the user configures and what the publisher needs on the wire:
  *
- * `rtmp://[user:pass@]host[:port]/app/streamKey` (or `rtmps://` for TLS)
+ * `rtmp://[user:pass@]host[:port]/app/streamKey` (or `rtmps://` for TLS) —
+ * a portless authority defaults to 1935 for `rtmp` and 443 for `rtmps`
  *
  * - [app] carries every path segment except the last (multi-level apps like
  *   `live/extra` stay whole) plus any `?query` (nginx-rtmp auth reads
@@ -34,12 +35,16 @@ data class RtmpUrl(
     val tcUrl: String
         get() = "${if (secure) "rtmps" else "rtmp"}://$hostAndPort/$app"
 
-    /** host[:port], the port shown only when it differs from the default. */
+    /** host[:port], the port shown only when it differs from the scheme's default. */
     val hostAndPort: String
-        get() = if (port == DEFAULT_PORT) host else "$host:$port"
+        get() = if (port == defaultPort) host else "$host:$port"
+
+    private val defaultPort: Int
+        get() = if (secure) DEFAULT_SECURE_PORT else DEFAULT_PORT
 
     companion object {
         const val DEFAULT_PORT = 1935
+        const val DEFAULT_SECURE_PORT = 443
 
         /** The tolerant decode: null for anything not a usable push URL. */
         fun parse(raw: String): RtmpUrl? {
@@ -93,7 +98,7 @@ data class RtmpUrl(
             // a port, so bracketed IPv6 literals survive (their colons are
             // inside brackets and the last ':' is the port separator at most).
             var host = hostPort
-            var port = DEFAULT_PORT
+            var port = if (secure) DEFAULT_SECURE_PORT else DEFAULT_PORT
             val colon = hostPort.lastIndexOf(':')
             if (colon > 0 && hostPort.indexOf(']') < colon) {
                 val portPart = hostPort.substring(colon + 1)

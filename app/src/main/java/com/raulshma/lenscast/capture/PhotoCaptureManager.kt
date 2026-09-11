@@ -193,7 +193,8 @@ class PhotoCaptureManager(
         onError: (ImageCaptureException) -> Unit,
     ) = object : ImageCapture.OnImageSavedCallback {
         override fun onImageSaved(output: ImageCapture.OutputFileResults) {
-            onSaved(destination.savedPath(output), destination.savedSize(output))
+            val saved = destination.saved(output)
+            onSaved(saved.path, saved.sizeBytes)
         }
 
         override fun onError(exception: ImageCaptureException) {
@@ -204,11 +205,19 @@ class PhotoCaptureManager(
         }
     }
 
+    /** A destination's post-save answer: where the photo landed, and the size to record. */
+    private data class SavedPhoto(val path: String, val sizeBytes: Long)
+
     /** Where a photo lands, and how a saved result maps back to path + size. */
     private sealed interface PhotoDestination {
         val outputOptions: ImageCapture.OutputFileOptions
-        fun savedPath(output: ImageCapture.OutputFileResults): String
-        fun savedSize(output: ImageCapture.OutputFileResults): Long
+
+        /**
+         * The one post-save hook: maps the saved output onto the path + size
+         * the history records. The encrypted destination promotes its temp
+         * file into MediaStore here — a write, never hidden behind a getter.
+         */
+        fun saved(output: ImageCapture.OutputFileResults): SavedPhoto
 
         /** Frees any intermediate artifact (the encrypted path's temp file). */
         fun cleanup() {}
@@ -225,19 +234,17 @@ class PhotoCaptureManager(
             },
         ).build()
 
-        override fun savedPath(output: ImageCapture.OutputFileResults): String =
-            output.savedUri?.toString().orEmpty()
-
-        // Query MediaStore SIZE post-save instead of recording 0 ("Unknown size").
-        override fun savedSize(output: ImageCapture.OutputFileResults): Long {
-            val uri = output.savedUri ?: return 0L
-            return try {
+        override fun saved(output: ImageCapture.OutputFileResults): SavedPhoto {
+            val uri = output.savedUri ?: return SavedPhoto("", 0L)
+            // Query MediaStore SIZE post-save instead of recording 0 ("Unknown size").
+            val size = try {
                 context.contentResolver.query(uri, arrayOf(MediaStore.MediaColumns.SIZE), null, null, null)?.use { c ->
                     if (c.moveToFirst()) c.getLong(0) else 0L
                 } ?: 0L
             } catch (_: Exception) {
                 0L
             }
+            return SavedPhoto(uri.toString(), size)
         }
     }
 
@@ -245,11 +252,8 @@ class PhotoCaptureManager(
         override val outputOptions: ImageCapture.OutputFileOptions =
             ImageCapture.OutputFileOptions.Builder(file).build()
 
-        override fun savedPath(output: ImageCapture.OutputFileResults): String =
-            file.absolutePath
-
-        override fun savedSize(output: ImageCapture.OutputFileResults): Long =
-            file.length()
+        override fun saved(output: ImageCapture.OutputFileResults): SavedPhoto =
+            SavedPhoto(file.absolutePath, file.length())
     }
 
     private fun destinationFor(fileName: String): PhotoDestination =
@@ -262,8 +266,8 @@ class PhotoCaptureManager(
 
     /**
      * The encrypted variant of the MediaStore destination: CameraX writes the
-     * photo into a cacheDir temp file, and [savedPath] — the one post-save
-     * hook in the callback ladder — promotes it into MediaStore through the
+     * photo into a cacheDir temp file, and [saved] — the one post-save hook
+     * in the callback ladder — promotes it into MediaStore through the
      * [EncryptedMediaSink]. A failed promotion returns a blank path (the
      * history merge tolerates it, exactly like a provider rejection today).
      */
@@ -281,14 +285,10 @@ class PhotoCaptureManager(
         override val outputOptions: ImageCapture.OutputFileOptions =
             ImageCapture.OutputFileOptions.Builder(tempFile).build()
 
-        override fun savedPath(output: ImageCapture.OutputFileResults): String {
+        override fun saved(output: ImageCapture.OutputFileResults): SavedPhoto {
             promote()
-            return promoted?.uriString.orEmpty()
+            return SavedPhoto(promoted?.uriString.orEmpty(), promoted?.storedSizeBytes ?: 0L)
         }
-
-        // The at-rest (ciphertext) size the row reports post-write.
-        override fun savedSize(output: ImageCapture.OutputFileResults): Long =
-            promoted?.storedSizeBytes ?: 0L
 
         override fun cleanup() {
             tempFile.delete()

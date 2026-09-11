@@ -75,6 +75,10 @@ class SettingsViewModel(
     val rtspPort: StateFlow<Int> = settingsDataStore.rtspPort
     val rtspInputFormat: StateFlow<RtspInputFormat> = settingsDataStore.rtspInputFormat
     val rtmpEnabled: StateFlow<Boolean> = settingsDataStore.rtmpEnabled
+    // Unlike the WHIP token below, the RTMP URL keeps its read-side flow:
+    // the write-only contract is the Web API's (the stream key embedded in
+    // the URL never echoes over the wire), while the in-app screen is the
+    // device owner editing locally and prefills the field from the store.
     val rtmpUrl: StateFlow<String> = settingsDataStore.rtmpUrl
     // The WHIP bearer token has no read-side flow: it is write-only, the
     // screen types into local state and the store never echoes it back.
