@@ -342,10 +342,41 @@ private fun ArmDayChips(daysMask: Int, onToggleDay: (isoDayIndex: Int) -> Unit) 
 }
 
 /**
+ * The display label for one curated YAMNet wire label: a resource map from
+ * the exact AudioSet spelling ([SoundClassPolicy.SECURITY_CLASSES] member —
+ * the persistence and payload key) onto localized chip text. Anything without
+ * a resource falls back to [SoundClassPolicy.humanReadable], so future custom
+ * labels still render and the wire set itself stays untouched.
+ */
+@Composable
+private fun soundClassChipLabel(label: String): String = when (label) {
+    "Speech" -> stringResource(R.string.sound_class_speech)
+    "Shout" -> stringResource(R.string.sound_class_shout)
+    "Screaming" -> stringResource(R.string.sound_class_screaming)
+    "Yell" -> stringResource(R.string.sound_class_yell)
+    "Wail, moan" -> stringResource(R.string.sound_class_wail_moan)
+    "Dog" -> stringResource(R.string.sound_class_dog)
+    "Bark" -> stringResource(R.string.sound_class_bark)
+    "Knock" -> stringResource(R.string.sound_class_knock)
+    "Doorbell" -> stringResource(R.string.sound_class_doorbell)
+    "Glass" -> stringResource(R.string.sound_class_glass)
+    "Shatter" -> stringResource(R.string.sound_class_shatter)
+    "Alarm" -> stringResource(R.string.sound_class_alarm)
+    "Smoke detector, smoke alarm" -> stringResource(R.string.sound_class_smoke_detector)
+    "Fire alarm" -> stringResource(R.string.sound_class_fire_alarm)
+    "Siren" -> stringResource(R.string.sound_class_siren)
+    "Gunshot, gunfire" -> stringResource(R.string.sound_class_gunshot)
+    "Cap gun" -> stringResource(R.string.sound_class_cap_gun)
+    "Engine starting" -> stringResource(R.string.sound_class_engine_starting)
+    else -> SoundClassPolicy.humanReadable(label)
+}
+
+/**
  * The sound-classification allow-list chips: one per curated YAMNet class
  * ([SoundClassPolicy.SECURITY_CLASSES] order), selected when persisted. The
  * descriptor folds an all-off save back to the curated default, so the chips
- * narrow, never disarm.
+ * narrow, never disarm. Chip text routes through [soundClassChipLabel] —
+ * the toggled/report value is always the wire label, never the display.
  */
 @Composable
 private fun SoundClassChips(allowed: Set<String>, onToggle: (label: String) -> Unit) {
@@ -364,7 +395,7 @@ private fun SoundClassChips(allowed: Set<String>, onToggle: (label: String) -> U
             ) {
                 rowClasses.forEach { label ->
                     FilterChip(
-                        label = SoundClassPolicy.humanReadable(label),
+                        label = soundClassChipLabel(label),
                         selected = label in allowed,
                         onClick = { onToggle(label) }
                     )

@@ -168,6 +168,12 @@
     <string name="gallery_next_item_cd">Next item</string>
     <string name="gallery_image_unavailable">Image not available</string>
     <string name="gallery_video_unavailable">Video not available</string>
+    <!-- Section headers and the empty-size token render localized at the
+         screen layer; GalleryMedia.kt's pure formatters keep returning the
+         stable English tokens (the mapping keys pinned by GalleryMediaTest). -->
+    <string name="gallery_section_today">Today</string>
+    <string name="gallery_section_yesterday">Yesterday</string>
+    <string name="gallery_unknown_size">Unknown size</string>
 
     <!-- ── Camera settings screen ── -->
     <string name="settings_camera_title">Camera Settings</string>
@@ -205,6 +211,40 @@
     <string name="settings_mode">Mode</string>
     <string name="settings_section_scene">Scene</string>
     <string name="settings_scene_mode">Scene Mode</string>
+
+    <!-- ── Wire-value display names ──
+         Localized labels for the protocol/enum wire values the settings
+         dropdowns render. The wire values themselves (CameraSettings enums,
+         GridStyle, SelfTimerMode, RtspInputFormat, scene modes) are the
+         storage and write-path keys and never change; anything unmapped
+         falls back to the catalog underscore-to-space rule at the screen
+         layer. -->
+    <string name="option_auto">Auto</string>
+    <string name="option_off">Off</string>
+    <string name="option_on">On</string>
+    <string name="option_manual">Manual</string>
+    <string name="option_macro">Macro</string>
+    <string name="option_continuous_picture">Continuous picture</string>
+    <string name="option_continuous_video">Continuous video</string>
+    <string name="option_daylight">Daylight</string>
+    <string name="option_cloudy">Cloudy</string>
+    <string name="option_indoor">Indoor</string>
+    <string name="option_fluorescent">Fluorescent</string>
+    <string name="option_sd_480p">SD 480p</string>
+    <string name="option_hd_720p">HD 720p</string>
+    <string name="option_fhd_1080p">Full HD 1080p</string>
+    <string name="option_qhd_1440p">QHD 1440p</string>
+    <string name="option_uhd_4k">4K UHD</string>
+    <string name="option_grid_3x3">3 × 3</string>
+    <string name="option_grid_4x4">4 × 4</string>
+    <string name="option_golden_ratio">Golden ratio</string>
+    <string name="option_s3">3 s</string>
+    <string name="option_s10">10 s</string>
+    <string name="option_face_detection">Face detection</string>
+    <string name="option_night">Night</string>
+    <string name="option_hdr">HDR</string>
+    <string name="option_sunset">Sunset</string>
+    <string name="option_fireworks">Fireworks</string>
 
     <!-- ── App settings screen ── -->
     <string name="settings_app_title">App Settings</string>
@@ -254,7 +294,29 @@
     <string name="settings_rtmp_url_invalid">Not a usable push URL — expected rtmp://host/app/stream-key (or rtmps://…)</string>
     <string name="settings_rtmp_status">Status: %1$s</string>
     <string name="settings_rtmp_status_error">error — %1$s</string>
+    <!-- Display names for the RtmpStatus wireNames (idle/connecting/
+         connected); the error state already carries its own readable text. -->
+    <string name="settings_rtmp_status_idle">Idle</string>
+    <string name="settings_rtmp_status_connecting">Connecting…</string>
+    <string name="settings_rtmp_status_connected">Connected</string>
     <string name="settings_rtmp_h264_note">Video must be H.264 (RTSP video codec); the stream key stays in the URL on this device</string>
+    <string name="settings_section_whip">WHIP Push (WebRTC)</string>
+    <string name="settings_enable_whip">Enable WHIP Push</string>
+    <string name="settings_whip_url">WHIP Endpoint</string>
+    <string name="settings_whip_url_hint" translatable="false">https://server/whip-endpoint</string>
+    <string name="settings_whip_url_invalid">Not a usable WHIP endpoint — expected http(s)://host[:port]/endpoint</string>
+    <string name="settings_whip_token">Bearer Token</string>
+    <string name="settings_whip_token_hint">Paste to replace — empty keeps the stored token</string>
+    <string name="settings_whip_stun">STUN Server</string>
+    <string name="settings_whip_stun_hint">host[:port] — blank means LAN only</string>
+    <string name="settings_whip_status">Status: %1$s</string>
+    <string name="settings_whip_status_error">error — %1$s</string>
+    <!-- Display names for the WhipStatus wireNames (idle/connecting/
+         connected); the error state already carries its own readable text. -->
+    <string name="settings_whip_status_idle">Idle</string>
+    <string name="settings_whip_status_connecting">Connecting…</string>
+    <string name="settings_whip_status_connected">Connected</string>
+    <string name="settings_whip_note">Video encodes from the camera tap independent of the RTSP codec; audio uses a dedicated mic capture only while the microphone is free; https endpoints use the system trust stores</string>
     <string name="settings_section_audio">Audio</string>
     <string name="settings_stream_audio">Include Audio in Live Stream</string>
     <string name="settings_microphone">Microphone</string>
@@ -301,6 +363,29 @@
     <string name="detection_sound_classification_description">Applies on top of sound detection — a YAMNet model classifies the audio around each event and the class labels (smoke alarm, dog bark, glass, siren…) ride the alert, webhook, MQTT, and event-log payloads. Never suppresses the event itself, and never available before Android 7.0 (API 24)</string>
     <string name="detection_min_confidence">Minimum Confidence (%)</string>
     <string name="detection_sound_classes">Classes that Label Events</string>
+    <!-- The YAMNet class chips display names, mapped from the curated wire
+         labels in SoundClassPolicy.SECURITY_CLASSES. The wire labels (exact
+         AudioSet spellings) stay the persistence and payload keys and never
+         localize; English defaults mirror SoundClassPolicy.humanReadable()
+         so the default-locale display is unchanged. -->
+    <string name="sound_class_speech">Speech</string>
+    <string name="sound_class_shout">Shout</string>
+    <string name="sound_class_screaming">Screaming</string>
+    <string name="sound_class_yell">Yell</string>
+    <string name="sound_class_wail_moan">Wail, Moan</string>
+    <string name="sound_class_dog">Dog</string>
+    <string name="sound_class_bark">Bark</string>
+    <string name="sound_class_knock">Knock</string>
+    <string name="sound_class_doorbell">Doorbell</string>
+    <string name="sound_class_glass">Glass</string>
+    <string name="sound_class_shatter">Shatter</string>
+    <string name="sound_class_alarm">Alarm</string>
+    <string name="sound_class_smoke_detector">Smoke Detector, Smoke Alarm</string>
+    <string name="sound_class_fire_alarm">Fire Alarm</string>
+    <string name="sound_class_siren">Siren</string>
+    <string name="sound_class_gunshot">Gunshot, Gunfire</string>
+    <string name="sound_class_cap_gun">Cap Gun</string>
+    <string name="sound_class_engine_starting">Engine Starting</string>
     <string name="detection_local_alerts">Local Alerts on Detection</string>
     <string name="detection_quiet_hours">Quiet Hours</string>
     <string name="detection_quiet_hours_description">Local notifications are held inside the window — webhooks, MQTT, recordings, and the event log keep firing</string>

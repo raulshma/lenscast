@@ -203,11 +203,11 @@ fun GalleryOverviewCard(
                 title = stringResource(R.string.gallery_stat_visible),
                 value = visibleCount.toString(),
                 icon = Icons.Default.PhotoLibrary,
-                supporting = formatFileSize(visibleBytes),
+                supporting = localizedFileSize(visibleBytes),
             )
             GalleryStatTile(
                 title = stringResource(R.string.gallery_stat_storage),
-                value = formatFileSize(overview.totalBytes),
+                value = localizedFileSize(overview.totalBytes),
                 icon = Icons.Default.Folder,
                 supporting = stringResource(R.string.gallery_stat_in_library),
             )

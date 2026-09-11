@@ -164,6 +164,12 @@
     <string name="gallery_next_item_cd">Nächstes Element</string>
     <string name="gallery_image_unavailable">Bild nicht verfügbar</string>
     <string name="gallery_video_unavailable">Video nicht verfügbar</string>
+    <!-- Abschnittsüberschriften und der Token für unbekannte Größe werden
+         erst auf der Screen-Ebene lokalisiert; die reinen Formatierer in
+         GalleryMedia.kt behalten ihre stabilen englischen Tokens. -->
+    <string name="gallery_section_today">Heute</string>
+    <string name="gallery_section_yesterday">Gestern</string>
+    <string name="gallery_unknown_size">Unbekannte Größe</string>
     <plurals name="gallery_share_chooser">
         <item quantity="one">%d Element teilen</item>
         <item quantity="other">%d Elemente teilen</item>
@@ -206,6 +212,39 @@
     <string name="settings_mode">Modus</string>
     <string name="settings_section_scene">Szene</string>
     <string name="settings_scene_mode">Szenenmodus</string>
+
+    <!-- ── Anzeigenamen der Wire-Werte ──
+         Lokalisierte Labels für die Protokoll-/Enum-Werte, die die
+         Einstellungs-Dropdowns darstellen. Die Wire-Werte selbst sind die
+         Speicher- und Schreibschlüssel und bleiben unverändert; nicht
+         abgebildete Werte fallen auf die Unterstrich-zu-Leerzeichen-Regel
+         des Katalogs auf der Screen-Ebene zurück. -->
+    <string name="option_auto">Automatisch</string>
+    <string name="option_off">Aus</string>
+    <string name="option_on">Ein</string>
+    <string name="option_manual">Manuell</string>
+    <string name="option_macro">Makro</string>
+    <string name="option_continuous_picture">Kontinuierlich (Bild)</string>
+    <string name="option_continuous_video">Kontinuierlich (Video)</string>
+    <string name="option_daylight">Tageslicht</string>
+    <string name="option_cloudy">Bewölkt</string>
+    <string name="option_indoor">Innenraum</string>
+    <string name="option_fluorescent">Leuchtstoffröhre</string>
+    <string name="option_sd_480p">SD 480p</string>
+    <string name="option_hd_720p">HD 720p</string>
+    <string name="option_fhd_1080p">Full HD 1080p</string>
+    <string name="option_qhd_1440p">QHD 1440p</string>
+    <string name="option_uhd_4k">4K UHD</string>
+    <string name="option_grid_3x3">3 × 3</string>
+    <string name="option_grid_4x4">4 × 4</string>
+    <string name="option_golden_ratio">Goldener Schnitt</string>
+    <string name="option_s3">3 s</string>
+    <string name="option_s10">10 s</string>
+    <string name="option_face_detection">Gesichtserkennung</string>
+    <string name="option_night">Nacht</string>
+    <string name="option_hdr">HDR</string>
+    <string name="option_sunset">Sonnenuntergang</string>
+    <string name="option_fireworks">Feuerwerk</string>
 
     <!-- ── App settings screen ── -->
     <string name="settings_app_title">App-Einstellungen</string>
@@ -254,7 +293,28 @@
     <string name="settings_rtmp_url_invalid">Keine verwendbare Push-URL — erwartet wird rtmp://host/app/stream-key (oder rtmps://…)</string>
     <string name="settings_rtmp_status">Status: %1$s</string>
     <string name="settings_rtmp_status_error">Fehler — %1$s</string>
+    <!-- Anzeigenamen für die RtmpStatus-Wire-Werte (idle/connecting/
+         connected); der Fehlerzustand trägt bereits seinen eigenen Text. -->
+    <string name="settings_rtmp_status_idle">Inaktiv</string>
+    <string name="settings_rtmp_status_connecting">Verbindet…</string>
+    <string name="settings_rtmp_status_connected">Verbunden</string>
     <string name="settings_rtmp_h264_note">Video muss H.264 sein (RTSP-Video-Codec); der Stream-Schlüssel bleibt auf diesem Gerät in der URL</string>
+    <string name="settings_section_whip">WHIP-Push (WebRTC)</string>
+    <string name="settings_enable_whip">WHIP-Push aktivieren</string>
+    <string name="settings_whip_url">WHIP-Endpunkt</string>
+    <string name="settings_whip_url_invalid">Keine verwendbare WHIP-Endpunkt-URL — erwartet wird http(s)://host[:port]/endpoint</string>
+    <string name="settings_whip_token">Bearer-Token</string>
+    <string name="settings_whip_token_hint">Einfügen zum Ersetzen — leer behält den gespeicherten Token</string>
+    <string name="settings_whip_stun">STUN-Server</string>
+    <string name="settings_whip_stun_hint">Host[:Port] — leer bedeutet nur LAN</string>
+    <string name="settings_whip_status">Status: %1$s</string>
+    <string name="settings_whip_status_error">Fehler — %1$s</string>
+    <!-- Anzeigenamen für die WhipStatus-Wire-Werte (idle/connecting/
+         connected); der Fehlerzustand trägt bereits seinen eigenen Text. -->
+    <string name="settings_whip_status_idle">Inaktiv</string>
+    <string name="settings_whip_status_connecting">Verbindet…</string>
+    <string name="settings_whip_status_connected">Verbunden</string>
+    <string name="settings_whip_note">Video wird vom Kamera-Tap codiert, unabhängig vom RTSP-Codec; Audio nutzt eine eigene Mikrofon-Aufnahme nur, solange das Mikrofon frei ist; HTTPS-Endpunkte nutzen die System-Trust-Stores</string>
     <string name="settings_section_audio">Audio</string>
     <string name="settings_stream_audio">Audio im Live-Stream</string>
     <string name="settings_microphone">Mikrofon</string>
@@ -301,6 +361,28 @@
     <string name="detection_sound_classification_description">Setzt auf der Tonerkennung auf — ein YAMNet-Modell klassifiziert das Audio um jedes Ereignis, und die Klassenlabels (Rauchmelder, Hundebellen, Glas, Sirene…) laufen mit Alarm, Webhook, MQTT und Ereignisprotokoll. Unterdrückt nie das Ereignis selbst und ist nie vor Android 7.0 (API 24) verfügbar</string>
     <string name="detection_min_confidence">Mindestkonfidenz (%)</string>
     <string name="detection_sound_classes">Klassen, die Ereignisse labeln</string>
+    <!-- Anzeigenamen der YAMNet-Klassen-Chips, abgebildet von den kuratierten
+         Wire-Labels in SoundClassPolicy.SECURITY_CLASSES. Die Wire-Labels
+         (exakte AudioSet-Schreibweisen) bleiben die Schlüssel für
+         Persistenz und Payload und werden nie lokalisiert. -->
+    <string name="sound_class_speech">Sprache</string>
+    <string name="sound_class_shout">Rufen</string>
+    <string name="sound_class_screaming">Schreien</string>
+    <string name="sound_class_yell">Brüllen</string>
+    <string name="sound_class_wail_moan">Wehklagen, Stöhnen</string>
+    <string name="sound_class_dog">Hund</string>
+    <string name="sound_class_bark">Hundebellen</string>
+    <string name="sound_class_knock">Klopfen</string>
+    <string name="sound_class_doorbell">Türklingel</string>
+    <string name="sound_class_glass">Glas</string>
+    <string name="sound_class_shatter">Glasbruch</string>
+    <string name="sound_class_alarm">Alarm</string>
+    <string name="sound_class_smoke_detector">Rauchmelder</string>
+    <string name="sound_class_fire_alarm">Feueralarm</string>
+    <string name="sound_class_siren">Sirene</string>
+    <string name="sound_class_gunshot">Schuss</string>
+    <string name="sound_class_cap_gun">Spielzeugpistole</string>
+    <string name="sound_class_engine_starting">Motorstart</string>
     <string name="detection_local_alerts">Lokale Alarme bei Erkennung</string>
     <string name="detection_quiet_hours">Ruhezeiten</string>
     <string name="detection_quiet_hours_description">Lokale Benachrichtigungen werden im Zeitfenster zurückgehalten — Webhooks, MQTT, Aufzeichnungen und das Ereignisprotokoll laufen weiter</string>

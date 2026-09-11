@@ -147,7 +147,9 @@ private fun GallerySectionHeader(section: GallerySection) {
         verticalAlignment = Alignment.Bottom,
     ) {
         Column {
-            Text(section.title, style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onBackground, fontWeight = FontWeight.SemiBold)
+            // The section model's title token ("Today"/"Yesterday") maps to
+            // localized text here at the render layer, not in the pure math.
+            Text(localizedSectionTitle(section.title), style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onBackground, fontWeight = FontWeight.SemiBold)
             Text(section.subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         Text(
@@ -155,7 +157,7 @@ private fun GallerySectionHeader(section: GallerySection) {
                 R.plurals.gallery_section_item_count,
                 section.items.size,
                 section.items.size,
-                formatFileSize(section.totalBytes)
+                localizedFileSize(section.totalBytes)
             ),
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,

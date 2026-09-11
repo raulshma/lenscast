@@ -47,6 +47,8 @@ import com.raulshma.lenscast.R
 import com.raulshma.lenscast.streaming.rtsp.RtspInputFormat
 import com.raulshma.lenscast.streaming.rtmp.RtmpStatus
 import com.raulshma.lenscast.streaming.rtmp.RtmpUrl
+import com.raulshma.lenscast.streaming.whip.WhipStatus
+import com.raulshma.lenscast.streaming.whip.WhipUrl
 import com.raulshma.lenscast.update.UpdateViewModel
 import com.raulshma.lenscast.update.model.UpdateState
 import android.text.format.DateUtils
@@ -126,6 +128,9 @@ fun AppSettingsScreen(
     val rtspInputFormat by viewModel.rtspInputFormat.collectAsState()
     val rtmpEnabled by viewModel.rtmpEnabled.collectAsState()
     val rtmpUrl by viewModel.rtmpUrl.collectAsState()
+    val whipEnabled by viewModel.whipEnabled.collectAsState()
+    val whipUrl by viewModel.whipUrl.collectAsState()
+    val whipStunServer by viewModel.whipStunServer.collectAsState()
     val adaptiveBitrateEnabled by viewModel.adaptiveBitrateEnabled.collectAsState()
     val mdnsEnabled by viewModel.mdnsEnabled.collectAsState()
     val isIgnoringBatteryOptimizations by viewModel.isIgnoringBatteryOptimizations
@@ -494,13 +499,16 @@ fun AppSettingsScreen(
                                 style = MaterialTheme.typography.bodySmall
                             )
                         }
-                        val statusText = when (val s = rtmpStatus) {
-                            is RtmpStatus.Error -> stringResource(
-                                R.string.settings_rtmp_status,
-                                stringResource(R.string.settings_rtmp_status_error, s.message)
-                            )
-                            else -> stringResource(R.string.settings_rtmp_status, s.wireName)
+                        // The wireName stays the state key; the display name
+                        // routes through resources (the error state carries
+                        // its own readable message and keeps its string).
+                        val statusName = when (val s = rtmpStatus) {
+                            is RtmpStatus.Error -> stringResource(R.string.settings_rtmp_status_error, s.message)
+                            RtmpStatus.Idle -> stringResource(R.string.settings_rtmp_status_idle)
+                            RtmpStatus.Connecting -> stringResource(R.string.settings_rtmp_status_connecting)
+                            RtmpStatus.Connected -> stringResource(R.string.settings_rtmp_status_connected)
                         }
+                        val statusText = stringResource(R.string.settings_rtmp_status, statusName)
                         Text(
                             statusText,
                             color = if (rtmpStatus is RtmpStatus.Error) {
@@ -512,6 +520,90 @@ fun AppSettingsScreen(
                         )
                         Text(
                             stringResource(R.string.settings_rtmp_h264_note),
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
+                }
+            }
+
+            item {
+                // The WHIP push output: the RTMP section's twin with one
+                // difference — the endpoint carries no embedded secret, so it
+                // round-trips; the bearer token is the write-only field (type
+                // once, never displayed back), and the STUN setting may be
+                // blanked for LAN-only ICE.
+                val whipStatus by app.streamingManager.whipStatus.collectAsState()
+                SettingsSection(title = stringResource(R.string.settings_section_whip)) {
+                    SwitchSetting(
+                        title = stringResource(R.string.settings_enable_whip),
+                        checked = whipEnabled,
+                        onCheckedChange = { viewModel.updateWhipEnabled(it) }
+                    )
+                    if (whipEnabled) {
+                        OutlinedTextField(
+                            value = whipUrl,
+                            onValueChange = { viewModel.updateWhipUrl(it) },
+                            label = { Text(stringResource(R.string.settings_whip_url)) },
+                            placeholder = { Text(stringResource(R.string.settings_whip_url_hint)) },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true
+                        )
+                        if (whipUrl.isNotBlank() && WhipUrl.parse(whipUrl) == null) {
+                            Text(
+                                stringResource(R.string.settings_whip_url_invalid),
+                                color = MaterialTheme.colorScheme.error,
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                        }
+                        val keyboardController = LocalSoftwareKeyboardController.current
+                        var whipTokenText by remember { mutableStateOf("") }
+                        OutlinedTextField(
+                            value = whipTokenText,
+                            onValueChange = { whipTokenText = it },
+                            label = { Text(stringResource(R.string.settings_whip_token)) },
+                            visualTransformation = PasswordVisualTransformation(),
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                            keyboardActions = KeyboardActions(
+                                onDone = {
+                                    if (whipTokenText.isNotEmpty()) {
+                                        viewModel.updateWhipToken(whipTokenText)
+                                        whipTokenText = ""
+                                    }
+                                    keyboardController?.hide()
+                                }
+                            )
+                        )
+                        OutlinedTextField(
+                            value = whipStunServer,
+                            onValueChange = { viewModel.updateWhipStunServer(it) },
+                            label = { Text(stringResource(R.string.settings_whip_stun)) },
+                            placeholder = { Text(stringResource(R.string.settings_whip_stun_hint)) },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true
+                        )
+                        // The wireName stays the state key; the display name
+                        // routes through resources (the error state carries
+                        // its own readable message and keeps its string).
+                        val whipStatusName = when (val s = whipStatus) {
+                            is WhipStatus.Error -> stringResource(R.string.settings_whip_status_error, s.message)
+                            WhipStatus.Idle -> stringResource(R.string.settings_whip_status_idle)
+                            WhipStatus.Connecting -> stringResource(R.string.settings_whip_status_connecting)
+                            WhipStatus.Connected -> stringResource(R.string.settings_whip_status_connected)
+                        }
+                        val whipStatusText = stringResource(R.string.settings_whip_status, whipStatusName)
+                        Text(
+                            whipStatusText,
+                            color = if (whipStatus is WhipStatus.Error) {
+                                MaterialTheme.colorScheme.error
+                            } else {
+                                MaterialTheme.colorScheme.onSurface
+                            },
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                        Text(
+                            stringResource(R.string.settings_whip_note),
                             style = MaterialTheme.typography.bodySmall
                         )
                     }

@@ -420,6 +420,54 @@ fun SliderSetting(
     }
 }
 
+/**
+ * The display name for a dropdown's wire option — the one resource map from
+ * wire value to localized chip text, replacing the raw uppercase enum
+ * spellings the dropdowns used to show. The wire value itself is untouched:
+ * it stays the storage key, the `selected` comparison, and the value the
+ * write path parses back, so only the DISPLAY routes through resources.
+ * Anything without a mapping (numeric ISO stops, the NV* pixel formats,
+ * audio device names, already-localized labels) falls back to the catalog's
+ * underscore-to-space rule, exactly as before.
+ */
+@Composable
+internal fun dropdownOptionLabel(option: String): String = when (option) {
+    // Shared mode verdicts
+    "Auto", "AUTO" -> stringResource(R.string.option_auto)
+    "OFF" -> stringResource(R.string.option_off)
+    "ON" -> stringResource(R.string.option_on)
+    // FocusMode
+    "MANUAL" -> stringResource(R.string.option_manual)
+    "MACRO" -> stringResource(R.string.option_macro)
+    "CONTINUOUS_PICTURE" -> stringResource(R.string.option_continuous_picture)
+    "CONTINUOUS_VIDEO" -> stringResource(R.string.option_continuous_video)
+    // WhiteBalance
+    "DAYLIGHT" -> stringResource(R.string.option_daylight)
+    "CLOUDY" -> stringResource(R.string.option_cloudy)
+    "INDOOR" -> stringResource(R.string.option_indoor)
+    "FLUORESCENT" -> stringResource(R.string.option_fluorescent)
+    // Resolution
+    "SD_480P" -> stringResource(R.string.option_sd_480p)
+    "HD_720P" -> stringResource(R.string.option_hd_720p)
+    "FHD_1080P" -> stringResource(R.string.option_fhd_1080p)
+    "QHD_1440P" -> stringResource(R.string.option_qhd_1440p)
+    "UHD_4K" -> stringResource(R.string.option_uhd_4k)
+    // GridStyle
+    "GRID_3X3" -> stringResource(R.string.option_grid_3x3)
+    "GRID_4X4" -> stringResource(R.string.option_grid_4x4)
+    "GOLDEN_RATIO" -> stringResource(R.string.option_golden_ratio)
+    // SelfTimerMode
+    "S3" -> stringResource(R.string.option_s3)
+    "S10" -> stringResource(R.string.option_s10)
+    // Scene modes
+    "FACE_DETECTION" -> stringResource(R.string.option_face_detection)
+    "NIGHT" -> stringResource(R.string.option_night)
+    "HDR" -> stringResource(R.string.option_hdr)
+    "SUNSET" -> stringResource(R.string.option_sunset)
+    "FIREWORKS" -> stringResource(R.string.option_fireworks)
+    else -> chipLabel(option)
+}
+
 @Composable
 fun DropdownSetting(
     title: String,
@@ -442,7 +490,7 @@ fun DropdownSetting(
         ) {
             options.forEach { option ->
                 FilterChip(
-                    label = chipLabel(option),
+                    label = dropdownOptionLabel(option),
                     selected = option == selected,
                     onClick = { onSelect(option) }
                 )

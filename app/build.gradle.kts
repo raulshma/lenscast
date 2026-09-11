@@ -239,6 +239,9 @@ android {
             // Plain-JVM unit tests hit android.util.Log in the streaming
             // monitors; return defaults instead of throwing "not mocked".
             isReturnDefaultValues = true
+            // Robolectric tests (automation receiver manifest-gate suite)
+            // read the merged manifest and resources.
+            isIncludeAndroidResources = true
         }
     }
 }
@@ -302,7 +305,7 @@ dependencies {
 
     implementation(libs.zxing.core)
 
-    // WebRTC stack for the WHIP egress (streaming/webrtc/): Stream's
+    // WebRTC stack for the WHIP egress (streaming/whip/): Stream's
     // maintained Apache-2.0 build of libwebrtc (BSD upstream).
     implementation(libs.stream.webrtc.android)
 

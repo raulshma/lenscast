@@ -3,7 +3,10 @@ package com.raulshma.lenscast.gallery
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import androidx.compose.runtime.Composable
 import androidx.core.content.FileProvider
+import androidx.compose.ui.res.stringResource
+import com.raulshma.lenscast.R
 import com.raulshma.lenscast.capture.CaptureMediaResolver
 import com.raulshma.lenscast.capture.model.CaptureHistory
 import com.raulshma.lenscast.capture.model.CaptureMediaFormat
@@ -14,6 +17,14 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
+
+// The stable display tokens the pure formatters below emit. GalleryMediaTest
+// pins them, and the composable mappers at the bottom of this file key their
+// resource lookups off them — so the math stays locale-independent (and
+// JVM-testable) and localized text is chosen only at the render layer.
+internal const val SECTION_TITLE_TODAY = "Today"
+internal const val SECTION_TITLE_YESTERDAY = "Yesterday"
+private const val UNKNOWN_SIZE_TOKEN = "Unknown size"
 
 // SimpleDateFormat is mutable, so one instance per thread replaces the shared
 // val a DateTimeFormatter allowed; gallery rendering is main-thread only.
@@ -142,7 +153,7 @@ fun openMediaExternal(context: Context, item: CaptureHistory) {
 }
 
 fun formatFileSize(bytes: Long): String {
-    if (bytes <= 0) return "Unknown size"
+    if (bytes <= 0) return UNKNOWN_SIZE_TOKEN
     val units = listOf("B", "KB", "MB", "GB", "TB")
     var value = bytes.toDouble()
     var unitIndex = 0
@@ -179,6 +190,10 @@ fun formatViewerDateTime(timestamp: Long): String {
  * The section header for a capture day: Today / Yesterday relative to the
  * injected [todayEpochDay] (callers default to now, keeping call sites
  * clean; tests inject a fixed day), otherwise the formatted date.
+ *
+ * The Today/Yesterday literals are stable tokens, not final display text:
+ * composable render sites map them onto localized resources via
+ * [localizedSectionTitle], keeping this function pure and JVM-testable.
  */
 fun formatGallerySectionTitle(
     dayEpochDay: Long,
@@ -186,9 +201,36 @@ fun formatGallerySectionTitle(
     timeZone: TimeZone = TimeZone.getDefault(),
 ): String {
     return when (dayEpochDay) {
-        todayEpochDay -> "Today"
-        todayEpochDay - 1 -> "Yesterday"
+        todayEpochDay -> SECTION_TITLE_TODAY
+        todayEpochDay - 1 -> SECTION_TITLE_YESTERDAY
         else -> galleryDayFormat.get().format(Date(GalleryDates.dayStartMillis(dayEpochDay, timeZone)))
+    }
+}
+
+/**
+ * The screen-layer render of a [GallerySection] title: the pure formatter's
+ * stable Today/Yesterday tokens map onto localized resources here; older
+ * days already carry a locale-formatted date and pass through unchanged.
+ */
+@Composable
+fun localizedSectionTitle(title: String): String = when (title) {
+    SECTION_TITLE_TODAY -> stringResource(R.string.gallery_section_today)
+    SECTION_TITLE_YESTERDAY -> stringResource(R.string.gallery_section_yesterday)
+    else -> title
+}
+
+/**
+ * The screen-layer render of [formatFileSize]: the pure formatter's stable
+ * "Unknown size" token (non-positive bytes) maps onto a localized resource;
+ * every sized value already formats locale-aware.
+ */
+@Composable
+fun localizedFileSize(bytes: Long): String {
+    val formatted = formatFileSize(bytes)
+    return if (formatted == UNKNOWN_SIZE_TOKEN) {
+        stringResource(R.string.gallery_unknown_size)
+    } else {
+        formatted
     }
 }
 

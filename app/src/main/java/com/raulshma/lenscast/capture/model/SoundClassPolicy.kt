@@ -78,7 +78,15 @@ object SoundClassPolicy {
         return allowedClasses.firstOrNull { it == topLabel }
     }
 
-    /** UI spelling of a YAMNet label: `Wail, moan` → `Wail, Moan`. */
+    /**
+     * The display fallback for a YAMNet label: `Wail, moan` → `Wail, Moan`.
+     * It stays the default-locale rendering — localized chip names live in
+     * resources (`sound_class_*`, mapped from the wire label at the screen
+     * layer in DetectionSettingsSection), so this only fires for labels
+     * without a resource (future custom labels). The wire label itself is
+     * never localized: it is the persistence key, the gate's comparison
+     * value, and the event payload's `labels` entry.
+     */
     fun humanReadable(label: String): String =
         label.split(' ').filter { it.isNotEmpty() }.joinToString(" ") { word ->
             word.replaceFirstChar { it.uppercase() }
