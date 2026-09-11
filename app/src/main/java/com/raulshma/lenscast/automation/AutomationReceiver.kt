@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.Intent
 import android.util.Log
 import com.raulshma.lenscast.MainApplication
+import com.raulshma.lenscast.automation.AutomationIntentPolicy.AutomationAction
 import com.raulshma.lenscast.capture.model.RecordingConfig
 import com.raulshma.lenscast.capture.model.RecordingQuality
 import com.raulshma.lenscast.streaming.BootResumePolicy
@@ -48,13 +49,13 @@ class AutomationReceiver : BroadcastReceiver() {
             // must not close the broadcast window under a live capture.
             var completionOwnedByCallbacks = false
             try {
-                when (intent.action) {
-                    ACTION_START_STREAM -> BootResumePolicy.execute(
+                when (AutomationIntentPolicy.route(intent.action)) {
+                    AutomationAction.START_STREAM -> BootResumePolicy.execute(
                         app.streamToggle,
                         BootResumePolicy.tileStart(app.streamStateJournal.load()),
                     )
-                    ACTION_STOP_STREAM -> app.streamToggle.stopServer()
-                    ACTION_CAPTURE_PHOTO -> {
+                    AutomationAction.STOP_STREAM -> app.streamToggle.stopServer()
+                    AutomationAction.CAPTURE_PHOTO -> {
                         // Null means the use case could not be acquired — no
                         // callback will ever fire, so the finally completes.
                         completionOwnedByCallbacks = runCatching {
@@ -67,34 +68,40 @@ class AutomationReceiver : BroadcastReceiver() {
                             )
                         }.getOrNull() != null
                     }
-                    ACTION_START_RECORDING -> app.recordingController.start(
+                    AutomationAction.START_RECORDING -> app.recordingController.start(
                         RecordingConfig(
-                            durationSeconds = intent.getIntExtra(EXTRA_DURATION_SECONDS, 0).toLong()
-                                .coerceIn(0, RecordingConfig.MAX_DURATION_SECONDS),
+                            durationSeconds = AutomationIntentPolicy.recordingDurationSeconds(
+                                intent.getIntExtra(EXTRA_DURATION_SECONDS, 0),
+                            ),
                             repeatIntervalSeconds = 0,
                             quality = RecordingQuality.HIGH,
                             includeAudio = app.settingsDataStore.recordingAudioEnabled.value,
                         ),
                     )
-                    ACTION_STOP_RECORDING -> app.recordingController.stop()
-                    ACTION_SET_TORCH -> {
+                    AutomationAction.STOP_RECORDING -> app.recordingController.stop()
+                    AutomationAction.SET_TORCH -> {
                         // Toggle semantics read the live torch, not the
                         // persisted setting: deterrence (ACTION_TORCH) drives
                         // the torch without persisting, so the setting can
                         // disagree with reality and a toggle would compute
                         // the wrong target.
-                        val enable = resolvedEnable(
-                            intent,
-                            !app.cameraService.isTorchOn(),
+                        val enable = AutomationIntentPolicy.resolveEnable(
+                            hasEnabledExtra = intent.hasExtra(EXTRA_ENABLED),
+                            enabledExtraValue = intent.getBooleanExtra(EXTRA_ENABLED, false),
+                            currentState = !app.cameraService.isTorchOn(),
                         )
                         kotlinx.coroutines.withContext(Dispatchers.Main) {
                             runCatching { app.cameraService.setTorchEnabled(enable) }
                                 .onFailure { Log.w(TAG, "Automation torch failed: ${it.message}") }
                         }
                     }
-                    ACTION_SET_SIREN -> {
+                    AutomationAction.SET_SIREN -> {
                         val siren = app.streamingManager.sirenController()
-                        val enable = resolvedEnable(intent, !siren.isRunning())
+                        val enable = AutomationIntentPolicy.resolveEnable(
+                            hasEnabledExtra = intent.hasExtra(EXTRA_ENABLED),
+                            enabledExtraValue = intent.getBooleanExtra(EXTRA_ENABLED, false),
+                            currentState = !siren.isRunning(),
+                        )
                         if (enable) {
                             siren.start()
                             // Only an explicit duration command touches the
@@ -102,15 +109,23 @@ class AutomationReceiver : BroadcastReceiver() {
                             // stop, but a bare toggle-on must not cancel an
                             // already-armed stop. Absent extra = run until
                             // stopped; a 0-valued extra = explicit "no limit".
-                            if (intent.hasExtra(EXTRA_DURATION_SECONDS)) {
-                                val durationSeconds = intent.getIntExtra(EXTRA_DURATION_SECONDS, 0)
-                                app.sirenAutoStop.armAfterStart(durationSeconds * 1_000L) { siren.stop() }
+                            val autoStopDelayMs = AutomationIntentPolicy.sirenAutoStopDelayMs(
+                                hasDurationExtra = intent.hasExtra(EXTRA_DURATION_SECONDS),
+                                rawDurationSeconds = intent.getIntExtra(EXTRA_DURATION_SECONDS, 0),
+                            )
+                            if (autoStopDelayMs != null) {
+                                app.sirenAutoStop.armAfterStart(autoStopDelayMs) { siren.stop() }
                             }
                         } else {
                             app.sirenAutoStop.cancel()
                             siren.stop()
                         }
                     }
+                    // Unlisted actions touch nothing — the policy's route is
+                    // the in-code allow-list behind the manifest permission
+                    // gate. The widget refresh below still runs, exactly as
+                    // the old fall-through `when` did.
+                    null -> Unit
                 }
                 StreamWidgetProvider.refresh(app)
             } catch (e: Exception) {
@@ -120,10 +135,6 @@ class AutomationReceiver : BroadcastReceiver() {
             }
         }
     }
-
-    /** An `enabled` extra forces the state; without it the action toggles [current]. */
-    private fun resolvedEnable(intent: Intent, current: Boolean): Boolean =
-        if (intent.hasExtra(EXTRA_ENABLED)) intent.getBooleanExtra(EXTRA_ENABLED, false) else !current
 
     companion object {
         private const val TAG = "AutomationReceiver"

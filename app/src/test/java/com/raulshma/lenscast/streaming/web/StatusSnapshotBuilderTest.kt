@@ -191,4 +191,48 @@ class StatusSnapshotBuilderTest {
         assertEquals(999L, wd.lastRecoveryTimestamp)
         assertNull(wd.lastFailureReason)
     }
+
+    @Test
+    fun `rtmp defaults fold to disabled idle with no error`() {
+        val response = StatusSnapshotBuilder.build(
+            streaming = streaming(active = true),
+            thermal = thermal(),
+            battery = battery(),
+            watchdog = watchdog(),
+            adaptive = adaptive(enabled = true),
+            network = network(),
+        )
+
+        assertEquals(false, response.streaming.rtmpEnabled)
+        assertEquals(false, response.streaming.rtmpActive)
+        assertEquals("idle", response.streaming.rtmpStatus)
+        assertNull(response.streaming.rtmpError)
+    }
+
+    @Test
+    fun `rtmp live state and error text pass through`() {
+        val response = StatusSnapshotBuilder.build(
+            streaming = streaming(
+                active = true,
+            ).copy(
+                rtmpEnabled = true,
+                rtmpActive = true,
+                rtmpStatus = "error",
+                rtmpError = "RTMP connect rejected: NetStream.Connect.Rejected — bad app",
+            ),
+            thermal = thermal(),
+            battery = battery(),
+            watchdog = watchdog(),
+            adaptive = adaptive(enabled = true),
+            network = network(),
+        )
+
+        assertEquals(true, response.streaming.rtmpEnabled)
+        assertEquals(true, response.streaming.rtmpActive)
+        assertEquals("error", response.streaming.rtmpStatus)
+        assertEquals(
+            "RTMP connect rejected: NetStream.Connect.Rejected — bad app",
+            response.streaming.rtmpError,
+        )
+    }
 }

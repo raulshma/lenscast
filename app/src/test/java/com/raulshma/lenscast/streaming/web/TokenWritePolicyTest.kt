@@ -19,6 +19,8 @@ class TokenWritePolicyTest {
         assertTrue(TokenWritePolicy.allowsPost("/api/stream/web/stop"))
         assertTrue(TokenWritePolicy.allowsPost("/api/stream/rtsp/start"))
         assertTrue(TokenWritePolicy.allowsPost("/api/stream/rtsp/stop"))
+        assertTrue(TokenWritePolicy.allowsPost("/api/stream/rtmp/start"))
+        assertTrue(TokenWritePolicy.allowsPost("/api/stream/rtmp/stop"))
     }
 
     @Test
@@ -43,6 +45,8 @@ class TokenWritePolicyTest {
     @Test
     fun `the detection model download and test-alert routes are writable`() {
         assertTrue(TokenWritePolicy.allowsPost("/api/settings/ml-model/download"))
+        // The YAMNet twin: same device-maintenance class, nothing persisted.
+        assertTrue(TokenWritePolicy.allowsPost("/api/settings/audio-model/download"))
         // The test alert dispatches the alert sinks once; it persists nothing.
         assertTrue(TokenWritePolicy.allowsPost("/api/detection/test"))
     }
@@ -88,12 +92,15 @@ class TokenWritePolicyTest {
                 "/api/stream/web/stop",
                 "/api/stream/rtsp/start",
                 "/api/stream/rtsp/stop",
+                "/api/stream/rtmp/start",
+                "/api/stream/rtmp/stop",
                 "/api/capture",
                 "/api/recording/start",
                 "/api/recording/stop",
                 "/api/deterrence/siren",
                 "/api/camera/torch",
                 "/api/settings/ml-model/download",
+                "/api/settings/audio-model/download",
                 "/api/detection/test",
             ),
             TokenWritePolicy.TOKEN_WRITABLE_POST_ROUTES,
