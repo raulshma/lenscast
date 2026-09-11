@@ -1,0 +1,338 @@
+<resources>
+    <!-- ── Legacy app/automation/widget strings ── -->
+    <string name="automation_permission_label">LensCast steuern</string>
+    <string name="automation_permission_description">Ermöglicht der App, LensCast-Streaming, -Aufzeichnung, -Fotos, die Taschenlampe und die Sirene über Automatisierungs-Broadcasts zu starten oder zu stoppen.</string>
+    <string name="widget_status_idle">Inaktiv</string>
+    <string name="widget_start_stream">Stream starten</string>
+    <string name="widget_photo">Foto</string>
+
+    <!-- ── Navigation chrome ── -->
+    <string name="nav_back">Zurück</string>
+
+    <!-- ── Camera screen ── -->
+    <string name="camera_preview_hidden">Vorschau ausgeblendet</string>
+    <string name="camera_switch_camera_cd">Kamera wechseln</string>
+    <string name="camera_connect_cd">Verbinden — QR + URLs</string>
+    <string name="camera_hide_preview_cd">Vorschau ausblenden</string>
+    <string name="camera_show_preview_cd">Vorschau einblenden</string>
+    <string name="camera_gallery_cd">Galerie</string>
+    <string name="camera_more_options_cd">Weitere Optionen</string>
+    <string name="camera_menu_camera_controls">Kamerasteuerung</string>
+    <string name="camera_menu_capture_tools">Aufnahmewerkzeuge</string>
+    <string name="camera_menu_settings">Einstellungen</string>
+    <string name="camera_collapse_quick_settings_cd">Schnelleinstellungen einklappen</string>
+    <string name="camera_stop_recording_cd">Aufnahme stoppen</string>
+    <string name="camera_record_video_cd">Video aufnehmen</string>
+    <string name="camera_capture_photo_cd">Foto aufnehmen</string>
+    <string name="camera_permission_title">Kamerazugriff erforderlich</string>
+    <string name="camera_permission_rationale">LensCast benötigt Kamerazugriff für die Live-Vorschau und das Mikrofon für Audio-Streaming und Aufnahmen.</string>
+    <string name="camera_permission_grant">Berechtigung erteilen</string>
+    <string name="camera_initializing">Kamera wird initialisiert…</string>
+    <string name="camera_error_title">Kamerafehler</string>
+    <string name="camera_retry">Wiederholen</string>
+    <string name="camera_server_status_cd">Webserver-Status</string>
+    <string name="camera_web_server_title">Webserver</string>
+    <string name="camera_server_offline">Server offline</string>
+    <string name="camera_copy_url">URL kopieren</string>
+    <string name="camera_rtsp_stream_title">RTSP-Stream</string>
+    <string name="camera_copy_rtsp_url">RTSP-URL kopieren</string>
+    <string name="camera_turn_server_off">Server ausschalten</string>
+    <string name="camera_turn_server_on">Server einschalten</string>
+    <string name="camera_connection_quality_title">Verbindungsqualität</string>
+    <string name="camera_quality_label">Qualität</string>
+    <string name="camera_per_client_stats">Statistiken pro Client</string>
+
+    <!-- ── Connect sheet ── -->
+    <string name="camera_connect_title">Mit dieser Kamera verbinden</string>
+    <string name="camera_qr_code_cd">QR-Code für %1$s</string>
+    <string name="camera_connect_browser_mjpeg">Browser (MJPEG)</string>
+    <string name="camera_connect_browser_hls">Browser (HLS)</string>
+    <string name="camera_connect_vlc_obs">VLC / OBS (RTSP)</string>
+    <string name="camera_copy">Kopieren</string>
+    <string name="camera_connect_cert_fingerprint">Zertifikat-Fingerabdruck (SHA-256):\n%1$s</string>
+    <string name="camera_connect_usb_instructions">USB (ohne WLAN): Kabel verbinden und\n  adb forward tcp:%1$d tcp:%1$d\nausführen, dann http://localhost:%1$d am Computer öffnen. mDNS: LensCast._http._tcp + LensCast-RTSP._rtsp._tcp. Limit: %2$d HTTP-Viewer.</string>
+    <plurals name="camera_viewers_watching">
+        <item quantity="one">%d Zuschauer</item>
+        <item quantity="other">%d Zuschauer</item>
+    </plurals>
+
+    <!-- ── Capture screen ── -->
+    <string name="capture_title">Aufnahme</string>
+    <string name="capture_section_quick">Schnellaufnahme</string>
+    <string name="capture_photo">Foto</string>
+    <string name="capture_stop">Stopp</string>
+    <string name="capture_record">Aufnehmen</string>
+    <string name="capture_section_interval">Intervallaufnahmen</string>
+    <string name="capture_interval_seconds">Intervall (Sekunden)</string>
+    <string name="capture_total_captures">Aufnahmen gesamt</string>
+    <string name="capture_flash_mode">Blitzmodus</string>
+    <string name="capture_stop_interval">Intervall stoppen</string>
+    <string name="capture_start_interval">Intervall starten</string>
+    <string name="capture_assembling">Wird zusammengefügt…</string>
+    <string name="capture_assemble_timelapse">Zeitraffer erstellen (letzte 100 Fotos)</string>
+    <string name="capture_section_scheduled">Geplante Aufnahme</string>
+    <string name="capture_include_audio">Audio einbeziehen</string>
+    <string name="capture_recording_quality">Aufnahmequalität</string>
+    <string name="capture_duration">Dauer (Sekunden, 0 = unbegrenzt)</string>
+    <string name="capture_repeat_interval">Wiederholungsintervall (Sekunden, 0 = keine Wiederholung)</string>
+    <string name="capture_clear_schedule_cd">Zeitplan löschen</string>
+    <string name="capture_recording_elapsed">Aufnahme: %1$s</string>
+    <string name="capture_stop_recording">Aufnahme stoppen</string>
+    <string name="capture_set_start_time">Startzeit festlegen</string>
+    <string name="capture_schedule">Planen</string>
+    <string name="capture_start_now">Jetzt starten</string>
+    <string name="capture_scheduled_start">Start: %1$s</string>
+    <string name="capture_ok">OK</string>
+    <string name="capture_cancel">Abbrechen</string>
+
+    <!-- ── Detection events screen ── -->
+    <string name="detection_title">Erkennungsereignisse</string>
+    <string name="detection_filter_all">Alle</string>
+    <string name="detection_filter_motion">Bewegung</string>
+    <string name="detection_filter_sound">Ton</string>
+    <string name="detection_filter_tamper">Manipulation</string>
+    <string name="detection_clear">Löschen</string>
+    <string name="detection_empty">Noch keine Erkennungsereignisse</string>
+    <string name="detection_snapshot_cd">%1$s-Snapshot</string>
+    <string name="detection_zones">Zonen: %1$s</string>
+    <string name="detection_ml_labels">ML: %1$s</string>
+    <string name="detection_actions">Aktionen: %1$s</string>
+    <string name="detection_clip">Clip: %1$s</string>
+
+    <!-- ── Gallery screens ── -->
+    <string name="gallery_title">Galerie</string>
+    <string name="gallery_select_media_cd">Medien auswählen</string>
+    <string name="gallery_delete_selected_title">Auswahl löschen</string>
+    <plurals name="gallery_delete_selected_message">
+        <item quantity="one">%d ausgewähltes Element löschen?</item>
+        <item quantity="other">%d ausgewählte Elemente löschen?</item>
+    </plurals>
+    <string name="gallery_delete">Löschen</string>
+    <string name="gallery_cancel">Abbrechen</string>
+    <string name="gallery_selection_title">%1$d von %2$d ausgewählt</string>
+    <string name="gallery_exit_selection_cd">Auswahlmodus beenden</string>
+    <string name="gallery_deselect_all_cd">Alle abwählen</string>
+    <string name="gallery_select_all_cd">Alle auswählen</string>
+    <plurals name="gallery_selected_count">
+        <item quantity="one">%d ausgewählt</item>
+        <item quantity="other">%d ausgewählt</item>
+    </plurals>
+    <string name="gallery_choose_items_hint">Elemente zum Teilen oder Löschen auswählen</string>
+    <string name="gallery_batch_ready">Sammelaktionen sind bereit</string>
+    <string name="gallery_share">Teilen</string>
+    <string name="gallery_deleting">Wird gelöscht</string>
+    <string name="gallery_library_title">Ihre LensCast-Mediathek</string>
+    <string name="gallery_library_empty">Aufgenommene Fotos und Videos erscheinen hier.</string>
+    <plurals name="gallery_library_summary">
+        <item quantity="one">Zeigt %1$d von %2$d Elementen über %3$d Tag.</item>
+        <item quantity="other">Zeigt %1$d von %2$d Elementen über %3$d Tage.</item>
+    </plurals>
+    <string name="gallery_stat_photos">Fotos</string>
+    <string name="gallery_stat_videos">Videos</string>
+    <string name="gallery_stat_visible">Sichtbar</string>
+    <string name="gallery_stat_storage">Speicher</string>
+    <string name="gallery_stat_in_library">In der App-Mediathek</string>
+    <string name="gallery_filter_all">Alle (%1$d)</string>
+    <string name="gallery_filter_photos">Fotos (%1$d)</string>
+    <string name="gallery_filter_videos">Videos (%1$d)</string>
+    <string name="gallery_empty_none_title">Noch keine Medien</string>
+    <string name="gallery_empty_none_body">Aufgenommene Fotos und Videos erscheinen hier, sobald Sie loslegen.</string>
+    <string name="gallery_empty_photos_title">Keine Fotos in dieser Ansicht</string>
+    <string name="gallery_empty_photos_body">Wechseln Sie zurück zu Alle, um alles Aufgenommene zu durchsuchen.</string>
+    <string name="gallery_empty_videos_title">Keine Videos in dieser Ansicht</string>
+    <string name="gallery_empty_videos_body">Wechseln Sie zurück zu Alle, um den Rest Ihrer Mediathek zu sehen.</string>
+    <string name="gallery_empty_other_title">Nichts anzuzeigen</string>
+    <string name="gallery_empty_other_body">Ihre Galerie ist bereit, wenn neue Aufnahmen eintreffen.</string>
+    <plurals name="gallery_section_item_count">
+        <item quantity="one">%1$d Element • %2$s</item>
+        <item quantity="other">%1$d Elemente • %2$s</item>
+    </plurals>
+    <string name="gallery_play_video_cd">Video abspielen</string>
+    <string name="gallery_type_photo">Foto</string>
+    <string name="gallery_type_video">Video</string>
+    <string name="gallery_selected_cd">Ausgewählt</string>
+    <string name="gallery_storage_usage">Speicher: %1$s / %2$s</string>
+    <string name="gallery_free_space">Speicherplatz freigeben</string>
+    <string name="gallery_media_not_found">Medium nicht gefunden</string>
+    <string name="gallery_delete_item_message">„%1$s“ löschen?</string>
+    <string name="gallery_viewer_position">%1$d von %2$d</string>
+    <string name="gallery_toggle_details_cd">Details umschalten</string>
+    <string name="gallery_share_cd">Teilen</string>
+    <string name="gallery_open_externally_cd">Extern öffnen</string>
+    <string name="gallery_delete_cd">Löschen</string>
+    <string name="gallery_previous_item_cd">Vorheriges Element</string>
+    <string name="gallery_next_item_cd">Nächstes Element</string>
+    <string name="gallery_image_unavailable">Bild nicht verfügbar</string>
+    <string name="gallery_video_unavailable">Video nicht verfügbar</string>
+    <plurals name="gallery_share_chooser">
+        <item quantity="one">%d Element teilen</item>
+        <item quantity="other">%d Elemente teilen</item>
+    </plurals>
+    <string name="gallery_open_chooser">%1$s öffnen</string>
+
+    <!-- ── Camera settings screen ── -->
+    <string name="settings_camera_title">Kameraeinstellungen</string>
+    <string name="settings_reset">Zurücksetzen</string>
+    <string name="settings_section_exposure">Belichtung</string>
+    <string name="settings_exposure_compensation">Belichtungskorrektur</string>
+    <string name="settings_iso">ISO</string>
+    <string name="settings_section_focus">Fokus</string>
+    <string name="settings_focus_mode">Fokusmodus</string>
+    <string name="settings_focus_distance">Fokusdistanz</string>
+    <string name="settings_white_balance">Weißabgleich</string>
+    <string name="settings_color_temperature">Farbtemperatur (K)</string>
+    <string name="settings_section_lens">Objektiv</string>
+    <string name="settings_zoom">Zoom</string>
+    <string name="settings_section_capture">Aufnahme</string>
+    <string name="settings_resolution">Auflösung</string>
+    <string name="settings_frame_rate">Bildrate</string>
+    <string name="settings_hdr">HDR</string>
+    <string name="settings_section_video">Video</string>
+    <string name="settings_image_stabilization">Bildstabilisierung</string>
+    <string name="settings_section_viewfinder_aids">Sucherhilfen</string>
+    <string name="settings_grid_overlay">Gitter-Overlay</string>
+    <string name="settings_self_timer">Selbstauslöser</string>
+    <string name="settings_spirit_level">Wasserwaage</string>
+    <string name="settings_histogram">Histogramm</string>
+    <string name="settings_exposure_zebras">Belichtungszebras</string>
+    <string name="settings_focus_peaking">Fokus-Peaking</string>
+    <string name="settings_section_photo_capture">Fotoaufnahme</string>
+    <string name="settings_jpeg_quality">JPEG-Qualität</string>
+    <string name="settings_maximize_quality">Qualität maximieren</string>
+    <string name="settings_raw_jpeg">RAW+JPEG-Aufnahme</string>
+    <string name="settings_raw_unsupported">Diese Kamera unterstützt kein RAW+JPEG; Aufnahmen werden als JPEG gespeichert.</string>
+    <string name="settings_gps_geotag">GPS-Geotag (EXIF)</string>
+    <string name="settings_section_night_vision">Nachtsicht / IR</string>
+    <string name="settings_mode">Modus</string>
+    <string name="settings_section_scene">Szene</string>
+    <string name="settings_scene_mode">Szenenmodus</string>
+
+    <!-- ── App settings screen ── -->
+    <string name="settings_app_title">App-Einstellungen</string>
+    <string name="settings_section_updates">Updates</string>
+    <string name="settings_current_version">Aktuelle Version</string>
+    <string name="settings_last_check">Zuletzt geprüft: %1$s</string>
+    <string name="settings_auto_check">Automatisch beim App-Start prüfen</string>
+    <string name="settings_check_updates">Nach Updates suchen</string>
+    <string name="settings_up_to_date">Sie sind auf dem neuesten Stand (aktuell: %1$s)</string>
+    <string name="settings_checking">Suche nach Updates...</string>
+    <string name="settings_update_available">Update %1$s verfügbar</string>
+    <string name="settings_download">Herunterladen</string>
+    <string name="settings_dismiss">Ausblenden</string>
+    <string name="settings_downloading">Wird heruntergeladen... %1$d %%</string>
+    <string name="settings_install_update">Update installieren</string>
+    <string name="settings_retry">Wiederholen</string>
+    <string name="settings_section_display">Anzeige</string>
+    <string name="settings_show_preview">Kameravorschau anzeigen</string>
+    <string name="settings_section_streaming">Streaming</string>
+    <string name="settings_enable_web_streaming">Web-Streaming aktivieren</string>
+    <string name="settings_streaming_port">Streaming-Port</string>
+    <string name="settings_adaptive_bitrate">Adaptive Bitrate</string>
+    <string name="settings_eco_idle">Eco-Ruhemodus (Akku)</string>
+    <string name="settings_eco_idle_description">Reduziert im Akkubetrieb ohne Zuschauer den Stream auf eine niedrige Idle-Bildrate und pausiert Audio; wird beim ersten Zuschauer, am Ladegerät oder bei einem thermischen Ereignis wiederhergestellt</string>
+    <string name="settings_mdns">Netzwerkerkennung (mDNS)</string>
+    <string name="settings_section_recording">Aufzeichnung</string>
+    <string name="settings_continuous_recording">Daueraufzeichnung</string>
+    <string name="settings_continuous_recording_description">Zeichnet NVR-artig Schleifensegmente hintereinander auf; alte Segmente laufen über das Aufbewahrungsfenster heraus</string>
+    <string name="settings_segment_length">Segmentlänge (Minuten)</string>
+    <string name="settings_section_storage">Speicher</string>
+    <string name="settings_storage_quota">Speicherkontingent (MB)</string>
+    <string name="settings_storage_quota_description">Übersteigen LensCast-Medien das Kontingent, werden die ältesten Aufnahmen automatisch gelöscht (100 MB – 32 GB)</string>
+    <string name="settings_encrypt_captures">Aufnahmen verschlüsseln</string>
+    <string name="settings_encrypt_captures_description">Verschlüsselt neue Fotos und Videos mit AES-256-GCM unter einem hardwaregestützten Schlüssel. Bestehende Aufnahmen bleiben in jedem Fall lesbar; während aktiviert zeigen Video-Vorschaubilder einen Platzhalter (die Wiedergabe funktioniert) und Backups werden entschlüsselt hochgeladen</string>
+    <string name="settings_section_background">Hintergrund</string>
+    <string name="settings_disable_battery_opt">Akkuoptimierung deaktivieren</string>
+    <string name="settings_disable_battery_opt_description">Verhindert, dass das System die App im Hintergrund stoppt</string>
+    <string name="settings_resume_on_boot">Streams beim Neustart fortsetzen</string>
+    <string name="settings_section_rtsp">RTSP-Stream</string>
+    <string name="settings_enable_rtsp">RTSP-Streaming aktivieren</string>
+    <string name="settings_rtsp_port">RTSP-Port</string>
+    <string name="settings_rtsp_input_format">RTSP-Encoder-Eingangsformat</string>
+    <string name="settings_section_rtmp">RTMP-Push</string>
+    <string name="settings_enable_rtmp">RTMP-Push aktivieren</string>
+    <string name="settings_rtmp_push_url">Push-URL</string>
+    <string name="settings_rtmp_url_invalid">Keine verwendbare Push-URL — erwartet wird rtmp://host/app/stream-key (oder rtmps://…)</string>
+    <string name="settings_rtmp_status">Status: %1$s</string>
+    <string name="settings_rtmp_status_error">Fehler — %1$s</string>
+    <string name="settings_rtmp_h264_note">Video muss H.264 sein (RTSP-Video-Codec); der Stream-Schlüssel bleibt auf diesem Gerät in der URL</string>
+    <string name="settings_section_audio">Audio</string>
+    <string name="settings_stream_audio">Audio im Live-Stream</string>
+    <string name="settings_microphone">Mikrofon</string>
+    <string name="settings_audio_default">Standard (automatisch)</string>
+    <string name="settings_echo_cancellation">Echounterdrückung &amp; Rauschunterdrückung</string>
+    <string name="settings_audio_bitrate">Live-Audio-Bitrate (kbps)</string>
+    <string name="settings_audio_channels">Live-Audio-Kanäle</string>
+    <string name="settings_mono">Mono</string>
+    <string name="settings_stereo">Stereo</string>
+    <string name="settings_recording_audio">Audio in Aufnahmen</string>
+    <string name="settings_section_security">Sicherheit</string>
+    <string name="settings_https">HTTPS (selbstsigniertes Zertifikat)</string>
+    <string name="settings_stream_auth">Stream-Authentifizierung</string>
+    <string name="settings_username">Benutzername</string>
+    <string name="settings_password">Passwort</string>
+    <string name="settings_password_hint">Neues Passwort eingeben</string>
+
+    <!-- ── Detection & alerts settings ── -->
+    <string name="detection_section_title">Erkennung &amp; Alarme</string>
+    <string name="detection_open_event_log">Ereignisprotokoll öffnen</string>
+    <string name="detection_motion">Bewegungserkennung</string>
+    <string name="detection_motion_sensitivity">Empfindlichkeit (%)</string>
+    <string name="detection_event_cooldown">Abklingzeit (Sekunden)</string>
+    <string name="detection_record_on_motion">Bei Bewegung aufzeichnen</string>
+    <string name="detection_post_roll">Nachlauf (Sekunden)</string>
+    <string name="detection_arm_on_schedule">Nach Zeitplan scharf schalten</string>
+    <string name="detection_arm_from">Scharf ab (Minute des Tages)</string>
+    <string name="detection_arm_until">Scharf bis (Minute des Tages)</string>
+    <string name="detection_arm_days">Aktive Tage</string>
+    <string name="detection_day_mon">Mo</string>
+    <string name="detection_day_tue">Di</string>
+    <string name="detection_day_wed">Mi</string>
+    <string name="detection_day_thu">Do</string>
+    <string name="detection_day_fri">Fr</string>
+    <string name="detection_day_sat">Sa</string>
+    <string name="detection_day_sun">So</string>
+    <string name="detection_sound">Tonerkennung</string>
+    <string name="detection_sound_threshold">Schwellwert (%)</string>
+    <string name="detection_adaptive_noise_floor">Adaptiver Rauschuntergrund</string>
+    <string name="detection_adaptive_noise_floor_description">Der Auslöser liegt über einem verfolgten Umgebungspegel, sodass ein konstanter Hintergrund (Klimaanlage, Verkehr) echte Ereignisse weder überdeckt noch allein auslöst</string>
+    <string name="detection_record_on_sound">Bei Ton aufzeichnen</string>
+    <string name="detection_record_on_sound_description">Tonereignisse starten einen begrenzten Clip mit der Nachlaufdauer der Bewegungserkennung</string>
+    <string name="detection_sound_classification">Tonklassifizierung (YAMNet)</string>
+    <string name="detection_sound_classification_description">Setzt auf der Tonerkennung auf — ein YAMNet-Modell klassifiziert das Audio um jedes Ereignis, und die Klassenlabels (Rauchmelder, Hundebellen, Glas, Sirene…) laufen mit Alarm, Webhook, MQTT und Ereignisprotokoll. Unterdrückt nie das Ereignis selbst und ist nie vor Android 7.0 (API 24) verfügbar</string>
+    <string name="detection_min_confidence">Mindestkonfidenz (%)</string>
+    <string name="detection_sound_classes">Klassen, die Ereignisse labeln</string>
+    <string name="detection_local_alerts">Lokale Alarme bei Erkennung</string>
+    <string name="detection_quiet_hours">Ruhezeiten</string>
+    <string name="detection_quiet_hours_description">Lokale Benachrichtigungen werden im Zeitfenster zurückgehalten — Webhooks, MQTT, Aufzeichnungen und das Ereignisprotokoll laufen weiter</string>
+    <string name="detection_quiet_from">Ruhe ab (Minute des Tages)</string>
+    <string name="detection_quiet_until">Ruhe bis (Minute des Tages)</string>
+    <string name="detection_tamper">Manipulationserkennung (Stromausfall)</string>
+    <string name="detection_ml">Objekterkennung (ML)</string>
+    <string name="detection_ml_description">Setzt auf der Bewegungserkennung auf — Alarme feuern nur, wenn eine Person, ein Haustier oder ein Fahrzeug im Bild erkannt wird</string>
+    <string name="detection_alert_people">Alarm bei Personen</string>
+    <string name="detection_alert_animals">Alarm bei Tieren</string>
+    <string name="detection_alert_vehicles">Alarm bei Fahrzeugen</string>
+    <string name="detection_audio_model_not_downloaded">Tonklassifizierungsmodell nicht geladen (%1$s, einmalig geladen und im App-Speicher behalten)</string>
+    <string name="detection_audio_model_downloading">Tonklassifizierungsmodell wird geladen…</string>
+    <string name="detection_audio_model_ready">Tonklassifizierungsmodell bereit (%1$s)</string>
+    <string name="detection_audio_model_failed">Laden des Tonklassifizierungsmodells fehlgeschlagen: %1$s</string>
+    <string name="detection_ml_model_not_downloaded">Erkennungsmodell nicht geladen (%1$s, einmalig geladen und im App-Speicher behalten)</string>
+    <string name="detection_ml_model_downloading">Erkennungsmodell wird geladen…</string>
+    <string name="detection_ml_model_ready">Erkennungsmodell bereit (%1$s)</string>
+    <string name="detection_ml_model_failed">Laden des Erkennungsmodells fehlgeschlagen: %1$s</string>
+    <string name="detection_model_download">Modell laden</string>
+    <string name="detection_model_retry">Laden wiederholen</string>
+
+    <!-- ── Watchdog settings ── -->
+    <string name="settings_section_watchdog">Stream-Watchdog</string>
+    <string name="settings_watchdog_enable">Watchdog aktivieren</string>
+    <string name="settings_watchdog_max_retries">Max. Wiederholungen</string>
+    <string name="settings_watchdog_interval">Prüfintervall (Sekunden)</string>
+
+    <!-- ── Backup settings ── -->
+    <string name="settings_section_backup">Backup (WebDAV)</string>
+    <string name="settings_backup_auto_upload">Neue Aufnahmen automatisch hochladen</string>
+    <string name="settings_backup_url">WebDAV-Sammlungs-URL</string>
+    <string name="settings_backup_password">Passwort (leer lassen zum Behalten)</string>
+    <string name="settings_backup_wifi_only">Nur über WLAN hochladen</string>
+</resources>
