@@ -24,6 +24,7 @@ import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -106,6 +107,9 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
@@ -113,6 +117,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -122,11 +127,15 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.raulshma.lenscast.MainApplication
+import com.raulshma.lenscast.R
 import com.raulshma.lenscast.camera.model.CameraDashboardPolicy
 import com.raulshma.lenscast.camera.model.CameraLensInfo
 import com.raulshma.lenscast.camera.model.CameraSettings
 import com.raulshma.lenscast.camera.model.CameraState
+import com.raulshma.lenscast.camera.model.GridViewPolicy
+import com.raulshma.lenscast.camera.model.LevelIndicatorPolicy
 import com.raulshma.lenscast.camera.model.PreviewGestures
+import com.raulshma.lenscast.camera.model.ProToolsPolicy
 import com.raulshma.lenscast.camera.model.QuickSettingCatalog
 import com.raulshma.lenscast.camera.model.QuickSettingDescriptor
 import com.raulshma.lenscast.camera.model.QuickSettingEditor
@@ -141,6 +150,8 @@ import com.raulshma.lenscast.gallery.formatDuration
 import com.raulshma.lenscast.ui.theme.LensOrange
 import com.raulshma.lenscast.ui.theme.LensRed
 import com.raulshma.lenscast.ui.theme.RecordingRed
+import kotlin.math.cos
+import kotlin.math.sin
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -148,6 +159,16 @@ private val OverlayScrim = Color(0xB3000000)
 private val OverlayLight = Color(0x80000000)
 private val TopGradientColor = Color(0x78000000)
 private val BottomGradientColor = Color(0x78000000)
+
+// Viewfinder-aid palette: the composition grid is a faint white; the level
+// line shares the app's live-status green when aligned; pro-tools heat uses
+// the exposure-convention colors (blown highlights red, crushed blacks blue)
+// and the focus-peaking yellow.
+private val GridLineColor = Color(0x66FFFFFF)
+private val LevelAlignedColor = Color(0xFF4CAF50)
+private val ZebraOverColor = Color(0x66FF3B30)
+private val ZebraUnderColor = Color(0x660A84FF)
+private val PeakingColor = Color(0x99FFD60A)
 
 // One POST_NOTIFICATIONS ask per process: LaunchedEffect(Unit) re-runs on
 // every fresh composition (each navigation back), which would re-prompt
@@ -232,8 +253,16 @@ fun CameraScreen(
         }
     }
 
-    val coroutineScope = rememberCoroutineScope()
     val flashAlpha = remember { Animatable(0f) }
+
+    // The shutter flash rides the ViewModel's capture events, so a self-timer
+    // countdown flashes when the capture actually fires, not at press time.
+    LaunchedEffect(Unit) {
+        viewModel.captureFlashEvents.collect {
+            flashAlpha.snapTo(1f)
+            flashAlpha.animateTo(0f, animationSpec = tween(150))
+        }
+    }
 
     var quickSettingsExpanded by remember { mutableStateOf(false) }
     var activeSetting by remember { mutableStateOf<QuickSettingType?>(null) }
@@ -299,11 +328,9 @@ fun CameraScreen(
                     activeSetting = if (activeSetting == type) null else type
                 },
                 onCapture = {
-                    viewModel.capturePhoto()
-                    coroutineScope.launch {
-                        flashAlpha.snapTo(1f)
-                        flashAlpha.animateTo(0f, animationSpec = tween(150))
-                    }
+                    // The press verdict (capture now vs self-timer countdown)
+                    // is SelfTimerPolicy's, executed in the ViewModel.
+                    viewModel.onShutterPress()
                 },
                 onWebStreamToggle = { viewModel.toggleWebStreaming() },
                 onRtspStreamToggle = { viewModel.toggleRtspStreaming() },
@@ -402,6 +429,7 @@ private fun ImmersiveCameraView(
     onPinchStateChange: (Boolean, Float) -> Unit,
 ) {
     val lastServerError by viewModel.lastServerError.collectAsState()
+    val selfTimerSeconds by viewModel.selfTimerSecondsRemaining.collectAsState()
 
     Box(modifier = Modifier.fillMaxSize()) {
         if (showPreview) {
@@ -428,7 +456,7 @@ private fun ImmersiveCameraView(
                     )
                     Spacer(modifier = Modifier.height(8.dp))
                     Text(
-                        text = "Preview Hidden",
+                        text = stringResource(R.string.camera_preview_hidden),
                         color = Color.White.copy(alpha = 0.35f),
                         style = MaterialTheme.typography.bodyMedium
                     )
@@ -577,6 +605,16 @@ private fun ImmersiveCameraView(
                     .align(Alignment.Center)
             )
         }
+
+        // The self-timer's countdown covers the viewfinder; any tap cancels
+        // (the timer mode stays selected for the next press).
+        selfTimerSeconds?.let { seconds ->
+            SelfTimerCountdownOverlay(
+                secondsRemaining = seconds,
+                onCancel = { viewModel.cancelSelfTimer() },
+                modifier = Modifier.align(Alignment.Center)
+            )
+        }
     }
 }
 
@@ -613,7 +651,7 @@ private fun CameraTopOverlay(
         ) {
             CameraControlButton(
                 icon = Icons.Default.Cameraswitch,
-                contentDescription = "Switch camera",
+                contentDescription = stringResource(R.string.camera_switch_camera_cd),
                 onClick = onSwitchCamera
             )
             if (streamStatus.isActive) {
@@ -637,23 +675,24 @@ private fun CameraTopOverlay(
             )
             CameraControlButton(
                 icon = Icons.Default.ContentCopy,
-                contentDescription = "Connect — QR + URLs",
+                contentDescription = stringResource(R.string.camera_connect_cd),
                 onClick = onShowConnect
             )
             CameraControlButton(
                 icon = if (showPreview) Icons.Default.Visibility else Icons.Default.VisibilityOff,
-                contentDescription = if (showPreview) "Hide preview" else "Show preview",
+                contentDescription = if (showPreview) stringResource(R.string.camera_hide_preview_cd)
+                else stringResource(R.string.camera_show_preview_cd),
                 onClick = onTogglePreview
             )
             CameraControlButton(
                 icon = Icons.Default.Collections,
-                contentDescription = "Gallery",
+                contentDescription = stringResource(R.string.camera_gallery_cd),
                 onClick = onNavigateToGallery
             )
             Box {
                 CameraControlButton(
                     icon = Icons.Default.MoreVert,
-                    contentDescription = "More options",
+                    contentDescription = stringResource(R.string.camera_more_options_cd),
                     onClick = { menuExpanded = true }
                 )
                 DropdownMenu(
@@ -673,7 +712,7 @@ private fun CameraTopOverlay(
                                 )
                                 Spacer(modifier = Modifier.width(12.dp))
                                 Text(
-                                    "Camera controls",
+                                    stringResource(R.string.camera_menu_camera_controls),
                                     style = MaterialTheme.typography.bodyMedium
                                 )
                             }
@@ -694,7 +733,7 @@ private fun CameraTopOverlay(
                                 )
                                 Spacer(modifier = Modifier.width(12.dp))
                                 Text(
-                                    "Capture tools",
+                                    stringResource(R.string.camera_menu_capture_tools),
                                     style = MaterialTheme.typography.bodyMedium
                                 )
                             }
@@ -715,7 +754,7 @@ private fun CameraTopOverlay(
                                 )
                                 Spacer(modifier = Modifier.width(12.dp))
                                 Text(
-                                    "Settings",
+                                    stringResource(R.string.camera_menu_settings),
                                     style = MaterialTheme.typography.bodyMedium
                                 )
                             }
@@ -888,7 +927,7 @@ private fun ShutterRow(
                         Box(contentAlignment = Alignment.Center) {
                             Icon(
                                 imageVector = Icons.Default.Flip,
-                                contentDescription = "Collapse quick settings",
+                                contentDescription = stringResource(R.string.camera_collapse_quick_settings_cd),
                                 tint = Color.White.copy(alpha = 0.7f),
                                 modifier = Modifier.size(22.dp)
                             )
@@ -933,7 +972,8 @@ private fun ShutterRow(
                 Box(contentAlignment = Alignment.Center) {
                     Icon(
                         imageVector = if (isRecording) Icons.Default.Stop else Icons.Default.FiberManualRecord,
-                        contentDescription = if (isRecording) "Stop recording" else "Record video",
+                        contentDescription = if (isRecording) stringResource(R.string.camera_stop_recording_cd)
+                        else stringResource(R.string.camera_record_video_cd),
                         tint = if (isRecording) Color.White else RecordingRed,
                         modifier = Modifier.size(24.dp)
                     )
@@ -1017,7 +1057,7 @@ private fun ShutterButton(
             Box(contentAlignment = Alignment.Center) {
                 Icon(
                     imageVector = Icons.Default.Camera,
-                    contentDescription = "Capture photo",
+                    contentDescription = stringResource(R.string.camera_capture_photo_cd),
                     tint = Color(0xFF1A1A1A),
                     modifier = Modifier.size(24.dp)
                 )
@@ -1313,14 +1353,14 @@ private fun CameraPermissionRequest(
             }
             Spacer(modifier = Modifier.height(24.dp))
             Text(
-                text = "Camera access required",
+                text = stringResource(R.string.camera_permission_title),
                 style = MaterialTheme.typography.headlineSmall,
                 fontWeight = FontWeight.SemiBold,
                 textAlign = TextAlign.Center
             )
             Spacer(modifier = Modifier.height(12.dp))
             Text(
-                text = "LensCast needs camera access for the live preview and microphone for audio streaming and recordings.",
+                text = stringResource(R.string.camera_permission_rationale),
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = TextAlign.Center
@@ -1334,7 +1374,7 @@ private fun CameraPermissionRequest(
                 )
             ) {
                 Text(
-                    text = "Grant permission",
+                    text = stringResource(R.string.camera_permission_grant),
                     modifier = Modifier.padding(horizontal = 8.dp)
                 )
             }
@@ -1358,6 +1398,12 @@ private fun CameraPreview(
     }
     val settings by viewModel.settings.collectAsState()
     val zoomRange by viewModel.availableZoomRange.collectAsState()
+    val gridStyle by viewModel.gridStyle.collectAsState()
+    val levelLineState by viewModel.levelLineState.collectAsState()
+    val histogramEnabled by viewModel.histogramEnabled.collectAsState()
+    val zebrasEnabled by viewModel.zebrasEnabled.collectAsState()
+    val peakingEnabled by viewModel.peakingEnabled.collectAsState()
+    val proToolsFrame by viewModel.proToolsFrame.collectAsState()
 
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(previewView, lifecycleOwner) {
@@ -1370,6 +1416,23 @@ private fun CameraPreview(
             factory = { previewView },
             modifier = Modifier.fillMaxSize()
         )
+
+        // Viewfinder aids: the pure policies own the geometry — these
+        // composables only map it onto the preview box (Canvas-only, so the
+        // gesture layer below keeps every pointer event).
+        GridOverlay(lines = GridViewPolicy.linesFor(gridStyle))
+        levelLineState?.let { LevelLineOverlay(state = it) }
+        if (histogramEnabled || zebrasEnabled || peakingEnabled) {
+            proToolsFrame?.let { frame ->
+                ProToolsCellsOverlay(frame = frame)
+                frame.histogram?.let { histogram ->
+                    HistogramPanel(
+                        bins = histogram,
+                        modifier = Modifier.align(Alignment.BottomStart)
+                    )
+                }
+            }
+        }
 
         Box(
             modifier = Modifier
@@ -1423,7 +1486,7 @@ private fun CameraInitializingScreen() {
                 )
                 Spacer(modifier = Modifier.height(16.dp))
                 Text(
-                    "Initializing camera\u2026",
+                    stringResource(R.string.camera_initializing),
                     style = MaterialTheme.typography.bodyLarge,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -1455,7 +1518,7 @@ private fun ErrorDisplay(
             ) {
                 Box(contentAlignment = Alignment.Center) {
                     Text(
-                        text = "!",
+                        text = stringResource(R.string.camera_error_bang),
                         color = MaterialTheme.colorScheme.onErrorContainer,
                         style = MaterialTheme.typography.headlineMedium,
                         fontWeight = FontWeight.Bold
@@ -1464,7 +1527,7 @@ private fun ErrorDisplay(
             }
             Spacer(modifier = Modifier.height(16.dp))
             Text(
-                text = "Camera error",
+                text = stringResource(R.string.camera_error_title),
                 style = MaterialTheme.typography.headlineSmall,
                 color = MaterialTheme.colorScheme.error,
                 fontWeight = FontWeight.SemiBold
@@ -1484,7 +1547,7 @@ private fun ErrorDisplay(
                     containerColor = MaterialTheme.colorScheme.primary
                 )
             ) {
-                Text("Retry")
+                Text(stringResource(R.string.camera_retry))
             }
         }
     }
@@ -1515,7 +1578,7 @@ private fun StreamIndicator(
                 ) {}
                 Spacer(modifier = Modifier.size(6.dp))
                 Text(
-                    text = "LIVE",
+                    text = stringResource(R.string.camera_live_badge),
                     style = MaterialTheme.typography.labelSmall.copy(
                         fontWeight = FontWeight.Bold,
                         fontFamily = FontFamily.Monospace
@@ -1526,10 +1589,10 @@ private fun StreamIndicator(
         }
 
         if (streamStatus.isWebActive) {
-            StreamBadge(icon = Icons.Default.Wifi, label = "WEB")
+            StreamBadge(icon = Icons.Default.Wifi, label = stringResource(R.string.camera_badge_web))
         }
         if (streamStatus.isRtspActive) {
-            StreamBadge(icon = Icons.Default.Videocam, label = "RTSP")
+            StreamBadge(icon = Icons.Default.Videocam, label = stringResource(R.string.camera_badge_rtsp))
         }
     }
 }
@@ -1639,7 +1702,7 @@ private fun ServerStatusButton(
     Box(modifier = modifier) {
         CameraControlButton(
             icon = Icons.Default.Wifi,
-            contentDescription = "Web server status",
+            contentDescription = stringResource(R.string.camera_server_status_cd),
             onClick = { expanded = true },
             tint = iconTint,
         )
@@ -1653,7 +1716,7 @@ private fun ServerStatusButton(
                 text = {
                     Column {
                         Text(
-                            "Web Server",
+                            stringResource(R.string.camera_web_server_title),
                             style = MaterialTheme.typography.labelLarge,
                             fontWeight = FontWeight.Bold,
                         )
@@ -1668,7 +1731,7 @@ private fun ServerStatusButton(
                             )
                         } else {
                             Text(
-                                "Server offline",
+                                stringResource(R.string.camera_server_offline),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
                             )
@@ -1707,7 +1770,7 @@ private fun ServerStatusButton(
                                 tint = MaterialTheme.colorScheme.onSurface,
                             )
                             Spacer(modifier = Modifier.width(12.dp))
-                            Text("Copy URL", style = MaterialTheme.typography.bodyMedium)
+                            Text(stringResource(R.string.camera_copy_url), style = MaterialTheme.typography.bodyMedium)
                         }
                     },
                     onClick = {
@@ -1721,7 +1784,7 @@ private fun ServerStatusButton(
                     text = {
                         Column {
                             Text(
-                                "RTSP Stream",
+                                stringResource(R.string.camera_rtsp_stream_title),
                                 style = MaterialTheme.typography.labelLarge,
                                 fontWeight = FontWeight.Bold,
                             )
@@ -1748,7 +1811,7 @@ private fun ServerStatusButton(
                                 tint = MaterialTheme.colorScheme.onSurface,
                             )
                             Spacer(modifier = Modifier.width(12.dp))
-                            Text("Copy RTSP URL", style = MaterialTheme.typography.bodyMedium)
+                            Text(stringResource(R.string.camera_copy_rtsp_url), style = MaterialTheme.typography.bodyMedium)
                         }
                     },
                     onClick = {
@@ -1773,7 +1836,8 @@ private fun ServerStatusButton(
                             )
                             Spacer(modifier = Modifier.width(12.dp))
                             Text(
-                                if (streamStatus.isServerRunning) "Turn off server" else "Turn on server",
+                                if (streamStatus.isServerRunning) stringResource(R.string.camera_turn_server_off)
+                                else stringResource(R.string.camera_turn_server_on),
                                 style = MaterialTheme.typography.bodyMedium,
                             )
                         }
@@ -1856,6 +1920,136 @@ private fun ZoomIndicator(
     }
 }
 
+// ── Viewfinder aid overlays ──
+// The pure policies decide the geometry and the verdicts (GridViewPolicy,
+// LevelIndicatorPolicy, ProToolsPolicy); these composables only map the
+// results onto the preview box.
+
+@Composable
+private fun GridOverlay(
+    lines: List<GridViewPolicy.GridLine>,
+    modifier: Modifier = Modifier,
+) {
+    if (lines.isEmpty()) return
+    Canvas(modifier = modifier.fillMaxSize()) {
+        val stroke = 1.dp.toPx()
+        lines.forEach { line ->
+            when (line.axis) {
+                GridViewPolicy.Axis.VERTICAL -> drawLine(
+                    color = GridLineColor,
+                    start = Offset(size.width * line.fraction, 0f),
+                    end = Offset(size.width * line.fraction, size.height),
+                    strokeWidth = stroke,
+                )
+                GridViewPolicy.Axis.HORIZONTAL -> drawLine(
+                    color = GridLineColor,
+                    start = Offset(0f, size.height * line.fraction),
+                    end = Offset(size.width, size.height * line.fraction),
+                    strokeWidth = stroke,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun LevelLineOverlay(
+    state: LevelIndicatorPolicy.LevelLineState,
+    modifier: Modifier = Modifier,
+) {
+    Canvas(modifier = modifier.fillMaxSize()) {
+        // The policy's verdict picks the color: the line goes green only
+        // within the level threshold on both axes.
+        val color = if (state.isLevel) LevelAlignedColor else Color.White.copy(alpha = 0.85f)
+        val halfLength = size.width * 0.3f
+        val radians = Math.toRadians(state.lineRotationDeg.toDouble())
+        val centerX = size.width / 2f
+        val centerY = size.height / 2f + state.lineCenterOffsetFraction * (size.height / 2f)
+        val dx = cos(radians).toFloat() * halfLength
+        val dy = sin(radians).toFloat() * halfLength
+        drawLine(
+            color = color,
+            start = Offset(centerX - dx, centerY - dy),
+            end = Offset(centerX + dx, centerY + dy),
+            strokeWidth = 2.dp.toPx(),
+            cap = StrokeCap.Round,
+        )
+    }
+}
+
+@Composable
+private fun ProToolsCellsOverlay(
+    frame: ProToolsPolicy.ProToolsFrame,
+    modifier: Modifier = Modifier,
+) {
+    Canvas(modifier = modifier.fillMaxSize()) {
+        frame.cells.forEach { cell ->
+            drawRect(
+                color = when (cell.kind) {
+                    ProToolsPolicy.CellKind.ZEBRA_OVER -> ZebraOverColor
+                    ProToolsPolicy.CellKind.ZEBRA_UNDER -> ZebraUnderColor
+                    ProToolsPolicy.CellKind.PEAK -> PeakingColor
+                },
+                topLeft = Offset(cell.left * size.width, cell.top * size.height),
+                size = Size(
+                    width = (cell.right - cell.left) * size.width,
+                    height = (cell.bottom - cell.top) * size.height,
+                ),
+            )
+        }
+    }
+}
+
+@Composable
+private fun HistogramPanel(
+    bins: IntArray,
+    modifier: Modifier = Modifier,
+) {
+    Canvas(
+        modifier = modifier
+            .padding(start = 16.dp, bottom = 230.dp)
+            .size(width = 140.dp, height = 64.dp)
+            .background(OverlayScrim.copy(alpha = 0.6f), RoundedCornerShape(8.dp))
+            .padding(6.dp),
+    ) {
+        val maxCount = bins.max()
+        val barWidth = size.width / ProToolsPolicy.HISTOGRAM_BINS
+        bins.forEachIndexed { index, count ->
+            val barHeight = if (maxCount > 0) size.height * count.toFloat() / maxCount else 0f
+            drawRect(
+                color = Color.White.copy(alpha = 0.9f),
+                topLeft = Offset(index * barWidth, size.height - barHeight),
+                size = Size(width = barWidth, height = barHeight),
+            )
+        }
+    }
+}
+
+@Composable
+private fun SelfTimerCountdownOverlay(
+    secondsRemaining: Int,
+    onCancel: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    // Full-screen tap surface: the tap cancels the countdown (the timer mode
+    // stays selected, so the next press counts down again).
+    Surface(
+        modifier = modifier.fillMaxSize(),
+        color = Color.Transparent,
+        onClick = onCancel,
+    ) {
+        Box(contentAlignment = Alignment.Center) {
+            Text(
+                text = "$secondsRemaining",
+                color = Color.White,
+                fontSize = 96.sp,
+                fontWeight = FontWeight.Bold,
+                fontFamily = FontFamily.Monospace
+            )
+        }
+    }
+}
+
 @Composable
 private fun ConnectionQualityIndicator(
     qualityLevel: NetworkQualityLevel,
@@ -1933,14 +2127,14 @@ private fun ConnectionQualityIndicator(
                     modifier = Modifier.padding(12.dp)
                 ) {
                     Text(
-                        text = "Connection Quality",
+                        text = stringResource(R.string.camera_connection_quality_title),
                         style = MaterialTheme.typography.labelMedium.copy(
                             fontWeight = FontWeight.Bold,
                             color = Color.White
                         )
                     )
                     Spacer(modifier = Modifier.height(6.dp))
-                    ConnectionStatRow(label = "Quality", value = label, valueColor = dotColor)
+                    ConnectionStatRow(label = stringResource(R.string.camera_quality_label), value = label, valueColor = dotColor)
                     CameraDashboardPolicy.connectionStatRows(
                         estimatedBandwidthKbps = estimatedBandwidthKbps,
                         stats = stats,
@@ -1951,7 +2145,7 @@ private fun ConnectionQualityIndicator(
                     if (stats.clientDetails.isNotEmpty()) {
                         Spacer(modifier = Modifier.height(6.dp))
                         Text(
-                            text = "Per-Client Stats",
+                            text = stringResource(R.string.camera_per_client_stats),
                             style = MaterialTheme.typography.labelSmall.copy(
                                 fontWeight = FontWeight.SemiBold,
                                 color = Color.White.copy(alpha = 0.6f)

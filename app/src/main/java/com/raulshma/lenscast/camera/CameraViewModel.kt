@@ -4,6 +4,7 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.pm.PackageManager
+import android.os.SystemClock
 import android.util.Log
 import android.widget.Toast
 import androidx.camera.view.PreviewView
@@ -11,14 +12,20 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
+import com.raulshma.lenscast.R
 import com.raulshma.lenscast.camera.model.CameraInitRetry
 import com.raulshma.lenscast.camera.model.CameraLensInfo
 import com.raulshma.lenscast.camera.model.CameraSettings
 import com.raulshma.lenscast.camera.model.CameraState
+import com.raulshma.lenscast.camera.model.GridStyle
+import com.raulshma.lenscast.camera.model.LevelIndicatorPolicy
+import com.raulshma.lenscast.camera.model.ProToolsPolicy
 import com.raulshma.lenscast.camera.model.QuickSettingCatalog
 import com.raulshma.lenscast.camera.model.QuickSettingEditorValue
 import com.raulshma.lenscast.camera.model.QuickSettingType
 import com.raulshma.lenscast.camera.model.RecordingToggle
+import com.raulshma.lenscast.camera.model.SelfTimerMode
+import com.raulshma.lenscast.camera.model.SelfTimerPolicy
 import com.raulshma.lenscast.camera.model.StreamKind
 import com.raulshma.lenscast.camera.model.StreamStartOutcome
 import com.raulshma.lenscast.camera.model.StreamStatus
@@ -38,9 +45,13 @@ import com.raulshma.lenscast.streaming.AdaptiveBitrateController
 import com.raulshma.lenscast.streaming.StreamingManager
 import com.raulshma.lenscast.streaming.StreamingSession
 import com.raulshma.lenscast.streaming.StreamingTransports
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.collectLatest
@@ -124,6 +135,54 @@ class CameraViewModel(
     private val _connectionQualityStats = MutableStateFlow<NetworkQualityMonitor.NetworkStatsSnapshot?>(null)
     val connectionQualityStats: StateFlow<NetworkQualityMonitor.NetworkStatsSnapshot?> = _connectionQualityStats.asStateFlow()
 
+    // ── Camera pro mode ──
+    // Viewfinder aids (grid, spirit level, pro-tools overlays) and the
+    // self-timer read straight from the Settings Store; the analyzer/monitor
+    // runtimes own only plumbing — every verdict is their pure policy's.
+
+    val gridStyle: StateFlow<GridStyle> = settingsDataStore.gridStyle
+
+    val selfTimer: StateFlow<SelfTimerMode> = settingsDataStore.selfTimer
+
+    val spiritLevelEnabled: StateFlow<Boolean> = settingsDataStore.spiritLevelEnabled
+
+    val histogramEnabled: StateFlow<Boolean> = settingsDataStore.histogramEnabled
+
+    val zebrasEnabled: StateFlow<Boolean> = settingsDataStore.zebrasEnabled
+
+    val peakingEnabled: StateFlow<Boolean> = settingsDataStore.peakingEnabled
+
+    private val geotagEnabled: StateFlow<Boolean> = settingsDataStore.geotagEnabled
+
+    // The pro-tools frame consumer: rides the analysis NV21 frames while the
+    // preview is up; the per-frame flags read is a cheap settings snapshot.
+    private val proToolsFrameAnalyzer = ProToolsFrameAnalyzer(
+        flags = {
+            ProToolsPolicy.Flags(
+                histogram = histogramEnabled.value,
+                zebras = zebrasEnabled.value,
+                peaking = peakingEnabled.value,
+            )
+        },
+    )
+    val proToolsFrame: StateFlow<ProToolsPolicy.ProToolsFrame?> = proToolsFrameAnalyzer.frame
+
+    // The level's sensors run only while both the setting is on and the
+    // preview is showing (the second gate lives in start/stopPreview).
+    private val spiritLevelMonitor = SpiritLevelMonitor(context)
+    val levelLineState: StateFlow<LevelIndicatorPolicy.LevelLineState?> = spiritLevelMonitor.lineState
+
+    // The self-timer's exposed remaining-seconds state (null = no countdown
+    // running); every verdict is SelfTimerPolicy's, this keeps only the job.
+    private val _selfTimerSecondsRemaining = MutableStateFlow<Int?>(null)
+    val selfTimerSecondsRemaining: StateFlow<Int?> = _selfTimerSecondsRemaining.asStateFlow()
+    private var selfTimerJob: Job? = null
+
+    // One-shot signal per actual capture (immediate or timer fire) — the
+    // screen's shutter flash rides it, so a countdown flashes at fire time.
+    private val _captureFlashEvents = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+    val captureFlashEvents: SharedFlow<Unit> = _captureFlashEvents.asSharedFlow()
+
     init {
         viewModelScope.launch {
             cameraService.cameraState.collect { state ->
@@ -201,6 +260,12 @@ class CameraViewModel(
             }
         }
 
+        // The spirit level's sensor registration follows the persisted toggle;
+        // the preview-active gate opens and closes in start/stopPreview.
+        viewModelScope.launch {
+            settingsDataStore.spiritLevelEnabled.collect { spiritLevelMonitor.setEnabled(it) }
+        }
+
         checkPermission()
     }
 
@@ -260,6 +325,12 @@ class CameraViewModel(
     fun startPreview(previewView: PreviewView, lifecycleOwner: androidx.lifecycle.LifecycleOwner) {
         cameraService.setLifecycleOwner(lifecycleOwner)
         cameraService.startPreview(previewView)
+        // The pro-tools analyzer rides the analysis frames only while a
+        // preview is up; the level's sensor gate opens with it.
+        cameraService.setProToolsFrameListener { nv21, width, height, rotation ->
+            proToolsFrameAnalyzer.onFrame(nv21, width, height, rotation, System.currentTimeMillis())
+        }
+        spiritLevelMonitor.setPreviewActive(true)
         viewModelScope.launch {
             cameraService.applySettings(settings.value)
         }
@@ -267,6 +338,8 @@ class CameraViewModel(
 
     fun stopPreview() {
         cameraService.stopPreview()
+        cameraService.setProToolsFrameListener(null)
+        spiritLevelMonitor.setPreviewActive(false)
     }
 
     // The service owns its own preview view; switching works headless too.
@@ -448,13 +521,107 @@ class CameraViewModel(
         )
     }
 
+    /**
+     * The shutter press: the capture-now/countdown verdict is SelfTimerPolicy's;
+     * a countdown keeps only the job and the remaining-seconds state and fires
+     * the same [capturePhoto] path at the policy's Fire boundary.
+     */
+    fun onShutterPress() {
+        when (val press = SelfTimerPolicy.onShutterPress(selfTimer.value)) {
+            is SelfTimerPolicy.ShutterPress.CaptureNow -> capturePhoto()
+            is SelfTimerPolicy.ShutterPress.StartCountdown -> startSelfTimerCountdown(press)
+        }
+    }
+
+    private fun startSelfTimerCountdown(countdown: SelfTimerPolicy.ShutterPress.StartCountdown) {
+        selfTimerJob?.cancel()
+        selfTimerJob = viewModelScope.launch {
+            val startedAtMs = SystemClock.elapsedRealtime()
+            _selfTimerSecondsRemaining.value = countdown.initialSeconds
+            while (true) {
+                delay(SelfTimerPolicy.TICK_MS)
+                when (
+                    val tick = SelfTimerPolicy.onTick(
+                        countdown.durationMs,
+                        SystemClock.elapsedRealtime() - startedAtMs,
+                    )
+                ) {
+                    is SelfTimerPolicy.Tick.Counting ->
+                        _selfTimerSecondsRemaining.value = tick.secondsRemaining
+                    SelfTimerPolicy.Tick.Fire -> {
+                        _selfTimerSecondsRemaining.value = null
+                        selfTimerJob = null
+                        capturePhoto()
+                        return@launch
+                    }
+                }
+            }
+        }
+    }
+
+    /** A tap while the countdown runs cancels it (the verdict is SelfTimerPolicy's). */
+    fun cancelSelfTimer() {
+        if (SelfTimerPolicy.onTap(_selfTimerSecondsRemaining.value != null) ==
+            SelfTimerPolicy.TapVerdict.CANCEL_COUNTDOWN
+        ) {
+            selfTimerJob?.cancel()
+            selfTimerJob = null
+            _selfTimerSecondsRemaining.value = null
+        }
+    }
+
     fun capturePhoto() {
         val fileName = photoCaptureManager.captureToGallery(
+            onSaved = { filePath, _ -> tagCapturedPhoto(filePath) },
             onError = { exception -> Log.e(TAG, "Capture failed", exception) },
         )
         if (fileName == null) {
             Log.w(TAG, "capturePhoto: camera use case unavailable")
+            return
         }
+        _captureFlashEvents.tryEmit(Unit)
+    }
+
+    // EXIF tagging: the app-credit Artist/UserComment tags on every capture,
+    // GPS only while the opt-in geotag setting is on AND the location
+    // permission is granted (the settings screen asks once when the toggle
+    // first turns on; a denied grant degrades to credit-only tags).
+    private val exifTagger by lazy {
+        ExifTagger(
+            context = context,
+            appName = context.getString(R.string.app_name),
+            locationProvider = { currentLocationFix() },
+        )
+    }
+
+    private fun tagCapturedPhoto(filePath: String) {
+        viewModelScope.launch {
+            exifTagger.tagPhoto(
+                filePath,
+                includeGeotag = geotagEnabled.value && hasLocationPermission(),
+            )
+        }
+    }
+
+    private fun hasLocationPermission(): Boolean =
+        ContextCompat.checkSelfPermission(
+            context,
+            android.Manifest.permission.ACCESS_COARSE_LOCATION,
+        ) == PackageManager.PERMISSION_GRANTED
+
+    /** The freshest last-known fix across the standard providers, or null. */
+    private fun currentLocationFix(): android.location.Location? {
+        if (!hasLocationPermission()) return null
+        val manager = context.getSystemService(Context.LOCATION_SERVICE) as? android.location.LocationManager
+            ?: return null
+        return listOf(
+            android.location.LocationManager.NETWORK_PROVIDER,
+            android.location.LocationManager.GPS_PROVIDER,
+            android.location.LocationManager.PASSIVE_PROVIDER,
+        )
+            .mapNotNull { provider -> runCatching { manager.getLastKnownLocation(provider) }.getOrNull() }
+            .filterNotNull()
+            .maxByOrNull { it.time }
     }
 
     /**
@@ -511,5 +678,12 @@ class CameraViewModel(
 
     private fun refreshAudioPermission() {
         _hasAudioPermission.value = MicAccess.isGranted(context)
+    }
+
+    override fun onCleared() {
+        selfTimerJob?.cancel()
+        cameraService.setProToolsFrameListener(null)
+        spiritLevelMonitor.setPreviewActive(false)
+        super.onCleared()
     }
 }

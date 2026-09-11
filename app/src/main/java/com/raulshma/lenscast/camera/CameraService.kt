@@ -39,6 +39,7 @@ import com.raulshma.lenscast.camera.model.CameraState
 import com.raulshma.lenscast.camera.model.CameraSessionArbiter
 import com.raulshma.lenscast.camera.model.FocusApplyPolicy
 import com.raulshma.lenscast.camera.model.FrameErrorPolicy
+import com.raulshma.lenscast.camera.model.PhotoCapturePlan
 import com.raulshma.lenscast.core.YuvConverter
 import com.raulshma.lenscast.camera.model.WhiteBalance
 import com.raulshma.lenscast.camera.model.HdrMode
@@ -90,6 +91,31 @@ class CameraService(private val context: Context) {
     private var camera: Camera? = null
     private var lifecycleOwner: LifecycleOwner? = null
     private var frameListener: ((ByteArray, Int, Int, Int) -> Unit)? = null
+
+    // Second frame consumer: the pro-tools analyzer (histogram / zebras /
+    // peaking), registered while the camera screen shows the preview. Rides
+    // the same tightly-packed NV21 frames as the streaming frame listener.
+    @Volatile
+    private var proToolsFrameListener: ((ByteArray, Int, Int, Int) -> Unit)? = null
+
+    /**
+     * The photo-capture build request (JPEG quality, capture mode, RAW
+     * toggle) — applied by the Settings Applier and folded to the device's
+     * live RAW capability at bind time. [boundPhotoConfig] is the effective
+     * config the current ImageCapture was actually built with.
+     */
+    @Volatile
+    private var photoConfig = PhotoCapturePlan.PhotoCaptureConfig()
+    private var boundPhotoConfig: PhotoCapturePlan.PhotoCaptureConfig? = null
+
+    /** Set when a fresh bind's capability query invalidates the config it just built. */
+    private var correctivePhotoConfigRebind = false
+
+    private val _isRawCaptureSupported = MutableStateFlow(false)
+
+    /** Whether the bound camera can produce RAW+JPEG output (OUTPUT_FORMAT_RAW_JPEG). */
+    val isRawCaptureSupported: StateFlow<Boolean> = _isRawCaptureSupported.asStateFlow()
+
     private var currentCameraSelector: CameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
     private var previewRequested = false
     private var exclusiveSessionRefCount = 0
@@ -244,6 +270,39 @@ class CameraService(private val context: Context) {
 
     fun setFrameListener(listener: ((ByteArray, Int, Int, Int) -> Unit)?) {
         frameListener = listener
+    }
+
+    /**
+     * Registers the pro-tools frame consumer (histogram / zebras / focus
+     * peaking). Receives the same tightly-packed NV21 frames as the
+     * streaming listener, on the analysis thread — the consumer must be
+     * cheap or self-throttling.
+     */
+    fun setProToolsFrameListener(listener: ((ByteArray, Int, Int, Int) -> Unit)?) {
+        proToolsFrameListener = listener
+    }
+
+    /**
+     * The photo-capture apply seam: stores the request and, when it changes
+     * what the ImageCapture builder would produce on an already-bound
+     * camera, rebinds through the arbiter's RebindIfFree verdict (the
+     * resolution seam's twin — a busy camera picks the change up at the next
+     * natural rebind). The plan owns the effective-config fold; this only
+     * translates and rebinds.
+     */
+    fun applyPhotoCaptureConfig(config: PhotoCapturePlan.PhotoCaptureConfig) {
+        photoConfig = config
+        val effective = PhotoCapturePlan.effective(config, _isRawCaptureSupported.value)
+        if (PhotoCapturePlan.needsRebind(boundPhotoConfig, effective)) {
+            when (
+                val action = CameraSessionArbiter.decide(
+                    demandState(CameraSessionArbiter.Trigger.RebindIfFree)
+                )
+            ) {
+                is CameraSessionArbiter.BindingAction -> executeBinding(action)
+                else -> Log.d(TAG, "applyPhotoCaptureConfig: deferred until next active session")
+            }
+        }
     }
 
     suspend fun initialize(): Result<Unit> = withContext(Dispatchers.Main) {
@@ -637,12 +696,29 @@ class CameraService(private val context: Context) {
             )
             .build()
 
-        // Intentionally DO NOT bind ResolutionSelector to Preview. 
+        // Intentionally DO NOT bind ResolutionSelector to Preview.
         // Let CameraX decide the best display aspect ratio natively to prevent surface bind failures.
         val previewBuilder = Preview.Builder()
+        // The photo-use-case decisions (quality clamp, capture mode, RAW
+        // output format, capability fold) are the pure Photo Capture Plan's;
+        // this builder only translates them onto CameraX.
+        val effectivePhotoConfig = PhotoCapturePlan.effective(photoConfig, _isRawCaptureSupported.value)
         val captureBuilder = ImageCapture.Builder()
-            .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
+            .setJpegQuality(effectivePhotoConfig.jpegQuality)
+            .setCaptureMode(
+                when (PhotoCapturePlan.captureMode(effectivePhotoConfig)) {
+                    PhotoCapturePlan.CaptureMode.MAXIMIZE_QUALITY ->
+                        ImageCapture.CAPTURE_MODE_MAXIMIZE_QUALITY
+                    PhotoCapturePlan.CaptureMode.MINIMIZE_LATENCY ->
+                        ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY
+                }
+            )
             .setResolutionSelector(captureResolutionSelector)
+        if (PhotoCapturePlan.outputFormat(effectivePhotoConfig) ==
+            PhotoCapturePlan.PhotoOutputFormat.RAW_JPEG
+        ) {
+            captureBuilder.setOutputFormat(ImageCapture.OUTPUT_FORMAT_RAW_JPEG)
+        }
         val analysisBuilder = ImageAnalysis.Builder()
             .setResolutionSelector(analysisResolutionSelector)
             .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
@@ -694,6 +770,17 @@ class CameraService(private val context: Context) {
             }
 
             camera?.let { cam ->
+                // Refresh the live RAW capability from the camera just
+                // bound; if the plan's capability fold changed what should
+                // have been built (first bind starts with no camera to
+                // query), one self-correcting rebind lands the right config
+                // after this bind finishes its control apply.
+                _isRawCaptureSupported.value = rawCaptureSupported(cam.cameraInfo)
+                boundPhotoConfig = PhotoCapturePlan.effective(photoConfig, _isRawCaptureSupported.value)
+                if (boundPhotoConfig != effectivePhotoConfig) {
+                    Log.d(TAG, "bindUseCases: RAW capability changed the effective photo config; rebinding")
+                    correctivePhotoConfigRebind = true
+                }
                 cam.cameraInfo.zoomState.value?.let { zoom ->
                     // One ceiling: the device max clamped to the persistence
                     // bound, so pinch and settings re-apply agree.
@@ -722,6 +809,13 @@ class CameraService(private val context: Context) {
             }
 
             applyCameraControls(activeSettings, forceFocusReapply = true)
+
+            // Deferred from the capability check above: rebuild once so the
+            // ImageCapture matches the effective photo config.
+            if (correctivePhotoConfigRebind) {
+                correctivePhotoConfigRebind = false
+                rebindUseCases()
+            }
         } catch (e: Exception) {
             Log.e(TAG, "bindUseCases: failed to bind camera", e)
             _cameraState.value = CameraState.Error("Failed to start camera: ${e.message}")
@@ -786,6 +880,21 @@ class CameraService(private val context: Context) {
         imageCapture = null
         imageAnalysis = null
         camera = null
+        boundPhotoConfig = null
+    }
+
+    /**
+     * The device RAW verdict: ImageCaptureCapabilities' supported output
+     * formats on the bound camera. Fail-closed — a capability query error
+     * means no RAW.
+     */
+    private fun rawCaptureSupported(info: CameraInfo): Boolean = try {
+        ImageCapture.getImageCaptureCapabilities(info)
+            .supportedOutputFormats
+            .contains(ImageCapture.OUTPUT_FORMAT_RAW_JPEG)
+    } catch (e: Exception) {
+        Log.w(TAG, "RAW capability query failed", e)
+        false
     }
 
     fun switchCamera() {
@@ -836,6 +945,7 @@ class CameraService(private val context: Context) {
             if (yuvData != null) {
                 consecutiveFrameErrors = 0
                 frameListener?.invoke(yuvData, width, height, rotation)
+                proToolsFrameListener?.invoke(yuvData, width, height, rotation)
             }
         } catch (e: Exception) {
             // The window/threshold verdicts are the pure FrameErrorPolicy's;
@@ -1121,6 +1231,7 @@ class CameraService(private val context: Context) {
         cameraProvider = null
         clearBoundUseCases()
         _cameraState.value = CameraState.Idle
+        _isRawCaptureSupported.value = false
         previewRequested = false
         exclusiveSessionRefCount = 0
         currentPreviewView = null

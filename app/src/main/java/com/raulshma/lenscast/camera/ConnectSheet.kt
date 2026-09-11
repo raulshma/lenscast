@@ -11,7 +11,10 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import com.raulshma.lenscast.R
 import com.raulshma.lenscast.core.StreamDefaults
 import com.raulshma.lenscast.streaming.StreamingManager
 
@@ -46,24 +49,39 @@ fun ConnectSheet(
         modifier = modifier.padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Text("Connect to this camera", style = MaterialTheme.typography.titleMedium)
+        Text(stringResource(R.string.camera_connect_title), style = MaterialTheme.typography.titleMedium)
         if (qr != null) {
             androidx.compose.foundation.Image(
                 bitmap = qr.asImageBitmap(),
-                contentDescription = "QR code for ${info.httpUrl}",
+                contentDescription = stringResource(R.string.camera_qr_code_cd, info.httpUrl),
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(vertical = 4.dp),
             )
         }
-        ConnectRow(label = "Browser (MJPEG)", url = info.httpUrl, clients = info.httpClients, onCopy = onCopyHttp)
-        ConnectRow(label = "Browser (HLS)", url = info.hlsUrl, clients = null, onCopy = onCopyHls)
-        ConnectRow(label = "VLC / OBS (RTSP)", url = info.rtspUrl, clients = info.rtspClients, onCopy = onCopyRtsp)
+        ConnectRow(
+            label = stringResource(R.string.camera_connect_browser_mjpeg),
+            url = info.httpUrl,
+            clients = info.httpClients,
+            onCopy = onCopyHttp,
+        )
+        ConnectRow(
+            label = stringResource(R.string.camera_connect_browser_hls),
+            url = info.hlsUrl,
+            clients = null,
+            onCopy = onCopyHls,
+        )
+        ConnectRow(
+            label = stringResource(R.string.camera_connect_vlc_obs),
+            url = info.rtspUrl,
+            clients = info.rtspClients,
+            onCopy = onCopyRtsp,
+        )
         // HTTPS trust toe-print: the viewer compares this digest against the
         // browser's certificate exception to rule out a man-in-the-middle.
         if (info.httpUrl.startsWith("https://") && !tlsFingerprint.isNullOrBlank()) {
             Text(
-                "Certificate fingerprint (SHA-256):\n$tlsFingerprint",
+                stringResource(R.string.camera_connect_cert_fingerprint, tlsFingerprint),
                 style = MaterialTheme.typography.bodySmall,
             )
         }
@@ -71,8 +89,11 @@ fun ConnectSheet(
         // computer's browser can reach the camera over USB (reverse would
         // point the wrong way: device → host).
         Text(
-            "USB (no Wi-Fi): connect the cable and run\n  adb forward tcp:%1\$d tcp:%1\$d\nthen open http://localhost:%1\$d on the computer. mDNS: LensCast._http._tcp + LensCast-RTSP._rtsp._tcp. Cap: %2\$d HTTP viewers."
-                .format(currentPort, com.raulshma.lenscast.core.StreamDefaults.MAX_HTTP_CLIENTS),
+            stringResource(
+                R.string.camera_connect_usb_instructions,
+                currentPort,
+                StreamDefaults.MAX_HTTP_CLIENTS,
+            ),
             style = MaterialTheme.typography.bodySmall,
         )
     }
@@ -83,9 +104,14 @@ private fun ConnectRow(label: String, url: String, clients: Int?, onCopy: () -> 
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             Text(label, style = MaterialTheme.typography.labelLarge)
-            if (clients != null) Text("$clients watching", style = MaterialTheme.typography.bodySmall)
+            if (clients != null) {
+                Text(
+                    pluralStringResource(R.plurals.camera_viewers_watching, clients, clients),
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
         }
         Text(url, style = MaterialTheme.typography.bodyMedium)
-        Button(onClick = onCopy) { Text("Copy") }
+        Button(onClick = onCopy) { Text(stringResource(R.string.camera_copy)) }
     }
 }
