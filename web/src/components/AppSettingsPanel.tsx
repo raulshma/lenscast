@@ -1,5 +1,5 @@
 import { Show } from 'solid-js'
-import type { AllSettings, RtspInputFormat, RtspResolution, RtspVideoCodec } from '../types'
+import type { AllSettings, DeviceStatus, RtspInputFormat, RtspResolution, RtspVideoCodec } from '../types'
 import { API_DEFAULTS } from '../api/defaults'
 import SettingsCard from './SettingsCard'
 import ToggleRow from './ToggleRow'
@@ -11,15 +11,20 @@ import StorageCard from './StorageCard'
 import SystemPanel from './SystemPanel'
 import BackupCard from './BackupCard'
 import MqttCard from './MqttCard'
+import WhipCard from './WhipCard'
 import AuthCard from './AuthCard'
 import AuditCard from './AuditCard'
 import ConfigBackupCard from './ConfigBackupCard'
 
 interface Props {
   settings: () => AllSettings | null
+  status: () => DeviceStatus | null
+  streamActionLoading: () => boolean
   updateStreamingAndSave: (patch: Partial<AllSettings['streaming']>) => void
   updateStreamingDebounced: (patch: Partial<AllSettings['streaming']>) => void
   setRecordingConfigAudio: (v: boolean) => void
+  handleStartWhip: () => void
+  handleStopWhip: () => void
 }
 
 export default function AppSettingsPanel(props: Props) {
@@ -388,6 +393,16 @@ export default function AppSettingsPanel(props: Props) {
           </div>
         </Show>
       </SettingsCard>
+
+      <WhipCard
+        settings={props.settings}
+        status={props.status}
+        streamActionLoading={props.streamActionLoading}
+        updateStreamingAndSave={props.updateStreamingAndSave}
+        updateStreamingDebounced={props.updateStreamingDebounced}
+        handleStartWhip={props.handleStartWhip}
+        handleStopWhip={props.handleStopWhip}
+      />
 
       <SecurityCard
         settings={props.settings}

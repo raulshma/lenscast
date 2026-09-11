@@ -103,9 +103,13 @@ function App() {
                 <Show when={state.activeTab() === 'app'}>
                   <AppSettingsPanel
                     settings={state.settings}
+                    status={state.status}
+                    streamActionLoading={state.streamActionLoading}
                     updateStreamingAndSave={state.updateStreamingAndSave}
                     updateStreamingDebounced={state.updateStreamingDebounced}
                     setRecordingConfigAudio={(v) => state.setRecordingConfig({ ...state.recordingConfig(), includeAudio: v })}
+                    handleStartWhip={state.handleStartWhip}
+                    handleStopWhip={state.handleStopWhip}
                   />
                   <ClientsCard />
                   <MultiCamCard />

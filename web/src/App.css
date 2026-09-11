@@ -907,6 +907,14 @@ html, body {
   color: var(--lc-danger);
 }
 
+/* WHIP push connected state — the same recipe as the other banner variants
+   on the success pair of theme colors. */
+.status-banner-success {
+  background: var(--lc-success-bg);
+  border: 1px solid rgba(52, 211, 153, 0.2);
+  color: var(--lc-success);
+}
+
 /* Watchdog Card */
 .watchdog-status-badge {
   display: inline-flex;

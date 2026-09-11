@@ -188,6 +188,17 @@ export async function stopRtspStream(): Promise<{ success: boolean; isActive?: b
   return requestJson('/api/stream/rtsp/stop', { method: 'POST' })
 }
 
+// WHIP push (WebRTC-HTTP egress): the RTSP pair's shape minus `url` — the
+// endpoint is the device's configured publish resource, not something a
+// viewer opens, so the start response carries no URL.
+export async function startWhip(): Promise<{ success: boolean; isActive?: boolean; error?: string }> {
+  return requestJson('/api/stream/whip/start', { method: 'POST' })
+}
+
+export async function stopWhip(): Promise<{ success: boolean; isActive?: boolean; error?: string }> {
+  return requestJson('/api/stream/whip/stop', { method: 'POST' })
+}
+
 export async function getIntervalCaptureStatus(): Promise<import('../types').IntervalCaptureStatus> {
   return requestJson('/api/capture/interval/status')
 }
