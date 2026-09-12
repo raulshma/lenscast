@@ -90,12 +90,19 @@ class WebPushSender(
      * Queue a fan-out to every stored subscription. True when at least one
      * dispatch went out — the caller claims "push" in the event log at
      * dispatch time (the webhook's exact contract); false when disabled or
-     * nothing is subscribed.
+     * nothing is subscribed. [deepLink] is the dashboard deep link the
+     * notification's click opens (the payload's `url` field; the service
+     * worker reads it defensively, so null keeps the worker's own fallback).
      */
-    fun notifyEvent(alert: DetectionAlert, eventId: String?, clipAvailable: Boolean): Boolean {
+    fun notifyEvent(
+        alert: DetectionAlert,
+        eventId: String?,
+        clipAvailable: Boolean,
+        deepLink: String? = null,
+    ): Boolean {
         val config = configProvider()
         if (!willDispatch(config, store.count())) return false
-        val payload = buildPayload(alert, eventId, clipAvailable)
+        val payload = buildPayload(alert, eventId, clipAvailable, deepLink)
         executor.execute { dispatchAll(payload, config) }
         return true
     }
@@ -175,10 +182,16 @@ class WebPushSender(
         /**
          * The wire payload the service worker renders: a notification title,
          * a one-line body summary, a replace-per-type tag, the event id (null
-         * for the synthetic test alert), and whether the event dispatched a
-         * recording (the clip lands in the gallery moments later).
+         * for the synthetic test alert), whether the event dispatched a
+         * recording (the clip lands in the gallery moments later), and the
+         * dashboard deep link the notification's click opens ([deepLink]).
          */
-        fun buildPayload(alert: DetectionAlert, eventId: String?, clipAvailable: Boolean): PushEventWire {
+        fun buildPayload(
+            alert: DetectionAlert,
+            eventId: String?,
+            clipAvailable: Boolean,
+            deepLink: String? = null,
+        ): PushEventWire {
             // The tag is the notification-replace key — stable lowercase wire
             // casing; the title/body capitalize for display only.
             val kindName = alert.kind.name.lowercase(Locale.US)
@@ -196,6 +209,7 @@ class WebPushSender(
                 type = alert.kind.wireName,
                 timestampMs = alert.timestampMs,
                 clipAvailable = clipAvailable,
+                url = deepLink,
             )
         }
 
@@ -226,4 +240,10 @@ data class PushEventWire(
     val timestampMs: Long,
     /** True when the event dispatched a bounded recording (a clip follows). */
     val clipAvailable: Boolean,
+    /**
+     * The dashboard deep link the notification click opens (`#/events` at
+     * dispatch — the clip id only exists once the recording finalizes); the
+     * worker falls back to its own derivation when absent.
+     */
+    val url: String? = null,
 )

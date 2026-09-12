@@ -318,7 +318,8 @@ are served from a decrypted cache file for Coil, and backups upload the
 ### Encoded Stream Hub
 **`streaming/EncodedStreamHub.kt`** — the shared video/AAC encode pipeline:
 camera YUV in, encoded access units out to every registered sink — the RTSP
-server (RTP), the HLS ring, the WS video path, and the RTMP push — with its
+server (RTP), the HLS ring, the WS video path, and the RTMP and SRT pushes —
+with its
 start/stop decision the pure `EncodedStreamPolicy` verdict over sink
 activity. The
 codec seam is `RtspVideoCodec`: the hub lazily instantiates the H.264 or
@@ -326,10 +327,15 @@ H.265 encoder (one per codec, cached across flips), reconfigures
 stop → new encoder → start on a codec change, and implements the
 codec-aware `EncodedSource` seam the RTSP server reads for its SDP and PLAY
 sync-frame requests (SPS/PPS of the active codec, VPS H.265-only, so an
-H.264 SDP can never see a stale VPS). The fan-out feeds all four sinks the
-same access units except under H.265, where the H.264-only HLS muxer,
-WS/WebCodecs path, and RTMP push are gated off (the RTMP start ladder
-refuses an H.265 codec outright) and only RTSP receives.
+H.264 SDP can never see a stale VPS). The fan-out feeds every sink the same
+access units except under H.265, where the RTMP and SRT pushes are gated
+off (they have no usable H.265 mapping and their start ladders refuse the
+codec outright); HLS and WS are codec-aware — the TS muxer's PMT stream
+type flips with the codec (manager-owned, alongside a ring reset), and the
+WS sidecar opens with a self-describing config message (`LCCF` + avcC for
+H.264, `LCHC` + hvcC for HEVC) so legacy WS clients fail cleanly instead of
+misconfiguring a decoder (the shipped web player reads `LCCF` only; a
+Chromium-side hvcC path is future work).
 
 ### H264 Stream Assembler
 **`streaming/rtsp/H264StreamAssembler.kt`** — the wire-format core of the
@@ -694,9 +700,10 @@ the keyframe prepend decision),
 `MediaCodecVideoEncoder` — intra-refresh suppressed for the same
 no-IDR-to-join reason), and
 the RFC 7798 packetizer under Video Packetizers. Persisted as
-`rtsp_video_codec`; the swap is NEEDS_RESTART. H.265 fans out to RTSP only —
-the HLS muxer and WS/WebCodecs video path stay H.264-only at the hub's
-fan-out gate.
+`rtsp_video_codec`; the swap is NEEDS_RESTART. Under H.265 the fan-out is
+codec-aware: RTSP always receives, the HLS TS muxer flips its PMT stream
+type and the WS sidecar sends the `LCHC` hvcC config (see Encoded Stream
+Hub), while the RTMP and SRT pushes are gated off at the hub's fan-out.
 
 ### RTMP Push Output
 **`streaming/rtmp/`** — `RtspOutput`'s push twin: `RtmpOutput` owns the
@@ -725,6 +732,33 @@ the optional bearer token, a DELETE teardown of the session resource, and
 the status mirrored onto the snapshot exactly like RTMP's. The endpoint
 carries no embedded secret so it round-trips; the token is write-only like
 every other credential.
+
+### WHEP Viewer Endpoint
+**`streaming/whep/`** — the WHIP push's egress twin: browsers POST an SDP
+offer to `POST /whep` on the main HTTP server and watch the live camera
+sub-second over WebRTC. `WhepServer` owns the sessions: one shared
+libwebrtc environment (factory + `VideoSource` tapping the same NV21
+analysis frames WHIP consumes, plus one shared 16 kHz mono
+`JavaAudioDeviceModule` when WHIP's mic-arbitration verdict allows audio)
+under per-viewer `PeerConnection`s, each with its own hardware H.264
+encoder — H.264 only by construction, independent of the RTSP codec. The
+handshake is one-shot ICE like WHIP (answer after the ~3 s capped gather,
+candidates inline, no trickle), answered `201` with `Location:
+/whep/{id}`; `DELETE /whep/{id}` (or endpoint stop) disposes the session,
+and the pure `WhepSessionRegistry` GCs the rest — never-connected offers
+past the 10 s window and sessions DISCONNECTED past a 30 s grace — so a
+dead tab can never hold an encoder slot; `WHEP_MAX_VIEWERS` (the RTSP
+max-4 convention) caps concurrency at 503. The pure `WhepSdp` gate is the
+only code that touches a viewer's offer before libwebrtc (bounded bytes,
+line count, printable ASCII, `v=0` first, an `m=` video section required),
+so hostile bodies answer a readable 400 without reaching the native parser.
+The routes are transport branches served by `StreamingServer` outside the
+JSON router (SDP is not the JSON-handler contract, like ONVIF), gated by
+the Web Auth Filter as media egress: session cookie, or the API token's
+GET verdict for POST/DELETE (curl viewers need no session cookie), and the
+Role Gate allows a viewer session's WHEP verbs as reads. The status
+snapshot's `whepClients` mirrors the live count; the dashboard's player
+ladder rides WHEP as the top rung (`web/src/lib/whepClient.ts`).
 
 ### AAC Format
 **`streaming/rtsp/AacFormat.kt`** — one home for the AAC stream's format

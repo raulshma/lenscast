@@ -81,6 +81,9 @@ const STREAMING_KEYS = [
   'whipToken',
   'whipStunServer',
   'adaptiveBitrateEnabled',
+  'adaptiveEncodedBitrateEnabled',
+  'rtspSubStreamEnabled',
+  'hlsDvrSegments',
   'overlayEnabled',
   'showTimestamp',
   'timestampFormat',
@@ -198,6 +201,7 @@ describe('DTO contract fixtures', () => {
       'rtspEnabled',
       'rtspStreamingActive',
       'rtspUrl',
+      'whepClients',
     ])
     expectKeys(status.battery as unknown as Record<string, unknown>, ['level', 'isCharging', 'isPowerSaveMode'])
     expectKeys(status.adaptiveBitrate as unknown as Record<string, unknown>, [
@@ -240,6 +244,7 @@ describe('DTO contract fixtures', () => {
       'lastRecoveryTimestamp',
       'lastFailureReason',
     ])
+    expectKeys(status as unknown as Record<string, unknown>, ['encodedVideoBitrate'])
   })
 
   it('gallery fixture assigns to GalleryResponse', () => {

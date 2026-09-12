@@ -18,6 +18,7 @@ import com.raulshma.lenscast.capture.PhotoCaptureManager
 import com.raulshma.lenscast.capture.RecordingController
 import com.raulshma.lenscast.capture.TamperMonitor
 import com.raulshma.lenscast.capture.TamperResponsePolicy
+import com.raulshma.lenscast.capture.TimelapseComposer
 import com.raulshma.lenscast.capture.ml.AudioModelStore
 import com.raulshma.lenscast.capture.ml.DetectionModelStore
 import com.raulshma.lenscast.core.ConnectivityMonitor
@@ -30,6 +31,7 @@ import com.raulshma.lenscast.core.ThermalMonitor
 import com.raulshma.lenscast.core.TlsCertManager
 import com.raulshma.lenscast.core.WebhookNotifier
 import com.raulshma.lenscast.core.mqtt.MqttAlertPublisher
+import com.raulshma.lenscast.core.mqtt.MqttTopics
 import com.raulshma.lenscast.data.CaptureHistoryStore
 import com.raulshma.lenscast.data.SettingsDataStore
 import com.raulshma.lenscast.core.NetworkUtils
@@ -80,6 +82,17 @@ class MainApplication : Application(), SingletonImageLoader.Factory {
         )
     }
     val recordingController: RecordingController by lazy { RecordingController(this) }
+    // The one timelapse pipeline, shared by the capture screen's manual
+    // assembly and the interval worker's on-completion auto-assembly — one
+    // place owns the MediaStore + encryption publish seam.
+    val timelapseComposer: TimelapseComposer by lazy {
+        TimelapseComposer(
+            this,
+            captureHistoryStore,
+            encryptionEnabled = { settingsDataStore.mediaEncryptionEnabled.value },
+            mediaKeyProvider = mediaKeyProvider,
+        )
+    }
     val photoCaptureManager: PhotoCaptureManager by lazy {
         PhotoCaptureManager(
             this,
@@ -139,7 +152,9 @@ class MainApplication : Application(), SingletonImageLoader.Factory {
     }
     // The MQTT alert publisher reads its config live per dispatch (the same
     // live-read contract as the webhook above); the device id derives once
-    // per process — it is stable for the installation's lifetime.
+    // per process — it is stable for the installation's lifetime. The
+    // telemetry half reads the push outputs' live flags and the sensor
+    // snapshot (battery/thermal/bitrate/clients) live per announce/tick.
     val mqttAlertPublisher: MqttAlertPublisher by lazy {
         MqttAlertPublisher(
             configProvider = {
@@ -153,10 +168,33 @@ class MainApplication : Application(), SingletonImageLoader.Factory {
                         tls = settingsDataStore.mqttTls.value,
                     ),
                     discoveryPrefix = settingsDataStore.mqttDiscoveryPrefix.value,
+                    telemetryEnabled = settingsDataStore.mqttTelemetryEnabled.value,
                 )
             },
             deviceId = deviceId(),
             deviceName = android.os.Build.MODEL?.ifBlank { null } ?: "LensCast",
+            streamStatesProvider = {
+                mapOf(
+                    MqttTopics.StreamOutput.WEB to
+                        streamingManager.isWebStreamingActive.value,
+                    MqttTopics.StreamOutput.RTSP to
+                        streamingManager.isRtspRunning.value,
+                    MqttTopics.StreamOutput.RTMP to
+                        streamingManager.isRtmpActive(),
+                    MqttTopics.StreamOutput.WHIP to
+                        streamingManager.isWhipActive(),
+                    MqttTopics.StreamOutput.SRT to
+                        streamingManager.isSrtActive(),
+                )
+            },
+            telemetrySnapshotProvider = {
+                MqttAlertPublisher.TelemetrySnapshot(
+                    batteryPercent = powerManager.batteryLevel.value,
+                    thermal = thermalMonitor.thermalState.value.name,
+                    encodedBitrateBps = streamingManager.currentVideoBitrate(),
+                    activeClients = streamingManager.telemetryActiveClientCount(),
+                )
+            },
         )
     }
     val detectionNotifier: DetectionNotifier by lazy {
@@ -252,7 +290,8 @@ class MainApplication : Application(), SingletonImageLoader.Factory {
     val streamToggle: StreamToggle by lazy {
         StreamToggle(StreamingTransports(streamingManager, streamingSession))
     }
-    private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    /** App-lifetime scope for work that must outlive a ViewModel or screen. */
+    val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
     override fun onCreate() {
         super.onCreate()

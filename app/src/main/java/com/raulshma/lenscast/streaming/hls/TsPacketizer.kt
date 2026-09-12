@@ -14,12 +14,25 @@ object TsPacketizer {
     const val PID_VIDEO = 0x0100
     const val PID_AUDIO = 0x0101
     const val STREAM_TYPE_H264 = 0x1B
+    const val STREAM_TYPE_HEVC = 0x24
     const val STREAM_TYPE_AAC = 0x0F
 
     private var patCc = 0
     private var pmtCc = 0
     private var videoCc = 0
     private var audioCc = 0
+
+    // The video stream type the PMT declares. The muxer is stateless over the
+    // elementary-stream bytes (Annex-B framing is identical for both codecs),
+    // so only the PMT is codec-aware. The flip is manager-owned and must ride
+    // an HlsManager.reset() — segments from both codecs must never share a ring.
+    @Volatile private var videoStreamType: Int = STREAM_TYPE_H264
+
+    fun setVideoStreamType(streamType: Int) {
+        videoStreamType = streamType
+    }
+
+    fun currentVideoStreamType(): Int = videoStreamType
 
     fun reset() {
         patCc = 0
@@ -62,11 +75,12 @@ object TsPacketizer {
     }
 
     internal fun pmt(): ByteArray {
-        // PMT: H264 video on PID_VIDEO + AAC audio on PID_AUDIO.
+        // PMT: video on PID_VIDEO (H.264 or HEVC per [videoStreamType]) + AAC
+        // audio on PID_AUDIO.
         val section = byteArrayOf(
             0x02, 0xB0.toByte(), 0x17, 0x00, 0x01, 0xC1.toByte(), 0x00, 0x00,
             0xF0.toByte(), 0x00.toByte(),
-            STREAM_TYPE_H264.toByte(), 0xE1.toByte(), 0x00.toByte(), 0xF0.toByte(), 0x00.toByte(),
+            videoStreamType.toByte(), 0xE1.toByte(), 0x00.toByte(), 0xF0.toByte(), 0x00.toByte(),
             STREAM_TYPE_AAC.toByte(), 0xE1.toByte(), 0x01.toByte(), 0xF0.toByte(), 0x00.toByte(),
         )
         return tsPacket(PID_PMT, sectionWithCrc(section), payloadStart = true, cc = pmtCc++ and 0x0F)

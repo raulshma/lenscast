@@ -43,6 +43,14 @@ object WearRequestUrls {
     /** GET /snapshot — the current preview frame as JPEG bytes. */
     fun snapshot(host: String, port: Int): String = "${baseUrl(host, port)}/snapshot"
 
+    /**
+     * GET /api/detection/events?limit=N — the newest-first detection feed
+     * the alert loop tails. [limit] is clamped to the small window the loop
+     * needs (the server clamps again on its side); callers pass 5.
+     */
+    fun detectionEvents(host: String, port: Int, limit: Int): String =
+        "${baseUrl(host, port)}/api/detection/events?limit=$limit"
+
     /** POST /api/stream/start — mirrors the dashboard's stream toggle. */
     fun streamStart(host: String, port: Int): String = "${baseUrl(host, port)}/api/stream/start"
 

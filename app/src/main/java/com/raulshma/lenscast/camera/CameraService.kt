@@ -40,6 +40,7 @@ import com.raulshma.lenscast.camera.model.CameraSessionArbiter
 import com.raulshma.lenscast.camera.model.FocusApplyPolicy
 import com.raulshma.lenscast.camera.model.FrameErrorPolicy
 import com.raulshma.lenscast.camera.model.PhotoCapturePlan
+import com.raulshma.lenscast.camera.model.PhotoAspectRatioPolicy
 import com.raulshma.lenscast.core.YuvConverter
 import com.raulshma.lenscast.camera.model.WhiteBalance
 import com.raulshma.lenscast.camera.model.HdrMode
@@ -679,10 +680,23 @@ class CameraService(private val context: Context) {
     ) {
         Log.d(TAG, "bindUseCases: selector=$currentCameraSelector, resolution=$currentResolution, attachPreview=${shouldAttachPreview()}")
 
+        // The photo-use-case decisions (quality clamp, capture mode, RAW
+        // output format, capability fold) are the pure Photo Capture Plan's;
+        // this builder only translates them onto CameraX.
+        val effectivePhotoConfig = PhotoCapturePlan.effective(photoConfig, _isRawCaptureSupported.value)
+
+        // The photo use case gets its own resolution selector: the video
+        // resolution for 16:9 (the historical behavior), the same tier widened
+        // to 4:3 for the full-sensor-ish aspect — the pure Photo Aspect Ratio
+        // Policy's mapping, with CameraX's closest-lower-then-higher fallback
+        // ladder absorbing devices without the exact size.
         val captureResolutionSelector = ResolutionSelector.Builder()
             .setResolutionStrategy(
                 ResolutionStrategy(
-                    currentResolution,
+                    PhotoAspectRatioPolicy.captureTargetSize(
+                        effectivePhotoConfig.aspect,
+                        currentResolution,
+                    ),
                     ResolutionStrategy.FALLBACK_RULE_CLOSEST_LOWER_THEN_HIGHER
                 )
             )
@@ -699,10 +713,6 @@ class CameraService(private val context: Context) {
         // Intentionally DO NOT bind ResolutionSelector to Preview.
         // Let CameraX decide the best display aspect ratio natively to prevent surface bind failures.
         val previewBuilder = Preview.Builder()
-        // The photo-use-case decisions (quality clamp, capture mode, RAW
-        // output format, capability fold) are the pure Photo Capture Plan's;
-        // this builder only translates them onto CameraX.
-        val effectivePhotoConfig = PhotoCapturePlan.effective(photoConfig, _isRawCaptureSupported.value)
         val captureBuilder = ImageCapture.Builder()
             .setJpegQuality(effectivePhotoConfig.jpegQuality)
             .setCaptureMode(

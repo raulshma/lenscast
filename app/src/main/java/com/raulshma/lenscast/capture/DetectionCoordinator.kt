@@ -11,6 +11,7 @@ import com.raulshma.lenscast.capture.model.DetectionClassPolicy
 import com.raulshma.lenscast.capture.model.SoundClassPolicy
 import com.raulshma.lenscast.capture.model.SoundLabelTracker
 import com.raulshma.lenscast.camera.CameraService
+import com.raulshma.lenscast.capture.model.DetectionEventDeepLink
 import com.raulshma.lenscast.core.DetectionAlert
 import com.raulshma.lenscast.core.EventKind
 import com.raulshma.lenscast.core.JpegDownscaler
@@ -21,6 +22,7 @@ import com.raulshma.lenscast.core.mqtt.MqttAlertPublisher
 import com.raulshma.lenscast.capture.model.CaptureType
 import com.raulshma.lenscast.capture.model.RecordingConfig
 import com.raulshma.lenscast.capture.model.RecordingQuality
+import com.raulshma.lenscast.capture.model.RecordingTrigger
 import com.raulshma.lenscast.data.CaptureHistoryStore
 import com.raulshma.lenscast.data.SettingsDataStore
 import com.raulshma.lenscast.streaming.StreamingManager
@@ -197,6 +199,10 @@ class DetectionCoordinator(
     private val audioModelRequestLock = Any()
     private var lastAudioModelRequestMs = 0L
 
+    /** The class-trigger path's last-fire stamp; its cooldown compares against it. */
+    @Volatile
+    private var lastSoundClassTriggerMs = 0L
+
     /**
      * Audio entry point for classification (wired from StreamingManager's
      * chunk tap, audio reader thread). Cheap when the feature is off — one
@@ -223,18 +229,47 @@ class DetectionCoordinator(
      * One completed YAMNet window, on the classifier worker: the raw top-1
      * through the policy gate, then into the tracker. Reads the settings
      * live, like the ML gate does per verdict.
+     *
+     * The second decision path — the opt-in class trigger — rides the same
+     * window: a label in the chosen trigger classes at/above the confidence
+     * floor fires a detection event of its own (recording/alert/log, exactly
+     * the choreography an RMS event gets) *independent of the RMS threshold*
+     * and behind the persisted sound cooldown. Additive only: nothing here
+     * can suppress or delay an RMS event — the two paths never meet.
      */
     private fun onSoundWindow(label: String?, scorePercent: Float) {
         try {
+            val store = settingsDataStore
             val qualified = SoundClassPolicy.windowLabel(
                 topLabel = label,
                 scorePercent = scorePercent,
-                minConfidencePercent = settingsDataStore.soundClassificationConfidencePercent.value,
+                minConfidencePercent = store.soundClassificationConfidencePercent.value,
                 allowedClasses = SoundClassPolicy.normalizeAllowed(
-                    settingsDataStore.soundClassificationAllowedClasses.value,
+                    store.soundClassificationAllowedClasses.value,
                 ),
             )
             soundLabelTracker.onWindow(qualified, nowMs())
+            if (store.soundTriggerEnabled.value) {
+                val now = nowMs()
+                if (SoundClassPolicy.shouldTriggerOnClass(
+                        topLabel = label,
+                        scorePercent = scorePercent,
+                        minConfidencePercent = store.soundClassificationConfidencePercent.value,
+                        triggerClasses = SoundClassPolicy.normalizeTriggerClasses(
+                            store.soundTriggerClasses.value,
+                        ),
+                        nowMs = now,
+                        lastTriggerMs = lastSoundClassTriggerMs,
+                        cooldownMs = store.soundCooldownSeconds.value * 1_000L,
+                    )
+                ) {
+                    lastSoundClassTriggerMs = now
+                    // The metric column carries the classifier's confidence
+                    // percent; the label rides the same `labels` field every
+                    // sound event carries.
+                    onEvent(EventKind.SOUND, scorePercent.toDouble(), labels = listOfNotNull(label))
+                }
+            }
         } catch (_: Exception) {
             // Fail-open: a dropped window never blocks anything.
         }
@@ -338,6 +373,11 @@ class DetectionCoordinator(
                     }
                     ObjectDetectionEngine.Classification.Unavailable -> onVerdict(false, emptyList())
                 }
+            } catch (e: Exception) {
+                // Fail open, same as Unavailable: a crashed classification
+                // must never eat the motion event on its way through.
+                Log.w(TAG, "ML classification failed; failing open", e)
+                onVerdict(false, emptyList())
             } finally {
                 mlInferring.set(false)
             }
@@ -385,12 +425,18 @@ class DetectionCoordinator(
         val webhookDispatched = webhookNotifier.notifyEvent(
             alert,
             headers = WebhookNotifier.parseHeaders(store.webhookHeaders.value),
+            deepLink = DetectionEventDeepLink.EVENTS,
         )
         if (webhookDispatched) dispatched.add(ACTION_WEBHOOK)
-        if (mqttPublisher()?.notifyEvent(alert) == true) dispatched.add(ACTION_MQTT)
+        if (mqttPublisher()?.notifyEvent(alert, deepLink = DetectionEventDeepLink.EVENTS) == true) dispatched.add(ACTION_MQTT)
         // Same claim contract: push fires only when the toggle is on and at
         // least one browser is subscribed (the verdict is the sender's own).
-        val pushed = webPushSender()?.notifyEvent(alert, eventId = null, clipAvailable = false) == true
+        val pushed = webPushSender()?.notifyEvent(
+            alert,
+            eventId = null,
+            clipAvailable = false,
+            deepLink = DetectionEventDeepLink.EVENTS,
+        ) == true
         if (pushed) dispatched.add(ACTION_PUSH)
         val notified = store.detectionNotificationsEnabled.value &&
             detectionNotifier()?.notify(EventKind.TEST, emptyList(), alert.snapshotJpegBase64) == true
@@ -444,7 +490,7 @@ class DetectionCoordinator(
                 DetectionEventPolicy.RecordingAction.START -> {
                     // Claimed only when the start command reached the
                     // controller without throwing.
-                    val started = runCatching { startBoundedRecording() }
+                    val started = runCatching { startBoundedRecording(isSound = isSound) }
                         .onFailure { Log.w(TAG, "Bounded recording start failed: ${it.message}") }
                         .isSuccess
                     if (started) {
@@ -493,14 +539,21 @@ class DetectionCoordinator(
                 // dispatch time: the settings can flip while the snapshot
                 // encodes, and the log must follow the verdict the notifier
                 // actually acted on, not a pre-encode one.
+                // The deep link is the events feed: at dispatch moment the
+                // bounded recording's clip is not linked yet (it links when
+                // the recording finalizes — see [watchMotionClip]) — the
+                // persisted event's feed url upgrades to the gallery link,
+                // while these dispatch-moment sinks carry "#/events".
                 val webhookDispatched = webhookNotifier.notifyEvent(
                     alert,
                     headers = WebhookNotifier.parseHeaders(store.webhookHeaders.value),
+                    deepLink = DetectionEventDeepLink.EVENTS,
                 )
                 if (webhookDispatched) dispatchedActions.add(ACTION_WEBHOOK)
                 // Same claim contract as the webhook: the MQTT verdict is the
                 // publisher's own would-publish decision.
-                val mqttPublished = mqttPublisher()?.notifyEvent(alert) == true
+                val mqttPublished =
+                    mqttPublisher()?.notifyEvent(alert, deepLink = DetectionEventDeepLink.EVENTS) == true
                 if (mqttPublished) dispatchedActions.add(ACTION_MQTT)
                 // The Web Push sink rides the same verdict contract: "push"
                 // is claimed when the toggle is on and at least one browser
@@ -511,6 +564,7 @@ class DetectionCoordinator(
                     alert,
                     eventId = eventId,
                     clipAvailable = dispatchedActions.contains(ACTION_RECORDING),
+                    deepLink = DetectionEventDeepLink.EVENTS,
                 ) == true
                 if (pushed) dispatchedActions.add(ACTION_PUSH)
                 // The local alert claims only when the platform accepted the
@@ -622,7 +676,7 @@ class DetectionCoordinator(
      * dispatch verdict must be known here so the event log claims the action
      * only when it ran.
      */
-    private fun startBoundedRecording() {
+    private fun startBoundedRecording(isSound: Boolean = false) {
         val store = settingsDataStore
         // The store clamps the persisted range (0..120); a clip still needs a
         // positive length, so zero post-roll floors at the minimum clip.
@@ -634,6 +688,10 @@ class DetectionCoordinator(
                 repeatIntervalSeconds = 0,
                 quality = RecordingQuality.HIGH,
                 includeAudio = store.recordingAudioEnabled.value,
+                // Clip provenance: the finalized capture's history entry (and
+                // with it the timeline) attributes to the event kind that
+                // started it.
+                trigger = if (isSound) RecordingTrigger.SOUND else RecordingTrigger.MOTION,
             ),
         )
     }

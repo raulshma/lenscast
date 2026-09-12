@@ -171,11 +171,14 @@ day-view card:
   today. Sessions are the day's video captures (start inside the day; an
   `endMs` may sit past midnight).
 - `trigger` is one of `manual`, `motion`, `sound`, `continuous`,
-  `scheduled` — but reconstruction from history can only ever answer the
-  first three: `motion`/`sound` when a persisted detection event overlaps
-  the capture window (a small lead tolerance before the start is allowed),
-  `manual` otherwise. A capture actually produced by the continuous loop or
-  a scheduled start is indistinguishable from a manual one after the fact.
+  `scheduled`, `interval`. Captures created since the provenance stamp
+  existed carry it directly (`RecordingConfig.trigger`, set at creation by
+  the recording chain: the coordinator's clips stamp `motion`/`sound`, the
+  continuous loop stamps `continuous`, the controller folds a scheduled
+  start to `scheduled`, and assembled timelapses stamp `interval`). Legacy
+  entries without a stamp reconstruct the old way: `motion`/`sound` when a
+  persisted detection event overlaps the capture window (a small lead
+  tolerance before the start is allowed), `manual` otherwise.
 - `endMs` is inferred: the capture's own duration when known, else the start
   of the next capture (capped at one hour), else start + 60 s.
 - `mediaId` is the capture-history id; the clip itself is downloadable
@@ -202,9 +205,37 @@ from their normal credential prompts / `-rtsp_transport` + URL credentials
 
 ## Frigate
 
-LensCast currently produces a single RTSP stream, so the detect-role pattern
-(a low-resolution sub-stream dedicated to detection) is not yet available —
-the main output serves both `detect` and `record` roles:
+An optional low-resolution sub-stream dedicated to detection is available:
+enable **RTSP Sub-Stream** (in the RTSP settings, off by default) and the
+device serves a fixed 640x480 H.264 stream (500 kbps cap) at
+`rtsp://PHONE_IP:8554/sub` — a separate RTSP URL with its own SDP, running
+only while the RTSP output is live. It carries video only (no audio track),
+which is exactly what a detect role wants:
+
+```yaml
+cameras:
+  lenscast:
+    ffmpeg:
+      inputs:
+        - path: rtsp://PHONE_IP:8554/stream
+          input_args: preset-rtsp-tcp
+          roles:
+            - record
+        - path: rtsp://PHONE_IP:8554/sub
+          input_args: preset-rtsp-tcp
+          roles:
+            - detect
+    detect:
+      enabled: true
+```
+
+The sub-stream encodes from the same camera frames as the main output (the
+frame is aspect-filled onto 640x480), so its content matches the recording —
+but it is a second encode: expect extra CPU/heat while it runs, and keep the
+main output's own resolution/bitrate in mind on thermally constrained
+devices.
+
+Without the sub-stream the main output serves both roles:
 
 ```yaml
 cameras:

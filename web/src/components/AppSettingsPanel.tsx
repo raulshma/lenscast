@@ -1,6 +1,7 @@
 import { Show } from 'solid-js'
 import type { AllSettings, DeviceStatus, RtspInputFormat, RtspResolution, RtspVideoCodec } from '../types'
 import { API_DEFAULTS } from '../api/defaults'
+import { t } from '../lib/i18n'
 import SettingsCard from './SettingsCard'
 import ToggleRow from './ToggleRow'
 import SecurityCard from './SecurityCard'
@@ -54,11 +55,11 @@ export default function AppSettingsPanel(props: Props) {
             <circle cx="12" cy="20" r="1" />
           </svg>
         }
-        title="Web Streaming"
+        title={t('webstream.title')}
       >
         <div class="field-group">
           <div class="field-row field-row-toggle">
-            <span class="field-label">Enable Web Streaming</span>
+            <span class="field-label">{t('webstream.enable')}</span>
             <label class="toggle-switch" for="web-stream-toggle-app">
               <input
                 id="web-stream-toggle-app"
@@ -71,13 +72,13 @@ export default function AppSettingsPanel(props: Props) {
           </div>
           <div class="status-banner status-banner-info stream-mode-hint" role="note" aria-live="polite">
             <span class="status-banner-dot" aria-hidden="true" />
-            <span>Web Stream and RTSP are independent. You can keep RTSP enabled while Web Stream is off.</span>
+            <span>{t('webstream.independent')}</span>
           </div>
         </div>
 
         <div class="field-group">
           <div class="field-row">
-            <span class="field-label">JPEG Quality</span>
+            <span class="field-label">{t('webstream.jpegQuality')}</span>
             <span class="field-value">{s()?.streaming?.jpegQuality ?? API_DEFAULTS.jpegQuality}%</span>
           </div>
           <input
@@ -98,7 +99,7 @@ export default function AppSettingsPanel(props: Props) {
 
         <div class="field-group">
           <div class="field-row field-row-toggle">
-            <span class="field-label">Adaptive Bitrate</span>
+            <span class="field-label">{t('webstream.adaptive')}</span>
             <label class="toggle-switch" for="adaptive-bitrate-toggle-app">
               <input
                 id="adaptive-bitrate-toggle-app"
@@ -111,13 +112,13 @@ export default function AppSettingsPanel(props: Props) {
           </div>
           <div class="status-banner status-banner-info stream-mode-hint" role="note" aria-live="polite">
             <span class="status-banner-dot" aria-hidden="true" />
-            <span>Automatically adjusts quality and frame rate based on network conditions.</span>
+            <span>{t('webstream.adaptiveDesc')}</span>
           </div>
         </div>
 
         <div class="field-group">
           <div class="field-row field-row-toggle">
-            <span class="field-label">Show Preview on Device</span>
+            <span class="field-label">{t('webstream.showPreview')}</span>
             <label class="toggle-switch" for="show-preview-toggle-app">
               <input
                 id="show-preview-toggle-app"
@@ -133,7 +134,7 @@ export default function AppSettingsPanel(props: Props) {
 
         <div class="field-group">
           <div class="field-row field-row-toggle">
-            <span class="field-label">mDNS Discovery</span>
+            <span class="field-label">{t('webstream.mdns')}</span>
             <label class="toggle-switch" for="mdns-toggle-app">
               <input
                 id="mdns-toggle-app"
@@ -146,20 +147,20 @@ export default function AppSettingsPanel(props: Props) {
           </div>
           <div class="status-banner status-banner-info stream-mode-hint" role="note" aria-live="polite">
             <span class="status-banner-dot" aria-hidden="true" />
-            <span>Advertises the stream on the local network so clients can discover it.</span>
+            <span>{t('webstream.mdnsDesc')}</span>
           </div>
         </div>
 
         <div class="field-group">
           <ToggleRow
             id="onvif-toggle"
-            label="ONVIF (Profile S)"
+            label={t('webstream.onvif')}
             checked={s()?.streaming?.onvifEnabled ?? API_DEFAULTS.onvifEnabled}
             onToggle={() => props.updateStreamingAndSave({ onvifEnabled: !(s()?.streaming?.onvifEnabled ?? API_DEFAULTS.onvifEnabled) })}
           />
           <div class="status-banner status-banner-info stream-mode-hint" role="note" aria-live="polite">
             <span class="status-banner-dot" aria-hidden="true" />
-            <span>WS-Discovery + device endpoint so NVRs (Home Assistant, tinyCam) can find this camera automatically.</span>
+            <span>{t('webstream.onvifDesc')}</span>
           </div>
         </div>
 
@@ -174,11 +175,11 @@ export default function AppSettingsPanel(props: Props) {
             <path d="M15.54 8.46a5 5 0 010 7.07" />
           </svg>
         }
-        title="Audio"
+        title={t('audio.title')}
       >
         <div class="field-group">
           <div class="field-row field-row-toggle">
-            <span class="field-label">Include Audio in Live Stream</span>
+            <span class="field-label">{t('audio.includeLive')}</span>
             <label class="toggle-switch" for="stream-audio-toggle-app">
               <input
                 id="stream-audio-toggle-app"
@@ -194,7 +195,7 @@ export default function AppSettingsPanel(props: Props) {
 
         <div class="field-group">
           <div class="field-row field-row-toggle">
-            <span class="field-label">Echo Cancellation & Noise Suppression</span>
+            <span class="field-label">{t('audio.echo')}</span>
             <label class="toggle-switch" for="echo-cancel-toggle-app">
               <input
                 id="echo-cancel-toggle-app"
@@ -210,7 +211,7 @@ export default function AppSettingsPanel(props: Props) {
 
         <div class="field-group">
           <div class="field-row">
-            <span class="field-label">Live Audio Bitrate</span>
+            <span class="field-label">{t('audio.bitrate')}</span>
             <span class="field-value">{s()?.streaming?.streamAudioBitrateKbps ?? API_DEFAULTS.streamAudioBitrateKbps} kbps</span>
           </div>
           <input
@@ -231,7 +232,7 @@ export default function AppSettingsPanel(props: Props) {
 
         <div class="field-group">
           <div class="field-row">
-            <span class="field-label">Audio Channels</span>
+            <span class="field-label">{t('audio.channels')}</span>
           </div>
           <select
             id="audio-channels-select-app"
@@ -243,14 +244,14 @@ export default function AppSettingsPanel(props: Props) {
               props.updateStreamingAndSave({ streamAudioChannels: v })
             }}
           >
-            <option value="1">Mono</option>
-            <option value="2">Stereo</option>
+            <option value="1">{t('audio.mono')}</option>
+            <option value="2">{t('audio.stereo')}</option>
           </select>
         </div>
 
         <div class="field-group">
           <div class="field-row field-row-toggle">
-            <span class="field-label">Include Audio in Recordings</span>
+            <span class="field-label">{t('audio.includeRecordings')}</span>
             <label class="toggle-switch" for="rec-audio-toggle-app">
               <input
                 id="rec-audio-toggle-app"
@@ -276,11 +277,11 @@ export default function AppSettingsPanel(props: Props) {
             <path d="M7 11V7a5 5 0 0110 0v4" />
           </svg>
         }
-        title="HTTPS (TLS)"
+        title={t('https.title')}
       >
         <div class="field-group">
           <div class="field-row field-row-toggle">
-            <span class="field-label">Serve Dashboard over HTTPS</span>
+            <span class="field-label">{t('https.serve')}</span>
             <label class="toggle-switch" for="https-toggle-app">
               <input
                 id="https-toggle-app"
@@ -293,7 +294,7 @@ export default function AppSettingsPanel(props: Props) {
           </div>
           <div class="status-banner status-banner-info stream-mode-hint" role="note" aria-live="polite">
             <span class="status-banner-dot" aria-hidden="true" />
-            <span>Self-signed certificate. Accept the browser warning once, then verify the fingerprint shown on the phone's Connect sheet. Enables encrypted streams and microphone talkback.</span>
+            <span>{t('https.desc')}</span>
           </div>
         </div>
       </SettingsCard>
@@ -307,11 +308,11 @@ export default function AppSettingsPanel(props: Props) {
             <path d="M2 12l10 5 10-5" />
           </svg>
         }
-        title="RTSP Stream"
+        title={t('rtsp.title')}
       >
         <div class="field-group">
           <div class="field-row field-row-toggle">
-            <span class="field-label">Enable RTSP Streaming</span>
+            <span class="field-label">{t('rtsp.enable')}</span>
             <label class="toggle-switch" for="rtsp-toggle-app">
               <input
                 id="rtsp-toggle-app"
@@ -327,7 +328,7 @@ export default function AppSettingsPanel(props: Props) {
         <Show when={s()?.streaming?.rtspEnabled}>
           <div class="field-group">
             <div class="field-row">
-              <span class="field-label">RTSP Port</span>
+              <span class="field-label">{t('rtsp.port')}</span>
               <span class="field-value">{s()?.streaming?.rtspPort ?? API_DEFAULTS.rtspPort}</span>
             </div>
             <input
@@ -347,7 +348,7 @@ export default function AppSettingsPanel(props: Props) {
 
           <div class="field-group">
             <div class="field-row">
-              <span class="field-label">Encoder Input Format</span>
+              <span class="field-label">{t('rtsp.inputFormat')}</span>
             </div>
             <select
               id="rtsp-format-select-app"
@@ -357,7 +358,7 @@ export default function AppSettingsPanel(props: Props) {
                 props.updateStreamingAndSave({ rtspInputFormat: e.currentTarget.value as RtspInputFormat })
               }}
             >
-              <option value="AUTO">Auto</option>
+              <option value="AUTO">{t('common.auto')}</option>
               <option value="NV21">NV21</option>
               <option value="NV12">NV12</option>
               <option value="I420">I420</option>
@@ -368,12 +369,12 @@ export default function AppSettingsPanel(props: Props) {
               keeps streaming at the previous size until it is restarted. */}
           <div class="field-group">
             <div class="field-row">
-              <span class="field-label" title="Applies with an RTSP restart">Resolution</span>
+              <span class="field-label" title={t('rtsp.restartHint')}>{t('common.resolution')}</span>
             </div>
             <select
               id="rtsp-resolution-select-app"
               class="field-select field-select-full"
-              title="Applies with an RTSP restart"
+              title={t('rtsp.restartHint')}
               value={s()?.streaming?.rtspResolution ?? API_DEFAULTS.rtspResolution}
               onChange={(e) => {
                 props.updateStreamingAndSave({ rtspResolution: e.currentTarget.value as RtspResolution })
@@ -387,7 +388,7 @@ export default function AppSettingsPanel(props: Props) {
 
           <div class="field-group">
             <div class="field-row">
-              <span class="field-label">Video Codec</span>
+              <span class="field-label">{t('rtsp.codec')}</span>
             </div>
             <select
               id="rtsp-codec-select-app"
@@ -397,7 +398,7 @@ export default function AppSettingsPanel(props: Props) {
                 props.updateStreamingAndSave({ rtspVideoCodec: e.currentTarget.value as RtspVideoCodec })
               }}
             >
-              <option value="h264">H.264 (recommended)</option>
+              <option value="h264">{t('rtsp.codecH264')}</option>
               <option value="h265">H.265</option>
             </select>
           </div>
@@ -430,7 +431,10 @@ export default function AppSettingsPanel(props: Props) {
         updateStreamingDebounced={props.updateStreamingDebounced}
       />
 
-      <EventFeed readOnly={props.readOnly} />
+      {/* #/events deep links scroll the feed into view via this anchor. */}
+      <div id="event-feed-anchor">
+        <EventFeed readOnly={props.readOnly} />
+      </div>
 
       <DetectionStatsCard />
 

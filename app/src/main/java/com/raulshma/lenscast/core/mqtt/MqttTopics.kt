@@ -18,6 +18,12 @@ import java.util.Locale
  * (the full detection JSON, snapshot included). The sensor-kind vocabulary is
  * [SensorKind] — the one home mapping an event type onto its state topic,
  * discovery topic, and discovery payload.
+ *
+ * The telemetry half rides the same base: `stream/<output>/state` (retained
+ * `ON`/`OFF` per push output — [StreamOutput]), `<sensor>/state` (periodic
+ * sensor readings — [TelemetrySensor], each with its `sensor` discovery
+ * config), and `clients/<kind>/event` (non-retained client connect/disconnect
+ * JSON — [ClientKind]).
  */
 object MqttTopics {
 
@@ -57,17 +63,70 @@ object MqttTopics {
         }
     }
 
+    /**
+     * The push outputs whose live state is published as a retained
+     * `ON`/`OFF` on `stream/<wireName>/state`. The wire names match the
+     * `/api/stream/<name>/start|stop` route segments.
+     */
+    enum class StreamOutput(val wireName: String) {
+        WEB("web"),
+        RTSP("rtsp"),
+        RTMP("rtmp"),
+        WHIP("whip"),
+        SRT("srt"),
+    }
+
+    /**
+     * The periodic telemetry sensors, one HA `sensor` discovery entity each.
+     * `unit`/`deviceClass`/`stateClass`/`icon` are the discovery fields that
+     * make the entity render well; null fields are omitted from the payload.
+     */
+    enum class TelemetrySensor(
+        val wireName: String,
+        val unit: String?,
+        val deviceClass: String?,
+        val stateClass: String?,
+        val icon: String?,
+    ) {
+        BATTERY("battery", "%", "battery", "measurement", null),
+        THERMAL("thermal", null, null, null, "mdi:thermometer"),
+        ENCODED_BITRATE("bitrate", "bit/s", "data_rate", "measurement", null),
+        CLIENTS("clients", "clients", null, "measurement", "mdi:account-multiple"),
+    }
+
+    /** The client populations whose connect/disconnect moments are published. */
+    enum class ClientKind(val wireName: String) {
+        MJPEG("mjpeg"),
+        RTSP("rtsp"),
+    }
+
     class EntityTopics(
         val availability: String,
         val event: String,
         private val stateTopics: Map<SensorKind, String>,
         private val discoveryTopics: Map<SensorKind, String>,
+        private val streamStateTopics: Map<StreamOutput, String>,
+        private val telemetryStateTopics: Map<TelemetrySensor, String>,
+        private val telemetryDiscoveryTopics: Map<TelemetrySensor, String>,
+        private val clientEventTopics: Map<ClientKind, String>,
     ) {
         /** The state topic a [kind] event publishes its ON pulse to. */
         fun stateTopicFor(kind: SensorKind): String = stateTopics.getValue(kind)
 
         /** The discovery config topic for [kind]'s binary_sensor. */
         fun discoveryTopicFor(kind: SensorKind): String = discoveryTopics.getValue(kind)
+
+        /** The retained `ON`/`OFF` state topic for one push output. */
+        fun streamStateTopicFor(output: StreamOutput): String = streamStateTopics.getValue(output)
+
+        /** The state topic one telemetry sensor publishes its reading to. */
+        fun telemetryStateTopicFor(sensor: TelemetrySensor): String = telemetryStateTopics.getValue(sensor)
+
+        /** The discovery config topic for one telemetry sensor's `sensor` entity. */
+        fun telemetryDiscoveryTopicFor(sensor: TelemetrySensor): String = telemetryDiscoveryTopics.getValue(sensor)
+
+        /** The non-retained client-event topic for one client population. */
+        fun clientEventTopicFor(kind: ClientKind): String = clientEventTopics.getValue(kind)
     }
 
     fun entityTopics(discoveryPrefix: String, deviceId: String): EntityTopics {
@@ -82,6 +141,12 @@ object MqttTopics {
             discoveryTopics = SensorKind.entries.associateWith { kind ->
                 discoveryConfigTopic(prefix, deviceId, kind.eventKind.wireName)
             },
+            streamStateTopics = StreamOutput.entries.associateWith { output -> "$base/stream/${output.wireName}/state" },
+            telemetryStateTopics = TelemetrySensor.entries.associateWith { sensor -> "$base/${sensor.wireName}/state" },
+            telemetryDiscoveryTopics = TelemetrySensor.entries.associateWith { sensor ->
+                "$prefix/sensor/${entityId(deviceId, sensor.wireName)}/config"
+            },
+            clientEventTopics = ClientKind.entries.associateWith { kind -> "$base/clients/${kind.wireName}/event" },
         )
     }
 
@@ -111,14 +176,62 @@ object MqttTopics {
                 availability_topic = topics.availability,
                 device_class = segment,
                 off_delay = kind.offDelaySeconds,
-                device = DeviceInfo(
-                    identifiers = listOf("lenscast_$deviceId"),
-                    name = deviceName,
-                    model = deviceName,
-                ),
+                device = deviceInfo(deviceId, deviceName),
             ),
         )
     }
+
+    /**
+     * The HA discovery config for one telemetry sensor: a plain `sensor`
+     * entity whose value class and unit come from the [sensor]'s own fields
+     * (omitted when null, so a string sensor like `thermal` stays string).
+     */
+    fun telemetryDiscoveryPayload(
+        topics: EntityTopics,
+        deviceId: String,
+        deviceName: String,
+        sensor: TelemetrySensor,
+    ): String {
+        val segment = sensor.wireName
+        return sensorAdapter.toJson(
+            SensorDiscoveryPayload(
+                name = "LensCast ${segment.replaceFirstChar { it.uppercase(Locale.US) }}",
+                unique_id = entityId(deviceId, segment),
+                state_topic = topics.telemetryStateTopicFor(sensor),
+                availability_topic = topics.availability,
+                device_class = sensor.deviceClass,
+                state_class = sensor.stateClass,
+                unit_of_measurement = sensor.unit,
+                icon = sensor.icon,
+                device = deviceInfo(deviceId, deviceName),
+            ),
+        )
+    }
+
+    /** The event JSON a client connect/disconnect moment publishes (non-retained). */
+    fun clientEventPayload(
+        kind: ClientKind,
+        connected: Boolean,
+        activeCount: Int,
+        timestampMs: Long,
+    ): ByteArray =
+        clientEventAdapter.toJson(
+            ClientEventWire(
+                kind = kind.wireName,
+                event = if (connected) EVENT_CONNECTED else EVENT_DISCONNECTED,
+                count = activeCount,
+                timestampMs = timestampMs,
+            ),
+        ).toByteArray(Charsets.UTF_8)
+
+    const val EVENT_CONNECTED = "connected"
+    const val EVENT_DISCONNECTED = "disconnected"
+
+    private fun deviceInfo(deviceId: String, deviceName: String) = DeviceInfo(
+        identifiers = listOf("lenscast_$deviceId"),
+        name = deviceName,
+        model = deviceName,
+    )
 
     /** The HA discovery wire shape (snake_case keys are the broker contract). */
     @JsonClass(generateAdapter = true)
@@ -134,6 +247,29 @@ object MqttTopics {
         val device: DeviceInfo,
     )
 
+    /** The telemetry sensor's discovery wire shape; null fields are omitted. */
+    @JsonClass(generateAdapter = true)
+    internal data class SensorDiscoveryPayload(
+        val name: String,
+        val unique_id: String,
+        val state_topic: String,
+        val availability_topic: String,
+        val device_class: String? = null,
+        val state_class: String? = null,
+        val unit_of_measurement: String? = null,
+        val icon: String? = null,
+        val device: DeviceInfo,
+    )
+
+    /** The client connect/disconnect event JSON (the `clients/<kind>/event` topic). */
+    @JsonClass(generateAdapter = true)
+    internal data class ClientEventWire(
+        val kind: String,
+        val event: String,
+        val count: Int,
+        val timestampMs: Long,
+    )
+
     @JsonClass(generateAdapter = true)
     internal data class DeviceInfo(
         val identifiers: List<String>,
@@ -143,4 +279,6 @@ object MqttTopics {
     )
 
     private val adapter by lazy { AppJson.moshi.adapter(DiscoveryPayload::class.java) }
+    private val sensorAdapter by lazy { AppJson.moshi.adapter(SensorDiscoveryPayload::class.java) }
+    private val clientEventAdapter by lazy { AppJson.moshi.adapter(ClientEventWire::class.java) }
 }

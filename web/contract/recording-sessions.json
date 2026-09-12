@@ -20,6 +20,20 @@
       "endMs": 1788850060000,
       "trigger": "sound",
       "mediaId": "9a8b7c6d-5e4f-4a3b-2c1d-0e9f8a7b6c5d"
+    },
+    {
+      "id": "4c4d4e4f-5a5b-4c5d-8e5f-1a2b3c4d5e6f",
+      "startMs": 1788862200000,
+      "endMs": 1788865800000,
+      "trigger": "continuous",
+      "mediaId": "4c4d4e4f-5a5b-4c5d-8e5f-1a2b3c4d5e6f"
+    },
+    {
+      "id": "6f7a8b9c-0d1e-4f2a-b3c4-d5e6f7a8b9c0",
+      "startMs": 1788868800000,
+      "endMs": 1788869100000,
+      "trigger": "interval",
+      "mediaId": "6f7a8b9c-0d1e-4f2a-b3c4-d5e6f7a8b9c0"
     }
   ]
 }

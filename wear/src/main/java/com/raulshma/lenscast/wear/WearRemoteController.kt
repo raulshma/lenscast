@@ -11,22 +11,47 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 /**
- * The remote's single state holder: merges the live settings with the four
- * async surfaces (status poll, snapshot, stream toggle, photo capture) into
- * one [UiState] StateFlow the screens render. Owns the periodic loops —
- * the status poll (the mirror for the stream toggle) and the snapshot
- * refresh — and serializes each surface so a slow fetch never stacks
- * duplicates.
+ * The remote's single state holder: merges the live settings with the async
+ * surfaces (status poll, snapshot, stream toggle, photo capture, detection
+ * feed) into one [UiState] StateFlow the screens render. Owns the periodic
+ * loops — the status poll (the mirror for the stream toggle), the snapshot
+ * refresh, and the detection-events tail — and serializes each surface so a
+ * slow fetch never stacks duplicates.
  *
  * Loop lifecycle belongs to the caller: the activities launch [start] inside
- * a resumed-lifecycle block, so both loops stop with the screen and the
- * watch keeps its battery. Every action is a plain suspend entry point the
- * UI fires from its own scope; failures land in the matching RequestState,
- * never in an exception.
+ * a resumed-lifecycle block, so every loop stops with the screen and the
+ * watch keeps its battery (deliberately NO background polling, NO Wear Data
+ * Layer). Every action is a plain suspend entry point the UI fires from its
+ * own scope; failures land in the matching RequestState, never in an
+ * exception.
+ *
+ * The alert loop is the pure [WearAlertPolicy] plus three injected side
+ * effects: the persisted seen-state ([WearAlertStateStoreApi]), the haptic +
+ * notification ([DetectionAlerter]), and the tile refresh ([TilePublisher]).
+ * The default no-op dependencies keep the controller constructible in plain
+ * JVM contexts.
  */
+/**
+ * The persisted alert seen-state seam (the SharedPreferences store).
+ * Two methods, so not a `fun interface` — [WearAlertStateStore] is the
+ * production implementation.
+ */
+interface WearAlertStateStoreApi {
+    fun load(): WearAlertPolicy.SeenState?
+    fun save(state: WearAlertPolicy.SeenState)
+}
+
+/** The side-effect seam fired after every successful status poll (tile refresh). */
+fun interface TilePublisher {
+    fun onStatus(status: WearStatus)
+}
+
 class WearRemoteController(
     private val settingsStore: WearSettingsStore,
     private val client: WearApiClient,
+    private val alertStateStore: WearAlertStateStoreApi? = null,
+    private val alerter: DetectionAlerter? = null,
+    private val tilePublisher: TilePublisher? = null,
 ) {
 
     /** Everything the UI draws, in one immutable snapshot. */
@@ -36,6 +61,8 @@ class WearRemoteController(
         val snapshot: RequestState<SnapshotFrame> = RequestState.Idle,
         val streamToggle: RequestState<Unit> = RequestState.Idle,
         val capture: RequestState<Unit> = RequestState.Idle,
+        /** The banner event currently surfaced, null when dismissed/unraised. */
+        val alert: WearDetectionEvent? = null,
     )
 
     private val _state = MutableStateFlow(UiState())
@@ -44,6 +71,7 @@ class WearRemoteController(
     /** The in-flight loops; non-null exactly while [start] is in effect. */
     private var statusLoop: Job? = null
     private var snapshotLoop: Job? = null
+    private var eventsLoop: Job? = null
 
     /**
      * Launches the poll loops in [scope]. Idempotent per surface: calling
@@ -53,14 +81,17 @@ class WearRemoteController(
         if (statusLoop?.isActive == true) return
         statusLoop = scope.launch { pollStatusForever() }
         snapshotLoop = scope.launch { refreshSnapshotForever() }
+        eventsLoop = scope.launch { pollEventsForever() }
     }
 
-    /** Stops both loops; the drawn state stays for the next resume. */
+    /** Stops every loop; the drawn state stays for the next resume. */
     fun stop() {
         statusLoop?.cancel()
         snapshotLoop?.cancel()
+        eventsLoop?.cancel()
         statusLoop = null
         snapshotLoop = null
+        eventsLoop = null
     }
 
     /**
@@ -73,12 +104,49 @@ class WearRemoteController(
             runOne { client.fetchStatus() }
                 .onSuccess { value ->
                     _state.update { it.copy(status = RequestState.Success(value), configured = true) }
+                    tilePublisher?.onStatus(value)
                 }
                 .onFailure { e ->
                     _state.update { it.copy(status = RequestState.Error(shortMessage(e))) }
                 }
             delay(STATUS_POLL_MS)
         }
+    }
+
+    /**
+     * The detection-events tail: the same resumed-only cadence as the status
+     * poll, staggered half a lap so the two requests never collide on the
+     * radio. Failures fold into a silent retry — the status header already
+     * owns "unreachable". New events surface through the policy: persisted
+     * dedup ([WearAlertStateStoreApi]), haptic + notification
+     * ([DetectionAlerter]), and the in-app banner (freshness-gated by
+     * [WearAlertPolicy], so a stale-but-unseen event only updates the ring).
+     */
+    private suspend fun pollEventsForever() {
+        delay(EVENT_POLL_STAGGER_MS)
+        while (true) {
+            val settings = settingsStore.current()
+            if (settings.isConfigured && settings.alertsEnabled && alertStateStore != null) {
+                runOne { client.fetchDetectionEvents(EVENT_FEED_LIMIT) }
+                    .onSuccess { feed ->
+                        val verdict = WearAlertPolicy.evaluate(
+                            feed,
+                            alertStateStore.load(),
+                            System.currentTimeMillis(),
+                        )
+                        verdict.nextSeen?.let(alertStateStore::save)
+                        val newest = verdict.newEvents.lastOrNull() ?: return@onSuccess
+                        alerter?.onNewEvent(newest)
+                        _state.update { it.copy(alert = newest) }
+                    }
+            }
+            delay(EVENT_POLL_MS)
+        }
+    }
+
+    /** User dismissal of the in-app alert banner (the notification stays). */
+    fun dismissAlert() {
+        _state.update { it.copy(alert = null) }
     }
 
     /**
@@ -188,5 +256,12 @@ class WearRemoteController(
 
         /** The snapshot cadence: a living preview pane without draining the link. */
         const val SNAPSHOT_REFRESH_MS = 10_000L
+
+        /** The detection feed rides the status cadence, staggered half a lap. */
+        const val EVENT_POLL_MS = STATUS_POLL_MS
+        const val EVENT_POLL_STAGGER_MS = STATUS_POLL_MS / 2
+
+        /** The feed window the alert policy needs (the server clamps again). */
+        const val EVENT_FEED_LIMIT = 5
     }
 }

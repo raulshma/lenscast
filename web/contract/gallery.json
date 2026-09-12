@@ -7,6 +7,7 @@
       "timestamp": 1788825600000,
       "fileSizeBytes": 2458624,
       "durationMs": 0,
+      "favorite": false,
       "thumbnailUrl": "/api/media/IMG_20260908_10153042.jpg/thumbnail",
       "url": "/api/media/IMG_20260908_10153042.jpg",
       "downloadUrl": "/api/media/IMG_20260908_10153042.jpg?download=1"
@@ -18,6 +19,7 @@
       "timestamp": 1788825900000,
       "fileSizeBytes": 52428800,
       "durationMs": 15200,
+      "favorite": false,
       "thumbnailUrl": "/api/media/VID_20260908_10201518.mp4/thumbnail",
       "url": "/api/media/VID_20260908_10201518.mp4",
       "downloadUrl": "/api/media/VID_20260908_10201518.mp4?download=1"

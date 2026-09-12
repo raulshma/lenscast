@@ -78,6 +78,14 @@ data class DetectionEventWire(
     val labels: List<String>,
     val batteryPercent: Int?,
     val snapshotJpeg: String?,
+    /**
+     * The dashboard deep link for the event (`#/gallery/<clipMediaId>` once a
+     * clip is linked, else `#/events` — see
+     * [com.raulshma.lenscast.capture.model.DetectionEventDeepLink]). Null
+     * never serializes, so payloads from callers that do not pass one keep
+     * the historical shape exactly.
+     */
+    val url: String? = null,
 ) {
     companion object {
         /** The `source` stamp every event carries. */
@@ -86,7 +94,7 @@ data class DetectionEventWire(
         private val adapter by lazy { AppJson.moshi.adapter(DetectionEventWire::class.java) }
 
         /** The alert→wire field mapping both sinks share. */
-        fun of(alert: DetectionAlert): DetectionEventWire =
+        fun of(alert: DetectionAlert, deepLink: String? = null): DetectionEventWire =
             DetectionEventWire(
                 type = alert.kind.wireName,
                 value = alert.value,
@@ -96,6 +104,7 @@ data class DetectionEventWire(
                 labels = alert.labels,
                 batteryPercent = alert.batteryPercent,
                 snapshotJpeg = alert.snapshotJpegBase64,
+                url = deepLink,
             )
 
         /**
@@ -104,7 +113,7 @@ data class DetectionEventWire(
          * escaping — hand-concatenation emitted invalid JSON under
          * comma-decimal locales.
          */
-        fun encode(alert: DetectionAlert): ByteArray =
-            adapter.toJson(of(alert)).toByteArray(Charsets.UTF_8)
+        fun encode(alert: DetectionAlert, deepLink: String? = null): ByteArray =
+            adapter.toJson(of(alert, deepLink)).toByteArray(Charsets.UTF_8)
     }
 }

@@ -244,6 +244,16 @@ android {
             isIncludeAndroidResources = true
         }
     }
+
+    lint {
+        // CI runs `:app:lintStoreDebug` with this checked-in baseline: the
+        // findings the tree already carries stay absorbed in the baseline and
+        // any NEW finding (error or warning) fails the build. When touching
+        // new code, regenerate with `./gradlew :app:updateLintBaseline` and
+        // commit the refreshed file alongside the change.
+        baseline = file("lint-baseline.xml")
+        abortOnError = true
+    }
 }
 
 tasks.matching {
@@ -284,11 +294,11 @@ dependencies {
     // frozen at 0.4.4 with native libs predating 16 KB page-size alignment
     // (mandatory on Play for apps targeting API 35+). Plain library — no
     // Play-services dependency — so the fdroid flavor gains nothing proprietary.
-    implementation("com.google.mediapipe:tasks-vision:1.0.0")
+    implementation(libs.mediapipe.tasks.vision)
     // MediaPipe Tasks Audio for YAMNet sound-event classification (capture/ml/):
     // same plain-library story as tasks-vision above — no Play-services
     // dependency, fdroid-safe.
-    implementation("com.google.mediapipe:tasks-audio:1.0.0")
+    implementation(libs.mediapipe.tasks.audio)
     implementation(libs.nanohttpd)
     implementation(libs.nanohttpd.ws)
     implementation(libs.datastore.preferences)
@@ -314,6 +324,4 @@ dependencies {
     testImplementation(libs.turbine)
     testImplementation(libs.robolectric)
     testImplementation(libs.compose.ui.test)
-    androidTestImplementation(libs.androidx.junit)
-    androidTestImplementation(libs.androidx.espresso.core)
 }

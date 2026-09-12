@@ -54,6 +54,15 @@ object StreamDefaults {
     const val RTSP_VIDEO_HEIGHT = 720
     const val RTSP_VIDEO_BITRATE = 2_000_000
 
+    // The RTSP sub-stream: a fixed-size low-res H.264 second encode for
+    // NVR detect roles. Fixed dimensions by design — the detect pipeline wants
+    // a stable, small frame — and the bitrate cap sits at VIDEO_BITRATE_MIN.
+    // The /sub URL path itself is RtspUriPolicy.SUB_STREAM_PATH — one source,
+    // not a re-copied default literal.
+    const val RTSP_SUB_VIDEO_WIDTH = 640
+    const val RTSP_SUB_VIDEO_HEIGHT = 480
+    const val RTSP_SUB_VIDEO_BITRATE = 500_000
+
     // HTTP fan-out guard: one hotspot phone can't serve unlimited browsers.
     const val MAX_HTTP_CLIENTS = 8
 
@@ -178,11 +187,32 @@ object StreamDefaults {
 
     // HLS segment pacing.
     const val HLS_SEGMENT_AUS = 48
+    // DVR window: how many segments the ring may retain when the DVR setting
+    // is raised above the sliding 5-segment live window (0 keeps LIVE mode).
+    const val HLS_DVR_SEGMENTS_MAX = 120
+    const val HLS_DVR_SEGMENTS_DEFAULT = 0
 
     // WHIP push (streaming/whip/): the default STUN server (blank setting =
     // no iceServers, host candidates only, LAN-only reachability) and the
     // dedicated audio capture's rate — libwebrtc encodes it as 16 kHz mono
-    // Opus at its default ~32 kbps mono bitrate.
+    // Opus at its default ~32 kbps mono bitrate. The STUN setting doubles as
+    // the WHEP viewer endpoint's ICE configuration.
     const val WHIP_STUN_SERVER = "stun.l.google.com:19302"
     const val WHIP_AUDIO_SAMPLE_RATE_HZ = 16_000
+
+    // WHEP viewer endpoint (streaming/whep/): the concurrent-viewer cap —
+    // each viewer owns a libwebrtc hardware H.264 encoder, so the RTSP
+    // server's max-4 convention (not MJPEG's 8) is the ceiling.
+    const val WHEP_MAX_VIEWERS = 4
+
+    // SRT push (streaming/srt/): the default UDP port (the IANA-registered
+    // SRT value), the handshake/socket timeouts, and the wire pacing — one
+    // SRT data packet carries 7 MPEG-TS packets (1316 bytes, the SRT/TS
+    // convention that keeps a TS packet from straddling UDP datagrams).
+    const val SRT_PORT_DEFAULT = 9710
+    const val SRT_CONNECT_TIMEOUT_MS = 10_000
+    const val SRT_IDLE_TIMEOUT_MS = 15_000
+    const val SRT_KEEPALIVE_INTERVAL_MS = 5_000
+    const val SRT_TS_PACKETS_PER_DATAGRAM = 7
+    const val SRT_TS_PAYLOAD_BYTES = SRT_TS_PACKETS_PER_DATAGRAM * 188
 }

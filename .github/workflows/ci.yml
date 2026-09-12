@@ -4,6 +4,10 @@ on:
   push:
     branches:
       - main
+      # Release branches run the same test suite as main: a signed release
+      # (release.yml) must never be the first build that runs the tests.
+      - 'v[0-9]+*'
+      - 'release/**'
   pull_request:
 
 concurrency:
@@ -29,10 +33,13 @@ jobs:
           cache: 'npm'
           cache-dependency-path: web/package-lock.json
 
-      - name: Set up JDK 17
+      # JDK 21 matches the Gradle daemon toolchain
+      # (gradle/gradle-daemon-jvm.properties); setup-java only bootstraps
+      # it, the daemon JVM criteria pick the exact version.
+      - name: Set up JDK 21
         uses: actions/setup-java@v4
         with:
-          java-version: '17'
+          java-version: '21'
           distribution: 'temurin'
 
       - name: Setup Gradle
@@ -51,8 +58,17 @@ jobs:
       - name: Android — JVM unit tests (fdroid flavor)
         run: ./gradlew :app:testFdroidDebugUnitTest
 
+      - name: Android — lint (store flavor, baseline-gated)
+        run: ./gradlew :app:lintStoreDebug
+
       - name: Android — debug build (store flavor)
         run: ./gradlew :app:assembleStoreDebug
+
+      - name: Wear — JVM unit tests
+        run: ./gradlew :wear:testDebugUnitTest
+
+      - name: Wear — debug build
+        run: ./gradlew :wear:assembleDebug
 
       - name: Upload test reports
         if: failure()
@@ -61,5 +77,8 @@ jobs:
           name: test-reports
           path: |
             app/build/reports/tests/**/*
+            app/build/reports/lint-results-*.html
             app/build/outputs/apk/**/*
+            wear/build/reports/tests/**/*
+            wear/build/outputs/apk/**/*
           if-no-files-found: ignore

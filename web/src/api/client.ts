@@ -1,4 +1,4 @@
-import type { AllSettings, AuthConfig, DetectionEventType, DeviceStatus, LensesResponse, SessionRole } from '../types'
+import type { AllSettings, AuthConfig, DetectionEventType, DeviceStatus, LensesResponse, RtspClient, SessionRole } from '../types'
 
 type JsonValue = Record<string, unknown> | unknown[] | string | number | boolean | null
 
@@ -249,11 +249,18 @@ export async function stopRecording(): Promise<{ success: boolean; error?: strin
   return requestJson('/api/recording/stop', { method: 'POST' })
 }
 
-export async function getGallery(type?: string, page: number = 0, pageSize: number = 0): Promise<import('../types').GalleryResponse> {
+export async function getGallery(
+  type?: string,
+  page: number = 0,
+  pageSize: number = 0,
+  /** Filename substring — newer servers filter server-side; callers keep a client-side filter as fallback. */
+  q?: string,
+): Promise<import('../types').GalleryResponse> {
   const params = new URLSearchParams()
   if (type) params.set('type', encodeURIComponent(type))
   if (page > 0) params.set('page', String(page))
   if (pageSize > 0) params.set('pageSize', String(pageSize))
+  if (q && q.trim()) params.set('q', q.trim())
   const url = params.toString() ? `/api/gallery?${params.toString()}` : '/api/gallery'
   return requestJson(url)
 }
@@ -294,7 +301,7 @@ export async function setTorch(enabled: boolean): Promise<{ success: boolean; er
   })
 }
 
-export async function listStreamClients(): Promise<{ httpClients: string[]; httpCount: number; rtspCount: number; maxHttp: number }> {
+export async function listStreamClients(): Promise<{ httpClients: string[]; httpCount: number; rtspCount: number; maxHttp: number; rtspClients?: RtspClient[] }> {
   return requestJson('/api/stream/clients')
 }
 
@@ -319,14 +326,21 @@ export async function setSiren(on: boolean): Promise<{ success: boolean }> {
   })
 }
 
-/** `limit` omitted or non-positive means the server's default page size; `type` narrows to one wire-name kind. */
+/**
+ * `limit` omitted or non-positive means the server's default page size; `type`
+ * narrows to one wire-name kind. `day` (YYYY-MM-DD, local calendar key)
+ * narrows to one day on newer servers — callers keep their client-side day
+ * filter as the fallback so the request works unchanged against older builds.
+ */
 export async function getDetectionEvents(
   limit?: number,
   type?: DetectionEventType,
+  day?: string,
 ): Promise<import('../types').DetectionEventsResponse> {
   const params = new URLSearchParams()
   if (limit != null && limit > 0) params.set('limit', String(limit))
   if (type) params.set('type', type)
+  if (day && /^\d{4}-\d{2}-\d{2}$/.test(day)) params.set('day', day)
   const url = params.toString() ? `/api/detection/events?${params.toString()}` : '/api/detection/events'
   return requestJson(url)
 }

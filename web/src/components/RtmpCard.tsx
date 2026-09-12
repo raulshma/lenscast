@@ -3,7 +3,8 @@ import type { AllSettings, DeviceStatus } from '../types'
 import { API_DEFAULTS } from '../api/defaults'
 import SettingsCard from './SettingsCard'
 import ToggleRow from './ToggleRow'
-import { rtmpStatusView, rtmpUrlField } from '../lib/rtmp'
+import { rtmpStatusView, rtmpUrlField, RTMP_STATUS_LABELS_EN, RTMP_HINTS_EN } from '../lib/rtmp'
+import { t } from '../lib/i18n'
 
 interface Props {
   settings: () => AllSettings | null
@@ -42,8 +43,21 @@ export default function RtmpCard(props: Props) {
       status: props.status()?.streaming?.rtmpStatus,
       active: rtmpActive(),
       error: props.status()?.streaming?.rtmpError,
+    }, {
+      ...RTMP_STATUS_LABELS_EN,
+      idle: t('status.idle'),
+      connecting: t('status.connecting'),
+      connected: t('status.connected'),
+      error: t('status.error'),
+      pushFailed: t('rtmp.pushFailed'),
     })
-  const urlField = () => rtmpUrlField(urlDraft())
+  const urlField = () => rtmpUrlField(urlDraft(), {
+    ...RTMP_HINTS_EN,
+    empty: t('rtmp.hintEmpty'),
+    scheme: t('rtmp.hintScheme'),
+    host: t('rtmp.hintHost'),
+    ok: t('rtmp.hintOk'),
+  })
 
   return (
     <SettingsCard
@@ -56,20 +70,19 @@ export default function RtmpCard(props: Props) {
           <path d="M4.93 19.07a10 10 0 0 1 0-14.14" />
         </svg>
       }
-      title="RTMP Push"
+      title={t('rtmp.title')}
     >
       <div class="field-group">
         <ToggleRow
           id="rtmp-toggle"
-          label="Enable RTMP Push"
+          label={t('rtmp.enable')}
           checked={rtmpOn()}
           onToggle={() => props.updateStreamingAndSave({ rtmpEnabled: !rtmpOn() })}
         />
         <div class="status-banner status-banner-info stream-mode-hint" role="note" aria-live="polite">
           <span class="status-banner-dot" aria-hidden="true" />
           <span>
-            Pushes the live feed to an RTMP/RTMPS server (MediaMTX, nginx-rtmp, YouTube…). Independent of Web Stream
-            and RTSP. RTMP is H.264-only — if the Video Codec in RTSP settings is H.265, the start is refused.
+            {t('rtmp.desc')}
           </span>
         </div>
       </div>
@@ -77,14 +90,14 @@ export default function RtmpCard(props: Props) {
       <Show when={rtmpOn()}>
         <div class="field-group">
           <div class="field-row">
-            <span class="field-label">Push URL</span>
+            <span class="field-label">{t('rtmp.url')}</span>
           </div>
           <input
             id="rtmp-url"
             type="password"
             class="field-input field-input-full"
             autocomplete="new-password"
-            placeholder="(unchanged) rtmp://ingest.example.com/live/stream-key"
+            placeholder={`${t('common.unchanged')} rtmp://ingest.example.com/live/stream-key`}
             value={urlDraft()}
             onInput={(e) => {
               setUrlDraft(e.currentTarget.value)
@@ -106,7 +119,7 @@ export default function RtmpCard(props: Props) {
         <div class={`status-banner status-banner-${statusView().variant}`} role="status" aria-live="polite">
           <span class="status-banner-dot" aria-hidden="true" />
           <span>
-            RTMP push: {statusView().label}
+            {t('rtmp.statusLine', { status: statusView().label })}
             {statusView().detail ? ` — ${statusView().detail}` : ''}
           </span>
         </div>
@@ -123,7 +136,7 @@ export default function RtmpCard(props: Props) {
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <rect x="6" y="6" width="12" height="12" rx="2" />
               </svg>
-              Stop RTMP
+              {t('rtmp.stop')}
             </button>
           ) : (
             <button
@@ -139,7 +152,7 @@ export default function RtmpCard(props: Props) {
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <polygon points="5 3 19 12 5 21 5 3" />
               </svg>
-              Start RTMP
+              {t('rtmp.start')}
             </button>
           )}
         </div>

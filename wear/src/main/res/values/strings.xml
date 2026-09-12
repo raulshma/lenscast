@@ -1,6 +1,42 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- LensCast Wear: the launcher label doubles as the app description on
-     the watch app list, so it names the pairing explicitly. -->
+     the watch app list, so it names the pairing explicitly. All new
+     user-visible strings live here (repo policy), not as inline literals. -->
 <resources>
     <string name="app_name">LensCast Wear</string>
+
+    <!-- Detection alerts: the notification channel + the per-event titles. -->
+    <string name="alert_channel_name">Detection alerts</string>
+    <string name="alert_channel_description">Motion, sound, and tamper events from the paired phone</string>
+    <string name="alert_title_motion">Motion detected</string>
+    <string name="alert_title_sound">Sound detected</string>
+    <string name="alert_title_tamper">Tamper detected</string>
+    <string name="alert_title_generic">Event detected</string>
+    <string name="alert_tap_open">Tap to open LensCast</string>
+
+    <!-- The in-app alert banner card. -->
+    <string name="banner_dismiss">Dismiss</string>
+    <string name="banner_no_detail">New event on the phone</string>
+
+    <!-- Relative-age templates for the banner ticker (buckets from WearAlertPolicy). -->
+    <string name="age_now">just now</string>
+    <string name="age_seconds">%1$ds ago</string>
+    <string name="age_minutes">%1$d min ago</string>
+    <string name="age_hours">%1$dh ago</string>
+
+    <!-- Settings screen: the alerts opt-in section. -->
+    <string name="settings_section_alerts">Alerts</string>
+    <string name="settings_alerts_on">Detection alerts: On</string>
+    <string name="settings_alerts_off">Detection alerts: Off</string>
+    <string name="settings_alerts_hint">Buzz + banner for phone events</string>
+    <string name="settings_alert_permission_denied">Notification permission not granted</string>
+
+    <!-- The watch tile. -->
+    <string name="tile_label">LensCast</string>
+    <string name="tile_state_unknown">Phone status unknown</string>
+    <string name="tile_state_idle">Idle</string>
+    <string name="tile_state_web">Web stream live</string>
+    <string name="tile_state_rtsp">RTSP stream live</string>
+    <string name="tile_state_both">Web + RTSP live</string>
+    <string name="tile_tap_to_open">Tap to open</string>
 </resources>

@@ -98,4 +98,44 @@ class GalleryPageTest {
         val page = GalleryPage.of(items(10), null, page = -1, pageSize = 5)
         assertEquals(10, page.items.size)
     }
+
+    // ── q (file-name search) filter ──
+
+    @Test
+    fun `blank or missing query matches everything`() {
+        assertEquals(10, GalleryPage.of(items(10), null, 0, 100, query = null).total)
+        assertEquals(10, GalleryPage.of(items(10), null, 0, 100, query = "  ").total)
+    }
+
+    @Test
+    fun `query filters case-insensitively on the file name`() {
+        val all = listOf(item("VID_20260912_101530"), item("IMG_20260912_101531"))
+        val page = GalleryPage.of(all, null, 0, 100, query = " vid_2026")
+        assertEquals(1, page.total)
+        assertEquals("VID_20260912_101530", page.items.single().id)
+    }
+
+    @Test
+    fun `query applies before pagination and total reflects the filtered count`() {
+        val all = (1..30).map { item("VID_$it") } + (1..30).map { item("IMG_$it") }
+        val first = GalleryPage.of(all, null, 0, 50, query = "img_")
+        assertEquals(30, first.total)
+        assertEquals(30, first.items.size)
+        assertFalse(first.hasMore)
+        // A query that narrows past the requested page's window pages honestly.
+        val second = GalleryPage.of(all, null, 1, 20, query = "img_")
+        assertEquals(10, second.items.size)
+        assertFalse(second.hasMore)
+    }
+
+    @Test
+    fun `query combines with the type filter`() {
+        val all = listOf(
+            item("VID_a", CaptureType.VIDEO),
+            item("IMG_a", CaptureType.PHOTO),
+        )
+        val page = GalleryPage.of(all, type = "PHOTO", page = 0, pageSize = 50, query = "_a")
+        assertEquals(1, page.total)
+        assertEquals(CaptureType.PHOTO, page.items.single().type)
+    }
 }

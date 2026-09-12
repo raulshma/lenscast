@@ -118,6 +118,65 @@ class WsVideoProtocolFuzzTest {
         assertTrue(!WsVideoProtocol.containsKeyframe(listOf(EncodedNalUnit(byteArrayOf(1), isKeyFrame = false))))
     }
 
+    // ── the HEVC additions under the same hostile-byte contract ──
+
+    @Test(timeout = 10_000)
+    fun `corpus - HEVC parameter-set scans over garbage NALs never throw`() {
+        val random = Random(11)
+        assertNull(WsVideoProtocol.extractHevcParameterSets(emptyList()))
+        assertNull(WsVideoProtocol.extractHevcParameterSets(listOf(ByteArray(0), ByteArray(1))))
+        // Short NALs whose first byte would decode to VPS/SPS/PPS types but
+        // lack the second header byte.
+        assertNull(WsVideoProtocol.extractHevcParameterSets(listOf(byteArrayOf(0x40.toByte()))))
+        assertNull(WsVideoProtocol.extractHevcParameterSets(listOf(byteArrayOf(0x42.toByte(), 1))))
+        // Random soup: extraction answers null or a full triple, never throws.
+        repeat(200) {
+            val units = List(random.nextInt(6)) {
+                ByteArray(random.nextInt(24)).also { random.nextBytes(it) }
+            }
+            val sets = WsVideoProtocol.extractHevcParameterSets(units)
+            if (sets != null) {
+                assertTrue(sets.vps.isNotEmpty() && sets.sps.isNotEmpty() && sets.pps.isNotEmpty())
+            }
+        }
+    }
+
+    @Test(timeout = 10_000)
+    fun `corpus - hvcC over hostile parameter sets keeps the record shape`() {
+        val random = Random(13)
+        for (vpsSize in 0..4) {
+            for (ppsSize in 0..4) {
+                val sps = ByteArray(maxOf(1, random.nextInt(20))).also { random.nextBytes(it) }
+                val record = WsVideoProtocol.hevcC(
+                    ByteArray(vpsSize).also { random.nextBytes(it) },
+                    sps,
+                    ByteArray(ppsSize).also { random.nextBytes(it) },
+                )
+                // Fixed header + three one-NAL arrays, whatever the inputs.
+                assertEquals(19 + 5 * 3 + vpsSize + sps.size + ppsSize, record.size)
+                assertEquals(1, record[0].toInt() and 0xFF)
+                assertEquals(3, record[18].toInt() and 0xFF)
+            }
+        }
+        // A short SPS still yields a record, not an index exception.
+        assertTrue(WsVideoProtocol.hevcC(ByteArray(2), ByteArray(1), ByteArray(0)).isNotEmpty())
+    }
+
+    @Test(timeout = 10_000)
+    fun `corpus - LCHC envelope over hostile hvcC keeps the 4-byte length contract`() {
+        val random = Random(17)
+        for (size in intArrayOf(0, 1, 40, 70_000)) {
+            val payload = ByteArray(size).also { random.nextBytes(it) }
+            val frame = WsVideoProtocol.envelope("LCHC", payload)
+            assertEquals("LCHC", String(frame, 0, 4, Charsets.US_ASCII))
+            val length = ((frame[4].toInt() and 0xFF) shl 24) or
+                ((frame[5].toInt() and 0xFF) shl 16) or
+                ((frame[6].toInt() and 0xFF) shl 8) or
+                (frame[7].toInt() and 0xFF)
+            assertEquals(size, length)
+        }
+    }
+
     private fun List<ByteArray>.joinToByteArray(block: (ByteArray) -> ByteArray): ByteArray {
         val out = java.io.ByteArrayOutputStream()
         for (item in this) out.write(block(item))

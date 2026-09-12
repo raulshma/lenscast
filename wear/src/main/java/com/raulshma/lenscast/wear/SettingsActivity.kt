@@ -1,8 +1,12 @@
 package com.raulshma.lenscast.wear
 
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.fillMaxSize
@@ -13,15 +17,18 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -55,8 +62,22 @@ import kotlinx.coroutines.launch
  * optional-auth posture. Field captions ride ABOVE each box (small text)
  * instead of in-box labels: the caption is always visible regardless of the
  * text field's internal layout.
+ *
+ * The detection-alerts opt-in lives here too (default ON). The API 33+
+ * POST_NOTIFICATIONS runtime permission is requested lazily — only at the
+ * moment the user flips alerts ON — mirroring the phone app's ask-when-used
+ * posture; the grant result surfaces as an inline hint, and the alert post
+ * itself is a silent no-op without the grant.
  */
 class SettingsActivity : ComponentActivity() {
+
+    /** The latest POST_NOTIFICATIONS grant, surfaced in the alerts section. */
+    private val notificationGranted = mutableStateOf<Boolean?>(null)
+
+    private val notificationPermissionLauncher =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+            notificationGranted.value = granted
+        }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -69,6 +90,14 @@ class SettingsActivity : ComponentActivity() {
                 SettingsScreen(
                     settingsStore = settingsStore,
                     client = client,
+                    notificationGranted = notificationGranted,
+                    onRequestNotificationPermission = {
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                        } else {
+                            notificationGranted.value = true
+                        }
+                    },
                 )
             }
         }
@@ -80,6 +109,8 @@ class SettingsActivity : ComponentActivity() {
 private fun SettingsScreen(
     settingsStore: WearSettingsStore,
     client: WearApiClient,
+    notificationGranted: MutableState<Boolean?>,
+    onRequestNotificationPermission: () -> Unit,
 ) {
     val scope = rememberCoroutineScope()
 
@@ -162,6 +193,52 @@ private fun SettingsScreen(
                             onValueChange = { draft = settings.copy(apiToken = it) },
                         )
                     }
+                }
+                item { FormHeader(stringResource(R.string.settings_section_alerts)) }
+                item {
+                    // The alerts opt-in: default ON, one tap to flip. A flip
+                    // to ON lazily asks for the notification permission;
+                    // both directions persist with Save/Test like the rest
+                    // of the form, and the poll loop picks the change up on
+                    // its next lap.
+                    Button(
+                        onClick = {
+                            val enabling = !settings.alertsEnabled
+                            draft = settings.copy(alertsEnabled = enabling)
+                            if (enabling) onRequestNotificationPermission()
+                        },
+                        colors = ButtonDefaults.buttonColors(
+                            backgroundColor = if (settings.alertsEnabled) Color(0xFF1E6B32) else Color(0xFF333236)
+                        ),
+                        modifier = Modifier.height(36.dp),
+                    ) {
+                        Text(
+                            text = stringResource(
+                                if (settings.alertsEnabled) R.string.settings_alerts_on
+                                else R.string.settings_alerts_off
+                            ),
+                            fontSize = 12.sp,
+                        )
+                    }
+                }
+                item {
+                    val granted = notificationGranted.value
+                    Text(
+                        text = stringResource(
+                            when {
+                                settings.alertsEnabled && granted == false -> R.string.settings_alert_permission_denied
+                                else -> R.string.settings_alerts_hint
+                            }
+                        ),
+                        fontSize = 11.sp,
+                        textAlign = TextAlign.Center,
+                        color = if (settings.alertsEnabled && granted == false) {
+                            MaterialTheme.colors.error
+                        } else {
+                            MaterialTheme.colors.onBackground.copy(alpha = 0.6f)
+                        },
+                        modifier = Modifier.padding(horizontal = 8.dp),
+                    )
                 }
                 item {
                     Button(

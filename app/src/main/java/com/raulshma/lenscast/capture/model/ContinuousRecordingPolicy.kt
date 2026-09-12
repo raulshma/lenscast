@@ -58,6 +58,10 @@ object ContinuousRecordingPolicy {
             repeatIntervalSeconds = REPEAT_GAP_SECONDS,
             quality = RecordingQuality.HIGH,
             includeAudio = audioEnabled,
+            // NVR provenance: every segment the loop produces (the initial arm
+            // and each repeat re-start through the same config) carries the
+            // loop's trigger onto the timeline.
+            trigger = RecordingTrigger.CONTINUOUS_LOOP,
         )
 
     /**

@@ -10,15 +10,16 @@ import java.util.TimeZone
  * requested local day's video captures turned into NVR timeline sessions,
  * each with an inferred end and an attributed trigger.
  *
- * Recording-state history does not exist (the [com.raulshma.lenscast.capture.RecordingController]
- * publishes only the live state), so triggers are reconstructed from the
- * signals that do persist: a capture whose window overlaps a motion or sound
- * detection event is attributed to it, and everything else reads as
- * `manual`. A capture that was actually produced by the continuous loop or a
- * scheduled start is not recoverable historically — it reports `manual`
- * unless a detection event overlaps. Session ends ride the same honesty:
- * a known `durationMs` wins, else the next capture pins the end (gap
- * inference, capped), else a fixed one-minute fallback.
+ * Triggers ride the capture's persisted provenance stamp
+ * ([CaptureHistory.trigger], set at creation by the recording chain) when it
+ * carries a known [RecordingTrigger] wire name — `manual`, `motion`, `sound`,
+ * `scheduled`, `continuous`, `interval`. Entries created before the field
+ * existed (or adopted from device media, `trigger == null`) reconstruct the
+ * way they always did: a capture whose window overlaps a motion or sound
+ * detection event is attributed to it, everything else reads as `manual`.
+ * Session ends ride the same honesty: a known `durationMs` wins, else the
+ * next capture pins the end (gap inference, capped), else a fixed one-minute
+ * fallback.
  *
  * All decisions are functions of the passed lists and stamps — caller-supplied
  * clock and zone — so the whole index is JVM-tested.
@@ -85,7 +86,8 @@ object RecordingSessionIndex {
 
     /**
      * The day's sessions: video captures starting inside [window], ends
-     * inferred per capture, triggers attributed from the motion/sound events.
+     * inferred per capture, triggers taken from the persisted provenance
+     * stamp when known, else attributed from the motion/sound events.
      * Ordered by start time; `captures` and `events` may arrive in any order.
      */
     fun buildSessions(
@@ -105,7 +107,12 @@ object RecordingSessionIndex {
                     id = capture.id,
                     startMs = startMs,
                     endMs = endMs,
-                    trigger = attributeTrigger(startMs, endMs, triggerEvents),
+                    // The creation-time stamp wins when it carries a known wire
+                    // name; unknown spellings and the pre-field null fall back
+                    // to the event-overlap reconstruction (below).
+                    trigger = capture.trigger
+                        ?.let { raw -> RecordingTrigger.entries.firstOrNull { it.wireName == raw }?.wireName }
+                        ?: attributeTrigger(startMs, endMs, triggerEvents),
                     mediaId = capture.id,
                 )
             }

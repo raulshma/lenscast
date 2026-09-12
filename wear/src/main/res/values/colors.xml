@@ -1,6 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- The adaptive-icon backdrop: a near-black slate that reads as "camera
-     hardware" next to the white lens rings of ic_launcher_foreground. -->
+     hardware" next to the white lens rings of ic_launcher_foreground, plus
+     the tile's stream-state line colors (the same green/gray language the
+     remote's stream button speaks). -->
 <resources>
     <color name="ic_launcher_background">#10141A</color>
+    <color name="tile_state_live">#FF81C784</color>
+    <color name="tile_state_idle">#FF9E9E9E</color>
+    <color name="tile_state_unknown">#FF79747E</color>
 </resources>

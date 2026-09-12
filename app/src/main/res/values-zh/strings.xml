@@ -12,6 +12,7 @@
     <!-- ── 相机界面 ── -->
     <string name="camera_preview_hidden">预览已隐藏</string>
     <string name="camera_switch_camera_cd">切换相机</string>
+    <string name="camera_flash_cd">闪光灯模式</string>
     <string name="camera_connect_cd">连接 — 二维码 + URL</string>
     <string name="camera_hide_preview_cd">隐藏预览</string>
     <string name="camera_show_preview_cd">显示预览</string>
@@ -70,6 +71,11 @@
     <string name="capture_start_interval">开始间隔拍摄</string>
     <string name="capture_assembling">正在合成…</string>
     <string name="capture_assemble_timelapse">合成延时摄影（最近 100 张照片）</string>
+    <string name="capture_auto_timelapse">完成后自动合成延时摄影</string>
+    <string name="capture_timelapse_saved">延时摄影已保存：%1$s（%2$d 帧）</string>
+    <string name="capture_timelapse_need_photos">至少需要 %1$d 张照片才能合成延时摄影</string>
+    <string name="capture_timelapse_unreadable">可读取的帧数不足（%1$s）</string>
+    <string name="capture_timelapse_failed">延时摄影合成失败</string>
     <string name="capture_section_scheduled">定时录像</string>
     <string name="capture_include_audio">包含音频</string>
     <string name="capture_recording_quality">录像画质</string>
@@ -135,6 +141,12 @@
     <string name="gallery_filter_all">全部 (%1$d)</string>
     <string name="gallery_filter_photos">照片 (%1$d)</string>
     <string name="gallery_filter_videos">视频 (%1$d)</string>
+    <string name="gallery_filter_favorites">收藏 (%1$d)</string>
+    <string name="gallery_search_hint">按文件名搜索</string>
+    <string name="gallery_search_clear_cd">清除搜索</string>
+    <string name="gallery_favorite_cd">标记为收藏</string>
+    <string name="gallery_unfavorite_cd">取消收藏</string>
+    <string name="gallery_undo">撤销</string>
     <string name="gallery_empty_none_title">暂无媒体文件</string>
     <string name="gallery_empty_none_body">开始拍摄后，照片和视频就会显示在这里。</string>
     <string name="gallery_empty_photos_title">此视图中没有照片</string>
@@ -148,6 +160,10 @@
         <item quantity="other">%1$d 个项目 • %2$s</item>
     </plurals>
     <string name="gallery_play_video_cd">播放视频</string>
+    <plurals name="gallery_trash_snackbar">
+        <item quantity="one">已移入回收站 — %d 项</item>
+        <item quantity="other">已移入回收站 — %d 项</item>
+    </plurals>
     <string name="gallery_type_photo">照片</string>
     <string name="gallery_type_video">视频</string>
     <string name="gallery_selected_cd">已选择</string>
@@ -206,6 +222,9 @@
     <string name="settings_maximize_quality">最高画质</string>
     <string name="settings_raw_jpeg">RAW+JPEG 拍摄</string>
     <string name="settings_raw_unsupported">此相机不支持 RAW+JPEG；照片将保存为 JPEG。</string>
+    <string name="settings_photo_aspect_ratio">照片宽高比</string>
+    <string name="settings_photo_aspect_16_9">16:9</string>
+    <string name="settings_photo_aspect_4_3">4:3</string>
     <string name="settings_gps_geotag">GPS 地理标记 (EXIF)</string>
     <string name="settings_section_night_vision">夜视 / 红外</string>
     <string name="settings_mode">模式</string>
@@ -265,6 +284,12 @@
     <string name="settings_enable_web_streaming">启用网页直播</string>
     <string name="settings_streaming_port">直播端口</string>
     <string name="settings_adaptive_bitrate">自适应码率</string>
+    <string name="settings_adaptive_encoded_bitrate">编码码率自适应</string>
+    <string name="settings_adaptive_encoded_bitrate_description">网络变慢（或设备发热）时自动降低编码器码率，带宽恢复后再回升 — 在 RTSP、WebSocket 和 HLS 发送路径上实测</string>
+    <string name="settings_hls_dvr">HLS DVR 窗口</string>
+    <string name="settings_hls_dvr_description">保留的 HLS 分段（每个约 2 秒）；0 表示仅直播列表，数值越大越可回看近期历史</string>
+    <string name="settings_rtsp_sub_stream">RTSP 子码流 (480p)</string>
+    <string name="settings_rtsp_sub_stream_description">在 rtsp://设备:端口/sub 提供第二路低分辨率 H.264 流，供 NVR 检测角色使用（如 Frigate）— 仅在 RTSP 输出运行时可用</string>
     <string name="settings_eco_idle">节能待机模式（电池）</string>
     <string name="settings_eco_idle_description">使用电池且无观众时，将视频流降至较低的待机帧率并暂停音频；在首位观众连接、接通充电器或发生温控事件时恢复</string>
     <string name="settings_mdns">网络发现 (mDNS)</string>
@@ -297,6 +322,19 @@
     <string name="settings_rtmp_status_connecting">连接中…</string>
     <string name="settings_rtmp_status_connected">已连接</string>
     <string name="settings_rtmp_h264_note">视频必须为 H.264（RTSP 视频编解码器）；流密钥保留在此设备的 URL 中</string>
+    <string name="settings_section_srt">SRT 推流</string>
+    <string name="settings_enable_srt">启用 SRT 推流</string>
+    <string name="settings_srt_url">推流 URL</string>
+    <string name="settings_srt_url_hint" translatable="false">srt://主机:端口?streamid=密钥</string>
+    <string name="settings_srt_url_invalid">不是可用的推流 URL — 应为 srt://主机:端口?streamid=…（默认端口 9710）</string>
+    <string name="settings_srt_status">状态：%1$s</string>
+    <string name="settings_srt_status_error">错误 — %1$s</string>
+    <string name="settings_srt_status_idle">空闲</string>
+    <string name="settings_srt_status_connecting">连接中…</string>
+    <string name="settings_srt_status_connected">已连接</string>
+    <string name="settings_srt_rtt">往返时延：%1$s 毫秒</string>
+    <string name="settings_srt_note">通过 UDP 向 SRT 监听端发布 MPEG-TS；视频必须为 H.264（RTSP 视频编解码器）；流 ID 保留在此设备的 URL 中</string>
+
     <string name="settings_section_whip">WHIP 推流 (WebRTC)</string>
     <string name="settings_enable_whip">启用 WHIP 推流</string>
     <string name="settings_whip_url">WHIP 端点</string>
@@ -359,6 +397,9 @@
     <string name="detection_sound_classification_description">在声音侦测之上叠加运行 — YAMNet 模型会对每次事件前后的音频进行分类，类别标签（烟雾报警器、狗叫声、玻璃、警报声…）会随警报、Webhook、MQTT 和事件日志一并传递。绝不会抑制事件本身，并且在 Android 7.0（API 24）之前不可用</string>
     <string name="detection_min_confidence">最低置信度（%）</string>
     <string name="detection_sound_classes">用于标记事件的类别</string>
+    <string name="detection_sound_trigger">按声音类别触发</string>
+    <string name="detection_sound_trigger_description">所选类别达到置信度下限时，会独立触发检测事件——玻璃破碎、警报、犬吠——无需先超过声音阈值。仅新增事件，阈值自身的警报不受影响</string>
+    <string name="detection_sound_trigger_classes">触发事件的类别</string>
     <!-- YAMNet 类别标签的显示名称，映射自 SoundClassPolicy.SECURITY_CLASSES
          中精选的 wire 标签。wire 标签（精确的 AudioSet 拼写）仍是持久化
          和负载的键，永不本地化。 -->

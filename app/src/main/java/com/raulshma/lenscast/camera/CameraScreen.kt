@@ -57,6 +57,9 @@ import androidx.compose.material.icons.filled.Collections
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Exposure
 import androidx.compose.material.icons.filled.FiberManualRecord
+import androidx.compose.material.icons.filled.FlashAuto
+import androidx.compose.material.icons.filled.FlashOff
+import androidx.compose.material.icons.filled.FlashOn
 import androidx.compose.material.icons.filled.FlashlightOn
 import androidx.compose.material.icons.filled.Flip
 import androidx.compose.material.icons.filled.Handyman
@@ -142,6 +145,8 @@ import com.raulshma.lenscast.camera.model.QuickSettingEditor
 import com.raulshma.lenscast.camera.model.QuickSettingIcon
 import com.raulshma.lenscast.camera.model.QuickSettingRanges
 import com.raulshma.lenscast.camera.model.QuickSettingType
+import com.raulshma.lenscast.camera.model.ZoomPresetsPolicy
+import com.raulshma.lenscast.capture.model.FlashMode
 import com.raulshma.lenscast.core.MicAccess
 import com.raulshma.lenscast.core.NetworkQualityMonitor.NetworkQualityLevel
 import com.raulshma.lenscast.core.StreamDefaults
@@ -221,6 +226,8 @@ fun CameraScreen(
     val adaptiveBitrateState by viewModel.adaptiveBitrateState.collectAsState()
     val connectionQualityStats by viewModel.connectionQualityStats.collectAsState()
     val hasAudioPermission by viewModel.hasAudioPermission.collectAsState()
+    val flashMode by viewModel.flashModeSetting.collectAsState()
+    val availableZoomRange by viewModel.availableZoomRange.collectAsState()
 
     val mediaPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestMultiplePermissions()
@@ -308,6 +315,8 @@ fun CameraScreen(
                 availableLenses = availableLenses,
                 selectedLensIndex = selectedLensIndex,
                 settings = settings,
+                zoomRange = availableZoomRange,
+                flashMode = flashMode,
                 showPreview = showPreview,
                 adaptiveBitrateState = adaptiveBitrateState,
                 connectionQualityStats = connectionQualityStats,
@@ -402,6 +411,8 @@ private fun ImmersiveCameraView(
     availableLenses: List<CameraLensInfo>,
     selectedLensIndex: Int,
     settings: CameraSettings,
+    zoomRange: ClosedFloatingPointRange<Float>,
+    flashMode: FlashMode,
     showPreview: Boolean,
     adaptiveBitrateState: com.raulshma.lenscast.streaming.AdaptiveBitrateController.AdaptiveState,
     connectionQualityStats: com.raulshma.lenscast.core.NetworkQualityMonitor.NetworkStatsSnapshot?,
@@ -502,6 +513,8 @@ private fun ImmersiveCameraView(
             recordingElapsedSeconds = recordingElapsedSeconds,
             showPreview = showPreview,
             lastServerError = lastServerError,
+            flashMode = flashMode,
+            onCycleFlashMode = { viewModel.cycleFlashMode() },
             onSwitchCamera = onSwitchCamera,
             onTogglePreview = onTogglePreview,
             onNavigateToGallery = onNavigateToGallery,
@@ -553,6 +566,7 @@ private fun ImmersiveCameraView(
             availableLenses = availableLenses,
             selectedLensIndex = selectedLensIndex,
             settings = settings,
+            zoomRange = zoomRange,
             quickSettingsExpanded = quickSettingsExpanded,
             activeSetting = activeSetting,
             isRecording = isRecording,
@@ -561,6 +575,11 @@ private fun ImmersiveCameraView(
             onCapture = onCapture,
             onRecord = onRecord,
             onSelectLens = onSelectLens,
+            onZoomPreset = { ratio ->
+                // The preset snaps through the zoom quick-setting's own write
+                // path: apply now for responsiveness, persist for the Applier.
+                viewModel.updateQuickSetting(QuickSettingType.ZOOM, ratio)
+            },
             onToggleQuickSettings = onToggleQuickSettings,
             onQuickSettingTap = onQuickSettingTap,
             modifier = Modifier
@@ -626,6 +645,8 @@ private fun CameraTopOverlay(
     recordingElapsedSeconds: Int,
     showPreview: Boolean,
     lastServerError: String?,
+    flashMode: FlashMode,
+    onCycleFlashMode: () -> Unit,
     onSwitchCamera: () -> Unit,
     onTogglePreview: () -> Unit,
     onNavigateToGallery: () -> Unit,
@@ -653,6 +674,17 @@ private fun CameraTopOverlay(
                 icon = Icons.Default.Cameraswitch,
                 contentDescription = stringResource(R.string.camera_switch_camera_cd),
                 onClick = onSwitchCamera
+            )
+            // The main-shutter flash chip: cycles OFF → AUTO → ON through the
+            // persisted setting (the icon is the mode's own state).
+            CameraControlButton(
+                icon = when (flashMode) {
+                    FlashMode.ON -> Icons.Default.FlashOn
+                    FlashMode.AUTO -> Icons.Default.FlashAuto
+                    FlashMode.OFF -> Icons.Default.FlashOff
+                },
+                contentDescription = stringResource(R.string.camera_flash_cd),
+                onClick = onCycleFlashMode
             )
             if (streamStatus.isActive) {
                 StreamIndicator(streamStatus = streamStatus)
@@ -801,6 +833,7 @@ private fun CameraBottomOverlay(
     availableLenses: List<CameraLensInfo>,
     selectedLensIndex: Int,
     settings: CameraSettings,
+    zoomRange: ClosedFloatingPointRange<Float>,
     quickSettingsExpanded: Boolean,
     activeSetting: QuickSettingType?,
     isRecording: Boolean,
@@ -809,14 +842,27 @@ private fun CameraBottomOverlay(
     onCapture: () -> Unit,
     onRecord: () -> Unit,
     onSelectLens: (Int) -> Unit,
+    onZoomPreset: (Float) -> Unit,
     onToggleQuickSettings: () -> Unit,
     onQuickSettingTap: (QuickSettingType) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    // The preset ladder is derived from the lens inventory + live zoom range;
+    // with no multi-lens info it degrades to [1x, max] (hidden below two).
+    val zoomPresets = remember(availableLenses, zoomRange) {
+        ZoomPresetsPolicy.presets(availableLenses, zoomRange)
+    }
     Column(
         modifier = modifier.navigationBarsPadding(),
         verticalArrangement = Arrangement.Bottom
     ) {
+        if (zoomPresets.size >= ZoomPresetsPolicy.MIN_PRESETS_FOR_ROW) {
+            ZoomPresetChipRow(
+                presets = zoomPresets,
+                currentRatio = settings.zoomRatio,
+                onPresetSelected = onZoomPreset,
+            )
+        }
         AnimatedVisibility(
             visible = quickSettingsExpanded,
             enter = fadeIn(tween(200)) + androidx.compose.animation.expandVertically(
@@ -856,6 +902,52 @@ private fun CameraBottomOverlay(
             onRecord = onRecord,
             onToggleQuickSettings = onToggleQuickSettings,
         )
+    }
+}
+
+/**
+ * The viewfinder's zoom-preset chip row: one chip per [ZoomPresetsPolicy.ZoomPreset]
+ * ("0.5x" / "1x" / "2x" / "MAX"), the active one highlighted within the
+ * policy's epsilon. A tap snaps zoom through the caller's write path.
+ */
+@Composable
+private fun ZoomPresetChipRow(
+    presets: List<ZoomPresetsPolicy.ZoomPreset>,
+    currentRatio: Float,
+    onPresetSelected: (Float) -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .horizontalScroll(rememberScrollState())
+            .padding(horizontal = 16.dp, vertical = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        presets.forEach { preset ->
+            val active = ZoomPresetsPolicy.isActive(preset, currentRatio)
+            Surface(
+                color = if (active) {
+                    MaterialTheme.colorScheme.primary.copy(alpha = 0.92f)
+                } else {
+                    OverlayScrim.copy(alpha = 0.55f)
+                },
+                shape = RoundedCornerShape(14.dp),
+                onClick = { onPresetSelected(preset.ratio) },
+            ) {
+                Text(
+                    text = preset.label,
+                    color = if (active) {
+                        MaterialTheme.colorScheme.onPrimary
+                    } else {
+                        Color.White.copy(alpha = 0.88f)
+                    },
+                    fontSize = 12.sp,
+                    fontWeight = if (active) FontWeight.Bold else FontWeight.Normal,
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 5.dp),
+                )
+            }
+        }
     }
 }
 

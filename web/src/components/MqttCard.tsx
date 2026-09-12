@@ -3,6 +3,7 @@ import type { AllSettings } from '../types'
 import { API_DEFAULTS } from '../api/defaults'
 import SettingsCard from './SettingsCard'
 import ToggleRow from './ToggleRow'
+import { t } from '../lib/i18n'
 
 interface Props {
   settings: () => AllSettings | null
@@ -36,32 +37,32 @@ export default function MqttCard(props: Props) {
           <path d="M4.93 19.07a10 10 0 010-14.14" />
         </svg>
       }
-      title="MQTT"
+      title={t('mqtt.title')}
     >
       <div class="field-group">
         <ToggleRow
           id="mqtt-toggle"
-          label="Enable MQTT"
+          label={t('mqtt.enable')}
           checked={mqttOn()}
           onToggle={() => props.updateStreamingAndSave({ mqttEnabled: !mqttOn() })}
         />
         <div class="status-banner status-banner-info stream-mode-hint" role="note" aria-live="polite">
           <span class="status-banner-dot" aria-hidden="true" />
-          <span>Publishes motion/sound/tamper alerts to an MQTT broker with Home Assistant discovery entities.</span>
+          <span>{t('mqtt.desc')}</span>
         </div>
       </div>
 
       <Show when={mqttOn()}>
         <div class="field-group">
           <div class="field-row">
-            <span class="field-label">Broker Host</span>
+            <span class="field-label">{t('mqtt.host')}</span>
           </div>
           <input
             id="mqtt-broker-host"
             type="text"
             class="field-input field-input-full"
             autocomplete="off"
-            placeholder="e.g. 192.168.1.10 or broker.example.com"
+            placeholder={t('mqtt.hostPlaceholder')}
             value={stream()?.mqttBrokerHost ?? API_DEFAULTS.mqttBrokerHost}
             onInput={(e) => props.updateStreamingDebounced({ mqttBrokerHost: e.currentTarget.value })}
           />
@@ -69,7 +70,7 @@ export default function MqttCard(props: Props) {
 
         <div class="field-group">
           <div class="field-row">
-            <span class="field-label">Broker Port</span>
+            <span class="field-label">{t('mqtt.port')}</span>
           </div>
           <input
             id="mqtt-broker-port"
@@ -88,7 +89,7 @@ export default function MqttCard(props: Props) {
         <div class="field-group">
           <ToggleRow
             id="mqtt-tls-toggle"
-            label="Use TLS (port 8883 typical)"
+            label={t('mqtt.tls')}
             checked={mqttTlsOn()}
             onToggle={() => props.updateStreamingAndSave({ mqttTls: !mqttTlsOn() })}
           />
@@ -96,7 +97,7 @@ export default function MqttCard(props: Props) {
 
         <div class="field-group">
           <div class="field-row">
-            <span class="field-label">Username</span>
+            <span class="field-label">{t('common.username')}</span>
           </div>
           <input
             id="mqtt-username"
@@ -110,14 +111,14 @@ export default function MqttCard(props: Props) {
 
         <div class="field-group">
           <div class="field-row">
-            <span class="field-label">Password</span>
+            <span class="field-label">{t('common.password')}</span>
           </div>
           <input
             id="mqtt-password"
             type="password"
             class="field-input field-input-full"
             autocomplete="new-password"
-            placeholder="(unchanged)"
+            placeholder={t('common.unchanged')}
             value={passwordDraft()}
             onInput={(e) => {
               setPasswordDraft(e.currentTarget.value)
@@ -128,14 +129,14 @@ export default function MqttCard(props: Props) {
 
         <div class="field-group">
           <div class="field-row">
-            <span class="field-label">HA Discovery Prefix</span>
+            <span class="field-label">{t('mqtt.prefix')}</span>
           </div>
           <input
             id="mqtt-discovery-prefix"
             type="text"
             class="field-input field-input-full"
             autocomplete="off"
-            placeholder="homeassistant"
+            placeholder={t('mqtt.prefixPlaceholder')}
             value={stream()?.mqttDiscoveryPrefix ?? API_DEFAULTS.mqttDiscoveryPrefix}
             onInput={(e) => props.updateStreamingDebounced({ mqttDiscoveryPrefix: e.currentTarget.value })}
           />

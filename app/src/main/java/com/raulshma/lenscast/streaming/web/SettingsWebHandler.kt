@@ -131,7 +131,14 @@ class SettingsWebHandler(
                 // Write-only, like mqttPassword: blank in every response.
                 whipToken = "",
                 whipStunServer = store.whipStunServer.value,
+                srtEnabled = store.srtEnabled.value,
+                // Write-only, like rtmpUrl: the userinfo/streamid are
+                // credentials; blank in every response.
+                srtUrl = "",
                 adaptiveBitrateEnabled = store.adaptiveBitrateEnabled.value,
+                adaptiveEncodedBitrateEnabled = store.encodedAdaptiveBitrateEnabled.value,
+                rtspSubStreamEnabled = store.rtspSubStreamEnabled.value,
+                hlsDvrSegments = store.hlsDvrSegments.value,
                 overlayEnabled = overlay.enabled,
                 showTimestamp = overlay.showTimestamp,
                 timestampFormat = overlay.timestampFormat,
@@ -170,6 +177,8 @@ class SettingsWebHandler(
                 soundClassificationEnabled = store.soundClassificationEnabled.value,
                 soundClassificationConfidencePercent = store.soundClassificationConfidencePercent.value,
                 soundClassificationAllowedClasses = store.soundClassificationAllowedClasses.value.toList(),
+                soundTriggerEnabled = store.soundTriggerEnabled.value,
+                soundTriggerClasses = store.soundTriggerClasses.value.toList(),
                 webhookEnabled = store.webhookEnabled.value,
                 webhookUrl = store.webhookUrl.value,
                 webhookHeaders = store.webhookHeaders.value,
@@ -208,6 +217,7 @@ class SettingsWebHandler(
                 mqttPassword = "",
                 mqttTls = store.mqttTls.value,
                 mqttDiscoveryPrefix = store.mqttDiscoveryPrefix.value,
+                mqttTelemetryEnabled = store.mqttTelemetryEnabled.value,
                 pushEnabled = store.pushEnabled.value,
                 captureRetentionDays = store.captureRetentionDays.value,
                 eventRetentionDays = store.eventRetentionDays.value,
@@ -299,7 +309,17 @@ class SettingsWebHandler(
             settingsDataStore.saveWhipEnabled(stream.whipEnabled)
             settingsDataStore.saveWhipUrl(stream.whipUrl)
             settingsDataStore.saveWhipStunServer(stream.whipStunServer)
+            // SRT push: the enable toggle round-trips; the write-only URL is
+            // judged at start time by SrtUrl.parse, exactly like the RTMP
+            // push URL (an empty update keeps the stored credential).
+            settingsDataStore.saveSrtEnabled(stream.srtEnabled)
+            if (stream.srtUrl.isNotEmpty()) {
+                settingsDataStore.saveSrtUrl(stream.srtUrl)
+            }
             settingsDataStore.saveAdaptiveBitrateEnabled(stream.adaptiveBitrateEnabled)
+            settingsDataStore.saveEncodedAdaptiveBitrateEnabled(stream.adaptiveEncodedBitrateEnabled)
+            settingsDataStore.saveRtspSubStreamEnabled(stream.rtspSubStreamEnabled)
+            settingsDataStore.saveHlsDvrSegments(stream.hlsDvrSegments)
             settingsDataStore.saveOverlaySettings(toOverlaySettings(stream, settingsDataStore.overlaySettings.value))
             settingsDataStore.saveWatchdogEnabled(stream.watchdogEnabled)
             settingsDataStore.saveWatchdogMaxRetries(stream.watchdogMaxRetries)
@@ -328,6 +348,11 @@ class SettingsWebHandler(
             settingsDataStore.saveSoundClassificationAllowedClasses(
                 stream.soundClassificationAllowedClasses.toSet(),
             )
+            // The trigger set normalizes on save exactly like the allow-list:
+            // unknown spellings drop out, an empty set folds back to the
+            // curated trigger default — the list narrows, never disarms.
+            settingsDataStore.saveSoundTriggerEnabled(stream.soundTriggerEnabled)
+            settingsDataStore.saveSoundTriggerClasses(stream.soundTriggerClasses.toSet())
             settingsDataStore.saveWebhookEnabled(stream.webhookEnabled)
             settingsDataStore.saveWebhookUrl(stream.webhookUrl)
             settingsDataStore.saveWebhookHeaders(stream.webhookHeaders)
@@ -354,6 +379,7 @@ class SettingsWebHandler(
             settingsDataStore.saveMqttUsername(stream.mqttUsername)
             settingsDataStore.saveMqttTls(stream.mqttTls)
             settingsDataStore.saveMqttDiscoveryPrefix(stream.mqttDiscoveryPrefix)
+            settingsDataStore.saveMqttTelemetryEnabled(stream.mqttTelemetryEnabled)
             // Web Push: the master gate rides the standard round-trip; the
             // subscriptions themselves are browser-session state through the
             // /api/push routes, never this document.

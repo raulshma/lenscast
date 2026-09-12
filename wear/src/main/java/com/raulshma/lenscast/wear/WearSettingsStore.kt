@@ -3,6 +3,7 @@ package com.raulshma.lenscast.wear
 import android.content.Context
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
@@ -34,6 +35,7 @@ private object Keys {
     val USERNAME = stringPreferencesKey("username")
     val PASSWORD = stringPreferencesKey("password")
     val API_TOKEN = stringPreferencesKey("api_token")
+    val ALERTS_ENABLED = booleanPreferencesKey("alerts_enabled")
 }
 
 class WearSettingsStore(private val context: Context) {
@@ -47,6 +49,7 @@ class WearSettingsStore(private val context: Context) {
             username = prefs[Keys.USERNAME].orEmpty(),
             password = prefs[Keys.PASSWORD].orEmpty(),
             apiToken = prefs[Keys.API_TOKEN].orEmpty(),
+            alertsEnabled = prefs[Keys.ALERTS_ENABLED] ?: true,
         )
     }
 
@@ -62,6 +65,7 @@ class WearSettingsStore(private val context: Context) {
             prefs[Keys.USERNAME] = settings.username.trim()
             prefs[Keys.PASSWORD] = settings.password
             prefs[Keys.API_TOKEN] = settings.apiToken.trim()
+            prefs[Keys.ALERTS_ENABLED] = settings.alertsEnabled
         }
     }
 

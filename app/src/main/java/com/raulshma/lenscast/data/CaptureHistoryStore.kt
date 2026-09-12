@@ -10,6 +10,7 @@ import com.raulshma.lenscast.capture.CaptureMediaResolver
 import com.raulshma.lenscast.capture.model.CaptureHistory
 import com.raulshma.lenscast.capture.model.CaptureMediaFormat
 import com.raulshma.lenscast.capture.model.CaptureType
+import com.raulshma.lenscast.capture.model.RecordingTrigger
 import com.raulshma.lenscast.core.AppJson
 import com.raulshma.lenscast.core.StreamDefaults
 import com.squareup.moshi.Types
@@ -224,6 +225,7 @@ class CaptureHistoryStore(
         filePath: String,
         fileSizeBytes: Long,
         durationMs: Long,
+        trigger: RecordingTrigger = RecordingTrigger.MANUAL,
     ): CaptureHistory {
         return CaptureHistory(
             id = UUID.randomUUID().toString(),
@@ -233,7 +235,22 @@ class CaptureHistoryStore(
             timestamp = System.currentTimeMillis(),
             fileSizeBytes = fileSizeBytes,
             durationMs = durationMs,
+            trigger = trigger.wireName,
         )
+    }
+
+    /**
+     * The favorite write: one entry's flag flips and persists. The only
+     * writer of the flag — merges keep favorites sticky (see [mergeFields]),
+     * so a refresh can never wipe a star.
+     */
+    fun setFavorite(id: String, favorite: Boolean) {
+        val index = _history.value.indexOfFirst { it.id == id }
+        if (index < 0) return
+        _history.value = _history.value.toMutableList().apply {
+            set(index, get(index).copy(favorite = favorite))
+        }
+        save()
     }
 
     companion object {
@@ -241,8 +258,12 @@ class CaptureHistoryStore(
 
         /**
          * The one field-wise merge policy: keep the richer entry. The incoming
-         * name wins unless blank, timestamps take the max, and zero size or
-         * duration never overwrites a real one.
+         * name wins unless blank, timestamps take the max, zero size or
+         * duration never overwrites a real one, a known trigger survives a
+         * merge with an unattributed copy (the first attribution is the truth),
+         * and a favorite is sticky — un-favoriting happens only through the
+         * explicit [setFavorite] write, never through a MediaStore refresh
+         * merging an adopted copy that carries the default.
          */
         internal fun mergeFields(existing: CaptureHistory, incoming: CaptureHistory): CaptureHistory =
             existing.copy(
@@ -250,6 +271,8 @@ class CaptureHistoryStore(
                 timestamp = maxOf(existing.timestamp, incoming.timestamp),
                 fileSizeBytes = incoming.fileSizeBytes.takeIf { it > 0 } ?: existing.fileSizeBytes,
                 durationMs = incoming.durationMs.takeIf { it > 0 } ?: existing.durationMs,
+                trigger = existing.trigger ?: incoming.trigger,
+                favorite = existing.favorite || incoming.favorite,
             )
 
         /**

@@ -11,6 +11,7 @@ import {
   updateAuthConfig,
 } from '../api/client'
 import type { AuthSessionInfo } from '../api/client'
+import { formatTime, t } from '../lib/i18n'
 
 /**
  * Remote credential rotation + session management. Talks to
@@ -92,7 +93,7 @@ export default function AuthCard() {
       setTokenEnabled(true)
       setTokenConfigured(true)
     } catch (e: any) {
-      setTokenMsg(e?.message || 'Token update failed')
+      setTokenMsg(e?.message || t('auth.tokenFailed'))
     } finally {
       setTokenBusy(false)
     }
@@ -107,7 +108,7 @@ export default function AuthCard() {
       await saveStreamingPatch({ apiTokenEnabled: next })
       setTokenEnabled(next)
     } catch (e: any) {
-      setTokenMsg(e?.message || 'Token update failed')
+      setTokenMsg(e?.message || t('auth.tokenFailed'))
     } finally {
       setTokenBusy(false)
     }
@@ -116,9 +117,9 @@ export default function AuthCard() {
   async function copyToken() {
     try {
       await navigator.clipboard.writeText(generatedToken())
-      setTokenMsg('Copied to clipboard')
+      setTokenMsg(t('auth.copied'))
     } catch {
-      setTokenMsg('Copy failed — select the text manually')
+      setTokenMsg(t('auth.copyFailed'))
     }
   }
 
@@ -129,7 +130,7 @@ export default function AuthCard() {
     const enteredPassword = password()
     try {
       await updateAuthConfig({ enabled: enabled(), username: username(), password: enteredPassword })
-      setMsg('Credentials updated')
+      setMsg(t('auth.updated'))
       setPassword('')
       if (enteredPassword) {
         // Password rotation revoked all sessions, including this one.
@@ -137,7 +138,7 @@ export default function AuthCard() {
       }
       await refresh()
     } catch (e: any) {
-      setMsg(e?.message || 'Update failed')
+      setMsg(e?.message || t('auth.updateFailed'))
     } finally {
       setBusy(false)
     }
@@ -169,11 +170,11 @@ export default function AuthCard() {
         viewerUsername: viewerUsername(),
         viewerPassword: enteredPassword,
       })
-      setViewerMsg('Viewer access updated')
+      setViewerMsg(t('auth.viewerUpdated'))
       setViewerPasswordDraft('')
       await refresh()
     } catch (e: any) {
-      setViewerMsg(e?.message || 'Update failed')
+      setViewerMsg(e?.message || t('auth.updateFailed'))
     } finally {
       setViewerBusy(false)
     }
@@ -189,11 +190,11 @@ export default function AuthCard() {
           <path d="M9 12l2 2 4-4" />
         </svg>
       }
-      title="Access & Sessions"
+      title={t('auth.title')}
     >
       <div class="field-group">
         <div class="field-row field-row-toggle">
-          <span class="field-label">Require Authentication</span>
+          <span class="field-label">{t('auth.require')}</span>
           <label class="toggle-switch" for="auth-enabled-toggle">
             <input
               id="auth-enabled-toggle"
@@ -209,7 +210,7 @@ export default function AuthCard() {
             id="auth-username"
             type="text"
             class="field-input field-input-full"
-            placeholder="Username"
+            placeholder={t('auth.usernamePlaceholder')}
             autocomplete="off"
             value={username()}
             onInput={(e) => setUsername(e.currentTarget.value)}
@@ -218,13 +219,13 @@ export default function AuthCard() {
             id="auth-password"
             type="password"
             class="field-input field-input-full"
-            placeholder="New password (blank = unchanged)"
+            placeholder={t('auth.passwordPlaceholder')}
             autocomplete="new-password"
             value={password()}
             onInput={(e) => setPassword(e.currentTarget.value)}
           />
           <button type="button" class="action-btn action-btn-primary" disabled={busy()} onClick={() => void apply()}>
-            <span>{busy() ? 'Saving…' : 'Save credentials'}</span>
+            <span>{busy() ? t('auth.saving') : t('auth.save')}</span>
           </button>
           <Show when={msg()}>
             <span class="clients-cap-row">{msg()}</span>
@@ -235,7 +236,7 @@ export default function AuthCard() {
       {/* Viewer access (optional read-only role) */}
       <div class="field-group">
         <div class="field-row field-row-toggle">
-          <span class="field-label">Viewer Access</span>
+          <span class="field-label">{t('auth.viewer')}</span>
           <label class="toggle-switch" for="viewer-enabled-toggle">
             <input
               id="viewer-enabled-toggle"
@@ -251,7 +252,7 @@ export default function AuthCard() {
             id="viewer-username"
             type="text"
             class="field-input field-input-full"
-            placeholder="Viewer username"
+            placeholder={t('auth.viewerUsername')}
             autocomplete="off"
             value={viewerUsername()}
             onInput={(e) => setViewerUsername(e.currentTarget.value)}
@@ -260,18 +261,18 @@ export default function AuthCard() {
             id="viewer-password"
             type="password"
             class="field-input field-input-full"
-            placeholder="(unchanged)"
+            placeholder={t('common.unchanged')}
             autocomplete="new-password"
             value={viewerPasswordDraft()}
             onInput={(e) => setViewerPasswordDraft(e.currentTarget.value)}
           />
           <button type="button" class="action-btn action-btn-primary" disabled={viewerBusy()} onClick={() => void applyViewer()}>
-            <span>{viewerBusy() ? 'Saving…' : 'Save viewer access'}</span>
+            <span>{viewerBusy() ? t('auth.saving') : t('auth.saveViewer')}</span>
           </button>
         </Show>
         <div class="status-banner status-banner-info stream-mode-hint" role="note">
           <span class="status-banner-dot" aria-hidden="true" />
-          <span>A viewer signs in with their own username and gets read-only access: live view, gallery and status — no settings, captures, or deletions. Changing or disabling viewer access signs out viewer sessions only.</span>
+          <span>{t('auth.viewerDesc')}</span>
         </div>
         <Show when={viewerMsg()}>
           <span class="clients-cap-row">{viewerMsg()}</span>
@@ -281,7 +282,7 @@ export default function AuthCard() {
       {/* API token (read-only programmatic access) */}
       <div class="field-group">
         <div class="field-row field-row-toggle">
-          <span class="field-label">API Token</span>
+          <span class="field-label">{t('auth.token')}</span>
           <label class="toggle-switch" for="api-token-toggle">
             <input
               id="api-token-toggle"
@@ -293,11 +294,11 @@ export default function AuthCard() {
           </label>
         </div>
         <div class="field-row">
-          <span class="field-label">Configured</span>
-          <span class="field-value">{tokenConfigured() ? 'Yes' : 'No'}</span>
+          <span class="field-label">{t('auth.configured')}</span>
+          <span class="field-value">{tokenConfigured() ? t('auth.yes') : t('auth.no')}</span>
         </div>
         <button type="button" class="action-btn action-btn-primary" disabled={tokenBusy()} onClick={() => void generateToken()}>
-          <span>{tokenBusy() ? 'Saving…' : 'Generate new token'}</span>
+          <span>{tokenBusy() ? t('auth.saving') : t('auth.generate')}</span>
         </button>
         <Show when={generatedToken()}>
           <input
@@ -310,12 +311,12 @@ export default function AuthCard() {
           />
           <div class="deterrence-row">
             <button type="button" class="action-btn action-btn-ghost" onClick={() => void copyToken()}>
-              <span>Copy</span>
+              <span>{t('auth.copy')}</span>
             </button>
           </div>
           <div class="status-banner status-banner-info stream-mode-hint" role="note">
             <span class="status-banner-dot" aria-hidden="true" />
-            <span>Copy it now — it is shown only once. It grants read-only GET access (never /api/auth/*) for scripts via Authorization: Bearer or X-Api-Token.</span>
+            <span>{t('auth.tokenWarning')}</span>
           </div>
         </Show>
         <Show when={tokenMsg()}>
@@ -325,17 +326,17 @@ export default function AuthCard() {
 
       <div class="field-group">
         <div class="field-row">
-          <span class="field-label">Active Sessions ({sessions().length})</span>
+          <span class="field-label">{t('auth.sessions', { count: sessions().length })}</span>
         </div>
         <ul class="clients-list">
-          <For each={sessions()} fallback={<li class="clients-empty">No active sessions</li>}>
+          <For each={sessions()} fallback={<li class="clients-empty">{t('auth.noSessions')}</li>}>
             {(session) => (
               <li class="client-row">
                 <span class="client-id" title={session.tokenPrefix}>
-                  session {session.tokenPrefix}…{session.role === 'viewer' ? ' · viewer' : ''} · expires {new Date(session.expiresAtMs).toLocaleTimeString()}
+                  {t('auth.sessionPrefix', { prefix: session.tokenPrefix })}{session.role === 'viewer' ? t('auth.viewerRole') : ''} · {t('auth.expires', { time: formatTime(session.expiresAtMs, { hour: '2-digit', minute: '2-digit', second: '2-digit' }) })}
                 </span>
                 <button type="button" class="client-kick-btn" onClick={() => void revoke(session.tokenPrefix)}>
-                  Revoke
+                  {t('auth.revoke')}
                 </button>
               </li>
             )}

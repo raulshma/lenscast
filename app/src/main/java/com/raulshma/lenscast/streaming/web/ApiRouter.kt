@@ -67,15 +67,17 @@ class ApiRouter(
                 type = r.query["type"],
                 page = r.query["page"]?.toIntOrNull() ?: 0,
                 pageSize = r.query["pageSize"]?.toIntOrNull() ?: 0,
+                query = r.query["q"],
             )
         )
         "/api/detection/events" -> ApiResponse.ok(
-            detectionEvents.list(r.query["limit"]?.toIntOrNull(), r.query["type"])
+            detectionEvents.list(r.query["limit"]?.toIntOrNull(), r.query["type"], r.query["day"])
         )
         "/api/detection/events/export" -> detectionEvents.export(r.query["format"], r.query["type"])
         "/api/detection/stats" -> ApiResponse.ok(detectionEvents.stats())
         "/api/system" -> ApiResponse.ok(system.get())
         "/api/audit" -> ApiResponse.ok(audit.list(r.query["limit"]?.toIntOrNull()))
+        "/api/openapi.json" -> ApiResponse(200, "application/json", OpenApiSpec.json())
         // The config read is role-aware: viewer sessions get the redacted view
         // (the filter already 403s them; this is defense in depth at the DTO).
         "/api/auth/config" -> ApiResponse.ok(auth.get(r.sessionRole))
@@ -100,6 +102,8 @@ class ApiRouter(
         "/api/stream/rtmp/stop" -> ApiResponse.ok(stream.stopRtmp())
         "/api/stream/whip/start" -> ApiResponse.ok(stream.startWhip())
         "/api/stream/whip/stop" -> ApiResponse.ok(stream.stopWhip())
+        "/api/stream/srt/start" -> ApiResponse.ok(stream.startSrt())
+        "/api/stream/srt/stop" -> ApiResponse.ok(stream.stopSrt())
         "/api/capture" -> ApiResponse.ok(capture.capturePhoto())
         "/api/camera/lens" -> ApiResponse.ok(lens.selectLens(r.body))
         "/api/camera/focus" -> ApiResponse.ok(lens.tapFocus(r.body))
@@ -153,5 +157,87 @@ class ApiRouter(
 
     companion object {
         private const val TAG = "ApiRouter"
+
+        /**
+         * One registered route as data: [method] and the literal [path] the
+         * dispatch `when` answers, plus the [specPath] template the OpenAPI
+         * document names it by (they differ only for the id-suffix DELETE
+         * routes, which the router matches by prefix and the spec by
+         * `{param}` template).
+         */
+        data class Route(val method: ApiMethod, val path: String, val specPath: String = path)
+
+        /**
+         * The routing table as data, next to the dispatch `when`s that
+         * implement it. This is the drift guard's hub: [OpenApiSpec] builds
+         * its paths from it, and the parity test cross-checks it against the
+         * router source, the live dispatch (a stub-router probe — a declared
+         * route that 404s fails the test), and the spec document, in both
+         * directions. A new route is one `when` branch plus one entry here;
+         * forgetting either side fails a JVM test.
+         */
+        val ROUTE_TABLE: List<Route> = listOf(
+            // GET reads
+            Route(ApiMethod.GET, "/api/settings"),
+            Route(ApiMethod.GET, "/api/settings/export"),
+            Route(ApiMethod.GET, "/api/status"),
+            Route(ApiMethod.GET, "/api/camera/lenses"),
+            Route(ApiMethod.GET, "/api/stream/clients"),
+            Route(ApiMethod.GET, "/api/capture/interval/status"),
+            Route(ApiMethod.GET, "/api/recording/status"),
+            Route(ApiMethod.GET, "/api/recordings/sessions"),
+            Route(ApiMethod.GET, "/api/gallery"),
+            Route(ApiMethod.GET, "/api/detection/events"),
+            Route(ApiMethod.GET, "/api/detection/events/export"),
+            Route(ApiMethod.GET, "/api/detection/stats"),
+            Route(ApiMethod.GET, "/api/system"),
+            Route(ApiMethod.GET, "/api/audit"),
+            Route(ApiMethod.GET, "/api/openapi.json"),
+            Route(ApiMethod.GET, "/api/auth/config"),
+            Route(ApiMethod.GET, "/api/auth/sessions"),
+            Route(ApiMethod.GET, "/api/push/vapid-public"),
+            Route(ApiMethod.GET, "/api/push/subscriptions"),
+            // Writes (PUT shares the POST dispatch; both verbs are accepted)
+            Route(ApiMethod.PUT, "/api/settings"),
+            Route(ApiMethod.POST, "/api/settings"),
+            Route(ApiMethod.POST, "/api/settings/import"),
+            Route(ApiMethod.POST, "/api/settings/ml-model/download"),
+            Route(ApiMethod.POST, "/api/settings/audio-model/download"),
+            Route(ApiMethod.POST, "/api/stream/start"),
+            Route(ApiMethod.POST, "/api/stream/resume"),
+            Route(ApiMethod.POST, "/api/stream/stop"),
+            Route(ApiMethod.POST, "/api/stream/web/start"),
+            Route(ApiMethod.POST, "/api/stream/web/stop"),
+            Route(ApiMethod.POST, "/api/stream/rtsp/start"),
+            Route(ApiMethod.POST, "/api/stream/rtsp/stop"),
+            Route(ApiMethod.POST, "/api/stream/rtmp/start"),
+            Route(ApiMethod.POST, "/api/stream/rtmp/stop"),
+            Route(ApiMethod.POST, "/api/stream/whip/start"),
+            Route(ApiMethod.POST, "/api/stream/whip/stop"),
+            Route(ApiMethod.POST, "/api/stream/srt/start"),
+            Route(ApiMethod.POST, "/api/stream/srt/stop"),
+            Route(ApiMethod.POST, "/api/capture"),
+            Route(ApiMethod.POST, "/api/camera/lens"),
+            Route(ApiMethod.POST, "/api/camera/focus"),
+            Route(ApiMethod.POST, "/api/camera/zoom"),
+            Route(ApiMethod.POST, "/api/camera/torch"),
+            Route(ApiMethod.POST, "/api/capture/interval/start"),
+            Route(ApiMethod.POST, "/api/capture/interval/stop"),
+            Route(ApiMethod.POST, "/api/recording/start"),
+            Route(ApiMethod.POST, "/api/recording/stop"),
+            Route(ApiMethod.POST, "/api/deterrence/siren"),
+            Route(ApiMethod.POST, "/api/detection/test"),
+            Route(ApiMethod.PUT, "/api/auth/config"),
+            Route(ApiMethod.POST, "/api/auth/config"),
+            Route(ApiMethod.POST, "/api/media/batch-delete"),
+            Route(ApiMethod.POST, "/api/push/subscriptions"),
+            // Deletes
+            Route(ApiMethod.DELETE, "/api/detection/events"),
+            Route(ApiMethod.DELETE, "/api/audit"),
+            Route(ApiMethod.DELETE, "/api/push/subscriptions"),
+            Route(ApiMethod.DELETE, "/api/stream/clients/", "/api/stream/clients/{clientId}"),
+            Route(ApiMethod.DELETE, "/api/auth/sessions/", "/api/auth/sessions/{sessionId}"),
+            Route(ApiMethod.DELETE, "/api/media/", "/api/media/{mediaId}"),
+        )
     }
 }

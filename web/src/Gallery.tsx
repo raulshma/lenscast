@@ -2,14 +2,13 @@ import { createSignal, createMemo, createEffect, For, Show, onCleanup } from 'so
 import * as api from './api/client'
 import type { GalleryItem, GalleryFilter } from './types'
 import { groupGalleryByDay, listCaptureDays } from './gallery/groupByDay'
+import { filterByQuery } from './lib/mediaSearch'
+import { toViewerMedia } from './lib/viewerStore'
+import { MediaViewer } from './components/MediaViewer'
+import { dayGroupLabel, formatDate, formatTime, t, tCount } from './lib/i18n'
 
-/**
- * Full-size image source for the viewer — `url` is the full-res media route;
- * `thumbnailUrl` stays the 512px grid thumbnail.
- */
-function fullImageUrl(item: GalleryItem): string {
-  return item.url
-}
+/** How long typing waits before the search refetches the gallery. */
+const SEARCH_DEBOUNCE_MS = 300
 
 function formatFileSize(bytes: number): string {
   if (bytes <= 0) return ''
@@ -23,10 +22,10 @@ function formatFileSize(bytes: number): string {
   return `${size.toFixed(i > 0 ? 1 : 0)} ${units[i]}`
 }
 
-function formatDate(ts: number): string {
+function formatDateLabel(ts: number): string {
   const d = new Date(ts)
-  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) +
-    ' ' + d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
+  return formatDate(d, { month: 'short', day: 'numeric' }) +
+    ' ' + formatTime(d, { hour: '2-digit', minute: '2-digit' })
 }
 
 function formatDuration(ms: number): string {
@@ -36,7 +35,12 @@ function formatDuration(ms: number): string {
   return `${min}:${sec.toString().padStart(2, '0')}`
 }
 
-export default function Gallery(props: { onClose: () => void; readOnly?: () => boolean }) {
+export default function Gallery(props: {
+  onClose: () => void
+  readOnly?: () => boolean
+  /** True while a higher overlay (shortcuts help, the shared media viewer) owns Escape. */
+  overlayActive?: () => boolean
+}) {
   // A viewer-role session hides the delete controls; downloads (reads) stay.
   const canDelete = () => props.readOnly?.() !== true
   const [filter, setFilter] = createSignal<GalleryFilter>('ALL')
@@ -48,12 +52,25 @@ export default function Gallery(props: { onClose: () => void; readOnly?: () => b
   const [selectMode, setSelectMode] = createSignal(false)
   const [selectedIds, setSelectedIds] = createSignal<Set<string>>(new Set<string>())
   const [batchDeleting, setBatchDeleting] = createSignal(false)
-  const [videoLoading, setVideoLoading] = createSignal(false)
   const [page, setPage] = createSignal(0)
   const [hasMore, setHasMore] = createSignal(false)
   const [totalItems, setTotalItems] = createSignal(0)
   const [selectedDay, setSelectedDay] = createSignal('')
+  // Filename search: the box owns searchInput; `query` is the debounced
+  // value that both the fetch (q= param — newer servers filter server-side)
+  // and the client-side filterByQuery (works against today's server) key off.
+  const [searchInput, setSearchInput] = createSignal('')
+  const [query, setQuery] = createSignal('')
+  let searchTimer: ReturnType<typeof setTimeout> | null = null
   const PAGE_SIZE = 50
+
+  function onSearchInput(value: string) {
+    setSearchInput(value)
+    if (searchTimer) clearTimeout(searchTimer)
+    searchTimer = setTimeout(() => setQuery(value), SEARCH_DEBOUNCE_MS)
+  }
+
+  onCleanup(() => { if (searchTimer) clearTimeout(searchTimer) })
 
   // One memo per items() change; the day picker reads it from two places in
   // the header JSX (the Show gate and the option list).
@@ -66,7 +83,8 @@ export default function Gallery(props: { onClose: () => void; readOnly?: () => b
     setError('')
     try {
       const f = filter()
-      const res = await api.getGallery(f === 'ALL' ? undefined : f, currentPage, PAGE_SIZE)
+      const q = query().trim()
+      const res = await api.getGallery(f === 'ALL' ? undefined : f, currentPage, PAGE_SIZE, q || undefined)
       if (currentPage === 0) {
         setItems(res.items)
       } else {
@@ -75,7 +93,7 @@ export default function Gallery(props: { onClose: () => void; readOnly?: () => b
       setHasMore(res.hasMore)
       setTotalItems(res.total)
     } catch (e: any) {
-      setError(e.message || 'Failed to load gallery')
+      setError(e.message || t('gallery.loadFailed'))
     } finally {
       setLoading(false)
     }
@@ -92,14 +110,26 @@ export default function Gallery(props: { onClose: () => void; readOnly?: () => b
     fetchGallery(true)
   })
 
+  // The debounced query refetches with q= (mount is covered by the filter
+  // effect above — only actual query changes fetch here).
+  createEffect((prev: string | undefined) => {
+    const q = query()
+    if (prev !== undefined && q !== prev) fetchGallery(true)
+    return q
+  })
+
   createEffect(() => {
     page()
     if (page() > 0) fetchGallery()
   })
 
-  // Day sections for the grid, filtered to the date-jump selection if set.
+  // Day sections for the grid — the loaded page is filtered by the search
+  // query first (the client-side half of the q= search), then optionally to
+  // the date-jump selection.
+  const filteredItems = createMemo(() => filterByQuery(items(), query()))
+
   const visibleDayGroups = () => {
-    const groups = groupGalleryByDay(items(), Date.now())
+    const groups = groupGalleryByDay(filteredItems(), Date.now())
     const selected = selectedDay()
     return selected ? groups.filter((g) => g.key === selected) : groups
   }
@@ -133,7 +163,7 @@ export default function Gallery(props: { onClose: () => void; readOnly?: () => b
       setItems(items().filter(i => i.id !== item.id))
       if (viewer()?.id === item.id) setViewer(null)
     } catch (e: any) {
-      setError(e.message || 'Failed to delete')
+      setError(e.message || t('gallery.deleteFailed'))
     } finally {
       setDeleting(null)
     }
@@ -142,7 +172,7 @@ export default function Gallery(props: { onClose: () => void; readOnly?: () => b
   async function handleBatchDelete() {
     const ids = [...selectedIds()]
     if (ids.length === 0 || batchDeleting()) return
-    if (!confirm(`Delete ${ids.length} item${ids.length > 1 ? 's' : ''}?`)) return
+    if (!confirm(tCount('gallery.deleteConfirm', ids.length))) return
     setBatchDeleting(true)
     setError('')
     try {
@@ -150,7 +180,7 @@ export default function Gallery(props: { onClose: () => void; readOnly?: () => b
       setItems(items().filter(i => !selectedIds().has(i.id)))
       setSelectedIds(new Set<string>())
     } catch {
-      setError('Batch delete failed, falling back to individual deletes...')
+      setError(t('gallery.batchFailed'))
       let failed = 0
       for (const id of ids) {
         try {
@@ -160,7 +190,7 @@ export default function Gallery(props: { onClose: () => void; readOnly?: () => b
           failed++
         }
       }
-      if (failed > 0) setError(`Failed to delete ${failed} item(s)`)
+      if (failed > 0) setError(t('gallery.batchPartial', { count: failed }))
       setSelectedIds(new Set<string>())
     } finally {
       setBatchDeleting(false)
@@ -186,6 +216,9 @@ export default function Gallery(props: { onClose: () => void; readOnly?: () => b
 
   function handleKeyDown(e: KeyboardEvent) {
     if (e.key === 'Escape') {
+      // A higher overlay (shortcuts help, the shared media viewer) owns
+      // Escape first — the gallery only handles it when none is up.
+      if (props.overlayActive?.() === true) return
       if (selectMode()) {
         setSelectMode(false)
         setSelectedIds(new Set<string>())
@@ -210,33 +243,35 @@ export default function Gallery(props: { onClose: () => void; readOnly?: () => b
       {/* Header */}
       <div class="gallery-header">
         <div class="flex items-center gap-3">
-          <h2>Gallery</h2>
-          <span class="gallery-count">{items().length} items</span>
+          <h2>{t('gallery.title')}</h2>
+          <span class="gallery-count">
+            {query().trim() ? t('gallery.countFiltered', { filtered: filteredItems().length, total: items().length }) : tCount('gallery.count', items().length)}
+          </span>
         </div>
         <div class="gallery-header-actions">
           <Show when={!selectMode()}>
             <Show when={captureDays().length > 1}>
               <select
                 class="field-select gallery-day-select"
-                title="Jump to capture day"
+                title={t('gallery.jumpDay')}
                 value={selectedDay()}
                 onChange={(e) => setSelectedDay(e.currentTarget.value)}
               >
-                <option value="">All days</option>
+                <option value="">{t('gallery.allDays')}</option>
                 <For each={captureDays()}>
-                  {(day) => <option value={day.key}>{day.label}</option>}
+                  {(day) => <option value={day.key}>{dayGroupLabel(day.label)}</option>}
                 </For>
               </select>
             </Show>
             <div class="gallery-filters">
-              <For each={[['ALL', 'All'], ['PHOTO', 'Photos'], ['VIDEO', 'Videos']] as [GalleryFilter, string][]}>
+              <For each={[['ALL', () => t('gallery.filter.all')], ['PHOTO', () => t('gallery.filter.photos')], ['VIDEO', () => t('gallery.filter.videos')]] as [GalleryFilter, () => string][]}>
                 {([key, label]) => (
                   <button
                     class="gallery-filter-btn"
                     classList={{ 'gallery-filter-active': filter() === key }}
                     onClick={() => setFilter(key)}
                   >
-                    {label}
+                    {label()}
                   </button>
                 )}
               </For>
@@ -246,7 +281,7 @@ export default function Gallery(props: { onClose: () => void; readOnly?: () => b
             class="navbar-icon-btn"
             classList={{ 'navbar-icon-btn-active': selectMode() }}
             onClick={toggleSelectMode}
-            title="Select multiple"
+            title={t('gallery.selectMultiple')}
           >
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
               <rect x="3" y="3" width="7" height="7" rx="1.5" />
@@ -257,7 +292,7 @@ export default function Gallery(props: { onClose: () => void; readOnly?: () => b
             </svg>
           </button>
           <Show when={!selectMode()}>
-            <button class="navbar-icon-btn" onClick={props.onClose} title="Close">
+            <button class="navbar-icon-btn" onClick={props.onClose} title={t('common.close')}>
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <path d="M18 6L6 18M6 6l12 12" />
               </svg>
@@ -279,10 +314,10 @@ export default function Gallery(props: { onClose: () => void; readOnly?: () => b
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
                 </Show>
               </svg>
-              <span>{allSelected() ? 'Deselect all' : 'Select all'}</span>
+              <span>{allSelected() ? t('gallery.deselectAll') : t('gallery.selectAll')}</span>
             </button>
             <span class="text-xs" style={{ color: 'var(--lc-text-muted)' }}>
-              {selectedCount()} selected
+              {tCount('gallery.selected', selectedCount())}
             </span>
           </div>
           <div class="flex items-center gap-2">
@@ -294,7 +329,7 @@ export default function Gallery(props: { onClose: () => void; readOnly?: () => b
               <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
               </svg>
-              <span>Download</span>
+              <span>{t('gallery.download')}</span>
             </button>
             <Show when={canDelete()}>
               <button
@@ -308,15 +343,15 @@ export default function Gallery(props: { onClose: () => void; readOnly?: () => b
                     <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
                     </svg>
-                    <span>Delete</span>
+                    <span>{t('common.delete')}</span>
                   </>
                 }>
                   <span class="btn-spinner" />
-                  <span>Deleting...</span>
+                  <span>{t('gallery.deleting')}</span>
                 </Show>
               </button>
             </Show>
-            <button class="navbar-icon-btn" onClick={toggleSelectMode} title="Cancel">
+            <button class="navbar-icon-btn" onClick={toggleSelectMode} title={t('common.cancel')}>
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <path d="M18 6L6 18M6 6l12 12" />
               </svg>
@@ -324,6 +359,31 @@ export default function Gallery(props: { onClose: () => void; readOnly?: () => b
           </div>
         </div>
       </Show>
+
+      {/* Filename search — debounced; '/' focuses here from anywhere. */}
+      <div class="gallery-search-bar">
+        <svg class="gallery-search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+          <circle cx="11" cy="11" r="8" />
+          <line x1="21" y1="21" x2="16.65" y2="16.65" />
+        </svg>
+        <input
+          id="gallery-search-input"
+          class="field-input gallery-search-input"
+          type="search"
+          placeholder={t('gallery.searchPlaceholder')}
+          autocomplete="off"
+          spellcheck={false}
+          value={searchInput()}
+          onInput={(e) => onSearchInput(e.currentTarget.value)}
+        />
+        <Show when={searchInput()}>
+          <button type="button" class="navbar-icon-btn" title={t('gallery.clearSearch')} onClick={() => onSearchInput('')}>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M18 6L6 18M6 6l12 12" />
+            </svg>
+          </button>
+        </Show>
+      </div>
 
       {/* Content */}
       <div class="gallery-content">
@@ -339,7 +399,7 @@ export default function Gallery(props: { onClose: () => void; readOnly?: () => b
         </Show>
 
         <Show when={loading()} fallback={
-          <Show when={items().length > 0} fallback={
+          <Show when={filteredItems().length > 0} fallback={
             <div class="gallery-empty">
               <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" style={{ opacity: 0.3 }}>
                 <rect x="3" y="3" width="7" height="7" rx="1.5" />
@@ -347,16 +407,23 @@ export default function Gallery(props: { onClose: () => void; readOnly?: () => b
                 <rect x="3" y="14" width="7" height="7" rx="1.5" />
                 <rect x="14" y="14" width="7" height="7" rx="1.5" />
               </svg>
-              <span style={{ 'font-size': '14px', 'font-weight': '500' }}>No captures yet</span>
-              <span style={{ 'font-size': '12px' }}>Photos and videos will appear here</span>
+              <Show when={query().trim()} fallback={
+                <>
+                  <span style={{ 'font-size': '14px', 'font-weight': '500' }}>{t('gallery.emptyTitle')}</span>
+                  <span style={{ 'font-size': '12px' }}>{t('gallery.emptyHint')}</span>
+                </>
+              }>
+                <span style={{ 'font-size': '14px', 'font-weight': '500' }}>{t('gallery.noMatches', { query: query().trim() })}</span>
+                <span style={{ 'font-size': '12px' }}>{t('gallery.noMatchesHint')}</span>
+              </Show>
             </div>
           }>
             <For each={visibleDayGroups()}>
               {(group) => (
                 <div class="gallery-day-section">
                   <div class="gallery-day-header">
-                    <span class="gallery-day-label">{group.label}</span>
-                    <span class="gallery-day-count">{group.items.length} item{group.items.length === 1 ? '' : 's'}</span>
+                    <span class="gallery-day-label">{dayGroupLabel(group.label)}</span>
+                    <span class="gallery-day-count">{tCount('gallery.count', group.items.length)}</span>
                   </div>
                   <div class="gallery-grid">
                     <For each={group.items}>
@@ -400,7 +467,7 @@ export default function Gallery(props: { onClose: () => void; readOnly?: () => b
                           <div class="gallery-item-info">
                             <span class="gallery-item-name">{item.fileName}</span>
                             <div class="gallery-item-meta">
-                              <span>{formatDate(item.timestamp)}</span>
+                              <span>{formatDateLabel(item.timestamp)}</span>
                               <Show when={item.fileSizeBytes > 0}>
                                 <span>{formatFileSize(item.fileSizeBytes)}</span>
                               </Show>
@@ -413,7 +480,7 @@ export default function Gallery(props: { onClose: () => void; readOnly?: () => b
                                 href={item.downloadUrl}
                                 download=""
                                 onClick={(e) => e.stopPropagation()}
-                                title="Download"
+                                title={t('gallery.download')}
                               >
                                 <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
                                   <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" />
@@ -426,7 +493,7 @@ export default function Gallery(props: { onClose: () => void; readOnly?: () => b
                                   class="gallery-action-btn gallery-action-btn-danger"
                                   onClick={(e) => handleDelete(item, e)}
                                   disabled={deleting() === item.id}
-                                  title="Delete"
+                                  title={t('common.delete')}
                                 >
                                   <Show when={deleting() === item.id} fallback={
                                     <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
@@ -449,7 +516,7 @@ export default function Gallery(props: { onClose: () => void; readOnly?: () => b
             <Show when={hasMore()}>
               <div style={{ display: 'flex', 'justify-content': 'center', padding: '16px' }}>
                 <button class="btn btn-outline btn-sm" onClick={loadMore} disabled={loading()}>
-                  <Show when={loading()} fallback={<>Load more ({totalItems() - items().length} remaining)</>}>
+                  <Show when={loading()} fallback={<>{t('gallery.loadMore', { count: totalItems() - items().length })}</>}>
                     <span class="btn-spinner" style={{ width: '16px', height: '16px' }} />
                   </Show>
                 </button>
@@ -463,66 +530,18 @@ export default function Gallery(props: { onClose: () => void; readOnly?: () => b
         </Show>
       </div>
 
-      {/* Viewer Modal */}
+      {/* Viewer Modal — the shared full-screen viewer (zoom, video player,
+          download, per-media share link); the delete action stays wired to
+          this grid so rows and state stay in sync. */}
       <Show when={viewer()}>
         {(item) => (
-          <div class="gallery-viewer" onClick={() => setViewer(null)}>
-            <div class="gallery-viewer-content" onClick={(e) => e.stopPropagation()}>
-              <Show when={item().type === 'PHOTO'} fallback={
-                <div style={{ position: 'relative', display: 'flex', 'align-items': 'center', 'justify-content': 'center', width: '100%', height: '100%' }}>
-                  <Show when={videoLoading()}>
-                    <div style={{ position: 'absolute', 'z-index': 10, display: 'flex', 'align-items': 'center', 'justify-content': 'center', background: 'rgba(0,0,0,0.5)', inset: 0, 'border-radius': 'var(--lc-radius)' }}>
-                      <div class="login-spinner" style={{ width: '40px', height: '40px', 'border-color': 'rgba(255,255,255,0.3)', 'border-top-color': '#fff' }}></div>
-                    </div>
-                  </Show>
-                  <video
-                    src={`/api/media/${item().id}`}
-                    controls
-                    autoplay
-                    preload="metadata"
-                    class="gallery-viewer-media"
-                    poster={`${item().thumbnailUrl}?t=${item().timestamp}`}
-                    onLoadStart={() => setVideoLoading(true)}
-                    onWaiting={() => setVideoLoading(true)}
-                    onCanPlay={() => setVideoLoading(false)}
-                    onPlaying={() => setVideoLoading(false)}
-                  />
-                </div>
-              }>
-                <img src={fullImageUrl(item())} alt={item().fileName} class="gallery-viewer-media" />
-              </Show>
-            </div>
-            <div class="gallery-viewer-bar" onClick={(e) => e.stopPropagation()}>
-              <div class="viewer-info">
-                <span class="viewer-name">{item().fileName}</span>
-                <span class="viewer-date">{formatDate(item().timestamp)}</span>
-              </div>
-              <div class="flex items-center gap-2">
-                <a class="action-btn action-btn-ghost" href={item().downloadUrl} download="">
-                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
-                    <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" />
-                    <polyline points="7 10 12 15 17 10" />
-                    <line x1="12" y1="15" x2="12" y2="3" />
-                  </svg>
-                  <span>Download</span>
-                </a>
-                <Show when={canDelete()}>
-                  <button
-                    class="action-btn"
-                    style={{ color: 'var(--lc-danger)', 'border-color': 'rgba(244, 63, 94, 0.3)' }}
-                    onClick={() => handleDelete(item(), new Event('click'))}
-                  >
-                    <span>Delete</span>
-                  </button>
-                </Show>
-                <button class="navbar-icon-btn" onClick={() => setViewer(null)}>
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <path d="M18 6L6 18M6 6l12 12" />
-                  </svg>
-                </button>
-              </div>
-            </div>
-          </div>
+          <MediaViewer
+            item={toViewerMedia(item())}
+            onClose={() => setViewer(null)}
+            canDelete={canDelete()}
+            onDelete={() => handleDelete(item(), new Event('click'))}
+            deleting={deleting() === item().id}
+          />
         )}
       </Show>
     </div>

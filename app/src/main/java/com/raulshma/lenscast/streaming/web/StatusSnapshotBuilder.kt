@@ -43,6 +43,15 @@ object StatusSnapshotBuilder {
         val whipActive: Boolean = false,
         val whipStatus: String = "idle",
         val whipError: String? = null,
+        /** The SRT push output: enabled gate, live flag, lifecycle wire name, and error text. */
+        val srtEnabled: Boolean = false,
+        val srtActive: Boolean = false,
+        val srtStatus: String = "idle",
+        val srtError: String? = null,
+        /** The SRT push's measured round-trip time in ms (from full ACKs); null while not connected. */
+        val srtRttMs: Int? = null,
+        /** The live WHEP (WebRTC viewer) session count. */
+        val whepClients: Int = 0,
     )
 
     data class ThermalInputs(
@@ -82,6 +91,11 @@ object StatusSnapshotBuilder {
         val totalRecoveries: Int,
         val lastRecoveryTimestamp: Long,
         val lastFailureReason: String?,
+    )
+
+    /** The encoded pipeline's effective target bitrate in bps (0 while idle). */
+    data class EncodedVideoInputs(
+        val bitrateBps: Int,
     )
 
     data class AdaptiveInputs(
@@ -127,6 +141,7 @@ object StatusSnapshotBuilder {
         watchdog: WatchdogInputs,
         adaptive: AdaptiveInputs,
         network: NetworkInputs,
+        encodedVideo: EncodedVideoInputs = EncodedVideoInputs(bitrateBps = 0),
     ): StatusResponseDto {
         val adaptiveBitrateDto = if (adaptive.enabled) {
             AdaptiveBitrateStatusDto(
@@ -194,6 +209,12 @@ object StatusSnapshotBuilder {
                 whipActive = streaming.whipActive,
                 whipStatus = streaming.whipStatus,
                 whipError = streaming.whipError,
+                srtEnabled = streaming.srtEnabled,
+                srtActive = streaming.srtActive,
+                srtStatus = streaming.srtStatus,
+                srtError = streaming.srtError,
+                srtRttMs = streaming.srtRttMs,
+                whepClients = streaming.whepClients,
             ),
             thermal = thermal.thermalName,
             camera = thermal.cameraStateName,
@@ -219,6 +240,7 @@ object StatusSnapshotBuilder {
                 lastRecoveryTimestamp = watchdog.lastRecoveryTimestamp,
                 lastFailureReason = watchdog.lastFailureReason,
             ),
+            encodedVideoBitrate = encodedVideo.bitrateBps,
         )
     }
 

@@ -2,11 +2,12 @@ import { createSignal, For, onMount, Show } from 'solid-js'
 import type { AuditEntry, AuditLogResponse } from '../types'
 import { clearAuditLog, getAuditLog } from '../api/client'
 import SettingsCard from './SettingsCard'
+import { formatDateTime, t } from '../lib/i18n'
 
 const DEFAULT_LIMIT = 50
 
 function formatTime(timestampMs: number): string {
-  return new Date(timestampMs).toLocaleString()
+  return formatDateTime(timestampMs)
 }
 
 /**
@@ -27,20 +28,20 @@ export default function AuditCard() {
       setAudit(await getAuditLog(DEFAULT_LIMIT))
       setError('')
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to load audit log')
+      setError(e instanceof Error ? e.message : t('audit.loadFailed'))
     } finally {
       setBusy(false)
     }
   }
 
   async function clear() {
-    if (busy() || !window.confirm('Clear the audit log?')) return
+    if (busy() || !window.confirm(t('audit.clearConfirm'))) return
     setBusy(true)
     try {
       await clearAuditLog()
       await refresh()
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to clear audit log')
+      setError(e instanceof Error ? e.message : t('audit.clearFailed'))
     } finally {
       setBusy(false)
     }
@@ -61,17 +62,17 @@ export default function AuditCard() {
           <path d="M13 3v6h6" />
         </svg>
       }
-      title="Audit Log"
+      title={t('audit.title')}
     >
       <div class="field-group">
         <div class="field-row">
-          <span class="field-label">Recent Activity</span>
+          <span class="field-label">{t('audit.recent')}</span>
           <div class="motion-zone-actions">
             <button type="button" class="action-btn action-btn-ghost" disabled={busy()} onClick={refresh}>
-              Refresh
+              {t('audit.refresh')}
             </button>
             <button type="button" class="client-kick-btn" disabled={busy()} onClick={clear}>
-              Clear
+              {t('audit.clear')}
             </button>
           </div>
         </div>
@@ -85,7 +86,7 @@ export default function AuditCard() {
           fallback={
             <div class="status-banner status-banner-info stream-mode-hint" role="note">
               <span class="status-banner-dot" aria-hidden="true" />
-              <span>No audited activity yet — config changes and logins will appear here.</span>
+              <span>{t('audit.empty')}</span>
             </div>
           }
         >
@@ -104,7 +105,7 @@ export default function AuditCard() {
           </div>
           <Show when={audit() && audit()!.total > audit()!.entries.length}>
             <span class="clients-cap-row">
-              Showing {audit()!.entries.length} of {audit()!.total} entries
+              {t('audit.showing', { shown: audit()!.entries.length, total: audit()!.total })}
             </span>
           </Show>
         </Show>

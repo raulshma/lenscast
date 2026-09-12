@@ -10,7 +10,8 @@
       "zones": ["Doorway"],
       "labels": ["person"],
       "clipMediaId": 123456,
-      "clipFileName": "VID_20260908_10153100.mp4"
+      "clipFileName": "VID_20260908_10153100.mp4",
+      "url": "#/gallery/123456"
     }
   ],
   "total": 1

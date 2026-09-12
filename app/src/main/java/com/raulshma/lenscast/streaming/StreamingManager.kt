@@ -10,6 +10,7 @@ import com.raulshma.lenscast.core.NetworkUtils
 import com.raulshma.lenscast.core.EcoIdlePolicy
 import com.raulshma.lenscast.core.StreamDefaults
 import com.raulshma.lenscast.core.ThermalMonitor
+import com.raulshma.lenscast.core.SirenPlayer
 import com.raulshma.lenscast.core.ThermalState
 import com.raulshma.lenscast.data.SettingsDataStore
 import com.raulshma.lenscast.data.StreamAuthSettings
@@ -31,12 +32,18 @@ import com.raulshma.lenscast.streaming.web.StatusWebHandler
 import com.raulshma.lenscast.streaming.web.StreamWebHandler
 import com.raulshma.lenscast.streaming.web.SystemWebHandler
 import com.raulshma.lenscast.streaming.hls.HlsManager
+import com.raulshma.lenscast.streaming.hls.TsPacketizer
 import com.raulshma.lenscast.streaming.rtmp.RtmpOutput
 import com.raulshma.lenscast.streaming.rtmp.RtmpPublisher
 import com.raulshma.lenscast.streaming.rtmp.RtmpStatus
+import com.raulshma.lenscast.streaming.srt.SrtStats
+import com.raulshma.lenscast.streaming.srt.SrtOutput
+import com.raulshma.lenscast.streaming.srt.SrtPublisher
+import com.raulshma.lenscast.streaming.srt.SrtStatus
 import com.raulshma.lenscast.streaming.whip.WhipOutput
 import com.raulshma.lenscast.streaming.whip.WhipPublisher
 import com.raulshma.lenscast.streaming.whip.WhipStatus
+import com.raulshma.lenscast.streaming.whep.WhepServer
 import com.raulshma.lenscast.streaming.rtsp.RtspAuthSpec
 import com.raulshma.lenscast.streaming.rtsp.RtspConfigDiff
 import com.raulshma.lenscast.streaming.rtsp.RtspInputFormat
@@ -46,9 +53,12 @@ import com.raulshma.lenscast.streaming.rtsp.RtspUriPolicy
 import com.raulshma.lenscast.streaming.rtsp.RtspVideoCodec
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.StateFlow
 import java.util.concurrent.atomic.AtomicBoolean
@@ -109,6 +119,19 @@ class StreamingManager(
                 rtmpOutput.feedEncodedAudio(aacData)
             }
         },
+        // The SRT push output rides the same encoded-AU tap as the RTMP
+        // push (H.264 AUs + AAC, gated off under H.265 at the fan-out).
+        srtSink = object : EncodedSink {
+            override fun feedVideo(nalUnits: List<EncodedNalUnit>) {
+                srtOutput.feedEncodedVideo(nalUnits)
+            }
+
+            override fun feedAudio(aacData: ByteArray) {
+                srtOutput.feedEncodedAudio(aacData)
+            }
+        },
+        // The low-res sub-stream's fan-out onto the RTSP server's /sub URL.
+        subVideoSink = { nalUnits -> rtspOutput.feedEncodedSubVideo(nalUnits) },
     )
 
     /** The sink-activity snapshot the hub's policy verdicts read. */
@@ -118,7 +141,20 @@ class StreamingManager(
         hlsRequested = HlsManager.isHot(),
         wsVideoClients = wsMediaServer?.videoClientCount() ?: 0,
         rtmpActive = rtmpOutput.isActive(),
+        srtActive = srtOutput.isActive(),
     )
+
+    /**
+     * The active-client count the MQTT telemetry sensor publishes — the same
+     * consumer list the eco verdict reads (MJPEG/WS/RTSP clients, HLS
+     * fetches, RTMP/WHIP/SRT pushes), so the broker can never see a number
+     * that disagrees with the device's own adaptation inputs.
+     */
+    fun telemetryActiveClientCount(): Int = try {
+        liveConsumerCount()
+    } catch (_: Exception) {
+        0
+    }
 
     // The RTSP output behind this manager's public surface: retained config,
     // server lifecycle, the restart-vs-apply choice, the audio-stream handle,
@@ -134,7 +170,19 @@ class StreamingManager(
             _isRtspRunning.value = running
             _rtspUrl.value = url
         },
-        serverFactory = { port -> RtspServer(port, encodedHub) },
+        // rtsps when HTTPS mode is on — the listener and every advertised URL follow.
+        secure = { tlsEnabled },
+        serverFactory = { port ->
+            RtspServer(
+                port = port,
+                encodedSource = encodedHub,
+                // TLS on/off follows the HTTPS setting: the same self-signed
+                // identity, the same 8554 port, clients use rtsps://.
+                sslServerSocketFactory = rtspTlsFactory(),
+                subStreamActive = { encodedHub.isSubStreamEnabled() },
+                encodedSendTap = ::onEncodedSinkSend,
+            )
+        },
     )
 
     // The RTMP push output behind this manager's public surface: the retained
@@ -147,6 +195,17 @@ class StreamingManager(
         source = encodedHub,
         onStatusChanged = { status -> _rtmpStatus.value = status },
         publisherFactory = { url, onStatus -> RtmpPublisher(url, encodedHub, onStatus) },
+    )
+
+    // The SRT push output behind this manager's public surface: the RTMP
+    // output's twin — retained URL, enabled gate, the H.264-only validation
+    // ladder, and the publisher lifecycle all live in the deep module; this
+    // class keeps the fan-out and the status mirror. Its sink receives the
+    // hub's H.264/AAC access units exactly like RTSP/HLS/WS/RTMP.
+    private val srtOutput: SrtOutput = SrtOutput(
+        source = encodedHub,
+        onStatusChanged = { status -> _srtStatus.value = status },
+        publisherFactory = { url, onStatus -> SrtPublisher(url, encodedHub, onStatus) },
     )
 
     // The WHIP push output behind this manager's public surface: the retained
@@ -165,8 +224,23 @@ class StreamingManager(
         },
     )
 
+    // The WHEP viewer endpoint (streaming/whep/): the WebRTC egress twin of
+    // the WHIP push — browsers POST /whep on the web transport and watch the
+    // camera sub-second. Like WHIP it does not consume the encoded hub
+    // (libwebrtc encodes its own H.264 from the NV21 analysis tap); its
+    // runtime couplings here are the frame feed, the fps fan-out, the
+    // transport lifecycle (sessions die with the web server, like the WS
+    // sidecar), the WHIP STUN setting reused for ICE, and WHIP's exact
+    // mic-arbitration verdict re-evaluated per session at offer time.
+    private val whepServer: WhepServer =
+        WhepServer(
+            context = context,
+            stunServer = { whipStunSetting },
+            audioAllowed = ::whipAudioAllowed,
+        )
+
     private val serviceDiscoveryManager = ServiceDiscoveryManager(context)
-    private val sirenPlayer = com.raulshma.lenscast.core.SirenPlayer()
+    private val sirenPlayer = SirenPlayer()
 
     private val webStreamingEnabled = AtomicBoolean(true)
     private val mdnsEnabled = AtomicBoolean(true)
@@ -222,7 +296,12 @@ class StreamingManager(
     @Volatile private var userFrameRate = StreamDefaults.STREAM_FPS
     private var ecoIdleState = EcoIdlePolicy.State()
     private val ecoIdleLock = Any()
-    private val ecoIdleMonitorStarted = AtomicBoolean(false)
+
+    // Both periodic monitors (eco idle-fps, encoded adaptive bitrate) share
+    // one scope; each poll loop lives only while its toggle is on, so a
+    // disabled mode costs no wakeups and no loop outlives its job.
+    private val monitorScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private var ecoIdleMonitorJob: Job? = null
 
     /** The app-scoped PowerManager, resolved lazily like the auth settings store. */
     private val powerDelegate: com.raulshma.lenscast.core.PowerManager by lazy {
@@ -238,14 +317,18 @@ class StreamingManager(
         if (changed) {
             Log.d(TAG, "Eco idle-fps mode ${if (enabled) "enabled" else "disabled"}")
         }
-        startEcoIdleMonitorOnce()
+        if (enabled) {
+            startEcoIdleMonitor()
+        } else {
+            ecoIdleMonitorJob?.cancel()
+        }
         evaluateEcoIdle(System.currentTimeMillis())
     }
 
-    private fun startEcoIdleMonitorOnce() {
-        if (!ecoIdleMonitorStarted.compareAndSet(false, true)) return
-        CoroutineScope(SupervisorJob() + Dispatchers.Default).launch {
-            while (true) {
+    private fun startEcoIdleMonitor() {
+        if (ecoIdleMonitorJob?.isActive == true) return
+        ecoIdleMonitorJob = monitorScope.launch {
+            while (isActive) {
                 delay(EcoIdlePolicy.EVALUATION_INTERVAL_MS)
                 evaluateEcoIdle(System.currentTimeMillis())
             }
@@ -320,6 +403,10 @@ class StreamingManager(
             latestWebJpeg = jpeg
             server.updateFrame(jpeg)
         }
+        // The encoded sinks' aggregate send tap: RTSP RTP fan-out, WS video
+        // fan-out (per server) and the HLS segment writer all report
+        // bytes/time here, feeding the adaptive encoded-bitrate lane.
+        HlsManager.encodedSendTap = ::onEncodedSinkSend
         // The gate reads the API-token settings live through this provider —
         // no snapshot and no re-apply: a token (or the enable toggle) saved
         // over /api/settings authorizes on the very next request. Installed
@@ -330,6 +417,15 @@ class StreamingManager(
                 hash = authSettingsStore.apiTokenHash.value,
             )
         }
+    }
+
+    /**
+     * The one encoded-sink send seam: bytes actually handed to consumers over
+     * the measured wall time, aggregated into the monitor's encoded lane.
+     * 0-byte/0-time samples are dropped at the monitor.
+     */
+    private fun onEncodedSinkSend(bytes: Int, durationMs: Long) {
+        networkQualityMonitor.recordEncodedSend(bytes, durationMs)
     }
 
     private val _isStreaming = MutableStateFlow(false)
@@ -378,6 +474,13 @@ class StreamingManager(
     /** The WHIP push output's lifecycle state — idle/connecting/connected/error(+message). */
     private val _whipStatus = MutableStateFlow<WhipStatus>(WhipStatus.Idle)
     val whipStatus: StateFlow<WhipStatus> = _whipStatus
+
+    private val _isSrtEnabled = MutableStateFlow(false)
+    val isSrtEnabled: StateFlow<Boolean> = _isSrtEnabled
+
+    /** The SRT push output's lifecycle state — idle/connecting/connected/error(+message). */
+    private val _srtStatus = MutableStateFlow<SrtStatus>(SrtStatus.Idle)
+    val srtStatus: StateFlow<SrtStatus> = _srtStatus
 
     val droppedFrames: StateFlow<Int> = framePipeline.droppedFrames
 
@@ -549,7 +652,7 @@ class StreamingManager(
     }
 
     /** The shared siren for the web toggle and detection automation — one audio owner. */
-    fun sirenController(): com.raulshma.lenscast.core.SirenPlayer = sirenPlayer
+    fun sirenController(): SirenPlayer = sirenPlayer
 
     /** Latest rendered M-JPEG frame for detection-event snapshots; null before the first frame. */
     fun latestWebFrame(): ByteArray? = latestWebJpeg
@@ -577,13 +680,15 @@ class StreamingManager(
     fun getFramesPerSecond(clientId: String): Double = networkQualityMonitor.getFramesPerSecond(clientId)
 
     fun isLiveStreaming(): Boolean =
-        webStreamingActive.get() || rtspOutput.isActive() || rtmpOutput.isActive() || whipOutput.isActive()
+        webStreamingActive.get() || rtspOutput.isActive() || rtmpOutput.isActive() ||
+            whipOutput.isActive() || srtOutput.isActive()
 
     fun isWebStreamActive(): Boolean = webStreamingActive.get()
 
     private fun updateStreamingState() {
         val anyActive =
-            webStreamingActive.get() || rtspOutput.isActive() || rtmpOutput.isActive() || whipOutput.isActive()
+            webStreamingActive.get() || rtspOutput.isActive() || rtmpOutput.isActive() ||
+                whipOutput.isActive() || srtOutput.isActive()
         _isStreaming.value = anyActive
         _isWebStreamingActive.value = webStreamingActive.get()
     }
@@ -632,6 +737,108 @@ class StreamingManager(
         Log.d(TAG, "Adaptive bitrate ${if (enabled) "enabled" else "disabled"}")
     }
 
+    // ── Adaptive encoded-video bitrate ──
+    // The MJPEG adaptive ladder's twin for the encoded sinks: measured
+    // encoded-sink throughput (the monitor's encoded lane) + thermal scale
+    // the CONFIGURED bitrate down and back up, through the pure
+    // [EncodedBitratePolicy], applied live via the hub's setVideoBitrate
+    // hot-swap. Opt-in (default off, matching the MJPEG adaptive toggle);
+    // a short poll re-evaluates while the encoded pipeline runs.
+
+    private val encodedAdaptiveEnabled = AtomicBoolean(false)
+    private var encodedAdaptiveMonitorJob: Job? = null
+
+    /**
+     * The adaptation ceiling — the configured bitrate the ladder starts from
+     * and falls back to. No persisted bitrate setting exists yet, so this is
+     * the StreamDefaults default; the ladder can lower the live value but
+     * never above this.
+     */
+    @Volatile private var configuredVideoBitrate = StreamDefaults.RTSP_VIDEO_BITRATE
+
+    /** The persisted encoded-adaptive toggle (Settings Applier). */
+    fun setEncodedAdaptiveBitrateEnabled(enabled: Boolean) {
+        val changed = encodedAdaptiveEnabled.getAndSet(enabled) != enabled
+        if (changed) {
+            Log.d(TAG, "Encoded adaptive bitrate ${if (enabled) "enabled" else "disabled"}")
+        }
+        if (enabled) {
+            startEncodedAdaptiveMonitor()
+        } else {
+            encodedAdaptiveMonitorJob?.cancel()
+        }
+        if (!enabled) {
+            restoreConfiguredVideoBitrate()
+        } else {
+            evaluateEncodedBitrate()
+        }
+    }
+
+    fun isEncodedAdaptiveBitrateEnabled(): Boolean = encodedAdaptiveEnabled.get()
+
+    private fun startEncodedAdaptiveMonitor() {
+        if (encodedAdaptiveMonitorJob?.isActive == true) return
+        encodedAdaptiveMonitorJob = monitorScope.launch {
+            while (isActive) {
+                delay(ENCODED_ADAPTIVE_INTERVAL_MS)
+                evaluateEncodedBitrate()
+            }
+        }
+    }
+
+    /** One evaluation: policy verdict in, live encoder hot-swap out. */
+    private fun evaluateEncodedBitrate() {
+        if (!encodedHub.isRunning()) return
+        val target = EncodedBitratePolicy.targetBitrate(
+            enabled = encodedAdaptiveEnabled.get(),
+            level = networkQualityMonitor.getEncodedQualityLevel(),
+            thermal = thermalMonitor.thermalState.value,
+            configuredBitrate = configuredVideoBitrate,
+            currentBitrate = encodedHub.currentVideoBitrate(),
+        )
+        if (target != null) {
+            encodedHub.setVideoBitrate(target)
+            Log.d(
+                TAG,
+                "Encoded adaptive bitrate → $target bps " +
+                    "(level=${networkQualityMonitor.getEncodedQualityLevel()}, " +
+                    "thermal=${thermalMonitor.thermalState.value})",
+            )
+        }
+    }
+
+    private fun restoreConfiguredVideoBitrate() {
+        if (encodedHub.currentVideoBitrate() != configuredVideoBitrate) {
+            encodedHub.setVideoBitrate(configuredVideoBitrate)
+            Log.d(TAG, "Encoded bitrate restored to configured $configuredVideoBitrate bps")
+        }
+    }
+
+    // ── RTSP sub-stream (NVR detect role) ──
+
+    /**
+     * The opt-in low-res sub-stream: lands the toggle on the hub (a refresh
+     * starts/stops its H.264 encoder) and — while the RTSP output is live —
+     * /sub immediately serves or answers 404.
+     */
+    fun setRtspSubStreamEnabled(enabled: Boolean) {
+        if (encodedHub.isSubStreamEnabled() == enabled) return
+        encodedHub.setSubStreamEnabled(enabled)
+        encodedHub.refresh()
+        Log.d(TAG, "RTSP sub-stream ${if (enabled) "enabled" else "disabled"}")
+    }
+
+    /** The connected RTSP sessions for the clients list. */
+    fun getRtspClients(): List<RtspClientDescriptor> = rtspOutput.clientSnapshot()
+
+    /** True kick of one RTSP session by id (the MJPEG kick's RTSP twin). */
+    fun kickRtspClient(clientId: String): Boolean = rtspOutput.kickClient(clientId)
+
+    /** The HLS DVR window, in segments (0 = sliding live window). */
+    fun setHlsDvrSegments(segments: Int) {
+        HlsManager.setDvrSegments(segments)
+    }
+
     fun ensureServerRunning(): Boolean {
         if (_isServerRunning.value) {
             if (_streamUrl.value.isBlank()) {
@@ -645,6 +852,9 @@ class StreamingManager(
             return false
         }
         startWsSidecar()
+        // The WHEP endpoint rides the web transport: its reap loop arms with
+        // the server (sessions are created on demand by viewers).
+        runCatching { whepServer.start() }
 
         _isServerRunning.value = true
         _streamUrl.value = buildVideoUrl()
@@ -659,6 +869,7 @@ class StreamingManager(
                 currentPort + WS_PORT_OFFSET,
                 audioStreamingManager,
                 webAuthGate,
+                encodedSendTap = ::onEncodedSinkSend,
             )
             if (tlsEnabled) {
                 runCatching {
@@ -680,6 +891,9 @@ class StreamingManager(
     private fun stopTransport() {
         server.stopServer()
         stopWsSidecar()
+        // WHEP sessions live on the web transport: every viewer's peer
+        // connection dies with it (the WS sidecar's rule).
+        runCatching { whepServer.stop() }
     }
 
     /** Every LAN address, best effort — the TLS identity covers all of them, falling back to the single local one. */
@@ -688,8 +902,10 @@ class StreamingManager(
             .getOrDefault(listOfNotNull(NetworkUtils.getLocalIpAddress()))
 
     fun startStreaming(): Boolean {
-        if (!webStreamingEnabled.get() && !rtspOutput.isEnabled() && !rtmpOutput.isEnabled() && !whipOutput.isEnabled()) {
-            Log.w(TAG, "Cannot start streaming: web, RTSP, RTMP, and WHIP outputs are all disabled")
+        if (!webStreamingEnabled.get() && !rtspOutput.isEnabled() && !rtmpOutput.isEnabled() &&
+            !whipOutput.isEnabled() && !srtOutput.isEnabled()
+        ) {
+            Log.w(TAG, "Cannot start streaming: every output is disabled")
             return false
         }
 
@@ -705,6 +921,9 @@ class StreamingManager(
         if (whipOutput.isEnabled()) {
             startWhipStreaming()
         }
+        if (srtOutput.isEnabled()) {
+            startSrtStreaming()
+        }
 
         Log.d(TAG, "Streaming started at ${_streamUrl.value}")
         return true
@@ -715,6 +934,7 @@ class StreamingManager(
         stopRtspStreaming()
         stopRtmpStreaming()
         stopWhipStreaming()
+        stopSrtStreaming()
         stopTransport()
         unregisterMdnsService()
         _isServerRunning.value = false
@@ -726,6 +946,7 @@ class StreamingManager(
         stopRtspStreaming()
         stopRtmpStreaming()
         stopWhipStreaming()
+        stopSrtStreaming()
         Log.d(TAG, "Live streaming paused (server still running)")
     }
 
@@ -859,6 +1080,71 @@ class StreamingManager(
      */
     fun isRtmpActive(): Boolean = rtmpOutput.isActive()
 
+    // ── SRT push output: the RTMP twins, MPEG-TS over UDP ──
+
+    /**
+     * Starts the SRT push output. The validation ladder (enabled gate, URL
+     * parse, H.264 codec) runs synchronously in the output and a refusal
+     * lands on [srtStatus] as an Error with the readable message; the
+     * handshake itself is asynchronous (Connecting → Connected,
+     * auto-reconnect with capped backoff while active). False means refused
+     * — read [srtStatus] for the reason.
+     */
+    fun startSrtStreaming(): Boolean {
+        if (!srtOutput.isEnabled()) {
+            Log.w(TAG, "Cannot start SRT push: SRT is disabled")
+            return false
+        }
+        if (srtOutput.isActive()) return true
+        when (srtOutput.start()) {
+            is SrtOutput.StartResult.Started -> Unit
+            is SrtOutput.StartResult.Rejected -> {
+                encodedHub.refresh()
+                updateStreamingState()
+                return false
+            }
+        }
+        encodedHub.refresh()
+        updateStreamingState()
+        Log.d(TAG, "SRT push started")
+        return true
+    }
+
+    fun stopSrtStreaming() {
+        if (!srtOutput.isActive()) return
+        srtOutput.stop()
+        encodedHub.refresh()
+        updateStreamingState()
+        Log.d(TAG, "SRT push stopped")
+    }
+
+    fun setSrtEnabled(enabled: Boolean) {
+        if (!srtOutput.setEnabled(enabled)) return
+        _isSrtEnabled.value = enabled
+        if (!enabled) {
+            stopSrtStreaming()
+        }
+    }
+
+    /**
+     * The push URL from settings: lands in the output's retained value (so
+     * the next start picks it up), and a live output restarts on it through
+     * the output's own URL-change path.
+     */
+    fun setSrtUrl(url: String) {
+        srtOutput.setUrl(url)
+    }
+
+    /**
+     * True while the SRT push output is live — from a passing start until
+     * stop, including connecting/reconnecting gaps (the [srtStatus] carries
+     * which of the two is happening). The status snapshot's SRT activity bit.
+     */
+    fun isSrtActive(): Boolean = srtOutput.isActive()
+
+    /** The SRT output's live wire stats (RTT, loss counts) for the status surfaces. */
+    fun srtStats(): SrtStats = srtOutput.stats()
+
     // ── WHIP push output: the RTMP twins, on the NV21 analysis tap ──
 
     /**
@@ -926,8 +1212,23 @@ class StreamingManager(
         whipOutput.setToken(token)
     }
 
+    /**
+     * The retained WHIP STUN setting, so it can be handed to the WHEP
+     * endpoint's ICE configuration too (one STUN setting serves both
+     * WebRTC ends; blank = host candidates only).
+     */
+    @Volatile private var whipStunSetting: String = StreamDefaults.WHIP_STUN_SERVER
+
     fun setWhipStunServer(server: String) {
+        whipStunSetting = server
         whipOutput.setStunServer(server)
+    }
+
+    /** The live WHEP viewer count — the status snapshot's `whepClients` value. */
+    fun whepClientCount(): Int = try {
+        whepServer.sessionCount()
+    } catch (_: Exception) {
+        0
     }
 
     /**
@@ -983,6 +1284,10 @@ class StreamingManager(
         // The WHIP publisher taps the same NV21 analysis frame (it encodes its
         // own H.264 from it) and no-ops internally while stopped.
         whipOutput.feedVideoFrame(yuvData, width, height, rotation)
+        // The WHEP endpoint taps it too — one shared libwebrtc VideoSource
+        // fans the frame to every viewer's hardware encoder. No-ops with no
+        // viewers.
+        whepServer.feedVideoFrame(yuvData, width, height, rotation)
     }
 
     private fun pushFrameToWeb(yuvData: ByteArray, width: Int, height: Int, rotation: Int) {
@@ -1030,6 +1335,7 @@ class StreamingManager(
         rtspOutput.setFrameRate(fps)
         encodedHub.setFrameRate(fps)
         whipOutput.setFrameRate(fps)
+        whepServer.setFrameRate(fps)
     }
 
     private fun setStreamFrameRate(fps: Int) {
@@ -1264,6 +1570,14 @@ class StreamingManager(
     fun setRtspVideoCodec(codec: RtspVideoCodec) {
         rtspOutput.setVideoCodec(codec)
         encodedHub.setVideoCodec(codec)
+        // The HLS TS muxer's PMT must declare the elementary stream actually
+        // in the segments: flip the stream type with the codec and drop the
+        // ring so segments of both codecs never mix (an H.265 HLS is
+        // Safari-grade; the WS path answers with an hvcC config message).
+        TsPacketizer.setVideoStreamType(
+            if (codec == RtspVideoCodec.H265) TsPacketizer.STREAM_TYPE_HEVC else TsPacketizer.STREAM_TYPE_H264,
+        )
+        HlsManager.reset()
         // RTMP has no H.265 mapping: a live push under a codec flip to H265
         // goes dark silently otherwise — stop it with the readable reason.
         // (A flip back to H264 needs no help; the user restarts the push.)
@@ -1271,6 +1585,17 @@ class StreamingManager(
             rtmpOutput.stop()
             _rtmpStatus.value = RtmpStatus.Error(
                 "RTMP push stopped: the video codec changed to H.265, which RTMP cannot carry — " +
+                    "switch back to H.264 and restart the push",
+            )
+            encodedHub.refresh()
+            updateStreamingState()
+        }
+        // The SRT push is the same H.264-pinned consumer — stop it the same
+        // way, with its own readable reason on its own status line.
+        if (codec == RtspVideoCodec.H265 && srtOutput.isActive()) {
+            srtOutput.stop()
+            _srtStatus.value = SrtStatus.Error(
+                "SRT push stopped: the video codec changed to H.265, which this SRT push cannot carry — " +
                     "switch back to H.264 and restart the push",
             )
             encodedHub.refresh()
@@ -1326,6 +1651,7 @@ class StreamingManager(
             port, context, audioStreamingManager, webApiStack, networkQualityMonitor, webAuthGate,
             encodedStreamActive = { encodedHub.isRunning() },
             tlsServerSocketFactory = factory,
+            whepServer = whepServer,
         ).also {
             it.setWebStreamingEnabled(webStreamingEnabled.get())
         }
@@ -1334,17 +1660,33 @@ class StreamingManager(
     /**
      * Switch the server between plain HTTP and HTTPS (self-signed). Like a
      * port change, this is a stop → recreate → start cycle; the shared auth
-     * gate survives, so dashboards stay logged in.
+     * gate survives, so dashboards stay logged in. The RTSP listener follows
+     * the same toggle — a live output restarts so the next accept is TLS
+     * (clients use rtsps:// on the same port) or plain rtsp again.
      */
     fun setTlsEnabled(enabled: Boolean) {
         if (tlsEnabled == enabled) return
+        tlsEnabled = enabled
         val restarted = recreateServerIfRunning {
-            tlsEnabled = enabled
             server = createServer(currentPort)
         }
         if (restarted != null) {
             Log.d(TAG, "TLS ${if (enabled) "enabled" else "disabled"}; server restart=$restarted")
         }
+        if (rtspOutput.isActive()) {
+            rtspOutput.stop()
+            rtspOutput.start()
+        }
+    }
+
+    /** The RTSP listener's TLS factory while HTTPS mode is on; null keeps it plain. */
+    private fun rtspTlsFactory(): javax.net.ssl.SSLServerSocketFactory? {
+        if (!tlsEnabled) return null
+        return runCatching {
+            val app = context.applicationContext as MainApplication
+            app.tlsCertManager.identity(localIpsSafe()).serverSocketFactory
+        }.onFailure { Log.w(TAG, "TLS identity unavailable; serving plain RTSP", it) }
+            .getOrNull()
     }
 
     fun tlsCertificateFingerprint(): String = tlsFingerprint
@@ -1447,6 +1789,11 @@ class StreamingManager(
         encodedHub.stop()
         audioStreamingManager.release()
         stopStreaming()
+        // The periodic monitors die with the manager, not just with their
+        // toggles — a released manager keeps no polling loop alive.
+        ecoIdleMonitorJob?.cancel()
+        encodedAdaptiveMonitorJob?.cancel()
+        monitorScope.cancel()
     }
     private fun refreshAudioStreamingState() {
         audioStreamingManager.stop()
@@ -1486,6 +1833,9 @@ class StreamingManager(
     companion object {
         private const val TAG = "StreamingManager"
         private const val WS_PORT_OFFSET = 1
+
+        /** Poll cadence of the adaptive encoded-bitrate evaluation loop. */
+        private const val ENCODED_ADAPTIVE_INTERVAL_MS = 2_000L
 
         /** The Web API audit trail, inside app-private files. */
         private const val AUDIT_LOG_FILE = "audit_log.json"

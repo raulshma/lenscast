@@ -9,6 +9,7 @@ import com.raulshma.lenscast.camera.CameraService
 import com.raulshma.lenscast.camera.CameraSettingsEditor
 import com.raulshma.lenscast.camera.model.CameraSettings
 import com.raulshma.lenscast.camera.model.GridStyle
+import com.raulshma.lenscast.camera.model.PhotoAspectRatio
 import com.raulshma.lenscast.camera.model.SelfTimerMode
 import com.raulshma.lenscast.camera.model.QuickSettingCatalog
 import com.raulshma.lenscast.camera.model.QuickSettingType
@@ -62,7 +63,12 @@ class SettingsViewModel(
     val photoJpegQuality: StateFlow<Int> = settingsDataStore.photoJpegQuality
     val photoMaximizeQuality: StateFlow<Boolean> = settingsDataStore.photoMaximizeQuality
     val rawCaptureEnabled: StateFlow<Boolean> = settingsDataStore.rawCaptureEnabled
+    val photoAspectRatio: StateFlow<PhotoAspectRatio> = settingsDataStore.photoAspectRatio
     val geotagEnabled: StateFlow<Boolean> = settingsDataStore.geotagEnabled
+
+    /** The sound-class triggers (feature gate + the narrowed YAMNet class set). */
+    val soundTriggerEnabled: StateFlow<Boolean> = settingsDataStore.soundTriggerEnabled
+    val soundTriggerClasses: StateFlow<Set<String>> = settingsDataStore.soundTriggerClasses
 
     // The bound camera's live RAW verdict, for the RAW row's capability note.
     val isRawCaptureSupported: StateFlow<Boolean> = cameraService.isRawCaptureSupported
@@ -85,7 +91,14 @@ class SettingsViewModel(
     val whipEnabled: StateFlow<Boolean> = settingsDataStore.whipEnabled
     val whipUrl: StateFlow<String> = settingsDataStore.whipUrl
     val whipStunServer: StateFlow<String> = settingsDataStore.whipStunServer
+    // The SRT push URL keeps its read-side flow like the RTMP one: the
+    // write-only contract is the Web API's, the screen is the device owner.
+    val srtEnabled: StateFlow<Boolean> = settingsDataStore.srtEnabled
+    val srtUrl: StateFlow<String> = settingsDataStore.srtUrl
     val adaptiveBitrateEnabled: StateFlow<Boolean> = settingsDataStore.adaptiveBitrateEnabled
+    val adaptiveEncodedBitrateEnabled: StateFlow<Boolean> = settingsDataStore.encodedAdaptiveBitrateEnabled
+    val rtspSubStreamEnabled: StateFlow<Boolean> = settingsDataStore.rtspSubStreamEnabled
+    val hlsDvrSegments: StateFlow<Int> = settingsDataStore.hlsDvrSegments
     val mdnsEnabled: StateFlow<Boolean> = settingsDataStore.mdnsEnabled
     val motionDetectionEnabled: StateFlow<Boolean> = settingsDataStore.motionDetectionEnabled
     val motionSensitivityPercent: StateFlow<Int> = settingsDataStore.motionSensitivity
@@ -240,6 +253,9 @@ class SettingsViewModel(
 
     fun updateRawCaptureEnabled(enabled: Boolean) = save { settingsDataStore.saveRawCaptureEnabled(enabled) }
 
+    fun updatePhotoAspectRatio(aspect: PhotoAspectRatio) =
+        save { settingsDataStore.savePhotoAspectRatio(aspect) }
+
     fun updateGeotagEnabled(enabled: Boolean) = save { settingsDataStore.saveGeotagEnabled(enabled) }
 
     fun updateShowPreview(show: Boolean) = save { settingsDataStore.saveShowPreview(show) }
@@ -277,7 +293,14 @@ class SettingsViewModel(
 
     fun updateWhipStunServer(server: String) = save { settingsDataStore.saveWhipStunServer(server) }
 
+    fun updateSrtEnabled(enabled: Boolean) = save { settingsDataStore.saveSrtEnabled(enabled) }
+
+    fun updateSrtUrl(url: String) = save { settingsDataStore.saveSrtUrl(url) }
+
     fun updateAdaptiveBitrateEnabled(enabled: Boolean) = save { settingsDataStore.saveAdaptiveBitrateEnabled(enabled) }
+    fun updateAdaptiveEncodedBitrateEnabled(enabled: Boolean) = save { settingsDataStore.saveEncodedAdaptiveBitrateEnabled(enabled) }
+    fun updateRtspSubStreamEnabled(enabled: Boolean) = save { settingsDataStore.saveRtspSubStreamEnabled(enabled) }
+    fun updateHlsDvrSegments(segments: Int) = save { settingsDataStore.saveHlsDvrSegments(segments) }
 
     fun updateMdnsEnabled(enabled: Boolean) = save { settingsDataStore.saveMdnsEnabled(enabled) }
 
@@ -346,6 +369,12 @@ class SettingsViewModel(
 
     fun updateSoundClassificationAllowedClasses(classes: Set<String>) =
         save { settingsDataStore.saveSoundClassificationAllowedClasses(classes) }
+
+    fun updateSoundTriggerEnabled(enabled: Boolean) =
+        save { settingsDataStore.saveSoundTriggerEnabled(enabled) }
+
+    fun updateSoundTriggerClasses(classes: Set<String>) =
+        save { settingsDataStore.saveSoundTriggerClasses(classes) }
 
     /** The YAMNet model fetch — same idempotent contract as the detection model's. */
     fun downloadAudioModel() {

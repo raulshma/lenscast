@@ -24,6 +24,7 @@ import com.raulshma.lenscast.core.ForegroundNotifications
 import com.raulshma.lenscast.core.MicAccess
 import com.raulshma.lenscast.capture.model.RecordingConfig
 import com.raulshma.lenscast.capture.model.RecordingQuality
+import com.raulshma.lenscast.capture.model.RecordingTrigger
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -74,6 +75,15 @@ class RecordingService : Service() {
     }
 
     override fun onDestroy() {
+        // Destroy mid-drain (system teardown while the encrypted promotion is
+        // in flight): the clip is lost with the cancelled scope, but the
+        // controller must never stay wedged in Finalizing and the temp
+        // plaintext must not outlive the service.
+        if (isFinalizingRecording) {
+            pendingTempFile?.delete()
+            pendingTempFile = null
+            recordingController.onServiceStopped()
+        }
         serviceScope.cancel()
         super.onDestroy()
     }
@@ -204,8 +214,9 @@ class RecordingService : Service() {
                             }
                             // The duration is a Finalize-time fact; the
                             // encrypted promotion below only spends IO time.
+                            // [pendingTempFile] stays set through the drain so
+                            // a service teardown can clean the plaintext temp.
                             val duration = System.currentTimeMillis() - startTimeMs
-                            pendingTempFile = null
 
                             if (!event.hasError() && (savedUri != null || tempFile != null)) {
                                 serviceScope.launch {
@@ -227,6 +238,7 @@ class RecordingService : Service() {
                                             tempFile,
                                         )
                                         tempFile.delete()
+                                        pendingTempFile = null
                                         if (saved == null) {
                                             Log.e(TAG, "Encrypted recording promotion failed; clip discarded")
                                             withContext(Dispatchers.Main) { finishRecordingSession() }
@@ -235,6 +247,7 @@ class RecordingService : Service() {
                                         filePath = saved.uriString
                                         fileSizeBytes = saved.storedSizeBytes
                                     } else {
+                                        pendingTempFile = null
                                         filePath = savedUri!!.toString()
                                         fileSizeBytes = queryMediaSize(savedUri)
                                     }
@@ -243,6 +256,13 @@ class RecordingService : Service() {
                                         filePath = filePath,
                                         fileSizeBytes = fileSizeBytes,
                                         durationMs = duration,
+                                        // Provenance stamped at creation: the
+                                        // config's trigger (folded to SCHEDULED
+                                        // by the controller's schedule path,
+                                        // MOTION/SOUND by the detection
+                                        // coordinator, CONTINUOUS_LOOP by the
+                                        // loop controller) — never reconstructed.
+                                        trigger = recordingConfig?.trigger ?: RecordingTrigger.MANUAL,
                                     )
                                     app.captureHistoryStore.add(entry)
                                     BackupWorker.enqueue(applicationContext, filePath)
@@ -252,6 +272,7 @@ class RecordingService : Service() {
                             } else {
                                 Log.e(TAG, "Recording error: ${event.error}, uri=$savedUri")
                                 tempFile?.delete()
+                                pendingTempFile = null
                                 savedUri?.let { failedUri ->
                                     runCatching {
                                         contentResolver.delete(failedUri, null, null)

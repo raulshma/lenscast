@@ -28,6 +28,7 @@ import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -68,13 +69,22 @@ fun RemoteScreen(
     val scope = rememberCoroutineScope()
 
     Scaffold(timeText = { TimeText() }) {
-        ScalingLazyColumn(
-            modifier = Modifier.fillMaxSize(),
-            state = rememberScalingLazyListState(),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(6.dp),
-        ) {
-            item { StatusHeader(state.status) }
+            ScalingLazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                state = rememberScalingLazyListState(),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                state.alert?.let { alert ->
+                    item {
+                        AlertBannerCard(
+                            alert = alert,
+                            snapshot = state.snapshot,
+                            onDismiss = { controller.dismissAlert() },
+                        )
+                    }
+                }
+                item { StatusHeader(state.status) }
             item {
                 StreamToggleButton(
                     state = state,
@@ -311,6 +321,83 @@ private fun SnapshotPane(
 }
 
 // ── Small pure helpers ──
+
+/**
+ * The detection-alert banner: the newest event from the phone, rendered as
+ * a dismissible card at the top of the remote — event title (motion /
+ * sound / tamper), the label/zone detail line, the live snapshot pane's
+ * last frame as the thumbnail, a one-second age ticker, and a Dismiss
+ * button. Dismissing only clears the card; the notification (if posted)
+ * stays until its own dismissal.
+ */
+@Composable
+private fun AlertBannerCard(
+    alert: WearDetectionEvent,
+    snapshot: RequestState<SnapshotFrame>,
+    onDismiss: () -> Unit,
+) {
+    val nowMs = rememberNowMs()
+    val detail = WearAlertPolicy.detailLine(alert).ifBlank { stringResource(R.string.banner_no_detail) }
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 8.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .background(Color(0xFF4A2B26))
+            .padding(horizontal = 10.dp, vertical = 8.dp),
+    ) {
+        Text(
+            text = stringResource(eventTitleRes(alert.type)),
+            fontSize = 13.sp,
+            fontWeight = FontWeight.Bold,
+            color = Color(0xFFFFB4A9),
+        )
+        val frame = (snapshot as? RequestState.Success)?.value
+        if (frame != null) {
+            Image(
+                bitmap = frame.bitmap.asImageBitmap(),
+                contentDescription = "Event snapshot",
+                contentScale = ContentScale.Crop,
+                modifier = Modifier
+                    .padding(top = 4.dp)
+                    .width(72.dp)
+                    .height(54.dp)
+                    .clip(RoundedCornerShape(8.dp)),
+            )
+        }
+        Text(
+            text = detail,
+            fontSize = 11.sp,
+            textAlign = TextAlign.Center,
+            color = MaterialTheme.colors.onBackground.copy(alpha = 0.85f),
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.padding(top = 2.dp),
+        )
+        Text(
+            text = ageText(WearAlertPolicy.relativeAge(alert.timestampMs, nowMs)),
+            fontSize = 10.sp,
+            color = MaterialTheme.colors.onBackground.copy(alpha = 0.6f),
+        )
+        Button(
+            onClick = onDismiss,
+            colors = ButtonDefaults.buttonColors(backgroundColor = Color(0xFF44464F)),
+            modifier = Modifier
+                .padding(top = 4.dp)
+                .height(28.dp),
+        ) { Text(stringResource(R.string.banner_dismiss), fontSize = 11.sp) }
+    }
+}
+
+/** The age bucket → its string template (the banner's one-second ticker). */
+@Composable
+private fun ageText(bucket: WearAlertPolicy.AgeBucket): String = when (bucket) {
+    WearAlertPolicy.AgeBucket.Now -> stringResource(R.string.age_now)
+    is WearAlertPolicy.AgeBucket.Seconds -> stringResource(R.string.age_seconds, bucket.value)
+    is WearAlertPolicy.AgeBucket.Minutes -> stringResource(R.string.age_minutes, bucket.value)
+    is WearAlertPolicy.AgeBucket.Hours -> stringResource(R.string.age_hours, bucket.value)
+}
 
 /** The last known stream state, or false before the first poll lands. */
 private fun WearRemoteController.UiState.activeNow(): Boolean =

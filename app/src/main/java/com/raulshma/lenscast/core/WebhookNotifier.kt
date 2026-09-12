@@ -44,11 +44,17 @@ class WebhookNotifier(
      * detection coordinator) its verdict for claiming "webhook" in the event
      * log at dispatch time, not minutes earlier while a snapshot encodes.
      * False when the notifier no-ops: disabled, or a non-HTTP URL.
+     * [deepLink] is the dashboard deep link riding the JSON body's `url`
+     * field (the MQTT event payload carries the identical value).
      */
-    fun notifyEvent(alert: DetectionAlert, headers: Map<String, String> = emptyMap()): Boolean {
+    fun notifyEvent(
+        alert: DetectionAlert,
+        headers: Map<String, String> = emptyMap(),
+        deepLink: String? = null,
+    ): Boolean {
         val (enabled, url) = configProvider()
         if (!willDispatch(enabled, url)) return false
-        dispatch(PendingDispatch(url.trim(), buildBody(alert), headers, clockMs()))
+        dispatch(PendingDispatch(url.trim(), buildBody(alert, deepLink), headers, clockMs()))
         return true
     }
 
@@ -100,8 +106,8 @@ class WebhookNotifier(
         next
     }
 
-    private fun buildBody(alert: DetectionAlert): ByteArray =
-        DetectionEventWire.encode(alert)
+    private fun buildBody(alert: DetectionAlert, deepLink: String? = null): ByteArray =
+        DetectionEventWire.encode(alert, deepLink)
 
     private fun post(url: String, body: ByteArray, headers: Map<String, String>): Int {
         val connection = (java.net.URI(url).toURL().openConnection() as java.net.HttpURLConnection).apply {

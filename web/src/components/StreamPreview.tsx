@@ -7,6 +7,9 @@ import { tapToFocus as apiTapToFocus, setZoom as apiSetZoom, setTorch as apiSetT
 import { API_DEFAULTS } from '../api/defaults'
 import { createH264Player, h264Supported, wsBaseUrl } from '../video/h264Player'
 import { cyclePlayerMode, hlsSupported, nextPlayerMode, type PlayerMode } from '../video/playerLadder'
+import { createWhepPlayer } from '../lib/whepClient'
+import { canShareFiles, shareSnapshotImage, snapshotFileName } from '../lib/share'
+import { t, tCount } from '../lib/i18n'
 import type Hls from 'hls.js'
 
 interface Props {
@@ -18,6 +21,9 @@ interface Props {
   captureMsg: () => string
   liveAudioStatus: () => LiveAudioStatus
   recordingTimer: { formatElapsed: () => string }
+  /** The live preview's player rung, owned by useAppState so the P shortcut cycles it. */
+  playerMode: () => PlayerMode
+  setPlayerMode: (mode: PlayerMode) => void
   handleCapture: () => void
   handleStartWebStream: () => void
   handleStopWebStream: () => void
@@ -86,16 +92,43 @@ export default function StreamPreview(props: Props) {
 
   const [previewErrorCount, setPreviewErrorCount] = createSignal(0)
   const MAX_PREVIEW_ERRORS = 5
-  const [playerMode, setPlayerMode] = createSignal<PlayerMode>(
-    nextPlayerMode('mjpeg', !h264Supported(), false, hlsSupported()),
-  )
+  // The player rung is owned by useAppState (so the P shortcut and this
+  // component's ladder fall-down drive the same signal); these two one-line
+  // adapters keep the whole ladder logic below untouched.
+  const playerMode = () => props.playerMode()
+  const setPlayerMode = (mode: PlayerMode) => props.setPlayerMode(mode)
   const [h264Canvas, setH264Canvas] = createSignal<HTMLCanvasElement | null>(null)
+
+  // ── WHEP rung: WebRTC over the same-origin POST /whep, top of the ladder. ──
+  // One <video> element fed by the negotiated track; a fatal error (refused
+  // offer, dead ICE) demotes to the h264 rung exactly like the h264 rung's
+  // own demotion below. stop() fires on rung change and on dispose, DELETEing
+  // the device-side session resource.
+  const [whepVideo, setWhepVideo] = createSignal<HTMLVideoElement | null>(null)
+  const whep = createWhepPlayer({
+    onStatus: (s) => {
+      if (s === 'error' && playerMode() === 'whep') {
+        setPlayerMode(nextPlayerMode('whep', true, !h264Supported(), false, hlsSupported()))
+      }
+    },
+  })
+  createEffect(() => {
+    const el = whepVideo()
+    const active = props.previewVisible() && webActive()
+    if (playerMode() === 'whep' && active && el) {
+      void whep.start(el)
+    } else {
+      whep.stop()
+    }
+  })
+  onCleanup(() => whep.stop())
+
   const h264 = createH264Player({
     onStatus: (s) => {
       // Fall down the ladder when the WebSocket or decoder gives up:
       // MJPEG next, HLS beyond it if MJPEG is also out of play.
       if (s === 'error' && playerMode() === 'h264') {
-        setPlayerMode(nextPlayerMode('h264', true, false, hlsSupported()))
+        setPlayerMode(nextPlayerMode('h264', true, true, false, hlsSupported()))
       }
     },
   })
@@ -242,7 +275,7 @@ export default function StreamPreview(props: Props) {
       const statusParts: string[] = []
       if (props.isRecording()) statusParts.push('REC')
       const clientCount = st()?.streaming?.clientCount ?? API_DEFAULTS.clientCount
-      if (clientCount > 0) statusParts.push(`${clientCount} viewer${clientCount !== 1 ? 's' : ''}`)
+      if (clientCount > 0) statusParts.push(tCount('preview.viewers', clientCount))
       if (statusParts.length > 0) lines.push(statusParts.join('  '))
     }
 
@@ -330,6 +363,48 @@ export default function StreamPreview(props: Props) {
     }
   }
 
+  // ── Snapshot share: Web Share with a File payload when the browser can,
+  // otherwise the same programmatic download the Snap button does. ──
+  const [sharingSnapshot, setSharingSnapshot] = createSignal(false)
+  const [shareMsg, setShareMsg] = createSignal('')
+
+  function flashShareMsg(msg: string) {
+    setShareMsg(msg)
+    setTimeout(() => setShareMsg((current) => (current === msg ? '' : current)), 4000)
+  }
+
+  async function handleShareSnapshot() {
+    if (sharingSnapshot()) return
+    setSharingSnapshot(true)
+    try {
+      const res = await fetch('/snapshot?highres=1')
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      const blob = await res.blob()
+      const fileName = snapshotFileName(new Date())
+      const outcome = await shareSnapshotImage(blob, fileName, {
+        shareFiles: canShareFiles(navigator)
+          ? (data) => navigator.share(data as unknown as ShareData)
+          : undefined,
+        download: (b, name) => {
+          const objectUrl = URL.createObjectURL(b)
+          const a = document.createElement('a')
+          a.href = objectUrl
+          a.download = name
+          document.body.appendChild(a)
+          a.click()
+          document.body.removeChild(a)
+          setTimeout(() => URL.revokeObjectURL(objectUrl), 10_000)
+        },
+      })
+      if (outcome === 'downloaded') flashShareMsg(t('preview.snapshotDownloaded'))
+      else if (outcome === 'shared') flashShareMsg(t('preview.snapshotShared'))
+    } catch {
+      flashShareMsg(t('preview.snapshotFailed'))
+    } finally {
+      setSharingSnapshot(false)
+    }
+  }
+
   return (
     <section class="preview-section" id="preview-section">
       <div
@@ -342,7 +417,7 @@ export default function StreamPreview(props: Props) {
           <img
             class="preview-img zoomable-content"
             src={`/stream?t=${props.streamNonce()}`}
-            alt="Live camera stream"
+            alt={t('preview.liveAlt')}
             draggable={false}
             loading="eager"
             decoding="async"
@@ -354,7 +429,7 @@ export default function StreamPreview(props: Props) {
                 // MJPEG used up its retries: drop down the ladder to HLS
                 // (muxed A/V). With no HLS rung available, keep the slow
                 // MJPEG auto-retry so the stream isn't permanently stuck.
-                const next = nextPlayerMode('mjpeg', true, true, hlsSupported())
+                const next = nextPlayerMode('mjpeg', true, true, true, hlsSupported())
                 setPreviewErrorCount(0)
                 if (next === 'mjpeg') {
                   setTimeout(() => {
@@ -382,20 +457,31 @@ export default function StreamPreview(props: Props) {
             }}
           />
           }>
-          <Show when={playerMode() === 'h264'} fallback={
-            <video
-              ref={(el) => setHlsVideo(el)}
+          <Show when={playerMode() === 'whep'} fallback={
+            <Show when={playerMode() === 'h264'} fallback={
+              <video
+                ref={(el) => setHlsVideo(el)}
+                class="preview-img zoomable-content"
+                controls
+                autoplay
+                muted
+                playsinline
+                style={{ width: '100%', 'background-color': '#000' }}
+              />
+            }>
+            <canvas
+              ref={(el) => setH264Canvas(el)}
               class="preview-img zoomable-content"
-              controls
-              autoplay
-              muted
-              playsinline
               style={{ width: '100%', 'background-color': '#000' }}
             />
+            </Show>
           }>
-          <canvas
-            ref={(el) => setH264Canvas(el)}
+          <video
+            ref={(el) => setWhepVideo(el)}
             class="preview-img zoomable-content"
+            autoplay
+            muted
+            playsinline
             style={{ width: '100%', 'background-color': '#000' }}
           />
           </Show>
@@ -408,11 +494,11 @@ export default function StreamPreview(props: Props) {
                 <circle cx="12" cy="13" r="4" />
               </svg>
             </div>
-            <span class="preview-placeholder-text">{webActive() ? 'Connecting...' : isActive() ? 'Stream error' : 'No active stream'}</span>
+            <span class="preview-placeholder-text">{webActive() ? t('preview.connecting') : isActive() ? t('preview.streamError') : t('preview.noStream')}</span>
             <span class="preview-placeholder-sub">
               {!webStreamingEnabled() && !rtspEnabled()
-                ? 'Enable Web Stream or RTSP in settings to start'
-                : webStreamingEnabled() ? 'Click Web Stream to start the live feed' : 'Web streaming is disabled in settings'}
+                ? t('preview.hint.disabled')
+                : webStreamingEnabled() ? t('preview.hint.web') : t('preview.hint.webOff')}
             </span>
           </div>
         )}
@@ -471,7 +557,7 @@ export default function StreamPreview(props: Props) {
           <button
             class="action-btn action-btn-ghost"
             onClick={() => setPlayerMode(cyclePlayerMode(playerMode()))}
-            title="Cycle player (H.264 → MJPEG → HLS)"
+            title={t('preview.cyclePlayer')}
           >
             <span>{cyclePlayerMode(playerMode()).toUpperCase()}</span>
           </button>
@@ -480,13 +566,13 @@ export default function StreamPreview(props: Props) {
             class="action-btn action-btn-primary"
             onClick={props.handleCapture}
             disabled={!isActive()}
-            title="Capture Photo"
+            title={t('preview.captureTitle')}
           >
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <circle cx="12" cy="12" r="10" />
               <circle cx="12" cy="12" r="4" />
             </svg>
-            <span>Capture</span>
+            <span>{t('preview.capture')}</span>
           </button>
 
           {webActive() ? (
@@ -498,7 +584,7 @@ export default function StreamPreview(props: Props) {
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <rect x="6" y="6" width="12" height="12" rx="2" />
               </svg>
-              <span>Stop Web</span>
+              <span>{t('preview.stopWeb')}</span>
             </button>
           ) : (
             <button
@@ -509,7 +595,7 @@ export default function StreamPreview(props: Props) {
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <polygon points="5 3 19 12 5 21 5 3" />
               </svg>
-              <span>Web Stream</span>
+              <span>{t('preview.webStream')}</span>
             </button>
           )}
 
@@ -522,7 +608,7 @@ export default function StreamPreview(props: Props) {
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <rect x="6" y="6" width="12" height="12" rx="2" />
               </svg>
-              <span>Stop RTSP</span>
+              <span>{t('preview.stopRtsp')}</span>
             </button>
           ) : (
             <button
@@ -533,20 +619,37 @@ export default function StreamPreview(props: Props) {
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <polygon points="5 3 19 12 5 21 5 3" />
               </svg>
-              <span>RTSP Stream</span>
+              <span>{t('preview.rtspStream')}</span>
             </button>
           )}
 
-          <a id="snapshot-btn" class="action-btn action-btn-ghost" href="/snapshot?highres=1&save=1" target="_blank" rel="noopener noreferrer" title="Download High-Res Snapshot">
+          <a id="snapshot-btn" class="action-btn action-btn-ghost" href="/snapshot?highres=1&save=1" target="_blank" rel="noopener noreferrer" title={t('preview.snapTitle')}>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" />
               <polyline points="7 10 12 15 17 10" />
               <line x1="12" y1="15" x2="12" y2="3" />
             </svg>
-            <span>Snap</span>
+            <span>{t('preview.snap')}</span>
           </a>
 
-          <label class="action-btn action-btn-ghost" title="Remote zoom">
+          <button
+            id="share-snapshot-btn"
+            class="action-btn action-btn-ghost"
+            onClick={() => void handleShareSnapshot()}
+            disabled={sharingSnapshot()}
+            title={t('preview.shareTitle')}
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="18" cy="5" r="3" />
+              <circle cx="6" cy="12" r="3" />
+              <circle cx="18" cy="19" r="3" />
+              <line x1="8.59" y1="13.51" x2="15.42" y2="17.49" />
+              <line x1="15.41" y1="6.51" x2="8.59" y2="10.49" />
+            </svg>
+            <span>{sharingSnapshot() ? t('preview.sharing') : t('preview.share')}</span>
+          </button>
+
+          <label class="action-btn action-btn-ghost" title={t('preview.remoteZoom')}>
             <span>{zoomRatio().toFixed(1)}x</span>
             <input
               id="remote-zoom-slider"
@@ -579,9 +682,9 @@ export default function StreamPreview(props: Props) {
                 setTorchOn(!next)
               }
             }}
-            title="Toggle torch"
+            title={t('preview.torchTitle')}
           >
-            <span>{torchOn() ? 'Torch ON' : 'Torch'}</span>
+            <span>{torchOn() ? t('preview.torchOn') : t('preview.torch')}</span>
           </button>
 
           <button
@@ -597,15 +700,18 @@ export default function StreamPreview(props: Props) {
             }}
             onPointerUp={() => { void stopPtt() }}
             onPointerLeave={() => { if (talking()) void stopPtt() }}
-            title="Hold to talk"
+            title={t('preview.talkTitle')}
           >
-            <span>{talking() ? 'Talking…' : 'Talk'}</span>
+            <span>{talking() ? t('preview.talking') : t('preview.talk')}</span>
           </button>
         </div>
 
         <div class="preview-actions-right">
           <Show when={props.captureMsg()}>
             <span class="capture-msg">{props.captureMsg()}</span>
+          </Show>
+          <Show when={shareMsg()}>
+            <span class="capture-msg">{shareMsg()}</span>
           </Show>
         </div>
       </div>
@@ -626,11 +732,11 @@ export default function StreamPreview(props: Props) {
               <line x1="8" y1="23" x2="16" y2="23" />
             </svg>
             <span>
-              {props.liveAudioStatus() === 'live' ? 'Audio Live' :
-                props.liveAudioStatus() === 'blocked' ? 'Tap anywhere to enable audio' :
-                  props.liveAudioStatus() === 'connecting' ? 'Connecting...' :
-                    props.liveAudioStatus() === 'error' ? 'Audio Error' :
-                      'Audio Idle'}
+              {props.liveAudioStatus() === 'live' ? t('preview.audioLive') :
+                props.liveAudioStatus() === 'blocked' ? t('preview.audioBlocked') :
+                  props.liveAudioStatus() === 'connecting' ? t('preview.audioConnecting') :
+                    props.liveAudioStatus() === 'error' ? t('preview.audioError') :
+                      t('preview.audioIdle')}
             </span>
           </div>
         </div>

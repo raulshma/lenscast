@@ -66,6 +66,57 @@ class NetworkQualityMonitor {
         }
     }
 
+    // ── Encoded-sink throughput lane ──
+    // The MJPEG lane above samples per browser client at the multipart write.
+    // The encoded sinks (RTSP RTP fan-out, WS video fan-out, HLS segment
+    // writes) carry their own bytes/time at their send seams, aggregated into
+    // this lane — a deliberately separate sample store so the encoded-side
+    // adaptation never re-weights the MJPEG per-client ladder (and vice
+    // versa). Empty means "no encoded sink sent anything"; the ladder's
+    // default-aware view applies.
+
+    private val encodedThroughputSamples = ArrayDeque<Int>()
+
+    /** One aggregate encoded-sink send: [bytes] over [durationMs] at a send seam. */
+    fun recordEncodedSend(bytes: Int, durationMs: Long) {
+        if (bytes <= 0 || durationMs <= 0) return
+        val kbps = (bytes * 8.0 / durationMs.toDouble()).toInt()
+        synchronized(encodedThroughputSamples) {
+            encodedThroughputSamples.addLast(kbps)
+            if (encodedThroughputSamples.size > ENCODED_SAMPLE_WINDOW) {
+                encodedThroughputSamples.removeFirst()
+            }
+        }
+    }
+
+    /** Average encoded-sink throughput; 0 while the lane has no samples. */
+    fun getEncodedThroughputKbps(): Int = synchronized(encodedThroughputSamples) {
+        if (encodedThroughputSamples.isEmpty()) 0 else encodedThroughputSamples.average().toInt()
+    }
+
+    fun hasEncodedSamples(): Boolean = synchronized(encodedThroughputSamples) { encodedThroughputSamples.isNotEmpty() }
+
+    /**
+     * The network-quality ladder over the encoded-sink lane: samples drive the
+     * level; with no samples at all the ladder's default-aware view applies
+     * (idle ⇒ EXCELLENT ⇒ the encoded bitrate target stays at its configured
+     * value), never stalling at the bottom rung. Sample presence and
+     * throughput read as one snapshot — two separate reads could disagree.
+     */
+    fun getEncodedQualityLevel(): NetworkQualityLevel {
+        val hasSamples: Boolean
+        val throughputKbps: Int
+        synchronized(encodedThroughputSamples) {
+            hasSamples = encodedThroughputSamples.isNotEmpty()
+            throughputKbps = if (hasSamples) encodedThroughputSamples.average().toInt() else 0
+        }
+        return NetworkAdaptationPolicy.levelFor(
+            minThroughputKbps = if (hasSamples) throughputKbps
+            else NetworkAdaptationPolicy.DEFAULT_BANDWIDTH_KBPS,
+            activeClients = if (hasSamples) 1 else 0,
+        )
+    }
+
     fun getMinClientThroughputKbps(): Int {
         if (clientStats.isEmpty()) return NetworkAdaptationPolicy.DEFAULT_BANDWIDTH_KBPS
         var minThroughput = Int.MAX_VALUE
@@ -186,6 +237,7 @@ class NetworkQualityMonitor {
     fun resetStats() {
         clientStats.clear()
         _activeClients.set(0)
+        synchronized(encodedThroughputSamples) { encodedThroughputSamples.clear() }
         synchronized(this) {
             totalBytesSent = 0L
         }
@@ -264,5 +316,6 @@ class NetworkQualityMonitor {
     companion object {
         private const val TAG = "NetworkQualityMonitor"
         private const val THROUGHPUT_WINDOW = 20
+        private const val ENCODED_SAMPLE_WINDOW = 20
     }
 }

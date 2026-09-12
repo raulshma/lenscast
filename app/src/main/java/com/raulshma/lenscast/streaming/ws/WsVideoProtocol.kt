@@ -20,6 +20,35 @@ object WsVideoProtocol {
     const val NAL_PPS = 8
     const val NAL_IDR = 5
 
+    // HEVC NAL unit types (2-byte header: 6-bit type in the first byte's high
+    // bits). The server uses these to recognize HEVC AUs and to pick the VPS/
+    // SPS/PPS out of a keyframe for the hvcC config message.
+    const val NAL_HEVC_VPS = 32
+    const val NAL_HEVC_SPS = 33
+    const val NAL_HEVC_PPS = 34
+
+    /** HEVC NAL unit type from a start-code-free NAL (the 6-bit type field across bytes 0-1). */
+    fun hevcNalType(nal: ByteArray): Int =
+        if (nal.size < 2) -1 else ((nal[0].toInt() and 0x7E) shr 1)
+
+    /** The three HEVC parameter sets from one AU's NAL units, when all are present. */
+    data class HevcParameterSets(val vps: ByteArray, val sps: ByteArray, val pps: ByteArray)
+
+    /** Scan start-code-free NAL units for the HEVC VPS/SPS/PPS triple; null until all three appear. */
+    fun extractHevcParameterSets(nalUnits: List<ByteArray>): HevcParameterSets? {
+        var vps: ByteArray? = null
+        var sps: ByteArray? = null
+        var pps: ByteArray? = null
+        for (nal in nalUnits) {
+            when (hevcNalType(nal)) {
+                NAL_HEVC_VPS -> vps = nal
+                NAL_HEVC_SPS -> sps = nal
+                NAL_HEVC_PPS -> pps = nal
+            }
+        }
+        return if (vps != null && sps != null && pps != null) HevcParameterSets(vps, sps, pps) else null
+    }
+
     /** Annex-B start code. */
     val START_CODE = byteArrayOf(0, 0, 0, 1)
 
@@ -130,4 +159,49 @@ object WsVideoProtocol {
 
     /** Config message: 'LCCF' + avcC bytes. */
     fun videoConfig(sps: ByteArray, pps: ByteArray): ByteArray = envelope("LCCF", avcC(sps, pps))
+
+    /**
+     * The hvcC (HEVCDecoderConfigurationRecord, ISO 14496-15 §8.3) bytes for a
+     * VPS/SPS/PPS triple. The dynamic profile/tier/level bytes come from the
+     * SPS's profile_tier_level (payload bytes 2..13, after the 2-byte NAL
+     * header); the static structure fields assume the encoder's actual output
+     * shape — 8-bit 4:2:0, one NAL per array. Browsers: Safari's WebCodecs
+     * parses this natively ('hvc1'/'hev1'); a Chromium-based player needs its
+     * own hvcC handling in the WS client before HEVC frames decode — the
+     * config message is self-describing so the client can branch on the
+     * 'LCHC' magic and fail cleanly instead of misconfiguring an AVC decoder.
+     */
+    fun hevcC(vps: ByteArray, sps: ByteArray, pps: ByteArray): ByteArray {
+        val out = java.io.ByteArrayOutputStream(32 + vps.size + sps.size + pps.size)
+        out.write(1) // configurationVersion
+        // general_profile_space/tier_flag/profile_idc + compatibility flags +
+        // constraint flags + level_idc, copied from the SPS's
+        // profile_tier_level; defensive indexing like the avcC side.
+        out.write(sps.getOrElse(2) { 1.toByte() }.toInt() and 0xFF) // profile_idc 1 = Main fallback
+        for (i in 3..6) out.write(sps.getOrElse(i) { 0.toByte() }.toInt() and 0xFF) // general_profile_compatibility_flags
+        for (i in 7..12) out.write(sps.getOrElse(i) { 0.toByte() }.toInt() and 0xFF) // general_constraint_indicator_flags
+        out.write(sps.getOrElse(13) { 93.toByte() }.toInt() and 0xFF) // general_level_idc (93 = level 3.1 fallback)
+        out.write(0xF0) // 1111 + min_spatial_segmentation_idc=0
+        out.write(0xFC) // 111111 + parallelismType=0
+        out.write(0xFC or 1) // 111111 + chroma_format_idc=1 (4:2:0)
+        out.write(0xF8) // 11111 + bit_depth_luma_minus8=0 (8-bit)
+        out.write(0xF8) // 11111 + bit_depth_chroma_minus8=0 (8-bit)
+        out.write(3) // numOfArrays
+        writeHevcArray(out, NAL_HEVC_VPS, vps)
+        writeHevcArray(out, NAL_HEVC_SPS, sps)
+        writeHevcArray(out, NAL_HEVC_PPS, pps)
+        return out.toByteArray()
+    }
+
+    /** One hvcC array entry: array_completeness + NAL type, count 1, the length-prefixed NAL. */
+    private fun writeHevcArray(out: java.io.ByteArrayOutputStream, nalType: Int, nal: ByteArray) {
+        out.write(0x80 or nalType) // array_completeness=1, reserved=0, NAL_unit_type
+        out.write(0) // numNalus high byte
+        out.write(1) // numNalus low byte
+        writeNal(out, nal)
+    }
+
+    /** Config message: 'LCHC' + hvcC bytes — self-describing HEVC twin of [videoConfig]. */
+    fun hevcVideoConfig(vps: ByteArray, sps: ByteArray, pps: ByteArray): ByteArray =
+        envelope("LCHC", hevcC(vps, sps, pps))
 }

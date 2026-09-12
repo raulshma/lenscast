@@ -8,6 +8,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import androidx.wear.compose.material.MaterialTheme
+import androidx.wear.tiles.TileService
 import kotlinx.coroutines.launch
 
 /**
@@ -21,6 +22,11 @@ import kotlinx.coroutines.launch
  * module holding a foreground service. A first-run user (no host stored)
  * is opened into [SettingsActivity] once per activity instance — missing
  * config is a settings door, never a crash.
+ *
+ * The alert/tile side effects ride the same graph: [WearAlertStateStore]
+ * persists the alert dedup state across screen-off, [WearDetectionAlerter]
+ * fires the haptic + notification per new event, and the [TilePublisher]
+ * hook pushes the tile refresh when the stream-state line changes.
  */
 class MainActivity : ComponentActivity() {
 
@@ -30,10 +36,23 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        val settingsStore = WearSettingsStore(applicationContext)
+        val appContext = applicationContext
+        val settingsStore = WearSettingsStore(appContext)
         val controller = WearRemoteController(
             settingsStore = settingsStore,
             client = WearApiClient(settingsStore),
+            alertStateStore = WearAlertStateStore(appContext),
+            alerter = WearDetectionAlerter(appContext),
+            tilePublisher = TilePublisher { status ->
+                // Only a stream-state line change warrants waking the tile
+                // host; the 30-min freshness interval is the fallback.
+                if (WearTileStatusCache.publish(status)) {
+                    runCatching {
+                        TileService.getUpdater(appContext)
+                            .requestUpdate(WearTileService::class.java)
+                    }
+                }
+            },
         )
 
         lifecycleScope.launch {

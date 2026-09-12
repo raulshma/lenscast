@@ -1,4 +1,5 @@
 import { Show } from 'solid-js'
+import { t } from '../lib/i18n'
 
 interface Props {
   loginUser: () => string
@@ -22,17 +23,17 @@ export default function LoginScreen(props: Props) {
             </div>
           </div>
           <h1 class="login-title">LensCast</h1>
-          <p class="login-subtitle">Remote Camera Control</p>
+          <p class="login-subtitle">{t('login.subtitle')}</p>
         </div>
 
         <form onSubmit={props.handleLogin} class="login-form">
           <div class="form-field">
-            <label class="field-label" for="login-username">Username</label>
+            <label class="field-label" for="login-username">{t('login.username')}</label>
             <input
               id="login-username"
               type="text"
               class="field-input"
-              placeholder="Enter username"
+              placeholder={t('login.usernamePlaceholder')}
               value={props.loginUser()}
               onInput={(e) => props.setLoginUser(e.currentTarget.value)}
               autocomplete="username"
@@ -40,12 +41,12 @@ export default function LoginScreen(props: Props) {
             />
           </div>
           <div class="form-field">
-            <label class="field-label" for="login-password">Password</label>
+            <label class="field-label" for="login-password">{t('login.password')}</label>
             <input
               id="login-password"
               type="password"
               class="field-input"
-              placeholder="Enter password"
+              placeholder={t('login.passwordPlaceholder')}
               value={props.loginPass()}
               onInput={(e) => props.setLoginPass(e.currentTarget.value)}
               autocomplete="current-password"
@@ -68,9 +69,9 @@ export default function LoginScreen(props: Props) {
             type="submit"
             disabled={props.loginLoading()}
           >
-            <Show when={props.loginLoading()} fallback="Sign In">
+            <Show when={props.loginLoading()} fallback={t('login.signIn')}>
               <span class="login-spinner" />
-              Signing in...
+              {t('login.signingIn')}
             </Show>
           </button>
         </form>

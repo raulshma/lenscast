@@ -166,7 +166,7 @@ export function eventMarkers(events: DetectionEvent[], dayKey: string): EventMar
     }))
 }
 
-const KNOWN_TRIGGERS: readonly RecordingTrigger[] = ['manual', 'motion', 'sound', 'continuous', 'scheduled']
+const KNOWN_TRIGGERS: readonly RecordingTrigger[] = ['manual', 'motion', 'sound', 'continuous', 'scheduled', 'interval']
 
 function isTrigger(value: unknown): value is RecordingTrigger {
   return typeof value === 'string' && (KNOWN_TRIGGERS as readonly string[]).includes(value)

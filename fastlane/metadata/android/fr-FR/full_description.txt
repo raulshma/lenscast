@@ -1,0 +1,30 @@
+LensCast transforme votre appareil Android en station caméra réseau avec commandes professionnelles, accès web à distance, photographie par intervalles et enregistrement programmé.
+
+Caméra
+• Aperçu en direct avec barre de réglages rapides professionnelle
+• Commandes manuelles : compensation d'exposition, ISO, balance des blancs, mode de mise au point, zoom
+• Prise en charge multi-objectifs (ultra grand-angle, grand-angle, téléobjectif) avec changement d'objectif à l'exécution
+• HDR, stabilisation d'image, résolution jusqu'à 4K, cadence de 15 à 60 i/s
+• Prise de photos et enregistrement vidéo
+• Mode vision nocturne / IR, modes scène, distance de mise au point manuelle, température de couleur
+
+Streaming en direct
+• Streaming vidéo MJPEG en temps réel vers n'importe quel navigateur du même réseau
+• Lecture à faible latence dans le navigateur (WebCodecs sur WebSocket) avec repli automatique vers MJPEG et HLS
+• Streaming RTSP avec audio AAC et vidéo H.264/H.265 en 480p/720p/1080p pour VLC, OBS et NVR
+• Service appareil ONVIF Profile S (désactivé par défaut) pour que des NVR comme Home Assistant découvrent la caméra
+• Mode HTTPS avec certificat auto-signé sur l'appareil
+
+Tableau de bord web
+• Regarder le flux en direct, parcourir et télécharger photos et enregistrements
+• Contrôle à distance complet des réglages caméra et streaming
+• Authentification par mot de passe en option
+
+Automatisation
+• Filtre de détection d'objets (optionnel) : le modèle open source EfficientDet-Lite0 — Apache-2.0, téléchargé à la demande avec un SHA-256 figé depuis l'hébergement officiel de TensorFlow — déclenche des alertes MQTT ou un enregistrement lorsque les objets configurés apparaissent
+• Photographie par intervalles et enregistrement programmé ou continu
+• Heures calmes pour les notifications
+
+Pas de publicité, pas de pistage, pas de cloud. Tout le traitement reste sur votre appareil ; le tableau de bord web est servi par un serveur HTTP intégré sur votre réseau local.
+
+Remarque : la version F-Droid est livrée sans l'auto-updater intégré ; les mises à jour proviennent de F-Droid.

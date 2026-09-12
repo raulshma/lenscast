@@ -31,6 +31,9 @@ class RecordingSessionIndexTest {
         durationMs = durationMs,
     )
 
+    private fun videoWithTrigger(id: String, timestamp: Long, trigger: String?) =
+        video(id, timestamp).copy(trigger = trigger)
+
     private fun photo(timestamp: Long) = CaptureHistory(
         id = "photo",
         type = CaptureType.PHOTO,
@@ -295,5 +298,56 @@ class RecordingSessionIndexTest {
             window = dayWindow("2026-09-11"),
         )
         assertEquals("a", sessions.single().mediaId)
+    }
+
+    // ── Persisted trigger provenance ──
+
+    @Test
+    fun `a persisted trigger wins over reconstruction`() {
+        val sessions = RecordingSessionIndex.buildSessions(
+            captures = listOf(
+                videoWithTrigger("loop", dayStart + 1_000, trigger = "continuous"),
+                videoWithTrigger("sched", dayStart + 2_000, trigger = "scheduled"),
+                videoWithTrigger("clip", dayStart + 3_000, trigger = "motion"),
+                videoWithTrigger("tl", dayStart + 4_000, trigger = "interval"),
+            ),
+            events = emptyList(),
+            window = dayWindow("2026-09-11"),
+        )
+        assertEquals(listOf("continuous", "scheduled", "motion", "interval"), sessions.map { it.trigger })
+    }
+
+    @Test
+    fun `null trigger falls back to event-overlap reconstruction`() {
+        // A capture created before the field existed, overlapped by a motion
+        // event: the old reconstruction still answers.
+        val sessions = RecordingSessionIndex.buildSessions(
+            captures = listOf(videoWithTrigger("legacy", dayStart + 1_000, trigger = null)),
+            events = listOf(event("motion", dayStart + 2_000)),
+            window = dayWindow("2026-09-11"),
+        )
+        assertEquals(RecordingSessionIndex.TRIGGER_MOTION, sessions.single().trigger)
+    }
+
+    @Test
+    fun `unknown trigger spellings fall back to reconstruction not the raw string`() {
+        val sessions = RecordingSessionIndex.buildSessions(
+            captures = listOf(videoWithTrigger("weird", dayStart + 1_000, trigger = "teleport")),
+            events = emptyList(),
+            window = dayWindow("2026-09-11"),
+        )
+        assertEquals(RecordingSessionIndex.TRIGGER_MANUAL, sessions.single().trigger)
+    }
+
+    @Test
+    fun `persisted manual stays manual even with an overlapping event`() {
+        // A user's own capture the coordinator happens to overlap: the stamp
+        // is the truth, the reconstruction would have claimed motion.
+        val sessions = RecordingSessionIndex.buildSessions(
+            captures = listOf(videoWithTrigger("user", dayStart + 1_000, trigger = "manual")),
+            events = listOf(event("motion", dayStart + 2_000)),
+            window = dayWindow("2026-09-11"),
+        )
+        assertEquals(RecordingSessionIndex.TRIGGER_MANUAL, sessions.single().trigger)
     }
 }

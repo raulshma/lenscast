@@ -152,9 +152,11 @@ fun NavigationGraph() {
                 ) { backStackEntry ->
                     val mediaId = backStackEntry.arguments?.getString("mediaId") ?: ""
                     val galleryViewModel: GalleryViewModel = viewModel(
-                        factory = GalleryViewModel.Factory(app.captureHistoryStore, app.decryptedPhotoCache)
+                        factory = GalleryViewModel.Factory(app.captureHistoryStore, app.decryptedPhotoCache, app.appScope)
                     )
-                    val allItems by galleryViewModel.allItems.collectAsState()
+                    // The viewer's list excludes staged (pending-undo) deletes,
+                    // so a staged delete advances the pager like a real one.
+                    val allItems by galleryViewModel.viewerItems.collectAsState()
                     val decryptedPhotos by galleryViewModel.decryptedPhotos.collectAsState()
                     val encryptedVideoIds by galleryViewModel.encryptedVideoIds.collectAsState()
 
@@ -199,6 +201,7 @@ fun NavigationGraph() {
                                     navController.popBackStack()
                                 }
                             },
+                            onToggleFavorite = { id -> galleryViewModel.toggleFavorite(id) },
                         )
                     }
                 }

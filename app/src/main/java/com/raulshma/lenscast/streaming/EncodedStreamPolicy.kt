@@ -18,10 +18,12 @@ object EncodedStreamPolicy {
         val wsVideoClients: Int,
         /** The RTMP push output is live (connecting or connected) — its own encode trigger. */
         val rtmpActive: Boolean,
+        /** The SRT push output is live — the RTMP push's twin encode trigger. */
+        val srtActive: Boolean = false,
     )
 
     fun shouldRun(inputs: Inputs): Boolean =
-        inputs.rtspActive || inputs.rtmpActive || inputs.hlsRequested ||
+        inputs.rtspActive || inputs.rtmpActive || inputs.srtActive || inputs.hlsRequested ||
             (inputs.webActive && inputs.wsVideoClients > 0)
 
     /**

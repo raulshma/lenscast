@@ -49,6 +49,70 @@ object SoundClassPolicy {
     val DEFAULT_ALLOWED_CLASSES: Set<String> = SECURITY_CLASSES.toSet()
 
     /**
+     * The curated sound-*trigger* classes — the subset of [SECURITY_CLASSES]
+     * that makes sense as a standalone detector (things that are loud *and*
+     * alarming on their own, without needing an RMS breach first): glass
+     * breaking, smoke/fire alarms, sirens, gunshots, dogs barking, screams
+     * and shouts, and the doorbell/knock entry sounds. Speech is included:
+     * a voice where nobody should be is a security signal. The persisted
+     * trigger set narrows from this list exactly the way the allow-list
+     * narrows from [SECURITY_CLASSES].
+     */
+    val TRIGGER_CLASSES: List<String> = listOf(
+        "Shout",
+        "Screaming",
+        "Dog",
+        "Bark",
+        "Knock",
+        "Doorbell",
+        "Glass",
+        "Shatter",
+        "Alarm",
+        "Smoke detector, smoke alarm",
+        "Fire alarm",
+        "Siren",
+        "Gunshot, gunfire",
+    )
+
+    /** The default trigger set as the set the trigger gate compares against. */
+    val DEFAULT_TRIGGER_CLASSES: Set<String> = TRIGGER_CLASSES.toSet()
+
+    /**
+     * The persisted trigger set made safe — same conventions as
+     * [normalizeAllowed]: unknown spellings drop out, an empty result folds
+     * back to the [DEFAULT_TRIGGER_CLASSES] so the chips narrow, they never
+     * disarm silently.
+     */
+    fun normalizeTriggerClasses(persisted: Set<String>): Set<String> {
+        val known = persisted.filterTo(LinkedHashSet()) { it in DEFAULT_TRIGGER_CLASSES }
+        return if (known.isEmpty()) DEFAULT_TRIGGER_CLASSES else known
+    }
+
+    /**
+     * The pure decision whether one YAMNet window *fires a detection event*
+     * on its own — independent of the RMS threshold: the label must be one of
+     * the chosen trigger classes with confidence at or above the persisted
+     * floor, and the caller's own event cooldown must have lapsed. Pure over
+     * caller-supplied stamps; the coordinator keeps the last-fire bookkeeping
+     * and dispatches. This path only ever *adds* events — the RMS detector's
+     * verdicts are untouched by definition (they never read this).
+     */
+    fun shouldTriggerOnClass(
+        topLabel: String?,
+        scorePercent: Float,
+        minConfidencePercent: Int,
+        triggerClasses: Set<String> = DEFAULT_TRIGGER_CLASSES,
+        nowMs: Long,
+        lastTriggerMs: Long,
+        cooldownMs: Long,
+    ): Boolean {
+        if (topLabel.isNullOrBlank()) return false
+        if (topLabel !in triggerClasses) return false
+        if (scorePercent < minConfidencePercent) return false
+        return nowMs - lastTriggerMs >= cooldownMs
+    }
+
+    /**
      * The persisted allow-list made safe: unknown spellings drop out (a
      * restored backup or a renamed class must not silently widen the gate),
      * and an empty result folds back to the [DEFAULT_ALLOWED_CLASSES] — the

@@ -9,9 +9,10 @@ import java.util.concurrent.CopyOnWriteArrayList
 
 /**
  * The WebSocket sidecar on the streaming server's port: `/ws/video` pushes
- * H.264 AUs (AVCC-framed, configured via a cached avcC) for WebCodecs
- * playback — sub-second latency at a fraction of MJPEG's bandwidth — and
- * `/ws/talkback` takes continuous PCM16 chunks for push-to-talk.
+ * H.264 or H.265 AUs (length-prefixed, configured via a cached avcC or hvcC)
+ * for WebCodecs playback — sub-second latency at a fraction of MJPEG's
+ * bandwidth — and `/ws/talkback` takes continuous PCM16 chunks for
+ * push-to-talk.
  *
  * Handshakes pass the same [WebAuthGate] as the HTTP surface: auth off lets
  * everything through, auth on requires the session cookie (SameSite=Lax
@@ -25,17 +26,24 @@ import java.util.concurrent.CopyOnWriteArrayList
  * Video frames arrive through [feedVideo], one of the encoded-stream hub's
  * sinks alongside the RTSP and HLS paths. Clients joining mid-stream receive the
  * cached parameter sets with their config message and wait for the next
- * keyframe, so no keyframe storms are requested from the encoder.
+ * keyframe, so no keyframe storms are requested from the encoder. The config
+ * message is self-describing — 'LCCF' carries an avcC (H.264), 'LCHC' an
+ * hvcC (H.265) — so a browser that cannot decode HEVC can fail cleanly at
+ * the config step instead of misparsing frames.
  */
 class WsMediaServer(
     private val bindPort: Int,
     private val audioStreamingManager: AudioStreamingManager,
     private val authGate: WebAuthGate,
+    /** Aggregate encoded-sink send samples (bytes, ms) from the WS video fan-out. */
+    private val encodedSendTap: ((bytes: Int, durationMs: Long) -> Unit)? = null,
 ) : NanoWSD(bindPort) {
 
     private val videoClients = CopyOnWriteArrayList<VideoSocket>()
     @Volatile private var cachedSps: ByteArray? = null
     @Volatile private var cachedPps: ByteArray? = null
+    @Volatile private var cachedVps: ByteArray? = null
+    @Volatile private var cachedCodecIsHevc = false
 
     /** The fan-out sink; wired once by the Streaming Manager at the RTSP output. */
     fun videoSink(): (List<com.raulshma.lenscast.streaming.rtsp.EncodedNalUnit>) -> Unit =
@@ -44,9 +52,23 @@ class WsMediaServer(
     fun feedVideo(nalUnits: List<com.raulshma.lenscast.streaming.rtsp.EncodedNalUnit>) {
         if (nalUnits.isEmpty()) return
         val raw = nalUnits.map { it.data }
-        WsVideoProtocol.extractParameterSets(raw)?.let { (sps, pps) ->
-            cachedSps = sps
-            cachedPps = pps
+        // Codec detection per AU: the HEVC VPS/SPS/PPS triple is only present
+        // in HEVC keyframes, the AVC SPS/PPS pair in H.264 ones — whichever
+        // appears (re)marks the cached codec, so a mid-stream codec flip
+        // re-configures joining clients automatically.
+        val hevcSets = WsVideoProtocol.extractHevcParameterSets(raw)
+        when {
+            hevcSets != null -> {
+                cachedVps = hevcSets.vps
+                cachedSps = hevcSets.sps
+                cachedPps = hevcSets.pps
+                cachedCodecIsHevc = true
+            }
+            else -> WsVideoProtocol.extractParameterSets(raw)?.let { (sps, pps) ->
+                cachedSps = sps
+                cachedPps = pps
+                cachedCodecIsHevc = false
+            }
         }
         if (videoClients.isEmpty()) return
         val isKey = WsVideoProtocol.containsKeyframe(nalUnits)
@@ -54,8 +76,19 @@ class WsMediaServer(
             WebSocketFrame.OpCode.Binary, true,
             WsVideoProtocol.videoFrameAvcc(WsVideoProtocol.nalUnitsToAvcc(raw), isKey),
         )
+        // The fan-out doubles as the adaptive encoded-bitrate tap: frame bytes
+        // handed to clients over the send loop's wall time.
+        var sentBytes = 0L
+        val sendStartNanos = System.nanoTime()
         videoClients.forEach { client ->
-            runCatching { client.sendFrame(wsFrame) }
+            runCatching {
+                client.sendFrame(wsFrame)
+                sentBytes += wsFrame.binaryPayload?.size ?: 0
+            }
+        }
+        val sendDurationMs = (System.nanoTime() - sendStartNanos) / 1_000_000
+        if (sentBytes > 0) {
+            encodedSendTap?.invoke(sentBytes.coerceAtMost(Int.MAX_VALUE.toLong()).toInt(), sendDurationMs)
         }
     }
 
@@ -104,7 +137,19 @@ class WsMediaServer(
         override fun onOpen() {
             val sps = cachedSps
             val pps = cachedPps
-            if (sps != null && pps != null) {
+            if (cachedCodecIsHevc) {
+                val vps = cachedVps
+                if (vps != null && sps != null && pps != null) {
+                    runCatching {
+                        sendFrame(
+                            WebSocketFrame(
+                                WebSocketFrame.OpCode.Binary, true,
+                                WsVideoProtocol.hevcVideoConfig(vps, sps, pps),
+                            )
+                        )
+                    }
+                }
+            } else if (sps != null && pps != null) {
                 runCatching {
                     sendFrame(WebSocketFrame(WebSocketFrame.OpCode.Binary, true, WsVideoProtocol.videoConfig(sps, pps)))
                 }

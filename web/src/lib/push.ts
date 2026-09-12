@@ -82,3 +82,22 @@ export function permissionLabel(permission: string | undefined): string {
       return 'Unknown'
   }
 }
+
+/**
+ * The notification's in-dashboard deep-link target — the #/… hash the
+ * notification click opens. Every field is read defensively: today's server
+ * payloads carry only { title, body, tag, eventId, type, timestampMs,
+ * clipAvailable } and no `url` at all, so the derivation degrades through
+ * the clip fields to the plain dashboard root and never throws on a shape
+ * it does not recognize.
+ */
+export function pushNotificationUrl(payload: Record<string, unknown> | null | undefined): string {
+  if (payload == null) return '/'
+  const url = payload.url
+  if (typeof url === 'string' && (url.startsWith('#') || url.startsWith('/'))) return url
+  // A clip-bearing event deep-links straight to the clip in the viewer.
+  if (payload.clipAvailable === true && typeof payload.eventId === 'string' && payload.eventId) {
+    return `#/gallery/${encodeURIComponent(payload.eventId)}`
+  }
+  return '/'
+}

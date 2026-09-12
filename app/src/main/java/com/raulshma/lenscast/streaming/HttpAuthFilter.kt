@@ -138,6 +138,20 @@ class HttpAuthFilter(
         headers: Map<String, String?>,
     ): HttpResult? {
         if (!isProtectedRoute(uri)) return null
+        // The WHEP routes are media egress: their POST (SDP offer) and
+        // DELETE (session teardown) are reads, not writes — an armed API
+        // token rides its GET verdict here instead of the write-policy
+        // ladder (curl viewers need no session cookie), and an invalid
+        // token still fails closed.
+        if (isWhepRoute(uri)) {
+            val whepToken = apiTokenFrom(headers)
+            if (whepToken != null && webAuthGate.isApiTokenArmed) {
+                if (!webAuthGate.authorizeApiToken(whepToken, "GET", uri)) {
+                    return HttpResult.jsonError(401, "Authentication required")
+                }
+                return null
+            }
+        }
         val apiToken = apiTokenFrom(headers)
         if (apiToken != null && webAuthGate.isApiTokenArmed) {
             if (!webAuthGate.authorizeApiToken(apiToken, method, uri)) {
@@ -188,7 +202,11 @@ class HttpAuthFilter(
 
     fun isProtectedRoute(uri: String): Boolean =
         uri.startsWith("/api/") || uri == "/stream" || uri == "/audio" ||
-            uri.startsWith("/snapshot") || uri.startsWith("/hls/")
+            uri.startsWith("/snapshot") || uri.startsWith("/hls/") || isWhepRoute(uri)
+
+    /** The WHEP viewer-session routes (`/whep`, `/whep/{id}`) — protected like the stream transports. */
+    fun isWhepRoute(uri: String): Boolean =
+        uri == "/whep" || uri.startsWith("/whep/")
 
     private fun handleLogout(headers: Map<String, String?>): HttpResult {
         if (!webAuthGate.authenticate(headers["cookie"])) {

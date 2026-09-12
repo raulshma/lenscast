@@ -1,6 +1,7 @@
 import { ErrorBoundary, Show } from 'solid-js'
 import { useAppState } from './hooks/useAppState'
 import { useTheme } from './hooks/useTheme'
+import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts'
 import LoginScreen from './components/LoginScreen'
 import Navbar from './components/Navbar'
 import StreamPreview from './components/StreamPreview'
@@ -8,12 +9,84 @@ import SettingsPanel from './components/SettingsPanel'
 import AppSettingsPanel from './components/AppSettingsPanel'
 import ClientsCard from './components/ClientsCard'
 import MultiCamCard from './components/MultiCamCard'
+import ShareCard from './components/ShareCard'
+import ShortcutsOverlay from './components/ShortcutsOverlay'
+import { MediaViewerOverlay } from './components/MediaViewer'
 import Gallery from './Gallery'
+import { cyclePlayerMode } from './video/playerLadder'
+import { viewerTarget } from './lib/viewerStore'
+import { t } from './lib/i18n'
 import './App.css'
+
+/** Programmatic download of a GET route, the Gallery batch-download pattern. */
+function triggerDownload(url: string) {
+  const a = document.createElement('a')
+  a.href = url
+  a.download = ''
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
+}
 
 function App() {
   const state = useAppState()
   const { theme, toggleTheme } = useTheme()
+
+  // One global keydown listener; every guard (editable focus, modifier keys,
+  // the key map) is the pure lib/shortcuts module. Write shortcuts skip
+  // viewer sessions — the same POSTs the buttons fire would 403 — and the
+  // gating mirrors the buttons exactly (stream enabled flags, action busy,
+  // active stream for capture).
+  useKeyboardShortcuts({
+    capture: () => {
+      if (state.isViewer()) return
+      if (state.status()?.streaming?.isActive) state.handleCapture()
+    },
+    snapshot: () => {
+      triggerDownload('/snapshot?highres=1&save=1')
+    },
+    'toggle-web': () => {
+      if (state.isViewer() || state.streamActionLoading()) return
+      const s = state.status()?.streaming
+      if (!s) return
+      if (s.webStreamingActive) state.handleStopWebStream()
+      else if (s.webStreamingEnabled) state.handleStartWebStream()
+    },
+    'toggle-rtsp': () => {
+      if (state.isViewer() || state.streamActionLoading()) return
+      const s = state.status()?.streaming
+      if (!s) return
+      if (s.rtspStreamingActive) state.handleStopRtspStream()
+      else if (s.rtspEnabled) state.handleStartRtspStream()
+    },
+    'cycle-player': () => {
+      state.setPlayerMode(cyclePlayerMode(state.playerMode()))
+    },
+    gallery: () => {
+      state.setShowGallery(!state.showGallery())
+    },
+    search: () => {
+      const focus = () => {
+        (document.getElementById('gallery-search-input') as HTMLInputElement | null)?.focus()
+      }
+      if (state.showGallery()) focus()
+      else {
+        state.setShowGallery(true)
+        // Solid renders the gallery synchronously with the signal flip; one
+        // macrotask later the input exists.
+        setTimeout(focus, 50)
+      }
+    },
+    help: () => {
+      state.setShowShortcuts(!state.showShortcuts())
+    },
+  }, {
+    enabled: () => state.authChecked() && (!state.authRequired() || state.authenticated()),
+  })
+
+  // True while a higher overlay owns Escape (shortcuts help, the shared media
+  // viewer) — the gallery defers its own Escape handling then.
+  const overlayActive = () => state.showShortcuts() || viewerTarget() != null
 
   return (
     <div class="app">
@@ -27,7 +100,7 @@ function App() {
                   <line x1="12" y1="8" x2="12" y2="12" />
                   <line x1="12" y1="16" x2="12.01" y2="16" />
                 </svg>
-                <span>Dashboard rendering error: {String(err)}</span>
+                <span>{t('app.renderError', { error: String(err) })}</span>
               </div>
             </div>
           )}>
@@ -38,6 +111,7 @@ function App() {
                 authRequired={state.authRequired}
                 handleLogout={state.handleLogout}
                 setShowGallery={state.setShowGallery}
+                onShowShortcuts={() => state.setShowShortcuts(true)}
                 theme={theme}
                 toggleTheme={toggleTheme}
               />
@@ -49,7 +123,7 @@ function App() {
                     <line x1="12" y1="9" x2="12" y2="13" />
                     <line x1="12" y1="17" x2="12.01" y2="17" />
                   </svg>
-                  <span>Connection lost — retrying…</span>
+                  <span>{t('app.connectionLost')}</span>
                 </div>
               </Show>
 
@@ -59,7 +133,7 @@ function App() {
                     <rect x="3" y="11" width="18" height="11" rx="2" />
                     <path d="M7 11V7a5 5 0 0110 0v4" />
                   </svg>
-                  <span>Read-only session — live view only; changes require admin sign-in.</span>
+                  <span>{t('app.viewerBanner')}</span>
                 </div>
               </Show>
 
@@ -73,6 +147,8 @@ function App() {
                   captureMsg={state.captureMsg}
                   liveAudioStatus={state.liveAudioStatus}
                   recordingTimer={state.recordingTimer}
+                  playerMode={state.playerMode}
+                  setPlayerMode={state.setPlayerMode}
                   handleCapture={state.handleCapture}
                   handleStartWebStream={state.handleStartWebStream}
                   handleStopWebStream={state.handleStopWebStream}
@@ -126,11 +202,24 @@ function App() {
                   />
                   <ClientsCard readOnly={state.isViewer} />
                   <MultiCamCard />
+                  <ShareCard />
                 </Show>
               </main>
 
               <Show when={state.showGallery()}>
-                <Gallery onClose={() => state.setShowGallery(false)} readOnly={state.isViewer} />
+                <Gallery
+                  onClose={() => state.setShowGallery(false)}
+                  readOnly={state.isViewer}
+                  overlayActive={overlayActive}
+                />
+              </Show>
+
+              {/* The shared clip viewer: event-feed "View clip", timeline
+                  segments, and #/gallery/<id> deep links all open here. */}
+              <MediaViewerOverlay canDelete={!state.isViewer()} />
+
+              <Show when={state.showShortcuts()}>
+                <ShortcutsOverlay onClose={() => state.setShowShortcuts(false)} />
               </Show>
             </>
           </ErrorBoundary>

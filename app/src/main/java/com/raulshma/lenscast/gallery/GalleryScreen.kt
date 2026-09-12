@@ -16,9 +16,14 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Snackbar
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -43,22 +48,52 @@ fun GalleryScreen(
     val context = LocalContext.current
     val app = context.applicationContext as MainApplication
     val viewModel: GalleryViewModel = viewModel(
-        factory = GalleryViewModel.Factory(app.captureHistoryStore, app.decryptedPhotoCache)
+        factory = GalleryViewModel.Factory(app.captureHistoryStore, app.decryptedPhotoCache, app.appScope)
     )
 
     val allItems by viewModel.allItems.collectAsState()
     val galleryItems by viewModel.galleryItems.collectAsState()
     val filter by viewModel.filter.collectAsState()
+    val searchQuery by viewModel.searchQuery.collectAsState()
     val selectMode by viewModel.selectMode.collectAsState()
     val selectedIds by viewModel.selectedIds.collectAsState()
-    val batchDeleting by viewModel.batchDeleting.collectAsState()
     val decryptedPhotos by viewModel.decryptedPhotos.collectAsState()
     val encryptedVideoIds by viewModel.encryptedVideoIds.collectAsState()
+
+    // The trash/undo surface: staged ids + their count drive the snackbar.
+    val pendingUndoCount by viewModel.pendingUndoCount.collectAsState()
+    val stagedIds by viewModel.stagedIds.collectAsState()
 
     val overview = remember(allItems) { buildGalleryOverview(allItems) }
     val sections = remember(galleryItems) { buildGallerySections(galleryItems) }
 
     var showBatchDeleteDialog by remember { mutableStateOf(false) }
+
+    val snackbarHostState = remember { SnackbarHostState() }
+    // One snackbar per staging burst: "N moved to trash" with the Undo action —
+    // undoing restores every id still staged; expiry dismisses on its own.
+    // The strings resolve in composition (they are composable reads); the
+    // effect only uses the resolved values.
+    val trashMessage = if (pendingUndoCount > 0) {
+        pluralStringResource(R.plurals.gallery_trash_snackbar, pendingUndoCount, pendingUndoCount)
+    } else {
+        ""
+    }
+    val undoLabel = stringResource(R.string.gallery_undo)
+    LaunchedEffect(pendingUndoCount) {
+        if (pendingUndoCount == 0) {
+            snackbarHostState.currentSnackbarData?.dismiss()
+        } else {
+            val result = snackbarHostState.showSnackbar(
+                message = trashMessage,
+                actionLabel = undoLabel,
+                withDismissAction = true,
+            )
+            if (result == SnackbarResult.ActionPerformed) {
+                viewModel.undoStaged(stagedIds.toList())
+            }
+        }
+    }
 
     if (showBatchDeleteDialog) {
         AlertDialog(
@@ -73,7 +108,6 @@ fun GalleryScreen(
                         viewModel.deleteSelected()
                         showBatchDeleteDialog = false
                     },
-                    enabled = !batchDeleting,
                 ) {
                     Text(stringResource(R.string.gallery_delete), color = MaterialTheme.colorScheme.error)
                 }
@@ -87,6 +121,15 @@ fun GalleryScreen(
     }
 
     Scaffold(
+        snackbarHost = {
+            SnackbarHost(snackbarHostState) { data ->
+                Snackbar(
+                    snackbarData = data,
+                    containerColor = MaterialTheme.colorScheme.inverseSurface,
+                    contentColor = MaterialTheme.colorScheme.inverseOnSurface,
+                )
+            }
+        },
         topBar = {
             if (selectMode) {
                 GallerySelectModeTopBar(
@@ -122,7 +165,6 @@ fun GalleryScreen(
             ) {
                 GallerySelectModeBottomBar(
                     selectedCount = selectedIds.size,
-                    batchDeleting = batchDeleting,
                     onShareSelected = {
                         shareGalleryMedia(context, allItems.filter { it.id in selectedIds })
                     },
@@ -136,6 +178,12 @@ fun GalleryScreen(
                 .fillMaxSize()
                 .padding(padding)
         ) {
+            if (!selectMode) {
+                GallerySearchField(
+                    query = searchQuery,
+                    onQueryChanged = viewModel::setSearchQuery,
+                )
+            }
             GalleryFilterRow(
                 currentFilter = filter,
                 onFilterChanged = viewModel::setFilter,
@@ -160,6 +208,7 @@ fun GalleryScreen(
                         if (!selectMode) viewModel.setSelectMode(true)
                         viewModel.toggleSelect(item.id)
                     },
+                    onToggleFavorite = { item -> viewModel.toggleFavorite(item.id) },
                     decryptedPhotos = decryptedPhotos,
                     encryptedVideoIds = encryptedVideoIds,
                 )

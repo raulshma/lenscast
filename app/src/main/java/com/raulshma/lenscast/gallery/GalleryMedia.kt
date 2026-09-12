@@ -48,6 +48,7 @@ data class GalleryOverview(
     val totalCount: Int,
     val photoCount: Int,
     val videoCount: Int,
+    val favoriteCount: Int,
     val totalBytes: Long,
     val dayCount: Int,
 )
@@ -68,6 +69,7 @@ fun buildGalleryOverview(
         totalCount = items.size,
         photoCount = items.count { it.type == CaptureType.PHOTO },
         videoCount = items.count { it.type == CaptureType.VIDEO },
+        favoriteCount = items.count { it.favorite },
         totalBytes = items.sumOf { it.fileSizeBytes.coerceAtLeast(0L) },
         dayCount = items.mapTo(linkedSetOf()) { GalleryDates.epochDayOf(it.timestamp, timeZone) }.size,
     )

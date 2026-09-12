@@ -52,6 +52,8 @@ fun DetectionSettingsSection(viewModel: SettingsViewModel, onOpenEventLog: (() -
     val soundClassificationEnabled by viewModel.soundClassificationEnabled.collectAsState()
     val soundClassificationConfidence by viewModel.soundClassificationConfidencePercent.collectAsState()
     val soundClassificationAllowed by viewModel.soundClassificationAllowedClasses.collectAsState()
+    val soundTriggerEnabled by viewModel.soundTriggerEnabled.collectAsState()
+    val soundTriggerClasses by viewModel.soundTriggerClasses.collectAsState()
     val audioModelState by viewModel.audioModelState.collectAsState()
     val motionCooldown by viewModel.motionCooldownSeconds.collectAsState()
     val soundCooldown by viewModel.soundCooldownSeconds.collectAsState()
@@ -212,6 +214,35 @@ fun DetectionSettingsSection(viewModel: SettingsViewModel, onOpenEventLog: (() -
                         viewModel.updateSoundClassificationAllowedClasses(next)
                     }
                 )
+                // The second decision path: opt-in class triggers. A chosen
+                // class at/above the confidence floor fires a detection event
+                // of its own — additive to the RMS detector, never a gate on
+                // it (the RMS events and their labels are untouched).
+                SwitchSetting(
+                    title = stringResource(R.string.detection_sound_trigger),
+                    checked = soundTriggerEnabled,
+                    onCheckedChange = { viewModel.updateSoundTriggerEnabled(it) }
+                )
+                if (soundTriggerEnabled) {
+                    Text(
+                        text = stringResource(R.string.detection_sound_trigger_description),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    SoundTriggerClassChips(
+                        selected = soundTriggerClasses,
+                        onToggle = { label ->
+                            val next = if (label in soundTriggerClasses) {
+                                soundTriggerClasses - label
+                            } else {
+                                soundTriggerClasses + label
+                            }
+                            // Same narrowing convention as the allow-list: an
+                            // all-off save folds back to the curated default.
+                            viewModel.updateSoundTriggerClasses(next)
+                        }
+                    )
+                }
                 // The YAMNet model ships outside the APK — this row is its only
                 // user-facing fetch control (the classifier's feed also
                 // auto-requests the download, throttled).
@@ -414,6 +445,38 @@ private fun SoundClassChips(allowed: Set<String>, onToggle: (label: String) -> U
                     FilterChip(
                         label = soundClassChipLabel(label),
                         selected = label in allowed,
+                        onClick = { onToggle(label) }
+                    )
+                }
+            }
+        }
+    }
+}
+
+/**
+ * The sound-trigger chips: one per curated trigger class
+ * ([SoundClassPolicy.TRIGGER_CLASSES] order), selected when persisted. The
+ * store's descriptor folds an all-off save back to the curated default, so
+ * the chips narrow, never disarm. Chip text routes through
+ * [soundClassChipLabel] — the toggled/persisted value is the wire label.
+ */
+@Composable
+private fun SoundTriggerClassChips(selected: Set<String>, onToggle: (label: String) -> Unit) {
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Text(
+            text = stringResource(R.string.detection_sound_trigger_classes),
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurface,
+        )
+        SoundClassPolicy.TRIGGER_CLASSES.chunked(StreamDefaultsRange.SOUND_CHIPS_PER_ROW).forEach { rowClasses ->
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                rowClasses.forEach { label ->
+                    FilterChip(
+                        label = soundClassChipLabel(label),
+                        selected = label in selected,
                         onClick = { onToggle(label) }
                     )
                 }
@@ -634,6 +697,10 @@ internal object StreamDefaultsRange {
         StreamDefaults.MOTION_COOLDOWN_MIN_SECONDS.toFloat()..StreamDefaults.MOTION_COOLDOWN_MAX_SECONDS.toFloat()
     val SOUND_COOLDOWN =
         StreamDefaults.SOUND_COOLDOWN_MIN_SECONDS.toFloat()..StreamDefaults.SOUND_COOLDOWN_MAX_SECONDS.toFloat()
+    // HLS DVR window: 0 (live) .. 120 segments, 10-segment steps.
+    val HLS_DVR_SEGMENTS =
+        0f..StreamDefaults.HLS_DVR_SEGMENTS_MAX.toFloat()
+    val HLS_DVR_STEPS = StreamDefaults.HLS_DVR_SEGMENTS_MAX / 10 - 1
 
     // Material3 `steps` counts the discrete points BETWEEN the endpoints, so
     // a 5-unit slider step is (span / 5) - 1.

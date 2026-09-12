@@ -2,14 +2,16 @@
 <!--
   LensCast Wear — watch-side remote for the LensCast phone server.
 
-  INTERNET is the only permission: every control in this app is an HTTP
-  round trip to the paired phone's LAN server (see wear/README.md for the
-  WiFi-path caveat). No Wear Data Layer, no body sensors, no background
-  services — the remote lives entirely in its two activities.
+  INTERNET carries the HTTP remote itself (see wear/README.md for the
+  WiFi-path caveat); POST_NOTIFICATIONS (runtime-requested on API 33+ when
+  the user enables detection alerts) carries the alert surface. No Wear
+  Data Layer, no body sensors, no background services — polling lives
+  entirely inside the resumed activities.
 -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <!-- A watch form factor is assumed everywhere (round layout, Wear
          Compose components); do not offer this APK to non-wear devices. -->
@@ -22,9 +24,10 @@
         android:supportsRtl="true"
         android:theme="@android:style/Theme.DeviceDefault">
 
-        <!-- The launcher entry: status header, stream/photo controls and the
-             snapshot pane. singleTask keeps one remote instance across
-             relaunches from the app list. -->
+        <!-- The launcher entry: status header, stream/photo controls, the
+             snapshot pane and the detection-alert banner. singleTask keeps
+             one remote instance across relaunches from the app list (and
+             from the alert notification / tile tap). -->
         <activity
             android:name=".MainActivity"
             android:exported="true"
@@ -35,10 +38,24 @@
             </intent-filter>
         </activity>
 
-        <!-- Connection settings (host, port, credentials) plus the live
-             connection test. Not exported: only this app opens it. -->
+        <!-- Connection settings (host, port, credentials, alerts opt-in)
+             plus the live connection test. Not exported: only this app
+             opens it. -->
         <activity
             android:name=".SettingsActivity"
             android:exported="false" />
+
+        <!-- The watch-face tile: the cached stream-state line + "Tap to
+             open" into the remote. Only the Wear OS system may bind it. -->
+        <service
+            android:name=".WearTileService"
+            android:exported="true"
+            android:icon="@mipmap/ic_launcher"
+            android:label="@string/tile_label"
+            android:permission="com.google.android.wearable.permission.BIND_TILE_PROVIDER">
+            <intent-filter>
+                <action android:name="androidx.wear.tiles.action.BIND_TILE_PROVIDER" />
+            </intent-filter>
+        </service>
     </application>
 </manifest>

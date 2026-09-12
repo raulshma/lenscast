@@ -1,6 +1,7 @@
 import { createSignal, Show } from 'solid-js'
 import { exportSettings, importSettings } from '../api/client'
 import SettingsCard from './SettingsCard'
+import { t } from '../lib/i18n'
 
 function exportFileName(): string {
   const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
@@ -33,9 +34,9 @@ export default function ConfigBackupCard() {
       anchor.download = exportFileName()
       anchor.click()
       URL.revokeObjectURL(url)
-      setMessage('Settings exported. Passwords and tokens are excluded; custom webhook headers are included.')
+      setMessage(t('config.exported'))
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Export failed')
+      setError(e instanceof Error ? e.message : t('config.exportFailed'))
     } finally {
       setBusy(false)
     }
@@ -49,9 +50,9 @@ export default function ConfigBackupCard() {
     try {
       const parsed: unknown = JSON.parse(await file.text())
       await importSettings(parsed)
-      setMessage('Settings imported. Values appear as the dashboard refreshes.')
+      setMessage(t('config.imported'))
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Import failed — is this a LensCast settings export?')
+      setError(e instanceof Error ? e.message : t('config.importFailed'))
     } finally {
       setBusy(false)
       // Allow re-selecting the same file after a failed attempt.
@@ -69,15 +70,15 @@ export default function ConfigBackupCard() {
           <path d="M12 15V3" />
         </svg>
       }
-      title="Config Backup"
+      title={t('config.title')}
     >
       <div class="field-group">
         <div class="deterrence-row">
           <button type="button" class="action-btn action-btn-ghost" disabled={busy()} onClick={download}>
-            Export Settings
+            {t('config.export')}
           </button>
           <label class="action-btn action-btn-ghost" for="settings-import-input">
-            {busy() ? 'Working…' : 'Import Settings'}
+            {busy() ? t('config.working') : t('config.import')}
           </label>
           <input
             id="settings-import-input"

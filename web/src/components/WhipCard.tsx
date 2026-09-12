@@ -3,7 +3,8 @@ import type { AllSettings, DeviceStatus } from '../types'
 import { API_DEFAULTS } from '../api/defaults'
 import SettingsCard from './SettingsCard'
 import ToggleRow from './ToggleRow'
-import { whipStatusView, whipStunField } from '../lib/whip'
+import { whipStatusView, whipStunField, WHIP_STATUS_LABELS_EN, WHIP_STUN_HINTS_EN } from '../lib/whip'
+import { t } from '../lib/i18n'
 
 interface Props {
   settings: () => AllSettings | null
@@ -40,8 +41,20 @@ export default function WhipCard(props: Props) {
       status: props.status()?.streaming?.whipStatus,
       active: whipActive(),
       error: props.status()?.streaming?.whipError,
+    }, {
+      ...WHIP_STATUS_LABELS_EN,
+      idle: t('status.idle'),
+      connecting: t('status.connecting'),
+      connected: t('status.connected'),
+      error: t('status.error'),
+      pushFailed: t('whip.pushFailed'),
     })
-  const stunField = () => whipStunField(stream()?.whipStunServer ?? '', API_DEFAULTS.whipStunServer)
+  const stunField = () => whipStunField(stream()?.whipStunServer ?? '', API_DEFAULTS.whipStunServer, {
+    ...WHIP_STUN_HINTS_EN,
+    invalid: t('whip.stunInvalid'),
+    present: t('whip.stunSet'),
+    empty: t('whip.stunEmpty'),
+  })
 
   return (
     <SettingsCard
@@ -52,25 +65,25 @@ export default function WhipCard(props: Props) {
           <line x1="12" y1="3" x2="12" y2="15" />
         </svg>
       }
-      title="WHIP Push"
+      title={t('whip.title')}
     >
       <div class="field-group">
         <ToggleRow
           id="whip-toggle"
-          label="Enable WHIP Push"
+          label={t('whip.enable')}
           checked={whipOn()}
           onToggle={() => props.updateStreamingAndSave({ whipEnabled: !whipOn() })}
         />
         <div class="status-banner status-banner-info stream-mode-hint" role="note" aria-live="polite">
           <span class="status-banner-dot" aria-hidden="true" />
-          <span>Pushes the live feed to a WHIP endpoint (WebRTC egress) such as MediaMTX or Cloudflare Stream. Independent of Web Stream and RTSP.</span>
+          <span>{t('whip.desc')}</span>
         </div>
       </div>
 
       <Show when={whipOn()}>
         <div class="field-group">
           <div class="field-row">
-            <span class="field-label">Endpoint URL</span>
+            <span class="field-label">{t('whip.url')}</span>
           </div>
           <input
             id="whip-url"
@@ -85,14 +98,14 @@ export default function WhipCard(props: Props) {
 
         <div class="field-group">
           <div class="field-row">
-            <span class="field-label">Bearer Token (optional)</span>
+            <span class="field-label">{t('whip.token')}</span>
           </div>
           <input
             id="whip-token"
             type="password"
             class="field-input field-input-full"
             autocomplete="new-password"
-            placeholder="(unchanged)"
+            placeholder={t('common.unchanged')}
             value={tokenDraft()}
             onInput={(e) => {
               setTokenDraft(e.currentTarget.value)
@@ -103,7 +116,7 @@ export default function WhipCard(props: Props) {
 
         <div class="field-group">
           <div class="field-row">
-            <span class="field-label">STUN Server</span>
+            <span class="field-label">{t('whip.stun')}</span>
           </div>
           <input
             id="whip-stun-server"
@@ -129,7 +142,7 @@ export default function WhipCard(props: Props) {
         <div class={`status-banner status-banner-${statusView().variant}`} role="status" aria-live="polite">
           <span class="status-banner-dot" aria-hidden="true" />
           <span>
-            WHIP push: {statusView().label}
+            {t('whip.statusLine', { status: statusView().label })}
             {statusView().detail ? ` — ${statusView().detail}` : ''}
           </span>
         </div>
@@ -146,7 +159,7 @@ export default function WhipCard(props: Props) {
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <rect x="6" y="6" width="12" height="12" rx="2" />
               </svg>
-              Stop WHIP
+              {t('whip.stop')}
             </button>
           ) : (
             <button
@@ -161,7 +174,7 @@ export default function WhipCard(props: Props) {
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <polygon points="5 3 19 12 5 21 5 3" />
               </svg>
-              Start WHIP
+              {t('whip.start')}
             </button>
           )}
         </div>

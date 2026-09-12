@@ -1,0 +1,30 @@
+O LensCast transforma seu dispositivo Android em uma estação de câmera de rede com controles profissionais, acesso remoto pela web, fotografia por intervalos e gravação agendada.
+
+Câmera
+• Prévia ao vivo com barra de ajustes rápidos profissional
+• Controles manuais: compensação de exposição, ISO, balanço de branco, modo de foco, zoom
+• Suporte a múltiplas lentes (ultra grande-angular, grande-angular, teleobjetiva) com troca de lente em tempo de execução
+• HDR, estabilização de imagem, resolução até 4K, taxa de quadros de 15–60 fps
+• Captura de fotos e gravação de vídeos
+• Modo visão noturna / IR, modos de cena, distância de foco manual, temperatura de cor
+
+Streaming ao vivo
+• Streaming de vídeo MJPEG em tempo real para qualquer navegador na mesma rede
+• Reprodução com baixa latência no navegador (WebCodecs sobre WebSocket) com fallback automático para MJPEG e HLS
+• Streaming RTSP com áudio AAC e vídeo H.264/H.265 em 480p/720p/1080p para VLC, OBS e NVRs
+• Serviço de dispositivo ONVIF Profile S (desativado por padrão) para que NVRs como o Home Assistant descubram a câmera
+• Modo HTTPS com certificado autoassinado no próprio aparelho
+
+Painel web
+• Assistir ao stream ao vivo, navegar e baixar fotos e gravações
+• Controle remoto completo das configurações de câmera e stream
+• Autenticação por senha opcional
+
+Automação
+• Filtro de detecção de objetos (opcional): o modelo de código aberto EfficientDet-Lite0 — Apache-2.0, baixado sob demanda com SHA-256 fixado da hospedagem oficial do TensorFlow — dispara alertas MQTT ou gravação quando os objetos configurados aparecem
+• Fotografia por intervalos e gravação agendada ou contínua
+• Horário de silêncio para notificações
+
+Sem anúncios, sem rastreamento, sem nuvem. Todo o processamento fica no seu aparelho; o painel web é servido por um servidor HTTP embutido na sua rede local.
+
+Observação: a compilação do F-Droid não inclui o atualizador integrado; as atualizações vêm do F-Droid.

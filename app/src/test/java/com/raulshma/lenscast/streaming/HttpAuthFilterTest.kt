@@ -354,6 +354,93 @@ class HttpAuthFilterTest {
         assertNull(filter.authorize("GET", "/snapshot", headers))
     }
 
+    // ── WHEP routes: protected like the stream transports, egress-tokened ──
+
+    @Test
+    fun `the whep routes are protected`() {
+        val filter = HttpAuthFilter(disabledGate(), port = 8080)
+        assertTrue(filter.isWhepRoute("/whep"))
+        assertTrue(filter.isWhepRoute("/whep/abc123"))
+        assertTrue(filter.isProtectedRoute("/whep"))
+        assertTrue(filter.isProtectedRoute("/whep/abc123"))
+        assertEquals(false, filter.isWhepRoute("/whep-evil"))
+        assertEquals(false, filter.isWhepRoute("/whepo"))
+    }
+
+    @Test
+    fun `whep requires a cookie when the gate is enabled`() {
+        val filter = HttpAuthFilter(enabledGate(), port = 8080)
+        assertEquals(401, filter.authorize("POST", "/whep", emptyMap())!!.statusCode)
+        assertEquals(401, filter.authorize("DELETE", "/whep/abc123", emptyMap())!!.statusCode)
+    }
+
+    @Test
+    fun `whep writes ride the csrf check like every cookie method`() {
+        // The SDP offer and the teardown are media egress — reads in the
+        // stream-transport sense — but they are POST/DELETE on the wire, so a
+        // cookie-authenticated request still needs CSRF cover (the browser
+        // sends Origin on the dashboard's same-origin POST/DELETE fetches;
+        // the client adds X-Requested-With).
+        val filter = HttpAuthFilter(disabledGate(), port = 8080)
+        val covered = mapOf("x-requested-with" to "XMLHttpRequest")
+        assertNull(filter.authorize("POST", "/whep", covered))
+        assertNull(filter.authorize("DELETE", "/whep/abc123", covered))
+        assertEquals(403, filter.authorize("POST", "/whep", emptyMap())!!.statusCode)
+    }
+
+    @Test
+    fun `an armed token authorizes the whep verbs by its GET verdict`() {
+        val filter = HttpAuthFilter(tokenGate(), port = 8080)
+        // Media egress rides the read verdict: curl viewers need no session
+        // (and no CSRF cover — header-authenticated requests skip it).
+        assertNull(filter.authorize("POST", "/whep", mapOf("authorization" to "Bearer $apiToken")))
+        assertNull(filter.authorize("DELETE", "/whep/abc123", mapOf("x-api-token" to apiToken)))
+        // An invalid token still fails closed.
+        assertEquals(
+            401,
+            filter.authorize("POST", "/whep", mapOf("authorization" to "Bearer wrong"))!!.statusCode,
+        )
+    }
+
+    @Test
+    fun `a viewer session may take the whep verbs and is denied elsewhere on them`() {
+        val gate = viewerGate()
+        val filter = HttpAuthFilter(gate, port = 8080)
+        val viewer = mapOf(
+            cookieFor(gate.login("1.2.3.4", "door", "viewer-pw").token!!),
+            "x-requested-with" to "XMLHttpRequest",
+        )
+        assertNull(filter.authorize("POST", "/whep", viewer))
+        assertNull(filter.authorize("DELETE", "/whep/abc123", viewer))
+        // Non-verb requests on the path are denied (the transport would 405).
+        assertEquals(403, filter.authorize("PUT", "/whep", viewer)!!.statusCode)
+    }
+
+    @Test
+    fun `a viewer whep denial on a foreign method is audited`() {
+        val auditLog = io.mockk.mockk<com.raulshma.lenscast.streaming.web.AuditLog>(relaxed = true)
+        val gate = viewerGate()
+        val filter = HttpAuthFilter(gate, port = 8080, auditLog = auditLog)
+        val viewer = mapOf(
+            cookieFor(gate.login("1.2.3.4", "door", "viewer-pw").token!!),
+            "x-requested-with" to "XMLHttpRequest", // CSRF cover: the denial is the role gate's, not CSRF's
+        )
+        filter.authorize("PUT", "/whep", viewer)
+        io.mockk.verify(exactly = 1) {
+            auditLog.record("access.denied", "PUT /whep", "error")
+        }
+    }
+
+    @Test
+    fun `a token header is inert on whep while the token setting is off`() {
+        // Auth disabled and token disarmed: a stale or garbage bearer header
+        // must never 401 a route that is simply public — it rides the same
+        // public-or-cookie path, CSRF cover included.
+        val filter = HttpAuthFilter(disabledGate(), port = 8080)
+        val covered = mapOf("authorization" to "Bearer stale", "x-requested-with" to "XMLHttpRequest")
+        assertNull(filter.authorize("POST", "/whep", covered))
+    }
+
     private fun loginCookie(gate: WebAuthGate): String {
         val result = gate.login("1.2.3.4", "admin", "s3cret")
         assertTrue(result.success)

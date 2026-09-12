@@ -25,9 +25,11 @@ import com.raulshma.lenscast.camera.model.MaskingZone
 import com.raulshma.lenscast.camera.model.MotionZone
 import com.raulshma.lenscast.camera.model.OverlayPosition
 import com.raulshma.lenscast.camera.model.OverlaySettings
+import com.raulshma.lenscast.camera.model.PhotoAspectRatio
 import com.raulshma.lenscast.camera.model.Resolution
 import com.raulshma.lenscast.camera.model.WhiteBalance
 import com.raulshma.lenscast.camera.model.PhotoCapturePlan
+import com.raulshma.lenscast.capture.model.FlashMode
 import com.raulshma.lenscast.capture.model.SoundClassPolicy
 import com.raulshma.lenscast.core.AppJson
 import com.raulshma.lenscast.core.BackupTargetPolicy
@@ -95,6 +97,9 @@ private object Keys {
     val PHOTO_MAXIMIZE_QUALITY = stringPreferencesKey("photo_maximize_quality")
     val RAW_CAPTURE_ENABLED = stringPreferencesKey("raw_capture_enabled")
     val GEOTAG_ENABLED = stringPreferencesKey("geotag_enabled")
+    val FLASH_MODE = stringPreferencesKey("flash_mode")
+    val PHOTO_ASPECT_RATIO = stringPreferencesKey("photo_aspect_ratio")
+    val AUTO_TIMELAPSE_ENABLED = stringPreferencesKey("auto_timelapse_enabled")
     val HDR_MODE = stringPreferencesKey("hdr_mode")
     val SCENE_MODE = stringPreferencesKey("scene_mode")
     val STREAMING_PORT = intPreferencesKey("streaming_port")
@@ -123,7 +128,12 @@ private object Keys {
     val WHIP_URL = stringPreferencesKey("whip_url")
     val WHIP_TOKEN = stringPreferencesKey("whip_token")
     val WHIP_STUN_SERVER = stringPreferencesKey("whip_stun_server")
+    val SRT_ENABLED = stringPreferencesKey("srt_enabled")
+    val SRT_URL = stringPreferencesKey("srt_url")
     val ADAPTIVE_BITRATE_ENABLED = stringPreferencesKey("adaptive_bitrate_enabled")
+    val ENCODED_ADAPTIVE_BITRATE_ENABLED = stringPreferencesKey("encoded_adaptive_bitrate_enabled")
+    val RTSP_SUB_STREAM_ENABLED = stringPreferencesKey("rtsp_sub_stream_enabled")
+    val HLS_DVR_SEGMENTS = intPreferencesKey("hls_dvr_segments")
     val MDNS_ENABLED = stringPreferencesKey("mdns_enabled")
     val MOTION_DETECTION_ENABLED = stringPreferencesKey("motion_detection_enabled")
     val NIGHT_VISION_MODE = stringPreferencesKey("night_vision_mode")
@@ -174,6 +184,8 @@ private object Keys {
     val SOUND_CLASSIFICATION_ENABLED = stringPreferencesKey("sound_classification_enabled")
     val SOUND_CLASSIFICATION_CONFIDENCE_PERCENT = intPreferencesKey("sound_classification_confidence_percent")
     val SOUND_CLASSIFICATION_ALLOWED_CLASSES = stringSetPreferencesKey("sound_classification_allowed_classes")
+    val SOUND_TRIGGER_ENABLED = stringPreferencesKey("sound_trigger_enabled")
+    val SOUND_TRIGGER_CLASSES = stringSetPreferencesKey("sound_trigger_classes")
     val CONTINUOUS_RECORDING = stringPreferencesKey("continuous_recording")
     val CONTINUOUS_SEGMENT_MINUTES = intPreferencesKey("continuous_segment_minutes")
     val ONVIF_ENABLED = stringPreferencesKey("onvif_enabled")
@@ -207,6 +219,7 @@ private object Keys {
     val MQTT_PASSWORD = stringPreferencesKey("mqtt_password")
     val MQTT_TLS = stringPreferencesKey("mqtt_tls")
     val MQTT_DISCOVERY_PREFIX = stringPreferencesKey("mqtt_discovery_prefix")
+    val MQTT_TELEMETRY_ENABLED = stringPreferencesKey("mqtt_telemetry_enabled")
     val PUSH_ENABLED = stringPreferencesKey("push_enabled")
     val PUSH_VAPID_SUBJECT = stringPreferencesKey("push_vapid_subject")
     val CAPTURE_RETENTION_DAYS = intPreferencesKey("capture_retention_days")
@@ -289,6 +302,29 @@ internal val rawCaptureEnabledPref = boolPref(Keys.RAW_CAPTURE_ENABLED, defaultT
 
 /** Opt-in GPS geotagging on captured photos (needs location permission). */
 internal val geotagEnabledPref = boolPref(Keys.GEOTAG_ENABLED, defaultTrue = false)
+
+/**
+ * The main-shutter flash mode (OFF / AUTO / ON), applied per capture through
+ * the pure [com.raulshma.lenscast.capture.model.FlashModePolicy] mapping —
+ * the same [FlashMode] enum the interval capture already persists, so one
+ * spelling serves both shutters.
+ */
+internal val flashModePref = enumPref(Keys.FLASH_MODE, FlashMode.OFF)
+
+/**
+ * The photo aspect: 16:9 (the historical behavior — the photo use case rode
+ * the video resolution) or 4:3 (the wider, full-sensor-ish frame), resolved
+ * onto the ImageCapture bind through [com.raulshma.lenscast.camera.model.PhotoAspectRatioPolicy].
+ */
+internal val photoAspectRatioPref = enumPref(Keys.PHOTO_ASPECT_RATIO, PhotoAspectRatio.R16_9)
+
+/**
+ * Auto-assemble a timelapse when an interval series completes — the
+ * [com.raulshma.lenscast.capture.model.TimelapseCompletionPolicy] handoff's
+ * master toggle. Default on: a finished series that leaves only loose photos
+ * is the worse default (the assembly itself is bounded by the policy).
+ */
+internal val autoTimelapseEnabledPref = boolPref(Keys.AUTO_TIMELAPSE_ENABLED, defaultTrue = true)
 
 internal val streamAudioEnabledPref = boolPref(Keys.STREAM_AUDIO_ENABLED, defaultTrue = true)
 
@@ -381,6 +417,34 @@ internal val rtspVideoCodecPref = SettingPref(
 internal val adaptiveBitrateEnabledPref = boolPref(Keys.ADAPTIVE_BITRATE_ENABLED, defaultTrue = false)
 
 /**
+ * The adaptive ENCODED-video bitrate: measured encoded-sink throughput (RTSP
+ * RTP / WS video / HLS writes) + thermal scale the encoder's live target down
+ * and back up through the pure EncodedBitratePolicy, clamped to
+ * [StreamDefaults.VIDEO_BITRATE_MIN]..configured. Off by default, matching
+ * the MJPEG adaptive toggle's convention.
+ */
+internal val encodedAdaptiveBitrateEnabledPref =
+    boolPref(Keys.ENCODED_ADAPTIVE_BITRATE_ENABLED, defaultTrue = false)
+
+/**
+ * The RTSP low-res sub-stream (rtsp://…/sub): a fixed 480p H.264 second
+ * encode for NVR detect roles, only while the RTSP output runs. Off by
+ * default — it is a second always-on encode.
+ */
+internal val rtspSubStreamEnabledPref = boolPref(Keys.RTSP_SUB_STREAM_ENABLED, defaultTrue = false)
+
+/**
+ * The HLS DVR window in segments: 0 keeps the sliding live ring; above that
+ * the playlist renders as EVENT and the ring retains up to the value
+ * (≈2 s per segment, so 120 ≈ 4 minutes of seekable history).
+ */
+internal val hlsDvrSegmentsPref = intPref(
+    Keys.HLS_DVR_SEGMENTS,
+    StreamDefaults.HLS_DVR_SEGMENTS_DEFAULT,
+    IntBounds(0, StreamDefaults.HLS_DVR_SEGMENTS_MAX),
+)
+
+/**
  * The RTMP push output (publish to an RTMP/RTMP(S) server), off by default.
  * The URL itself carries the stream key (a credential), so it persists raw
  * but never round-trips over the Web API — see [rtmpUrlPref].
@@ -422,6 +486,22 @@ internal val whipTokenPref = stringPref(Keys.WHIP_TOKEN, "") { it.trim() }
  * host candidates only, i.e. LAN-only reachability.
  */
 internal val whipStunServerPref = stringPref(Keys.WHIP_STUN_SERVER, StreamDefaults.WHIP_STUN_SERVER) { it.trim() }
+
+/**
+ * The SRT push output (publish MPEG-TS over Secure Reliable Transport to an
+ * `srt://` listener), off by default. The target URL carries the stream id
+ * (and optional userinfo credentials), so like the RTMP push URL it persists
+ * raw but never round-trips over the Web API — see [srtUrlPref].
+ */
+internal val srtEnabledPref = boolPref(Keys.SRT_ENABLED, defaultTrue = false)
+
+/**
+ * The SRT push target — `srt://[user:pass@]host[:port][?streamid=…]`. Trimmed
+ * on save like the MQTT host; validity is judged at start time by the output
+ * (a readable error beats silently "fixing" a URL the user mistyped), and
+ * the userinfo/streamid are write-only credentials the Web API never echoes.
+ */
+internal val srtUrlPref = stringPref(Keys.SRT_URL, "") { it.trim() }
 
 internal val mdnsEnabledPref = boolPref(Keys.MDNS_ENABLED, defaultTrue = true)
 
@@ -557,6 +637,29 @@ internal val soundClassificationAllowedClassesPref = SettingPref(
     },
 )
 
+/**
+ * YAMNet class triggers: when on, a window whose top label is one of the
+ * chosen trigger classes at/above the confidence floor fires a detection
+ * event of its own — additive to the RMS detector, never a replacement.
+ */
+internal val soundTriggerEnabledPref = boolPref(Keys.SOUND_TRIGGER_ENABLED, defaultTrue = false)
+
+/**
+ * The user-narrowed trigger class set, stored as a string set and normalized
+ * through the policy exactly like the allow-list: unknown spellings drop
+ * out, an empty set folds back to the curated default — the chips narrow,
+ * they never disarm silently.
+ */
+internal val soundTriggerClassesPref = SettingPref(
+    default = SoundClassPolicy.DEFAULT_TRIGGER_CLASSES,
+    decode = { prefs ->
+        SoundClassPolicy.normalizeTriggerClasses(prefs[Keys.SOUND_TRIGGER_CLASSES] ?: emptySet())
+    },
+    encode = { prefs, value ->
+        prefs[Keys.SOUND_TRIGGER_CLASSES] = SoundClassPolicy.normalizeTriggerClasses(value)
+    },
+)
+
 /** Continuous NVR-style loop recording: chained bounded segments while the camera is free. */
 internal val continuousRecordingPref = boolPref(Keys.CONTINUOUS_RECORDING, defaultTrue = false)
 
@@ -658,6 +761,13 @@ internal val mqttTlsPref = boolPref(Keys.MQTT_TLS, defaultTrue = false)
 internal val mqttDiscoveryPrefixPref = stringPref(Keys.MQTT_DISCOVERY_PREFIX, StreamDefaults.MQTT_DISCOVERY_PREFIX_DEFAULT) {
     it.trim().trimEnd('/')
 }
+
+/**
+ * MQTT telemetry: client events and the periodic sensor readings (battery,
+ * thermal, encoded bitrate, clients) ride the alert publisher's connection.
+ * Off by default — the alert entities are the MQTT feature's core.
+ */
+internal val mqttTelemetryEnabledPref = boolPref(Keys.MQTT_TELEMETRY_ENABLED, defaultTrue = false)
 
 /** Web Push alerts to subscribed browsers: the phone-side master gate, off by default. */
 internal val pushEnabledPref = boolPref(Keys.PUSH_ENABLED, defaultTrue = false)
@@ -1058,6 +1168,12 @@ class SettingsDataStore(
 
     val geotagEnabled: StateFlow<Boolean> = geotagEnabledPref.shared()
 
+    val flashMode: StateFlow<FlashMode> = flashModePref.shared()
+
+    val photoAspectRatio: StateFlow<PhotoAspectRatio> = photoAspectRatioPref.shared()
+
+    val autoTimelapseEnabled: StateFlow<Boolean> = autoTimelapseEnabledPref.shared()
+
     val streamAudioEnabled: StateFlow<Boolean> = streamAudioEnabledPref.shared()
 
     val streamAudioBitrateKbps: StateFlow<Int> = streamAudioBitrateKbpsPref.shared()
@@ -1094,7 +1210,17 @@ class SettingsDataStore(
 
     val whipStunServer: StateFlow<String> = whipStunServerPref.shared()
 
+    val srtEnabled: StateFlow<Boolean> = srtEnabledPref.shared()
+
+    val srtUrl: StateFlow<String> = srtUrlPref.shared()
+
     val adaptiveBitrateEnabled: StateFlow<Boolean> = adaptiveBitrateEnabledPref.shared()
+
+    val encodedAdaptiveBitrateEnabled: StateFlow<Boolean> = encodedAdaptiveBitrateEnabledPref.shared()
+
+    val rtspSubStreamEnabled: StateFlow<Boolean> = rtspSubStreamEnabledPref.shared()
+
+    val hlsDvrSegments: StateFlow<Int> = hlsDvrSegmentsPref.shared()
 
     val mdnsEnabled: StateFlow<Boolean> = mdnsEnabledPref.shared()
 
@@ -1158,6 +1284,10 @@ class SettingsDataStore(
 
     val soundClassificationAllowedClasses: StateFlow<Set<String>> = soundClassificationAllowedClassesPref.shared()
 
+    val soundTriggerEnabled: StateFlow<Boolean> = soundTriggerEnabledPref.shared()
+
+    val soundTriggerClasses: StateFlow<Set<String>> = soundTriggerClassesPref.shared()
+
     val webhookEnabled: StateFlow<Boolean> = webhookEnabledPref.shared()
 
     val webhookUrl: StateFlow<String> = webhookUrlPref.shared()
@@ -1219,6 +1349,8 @@ class SettingsDataStore(
 
     val mqttDiscoveryPrefix: StateFlow<String> = mqttDiscoveryPrefixPref.shared()
 
+    val mqttTelemetryEnabled: StateFlow<Boolean> = mqttTelemetryEnabledPref.shared()
+
     val pushEnabled: StateFlow<Boolean> = pushEnabledPref.shared()
 
     val pushVapidSubject: StateFlow<String> = pushVapidSubjectPref.shared()
@@ -1274,6 +1406,12 @@ class SettingsDataStore(
 
     suspend fun saveGeotagEnabled(enabled: Boolean) = geotagEnabledPref.save(enabled)
 
+    suspend fun saveFlashMode(mode: FlashMode) = flashModePref.save(mode)
+
+    suspend fun savePhotoAspectRatio(aspect: PhotoAspectRatio) = photoAspectRatioPref.save(aspect)
+
+    suspend fun saveAutoTimelapseEnabled(enabled: Boolean) = autoTimelapseEnabledPref.save(enabled)
+
     suspend fun saveStreamAudioEnabled(enabled: Boolean) = streamAudioEnabledPref.save(enabled)
 
     suspend fun saveStreamAudioBitrateKbps(bitrateKbps: Int) = streamAudioBitrateKbpsPref.save(bitrateKbps)
@@ -1311,7 +1449,18 @@ class SettingsDataStore(
 
     suspend fun saveWhipStunServer(server: String) = whipStunServerPref.save(server)
 
+    suspend fun saveSrtEnabled(enabled: Boolean) = srtEnabledPref.save(enabled)
+
+    suspend fun saveSrtUrl(url: String) = srtUrlPref.save(url)
+
     suspend fun saveAdaptiveBitrateEnabled(enabled: Boolean) = adaptiveBitrateEnabledPref.save(enabled)
+
+    suspend fun saveEncodedAdaptiveBitrateEnabled(enabled: Boolean) =
+        encodedAdaptiveBitrateEnabledPref.save(enabled)
+
+    suspend fun saveRtspSubStreamEnabled(enabled: Boolean) = rtspSubStreamEnabledPref.save(enabled)
+
+    suspend fun saveHlsDvrSegments(segments: Int) = hlsDvrSegmentsPref.save(segments)
 
     suspend fun saveWatchdogEnabled(enabled: Boolean) = watchdogEnabledPref.save(enabled)
 
@@ -1385,6 +1534,10 @@ class SettingsDataStore(
     suspend fun saveSoundClassificationAllowedClasses(classes: Set<String>) =
         soundClassificationAllowedClassesPref.save(classes)
 
+    suspend fun saveSoundTriggerEnabled(enabled: Boolean) = soundTriggerEnabledPref.save(enabled)
+
+    suspend fun saveSoundTriggerClasses(classes: Set<String>) = soundTriggerClassesPref.save(classes)
+
     suspend fun saveWebhookEnabled(enabled: Boolean) = webhookEnabledPref.save(enabled)
 
     suspend fun saveWebhookUrl(url: String) = webhookUrlPref.save(url)
@@ -1444,6 +1597,8 @@ class SettingsDataStore(
     suspend fun saveMqttTls(enabled: Boolean) = mqttTlsPref.save(enabled)
 
     suspend fun saveMqttDiscoveryPrefix(prefix: String) = mqttDiscoveryPrefixPref.save(prefix)
+
+    suspend fun saveMqttTelemetryEnabled(enabled: Boolean) = mqttTelemetryEnabledPref.save(enabled)
 
     suspend fun savePushEnabled(enabled: Boolean) = pushEnabledPref.save(enabled)
 

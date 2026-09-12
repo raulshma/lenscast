@@ -15,7 +15,11 @@
     "rtmpStatus": "idle",
     "whipEnabled": false,
     "whipActive": false,
-    "whipStatus": "idle"
+    "whipStatus": "idle",
+    "srtEnabled": false,
+    "srtActive": false,
+    "srtStatus": "idle",
+    "whepClients": 0
   },
   "thermal": "NORMAL",
   "camera": "Ready",
@@ -79,5 +83,6 @@
     "totalRecoveries": 3,
     "lastRecoveryTimestamp": 1788825600000,
     "lastFailureReason": "Encoder stalled; pipeline restarted"
-  }
+  },
+  "encodedVideoBitrate": 2000000
 }

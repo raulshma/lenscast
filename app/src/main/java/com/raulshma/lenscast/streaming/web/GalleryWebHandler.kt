@@ -47,8 +47,8 @@ class GalleryWebHandler(
     @Volatile
     private var placeholderThumbnail: ByteArray? = null
 
-    fun getGallery(type: String?, page: Int = 0, pageSize: Int = 0): String {
-        val galleryPage = GalleryPage.of(captureHistoryStore.history.value, type, page, pageSize)
+    fun getGallery(type: String?, page: Int = 0, pageSize: Int = 0, query: String? = null): String {
+        val galleryPage = GalleryPage.of(captureHistoryStore.history.value, type, page, pageSize, query)
 
         val items = galleryPage.items.map { entry ->
             GalleryItemDto(
@@ -58,6 +58,7 @@ class GalleryWebHandler(
                 timestamp = entry.timestamp,
                 fileSizeBytes = entry.fileSizeBytes,
                 durationMs = entry.durationMs,
+                favorite = entry.favorite,
                 // Both types serve a downscaled grid thumbnail; photos point
                 // `url` at the full-size route so the viewer can load the
                 // original while the grid uses the thumbnail.

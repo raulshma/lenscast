@@ -18,15 +18,21 @@ nowhere to bind and starts without WebSocket video or talkback.
 | M-JPEG stream | 8080 | `http://PHONE_IP:8080/stream` | `https://PHONE_IP:8080/stream` |
 | Snapshot (JPEG frame) | 8080 | `http://PHONE_IP:8080/snapshot` | `https://PHONE_IP:8080/snapshot` |
 | HLS playlist | 8080 | `http://PHONE_IP:8080/hls/playlist.m3u8` | `https://PHONE_IP:8080/hls/playlist.m3u8` |
+| WebRTC viewer (WHEP SDP endpoint) | 8080 | `POST http://PHONE_IP:8080/whep` | `https://PHONE_IP:8080/whep` |
 | WebSocket sidecar (WebCodecs video / talkback) | 8081 (web port + 1) | `ws://PHONE_IP:8081` | `wss://PHONE_IP:8081` |
-| RTSP (H.264/H.265 + AAC) | 8554 | `rtsp://PHONE_IP:8554/stream` | `rtsp://PHONE_IP:8554/stream` (unchanged) |
+| RTSP (H.264/H.265 + AAC) | 8554 | `rtsp://PHONE_IP:8554/stream` | `rtsps://PHONE_IP:8554/stream` (TLS follows HTTPS mode) |
+| RTSP sub-stream (low-res detect role) | 8554 | `rtsp://PHONE_IP:8554/sub` | `rtsps://PHONE_IP:8554/sub` |
 
 Two toggles change how these URLs behave:
 
-- **HTTPS** (`httpsEnabled`, off by default): the web server and WebSocket
-  sidecar switch to TLS with a persistent self-signed certificate. The
-  certificate's SHA-256 fingerprint is shown on the in-app Connect sheet for
-  one-tap verification.
+- **HTTPS** (`httpsEnabled`, off by default): the web server, WebSocket
+  sidecar, and RTSP listener all switch to TLS with a persistent self-signed
+  certificate. The RTSP port stays 8554 — a TLS-enabled listener answers
+  `rtsps://` on it, so clients switch their scheme (and the plain-
+  and TLS-listener never run at the same time). The listener binds the
+  dual-stack `::` address, so IPv4 and IPv6 clients reach both `rtsp://` and
+  `rtsps://` URLs. The certificate's SHA-256 fingerprint is shown on the
+  in-app Connect sheet for one-tap verification.
 - **Stream auth** (off by default): when enabled, `/api/*`, `/stream`,
   `/audio`, `/snapshot`, and `/hls/*` require a session obtained by logging in
   on the dashboard. Passwords are stored PBKDF2-hashed and failed logins are
@@ -133,12 +139,54 @@ If you insist despite this:
 The Tailscale and WireGuard options above achieve the same reachability
 without this exposure.
 
+## WebRTC viewing (WHEP)
+
+Browsers can watch the live camera sub-second over WebRTC: the dashboard's
+player ladder tries **WHEP** (WebRTC-HTTP Egress Protocol, the viewing twin of
+the WHIP *publish* protocol) first whenever the browser offers
+`RTCPeerConnection`, falling back to the WebCodecs-over-WebSocket, M-JPEG, and
+HLS paths as before.
+
+- **URL / handshake** — `POST /whep` on the web port with an
+  `application/sdp` offer body; the answer SDP comes back as `201 Created`
+  (`application/sdp`) with the session resource in `Location: /whep/{id}`.
+  `DELETE /whep/{id}` tears the session down (and the device reaps sessions
+  that never connect or die silently, so a closed tab cannot hold an encoder
+  slot). Any WebRTC player that speaks WHEP works; the dashboard's own client
+  is `web/src/lib/whepClient.ts`.
+- **Auth** — the endpoint is protected exactly like `/stream`: a dashboard
+  session cookie, or the API token as `Authorization: Bearer <token>`
+  (media egress rides the token's *read* verdict, so curl viewers need no
+  session cookie):
+
+  ```sh
+  curl -X POST https://PHONE_IP:8080/whep \
+       -H "Authorization: Bearer YOUR_TOKEN" \
+       -H "Content-Type: application/sdp" \
+       --data-binary @offer.sdp
+  ```
+
+- **Latency** — sub-second glass-to-glass, the same class as the WebCodecs
+  WebSocket rung, with standard-player A/V sync and browser-native decoding.
+- **Media** — video is always sent; audio (16 kHz mono Opus) rides along only
+  while the device's microphone is free — the same arbitration as the WHIP
+  push (a live recording or talkback claims it, and the session runs
+  video-only).
+- **Limits** — H.264 only (each viewer gets its own hardware encoder,
+  independent of the RTSP codec setting; H.265 is *not* offered over WHEP),
+  at most `WHEP_MAX_VIEWERS` (4) concurrent viewers, one-shot ICE with no
+  trickle, and **no TURN server** — like the WHIP push, only the WHIP STUN
+  setting is honored, so both ends must be routable to each other (LAN or a
+  VPN such as Tailscale/WireGuard; WHEP does not magically cross NATs or the
+  open internet).
+
 ## What does not work today
 
 - There is no built-in cloud relay — LensCast has no hosted service; traffic
   never leaves your network unless you add a tunnel yourself.
-- There is no WebRTC support — browsers use the M-JPEG, WebCodecs-over-
-  WebSocket, or HLS paths described above.
+- There is no TURN server support — WebRTC works where the peers are directly
+  routable: WHEP viewing (above) and WHIP push are LAN/VPN surfaces, not
+  internet-crossover relays.
 
 ---
 

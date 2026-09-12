@@ -1,7 +1,8 @@
-import { Show } from 'solid-js'
+import { For, Show } from 'solid-js'
 import type { DeviceStatus } from '../types'
 import { API_DEFAULTS } from '../api/defaults'
 import type { ThemeMode } from '../hooks/useTheme'
+import { LOCALES, LOCALE_DISPLAY_NAMES, locale, setLocale, t, type Locale } from '../lib/i18n'
 
 interface Props {
   status: () => DeviceStatus | null
@@ -9,6 +10,7 @@ interface Props {
   authRequired: () => boolean
   handleLogout: () => void
   setShowGallery: (v: boolean) => void
+  onShowShortcuts: () => void
   theme: () => ThemeMode
   toggleTheme: () => void
 }
@@ -79,7 +81,7 @@ export default function Navbar(props: Props) {
           id="theme-toggle-btn"
           class="navbar-icon-btn"
           onClick={props.toggleTheme}
-          title={props.theme() === 'light' ? 'Switch to dark theme' : 'Switch to light theme'}
+          title={props.theme() === 'light' ? t('nav.theme.dark') : t('nav.theme.light')}
         >
           <Show
             when={props.theme() === 'light'}
@@ -99,7 +101,7 @@ export default function Navbar(props: Props) {
         </button>
 
         {/* Gallery */}
-        <button id="gallery-btn" class="navbar-icon-btn" onClick={() => props.setShowGallery(true)} title="Gallery">
+        <button id="gallery-btn" class="navbar-icon-btn" onClick={() => props.setShowGallery(true)} title={t('nav.gallery')}>
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
             <rect x="3" y="3" width="7" height="7" rx="1.5" />
             <rect x="14" y="3" width="7" height="7" rx="1.5" />
@@ -107,6 +109,32 @@ export default function Navbar(props: Props) {
             <rect x="14" y="14" width="7" height="7" rx="1.5" />
           </svg>
         </button>
+
+        {/* Keyboard shortcuts help ('?') */}
+        <button
+          id="shortcuts-btn"
+          class="navbar-icon-btn"
+          onClick={props.onShowShortcuts}
+          title={t('nav.shortcuts')}
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+            <rect x="2" y="6" width="20" height="12" rx="2" />
+            <path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M6 14h.01M18 14h.01M9 14h6" stroke-width="2" stroke-linecap="round" />
+          </svg>
+        </button>
+
+        {/* Language */}
+        <select
+          class="navbar-icon-btn navbar-locale-select"
+          aria-label={t('nav.language')}
+          title={t('nav.language')}
+          value={locale()}
+          onChange={(e) => setLocale(e.currentTarget.value as Locale)}
+        >
+          <For each={LOCALES}>
+            {(code) => <option value={code}>{LOCALE_DISPLAY_NAMES[code]}</option>}
+          </For>
+        </select>
 
         {/* Save indicator */}
         <div class="save-indicator" classList={{ 'save-indicator-active': props.saving() }}>
@@ -121,7 +149,7 @@ export default function Navbar(props: Props) {
 
         {/* Logout */}
         <Show when={props.authRequired()}>
-          <button id="logout-btn" class="navbar-icon-btn navbar-icon-btn-danger" onClick={props.handleLogout} title="Logout">
+          <button id="logout-btn" class="navbar-icon-btn navbar-icon-btn-danger" onClick={props.handleLogout} title={t('nav.logout')}>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
               <path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4" />
               <polyline points="16 17 21 12 16 7" />

@@ -23,6 +23,8 @@ class TokenWritePolicyTest {
         assertTrue(TokenWritePolicy.allowsPost("/api/stream/rtmp/stop"))
         assertTrue(TokenWritePolicy.allowsPost("/api/stream/whip/start"))
         assertTrue(TokenWritePolicy.allowsPost("/api/stream/whip/stop"))
+        assertTrue(TokenWritePolicy.allowsPost("/api/stream/srt/start"))
+        assertTrue(TokenWritePolicy.allowsPost("/api/stream/srt/stop"))
     }
 
     @Test
@@ -98,6 +100,8 @@ class TokenWritePolicyTest {
                 "/api/stream/rtmp/stop",
                 "/api/stream/whip/start",
                 "/api/stream/whip/stop",
+                "/api/stream/srt/start",
+                "/api/stream/srt/stop",
                 "/api/capture",
                 "/api/recording/start",
                 "/api/recording/stop",

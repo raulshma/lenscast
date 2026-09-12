@@ -2,6 +2,7 @@ import { Show, createSignal } from 'solid-js'
 import type { AllSettings } from '../types'
 import { API_DEFAULTS } from '../api/defaults'
 import SettingsCard from './SettingsCard'
+import { t } from '../lib/i18n'
 
 interface Props {
   settings: () => AllSettings | null
@@ -36,11 +37,11 @@ export default function BackupCard(props: Props) {
           <line x1="12" y1="3" x2="12" y2="15" />
         </svg>
       }
-      title="Backup"
+      title={t('backup.title')}
     >
       <div class="field-group">
         <div class="field-row field-row-toggle">
-          <span class="field-label">Auto-upload New Captures</span>
+          <span class="field-label">{t('backup.autoUpload')}</span>
           <label class="toggle-switch" for="backup-toggle">
             <input
               id="backup-toggle"
@@ -56,7 +57,7 @@ export default function BackupCard(props: Props) {
       <Show when={backupOn()}>
         <div class="field-group">
           <div class="field-row">
-            <span class="field-label">Target</span>
+            <span class="field-label">{t('backup.target')}</span>
           </div>
           <div class="deterrence-row">
             <button
@@ -78,7 +79,7 @@ export default function BackupCard(props: Props) {
 
         <div class="field-group">
           <div class="field-row">
-            <span class="field-label">WebDAV Collection URL</span>
+            <span class="field-label">{t('backup.webdavUrl')}</span>
           </div>
           <input
             id="backup-webdav-url"
@@ -93,7 +94,7 @@ export default function BackupCard(props: Props) {
 
         <div class="field-group">
           <div class="field-row">
-            <span class="field-label">Username</span>
+            <span class="field-label">{t('common.username')}</span>
           </div>
           <input
             id="backup-webdav-user"
@@ -108,14 +109,14 @@ export default function BackupCard(props: Props) {
 
         <div class="field-group">
           <div class="field-row">
-            <span class="field-label">Password</span>
+            <span class="field-label">{t('common.password')}</span>
           </div>
           <input
             id="backup-webdav-pass"
             type="password"
             class="field-input field-input-full"
             autocomplete="new-password"
-            placeholder="(unchanged)"
+            placeholder={t('common.unchanged')}
             disabled={telegramSelected()}
             value={passwordDraft()}
             onInput={(e) => {
@@ -128,14 +129,14 @@ export default function BackupCard(props: Props) {
         <Show when={telegramSelected()}>
           <div class="field-group">
             <div class="field-row">
-              <span class="field-label">Telegram Bot Token</span>
+              <span class="field-label">{t('backup.telegramToken')}</span>
             </div>
             <input
               id="backup-telegram-token"
               type="password"
               class="field-input field-input-full"
               autocomplete="new-password"
-              placeholder="(unchanged) — from @BotFather"
+              placeholder={t('backup.telegramTokenHint')}
               value={telegramTokenDraft()}
               onInput={(e) => {
                 setTelegramTokenDraft(e.currentTarget.value)
@@ -146,14 +147,14 @@ export default function BackupCard(props: Props) {
 
           <div class="field-group">
             <div class="field-row">
-              <span class="field-label">Telegram Chat ID</span>
+              <span class="field-label">{t('backup.telegramChat')}</span>
             </div>
             <input
               id="backup-telegram-chat"
               type="text"
               class="field-input field-input-full"
               autocomplete="off"
-              placeholder="e.g. 123456789 (from @userinfobot)"
+              placeholder={t('backup.telegramChatHint')}
               value={stream()?.telegramChatId ?? ''}
               onInput={(e) => props.updateStreamingDebounced({ telegramChatId: e.currentTarget.value })}
             />
@@ -162,7 +163,7 @@ export default function BackupCard(props: Props) {
 
         <div class="field-group">
           <div class="field-row field-row-toggle">
-            <span class="field-label">Upload on Wi-Fi only</span>
+            <span class="field-label">{t('backup.wifiOnly')}</span>
             <label class="toggle-switch" for="backup-wifi-toggle">
               <input
                 id="backup-wifi-toggle"

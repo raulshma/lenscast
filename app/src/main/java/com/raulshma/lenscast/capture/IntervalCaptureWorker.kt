@@ -7,6 +7,7 @@ import androidx.work.ForegroundInfo
 import androidx.work.WorkerParameters
 import com.raulshma.lenscast.MainApplication
 import com.raulshma.lenscast.core.ForegroundNotifications
+import com.raulshma.lenscast.capture.model.TimelapseCompletionPolicy
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
@@ -37,6 +38,7 @@ class IntervalCaptureWorker(
 
         if (IntervalCapturePolicy.isComplete(tick)) {
             Log.d(TAG, "Interval capture complete: ${tick.completedCaptures}/${tick.totalCaptures}")
+            maybeAssembleTimelapse(app, tick.completedCaptures)
             return Result.success(IntervalCapturePolicy.progressData(tick.completedCaptures))
         }
 
@@ -49,6 +51,7 @@ class IntervalCaptureWorker(
 
                 if (IntervalCapturePolicy.isComplete(advanced)) {
                     Log.d(TAG, "All captures complete")
+                    maybeAssembleTimelapse(app, advanced.completedCaptures)
                     return Result.success(IntervalCapturePolicy.progressData(advanced.completedCaptures))
                 }
 
@@ -97,6 +100,40 @@ class IntervalCaptureWorker(
                 }
                 return Result.success()
             }
+        }
+    }
+
+    /**
+     * The completion→assemble handoff: the pure [TimelapseCompletionPolicy]
+     * decides (persisted toggle on, at least the assembler's floor of interval
+     * photos available), and the shared [TimelapseComposer] runs the assembly
+     * — its MediaStore + encryption publish seam, never the legacy plaintext
+     * folder. [seriesCaptures] is THIS series' successful capture count — the
+     * history store cannot distinguish interval photos from manual ones, so
+     * the worker's own tick counter is the only honest source. Runs on the
+     * worker's own background thread (MediaCodec work); a failure is logged
+     * and swallowed — the photos are safe either way.
+     */
+    private suspend fun maybeAssembleTimelapse(app: MainApplication, seriesCaptures: Int) {
+        val verdict = TimelapseCompletionPolicy.onSeriesComplete(
+            autoTimelapseEnabled = app.settingsDataStore.autoTimelapseEnabled.value,
+            availablePhotos = seriesCaptures,
+        )
+        when (verdict) {
+            is TimelapseCompletionPolicy.Verdict.Assemble -> {
+                Log.d(TAG, "Auto-timelapse: assembling from ${verdict.photoCount} photos")
+                withContext(Dispatchers.IO) {
+                    app.timelapseComposer.assembleLatest(verdict.photoCount)
+                }.let { result ->
+                    when (result) {
+                        is TimelapseComposer.Result.Saved ->
+                            Log.d(TAG, "Auto-timelapse saved: ${result.fileName} (${result.frameCount} frames)")
+                        is TimelapseComposer.Result.NotSaved ->
+                            Log.w(TAG, "Auto-timelapse skipped/failed: ${result.reason} ${result.detail}")
+                    }
+                }
+            }
+            TimelapseCompletionPolicy.Verdict.Skip -> Unit
         }
     }
 

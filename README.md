@@ -56,12 +56,14 @@ LensCast is an Android camera application with live video/audio streaming to web
 
 ### Live Streaming
 - HTTPS mode with a self-signed on-device certificate (fingerprint shown for one-tap verification) — encrypts streams and enables in-browser microphone talkback
-- Low-latency H.264 playback in the dashboard via WebCodecs over WebSocket, with an automatic fallback ladder to MJPEG and then HLS (muxed A/V for iOS) — both fallback rungs are plain HTTP(S) requests (no WebSocket), so playback keeps working when WebSockets are blocked
+- Low-latency H.264 playback in the dashboard via WebRTC (WHEP, below) when the browser offers `RTCPeerConnection`, then WebCodecs over WebSocket, with an automatic fallback ladder to MJPEG and then HLS (muxed A/V for iOS) — the non-WHEP rungs are plain HTTP(S) requests (no WebSocket), so playback keeps working when WebSockets are blocked
+- WebRTC viewing (WHEP, RFC 9725's egress twin): any browser or WHEP player POSTs an SDP offer to `POST /whep` on the web port and watches sub-second — `201` + answer SDP back, session teardown via `DELETE /whep/{id}`; each viewer gets its own libwebrtc hardware H.264 encoder from the camera NV21 tap (H.264 only, independent of the RTSP codec setting, max 4 concurrent viewers), audio rides the same mic-arbitration rule as the WHIP push (16 kHz mono Opus only while the microphone is free), ICE is one-shot with the WHIP STUN setting and no TURN (LAN/VPN reachability), and the endpoint is protected like `/stream` (session cookie or the API token's read verdict for curl viewers), see [Remote access](docs/remote-access.md)
 - Real-time M-JPEG video streaming to any web browser on the same WiFi network
-- RTSP streaming with AAC audio and H.264 or H.265 video (H.264 is the default; the HLS and WebCodecs playback paths stay H.264-only) at 480p/720p/1080p, for use with VLC, OBS, NVRs, and other RTSP clients
+- RTSP streaming with AAC audio and H.264 or H.265 video (H.264 is the default; under H.265 the HLS and WS playback paths carry the HEVC encode — Safari decodes HEVC HLS, the built-in web player still wants H.264 — while the RTMP/SRT pushes refuse the codec) at 480p/720p/1080p, for use with VLC, OBS, NVRs, and other RTSP clients
 - Mid-GOP RTSP joins: every PLAY re-arms a per-client keyframe wait and requests a sync frame, so a client that connects late starts decoding at the next IDR frame instead of choking on orphaned P-frames
 - RTMP push publishing (off by default): pushes the same H.264/AAC encode to an RTMP or RTMP(S) server — YouTube, Twitch, nginx-rtmp, or any media server — configured with a `rtmp://[user:pass@]host[:port]/app/stream-key` URL, with a capped-backoff auto-reconnect while enabled, a status line (idle/connecting/connected/error) on the device status snapshot, `/api/stream/rtmp/start|stop` routes, and a clean FCUnpublish/DeleteStream close; H.264 only (H.265 has no standard RTMP mapping and the push refuses to start under it), see [RTMP push](docs/rtmp.md)
 - WHIP push publishing (WebRTC, RFC 9725; off by default): pushes camera video over WebRTC to any WHIP ingest — MediaMTX, Cloudflare (SFU) mode, IVS, LiveKit — via an `http(s)://[user:pass@]host[:port]/endpoint` URL plus an optional bearer token and STUN server (blank STUN = LAN-only host candidates); video encodes from the camera NV21 tap with libwebrtc's hardware H.264 (independent of the RTSP codec setting), audio rides a dedicated 16 kHz mono Opus capture only while the microphone is free (video-only otherwise), ICE is one-shot with a ~3 s gather cap, teardown DELETEs the session resource, and the status line mirrors on the device snapshot with `/api/stream/whip/start|stop` routes
+- SRT push publishing (off by default): pushes MPEG-TS over Secure Reliable Transport to any SRT listener (MediaMTX, OBS, NVR ingests) via an `srt://[user:pass@]host[:port][?streamid=…]` URL, hand-rolled caller handshake (induction + conclusion with HSREQ/HSREP extension blocks), a per-session MPEG-TS muxer (PAT/PMT before keyframes, 7 TS packets per datagram), keepalives, a 15 s idle timeout with capped-backoff auto-reconnect, RTT from full ACKs on the status snapshot, `/api/stream/srt/start|stop` routes, and a retained MQTT stream-state topic; H.264 only, and v1 counts NAKed packets without retransmitting them (honest limitation, documented), see [SRT push](docs/srt.md)
 - ONVIF Profile S device service (off by default): WS-Discovery answers probes on UDP 239.255.255.250:3702 and a SOAP endpoint at `/onvif/device_service` serves the standard device/media queries, so ONVIF NVRs such as Home Assistant can discover the camera automatically — unauthenticated by design (LAN device metadata and stream URIs only; RTSP keeps its own auth), see [NVR integration](docs/nvr-integration.md)
 - Live audio streaming with configurable bitrate (32–320 kbps), channels (mono/stereo), and echo cancellation
 - Adaptive bitrate control that dynamically adjusts JPEG quality and frame rate based on network quality and thermal state
@@ -72,7 +74,7 @@ LensCast is an Android camera application with live video/audio streaming to web
 - Network quality monitoring with per-client throughput tracking and quality level classification (Excellent → Critical)
 - Foreground service with persistent notification to keep streaming alive in the background
 - Resume streams on boot (when the setting is enabled) and a Quick Settings tile for unattended camera operation — the tile is a manual request and always starts, restoring the outputs the on-device journal last recorded
-- Optional API token (Bearer / X-Api-Token header) for programmatic clients like Home Assistant or curl: read-only GET/HEAD on the protected routes plus POST on an explicit allow-list (stream/web/RTSP/RTMP start and stop, photo capture, recording start and stop, siren, torch, the ML-model and audio-model downloads, and the detection-test alert) — auth and session-management routes are never token-writable
+- Optional API token (Bearer / X-Api-Token header) for programmatic clients like Home Assistant or curl: read-only GET/HEAD on the protected routes plus POST on an explicit allow-list (stream/web/RTSP/RTMP/WHIP/SRT start and stop, photo capture, recording start and stop, siren, torch, the ML-model and audio-model downloads, and the detection-test alert) — auth and session-management routes are never token-writable
 
 ### Web UI (Remote Control Dashboard)
 - Full remote camera control dashboard built with SolidJS, Tailwind CSS v4, and DaisyUI
@@ -168,7 +170,11 @@ LensCast is an Android camera application with live video/audio streaming to web
 - [Remote access](docs/remote-access.md) — viewing the stream outside your LAN (Tailscale, WireGuard, and why port forwarding is discouraged)
 - [NVR integration](docs/nvr-integration.md) — Home Assistant (generic camera + ONVIF), VLC/ffmpeg, Frigate, and detection webhook recipes
 - [RTMP push](docs/rtmp.md) — push-publishing the stream to YouTube, Twitch, nginx-rtmp, and other RTMP(S) servers
+- [SRT push](docs/srt.md) — push-publishing the stream over Secure Reliable Transport (UDP) to SRT listeners
 - [Wear companion](wear/README.md) — the Wear OS module: watch-side stream toggle, photo capture, and snapshot view over the LAN API
+- [Contributing](CONTRIBUTING.md) — build prerequisites, test commands, architecture onboarding, and the release checklist
+- [Security](SECURITY.md) — threat model, known risk envelope, and how to report vulnerabilities
+- [Privacy](PRIVACY.md) — what LensCast does (and never does) with your data
 
 ---
 
@@ -195,7 +201,7 @@ LensCast is an Android camera application with live video/audio streaming to web
 - WiFi connection for streaming
 - Camera and microphone permissions
 - Node.js 20+ and npm (for building the web UI)
-- JDK 17 (for building the Android app)
+- JDK 21 (for building the Android app — matches the Gradle daemon toolchain in `gradle/gradle-daemon-jvm.properties`)
 
 ---
 
@@ -205,7 +211,7 @@ LensCast is an Android camera application with live video/audio streaming to web
 <summary><strong>Prerequisites</strong></summary>
 
   - Android Studio or Gradle CLI
-  - JDK 17
+  - JDK 21
   - Node.js 20+ with npm
 </details>
 
@@ -245,10 +251,11 @@ The Vite dev server proxies `/api`, `/stream`, `/audio`, and `/snapshot` request
 
 ## CI/CD
 
-A CI workflow (`.github/workflows/ci.yml`) runs on every push to main and every pull request: web UI typecheck + vitest, JVM unit tests for both flavors, and a store-flavor debug build.
+A CI workflow (`.github/workflows/ci.yml`) runs on every push to main, every pull request, and every release branch (`v*`, `release/**`): web UI typecheck + vitest, JVM unit tests for both flavors, a store-flavor debug build, and the Wear companion's unit tests + debug build.
 
 A GitHub Actions workflow (`.github/workflows/release.yml`) automates release builds:
 - Triggers on pushes to `v*` or `release/**` branches, or via manual dispatch
+- Runs the full test suite (web, app, wear) before any signed build
 - Builds the **store flavor** (with the in-app updater) as one signed APK per ABI (`armeabi-v7a`, `arm64-v8a`, `x86_64`) with distinct `versionCode`s (`major*10000 + minor*1000 + patch*10 + abiIndex`); the `fdroid` flavor is built by F-Droid's own recipe, not shipped here
 - Publishes them to a **draft** GitHub Release with automatic semantic version tagging — verify the assets, then publish
 - The `versionCode`/`versionName` literals in `app/build.gradle.kts` (which F-Droid's update checker reads) must be bumped in the same release — the workflow overrides them per build via `-PversionCode`/`-PversionName` but does not rewrite the tag's literals
@@ -287,6 +294,9 @@ app/src/main/java/com/raulshma/lenscast/
 │   ├── model/       Web API DTOs
 │   ├── onvif/       ONVIF Profile S device service and WS-Discovery responder
 │   ├── rtmp/        RTMP push publisher (AMF0, chunk protocol, FLV media tags)
+│   ├── srt/         SRT push publisher (caller handshake, MPEG-TS muxer, ACK/NAK stats)
+│   ├── whep/        WebRTC viewer endpoint (WHEP: SDP offer/answer, session registry)
+│   ├── whip/        WHIP push publisher (libwebrtc offer/answer, signaling)
 │   └── rtsp/        RTSP server, H.264/H.265 encoders, AAC encoder, RTP packetizers
 ├── settings/        Camera settings and app settings screens with ViewModels
 ├── navigation/      Compose navigation graph with shared element transitions

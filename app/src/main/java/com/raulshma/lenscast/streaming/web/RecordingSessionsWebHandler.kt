@@ -10,11 +10,13 @@ import com.raulshma.lenscast.streaming.model.RecordingSessionsResponseDto
 /**
  * GET /api/recordings/sessions?day=YYYY-MM-DD — the NVR day timeline behind
  * the web dashboard's recording timeline. Sessions are the day's video
- * captures (day boundary in device-local time), each with an inferred end
- * and a reconstructed trigger; the grouping and attribution decisions live
- * in the pure [RecordingSessionIndex], this handler only joins the two
- * stores and serializes. A missing, malformed, or impossible `day` answers
- * today — the timeline degrades, it never errors.
+ * captures (day boundary in device-local time), each with an inferred end and
+ * an attributed trigger: the capture's persisted provenance stamp when it
+ * carries a known wire name, else reconstruction from the detection events.
+ * The grouping and attribution decisions live in the pure
+ * [RecordingSessionIndex], this handler only joins the two stores and
+ * serializes. A missing, malformed, or impossible `day` answers today — the
+ * timeline degrades, it never errors.
  */
 class RecordingSessionsWebHandler(
     private val captureHistoryStore: CaptureHistoryStore,

@@ -6,6 +6,7 @@ import android.os.Build
 import android.util.Log
 import com.raulshma.lenscast.capture.model.RecordingConfig
 import com.raulshma.lenscast.capture.model.RecordingDurationPolicy
+import com.raulshma.lenscast.capture.model.RecordingTriggerPolicy
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -255,9 +256,18 @@ class RecordingController(
     }
 
     private fun schedule(config: RecordingConfig, startAtMs: Long) {
+        // Provenance fold at the scheduling boundary: a config that reaches
+        // the scheduled-start path and was not already attributed (a motion
+        // clip cannot be scheduled today, but the policy keeps that explicit)
+        // carries SCHEDULED from here on — the Scheduled state and the fired
+        // intent both hold the folded config, so the finalized capture's
+        // history entry stamps it without the service guessing.
+        val scheduled = config.copy(
+            trigger = RecordingTriggerPolicy.forStart(config, scheduledStart = true),
+        )
         synchronized(lock) {
             scheduledJob?.cancel()
-            _state.value = RecordingState.Scheduled(startAtMs, config)
+            _state.value = RecordingState.Scheduled(startAtMs, scheduled)
             scheduledJob = scope.launch {
                 val self = kotlin.coroutines.coroutineContext[Job]
                 val delayMs = startAtMs - System.currentTimeMillis()
@@ -266,7 +276,7 @@ class RecordingController(
                 // only fire if we are still the active schedule.
                 val fire = synchronized(lock) { scheduledJob === self }
                 if (fire) {
-                    launchService(startIntent(config), foreground = true)
+                    launchService(startIntent(scheduled), foreground = true)
                 }
             }
         }

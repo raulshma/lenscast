@@ -90,6 +90,20 @@ class DetectionEventWireTest {
     }
 
     @Test
+    fun `deep link rides the url field and a missing one stays omitted`() {
+        val alert = DetectionAlert(
+            kind = EventKind.MOTION,
+            value = 1.0,
+            timestampMs = 0,
+        )
+        // No deep link: the field is absent, keeping the historical payload
+        // shape byte-identical for callers that do not pass one.
+        assertFalse(encodeToJson(alert).contains("\"url\""))
+        val withLink = DetectionEventWire.encode(alert, "#/events").toString(Charsets.UTF_8)
+        assertTrue(withLink.contains("\"url\":\"#/events\""))
+    }
+
+    @Test
     fun `wire names decode to their kinds and unknown blank or cased names yield null`() {
         // The event feed's ?type= filter decodes through this mapper — an
         // unknown name must read as unknown (handler error), never silently

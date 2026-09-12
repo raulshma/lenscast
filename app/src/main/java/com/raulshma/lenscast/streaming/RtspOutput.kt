@@ -37,7 +37,9 @@ internal interface RtspAudioSource {
 
 /**
  * The live RTSP server as [RtspOutput] drives it. [RtspServer] implements
- * it; JVM tests substitute a fake server that records the calls.
+ * it; JVM tests substitute a fake server that records the calls. The
+ * sub-stream/client-registry members carry no-op defaults so a fake only
+ * needs what its test exercises.
  */
 internal interface RtspServerHandle {
     fun start(initial: RtspConfig): Boolean
@@ -52,8 +54,17 @@ internal interface RtspServerHandle {
     /** One AAC access unit from the encoded-stream hub. */
     fun feedAudio(aacData: ByteArray)
 
+    /** One encoded access unit for the low-res sub-stream (/sub); no-op when the server has none. */
+    fun feedSubVideo(nalUnits: List<EncodedNalUnit>) {}
+
     /** The watchdog/dashboard health snapshot. */
     fun health(): RtspHealth
+
+    /** The connected sessions, for the Web API's clients list. */
+    fun clients(): List<RtspClientDescriptor> = emptyList()
+
+    /** True kick: close one session by id; false when no such session. */
+    fun kickClient(clientId: String): Boolean = false
 }
 
 /**
@@ -80,6 +91,23 @@ data class RtspHealth(
     val acceptedFrames: Long = 0L,
     val droppedFrames: Long = 0L,
     val healthy: Boolean = true,
+)
+
+/**
+ * One connected RTSP session, for the Web API's clients list — the RTSP
+ * half of the client-parity surface (the MJPEG pump exposes its clients the
+ * same way). [media] lists the tracks the connection SETUPed: `video`,
+ * `audio`, and/or the sub-stream's path name. [playing] is true once any
+ * PLAY landed on the connection (main or sub).
+ */
+data class RtspClientDescriptor(
+    val id: String,
+    val remoteAddress: String,
+    val connectedAtMs: Long,
+    val transport: String,
+    val media: List<String>,
+    val playing: Boolean,
+    val framesSent: Long = 0,
 )
 
 /**
@@ -114,6 +142,8 @@ internal class RtspOutput(
     private val onStateChanged: (running: Boolean, url: String) -> Unit,
     /** The encoded-stream hub's live bitrate seam: the H.264 encoder is the hub's, so a bitrate change lands there, not in any server instance. */
     private val onVideoBitrateChanged: (Int) -> Unit = {},
+    /** True while HTTPS/TLS mode is on — the advertised scheme becomes rtsps and the listener wraps in SSL. */
+    private val secure: () -> Boolean = { false },
     private val serverFactory: (port: Int) -> RtspServerHandle,
 ) {
 
@@ -201,6 +231,17 @@ internal class RtspOutput(
     fun feedEncodedAudio(aacData: ByteArray) {
         server?.feedAudio(aacData)
     }
+
+    /** The hub's low-res sub-stream feed, forwarded like [feedEncodedVideo]. */
+    fun feedEncodedSubVideo(nalUnits: List<EncodedNalUnit>) {
+        server?.feedSubVideo(nalUnits)
+    }
+
+    /** The connected RTSP sessions for the clients list; empty while stopped. */
+    fun clientSnapshot(): List<RtspClientDescriptor> = server?.clients() ?: emptyList()
+
+    /** True kick of one RTSP session by id; false while stopped or unknown id. */
+    fun kickClient(clientId: String): Boolean = server?.kickClient(clientId) ?: false
 
     // ── settings: the restart-vs-apply choice ──
 
@@ -436,7 +477,8 @@ internal class RtspOutput(
 
     private fun buildUrl(): String {
         val ip = NetworkUtils.getLocalIpAddress() ?: "localhost"
-        return "rtsp://$ip:$port/${RtspUriPolicy.DEFAULT_STREAM_PATH}"
+        val scheme = if (secure()) "rtsps" else "rtsp"
+        return "$scheme://${NetworkUtils.formatHostForUrl(ip)}:$port/${RtspUriPolicy.DEFAULT_STREAM_PATH}"
     }
 
     companion object {

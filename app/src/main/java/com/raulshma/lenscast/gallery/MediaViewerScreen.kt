@@ -35,6 +35,8 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.StarBorder
 import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -86,6 +88,7 @@ fun MediaViewerScreen(
     initialMediaId: String,
     pagerState: PagerState,
     onDeleteCurrent: () -> Unit,
+    onToggleFavorite: (String) -> Unit = {},
     onNavigateBack: () -> Unit,
     /** Encrypted-at-rest photos' decrypted cache files, keyed by history id. */
     decryptedPhotos: Map<String, java.io.File> = emptyMap(),
@@ -179,6 +182,18 @@ fun MediaViewerScreen(
                 }
                 IconButton(onClick = { openMediaExternal(context, mediaItem) }) {
                     Icon(Icons.AutoMirrored.Filled.OpenInNew, contentDescription = stringResource(R.string.gallery_open_externally_cd), tint = Color.White)
+                }
+                IconButton(onClick = { onToggleFavorite(mediaItem.id) }) {
+                    // The viewer's star toggle; the grid badge and the favorites
+                    // filter read the same persisted flag.
+                    Icon(
+                        if (mediaItem.favorite) Icons.Default.Star else Icons.Default.StarBorder,
+                        contentDescription = stringResource(
+                            if (mediaItem.favorite) R.string.gallery_unfavorite_cd
+                            else R.string.gallery_favorite_cd
+                        ),
+                        tint = if (mediaItem.favorite) MaterialTheme.colorScheme.primary else Color.White,
+                    )
                 }
                 IconButton(onClick = { showDeleteDialog = true }) {
                     Icon(Icons.Default.Delete, contentDescription = stringResource(R.string.gallery_delete_cd), tint = Color.White)

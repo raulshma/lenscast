@@ -1,6 +1,7 @@
 package com.raulshma.lenscast.streaming.model
 
 import com.raulshma.lenscast.core.AppJson
+import com.raulshma.lenscast.capture.model.DetectionEventDeepLink
 import com.raulshma.lenscast.streaming.web.AuthWebHandler
 import com.squareup.moshi.Types
 import org.junit.Assert.assertEquals
@@ -130,6 +131,7 @@ class DtoContractFixtureTest {
                 lastRecoveryTimestamp = 1_788_825_600_000,
                 lastFailureReason = "Encoder stalled; pipeline restarted",
             ),
+            encodedVideoBitrate = 2_000_000,
         )
         assertMatchesFixture(
             "status.json",
@@ -245,6 +247,7 @@ class DtoContractFixtureTest {
                     labels = listOf("person"),
                     clipMediaId = 123_456L,
                     clipFileName = "VID_20260908_10153100.mp4",
+                    url = DetectionEventDeepLink.forClip(123_456L),
                 ),
             ),
             total = 1,
@@ -388,6 +391,22 @@ class DtoContractFixtureTest {
                     endMs = 1_788_850_060_000,
                     trigger = "sound",
                     mediaId = "9a8b7c6d-5e4f-4a3b-2c1d-0e9f8a7b6c5d",
+                ),
+                // The provenance stamp's own wire names beyond reconstruction:
+                // a continuous-loop segment and an assembled timelapse.
+                RecordingSessionDto(
+                    id = "4c4d4e4f-5a5b-4c5d-8e5f-1a2b3c4d5e6f",
+                    startMs = 1_788_862_200_000,
+                    endMs = 1_788_865_800_000,
+                    trigger = "continuous",
+                    mediaId = "4c4d4e4f-5a5b-4c5d-8e5f-1a2b3c4d5e6f",
+                ),
+                RecordingSessionDto(
+                    id = "6f7a8b9c-0d1e-4f2a-b3c4-d5e6f7a8b9c0",
+                    startMs = 1_788_868_800_000,
+                    endMs = 1_788_869_100_000,
+                    trigger = "interval",
+                    mediaId = "6f7a8b9c-0d1e-4f2a-b3c4-d5e6f7a8b9c0",
                 ),
             ),
         )

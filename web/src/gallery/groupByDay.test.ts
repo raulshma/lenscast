@@ -8,8 +8,8 @@ const NOW = new Date(2026, 8, 9, 12, 0, 0).getTime()
 function item(id: string, timestamp: number): GalleryItem {
   return {
     id, type: 'PHOTO', fileName: `${id}.jpg`, timestamp, fileSizeBytes: 1,
-    durationMs: 0, thumbnailUrl: `/api/media/${id}/thumbnail`, downloadUrl: `/api/media/${id}`,
-    url: `/api/media/${id}`,
+    durationMs: 0, favorite: false, thumbnailUrl: `/api/media/${id}/thumbnail`,
+    downloadUrl: `/api/media/${id}`, url: `/api/media/${id}`,
   }
 }
 

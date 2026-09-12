@@ -50,6 +50,7 @@ import com.raulshma.lenscast.camera.model.QuickSettingEditor
 import com.raulshma.lenscast.camera.model.QuickSettingRanges
 import com.raulshma.lenscast.camera.model.QuickSettingType
 import com.raulshma.lenscast.camera.model.PhotoCapturePlan
+import com.raulshma.lenscast.camera.model.PhotoAspectRatio
 import com.raulshma.lenscast.camera.model.SelfTimerMode
 import com.raulshma.lenscast.camera.model.WhiteBalance
 import com.raulshma.lenscast.camera.model.chipLabel
@@ -111,6 +112,7 @@ fun CameraSettingsScreen(
     val photoJpegQuality by viewModel.photoJpegQuality.collectAsState()
     val photoMaximizeQuality by viewModel.photoMaximizeQuality.collectAsState()
     val rawCaptureEnabled by viewModel.rawCaptureEnabled.collectAsState()
+    val photoAspectRatio by viewModel.photoAspectRatio.collectAsState()
     val rawCaptureSupported by viewModel.isRawCaptureSupported.collectAsState()
     val geotagEnabled by viewModel.geotagEnabled.collectAsState()
 
@@ -301,6 +303,23 @@ fun CameraSettingsScreen(
                                 PhotoCapturePlan.PHOTO_JPEG_QUALITY_MAX.toFloat(),
                         onValueChange = { viewModel.updatePhotoJpegQuality(it.toInt()) }
                     )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = stringResource(R.string.settings_photo_aspect_ratio),
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        PhotoAspectRatio.entries.forEach { aspect ->
+                            FilterChip(
+                                label = photoAspectChipLabel(aspect),
+                                selected = aspect == photoAspectRatio,
+                                onClick = { viewModel.updatePhotoAspectRatio(aspect) }
+                            )
+                        }
+                    }
                     Spacer(modifier = Modifier.height(8.dp))
                     SwitchSetting(
                         title = stringResource(R.string.settings_maximize_quality),
@@ -517,6 +536,13 @@ fun SwitchSetting(
         )
         Switch(checked = checked, onCheckedChange = onCheckedChange)
     }
+}
+
+/** The aspect chips' labels: the two ratios are universal camera shorthand — "4:3", "16:9". */
+@Composable
+internal fun photoAspectChipLabel(aspect: PhotoAspectRatio): String = when (aspect) {
+    PhotoAspectRatio.R4_3 -> stringResource(R.string.settings_photo_aspect_4_3)
+    PhotoAspectRatio.R16_9 -> stringResource(R.string.settings_photo_aspect_16_9)
 }
 
 @Composable

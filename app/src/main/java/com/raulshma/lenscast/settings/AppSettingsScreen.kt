@@ -47,6 +47,8 @@ import com.raulshma.lenscast.R
 import com.raulshma.lenscast.streaming.rtsp.RtspInputFormat
 import com.raulshma.lenscast.streaming.rtmp.RtmpStatus
 import com.raulshma.lenscast.streaming.rtmp.RtmpUrl
+import com.raulshma.lenscast.streaming.srt.SrtStatus
+import com.raulshma.lenscast.streaming.srt.SrtUrl
 import com.raulshma.lenscast.streaming.whip.WhipStatus
 import com.raulshma.lenscast.streaming.whip.WhipUrl
 import com.raulshma.lenscast.update.UpdateViewModel
@@ -130,8 +132,13 @@ fun AppSettingsScreen(
     val rtmpUrl by viewModel.rtmpUrl.collectAsState()
     val whipEnabled by viewModel.whipEnabled.collectAsState()
     val whipUrl by viewModel.whipUrl.collectAsState()
+    val srtEnabled by viewModel.srtEnabled.collectAsState()
+    val srtUrl by viewModel.srtUrl.collectAsState()
     val whipStunServer by viewModel.whipStunServer.collectAsState()
     val adaptiveBitrateEnabled by viewModel.adaptiveBitrateEnabled.collectAsState()
+    val adaptiveEncodedBitrateEnabled by viewModel.adaptiveEncodedBitrateEnabled.collectAsState()
+    val hlsDvrSegments by viewModel.hlsDvrSegments.collectAsState()
+    val rtspSubStreamEnabled by viewModel.rtspSubStreamEnabled.collectAsState()
     val mdnsEnabled by viewModel.mdnsEnabled.collectAsState()
     val isIgnoringBatteryOptimizations by viewModel.isIgnoringBatteryOptimizations
     val resumeStreamsOnBoot by viewModel.resumeStreamsOnBoot.collectAsState()
@@ -327,6 +334,30 @@ fun AppSettingsScreen(
                         onCheckedChange = { viewModel.updateAdaptiveBitrateEnabled(it) }
                     )
                     SwitchSetting(
+                        title = stringResource(R.string.settings_adaptive_encoded_bitrate),
+                        checked = adaptiveEncodedBitrateEnabled,
+                        onCheckedChange = { viewModel.updateAdaptiveEncodedBitrateEnabled(it) }
+                    )
+                    if (adaptiveEncodedBitrateEnabled) {
+                        Text(
+                            text = stringResource(R.string.settings_adaptive_encoded_bitrate_description),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    SliderSetting(
+                        title = stringResource(R.string.settings_hls_dvr),
+                        value = hlsDvrSegments.toFloat(),
+                        range = StreamDefaultsRange.HLS_DVR_SEGMENTS,
+                        steps = StreamDefaultsRange.HLS_DVR_STEPS,
+                        onValueChange = { viewModel.updateHlsDvrSegments(it.toInt()) }
+                    )
+                    Text(
+                        text = stringResource(R.string.settings_hls_dvr_description),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    SwitchSetting(
                         title = stringResource(R.string.settings_eco_idle),
                         checked = ecoIdleFpsEnabled,
                         onCheckedChange = { viewModel.updateEcoIdleFpsEnabled(it) }
@@ -466,6 +497,18 @@ fun AppSettingsScreen(
                             selected = rtspInputFormat.name,
                             onSelect = { viewModel.updateRtspInputFormat(it) }
                         )
+                        SwitchSetting(
+                            title = stringResource(R.string.settings_rtsp_sub_stream),
+                            checked = rtspSubStreamEnabled,
+                            onCheckedChange = { viewModel.updateRtspSubStreamEnabled(it) }
+                        )
+                        if (rtspSubStreamEnabled) {
+                            Text(
+                                text = stringResource(R.string.settings_rtsp_sub_stream_description),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
                     }
                 }
             }
@@ -604,6 +647,66 @@ fun AppSettingsScreen(
                         )
                         Text(
                             stringResource(R.string.settings_whip_note),
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
+                }
+            }
+
+            item {
+                // The SRT push output: the RTMP section's twin — the enable
+                // gate arms it, the URL is the push target (srt://host:port
+                // ?streamid=... — the stream id never displays back on the
+                // web API), and the status line mirrors the publisher's live
+                // lifecycle with the measured RTT while connected.
+                val srtStatus by app.streamingManager.srtStatus.collectAsState()
+                val srtStats = app.streamingManager.srtStats()
+                SettingsSection(title = stringResource(R.string.settings_section_srt)) {
+                    SwitchSetting(
+                        title = stringResource(R.string.settings_enable_srt),
+                        checked = srtEnabled,
+                        onCheckedChange = { viewModel.updateSrtEnabled(it) }
+                    )
+                    if (srtEnabled) {
+                        OutlinedTextField(
+                            value = srtUrl,
+                            onValueChange = { viewModel.updateSrtUrl(it) },
+                            label = { Text(stringResource(R.string.settings_srt_url)) },
+                            placeholder = { Text(stringResource(R.string.settings_srt_url_hint)) },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true
+                        )
+                        if (srtUrl.isNotBlank() && SrtUrl.parse(srtUrl) == null) {
+                            Text(
+                                stringResource(R.string.settings_srt_url_invalid),
+                                color = MaterialTheme.colorScheme.error,
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                        }
+                        val srtStatusName = when (val s = srtStatus) {
+                            is SrtStatus.Error -> stringResource(R.string.settings_srt_status_error, s.message)
+                            SrtStatus.Idle -> stringResource(R.string.settings_srt_status_idle)
+                            SrtStatus.Connecting -> stringResource(R.string.settings_srt_status_connecting)
+                            SrtStatus.Connected -> stringResource(R.string.settings_srt_status_connected)
+                        }
+                        val srtStatusText = stringResource(R.string.settings_srt_status, srtStatusName)
+                        Text(
+                            srtStatusText,
+                            color = if (srtStatus is SrtStatus.Error) {
+                                MaterialTheme.colorScheme.error
+                            } else {
+                                MaterialTheme.colorScheme.onSurface
+                            },
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                        if (srtStats.rttMs > 0.0) {
+                            Text(
+                                stringResource(R.string.settings_srt_rtt, String.format(java.util.Locale.US, "%.0f", srtStats.rttMs)),
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                        }
+                        Text(
+                            stringResource(R.string.settings_srt_note),
                             style = MaterialTheme.typography.bodySmall
                         )
                     }

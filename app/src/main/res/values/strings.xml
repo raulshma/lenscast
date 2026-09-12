@@ -12,6 +12,7 @@
     <!-- ── Camera screen ── -->
     <string name="camera_preview_hidden">Preview Hidden</string>
     <string name="camera_switch_camera_cd">Switch camera</string>
+    <string name="camera_flash_cd">Flash mode</string>
     <string name="camera_connect_cd">Connect — QR + URLs</string>
     <string name="camera_hide_preview_cd">Hide preview</string>
     <string name="camera_show_preview_cd">Show preview</string>
@@ -74,6 +75,11 @@
     <string name="capture_start_interval">Start Interval</string>
     <string name="capture_assembling">Assembling…</string>
     <string name="capture_assemble_timelapse">Assemble Timelapse (last 100 photos)</string>
+    <string name="capture_auto_timelapse">Auto-Timelapse on Completion</string>
+    <string name="capture_timelapse_saved">Timelapse saved: %1$s (%2$d frames)</string>
+    <string name="capture_timelapse_need_photos">Need at least %1$d photos to assemble a timelapse</string>
+    <string name="capture_timelapse_unreadable">Could not read enough frames (%1$s)</string>
+    <string name="capture_timelapse_failed">Timelapse failed</string>
     <string name="capture_section_scheduled">Scheduled Recording</string>
     <string name="capture_include_audio">Include Audio</string>
     <string name="capture_recording_quality">Recording Quality</string>
@@ -139,6 +145,12 @@
     <string name="gallery_filter_all">All (%1$d)</string>
     <string name="gallery_filter_photos">Photos (%1$d)</string>
     <string name="gallery_filter_videos">Videos (%1$d)</string>
+    <string name="gallery_filter_favorites">Favorites (%1$d)</string>
+    <string name="gallery_search_hint">Search by file name</string>
+    <string name="gallery_search_clear_cd">Clear search</string>
+    <string name="gallery_favorite_cd">Mark as favorite</string>
+    <string name="gallery_unfavorite_cd">Remove from favorites</string>
+    <string name="gallery_undo">Undo</string>
     <string name="gallery_empty_none_title">No media yet</string>
     <string name="gallery_empty_none_body">Captured photos and videos will appear here once you start shooting.</string>
     <string name="gallery_empty_photos_title">No photos in this view</string>
@@ -152,6 +164,10 @@
         <item quantity="other">%1$d items • %2$s</item>
     </plurals>
     <string name="gallery_play_video_cd">Play video</string>
+    <plurals name="gallery_trash_snackbar">
+        <item quantity="one">Moved to trash — %d item</item>
+        <item quantity="other">Moved to trash — %d items</item>
+    </plurals>
     <string name="gallery_type_photo">Photo</string>
     <string name="gallery_type_video">Video</string>
     <string name="gallery_selected_cd">Selected</string>
@@ -206,6 +222,9 @@
     <string name="settings_maximize_quality">Maximize Quality</string>
     <string name="settings_raw_jpeg">RAW+JPEG Capture</string>
     <string name="settings_raw_unsupported">This camera doesn\'t support RAW+JPEG; captures save as JPEG.</string>
+    <string name="settings_photo_aspect_ratio">Photo Aspect Ratio</string>
+    <string name="settings_photo_aspect_16_9">16:9</string>
+    <string name="settings_photo_aspect_4_3">4:3</string>
     <string name="settings_gps_geotag">GPS Geotag (EXIF)</string>
     <string name="settings_section_night_vision">Night Vision / IR</string>
     <string name="settings_mode">Mode</string>
@@ -267,6 +286,12 @@
     <string name="settings_enable_web_streaming">Enable Web Streaming</string>
     <string name="settings_streaming_port">Streaming Port</string>
     <string name="settings_adaptive_bitrate">Adaptive Bitrate</string>
+    <string name="settings_adaptive_encoded_bitrate">Adaptive Encoded Bitrate</string>
+    <string name="settings_adaptive_encoded_bitrate_description">Scales the RTSP/WebRTC encoder bitrate down on a slow network (or in the heat) and back up when bandwidth recovers — measured at the RTSP, WebSocket, and HLS send paths</string>
+    <string name="settings_hls_dvr">HLS DVR Window</string>
+    <string name="settings_hls_dvr_description">Retained HLS segments (~2 s each); 0 keeps the live-only playlist, higher values let players seek recent history</string>
+    <string name="settings_rtsp_sub_stream">RTSP Sub-Stream (480p)</string>
+    <string name="settings_rtsp_sub_stream_description">Second low-res H.264 stream at rtsp://device:port/sub for NVR detect roles (e.g. Frigate) — runs only while the RTSP output is live</string>
     <string name="settings_eco_idle">Eco Idle Mode (Battery)</string>
     <string name="settings_eco_idle_description">While on battery with no viewers, drops the stream to a low idle frame rate and pauses audio; restores on the first viewer, charger, or thermal event</string>
     <string name="settings_mdns">Network Discovery (mDNS)</string>
@@ -300,6 +325,19 @@
     <string name="settings_rtmp_status_connecting">Connecting…</string>
     <string name="settings_rtmp_status_connected">Connected</string>
     <string name="settings_rtmp_h264_note">Video must be H.264 (RTSP video codec); the stream key stays in the URL on this device</string>
+    <string name="settings_section_srt">SRT Push</string>
+    <string name="settings_enable_srt">Enable SRT Push</string>
+    <string name="settings_srt_url">Push URL</string>
+    <string name="settings_srt_url_hint" translatable="false">srt://host:port?streamid=key</string>
+    <string name="settings_srt_url_invalid">Not a usable push URL - expected srt://host:port?streamid=… (port defaults to 9710)</string>
+    <string name="settings_srt_status">Status: %1$s</string>
+    <string name="settings_srt_status_error">error - %1$s</string>
+    <string name="settings_srt_status_idle">Idle</string>
+    <string name="settings_srt_status_connecting">Connecting…</string>
+    <string name="settings_srt_status_connected">Connected</string>
+    <string name="settings_srt_rtt">Round-trip time: %1$s ms</string>
+    <string name="settings_srt_note">Publishes MPEG-TS over UDP to an SRT listener; video must be H.264 (RTSP video codec); the stream id stays in the URL on this device</string>
+
     <string name="settings_section_whip">WHIP Push (WebRTC)</string>
     <string name="settings_enable_whip">Enable WHIP Push</string>
     <string name="settings_whip_url">WHIP Endpoint</string>
@@ -363,6 +401,9 @@
     <string name="detection_sound_classification_description">Applies on top of sound detection — a YAMNet model classifies the audio around each event and the class labels (smoke alarm, dog bark, glass, siren…) ride the alert, webhook, MQTT, and event-log payloads. Never suppresses the event itself, and never available before Android 7.0 (API 24)</string>
     <string name="detection_min_confidence">Minimum Confidence (%)</string>
     <string name="detection_sound_classes">Classes that Label Events</string>
+    <string name="detection_sound_trigger">Trigger on Sound Classes</string>
+    <string name="detection_sound_trigger_description">A chosen class at or above the confidence floor fires a detection event on its own — loud glass, an alarm, a bark — without needing the sound threshold first. Adds events; the threshold\'s own alerts are untouched</string>
+    <string name="detection_sound_trigger_classes">Classes that Trigger Events</string>
     <!-- The YAMNet class chips display names, mapped from the curated wire
          labels in SoundClassPolicy.SECURITY_CLASSES. The wire labels (exact
          AudioSet spellings) stay the persistence and payload keys and never

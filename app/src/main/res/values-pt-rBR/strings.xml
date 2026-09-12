@@ -12,6 +12,7 @@
     <!-- ── Tela da câmera ── -->
     <string name="camera_preview_hidden">Prévia oculta</string>
     <string name="camera_switch_camera_cd">Alternar câmera</string>
+    <string name="camera_flash_cd">Modo de flash</string>
     <string name="camera_connect_cd">Conectar — QR + URLs</string>
     <string name="camera_hide_preview_cd">Ocultar prévia</string>
     <string name="camera_show_preview_cd">Mostrar prévia</string>
@@ -70,6 +71,11 @@
     <string name="capture_start_interval">Iniciar intervalo</string>
     <string name="capture_assembling">Montando…</string>
     <string name="capture_assemble_timelapse">Montar timelapse (últimas 100 fotos)</string>
+    <string name="capture_auto_timelapse">Timelapse automático ao concluir</string>
+    <string name="capture_timelapse_saved">Timelapse salvo: %1$s (%2$d quadros)</string>
+    <string name="capture_timelapse_need_photos">É preciso pelo menos %1$d fotos para montar um timelapse</string>
+    <string name="capture_timelapse_unreadable">Não foi possível ler quadros suficientes (%1$s)</string>
+    <string name="capture_timelapse_failed">Falha ao montar o timelapse</string>
     <string name="capture_section_scheduled">Gravação agendada</string>
     <string name="capture_include_audio">Incluir áudio</string>
     <string name="capture_recording_quality">Qualidade de gravação</string>
@@ -135,6 +141,12 @@
     <string name="gallery_filter_all">Todos (%1$d)</string>
     <string name="gallery_filter_photos">Fotos (%1$d)</string>
     <string name="gallery_filter_videos">Vídeos (%1$d)</string>
+    <string name="gallery_filter_favorites">Favoritos (%1$d)</string>
+    <string name="gallery_search_hint">Pesquisar por nome do arquivo</string>
+    <string name="gallery_search_clear_cd">Limpar pesquisa</string>
+    <string name="gallery_favorite_cd">Marcar como favorito</string>
+    <string name="gallery_unfavorite_cd">Remover dos favoritos</string>
+    <string name="gallery_undo">Desfazer</string>
     <string name="gallery_empty_none_title">Ainda não há mídias</string>
     <string name="gallery_empty_none_body">Fotos e vídeos capturados aparecerão aqui quando você começar a fotografar.</string>
     <string name="gallery_empty_photos_title">Nenhuma foto nesta visualização</string>
@@ -148,6 +160,10 @@
         <item quantity="other">%1$d itens • %2$s</item>
     </plurals>
     <string name="gallery_play_video_cd">Reproduzir vídeo</string>
+    <plurals name="gallery_trash_snackbar">
+        <item quantity="one">Movido para a lixeira — %d item</item>
+        <item quantity="other">Movido para a lixeira — %d itens</item>
+    </plurals>
     <string name="gallery_type_photo">Foto</string>
     <string name="gallery_type_video">Vídeo</string>
     <string name="gallery_selected_cd">Selecionado</string>
@@ -207,6 +223,9 @@
     <string name="settings_maximize_quality">Qualidade máxima</string>
     <string name="settings_raw_jpeg">Captura RAW+JPEG</string>
     <string name="settings_raw_unsupported">Esta câmera não é compatível com RAW+JPEG; as capturas são salvas como JPEG.</string>
+    <string name="settings_photo_aspect_ratio">Proporção da foto</string>
+    <string name="settings_photo_aspect_16_9">16:9</string>
+    <string name="settings_photo_aspect_4_3">4:3</string>
     <string name="settings_gps_geotag">Geotag por GPS (EXIF)</string>
     <string name="settings_section_night_vision">Visão noturna / IR</string>
     <string name="settings_mode">Modo</string>
@@ -268,6 +287,12 @@
     <string name="settings_enable_web_streaming">Ativar transmissão web</string>
     <string name="settings_streaming_port">Porta de transmissão</string>
     <string name="settings_adaptive_bitrate">Bitrate adaptativo</string>
+    <string name="settings_adaptive_encoded_bitrate">Bitrate adaptativo do codificador</string>
+    <string name="settings_adaptive_encoded_bitrate_description">Reduz o bitrate do codificador em redes lentas (ou com calor) e restaura quando a banda volta — medido nos envios RTSP, WebSocket e HLS</string>
+    <string name="settings_hls_dvr">Janela DVR do HLS</string>
+    <string name="settings_hls_dvr_description">Segmentos HLS retidos (~2 s cada); 0 mantém a playlist apenas ao vivo, valores maiores permitem voltar no histórico recente</string>
+    <string name="settings_rtsp_sub_stream">Substream RTSP (480p)</string>
+    <string name="settings_rtsp_sub_stream_description">Segundo fluxo H.264 de baixa resolução em rtsp://dispositivo:porta/sub para papéis de detecção de NVR (ex.: Frigate) — funciona apenas com a saída RTSP ativa</string>
     <string name="settings_eco_idle">Modo econômico em repouso (bateria)</string>
     <string name="settings_eco_idle_description">Com bateria e sem espectadores, reduz a transmissão a uma baixa taxa de quadros de espera e pausa o áudio; retoma com o primeiro espectador, o carregador ou um evento térmico</string>
     <string name="settings_mdns">Descoberta de rede (mDNS)</string>
@@ -300,6 +325,19 @@
     <string name="settings_rtmp_status_connecting">Conectando…</string>
     <string name="settings_rtmp_status_connected">Conectado</string>
     <string name="settings_rtmp_h264_note">O vídeo precisa ser H.264 (codec de vídeo do RTSP); a chave do stream permanece na URL neste dispositivo</string>
+    <string name="settings_section_srt">Push SRT</string>
+    <string name="settings_enable_srt">Ativar push SRT</string>
+    <string name="settings_srt_url">URL de push</string>
+    <string name="settings_srt_url_hint" translatable="false">srt://host:porta?streamid=chave</string>
+    <string name="settings_srt_url_invalid">Não é uma URL de push utilizável - esperado srt://host:porta?streamid=… (porta padrão 9710)</string>
+    <string name="settings_srt_status">Status: %1$s</string>
+    <string name="settings_srt_status_error">erro - %1$s</string>
+    <string name="settings_srt_status_idle">Ocioso</string>
+    <string name="settings_srt_status_connecting">Conectando…</string>
+    <string name="settings_srt_status_connected">Conectado</string>
+    <string name="settings_srt_rtt">Tempo de ida e volta: %1$s ms</string>
+    <string name="settings_srt_note">Publica MPEG-TS via UDP para um listener SRT; o vídeo precisa ser H.264 (codec de vídeo do RTSP); o stream id permanece na URL neste dispositivo</string>
+
     <string name="settings_section_whip">Push WHIP (WebRTC)</string>
     <string name="settings_enable_whip">Ativar push WHIP</string>
     <string name="settings_whip_url">Endpoint WHIP</string>
@@ -362,6 +400,9 @@
     <string name="detection_sound_classification_description">Aplica-se sobre a detecção de som — um modelo YAMNet classifica o áudio ao redor de cada evento e os rótulos de classe (detector de fumaça, latido de cachorro, vidro, sirene…) acompanham o alerta, o webhook, o MQTT e o registro de eventos. Nunca suprime o evento em si e nunca está disponível antes do Android 7.0 (API 24)</string>
     <string name="detection_min_confidence">Confiança mínima (%)</string>
     <string name="detection_sound_classes">Classes que rotulam eventos</string>
+    <string name="detection_sound_trigger">Disparar por classes de som</string>
+    <string name="detection_sound_trigger_description">Uma classe escolhida com confiança suficiente dispara um evento de detecção por si só — vidro alto, alarme, latido — sem precisar antes do limite de som. Apenas adiciona eventos; os alertas do limite ficam intactos</string>
+    <string name="detection_sound_trigger_classes">Classes que disparam eventos</string>
     <!-- Nomes exibidos dos chips de classes YAMNet, mapeados a partir dos
          rótulos wire curados em SoundClassPolicy.SECURITY_CLASSES. Os
          rótulos wire (grafia exata do AudioSet) permanecem as chaves de

@@ -1,0 +1,30 @@
+LensCast convierte tu dispositivo Android en una estación de cámara en red con controles profesionales, acceso web remoto, fotografía por intervalos y grabación programada.
+
+Cámara
+• Vista previa en vivo con barra de ajustes rápidos profesional
+• Controles manuales: compensación de exposición, ISO, balance de blancos, modo de enfoque, zoom
+• Soporte de múltiples lentes (ultrapanorámica, gran angular, teleobjetivo) con cambio de lente en tiempo de ejecución
+• HDR, estabilización de imagen, resolución hasta 4K, velocidad de 15–60 fps
+• Captura de fotos y grabación de vídeo
+• Modo visión nocturna / IR, modos de escena, distancia de enfoque manual, temperatura de color
+
+Streaming en vivo
+• Streaming de vídeo MJPEG en tiempo real a cualquier navegador de la misma red
+• Reproducción de baja latencia en el navegador (WebCodecs sobre WebSocket) con degradación automática a MJPEG y HLS
+• Streaming RTSP con audio AAC y vídeo H.264/H.265 a 480p/720p/1080p para VLC, OBS y NVR
+• Servicio de dispositivo ONVIF Profile S (desactivado por defecto) para que NVR como Home Assistant descubran la cámara
+• Modo HTTPS con certificado autofirmado en el propio dispositivo
+
+Panel web
+• Ver el stream en vivo, explorar y descargar fotos y grabaciones
+• Control remoto total de los ajustes de cámara y streaming
+• Autenticación con contraseña opcional
+
+Automatización
+• Filtro de detección de objetos (opcional): el modelo de código abierto EfficientDet-Lite0 — Apache-2.0, descargado a demanda con SHA-256 fijado desde el alojamiento oficial de TensorFlow — dispara alertas MQTT o grabación cuando aparecen los objetos configurados
+• Fotografía por intervalos y grabación programada o continua
+• Horas de silencio para las notificaciones
+
+Sin anuncios, sin rastreo, sin nube. Todo el procesamiento permanece en tu dispositivo; el panel web lo sirve un servidor HTTP integrado en tu red local.
+
+Nota: la compilación de F-Droid se distribuye sin el actualizador integrado; las actualizaciones llegan desde F-Droid.

@@ -52,6 +52,10 @@ class WearRequestUrlsTest {
             WearRequestUrls.snapshot("10.0.0.2", 8080),
         )
         assertEquals(
+            "http://10.0.0.2:8080/api/detection/events?limit=5",
+            WearRequestUrls.detectionEvents("10.0.0.2", 8080, 5),
+        )
+        assertEquals(
             "http://10.0.0.2:8080/api/stream/start",
             WearRequestUrls.streamStart("10.0.0.2", 8080),
         )

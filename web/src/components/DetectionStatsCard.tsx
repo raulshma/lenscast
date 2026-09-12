@@ -4,11 +4,12 @@ import { getDetectionStats } from '../api/client'
 import { STATS_WINDOWS, sevenDaySeries, windowCounts, windowTotal, type StatsWindow } from '../lib/detectionStats'
 import { todayKey } from '../lib/timeline'
 import SettingsCard from './SettingsCard'
+import { formatDate, t, tCount } from '../lib/i18n'
 
 function weekdayLabel(day: string): string {
   const [y, m, d] = day.split('-').map(Number)
   if (!y || !m || !d) return day
-  return new Date(y, m - 1, d).toLocaleDateString(undefined, { weekday: 'narrow' })
+  return formatDate(new Date(y, m - 1, d), { weekday: 'narrow' })
 }
 
 /**
@@ -37,20 +38,20 @@ export default function DetectionStatsCard() {
           <rect x="16" y="4" width="3" height="14" rx="1" />
         </svg>
       }
-      title="Detection Statistics"
+      title={t('stats.title')}
     >
       <Show
         when={stats()}
         fallback={
           <div class="status-banner status-banner-info stream-mode-hint" role="note">
             <span class="status-banner-dot" aria-hidden="true" />
-            <span>Detection statistics unavailable.</span>
+            <span>{t('stats.unavailable')}</span>
           </div>
         }
       >
         <div class="field-group">
           <div class="field-row">
-            <div class="gallery-filters" role="group" aria-label="Statistics window">
+            <div class="gallery-filters" role="group" aria-label={t('stats.windowAria')}>
               <For each={STATS_WINDOWS}>
                 {({ value, label }) => (
                   <button
@@ -59,19 +60,19 @@ export default function DetectionStatsCard() {
                     classList={{ 'gallery-filter-active': window() === value }}
                     onClick={() => setWindow(value)}
                   >
-                    {label}
+                    {label === 'All time' ? t('stats.window.all') : label}
                   </button>
                 )}
               </For>
             </div>
-            <span class="field-value">{windowTotal(stats()!, window())} total</span>
+            <span class="field-value">{t('stats.total', { count: windowTotal(stats()!, window()) })}</span>
           </div>
 
           <For each={counts()}>
             {(row) => (
               <div class="field-row">
                 <span class={`event-badge event-badge-${row.type}`}>{row.type}</span>
-                <span class="field-value">{row.count} event{row.count === 1 ? '' : 's'}</span>
+                <span class="field-value">{tCount('stats.eventCount', row.count)}</span>
               </div>
             )}
           </For>
@@ -79,12 +80,12 @@ export default function DetectionStatsCard() {
 
         <div class="field-group">
           <div class="field-row">
-            <span class="field-label">Last 7 days</span>
+            <span class="field-label">{t('stats.last7')}</span>
           </div>
-          <div class="stats-bars" role="img" aria-label="Detections per day over the last seven days">
+          <div class="stats-bars" role="img" aria-label={t('stats.perDayAria')}>
             <For each={bars()}>
               {(day) => (
-                <div class="stats-bar-col" title={`${day.day}: ${day.count} event${day.count === 1 ? '' : 's'}`}>
+                <div class="stats-bar-col" title={`${day.day}: ${tCount('stats.eventCount', day.count)}`}>
                   <div class="stats-bar" style={{ height: `${Math.round((day.count / maxCount()) * 100)}%` }} />
                   <span class="stats-bar-count">
                     <Show when={day.count > 0}>{day.count}</Show>
@@ -100,7 +101,7 @@ export default function DetectionStatsCard() {
           <div class="field-group stats-top-grid">
             <Show when={stats()!.topZones.length > 0}>
               <div class="stats-top-list">
-                <span class="field-label">Top zones</span>
+                <span class="field-label">{t('stats.topZones')}</span>
                 <For each={stats()!.topZones}>
                   {(zone) => (
                     <div class="field-row">
@@ -113,7 +114,7 @@ export default function DetectionStatsCard() {
             </Show>
             <Show when={stats()!.topLabels.length > 0}>
               <div class="stats-top-list">
-                <span class="field-label">Top ML labels</span>
+                <span class="field-label">{t('stats.topLabels')}</span>
                 <For each={stats()!.topLabels}>
                   {(label) => (
                     <div class="field-row">

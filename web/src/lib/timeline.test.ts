@@ -175,6 +175,17 @@ describe('payload validation', () => {
     expect(parsed[1].mediaId).toBe('42')
   })
 
+  it('accepts every wire trigger including interval (the v2 session kind)', () => {
+    const parsed = parseSessions({ sessions: [
+      { id: 'i', startMs: at(1), endMs: at(2), trigger: 'interval' },
+      { id: 'm', startMs: at(3), endMs: at(4), trigger: 'motion' },
+      { id: 's', startMs: at(5), endMs: at(6), trigger: 'sound' },
+      { id: 'c', startMs: at(7), endMs: at(8), trigger: 'continuous' },
+      { id: 'p', startMs: at(9), endMs: at(10), trigger: 'scheduled' },
+    ] })
+    expect(parsed.map((s) => s.trigger)).toEqual(['interval', 'motion', 'sound', 'continuous', 'scheduled'])
+  })
+
   it('drops malformed rows and non-array bodies', () => {
     expect(parseSessions({ sessions: [
       { id: 'ok', startMs: at(1), endMs: at(2), trigger: 'scheduled' },

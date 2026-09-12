@@ -1,6 +1,7 @@
 import { Show } from 'solid-js'
 import type { AllSettings, CameraSettings, DeviceStatus, IntervalCaptureConfig, RecordingConfig, NightVisionMode } from '../types'
 import { API_DEFAULTS } from '../api/defaults'
+import { t } from '../lib/i18n'
 import LensSelector from './LensSelector'
 import ExposureCard from './ExposureCard'
 import FocusCard from './FocusCard'
@@ -60,7 +61,7 @@ export default function SettingsPanel(props: Props) {
             <path d="M23 19a2 2 0 01-2 2H3a2 2 0 01-2-2V8a2 2 0 012-2h4l2-3h6l2 3h4a2 2 0 012 2z" />
             <circle cx="12" cy="13" r="4" />
           </svg>
-          Camera
+          {t('tabs.camera')}
         </button>
         <button
           class="settings-tab-btn"
@@ -71,7 +72,7 @@ export default function SettingsPanel(props: Props) {
             <circle cx="12" cy="12" r="3" />
             <path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z" />
           </svg>
-          App
+          {t('tabs.app')}
         </button>
       </div>
 
@@ -149,7 +150,7 @@ export default function SettingsPanel(props: Props) {
             <path d="M1 4v6h6" />
             <path d="M3.51 15a9 9 0 102.13-9.36L1 10" />
           </svg>
-          Reset to Defaults
+          {t('settings.resetDefaults')}
         </button>
       </div>
     </section>

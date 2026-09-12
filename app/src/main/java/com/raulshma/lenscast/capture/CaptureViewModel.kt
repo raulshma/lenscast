@@ -5,6 +5,7 @@ import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
+import com.raulshma.lenscast.R
 import com.raulshma.lenscast.capture.model.IntervalCaptureConfig
 import com.raulshma.lenscast.capture.model.RecordingConfig
 import com.raulshma.lenscast.camera.model.RecordingToggle
@@ -30,6 +31,8 @@ class CaptureViewModel(
     private val settingsDataStore: SettingsDataStore,
     private val recordingController: RecordingController,
     private val photoCaptureManager: PhotoCaptureManager,
+    /** The one timelapse pipeline (MediaStore + encryption publish seam). */
+    private val timelapseComposer: TimelapseComposer? = null,
 ) : ViewModel() {
     private val context: Context = context.applicationContext
 
@@ -116,61 +119,46 @@ class CaptureViewModel(
     private val _timelapseMessage = MutableStateFlow<String?>(null)
     val timelapseMessage: StateFlow<String?> = _timelapseMessage.asStateFlow()
 
+    /** The persisted auto-assemble-on-completion toggle. */
+    val autoTimelapseEnabled: StateFlow<Boolean> = settingsDataStore.autoTimelapseEnabled
+
+    fun setAutoTimelapseEnabled(enabled: Boolean) {
+        viewModelScope.launch { settingsDataStore.saveAutoTimelapseEnabled(enabled) }
+    }
+
     /** Assemble the most recent interval photos into an MP4 timelapse. */
     fun assembleTimelapse(lastN: Int = 100, fps: Int = 30) {
         if (_timelapseBusy.value) return
         _timelapseBusy.value = true
         viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
             try {
-                val photos = TimelapseAssembler.selectSources(captureHistoryStore.history.value, lastN)
-                if (photos.size < TimelapseAssembler.MIN_SOURCES) {
-                    _timelapseMessage.value = "Need at least 10 photos (have ${photos.size})"
-                    return@launch
-                }
-                // Keyed with the app's media key so encrypted-at-rest interval
-                // photos decrypt into timelapse frames like any other read.
-                val resolver = com.raulshma.lenscast.capture.CaptureMediaResolver(
-                    context.contentResolver,
-                    (context.applicationContext as? com.raulshma.lenscast.MainApplication)?.mediaKeyProvider,
-                )
-                val tmpDir = java.io.File(context.cacheDir, "timelapse_frames").apply { mkdirs() }
-                tmpDir.listFiles()?.forEach { it.delete() }
-                var idx = 0
-                for (entry in photos) {
-                    val bytes = try {
-                        resolver.openStream(entry.filePath)?.use { it.readBytes() }
-                    } catch (_: Exception) {
-                        null
-                    } ?: continue
-                    java.io.File(tmpDir, com.raulshma.lenscast.capture.MediaFileNaming.timelapseFrameName(idx++)).writeBytes(bytes)
-                }
-                if (idx < TimelapseAssembler.MIN_SOURCES) {
-                    _timelapseMessage.value = "Could not read frames (read $idx)"
-                    return@launch
-                }
-                val outName = com.raulshma.lenscast.capture.MediaFileNaming.timelapseName(java.util.Date())
-                val movies = android.os.Environment.getExternalStoragePublicDirectory(
-                    android.os.Environment.DIRECTORY_MOVIES
-                )
-                val dir = com.raulshma.lenscast.capture.model.CaptureMediaFormat.videoDir(movies).apply { mkdirs() }
-                val outFile = java.io.File(dir, outName)
-                val ok = TimelapseAssembler.assemble(tmpDir, outFile, fps)
-                if (ok) {
-                    captureHistoryStore.add(
-                        captureHistoryStore.createVideoEntry(
-                            fileName = outName,
-                            filePath = outFile.absolutePath,
-                            fileSizeBytes = outFile.length(),
-                            durationMs = (idx * 1000L / fps),
-                        )
-                    )
-                    _timelapseMessage.value = "Timelapse saved: $outName ($idx frames)"
-                } else {
-                    _timelapseMessage.value = "Timelapse failed"
+                // The one timelapse pipeline: source selection, decrypting
+                // reads, MediaCodec assembly, and the MediaStore + encryption
+                // publish seam all live in the composer (shared with the
+                // interval worker's auto-assembly). Output never lands in a
+                // legacy public folder as plaintext.
+                when (val result = timelapseComposer?.assembleLatest(lastN, fps)) {
+                    null -> _timelapseMessage.value =
+                        context.getString(R.string.capture_timelapse_failed)
+                    is TimelapseComposer.Result.Saved ->
+                        _timelapseMessage.value =
+                            context.getString(
+                                R.string.capture_timelapse_saved,
+                                result.fileName,
+                                result.frameCount,
+                            )
+                    is TimelapseComposer.Result.NotSaved -> _timelapseMessage.value = when (result.reason) {
+                        TimelapseComposer.Reason.NOT_ENOUGH_SOURCES ->
+                            context.getString(R.string.capture_timelapse_need_photos, TimelapseAssembler.MIN_SOURCES)
+                        TimelapseComposer.Reason.UNREADABLE_SOURCES ->
+                            context.getString(R.string.capture_timelapse_unreadable, result.detail)
+                        else ->
+                            context.getString(R.string.capture_timelapse_failed)
+                    }
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "Timelapse failed", e)
-                _timelapseMessage.value = "Timelapse failed: ${e.message}"
+                _timelapseMessage.value = context.getString(R.string.capture_timelapse_failed)
             } finally {
                 _timelapseBusy.value = false
             }
@@ -245,6 +233,7 @@ class CaptureViewModel(
         private val settingsDataStore: SettingsDataStore,
         private val recordingController: RecordingController,
         private val photoCaptureManager: PhotoCaptureManager,
+        private val timelapseComposer: TimelapseComposer? = null,
     ) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
         override fun <T : androidx.lifecycle.ViewModel> create(modelClass: Class<T>): T {
@@ -253,7 +242,8 @@ class CaptureViewModel(
                 captureHistoryStore,
                 settingsDataStore,
                 recordingController,
-                photoCaptureManager
+                photoCaptureManager,
+                timelapseComposer
             ) as T
         }
     }

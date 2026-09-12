@@ -121,7 +121,29 @@ export interface StreamingSettings {
    * means no iceServers — host candidates only, i.e. LAN-only reachability.
    */
   whipStunServer: string
+  /**
+   * The SRT push output (publish MPEG-TS over SRT to an `srt://` listener).
+   * H.264 only; the server judges the URL at start time.
+   */
+  srtEnabled: boolean
+  /**
+   * The SRT push target: `srt://[user:pass@]host[:port][?streamid=…]`.
+   * Write-only, like rtmpUrl: the userinfo and stream id are credentials,
+   * so PUT carries it and responses are blank (an empty PUT keeps the
+   * stored one).
+   */
+  srtUrl: string
   adaptiveBitrateEnabled: boolean
+  /**
+   * The adaptive ENCODED-video bitrate: measured encoded-sink throughput
+   * (RTSP/WS/HLS) + thermal scale the encoder's live target within its
+   * configured bounds. Off by default like adaptiveBitrateEnabled.
+   */
+  adaptiveEncodedBitrateEnabled: boolean
+  /** The RTSP low-res sub-stream (rtsp://…/sub) for NVR detect roles; a second encode, off by default. */
+  rtspSubStreamEnabled: boolean
+  /** The HLS DVR window in segments: 0 = sliding live playlist, >0 = EVENT with seekable history (~2s per segment). */
+  hlsDvrSegments: number
   overlayEnabled: boolean
   showTimestamp: boolean
   timestampFormat: string
@@ -172,6 +194,10 @@ export interface StreamingSettings {
   soundClassificationConfidencePercent: number
   /** The user-narrowed YAMNet allow-list (exact AudioSet class names). */
   soundClassificationAllowedClasses: string[]
+  /** YAMNet class triggers: a chosen class at/above the confidence floor fires an event of its own. */
+  soundTriggerEnabled: boolean
+  /** The chosen sound-trigger class set (exact AudioSet names; empty list means the curated default). */
+  soundTriggerClasses: string[]
   webhookEnabled: boolean
   webhookUrl: string
   /** Custom POST headers as a JSON `{"Name": "value"}` map string. */
@@ -213,6 +239,12 @@ export interface StreamingSettings {
   mqttPassword: string
   mqttTls: boolean
   mqttDiscoveryPrefix: string
+  /**
+   * MQTT telemetry (client events + periodic sensor readings: battery,
+   * thermal, encoded bitrate, active clients) riding the alert publisher's
+   * connection. Alerts and stream states are unaffected by this toggle.
+   */
+  mqttTelemetryEnabled: boolean
   /**
    * Web Push alerts to subscribed browsers (RFC 8291/8292): the master gate
    * on the phone's push dispatches. Subscriptions are browser-session state
@@ -295,6 +327,15 @@ export interface DeviceStatus {
     whipActive?: boolean
     whipStatus?: 'idle' | 'connecting' | 'connected' | 'error'
     whipError?: string | null
+    /** The SRT push output; absent on older devices (pre-SRT firmware). */
+    srtEnabled?: boolean
+    srtActive?: boolean
+    srtStatus?: 'idle' | 'connecting' | 'connected' | 'error'
+    srtError?: string | null
+    /** The SRT push's measured round-trip time in ms (from full ACKs); absent while not connected. */
+    srtRttMs?: number | null
+    /** The live WHEP (WebRTC viewer) session count; absent on pre-WHEP firmware. */
+    whepClients?: number
   }
   thermal: ThermalState
   battery: {
@@ -335,6 +376,20 @@ export interface DeviceStatus {
     lastRecoveryTimestamp: number
     lastFailureReason: string | null
   }
+  /** The encoded pipeline's effective target bitrate in bps (the adaptive encoded-bitrate ladder's current value). */
+  encodedVideoBitrate?: number
+}
+
+/** One connected RTSP session, additive to the /api/stream/clients payload. */
+export interface RtspClient {
+  id: string
+  remoteAddress: string
+  connectedAtMs: number
+  transport: string
+  /** SETUPed media: 'video', 'audio', and/or the sub-stream's 'sub'. */
+  media: string[]
+  playing: boolean
+  framesSent: number
 }
 
 export interface ClientConnectionDetail {
@@ -481,6 +536,8 @@ export interface GalleryItem {
   timestamp: number
   fileSizeBytes: number
   durationMs: number
+  /** The user-marked favorite flag (app gallery star). */
+  favorite: boolean
   thumbnailUrl: string
   /** Full-size media route — the viewer's source for photos. */
   url: string
@@ -512,6 +569,12 @@ export interface DetectionEvent {
   clipMediaId?: number | null
   /** File name of the motion clip, linked together with clipMediaId. */
   clipFileName?: string | null
+  /**
+   * The dashboard deep link for the event: `#/gallery/<clipMediaId>` once a
+   * clip is linked, else `#/events` — the same value push notifications and
+   * the MQTT/webhook bodies carry.
+   */
+  url?: string | null
 }
 
 export interface DetectionEventsResponse {
@@ -582,7 +645,7 @@ export interface DetectionStats {
 }
 
 /** The recording-session trigger wire names on GET /api/recordings/sessions. */
-export type RecordingTrigger = 'manual' | 'motion' | 'sound' | 'continuous' | 'scheduled'
+export type RecordingTrigger = 'manual' | 'motion' | 'sound' | 'continuous' | 'scheduled' | 'interval'
 
 /** One NVR recording session overlapping the requested day; `endMs` may sit past midnight for cross-day sessions. */
 export interface RecordingSession {

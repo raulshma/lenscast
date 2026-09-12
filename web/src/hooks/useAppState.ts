@@ -3,6 +3,11 @@ import * as api from '../api/client'
 import { createRecordingTimer } from '../RecordingTimer'
 import { createLiveAudioPlayer, type LiveAudioStatus } from '../audio/LiveAudioPlayer'
 import { createPollLadder } from './pollLadder'
+import { hashRouter, type RouteName } from '../lib/router'
+import { closeMedia, openMedia, viewerTarget } from '../lib/viewerStore'
+import { hlsSupported, nextPlayerMode, whepSupported, type PlayerMode } from '../video/playerLadder'
+import { h264Supported } from '../video/h264Player'
+import { t } from '../lib/i18n'
 import type {
   AllSettings, DeviceStatus, LensInfo, CameraSettings,
   FocusMode, WhiteBalance, Resolution, HdrMode,
@@ -40,6 +45,14 @@ export function useAppState() {
   const [streamActionLoading, setStreamActionLoading] = createSignal(false)
   const [streamNonce, setStreamNonce] = createSignal(0)
   const [showGallery, setShowGallery] = createSignal(false)
+  // The '?' shortcut overlay (ShortcutsOverlay in App).
+  const [showShortcuts, setShowShortcuts] = createSignal(false)
+  // The live preview's player rung, lifted here so the P shortcut can cycle
+  // it — StreamPreview consumes it as props and keeps its ladder fall-down
+  // logic untouched.
+  const [playerMode, setPlayerMode] = createSignal<PlayerMode>(
+    nextPlayerMode('mjpeg', !whepSupported(), !h264Supported(), false, hlsSupported()),
+  )
 
   // ── Connection health ──
   // The status lane fails when fetchStatus errors; the SSE lane reports its
@@ -171,7 +184,7 @@ export function useAppState() {
       setAuthenticated(true)
       setSessionRole(result.role ?? 'admin')
     } catch (e: any) {
-      setLoginError(e.message || 'Login failed')
+      setLoginError(e.message || t('error.loginFailed'))
     } finally {
       setLoginLoading(false)
     }
@@ -291,12 +304,12 @@ export function useAppState() {
 
   // ── Actions ──
   async function handleCapture() {
-    setCaptureMsg('Capturing...')
+    setCaptureMsg(t('error.capturing'))
     try {
       const result = await api.capturePhoto()
-      setCaptureMsg(result.success ? `Captured: ${result.fileName}` : `Failed: ${result.error}`)
+      setCaptureMsg(result.success ? t('error.captured', { name: result.fileName ?? '' }) : t('error.actionFailedMsg', { message: result.error ?? '' }))
     } catch (e: any) {
-      setCaptureMsg(`Failed: ${e?.message ?? 'Capture failed'}`)
+      setCaptureMsg(t('error.actionFailedMsg', { message: e?.message ?? t('error.captureFailed') }))
     }
     setTimeout(() => setCaptureMsg(''), 4000)
   }
@@ -320,25 +333,25 @@ export function useAppState() {
   // ── Stream actions ──
   function handleStartWebStream() {
     return runStreamAction(api.startWebStream, {
-      fallbackError: 'Failed to start web stream', previewTo: true, bumpNonce: true,
+      fallbackError: t('error.startWeb'), previewTo: true, bumpNonce: true,
     })
   }
 
   function handleStopWebStream() {
     return runStreamAction(api.stopWebStream, {
-      fallbackError: 'Failed to stop web stream', previewTo: false, bumpNonce: true,
+      fallbackError: t('error.stopWeb'), previewTo: false, bumpNonce: true,
     })
   }
 
   function handleStartRtspStream() {
     return runStreamAction(api.startRtspStream, {
-      fallbackError: 'Failed to start RTSP stream', previewTo: null, bumpNonce: false,
+      fallbackError: t('error.startRtsp'), previewTo: null, bumpNonce: false,
     })
   }
 
   function handleStopRtspStream() {
     return runStreamAction(api.stopRtspStream, {
-      fallbackError: 'Failed to stop RTSP stream', previewTo: null, bumpNonce: false,
+      fallbackError: t('error.stopRtsp'), previewTo: null, bumpNonce: false,
     })
   }
 
@@ -346,13 +359,13 @@ export function useAppState() {
   // the push egress never touches the local preview player.
   function handleStartWhip() {
     return runStreamAction(api.startWhip, {
-      fallbackError: 'Failed to start WHIP push', previewTo: null, bumpNonce: false,
+      fallbackError: t('error.startWhip'), previewTo: null, bumpNonce: false,
     })
   }
 
   function handleStopWhip() {
     return runStreamAction(api.stopWhip, {
-      fallbackError: 'Failed to stop WHIP push', previewTo: null, bumpNonce: false,
+      fallbackError: t('error.stopWhip'), previewTo: null, bumpNonce: false,
     })
   }
 
@@ -360,13 +373,13 @@ export function useAppState() {
   // the push egress never touches the local preview player.
   function handleStartRtmp() {
     return runStreamAction(api.startRtmp, {
-      fallbackError: 'Failed to start RTMP push', previewTo: null, bumpNonce: false,
+      fallbackError: t('error.startRtmp'), previewTo: null, bumpNonce: false,
     })
   }
 
   function handleStopRtmp() {
     return runStreamAction(api.stopRtmp, {
-      fallbackError: 'Failed to stop RTMP push', previewTo: null, bumpNonce: false,
+      fallbackError: t('error.stopRtmp'), previewTo: null, bumpNonce: false,
     })
   }
 
@@ -374,7 +387,7 @@ export function useAppState() {
   function handleStartIntervalCapture() {
     return runResultAction(
       () => api.startIntervalCapture(intervalConfig()),
-      'Failed to start interval capture',
+      t('error.startInterval'),
       () => {
         setIntervalRunning(true)
         setIntervalCompleted(0)
@@ -383,7 +396,7 @@ export function useAppState() {
   }
 
   function handleStopIntervalCapture() {
-    return runResultAction(api.stopIntervalCapture, 'Failed to stop interval capture', () => {
+    return runResultAction(api.stopIntervalCapture, t('error.stopInterval'), () => {
       setIntervalRunning(false)
     })
   }
@@ -391,7 +404,7 @@ export function useAppState() {
   function handleStartRecording() {
     return runResultAction(
       () => api.startRecording(recordingConfig()),
-      'Failed to start recording',
+      t('error.startRecording'),
       () => {
         if (recordingConfig().startTimeMs) {
           setIsScheduled(true)
@@ -405,7 +418,7 @@ export function useAppState() {
   }
 
   function handleStopRecording() {
-    return runResultAction(api.stopRecording, 'Failed to stop recording', () => {
+    return runResultAction(api.stopRecording, t('error.stopRecording'), () => {
       setIsRecording(false)
       setIsScheduled(false)
       setScheduledStartTimeMs(null)
@@ -414,6 +427,56 @@ export function useAppState() {
 
   // ── Effects ──
   createEffect(() => { checkAuth() })
+
+  // ── Hash router sync (bidirectional, loop-free) ──
+  // hash → state: every hash source (deep links, back/forward, the service
+  // worker's notification click) lands here once and maps onto the existing
+  // tab/gallery signals; the viewer deep link additionally opens the shared
+  // media overlay. The previous-route bookkeeping closes that deep-linked
+  // viewer when the route leaves it — without reading the viewer store, so
+  // ordinary openMedia() calls (event feed, timeline) never bounce off this
+  // effect.
+  const router = hashRouter()
+  createEffect((prev?: { name: RouteName; mediaId?: string }) => {
+    const route = router.route()
+    if (prev && prev.name === 'gallery' && prev.mediaId &&
+        (route.name !== 'gallery' || route.mediaId !== prev.mediaId)) {
+      closeMedia()
+    }
+    if (route.name === 'gallery') {
+      if (!showGallery()) setShowGallery(true)
+      if (route.mediaId && viewerTarget()?.id !== route.mediaId) {
+        openMedia(route.mediaId)
+      }
+    } else {
+      if (showGallery()) setShowGallery(false)
+      if (route.name === 'settings' || route.name === 'events') {
+        if (activeTab() !== 'app') setActiveTab('app')
+        if (route.name === 'events') {
+          queueMicrotask(() => {
+            document.getElementById('event-feed-anchor')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+          })
+        }
+      }
+    }
+    return { name: route.name, mediaId: route.mediaId }
+  })
+
+  // state → hash: user-driven tab/gallery changes rewrite the hash only when
+  // it contradicts the state (the '#/' default is compatible with either
+  // tab), so the pair settles in one hop instead of oscillating.
+  createEffect(() => {
+    const open = showGallery()
+    const tab = activeTab()
+    const route = router.route()
+    if (open && route.name !== 'gallery') {
+      router.navigate({ name: 'gallery' })
+    } else if (!open && route.name === 'gallery') {
+      router.navigate({ name: tab === 'app' ? 'settings' : 'dashboard' })
+    } else if (!open && tab !== 'app' && (route.name === 'settings' || route.name === 'events')) {
+      router.navigate({ name: 'dashboard' })
+    }
+  })
 
   createEffect(() => {
     if (!authenticated()) return
@@ -528,6 +591,8 @@ export function useAppState() {
     // Core
     settings, status, lenses, error, captureMsg, saving,
     previewVisible, setPreviewVisible, streamActionLoading, streamNonce, showGallery, setShowGallery,
+    showShortcuts, setShowShortcuts,
+    playerMode, setPlayerMode,
     connectionLost,
     // Camera
     updateCamera,

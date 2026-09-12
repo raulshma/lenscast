@@ -7,12 +7,15 @@ import android.content.pm.PackageManager
 import android.os.SystemClock
 import android.util.Log
 import android.widget.Toast
+import androidx.camera.core.ImageCapture
 import androidx.camera.view.PreviewView
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.raulshma.lenscast.R
+import com.raulshma.lenscast.capture.model.FlashMode
+import com.raulshma.lenscast.capture.model.FlashModePolicy
 import com.raulshma.lenscast.camera.model.CameraInitRetry
 import com.raulshma.lenscast.camera.model.CameraLensInfo
 import com.raulshma.lenscast.camera.model.CameraSettings
@@ -571,7 +574,15 @@ class CameraViewModel(
     }
 
     fun capturePhoto() {
+        // The persisted flash mode rides every main-shutter capture; the
+        // CameraX constant mapping is the one seam translation here.
+        val flashMode = when (flashModeSetting.value) {
+            FlashMode.ON -> ImageCapture.FLASH_MODE_ON
+            FlashMode.AUTO -> ImageCapture.FLASH_MODE_AUTO
+            FlashMode.OFF -> ImageCapture.FLASH_MODE_OFF
+        }
         val fileName = photoCaptureManager.captureToGallery(
+            flashMode = flashMode,
             onSaved = { filePath, _ -> tagCapturedPhoto(filePath) },
             onError = { exception -> Log.e(TAG, "Capture failed", exception) },
         )
@@ -580,6 +591,16 @@ class CameraViewModel(
             return
         }
         _captureFlashEvents.tryEmit(Unit)
+    }
+
+    /** The persisted main-shutter flash mode (OFF / AUTO / ON). */
+    val flashModeSetting: StateFlow<FlashMode> = settingsDataStore.flashMode
+
+    /** A tap on the flash chip: the cycle order is FlashModePolicy's. */
+    fun cycleFlashMode() {
+        viewModelScope.launch {
+            settingsDataStore.saveFlashMode(FlashModePolicy.next(flashModeSetting.value))
+        }
     }
 
     // EXIF tagging: the app-credit Artist/UserComment tags on every capture,

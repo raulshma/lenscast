@@ -226,6 +226,18 @@ html, body {
   background: var(--lc-danger-bg);
 }
 
+/* Navbar locale switcher: a compact select styled like the icon buttons. */
+.navbar-locale-select {
+  width: auto;
+  min-width: 0;
+  padding: 0 18px 0 8px;
+  font-size: 11px;
+  appearance: none;
+  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%23888' stroke-width='1.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 6px center;
+}
+
 /* Save Indicator */
 .save-indicator {
   width: 28px;
@@ -2658,6 +2670,10 @@ html, body {
   background: #a78bfa;
 }
 
+.timeline-trigger-interval {
+  background: #2dd4bf;
+}
+
 /* Detection-event marker strip under the track, colored by event type. */
 .timeline-markers {
   position: relative;
@@ -2751,4 +2767,230 @@ html, body {
   --lc-shadow: 0 2px 12px rgba(18, 22, 48, 0.08);
   --lc-shadow-lg: 0 8px 32px rgba(18, 22, 48, 0.12);
   --lc-glow-accent: 0 0 20px rgba(0, 137, 189, 0.15);
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   Web dashboard feature styles — keyboard shortcuts help, share card,
+   gallery search, multi-cam v2 (credentials, capture-all, refresh).
+   ═══════════════════════════════════════════════════════════════════ */
+
+/* Keyboard-shortcut help overlay ('?' / navbar button). Centered modal
+   twin of the gallery header styling. */
+.shortcuts-modal {
+  margin: auto;
+  width: min(420px, calc(100vw - 32px));
+  max-height: min(560px, calc(100vh - 32px));
+  overflow-y: auto;
+  background: var(--lc-surface);
+  border: 1px solid var(--lc-border);
+  border-radius: var(--lc-radius-lg);
+  box-shadow: var(--lc-shadow-lg);
+  animation: fade-in 0.2s ease;
+}
+
+.shortcuts-list {
+  display: flex;
+  flex-direction: column;
+  padding: 8px 16px 12px;
+}
+
+.shortcuts-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 7px 0;
+  border-bottom: 1px solid var(--lc-border);
+}
+
+.shortcuts-row:last-child {
+  border-bottom: none;
+}
+
+.shortcuts-key {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 28px;
+  height: 24px;
+  padding: 0 7px;
+  font-family: var(--lc-mono);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--lc-accent);
+  background: var(--lc-accent-bg);
+  border: 1px solid var(--lc-border);
+  border-bottom-width: 2px;
+  border-radius: 6px;
+}
+
+.shortcuts-label {
+  font-size: 13px;
+  color: var(--lc-text-dim);
+}
+
+.shortcuts-hint {
+  margin: 0;
+  padding: 0 16px 14px;
+  font-size: 11px;
+  color: var(--lc-text-muted);
+}
+
+/* Gallery filename search bar (debounced; '/' focuses it). */
+.gallery-search-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--lc-border);
+  flex-shrink: 0;
+  background: var(--lc-surface);
+}
+
+.gallery-search-icon {
+  width: 15px;
+  height: 15px;
+  color: var(--lc-text-muted);
+  flex-shrink: 0;
+}
+
+.gallery-search-input {
+  flex: 1;
+}
+
+/* Share Dashboard card: QR of the LAN URL + copyable link. */
+.share-card-body {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+}
+
+.share-qr-wrap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 164px;
+  height: 164px;
+  padding: 8px;
+  background: #fff;
+  border-radius: var(--lc-radius);
+  border: 1px solid var(--lc-border);
+  flex-shrink: 0;
+}
+
+/* The QR canvas itself: white quiet zone, dark modules either way. */
+.share-qr-canvas {
+  display: block;
+  width: 148px;
+  height: 148px;
+}
+
+.share-qr-error {
+  font-size: 11px;
+  color: var(--lc-text-muted);
+}
+
+.share-card-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.share-url {
+  font-family: var(--lc-mono);
+  font-size: 12px;
+  color: var(--lc-text);
+  background: var(--lc-surface-2);
+  border: 1px solid var(--lc-border);
+  border-radius: var(--lc-radius-sm);
+  padding: 6px 10px;
+  word-break: break-all;
+}
+
+.share-hint {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--lc-text-muted);
+}
+
+.share-hint code {
+  font-family: var(--lc-mono);
+  color: var(--lc-text-dim);
+}
+
+/* Clip playback affordances: the event feed's clip button became a
+   <button>, so give it the anchor reset. */
+button.event-clip-btn {
+  border: none;
+  cursor: pointer;
+  font-family: var(--lc-font);
+}
+
+/* Timeline segments are <button>s too. */
+button.timeline-segment {
+  border: none;
+  padding: 0;
+  cursor: pointer;
+}
+
+/* Multi-cam v2: per-tile auth + refresh rows, plaintext warning,
+   capture-all badge. */
+.multicam-edit-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.multicam-edit-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--lc-text-dim);
+  min-width: 48px;
+}
+
+.multicam-edit-select {
+  flex: 1;
+}
+
+.multicam-auth-warning {
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--lc-warning);
+  background: var(--lc-warning-bg);
+  border: 1px solid rgba(251, 191, 36, 0.25);
+  border-radius: var(--lc-radius-sm);
+  padding: 6px 10px;
+}
+
+.multicam-capture-badge {
+  top: auto;
+  bottom: 8px;
+  right: 8px;
+  left: auto;
+  transform: none;
+}
+
+.multicam-capture-sending {
+  background: rgba(0, 212, 255, 0.85);
+  color: #00131a;
+}
+
+.multicam-capture-sent {
+  background: rgba(52, 211, 153, 0.9);
+  color: #00281c;
+}
+
+.multicam-capture-failed {
+  background: rgba(244, 63, 94, 0.9);
+  color: #fff;
+}
+
+.multicam-mini-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.multicam-mini-btn:disabled:hover {
+  filter: none;
 }

@@ -24,23 +24,45 @@ export interface RtmpStatusView {
   variant: 'info' | 'success' | 'warning' | 'error'
 }
 
+/** The display strings rtmpStatusView emits — overridden by the i18n caller. */
+export interface RtmpStatusLabelSet {
+  idle: string
+  connecting: string
+  connected: string
+  error: string
+  pushFailed: string
+}
+
+export const RTMP_STATUS_LABELS_EN: RtmpStatusLabelSet = {
+  idle: 'Idle',
+  connecting: 'Connecting…',
+  connected: 'Connected',
+  error: 'Error',
+  pushFailed: 'RTMP push failed',
+}
+
 /**
  * Maps the RTMP slice of the status snapshot onto the card's status line.
  * `connecting` outranks `active` (the connect handshake is still in flight),
  * while a bare `active` without a status reads as connected — pre-RTMP
- * firmware omits the fields entirely and lands on idle.
+ * firmware omits the fields entirely and lands on idle. The default labels
+ * keep the pure-English behavior the tests pin; the card passes localized
+ * ones.
  */
-export function rtmpStatusView(input: RtmpStatusInput): RtmpStatusView {
+export function rtmpStatusView(
+  input: RtmpStatusInput,
+  labels: RtmpStatusLabelSet = RTMP_STATUS_LABELS_EN,
+): RtmpStatusView {
   if (input.status === 'error') {
-    return { label: 'Error', detail: (input.error ?? '').trim() || 'RTMP push failed', variant: 'error' }
+    return { label: labels.error, detail: (input.error ?? '').trim() || labels.pushFailed, variant: 'error' }
   }
   if (input.status === 'connecting') {
-    return { label: 'Connecting…', detail: '', variant: 'warning' }
+    return { label: labels.connecting, detail: '', variant: 'warning' }
   }
   if (input.status === 'connected' || (input.active ?? false)) {
-    return { label: 'Connected', detail: '', variant: 'success' }
+    return { label: labels.connected, detail: '', variant: 'success' }
   }
-  return { label: 'Idle', detail: '', variant: 'info' }
+  return { label: labels.idle, detail: '', variant: 'info' }
 }
 
 export interface RtmpUrlFieldView {
@@ -55,6 +77,21 @@ export interface RtmpUrlFieldView {
 /** `rtmp://` or `rtmps://` — everything else (https:, plain host, rtsp:) is refused. */
 const RTMP_SCHEME = /^rtmps?:\/\//i
 
+/** The hint strings rtmpUrlField emits — overridden by the i18n caller. */
+export interface RtmpHintSet {
+  empty: string
+  scheme: string
+  host: string
+  ok: string
+}
+
+export const RTMP_HINTS_EN: RtmpHintSet = {
+  empty: 'Paste the push target from your streaming server, e.g. rtmp://ingest.example.com/live/stream-key — saved once, never echoed back.',
+  scheme: 'Start with rtmp:// or rtmps:// — the server refuses any other scheme.',
+  host: 'The URL needs a host — rtmp:///path is missing where to publish.',
+  ok: 'Prefer rtmps:// when the server supports TLS — the stream key rides in the URL.',
+}
+
 /**
  * The push-target field's hint/validation state. Client-side the check is
  * intentionally shallow — scheme plus a non-empty host — because the
@@ -63,18 +100,18 @@ const RTMP_SCHEME = /^rtmps?:\/\//i
  * embedded in the URL, so responses never carry it) and starts blank
  * whether or not the device holds a stored URL.
  */
-export function rtmpUrlField(value: string): RtmpUrlFieldView {
+export function rtmpUrlField(value: string, hints: RtmpHintSet = RTMP_HINTS_EN): RtmpUrlFieldView {
   const trimmed = value.trim()
   if (!trimmed) {
     return {
-      hint: 'Paste the push target from your streaming server, e.g. rtmp://ingest.example.com/live/stream-key — saved once, never echoed back.',
+      hint: hints.empty,
       invalid: false,
       valid: false,
     }
   }
   if (!RTMP_SCHEME.test(trimmed)) {
     return {
-      hint: 'Start with rtmp:// or rtmps:// — the server refuses any other scheme.',
+      hint: hints.scheme,
       invalid: true,
       valid: false,
     }
@@ -85,13 +122,13 @@ export function rtmpUrlField(value: string): RtmpUrlFieldView {
   const host = authority.includes('@') ? authority.slice(authority.lastIndexOf('@') + 1) : authority
   if (!host) {
     return {
-      hint: 'The URL needs a host — rtmp:///path is missing where to publish.',
+      hint: hints.host,
       invalid: true,
       valid: false,
     }
   }
   return {
-    hint: 'Prefer rtmps:// when the server supports TLS — the stream key rides in the URL.',
+    hint: hints.ok,
     invalid: false,
     valid: true,
   }

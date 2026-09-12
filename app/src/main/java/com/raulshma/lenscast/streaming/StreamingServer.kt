@@ -6,6 +6,8 @@ import com.raulshma.lenscast.core.NetworkQualityMonitor
 import com.raulshma.lenscast.core.StreamDefaults
 import com.raulshma.lenscast.streaming.HttpResult.ResponseBody
 import com.raulshma.lenscast.streaming.onvif.OnvifServer
+import com.raulshma.lenscast.streaming.whep.WhepSdp
+import com.raulshma.lenscast.streaming.whep.WhepServer
 import com.raulshma.lenscast.streaming.web.ApiMethod
 import com.raulshma.lenscast.streaming.web.ApiRequest
 import com.raulshma.lenscast.streaming.web.AuditEntry
@@ -50,6 +52,11 @@ class StreamingServer(
     // composed process instance so the manager's construction site is
     // untouched; tests inject their own instance here.
     private val onvifServer: OnvifServer = OnvifServer.shared,
+    // The WHEP viewer endpoint (streaming/whep/), owned by the Streaming
+    // Manager and received at construction like the ONVIF service: the
+    // transport only translates POST /whep + DELETE /whep/{id} onto it — the
+    // SDP offer/answer and the session registry live behind the seam.
+    private val whepServer: com.raulshma.lenscast.streaming.whep.WhepServer? = null,
 ) : NanoHTTPD(port) {
 
     val isSecure: Boolean = tlsServerSocketFactory != null
@@ -192,6 +199,11 @@ class StreamingServer(
                 }
                 translate(if (ok) HttpResult.jsonError(200, "Talkback played") else HttpResult.jsonError(503, "Speaker unavailable"))
             }
+            // WHEP (WebRTC-HTTP egress): the SDP POST and the session DELETE
+            // ride the auth gate above (session cookie or the API token's
+            // read verdict — media egress is a read) and are served here,
+            // outside the JSON router like every non-JSON contract.
+            uri.startsWith(WHEP_OFFER_PATH) -> serveWhep(method, uri, session)
             uri == "/hls/playlist.m3u8" -> translate(
                 mediaResponder.serveHlsPlaylist(encodedStreamActive()),
             )
@@ -224,14 +236,58 @@ class StreamingServer(
     }
 
     /**
+     * The WHEP branch: `POST /whep` carries the viewer's SDP offer and is
+     * answered `201 Created` with the answer SDP (`application/sdp`) and the
+     * session resource in `Location: /whep/{id}` (the WHEP convention);
+     * `DELETE /whep/{id}` (or `DELETE /whep` with the id as the body) tears
+     * the session down. Any other method on the path answers 405. The
+     * endpoint is composed in — never grown by — the transport; a null
+     * endpoint (a test construction without one) answers 503.
+     */
+    private fun serveWhep(method: Method, uri: String, session: IHTTPSession): Response {
+        val whep = whepServer
+            ?: return translate(HttpResult.jsonError(503, "WHEP endpoint unavailable"))
+        val pathId = uri.removePrefix(WHEP_OFFER_PATH).removePrefix("/")
+        if (method == Method.POST && pathId.isEmpty()) {
+            val body = readRequestBody(session, WhepSdp.MAX_OFFER_BYTES.toLong())
+                ?: return translate(tooLargeResult(WhepSdp.MAX_OFFER_BYTES.toLong()))
+            return when (val result = whep.handleOffer(body.toString(Charsets.UTF_8))) {
+                is WhepServer.Handshake.Created ->
+                    newFixedLengthResponse(Response.Status.CREATED, SDP_CONTENT_TYPE, result.answerSdp).apply {
+                        addHeader("Location", "${WhepServer.OFFER_PATH}/${result.sessionId}")
+                    }
+                is WhepServer.Handshake.Rejected ->
+                    translate(HttpResult.jsonError(result.statusCode, result.message))
+            }
+        }
+        if (method == Method.DELETE) {
+            // The id rides the path; a bare `DELETE /whep` tolerates it in the body.
+            val id = pathId.ifEmpty {
+                readRequestBody(session, SESSION_ID_BODY_MAX_BYTES)
+                    ?.toString(Charsets.UTF_8)?.trim().orEmpty()
+            }
+            if (id.isEmpty()) {
+                return translate(HttpResult.jsonError(400, "Missing WHEP session id (path or body)"))
+            }
+            return translate(
+                if (whep.teardown(id)) {
+                    HttpResult.jsonError(200, "WHEP session ended")
+                } else {
+                    HttpResult.jsonError(404, "Unknown WHEP session")
+                },
+            )
+        }
+        return translate(HttpResult.jsonError(405, "Method not allowed on $WHEP_OFFER_PATH"))
+    }
+
+    /**
      * The ONVIF branch's whole body: read the (possibly absent) SOAP body,
      * hand it to the injected service, and answer SOAP. A GET with no body
      * still lands here — the service answers it with the
      * GetSystemDateAndTime response (some clients probe that way, and it is
      * harmless static metadata).
      */
-    private fun serveOnvif(session: IHTTPSession): Response {
-        val body = readRequestBody(session, MAX_BODY_BYTES)
+    private fun serveOnvif(session: IHTTPSession): Response {        val body = readRequestBody(session, MAX_BODY_BYTES)
             ?: return translate(tooLargeResult(MAX_BODY_BYTES)).apply { addSecurityHeaders() }
         return newFixedLengthResponse(
             Response.Status.OK,
@@ -469,5 +525,14 @@ class StreamingServer(
          * request while keeping an attacker's allocation bounded.
          */
         private const val LOGIN_BODY_MAX_BYTES = 64L * 1024
+
+        /** The WHEP offer route (the id-suffixed DELETE shares the prefix). */
+        private const val WHEP_OFFER_PATH = com.raulshma.lenscast.streaming.whep.WhepServer.OFFER_PATH
+
+        /** SDP bodies ride this content type, request and response. */
+        private const val SDP_CONTENT_TYPE = "application/sdp"
+
+        /** A DELETE-body session id is 32 hex characters — the cap is generous. */
+        private const val SESSION_ID_BODY_MAX_BYTES = 256L
     }
 }

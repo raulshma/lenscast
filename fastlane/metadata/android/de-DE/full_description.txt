@@ -1,0 +1,30 @@
+LensCast verwandelt dein Android-Gerät in eine Netzwerkkamera-Station mit professionellen Steuerungen, Fernzugriff über den Browser, Intervallfotografie und geplanter Aufnahme.
+
+Kamera
+• Live-Vorschau mit professioneller Schnelleinstellungsleiste
+• Manuelle Steuerung: Belichtungskompensation, ISO, Weißabgleich, Fokusmodus, Zoom
+• Multi-Linsen-Support (Ultraweitwinkel, Weitwinkel, Telefoto) mit Laufzeit-Linsenwechsel
+• HDR, Bildstabilisierung, Auflösung bis 4K, Bildrate 15–60 fps
+• Fotoaufnahme und Videoaufzeichnung
+• Nachtvisions-/IR-Modus, Szenenmodi, manueller Fokusabstand, Farbtemperatur
+
+Live-Streaming
+• Echtzeit-MJPEG-Videostreaming in jeden Browser im selben Netzwerk
+• Latenzarme Wiedergabe im Browser (WebCodecs über WebSocket) mit automatischem Fallback auf MJPEG und HLS
+• RTSP-Streaming mit AAC-Audio und H.264/H.265-Video bei 480p/720p/1080p für VLC, OBS und NVRs
+• ONVIF-Profile-S-Gerätedienst (standardmäßig aus), damit NVRs wie Home Assistant die Kamera automatisch finden
+• HTTPS-Modus mit einem selbstsignierten Zertifikat auf dem Gerät
+
+Web-Dashboard
+• Live-Stream ansehen, Fotos und Aufnahmen durchsuchen und herunterladen
+• Volle Fernsteuerung von Kamera- und Stream-Einstellungen
+• Optionale Passwort-Authentifizierung
+
+Automatisierung
+• Objekterkennungs-Gate (optional): das Open-Source-Modell EfficientDet-Lite0 — Apache-2.0, bei Bedarf mit fixiertem SHA-256 von TensorFlows offiziellem Hosting heruntergeladen — löst MQTT-Benachrichtigungen oder Aufnahmen aus, wenn konfigurierte Objekte erscheinen
+• Intervallfotografie sowie geplante oder kontinuierliche Aufnahme
+• Ruhezeiten für Benachrichtigungen
+
+Keine Werbung, kein Tracking, keine Cloud. Die gesamte Verarbeitung bleibt auf deinem Gerät; das Web-Dashboard wird von einem integrierten HTTP-Server in deinem lokalen Netzwerk ausgeliefert.
+
+Hinweis: Der F-Droid-Build enthält den In-App-Self-Updater nicht; Updates kommen über F-Droid.

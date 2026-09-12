@@ -4,7 +4,6 @@ import android.content.Context
 import android.os.Build
 import android.os.PowerManager
 import android.util.Log
-import com.raulshma.lenscast.core.StreamDefaults
 import com.raulshma.lenscast.streaming.ThermalAdjustmentSource
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -16,11 +15,7 @@ class ThermalMonitor(private val context: Context) : ThermalAdjustmentSource {
     private val _thermalState = MutableStateFlow(ThermalState.NORMAL)
     val thermalState: StateFlow<ThermalState> = _thermalState.asStateFlow()
 
-    private val _throttlingResult = MutableStateFlow(ThermalThrottlingResult(
-        frameRateMultiplier = 1.0f,
-        jpegQuality = StreamDefaults.JPEG_QUALITY,
-        shouldPause = false,
-    ))
+    private val _throttlingResult = MutableStateFlow(ThermalThrottlePolicy.resolve(ThermalState.NORMAL))
     val throttlingResult: StateFlow<ThermalThrottlingResult> = _throttlingResult.asStateFlow()
 
     private var listener: PowerManager.OnThermalStatusChangedListener? = null
@@ -30,17 +25,22 @@ class ThermalMonitor(private val context: Context) : ThermalAdjustmentSource {
         if (!monitoring.compareAndSet(false, true)) return
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             val pm = context.getSystemService(Context.POWER_SERVICE) as PowerManager
+            // Pre-API-30 there is no getCurrentThermalStatus() query — the
+            // initial state stays NORMAL until the first listener callback
+            // arrives (listener-only startup). Deliberate, unchanged
+            // behavior; this class only reads status and delegates the
+            // tier mapping to ThermalThrottlePolicy.
             if (Build.VERSION.SDK_INT >= 30) {
                 val initialStatus = getThermalStatus(pm)
                 val initialState = thermalStatusToState(initialStatus)
                 _thermalState.value = initialState
-                _throttlingResult.value = applyThermalThrottling(initialState)
+                _throttlingResult.value = ThermalThrottlePolicy.resolve(initialState)
             }
 
             listener = PowerManager.OnThermalStatusChangedListener { status ->
                 val state = thermalStatusToState(status)
                 _thermalState.value = state
-                _throttlingResult.value = applyThermalThrottling(state)
+                _throttlingResult.value = ThermalThrottlePolicy.resolve(state)
                 Log.d(TAG, "Thermal state changed: $state")
             }
             pm.addThermalStatusListener(listener!!)
@@ -56,11 +56,7 @@ class ThermalMonitor(private val context: Context) : ThermalAdjustmentSource {
             listener = null
         }
         _thermalState.value = ThermalState.NORMAL
-        _throttlingResult.value = ThermalThrottlingResult(
-            frameRateMultiplier = 1.0f,
-            jpegQuality = StreamDefaults.JPEG_QUALITY,
-            shouldPause = false,
-        )
+        _throttlingResult.value = ThermalThrottlePolicy.resolve(ThermalState.NORMAL)
         Log.d(TAG, "Thermal monitoring stopped")
     }
 
@@ -88,35 +84,9 @@ class ThermalMonitor(private val context: Context) : ThermalAdjustmentSource {
         }
     }
 
-    private fun applyThermalThrottling(state: ThermalState): ThermalThrottlingResult {
-        return when (state) {
-            ThermalState.NORMAL -> ThermalThrottlingResult(
-                frameRateMultiplier = 1.0f,
-                jpegQuality = StreamDefaults.JPEG_QUALITY,
-                shouldPause = false,
-            )
-            ThermalState.LIGHT -> ThermalThrottlingResult(
-                frameRateMultiplier = 0.9f,
-                jpegQuality = 60,
-                shouldPause = false,
-            )
-            ThermalState.MODERATE -> ThermalThrottlingResult(
-                frameRateMultiplier = 0.7f,
-                jpegQuality = 55,
-                shouldPause = false,
-            )
-            ThermalState.SEVERE -> ThermalThrottlingResult(
-                frameRateMultiplier = 0.5f,
-                jpegQuality = 40,
-                shouldPause = false,
-            )
-            ThermalState.CRITICAL -> ThermalThrottlingResult(
-                frameRateMultiplier = 0.0f,
-                jpegQuality = 20,
-                shouldPause = true,
-            )
-        }
-    }
+    // The thermal status → quality-tier mapping lives in the pure, JVM-tested
+    // ThermalThrottlePolicy (mirroring BatteryQualityPolicy's split); this
+    // class only translates framework status codes into ThermalState.
 
     override fun getAdjustedQuality(baseQuality: Int): Int {
         return _throttlingResult.value.jpegQuality

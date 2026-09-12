@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { isPushSupported, permissionLabel, pushSupport, urlBase64ToUint8Array } from './push'
+import { isPushSupported, permissionLabel, pushNotificationUrl, pushSupport, urlBase64ToUint8Array } from './push'
 import type { PushSupportInput } from './push'
 
 function input(overrides: Partial<PushSupportInput> = {}): PushSupportInput {
@@ -85,5 +85,31 @@ describe('permissionLabel', () => {
     expect(permissionLabel('denied')).toBe('Blocked')
     expect(permissionLabel('default')).toBe('Not requested')
     expect(permissionLabel(undefined)).toBe('Unknown')
+  })
+})
+
+describe('pushNotificationUrl', () => {
+  it('uses the payload url verbatim when the server sends one', () => {
+    expect(pushNotificationUrl({ url: '#/events' })).toBe('#/events')
+    expect(pushNotificationUrl({ url: '#/gallery/abc123' })).toBe('#/gallery/abc123')
+  })
+
+  it('derives the clip deep link from the legacy payload fields', () => {
+    // Today's payloads carry clipAvailable + eventId and no url at all.
+    expect(pushNotificationUrl({ clipAvailable: true, eventId: 'clip 7' }))
+      .toBe('#/gallery/clip%207')
+  })
+
+  it('does not derive a clip link when the clip flag or id is missing', () => {
+    expect(pushNotificationUrl({ clipAvailable: true })).toBe('/')
+    expect(pushNotificationUrl({ clipAvailable: false, eventId: 'x' })).toBe('/')
+    expect(pushNotificationUrl({ clipAvailable: 'yes', eventId: 'x' })).toBe('/')
+  })
+
+  it('falls back to the dashboard root for unrecognized shapes', () => {
+    expect(pushNotificationUrl({})).toBe('/')
+    expect(pushNotificationUrl({ url: 42 })).toBe('/')
+    expect(pushNotificationUrl({ url: 'javascript:alert(1)' })).toBe('/')
+    expect(pushNotificationUrl(null as unknown as Record<string, unknown>)).toBe('/')
   })
 })

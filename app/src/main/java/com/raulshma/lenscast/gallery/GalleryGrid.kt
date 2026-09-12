@@ -29,6 +29,7 @@ import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
@@ -65,6 +66,8 @@ fun GalleryMediaGrid(
     selectedIds: Set<String>,
     onItemClick: (CaptureHistory) -> Unit,
     onItemLongClick: (CaptureHistory) -> Unit,
+    /** Star tap: flips the item's persisted favorite flag. */
+    onToggleFavorite: (CaptureHistory) -> Unit = {},
     /** Encrypted-at-rest photos' decrypted cache files, keyed by history id. */
     decryptedPhotos: Map<String, java.io.File> = emptyMap(),
     /** Encrypted-at-rest videos: previewed as a placeholder (playback decrypts). */
@@ -89,6 +92,7 @@ fun GalleryMediaGrid(
                     showPlaceholder = item.type == CaptureType.VIDEO && item.id in encryptedVideoIds,
                     onClick = { onItemClick(item) },
                     onLongClick = { onItemLongClick(item) },
+                    onToggleFavorite = { onToggleFavorite(item) },
                 )
             }
         }
@@ -173,6 +177,7 @@ private fun GalleryMediaCard(
     isSelected: Boolean,
     onClick: () -> Unit,
     onLongClick: () -> Unit,
+    onToggleFavorite: () -> Unit = {},
     /** Overrides the resolved model with a decrypted cache file when present. */
     decryptedModel: Any? = null,
     /** Forces the placeholder icon (encrypted video: no frameable bytes for Coil). */
@@ -238,6 +243,25 @@ private fun GalleryMediaCard(
             }
 
             GalleryTypeBadge(item, Modifier.align(Alignment.TopStart).padding(10.dp))
+            if (!selectMode && item.favorite) {
+                // The favorite badge doubles as the grid's star toggle, riding
+                // the type badge's top-start corner.
+                Surface(
+                    onClick = onToggleFavorite,
+                    modifier = Modifier
+                        .align(Alignment.TopStart)
+                        .padding(start = 64.dp, top = 10.dp),
+                    shape = CircleShape,
+                    color = Color.Black.copy(alpha = 0.54f),
+                ) {
+                    Icon(
+                        Icons.Default.Star,
+                        contentDescription = stringResource(R.string.gallery_unfavorite_cd),
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.padding(5.dp).size(16.dp),
+                    )
+                }
+            }
             if (item.type == CaptureType.VIDEO) {
                 GalleryDurationBadge(
                     durationMs = item.durationMs,

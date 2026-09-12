@@ -1,6 +1,7 @@
 import SettingsCard from './SettingsCard'
 import type { AllSettings, CameraSettings } from '../types'
 import { API_DEFAULTS } from '../api/defaults'
+import { t } from '../lib/i18n'
 
 interface Props {
   settings: () => AllSettings | null
@@ -19,12 +20,12 @@ export default function ExposureCard(props: Props) {
           <path d="M12 7v10M7 12h10" opacity="0.4" />
         </svg>
       }
-      title="Exposure"
+      title={t('exposure.title')}
     >
       {/* Exposure Compensation */}
       <div class="field-group">
         <div class="field-row">
-          <span class="field-label">Compensation</span>
+          <span class="field-label">{t('exposure.compensation')}</span>
           <span class="field-value">{s()?.camera?.exposureCompensation ?? API_DEFAULTS.cameraExposureCompensation}</span>
         </div>
         <input
@@ -41,7 +42,7 @@ export default function ExposureCard(props: Props) {
       {/* ISO */}
       <div class="field-group">
         <div class="field-row">
-          <span class="field-label">ISO</span>
+          <span class="field-label">{t('exposure.iso')}</span>
         </div>
         <div class="field-inline">
           <select
@@ -56,8 +57,8 @@ export default function ExposureCard(props: Props) {
               }
             }}
           >
-            <option value="auto">Auto</option>
-            <option value="manual">Manual</option>
+            <option value="auto">{t('common.auto')}</option>
+            <option value="manual">{t('common.manual')}</option>
           </select>
           {s()?.camera?.iso != null && (
             <input
@@ -76,7 +77,7 @@ export default function ExposureCard(props: Props) {
       {/* Exposure Time */}
       <div class="field-group">
         <div class="field-row">
-          <span class="field-label">Exposure Time</span>
+          <span class="field-label">{t('exposure.time')}</span>
         </div>
         <div class="field-inline">
           <select
@@ -91,8 +92,8 @@ export default function ExposureCard(props: Props) {
               }
             }}
           >
-            <option value="auto">Auto</option>
-            <option value="manual">Manual</option>
+            <option value="auto">{t('common.auto')}</option>
+            <option value="manual">{t('common.manual')}</option>
           </select>
           {s()?.camera?.exposureTime != null && (
             <input

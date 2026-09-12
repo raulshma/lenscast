@@ -24,23 +24,44 @@ export interface WhipStatusView {
   variant: 'info' | 'success' | 'warning' | 'error'
 }
 
+/** The display strings whipStatusView emits — overridden by the i18n caller. */
+export interface WhipStatusLabelSet {
+  idle: string
+  connecting: string
+  connected: string
+  error: string
+  pushFailed: string
+}
+
+export const WHIP_STATUS_LABELS_EN: WhipStatusLabelSet = {
+  idle: 'Idle',
+  connecting: 'Connecting…',
+  connected: 'Connected',
+  error: 'Error',
+  pushFailed: 'WHIP push failed',
+}
+
 /**
  * Maps the WHIP slice of the status snapshot onto the card's status line.
  * `connecting` outranks `active` (the connect is still in flight), while a
  * bare `active` without a status reads as connected — pre-WHIP firmware
- * omits the fields entirely and lands on idle.
+ * omits the fields entirely and lands on idle. The default labels keep the
+ * pure-English behavior the tests pin; the card passes localized ones.
  */
-export function whipStatusView(input: WhipStatusInput): WhipStatusView {
+export function whipStatusView(
+  input: WhipStatusInput,
+  labels: WhipStatusLabelSet = WHIP_STATUS_LABELS_EN,
+): WhipStatusView {
   if (input.status === 'error') {
-    return { label: 'Error', detail: (input.error ?? '').trim() || 'WHIP push failed', variant: 'error' }
+    return { label: labels.error, detail: (input.error ?? '').trim() || labels.pushFailed, variant: 'error' }
   }
   if (input.status === 'connecting') {
-    return { label: 'Connecting…', detail: '', variant: 'warning' }
+    return { label: labels.connecting, detail: '', variant: 'warning' }
   }
   if (input.status === 'connected' || (input.active ?? false)) {
-    return { label: 'Connected', detail: '', variant: 'success' }
+    return { label: labels.connected, detail: '', variant: 'success' }
   }
-  return { label: 'Idle', detail: '', variant: 'info' }
+  return { label: labels.idle, detail: '', variant: 'info' }
 }
 
 export interface WhipStunFieldView {
@@ -52,6 +73,20 @@ export interface WhipStunFieldView {
   invalid: boolean
 }
 
+/** The hint strings whipStunField emits — overridden by the i18n caller. */
+export interface WhipStunHintSet {
+  invalid: string
+  present: string
+  /** May carry a {default} placeholder interpolated with defaultStun. */
+  empty: string
+}
+
+export const WHIP_STUN_HINTS_EN: WhipStunHintSet = {
+  invalid: 'Enter a bare host[:port] — drop the scheme; the server assembles the stun: URI.',
+  present: 'One STUN server for one-shot ICE gathering.',
+  empty: 'Empty means host candidates only (LAN-only reachability); the default is {default}.',
+}
+
 /**
  * The STUN field's placeholder/hint/validation state. The server takes a
  * bare `host[:port]` (it assembles the `stun:` URI for iceServers itself),
@@ -59,16 +94,16 @@ export interface WhipStunFieldView {
  * a blank value is valid: it means no iceServers, i.e. host candidates only
  * (LAN-only reachability).
  */
-export function whipStunField(value: string, defaultStun: string): WhipStunFieldView {
+export function whipStunField(value: string, defaultStun: string, hints: WhipStunHintSet = WHIP_STUN_HINTS_EN): WhipStunFieldView {
   const trimmed = value.trim()
   const invalid = /^(stun|stuns|http|https):/i.test(trimmed)
   return {
     placeholder: defaultStun,
     invalid,
     hint: invalid
-      ? 'Enter a bare host[:port] — drop the scheme; the server assembles the stun: URI.'
+      ? hints.invalid
       : trimmed
-        ? 'One STUN server for one-shot ICE gathering.'
-        : `Empty means host candidates only (LAN-only reachability); the default is ${defaultStun}.`,
+        ? hints.present
+        : hints.empty.replace('{default}', defaultStun),
   }
 }

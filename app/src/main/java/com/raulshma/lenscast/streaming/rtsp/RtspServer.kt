@@ -28,10 +28,23 @@ import java.util.concurrent.atomic.AtomicLong
 // The H.264/AAC encoders live in the shared
 // [com.raulshma.lenscast.streaming.EncodedStreamHub]; this server is a sink
 // consumer of encoded access units ([feedVideo]/[feedAudio]) and reads the
-// encoder state for SDP through [EncodedSource].
+// encoder state for SDP through [EncodedSource]. The optional low-res
+// sub-stream rides its own URL ([RtspUriPolicy.SUB_STREAM_PATH]) on the same
+// listener: DESCRIBE /sub answers its own video-only SDP and the hub's sub
+// feed arrives through [feedSubVideo].
+//
+// TLS: when [sslServerSocketFactory] is non-null the listener wraps in
+// SSLServerSocket using the same self-signed identity as HTTPS mode — same
+// port, TLS on/off follows the HTTPS setting, clients use rtsps://.
 class RtspServer(
     private val port: Int = DEFAULT_PORT,
     private val encodedSource: EncodedSource,
+    /** Non-null when HTTPS mode is on: the listener serves TLS (rtsps://) on the same port. */
+    private val sslServerSocketFactory: javax.net.ssl.SSLServerSocketFactory? = null,
+    /** Whether the optional low-res sub-stream is enabled — DESCRIBE/SETUP/PLAY on /sub answer 404 while false. */
+    private val subStreamActive: () -> Boolean = { false },
+    /** Aggregate encoded-sink send samples (bytes, ms) from the RTP fan-out — the adaptive encoded-bitrate tap. */
+    private val encodedSendTap: ((bytes: Int, durationMs: Long) -> Unit)? = null,
 ) : RtspServerHandle {
 
     private var serverSocket: ServerSocket? = null
@@ -41,10 +54,13 @@ class RtspServer(
     // Fresh packetizers per start replace the old global reset() ritual. The
     // video packetizer is picked per codec at start (RtpPacketizer for H.264,
     // H265RtpPacketizer for H.265); behind the shared [VideoPacketizer] seam
-    // the fan-out and the RTCP counters stay codec-blind.
+    // the fan-out and the RTCP counters stay codec-blind. The sub-stream
+    // packetizer is always H.264 (the sub encode is codec-fixed).
     private var videoPacketizer: VideoPacketizer = RtpPacketizer()
+    private var subVideoPacketizer: VideoPacketizer = RtpPacketizer()
     private var audioPacketizer = AacRtpPacketizer()
     private var audioTimestamp: Long = 0
+    private var subRtpTimestamp: Long = 0
 
     private val clients = ConcurrentHashMap<String, ClientSession>()
     private val sessionIdCounter = AtomicInteger(0)
@@ -91,11 +107,9 @@ class RtspServer(
         config = normalize(initial)
 
         return try {
-            serverSocket = ServerSocket().apply {
-                reuseAddress = true
-                bind(InetSocketAddress(InetAddress.getByName("0.0.0.0"), port), 5)
-            }
+            serverSocket = openBoundSocket()
             rtpTimestamp = 0
+            subRtpTimestamp = 0
             audioTimestamp = 0
             firstKeyframeLogged = false
             lastSenderReportTime = 0L
@@ -107,6 +121,7 @@ class RtspServer(
                 RtspVideoCodec.H264 -> RtpPacketizer()
                 RtspVideoCodec.H265 -> H265RtpPacketizer()
             }
+            subVideoPacketizer = RtpPacketizer()
             audioPacketizer = AacRtpPacketizer()
 
             acceptThread = Thread({ acceptLoop() }, "RtspServer-Accept").apply {
@@ -115,7 +130,7 @@ class RtspServer(
                 start()
             }
 
-            Log.d(TAG, "RTSP server started on port $port")
+            Log.d(TAG, "RTSP server started on port $port${if (isTls()) " (TLS — clients use rtsps://)" else ""}")
             true
         } catch (e: Exception) {
             Log.e(TAG, "Failed to start RTSP server", e)
@@ -123,6 +138,23 @@ class RtspServer(
             false
         }
     }
+
+    /**
+     * The one listener factory, shared by [start] and the accept-loop's
+     * SocketException reopen: dual-stack bind on `::` (v4 peers arrive as
+     * v4-mapped), wrapped in SSL when TLS mode is on.
+     */
+    private fun openBoundSocket(): ServerSocket {
+        val socket: ServerSocket = sslServerSocketFactory?.createServerSocket() ?: ServerSocket()
+        socket.reuseAddress = true
+        socket.bind(InetSocketAddress(InetAddress.getByName(RtspAddressing.BIND_HOST), port), 5)
+        return socket
+    }
+
+    private fun isTls(): Boolean = sslServerSocketFactory != null
+
+    /** The URL scheme matching the listener's transport — rtsps under TLS. */
+    private fun urlScheme(): String = if (isTls()) "rtsps" else "rtsp"
 
     override fun stop() {
         if (!running.getAndSet(false)) return
@@ -222,17 +254,32 @@ class RtspServer(
 
         val isKeyframeAu = nalUnits.any { it.isKeyFrame }
 
+        // The RTP fan-out doubles as the adaptive encoded-bitrate tap: bytes
+        // actually handed to playing clients over the fan-out's wall time —
+        // honest bytes/time at the send seam (blocking socket writes included).
+        var sentBytes = 0L
+        val sendStartNanos = System.nanoTime()
+        // One packetization per AU: the packetizer's sequence state is shared,
+        // so per-client packetizing would advance the seq N times per frame —
+        // every client after the first would see sequence gaps. All playing
+        // clients receive the same packets.
+        val packets = videoPacketizer.packetizeAccessUnit(nalUnits.map { it.data }, rtpTimestamp)
+        distributedPackets.addAndGet(packets.size.toLong())
         for (client in clients.values) {
             // Mid-join discipline: a client that reached PLAY mid-GOP waits
             // for the next keyframe AU before its first byte — P-frames
             // referencing unseen frames are undecodable filler.
             if (!client.acceptVideoAu(isKeyframeAu)) continue
             if (senderReport != null) client.sendVideoRtcpPacket(senderReport)
-            val packets = videoPacketizer.packetizeAccessUnit(nalUnits.map { it.data }, rtpTimestamp)
-            distributedPackets.addAndGet(packets.size.toLong())
             for (packet in packets) {
                 client.sendRtpPacket(packet)
             }
+            client.onVideoAuDelivered()
+            sentBytes += packets.sumOf { it.size }
+        }
+        val sendDurationMs = (System.nanoTime() - sendStartNanos) / 1_000_000
+        if (sentBytes > 0) {
+            encodedSendTap?.invoke(sentBytes.coerceAtMost(Int.MAX_VALUE.toLong()).toInt(), sendDurationMs)
         }
     }
 
@@ -246,6 +293,39 @@ class RtspServer(
                 val packet = audioPacketizer.packetize(aacData, audioTimestamp)
                 client.sendAudioRtpPacket(packet)
             }
+        }
+    }
+
+    /**
+     * One encoded H.264 access unit for the low-res sub-stream, fanned out to
+     * the clients that PLAYed `/sub` (own keyframe gate, own interleaved
+     * channels, own packetizer + RTP timestamp — the main stream's state is
+     * never touched). No-op while nobody subscribed to the sub.
+     */
+    override fun feedSubVideo(nalUnits: List<EncodedNalUnit>) {
+        if (!running.get() || nalUnits.isEmpty()) return
+        val hasSubListeners = clients.values.any { it.isSubWanted }
+        if (!hasSubListeners) return
+
+        subRtpTimestamp += timestampIncrement
+        val isKeyframeAu = nalUnits.any { it.isKeyFrame }
+
+        var sentBytes = 0L
+        val sendStartNanos = System.nanoTime()
+        // Same once-per-AU packetization discipline as the main fan-out — the
+        // sub packetizer's sequence state is shared across sub clients.
+        val packets = subVideoPacketizer.packetizeAccessUnit(nalUnits.map { it.data }, subRtpTimestamp)
+        for (client in clients.values) {
+            if (!client.acceptSubAu(isKeyframeAu)) continue
+            for (packet in packets) {
+                client.sendSubRtpPacket(packet)
+            }
+            client.onVideoAuDelivered()
+            sentBytes += packets.sumOf { it.size }
+        }
+        val sendDurationMs = (System.nanoTime() - sendStartNanos) / 1_000_000
+        if (sentBytes > 0) {
+            encodedSendTap?.invoke(sentBytes.coerceAtMost(Int.MAX_VALUE.toLong()).toInt(), sendDurationMs)
         }
     }
 
@@ -308,10 +388,7 @@ class RtspServer(
                 }
                 serverSocket = null
                 try {
-                    serverSocket = ServerSocket().apply {
-                        reuseAddress = true
-                        bind(InetSocketAddress(InetAddress.getByName("0.0.0.0"), port), 5)
-                    }
+                    serverSocket = openBoundSocket()
                     Log.w(TAG, "Accept socket reopened after SocketException — resuming accept loop")
                     continue
                 } catch (e: Exception) {
@@ -339,11 +416,25 @@ class RtspServer(
         healthy = isHealthy(),
     )
 
+    /** The connected RTSP sessions, for the Web API's clients list. */
+    override fun clients(): List<com.raulshma.lenscast.streaming.RtspClientDescriptor> =
+        clients.values.map { it.describe() }
+
+    /** True kick: closes the session's socket like a TEARDOWN the client did not ask for. */
+    override fun kickClient(clientId: String): Boolean {
+        val client = clients[clientId] ?: return false
+        Log.d(TAG, "Kicking RTSP client $clientId")
+        client.close()
+        return true
+    }
+
     /**
      * One client connection: reads the wire (via [RtspWireReader]), parses
      * (via [RtspRequestParser]), authorizes (via [RtspSessionAuthorizer]),
      * routes URIs (via [RtspUriPolicy]), and drives the SETUP/PLAY/TEARDOWN
-     * state machine plus the interleaved-frame writers.
+     * state machine plus the interleaved-frame writers. One connection can
+     * carry the main stream (video+audio), the low-res sub-stream, or both —
+     * each side keeps its own SETUP/PLAY/keyframe-gate state.
      */
     private inner class ClientSession(
         private val socket: Socket,
@@ -354,6 +445,10 @@ class RtspServer(
         private var lastCSeq = -1
         private var rtspSessionId = ""
         private var lastActivity = System.currentTimeMillis()
+        private val connectedAtMs = System.currentTimeMillis()
+
+        /** Video AUs actually delivered to this client (main + sub), for the clients list. */
+        private val framesSent = AtomicLong(0)
 
         private val tracks = mutableMapOf<Int, TrackState>()
 
@@ -371,7 +466,17 @@ class RtspServer(
         private val audioRtpChannel: Int get() = tracks[1]?.rtpChannel ?: 2
         private val audioRtcpChannel: Int get() = tracks[1]?.rtcpChannel ?: 3
 
+        // Sub-stream state: its own SETUP gate, channels, PLAY gate, and the
+        // same keyframe-wait discipline as the main video track.
+        private var subSetup = false
+        private var subRtpChannel = 0
+        private var subRtcpChannel = 1
+        private var awaitingSubKeyframe = true
+
         var isPlaying = false
+            private set
+
+        var isSubWanted = false
             private set
 
         /** Set at PLAY; cleared on the first keyframe AU that follows (see [acceptVideoAu]). */
@@ -390,6 +495,43 @@ class RtspServer(
                 awaitingKeyframe = false
             }
             return true
+        }
+
+        /** The sub-stream's twin of [acceptVideoAu]: sub PLAY + own keyframe wait. */
+        fun acceptSubAu(isKeyframeAu: Boolean): Boolean {
+            if (!isSubWanted || !subSetup) return false
+            if (awaitingSubKeyframe) {
+                if (!isKeyframeAu) return false
+                awaitingSubKeyframe = false
+            }
+            return true
+        }
+
+        fun onVideoAuDelivered() {
+            framesSent.incrementAndGet()
+        }
+
+        /** The Web API clients-list entry for this connection. */
+        fun describe(): com.raulshma.lenscast.streaming.RtspClientDescriptor {
+            val media = buildList {
+                if (tracks[0]?.isSetup == true) add("video")
+                if (isAudioSetup) add("audio")
+                if (subSetup) add(RtspUriPolicy.SUB_STREAM_PATH)
+            }
+            val transport = if (media.isEmpty()) "TCP" else "RTP/AVP/TCP;interleaved"
+            return com.raulshma.lenscast.streaming.RtspClientDescriptor(
+                id = sessionId,
+                remoteAddress = try {
+                    "${socket.inetAddress?.hostAddress}:${socket.port}"
+                } catch (_: Exception) {
+                    "unknown"
+                },
+                connectedAtMs = connectedAtMs,
+                transport = transport,
+                media = media,
+                playing = isPlaying || isSubWanted,
+                framesSent = framesSent.get(),
+            )
         }
 
         private val outputStream: OutputStream?
@@ -488,9 +630,9 @@ class RtspServer(
 
             when (request.method) {
                 "OPTIONS" -> handleOptions(output)
-                "DESCRIBE" -> handleDescribe(output)
+                "DESCRIBE" -> handleDescribe(output, request.uri)
                 "SETUP" -> handleSetup(output, request.headers, request.uri)
-                "PLAY" -> handlePlay(output, request.headers)
+                "PLAY" -> handlePlay(output, request.headers, request.uri)
                 "TEARDOWN" -> handleTeardown(output, request.headers)
                 "GET_PARAMETER" -> if (isValidSession(request.headers)) sendOk(output) else sendResponse(output, "454 Session Not Found")
                 "SET_PARAMETER" -> if (isValidSession(request.headers)) sendOk(output) else sendResponse(output, "454 Session Not Found")
@@ -506,33 +648,85 @@ class RtspServer(
             )
         }
 
-        private fun handleDescribe(output: OutputStream) {
+        /**
+         * The advertised host for SDP/URLs: the accepted socket's local
+         * address normalized through [RtspAddressing] (a dual-stack bind's
+         * v4-mapped literal reduces to plain IPv4; a genuine IPv6 literal
+         * passes through and switches the SDP address family).
+         */
+        private fun advertisedHost(): String {
+            val raw = try {
+                socket.localAddress.hostAddress
+            } catch (_: Exception) {
+                null
+            }
+            return RtspAddressing.advertisedHost(raw) ?: (raw ?: "0.0.0.0")
+        }
+
+        private fun handleDescribe(output: OutputStream, requestUri: String) {
+            val isSub = RtspUriPolicy.isSubStreamUri(requestUri)
+            if (isSub && !subStreamActive()) {
+                sendResponse(output, "404 Not Found")
+                return
+            }
             if (rtspSessionId.isEmpty()) {
                 rtspSessionId = sessionId + "_" + System.currentTimeMillis().toString(16)
             }
 
-            val sdp = SdpBuilder.build(
-                sessionId = sessionId,
-                ip = socket.localAddress.hostAddress,
-                videoBitrate = config.videoBitrate,
-                audioEnabled = config.audioEnabled,
-                audioSampleRateHz = config.audioSampleRateHz,
-                audioChannelCount = config.audioChannelCount,
-                sps = encodedSource.sps,
-                pps = encodedSource.pps,
-                audioSpecificConfig = encodedSource.audioSpecificConfig,
-                codec = encodedSource.videoCodec,
-                vps = encodedSource.vps,
-            )
+            val host = advertisedHost()
+            val addressType = RtspAddressing.networkType(host)
+            val controlPath = if (isSub) RtspUriPolicy.SUB_STREAM_PATH else RtspUriPolicy.DEFAULT_STREAM_PATH
+            val sdp = if (isSub) {
+                // The sub-stream's own video-only SDP: its encoder's parameter
+                // sets, its fixed bitrate, control anchored at /sub.
+                SdpBuilder.build(
+                    sessionId = sessionId,
+                    ip = host,
+                    videoBitrate = StreamDefaults.RTSP_SUB_VIDEO_BITRATE,
+                    audioEnabled = false,
+                    audioSampleRateHz = config.audioSampleRateHz,
+                    audioChannelCount = config.audioChannelCount,
+                    sps = encodedSource.subSps,
+                    pps = encodedSource.subPps,
+                    audioSpecificConfig = null,
+                    codec = RtspVideoCodec.H264,
+                    vps = null,
+                    controlPath = controlPath,
+                    addressType = addressType,
+                )
+            } else {
+                SdpBuilder.build(
+                    sessionId = sessionId,
+                    ip = host,
+                    videoBitrate = config.videoBitrate,
+                    audioEnabled = config.audioEnabled,
+                    audioSampleRateHz = config.audioSampleRateHz,
+                    audioChannelCount = config.audioChannelCount,
+                    sps = encodedSource.sps,
+                    pps = encodedSource.pps,
+                    audioSpecificConfig = encodedSource.audioSpecificConfig,
+                    codec = encodedSource.videoCodec,
+                    vps = encodedSource.vps,
+                    controlPath = controlPath,
+                    addressType = addressType,
+                )
+            }
             sendResponse(
                 output, "200 OK", mapOf(
                     "Content-Type" to "application/sdp",
-                    "Content-Base" to "rtsp://${socket.localAddress.hostAddress}:$port/"
+                    "Content-Base" to "${urlScheme()}://${RtspAddressing.urlHost(host)}:$port/$controlPath/"
                 ), sdp.toByteArray(Charsets.UTF_8)
             )
         }
 
         private fun handleSetup(output: OutputStream, headers: Map<String, String>, requestUri: String) {
+            // The sub-stream owns /sub and /sub/trackID=0 — the main track
+            // grammar never matches those paths.
+            if (RtspUriPolicy.isSubControlUri(requestUri)) {
+                setupSubStream(output, headers)
+                return
+            }
+
             val trackId = RtspUriPolicy.resolveTrackId(requestUri)
             if (trackId == null) {
                 sendResponse(output, "404 Not Found")
@@ -587,9 +781,88 @@ class RtspServer(
             )
         }
 
-        private fun handlePlay(output: OutputStream, headers: Map<String, String>) {
+        /**
+         * The sub-stream's SETUP: video-only, its own interleaved channel pair
+         * (the client picks, same response shape as the main video track).
+         * Answers 404 while the sub stream is disabled.
+         */
+        private fun setupSubStream(output: OutputStream, headers: Map<String, String>) {
+            if (!subStreamActive()) {
+                sendResponse(output, "404 Not Found")
+                return
+            }
+
+            val transportVerdict = RtspSessionProtocol.parseTransportHeader(headers["transport"])
+            if (transportVerdict is RtspSessionProtocol.TransportVerdict.Unsupported) {
+                sendResponse(output, "461 Unsupported Transport")
+                return
+            }
+
+            if (rtspSessionId.isNotEmpty()) {
+                val requestedSession = RtspSessionProtocol.parseSessionHeader(headers["session"])
+                if (requestedSession != null && requestedSession != rtspSessionId) {
+                    sendResponse(output, "454 Session Not Found")
+                    return
+                }
+            }
+
+            if (transportVerdict is RtspSessionProtocol.TransportVerdict.Interleaved) {
+                transportVerdict.channels?.let { channels ->
+                    subRtpChannel = channels.rtp
+                    subRtcpChannel = channels.rtcp
+                }
+            }
+
+            subSetup = true
+
+            if (rtspSessionId.isEmpty()) {
+                rtspSessionId = sessionId + "_" + System.currentTimeMillis().toString(16)
+            }
+
+            state = SessionState.READY
+
+            sendResponse(
+                output, "200 OK", mapOf(
+                    "Transport" to "RTP/AVP/TCP;unicast;interleaved=$subRtpChannel-$subRtcpChannel",
+                    "Session" to "$rtspSessionId;timeout=$SESSION_TIMEOUT_HEADER_SECONDS"
+                )
+            )
+        }
+
+        private fun handlePlay(output: OutputStream, headers: Map<String, String>, requestUri: String) {
             if (!isValidSession(headers)) {
                 sendResponse(output, "454 Session Not Found")
+                return
+            }
+
+            val isSubPlay = !RtspUriPolicy.isAggregateOrStreamUri(requestUri) &&
+                RtspUriPolicy.isSubControlUri(requestUri)
+
+            if (isSubPlay) {
+                if (!subStreamActive() || !subSetup) {
+                    sendResponse(output, "455 Method Not Valid In This State")
+                    return
+                }
+                // Every PLAY (re)arms the sub keyframe wait, then forces a
+                // sync frame from the sub encoder — the main stream's gate
+                // discipline, per stream.
+                isSubWanted = true
+                awaitingSubKeyframe = true
+                encodedSource.requestSubKeyFrame()
+
+                val streamBase = buildAbsoluteRtspUrl("/${RtspUriPolicy.SUB_STREAM_PATH}")
+                val nextSeq = (subVideoPacketizer.currentSeq + 1) and 0xFFFF
+                val nextRtpTime = (subRtpTimestamp + timestampIncrement) and 0xFFFFFFFFL
+                sendResponse(
+                    output, "200 OK", mapOf(
+                        "Session" to rtspSessionId,
+                        "Range" to "npt=0.000-",
+                        "RTP-Info" to RtspSessionProtocol.buildRtpInfo(
+                            RtspSessionProtocol.RtpInfoEntry(url = streamBase, seq = nextSeq, rtpTime = nextRtpTime),
+                            null,
+                        )
+                    )
+                )
                 return
             }
 
@@ -636,7 +909,9 @@ class RtspServer(
                 return
             }
 
+            // TEARDOWN is aggregate: both streams end, the session drops to INIT.
             isPlaying = false
+            isSubWanted = false
             state = SessionState.INIT
             sendResponse(
                 output, "200 OK", mapOf(
@@ -663,11 +938,13 @@ class RtspServer(
         }
 
         private fun buildAbsoluteRtspUrl(requestUri: String): String {
-            if (requestUri.startsWith("rtsp://", ignoreCase = true)) {
+            if (requestUri.startsWith("rtsp://", ignoreCase = true) ||
+                requestUri.startsWith("rtsps://", ignoreCase = true)
+            ) {
                 return requestUri
             }
             val normalizedPath = if (requestUri.startsWith("/")) requestUri else "/$requestUri"
-            return "rtsp://${socket.localAddress.hostAddress}:$port$normalizedPath"
+            return "${urlScheme()}://${RtspAddressing.urlHost(advertisedHost())}:$port$normalizedPath"
         }
 
         /**
@@ -692,6 +969,8 @@ class RtspServer(
         fun sendAudioRtpPacket(packet: ByteArray) = sendInterleaved(audioRtpChannel, packet)
 
         fun sendVideoRtcpPacket(packet: ByteArray) = sendInterleaved(videoRtcpChannel, packet)
+
+        fun sendSubRtpPacket(packet: ByteArray) = sendInterleaved(subRtpChannel, packet)
 
         fun close() {
             isPlaying = false

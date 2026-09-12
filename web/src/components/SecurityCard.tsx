@@ -5,6 +5,7 @@ import { ARM_DAY_LABELS, isDayArmed, toggleArmDayMask } from '../armDays'
 import SettingsCard from './SettingsCard'
 import ToggleRow from './ToggleRow'
 import { downloadDetectionModel, sendTestAlert, setSiren, setTorch } from '../api/client'
+import { t } from '../lib/i18n'
 
 interface Props {
   settings: () => AllSettings | null
@@ -33,12 +34,12 @@ function webhookHeadersWarning(value: string | undefined): string {
   try {
     const parsed: unknown = JSON.parse(text)
     if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
-      return 'Not a JSON object — these headers will not be sent'
+      return t('security.headersNotObject')
     }
     const invalid = Object.values(parsed as Record<string, unknown>).some((v) => typeof v !== 'string')
-    return invalid ? 'Header values must be strings — non-string values will not be sent' : ''
+    return invalid ? t('security.headersNotStrings') : ''
   } catch {
-    return 'Invalid JSON — these headers will not be sent'
+    return t('security.headersInvalid')
   }
 }
 
@@ -111,12 +112,12 @@ export default function SecurityCard(props: Props) {
         setTestAlertResult(
           result.success
             ? result.dispatchedActions.length > 0
-              ? `Test alert sent via: ${result.dispatchedActions.join(', ')}`
-              : 'Test alert fired, but no alert channel is enabled'
-            : 'Test alert unavailable',
+              ? t('security.testAlertVia', { channels: result.dispatchedActions.join(', ') })
+              : t('security.testAlertNoChannel')
+            : t('security.testAlertUnavailable'),
         )
       })
-      .catch(() => setTestAlertResult('Test alert failed'))
+      .catch(() => setTestAlertResult(t('security.testAlertFailed')))
       .finally(() => setTestAlertBusy(false))
   }
 
@@ -134,18 +135,18 @@ export default function SecurityCard(props: Props) {
     button: { label: string; disabled: boolean } | null
     showError: boolean
   } {
-    if (mlModelState() === 'ready') return { status: 'Ready', button: null, showError: false }
+    if (mlModelState() === 'ready') return { status: t('security.modelReady'), button: null, showError: false }
     if (mlModelState() === 'downloading' || modelBusy()) {
       const p = mlModelProgress()
       return {
-        status: p >= 0 ? `Downloading ${Math.round(p * 100)}%` : 'Downloading…',
-        button: { label: 'Downloading…', disabled: true },
+        status: p >= 0 ? t('security.modelDownloadingPct', { pct: Math.round(p * 100) }) : t('security.modelDownloading'),
+        button: { label: t('security.modelDownloading'), disabled: true },
         showError: mlModelState() === 'failed',
       }
     }
     return mlModelState() === 'failed'
-      ? { status: 'Download failed', button: { label: 'Retry Download', disabled: false }, showError: true }
-      : { status: `Not downloaded (${API_DEFAULTS.mlModelSizeLabel})`, button: { label: 'Download Model', disabled: false }, showError: false }
+      ? { status: t('security.modelFailed'), button: { label: t('security.modelRetry'), disabled: false }, showError: true }
+      : { status: t('security.modelNotDownloaded', { size: API_DEFAULTS.mlModelSizeLabel }), button: { label: t('security.modelDownload'), disabled: false }, showError: false }
   }
 
   function toggleSiren() {
@@ -162,7 +163,7 @@ export default function SecurityCard(props: Props) {
     const current = zones()
     const next: MotionZone = {
       id: crypto.randomUUID(),
-      label: `Zone ${current.length + 1}`,
+      label: t('security.zone', { n: current.length + 1 }),
       enabled: true,
       x: 0.1 + 0.05 * (current.length % 4),
       y: 0.1 + 0.05 * (current.length % 3),
@@ -189,13 +190,13 @@ export default function SecurityCard(props: Props) {
           <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
         </svg>
       }
-      title="Security & Detection"
+      title={t('security.title')}
     >
       {/* Motion */}
       <div class="field-group">
         <ToggleRow
           id="motion-toggle"
-          label="Motion Detection"
+          label={t('security.motion')}
           checked={motionOn()}
           onToggle={() => props.updateStreamingAndSave({ motionDetectionEnabled: !motionOn() })}
         />
@@ -204,7 +205,7 @@ export default function SecurityCard(props: Props) {
       <Show when={motionOn()}>
         <div class="field-group">
           <div class="field-row">
-            <span class="field-label">Sensitivity</span>
+            <span class="field-label">{t('security.sensitivity')}</span>
             <span class="field-value">{stream()?.motionSensitivityPercent ?? API_DEFAULTS.motionSensitivityPercent}%</span>
           </div>
           <input
@@ -218,7 +219,7 @@ export default function SecurityCard(props: Props) {
             onInput={(e) => props.updateStreamingDebounced({ motionSensitivityPercent: parseInt(e.currentTarget.value) })}
           />
           <div class="field-row">
-            <span class="field-label">Event Cooldown</span>
+            <span class="field-label">{t('security.cooldown')}</span>
             <span class="field-value">{stream()?.motionCooldownSeconds ?? API_DEFAULTS.motionCooldownSeconds}s</span>
           </div>
           <input
@@ -236,12 +237,12 @@ export default function SecurityCard(props: Props) {
         <div class="field-group">
           <ToggleRow
             id="motion-rec-toggle"
-            label="Record on Motion"
+            label={t('security.recordOnMotion')}
             checked={motionRecordingOn()}
             onToggle={() => props.updateStreamingAndSave({ motionRecordingEnabled: !motionRecordingOn() })}
           />
           <div class="field-row">
-            <span class="field-label">Post-roll</span>
+            <span class="field-label">{t('security.postRoll')}</span>
             <span class="field-value">{stream()?.motionPostRollSeconds ?? API_DEFAULTS.motionPostRollSeconds}s</span>
           </div>
           <input
@@ -260,13 +261,13 @@ export default function SecurityCard(props: Props) {
         <div class="field-group">
           <ToggleRow
             id="motion-schedule-toggle"
-            label="Arm on Schedule"
+            label={t('security.armSchedule')}
             checked={armScheduleOn()}
             onToggle={() => props.updateStreamingAndSave({ motionArmScheduleEnabled: !armScheduleOn() })}
           />
           <Show when={armScheduleOn()}>
             <div class="field-row">
-              <span class="field-label">From</span>
+              <span class="field-label">{t('security.from')}</span>
               <span class="field-value">{minutesToLabel(stream()?.motionArmStartMinute ?? API_DEFAULTS.motionArmStartMinute)}</span>
             </div>
             <input
@@ -280,7 +281,7 @@ export default function SecurityCard(props: Props) {
               onInput={(e) => props.updateStreamingDebounced({ motionArmStartMinute: parseInt(e.currentTarget.value) })}
             />
             <div class="field-row">
-              <span class="field-label">Until</span>
+              <span class="field-label">{t('security.until')}</span>
               <span class="field-value">{minutesToLabel(stream()?.motionArmEndMinute ?? API_DEFAULTS.motionArmEndMinute)}</span>
             </div>
             <input
@@ -294,10 +295,10 @@ export default function SecurityCard(props: Props) {
               onInput={(e) => props.updateStreamingDebounced({ motionArmEndMinute: parseInt(e.currentTarget.value) })}
             />
             <div class="field-row">
-              <span class="field-label">Days</span>
+              <span class="field-label">{t('security.days')}</span>
               <span class="field-value">{armedDayCount()}/7</span>
             </div>
-            <div class="arm-days-row" role="group" aria-label="Arm on days">
+            <div class="arm-days-row" role="group" aria-label={t('security.armDaysAria')}>
               <For each={ARM_DAY_LABELS}>
                 {(label, i) => (
                   <button
@@ -317,15 +318,15 @@ export default function SecurityCard(props: Props) {
         {/* Detection zones */}
         <div class="field-group">
           <div class="field-row">
-            <span class="field-label">Detection Zones</span>
+            <span class="field-label">{t('security.zones')}</span>
             <button type="button" class="action-btn action-btn-ghost" onClick={addZone}>
-              <span>Add zone</span>
+              <span>{t('security.addZone')}</span>
             </button>
           </div>
           <Show when={zones().length === 0}>
             <div class="status-banner status-banner-info stream-mode-hint" role="note">
               <span class="status-banner-dot" aria-hidden="true" />
-              <span>No zones — the whole frame is the detection area.</span>
+              <span>{t('security.noZones')}</span>
             </div>
           </Show>
           <For each={zones()}>
@@ -335,7 +336,7 @@ export default function SecurityCard(props: Props) {
                   {zone.enabled ? '' : '· '}({zone.x.toFixed(2)}, {zone.y.toFixed(2)}) {zone.width.toFixed(2)}×{zone.height.toFixed(2)}
                 </span>
                 <div class="motion-zone-actions">
-                  <label class="toggle-switch" title="Enable zone">
+                  <label class="toggle-switch" title={t('security.enableZone')}>
                     <input
                       type="checkbox"
                       checked={zone.enabled}
@@ -344,7 +345,7 @@ export default function SecurityCard(props: Props) {
                     <span class="toggle-slider" />
                   </label>
                   <button type="button" class="client-kick-btn" onClick={() => removeZone(zone.id)}>
-                    Remove
+                    {t('security.remove')}
                   </button>
                 </div>
               </div>
@@ -357,13 +358,13 @@ export default function SecurityCard(props: Props) {
       <div class="field-group">
         <ToggleRow
           id="sound-toggle"
-          label="Sound Detection"
+          label={t('security.sound')}
           checked={soundOn()}
           onToggle={() => props.updateStreamingAndSave({ soundDetectionEnabled: !soundOn() })}
         />
         <Show when={soundOn()}>
           <div class="field-row">
-            <span class="field-label">Trigger Threshold</span>
+            <span class="field-label">{t('security.threshold')}</span>
             <span class="field-value">{stream()?.soundThresholdPercent ?? API_DEFAULTS.soundThresholdPercent}%</span>
           </div>
           <input
@@ -378,7 +379,7 @@ export default function SecurityCard(props: Props) {
           />
           <ToggleRow
             id="sound-adaptive-floor-toggle"
-            label="Adaptive Noise Floor"
+            label={t('security.adaptiveFloor')}
             checked={stream()?.soundAdaptiveNoiseFloor ?? API_DEFAULTS.soundAdaptiveNoiseFloor}
             onToggle={() =>
               props.updateStreamingAndSave({
@@ -388,11 +389,11 @@ export default function SecurityCard(props: Props) {
           />
           <Show when={stream()?.soundAdaptiveNoiseFloor}>
             <div class="stream-mode-hint" style="margin-top: -4px">
-              Trigger rides above the tracked ambient level — constant background noise neither masks events nor trips alone.
+              {t('security.adaptiveFloorDesc')}
             </div>
           </Show>
           <div class="field-row">
-            <span class="field-label">Event Cooldown</span>
+            <span class="field-label">{t('security.cooldown')}</span>
             <span class="field-value">{stream()?.soundCooldownSeconds ?? API_DEFAULTS.soundCooldownSeconds}s</span>
           </div>
           <input
@@ -407,14 +408,14 @@ export default function SecurityCard(props: Props) {
           />
           <ToggleRow
             id="sound-rec-toggle"
-            label="Record on Sound"
+            label={t('security.recordOnSound')}
             checked={soundRecordingOn()}
             onToggle={() => props.updateStreamingAndSave({ soundRecordingEnabled: !soundRecordingOn() })}
           />
           <Show when={soundRecordingOn()}>
             <div class="status-banner status-banner-info stream-mode-hint" role="note">
               <span class="status-banner-dot" aria-hidden="true" />
-              <span>Sound events start a bounded clip using the motion post-roll duration.</span>
+              <span>{t('security.recordOnSoundDesc')}</span>
             </div>
           </Show>
         </Show>
@@ -424,16 +425,16 @@ export default function SecurityCard(props: Props) {
       <div class="field-group">
         <ToggleRow
           id="ml-detection-toggle"
-          label="Object Detection (ML)"
+          label={t('security.ml')}
           checked={mlOn()}
           onToggle={() => props.updateStreamingAndSave({ mlDetectionEnabled: !mlOn() })}
         />
         <div class="status-banner status-banner-info stream-mode-hint" role="note" aria-live="polite">
           <span class="status-banner-dot" aria-hidden="true" />
-          <span>Verifies motion with an on-device model (person, pet, vehicle); events without a matching object are suppressed.</span>
+          <span>{t('security.mlDesc')}</span>
         </div>
         <div class="field-row">
-          <span class="field-label">Minimum Confidence</span>
+          <span class="field-label">{t('security.minConfidence')}</span>
           <span class="field-value">{stream()?.mlMinScorePercent ?? API_DEFAULTS.mlMinScorePercent}%</span>
         </div>
         <input
@@ -448,33 +449,33 @@ export default function SecurityCard(props: Props) {
           onInput={(e) => props.updateStreamingDebounced({ mlMinScorePercent: parseInt(e.currentTarget.value) })}
         />
         <div class="field-row">
-          <span class="field-label">Alert Classes</span>
+          <span class="field-label">{t('security.alertClasses')}</span>
         </div>
         <div class="field-group">
           <ToggleRow
             id="ml-person-toggle"
-            label="People"
+            label={t('security.people')}
             checked={mlPersonOn()}
             disabled={!mlOn()}
             onToggle={() => props.updateStreamingAndSave({ mlIncludePerson: !mlPersonOn() })}
           />
           <ToggleRow
             id="ml-pets-toggle"
-            label="Animals"
+            label={t('security.animals')}
             checked={mlPetsOn()}
             disabled={!mlOn()}
             onToggle={() => props.updateStreamingAndSave({ mlIncludePets: !mlPetsOn() })}
           />
           <ToggleRow
             id="ml-vehicles-toggle"
-            label="Vehicles"
+            label={t('security.vehicles')}
             checked={mlVehiclesOn()}
             disabled={!mlOn()}
             onToggle={() => props.updateStreamingAndSave({ mlIncludeVehicles: !mlVehiclesOn() })}
           />
         </div>
         <div class="field-row">
-          <span class="field-label">Detection Model</span>
+          <span class="field-label">{t('security.model')}</span>
           <span class="field-value">{mlModelView().status}</span>
         </div>
         <Show when={mlModelView().showError}>
@@ -501,16 +502,16 @@ export default function SecurityCard(props: Props) {
       <div class="field-group">
         <ToggleRow
           id="continuous-rec-toggle"
-          label="Continuous Recording"
+          label={t('security.continuous')}
           checked={continuousOn()}
           onToggle={() => props.updateStreamingAndSave({ continuousRecording: !continuousOn() })}
         />
         <div class="status-banner status-banner-info stream-mode-hint" role="note" aria-live="polite">
           <span class="status-banner-dot" aria-hidden="true" />
-          <span>Records chained segments while the camera is idle; oldest segments age out with the capture retention window.</span>
+          <span>{t('security.continuousDesc')}</span>
         </div>
         <div class="field-row">
-          <span class="field-label">Segment Length</span>
+          <span class="field-label">{t('security.segmentLength')}</span>
           <span class="field-value">{stream()?.continuousSegmentMinutes ?? API_DEFAULTS.continuousSegmentMinutes} min</span>
         </div>
         <input
@@ -530,20 +531,20 @@ export default function SecurityCard(props: Props) {
       <div class="field-group">
         <ToggleRow
           id="local-alerts-toggle"
-          label="Local Alerts"
+          label={t('security.localAlerts')}
           checked={localAlertsOn()}
           onToggle={() => props.updateStreamingAndSave({ detectionNotificationsEnabled: !localAlertsOn() })}
         />
         <Show when={localAlertsOn()}>
           <ToggleRow
             id="quiet-hours-toggle"
-            label="Quiet Hours"
+            label={t('security.quietHours')}
             checked={quietHoursOn()}
             onToggle={() => props.updateStreamingAndSave({ alertQuietHoursEnabled: !quietHoursOn() })}
           />
           <Show when={quietHoursOn()}>
             <div class="field-row">
-              <span class="field-label">Quiet From</span>
+              <span class="field-label">{t('security.quietFrom')}</span>
               <span class="field-value">{minutesToLabel(stream()?.alertQuietHoursStartMinute ?? API_DEFAULTS.alertQuietHoursStartMinute)}</span>
             </div>
             <input
@@ -557,7 +558,7 @@ export default function SecurityCard(props: Props) {
               onInput={(e) => props.updateStreamingDebounced({ alertQuietHoursStartMinute: parseInt(e.currentTarget.value) })}
             />
             <div class="field-row">
-              <span class="field-label">Quiet Until</span>
+              <span class="field-label">{t('security.quietUntil')}</span>
               <span class="field-value">{minutesToLabel(stream()?.alertQuietHoursEndMinute ?? API_DEFAULTS.alertQuietHoursEndMinute)}</span>
             </div>
             <input
@@ -571,13 +572,13 @@ export default function SecurityCard(props: Props) {
               onInput={(e) => props.updateStreamingDebounced({ alertQuietHoursEndMinute: parseInt(e.currentTarget.value) })}
             />
             <div class="stream-mode-hint" style="margin-top: -4px">
-              Notifications are held inside the window — webhooks, MQTT, recordings, and the event log keep firing.
+              {t('security.quietDesc')}
             </div>
           </Show>
         </Show>
         <ToggleRow
           id="tamper-toggle"
-          label="Tamper Detection"
+          label={t('security.tamper')}
           checked={tamperOn()}
           onToggle={() => props.updateStreamingAndSave({ tamperDetectionEnabled: !tamperOn() })}
         />
@@ -587,7 +588,7 @@ export default function SecurityCard(props: Props) {
       <div class="field-group">
         <ToggleRow
           id="webhook-toggle"
-          label="Webhook Alerts"
+          label={t('security.webhook')}
           checked={webhookOn()}
           onToggle={() => props.updateStreamingAndSave({ webhookEnabled: !webhookOn() })}
         />
@@ -596,7 +597,7 @@ export default function SecurityCard(props: Props) {
             id="webhook-url"
             type="url"
             class="field-input field-input-full"
-            placeholder="https://ntfy.sh/your-topic or any JSON endpoint"
+            placeholder={t('security.webhookUrlPlaceholder')}
             value={stream()?.webhookUrl ?? ''}
             onInput={(e) => props.updateStreamingDebounced({ webhookUrl: e.currentTarget.value })}
           />
@@ -604,7 +605,7 @@ export default function SecurityCard(props: Props) {
             id="webhook-headers"
             type="text"
             class="field-input field-input-full"
-            placeholder='Custom headers as JSON, e.g. {"Authorization": "Bearer token"}'
+            placeholder={t('security.webhookHeadersPlaceholder')}
             value={stream()?.webhookHeaders ?? API_DEFAULTS.webhookHeaders}
             onInput={(e) => props.updateStreamingDebounced({ webhookHeaders: e.currentTarget.value })}
           />
@@ -622,7 +623,7 @@ export default function SecurityCard(props: Props) {
             disabled={testAlertBusy()}
             onClick={sendTestAlertNow}
           >
-            {testAlertBusy() ? 'Sending…' : 'Send Test Alert'}
+            {testAlertBusy() ? t('security.sending') : t('security.sendTestAlert')}
           </button>
           <Show when={testAlertResult()}>
             <span class="clients-cap-row" role="status" aria-live="polite">
@@ -636,13 +637,13 @@ export default function SecurityCard(props: Props) {
       <div class="field-group">
         <ToggleRow
           id="auto-siren-toggle"
-          label="Auto-Siren on Detection"
+          label={t('security.autoSiren')}
           checked={autoSirenOn()}
           onToggle={() => props.updateStreamingAndSave({ autoSiren: !autoSirenOn() })}
         />
         <Show when={autoSirenOn()}>
           <div class="field-row">
-            <span class="field-label">Siren Duration</span>
+            <span class="field-label">{t('security.sirenDuration')}</span>
             <span class="field-value">{stream()?.sirenDurationSeconds ?? API_DEFAULTS.sirenDurationSeconds}s</span>
           </div>
           <input
@@ -658,12 +659,12 @@ export default function SecurityCard(props: Props) {
         </Show>
         <ToggleRow
           id="auto-torch-toggle"
-          label="Auto-Light on Detection"
+          label={t('security.autoTorch')}
           checked={autoTorchOn()}
           onToggle={() => props.updateStreamingAndSave({ autoTorch: !autoTorchOn() })}
         />
         <div class="field-row">
-          <span class="field-label">Re-trigger Cooldown</span>
+          <span class="field-label">{t('security.retriggerCooldown')}</span>
           <span class="field-value">{stream()?.autoDeterrenceCooldownSeconds ?? API_DEFAULTS.autoDeterrenceCooldownSeconds}s</span>
         </div>
         <input
@@ -678,14 +679,14 @@ export default function SecurityCard(props: Props) {
         />
         <div class="status-banner status-banner-info stream-mode-hint" role="note">
           <span class="status-banner-dot" aria-hidden="true" />
-          <span>When armed detection fires, the siren and light trigger automatically — at most once per cooldown window.</span>
+          <span>{t('security.autoDesc')}</span>
         </div>
       </div>
 
       {/* Deterrence */}
       <div class="field-group">
         <div class="field-row">
-          <span class="field-label">Deterrence</span>
+          <span class="field-label">{t('security.deterrence')}</span>
         </div>
         <div class="deterrence-row">
           <button
@@ -698,7 +699,7 @@ export default function SecurityCard(props: Props) {
               <path d="M11 5L6 9H2v6h4l5 4V5z" />
               <path d="M19.07 4.93a10 10 0 010 14.14" />
             </svg>
-            <span>{sirenOn() ? 'Siren OFF' : 'Siren ON'}</span>
+            <span>{sirenOn() ? t('security.sirenOff') : t('security.sirenOn')}</span>
           </button>
           <button
             type="button"
@@ -709,7 +710,7 @@ export default function SecurityCard(props: Props) {
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <path d="M9 18h6M10 22h4M12 2a7 7 0 00-4 12.7c.6.5 1 1.4 1 2.3h6c0-.9.4-1.8 1-2.3A7 7 0 0012 2z" />
             </svg>
-            <span>{torchOn() ? 'Light OFF' : 'Light ON'}</span>
+            <span>{torchOn() ? t('security.lightOff') : t('security.lightOn')}</span>
           </button>
         </div>
       </div>

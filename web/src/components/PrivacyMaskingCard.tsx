@@ -2,6 +2,14 @@ import { Show, For, createSignal } from 'solid-js'
 import SettingsCard from './SettingsCard'
 import type { MaskingType, MaskingZone, StreamingSettings } from '../types'
 import { MASKING_TYPE_LABELS } from '../types'
+import { t } from '../lib/i18n'
+
+/** Wire value → i18n key for the masking-type options. */
+const MASK_KEYS: Record<MaskingType, string> = {
+  BLACKOUT: 'option.mask.blackout',
+  PIXELATE: 'option.mask.pixelate',
+  BLUR: 'option.mask.blur',
+}
 
 interface Props {
   streaming: () => StreamingSettings
@@ -37,7 +45,6 @@ export default function PrivacyMaskingCard(props: Props) {
     props.onUpdate({ maskingZones: [...zones(), newZone] })
     setExpandedZoneId(newZone.id)
   }
-
   function removeZone(id: string) {
     props.onUpdate({ maskingZones: zones().filter((z) => z.id !== id) })
     if (expandedZoneId() === id) setExpandedZoneId(null)
@@ -63,11 +70,11 @@ export default function PrivacyMaskingCard(props: Props) {
           <rect x="14" y="3" width="7" height="7" />
         </svg>
       }
-      title="Privacy Masking"
+      title={t('privacy.title')}
     >
       <div class="settings-group">
         <div class="field-row field-row-toggle">
-          <span class="field-label">Enable Privacy Masking</span>
+          <span class="field-label">{t('privacy.enable')}</span>
           <label class="toggle-switch" for="masking-enabled-toggle">
             <input
               id="masking-enabled-toggle"
@@ -83,7 +90,7 @@ export default function PrivacyMaskingCard(props: Props) {
       <Show when={s().maskingEnabled}>
         <div class="settings-group">
           <div class="setting-row" style={{ 'justify-content': 'space-between', 'align-items': 'center' }}>
-            <span class="setting-label">Masking Zones ({zones().length})</span>
+            <span class="setting-label">{t('privacy.zones', { count: zones().length })}</span>
             <button
               class="card-btn card-btn-primary"
               style={{ 'font-size': '12px', padding: '4px 10px' }}
@@ -93,7 +100,7 @@ export default function PrivacyMaskingCard(props: Props) {
                 <line x1="12" y1="5" x2="12" y2="19" />
                 <line x1="5" y1="12" x2="19" y2="12" />
               </svg>
-              Add Zone
+              {t('privacy.addZone')}
             </button>
           </div>
         </div>
@@ -122,7 +129,7 @@ export default function PrivacyMaskingCard(props: Props) {
                     <polyline points="9 18 15 12 9 6" />
                   </svg>
                   <span class="setting-label" style={{ flex: 1 }}>
-                    {zone.label || `Zone ${zones().indexOf(zone) + 1}`}
+                    {zone.label || t('privacy.zone', { n: zones().indexOf(zone) + 1 })}
                   </span>
                   <span
                     style={{
@@ -133,7 +140,7 @@ export default function PrivacyMaskingCard(props: Props) {
                       color: '#9ca3af',
                     }}
                   >
-                    {MASKING_TYPE_LABELS[zone.type]}
+                    {t(MASK_KEYS[zone.type])}
                   </span>
                 </div>
                 <button
@@ -151,7 +158,7 @@ export default function PrivacyMaskingCard(props: Props) {
                     e.stopPropagation()
                     removeZone(zone.id)
                   }}
-                  title="Remove zone"
+                  title={t('privacy.removeZone')}
                 >
                   ×
                 </button>
@@ -160,18 +167,18 @@ export default function PrivacyMaskingCard(props: Props) {
               <Show when={expandedZoneId() === zone.id}>
                 <div style={{ 'margin-top': '8px', 'padding-left': '24px' }}>
                   <label class="setting-row">
-                    <span class="setting-label">Label</span>
+                    <span class="setting-label">{t('privacy.label')}</span>
                     <input
                       type="text"
                       class="text-input text-input-sm"
                       value={zone.label}
-                      placeholder="e.g. Front door, Monitor"
+                      placeholder={t('privacy.labelPlaceholder')}
                       onChange={(e) => updateZone(zone.id, { label: e.currentTarget.value })}
                     />
                   </label>
 
                   <div class="field-row field-row-toggle">
-                    <span class="field-label">Enabled</span>
+                    <span class="field-label">{t('privacy.enabled')}</span>
                     <label class="toggle-switch" for={`mask-zone-enabled-${zone.id}`}>
                       <input
                         id={`mask-zone-enabled-${zone.id}`}
@@ -184,20 +191,20 @@ export default function PrivacyMaskingCard(props: Props) {
                   </div>
 
                   <div class="setting-row">
-                    <span class="setting-label">Mask Type</span>
+                    <span class="setting-label">{t('privacy.maskType')}</span>
                     <select
                       class="select-input select-input-sm"
                       value={zone.type}
                       onChange={(e) => updateZone(zone.id, { type: e.currentTarget.value as MaskingType })}
                     >
-                      {Object.entries(MASKING_TYPE_LABELS).map(([value, label]) => (
-                        <option value={value}>{label}</option>
+                      {Object.keys(MASKING_TYPE_LABELS).map((value) => (
+                        <option value={value}>{t(MASK_KEYS[value as MaskingType])}</option>
                       ))}
                     </select>
                   </div>
 
                   <div class="setting-row">
-                    <span class="setting-label">X Position</span>
+                    <span class="setting-label">{t('privacy.x')}</span>
                     <input
                       type="range"
                       class="range-input"
@@ -210,7 +217,7 @@ export default function PrivacyMaskingCard(props: Props) {
                   </div>
 
                   <div class="setting-row">
-                    <span class="setting-label">Y Position</span>
+                      <span class="setting-label">{t('privacy.y')}</span>
                     <input
                       type="range"
                       class="range-input"
@@ -223,7 +230,7 @@ export default function PrivacyMaskingCard(props: Props) {
                   </div>
 
                   <div class="setting-row">
-                    <span class="setting-label">Width</span>
+                      <span class="setting-label">{t('privacy.width')}</span>
                     <input
                       type="range"
                       class="range-input"
@@ -236,7 +243,7 @@ export default function PrivacyMaskingCard(props: Props) {
                   </div>
 
                   <div class="setting-row">
-                    <span class="setting-label">Height</span>
+                      <span class="setting-label">{t('privacy.height')}</span>
                     <input
                       type="range"
                       class="range-input"
@@ -250,7 +257,7 @@ export default function PrivacyMaskingCard(props: Props) {
 
                   <Show when={zone.type === 'PIXELATE'}>
                     <div class="setting-row">
-                      <span class="setting-label">Pixel Size</span>
+                      <span class="setting-label">{t('privacy.pixelSize')}</span>
                       <input
                         type="range"
                         class="range-input"
@@ -265,7 +272,7 @@ export default function PrivacyMaskingCard(props: Props) {
 
                   <Show when={zone.type === 'BLUR'}>
                     <div class="setting-row">
-                      <span class="setting-label">Blur Radius</span>
+                      <span class="setting-label">{t('privacy.blurRadius')}</span>
                       <input
                         type="range"
                         class="range-input"
@@ -285,7 +292,7 @@ export default function PrivacyMaskingCard(props: Props) {
 
         <Show when={zones().length === 0}>
           <div style={{ 'text-align': 'center', padding: '16px 0', color: '#6b7280', 'font-size': '13px' }}>
-            No masking zones defined. Click "Add Zone" to create one.
+            {t('privacy.empty')}
           </div>
         </Show>
       </Show>

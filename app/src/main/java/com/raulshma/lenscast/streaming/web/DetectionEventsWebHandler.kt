@@ -1,8 +1,10 @@
 package com.raulshma.lenscast.streaming.web
 
 import com.raulshma.lenscast.capture.DetectionEvent
+import com.raulshma.lenscast.capture.DetectionEventLogPolicy
 import com.raulshma.lenscast.capture.DetectionEventStore
 import com.raulshma.lenscast.capture.DetectionStatsPolicy
+import com.raulshma.lenscast.capture.model.DetectionEventDeepLink
 import com.raulshma.lenscast.core.AppJson
 import com.raulshma.lenscast.core.EventKind
 import com.raulshma.lenscast.streaming.model.DailyCountDto
@@ -20,12 +22,12 @@ import java.util.TimeZone
 /**
  * /api/detection/events — the detection event feed: GET lists the persisted
  * events newest first (bounded by the `limit` query param, narrowed by the
- * `type` param), DELETE clears the log, GET …/export downloads the log as
- * JSON or CSV, and GET /api/detection/stats aggregates it. Reads and writes
- * go through the shared [DetectionEventStore]; the store's own policy owns
- * the cap and the limit clamp. The per-event JSON serializer ([eventJson]) is
- * the one the SSE stream reuses, so both the polling GET and the live stream
- * carry the exact same event object shape.
+ * `type` and `day` params), DELETE clears the log, GET …/export downloads the
+ * log as JSON or CSV, and GET /api/detection/stats aggregates it. Reads and
+ * writes go through the shared [DetectionEventStore]; the store's own policy
+ * owns the cap and the limit clamp. The per-event JSON serializer
+ * ([eventJson]) is the one the SSE stream reuses, so both the polling GET and
+ * the live stream carry the exact same event object shape.
  *
  * The export deliberately omits the base64 snapshots — the JSON body would be
  * megabytes and the CSV column meaningless; the fields survive in the
@@ -46,14 +48,33 @@ class DetectionEventsWebHandler(
     private val statsAdapter by lazy { AppJson.moshi.adapter(DetectionStatsResponseDto::class.java) }
     private val successAdapter by lazy { AppJson.moshi.adapter(SuccessResponse::class.java) }
 
-    fun list(limit: Int?, type: String? = null): String {
+    /**
+     * The event feed's list read: newest first, the `limit` clamp and `type`
+     * wire-name filter, plus the optional `day=YYYY-MM-DD` local-calendar-day
+     * filter the web timeline rides. A malformed `day` (or unknown `type`)
+     * answers the handler-error payload — a silently empty or silently
+     * unfiltered feed would lie.
+     */
+    fun list(limit: Int?, type: String? = null, day: String? = null): String {
         val kind = typeFilterOrNull(type)
         if (kind == null && !type.isNullOrBlank()) return unknownTypeError(type)
-        val events = eventStore.events(limit, kind?.wireName)
+        val window = DetectionEventDayFilter.windowOrNull(day)
+        if (window == null && !day.isNullOrBlank()) return dayTypeError(day)
+        // Day filter first, limit clamp after: a page must be able to fill
+        // its limit from the filtered set, and `total` counts that same set.
+        val dayFiltered = eventStore.events(limit = null, type = kind?.wireName).let { events ->
+            if (window == null) {
+                events
+            } else {
+                val (startInclusive, endExclusive) = window
+                events.filter { it.timestampMs >= startInclusive && it.timestampMs < endExclusive }
+            }
+        }
+        val events = DetectionEventLogPolicy.readNewestFirst(dayFiltered, limit)
         return responseAdapter.toJson(
             DetectionEventsResponseDto(
                 events = events.map(::toDto),
-                total = eventStore.count(kind?.wireName),
+                total = dayFiltered.size,
             ),
         )
     }
@@ -116,6 +137,10 @@ class DetectionEventsWebHandler(
     private fun unknownTypeError(type: String): String =
         ApiResponse.error(IllegalArgumentException("Unknown event type '$type' (expected motion, sound, or tamper)"))
 
+    /** The malformed-`day` answer: the handler-error payload, same contract. */
+    private fun dayTypeError(day: String): String =
+        ApiResponse.error(IllegalArgumentException("Invalid day '$day' — expected YYYY-MM-DD"))
+
     /** The SSE connect-time backlog: the latest [limit] events, chronological (oldest first). */
     fun replayBacklog(limit: Int): List<DetectionEvent> = eventStore.events(limit).reversed()
 
@@ -153,7 +178,51 @@ class DetectionEventsWebHandler(
         labels = event.labels,
         clipMediaId = event.clipMediaId,
         clipFileName = event.clipFileName,
+        url = DetectionEventDeepLink.forClip(event.clipMediaId),
     )
+}
+
+/**
+ * The `?day=YYYY-MM-DD` query filter behind the event feed's list read, pure
+ * for tests (the [DetectionEventCsv] pattern): a strict calendar day window
+ * in device-local time. A null or blank day means "no filter"; anything else
+ * that is not a real calendar date (wrong shape, month 13, February 30) is
+ * null — the handler turns that into the handler-error payload rather than a
+ * silently filtered feed.
+ */
+internal object DetectionEventDayFilter {
+
+    private val PATTERN = Regex("""^\d{4}-\d{2}-\d{2}$""")
+
+    /**
+     * [startInclusive, endExclusive) in epoch ms for a strict `YYYY-MM-DD`
+     * day, or null when absent or malformed. The DST rule is honored by
+     * deriving the end from the next local midnight, never by adding a fixed
+     * 24 h.
+     */
+    fun windowOrNull(
+        day: String?,
+        zone: java.util.TimeZone = java.util.TimeZone.getDefault(),
+    ): Pair<Long, Long>? {
+        if (day.isNullOrEmpty() || !PATTERN.matches(day)) return null
+        return runCatching {
+            val calendar = java.util.Calendar.getInstance(zone).apply {
+                isLenient = false
+                clear()
+                set(
+                    day.substring(0, 4).toInt(),
+                    day.substring(5, 7).toInt() - 1,
+                    day.substring(8, 10).toInt(),
+                    0,
+                    0,
+                    0,
+                )
+            }
+            val start = calendar.timeInMillis
+            calendar.add(java.util.Calendar.DAY_OF_YEAR, 1)
+            start to calendar.timeInMillis
+        }.getOrNull()
+    }
 }
 
 /** RFC 4180 field escaping for the CSV export, pure for tests. */

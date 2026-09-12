@@ -11,12 +11,20 @@ object RtspUriPolicy {
     /** Aggregate stream path segment — the RTSP URL is rtsp://host:port/stream. */
     const val DEFAULT_STREAM_PATH = "stream"
 
+    /**
+     * Aggregate sub-stream path — the low-res detect-role second encode, its
+     * own RTSP URL (rtsp://host:port/sub) with its own SDP, not a second
+     * MediaDescription inside the main SDP. Video-only.
+     */
+    const val SUB_STREAM_PATH = "sub"
+
     /** Whether [method] may address [requestUri] at all (404 verdict otherwise). */
     fun isRequestUriAllowed(method: String, requestUri: String): Boolean {
         return when (method) {
-            "OPTIONS", "DESCRIBE" -> isAggregateOrStreamUri(requestUri)
-            "SETUP" -> isStreamControlUri(requestUri) || isTrackUri(requestUri)
-            "PLAY", "TEARDOWN" -> isAggregateOrStreamUri(requestUri) || isStreamControlUri(requestUri)
+            "OPTIONS", "DESCRIBE" -> isAggregateOrStreamUri(requestUri) || isSubStreamUri(requestUri)
+            "SETUP" -> isStreamControlUri(requestUri) || isTrackUri(requestUri) || isSubControlUri(requestUri)
+            "PLAY", "TEARDOWN" ->
+                isAggregateOrStreamUri(requestUri) || isStreamControlUri(requestUri) || isSubControlUri(requestUri)
             "GET_PARAMETER", "SET_PARAMETER" -> true
             else -> true
         }
@@ -25,6 +33,17 @@ object RtspUriPolicy {
     fun isAggregateOrStreamUri(requestUri: String): Boolean {
         val path = normalizedPath(requestUri)
         return path == "/" || path == "/$DEFAULT_STREAM_PATH"
+    }
+
+    /** The sub-stream's aggregate path: exactly `/sub`. */
+    fun isSubStreamUri(requestUri: String): Boolean =
+        normalizedPath(requestUri) == "/$SUB_STREAM_PATH"
+
+    /** The sub-stream's video track: `/sub/trackID=0` (or the bare `/sub` aggregate). */
+    fun isSubControlUri(requestUri: String): Boolean {
+        if (isSubStreamUri(requestUri)) return true
+        val path = normalizedPath(requestUri)
+        return path.equals("/$SUB_STREAM_PATH/trackID=0", ignoreCase = true)
     }
 
     fun isStreamControlUri(requestUri: String): Boolean {

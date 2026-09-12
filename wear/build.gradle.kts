@@ -2,17 +2,17 @@
 // LensCast Wear — the watch-side remote (:wear). A standalone `application`
 // module: the integrator only adds `include(":wear")` to settings.gradle.kts.
 //
-// The version catalog (gradle/libs.versions.toml) is shared by :app and is
-// intentionally NOT touched by this module, so every plugin and dependency
-// version below is declared INLINE, matching the root versions exactly
-// (AGP 9.4.0, Kotlin 2.2.10 — see gradle/libs.versions.toml). If the root
-// build ever bumps a pin, this file must follow.
+// Every plugin and dependency rides the shared version catalog
+// (gradle/libs.versions.toml) with the same pins the root declares for :app
+// (AGP, Kotlin compose plugin, Compose BOM) plus the wear-only entries
+// (wear, wear-compose, wear-tiles, okhttp) — no second copy of a version
+// anywhere in this file, so a root pin bump lands here with it.
 plugins {
-    id("com.android.application") version "9.4.0" apply true
+    alias(libs.plugins.android.application)
     // The Compose compiler plugin rides AGP 9's built-in Kotlin (the module
     // deliberately does NOT apply org.jetbrains.kotlin.android — mirroring
     // :app's plugin set).
-    id("org.jetbrains.kotlin.plugin.compose") version "2.2.10" apply true
+    alias(libs.plugins.kotlin.compose)
 }
 
 android {
@@ -64,32 +64,38 @@ android {
 dependencies {
     // Compose BOM pinned to the same 2026.03.00 the root catalog pins; the
     // unversioned androidx.compose artifacts below inherit from it.
-    implementation(platform("androidx.compose:compose-bom:2026.03.00"))
+    implementation(platform(libs.compose.bom))
 
-    // Wear core + Wear Compose (stable 1.4.0 — verified present on Google
-    // Maven; NOT the Material 3 alpha line). compose-material is the
-    // M2-flavored Wear MaterialTheme (Scaffold/TimeText/ScalingLazyColumn);
-    // compose-foundation adds the rotary/lazy building blocks beneath it.
-    implementation("androidx.wear:wear:1.3.0")
-    implementation("androidx.wear.compose:compose-foundation:1.4.0")
-    implementation("androidx.wear.compose:compose-material:1.4.0")
+    // Wear core + Wear Compose (stable 1.4.0 — NOT the Material 3 alpha
+    // line). compose-material is the M2-flavored Wear MaterialTheme
+    // (Scaffold/TimeText/ScalingLazyColumn); compose-foundation adds the
+    // rotary/lazy building blocks beneath it.
+    implementation(libs.wear)
+    implementation(libs.wear.compose.foundation)
+    implementation(libs.wear.compose.material)
 
-    implementation("androidx.compose.ui:ui")
-    implementation("androidx.compose.foundation:foundation")
-    implementation("androidx.compose.ui:ui-tooling-preview")
-    debugImplementation("androidx.compose.ui:ui-tooling")
+    implementation(libs.compose.ui)
+    implementation(libs.compose.foundation)
+    implementation(libs.compose.ui.tooling.preview)
+    debugImplementation(libs.compose.ui.tooling)
 
-    implementation("androidx.activity:activity-compose:1.10.1")
+    implementation(libs.androidx.activity.compose)
 
-    // Watch-side settings persistence (host, port, credentials).
-    implementation("androidx.datastore:datastore-preferences:1.1.4")
+    // Watch-side settings persistence (host, port, credentials, alerts).
+    implementation(libs.datastore.preferences)
 
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
+    implementation(libs.coroutines.android)
 
     // Plain OkHttp for the phone's HTTP API — small, no image loader (the
     // snapshot decodes through BitmapFactory), no MOSHI (org.json parses the
-    // two tiny status payloads).
-    implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    // small status/event payloads).
+    implementation(libs.okhttp)
 
-    testImplementation("junit:junit:4.13.2")
+    // The Wear OS tile (stream-state mirror on the watch face carousel):
+    // tiles = the TileService + protocol builders, tiles-material = the
+    // ready-made layout components. Nothing beyond these two artifacts.
+    implementation(libs.wear.tiles)
+    implementation(libs.wear.tiles.material)
+
+    testImplementation(libs.junit)
 }

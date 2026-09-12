@@ -20,6 +20,13 @@ object PhotoCapturePlan {
         val jpegQuality: Int = PHOTO_JPEG_QUALITY_DEFAULT,
         val maximizeQuality: Boolean = false,
         val rawRequested: Boolean = false,
+        /**
+         * The photo frame's aspect (16:9 default — the historical behavior;
+         * 4:3 re-binds the ImageCapture onto the wider full-sensor-ish crop
+         * through [PhotoAspectRatioPolicy.captureTargetSize]). Part of the
+         * config, so an aspect flip rebinds through the same needsRebind rule.
+         */
+        val aspect: PhotoAspectRatio = PhotoAspectRatio.R16_9,
     )
 
     /** The image files a shot produces. */

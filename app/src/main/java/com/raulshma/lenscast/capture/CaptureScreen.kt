@@ -65,7 +65,7 @@ fun CaptureScreen(
     val viewModel: CaptureViewModel = viewModel(
         factory = CaptureViewModel.Factory(
             context, app.captureHistoryStore, app.settingsDataStore,
-            app.recordingController, app.photoCaptureManager
+            app.recordingController, app.photoCaptureManager, app.timelapseComposer
         )
     )
 
@@ -208,6 +208,15 @@ fun CaptureScreen(
                     Spacer(modifier = Modifier.height(8.dp))
                     val timelapseBusy by viewModel.timelapseBusy.collectAsState()
                     val timelapseMessage by viewModel.timelapseMessage.collectAsState()
+                    // The completion handoff's master toggle: when a series
+                    // finishes, the shared composer assembles a timelapse
+                    // automatically (bounded by the completion policy).
+                    val autoTimelapse by viewModel.autoTimelapseEnabled.collectAsState()
+                    SwitchSetting(
+                        title = stringResource(R.string.capture_auto_timelapse),
+                        checked = autoTimelapse,
+                        onCheckedChange = { viewModel.setAutoTimelapseEnabled(it) }
+                    )
                     OutlinedButton(
                         onClick = { viewModel.assembleTimelapse() },
                         enabled = !timelapseBusy,

@@ -2,6 +2,16 @@ import SettingsCard from './SettingsCard'
 import type { AllSettings, CameraSettings, FocusMode } from '../types'
 import { FOCUS_MODE_LABELS } from '../types'
 import { API_DEFAULTS } from '../api/defaults'
+import { t } from '../lib/i18n'
+
+/** Wire value → i18n key for the focus-mode options (labels live in the catalog). */
+const FOCUS_KEYS: Record<FocusMode, string> = {
+  AUTO: 'common.auto',
+  MANUAL: 'common.manual',
+  MACRO: 'option.macro',
+  CONTINUOUS_PICTURE: 'option.focus.contPhoto',
+  CONTINUOUS_VIDEO: 'option.focus.contVideo',
+}
 
 interface Props {
   settings: () => AllSettings | null
@@ -23,11 +33,11 @@ export default function FocusCard(props: Props) {
           <line x1="20" y1="12" x2="23" y2="12" />
         </svg>
       }
-      title="Focus"
+      title={t('focus.title')}
     >
       <div class="field-group">
         <div class="field-row">
-          <span class="field-label">Focus Mode</span>
+          <span class="field-label">{t('focus.mode')}</span>
         </div>
         <select
           id="focus-mode-select"
@@ -35,8 +45,8 @@ export default function FocusCard(props: Props) {
           value={s()?.camera?.focusMode ?? API_DEFAULTS.cameraFocusMode}
           onChange={(e) => props.updateCamera({ focusMode: e.currentTarget.value as FocusMode })}
         >
-          {Object.entries(FOCUS_MODE_LABELS).map(([k, v]) => (
-            <option value={k}>{v}</option>
+          {Object.keys(FOCUS_MODE_LABELS).map((k) => (
+            <option value={k}>{t(FOCUS_KEYS[k as FocusMode])}</option>
           ))}
         </select>
       </div>
@@ -44,7 +54,7 @@ export default function FocusCard(props: Props) {
       {s()?.camera?.focusMode === 'MANUAL' && (
         <div class="field-group">
           <div class="field-row">
-            <span class="field-label">Focus Distance</span>
+            <span class="field-label">{t('focus.distance')}</span>
             <span class="field-value">{(s()?.camera?.focusDistance ?? API_DEFAULTS.cameraFocusDistance).toFixed(1)}</span>
           </div>
           <input

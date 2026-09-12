@@ -111,6 +111,28 @@ class RoleGatePolicyTest {
         assertEquals(RoleGatePolicy.Verdict.ALLOW, decide(SessionRole.VIEWER, "POST", "/api/audio/uplink"))
     }
 
+    // ── WHEP media-session verbs: egress reads, viewer-allowed like /stream ──
+
+    @Test
+    fun `viewer may POST an SDP offer and DELETE its WHEP session`() {
+        assertEquals(RoleGatePolicy.Verdict.ALLOW, decide(SessionRole.VIEWER, "POST", "/whep"))
+        assertEquals(RoleGatePolicy.Verdict.ALLOW, decide(SessionRole.VIEWER, "DELETE", "/whep"))
+        assertEquals(RoleGatePolicy.Verdict.ALLOW, decide(SessionRole.VIEWER, "DELETE", "/whep/abc123"))
+    }
+
+    @Test
+    fun `the WHEP egress exception does not leak onto other methods or paths`() {
+        // GET /whep is a read like every GET — ALLOW here, 405 at the
+        // transport (the session verbs are POST and DELETE only).
+        assertEquals(RoleGatePolicy.Verdict.ALLOW, decide(SessionRole.VIEWER, "GET", "/whep"))
+        assertEquals(RoleGatePolicy.Verdict.DENY, decide(SessionRole.VIEWER, "PUT", "/whep"))
+        // POST under the id prefix is not the offer route.
+        assertEquals(RoleGatePolicy.Verdict.DENY, decide(SessionRole.VIEWER, "POST", "/whep/abc123"))
+        // Look-alike paths stay denied.
+        assertEquals(RoleGatePolicy.Verdict.DENY, decide(SessionRole.VIEWER, "POST", "/whep-evil"))
+        assertEquals(RoleGatePolicy.Verdict.DENY, decide(SessionRole.VIEWER, "POST", "/api/whep"))
+    }
+
     // ── the legacy/default role ──
 
     @Test

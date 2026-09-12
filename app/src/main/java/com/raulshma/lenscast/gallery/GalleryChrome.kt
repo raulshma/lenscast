@@ -15,12 +15,14 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Deselect
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.filled.PhotoLibrary
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.SelectAll
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.CircularProgressIndicator
@@ -30,6 +32,7 @@ import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
@@ -97,7 +100,6 @@ fun GallerySelectModeTopBar(
 @Composable
 fun GallerySelectModeBottomBar(
     selectedCount: Int,
-    batchDeleting: Boolean,
     onShareSelected: () -> Unit,
     onDeleteSelected: () -> Unit,
 ) {
@@ -142,15 +144,11 @@ fun GallerySelectModeBottomBar(
                     onClick = onShareSelected,
                 )
                 GalleryActionPill(
-                    label = if (batchDeleting) {
-                        stringResource(R.string.gallery_deleting)
-                    } else {
-                        stringResource(R.string.gallery_delete)
-                    },
+                    label = stringResource(R.string.gallery_delete),
                     icon = Icons.Default.Delete,
-                    enabled = selectedCount > 0 && !batchDeleting,
+                    enabled = selectedCount > 0,
                     destructive = true,
-                    loading = batchDeleting,
+                    loading = false,
                     onClick = onDeleteSelected,
                 )
             }
@@ -234,6 +232,7 @@ fun GalleryFilterRow(
                 GalleryFilter.ALL -> stringResource(R.string.gallery_filter_all, overview.totalCount)
                 GalleryFilter.PHOTOS -> stringResource(R.string.gallery_filter_photos, overview.photoCount)
                 GalleryFilter.VIDEOS -> stringResource(R.string.gallery_filter_videos, overview.videoCount)
+                GalleryFilter.FAVORITES -> stringResource(R.string.gallery_filter_favorites, overview.favoriteCount)
             }
             FilterChip(
                 selected = currentFilter == filter,
@@ -247,6 +246,35 @@ fun GalleryFilterRow(
             )
         }
     }
+}
+
+/**
+ * The gallery's search box: a compact outlined field filtering the loaded
+ * items by (case-insensitive) file-name contains. The filtering verdict is
+ * [GallerySearchPolicy]'s; this field only carries the live query.
+ */
+@Composable
+fun GallerySearchField(
+    query: String,
+    onQueryChanged: (String) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    OutlinedTextField(
+        value = query,
+        onValueChange = onQueryChanged,
+        modifier = modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(bottom = 8.dp),
+        singleLine = true,
+        placeholder = { Text(stringResource(R.string.gallery_search_hint), style = MaterialTheme.typography.bodyMedium) },
+        leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+        trailingIcon = {
+            if (query.isNotEmpty()) {
+                IconButton(onClick = { onQueryChanged("") }) {
+                    Icon(Icons.Default.Close, contentDescription = stringResource(R.string.gallery_search_clear_cd))
+                }
+            }
+        },
+        shape = RoundedCornerShape(999.dp),
+    )
 }
 
 @Composable

@@ -1,5 +1,6 @@
 package com.raulshma.lenscast.streaming.hls
 
+import com.raulshma.lenscast.core.StreamDefaults
 import com.raulshma.lenscast.streaming.rtsp.EncodedNalUnit
 import android.util.Log
 import java.util.ArrayDeque
@@ -33,6 +34,14 @@ object HlsManager : HlsVideoSink, HlsSegmentSource {
     /** Injectable clock (elapsed-realtime ms) — tests drive PTS deterministically. */
     internal var clockMs: () -> Long = { android.os.SystemClock.elapsedRealtime() }
 
+    /**
+     * The adaptive encoded-bitrate tap: segment bytes over the segment's
+     * duration, recorded at segment completion while the ring is hot (a hot
+     * ring is by definition being pulled). Injected by the Streaming Manager
+     * like [clockMs].
+     */
+    internal var encodedSendTap: ((bytes: Int, durationMs: Long) -> Unit)? = null
+
     class HlsSegment(val sequence: Long, val bytes: ByteArray, val durationSec: Double)
 
     private val lock = Any()
@@ -42,6 +51,11 @@ object HlsManager : HlsVideoSink, HlsSegmentSource {
     private var pendingStartPts = -1L
     private var lastVideoPts = -1L
     @Volatile private var enabled = false
+
+    // DVR window: 0 keeps the sliding live ring (MAX_SEGMENTS + a 5-segment
+    // playlist); above that the ring retains up to the setting's segments and
+    // the playlist renders as EVENT. Clamped through [setDvrSegments].
+    @Volatile private var dvrSegments = StreamDefaults.HLS_DVR_SEGMENTS_DEFAULT
 
     // The last playlist/segment serve, or the enable itself (epoch-ms via the
     // injectable clock) — the demand signal behind [isHot].
@@ -61,6 +75,19 @@ object HlsManager : HlsVideoSink, HlsSegmentSource {
             reset()
         }
     }
+
+    /**
+     * The DVR window in segments: 0 keeps the sliding live ring; above that
+     * the ring retains up to the value (bounded by
+     * [StreamDefaults.HLS_DVR_SEGMENTS_MAX]) and the playlist renders as
+     * EVENT. Applies to the next segment completions — the existing ring is
+     * trimmed lazily, never dropped.
+     */
+    fun setDvrSegments(segments: Int) {
+        dvrSegments = segments.coerceIn(0, StreamDefaults.HLS_DVR_SEGMENTS_MAX)
+    }
+
+    fun dvrSegments(): Int = dvrSegments
 
     /**
      * Whether the ring is actively wanted: enabled and asked-for inside the
@@ -122,9 +149,21 @@ object HlsManager : HlsVideoSink, HlsSegmentSource {
                     val combined = pending.fold(ByteArray(0)) { acc, b -> acc + b }
                     val durationSec = (pts - pendingStartPts).toDouble() / PTS_HZ
                     segments.addLast(HlsSegment(seq, combined, durationSec))
-                    while (segments.size > MAX_SEGMENTS) segments.removeFirst()
+                    // The ring bound: the DVR setting while raised, else the
+                    // compact sliding-live cap.
+                    val cap = if (dvrSegments > 0) dvrSegments else MAX_SEGMENTS
+                    while (segments.size > cap) segments.removeFirst()
                     pending.clear()
                     pendingStartPts = -1
+                    // Demand-gated sample: a hot ring is being pulled, so the
+                    // segment's bytes over its duration are honest send-side
+                    // throughput for the adaptive encoded-bitrate lane.
+                    if (isHot()) {
+                        encodedSendTap?.invoke(
+                            combined.size,
+                            (durationSec * 1000).toLong().coerceAtLeast(1),
+                        )
+                    }
                     Log.d(TAG, "HLS segment $seq ready (${combined.size}B, ${String.format(java.util.Locale.US, "%.2f", durationSec)}s, window=${segments.size})")
                 }
             }
@@ -136,11 +175,13 @@ object HlsManager : HlsVideoSink, HlsSegmentSource {
     override fun playlist(): String {
         lastRequestMs = clockMs()
         return synchronized(lock) {
-            val window = segments.toList().takeLast(HlsPlaylist.WINDOW_SEGMENTS)
+            val dvr = dvrSegments > 0
+            val window = if (dvr) segments.toList() else segments.toList().takeLast(HlsPlaylist.WINDOW_SEGMENTS)
             HlsPlaylist.build(
                 segmentNames = window.map { HlsPlaylist.segmentName(it.sequence) },
                 sequence = sequence.get(),
                 segmentDurationsSec = window.map { it.durationSec },
+                dvr = dvr,
             )
         }
     }

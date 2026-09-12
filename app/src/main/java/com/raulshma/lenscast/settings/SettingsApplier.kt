@@ -5,13 +5,18 @@ import com.raulshma.lenscast.camera.CameraService
 import com.raulshma.lenscast.camera.model.PhotoCapturePlan
 import com.raulshma.lenscast.core.StreamWatchdog
 import com.raulshma.lenscast.core.mqtt.MqttAlertPublisher
+import com.raulshma.lenscast.core.mqtt.MqttTopics
 import com.raulshma.lenscast.data.SettingsDataStore
 import com.raulshma.lenscast.streaming.StreamingManager
 import com.raulshma.lenscast.streaming.onvif.OnvifServer
+import com.raulshma.lenscast.streaming.rtmp.RtmpStatus
 import com.raulshma.lenscast.streaming.rtsp.RtspInputFormat
 import com.raulshma.lenscast.streaming.rtsp.RtspResolution
 import com.raulshma.lenscast.streaming.rtsp.RtspVideoCodec
+import com.raulshma.lenscast.streaming.srt.SrtStatus
+import com.raulshma.lenscast.streaming.whip.WhipStatus
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -124,6 +129,15 @@ class SettingsApplier(
             }
         }
 
+        // The RTSP low-res sub-stream: a single-flow rule like ONVIF's — the
+        // toggle lands on the hub (a refresh starts/stops its second encoder)
+        // and /sub serves or 404s on the next request.
+        scope.launch {
+            settingsDataStore.rtspSubStreamEnabled.collectLatest { enabled ->
+                streamingManager.setRtspSubStreamEnabled(enabled)
+            }
+        }
+
         // RTMP push: the enable gate and the target URL run the output's own
         // lifecycle rule — off stops a live push, a URL change restarts it
         // through the output's URL-change path, and on simply arms it (the
@@ -160,19 +174,36 @@ class SettingsApplier(
             }
         }
 
-        // Photo capture quality/RAW: the three persisted knobs fold into the
-        // one immutable PhotoCaptureConfig the CameraService's ImageCapture
-        // builder consumes — the plan (not this applier) owns the quality
-        // clamp, the capture-mode choice, and the device RAW capability fold;
-        // a change that alters the bound builder triggers the service's own
-        // RebindIfFree rebind.
+        // SRT push: the same lifecycle rule as the RTMP/WHIP pushes — the
+        // enable gate arms it, and a URL change restarts a live output
+        // through the output's own URL-change path (the handshake parameters
+        // are per-attempt, so nothing can hot-swap).
+        scope.launch {
+            combine(
+                settingsDataStore.srtEnabled,
+                settingsDataStore.srtUrl,
+            ) { enabled, url ->
+                SrtSettings(enabled, url)
+            }.collectLatest { srt ->
+                streamingManager.setSrtUrl(srt.url)
+                streamingManager.setSrtEnabled(srt.enabled)
+            }
+        }
+
+        // Photo capture quality/aspect/RAW: the four persisted knobs fold into
+        // the one immutable PhotoCaptureConfig the CameraService's
+        // ImageCapture builder consumes — the plan (not this applier) owns the
+        // quality clamp, the capture-mode choice, the aspect→bound-size
+        // mapping, and the device RAW capability fold; a change that alters
+        // the bound builder triggers the service's own RebindIfFree rebind.
         scope.launch {
             combine(
                 settingsDataStore.photoJpegQuality,
                 settingsDataStore.photoMaximizeQuality,
                 settingsDataStore.rawCaptureEnabled,
-            ) { jpegQuality, maximizeQuality, rawRequested ->
-                PhotoCapturePlan.PhotoCaptureConfig(jpegQuality, maximizeQuality, rawRequested)
+                settingsDataStore.photoAspectRatio,
+            ) { jpegQuality, maximizeQuality, rawRequested, aspect ->
+                PhotoCapturePlan.PhotoCaptureConfig(jpegQuality, maximizeQuality, rawRequested, aspect)
             }.collectLatest { config ->
                 cameraService.applyPhotoCaptureConfig(config)
             }
@@ -184,12 +215,16 @@ class SettingsApplier(
                 settingsDataStore.webStreamingEnabled,
                 settingsDataStore.mdnsEnabled,
                 settingsDataStore.adaptiveBitrateEnabled,
-            ) { webEnabled, mdns, adaptive ->
-                DiscoverySettings(webEnabled, mdns, adaptive)
+                settingsDataStore.encodedAdaptiveBitrateEnabled,
+                settingsDataStore.hlsDvrSegments,
+            ) { webEnabled, mdns, adaptive, encodedAdaptive, hlsDvr ->
+                DiscoverySettings(webEnabled, mdns, adaptive, encodedAdaptive, hlsDvr)
             }.collectLatest { discovery ->
                 streamingManager.setWebStreamingEnabled(discovery.webEnabled)
                 streamingManager.setMdnsEnabled(discovery.mdns)
                 streamingManager.setAdaptiveBitrateEnabled(discovery.adaptive)
+                streamingManager.setEncodedAdaptiveBitrateEnabled(discovery.encodedAdaptive)
+                streamingManager.setHlsDvrSegments(discovery.hlsDvr)
             }
         }
 
@@ -274,11 +309,85 @@ class SettingsApplier(
                 settingsDataStore.mqttPassword,
                 settingsDataStore.mqttTls,
                 settingsDataStore.mqttDiscoveryPrefix,
+                settingsDataStore.mqttTelemetryEnabled,
             ).collect {
                 if (settingsDataStore.mqttEnabled.value) {
                     mqttAlertPublisher.start()
                 } else {
                     mqttAlertPublisher.close()
+                }
+            }
+        }
+
+        // MQTT stream states: every push output's live flag lands as a
+        // retained ON/OFF on the broker. The first emission replays the
+        // current truth (so a just-connected broker learns the state at
+        // once), later emissions publish only the outputs that moved.
+        scope.launch {
+            var lastStates: Map<MqttTopics.StreamOutput, Boolean> = emptyMap()
+            combine(
+                streamingManager.isWebStreamingActive,
+                streamingManager.isRtspRunning,
+                streamingManager.rtmpStatus,
+                streamingManager.whipStatus,
+                streamingManager.srtStatus,
+            ) { web, rtsp, rtmp, whip, srt ->
+                mapOf(
+                    MqttTopics.StreamOutput.WEB to web,
+                    MqttTopics.StreamOutput.RTSP to rtsp,
+                    // A push output is "live" from a passing start until its
+                    // stop — the connecting/reconnecting/error statuses
+                    // included, exactly like the output's own isActive.
+                    MqttTopics.StreamOutput.RTMP to (rtmp != RtmpStatus.Idle),
+                    MqttTopics.StreamOutput.WHIP to (whip != WhipStatus.Idle),
+                    MqttTopics.StreamOutput.SRT to (srt != SrtStatus.Idle),
+                )
+            }.collect { states ->
+                for ((output, on) in states) {
+                    if (lastStates[output] != on) {
+                        mqttAlertPublisher.notifyStreamState(output, on)
+                    }
+                }
+                lastStates = states
+            }
+        }
+
+        // MQTT client events: MJPEG viewers ride the manager's client-count
+        // flow (change-driven), RTSP sessions are sampled on a short poll
+        // (the RTSP server exposes no change flow) and diffed by session id.
+        // Both throttle and gate inside the publisher.
+        scope.launch {
+            var previous = -1
+            streamingManager.clientCount.collect { count ->
+                if (previous >= 0 && count != previous) {
+                    mqttAlertPublisher.notifyClientEvent(
+                        MqttTopics.ClientKind.MJPEG,
+                        connected = count > previous,
+                        activeCount = count,
+                    )
+                }
+                previous = count
+            }
+        }
+        // The RTSP poll runs only while MQTT alerts are enabled — with the
+        // toggle off the publisher would no-op every sample anyway. A toggle
+        // change cancels the previous poll (collectLatest) or starts a fresh
+        // one, so no disabled loop keeps waking every 2 s.
+        scope.launch {
+            settingsDataStore.mqttEnabled.collectLatest { enabled ->
+                if (!enabled) return@collectLatest
+                var previousIds = emptySet<String>()
+                while (true) {
+                    delay(RTSP_CLIENT_POLL_MS)
+                    val clients = runCatching { streamingManager.getRtspClients() }.getOrDefault(emptyList())
+                    val ids = clients.map { it.id }.toSet()
+                    for (id in ids - previousIds) {
+                        mqttAlertPublisher.notifyClientEvent(MqttTopics.ClientKind.RTSP, connected = true, activeCount = ids.size)
+                    }
+                    for (id in previousIds - ids) {
+                        mqttAlertPublisher.notifyClientEvent(MqttTopics.ClientKind.RTSP, connected = false, activeCount = ids.size)
+                    }
+                    previousIds = ids
                 }
             }
         }
@@ -342,10 +451,17 @@ class SettingsApplier(
         val stunServer: String,
     )
 
+    private data class SrtSettings(
+        val enabled: Boolean,
+        val url: String,
+    )
+
     private data class DiscoverySettings(
         val webEnabled: Boolean,
         val mdns: Boolean,
         val adaptive: Boolean,
+        val encodedAdaptive: Boolean,
+        val hlsDvr: Int,
     )
 
     private data class WatchdogSettings(
@@ -370,5 +486,8 @@ class SettingsApplier(
 
     companion object {
         private const val TAG = "SettingsApplier"
+
+        /** The RTSP session sampler's cadence: prompt enough for a client event, cheap enough to idle on. */
+        private const val RTSP_CLIENT_POLL_MS = 2_000L
     }
 }

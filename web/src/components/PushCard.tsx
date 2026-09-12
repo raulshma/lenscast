@@ -5,6 +5,7 @@ import SettingsCard from './SettingsCard'
 import ToggleRow from './ToggleRow'
 import { permissionLabel, pushSupport, urlBase64ToUint8Array, type PushSupportReason } from '../lib/push'
 import { deletePushSubscription, getVapidPublicKey, subscribePush } from '../api/client'
+import { t } from '../lib/i18n'
 
 interface Props {
   settings: () => AllSettings | null
@@ -15,13 +16,24 @@ interface Props {
  * The reason each unsupported verdict shows, so a hidden or disabled feature
  * explains itself instead of silently vanishing — plain http:// LAN IPs are
  * the common case (Web Push needs the HTTPS dashboard mode's secure context).
+ * The hints are functions so the strings track the current locale.
  */
-const SUPPORT_HINTS: Record<PushSupportReason, string> = {
-  supported: '',
-  'insecure-context': 'Web Push needs a secure context — enable the HTTPS dashboard mode and accept its certificate, then reload.',
-  'no-service-worker': 'This browser has no service worker support, so it cannot receive push notifications.',
-  'no-push-manager': 'This browser does not support Web Push (no PushManager API).',
-  'permission-denied': 'Notifications are blocked for this site — re-allow them in the browser’s site settings.',
+const SUPPORT_HINTS: Record<PushSupportReason, () => string> = {
+  supported: () => '',
+  'insecure-context': () => t('push.insecure'),
+  'no-service-worker': () => t('push.noSW'),
+  'no-push-manager': () => t('push.noPushManager'),
+  'permission-denied': () => t('push.permissionDeniedHint'),
+}
+
+/** Localizes lib/push's stable English permission labels at the UI layer. */
+function localizedPermissionLabel(permission: string | undefined): string {
+  switch (permissionLabel(permission)) {
+    case 'Allowed': return t('push.allowed')
+    case 'Blocked': return t('push.blocked')
+    case 'Not requested': return t('push.notRequested')
+    default: return t('push.unknown')
+  }
 }
 
 /**
@@ -74,7 +86,7 @@ export default function PushCard(props: Props) {
     setBusy(true)
     setMessage('')
     action()
-      .catch((err) => setMessage(err instanceof Error ? err.message : 'Web Push action failed'))
+      .catch((err) => setMessage(err instanceof Error ? err.message : t('push.actionFailed')))
       .finally(() => setBusy(false))
   }
 
@@ -84,7 +96,7 @@ export default function PushCard(props: Props) {
       const permissionResult = await Notification.requestPermission()
       setPermission(permissionResult)
       if (permissionResult !== 'granted') {
-        setMessage('Notification permission was not granted')
+        setMessage(t('push.permissionDeniedMsg'))
         return
       }
       const registration = await navigator.serviceWorker.register('/push-sw.js')
@@ -97,11 +109,11 @@ export default function PushCard(props: Props) {
       const keys = subscription.toJSON().keys
       const p256dh = keys?.p256dh
       const auth = keys?.auth
-      if (!p256dh || !auth) throw new Error('Browser returned an incomplete push subscription')
+      if (!p256dh || !auth) throw new Error(t('push.incomplete'))
       const result = await subscribePush({ endpoint: subscription.endpoint, p256dh, auth })
-      if (!result.success) throw new Error('The device rejected the subscription')
+      if (!result.success) throw new Error(t('push.rejected'))
       setSubscribed(true)
-      setMessage('This browser will now receive detection alerts')
+      setMessage(t('push.enabledMsg'))
     })
   }
 
@@ -117,7 +129,7 @@ export default function PushCard(props: Props) {
         await deletePushSubscription(existing.endpoint).catch(() => undefined)
       }
       setSubscribed(false)
-      setMessage('Notifications disabled for this browser')
+      setMessage(t('push.disabledMsg'))
     })
   }
 
@@ -129,18 +141,18 @@ export default function PushCard(props: Props) {
           <path d="M13.73 21a2 2 0 01-3.46 0" />
         </svg>
       }
-      title="Web Push"
+      title={t('push.title')}
     >
       <div class="field-group">
         <ToggleRow
           id="push-enabled-toggle"
-          label="Web Push Alerts (device)"
+          label={t('push.deviceToggle')}
           checked={pushOn()}
           onToggle={() => props.updateStreamingAndSave({ pushEnabled: !pushOn() })}
         />
         <div class="status-banner status-banner-info stream-mode-hint" role="note" aria-live="polite">
           <span class="status-banner-dot" aria-hidden="true" />
-          <span>The phone sends encrypted detection alerts to every subscribed browser — notifications arrive even with the dashboard tab closed.</span>
+          <span>{t('push.desc')}</span>
         </div>
       </div>
 
@@ -150,30 +162,30 @@ export default function PushCard(props: Props) {
           <div class="field-group">
             <div class="status-banner status-banner-info stream-mode-hint" role="note">
               <span class="status-banner-dot" aria-hidden="true" />
-              <span>{SUPPORT_HINTS[support]}</span>
+              <span>{SUPPORT_HINTS[support]()}</span>
             </div>
           </div>
         }
       >
         <div class="field-group">
           <div class="field-row">
-            <span class="field-label">This Browser</span>
+            <span class="field-label">{t('push.thisBrowser')}</span>
             <span class="field-value">
-              {subscribed() === undefined ? 'Checking…' : subscribed() ? 'Subscribed' : 'Not subscribed'}
+              {subscribed() === undefined ? t('push.checking') : subscribed() ? t('push.subscribed') : t('push.notSubscribed')}
             </span>
           </div>
           <div class="field-row">
-            <span class="field-label">Notifications</span>
-            <span class="field-value">{permissionLabel(permission())}</span>
+            <span class="field-label">{t('push.notifications')}</span>
+            <span class="field-value">{localizedPermissionLabel(permission())}</span>
           </div>
           <Show when={subscribed() === true}>
             <button type="button" class="action-btn action-btn-ghost" disabled={busy()} onClick={disable}>
-              {busy() ? 'Working…' : 'Disable Notifications'}
+              {busy() ? t('push.working') : t('push.disable')}
             </button>
           </Show>
           <Show when={subscribed() === false}>
             <button type="button" class="action-btn action-btn-ghost" disabled={busy()} onClick={enable}>
-              {busy() ? 'Working…' : 'Enable Notifications'}
+              {busy() ? t('push.working') : t('push.enable')}
             </button>
           </Show>
           <Show when={message()}>

@@ -21,7 +21,10 @@ import com.raulshma.lenscast.streaming.SessionRole
  *   today's authed-read behavior.
  * - VIEWER writes (everything else): DENY, with exactly two exceptions:
  *   `/api/auth/logout` (a viewer may end their own session) and
- *   `/api/audio/uplink` — talkback.
+ *   `/api/audio/uplink` — talkback — plus the WHEP media-session verbs
+ *   (`POST /whep`, `DELETE /whep[/{id}]`), which are media egress: they
+ *   never change device state, they only let the caller *receive* the
+ *   stream, exactly like the GET-shaped stream transports.
  *
  * Talkback decision: talkback is a viewer-ALLOWED feature — it is the
  * doorbell intercom use (a person at the door presses talk and speaks), not
@@ -47,13 +50,25 @@ object RoleGatePolicy {
     )
 
     /**
-     * The non-read methods a viewer may still issue: their own logout, and
-     * the talkback uplink (see the class comment for the talkback decision).
+     * The non-read methods a viewer may still issue: their own logout, the
+     * talkback uplink, and the WHEP media-session verbs (see
+     * [isWhepMediaSession] — media egress is a read).
      */
     val VIEWER_ALLOWED_WRITES: Set<String> = setOf(
         "/api/auth/logout",
         "/api/audio/uplink",
     )
+
+    /**
+     * True when [method] on [path] is a WHEP media-session verb: POSTing an
+     * SDP offer to `/whep` (which only ever *sends* media to the caller) and
+     * DELETEing the session resource. Both are media egress — reads in the
+     * same sense `/stream` is — so a viewer session may take them like any
+     * stream transport, while every configuration write stays denied.
+     */
+    fun isWhepMediaSession(method: String, path: String): Boolean =
+        method == "POST" && path == "/whep" ||
+            method == "DELETE" && (path == "/whep" || path.startsWith("/whep/"))
 
     /** The verdict for [role] requesting [method] on [path]. */
     fun decide(role: SessionRole, method: String, path: String): Verdict = when (role) {
@@ -62,6 +77,7 @@ object RoleGatePolicy {
             method == "GET" || method == "HEAD" || method == "OPTIONS" ->
                 if (path in ADMIN_ONLY_GETS) Verdict.DENY else Verdict.ALLOW
             path in VIEWER_ALLOWED_WRITES -> Verdict.ALLOW
+            isWhepMediaSession(method, path) -> Verdict.ALLOW
             else -> Verdict.DENY
         }
     }

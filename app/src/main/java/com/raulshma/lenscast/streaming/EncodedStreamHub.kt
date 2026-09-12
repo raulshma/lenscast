@@ -37,6 +37,20 @@ interface EncodedSource {
     val audioSpecificConfig: ByteArray?
 
     fun requestKeyFrame()
+
+    /**
+     * The low-res sub-stream's H.264 parameter sets (its encoder is
+     * codec-fixed H.264, independent of the main codec); null while the sub
+     * encode is not running. Defaults keep fakes compiling.
+     */
+    val subSps: ByteArray?
+        get() = null
+
+    val subPps: ByteArray?
+        get() = null
+
+    /** Forces a sync frame from the sub encoder for a mid-GOP /sub join. */
+    fun requestSubKeyFrame() {}
 }
 
 /**
@@ -73,10 +87,11 @@ internal interface EncodedSink {
  * The video codec ([RtspVideoCodec], persisted through the store and applied
  * by the Settings Applier) selects which encoder is instantiated, lazily and
  * one at a time; a codec change on a running pipeline reconfigures stop →
- * (new) encoder → start + black frame. On H.265 the fan-out feeds the RTSP
- * sink ONLY — the HLS TS muxer, the WS/WebCodecs video path, and the RTMP
- * push output are H.264-only and are gated off, so HLS/WS/RTMP stay dark
- * until the codec returns to H.264.
+ * (new) encoder → start + black frame. On H.265 the fan-out is codec-aware:
+ * RTSP always receives, the HLS TS muxer flips its PMT stream type and the
+ * WS sidecar sends the self-describing 'LCHC' hvcC config (legacy WS clients
+ * fail cleanly), while the RTMP and SRT pushes are gated off — no usable
+ * H.265 mapping on this path — and their start ladders refuse the codec.
  */
 internal class EncodedStreamHub(
     private val policyInputs: () -> EncodedStreamPolicy.Inputs,
@@ -88,7 +103,17 @@ internal class EncodedStreamHub(
     private val hlsSink: HlsVideoSink,
     private val wsVideoSink: (List<EncodedNalUnit>) -> Unit,
     private val rtmpSink: EncodedSink,
+    /** The SRT push output's sink (MPEG-TS over SRT); unused while the push is stopped. */
+    private val srtSink: EncodedSink = NoopSink,
+    /** The low-res sub-stream's video sink (the RTSP server's /sub fan-out); unused while the sub is disabled. */
+    private val subVideoSink: (List<EncodedNalUnit>) -> Unit = {},
 ) : EncodedSource {
+
+    /** The fan-out's no-op sink — the default keeps every existing construction site compiling. */
+    private object NoopSink : EncodedSink {
+        override fun feedVideo(nalUnits: List<EncodedNalUnit>) = Unit
+        override fun feedAudio(aacData: ByteArray) = Unit
+    }
 
     private val aacEncoder = AacEncoder()
 
@@ -99,6 +124,14 @@ internal class EncodedStreamHub(
     // not rebuild what it already built.
     private var h264Encoder: VideoEncoder? = null
     private var h265Encoder: VideoEncoder? = null
+
+    // The sub-stream's own H.264 encoder, independent of the main codec —
+    // NVR detect roles want a small, always-H.264 stream even when the main
+    // output runs H.265. Runs only while [subEnabled] and the pipeline runs.
+    // Volatile like [activeEncoder]: written under the state lock on the
+    // applier thread, read unsynchronized on the camera frame thread.
+    @Volatile
+    private var subEncoder: VideoEncoder? = null
 
     @Volatile
     private var activeEncoder: VideoEncoder? = null
@@ -123,6 +156,10 @@ internal class EncodedStreamHub(
     @Volatile private var frameRate = StreamDefaults.STREAM_FPS
     @Volatile private var inputFormat = RtspInputFormat.AUTO
     @Volatile private var activeVideoCodec = RtspVideoCodec.H264
+
+    // The sub-stream: opt-in (settings land via [setSubStreamEnabled] + a
+    // [refresh]), fixed VGA (640×480) H.264 at a low bitrate cap. Off by default.
+    @Volatile private var subEnabled = false
 
     @Volatile private var audioStream: InputStream? = null
     @Volatile private var configuredSampleRateHz = -1
@@ -198,6 +235,7 @@ internal class EncodedStreamHub(
             droppedFrames.set(0)
             Log.d(TAG, "Encoded stream started (${activeVideoCodec.wireName}; rtsp/hls/ws sinks attached)")
         }
+        ensureSubEncoderLocked()
         ensureAudioLocked()
     }
 
@@ -206,8 +244,53 @@ internal class EncodedStreamHub(
             activeEncoder?.stop()
             Log.d(TAG, "Encoded stream stopped")
         }
+        stopSubEncoderLocked()
         stopAudioLocked()
     }
+
+    // ── sub-stream: the optional VGA (640×480) detect-role second encode ──
+
+    /** The opt-in toggle; a [refresh] lands the start/stop while the pipeline runs. */
+    fun setSubStreamEnabled(enabled: Boolean) {
+        subEnabled = enabled
+    }
+
+    fun isSubStreamEnabled(): Boolean = subEnabled
+
+    private fun ensureSubEncoderLocked() {
+        if (!subEnabled || !running.get()) {
+            stopSubEncoderLocked()
+            return
+        }
+        if (subEncoder != null) return
+        val encoder = H264Encoder()
+        encoder.onEncodedFrame = { units -> subVideoSink(units) }
+        encoder.configure(
+            StreamDefaults.RTSP_SUB_VIDEO_WIDTH,
+            StreamDefaults.RTSP_SUB_VIDEO_HEIGHT,
+            subBitrate(),
+            frameRate,
+        )
+        encoder.setInputFormat(inputFormat)
+        if (!encoder.start()) {
+            Log.e(TAG, "Sub-stream encoder failed to start; /sub stays idle")
+            return
+        }
+        subEncoder = encoder
+        encoder.submitBlackFrame()
+        Log.d(TAG, "Sub-stream encoder started (${StreamDefaults.RTSP_SUB_VIDEO_WIDTH}x${StreamDefaults.RTSP_SUB_VIDEO_HEIGHT} H.264)")
+    }
+
+    private fun stopSubEncoderLocked() {
+        val encoder = subEncoder ?: return
+        subEncoder = null
+        encoder.stop()
+        Log.d(TAG, "Sub-stream encoder stopped")
+    }
+
+    /** The sub bitrate cap, clamped to the encoder's valid range like every other bitrate write. */
+    private fun subBitrate(): Int = StreamDefaults.RTSP_SUB_VIDEO_BITRATE
+        .coerceIn(StreamDefaults.VIDEO_BITRATE_MIN, StreamDefaults.VIDEO_BITRATE_MAX)
 
     // ── audio: the (re)attach ladder ──
 
@@ -317,6 +400,27 @@ internal class EncodedStreamHub(
 
         acceptedFrames.incrementAndGet()
         encoder.encodeFrame(frameData)
+
+        // The sub-stream's feed: the same rotated frame aspect-filled onto
+        // the fixed VGA (640×480) size, encoded by its own H.264 instance — one extra
+        // small-scale + small encode, only while opted in and running.
+        val sub = subEncoder
+        if (sub != null && !sub.isEncoderLagged()) {
+            val subFrame = if (effectiveWidth != StreamDefaults.RTSP_SUB_VIDEO_WIDTH ||
+                effectiveHeight != StreamDefaults.RTSP_SUB_VIDEO_HEIGHT
+            ) {
+                YuvConverter.scaleNv21(
+                    frameData,
+                    effectiveWidth,
+                    effectiveHeight,
+                    StreamDefaults.RTSP_SUB_VIDEO_WIDTH,
+                    StreamDefaults.RTSP_SUB_VIDEO_HEIGHT,
+                )
+            } else {
+                frameData
+            }
+            sub.encodeFrame(subFrame)
+        }
     }
 
     /** Live frame-rate change: throttle interval now, encoder at its next (re)configure. */
@@ -356,6 +460,7 @@ internal class EncodedStreamHub(
         synchronized(stateLock) {
             if (running.get()) {
                 reconfigureEncoderLocked(videoWidth, videoHeight)
+                reconfigureSubEncoderLocked()
             }
         }
     }
@@ -413,24 +518,49 @@ internal class EncodedStreamHub(
         Log.d(TAG, "Encoder reconfigured to ${width}x${height} (${activeVideoCodec.wireName})")
     }
 
+    /** Stop → configure → start on the live sub encoder (input-format changes); no-op while it is down. */
+    private fun reconfigureSubEncoderLocked() {
+        val encoder = subEncoder ?: return
+        encoder.stop()
+        encoder.configure(
+            StreamDefaults.RTSP_SUB_VIDEO_WIDTH,
+            StreamDefaults.RTSP_SUB_VIDEO_HEIGHT,
+            subBitrate(),
+            frameRate,
+        )
+        encoder.setInputFormat(inputFormat)
+        if (!encoder.start()) {
+            subEncoder = null
+            Log.e(TAG, "Sub-stream encoder restart failed; /sub stays idle until the next lifecycle change")
+            return
+        }
+        encoder.submitBlackFrame()
+    }
+
     // ── fan-out ──
 
     /**
      * The video fan-out. [producingCodec] is the codec that ENCODED these AUs,
      * not the live configured codec — during a codec swap an in-flight drain
      * must take the route of the encoder that produced it, or HEVC AUs would
-     * land in the H.264-only HLS muxer / WebCodecs path.
+     * land in the H.264-only RTMP path. HLS and WS are codec-aware since the
+     * HEVC muxer/config work: the TS muxer's PMT stream type flips with the
+     * codec (manager-owned, alongside a ring reset), and the WS sidecar sends
+     * an hvcC-style config message ('LCHC') — browser support for HEVC HLS is
+     * effectively Safari-only, and the WS WebCodecs player must learn to
+     * parse the hvcC record before HEVC frames decodable in Chrome land.
      */
     private fun fanOutVideo(producingCodec: RtspVideoCodec, nalUnits: List<EncodedNalUnit>) {
         if (nalUnits.isEmpty()) return
         fanOut("RTSP video") { rtspSink.feedVideo(nalUnits) }
-        // HLS stays H.264-only: the TS muxer has no HEVC mapping, so H.265 AUs would corrupt segments.
-        // WS video stays H.264-only too: the WebCodecs decode path has no HEVC configuration yet.
-        // RTMP likewise has no standard H.265 mapping (the output refuses to start under H.265).
+        fanOut("HLS video") { hlsSink.feedVideo(nalUnits) }
+        fanOut("WS video") { wsVideoSink(nalUnits) }
+        // RTMP and SRT have no usable H.265 mapping on this path (the
+        // outputs refuse to start under H.265) — HEVC AUs would corrupt
+        // their streams.
         if (producingCodec != RtspVideoCodec.H265) {
-            fanOut("HLS video") { hlsSink.feedVideo(nalUnits) }
-            fanOut("WS video") { wsVideoSink(nalUnits) }
             fanOut("RTMP video") { rtmpSink.feedVideo(nalUnits) }
+            fanOut("SRT video") { srtSink.feedVideo(nalUnits) }
         }
     }
 
@@ -439,6 +569,7 @@ internal class EncodedStreamHub(
         fanOut("RTSP audio") { rtspSink.feedAudio(aacData) }
         fanOut("HLS audio") { hlsSink.feedAudio(aacData) }
         fanOut("RTMP audio") { rtmpSink.feedAudio(aacData) }
+        fanOut("SRT audio") { srtSink.feedAudio(aacData) }
     }
 
     /** One isolated sink delivery: a broken consumer must never starve the others. */
@@ -475,6 +606,19 @@ internal class EncodedStreamHub(
 
     override fun requestKeyFrame() {
         activeEncoder?.requestKeyFrame()
+    }
+
+    // The sub-stream's EncodedSource answers: its own H.264 encoder's CSD and
+    // keyframe requests, independent of the main codec's encoder.
+
+    override val subSps: ByteArray?
+        get() = subEncoder?.sps
+
+    override val subPps: ByteArray?
+        get() = subEncoder?.pps
+
+    override fun requestSubKeyFrame() {
+        subEncoder?.requestKeyFrame()
     }
 
     companion object {

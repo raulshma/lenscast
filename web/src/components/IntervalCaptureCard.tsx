@@ -2,6 +2,15 @@ import { Show } from 'solid-js'
 import SettingsCard from './SettingsCard'
 import type { IntervalCaptureConfig, FlashMode } from '../types'
 import { FLASH_MODE_LABELS } from '../types'
+import { t } from '../lib/i18n'
+import type { FlashMode as FlashModeType } from '../types'
+
+/** Wire value → i18n key for the flash options. */
+const FLASH_KEYS: Record<FlashMode, string> = {
+  OFF: 'common.off',
+  ON: 'common.on',
+  AUTO: 'common.auto',
+}
 
 interface Props {
   intervalConfig: () => IntervalCaptureConfig
@@ -23,19 +32,19 @@ export default function IntervalCaptureCard(props: Props) {
           <polyline points="12 6 12 12 16 14" />
         </svg>
       }
-      title="Interval Capture"
+      title={t('interval.title')}
     >
       <Show when={props.intervalRunning()}>
         <div class="status-banner status-banner-info">
           <span class="status-banner-dot" />
-          Running — {props.intervalCompleted()} captures completed
+          {t('interval.running', { count: props.intervalCompleted() })}
         </div>
       </Show>
 
       {/* Interval */}
       <div class="field-group">
         <div class="field-row">
-          <span class="field-label">Interval</span>
+          <span class="field-label">{t('interval.interval')}</span>
           <span class="field-value">{cfg().intervalSeconds}s</span>
         </div>
         <input
@@ -53,7 +62,7 @@ export default function IntervalCaptureCard(props: Props) {
       {/* Total Captures */}
       <div class="field-group">
         <div class="field-row">
-          <span class="field-label">Total Captures</span>
+          <span class="field-label">{t('interval.total')}</span>
           <span class="field-value">{cfg().totalCaptures}</span>
         </div>
         <input
@@ -71,7 +80,7 @@ export default function IntervalCaptureCard(props: Props) {
       {/* Flash Mode */}
       <div class="field-group">
         <div class="field-row">
-          <span class="field-label">Flash</span>
+          <span class="field-label">{t('interval.flash')}</span>
         </div>
         <select
           id="interval-flash-mode"
@@ -80,8 +89,8 @@ export default function IntervalCaptureCard(props: Props) {
           onChange={(e) => props.setIntervalConfig({ ...cfg(), flashMode: e.currentTarget.value as FlashMode })}
           disabled={props.intervalRunning()}
         >
-          {Object.entries(FLASH_MODE_LABELS).map(([k, v]) => (
-            <option value={k}>{v}</option>
+          {Object.keys(FLASH_MODE_LABELS).map((k) => (
+            <option value={k}>{t(FLASH_KEYS[k as FlashModeType])}</option>
           ))}
         </select>
       </div>
@@ -93,14 +102,14 @@ export default function IntervalCaptureCard(props: Props) {
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <rect x="6" y="6" width="12" height="12" rx="2" />
             </svg>
-            Stop Interval Capture
+            {t('interval.stop')}
           </button>
         ) : (
           <button id="start-interval-btn" class="card-btn card-btn-primary" onClick={props.handleStartIntervalCapture}>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <polygon points="5 3 19 12 5 21 5 3" />
             </svg>
-            Start Interval Capture
+            {t('interval.start')}
           </button>
         )}
       </div>

@@ -17,11 +17,12 @@ This project is set up for the official F-Droid repository (f-droid.org).
   users can download it at runtime from TensorFlow's official storage with a
   pinned SHA-256 (`DetectionModelStore.kt`). This is declared in the
   submission so reviewers don't flag it as a binary artifact.
-- `versionCode` follows `major*1_000_000 + minor*1_000 + patch` and must be
-  bumped in `app/build.gradle.kts` defaults on **every** release, because
-  F-Droid builds the tag with plain `assembleFdroidRelease` (no `-P`
-  overrides). CI (`release.yml`) derives and passes the same value for
-  GitHub releases.
+- `versionCode` follows `major*10_000 + minor*1_000 + patch*10 + abiIndex`
+  (abiIndex: armeabi-v7a=1, arm64-v8a=2, x86_64=3; 0.1.2 → 1021/1022/1023)
+  and must be bumped in `app/build.gradle.kts` defaults on **every** release,
+  because F-Droid builds the tag with plain `assembleFdroidRelease` + an
+  `abiFilter` gradleprop (no `-PversionCode` override). CI (`release.yml`)
+  derives and passes the same value for GitHub releases.
 
 ## Submitting / updating
 

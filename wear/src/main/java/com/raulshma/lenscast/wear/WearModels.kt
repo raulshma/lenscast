@@ -25,6 +25,13 @@ data class WearSettings(
     val username: String = "",
     val password: String = "",
     val apiToken: String = "",
+    /**
+     * The detection-alerts opt-in (default ON, toggled in the settings
+     * screen): when true, the resumed alert loop surfaces new phone-side
+     * detection events as a banner + notification + haptic. The poll loop
+     * re-reads settings each lap, so a flip takes effect on the next poll.
+     */
+    val alertsEnabled: Boolean = true,
 ) {
     /** True when a host is present — the single "configured" gate. */
     val isConfigured: Boolean get() = host.isNotBlank()
@@ -52,7 +59,13 @@ data class WearSettings(
  */
 enum class AuthMode { BASIC, API_TOKEN }
 
-/** One decoded phone status poll: exactly the fields the remote renders. */
+/**
+ * One decoded phone status poll: exactly the fields the remote and the tile
+ * render. [streamingActive] is the whole-server mirror behind the toggle;
+ * [webStreamingActive] / [rtspStreamingActive] are the per-transport live
+ * flags the tile's stream-state line reads (both default false — the wire
+ * fields are optional on older phone builds).
+ */
 data class WearStatus(
     val streamingActive: Boolean,
     val clientCount: Int,
@@ -60,12 +73,31 @@ data class WearStatus(
     val batteryCharging: Boolean,
     val cameraState: String,
     val thermalState: String,
+    val webStreamingActive: Boolean = false,
+    val rtspStreamingActive: Boolean = false,
 )
 
 /** The device identity the settings test button surfaces on success. */
 data class WearSystemInfo(
     val deviceModel: String,
     val appVersion: String,
+)
+
+/**
+ * One detection event off `GET /api/detection/events` — the newest-first
+ * feed the alert loop tails. Only the fields the watch surfaces are parsed:
+ * identity ([id], a phone-side UUID string, NOT an ordered counter — the
+ * new-event verdict lives in [WearAlertPolicy]), the event clock, and the
+ * label material ([labels] = ML/YAMNet classes, [zones] = motion zones).
+ * The base64 snapshot deliberately stays on the phone — the banner's
+ * thumbnail is the live `/snapshot` frame the pane already fetches.
+ */
+data class WearDetectionEvent(
+    val id: String,
+    val type: String,
+    val timestampMs: Long,
+    val zones: List<String> = emptyList(),
+    val labels: List<String> = emptyList(),
 )
 
 /** One decoded `/snapshot` frame plus the wall-clock instant it arrived. */

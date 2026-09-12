@@ -2,6 +2,7 @@ import { Show } from 'solid-js'
 import SettingsCard from './SettingsCard'
 import type { AllSettings, DeviceStatus } from '../types'
 import { API_DEFAULTS } from '../api/defaults'
+import { formatTime, t } from '../lib/i18n'
 
 interface Props {
   settings: () => AllSettings | null
@@ -10,12 +11,20 @@ interface Props {
   updateStreamingDebounced: (patch: Partial<AllSettings['streaming']>) => void
 }
 
-const STATUS_LABELS: Record<string, { label: string; color: string }> = {
-  IDLE: { label: 'Idle', color: 'var(--lc-text-muted)' },
-  MONITORING: { label: 'Monitoring', color: 'var(--lc-success)' },
-  RECOVERING: { label: 'Recovering…', color: 'var(--lc-warning)' },
-  FAILED: { label: 'Failed', color: 'var(--lc-danger)' },
-  COOLDOWN: { label: 'Cooldown', color: 'var(--lc-warning)' },
+const STATE_KEYS: Record<string, string> = {
+  IDLE: 'watchdog.state.idle',
+  MONITORING: 'watchdog.state.monitoring',
+  RECOVERING: 'watchdog.state.recovering',
+  FAILED: 'watchdog.state.failed',
+  COOLDOWN: 'watchdog.state.cooldown',
+}
+
+const STATE_COLORS: Record<string, string> = {
+  IDLE: 'var(--lc-text-muted)',
+  MONITORING: 'var(--lc-success)',
+  RECOVERING: 'var(--lc-warning)',
+  FAILED: 'var(--lc-danger)',
+  COOLDOWN: 'var(--lc-warning)',
 }
 
 export default function WatchdogCard(props: Props) {
@@ -25,13 +34,12 @@ export default function WatchdogCard(props: Props) {
 
   const statusInfo = () => {
     const st = wd()?.status ?? 'IDLE'
-    return STATUS_LABELS[st] ?? STATUS_LABELS.IDLE
+    return { label: t(STATE_KEYS[st] ?? STATE_KEYS.IDLE), color: STATE_COLORS[st] ?? STATE_COLORS.IDLE }
   }
 
   const formatTimestamp = (ts: number) => {
     if (!ts) return '—'
-    const d = new Date(ts)
-    return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+    return formatTime(ts, { hour: '2-digit', minute: '2-digit', second: '2-digit' })
   }
 
   return (
@@ -42,12 +50,12 @@ export default function WatchdogCard(props: Props) {
           <path d="M12 6v6l4 2" />
         </svg>
       }
-      title="Auto-Restart Watchdog"
+      title={t('watchdog.title')}
     >
       {/* Enable Toggle */}
       <div class="field-group">
         <div class="field-row field-row-toggle">
-          <span class="field-label">Enable Watchdog</span>
+          <span class="field-label">{t('watchdog.enable')}</span>
           <label class="toggle-switch" for="watchdog-enable-toggle">
             <input
               id="watchdog-enable-toggle"
@@ -60,7 +68,7 @@ export default function WatchdogCard(props: Props) {
         </div>
         <div class="status-banner status-banner-info stream-mode-hint" role="note" aria-live="polite">
           <span class="status-banner-dot" aria-hidden="true" />
-          <span>Automatically detects camera or streaming failures and restarts the pipeline. Designed for 24/7 surveillance.</span>
+          <span>{t('watchdog.desc')}</span>
         </div>
       </div>
 
@@ -68,7 +76,7 @@ export default function WatchdogCard(props: Props) {
         {/* Max Retries */}
         <div class="field-group">
           <div class="field-row">
-            <span class="field-label">Max Recovery Attempts</span>
+            <span class="field-label">{t('watchdog.maxRetries')}</span>
             <span class="field-value">{s()?.streaming?.watchdogMaxRetries ?? API_DEFAULTS.watchdogMaxRetries}</span>
           </div>
           <input
@@ -89,7 +97,7 @@ export default function WatchdogCard(props: Props) {
         {/* Check Interval */}
         <div class="field-group">
           <div class="field-row">
-            <span class="field-label">Health Check Interval</span>
+            <span class="field-label">{t('watchdog.interval')}</span>
             <span class="field-value">{s()?.streaming?.watchdogCheckIntervalSeconds ?? API_DEFAULTS.watchdogCheckIntervalSeconds}s</span>
           </div>
           <input
@@ -111,7 +119,7 @@ export default function WatchdogCard(props: Props) {
         <Show when={wd()}>
           <div class="field-group">
             <div class="field-row">
-              <span class="field-label">Status</span>
+              <span class="field-label">{t('common.status')}</span>
               <span
                 class="field-value watchdog-status-badge"
                 style={{ color: statusInfo().color }}
@@ -129,19 +137,19 @@ export default function WatchdogCard(props: Props) {
             <div class="field-group watchdog-stats-grid">
               <Show when={wd()!.consecutiveFailures > 0}>
                 <div class="field-row">
-                  <span class="field-label">Consecutive Failures</span>
+                  <span class="field-label">{t('watchdog.consecutiveFailures')}</span>
                   <span class="field-value" style={{ color: 'var(--lc-warning)' }}>
                     {wd()!.consecutiveFailures}
                   </span>
                 </div>
               </Show>
               <div class="field-row">
-                <span class="field-label">Total Recoveries</span>
+                <span class="field-label">{t('watchdog.totalRecoveries')}</span>
                 <span class="field-value">{wd()!.totalRecoveries}</span>
               </div>
               <Show when={wd()!.lastRecoveryTimestamp > 0}>
                 <div class="field-row">
-                  <span class="field-label">Last Recovery</span>
+                  <span class="field-label">{t('watchdog.lastRecovery')}</span>
                   <span class="field-value">{formatTimestamp(wd()!.lastRecoveryTimestamp)}</span>
                 </div>
               </Show>
@@ -158,7 +166,7 @@ export default function WatchdogCard(props: Props) {
           <Show when={wd()!.status === 'FAILED'}>
             <div class="status-banner status-banner-error" role="alert">
               <span class="status-banner-dot" aria-hidden="true" />
-              <span>Watchdog exhausted all recovery attempts. Manual intervention required.</span>
+              <span>{t('watchdog.exhausted')}</span>
             </div>
           </Show>
         </Show>

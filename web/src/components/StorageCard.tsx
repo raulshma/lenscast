@@ -5,6 +5,7 @@ import { getGallery, getSystemInfo } from '../api/client'
 import { forecastStorage, type StorageForecast } from '../lib/storageForecast'
 import { formatBytes } from '../format'
 import SettingsCard from './SettingsCard'
+import { t, tCount } from '../lib/i18n'
 
 interface Props {
   settings: () => AllSettings | null
@@ -92,11 +93,11 @@ export default function StorageCard(props: Props) {
           <line x1="10" y1="16" x2="10.01" y2="16" />
         </svg>
       }
-      title="Storage"
+      title={t('storage.title')}
     >
       <div class="field-group">
         <div class="field-row">
-          <span class="field-label">Keep Captures (days)</span>
+          <span class="field-label">{t('storage.keepCaptures')}</span>
           <span class="field-value">{stream()?.captureRetentionDays ?? API_DEFAULTS.captureRetentionDays}</span>
         </div>
         <input
@@ -116,7 +117,7 @@ export default function StorageCard(props: Props) {
 
       <div class="field-group">
         <div class="field-row">
-          <span class="field-label">Keep Detection Events (days)</span>
+          <span class="field-label">{t('storage.keepEvents')}</span>
           <span class="field-value">{stream()?.eventRetentionDays ?? API_DEFAULTS.eventRetentionDays}</span>
         </div>
         <input
@@ -136,7 +137,7 @@ export default function StorageCard(props: Props) {
 
       <div class="field-group">
         <div class="field-row">
-          <span class="field-label">Storage Quota (MB)</span>
+          <span class="field-label">{t('storage.quota')}</span>
           <span class="field-value">{stream()?.storageQuotaMb ?? API_DEFAULTS.storageQuotaMb}</span>
         </div>
         <input
@@ -158,14 +159,13 @@ export default function StorageCard(props: Props) {
         {(f) => (
           <div class="field-group">
             <div class="field-row">
-              <span class="field-label" title="Average daily growth over the retained capture history">Storage Forecast</span>
-              <span class="field-value">≈ {f().daysRemaining} day{f().daysRemaining === 1 ? '' : 's'} until quota</span>
+              <span class="field-label" title={t('storage.forecastTitle')}>{t('storage.forecast')}</span>
+              <span class="field-value">{tCount('storage.untilQuota', f().daysRemaining)}</span>
             </div>
             <div class="status-banner status-banner-info stream-mode-hint" role="note">
               <span class="status-banner-dot" aria-hidden="true" />
               <span>
-                {formatBytes(f().bytesPerDay)}/day over {Math.round(f().daysSpanned)} day{Math.round(f().daysSpanned) === 1 ? '' : 's'} of captures —
-                the quota is not a hard stop: past it, the oldest captures age out automatically.
+                {t('storage.forecastDesc', { perDay: formatBytes(f().bytesPerDay), days: tCount('storage.daysSpanned', Math.round(f().daysSpanned)) })}
               </span>
             </div>
           </div>
@@ -174,7 +174,7 @@ export default function StorageCard(props: Props) {
 
       <div class="status-banner status-banner-info stream-mode-hint" role="note" aria-live="polite">
         <span class="status-banner-dot" aria-hidden="true" />
-        <span>0 keeps everything; oldest items are deleted beyond the window. Past the quota, the oldest captures are removed automatically.</span>
+        <span>{t('storage.retentionDesc')}</span>
       </div>
     </SettingsCard>
   )

@@ -1,6 +1,7 @@
 import { createSignal, For, onCleanup, onMount, Show } from 'solid-js'
 import { kickStreamClient, listStreamClients } from '../api/client'
 import SettingsCard from './SettingsCard'
+import { t, tCount } from '../lib/i18n'
 
 interface ClientSummary {
   httpClients: string[]
@@ -29,7 +30,7 @@ export default function ClientsCard(props: { readOnly?: () => boolean } = {}) {
       setClients(await listStreamClients())
       setError('')
     } catch (e: any) {
-      setError(e?.message || 'Failed to list clients')
+      setError(e?.message || t('clients.listFailed'))
     }
   }
 
@@ -42,7 +43,7 @@ export default function ClientsCard(props: { readOnly?: () => boolean } = {}) {
       setTimeout(() => setKicked(''), 2500)
       await refresh()
     } catch (e: any) {
-      setError(e?.message || 'Kick failed')
+      setError(e?.message || t('clients.kickFailed'))
     } finally {
       setKicking('')
     }
@@ -63,7 +64,7 @@ export default function ClientsCard(props: { readOnly?: () => boolean } = {}) {
           <line x1="12" y1="17" x2="12" y2="21" />
         </svg>
       }
-      title="Connected Clients"
+      title={t('clients.title')}
     >
       <div class="clients-card-body">
         <Show when={error()}>
@@ -74,19 +75,19 @@ export default function ClientsCard(props: { readOnly?: () => boolean } = {}) {
         </Show>
 
         <Show when={clients()} fallback={
-          <div class="clients-empty">Waiting for client data…</div>
+          <div class="clients-empty">{t('clients.waiting')}</div>
         }>
           <div class="clients-count-row">
-            <span class="clients-count-badge" title="HTTP / RTSP viewers">
+            <span class="clients-count-badge" title={t('clients.slotsTitle')}>
               {clients()!.httpCount}<span class="clients-count-sep">HTTP</span>{clients()!.rtspCount}<span class="clients-count-sep">RTSP</span>
             </span>
           </div>
           <ul class="clients-list">
             <For each={clients()!.httpClients} fallback={
               <li class="clients-empty">
-                No HTTP viewers connected
+                {t('clients.noHttp')}
                 <Show when={clients()!.rtspCount > 0}>
-                  {' '}· {clients()!.rtspCount} RTSP client{clients()!.rtspCount === 1 ? '' : 's'}
+                  {' '}· {tCount('clients.rtspCount', clients()!.rtspCount)}
                 </Show>
               </li>
             }>
@@ -98,20 +99,20 @@ export default function ClientsCard(props: { readOnly?: () => boolean } = {}) {
                       type="button"
                       class="client-kick-btn"
                       disabled={kicking() !== '' || props.readOnly?.() === true}
-                      title={props.readOnly?.() === true ? 'Read-only session' : undefined}
+                      title={props.readOnly?.() === true ? t('clients.readOnlyTitle') : undefined}
                       onClick={() => void handleKick(id)}
                     >
-                      {kicking() === id ? 'Kicking…' : 'Kick'}
+                      {kicking() === id ? t('clients.kicking') : t('clients.kick')}
                     </button>
                   }>
-                    <span class="client-kicked">Kicked</span>
+                    <span class="client-kicked">{t('clients.kicked')}</span>
                   </Show>
                 </li>
               )}
             </For>
           </ul>
           <div class="clients-cap-row">
-            <span>{clients()!.httpCount} / {clients()!.maxHttp} HTTP viewer slots in use</span>
+            <span>{t('clients.slotsInUse', { used: clients()!.httpCount, max: clients()!.maxHttp })}</span>
           </div>
         </Show>
       </div>

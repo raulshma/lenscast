@@ -2,6 +2,7 @@ import SettingsCard from './SettingsCard'
 import type { AllSettings, CameraSettings, Resolution } from '../types'
 import { RESOLUTION_LABELS, FRAME_RATE_OPTIONS } from '../types'
 import { API_DEFAULTS } from '../api/defaults'
+import { t } from '../lib/i18n'
 
 interface Props {
   settings: () => AllSettings | null
@@ -21,12 +22,12 @@ export default function ZoomFrameCard(props: Props) {
           <line x1="8" y1="11" x2="14" y2="11" />
         </svg>
       }
-      title="Zoom & Frame"
+      title={t('zoomframe.title')}
     >
       {/* Zoom */}
       <div class="field-group">
         <div class="field-row">
-          <span class="field-label">Zoom</span>
+          <span class="field-label">{t('zoomframe.zoom')}</span>
           <span class="field-value">{(s()?.camera?.zoomRatio ?? API_DEFAULTS.cameraZoomRatio).toFixed(1)}x</span>
         </div>
         <input
@@ -44,7 +45,7 @@ export default function ZoomFrameCard(props: Props) {
       {/* Frame Rate */}
       <div class="field-group">
         <div class="field-row">
-          <span class="field-label">Frame Rate</span>
+          <span class="field-label">{t('zoomframe.frameRate')}</span>
         </div>
         <select
           id="framerate-select"
@@ -61,7 +62,7 @@ export default function ZoomFrameCard(props: Props) {
       {/* Resolution */}
       <div class="field-group">
         <div class="field-row">
-          <span class="field-label">Resolution</span>
+          <span class="field-label">{t('common.resolution')}</span>
         </div>
         <select
           id="resolution-select"

@@ -61,6 +61,8 @@ class WearApiClient(private val settingsStore: WearSettingsStore) {
             batteryCharging = battery.optBoolean("isCharging", false),
             cameraState = json.optString("camera", "unknown"),
             thermalState = json.optString("thermal", "unknown"),
+            webStreamingActive = streaming.optBoolean("webStreamingActive", false),
+            rtspStreamingActive = streaming.optBoolean("rtspStreamingActive", false),
         )
     }
 
@@ -90,6 +92,36 @@ class WearApiClient(private val settingsStore: WearSettingsStore) {
 
     /** POST /api/capture — one photo through the phone's capture pipeline. */
     suspend fun capturePhoto(): CommandResult = post(WearRequestUrls::capture)
+
+    /**
+     * GET /api/detection/events?limit=N — the newest-first event feed the
+     * alert loop tails. Only the banner-relevant fields are decoded; the
+     * base64 snapshots stay on the wire (the banner shows the live /snapshot
+     * frame instead). Throws upward like [fetchStatus]; the loop folds it
+     * into a silent retry — the status header already owns "unreachable".
+     */
+    suspend fun fetchDetectionEvents(limit: Int): List<WearDetectionEvent> = withContext(Dispatchers.IO) {
+        val settings = settingsStore.current()
+        val body = executeForText(
+            requestBuilder(WearRequestUrls.detectionEvents(settings.host, settings.port, limit), settings).build()
+        )
+        val events = JSONObject(body).optJSONArray("events") ?: return@withContext emptyList()
+        List(events.length()) { index ->
+            val event = events.optJSONObject(index) ?: JSONObject()
+            WearDetectionEvent(
+                id = event.optString("id"),
+                timestampMs = event.optLong("timestampMs", 0L),
+                type = event.optString("type", "unknown"),
+                zones = event.optJSONArray("zones").toStrings(),
+                labels = event.optJSONArray("labels").toStrings(),
+            )
+        }.filter { it.id.isNotBlank() }
+    }
+
+    /** org.json's optJSONArray null-tolerance: a missing array is an empty list. */
+    private fun org.json.JSONArray?.toStrings(): List<String> =
+        this?.let { array -> List(array.length()) { index -> array.optString(index) }.filter(String::isNotBlank) }
+            .orEmpty()
 
     /**
      * GET /snapshot → the current preview frame, decoded off the JPEG bytes.

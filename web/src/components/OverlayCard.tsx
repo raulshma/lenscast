@@ -2,6 +2,15 @@ import { Show } from 'solid-js'
 import SettingsCard from './SettingsCard'
 import type { OverlayPosition, StreamingSettings } from '../types'
 import { OVERLAY_POSITION_LABELS } from '../types'
+import { t } from '../lib/i18n'
+
+/** Wire value → i18n key for the overlay-position options. */
+const POS_KEYS: Record<OverlayPosition, string> = {
+  TOP_LEFT: 'option.pos.topLeft',
+  TOP_RIGHT: 'option.pos.topRight',
+  BOTTOM_LEFT: 'option.pos.bottomLeft',
+  BOTTOM_RIGHT: 'option.pos.bottomRight',
+}
 
 interface Props {
   streaming: () => StreamingSettings
@@ -20,11 +29,11 @@ export default function OverlayCard(props: Props) {
           <text x="6" y="13" font-size="6" fill="currentColor" stroke="none">T</text>
         </svg>
       }
-      title="Stream Overlay"
+      title={t('overlay.title')}
     >
       <div class="settings-group">
         <div class="field-row field-row-toggle">
-          <span class="field-label">Enable Overlay</span>
+          <span class="field-label">{t('overlay.enable')}</span>
           <label class="toggle-switch" for="overlay-enabled-toggle">
             <input
               id="overlay-enabled-toggle"
@@ -40,7 +49,7 @@ export default function OverlayCard(props: Props) {
       <Show when={s().overlayEnabled}>
         <div class="settings-group">
           <label class="setting-row">
-            <span class="setting-label">Timestamp</span>
+            <span class="setting-label">{t('overlay.timestamp')}</span>
             <input
               type="checkbox"
               class="toggle-input"
@@ -51,7 +60,7 @@ export default function OverlayCard(props: Props) {
 
           <Show when={s().showTimestamp}>
             <div class="setting-row">
-              <span class="setting-label">Format</span>
+              <span class="setting-label">{t('overlay.format')}</span>
               <input
                 type="text"
                 class="text-input text-input-sm"
@@ -65,7 +74,7 @@ export default function OverlayCard(props: Props) {
 
         <div class="settings-group">
           <label class="setting-row">
-            <span class="setting-label">Branding</span>
+            <span class="setting-label">{t('overlay.branding')}</span>
             <input
               type="checkbox"
               class="toggle-input"
@@ -76,7 +85,7 @@ export default function OverlayCard(props: Props) {
 
           <Show when={s().showBranding}>
             <div class="setting-row">
-              <span class="setting-label">Text</span>
+              <span class="setting-label">{t('overlay.text')}</span>
               <input
                 type="text"
                 class="text-input text-input-sm"
@@ -90,7 +99,7 @@ export default function OverlayCard(props: Props) {
 
         <div class="settings-group">
           <label class="setting-row">
-            <span class="setting-label">Status (viewers, REC)</span>
+            <span class="setting-label">{t('overlay.status')}</span>
             <input
               type="checkbox"
               class="toggle-input"
@@ -102,7 +111,7 @@ export default function OverlayCard(props: Props) {
 
         <div class="settings-group">
           <label class="setting-row">
-            <span class="setting-label">Custom Text</span>
+            <span class="setting-label">{t('overlay.custom')}</span>
             <input
               type="checkbox"
               class="toggle-input"
@@ -113,12 +122,12 @@ export default function OverlayCard(props: Props) {
 
           <Show when={s().showCustomText}>
             <div class="setting-row">
-              <span class="setting-label">Text</span>
+              <span class="setting-label">{t('overlay.text')}</span>
               <input
                 type="text"
                 class="text-input text-input-sm"
                 value={s().customText}
-                placeholder="Custom text"
+                placeholder={t('overlay.customPlaceholder')}
                 onChange={(e) => props.onUpdate({ customText: e.currentTarget.value })}
               />
             </div>
@@ -127,20 +136,20 @@ export default function OverlayCard(props: Props) {
 
         <div class="settings-group">
           <div class="setting-row">
-            <span class="setting-label">Position</span>
+            <span class="setting-label">{t('overlay.position')}</span>
             <select
               class="select-input select-input-sm"
               value={s().overlayPosition}
               onChange={(e) => props.onUpdate({ overlayPosition: e.currentTarget.value as OverlayPosition })}
             >
-              {Object.entries(OVERLAY_POSITION_LABELS).map(([value, label]) => (
-                <option value={value}>{label}</option>
+              {Object.keys(OVERLAY_POSITION_LABELS).map((value) => (
+                <option value={value}>{t(POS_KEYS[value as OverlayPosition])}</option>
               ))}
             </select>
           </div>
 
           <div class="setting-row">
-            <span class="setting-label">Font Size</span>
+            <span class="setting-label">{t('overlay.fontSize')}</span>
             <input
               type="range"
               class="range-input"
@@ -153,7 +162,7 @@ export default function OverlayCard(props: Props) {
           </div>
 
           <div class="setting-row">
-            <span class="setting-label">Text Color</span>
+            <span class="setting-label">{t('overlay.textColor')}</span>
             <input
               type="color"
               class="color-input"
@@ -163,7 +172,7 @@ export default function OverlayCard(props: Props) {
           </div>
 
           <div class="setting-row">
-            <span class="setting-label">Background</span>
+            <span class="setting-label">{t('overlay.background')}</span>
             <input
               type="color"
               class="color-input"
@@ -177,7 +186,7 @@ export default function OverlayCard(props: Props) {
           </div>
 
           <div class="setting-row">
-            <span class="setting-label">Padding</span>
+            <span class="setting-label">{t('overlay.padding')}</span>
             <input
               type="range"
               class="range-input"
@@ -190,7 +199,7 @@ export default function OverlayCard(props: Props) {
           </div>
 
           <div class="setting-row">
-            <span class="setting-label">Line Height</span>
+            <span class="setting-label">{t('overlay.lineHeight')}</span>
             <input
               type="range"
               class="range-input"

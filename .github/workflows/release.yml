@@ -31,10 +31,13 @@ jobs:
           cache: 'npm'
           cache-dependency-path: web/package-lock.json
 
-      - name: Set up JDK 17
+      # JDK 21 matches the Gradle daemon toolchain
+      # (gradle/gradle-daemon-jvm.properties); setup-java only bootstraps
+      # it, the daemon JVM criteria pick the exact version.
+      - name: Set up JDK 21
         uses: actions/setup-java@v4
         with:
-          java-version: '17'
+          java-version: '21'
           distribution: 'temurin'
 
       - name: Setup Gradle
@@ -90,6 +93,29 @@ jobs:
           # The fastlane changelog ships per versionCode; the x86_64 entry
           # (abiIndex 3) is the release's canonical one for the notes.
           echo "changelog_vercode=$((VERSION_BASE + 3))" >> $GITHUB_OUTPUT
+
+      - name: Verify Release Changelog Exists
+        env:
+          CHANGELOG_VERCODE: ${{ steps.version.outputs.changelog_vercode }}
+        run: |
+          # body_path below points at this file; softprops/action-gh-release
+          # silently publishes an empty body when it is missing, so fail here
+          # instead — the vercode is computed exactly like the release step
+          # (version base + x86_64 abiIndex 3).
+          CHANGELOG_FILE="fastlane/metadata/android/en-US/changelogs/${CHANGELOG_VERCODE}.txt"
+          if [ ! -s "$CHANGELOG_FILE" ]; then
+            echo "::error::Missing or empty changelog: $CHANGELOG_FILE"
+            echo "::error::Add the release notes for versionCode ${CHANGELOG_VERCODE} before pushing the release branch."
+            exit 1
+          fi
+          echo "Changelog found: $CHANGELOG_FILE"
+          cat "$CHANGELOG_FILE"
+
+      - name: Run Test Suite (web + app + wear)
+        run: |
+          ./gradlew :app:testStoreDebugUnitTest :app:testFdroidDebugUnitTest \
+            :wear:testDebugUnitTest :wear:assembleDebug
+          (cd web && npm ci && npm run typecheck && npm run test)
 
       - name: Build Android App (Release, one APK per ABI)
         env:

@@ -111,7 +111,37 @@ data class StreamingSettingsDto(
      * candidates only, i.e. LAN-only reachability.
      */
     val whipStunServer: String = StreamDefaults.WHIP_STUN_SERVER,
+    /**
+     * The SRT push output (publish MPEG-TS over SRT to an `srt://` listener),
+     * off by default. H.264 only, like the RTMP push — the encoded-AU tap is
+     * the same one.
+     */
+    val srtEnabled: Boolean = false,
+    /**
+     * The SRT push target: `srt://[user:pass@]host[:port][?streamid=…]`.
+     * Write-only, like [rtmpUrl]: the userinfo and stream id are
+     * credentials, so PUT carries it and responses are always blank.
+     */
+    val srtUrl: String = "",
     val adaptiveBitrateEnabled: Boolean = false,
+    /**
+     * The adaptive ENCODED-video bitrate: measured encoded-sink throughput
+     * (RTSP RTP / WS video / HLS writes) + thermal scale the encoder's live
+     * target within [StreamDefaults.VIDEO_BITRATE_MIN]..configured, through
+     * the pure EncodedBitratePolicy. Off by default like [adaptiveBitrateEnabled].
+     */
+    val adaptiveEncodedBitrateEnabled: Boolean = false,
+    /**
+     * The RTSP low-res sub-stream (rtsp://…/sub): a fixed 480p H.264 second
+     * encode for NVR detect roles, served only while the RTSP output runs.
+     */
+    val rtspSubStreamEnabled: Boolean = false,
+    /**
+     * The HLS DVR window in segments: 0 keeps the sliding live playlist;
+     * above that the playlist renders as EVENT with seekable history
+     * (≈2 s per segment, up to [StreamDefaults.HLS_DVR_SEGMENTS_MAX]).
+     */
+    val hlsDvrSegments: Int = StreamDefaults.HLS_DVR_SEGMENTS_DEFAULT,
     val overlayEnabled: Boolean = OverlaySettings.DEFAULT.enabled,
     val showTimestamp: Boolean = OverlaySettings.DEFAULT.showTimestamp,
     val timestampFormat: String = OverlaySettings.DEFAULT.timestampFormat,
@@ -166,6 +196,15 @@ data class StreamingSettingsDto(
      * so a document that omits the list never silently disarms the gate.
      */
     val soundClassificationAllowedClasses: List<String> = emptyList(),
+    /** YAMNet class triggers: a chosen class at/above the confidence floor fires an event of its own. */
+    val soundTriggerEnabled: Boolean = false,
+    /**
+     * The chosen sound-trigger class set (exact AudioSet names). An empty
+     * list folds back to the curated trigger default on save
+     * ([com.raulshma.lenscast.capture.model.SoundClassPolicy]), the same
+     * narrowing convention as the allow-list above.
+     */
+    val soundTriggerClasses: List<String> = emptyList(),
     val webhookEnabled: Boolean = false,
     val webhookUrl: String = "",
     /** Custom POST headers as a JSON `{"Name": "value"}` map string. */
@@ -223,6 +262,12 @@ data class StreamingSettingsDto(
     val mqttPassword: String = "",
     val mqttTls: Boolean = false,
     val mqttDiscoveryPrefix: String = StreamDefaults.MQTT_DISCOVERY_PREFIX_DEFAULT,
+    /**
+     * MQTT telemetry (client events + periodic sensor readings: battery,
+     * thermal, encoded bitrate, active clients) riding the alert publisher's
+     * connection. Alerts and stream states are unaffected by this toggle.
+     */
+    val mqttTelemetryEnabled: Boolean = false,
     /**
      * Web Push alerts to subscribed browsers (RFC 8291/8292): the master
      * gate on the phone's push dispatches. Subscriptions themselves are
@@ -339,6 +384,16 @@ data class StreamingStatusDto(
     val whipStatus: String = "idle",
     /** The readable reason while [whipStatus] is "error"; null otherwise. */
     val whipError: String? = null,
+    /** The SRT push output: enabled gate, live flag, and its lifecycle state. */
+    val srtEnabled: Boolean = false,
+    val srtActive: Boolean = false,
+    val srtStatus: String = "idle",
+    /** The readable reason while [srtStatus] is "error"; null otherwise. */
+    val srtError: String? = null,
+    /** The push's measured round-trip time in ms (from full ACKs); null while not connected. */
+    val srtRttMs: Int? = null,
+    /** The live WHEP (WebRTC viewer) session count; absent on pre-WHEP firmware. */
+    val whepClients: Int = 0,
 )
 
 @JsonClass(generateAdapter = true)
@@ -368,6 +423,12 @@ data class StatusResponseDto(
     val adaptiveBitrate: AdaptiveBitrateStatusDto? = null,
     val connectionQuality: ConnectionQualityStatusDto? = null,
     val watchdog: WatchdogStatusDto? = null,
+    /**
+     * The encoded pipeline's effective target bitrate in bps — the value the
+     * adaptive encoded-bitrate ladder last set (or the configured default).
+     * ONVIF profiles read the same number through the manager.
+     */
+    val encodedVideoBitrate: Int = 0,
 )
 
 /** A device control range, min inclusive / max inclusive. */
@@ -496,6 +557,8 @@ data class GalleryItemDto(
     val timestamp: Long,
     val fileSizeBytes: Long,
     val durationMs: Long,
+    /** The user-marked favorite flag (app gallery star); false when unset. */
+    val favorite: Boolean = false,
     /** Grid thumbnail: the downscaled photo route or the video frame route. */
     val thumbnailUrl: String,
     /** The full-size media route — the viewer's source for photos. */
@@ -542,6 +605,26 @@ data class StreamClientsResponseDto(
     val httpCount: Int,
     val rtspCount: Int,
     val maxHttp: Int = StreamDefaults.MAX_HTTP_CLIENTS,
+    /**
+     * The connected RTSP sessions — the RTSP half of the client-parity
+     * surface: id (the kick target for /api/stream/clients/{id}), remote
+     * address, connect time, transport, the SETUPed media (`video`, `audio`,
+     * or the sub-stream's `sub`), whether any PLAY landed, and delivered
+     * video AUs.
+     */
+    val rtspClients: List<RtspClientDto> = emptyList(),
+)
+
+/** One connected RTSP session, additive to the clients DTO. */
+@JsonClass(generateAdapter = true)
+data class RtspClientDto(
+    val id: String,
+    val remoteAddress: String,
+    val connectedAtMs: Long,
+    val transport: String,
+    val media: List<String> = emptyList(),
+    val playing: Boolean = false,
+    val framesSent: Long = 0,
 )
 
 // ── Detection Event DTOs ──
@@ -562,6 +645,14 @@ data class DetectionEventDto(
     val clipMediaId: Long? = null,
     /** File name of the motion clip, linked together with [clipMediaId]. */
     val clipFileName: String? = null,
+    /**
+     * The dashboard deep link for the event: `#/gallery/<clipMediaId>` once a
+     * clip is linked, else `#/events` — the value push notifications and the
+     * MQTT/webhook bodies carry (see
+     * [com.raulshma.lenscast.capture.model.DetectionEventDeepLink]). Null
+     * never serializes, so the field is absent on error payloads.
+     */
+    val url: String? = null,
 )
 
 @JsonClass(generateAdapter = true)
@@ -674,11 +765,13 @@ data class StorageInfoDto(
 
 /**
  * One NVR timeline session on GET /api/recordings/sessions: a video capture
- * from the history with an inferred end and a reconstructed trigger. The
+ * from the history with an inferred end and an attributed trigger. The
  * trigger wire names are `manual` | `motion` | `sound` | `continuous` |
- * `scheduled`; historical reconstruction only ever answers the first three —
- * a capture produced by the continuous loop or a scheduled start is not
- * recoverable and reads as `manual` unless a detection event overlaps.
+ * `scheduled` | `interval`. Creation-time provenance ([CaptureHistory.trigger])
+ * answers directly; legacy entries without a stamp reconstruct `manual` /
+ * `motion` / `sound` from overlapping detection events — a capture produced
+ * by the continuous loop or a scheduled start was indistinguishable from a
+ * manual one before the stamp existed.
  */
 @JsonClass(generateAdapter = true)
 data class RecordingSessionDto(

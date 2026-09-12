@@ -12,6 +12,7 @@
     <!-- ── Экран камеры ── -->
     <string name="camera_preview_hidden">Предпросмотр скрыт</string>
     <string name="camera_switch_camera_cd">Переключить камеру</string>
+    <string name="camera_flash_cd">Режим вспышки</string>
     <string name="camera_connect_cd">Подключение — QR + URL</string>
     <string name="camera_hide_preview_cd">Скрыть предпросмотр</string>
     <string name="camera_show_preview_cd">Показать предпросмотр</string>
@@ -72,6 +73,11 @@
     <string name="capture_start_interval">Запустить интервал</string>
     <string name="capture_assembling">Сборка…</string>
     <string name="capture_assemble_timelapse">Собрать таймлапс (последние 100 фото)</string>
+    <string name="capture_auto_timelapse">Автотаймлапс по завершении</string>
+    <string name="capture_timelapse_saved">Таймлапс сохранён: %1$s (%2$d кадров)</string>
+    <string name="capture_timelapse_need_photos">Для сборки таймлапса нужно не менее %1$d фото</string>
+    <string name="capture_timelapse_unreadable">Не удалось прочитать достаточно кадров (%1$s)</string>
+    <string name="capture_timelapse_failed">Не удалось создать таймлапс</string>
     <string name="capture_section_scheduled">Запись по расписанию</string>
     <string name="capture_include_audio">Записывать звук</string>
     <string name="capture_recording_quality">Качество записи</string>
@@ -143,6 +149,12 @@
     <string name="gallery_filter_all">Все (%1$d)</string>
     <string name="gallery_filter_photos">Фото (%1$d)</string>
     <string name="gallery_filter_videos">Видео (%1$d)</string>
+    <string name="gallery_filter_favorites">Избранное (%1$d)</string>
+    <string name="gallery_search_hint">Поиск по имени файла</string>
+    <string name="gallery_search_clear_cd">Очистить поиск</string>
+    <string name="gallery_favorite_cd">Добавить в избранное</string>
+    <string name="gallery_unfavorite_cd">Убрать из избранного</string>
+    <string name="gallery_undo">Отменить</string>
     <string name="gallery_empty_none_title">Медиафайлов пока нет</string>
     <string name="gallery_empty_none_body">Снятые фото и видео появятся здесь, когда вы начнёте съёмку.</string>
     <string name="gallery_empty_photos_title">В этой подборке нет фото</string>
@@ -158,6 +170,12 @@
         <item quantity="other">%1$d элементов • %2$s</item>
     </plurals>
     <string name="gallery_play_video_cd">Воспроизвести видео</string>
+    <plurals name="gallery_trash_snackbar">
+        <item quantity="one">Перемещено в корзину — %d элемент</item>
+        <item quantity="few">Перемещено в корзину — %d элемента</item>
+        <item quantity="many">Перемещено в корзину — %d элементов</item>
+        <item quantity="other">Перемещено в корзину — %d элементов</item>
+    </plurals>
     <string name="gallery_type_photo">Фото</string>
     <string name="gallery_type_video">Видео</string>
     <string name="gallery_selected_cd">Выбрано</string>
@@ -219,6 +237,9 @@
     <string name="settings_maximize_quality">Максимальное качество</string>
     <string name="settings_raw_jpeg">Съёмка RAW+JPEG</string>
     <string name="settings_raw_unsupported">Эта камера не поддерживает RAW+JPEG; снимки сохраняются в JPEG.</string>
+    <string name="settings_photo_aspect_ratio">Соотношение сторон фото</string>
+    <string name="settings_photo_aspect_16_9">16:9</string>
+    <string name="settings_photo_aspect_4_3">4:3</string>
     <string name="settings_gps_geotag">Геометки GPS (EXIF)</string>
     <string name="settings_section_night_vision">Ночное зрение / ИК</string>
     <string name="settings_mode">Режим</string>
@@ -280,6 +301,12 @@
     <string name="settings_enable_web_streaming">Включить веб-трансляцию</string>
     <string name="settings_streaming_port">Порт трансляции</string>
     <string name="settings_adaptive_bitrate">Адаптивный битрейт</string>
+    <string name="settings_adaptive_encoded_bitrate">Адаптивный битрейт кодированного потока</string>
+    <string name="settings_adaptive_encoded_bitrate_description">Снижает битрейт кодировщика в медленной сети (или при перегреве) и восстанавливает его при улучшении канала — измеряется по отправке RTSP, WebSocket и HLS</string>
+    <string name="settings_hls_dvr">Окно DVR для HLS</string>
+    <string name="settings_hls_dvr_description">Хранимые сегменты HLS (по ~2 с); 0 — только живая трансляция, большие значения позволяют перематывать недавнюю историю</string>
+    <string name="settings_rtsp_sub_stream">Субпоток RTSP (480p)</string>
+    <string name="settings_rtsp_sub_stream_description">Второй низкоразрешённый H.264-поток на rtsp://устройство:порт/sub для роли detect в NVR (например, Frigate) — работает только при активном выводе RTSP</string>
     <string name="settings_eco_idle">Эко-режим ожидания (батарея)</string>
     <string name="settings_eco_idle_description">При работе от батареи без зрителей снижает частоту кадров потока до низкой и приостанавливает звук; нормальный режим восстанавливается при первом зрителе, подключении зарядки или тепловом событии</string>
     <string name="settings_mdns">Обнаружение в сети (mDNS)</string>
@@ -312,6 +339,19 @@
     <string name="settings_rtmp_status_connecting">Подключение…</string>
     <string name="settings_rtmp_status_connected">Подключено</string>
     <string name="settings_rtmp_h264_note">Видео должно быть в H.264 (видеокодек RTSP); ключ потока остаётся в URL на этом устройстве</string>
+    <string name="settings_section_srt">SRT-пуш</string>
+    <string name="settings_enable_srt">Включить SRT-пуш</string>
+    <string name="settings_srt_url">URL пуша</string>
+    <string name="settings_srt_url_hint" translatable="false">srt://хост:порт?streamid=ключ</string>
+    <string name="settings_srt_url_invalid">Непригодный URL пуша - ожидается srt://хост:порт?streamid=… (порт по умолчанию 9710)</string>
+    <string name="settings_srt_status">Статус: %1$s</string>
+    <string name="settings_srt_status_error">ошибка - %1$s</string>
+    <string name="settings_srt_status_idle">Неактивен</string>
+    <string name="settings_srt_status_connecting">Подключение…</string>
+    <string name="settings_srt_status_connected">Подключено</string>
+    <string name="settings_srt_rtt">Время туда-обратно: %1$s мс</string>
+    <string name="settings_srt_note">Отправляет MPEG-TS по UDP на SRT-приемник; видео должно быть в H.264 (видеокодек RTSP); идентификатор потока остаётся в URL на этом устройстве</string>
+
     <string name="settings_section_whip">WHIP-публикация (WebRTC)</string>
     <string name="settings_enable_whip">Включить WHIP-публикацию</string>
     <string name="settings_whip_url">Конечная точка WHIP</string>
@@ -374,6 +414,9 @@
     <string name="detection_sound_classification_description">Работает поверх детекции звука — модель YAMNet классифицирует аудио вокруг каждого события, а метки классов (дымовой извещатель, лай собаки, стекло, сирена…) передаются с оповещением, вебхуком, MQTT и журналом событий. Никогда не подавляет само событие и недоступна до Android 7.0 (API 24)</string>
     <string name="detection_min_confidence">Минимальная достоверность (%)</string>
     <string name="detection_sound_classes">Классы, помечающие события</string>
+    <string name="detection_sound_trigger">Срабатывать по классам звука</string>
+    <string name="detection_sound_trigger_description">Выбранный класс с достаточной уверенностью сам вызывает событие обнаружения — звонкое стекло, сирена, лай — без предварительного превышения порога громкости. Только добавляет события; оповещения порога не меняются</string>
+    <string name="detection_sound_trigger_classes">Классы, вызывающие события</string>
     <!-- Отображаемые имена чипов классов YAMNet, сопоставленные с
          курируемыми wire-метками из SoundClassPolicy.SECURITY_CLASSES.
          Wire-метки (точное написание AudioSet) остаются ключами

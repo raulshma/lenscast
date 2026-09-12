@@ -8,6 +8,7 @@ import com.raulshma.lenscast.core.StreamDefaults
 import com.raulshma.lenscast.streaming.StreamingManager
 import com.raulshma.lenscast.streaming.StreamingSession
 import com.raulshma.lenscast.streaming.StreamingTransports
+import com.raulshma.lenscast.streaming.model.RtspClientDto
 import com.raulshma.lenscast.streaming.model.StreamActionResponse
 import com.raulshma.lenscast.streaming.model.StreamClientsResponseDto
 
@@ -102,6 +103,22 @@ class StreamWebHandler(
 
     suspend fun stopWhip(): String = stopOutput { streamingManager.stopWhipStreaming() }
 
+    /**
+     * Starts the SRT push output through the shared push ladder
+     * ([startPushOutput]) — false from [StreamingManager.startSrtStreaming]
+     * means the synchronous validation ladder refused (disabled, an unusable
+     * URL, or the H.265 codec); the readable reason is already on the SRT
+     * status, and the response carries the generic failure.
+     */
+    suspend fun startSrt(): String = startPushOutput(
+        name = "SRT",
+        enabled = { streamingManager.isSrtEnabled.value },
+        start = { streamingManager.startSrtStreaming() },
+        stop = { streamingManager.stopSrtStreaming() },
+    )
+
+    suspend fun stopSrt(): String = stopOutput { streamingManager.stopSrtStreaming() }
+
     suspend fun stopAll(): String {
         streamingManager.pauseStreaming()
         streamingSession.end()
@@ -190,12 +207,28 @@ class StreamWebHandler(
                 httpCount = info.httpClients,
                 rtspCount = info.rtspClients,
                 maxHttp = StreamDefaults.MAX_HTTP_CLIENTS,
+                rtspClients = streamingManager.getRtspClients().map { client ->
+                    RtspClientDto(
+                        id = client.id,
+                        remoteAddress = client.remoteAddress,
+                        connectedAtMs = client.connectedAtMs,
+                        transport = client.transport,
+                        media = client.media,
+                        playing = client.playing,
+                        framesSent = client.framesSent,
+                    )
+                },
             )
         )
     }
 
+    /**
+     * True kick across both transports: the MJPEG pump first (its ids are
+     * `mjpeg_*`), then the RTSP session registry — one route, one
+     * session/token policy (the route's own), either backend.
+     */
     fun kickClient(id: String): String {
-        val ok = streamingManager.kickHttpClient(id)
+        val ok = streamingManager.kickHttpClient(id) || streamingManager.kickRtspClient(id)
         if (!ok) throw IllegalArgumentException("Client not found: $id")
         return actionAdapter.toJson(StreamActionResponse(success = true, isActive = streamingManager.isLiveStreaming()))
     }
