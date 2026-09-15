@@ -77,15 +77,15 @@ internal object WebRtcPlumbing {
     /** Runs [PeerConnection.createOffer], returning the description or failing with its error text. */
     fun awaitCreateOffer(pc: PeerConnection, label: String): SessionDescription =
         // expectDescription = true makes the null branch unreachable — the helper throws first.
-        awaitSdpStep(label, "step", SdpStep(), expectDescription = true) { pc.createOffer(it, MediaConstraints()) }!!
+        awaitSdpStep(label, SdpStep(), expectDescription = true) { pc.createOffer(it, MediaConstraints()) }!!
 
     /** Runs [PeerConnection.createAnswer], returning the description or failing with its error text. */
     fun awaitCreateAnswer(pc: PeerConnection, label: String): SessionDescription =
-        awaitSdpStep(label, "step", SdpStep(), expectDescription = true) { pc.createAnswer(it, MediaConstraints()) }!!
+        awaitSdpStep(label, SdpStep(), expectDescription = true) { pc.createAnswer(it, MediaConstraints()) }!!
 
     /** Runs a set(Local|Remote)Description, failing with its error text. */
     fun awaitSetDescription(pc: PeerConnection, local: Boolean, description: SessionDescription, label: String) {
-        awaitSdpStep(label, "set", SdpStep(), expectDescription = false) {
+        awaitSdpStep(label, SdpStep(), expectDescription = false) {
             if (local) pc.setLocalDescription(it, description) else pc.setRemoteDescription(it, description)
         }
     }
@@ -95,15 +95,19 @@ internal object WebRtcPlumbing {
      * writes [SdpStep] fields and opens the latch, and the caller reads them
      * only after the bounded wait — so a create and a set cannot drift into
      * different visibility disciplines. A create must produce a description
-     * ([expectDescription]); a set legitimately succeeds without one.
+     * ([expectDescription]); a set legitimately succeeds without one. A
+     * failure callback carrying null text still throws ("unknown error") —
+     * libwebrtc calling onFailure at all is the failure signal, and the old
+     * set path's silent success on a null text was the "failed without a
+     * reason" bug wearing a different hat.
      */
     private fun awaitSdpStep(
         label: String,
-        action: String,
         step: SdpStep,
         expectDescription: Boolean,
         invoke: (SdpObserver) -> Unit,
     ): SessionDescription? {
+        val action = if (expectDescription) "step" else "set"
         val latch = CountDownLatch(1)
         val observer = object : SdpObserver {
             override fun onCreateSuccess(sdp: SessionDescription) {

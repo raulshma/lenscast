@@ -147,7 +147,9 @@ export default function StreamPreview(props: Props) {
   // ungated effect would re-run start() on each tick, and start()'s
   // leading stop() would tear down the handshake before it can ever play.
   // The memo absorbs the per-tick re-evaluation and only propagates flips.
-  const whepWanted = createMemo(() => playerMode() === 'whep' && props.previewVisible() && webActive())
+  const modeWanted = (mode: PlayerMode) =>
+    createMemo(() => playerMode() === mode && props.previewVisible() && webActive())
+  const whepWanted = modeWanted('whep')
   createEffect(() => {
     const el = whepVideo()
     if (whepWanted() && el) {
@@ -170,7 +172,7 @@ export default function StreamPreview(props: Props) {
   // The same memo gate: an ungated effect opened a fresh WebSocket per
   // status tick (the old one kept feeding the canvas, so it only leaked
   // sockets instead of killing the rung — still wrong).
-  const h264Wanted = createMemo(() => playerMode() === 'h264' && props.previewVisible() && webActive())
+  const h264Wanted = modeWanted('h264')
   createEffect(() => {
     const target = h264Canvas()
     if (h264Wanted() && target) {
