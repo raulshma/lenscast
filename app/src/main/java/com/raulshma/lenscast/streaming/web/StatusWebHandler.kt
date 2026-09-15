@@ -116,6 +116,7 @@ class StatusWebHandler(
             encodedVideo = StatusSnapshotBuilder.EncodedVideoInputs(
                 bitrateBps = streamingManager.currentVideoBitrate(),
             ),
+            sirenActive = streamingManager.sirenController().isRunning(),
         )
         return responseAdapter.toJson(response)
     }

@@ -726,6 +726,7 @@ object OpenApiSpec {
             "camera" to stringSchema(),
             "battery" to ref("BatteryStatusDto"),
             "torchOn" to boolSchema(),
+            "sirenActive" to boolSchema(),
             "zoomRatio" to mapOf("type" to "number"),
             "lensId" to stringSchema(),
             "lensLabel" to stringSchema(),

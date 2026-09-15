@@ -69,6 +69,7 @@ fun DetectionSettingsSection(viewModel: SettingsViewModel, onOpenEventLog: (() -
     val quietHoursEnd by viewModel.alertQuietHoursEndMinute.collectAsState()
     val tamperEnabled by viewModel.tamperDetectionEnabled.collectAsState()
     val pushEnabled by viewModel.pushEnabled.collectAsState()
+    val pushVapidSubject by viewModel.pushVapidSubject.collectAsState()
 
     SettingsSection(title = stringResource(R.string.detection_section_title)) {
         // Persisted toggles: the screen writes the store, the Settings
@@ -299,11 +300,21 @@ fun DetectionSettingsSection(viewModel: SettingsViewModel, onOpenEventLog: (() -
             // Web Push pushes to dashboards subscribed through the web UI's
             // Web Push card — the browser's service worker shows the
             // notification even with the tab closed. Subscriptions live
-            // there; the phone only carries the master gate and the identity.
+            // there; the phone only carries the master gate, the identity,
+            // and the VAPID contact (RFC 8292 sub — device-local by design,
+            // it never rides the Web API).
             Text(
                 text = stringResource(R.string.detection_push_description),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+            OutlinedTextField(
+                value = pushVapidSubject,
+                onValueChange = { viewModel.updatePushVapidSubject(it) },
+                label = { Text(stringResource(R.string.detection_push_vapid_subject)) },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
             )
         }
         SwitchSetting(

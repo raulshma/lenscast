@@ -130,13 +130,13 @@ describe('request building', () => {
     expect(mediaUrl(LEGACY_ENTRY.baseUrl, '/snapshot', { ...LEGACY_ENTRY, auth: BASIC_AUTH })).toBe('http://192.168.1.55:8080/snapshot')
   })
 
-  it('captureRequest targets POST /api/camera/capture with the credentials on', () => {
+  it('captureRequest targets POST /api/capture with the credentials on', () => {
     const cam: SavedCamera = { ...LEGACY_ENTRY, auth: TOKEN_AUTH }
     expect(captureRequest(cam)).toEqual({
-      url: 'http://192.168.1.55:8080/api/camera/capture?token=secret-token',
+      url: 'http://192.168.1.55:8080/api/capture?token=secret-token',
       headers: { 'X-Api-Token': 'secret-token' },
     })
-    expect(captureRequest(LEGACY_ENTRY).url).toBe('http://192.168.1.55:8080/api/camera/capture')
+    expect(captureRequest(LEGACY_ENTRY).url).toBe('http://192.168.1.55:8080/api/capture')
     expect(captureRequest(LEGACY_ENTRY).headers).toEqual({})
   })
 })

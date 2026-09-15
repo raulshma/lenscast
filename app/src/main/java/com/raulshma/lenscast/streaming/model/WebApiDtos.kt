@@ -411,6 +411,8 @@ data class StatusResponseDto(
     val battery: BatteryStatusDto,
     /** Live torch state, so the dashboard's toggles mirror the device instead of guessing. */
     val torchOn: Boolean = false,
+    /** Live siren state, the siren toggle's device truth (auto-deterrence can start it). */
+    val sirenActive: Boolean = false,
     /** The persisted zoom ratio the camera is currently applying. */
     val zoomRatio: Double = 1.0,
     /** The selected lens's camera id and label; null before the lens enumeration lands. */

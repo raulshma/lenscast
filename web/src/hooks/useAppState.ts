@@ -88,7 +88,10 @@ export function useAppState() {
   // ── Settings Tabs ──
   const [activeTab, setActiveTab] = createSignal<'camera' | 'app'>('camera')
 
-  let saveTimer: ReturnType<typeof setTimeout> | null = null
+  // Per-section debounce slots: the camera and app tabs save disjoint
+  // sections, so one shared timer would let the last-edited tab silently
+  // replace the other tab's pending PUT (and the 30 s poll would revert it).
+  const saveTimers: Partial<Record<'camera' | 'streaming', ReturnType<typeof setTimeout> | null>> = {}
 
   function isAuthError(e: any): boolean {
     if (e?.status === 401) return true
@@ -100,9 +103,10 @@ export function useAppState() {
     return typeof document !== 'undefined' && document.hidden
   }
 
-  function debounceSave(fn: () => void, ms = 400) {
-    if (saveTimer) clearTimeout(saveTimer)
-    saveTimer = setTimeout(fn, ms)
+  function debounceSave(section: 'camera' | 'streaming', fn: () => void, ms = 400) {
+    const pending = saveTimers[section]
+    if (pending) clearTimeout(pending)
+    saveTimers[section] = setTimeout(fn, ms)
   }
 
   // ── Action pipeline ──
@@ -281,7 +285,7 @@ export function useAppState() {
     if (!current) return
     const newCam = { ...current.camera, ...patch }
     setSettings({ ...current, camera: newCam })
-    debounceSave(() => saveSettings({ camera: newCam }))
+    debounceSave('camera', () => saveSettings({ camera: newCam }))
   }
 
   function updateStreaming(patch: Partial<AllSettings['streaming']>) {
@@ -299,7 +303,7 @@ export function useAppState() {
 
   function updateStreamingDebounced(patch: Partial<AllSettings['streaming']>) {
     const nextStreaming = updateStreaming(patch)
-    if (nextStreaming) debounceSave(() => saveSettings({ streaming: nextStreaming }))
+    if (nextStreaming) debounceSave('streaming', () => saveSettings({ streaming: nextStreaming }))
   }
 
   // ── Actions ──

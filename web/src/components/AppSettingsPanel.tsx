@@ -114,6 +114,23 @@ export default function AppSettingsPanel(props: Props) {
             <span class="status-banner-dot" aria-hidden="true" />
             <span>{t('webstream.adaptiveDesc')}</span>
           </div>
+
+          <div class="field-row field-row-toggle" style={{ 'margin-top': '10px' }}>
+            <span class="field-label">{t('webstream.adaptiveEncoded')}</span>
+            <label class="toggle-switch" for="adaptive-encoded-toggle-app">
+              <input
+                id="adaptive-encoded-toggle-app"
+                type="checkbox"
+                checked={s()?.streaming?.adaptiveEncodedBitrateEnabled ?? API_DEFAULTS.adaptiveEncodedBitrateEnabled}
+                onChange={() => props.updateStreamingAndSave({ adaptiveEncodedBitrateEnabled: !(s()?.streaming?.adaptiveEncodedBitrateEnabled ?? API_DEFAULTS.adaptiveEncodedBitrateEnabled) })}
+              />
+              <span class="toggle-slider" />
+            </label>
+          </div>
+          <div class="status-banner status-banner-info stream-mode-hint" role="note" aria-live="polite">
+            <span class="status-banner-dot" aria-hidden="true" />
+            <span>{t('webstream.adaptiveEncodedDesc')}</span>
+          </div>
         </div>
 
         <div class="field-group">
@@ -267,6 +284,25 @@ export default function AppSettingsPanel(props: Props) {
             </label>
           </div>
         </div>
+
+        <div class="field-group">
+          <div class="field-row field-row-toggle">
+            <span class="field-label">{t('webstream.encryptCaptures')}</span>
+            <label class="toggle-switch" for="media-encryption-toggle-app">
+              <input
+                id="media-encryption-toggle-app"
+                type="checkbox"
+                checked={s()?.streaming?.mediaEncryptionEnabled ?? API_DEFAULTS.mediaEncryptionEnabled}
+                onChange={() => props.updateStreamingAndSave({ mediaEncryptionEnabled: !(s()?.streaming?.mediaEncryptionEnabled ?? API_DEFAULTS.mediaEncryptionEnabled) })}
+              />
+              <span class="toggle-slider" />
+            </label>
+          </div>
+          <div class="status-banner status-banner-info stream-mode-hint" role="note" aria-live="polite">
+            <span class="status-banner-dot" aria-hidden="true" />
+            <span>{t('webstream.encryptCapturesDesc')}</span>
+          </div>
+        </div>
       </SettingsCard>
 
       {/* HTTPS */}
@@ -326,6 +362,25 @@ export default function AppSettingsPanel(props: Props) {
         </div>
 
         <Show when={s()?.streaming?.rtspEnabled}>
+          <div class="field-group">
+            <div class="field-row field-row-toggle">
+              <span class="field-label">{t('rtsp.subStream')}</span>
+              <label class="toggle-switch" for="rtsp-substream-toggle-app">
+                <input
+                  id="rtsp-substream-toggle-app"
+                  type="checkbox"
+                  checked={s()?.streaming?.rtspSubStreamEnabled ?? API_DEFAULTS.rtspSubStreamEnabled}
+                  onChange={() => props.updateStreamingAndSave({ rtspSubStreamEnabled: !(s()?.streaming?.rtspSubStreamEnabled ?? API_DEFAULTS.rtspSubStreamEnabled) })}
+                />
+                <span class="toggle-slider" />
+              </label>
+            </div>
+            <div class="status-banner status-banner-info stream-mode-hint" role="note" aria-live="polite">
+              <span class="status-banner-dot" aria-hidden="true" />
+              <span>{t('rtsp.subStreamDesc')}</span>
+            </div>
+          </div>
+
           <div class="field-group">
             <div class="field-row">
               <span class="field-label">{t('rtsp.port')}</span>
@@ -427,6 +482,7 @@ export default function AppSettingsPanel(props: Props) {
 
       <SecurityCard
         settings={props.settings}
+        status={props.status}
         updateStreamingAndSave={props.updateStreamingAndSave}
         updateStreamingDebounced={props.updateStreamingDebounced}
       />

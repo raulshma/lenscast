@@ -200,6 +200,17 @@ export default function StreamPreview(props: Props) {
   const [torchOn, setTorchOn] = createSignal(false)
   const [talking, setTalking] = createSignal(false)
 
+  // Transient talkback status line — every silent failure mode this feature
+  // used to have (no mic API, denied permission, dead WS link) surfaces here.
+  const [talkMsg, setTalkMsg] = createSignal('')
+  let talkMsgResetTimer: ReturnType<typeof setTimeout> | null = null
+  function flashTalkMsg(msg: string) {
+    setTalkMsg(msg)
+    if (talkMsgResetTimer) clearTimeout(talkMsgResetTimer)
+    talkMsgResetTimer = setTimeout(() => setTalkMsg((current) => (current === msg ? '' : current)), 4000)
+  }
+  onCleanup(() => { if (talkMsgResetTimer) clearTimeout(talkMsgResetTimer) })
+
   // ── URL copy: the bars exist to hand the stream link to another device,
   // so a one-tap clipboard affordance with a brief "copied" state. ──
   const [copiedUrl, setCopiedUrl] = createSignal<'' | 'web' | 'rtsp'>('')
@@ -321,40 +332,102 @@ export default function StreamPreview(props: Props) {
   })
 
   // ── Continuous push-to-talk: mic → PCM16 chunks → WS /ws/talkback. ──
-  // getUserMedia is secure-context-only, so on a plain-HTTP origin this
-  // cannot run; the legacy one-shot uplink below still covers the case the
-  // WS sidecar is down but the mic is up.
+  // getUserMedia is secure-context-only, so on a plain-HTTP LAN origin the
+  // mic API does not exist at all — that failure (and mic-permission denial)
+  // throws a typed error the button handler turns into a visible status line
+  // instead of the old silent no-op. With the mic up but the WS sidecar
+  // unreachable, chunks detour to the HTTP one-shot uplink in serialized
+  // ~600 ms batches, so talkback keeps working through a dead sidecar.
+  const PTT_FALLBACK_BATCH_MS = 600
+
+  class TalkUnavailableError extends Error {
+    constructor(public readonly reason: 'insecure' | 'mic') { super(reason) }
+  }
+
   let pttCtx: AudioContext | null = null
   let pttSocket: WebSocket | null = null
   let pttStream: MediaStream | null = null
+  let pttFallbackQueue: ArrayBuffer[] = []
+  let pttFallbackTimer: ReturnType<typeof setTimeout> | null = null
+  let pttFallbackChain: Promise<void> = Promise.resolve()
+  // Hold generation: released mid-prompt (permission dialogs can outlive the
+  // hold), a stale startPtt must not resurrect the graph or touch the next
+  // hold's state — it bails at every await boundary.
+  let pttHold = 0
 
   async function startPtt() {
+    const hold = ++pttHold
+    if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) {
+      throw new TalkUnavailableError('insecure')
+    }
+    pttSocket = new WebSocket(`${wsBaseUrl()}/ws/talkback`)
+    pttSocket.binaryType = 'arraybuffer'
+    pttSocket.onclose = () => {
+      // Sidecar refused or dropped the link mid-hold: chunks now detour to
+      // the HTTP uplink via sendPcm's readyState check — say so once.
+      if (talking()) flashTalkMsg(t('preview.talkWsLost'))
+    }
     try {
-      pttSocket = new WebSocket(`${wsBaseUrl()}/ws/talkback`)
-      pttSocket.binaryType = 'arraybuffer'
-      pttStream = await navigator.mediaDevices.getUserMedia({ audio: { sampleRate: 16000, channelCount: 1 } })
-      pttCtx = new AudioContext({ sampleRate: 16000 })
-      const source = pttCtx.createMediaStreamSource(pttStream)
-      await tapPcm16(pttCtx, source, (chunk) => {
-        if (!pttSocket || pttSocket.readyState !== WebSocket.OPEN) return
-        pttSocket.send(floatChunkToPcm16(chunk))
-      })
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: { sampleRate: 16000, channelCount: 1 } })
+      if (hold !== pttHold) {
+        stream.getTracks().forEach((t) => t.stop())
+        return
+      }
+      pttStream = stream
     } catch (err) {
-      console.warn('PTT unavailable (mic or WS); falling back to one-shot capture', err)
-      // Legacy one-shot: 1.5s POST upload — no mic streaming required beyond
-      // the same getUserMedia this block already tried, so this only helps
-      // when the WS sidecar is down but the mic is up.
-      await stopPttCleanup()
-      const captured = await captureOneShotPcm()
-      if (captured) await pushTalkback(captured)
-      setTalking(false)
+      if (hold !== pttHold) return
+      throw new TalkUnavailableError('mic')
+    }
+    if (hold !== pttHold) return
+    pttCtx = new AudioContext({ sampleRate: 16000 })
+    const source = pttCtx.createMediaStreamSource(pttStream)
+    try {
+      await tapPcm16(pttCtx, source, sendPcm)
+    } catch (err) {
+      if (hold !== pttHold) return
+      throw err
     }
   }
 
+  function sendPcm(chunk: Float32Array) {
+    if (pttSocket && pttSocket.readyState === WebSocket.OPEN) {
+      pttSocket.send(floatChunkToPcm16(chunk))
+      return
+    }
+    // WS dead (sidecar down, handshake refused): batch onto the one-shot
+    // HTTP uplink. POSTs serialize — the device speaker track writes block,
+    // and overlapping uploads would interleave in the server's thread pool.
+    pttFallbackQueue.push(floatChunkToPcm16(chunk).slice(0))
+    if (!pttFallbackTimer) {
+      pttFallbackTimer = setTimeout(flushPttFallback, PTT_FALLBACK_BATCH_MS)
+    }
+  }
+
+  function flushPttFallback() {
+    pttFallbackTimer = null
+    if (pttFallbackQueue.length === 0) return
+    const total = pttFallbackQueue.reduce((n, c) => n + c.byteLength, 0)
+    const batch = new Uint8Array(total)
+    let off = 0
+    for (const c of pttFallbackQueue) {
+      batch.set(new Uint8Array(c), off)
+      off += c.byteLength
+    }
+    pttFallbackQueue = []
+    const post = pushTalkback(batch.buffer).catch(() => { })
+    pttFallbackChain = pttFallbackChain.then(() => post)
+  }
+
   async function stopPtt() {
+    pttHold++
     try {
       pttSocket?.send('stop')
     } catch { }
+    if (pttFallbackTimer) {
+      clearTimeout(pttFallbackTimer)
+      pttFallbackTimer = null
+    }
+    flushPttFallback()
     await stopPttCleanup()
     setTalking(false)
   }
@@ -364,37 +437,20 @@ export default function StreamPreview(props: Props) {
     pttStream = null
     if (pttCtx && pttCtx.state !== 'closed') await pttCtx.close().catch(() => {})
     pttCtx = null
-    try { pttSocket?.close() } catch { }
+    if (pttSocket) {
+      pttSocket.onclose = null
+      try { pttSocket.close() } catch { }
+    }
     pttSocket = null
+    // Let the last fallback POST land before the next hold reuses the chain.
+    await pttFallbackChain.catch(() => { })
+    pttFallbackChain = Promise.resolve()
   }
 
   function floatChunkToPcm16(input: Float32Array): ArrayBuffer {
     const pcm = new Int16Array(input.length)
     for (let i = 0; i < input.length; i++) pcm[i] = Math.max(-32768, Math.min(32767, input[i] * 32768))
     return pcm.buffer
-  }
-
-  async function captureOneShotPcm(): Promise<ArrayBuffer | null> {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: { sampleRate: 16000, channelCount: 1 } })
-      const ctx = new AudioContext({ sampleRate: 16000 })
-      const src = ctx.createMediaStreamSource(stream)
-      const chunks: ArrayBuffer[] = []
-      await tapPcm16(ctx, src, (chunk) => chunks.push(floatChunkToPcm16(chunk).slice(0)))
-      await new Promise((r) => setTimeout(r, 1500))
-      stream.getTracks().forEach((t) => t.stop())
-      await ctx.close()
-      const total = chunks.reduce((n, c) => n + c.byteLength, 0)
-      const merged = new Uint8Array(total)
-      let off = 0
-      for (const c of chunks) {
-        merged.set(new Uint8Array(c), off)
-        off += c.byteLength
-      }
-      return merged.byteLength > 0 ? merged.buffer : null
-    } catch {
-      return null
-    }
   }
 
   // ── Snapshot share: Web Share with a File payload when the browser can,
@@ -734,20 +790,28 @@ export default function StreamPreview(props: Props) {
           </button>
 
           <button
+            id="talk-btn"
             class="action-btn action-btn-ghost"
             classList={{ 'action-btn-talking': talking() }}
             aria-pressed={talking()}
-            onPointerDown={async () => {
+            onPointerDown={(e) => {
+              // Capture the pointer so a slight finger drift mid-hold can't
+              // cancel the talk (release anywhere still fires pointerup).
+              try { e.currentTarget.setPointerCapture(e.pointerId) } catch { }
               setTalking(true)
-              try {
-                await startPtt()
-              } catch (err) {
+              startPtt().catch((err) => {
                 console.error('Talkback failed:', err)
-                await stopPtt()
-              }
+                void stopPtt()
+                flashTalkMsg(
+                  err instanceof TalkUnavailableError
+                    ? err.reason === 'insecure' ? t('preview.talkNeedsHttps') : t('preview.talkMicDenied')
+                    : t('preview.talkFailed'),
+                )
+              })
             }}
             onPointerUp={() => { void stopPtt() }}
-            onPointerLeave={() => { if (talking()) void stopPtt() }}
+            onPointerCancel={() => { void stopPtt() }}
+            onContextMenu={(e) => e.preventDefault()}
             title={t('preview.talkTitle')}
           >
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -764,6 +828,9 @@ export default function StreamPreview(props: Props) {
           </Show>
           <Show when={shareMsg()}>
             <span class="capture-msg">{shareMsg()}</span>
+          </Show>
+          <Show when={talkMsg()}>
+            <span class="capture-msg">{talkMsg()}</span>
           </Show>
         </div>
       </div>

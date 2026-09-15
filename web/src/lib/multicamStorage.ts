@@ -97,7 +97,7 @@ export function mediaUrl(baseUrl: string, path: string, camera?: SavedCamera): s
 /** The fully-qualified capture POST for one remote camera, credentials on. */
 export function captureRequest(camera: SavedCamera): { url: string; headers: Record<string, string> } {
   return {
-    url: mediaUrl(camera.baseUrl, '/api/camera/capture', camera),
+    url: mediaUrl(camera.baseUrl, '/api/capture', camera),
     headers: authHeaders(camera.auth),
   }
 }

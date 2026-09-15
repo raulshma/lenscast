@@ -150,16 +150,20 @@ export default function SettingsPanel(props: Props) {
         {props.children}
       </Show>
 
-      {/* Reset */}
-      <div class="settings-footer">
-        <button id="reset-defaults-btn" class="card-btn card-btn-ghost" onClick={props.handleResetDefaults}>
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M1 4v6h6" />
-            <path d="M3.51 15a9 9 0 102.13-9.36L1 10" />
-          </svg>
-          {t('settings.resetDefaults')}
-        </button>
-      </div>
+      {/* Reset — camera-scoped on purpose: this is the camera tab's reset
+          (the only section with a client-side defaults model), so it lives
+          inside the camera tab instead of under both. */}
+      <Show when={props.activeTab() === 'camera'}>
+        <div class="settings-footer">
+          <button id="reset-defaults-btn" class="card-btn card-btn-ghost" onClick={props.handleResetDefaults}>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M1 4v6h6" />
+              <path d="M3.51 15a9 9 0 102.13-9.36L1 10" />
+            </svg>
+            {t('settings.resetDefaults')}
+          </button>
+        </div>
+      </Show>
     </section>
   )
 }

@@ -1602,6 +1602,8 @@ class SettingsDataStore(
 
     suspend fun savePushEnabled(enabled: Boolean) = pushEnabledPref.save(enabled)
 
+    suspend fun savePushVapidSubject(subject: String) = pushVapidSubjectPref.save(subject)
+
     suspend fun saveCaptureRetentionDays(days: Int) = captureRetentionDaysPref.save(days)
 
     suspend fun saveEventRetentionDays(days: Int) = eventRetentionDaysPref.save(days)

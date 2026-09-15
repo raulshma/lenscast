@@ -54,6 +54,18 @@ export default function MqttCard(props: Props) {
 
       <Show when={mqttOn()}>
         <div class="field-group">
+          <ToggleRow
+            id="mqtt-telemetry-toggle"
+            label={t('mqtt.telemetry')}
+            checked={stream()?.mqttTelemetryEnabled ?? API_DEFAULTS.mqttTelemetryEnabled}
+            onToggle={() => props.updateStreamingAndSave({ mqttTelemetryEnabled: !(stream()?.mqttTelemetryEnabled ?? API_DEFAULTS.mqttTelemetryEnabled) })}
+          />
+          <div class="status-banner status-banner-info stream-mode-hint" role="note" aria-live="polite">
+            <span class="status-banner-dot" aria-hidden="true" />
+            <span>{t('mqtt.telemetryDesc')}</span>
+          </div>
+        </div>
+        <div class="field-group">
           <div class="field-row">
             <span class="field-label">{t('mqtt.host')}</span>
           </div>

@@ -142,6 +142,7 @@ object StatusSnapshotBuilder {
         adaptive: AdaptiveInputs,
         network: NetworkInputs,
         encodedVideo: EncodedVideoInputs = EncodedVideoInputs(bitrateBps = 0),
+        sirenActive: Boolean = false,
     ): StatusResponseDto {
         val adaptiveBitrateDto = if (adaptive.enabled) {
             AdaptiveBitrateStatusDto(
@@ -224,6 +225,7 @@ object StatusSnapshotBuilder {
                 isPowerSaveMode = battery.isPowerSaveMode,
             ),
             torchOn = camera?.torchOn ?: false,
+            sirenActive = sirenActive,
             zoomRatio = camera?.zoomRatio ?: 1.0,
             lensId = camera?.lensId,
             lensLabel = camera?.lensLabel,

@@ -780,6 +780,15 @@ html, body {
   animation: recording-pulse 1.5s ease-in-out infinite;
 }
 
+/* Hold-to-talk: a long press must never be stolen by scrolling, text
+   selection, or the mobile context menu. */
+#talk-btn {
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+
 /* ═══════════════════════════════════════════════
    SETTINGS PANEL
    ═══════════════════════════════════════════════ */

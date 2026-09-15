@@ -29,6 +29,7 @@
     "isPowerSaveMode": false
   },
   "torchOn": false,
+  "sirenActive": false,
   "zoomRatio": 1.75,
   "lensId": "0",
   "lensLabel": "Wide",

@@ -1,5 +1,5 @@
-import { createSignal, For, Show } from 'solid-js'
-import type { AllSettings, MotionZone } from '../types'
+import { createSignal, createEffect, For, Show } from 'solid-js'
+import type { AllSettings, DeviceStatus, MotionZone } from '../types'
 import { API_DEFAULTS } from '../api/defaults'
 import { ARM_DAY_LABELS, isDayArmed, toggleArmDayMask } from '../armDays'
 import SettingsCard from './SettingsCard'
@@ -9,6 +9,7 @@ import { t } from '../lib/i18n'
 
 interface Props {
   settings: () => AllSettings | null
+  status?: () => DeviceStatus | null
   updateStreamingAndSave: (patch: Partial<AllSettings['streaming']>) => void
   updateStreamingDebounced: (patch: Partial<AllSettings['streaming']>) => void
 }
@@ -56,6 +57,20 @@ export default function SecurityCard(props: Props) {
   const [sirenBusy, setSirenBusy] = createSignal(false)
   const [torchOn, setTorchOn] = createSignal(false)
   const [torchBusy, setTorchBusy] = createSignal(false)
+
+  // Deterrence truth lives on the device: auto-deterrence (or another tab,
+  // or the phone itself) can flip siren/torch without this card's involvement,
+  // so the status push re-syncs the mirrors. The effect only propagates
+  // actual value flips — an optimistic flip that failed and rolled back is
+  // never re-overwritten by a stale snapshot.
+  createEffect(() => {
+    const deviceSiren = props.status?.()?.sirenActive
+    if (deviceSiren != null) setSirenOn(deviceSiren)
+  })
+  createEffect(() => {
+    const deviceTorch = props.status?.()?.torchOn
+    if (deviceTorch != null) setTorchOn(deviceTorch)
+  })
 
   // The one busy-guard choreography every action button here shares: a
   // re-entrancy guard, the call, and a finally that always releases.
