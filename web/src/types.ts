@@ -346,8 +346,8 @@ export interface DeviceStatus {
   camera: string
   /** Live torch state, so dashboard toggles mirror the device. */
   torchOn: boolean
-  /** Live siren state; absent on older firmware. */
-  sirenActive?: boolean
+  /** Live siren state, so dashboard toggles mirror the device. */
+  sirenActive: boolean
   /** The zoom ratio the camera is currently applying. */
   zoomRatio: number
   /** The selected lens; absent before the lens enumeration lands. */

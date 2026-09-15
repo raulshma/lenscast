@@ -2,6 +2,7 @@ import { Show } from 'solid-js'
 import type { AllSettings, DeviceStatus, RtspInputFormat, RtspResolution, RtspVideoCodec } from '../types'
 import { API_DEFAULTS } from '../api/defaults'
 import { t } from '../lib/i18n'
+import { streamToggle } from '../lib/streamToggle'
 import SettingsCard from './SettingsCard'
 import ToggleRow from './ToggleRow'
 import SecurityCard from './SecurityCard'
@@ -42,6 +43,19 @@ export default function AppSettingsPanel(props: Props) {
   // write controls stay on the banner + 403 path (the server answers
   // "Admin access required" and the global error handling surfaces it).
   const isAdmin = () => !props.readOnly?.()
+
+  // Every plain streaming toggle: the field named once here, both the
+  // live-or-default read and the negated save derived from it
+  // (lib/streamToggle) — the old triple repetition cannot drift.
+  const streaming = () => s()?.streaming
+  const save = (patch: Partial<AllSettings['streaming']>) => props.updateStreamingAndSave(patch)
+  const adaptiveBitrate = streamToggle(streaming, 'adaptiveBitrateEnabled', save)
+  const adaptiveEncoded = streamToggle(streaming, 'adaptiveEncodedBitrateEnabled', save)
+  const mdns = streamToggle(streaming, 'mdnsEnabled', save)
+  const onvif = streamToggle(streaming, 'onvifEnabled', save)
+  const mediaEncryption = streamToggle(streaming, 'mediaEncryptionEnabled', save)
+  const httpsToggle = streamToggle(streaming, 'httpsEnabled', save)
+  const rtspSubStream = streamToggle(streaming, 'rtspSubStreamEnabled', save)
 
   return (
     <section class="settings-panel" id="app-settings-panel">
@@ -92,15 +106,15 @@ export default function AppSettingsPanel(props: Props) {
           <ToggleRow
             id="adaptive-bitrate-toggle-app"
             label={t('webstream.adaptive')}
-            checked={s()?.streaming?.adaptiveBitrateEnabled ?? API_DEFAULTS.adaptiveBitrateEnabled}
-            onToggle={() => props.updateStreamingAndSave({ adaptiveBitrateEnabled: !(s()?.streaming?.adaptiveBitrateEnabled ?? API_DEFAULTS.adaptiveBitrateEnabled) })}
+            checked={adaptiveBitrate.checked()}
+            onToggle={adaptiveBitrate.onToggle}
             hint={t('webstream.adaptiveDesc')}
           />
           <ToggleRow
             id="adaptive-encoded-toggle-app"
             label={t('webstream.adaptiveEncoded')}
-            checked={s()?.streaming?.adaptiveEncodedBitrateEnabled ?? API_DEFAULTS.adaptiveEncodedBitrateEnabled}
-            onToggle={() => props.updateStreamingAndSave({ adaptiveEncodedBitrateEnabled: !(s()?.streaming?.adaptiveEncodedBitrateEnabled ?? API_DEFAULTS.adaptiveEncodedBitrateEnabled) })}
+            checked={adaptiveEncoded.checked()}
+            onToggle={adaptiveEncoded.onToggle}
             hint={t('webstream.adaptiveEncodedDesc')}
           />
         </div>
@@ -125,8 +139,8 @@ export default function AppSettingsPanel(props: Props) {
           <ToggleRow
             id="mdns-toggle-app"
             label={t('webstream.mdns')}
-            checked={s()?.streaming?.mdnsEnabled ?? API_DEFAULTS.mdnsEnabled}
-            onToggle={() => props.updateStreamingAndSave({ mdnsEnabled: !(s()?.streaming?.mdnsEnabled ?? API_DEFAULTS.mdnsEnabled) })}
+            checked={mdns.checked()}
+            onToggle={mdns.onToggle}
             hint={t('webstream.mdnsDesc')}
           />
         </div>
@@ -135,8 +149,8 @@ export default function AppSettingsPanel(props: Props) {
           <ToggleRow
             id="onvif-toggle"
             label={t('webstream.onvif')}
-            checked={s()?.streaming?.onvifEnabled ?? API_DEFAULTS.onvifEnabled}
-            onToggle={() => props.updateStreamingAndSave({ onvifEnabled: !(s()?.streaming?.onvifEnabled ?? API_DEFAULTS.onvifEnabled) })}
+            checked={onvif.checked()}
+            onToggle={onvif.onToggle}
             hint={t('webstream.onvifDesc')}
           />
         </div>
@@ -249,8 +263,8 @@ export default function AppSettingsPanel(props: Props) {
           <ToggleRow
             id="media-encryption-toggle-app"
             label={t('webstream.encryptCaptures')}
-            checked={s()?.streaming?.mediaEncryptionEnabled ?? API_DEFAULTS.mediaEncryptionEnabled}
-            onToggle={() => props.updateStreamingAndSave({ mediaEncryptionEnabled: !(s()?.streaming?.mediaEncryptionEnabled ?? API_DEFAULTS.mediaEncryptionEnabled) })}
+            checked={mediaEncryption.checked()}
+            onToggle={mediaEncryption.onToggle}
             hint={t('webstream.encryptCapturesDesc')}
           />
         </div>
@@ -270,8 +284,8 @@ export default function AppSettingsPanel(props: Props) {
           <ToggleRow
             id="https-toggle-app"
             label={t('https.serve')}
-            checked={s()?.streaming?.httpsEnabled ?? API_DEFAULTS.httpsEnabled}
-            onToggle={() => props.updateStreamingAndSave({ httpsEnabled: !(s()?.streaming?.httpsEnabled ?? API_DEFAULTS.httpsEnabled) })}
+            checked={httpsToggle.checked()}
+            onToggle={httpsToggle.onToggle}
             hint={t('https.desc')}
           />
         </div>
@@ -308,8 +322,8 @@ export default function AppSettingsPanel(props: Props) {
             <ToggleRow
               id="rtsp-substream-toggle-app"
               label={t('rtsp.subStream')}
-              checked={s()?.streaming?.rtspSubStreamEnabled ?? API_DEFAULTS.rtspSubStreamEnabled}
-              onToggle={() => props.updateStreamingAndSave({ rtspSubStreamEnabled: !(s()?.streaming?.rtspSubStreamEnabled ?? API_DEFAULTS.rtspSubStreamEnabled) })}
+              checked={rtspSubStream.checked()}
+              onToggle={rtspSubStream.onToggle}
               hint={t('rtsp.subStreamDesc')}
             />
           </div>

@@ -47,6 +47,8 @@ export const API_DEFAULTS = {
   whipUrl: '',
   whipToken: '',
   whipStunServer: 'stun.l.google.com:19302',
+  // SRT push output (StreamingSettingsDto.srtEnabled; store default false).
+  srtEnabled: false,
 
   // Slider bounds (StreamDefaults validation bounds)
   jpegQualityMin: 10,
@@ -155,6 +157,10 @@ export const API_DEFAULTS = {
   // Eco idle-fps mode: drop to the eco floor (StreamDefaults.ECO_IDLE_FPS = 5)
   // while on battery with no stream consumers.
   ecoIdleFpsEnabled: false,
+  // Privacy-masking master and the sound-trigger master
+  // (StreamingSettingsDto.maskingEnabled / soundTriggerEnabled, both false).
+  maskingEnabled: false,
+  soundTriggerEnabled: false,
 
   // Retention windows in days; 0 keeps captures/events forever.
   captureRetentionDays: 0,
@@ -179,6 +185,12 @@ export const API_DEFAULTS = {
   overlayFontSize: 28,
   overlayPadding: 8,
   overlayLineHeight: 4,
+  // The overlay's per-facet toggles (OverlaySettings.DEFAULT, embedded in
+  // StreamingSettingsDto): only the timestamp ships enabled.
+  showTimestamp: true,
+  showBranding: false,
+  showStatus: false,
+  showCustomText: false,
 
   // CameraSettingsDto. cameraIso/cameraExposureTime/cameraColorTemperature/
   // cameraFocusDistance/cameraSceneMode are the UI fallbacks for nullable DTO

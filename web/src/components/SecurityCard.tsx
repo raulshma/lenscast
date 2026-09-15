@@ -66,8 +66,10 @@ export default function SecurityCard(props: Props) {
   // device's answer.
   createEffect(() => {
     const device = props.status()
-    if (device?.sirenActive != null) setSirenOn(device.sirenActive)
-    if (device?.torchOn != null) setTorchOn(device.torchOn)
+    if (device) {
+      setSirenOn(device.sirenActive)
+      setTorchOn(device.torchOn)
+    }
   })
 
   // The one busy-guard choreography every action button here shares: a

@@ -36,6 +36,7 @@ import com.raulshma.lenscast.core.BackupTargetPolicy
 import com.raulshma.lenscast.core.StreamAuthCrypto
 import com.raulshma.lenscast.core.StreamDefaults
 import com.raulshma.lenscast.core.parseEnum
+import com.raulshma.lenscast.core.push.VapidSubjectPolicy
 import com.raulshma.lenscast.streaming.rtsp.RtspInputFormat
 import com.raulshma.lenscast.streaming.rtsp.RtspResolution
 import com.raulshma.lenscast.streaming.rtsp.RtspVideoCodec
@@ -778,11 +779,14 @@ internal val pushEnabledPref = boolPref(Keys.PUSH_ENABLED, defaultTrue = false)
  * it does not round-trip over the Web API, like the update-check settings.
  */
 internal val pushVapidSubjectPref = stringPref(Keys.PUSH_VAPID_SUBJECT, StreamDefaults.PUSH_VAPID_SUBJECT_DEFAULT) {
+    // The sub grammar has one home: VapidSubjectPolicy (also drives the
+    // settings field's live error and the sender's fail-open). URI schemes
+    // are case-insensitive, so a persisted "Mailto:…" survives decode.
     val trimmed = it.trim()
-    if (trimmed.isEmpty() || !(trimmed.startsWith("mailto:") || trimmed.startsWith("https:"))) {
-        StreamDefaults.PUSH_VAPID_SUBJECT_DEFAULT
-    } else {
+    if (VapidSubjectPolicy.isUsable(trimmed)) {
         trimmed
+    } else {
+        StreamDefaults.PUSH_VAPID_SUBJECT_DEFAULT
     }
 }
 

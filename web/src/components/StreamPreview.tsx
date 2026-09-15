@@ -391,6 +391,11 @@ export default function StreamPreview(props: Props) {
   let pttCtx: AudioContext | null = null
   let pttSocket: WebSocket | null = null
   let pttStream: MediaStream | null = null
+  // Chunks captured while the WS handshake is still in flight (the socket
+  // is created before getUserMedia, so a slow sidecar answer races the
+  // first audio): held for the WS, flushed in order on open, spilled to
+  // the fallback when the link dies instead.
+  let pttPending: ArrayBuffer[] = []
   const pttFallback = new PttFallbackUplink((batch) => pushTalkback(batch))
   // Hold generation: released mid-prompt (permission dialogs can outlive the
   // hold), a stale startPtt must not resurrect the graph or touch the next
@@ -404,9 +409,21 @@ export default function StreamPreview(props: Props) {
     }
     pttSocket = new WebSocket(`${wsBaseUrl()}/ws/talkback`)
     pttSocket.binaryType = 'arraybuffer'
+    pttSocket.onopen = () => {
+      // The handshake landed after audio started: the CONNECTING-window
+      // chunks go out on the WS they were held for, before any live chunk.
+      for (const bytes of pttPending.splice(0)) {
+        try {
+          pttSocket?.send(bytes)
+        } catch {
+          pttFallback.send(bytes)
+        }
+      }
+    }
     pttSocket.onclose = () => {
       // Sidecar refused or dropped the link mid-hold: chunks now detour to
       // the HTTP uplink via sendPcm's readyState check — say so once.
+      for (const bytes of pttPending.splice(0)) pttFallback.send(bytes)
       if (talking()) flashTalkMsg(t('preview.talkWsLost'))
     }
     try {
@@ -432,13 +449,20 @@ export default function StreamPreview(props: Props) {
   }
 
   function sendPcm(chunk: Float32Array) {
-    if (pttSocket && pttSocket.readyState === WebSocket.OPEN) {
-      pttSocket.send(floatChunkToPcm16(chunk))
+    const bytes = floatChunkToPcm16(chunk)
+    if (pttSocket?.readyState === WebSocket.OPEN) {
+      pttSocket.send(bytes)
+      return
+    }
+    if (pttSocket?.readyState === WebSocket.CONNECTING) {
+      // Handshake still in flight: the fallback is for a sidecar that's
+      // down, not one that's still answering — hold the chunk for the WS.
+      pttPending.push(bytes)
       return
     }
     // WS dead (sidecar down, handshake refused): batch onto the one-shot
     // HTTP uplink — POSTs serialize inside the uplink.
-    pttFallback.send(floatChunkToPcm16(chunk))
+    pttFallback.send(bytes)
   }
 
   async function stopPtt() {
@@ -460,8 +484,11 @@ export default function StreamPreview(props: Props) {
       try { pttSocket.close() } catch { }
     }
     pttSocket = null
-    // Flush the fallback queue and let the last POST land before the next
-    // hold reuses the uplink.
+    // A hold released mid-handshake strands its CONNECTING-window chunks in
+    // the pending buffer (onclose is gone) — spill them so they drain with
+    // the rest, then let the last POST land before the next hold reuses
+    // the uplink.
+    for (const bytes of pttPending.splice(0)) pttFallback.send(bytes)
     await pttFallback.drain()
   }
 

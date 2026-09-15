@@ -4,6 +4,7 @@ import { API_DEFAULTS } from '../api/defaults'
 import SettingsCard from './SettingsCard'
 import ToggleRow from './ToggleRow'
 import { t } from '../lib/i18n'
+import { streamToggle } from '../lib/streamToggle'
 
 interface Props {
   settings: () => AllSettings | null
@@ -24,6 +25,13 @@ export default function MqttCard(props: Props) {
   const stream = () => s()?.streaming
   const mqttOn = () => stream()?.mqttEnabled ?? API_DEFAULTS.mqttEnabled
   const mqttTlsOn = () => stream()?.mqttTls ?? API_DEFAULTS.mqttTls
+  // The plain telemetry toggle reads/saves through the one home for that
+  // shape (lib/streamToggle) — the field named once.
+  const mqttTelemetry = streamToggle(
+    stream,
+    'mqttTelemetryEnabled',
+    (patch) => props.updateStreamingAndSave(patch),
+  )
   const [passwordDraft, setPasswordDraft] = createSignal('')
 
   return (
@@ -54,8 +62,8 @@ export default function MqttCard(props: Props) {
           <ToggleRow
             id="mqtt-telemetry-toggle"
             label={t('mqtt.telemetry')}
-            checked={stream()?.mqttTelemetryEnabled ?? API_DEFAULTS.mqttTelemetryEnabled}
-            onToggle={() => props.updateStreamingAndSave({ mqttTelemetryEnabled: !(stream()?.mqttTelemetryEnabled ?? API_DEFAULTS.mqttTelemetryEnabled) })}
+            checked={mqttTelemetry.checked()}
+            onToggle={mqttTelemetry.onToggle}
             hint={t('mqtt.telemetryDesc')}
           />
         </div>
