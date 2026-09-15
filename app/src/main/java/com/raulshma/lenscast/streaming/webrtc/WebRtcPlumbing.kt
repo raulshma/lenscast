@@ -107,7 +107,9 @@ internal object WebRtcPlumbing {
         expectDescription: Boolean,
         invoke: (SdpObserver) -> Unit,
     ): SessionDescription? {
-        val action = if (expectDescription) "step" else "set"
+        // The libwebrtc verb this step invokes — createOffer/createAnswer vs
+        // setDescription — so the error strings name the operation that failed.
+        val action = if (expectDescription) "create" else "set"
         val latch = CountDownLatch(1)
         val observer = object : SdpObserver {
             override fun onCreateSuccess(sdp: SessionDescription) {
@@ -138,7 +140,7 @@ internal object WebRtcPlumbing {
         step.failure?.let { throw WebrtcSdpException("$label SDP $action failed: $it") }
         val description = step.description
         if (description == null && expectDescription) {
-            throw WebrtcSdpException("$label SDP step failed without a reason")
+            throw WebrtcSdpException("$label SDP $action failed without a reason")
         }
         return description
     }

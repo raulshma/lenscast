@@ -106,6 +106,22 @@ function UrlCopyButton(props: { copied: () => boolean; onCopy: () => void }) {
   )
 }
 
+/**
+ * One self-clearing message slot: replaces the value now, cancels any still-
+ * pending reset, and the reset only clears when the slot still shows this
+ * value — so a newer flash is never wiped by an older timer. Must be called
+ * under a component owner so the timer dies with the component.
+ */
+function flashLater(set: (v: string | ((prev: string) => string)) => void, ms: number): (msg: string) => void {
+  let timer: ReturnType<typeof setTimeout> | null = null
+  onCleanup(() => { if (timer) clearTimeout(timer) })
+  return (msg: string) => {
+    set(msg)
+    if (timer) clearTimeout(timer)
+    timer = setTimeout(() => set((current) => (current === msg ? '' : current)), ms)
+  }
+}
+
 export default function StreamPreview(props: Props) {
   const st = () => props.status()
   const isActive = () => !!st()?.streaming?.isActive
@@ -235,18 +251,12 @@ export default function StreamPreview(props: Props) {
   // Transient talkback status line — every silent failure mode this feature
   // used to have (no mic API, denied permission, dead WS link) surfaces here.
   const [talkMsg, setTalkMsg] = createSignal('')
-  let talkMsgResetTimer: ReturnType<typeof setTimeout> | null = null
-  function flashTalkMsg(msg: string) {
-    setTalkMsg(msg)
-    if (talkMsgResetTimer) clearTimeout(talkMsgResetTimer)
-    talkMsgResetTimer = setTimeout(() => setTalkMsg((current) => (current === msg ? '' : current)), 4000)
-  }
-  onCleanup(() => { if (talkMsgResetTimer) clearTimeout(talkMsgResetTimer) })
+  const flashTalkMsg = flashLater(setTalkMsg, 4000)
 
   // ── URL copy: the bars exist to hand the stream link to another device,
   // so a one-tap clipboard affordance with a brief "copied" state. ──
-  const [copiedUrl, setCopiedUrl] = createSignal<'' | 'web' | 'rtsp'>('')
-  let copiedResetTimer: ReturnType<typeof setTimeout> | null = null
+  const [copiedUrl, setCopiedUrl] = createSignal('')
+  const flashCopied = flashLater(setCopiedUrl, 2000)
 
   async function copyUrl(which: 'web' | 'rtsp', url: string) {
     try {
@@ -263,11 +273,8 @@ export default function StreamPreview(props: Props) {
       try { document.execCommand('copy') } catch { }
       document.body.removeChild(scratch)
     }
-    setCopiedUrl(which)
-    if (copiedResetTimer) clearTimeout(copiedResetTimer)
-    copiedResetTimer = setTimeout(() => setCopiedUrl(''), 2000)
+    flashCopied(which)
   }
-  onCleanup(() => { if (copiedResetTimer) clearTimeout(copiedResetTimer) })
 
   // Torch truth lives on the device: the status push is authoritative, and
   // the local optimistic flip below only bridges the round-trip. This effect
@@ -456,11 +463,7 @@ export default function StreamPreview(props: Props) {
   // otherwise the same programmatic download the Snap button does. ──
   const [sharingSnapshot, setSharingSnapshot] = createSignal(false)
   const [shareMsg, setShareMsg] = createSignal('')
-
-  function flashShareMsg(msg: string) {
-    setShareMsg(msg)
-    setTimeout(() => setShareMsg((current) => (current === msg ? '' : current)), 4000)
-  }
+  const flashShareMsg = flashLater(setShareMsg, 4000)
 
   async function handleShareSnapshot() {
     if (sharingSnapshot()) return

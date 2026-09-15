@@ -1,51 +1,52 @@
 package com.raulshma.lenscast.core.push
 
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertNull
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class VapidSubjectPolicyTest {
 
-    // ── problem: accepted shapes ──
+    // ── isUsable: accepted shapes ──
 
     @Test
-    fun `mailto subject is accepted`() {
-        assertNull(VapidSubjectPolicy.problem("mailto:owner@example.com"))
+    fun `mailto subject is usable`() {
+        assertTrue(VapidSubjectPolicy.isUsable("mailto:owner@example.com"))
     }
 
     @Test
-    fun `https subject is accepted`() {
-        assertNull(VapidSubjectPolicy.problem("https://example.com/push-contact"))
+    fun `https subject is usable`() {
+        assertTrue(VapidSubjectPolicy.isUsable("https://example.com/push-contact"))
     }
 
     @Test
     fun `scheme check ignores case`() {
-        assertNull(VapidSubjectPolicy.problem("MAILTO:owner@example.com"))
-        assertNull(VapidSubjectPolicy.problem("HTTPS://example.com"))
+        assertTrue(VapidSubjectPolicy.isUsable("MAILTO:owner@example.com"))
+        assertTrue(VapidSubjectPolicy.isUsable("HTTPS://example.com"))
     }
 
     @Test
     fun `surrounding whitespace is tolerated`() {
-        assertNull(VapidSubjectPolicy.problem("  mailto:owner@example.com "))
+        assertTrue(VapidSubjectPolicy.isUsable("  mailto:owner@example.com "))
     }
 
-    // ── problem: rejected shapes ──
+    // ── isUsable: rejected shapes ──
 
     @Test
-    fun `blank subject is rejected as blank`() {
-        assertEquals("blank", VapidSubjectPolicy.problem(""))
-        assertEquals("blank", VapidSubjectPolicy.problem("   "))
-    }
-
-    @Test
-    fun `non mailto or https scheme is rejected`() {
-        assertEquals("scheme", VapidSubjectPolicy.problem("http://example.com"))
-        assertEquals("scheme", VapidSubjectPolicy.problem("hello@example.com"))
+    fun `blank subject is not usable`() {
+        assertFalse(VapidSubjectPolicy.isUsable(""))
+        assertFalse(VapidSubjectPolicy.isUsable("   "))
     }
 
     @Test
-    fun `bare scheme prefix without colon lookalike is rejected`() {
-        assertEquals("scheme", VapidSubjectPolicy.problem("mailtoowner@example.com"))
+    fun `non mailto or https scheme is not usable`() {
+        assertFalse(VapidSubjectPolicy.isUsable("http://example.com"))
+        assertFalse(VapidSubjectPolicy.isUsable("hello@example.com"))
+    }
+
+    @Test
+    fun `bare scheme prefix without colon lookalike is not usable`() {
+        assertFalse(VapidSubjectPolicy.isUsable("mailtoowner@example.com"))
     }
 
     // ── orDefault: the sender's fail-open path ──

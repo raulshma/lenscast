@@ -45,11 +45,8 @@ export default function MqttCard(props: Props) {
           label={t('mqtt.enable')}
           checked={mqttOn()}
           onToggle={() => props.updateStreamingAndSave({ mqttEnabled: !mqttOn() })}
+          hint={t('mqtt.desc')}
         />
-        <div class="status-banner status-banner-info stream-mode-hint" role="note" aria-live="polite">
-          <span class="status-banner-dot" aria-hidden="true" />
-          <span>{t('mqtt.desc')}</span>
-        </div>
       </div>
 
       <Show when={mqttOn()}>
@@ -59,11 +56,8 @@ export default function MqttCard(props: Props) {
             label={t('mqtt.telemetry')}
             checked={stream()?.mqttTelemetryEnabled ?? API_DEFAULTS.mqttTelemetryEnabled}
             onToggle={() => props.updateStreamingAndSave({ mqttTelemetryEnabled: !(stream()?.mqttTelemetryEnabled ?? API_DEFAULTS.mqttTelemetryEnabled) })}
+            hint={t('mqtt.telemetryDesc')}
           />
-          <div class="status-banner status-banner-info stream-mode-hint" role="note" aria-live="polite">
-            <span class="status-banner-dot" aria-hidden="true" />
-            <span>{t('mqtt.telemetryDesc')}</span>
-          </div>
         </div>
         <div class="field-group">
           <div class="field-row">

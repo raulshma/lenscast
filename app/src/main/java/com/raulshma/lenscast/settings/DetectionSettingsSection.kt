@@ -313,13 +313,13 @@ fun DetectionSettingsSection(viewModel: SettingsViewModel, onOpenEventLog: (() -
             // Live RFC 8292 sub check: the field saves per keystroke, and an
             // invalid sub only fails later at dispatch — every push service
             // rejects the JWT outright, so the mistake must be visible here.
-            val vapidSubjectProblem = VapidSubjectPolicy.problem(pushVapidSubject)
+            val vapidSubjectUsable = VapidSubjectPolicy.isUsable(pushVapidSubject)
             OutlinedTextField(
                 value = pushVapidSubject,
                 onValueChange = { viewModel.updatePushVapidSubject(it) },
                 label = { Text(stringResource(R.string.detection_push_vapid_subject)) },
-                isError = vapidSubjectProblem != null,
-                supportingText = if (vapidSubjectProblem != null) {
+                isError = !vapidSubjectUsable,
+                supportingText = if (!vapidSubjectUsable) {
                     { Text(stringResource(R.string.detection_push_vapid_subject_invalid)) }
                 } else {
                     null

@@ -1,8 +1,12 @@
+import { Show } from 'solid-js'
+
 /**
  * One label + toggle-switch row (`field-row field-row-toggle`): the on/off
  * setting row every settings card repeats, extracted so the switch markup
- * lives in exactly one place. Props stay on `props.` (not destructured) so
- * Solid's reactivity survives the component boundary.
+ * lives in exactly one place. The optional `hint` renders the info banner
+ * that follows so many toggles, so that markup cannot drift either. Props
+ * stay on `props.` (not destructured) so Solid's reactivity survives the
+ * component boundary.
  */
 export default function ToggleRow(props: {
   id: string
@@ -11,20 +15,30 @@ export default function ToggleRow(props: {
   onToggle: () => void
   /** Disabled switches render inert but keep their label contrast for context. */
   disabled?: boolean
+  /** Optional explainer banner rendered under the row. */
+  hint?: string
 }) {
   return (
-    <div class="field-row field-row-toggle">
-      <span class="field-label">{props.label}</span>
-      <label class="toggle-switch" for={props.id}>
-        <input
-          id={props.id}
-          type="checkbox"
-          checked={props.checked}
-          disabled={props.disabled}
-          onChange={props.onToggle}
-        />
-        <span class="toggle-slider" />
-      </label>
-    </div>
+    <>
+      <div class="field-row field-row-toggle">
+        <span class="field-label">{props.label}</span>
+        <label class="toggle-switch" for={props.id}>
+          <input
+            id={props.id}
+            type="checkbox"
+            checked={props.checked}
+            disabled={props.disabled}
+            onChange={props.onToggle}
+          />
+          <span class="toggle-slider" />
+        </label>
+      </div>
+      <Show when={props.hint}>
+        <div class="status-banner status-banner-info stream-mode-hint" role="note" aria-live="polite">
+          <span class="status-banner-dot" aria-hidden="true" />
+          <span>{props.hint}</span>
+        </div>
+      </Show>
+    </>
   )
 }
