@@ -454,17 +454,19 @@ class RtspServer(
 
         init {
             // Default video track on channels 0-1
-            tracks[0] = TrackState(trackId = 0, rtpChannel = 0, rtcpChannel = 1)
+            tracks[RtspUriPolicy.VIDEO_TRACK_ID] =
+                TrackState(trackId = RtspUriPolicy.VIDEO_TRACK_ID, rtpChannel = 0, rtcpChannel = 1)
             // Default audio track on channels 2-3
-            tracks[1] = TrackState(trackId = 1, rtpChannel = 2, rtcpChannel = 3)
+            tracks[RtspUriPolicy.AUDIO_TRACK_ID] =
+                TrackState(trackId = RtspUriPolicy.AUDIO_TRACK_ID, rtpChannel = 2, rtcpChannel = 3)
         }
 
-        val isAudioSetup: Boolean get() = tracks[1]?.isSetup == true
+        val isAudioSetup: Boolean get() = tracks[RtspUriPolicy.AUDIO_TRACK_ID]?.isSetup == true
 
-        private val videoRtpChannel: Int get() = tracks[0]?.rtpChannel ?: 0
-        private val videoRtcpChannel: Int get() = tracks[0]?.rtcpChannel ?: 1
-        private val audioRtpChannel: Int get() = tracks[1]?.rtpChannel ?: 2
-        private val audioRtcpChannel: Int get() = tracks[1]?.rtcpChannel ?: 3
+        private val videoRtpChannel: Int get() = tracks[RtspUriPolicy.VIDEO_TRACK_ID]?.rtpChannel ?: 0
+        private val videoRtcpChannel: Int get() = tracks[RtspUriPolicy.VIDEO_TRACK_ID]?.rtcpChannel ?: 1
+        private val audioRtpChannel: Int get() = tracks[RtspUriPolicy.AUDIO_TRACK_ID]?.rtpChannel ?: 2
+        private val audioRtcpChannel: Int get() = tracks[RtspUriPolicy.AUDIO_TRACK_ID]?.rtcpChannel ?: 3
 
         // Sub-stream state: its own SETUP gate, channels, PLAY gate, and the
         // same keyframe-wait discipline as the main video track.
@@ -514,7 +516,7 @@ class RtspServer(
         /** The Web API clients-list entry for this connection. */
         fun describe(): com.raulshma.lenscast.streaming.RtspClientDescriptor {
             val media = buildList {
-                if (tracks[0]?.isSetup == true) add("video")
+                if (tracks[RtspUriPolicy.VIDEO_TRACK_ID]?.isSetup == true) add("video")
                 if (isAudioSetup) add("audio")
                 if (subSetup) add(RtspUriPolicy.SUB_STREAM_PATH)
             }
@@ -735,7 +737,7 @@ class RtspServer(
             }
 
             // Reject audio track if audio is not enabled
-            if (trackId == 1 && !config.audioEnabled) {
+            if (trackId == RtspUriPolicy.AUDIO_TRACK_ID && !config.audioEnabled) {
                 sendResponse(output, "404 Not Found")
                 return
             }
@@ -884,7 +886,7 @@ class RtspServer(
             val nextRtpTime = (rtpTimestamp + timestampIncrement) and 0xFFFFFFFFL
             val audioEntry = if (isAudioSetup && config.audioEnabled) {
                 RtspSessionProtocol.RtpInfoEntry(
-                    url = buildAbsoluteRtspUrl("/${RtspUriPolicy.DEFAULT_STREAM_PATH}/trackID=1"),
+                    url = buildAbsoluteRtspUrl("/${RtspUriPolicy.DEFAULT_STREAM_PATH}/trackID=${RtspUriPolicy.AUDIO_TRACK_ID}"),
                     seq = audioPacketizer.currentSeq,
                     rtpTime = audioTimestamp,
                 )

@@ -4,6 +4,7 @@ import { createRecordingTimer } from '../RecordingTimer'
 import { createLiveAudioPlayer, type LiveAudioStatus } from '../audio/LiveAudioPlayer'
 import { createPollLadder } from './pollLadder'
 import { hashRouter, type RouteName } from '../lib/router'
+import { createSectionedDebouncer } from '../lib/sectionedDebounce'
 import { closeMedia, openMedia, viewerTarget } from '../lib/viewerStore'
 import { hlsSupported, nextPlayerMode, whepSupported, type PlayerMode } from '../video/playerLadder'
 import { h264Supported } from '../video/h264Player'
@@ -88,10 +89,11 @@ export function useAppState() {
   // ── Settings Tabs ──
   const [activeTab, setActiveTab] = createSignal<'camera' | 'app'>('camera')
 
-  // Per-section debounce slots: the camera and app tabs save disjoint
-  // sections, so one shared timer would let the last-edited tab silently
-  // replace the other tab's pending PUT (and the 30 s poll would revert it).
-  const saveTimers: Partial<Record<'camera' | 'streaming', ReturnType<typeof setTimeout> | null>> = {}
+  // Per-section debounce slots (lib/sectionedDebounce): the camera and app
+  // tabs save disjoint sections, so one shared timer would let the
+  // last-edited tab silently replace the other tab's pending PUT (and the
+  // 30 s poll would revert it).
+  const debounceSave = createSectionedDebouncer()
 
   function isAuthError(e: any): boolean {
     if (e?.status === 401) return true
@@ -101,12 +103,6 @@ export function useAppState() {
 
   function isPageHidden() {
     return typeof document !== 'undefined' && document.hidden
-  }
-
-  function debounceSave(section: 'camera' | 'streaming', fn: () => void, ms = 400) {
-    const pending = saveTimers[section]
-    if (pending) clearTimeout(pending)
-    saveTimers[section] = setTimeout(fn, ms)
   }
 
   // ── Action pipeline ──

@@ -77,7 +77,7 @@ object SdpBuilder {
             for (line in videoLines) {
                 appendLine(line)
             }
-            appendLine("a=control:trackID=0")
+            appendLine("a=control:trackID=${RtspUriPolicy.VIDEO_TRACK_ID}")
 
             if (audioEnabled) {
                 // No live ASC yet (DESCRIBE raced the encoder start): derive the
@@ -93,7 +93,7 @@ object SdpBuilder {
                 appendLine("c=IN $addressType $connectionAddress")
                 appendLine("a=rtpmap:97 mpeg4-generic/$audioSampleRateHz/$audioChannelCount")
                 appendLine("a=fmtp:97 streamtype=5;profile-level-id=1;mode=AAC-hbr;sizelength=13;indexlength=3;indexdeltalength=3;config=$configHex")
-                appendLine("a=control:trackID=1")
+                appendLine("a=control:trackID=${RtspUriPolicy.AUDIO_TRACK_ID}")
             }
         }
     }

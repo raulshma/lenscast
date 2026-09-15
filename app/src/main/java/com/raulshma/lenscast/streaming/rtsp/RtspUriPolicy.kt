@@ -18,6 +18,15 @@ object RtspUriPolicy {
      */
     const val SUB_STREAM_PATH = "sub"
 
+    /**
+     * The one track grammar every wire surface restates: `trackID=0` is the
+     * video track (SDP control, SETUP path, RTP-Info), `trackID=1` its audio
+     * twin. SdpBuilder advertises them and RtspServer resolves them through
+     * these constants so the numbers never drift apart per call site.
+     */
+    const val VIDEO_TRACK_ID = 0
+    const val AUDIO_TRACK_ID = 1
+
     /** Whether [method] may address [requestUri] at all (404 verdict otherwise). */
     fun isRequestUriAllowed(method: String, requestUri: String): Boolean {
         return when (method) {
@@ -43,13 +52,13 @@ object RtspUriPolicy {
     fun isSubControlUri(requestUri: String): Boolean {
         if (isSubStreamUri(requestUri)) return true
         val path = normalizedPath(requestUri)
-        return path.equals("/$SUB_STREAM_PATH/trackID=0", ignoreCase = true)
+        return path.equals("/$SUB_STREAM_PATH/trackID=$VIDEO_TRACK_ID", ignoreCase = true)
     }
 
     fun isStreamControlUri(requestUri: String): Boolean {
         val path = normalizedPath(requestUri)
         if (path == "/$DEFAULT_STREAM_PATH") return true
-        if (path.equals("/trackid=0", ignoreCase = true)) return true
+        if (path.equals("/trackid=$VIDEO_TRACK_ID", ignoreCase = true)) return true
         if (path.startsWith("/$DEFAULT_STREAM_PATH/trackid=", ignoreCase = true)) return true
         if (path.startsWith("/$DEFAULT_STREAM_PATH/track", ignoreCase = true)) return true
         return false
@@ -57,8 +66,8 @@ object RtspUriPolicy {
 
     fun isTrackUri(requestUri: String): Boolean {
         val path = normalizedPath(requestUri)
-        if (path.equals("/trackID=0", ignoreCase = true)) return true
-        if (path.equals("/trackID=1", ignoreCase = true)) return true
+        if (path.equals("/trackID=$VIDEO_TRACK_ID", ignoreCase = true)) return true
+        if (path.equals("/trackID=$AUDIO_TRACK_ID", ignoreCase = true)) return true
         if (path.startsWith("/$DEFAULT_STREAM_PATH/trackID=", ignoreCase = true)) return true
         return false
     }
@@ -67,13 +76,13 @@ object RtspUriPolicy {
     fun resolveTrackId(requestUri: String): Int? {
         val path = normalizedPath(requestUri)
         // Aggregate or stream path defaults to video (track 0)
-        if (path == "/$DEFAULT_STREAM_PATH" || path == "/") return 0
+        if (path == "/$DEFAULT_STREAM_PATH" || path == "/") return VIDEO_TRACK_ID
         // Explicit trackID matching — toIntOrNull, never toInt: a hostile
         // SETUP `.../trackID=99999999999999` is a 404, not a dead session.
         val trackMatch = Regex("""/trackID=(\d+)$""", RegexOption.IGNORE_CASE).find(path)
         if (trackMatch != null) {
             val id = trackMatch.groupValues[1].toIntOrNull() ?: return null
-            return if (id == 0 || id == 1) id else null
+            return if (id == VIDEO_TRACK_ID || id == AUDIO_TRACK_ID) id else null
         }
         return null
     }

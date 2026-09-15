@@ -29,6 +29,7 @@ import com.raulshma.lenscast.capture.ml.AudioModelStore
 import com.raulshma.lenscast.capture.ml.DetectionModelStore
 import com.raulshma.lenscast.capture.model.SoundClassPolicy
 import com.raulshma.lenscast.core.StreamDefaults
+import com.raulshma.lenscast.core.push.VapidSubjectPolicy
 
 /**
  * The detection (motion + sound), watchdog, and backup settings sections.
@@ -309,10 +310,20 @@ fun DetectionSettingsSection(viewModel: SettingsViewModel, onOpenEventLog: (() -
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Spacer(modifier = Modifier.height(4.dp))
+            // Live RFC 8292 sub check: the field saves per keystroke, and an
+            // invalid sub only fails later at dispatch — every push service
+            // rejects the JWT outright, so the mistake must be visible here.
+            val vapidSubjectProblem = VapidSubjectPolicy.problem(pushVapidSubject)
             OutlinedTextField(
                 value = pushVapidSubject,
                 onValueChange = { viewModel.updatePushVapidSubject(it) },
                 label = { Text(stringResource(R.string.detection_push_vapid_subject)) },
+                isError = vapidSubjectProblem != null,
+                supportingText = if (vapidSubjectProblem != null) {
+                    { Text(stringResource(R.string.detection_push_vapid_subject_invalid)) }
+                } else {
+                    null
+                },
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true,
             )

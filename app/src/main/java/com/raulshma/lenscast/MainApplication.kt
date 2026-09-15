@@ -218,7 +218,13 @@ class MainApplication : Application(), SingletonImageLoader.Factory {
             configProvider = {
                 com.raulshma.lenscast.core.push.WebPushSender.Config(
                     enabled = settingsDataStore.pushEnabled.value,
-                    subject = settingsDataStore.pushVapidSubject.value,
+                    // An invalid sub makes every push service reject the JWT at
+                    // dispatch — fall open to the default contact instead of
+                    // failing silently (the settings field flags it live).
+                    subject = com.raulshma.lenscast.core.push.VapidSubjectPolicy.orDefault(
+                        settingsDataStore.pushVapidSubject.value,
+                        com.raulshma.lenscast.core.StreamDefaults.PUSH_VAPID_SUBJECT_DEFAULT,
+                    ),
                 )
             },
             store = pushSubscriptionStore,
