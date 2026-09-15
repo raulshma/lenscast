@@ -9,6 +9,7 @@ import { createH264Player, h264Supported, wsBaseUrl } from '../video/h264Player'
 import { cyclePlayerMode, hlsSupported, nextPlayerMode, type PlayerMode } from '../video/playerLadder'
 import { createWhepPlayer } from '../lib/whepClient'
 import { canShareFiles, shareSnapshotImage, snapshotFileName } from '../lib/share'
+import { PttFallbackUplink, floatChunkToPcm16 } from '../lib/pttFallback'
 import { t, tCount } from '../lib/i18n'
 import type Hls from 'hls.js'
 
@@ -74,6 +75,35 @@ async function tapPcm16(
   proc.onaudioprocess = (ev) => onChunk(ev.inputBuffer.getChannelData(0))
   source.connect(proc)
   proc.connect(sink)
+}
+
+/**
+ * One stream URL row's copy affordance: a one-tap clipboard button that
+ * flips to a checkmark for a moment (the caller owns the `copied` state, so
+ * the web and RTSP rows share one reset timer).
+ */
+function UrlCopyButton(props: { copied: () => boolean; onCopy: () => void }) {
+  return (
+    <button
+      type="button"
+      class="url-copy-btn"
+      classList={{ 'url-copy-btn-copied': props.copied() }}
+      onClick={props.onCopy}
+      aria-label={props.copied() ? t('preview.copied') : t('preview.copy')}
+      title={props.copied() ? t('preview.copied') : t('preview.copy')}
+    >
+      <Show when={props.copied()} fallback={
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <rect x="9" y="9" width="13" height="13" rx="2" />
+          <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" />
+        </svg>
+      }>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M20 6L9 17l-5-5" />
+        </svg>
+      </Show>
+    </button>
+  )
 }
 
 export default function StreamPreview(props: Props) {
@@ -337,9 +367,8 @@ export default function StreamPreview(props: Props) {
   // throws a typed error the button handler turns into a visible status line
   // instead of the old silent no-op. With the mic up but the WS sidecar
   // unreachable, chunks detour to the HTTP one-shot uplink in serialized
-  // ~600 ms batches, so talkback keeps working through a dead sidecar.
-  const PTT_FALLBACK_BATCH_MS = 600
-
+  // ~600 ms batches (see lib/pttFallback), so talkback keeps working through
+  // a dead sidecar.
   class TalkUnavailableError extends Error {
     constructor(public readonly reason: 'insecure' | 'mic') { super(reason) }
   }
@@ -347,9 +376,7 @@ export default function StreamPreview(props: Props) {
   let pttCtx: AudioContext | null = null
   let pttSocket: WebSocket | null = null
   let pttStream: MediaStream | null = null
-  let pttFallbackQueue: ArrayBuffer[] = []
-  let pttFallbackTimer: ReturnType<typeof setTimeout> | null = null
-  let pttFallbackChain: Promise<void> = Promise.resolve()
+  const pttFallback = new PttFallbackUplink((batch) => pushTalkback(batch))
   // Hold generation: released mid-prompt (permission dialogs can outlive the
   // hold), a stale startPtt must not resurrect the graph or touch the next
   // hold's state — it bails at every await boundary.
@@ -395,27 +422,8 @@ export default function StreamPreview(props: Props) {
       return
     }
     // WS dead (sidecar down, handshake refused): batch onto the one-shot
-    // HTTP uplink. POSTs serialize — the device speaker track writes block,
-    // and overlapping uploads would interleave in the server's thread pool.
-    pttFallbackQueue.push(floatChunkToPcm16(chunk).slice(0))
-    if (!pttFallbackTimer) {
-      pttFallbackTimer = setTimeout(flushPttFallback, PTT_FALLBACK_BATCH_MS)
-    }
-  }
-
-  function flushPttFallback() {
-    pttFallbackTimer = null
-    if (pttFallbackQueue.length === 0) return
-    const total = pttFallbackQueue.reduce((n, c) => n + c.byteLength, 0)
-    const batch = new Uint8Array(total)
-    let off = 0
-    for (const c of pttFallbackQueue) {
-      batch.set(new Uint8Array(c), off)
-      off += c.byteLength
-    }
-    pttFallbackQueue = []
-    const post = pushTalkback(batch.buffer).catch(() => { })
-    pttFallbackChain = pttFallbackChain.then(() => post)
+    // HTTP uplink — POSTs serialize inside the uplink.
+    pttFallback.send(floatChunkToPcm16(chunk))
   }
 
   async function stopPtt() {
@@ -423,11 +431,6 @@ export default function StreamPreview(props: Props) {
     try {
       pttSocket?.send('stop')
     } catch { }
-    if (pttFallbackTimer) {
-      clearTimeout(pttFallbackTimer)
-      pttFallbackTimer = null
-    }
-    flushPttFallback()
     await stopPttCleanup()
     setTalking(false)
   }
@@ -442,15 +445,9 @@ export default function StreamPreview(props: Props) {
       try { pttSocket.close() } catch { }
     }
     pttSocket = null
-    // Let the last fallback POST land before the next hold reuses the chain.
-    await pttFallbackChain.catch(() => { })
-    pttFallbackChain = Promise.resolve()
-  }
-
-  function floatChunkToPcm16(input: Float32Array): ArrayBuffer {
-    const pcm = new Int16Array(input.length)
-    for (let i = 0; i < input.length; i++) pcm[i] = Math.max(-32768, Math.min(32767, input[i] * 32768))
-    return pcm.buffer
+    // Flush the fallback queue and let the last POST land before the next
+    // hold reuses the uplink.
+    await pttFallback.drain()
   }
 
   // ── Snapshot share: Web Share with a File payload when the browser can,
@@ -795,6 +792,10 @@ export default function StreamPreview(props: Props) {
             classList={{ 'action-btn-talking': talking() }}
             aria-pressed={talking()}
             onPointerDown={(e) => {
+              // One hold at a time: a second finger on the button must not
+              // overwrite the first hold's socket mid-setup (it would leak
+              // that WebSocket and flash a spurious "link lost").
+              if (talking()) return
               // Capture the pointer so a slight finger drift mid-hold can't
               // cancel the talk (release anywhere still fires pointerup).
               try { e.currentTarget.setPointerCapture(e.pointerId) } catch { }
@@ -865,25 +866,10 @@ export default function StreamPreview(props: Props) {
       <Show when={webActive() && st()?.streaming?.url}>
         <div class="stream-url-bar">
           <code>{st()!.streaming.url}</code>
-          <button
-            type="button"
-            class="url-copy-btn"
-            classList={{ 'url-copy-btn-copied': copiedUrl() === 'web' }}
-            onClick={() => void copyUrl('web', st()!.streaming.url!)}
-            aria-label={copiedUrl() === 'web' ? t('preview.copied') : t('preview.copy')}
-            title={copiedUrl() === 'web' ? t('preview.copied') : t('preview.copy')}
-          >
-            <Show when={copiedUrl() === 'web'} fallback={
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <rect x="9" y="9" width="13" height="13" rx="2" />
-                <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" />
-              </svg>
-            }>
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M20 6L9 17l-5-5" />
-              </svg>
-            </Show>
-          </button>
+          <UrlCopyButton
+            copied={() => copiedUrl() === 'web'}
+            onCopy={() => void copyUrl('web', st()!.streaming.url!)}
+          />
         </div>
       </Show>
 
@@ -891,25 +877,10 @@ export default function StreamPreview(props: Props) {
       <Show when={rtspActive() && st()?.streaming?.rtspUrl}>
         <div class="stream-url-bar">
           <code>{st()!.streaming.rtspUrl}</code>
-          <button
-            type="button"
-            class="url-copy-btn"
-            classList={{ 'url-copy-btn-copied': copiedUrl() === 'rtsp' }}
-            onClick={() => void copyUrl('rtsp', st()!.streaming.rtspUrl!)}
-            aria-label={copiedUrl() === 'rtsp' ? t('preview.copied') : t('preview.copy')}
-            title={copiedUrl() === 'rtsp' ? t('preview.copied') : t('preview.copy')}
-          >
-            <Show when={copiedUrl() === 'rtsp'} fallback={
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <rect x="9" y="9" width="13" height="13" rx="2" />
-                <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" />
-              </svg>
-            }>
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M20 6L9 17l-5-5" />
-              </svg>
-            </Show>
-          </button>
+          <UrlCopyButton
+            copied={() => copiedUrl() === 'rtsp'}
+            onCopy={() => void copyUrl('rtsp', st()!.streaming.rtspUrl!)}
+          />
         </div>
       </Show>
     </section>

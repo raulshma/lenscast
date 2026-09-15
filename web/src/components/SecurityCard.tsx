@@ -60,16 +60,13 @@ export default function SecurityCard(props: Props) {
 
   // Deterrence truth lives on the device: auto-deterrence (or another tab,
   // or the phone itself) can flip siren/torch without this card's involvement,
-  // so the status push re-syncs the mirrors. The effect only propagates
+  // so the status push re-syncs both mirrors. The effect only propagates
   // actual value flips — an optimistic flip that failed and rolled back is
   // never re-overwritten by a stale snapshot.
   createEffect(() => {
-    const deviceSiren = props.status?.()?.sirenActive
-    if (deviceSiren != null) setSirenOn(deviceSiren)
-  })
-  createEffect(() => {
-    const deviceTorch = props.status?.()?.torchOn
-    if (deviceTorch != null) setTorchOn(deviceTorch)
+    const device = props.status?.()
+    if (device?.sirenActive != null) setSirenOn(device.sirenActive)
+    if (device?.torchOn != null) setTorchOn(device.torchOn)
   })
 
   // The one busy-guard choreography every action button here shares: a

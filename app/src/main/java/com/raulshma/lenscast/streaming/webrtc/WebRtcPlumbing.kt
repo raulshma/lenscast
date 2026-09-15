@@ -75,91 +75,68 @@ internal object WebRtcPlumbing {
     }
 
     /** Runs [PeerConnection.createOffer], returning the description or failing with its error text. */
-    fun awaitCreateOffer(pc: PeerConnection, label: String): SessionDescription {
-        val latch = CountDownLatch(1)
-        val step = SdpStep()
-        pc.createOffer(object : SdpObserver {
-            override fun onCreateSuccess(sdp: SessionDescription) {
-                step.description = sdp
-                latch.countDown()
-            }
-
-            override fun onSetSuccess() = Unit // unreachable from createOffer
-            override fun onCreateFailure(error: String?) {
-                step.failure = error ?: "unknown error"
-                latch.countDown()
-            }
-
-            override fun onSetFailure(error: String?) = Unit // unreachable from createOffer
-        }, MediaConstraints())
-        return awaitSdpLatch(latch, step, label)
-    }
+    fun awaitCreateOffer(pc: PeerConnection, label: String): SessionDescription =
+        // expectDescription = true makes the null branch unreachable — the helper throws first.
+        awaitSdpStep(label, "step", SdpStep(), expectDescription = true) { pc.createOffer(it, MediaConstraints()) }!!
 
     /** Runs [PeerConnection.createAnswer], returning the description or failing with its error text. */
-    fun awaitCreateAnswer(pc: PeerConnection, label: String): SessionDescription {
-        val latch = CountDownLatch(1)
-        val step = SdpStep()
-        pc.createAnswer(object : SdpObserver {
-            override fun onCreateSuccess(sdp: SessionDescription) {
-                step.description = sdp
-                latch.countDown()
-            }
-
-            override fun onSetSuccess() = Unit // unreachable from createAnswer
-            override fun onCreateFailure(error: String?) {
-                step.failure = error ?: "unknown error"
-                latch.countDown()
-            }
-
-            override fun onSetFailure(error: String?) = Unit // unreachable from createAnswer
-        }, MediaConstraints())
-        return awaitSdpLatch(latch, step, label)
-    }
+    fun awaitCreateAnswer(pc: PeerConnection, label: String): SessionDescription =
+        awaitSdpStep(label, "step", SdpStep(), expectDescription = true) { pc.createAnswer(it, MediaConstraints()) }!!
 
     /** Runs a set(Local|Remote)Description, failing with its error text. */
     fun awaitSetDescription(pc: PeerConnection, local: Boolean, description: SessionDescription, label: String) {
+        awaitSdpStep(label, "set", SdpStep(), expectDescription = false) {
+            if (local) pc.setLocalDescription(it, description) else pc.setRemoteDescription(it, description)
+        }
+    }
+
+    /**
+     * The one observer shape every SDP step shares: the callback thread only
+     * writes [SdpStep] fields and opens the latch, and the caller reads them
+     * only after the bounded wait — so a create and a set cannot drift into
+     * different visibility disciplines. A create must produce a description
+     * ([expectDescription]); a set legitimately succeeds without one.
+     */
+    private fun awaitSdpStep(
+        label: String,
+        action: String,
+        step: SdpStep,
+        expectDescription: Boolean,
+        invoke: (SdpObserver) -> Unit,
+    ): SessionDescription? {
         val latch = CountDownLatch(1)
-        var failure: String? = null
         val observer = object : SdpObserver {
-            override fun onCreateSuccess(sdp: SessionDescription) = Unit // unreachable from set
+            override fun onCreateSuccess(sdp: SessionDescription) {
+                step.description = sdp
+                latch.countDown()
+            }
+
             override fun onSetSuccess() = latch.countDown()
-            override fun onCreateFailure(error: String?) = Unit // unreachable from set
+            override fun onCreateFailure(error: String?) {
+                step.failure = error ?: "unknown error"
+                latch.countDown()
+            }
+
             override fun onSetFailure(error: String?) {
-                failure = error
+                step.failure = error ?: "unknown error"
                 latch.countDown()
             }
         }
-        if (local) {
-            pc.setLocalDescription(observer, description)
-        } else {
-            pc.setRemoteDescription(observer, description)
-        }
+        invoke(observer)
         try {
             if (!latch.await(SDP_TIMEOUT_MS, TimeUnit.MILLISECONDS)) {
-                throw WebrtcSdpException("$label SDP set did not complete in time")
+                throw WebrtcSdpException("$label SDP $action did not complete in time")
             }
         } catch (_: InterruptedException) {
             Thread.currentThread().interrupt()
-            throw WebrtcSdpException("$label SDP set interrupted")
+            throw WebrtcSdpException("$label SDP $action interrupted")
         }
-        failure?.let { throw WebrtcSdpException("$label SDP set failed: $it") }
-    }
-
-    private fun awaitSdpLatch(
-        latch: CountDownLatch,
-        step: SdpStep,
-        label: String,
-    ): SessionDescription {
-        try {
-            if (!latch.await(SDP_TIMEOUT_MS, TimeUnit.MILLISECONDS)) {
-                throw WebrtcSdpException("$label SDP step did not complete in time")
-            }
-        } catch (_: InterruptedException) {
-            Thread.currentThread().interrupt()
-            throw WebrtcSdpException("$label SDP step interrupted")
+        step.failure?.let { throw WebrtcSdpException("$label SDP $action failed: $it") }
+        val description = step.description
+        if (description == null && expectDescription) {
+            throw WebrtcSdpException("$label SDP step failed without a reason")
         }
-        step.failure?.let { throw WebrtcSdpException("$label SDP step failed: $it") }
-        return step.description ?: throw WebrtcSdpException("$label SDP step failed without a reason")
+        return description
     }
 }
 

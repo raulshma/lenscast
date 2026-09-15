@@ -457,7 +457,7 @@ export default function MultiCamCard() {
   }
 
   /**
-   * POST /api/camera/capture on every camera with its credentials. The
+   * POST /api/capture on every camera with its credentials. The
    * readable rung (cors mode) only succeeds against servers that send CORS
    * headers — today's builds don't, so the rejection falls back to an
    * opaque no-cors fire (the request still reaches the camera and triggers

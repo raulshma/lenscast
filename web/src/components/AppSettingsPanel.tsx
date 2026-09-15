@@ -115,17 +115,13 @@ export default function AppSettingsPanel(props: Props) {
             <span>{t('webstream.adaptiveDesc')}</span>
           </div>
 
-          <div class="field-row field-row-toggle" style={{ 'margin-top': '10px' }}>
-            <span class="field-label">{t('webstream.adaptiveEncoded')}</span>
-            <label class="toggle-switch" for="adaptive-encoded-toggle-app">
-              <input
-                id="adaptive-encoded-toggle-app"
-                type="checkbox"
-                checked={s()?.streaming?.adaptiveEncodedBitrateEnabled ?? API_DEFAULTS.adaptiveEncodedBitrateEnabled}
-                onChange={() => props.updateStreamingAndSave({ adaptiveEncodedBitrateEnabled: !(s()?.streaming?.adaptiveEncodedBitrateEnabled ?? API_DEFAULTS.adaptiveEncodedBitrateEnabled) })}
-              />
-              <span class="toggle-slider" />
-            </label>
+          <div style={{ 'margin-top': '10px' }}>
+            <ToggleRow
+              id="adaptive-encoded-toggle-app"
+              label={t('webstream.adaptiveEncoded')}
+              checked={s()?.streaming?.adaptiveEncodedBitrateEnabled ?? API_DEFAULTS.adaptiveEncodedBitrateEnabled}
+              onToggle={() => props.updateStreamingAndSave({ adaptiveEncodedBitrateEnabled: !(s()?.streaming?.adaptiveEncodedBitrateEnabled ?? API_DEFAULTS.adaptiveEncodedBitrateEnabled) })}
+            />
           </div>
           <div class="status-banner status-banner-info stream-mode-hint" role="note" aria-live="polite">
             <span class="status-banner-dot" aria-hidden="true" />
@@ -286,18 +282,12 @@ export default function AppSettingsPanel(props: Props) {
         </div>
 
         <div class="field-group">
-          <div class="field-row field-row-toggle">
-            <span class="field-label">{t('webstream.encryptCaptures')}</span>
-            <label class="toggle-switch" for="media-encryption-toggle-app">
-              <input
-                id="media-encryption-toggle-app"
-                type="checkbox"
-                checked={s()?.streaming?.mediaEncryptionEnabled ?? API_DEFAULTS.mediaEncryptionEnabled}
-                onChange={() => props.updateStreamingAndSave({ mediaEncryptionEnabled: !(s()?.streaming?.mediaEncryptionEnabled ?? API_DEFAULTS.mediaEncryptionEnabled) })}
-              />
-              <span class="toggle-slider" />
-            </label>
-          </div>
+          <ToggleRow
+            id="media-encryption-toggle-app"
+            label={t('webstream.encryptCaptures')}
+            checked={s()?.streaming?.mediaEncryptionEnabled ?? API_DEFAULTS.mediaEncryptionEnabled}
+            onToggle={() => props.updateStreamingAndSave({ mediaEncryptionEnabled: !(s()?.streaming?.mediaEncryptionEnabled ?? API_DEFAULTS.mediaEncryptionEnabled) })}
+          />
           <div class="status-banner status-banner-info stream-mode-hint" role="note" aria-live="polite">
             <span class="status-banner-dot" aria-hidden="true" />
             <span>{t('webstream.encryptCapturesDesc')}</span>
@@ -363,18 +353,12 @@ export default function AppSettingsPanel(props: Props) {
 
         <Show when={s()?.streaming?.rtspEnabled}>
           <div class="field-group">
-            <div class="field-row field-row-toggle">
-              <span class="field-label">{t('rtsp.subStream')}</span>
-              <label class="toggle-switch" for="rtsp-substream-toggle-app">
-                <input
-                  id="rtsp-substream-toggle-app"
-                  type="checkbox"
-                  checked={s()?.streaming?.rtspSubStreamEnabled ?? API_DEFAULTS.rtspSubStreamEnabled}
-                  onChange={() => props.updateStreamingAndSave({ rtspSubStreamEnabled: !(s()?.streaming?.rtspSubStreamEnabled ?? API_DEFAULTS.rtspSubStreamEnabled) })}
-                />
-                <span class="toggle-slider" />
-              </label>
-            </div>
+            <ToggleRow
+              id="rtsp-substream-toggle-app"
+              label={t('rtsp.subStream')}
+              checked={s()?.streaming?.rtspSubStreamEnabled ?? API_DEFAULTS.rtspSubStreamEnabled}
+              onToggle={() => props.updateStreamingAndSave({ rtspSubStreamEnabled: !(s()?.streaming?.rtspSubStreamEnabled ?? API_DEFAULTS.rtspSubStreamEnabled) })}
+            />
             <div class="status-banner status-banner-info stream-mode-hint" role="note" aria-live="polite">
               <span class="status-banner-dot" aria-hidden="true" />
               <span>{t('rtsp.subStreamDesc')}</span>
