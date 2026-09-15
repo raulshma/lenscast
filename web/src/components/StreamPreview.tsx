@@ -122,6 +122,15 @@ function flashLater(set: (v: string | ((prev: string) => string)) => void, ms: n
   }
 }
 
+/**
+ * Why a talk hold cannot start: the browser context is insecure (no mic API)
+ * or the mic permission was denied. The button handler turns it into the
+ * visible status line instead of the old silent no-op.
+ */
+class TalkUnavailableError extends Error {
+  constructor(public readonly reason: 'insecure' | 'mic') { super(reason) }
+}
+
 export default function StreamPreview(props: Props) {
   const st = () => props.status()
   const isActive = () => !!st()?.streaming?.isActive
@@ -277,9 +286,10 @@ export default function StreamPreview(props: Props) {
   }
 
   // Torch truth lives on the device: the status push is authoritative, and
-  // the local optimistic flip below only bridges the round-trip. This effect
-  // re-runs only when the status value itself changes, so a failed optimistic
-  // flip (rolled back locally) is never re-overwritten by a stale snapshot.
+  // the local optimistic flip below only bridges the round-trip. Every
+  // snapshot re-syncs the mirror, so a snapshot that raced the flip can
+  // momentarily revert it; the next snapshot settles it on the device's
+  // answer (which is also how a failed action self-corrects).
   createEffect(() => {
     const deviceTorch = st()?.torchOn
     if (deviceTorch != null) setTorchOn(deviceTorch)
@@ -378,10 +388,6 @@ export default function StreamPreview(props: Props) {
   // unreachable, chunks detour to the HTTP one-shot uplink in serialized
   // ~600 ms batches (see lib/pttFallback), so talkback keeps working through
   // a dead sidecar.
-  class TalkUnavailableError extends Error {
-    constructor(public readonly reason: 'insecure' | 'mic') { super(reason) }
-  }
-
   let pttCtx: AudioContext | null = null
   let pttSocket: WebSocket | null = null
   let pttStream: MediaStream | null = null

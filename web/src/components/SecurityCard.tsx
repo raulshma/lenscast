@@ -9,7 +9,7 @@ import { t } from '../lib/i18n'
 
 interface Props {
   settings: () => AllSettings | null
-  status?: () => DeviceStatus | null
+  status: () => DeviceStatus | null
   updateStreamingAndSave: (patch: Partial<AllSettings['streaming']>) => void
   updateStreamingDebounced: (patch: Partial<AllSettings['streaming']>) => void
 }
@@ -60,11 +60,12 @@ export default function SecurityCard(props: Props) {
 
   // Deterrence truth lives on the device: auto-deterrence (or another tab,
   // or the phone itself) can flip siren/torch without this card's involvement,
-  // so the status push re-syncs both mirrors. The effect only propagates
-  // actual value flips — an optimistic flip that failed and rolled back is
-  // never re-overwritten by a stale snapshot.
+  // so every status snapshot re-syncs both mirrors unconditionally. A
+  // snapshot that raced an optimistic flip can momentarily revert it; the
+  // next snapshot (or the action's own .then) settles the mirror on the
+  // device's answer.
   createEffect(() => {
-    const device = props.status?.()
+    const device = props.status()
     if (device?.sirenActive != null) setSirenOn(device.sirenActive)
     if (device?.torchOn != null) setTorchOn(device.torchOn)
   })

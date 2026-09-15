@@ -76,19 +76,31 @@ internal object WebRtcPlumbing {
 
     /** Runs [PeerConnection.createOffer], returning the description or failing with its error text. */
     fun awaitCreateOffer(pc: PeerConnection, label: String): SessionDescription =
-        // expectDescription = true makes the null branch unreachable — the helper throws first.
-        awaitSdpStep(label, SdpStep(), expectDescription = true) { pc.createOffer(it, MediaConstraints()) }!!
+        awaitSdpCreate(label) { pc.createOffer(it, MediaConstraints()) }
 
     /** Runs [PeerConnection.createAnswer], returning the description or failing with its error text. */
     fun awaitCreateAnswer(pc: PeerConnection, label: String): SessionDescription =
-        awaitSdpStep(label, SdpStep(), expectDescription = true) { pc.createAnswer(it, MediaConstraints()) }!!
+        awaitSdpCreate(label) { pc.createAnswer(it, MediaConstraints()) }
 
     /** Runs a set(Local|Remote)Description, failing with its error text. */
     fun awaitSetDescription(pc: PeerConnection, local: Boolean, description: SessionDescription, label: String) {
-        awaitSdpStep(label, SdpStep(), expectDescription = false) {
+        awaitSdpSet(label) {
             if (local) pc.setLocalDescription(it, description) else pc.setRemoteDescription(it, description)
         }
     }
+
+    /**
+     * A create step: libwebrtc answers with the description or calls a
+     * failure callback — the core throws on every failure *including* a
+     * missing description, so the null branch here only satisfies the type.
+     */
+    private fun awaitSdpCreate(label: String, invoke: (SdpObserver) -> Unit): SessionDescription =
+        awaitSdpCore(label, expectDescription = true, invoke)
+            ?: throw WebrtcSdpException("$label SDP create produced no description")
+
+    /** A set step: legitimately succeeds with no description to return. */
+    private fun awaitSdpSet(label: String, invoke: (SdpObserver) -> Unit): SessionDescription? =
+        awaitSdpCore(label, expectDescription = false, invoke)
 
     /**
      * The one observer shape every SDP step shares: the callback thread only
@@ -101,12 +113,12 @@ internal object WebRtcPlumbing {
      * set path's silent success on a null text was the "failed without a
      * reason" bug wearing a different hat.
      */
-    private fun awaitSdpStep(
+    private fun awaitSdpCore(
         label: String,
-        step: SdpStep,
         expectDescription: Boolean,
         invoke: (SdpObserver) -> Unit,
     ): SessionDescription? {
+        val step = SdpStep()
         // The libwebrtc verb this step invokes — createOffer/createAnswer vs
         // setDescription — so the error strings name the operation that failed.
         val action = if (expectDescription) "create" else "set"
