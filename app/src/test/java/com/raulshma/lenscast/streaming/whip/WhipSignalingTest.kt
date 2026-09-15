@@ -255,4 +255,19 @@ class WhipSignalingTest {
         assertFalse(out.contains("a=candidate\n"))
         assertTrue(out.contains("\r\n"))
     }
+
+    @Test
+    fun `trailing crlf sdp never grows a blank line before the candidates`() {
+        // libwebrtc's local description ends with a CRLF; the injected
+        // candidates must replace that position, not trail a blank line —
+        // browsers reject an SDP containing one empty line outright.
+        val candidate = "a=candidate:1 1 udp 1 10.0.0.1 5000 typ host"
+        val withTrailing = offer + "\r\n"
+        val out = WhipOfferBuilder.injectCandidates(withTrailing, listOf(candidate))
+        // A blank line between content lines is what browsers reject; the one
+        // empty element split() yields from the single trailing CRLF is fine.
+        assertFalse(out.split("\r\n").dropLast(1).any { it.isBlank() })
+        assertTrue(out.endsWith(candidate + "\r\n"))
+        assertFalse(out.endsWith("\r\n\r\n"))
+    }
 }

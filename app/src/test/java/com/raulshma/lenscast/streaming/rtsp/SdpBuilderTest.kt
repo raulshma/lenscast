@@ -57,7 +57,7 @@ class SdpBuilderTest {
             "a=rtpmap:96 H264/90000",
             "a=fmtp:96 packetization-mode=1;profile-level-id=42c01f;" +
                 "sprop-parameter-sets=${b64(sps)},${b64(pps)}",
-            "a=control:stream",
+            "a=control:trackID=0",
         )
         val actual = sdp.trimEnd('\n').split('\n')
         assertEquals(expected, actual)
@@ -166,7 +166,7 @@ class SdpBuilderTest {
             "b=AS:2000",
             "a=rtpmap:96 H265/90000",
             "a=fmtp:96 sprop-vps=${b64(vps)};sprop-sps=${b64(h265Sps)};sprop-pps=${b64(h265Pps)}",
-            "a=control:stream",
+            "a=control:trackID=0",
         )
         val actual = sdp.trimEnd('\n').split('\n')
         val videoStart = actual.indexOf("m=video 0 RTP/AVP 96")

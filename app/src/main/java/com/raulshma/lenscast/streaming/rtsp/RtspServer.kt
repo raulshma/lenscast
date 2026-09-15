@@ -675,6 +675,9 @@ class RtspServer(
 
             val host = advertisedHost()
             val addressType = RtspAddressing.networkType(host)
+            // The Content-Base is what distinguishes the two streams: the
+            // media-section control is always the track-level trackID=0 (see
+            // SdpBuilder), resolved against this base by every client.
             val controlPath = if (isSub) RtspUriPolicy.SUB_STREAM_PATH else RtspUriPolicy.DEFAULT_STREAM_PATH
             val sdp = if (isSub) {
                 // The sub-stream's own video-only SDP: its encoder's parameter
@@ -691,7 +694,6 @@ class RtspServer(
                     audioSpecificConfig = null,
                     codec = RtspVideoCodec.H264,
                     vps = null,
-                    controlPath = controlPath,
                     addressType = addressType,
                 )
             } else {
@@ -707,7 +709,6 @@ class RtspServer(
                     audioSpecificConfig = encodedSource.audioSpecificConfig,
                     codec = encodedSource.videoCodec,
                     vps = encodedSource.vps,
-                    controlPath = controlPath,
                     addressType = addressType,
                 )
             }

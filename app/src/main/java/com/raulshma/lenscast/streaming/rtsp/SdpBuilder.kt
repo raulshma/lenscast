@@ -9,11 +9,16 @@ import com.raulshma.lenscast.core.Base64Codec
  * details; everything else — the fmtp line, the AAC config hex with its
  * [AacFormat] fallback, the line order — is owned here so it is JVM-tested.
  *
- * [controlPath] is the aggregate `a=control:` target: the main stream's path
- * by default, the sub-stream's (`sub`) for the /sub DESCRIBE — one media
- * section per SDP either way, so /sub is a separate RTSP URL, not a second
- * MediaDescription inside the main SDP. [addressType] (`IP4`/`IP6`) selects
- * the origin/connection address family for the advertised host.
+ * [RtspUriPolicy.DEFAULT_STREAM_PATH] is never used as a media-section
+ * control target: a relative control resolves against the DESCRIBE response's
+ * Content-Base (`rtsp://host:port/stream/`), so `a=control:stream` resolved
+ * to `/stream/stream` — a URL the SETUP grammar rejects with 404, which
+ * every RFC 2326 §C.1.1 client (VLC/live555, FFmpeg) hit before any media
+ * flowed. Both streams' video track therefore advertises the track-level
+ * `trackID=0` (the audio's `trackID=1` twin), and the stream distinction
+ * lives entirely in the Content-Base the server attaches. [addressType]
+ * (`IP4`/`IP6`) selects the origin/connection address family for the
+ * advertised host.
  */
 object SdpBuilder {
 
@@ -29,7 +34,6 @@ object SdpBuilder {
         audioSpecificConfig: ByteArray?,
         codec: RtspVideoCodec = RtspVideoCodec.H264,
         vps: ByteArray? = null,
-        controlPath: String = RtspUriPolicy.DEFAULT_STREAM_PATH,
         addressType: String = "IP4",
     ): String {
         val spsBase64 = sps?.let { Base64Codec.encode(it) }
@@ -73,7 +77,7 @@ object SdpBuilder {
             for (line in videoLines) {
                 appendLine(line)
             }
-            appendLine("a=control:$controlPath")
+            appendLine("a=control:trackID=0")
 
             if (audioEnabled) {
                 // No live ASC yet (DESCRIBE raced the encoder start): derive the

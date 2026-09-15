@@ -565,6 +565,7 @@ html, body {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
+  flex-wrap: wrap;
   flex-shrink: 0;
 }
 
@@ -572,6 +573,7 @@ html, body {
   display: flex;
   align-items: center;
   gap: 6px;
+  flex-wrap: wrap;
 }
 
 .preview-actions-right {
@@ -717,12 +719,65 @@ html, body {
   border-radius: var(--lc-radius-sm);
   background: var(--lc-surface);
   border: 1px solid var(--lc-border);
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .stream-url-bar code {
   font-family: var(--lc-mono);
   font-size: 11px;
   color: var(--lc-accent);
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.url-copy-btn {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: none;
+  border-radius: var(--lc-radius-sm);
+  background: transparent;
+  color: var(--lc-text-muted);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.url-copy-btn svg {
+  width: 14px;
+  height: 14px;
+}
+
+.url-copy-btn:hover {
+  color: var(--lc-text);
+  background: var(--lc-surface-3);
+}
+
+.url-copy-btn-copied,
+.url-copy-btn-copied:hover {
+  color: var(--lc-success);
+}
+
+/* Toggled action buttons (torch on, talkback live) */
+.action-btn-toggled {
+  color: var(--lc-warning);
+  border-color: rgba(251, 191, 36, 0.4);
+  background: var(--lc-warning-bg);
+}
+
+.action-btn-talking {
+  color: var(--lc-danger);
+  border-color: rgba(244, 63, 94, 0.4);
+  background: var(--lc-danger-bg);
+  animation: recording-pulse 1.5s ease-in-out infinite;
 }
 
 /* ═══════════════════════════════════════════════

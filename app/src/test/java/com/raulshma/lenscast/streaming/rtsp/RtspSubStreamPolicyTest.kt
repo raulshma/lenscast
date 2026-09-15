@@ -70,13 +70,17 @@ class RtspSubStreamPolicyTest {
         audioSpecificConfig = null,
         codec = RtspVideoCodec.H264,
         vps = null,
-        controlPath = RtspUriPolicy.SUB_STREAM_PATH,
     )
 
     @Test
-    fun `sub SDP anchors control at the sub path`() {
-        assertTrue(subSdp().contains("a=control:sub"))
+    fun `sub SDP advertises the track-level control the Content-Base anchors at sub`() {
+        // The media control is track-level for BOTH streams (see SdpBuilder);
+        // the /sub vs /stream distinction is the DESCRIBE Content-Base, which
+        // resolves this line to /sub/trackID=0 — a URI the sub grammar takes.
+        assertTrue(subSdp().contains("a=control:trackID=0"))
+        assertFalse(subSdp().contains("a=control:sub"))
         assertFalse(subSdp().contains("a=control:stream"))
+        assertTrue(RtspUriPolicy.isSubControlUri("/sub/trackID=0"))
     }
 
     @Test
@@ -94,7 +98,7 @@ class RtspSubStreamPolicyTest {
     }
 
     @Test
-    fun `main SDP keeps its aggregate control path by default`() {
+    fun `main SDP advertises the same track-level control`() {
         val sdp = SdpBuilder.build(
             sessionId = "1_abc",
             ip = "192.168.1.10",
@@ -106,8 +110,9 @@ class RtspSubStreamPolicyTest {
             pps = null,
             audioSpecificConfig = null,
         )
-        assertTrue(sdp.contains("a=control:stream"))
+        assertTrue(sdp.contains("a=control:trackID=0"))
         assertFalse(sdp.contains("a=control:sub"))
+        assertTrue(RtspUriPolicy.resolveTrackId("/stream/trackID=0") == 0)
     }
 
     // ── fixed sub-stream constants ──

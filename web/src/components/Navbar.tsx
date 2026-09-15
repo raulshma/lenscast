@@ -136,16 +136,13 @@ export default function Navbar(props: Props) {
           </For>
         </select>
 
-        {/* Save indicator */}
-        <div class="save-indicator" classList={{ 'save-indicator-active': props.saving() }}>
-          <Show when={props.saving()} fallback={
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M5 13l4 4L19 7" />
-            </svg>
-          }>
+        {/* Save indicator — only meaningful while a save is in flight; an
+            always-on checkmark is just navbar noise. */}
+        <Show when={props.saving()}>
+          <div class="save-indicator save-indicator-active">
             <span class="save-spinner" />
-          </Show>
-        </div>
+          </div>
+        </Show>
 
         {/* Logout */}
         <Show when={props.authRequired()}>

@@ -61,7 +61,7 @@ export default function RecordingCard(props: Props) {
       </Show>
 
       <Show when={props.isScheduled()}>
-        <div class="status-banner status-banner-warning" style={{ background: '#3d3014', color: '#ffd54f', border: '1px solid rgba(255, 213, 79, 0.2)' }}>
+        <div class="status-banner status-banner-warning">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style={{ "flex-shrink": 0, width: '16px', height: '16px' }}>
             <circle cx="12" cy="12" r="10" />
             <path d="M12 6v6l4 2" />
@@ -172,7 +172,7 @@ export default function RecordingCard(props: Props) {
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <rect x="6" y="6" width="12" height="12" rx="2" />
             </svg>
-            {props.isScheduled() ? t('recording.stopScheduled') : t('recording.stop')}
+            {props.isRecording() ? t('recording.stop') : t('recording.stopScheduled')}
           </button>
         ) : (
           <button id="start-recording-btn" class="card-btn card-btn-primary" onClick={handleStartAction}>

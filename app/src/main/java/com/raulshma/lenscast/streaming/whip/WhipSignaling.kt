@@ -149,7 +149,12 @@ object WhipOfferBuilder {
             .filter { line -> sdp.lineSequence().none { it.trim() == line } }
         if (missing.isEmpty()) return sdp
 
-        val lines = sdp.split("\r\n", "\n").toMutableList()
+        // libwebrtc's description ends with a CRLF, which split() turns into a
+        // trailing empty element; appending candidates after it would strand
+        // them behind a blank line — browsers reject the whole SDP over one
+        // empty line ("Invalid SDP line"), so trailing blanks go and the
+        // rebuilt body ends with exactly one CRLF.
+        val lines = sdp.split("\r\n", "\n").dropLastWhile { it.isBlank() }
         var sectionStart = -1
         val out = mutableListOf<String>()
         for (line in lines) {
@@ -160,6 +165,6 @@ object WhipOfferBuilder {
             out.add(line)
         }
         if (sectionStart >= 0) out.addAll(missing)
-        return out.joinToString("\r\n")
+        return out.joinToString("\r\n") + "\r\n"
     }
 }

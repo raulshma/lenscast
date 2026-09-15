@@ -17,6 +17,7 @@ import WatchdogCard from './WatchdogCard'
 import type { LensInfo } from '../types'
 
 interface Props {
+  children?: import('solid-js').JSX.Element
   settings: () => AllSettings | null
   status: () => DeviceStatus | null
   lenses: () => LensInfo[]
@@ -141,6 +142,12 @@ export default function SettingsPanel(props: Props) {
             updateStreamingDebounced={props.updateStreamingDebounced}
           />
         </Show>
+      </Show>
+
+      {/* App Tab Content — the app-settings cards ride the same single
+          settings column so both tabs share one layout and one scroll. */}
+      <Show when={props.activeTab() === 'app'}>
+        {props.children}
       </Show>
 
       {/* Reset */}

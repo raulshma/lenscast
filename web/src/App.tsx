@@ -184,9 +184,7 @@ function App() {
                   handleStopRecording={state.handleStopRecording}
                   activeTab={state.activeTab}
                   setActiveTab={state.setActiveTab}
-                />
-
-                <Show when={state.activeTab() === 'app'}>
+                >
                   <AppSettingsPanel
                     settings={state.settings}
                     status={state.status}
@@ -203,7 +201,7 @@ function App() {
                   <ClientsCard readOnly={state.isViewer} />
                   <MultiCamCard />
                   <ShareCard />
-                </Show>
+                </SettingsPanel>
               </main>
 
               <Show when={state.showGallery()}>

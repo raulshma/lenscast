@@ -112,10 +112,15 @@ export default function StreamPreview(props: Props) {
       }
     },
   })
+  // The rung verdict must be a memo, not an inline read: webActive() tracks
+  // the whole status signal, which the SSE push replaces every second — an
+  // ungated effect would re-run start() on each tick, and start()'s
+  // leading stop() would tear down the handshake before it can ever play.
+  // The memo absorbs the per-tick re-evaluation and only propagates flips.
+  const whepWanted = createMemo(() => playerMode() === 'whep' && props.previewVisible() && webActive())
   createEffect(() => {
     const el = whepVideo()
-    const active = props.previewVisible() && webActive()
-    if (playerMode() === 'whep' && active && el) {
+    if (whepWanted() && el) {
       void whep.start(el)
     } else {
       whep.stop()
@@ -132,10 +137,13 @@ export default function StreamPreview(props: Props) {
       }
     },
   })
+  // The same memo gate: an ungated effect opened a fresh WebSocket per
+  // status tick (the old one kept feeding the canvas, so it only leaked
+  // sockets instead of killing the rung — still wrong).
+  const h264Wanted = createMemo(() => playerMode() === 'h264' && props.previewVisible() && webActive())
   createEffect(() => {
     const target = h264Canvas()
-    const active = props.previewVisible() && webActive()
-    if (playerMode() === 'h264' && active && target) {
+    if (h264Wanted() && target) {
       h264.start(target)
     } else {
       h264.stop()
@@ -191,6 +199,32 @@ export default function StreamPreview(props: Props) {
   const [zoomRatio, setZoomRatio] = createSignal(1)
   const [torchOn, setTorchOn] = createSignal(false)
   const [talking, setTalking] = createSignal(false)
+
+  // ── URL copy: the bars exist to hand the stream link to another device,
+  // so a one-tap clipboard affordance with a brief "copied" state. ──
+  const [copiedUrl, setCopiedUrl] = createSignal<'' | 'web' | 'rtsp'>('')
+  let copiedResetTimer: ReturnType<typeof setTimeout> | null = null
+
+  async function copyUrl(which: 'web' | 'rtsp', url: string) {
+    try {
+      await navigator.clipboard.writeText(url)
+    } catch {
+      // Clipboard API needs a secure context; fall back to the hidden-input
+      // execCommand path so plain-HTTP LAN users still get one-tap copy.
+      const scratch = document.createElement('textarea')
+      scratch.value = url
+      scratch.style.position = 'fixed'
+      scratch.style.opacity = '0'
+      document.body.appendChild(scratch)
+      scratch.select()
+      try { document.execCommand('copy') } catch { }
+      document.body.removeChild(scratch)
+    }
+    setCopiedUrl(which)
+    if (copiedResetTimer) clearTimeout(copiedResetTimer)
+    copiedResetTimer = setTimeout(() => setCopiedUrl(''), 2000)
+  }
+  onCleanup(() => { if (copiedResetTimer) clearTimeout(copiedResetTimer) })
 
   // Torch truth lives on the device: the status push is authoritative, and
   // the local optimistic flip below only bridges the round-trip. This effect
@@ -519,11 +553,12 @@ export default function StreamPreview(props: Props) {
           </div>
         </Show>
 
-        {/* Connection quality indicator */}
+        {/* Connection quality indicator — stacked below the LIVE badge when
+            that badge occupies the same top-right corner. */}
         <Show when={isActive() && props.previewVisible() && st()?.adaptiveBitrate?.enabled && st()?.connectionQuality}>
           <div style={{
             position: 'absolute',
-            top: '12px',
+            top: webActive() && props.previewVisible() ? '46px' : '12px',
             right: '12px',
             'z-index': '10',
           }}>
@@ -557,9 +592,14 @@ export default function StreamPreview(props: Props) {
           <button
             class="action-btn action-btn-ghost"
             onClick={() => setPlayerMode(cyclePlayerMode(playerMode()))}
-            title={t('preview.cyclePlayer')}
+            title={`${t('preview.playerTitle', { mode: playerMode().toUpperCase(), next: cyclePlayerMode(playerMode()).toUpperCase() })}`}
           >
-            <span>{cyclePlayerMode(playerMode()).toUpperCase()}</span>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <polygon points="12 2 2 7 12 12 22 7 12 2" />
+              <polyline points="2 17 12 22 22 17" />
+              <polyline points="2 12 12 17 22 12" />
+            </svg>
+            <span>{t('preview.playerLabel', { mode: playerMode().toUpperCase() })}</span>
           </button>
           <button
             id="capture-btn"
@@ -654,6 +694,7 @@ export default function StreamPreview(props: Props) {
             <input
               id="remote-zoom-slider"
               type="range"
+              aria-label={t('preview.remoteZoom')}
               min="1"
               max={String(zoomMax())}
               step="0.5"
@@ -672,6 +713,8 @@ export default function StreamPreview(props: Props) {
 
           <button
             class="action-btn action-btn-ghost"
+            classList={{ 'action-btn-toggled': torchOn() }}
+            aria-pressed={torchOn()}
             onClick={async () => {
               const next = !torchOn()
               setTorchOn(next)
@@ -684,11 +727,16 @@ export default function StreamPreview(props: Props) {
             }}
             title={t('preview.torchTitle')}
           >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M8 2h8l-1 7h3L10 22l2-9H7l1-11z" />
+            </svg>
             <span>{torchOn() ? t('preview.torchOn') : t('preview.torch')}</span>
           </button>
 
           <button
             class="action-btn action-btn-ghost"
+            classList={{ 'action-btn-talking': talking() }}
+            aria-pressed={talking()}
             onPointerDown={async () => {
               setTalking(true)
               try {
@@ -702,6 +750,10 @@ export default function StreamPreview(props: Props) {
             onPointerLeave={() => { if (talking()) void stopPtt() }}
             title={t('preview.talkTitle')}
           >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z" />
+              <path d="M19 10v2a7 7 0 01-14 0v-2" />
+            </svg>
             <span>{talking() ? t('preview.talking') : t('preview.talk')}</span>
           </button>
         </div>
@@ -746,6 +798,25 @@ export default function StreamPreview(props: Props) {
       <Show when={webActive() && st()?.streaming?.url}>
         <div class="stream-url-bar">
           <code>{st()!.streaming.url}</code>
+          <button
+            type="button"
+            class="url-copy-btn"
+            classList={{ 'url-copy-btn-copied': copiedUrl() === 'web' }}
+            onClick={() => void copyUrl('web', st()!.streaming.url!)}
+            aria-label={copiedUrl() === 'web' ? t('preview.copied') : t('preview.copy')}
+            title={copiedUrl() === 'web' ? t('preview.copied') : t('preview.copy')}
+          >
+            <Show when={copiedUrl() === 'web'} fallback={
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="9" y="9" width="13" height="13" rx="2" />
+                <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" />
+              </svg>
+            }>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M20 6L9 17l-5-5" />
+              </svg>
+            </Show>
+          </button>
         </div>
       </Show>
 
@@ -753,6 +824,25 @@ export default function StreamPreview(props: Props) {
       <Show when={rtspActive() && st()?.streaming?.rtspUrl}>
         <div class="stream-url-bar">
           <code>{st()!.streaming.rtspUrl}</code>
+          <button
+            type="button"
+            class="url-copy-btn"
+            classList={{ 'url-copy-btn-copied': copiedUrl() === 'rtsp' }}
+            onClick={() => void copyUrl('rtsp', st()!.streaming.rtspUrl!)}
+            aria-label={copiedUrl() === 'rtsp' ? t('preview.copied') : t('preview.copy')}
+            title={copiedUrl() === 'rtsp' ? t('preview.copied') : t('preview.copy')}
+          >
+            <Show when={copiedUrl() === 'rtsp'} fallback={
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="9" y="9" width="13" height="13" rx="2" />
+                <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" />
+              </svg>
+            }>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M20 6L9 17l-5-5" />
+              </svg>
+            </Show>
+          </button>
         </div>
       </Show>
     </section>
