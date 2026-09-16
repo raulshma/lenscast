@@ -1,7 +1,9 @@
 Categories:
   - Multimedia
 License: GPL-3.0-only
-WebSite: https://github.com/raulshma/lenscast
+AuthorName: Rahul Sharma
+AuthorEmail: me@raulshma.xyz
+AuthorWebSite: https://raulshma.xyz
 SourceCode: https://github.com/raulshma/lenscast
 IssueTracker: https://github.com/raulshma/lenscast/issues
 Changelog: https://github.com/raulshma/lenscast/releases
