@@ -429,6 +429,8 @@
     <string name="detection_tamper">防破坏侦测（断电）</string>
     <string name="detection_push">Web 推送提醒</string>
     <string name="detection_push_description">向通过 Web 界面的 Web 推送卡片订阅的仪表盘发送加密推送通知——即使标签页关闭，浏览器也会显示它们（HTTPS 仪表盘模式）</string>
+    <string name="detection_push_vapid_subject">VAPID 联系方式（mailto: 或 https:）</string>
+    <string name="detection_push_vapid_subject_invalid">推送服务会拒绝非 mailto: 或 https: URI 的联系方式</string>
     <string name="detection_ml">物体检测 (ML)</string>
     <string name="detection_ml_description">在移动侦测之上运行 — 只有在画面中检测到人、宠物或车辆时才会触发警报</string>
     <string name="detection_alert_people">检测到人时警报</string>

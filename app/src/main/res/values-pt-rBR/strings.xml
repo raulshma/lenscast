@@ -433,6 +433,8 @@
     <string name="detection_tamper">Detecção de sabotagem (corte de energia)</string>
     <string name="detection_push">Alertas Web Push</string>
     <string name="detection_push_description">Envia notificações push criptografadas aos painéis inscritos pelo cartão Web Push da interface web — o navegador as exibe mesmo com a aba fechada (modo de painel HTTPS)</string>
+    <string name="detection_push_vapid_subject">Contato VAPID (mailto: ou https:)</string>
+    <string name="detection_push_vapid_subject_invalid">Os serviços de push rejeitam um contato que não é um URI mailto: ou https:</string>
     <string name="detection_ml">Detecção de objetos (ML)</string>
     <string name="detection_ml_description">Aplica-se sobre a detecção de movimento — alertas disparam somente quando uma pessoa, um animal de estimação ou um veículo é detectado no quadro</string>
     <string name="detection_alert_people">Alertar sobre pessoas</string>
