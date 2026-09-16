@@ -59,7 +59,11 @@ class RecordingClockTest {
             val clock = RecordingClock(state, scope, tickMs = 10L)
             withTimeout(2000) { clock.elapsedMs.first { it > 0 } }
             state.value = RecordingState.Idle
+            // Await both flows: the clock resets elapsedMs before
+            // elapsedSeconds, so asserting seconds off the ms gate alone
+            // can observe the stale value on a loaded runner.
             withTimeout(2000) { clock.elapsedMs.first { it == 0L } }
+            withTimeout(2000) { clock.elapsedSeconds.first { it == 0 } }
             assertEquals(0, clock.elapsedSeconds.value)
             Unit
         } finally {
