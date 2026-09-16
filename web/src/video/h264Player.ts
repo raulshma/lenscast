@@ -74,25 +74,43 @@ export function createH264Player(options: { onStatus?: (s: 'idle' | 'playing' | 
   }
 
   function configureDecoder(description: Uint8Array) {
+    // Feature-detect at use time, not just at ladder setup: a manual cycle
+    // (P key / player button) can land on this rung in a browser without
+    // WebCodecs, and an unguarded `new VideoDecoder` here threw inside the
+    // WS onmessage handler — uncaught, invisible to onStatus, and the rung
+    // wedged on a black canvas instead of falling down the ladder.
+    const DecoderCtor = (window as any).VideoDecoder
+    if (typeof DecoderCtor !== 'function') {
+      console.warn('H264 rung: VideoDecoder unavailable — falling back')
+      setStatus('error')
+      options.onStatus?.('error')
+      return
+    }
     try {
       decoder?.close()
     } catch { }
-    decoder = new (window as any).VideoDecoder({
-      output: (frame: any) => {
-        renderFrame(frame)
-        frame.close()
-      },
-      error: (e: any) => {
-        console.error('H264 decoder error:', e)
-        setStatus('error')
-        options.onStatus?.('error')
-      },
-    })
-    decoder.configure({
-      codec: 'avc1.640028',
-      description: description.slice().buffer,
-      optimizeForLatency: true,
-    })
+    try {
+      decoder = new DecoderCtor({
+        output: (frame: any) => {
+          renderFrame(frame)
+          frame.close()
+        },
+        error: (e: any) => {
+          console.error('H264 decoder error:', e)
+          setStatus('error')
+          options.onStatus?.('error')
+        },
+      })
+      decoder.configure({
+        codec: 'avc1.640028',
+        description: description.slice().buffer,
+        optimizeForLatency: true,
+      })
+    } catch (e) {
+      console.error('H264 decoder configure failed:', e)
+      setStatus('error')
+      options.onStatus?.('error')
+    }
   }
 
   function decodeFrame(avcc: Uint8Array, isKey: boolean) {
@@ -120,6 +138,14 @@ export function createH264Player(options: { onStatus?: (s: 'idle' | 'playing' | 
   }
 
   function start(targetCanvas: HTMLCanvasElement) {
+    // Same use-time guard at the rung's entry: without WebCodecs this rung
+    // can never play, so report the error immediately (caller demotes to
+    // MJPEG) instead of opening a socket that only delivers a black canvas.
+    if (!h264Supported()) {
+      setStatus('error')
+      options.onStatus?.('error')
+      return
+    }
     canvas = targetCanvas
     renderCtx = canvas.getContext('2d')
     const url = `${wsBaseUrl()}/ws/video`

@@ -125,12 +125,35 @@ class MediaResponder(
                 headers = HttpResult.NO_STORE_HEADERS,
             )
         } else {
-            HttpResult.plainText(404, "No frame available")
+            // No cached MJPEG frame (fresh server, no viewer connected yet):
+            // fall back to a live capture instead of 404-ing a snapshot that
+            // a fresh page load asked for before the first frame landed.
+            val result = runBlocking { capture.captureSnapshot(options.saveToDisk) }
+            when (result) {
+                is PhotoCaptureManager.SnapshotResult.Success -> HttpResult(
+                    statusCode = 200,
+                    mimeType = "image/jpeg",
+                    body = Bytes(result.data),
+                    headers = HttpResult.NO_STORE_HEADERS + (
+                        result.savedPath?.let { path ->
+                            mapOf("X-Saved-Path" to path)
+                        } ?: emptyMap()
+                        ),
+                )
+                is PhotoCaptureManager.SnapshotResult.Error -> HttpResult.plainText(
+                    404,
+                    "No frame available",
+                )
+            }
         }
     }
 
     fun serveHlsPlaylist(enabled: Boolean): HttpResult {
         if (!enabled) return HttpResult.streamingDisabled()
+        // Register demand before the cold-ring 503: the poll itself is the
+        // hlsRequested signal that restarts the shared encoders, so the next
+        // polls find a filling ring instead of deadlocking on 503 forever.
+        hlsSegments.noteRequest()
         if (!hlsSegments.hasSegments()) {
             return HttpResult.plainText(503, "HLS starting — try again in a few seconds")
         }

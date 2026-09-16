@@ -2,6 +2,7 @@ package com.raulshma.lenscast.streaming.web
 
 import com.raulshma.lenscast.core.AppJson
 import com.raulshma.lenscast.core.SirenPlayer
+import com.squareup.moshi.JsonClass
 import com.raulshma.lenscast.streaming.model.SuccessResponse
 
 /**
@@ -25,5 +26,9 @@ class DeterrenceWebHandler(private val sirenPlayer: SirenPlayer) {
         return successAdapter.toJson(SuccessResponse())
     }
 
+    // Codegen adapter required: the app's Moshi instance has no reflective
+    // fallback, so an un-annotated request type silently parses as null and
+    // every siren toggle answered success:false (found by dashboard E2E).
+    @JsonClass(generateAdapter = true)
     data class DeterrenceRequest(val siren: Boolean? = null)
 }

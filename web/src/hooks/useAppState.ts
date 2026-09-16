@@ -18,6 +18,10 @@ import type {
 
 /** Consecutive status-lane failures before the dashboard shows the connection-lost banner. */
 const CONNECTION_LOST_FAILURES = 3
+// The push lane's freshness bar: the server streams a status event every
+// second, so five seconds of silence (open socket or not) counts as a dead
+// lane and hands telemetry back to the poll ladder.
+const SSE_STALE_MS = 5_000
 
 export function useAppState() {
   // ── Auth ──
@@ -99,6 +103,21 @@ export function useAppState() {
     if (e?.status === 401) return true
     const msg = e?.message ?? ''
     return msg.includes('401') || msg.includes('Authentication required')
+  }
+
+  // Auth turning on mid-session (enabled from another device, a revoked or
+  // expired session) lands every API call in the 401 path. Demote to the
+  // sign-in screen, not just the authenticated flag: authRequired was set
+  // false at load (auth was off then), and the login screen renders only
+  // when authRequired && !authenticated.
+  function demoteToLogin() {
+    setAuthRequired(true)
+    setAuthenticated(false)
+    setSessionRole('admin')
+    setSettings(null)
+    setStatus(null)
+    setStatusFailures(0)
+    setSseConnected(false)
   }
 
   function isPageHidden() {
@@ -212,7 +231,7 @@ export function useAppState() {
       setError('')
     } catch (e: any) {
       if (isAuthError(e)) {
-        setAuthenticated(false)
+        demoteToLogin()
         return
       }
       setError(e.message)
@@ -226,7 +245,7 @@ export function useAppState() {
       setStatusFailures(0)
     } catch (e: any) {
       if (isAuthError(e)) {
-        setAuthenticated(false)
+        demoteToLogin()
         return
       }
       setStatusFailures((n) => n + 1)
@@ -238,7 +257,7 @@ export function useAppState() {
       const r = await api.getLenses()
       setLenses(r.lenses)
     } catch (e: any) {
-      if (isAuthError(e)) setAuthenticated(false)
+      if (isAuthError(e)) demoteToLogin()
     }
   }
 
@@ -517,9 +536,16 @@ export function useAppState() {
         } catch { }
       })
       // Feed the connection-lost banner: the stream counts as connected from
-      // open until its next error (EventSource reconnects on its own).
-      eventSource.onopen = () => setSseConnected(true)
+      // open until its next error (EventSource reconnects on its own) — and,
+      // critically, only while events actually arrive. A half-open socket
+      // (device yanked off the network without a TCP reset) keeps readyState
+      // OPEN forever; without the freshness check the push lane would stay
+      // "connected", the poll lane stay disarmed, and the dashboard sit on
+      // stale telemetry behind a stale LIVE badge. The server pushes a
+      // status event every second, so silence past SSE_STALE_MS means dead.
+      eventSource.onopen = () => { lastSseEventAt = Date.now(); setSseConnected(true) }
       eventSource.onerror = () => setSseConnected(false)
+      eventSource.addEventListener('status', () => { lastSseEventAt = Date.now() })
       onCleanup(() => eventSource?.close())
     } catch {
       eventSource = null
@@ -546,11 +572,17 @@ export function useAppState() {
       tickMs: 1000,
     })
 
-    // Track SSE liveness with a small grace: a closed stream re-arms the lane.
+    // Track SSE liveness with a small grace: a closed stream re-arms the
+    // lane, and so does an open-but-silent one. Runs once per ladder tick
+    // (1 s) and publishes the verdict into sseConnected so the poll-lane
+    // gate and the connection-lost banner can never disagree.
     let sseAliveAt = 0
+    let lastSseEventAt = 0
     function sseHealthChecker(): boolean {
       if (eventSource && eventSource.readyState === EventSource.OPEN) sseAliveAt = Date.now()
-      return Date.now() - sseAliveAt < 5_000
+      const healthy = Date.now() - sseAliveAt < 5_000 && Date.now() - lastSseEventAt < SSE_STALE_MS
+      setSseConnected(healthy)
+      return healthy
     }
 
     ladder.start()

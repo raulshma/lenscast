@@ -41,6 +41,13 @@ class StreamingServer(
     // availability independent of the MJPEG pump's enabled flag, so HLS and
     // the h264 player mode work in every configuration (RTSP-only included).
     private val encodedStreamActive: () -> Boolean,
+    // True while the HLS ring is wanted (web streaming started it). The
+    // playlist route gates on this, NOT on [encodedStreamActive]: a stopped
+    // hub answering 503 before the request can register demand would
+    // deadlock the ring — the encoders stay off because nobody asks, and
+    // nobody can ask because the route answers 503. The request registers
+    // demand and the hub's frame-path refresh restarts the encoders.
+    private val hlsRingEnabled: () -> Boolean = { true },
     // Non-null when the server should serve HTTPS (self-signed cert owned
     // by TlsCertManager). Must be provided at construction: NanoHTTPD makes the
     // server socket secure before start().
@@ -205,7 +212,7 @@ class StreamingServer(
             // outside the JSON router like every non-JSON contract.
             uri.startsWith(WHEP_OFFER_PATH) -> serveWhep(method, uri, session)
             uri == "/hls/playlist.m3u8" -> translate(
-                mediaResponder.serveHlsPlaylist(encodedStreamActive()),
+                mediaResponder.serveHlsPlaylist(hlsRingEnabled()),
             )
             uri.startsWith("/hls/seg") && uri.endsWith(".ts") -> translate(
                 mediaResponder.serveHlsSegment(

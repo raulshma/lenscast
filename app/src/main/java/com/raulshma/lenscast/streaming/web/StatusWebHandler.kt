@@ -137,7 +137,13 @@ class StatusWebHandler(
         val isoRange = runCatching { cameraService.availableIsoRange.value }.getOrNull()
         return StatusSnapshotBuilder.CameraInputs(
             torchOn = runCatching { cameraService.isTorchOn() }.getOrDefault(false),
-            zoomRatio = settingsDataStore.settings.value.zoomRatio.toDouble(),
+            // Live zoomState first (a remote zoom is not a settings write);
+            // the persisted setting covers the pre-bind window so the status
+            // still answers.
+            zoomRatio = (
+                runCatching { cameraService.liveZoomRatio() }.getOrNull()
+                    ?: settingsDataStore.settings.value.zoomRatio
+                ).toDouble(),
             lensId = lens?.id,
             lensLabel = lens?.label,
             zoomMin = zoomRange?.start?.toDouble(),

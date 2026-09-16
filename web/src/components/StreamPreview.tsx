@@ -32,6 +32,8 @@ interface Props {
   handleStopRtspStream: () => void
   setPreviewVisible: (v: boolean) => void
   overlaySettings: () => StreamingSettings | null
+  /** True once both telemetry lanes are dead — the LIVE badge must not lie. */
+  connectionLost: () => boolean
 }
 
 // The talkback mic tap. AudioWorklet (the modern replacement for the
@@ -607,6 +609,15 @@ export default function StreamPreview(props: Props) {
             autoplay
             muted
             playsinline
+            onError={() => {
+              // The negotiated session can still be unplayable (track ends
+              // right away, decode failure): the element error is the only
+              // signal — without it the rung sat on "Unable to play media"
+              // with a black canvas while the device kept the session alive.
+              if (playerMode() === 'whep') {
+                setPlayerMode(nextPlayerMode('whep', true, !h264Supported(), false, hlsSupported()))
+              }
+            }}
             style={{ width: '100%', 'background-color': '#000' }}
           />
           </Show>
@@ -636,8 +647,10 @@ export default function StreamPreview(props: Props) {
           </div>
         </Show>
 
-        {/* Live badge */}
-        <Show when={webActive() && props.previewVisible()}>
+        {/* Live badge — hidden once telemetry is confirmed dead: a stale
+            status snapshot would otherwise keep it lit while the device is
+            unreachable (the App-level connection-lost banner explains why). */}
+        <Show when={webActive() && props.previewVisible() && !props.connectionLost()}>
           <div class="live-badge">
             <span class="live-badge-dot" />
             LIVE
@@ -850,6 +863,30 @@ export default function StreamPreview(props: Props) {
             }}
             onPointerUp={() => { void stopPtt() }}
             onPointerCancel={() => { void stopPtt() }}
+            onKeyDown={(e) => {
+              // Keyboard parity for the push-to-talk hold: Space or Enter
+              // holds the talk open until the matching keyup, the same
+              // press-and-hold contract the pointer path implements. The
+              // auto-repeat keydowns must not re-trigger mid-hold.
+              if (e.key !== ' ' && e.key !== 'Enter') return
+              e.preventDefault()
+              if (e.repeat || talking()) return
+              setTalking(true)
+              startPtt().catch((err) => {
+                console.error('Talkback failed:', err)
+                void stopPtt()
+                flashTalkMsg(
+                  err instanceof TalkUnavailableError
+                    ? err.reason === 'insecure' ? t('preview.talkNeedsHttps') : t('preview.talkMicDenied')
+                    : t('preview.talkFailed'),
+                )
+              })
+            }}
+            onKeyUp={(e) => {
+              if (e.key !== ' ' && e.key !== 'Enter') return
+              e.preventDefault()
+              void stopPtt()
+            }}
             onContextMenu={(e) => e.preventDefault()}
             title={t('preview.talkTitle')}
           >

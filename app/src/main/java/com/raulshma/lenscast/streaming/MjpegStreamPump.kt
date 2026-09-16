@@ -5,6 +5,7 @@ import com.raulshma.lenscast.core.NetworkQualityMonitor
 import com.raulshma.lenscast.core.StreamDefaults
 import com.raulshma.lenscast.streaming.HttpResult.ResponseBody.Stream
 import java.io.InputStream
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 
 /**
@@ -86,18 +87,20 @@ class MjpegStreamPump(
         )
     }
 
-    private inner class MjpegInputStream(val clientId: String) : InputStream() {
-        private var currentFrame: ByteArray? = null
-        private var currentFrameVersion = -1L
-        private var frameOffset = 0
-        private var headerBytes = ByteArray(0)
-        private var headerOffset = 0
-        private var footerOffset = 0
-        private var isFirstPart = true
-        @Volatile
-        private var closed = false
-        private var frameSendStartTime = 0L
-        private var currentFrameTotalBytes = 0
+        private inner class MjpegInputStream(val clientId: String) : InputStream() {
+            private var currentFrame: ByteArray? = null
+            private var currentFrameVersion = -1L
+            private var frameOffset = 0
+            private var headerBytes = ByteArray(0)
+            private var headerOffset = 0
+            private var footerOffset = 0
+            private var isFirstPart = true
+            // Atomic, not @Volatile: close() runs more than once per stream —
+            // the kick closes it, then NanoHTTPD closes it again when the
+            // write fails — and the count bookkeeping below must fire once.
+            private val closed = AtomicBoolean(false)
+            private var frameSendStartTime = 0L
+            private var currentFrameTotalBytes = 0
 
         override fun read(): Int {
             val buf = ByteArray(1)
@@ -106,7 +109,7 @@ class MjpegStreamPump(
         }
 
         override fun read(b: ByteArray, off: Int, len: Int): Int {
-            if (closed) return -1
+            if (closed.get()) return -1
             if (off < 0 || len < 0 || len > b.size - off) throw IndexOutOfBoundsException()
             if (len == 0) return 0
 
@@ -167,7 +170,7 @@ class MjpegStreamPump(
         }
 
         private fun ensureCurrentPart(): Boolean {
-            if (closed) return false
+            if (closed.get()) return false
             val frame = currentFrame
             if (frame != null && (
                 headerOffset < headerBytes.size ||
@@ -179,7 +182,7 @@ class MjpegStreamPump(
             }
 
             synchronized(frameLock) {
-                while (!closed) {
+                while (!closed.get()) {
                     val nextFrame = latestJpeg
                     if (nextFrame != null && latestFrameVersion != currentFrameVersion) {
                         currentFrame = nextFrame
@@ -201,7 +204,10 @@ class MjpegStreamPump(
         }
 
         override fun close() {
-            closed = true
+            // Idempotent: the kick closes the stream, then the server's failed
+            // write closes it again — the guard keeps the client count and the
+            // monitor unregister to exactly one decrement per connection.
+            if (!closed.compareAndSet(false, true)) return
             synchronized(frameLock) { frameLock.notifyAll() }
             liveStreams.remove(clientId)
             networkQualityMonitor.unregisterClient(clientId)

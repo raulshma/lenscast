@@ -33,10 +33,16 @@ async function requestJson<T>(input: string, init: RequestInit = {}): Promise<T>
 
       if (!response.ok) {
         const message = extractErrorMessage(body) ?? `Request failed: ${response.status}`
-        if (response.status === 401 && message === `Request failed: ${response.status}`) {
-          throw new Error('Authentication required')
-        }
-        throw new Error(message)
+        const err = new Error(
+          response.status === 401 && message === `Request failed: ${response.status}`
+            ? 'Authentication required'
+            : message,
+        )
+        // The HTTP status rides the error so every caller can tell an auth
+        // failure (401 → sign-in screen) from any other failure without
+        // sniffing message text.
+        ;(err as any).status = response.status
+        throw err
       }
 
       return body as T

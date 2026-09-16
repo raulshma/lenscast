@@ -21,4 +21,12 @@ interface HlsSegmentSource {
     fun playlist(): String
 
     fun segment(name: String): ByteArray?
+
+    /**
+     * Registers demand from a request that may not reach a playlist/segment
+     * serve — a cold-ring playlist poll answers 503 without serving, and
+     * without this signal the shared encoders would never restart (the ring
+     * stays empty because the encoders are off because the ring is empty).
+     */
+    fun noteRequest() {}
 }

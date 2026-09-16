@@ -224,12 +224,17 @@ export default function AuthCard() {
             value={password()}
             onInput={(e) => setPassword(e.currentTarget.value)}
           />
-          <button type="button" class="action-btn action-btn-primary" disabled={busy()} onClick={() => void apply()}>
-            <span>{busy() ? t('auth.saving') : t('auth.save')}</span>
-          </button>
-          <Show when={msg()}>
-            <span class="clients-cap-row">{msg()}</span>
-          </Show>
+        </Show>
+        {/* The save control must survive the toggle: hiding it with the
+            credentials form made "disable authentication" unsavable — the
+            flip stayed local and a reload reverted it to the server's
+            enabled=true. apply() sends enabled() as-is, blank password
+            included, so this button also persists the OFF state. */}
+        <button type="button" class="action-btn action-btn-primary" disabled={busy()} onClick={() => void apply()}>
+          <span>{busy() ? t('auth.saving') : t('auth.save')}</span>
+        </button>
+        <Show when={msg()}>
+          <span class="clients-cap-row">{msg()}</span>
         </Show>
       </div>
 

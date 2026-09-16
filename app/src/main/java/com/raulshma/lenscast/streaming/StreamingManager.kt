@@ -1650,6 +1650,7 @@ class StreamingManager(
         return StreamingServer(
             port, context, audioStreamingManager, webApiStack, networkQualityMonitor, webAuthGate,
             encodedStreamActive = { encodedHub.isRunning() },
+            hlsRingEnabled = { HlsManager.isEnabled() },
             tlsServerSocketFactory = factory,
             whepServer = whepServer,
         ).also {
@@ -1739,7 +1740,7 @@ class StreamingManager(
                 status = statusHandler,
                 stream = StreamWebHandler(this, app.streamingSession),
                 capture = CaptureWebHandler(app.photoCaptureManager),
-                lens = LensWebHandler(app.cameraService),
+                lens = LensWebHandler(app.cameraService, app.settingsDataStore),
                 interval = IntervalCaptureWebHandler(context),
                 recording = RecordingWebHandler(app.recordingController),
                 recordingSessions = com.raulshma.lenscast.streaming.web.RecordingSessionsWebHandler(

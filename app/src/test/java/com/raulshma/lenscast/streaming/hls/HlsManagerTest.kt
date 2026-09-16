@@ -123,8 +123,23 @@ class HlsManagerTest {
     }
 
     @Test
+    fun `a cold-ring playlist request registers demand without a served playlist`() {
+        // The cold-ring 503 path never reaches playlist(): noteRequest() is
+        // the demand signal that keeps the shared encoders from staying
+        // deadlocked off (nobody asks because 503, 503 because nobody asks).
+        nowMs += 16_000L
+        assertFalse(HlsManager.isHot())
+        HlsManager.noteRequest()
+        assertTrue(HlsManager.isHot())
+        nowMs += 16_000L
+        assertFalse(HlsManager.isHot())
+    }
+
+    @Test
     fun `a disabled ring is never hot`() {
         HlsManager.setEnabled(false)
+        assertFalse(HlsManager.isHot())
+        HlsManager.noteRequest()
         assertFalse(HlsManager.isHot())
     }
 }

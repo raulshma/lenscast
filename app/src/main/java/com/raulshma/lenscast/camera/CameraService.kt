@@ -123,6 +123,8 @@ class CameraService(private val context: Context) {
     private var currentPreviewView: PreviewView? = null
     private var activeSettings = CameraSettings()
 
+    private val controlsHandler = android.os.Handler(android.os.Looper.getMainLooper())
+
     // Last settings whose center AF/AE metering was fired; the focus part of
     // the next apply is gated on it (see FocusApplyPolicy). Reset on release
     // so a fresh session re-establishes metering.
@@ -221,6 +223,15 @@ class CameraService(private val context: Context) {
             false
         }
     }
+
+    /**
+     * The live zoom truth for the Web API's status: CameraX's observed zoom
+     * state, not the persisted setting — a remote zoom takes effect without a
+     * settings write, and the status must not keep reporting 1.0 while the
+     * lens is physically at 3x. Null before the first camera bind; the caller
+     * falls back to the persisted setting.
+     */
+    fun liveZoomRatio(): Float? = camera?.cameraInfo?.zoomState?.value?.zoomRatio
 
     fun setTorchEnabled(on: Boolean): Boolean {
         val cam = camera ?: return false
@@ -818,7 +829,15 @@ class CameraService(private val context: Context) {
                 }
             }
 
-            applyCameraControls(activeSettings, forceFocusReapply = true)
+            // CameraX drops control calls issued synchronously inside the
+            // bind window (the camera2 session is still settling): a fresh
+            // camera would come up at the platform default 1.0 zoom while
+            // activeSettings says otherwise — the restart-restores-zoom
+            // contract silently broke on rebinds. Defer the apply past the
+            // settle instead.
+            controlsHandler.postDelayed({
+                applyCameraControls(activeSettings, forceFocusReapply = true)
+            }, CONTROLS_APPLY_DELAY_MS)
 
             // Deferred from the capability check above: rebuild once so the
             // ImageCapture matches the effective photo config.
@@ -1254,6 +1273,15 @@ class CameraService(private val context: Context) {
 
     companion object {
         private const val TAG = "CameraService"
+
+        /**
+         * Post-bind settle window for deferred camera-control applies: CameraX
+         * drops zoom/torch calls issued synchronously inside the bind window
+         * on some devices (fresh camera then runs at platform defaults even
+         * though activeSettings says otherwise), while the same apply a beat
+         * later lands. Empirically verified on the DRG (Nokia 6.1 Plus).
+         */
+        private const val CONTROLS_APPLY_DELAY_MS = 400L
         internal const val MAX_ANALYSIS_WIDTH = 1280
         internal const val MAX_ANALYSIS_HEIGHT = 720
     }

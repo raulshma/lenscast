@@ -64,6 +64,9 @@ object HlsManager : HlsVideoSink, HlsSegmentSource {
     @Volatile private var videoAnchorMs = -1L
     @Volatile private var audioAnchorMs = -1L
 
+    /** Whether web streaming currently wants the ring (route gating + tests). */
+    fun isEnabled(): Boolean = enabled
+
     fun setEnabled(on: Boolean) {
         enabled = on
         if (on) {
@@ -194,4 +197,8 @@ object HlsManager : HlsVideoSink, HlsSegmentSource {
     }
 
     override fun hasSegments(): Boolean = synchronized(lock) { segments.isNotEmpty() }
+
+    override fun noteRequest() {
+        lastRequestMs = clockMs()
+    }
 }

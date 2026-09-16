@@ -4,6 +4,8 @@ import com.raulshma.lenscast.core.AppJson
 import android.util.Log
 import androidx.camera.core.CameraSelector
 import com.raulshma.lenscast.camera.CameraService
+import com.raulshma.lenscast.camera.model.CameraSettings
+import com.raulshma.lenscast.data.SettingsDataStore
 import com.raulshma.lenscast.streaming.model.LensDto
 import com.raulshma.lenscast.streaming.model.LensSelectRequest
 import com.raulshma.lenscast.streaming.model.LensesResponseDto
@@ -15,7 +17,13 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
 /** /api/camera/... — lens enumeration/selection and tap-to-focus. */
-class LensWebHandler(private val cameraService: CameraService) {
+class LensWebHandler(
+    private val cameraService: CameraService,
+    // Null in tests: set at the composition root so a remote zoom persists
+    // like the in-app one — otherwise the zoom silently reverts on restart
+    // while the status reports the (live) zoomed value.
+    private val settingsDataStore: SettingsDataStore? = null,
+) {
 
     private val lensesAdapter by lazy { AppJson.moshi.adapter(LensesResponseDto::class.java) }
     private val lensSelectAdapter by lazy { AppJson.moshi.adapter(LensSelectRequest::class.java) }
@@ -73,6 +81,14 @@ class LensWebHandler(private val cameraService: CameraService) {
             ?: throw IllegalArgumentException("Invalid zoom JSON (expected {\"zoomRatio\": 2.0})")
         val ok = withContext(Dispatchers.Main) { cameraService.setZoomRatio(ratio) }
         if (!ok) throw IllegalStateException("Zoom not available")
+        // Persist the clamped ratio the device actually accepted (the in-app
+        // slider's contract): the next session starts where this one left off.
+        settingsDataStore?.let { store ->
+            val maxZoom = runCatching { cameraService.availableZoomRange.value.endInclusive }
+                .getOrNull() ?: CameraSettings.ZOOM_RATIO_MAX
+            val accepted = ratio.coerceIn(1f, maxZoom)
+            runCatching { store.saveSettings(store.settings.value.copy(zoomRatio = accepted)) }
+        }
         return successAdapter.toJson(SuccessResponse())
     }
 

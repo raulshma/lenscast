@@ -62,6 +62,21 @@ class MjpegStreamPumpTest {
     }
 
     @Test
+    fun `double close counts the client once - kick then server teardown`() {
+        // The kick closes the stream, then the HTTP server's failed write
+        // closes it again: the client count must take exactly one decrement
+        // per connection, not go negative (the -2 viewers bug).
+        val pump = MjpegStreamPump(NetworkQualityMonitor(), "LensCastBoundary")
+        val result = pump.openStream()
+        assertEquals(1, pump.getClientCount())
+        val stream = (result.body as HttpResult.ResponseBody.Stream).stream
+        stream.close()
+        stream.close()
+        stream.close()
+        assertEquals(0, pump.getClientCount())
+    }
+
+    @Test
     fun `pump holds the latest frame for snapshots`() {
         val pump = MjpegStreamPump(NetworkQualityMonitor(), "LensCastBoundary")
         assertNull(pump.latestFrame())
