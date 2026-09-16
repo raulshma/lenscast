@@ -631,20 +631,25 @@ export default function SecurityCard(props: Props) {
               </span>
             )}
           </Show>
-          <button
-            type="button"
-            class="action-btn action-btn-ghost"
-            id="send-test-alert"
-            disabled={testAlertBusy()}
-            onClick={sendTestAlertNow}
-          >
-            {testAlertBusy() ? t('security.sending') : t('security.sendTestAlert')}
-          </button>
-          <Show when={testAlertResult()}>
-            <span class="clients-cap-row" role="status" aria-live="polite">
-              {testAlertResult()}
-            </span>
-          </Show>
+        </Show>
+        {/* The test alert fires every configured sink (webhook, MQTT, Web
+            Push, local notification), not just the webhook — so it stays
+            visible with the webhook off: a local-alerts-only user needs it
+            to verify their chain too. The zero-sink verdict reads honestly
+            in the result line below. */}
+        <button
+          type="button"
+          class="action-btn action-btn-ghost"
+          id="send-test-alert"
+          disabled={testAlertBusy()}
+          onClick={sendTestAlertNow}
+        >
+          {testAlertBusy() ? t('security.sending') : t('security.sendTestAlert')}
+        </button>
+        <Show when={testAlertResult()}>
+          <span class="clients-cap-row" role="status" aria-live="polite">
+            {testAlertResult()}
+          </span>
         </Show>
       </div>
 

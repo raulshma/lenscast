@@ -281,6 +281,10 @@ class StreamingManager(
     // one frame DetectionCoordinator can reach without a fresh camera capture.
     @Volatile private var latestWebJpeg: ByteArray? = null
 
+    // The no-viewer fallback for the same snapshot source: a retained camera
+    // frame copied at ~1 Hz, encoded on demand when no M-JPEG frame exists.
+    private val snapshotFrameStore = SnapshotFrameStore()
+
     // ── Eco idle-fps mode (battery-powered idle sessions) ──
     // The persisted toggle arrives through [setEcoIdleFpsEnabled] (the
     // Settings Applier); the verdicts are the pure
@@ -351,10 +355,15 @@ class StreamingManager(
                 EcoIdlePolicy.Verdict.Drop -> {
                     ecoIdleActive = true
                     applyEffectiveFrameRate()
-                    // No consumers by definition: pause the live mic capture
-                    // and let the hub's audioWanted verdict stop the encoder.
-                    if (_isAudioStreaming.value) {
-                        audioStreamingManager.stop()
+                    // No stream consumers by definition: the viewer-facing
+                    // audio state drops, but an armed sound detector keeps
+                    // the raw capture up — surveillance survives eco idle
+                    // exactly like motion does. The hub's audioWanted
+                    // verdict still stops the AAC encoder.
+                    if (audioStreamingManager.isRunning()) {
+                        if (!soundDetector.enabled) {
+                            audioStreamingManager.stop()
+                        }
                         clearWebAudioState()
                     }
                     encodedHub.refresh()
@@ -454,6 +463,18 @@ class StreamingManager(
 
     private val _isAudioStreaming = MutableStateFlow(false)
     val isAudioStreaming: StateFlow<Boolean> = _isAudioStreaming
+
+    /**
+     * True while the shared mic capture runs purely for sound detection — no
+     * viewer-facing audio behind it. The app runtime watches this to re-assert
+     * the foreground service's MICROPHONE type, without which the OS silences
+     * a headless detection capture.
+     */
+    private val _isDetectionMicActive = MutableStateFlow(false)
+    val isDetectionMicActive: StateFlow<Boolean> = _isDetectionMicActive
+
+    /** True while the shared mic capture runs for any reason. */
+    fun isSharedMicCapturing(): Boolean = audioStreamingManager.isRunning()
 
     private val _rtspUrl = MutableStateFlow("")
     val rtspUrl: StateFlow<String> = _rtspUrl
@@ -611,6 +632,9 @@ class StreamingManager(
         soundDetector.enabled = enabled
         soundDetector.thresholdPercent = thresholdPercent
         soundDetector.adaptiveNoiseFloor = adaptiveNoiseFloor
+        // An armed detector is itself a mic consumer: flipping the toggle
+        // starts (or stops) the headless capture it needs.
+        refreshAudioStreamingState()
     }
 
     /** The persisted sound-event cooldown, in seconds (the store clamps). */
@@ -653,6 +677,18 @@ class StreamingManager(
 
     /** The shared siren for the web toggle and detection automation — one audio owner. */
     fun sirenController(): SirenPlayer = sirenPlayer
+
+    /**
+     * The detection-event snapshot source: the newest rendered M-JPEG frame
+     * when a viewer is pulling one, else an on-demand encode from the
+     * retained snapshot frame ([SnapshotFrameStore]) — the pipeline no-ops
+     * with no M-JPEG viewer, and a headless event still deserves a snapshot.
+     * Null before the first camera frame.
+     */
+    fun latestSnapshotJpeg(): ByteArray? =
+        latestWebJpeg ?: snapshotFrameStore.encodeJpeg(
+            com.raulshma.lenscast.core.StreamDefaults.SNAPSHOT_JPEG_QUALITY,
+        )
 
     /** Latest rendered M-JPEG frame for detection-event snapshots; null before the first frame. */
     fun latestWebFrame(): ByteArray? = latestWebJpeg
@@ -981,10 +1017,11 @@ class StreamingManager(
 
     fun stopWebStreaming() {
         if (!webStreamingActive.getAndSet(false)) return
-        audioStreamingManager.stop()
         HlsManager.setEnabled(false)
         encodedHub.refresh()
-        clearWebAudioState()
+        // Sound detection keeps the capture up after the stream stops; the
+        // refresh drops it only when nothing needs the mic any more.
+        refreshAudioStreamingState()
         _streamUrl.value = ""
         _clientCount.value = 0
         lastReportedClientCount = -1
@@ -1232,18 +1269,34 @@ class StreamingManager(
     }
 
     /**
+     * The arbitration inputs, snapshotted from the live state — the single
+     * snapshot the mic verdicts below read so they can never disagree.
+     */
+    private fun micArbitrationInputs() = MicArbitrationPolicy.Inputs(
+        webStreamingActive = webStreamingActive.get(),
+        webStreamingEnabled = webStreamingEnabled.get(),
+        streamAudioEnabled = streamAudioEnabled.get(),
+        recordingAudioCaptureActive = recordingAudioCaptureActive,
+        ecoIdleActive = ecoIdleActive,
+        soundDetectionEnabled = soundDetector.enabled,
+    )
+
+    /**
      * The mic-arbitration verdict the WHIP publisher is built with: audio on
-     * only when the stream-audio toggle is on, no recording capture, no eco
-     * idle, and the shared live capture (web talkback, RTSP/RTMP audio) is not
-     * already running — the WHIP publisher owns a dedicated AudioRecord, so a
-     * busy shared capture means it runs video-only. Evaluated at
-     * publisher-construction time; the output re-arbitrates on every (re)start.
+     * unless recording owns the mic or the shared live capture is running for
+     * viewer-facing web audio — the WHIP publisher owns a dedicated
+     * AudioRecord, so a web-audio-busy capture means it runs video-only. A
+     * capture held up only by sound detection does not block the push: WHIP's
+     * own record and the detection capture coexist in-process, and disarming
+     * detection while a push runs would leave the surveillance use case deaf.
+     * Evaluated at publisher-construction time; the output re-arbitrates on
+     * every (re)start.
      */
     private fun whipAudioAllowed(): Boolean =
-        streamAudioEnabled.get() &&
-            !recordingAudioCaptureActive &&
-            !ecoIdleActive &&
-            !audioStreamingManager.isRunning()
+        MicArbitrationPolicy.whipAudioAllowed(
+            micArbitrationInputs(),
+            sharedCaptureRunning = audioStreamingManager.isRunning(),
+        )
 
     /**
      * Re-evaluates the WHIP audio verdict after one of its inputs moved: a
@@ -1275,6 +1328,10 @@ class StreamingManager(
         // synchronously inside the detector's fire callback) reads exactly
         // the frame that fired the verdict.
         latestAnalysisFrame = com.raulshma.lenscast.capture.ml.AnalysisFrame(yuvData, width, height)
+        // The event-snapshot fallback retains its own cheap copy: the M-JPEG
+        // pipeline below no-ops with no viewer, and a detection event fired
+        // with none still deserves a snapshot.
+        snapshotFrameStore.maybeRetain(yuvData, width, height, rotation, System.currentTimeMillis())
         try {
             motionDetector.feed(yuvData, width, height)
         } catch (_: Exception) {
@@ -1460,11 +1517,11 @@ class StreamingManager(
     // ── Stream-audio change policy: one decision point for every audio setting ──
 
     private fun onWebAudioChanged() {
-        if (webStreamingActive.get()) {
-            refreshAudioStreamingState()
-        } else {
-            clearWebAudioState()
-        }
+        // One decision point for every audio setting: the refresh stops,
+        // restarts, or keeps the capture per the current verdicts — web
+        // audio, sound detection, recording, eco idle — instead of the old
+        // web-only split that could leave a stale capture behind.
+        refreshAudioStreamingState()
     }
 
     private fun clearWebAudioState() {
@@ -1493,7 +1550,10 @@ class StreamingManager(
 
         when {
             active && !wasActive -> {
-                if (_isAudioStreaming.value) {
+                // Recording wins the mic outright — a capture held up only by
+                // sound detection pauses too, and comes back on the release
+                // branch below.
+                if (audioStreamingManager.isRunning()) {
                     audioStreamingManager.stop()
                     _isAudioStreaming.value = false
                     _audioStreamUrl.value = ""
@@ -1799,16 +1859,29 @@ class StreamingManager(
     private fun refreshAudioStreamingState() {
         audioStreamingManager.stop()
 
-        // Eco idle keeps the capture down: no consumers by definition, so the
-        // mic (and every AAC encoder fed from it) stays off until a restore.
-        if (!webStreamingActive.get() || !webStreamingEnabled.get() || !streamAudioEnabled.get() || recordingAudioCaptureActive || ecoIdleActive) {
+        // Two independent reasons the capture may run — the pure verdicts
+        // live in [MicArbitrationPolicy]; this keeps the capture handle and
+        // the flows.
+        val inputs = micArbitrationInputs()
+        val webAudioWanted = MicArbitrationPolicy.webAudioWanted(inputs)
+        val detectionWantsMic = MicArbitrationPolicy.detectionWantsMic(inputs)
+
+        if (!webAudioWanted && !detectionWantsMic) {
             clearWebAudioState()
+            _isDetectionMicActive.value = false
             return
         }
 
         val audioStarted = audioStreamingManager.start(audioConfig())
-        _isAudioStreaming.value = audioStarted
-        _audioStreamUrl.value = if (audioStarted) buildAudioUrl() else ""
+        // The viewer-facing state tracks the web verdict only: a capture kept
+        // up purely for detection publishes no audio URL — there is no
+        // consumer for it while the stream is down.
+        _isAudioStreaming.value = webAudioWanted && audioStarted
+        _audioStreamUrl.value = if (webAudioWanted && audioStarted) buildAudioUrl() else ""
+        // The detection-only hold is what the app runtime watches to re-assert
+        // the foreground service's MICROPHONE type: without it the OS silences
+        // a capture that started after the service was already up.
+        _isDetectionMicActive.value = detectionWantsMic && audioStarted
     }
 
     private fun buildVideoUrl(): String {
@@ -1826,8 +1899,9 @@ class StreamingManager(
      */
     private fun releaseRtspOwnedAudio() {
         if (!webStreamingActive.get()) {
-            audioStreamingManager.stop()
-            clearWebAudioState()
+            // The refresh keeps the capture up when sound detection still
+            // wants it, drops it otherwise.
+            refreshAudioStreamingState()
         }
     }
 

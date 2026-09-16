@@ -419,7 +419,7 @@ class DetectionCoordinator(
             timestampMs = nowMs(),
             batteryPercent = batteryPercent(),
             snapshotJpegBase64 = runCatching {
-                prepareSnapshotBase64(streamingManager()?.latestWebFrame())
+                prepareSnapshotBase64(streamingManager()?.latestSnapshotJpeg())
             }.getOrNull(),
         )
         val webhookDispatched = webhookNotifier.notifyEvent(
@@ -520,7 +520,7 @@ class DetectionCoordinator(
             scope.launch {
                 val snapshot = runCatching {
                     prepareSnapshotBase64(
-                        streamingManager()?.latestWebFrame(),
+                        streamingManager()?.latestSnapshotJpeg(),
                     )
                 }.getOrNull()
                 // One alert shape feeds every sink — webhook, MQTT, local

@@ -306,6 +306,7 @@ class MainApplication : Application(), SingletonImageLoader.Factory {
         wireFramePump()
         initializeStreamStateJournal()
         initializeTamperMonitor()
+        initializeDetectionMicWatch()
         initializeWidgetRefresh()
         initializeAutoUpdateCheck()
     }
@@ -393,6 +394,23 @@ class MainApplication : Application(), SingletonImageLoader.Factory {
             onTamper = { batteryPercentValue -> runTamperResponse(batteryPercentValue) },
             scope = appScope,
         ).start()
+    }
+
+    /**
+     * The sound-detection mic hold is app-runtime composition, not screen
+     * state: arming detection from the Web API (or a settings sync) starts a
+     * headless capture, and the foreground service must re-assert its
+     * MICROPHONE type or the OS silences the capture. The manager's flow
+     * flips only when the detection-only hold starts or stops, so the
+     * re-assert runs exactly on those transitions.
+     */
+    private fun initializeDetectionMicWatch() {
+        appScope.launch {
+            streamingManager.isDetectionMicActive.collect {
+                runCatching { streamingSession.refreshForegroundMicVerdict() }
+                    .onFailure { android.util.Log.w("MainApplication", "Mic verdict re-assert failed: ${it.message}") }
+            }
+        }
     }
 
     private fun runTamperResponse(batteryPercentValue: Int?) {

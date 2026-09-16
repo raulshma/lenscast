@@ -107,6 +107,22 @@ class StreamingSession(
     }
 
     /**
+     * Re-asserts the foreground service's type after a mic-capture verdict
+     * flip the stream lifecycle did not cause — arming sound detection starts
+     * a headless capture, disarming stops it, and the service must carry (or
+     * drop) the MICROPHONE type accordingly. No-op with no live session: the
+     * next begin() computes the verdict fresh.
+     */
+    suspend fun refreshForegroundMicVerdict() {
+        lifecycleMutex.withLock {
+            if (active.get()) {
+                sendForegroundIntent(StreamingService.ACTION_START)
+                Log.d(TAG, "Foreground mic verdict re-asserted")
+            }
+        }
+    }
+
+    /**
      * Tear the session down. No-op while another output is still live or when
      * no session is active.
      */
@@ -294,10 +310,12 @@ class StreamingSession(
                 // MICROPHONE type — the old web-only flag left RTSP-only
                 // streaming capturing without it, which the OS silences. The
                 // RTMP push taps the same AAC path and the WHIP push owns its
-                // dedicated AudioRecord, so both count the same way.
+                // dedicated AudioRecord, so both count the same way; the
+                // shared capture also covers the sound-detection hold, which
+                // keeps the mic up with no stream consumers at all.
                 putExtra(
                     StreamingService.EXTRA_AUDIO_ACTIVE,
-                    streamingManager.isAudioStreaming.value ||
+                    streamingManager.isSharedMicCapturing() ||
                         streamingManager.isRtspAudioActive() ||
                         streamingManager.isRtmpAudioActive() ||
                         streamingManager.isWhipAudioActive(),
