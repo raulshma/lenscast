@@ -1,0 +1,10 @@
+Since 0.1.2:
+• Push outputs: RTMP to YouTube/Twitch/nginx-rtmp (rtmp/rtmps, 443 default, write-only URL, auto-reconnect), WHIP egress RFC 9725 for sub-second remote + dashboard card, SRT push with keepalive/reconnect, WHEP viewer endpoint with per-viewer encoders (web player tries WHEP first)
+• HEVC where it fits: HLS PMT flip + WS hvcC config; RTMP/SRT refuse H.265 with a readable error
+• Camera pro mode: grids, spirit level, 3s/10s self-timer, histogram, zebras, focus peaking, JPEG 60-100 + max-quality, RAW+JPEG DNG, EXIF artist/comment + opt-in GPS; timelapse auto-assembly (capture screen + interval worker)
+• Detection: YAMNet sound labels (opt-in, allow-list, fail-open), mic stays up through eco-idle/headless via arbitration, snapshot fallback with no viewer, eco idle-fps 5fps on battery, recording-session day API, charge diagnostics
+• Privacy: opt-in AES-256-GCM encryption at rest (Keystore, coexists with plaintext, readable backups), tamper flush + expedited backups
+• Dashboard: NVR day timeline, detection stats card, multi-cam tiles, PWA + light/dark theme, storage forecast, Web Push alerts (VAPID), read-only viewer role, push-to-talk overhaul with HTTP fallback, per-section settings isolation, siren state
+• Watch: Wear OS companion (stream toggle, capture, snapshot, settings, tile, alerts)
+• Languages: German, Spanish, French, Russian, Simplified Chinese, Brazilian Portuguese
+• Hardening/fixes: fuzz-proven wire parsers, track-level SDP fixing VLC/ffmpeg 404, WebRTC SDP race, HLS ring deadlock, MJPEG close, zoom persistence, WHEP orphan cleanup, MQTT combine fix, Node 22
