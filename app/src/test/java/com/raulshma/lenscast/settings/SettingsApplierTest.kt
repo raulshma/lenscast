@@ -40,7 +40,7 @@ import org.junit.Test
  * mockk, and each test settles the initial fan-out before mutating a flow,
  * then pins the exact runtime calls the change must (and must not) produce —
  * including the two documented asymmetries: the camera-settings flow's
- * `distinctUntilChanged` frame-rate fan-out and the MQTT merge's collect-time
+ * `distinctUntilChanged` frame-rate fan-out and the MQTT combine's collect-time
  * enabled read. Group collectors (audio, RTSP, watchdog, motion, sound,
  * discovery) re-apply their whole group per emission, so a single field's
  * change is also a whole-group re-apply — the totals below pin that.
@@ -527,10 +527,10 @@ class SettingsApplierTest {
 
     @Test
     fun `mqtt lifecycle rule closes while disabled and reconnects on any setting emission while enabled`() {
-        // Eight merged flows → eight initial emissions, each answered with the
-        // disabled branch: close, never start.
+        // The eight combined flows initialize as ONE emission, answered with
+        // the disabled branch: close, never start.
         eventually {
-            verify(exactly = 8) { mqttAlertPublisher.close() }
+            verify(exactly = 1) { mqttAlertPublisher.close() }
             verify(exactly = 0) { mqttAlertPublisher.start() }
         }
         mqttEnabled.value = true
@@ -542,7 +542,7 @@ class SettingsApplierTest {
         mqttBrokerHost.value = "broker.local"
         eventually {
             verify(exactly = 2) { mqttAlertPublisher.start() }
-            verify(exactly = 8) { mqttAlertPublisher.close() }
+            verify(exactly = 1) { mqttAlertPublisher.close() }
         }
     }
 

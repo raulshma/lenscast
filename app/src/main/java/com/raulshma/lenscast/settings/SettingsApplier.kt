@@ -21,7 +21,6 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.flow.merge
 import kotlinx.coroutines.launch
 
 /**
@@ -300,17 +299,31 @@ class SettingsApplier(
         // under it), disabled closes (a retained `offline` plus discovery
         // clears, so the HA entities never outlive the setting). The
         // per-dispatch config read stays the publisher's own live-read.
+        // The eight flows fold through combines (not a merge) so their
+        // StateFlow subscription replay is ONE lifecycle run: a merge
+        // would replay each flow's current value as its own emission and
+        // re-run the rule once per flow when the collector attaches late.
         scope.launch {
-            merge(
-                settingsDataStore.mqttEnabled,
-                settingsDataStore.mqttBrokerHost,
-                settingsDataStore.mqttBrokerPort,
-                settingsDataStore.mqttUsername,
-                settingsDataStore.mqttPassword,
-                settingsDataStore.mqttTls,
-                settingsDataStore.mqttDiscoveryPrefix,
-                settingsDataStore.mqttTelemetryEnabled,
-            ).collect {
+            combine(
+                combine(
+                    settingsDataStore.mqttEnabled,
+                    settingsDataStore.mqttBrokerHost,
+                    settingsDataStore.mqttBrokerPort,
+                    settingsDataStore.mqttUsername,
+                ) { enabled, brokerHost, brokerPort, username ->
+                    MqttConnection(enabled, brokerHost, brokerPort, username)
+                },
+                combine(
+                    settingsDataStore.mqttPassword,
+                    settingsDataStore.mqttTls,
+                    settingsDataStore.mqttDiscoveryPrefix,
+                    settingsDataStore.mqttTelemetryEnabled,
+                ) { password, tls, discoveryPrefix, telemetryEnabled ->
+                    MqttDelivery(password, tls, discoveryPrefix, telemetryEnabled)
+                },
+            ) { connection, delivery ->
+                connection to delivery
+            }.collect {
                 if (settingsDataStore.mqttEnabled.value) {
                     mqttAlertPublisher.start()
                 } else {
@@ -468,6 +481,20 @@ class SettingsApplier(
         val enabled: Boolean,
         val maxRetries: Int,
         val checkInterval: Int,
+    )
+
+    private data class MqttConnection(
+        val enabled: Boolean,
+        val brokerHost: String,
+        val brokerPort: Int,
+        val username: String,
+    )
+
+    private data class MqttDelivery(
+        val password: String,
+        val tls: Boolean,
+        val discoveryPrefix: String,
+        val telemetryEnabled: Boolean,
     )
 
     private data class MotionSettings(
