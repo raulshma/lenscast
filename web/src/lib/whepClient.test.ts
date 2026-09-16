@@ -63,7 +63,24 @@ function makeFakePc() {
 }
 
 function makeVideo() {
-  return { srcObject: null as MediaStream | null, play: vi.fn(async () => {}) } as unknown as HTMLVideoElement
+  const listeners: Record<string, Array<() => void>> = {}
+  const video = {
+    srcObject: null as MediaStream | null,
+    error: null as MediaError | null,
+    play: vi.fn(async () => {}),
+    addEventListener(type: string, cb: () => void) {
+      ;(listeners[type] ??= []).push(cb)
+    },
+    removeEventListener(type: string, cb: () => void) {
+      listeners[type] = (listeners[type] ?? []).filter((f: () => void) => f !== cb)
+    },
+    /** The element raises its media error with `error` set (F-10). */
+    emitMediaError() {
+      video.error = { code: 3 } as MediaError
+      for (const cb of listeners['error'] ?? []) cb()
+    },
+  }
+  return video as unknown as HTMLVideoElement & { emitMediaError(): void }
 }
 
 const ANSWER_SDP = 'v=0\r\nm=video 9 UDP/TLS/RTP/SAVPF 96\r\na=recvonly\r\n'
@@ -211,7 +228,7 @@ describe('createWhepPlayer teardown', () => {
     expect(video.srcObject).toBeNull()
   })
 
-  it('stop mid-handshake aborts at the next checkpoint: no answer applied, no playing', async () => {
+  it('stop mid-handshake aborts at the next checkpoint and DELETEs the session the answer created', async () => {
     let resolvePost!: (r: WhepAnswerResponse) => void
     const { pc, statuses, deleteSession, player } = setupPlayer(
       () => new Promise<WhepAnswerResponse>((resolve) => { resolvePost = resolve }),
@@ -220,17 +237,112 @@ describe('createWhepPlayer teardown', () => {
     // Let the handshake reach the POST (offer built, gather awaited out).
     await vi.waitFor(() => expect(resolvePost).toBeInstanceOf(Function))
     player.stop() // the viewer navigated away while the POST was in flight
-    resolvePost(answerResponse())
+    resolvePost(answerResponse()) // the server answers (and created the session) after the stop
     await settled
     expect(statuses).toEqual(['negotiating', 'idle'])
-    expect(pc.remoteDescription).toBeNull()
+    expect(pc.remoteDescription).toBeNull() // the answer is never applied
     expect(pc.closed).toBe(true)
-    expect(deleteSession).not.toHaveBeenCalled() // the handshake never earned a session id
+    // The run is dead but its session exists server-side — the losing run
+    // cleans it up instead of leaving it to the reap (the orphan leak).
+    expect(deleteSession).toHaveBeenCalledWith('abc123')
+  })
+
+  it('a superseded run DELETEs the session its in-flight offer created', async () => {
+    const pending: Array<(r: WhepAnswerResponse) => void> = []
+    const { pc, statuses, deleteSession, player } = setupPlayer(
+      () => new Promise<WhepAnswerResponse>((resolve) => { pending.push(resolve) }),
+    )
+    const first = player.start(makeVideo())
+    await vi.waitFor(() => expect(pending.length).toBe(1))
+    const second = player.start(makeVideo()) // the element re-fired: a newer run takes over
+    await vi.waitFor(() => expect(pending.length).toBe(2))
+    pending[0](answerResponse()) // the losing run's offer lands late — server created its session
+    pending[1](answerResponse())
+    await Promise.all([first, second])
+    expect(statuses).toEqual(['negotiating', 'idle', 'negotiating', 'playing'])
+    // Exactly one live session remains: the loser's was DELETEd, the
+    // winner's answer applied.
+    expect(deleteSession).toHaveBeenCalledTimes(1)
+    expect(deleteSession).toHaveBeenCalledWith('abc123')
+    expect(pc.remoteDescription).toEqual({ type: 'answer', sdp: ANSWER_SDP })
   })
 
   it('stop without a session is a safe no-op', () => {
     const { deleteSession, player } = setupPlayer(() => Promise.resolve(answerResponse()))
     expect(() => player.stop()).not.toThrow()
     expect(deleteSession).not.toHaveBeenCalled()
+  })
+})
+
+// ── element media errors (F-10): the failure the handshake cannot see ──
+// The answer can "succeed" while its track is unplayable in this browser,
+// and the element error can land before (or without) the caller's onError —
+// the rung then sat on a black canvas while the device kept the session
+// alive. The player watches the element itself.
+
+describe('createWhepPlayer element media errors', () => {
+  it('an element that mounted already-dead lands on error without negotiating', async () => {
+    const postOffer = vi.fn(() => Promise.resolve(answerResponse()))
+    const { pc, statuses, deleteSession, player } = setupPlayer(postOffer)
+    const video = makeVideo()
+    ;(video as unknown as { error: MediaError | null }).error = { code: 4 } as MediaError
+    await player.start(video)
+    expect(statuses).toEqual(['error'])
+    expect(postOffer).not.toHaveBeenCalled()
+    expect(pc.createOfferCalls).toBe(0)
+    expect(deleteSession).not.toHaveBeenCalled()
+  })
+
+  it('a media error after playing owns the teardown: session DELETEd, peer closed, error verdict', async () => {
+    const { pc, statuses, deleteSession, player } = setupPlayer(() => Promise.resolve(answerResponse()))
+    const video = makeVideo()
+    pc.gatherComplete()
+    await player.start(video)
+    expect(statuses).toEqual(['negotiating', 'playing'])
+
+    video.emitMediaError()
+    expect(statuses).toEqual(['negotiating', 'playing', 'idle', 'error'])
+    expect(deleteSession).toHaveBeenCalledWith('abc123')
+    expect(pc.closed).toBe(true)
+    expect(video.srcObject).toBeNull()
+
+    // A second error event after the release is inert.
+    video.emitMediaError()
+    expect(statuses).toEqual(['negotiating', 'playing', 'idle', 'error'])
+    expect(deleteSession).toHaveBeenCalledTimes(1)
+  })
+
+  it('a media error mid-handshake aborts before the answer lands', async () => {
+    let resolvePost!: (r: WhepAnswerResponse) => void
+    const { pc, statuses, deleteSession, player } = setupPlayer(
+      () => new Promise<WhepAnswerResponse>((resolve) => { resolvePost = resolve }),
+    )
+    const video = makeVideo()
+    const settled = player.start(video)
+    await vi.waitFor(() => expect(resolvePost).toBeInstanceOf(Function))
+
+    video.emitMediaError()
+    resolvePost(answerResponse())
+    await settled
+    expect(statuses).toEqual(['negotiating', 'idle', 'error'])
+    expect(pc.remoteDescription).toBeNull()
+    expect(pc.closed).toBe(true)
+    // The element died before the answer landed; the session the answer
+    // created still gets DELETEd by the losing run (no orphan).
+    expect(deleteSession).toHaveBeenCalledWith('abc123')
+  })
+
+  it('a stale media error after an explicit stop is inert', async () => {
+    const { pc, statuses, deleteSession, player } = setupPlayer(() => Promise.resolve(answerResponse()))
+    const video = makeVideo()
+    pc.gatherComplete()
+    await player.start(video)
+    player.stop()
+    expect(statuses).toEqual(['negotiating', 'playing', 'idle'])
+    expect(deleteSession).toHaveBeenCalledTimes(1)
+
+    video.emitMediaError()
+    expect(statuses).toEqual(['negotiating', 'playing', 'idle'])
+    expect(deleteSession).toHaveBeenCalledTimes(1)
   })
 })

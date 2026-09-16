@@ -77,6 +77,7 @@ export function createWhepPlayer(
   let pc: RTCPeerConnection | null = null
   let sessionId: string | null = null
   let target: HTMLVideoElement | null = null
+  let onElementError: (() => void) | null = null
 
   const defaultNewPeerConnection = (): RTCPeerConnection => new RTCPeerConnection()
 
@@ -135,6 +136,16 @@ export function createWhepPlayer(
     stop()
     const myRun = ++run
     target = video
+    if (video.error) {
+      // The element mounted already-dead: the early media error (the F-10
+      // case) fired between element creation and this start, before any
+      // listener of ours could exist. Nothing to negotiate — report the
+      // verdict so the ladder demotes instead of opening a device-side
+      // session nobody can watch.
+      target = null
+      setStatus('error')
+      return
+    }
     setStatus('negotiating')
     try {
       const peer = (deps.newPeerConnection ?? defaultNewPeerConnection)()
@@ -156,6 +167,20 @@ export function createWhepPlayer(
         if (isFatalIceState(peer.iceConnectionState)) setStatus('error')
       }
 
+      // The element's media verdict is the one failure the handshake cannot
+      // see: the answer can "succeed" while its track is unplayable here,
+      // and the element error can land before (or without) the caller's own
+      // onError — the rung then sat on a black canvas while the device kept
+      // the session alive. The player watches the element itself: a live
+      // 'error' event owns the teardown (DELETE included) and then reports
+      // the verdict the caller demotes the ladder on.
+      onElementError = () => {
+        if (run !== myRun) return
+        stop()
+        setStatus('error')
+      }
+      video.addEventListener('error', onElementError)
+
       const offer = await peer.createOffer()
       await peer.setLocalDescription(offer)
       await awaitGatheringComplete(peer, deps.gatherTimeoutMs ?? GATHER_TIMEOUT_MS)
@@ -164,7 +189,17 @@ export function createWhepPlayer(
       const localSdp = peer.localDescription?.sdp ?? offer.sdp
       if (!localSdp) throw new Error('no local offer SDP')
       const response = await (deps.postOffer ?? defaultPostOffer)(localSdp)
-      if (run !== myRun) return
+      if (run !== myRun) {
+        // This run lost its element while the offer was in flight (a newer
+        // start(), or stop()). The server may have just created the session
+        // for it — DELETE it here, because the winner's stop() has no id to
+        // release: leaving it is exactly the orphaned-session leak.
+        const staleId = isWhepAnswer(response) ? whepSessionIdFromLocation(response.location) : null
+        if (staleId) {
+          void (deps.deleteSession ?? defaultDeleteSession)(staleId).catch(() => {})
+        }
+        return
+      }
       if (!isWhepAnswer(response)) {
         throw new Error(`WHEP offer refused (HTTP ${response.status})`)
       }
@@ -203,6 +238,10 @@ export function createWhepPlayer(
     const id = sessionId
     sessionId = null
     if (target) {
+      if (onElementError) {
+        try { target.removeEventListener('error', onElementError) } catch { /* detached element */ }
+        onElementError = null
+      }
       target.srcObject = null
       target = null
     }

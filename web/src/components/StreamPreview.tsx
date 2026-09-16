@@ -610,10 +610,10 @@ export default function StreamPreview(props: Props) {
             muted
             playsinline
             onError={() => {
-              // The negotiated session can still be unplayable (track ends
-              // right away, decode failure): the element error is the only
-              // signal — without it the rung sat on "Unable to play media"
-              // with a black canvas while the device kept the session alive.
+              // Backstop for the player's own element-error watch (which
+              // releases the session and reports the verdict): if this
+              // fires, demote here too — idempotent with the player's
+              // demotion, and it covers a player that somehow missed it.
               if (playerMode() === 'whep') {
                 setPlayerMode(nextPlayerMode('whep', true, !h264Supported(), false, hlsSupported()))
               }
