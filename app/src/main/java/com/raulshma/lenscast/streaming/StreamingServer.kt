@@ -14,7 +14,8 @@ import com.raulshma.lenscast.streaming.web.AuditEntry
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.TimeoutCancellationException
-import fi.iki.elonen.NanoHTTPD
+import fi.iki.elonen.NanoHTTPD.IHTTPSession
+import fi.iki.elonen.NanoWSD
 import java.io.ByteArrayInputStream
 import javax.net.ssl.SSLServerSocketFactory
 
@@ -25,6 +26,13 @@ import javax.net.ssl.SSLServerSocketFactory
  * snapshots / audio in [MediaResponder] — all received or built here at
  * construction, never grown per request. The `/api/` JSON routes stay on
  * the [WebApiStack] seam below.
+ *
+ * The server is a [NanoWSD] — a NanoHTTPD whose dispatch splits
+ * `Connection: upgrade` requests off to [openWebSocket] — so the WebSocket
+ * media routes ([WsMediaRoutes]: WebCodecs video, talkback) ride this same
+ * port as same-origin /ws paths. One port serves the dashboard and its
+ * sockets alike, and a reverse proxy needs a single forwarded hop with
+ * upgrade passthrough; the former +1 sidecar socket is gone.
  */
 class StreamingServer(
     private val port: Int = StreamDefaults.WEB_PORT,
@@ -64,7 +72,7 @@ class StreamingServer(
     // transport only translates POST /whep + DELETE /whep/{id} onto it — the
     // SDP offer/answer and the session registry live behind the seam.
     private val whepServer: com.raulshma.lenscast.streaming.whep.WhepServer? = null,
-) : NanoHTTPD(port) {
+) : NanoWSD(port) {
 
     val isSecure: Boolean = tlsServerSocketFactory != null
 
@@ -79,6 +87,12 @@ class StreamingServer(
         port,
         scheme = if (tlsServerSocketFactory != null) "https" else "http",
         auditLog = webApi.auditLog,
+    )
+    // The same-port WebSocket media routes (path gate + cookie gate + the
+    // video/talkback sockets) — the transport only hands upgrades over.
+    private val wsMedia = com.raulshma.lenscast.streaming.ws.WsMediaRoutes(
+        audioStreamingManager,
+        webAuthGate,
     )
     private val assetStore = StaticAssetStore(context)
     private val mjpegPump = MjpegStreamPump(networkQualityMonitor, BOUNDARY_MARKER)
@@ -104,11 +118,17 @@ class StreamingServer(
      * its load-time status (its poll fallback stays disarmed while the
      * connection reports OPEN). SSE must stay uncompressed; the finite
      * text and json bodies keep the default behavior.
+     *
+     * NanoHTTPD's rule (gzip text and /json mimes) is restated here rather than
+     * delegated to super: NanoWSD's own override returns false
+     * unconditionally — its concern is the WS handshake path, which never
+     * goes through this hook — and would silently strip the HTTP surface's
+     * compression.
      */
     override fun useGzipWhenAccepted(r: Response): Boolean {
         val mime = r.mimeType ?: return false
         if (mime.startsWith("text/event-stream")) return false
-        return super.useGzipWhenAccepted(r)
+        return mime.lowercase().contains("text/") || mime.lowercase().contains("/json")
     }
 
     fun setWebStreamingEnabled(enabled: Boolean) = mjpegPump.setEnabled(enabled)
@@ -119,7 +139,23 @@ class StreamingServer(
 
     fun kickHttpClient(clientId: String): Boolean = mjpegPump.kickClient(clientId)
 
-    override fun serve(session: IHTTPSession): Response {
+    /** The encoded hub's WS video fan-out sink (same-port `/ws/video` clients). */
+    fun feedVideo(nalUnits: List<com.raulshma.lenscast.streaming.rtsp.EncodedNalUnit>) =
+        wsMedia.feedVideo(nalUnits)
+
+    /** Live `/ws/video` client count — the encoded-stream policy's WS input. */
+    fun videoClientCount(): Int = wsMedia.videoClientCount()
+
+    /**
+     * The NanoWSD upgrade hook: every `Connection: upgrade` request lands
+     * here (plain HTTP dispatch continues in [serveHttp]). The path and
+     * cookie gates live in [WsMediaRoutes.openWebSocket]; a rejection throws,
+     * which aborts the handshake with an HTTP error — no 101, no media.
+     */
+    override fun openWebSocket(handshake: IHTTPSession): fi.iki.elonen.NanoWSD.WebSocket =
+        wsMedia.openWebSocket(handshake)
+
+    override fun serveHttp(session: IHTTPSession): Response {
         val uri = session.uri.substringBefore("?")
         val method = session.method
 

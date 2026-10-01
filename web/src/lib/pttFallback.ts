@@ -13,7 +13,7 @@ export function floatChunkToPcm16(input: Float32Array): ArrayBuffer {
 }
 
 /**
- * Where mic chunks detour when the /ws/talkback sidecar is down: chunks
+ * Where mic chunks detour when the /ws/talkback socket is down: chunks
  * accumulate for [batchMs], then each batch rides the one-shot HTTP talkback
  * uplink through a serialized chain — the device speaker track writes block,
  * and overlapping uploads would interleave in the server's thread pool. A

@@ -1,27 +1,31 @@
 package com.raulshma.lenscast.streaming.ws
 
-import com.raulshma.lenscast.streaming.rtsp.EncodedNalUnit
 import android.util.Log
 import com.raulshma.lenscast.streaming.AudioStreamingManager
 import com.raulshma.lenscast.streaming.WebAuthGate
-import fi.iki.elonen.NanoWSD
+import fi.iki.elonen.NanoHTTPD.IHTTPSession
+import fi.iki.elonen.NanoWSD.WebSocket
+import fi.iki.elonen.NanoWSD.WebSocketFrame
 import java.util.concurrent.CopyOnWriteArrayList
 
 /**
- * The WebSocket sidecar on the streaming server's port: `/ws/video` pushes
- * H.264 or H.265 AUs (length-prefixed, configured via a cached avcC or hvcC)
- * for WebCodecs playback — sub-second latency at a fraction of MJPEG's
+ * The WebSocket media routes on the streaming server's port: `/ws/video`
+ * pushes H.264 or H.265 AUs (length-prefixed, configured via a cached avcC or
+ * hvcC) for WebCodecs playback — sub-second latency at a fraction of MJPEG's
  * bandwidth — and `/ws/talkback` takes continuous PCM16 chunks for
- * push-to-talk.
+ * push-to-talk. The sockets ride the main [com.raulshma.lenscast.streaming.StreamingServer]
+ * (a NanoWSD, whose `openWebSocket` hands every `Connection: upgrade` request
+ * here), so the dashboard's WS URLs are same-origin: one port, one reverse-
+ * proxy hop, no sidecar socket.
  *
  * Handshakes pass the same [WebAuthGate] as the HTTP surface: auth off lets
  * everything through, auth on requires the session cookie (SameSite=Lax
  * keeps a cross-site page's handshake from attaching it). The handshake stays
  * cookie-only by design — browsers cannot set `Authorization`/`X-Api-Token`
  * headers on a WebSocket, so the read-only API-token path never applies to
- * the WebSocket paths; programmatic consumers use the HTTP surface instead. A rejected
- * handshake throws, which aborts the upgrade with an HTTP error — no 101,
- * no media.
+ * the WebSocket paths; programmatic consumers use the HTTP surface instead. A
+ * rejected handshake throws, which aborts the upgrade with an HTTP error — no
+ * 101, no media.
  *
  * Video frames arrive through [feedVideo], one of the encoded-stream hub's
  * sinks alongside the RTSP and HLS paths. Clients joining mid-stream receive the
@@ -31,13 +35,12 @@ import java.util.concurrent.CopyOnWriteArrayList
  * hvcC (H.265) — so a browser that cannot decode HEVC can fail cleanly at
  * the config step instead of misparsing frames.
  */
-class WsMediaServer(
-    private val bindPort: Int,
+class WsMediaRoutes(
     private val audioStreamingManager: AudioStreamingManager,
     private val authGate: WebAuthGate,
     /** Aggregate encoded-sink send samples (bytes, ms) from the WS video fan-out. */
     private val encodedSendTap: ((bytes: Int, durationMs: Long) -> Unit)? = null,
-) : NanoWSD(bindPort) {
+) {
 
     private val videoClients = CopyOnWriteArrayList<VideoSocket>()
     @Volatile private var cachedSps: ByteArray? = null
@@ -95,27 +98,8 @@ class WsMediaServer(
     /** Live /ws/video client count — the encoded-stream policy's WS input. */
     fun videoClientCount(): Int = videoClients.size
 
-    /**
-     * Non-null when the dashboard runs HTTPS: the sidecar must serve wss,
-     * or browsers refuse the mixed-content ws:// connection.
-     */
-    @Volatile var tlsServerSocketFactory: javax.net.ssl.SSLServerSocketFactory? = null
-
-    fun startServer(): Boolean = try {
-        tlsServerSocketFactory?.let { makeSecure(it, null) }
-        start(SOCKET_READ_TIMEOUT, true)
-        Log.d(TAG, "WS media server started on $bindPort")
-        true
-    } catch (e: Exception) {
-        Log.e(TAG, "Failed to start WS media server", e)
-        false
-    }
-
-    fun stopServer() {
-        stop()
-    }
-
-    override fun openWebSocket(handshake: IHTTPSession): WebSocket {
+    /** The transport's single upgrade entry: path gate, cookie gate, then the socket. */
+    fun openWebSocket(handshake: IHTTPSession): WebSocket {
         val path = handshake.uri?.substringBefore("?") ?: ""
         if (path != VIDEO_PATH && path != TALKBACK_PATH) {
             throw IllegalArgumentException("Unknown WS path: $path")
@@ -151,7 +135,12 @@ class WsMediaServer(
                 }
             } else if (sps != null && pps != null) {
                 runCatching {
-                    sendFrame(WebSocketFrame(WebSocketFrame.OpCode.Binary, true, WsVideoProtocol.videoConfig(sps, pps)))
+                    sendFrame(
+                        WebSocketFrame(
+                            WebSocketFrame.OpCode.Binary, true,
+                            WsVideoProtocol.videoConfig(sps, pps),
+                        )
+                    )
                 }
             }
             Log.d(TAG, "WS video client connected (${videoClients.size})")
@@ -211,7 +200,7 @@ class WsMediaServer(
     }
 
     companion object {
-        private const val TAG = "WsMediaServer"
+        private const val TAG = "WsMediaRoutes"
         const val VIDEO_PATH = "/ws/video"
         const val TALKBACK_PATH = "/ws/talkback"
     }

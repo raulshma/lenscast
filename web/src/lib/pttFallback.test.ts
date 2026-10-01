@@ -93,7 +93,7 @@ describe('PttFallbackUplink', () => {
     const uplink = new PttFallbackUplink(async (batch) => {
       if (failNext) {
         failNext = false
-        throw new Error('sidecar flapped')
+        throw new Error('socket flapped')
       }
       posts.push(pcmBytes(batch))
     })

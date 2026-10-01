@@ -5,7 +5,7 @@ import { useZoomable } from '../hooks/useZoomable'
 import ConnectionQualityIndicator from './ConnectionQualityIndicator'
 import { tapToFocus as apiTapToFocus, setZoom as apiSetZoom, setTorch as apiSetTorch, pushTalkback } from '../api/client'
 import { API_DEFAULTS } from '../api/defaults'
-import { createH264Player, h264Supported, wsBaseUrl } from '../video/h264Player'
+import { createH264Player, h264Supported, wsUrl } from '../video/h264Player'
 import { cyclePlayerMode, hlsSupported, nextPlayerMode, type PlayerMode } from '../video/playerLadder'
 import { createWhepPlayer } from '../lib/whepClient'
 import { canShareFiles, shareSnapshotImage, snapshotFileName } from '../lib/share'
@@ -386,15 +386,15 @@ export default function StreamPreview(props: Props) {
   // getUserMedia is secure-context-only, so on a plain-HTTP LAN origin the
   // mic API does not exist at all — that failure (and mic-permission denial)
   // throws a typed error the button handler turns into a visible status line
-  // instead of the old silent no-op. With the mic up but the WS sidecar
+  // instead of the old silent no-op. With the mic up but the WebSocket
   // unreachable, chunks detour to the HTTP one-shot uplink in serialized
   // ~600 ms batches (see lib/pttFallback), so talkback keeps working through
-  // a dead sidecar.
+  // a dead socket.
   let pttCtx: AudioContext | null = null
   let pttSocket: WebSocket | null = null
   let pttStream: MediaStream | null = null
   // Chunks captured while the WS handshake is still in flight (the socket
-  // is created before getUserMedia, so a slow sidecar answer races the
+  // is created before getUserMedia, so a slow WS answer races the
   // first audio): held for the WS, flushed in order on open, spilled to
   // the fallback when the link dies instead.
   let pttPending: ArrayBuffer[] = []
@@ -409,7 +409,7 @@ export default function StreamPreview(props: Props) {
     if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) {
       throw new TalkUnavailableError('insecure')
     }
-    pttSocket = new WebSocket(`${wsBaseUrl()}/ws/talkback`)
+    pttSocket = new WebSocket(wsUrl('talkback'))
     pttSocket.binaryType = 'arraybuffer'
     pttSocket.onopen = () => {
       // The handshake landed after audio started: the CONNECTING-window
@@ -457,12 +457,12 @@ export default function StreamPreview(props: Props) {
       return
     }
     if (pttSocket?.readyState === WebSocket.CONNECTING) {
-      // Handshake still in flight: the fallback is for a sidecar that's
+      // Handshake still in flight: the fallback is for a socket that's
       // down, not one that's still answering — hold the chunk for the WS.
       pttPending.push(bytes)
       return
     }
-    // WS dead (sidecar down, handshake refused): batch onto the one-shot
+    // WS dead (socket down, handshake refused): batch onto the one-shot
     // HTTP uplink — POSTs serialize inside the uplink.
     pttFallback.send(bytes)
   }

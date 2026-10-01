@@ -89,7 +89,7 @@ internal interface EncodedSink {
  * one at a time; a codec change on a running pipeline reconfigures stop →
  * (new) encoder → start + black frame. On H.265 the fan-out is codec-aware:
  * RTSP always receives, the HLS TS muxer flips its PMT stream type and the
- * WS sidecar sends the self-describing 'LCHC' hvcC config (legacy WS clients
+ * WS video route sends the self-describing 'LCHC' hvcC config (legacy WS clients
  * fail cleanly), while the RTMP and SRT pushes are gated off — no usable
  * H.265 mapping on this path — and their start ladders refuse the codec.
  */
@@ -545,7 +545,7 @@ internal class EncodedStreamHub(
      * must take the route of the encoder that produced it, or HEVC AUs would
      * land in the H.264-only RTMP path. HLS and WS are codec-aware since the
      * HEVC muxer/config work: the TS muxer's PMT stream type flips with the
-     * codec (manager-owned, alongside a ring reset), and the WS sidecar sends
+     * codec (manager-owned, alongside a ring reset), and the WS video route sends
      * an hvcC-style config message ('LCHC') — browser support for HEVC HLS is
      * effectively Safari-only, and the WS WebCodecs player must learn to
      * parse the hvcC record before HEVC frames decodable in Chrome land.
