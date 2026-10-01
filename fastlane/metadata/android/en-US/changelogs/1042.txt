@@ -1,0 +1,4 @@
+Since 0.1.3:
+• Fixed: settings saves from API clients sending partial JSON failed on release builds (missing R8 keep for Moshi's reflective defaults constructors) — the dashboard's API-token toggle could not be enabled; PUT /api/settings now accepts any subset of fields
+• Reverse proxy: the dashboard's WebSockets (WebCodecs video, push-to-talk) ride the main web port as same-origin /ws/video and /ws/talkback paths — the port+1 sidecar is gone, so a single forwarded port with WebSocket upgrade passthrough carries everything (https://host/ just works)
+• New: output rotation for mounted phones — a 0/90/180/270-degree correction plus a lock-orientation setting, applied before encoding so the M-JPEG stream, snapshots, HLS, RTSP, WebRTC and MP4 recordings all come out upright
