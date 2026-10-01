@@ -213,6 +213,8 @@ export const API_DEFAULTS = {
   cameraHdrMode: 'OFF',
   cameraSceneMode: '',
   cameraNightVisionMode: 'OFF',
+  cameraOutputRotation: 0,
+  cameraOrientationLocked: false,
 
   // Status fallbacks (used when /api/status has not loaded yet)
   clientCount: 0,

@@ -1,6 +1,6 @@
 import SettingsCard from './SettingsCard'
-import type { AllSettings, CameraSettings, Resolution } from '../types'
-import { RESOLUTION_LABELS, FRAME_RATE_OPTIONS } from '../types'
+import type { AllSettings, CameraSettings, OutputRotation, Resolution } from '../types'
+import { RESOLUTION_LABELS, FRAME_RATE_OPTIONS, OUTPUT_ROTATION_OPTIONS } from '../types'
 import { API_DEFAULTS } from '../api/defaults'
 import { t } from '../lib/i18n'
 
@@ -74,6 +74,32 @@ export default function ZoomFrameCard(props: Props) {
             <option value={k}>{v}</option>
           ))}
         </select>
+      </div>
+
+      {/* Output rotation — the mounted-phone correction (issue #6) */}
+      <div class="field-group">
+        <div class="field-row">
+          <span class="field-label">{t('zoomframe.rotation')}</span>
+        </div>
+        <select
+          id="rotation-select"
+          class="field-select field-select-full"
+          value={s()?.camera?.outputRotation ?? API_DEFAULTS.cameraOutputRotation}
+          onChange={(e) => props.updateCamera({ outputRotation: parseInt(e.currentTarget.value) as OutputRotation })}
+        >
+          {OUTPUT_ROTATION_OPTIONS.map((r) => (
+            <option value={r}>{r}°</option>
+          ))}
+        </select>
+        <label class="field-row" style={{ cursor: 'pointer', 'margin-top': '6px' }}>
+          <input
+            id="orientation-locked-toggle"
+            type="checkbox"
+            checked={s()?.camera?.orientationLocked ?? API_DEFAULTS.cameraOrientationLocked}
+            onChange={(e) => props.updateCamera({ orientationLocked: e.currentTarget.checked })}
+          />
+          <span class="field-label">{t('zoomframe.orientationLocked')}</span>
+        </label>
       </div>
     </SettingsCard>
   )

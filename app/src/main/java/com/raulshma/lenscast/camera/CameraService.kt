@@ -40,6 +40,7 @@ import com.raulshma.lenscast.camera.model.CameraSessionArbiter
 import com.raulshma.lenscast.camera.model.FocusApplyPolicy
 import com.raulshma.lenscast.camera.model.FrameErrorPolicy
 import com.raulshma.lenscast.camera.model.PhotoCapturePlan
+import com.raulshma.lenscast.camera.model.OutputRotationPolicy
 import com.raulshma.lenscast.camera.model.PhotoAspectRatioPolicy
 import com.raulshma.lenscast.core.YuvConverter
 import com.raulshma.lenscast.camera.model.WhiteBalance
@@ -726,6 +727,7 @@ class CameraService(private val context: Context) {
         val previewBuilder = Preview.Builder()
         val captureBuilder = ImageCapture.Builder()
             .setJpegQuality(effectivePhotoConfig.jpegQuality)
+            .setTargetRotation(captureTargetRotation())
             .setCaptureMode(
                 when (PhotoCapturePlan.captureMode(effectivePhotoConfig)) {
                     PhotoCapturePlan.CaptureMode.MAXIMIZE_QUALITY ->
@@ -970,6 +972,11 @@ class CameraService(private val context: Context) {
             val width = cropRect.width()
             val height = cropRect.height()
             val rotation = imageProxy.imageInfo.rotationDegrees
+            // The freshest sensor-to-display rotation the analysis stream saw —
+            // the capture/recording target-rotation computation reads it, so a
+            // locked-orientation still matches the streams even when the
+            // display's own rotation is not what the mount suggests.
+            lastSensorRotationDegrees = rotation
             val yuvData = yuvToNv21(imageProxy)
             if (yuvData != null) {
                 consecutiveFrameErrors = 0
@@ -1046,9 +1053,64 @@ class CameraService(private val context: Context) {
     private var pendingResolution: Size? = null
     private var currentResolution: Size = Size(1920, 1080)
 
+    /** The analysis stream's latest sensor-to-display rotation (degrees); the default covers the pre-first-frame bind. */
+    @Volatile private var lastSensorRotationDegrees = 0
+
+    /**
+     * The target rotation stills and recordings bind with so the file carries
+     * exactly the effective output rotation the streams show (issue #6): the
+     * pure [OutputRotationPolicy.targetRotationDegrees] inversion, fed by the
+     * current settings, the freshest sensor rotation, and the display's
+     * rotation. Recomputed on every bind — a locked mount keeps its constant,
+     * a handheld device picks the orientation up at the next rebind.
+     */
+    fun captureTargetRotation(): Int {
+        val settings = activeSettings
+        val effective = OutputRotationPolicy.effectiveRotation(
+            lastSensorRotationDegrees,
+            settings.outputRotation,
+            settings.orientationLocked,
+        )
+        val displayDegrees = OutputRotationPolicy.displayRotationDegrees(currentDisplayRotation())
+        return OutputRotationPolicy.surfaceRotationFromDegrees(
+            OutputRotationPolicy.targetRotationDegrees(lastSensorRotationDegrees, displayDegrees, effective)
+        )
+    }
+
+    private fun currentDisplayRotation(): Int = try {
+        val displayManager = context.getSystemService(Context.DISPLAY_SERVICE) as android.hardware.display.DisplayManager
+        displayManager.getDisplay(android.view.Display.DEFAULT_DISPLAY)?.rotation ?: android.view.Surface.ROTATION_0
+    } catch (_: Exception) {
+        android.view.Surface.ROTATION_0
+    }
+
+    /** True when the two settings that steer the capture target rotation moved between the bound and requested values. */
+    private fun outputRotationChanged(bound: CameraSettings, requested: CameraSettings): Boolean =
+        bound.outputRotation != requested.outputRotation || bound.orientationLocked != requested.orientationLocked
+
     @androidx.annotation.OptIn(androidx.camera.camera2.interop.ExperimentalCamera2Interop::class)
     suspend fun applySettings(settings: CameraSettings) {
+        val boundSettings = activeSettings
         activeSettings = settings
+        if (outputRotationChanged(boundSettings, settings)) {
+            // The ImageCapture bakes the output rotation in at bind time
+            // (target rotation); a change rebinds through the same arbiter
+            // consult the resolution seam rides — a busy camera picks the
+            // change up at the next natural rebind, since the builder reads
+            // [activeSettings] live.
+            when (
+                val action = CameraSessionArbiter.decide(
+                    demandState(CameraSessionArbiter.Trigger.RebindIfFree)
+                )
+            ) {
+                is CameraSessionArbiter.BindingAction -> {
+                    withContext(Dispatchers.Main) {
+                        executeBinding(action)
+                    }
+                }
+                else -> Log.d(TAG, "applySettings: deferring output-rotation rebind until next active session")
+            }
+        }
         if (settings.resolution.size != currentResolution) {
             currentResolution = settings.resolution.size
             // One arbiter consult: rebind now while the camera is free, park

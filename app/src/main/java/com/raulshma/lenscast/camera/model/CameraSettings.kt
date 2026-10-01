@@ -38,6 +38,11 @@ data class CameraSettings(
     val hdrMode: HdrMode = HdrMode.OFF,
     val nightVisionMode: NightVisionMode = NightVisionMode.OFF,
     val torchEnabled: Boolean = false,
+    // Issue #6: the output-orientation correction for a mounted phone —
+    // every output (M-JPEG, snapshots, HLS, RTSP, recordings) is rotated by
+    // this before it leaves the device. Ladder + semantics in OutputRotationPolicy.
+    val outputRotation: Int = 0,
+    val orientationLocked: Boolean = false,
 ) {
     companion object {
         // Persistence/validation bounds — the single home, referenced by the

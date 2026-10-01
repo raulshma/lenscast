@@ -109,6 +109,19 @@ class SettingsApplier(
                 }
         }
 
+        // Output rotation (issue #6): the mounted-phone correction lands on
+        // the manager's volatile pair — frames pick it up per fan-out, no
+        // consumer reconfiguration. Stills/recordings ride the camera
+        // service's rebind (the settings flow above re-applies the camera).
+        scope.launch {
+            settingsDataStore.settings
+                .map { RotationSetting(it.outputRotation, it.orientationLocked) }
+                .distinctUntilChanged()
+                .collectLatest { rotation ->
+                    streamingManager.setOutputRotation(rotation.degrees, rotation.locked)
+                }
+        }
+
         // RTSP settings
         scope.launch {
             combine(
@@ -438,6 +451,8 @@ class SettingsApplier(
         val channels: Int,
         val echoCancellation: Boolean,
     )
+
+    private data class RotationSetting(val degrees: Int, val locked: Boolean)
 
     private data class QualityOverlaySettings(
         val quality: Int,

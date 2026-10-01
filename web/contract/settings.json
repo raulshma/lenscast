@@ -13,7 +13,9 @@
     "stabilization": true,
     "hdrMode": "OFF",
     "sceneMode": "",
-    "nightVisionMode": "OFF"
+    "nightVisionMode": "OFF",
+    "outputRotation": 0,
+    "orientationLocked": false
   },
   "streaming": {
     "port": 8080,

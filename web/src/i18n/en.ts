@@ -116,6 +116,8 @@ export const en: Record<string, string> = {
   'zoomframe.title': 'Zoom & Frame',
   'zoomframe.zoom': 'Zoom',
   'zoomframe.frameRate': 'Frame Rate',
+  'zoomframe.rotation': 'Output Rotation',
+  'zoomframe.orientationLocked': 'Lock orientation',
 
   // ── Effects card ──
   'effects.title': 'Effects',
