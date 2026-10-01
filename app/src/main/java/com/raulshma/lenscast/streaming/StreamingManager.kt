@@ -3,6 +3,7 @@ package com.raulshma.lenscast.streaming
 import com.raulshma.lenscast.streaming.rtsp.EncodedNalUnit
 import android.content.Context
 import android.util.Log
+import com.raulshma.lenscast.camera.model.OutputRotationPolicy
 import com.raulshma.lenscast.camera.model.OverlaySettings
 import com.raulshma.lenscast.MainApplication
 import com.raulshma.lenscast.core.NetworkQualityMonitor
@@ -1291,12 +1292,21 @@ class StreamingManager(
      * push's libwebrtc video source. The web pipeline no-ops while inactive;
      * the hub runs its policy verdict per frame and encodes only while some
      * encoded sink is active; the WHIP publisher no-ops while stopped.
+     *
+     * The output-rotation correction (issue #6) is applied once here, at the
+     * single fan-out: every *output* consumer receives the effective rotation
+     * (setting applied on top of the sensor's), while detection consumes the
+     * raw sensor frames — the motion zones are defined on the sensor view,
+     * and rotating them upstream would shift their semantics.
      */
     fun pushFrame(yuvData: ByteArray, width: Int, height: Int, rotation: Int = 0) {
         // Thermal CRITICAL pauses encoding on both outputs — the pipeline's
         // Long.MAX_VALUE delay alone would stall MJPEG while the encoded
         // sinks kept burning CPU.
         if (isThermallyPaused()) return
+        val outputRotation = OutputRotationPolicy.effectiveRotation(
+            rotation, outputRotationDegrees, orientationLocked,
+        )
         // Motion runs on sampled luma even with zero viewers (surveillance).
         // The frame reference is freshened first so the ML gate (reached
         // synchronously inside the detector's fire callback) reads exactly
@@ -1305,21 +1315,36 @@ class StreamingManager(
         // The event-snapshot fallback retains its own cheap copy: the M-JPEG
         // pipeline below no-ops with no viewer, and a detection event fired
         // with none still deserves a snapshot.
-        snapshotFrameStore.maybeRetain(yuvData, width, height, rotation, System.currentTimeMillis())
+        snapshotFrameStore.maybeRetain(yuvData, width, height, outputRotation, System.currentTimeMillis())
         try {
             motionDetector.feed(yuvData, width, height)
         } catch (_: Exception) {
         }
-        pushFrameToWeb(yuvData, width, height, rotation)
-        encodedHub.pushFrame(yuvData, width, height, rotation)
+        pushFrameToWeb(yuvData, width, height, outputRotation)
+        encodedHub.pushFrame(yuvData, width, height, outputRotation)
         // The WHIP publisher taps the same NV21 analysis frame (it encodes its
         // own H.264 from it) and no-ops internally while stopped.
-        whipOutput.feedVideoFrame(yuvData, width, height, rotation)
+        whipOutput.feedVideoFrame(yuvData, width, height, outputRotation)
         // The WHEP endpoint taps it too — one shared libwebrtc VideoSource
         // fans the frame to every viewer's hardware encoder. No-ops with no
         // viewers.
-        whepServer.feedVideoFrame(yuvData, width, height, rotation)
+        whepServer.feedVideoFrame(yuvData, width, height, outputRotation)
     }
+
+    /**
+     * The output-rotation correction (degrees + the lock flag) — persisted
+     * settings reach the frame path through the Settings Applier, the
+     * [setFrameRate] route. Volatile: frames read it per fan-out, no
+     * reconfiguration of any consumer is needed (each already honors a
+     * rotation parameter).
+     */
+    fun setOutputRotation(degrees: Int, locked: Boolean) {
+        outputRotationDegrees = OutputRotationPolicy.coerce(degrees)
+        orientationLocked = locked
+    }
+
+    @Volatile private var outputRotationDegrees = 0
+    @Volatile private var orientationLocked = false
 
     private fun pushFrameToWeb(yuvData: ByteArray, width: Int, height: Int, rotation: Int) {
         if (!webStreamingActive.get()) return

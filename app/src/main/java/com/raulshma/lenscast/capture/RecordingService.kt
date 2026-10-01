@@ -169,6 +169,12 @@ class RecordingService : Service() {
 
             val videoCapture = VideoCapture.withOutput(recorder)
 
+            // The MP4 carries the effective output rotation as track metadata
+            // (issue #6): the target rotation is computed fresh per recording
+            // start, so players show the file upright on a mounted phone
+            // without any transcode.
+            videoCapture.targetRotation = cameraService.captureTargetRotation()
+
             if (!cameraService.bindRecording(videoCapture)) {
                 Log.e(TAG, "Could not bind camera for recording")
                 cleanupFailedStart()

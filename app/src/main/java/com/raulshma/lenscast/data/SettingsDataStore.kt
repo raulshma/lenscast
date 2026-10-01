@@ -19,6 +19,7 @@ import com.raulshma.lenscast.camera.model.FocusMode
 import com.raulshma.lenscast.camera.model.GridStyle
 import com.raulshma.lenscast.camera.model.HdrMode
 import com.raulshma.lenscast.camera.model.NightVisionMode
+import com.raulshma.lenscast.camera.model.OutputRotationPolicy
 import com.raulshma.lenscast.camera.model.SelfTimerMode
 import com.raulshma.lenscast.camera.model.MaskingType
 import com.raulshma.lenscast.camera.model.MaskingZone
@@ -138,6 +139,8 @@ private object Keys {
     val MDNS_ENABLED = stringPreferencesKey("mdns_enabled")
     val MOTION_DETECTION_ENABLED = stringPreferencesKey("motion_detection_enabled")
     val NIGHT_VISION_MODE = stringPreferencesKey("night_vision_mode")
+    val OUTPUT_ROTATION = intPreferencesKey("output_rotation")
+    val ORIENTATION_LOCKED = stringPreferencesKey("orientation_locked")
     val OVERLAY_ENABLED = stringPreferencesKey("overlay_enabled")
     val OVERLAY_SHOW_TIMESTAMP = stringPreferencesKey("overlay_show_timestamp")
     val OVERLAY_TIMESTAMP_FORMAT = stringPreferencesKey("overlay_timestamp_format")
@@ -870,6 +873,8 @@ private fun decodeCameraSettings(prefs: Preferences): CameraSettings = CameraSet
     sceneMode = prefs[Keys.SCENE_MODE],
     nightVisionMode = parseEnum(prefs[Keys.NIGHT_VISION_MODE], NightVisionMode.OFF),
     torchEnabled = readBool(prefs, Keys.TORCH_ENABLED, defaultTrue = false),
+    outputRotation = OutputRotationPolicy.coerce(prefs[Keys.OUTPUT_ROTATION] ?: 0),
+    orientationLocked = readBool(prefs, Keys.ORIENTATION_LOCKED, defaultTrue = false),
 )
 
 private fun encodeCameraSettings(prefs: MutablePreferences, settings: CameraSettings) {
@@ -912,6 +917,8 @@ private fun encodeCameraSettings(prefs: MutablePreferences, settings: CameraSett
     }
     prefs[Keys.NIGHT_VISION_MODE] = settings.nightVisionMode.name
     writeBool(prefs, Keys.TORCH_ENABLED, settings.torchEnabled)
+    prefs[Keys.OUTPUT_ROTATION] = OutputRotationPolicy.coerce(settings.outputRotation)
+    writeBool(prefs, Keys.ORIENTATION_LOCKED, settings.orientationLocked)
 }
 
 private fun decodeOverlaySettings(prefs: Preferences): OverlaySettings {
