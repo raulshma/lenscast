@@ -29,7 +29,7 @@ import com.raulshma.lenscast.streaming.SessionRole
  * Talkback decision: talkback is a viewer-ALLOWED feature — it is the
  * doorbell intercom use (a person at the door presses talk and speaks), not
  * a configuration change. The HTTP uplink is allowed above, and the WebSocket
- * twin `/ws/talkback` rides the ws sidecar, which stays cookie-gated only and
+ * twin `/ws/talkback` rides the web server's WebSocket routes, which stay cookie-gated only and
  * deliberately enforces no role at all (video/audio are reads; talkback is
  * the one write there and it is viewer-allowed by this same decision).
  *

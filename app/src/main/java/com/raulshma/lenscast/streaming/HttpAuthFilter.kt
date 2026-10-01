@@ -200,9 +200,18 @@ class HttpAuthFilter(
         return headers["x-api-token"]?.trim()?.takeIf { it.isNotEmpty() }
     }
 
+    /**
+     * The WebSocket media routes (`/ws/video`, `/ws/talkback`) — protected
+     * like the stream transports. An actual upgrade never reaches the HTTP
+     * auth ladder (the NanoWSD dispatch intercepts it before this caller,
+     * and the upgrade's cookie gate lives in WsMediaRoutes); this entry keeps
+     * a plain non-upgrade GET from falling through to the static index
+     * fallback unauthenticated.
+     */
     fun isProtectedRoute(uri: String): Boolean =
         uri.startsWith("/api/") || uri == "/stream" || uri == "/audio" ||
-            uri.startsWith("/snapshot") || uri.startsWith("/hls/") || isWhepRoute(uri)
+            uri.startsWith("/snapshot") || uri.startsWith("/hls/") || isWhepRoute(uri) ||
+            uri.startsWith("/ws/")
 
     /** The WHEP viewer-session routes (`/whep`, `/whep/{id}`) — protected like the stream transports. */
     fun isWhepRoute(uri: String): Boolean =

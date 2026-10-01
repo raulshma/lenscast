@@ -16,15 +16,13 @@ export function h264Supported(): boolean {
     typeof (window as any).VideoDecoder === 'function'
 }
 
-// The WS sidecar listens one port above the main HTTP server. Hand-maintained
-// mirror of StreamingManager's WS_PORT_OFFSET (the types.ts lockstep rule).
-export const WS_PORT_OFFSET = 1
-
-export function wsBaseUrl(): string {
-  const loc = window.location
+// WebSockets ride the main HTTP server as same-origin paths (`/ws/video`,
+// `/ws/talkback`) — the dashboard and its sockets share one port, so a
+// reverse proxy needs a single forwarded hop and the URL is always the page
+// origin: no port math to get wrong behind a proxy on a non-default port.
+export function wsUrl(path: string, loc: Location = window.location): string {
   const scheme = loc.protocol === 'https:' ? 'wss:' : 'ws:'
-  const wsPort = parseInt(loc.port || '80', 10) + WS_PORT_OFFSET
-  return `${scheme}//${loc.hostname}:${wsPort}`
+  return `${scheme}//${loc.host}/ws/${path}`
 }
 
 interface FrameEnvelope {
@@ -148,7 +146,7 @@ export function createH264Player(options: { onStatus?: (s: 'idle' | 'playing' | 
     }
     canvas = targetCanvas
     renderCtx = canvas.getContext('2d')
-    const url = `${wsBaseUrl()}/ws/video`
+    const url = wsUrl('video')
     try {
       socket = new WebSocket(url)
     } catch (e) {

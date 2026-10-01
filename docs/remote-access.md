@@ -8,9 +8,9 @@ options below are ordered by recommendation.
 ## Endpoints and defaults
 
 Defaults from `core/StreamDefaults.kt`. The web and RTSP ports are configurable
-in the app (valid range 1024–65535); the WebSocket sidecar always rides the web
-port + 1, so 65534 is the practical web-port ceiling — at 65535 the sidecar has
-nowhere to bind and starts without WebSocket video or talkback.
+in the app (valid range 1024–65535). The dashboard's WebSockets (WebCodecs
+video, talkback) ride the web port itself as same-origin `/ws/*` paths — one
+port serves HTTP and WebSocket alike.
 
 | Surface | Default port | HTTP mode | HTTPS mode |
 |---|---|---|---|
@@ -19,14 +19,15 @@ nowhere to bind and starts without WebSocket video or talkback.
 | Snapshot (JPEG frame) | 8080 | `http://PHONE_IP:8080/snapshot` | `https://PHONE_IP:8080/snapshot` |
 | HLS playlist | 8080 | `http://PHONE_IP:8080/hls/playlist.m3u8` | `https://PHONE_IP:8080/hls/playlist.m3u8` |
 | WebRTC viewer (WHEP SDP endpoint) | 8080 | `POST http://PHONE_IP:8080/whep` | `https://PHONE_IP:8080/whep` |
-| WebSocket sidecar (WebCodecs video / talkback) | 8081 (web port + 1) | `ws://PHONE_IP:8081` | `wss://PHONE_IP:8081` |
+| WebSocket video / talkback | 8080 | `ws://PHONE_IP:8080/ws/video`, `/ws/talkback` | `wss://PHONE_IP:8080/ws/video`, `/ws/talkback` |
 | RTSP (H.264/H.265 + AAC) | 8554 | `rtsp://PHONE_IP:8554/stream` | `rtsps://PHONE_IP:8554/stream` (TLS follows HTTPS mode) |
 | RTSP sub-stream (low-res detect role) | 8554 | `rtsp://PHONE_IP:8554/sub` | `rtsps://PHONE_IP:8554/sub` |
 
 Two toggles change how these URLs behave:
 
-- **HTTPS** (`httpsEnabled`, off by default): the web server, WebSocket
-  sidecar, and RTSP listener all switch to TLS with a persistent self-signed
+- **HTTPS** (`httpsEnabled`, off by default): the web server — its
+  WebSocket routes included — and the RTSP listener all switch to TLS with a
+  persistent self-signed
   certificate. The RTSP port stays 8554 — a TLS-enabled listener answers
   `rtsps://` on it, so clients switch their scheme (and the plain-
   and TLS-listener never run at the same time). The listener binds the
@@ -34,7 +35,8 @@ Two toggles change how these URLs behave:
   `rtsps://` URLs. The certificate's SHA-256 fingerprint is shown on the
   in-app Connect sheet for one-tap verification.
 - **Stream auth** (off by default): when enabled, `/api/*`, `/stream`,
-  `/audio`, `/snapshot`, and `/hls/*` require a session obtained by logging in
+  `/audio`, `/snapshot`, `/hls/*`, and `/ws/*` require a session obtained by
+  logging in
   on the dashboard. Passwords are stored PBKDF2-hashed and failed logins are
   rate-limited. The RTSP server challenges with Digest (Basic is also
   accepted) using the same credentials. For scripted clients that cannot hold
@@ -118,7 +120,35 @@ PersistentKeepalive = 25
 Then open `http://PHONE_LAN_IP:8080/` as usual. Forward only UDP 51820 on the
 router; do not forward 8080 or 8554.
 
-## 3. Port forwarding — NOT recommended
+## 3. Reverse proxy (advanced)
+
+One forwarded port is enough for everything the dashboard needs: the pages,
+the streams, and the WebSockets (`/ws/video`, `/ws/talkback`) all share the
+web port as same-origin URLs, so a proxy at `https://example.org/` terminates
+TLS with a public certificate and forwards to the phone over a trusted path
+(your LAN, or a Tailscale/WireGuard tunnel — don't carry the plain-HTTP hop
+across the open internet).
+
+The one requirement is **WebSocket upgrade passthrough** — without it the
+dashboard silently loses the WebCodecs video rung and push-to-talk (it falls
+back to M-JPEG/HLS and the one-shot uplink). nginx, for example:
+
+```nginx
+location / {
+    proxy_pass http://PHONE_IP:8080;
+    proxy_http_version 1.1;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "upgrade";
+    # SSE status/detection events stream continuously; don't buffer them.
+    proxy_buffering off;
+    proxy_read_timeout 1h;
+}
+```
+
+Stream auth keeps working unchanged — the session cookie rides the proxied
+origin, and the `/ws/*` handshake accepts it exactly as on the LAN.
+
+## 4. Port forwarding — NOT recommended
 
 Forwarding the web or RTSP port publishes the phone's server stack — a
 NanoHTTPD-based HTTP server plus a custom RTSP implementation — directly to

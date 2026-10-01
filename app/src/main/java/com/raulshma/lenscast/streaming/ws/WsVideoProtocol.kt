@@ -11,7 +11,7 @@ import com.raulshma.lenscast.streaming.rtsp.EncodedNalUnit
  *  - avcC record construction from the cached SPS/PPS so a browser joining
  *    mid-stream can configure its decoder before the next keyframe.
  *
- * The socket fan-out lives in [WsMediaServer]; this object never touches it.
+ * The socket fan-out lives in [WsMediaRoutes]; this object never touches it.
  */
 object WsVideoProtocol {
 

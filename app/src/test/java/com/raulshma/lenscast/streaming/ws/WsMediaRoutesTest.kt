@@ -3,6 +3,9 @@ package com.raulshma.lenscast.streaming.ws
 import com.raulshma.lenscast.core.StreamAuthCrypto
 import com.raulshma.lenscast.streaming.AudioStreamingManager
 import com.raulshma.lenscast.streaming.WebAuthGate
+import fi.iki.elonen.NanoHTTPD.IHTTPSession
+import fi.iki.elonen.NanoWSD
+import fi.iki.elonen.NanoWSD.WebSocket
 import io.mockk.mockk
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -15,35 +18,41 @@ import java.io.InputStreamReader
 import java.net.Socket
 
 /**
- * Socket-level handshake pass over [WsMediaServer] — the WS sidecar's own
- * surface (path gate + Web Auth Gate cookie verdict) exercised over a real
- * loopback socket against a real NanoWSD instance on an ephemeral port. The
- * upgrade accept-key computation itself lives in the NanoWSD library; what
- * this pins is that a valid handshake upgrades (with the RFC 6455 sample
- * key's well-known accept value, end to end) and that every rejected
- * handshake — unknown path, missing cookie, foreign cookie — never upgrades.
+ * Socket-level handshake pass over [WsMediaRoutes] — the same-origin
+ * /ws-surface's own contract (path gate + Web Auth Gate cookie verdict)
+ * exercised over a real loopback socket against a real NanoWSD instance on
+ * an ephemeral port. Production delegates [StreamingServer.openWebSocket]
+ * to the routes; this test re-creates that one-line delegation with a bare
+ * NanoWSD so the routes stay framework-free. The upgrade accept-key
+ * computation itself lives in the NanoWSD library; what this pins is that a
+ * valid handshake upgrades (with the RFC 6455 sample key's well-known accept
+ * value, end to end) and that every rejected handshake — unknown path,
+ * missing cookie, foreign cookie — never upgrades.
  *
  * **Not coverable here:** the OS-level enforcement semantics beyond the
  * handshake (frame fan-out timing under real encoders — device-only).
  */
-class WsMediaServerTest {
+class WsMediaRoutesTest {
 
     private val audioStreamingManager: AudioStreamingManager = mockk(relaxed = true)
     private val authGate = WebAuthGate()
-    private lateinit var server: WsMediaServer
+    private val routes = WsMediaRoutes(audioStreamingManager, authGate)
+    private val server = object : NanoWSD(0) {
+        override fun openWebSocket(handshake: IHTTPSession): WebSocket =
+            routes.openWebSocket(handshake)
+    }
     private var port = 0
 
     @Before
     fun setUp() {
-        server = WsMediaServer(0, audioStreamingManager, authGate)
-        assertTrue(server.startServer())
+        server.start()
         port = server.listeningPort
         assertTrue(port > 0)
     }
 
     @After
     fun tearDown() {
-        server.stopServer()
+        server.stop()
     }
 
     // ── helpers ──

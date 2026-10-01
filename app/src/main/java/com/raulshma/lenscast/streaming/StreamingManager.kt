@@ -79,10 +79,11 @@ class StreamingManager(
         (context.applicationContext as MainApplication).settingsDataStore
     }
 
-    // WebSocket sidecar for WebCodecs video + PTT talkback.
-    @Volatile private var wsMediaServer: com.raulshma.lenscast.streaming.ws.WsMediaServer? = null
+    // WebSocket video + PTT talkback ride the main server as same-origin
+    // /ws/* routes (see WsMediaRoutes); the closure reads the current server
+    // instance so a port/TLS recreation carries the sockets with it.
     private val wsVideoSink: (List<EncodedNalUnit>) -> Unit = { nalUnits ->
-        wsMediaServer?.feedVideo(nalUnits)
+        server.feedVideo(nalUnits)
     }
 
     // The shared H.264/AAC encode pipeline: started whenever any encoded sink
@@ -139,7 +140,7 @@ class StreamingManager(
         webActive = webStreamingActive.get(),
         rtspActive = rtspOutput.isActive(),
         hlsRequested = HlsManager.isHot(),
-        wsVideoClients = wsMediaServer?.videoClientCount() ?: 0,
+        wsVideoClients = server.videoClientCount(),
         rtmpActive = rtmpOutput.isActive(),
         srtActive = srtOutput.isActive(),
     )
@@ -400,7 +401,7 @@ class StreamingManager(
         } catch (_: Exception) {
             0
         }
-        val ws = wsMediaServer?.videoClientCount() ?: 0
+        val ws = server.videoClientCount()
         val hls = if (HlsManager.isHot()) 1 else 0
         val rtmp = if (rtmpOutput.isActive()) 1 else 0
         val whip = if (whipOutput.isActive()) 1 else 0
@@ -887,7 +888,6 @@ class StreamingManager(
         if (!started) {
             return false
         }
-        startWsSidecar()
         // The WHEP endpoint rides the web transport: its reap loop arms with
         // the server (sessions are created on demand by viewers).
         runCatching { whepServer.start() }
@@ -898,37 +898,11 @@ class StreamingManager(
         return true
     }
 
-    /** The WS sidecar rides the main server's lifecycle; failure is non-fatal. */
-    private fun startWsSidecar() {
-        if (wsMediaServer == null) {
-            val sidecar = com.raulshma.lenscast.streaming.ws.WsMediaServer(
-                currentPort + WS_PORT_OFFSET,
-                audioStreamingManager,
-                webAuthGate,
-                encodedSendTap = ::onEncodedSinkSend,
-            )
-            if (tlsEnabled) {
-                runCatching {
-                    val app = context.applicationContext as MainApplication
-                    sidecar.tlsServerSocketFactory = app.tlsCertManager.identity(localIpsSafe()).serverSocketFactory
-                }
-            }
-            wsMediaServer = sidecar
-        }
-        wsMediaServer?.startServer()
-    }
-
-    private fun stopWsSidecar() {
-        runCatching { wsMediaServer?.stopServer() }
-        wsMediaServer = null
-    }
-
-    /** One lever for "both transports stop": the HTTP server plus the WS sidecar riding its lifecycle. */
+    /** One lever for "the transport stops": the HTTP server carrying HTTP and the /ws WebSocket routes alike. */
     private fun stopTransport() {
         server.stopServer()
-        stopWsSidecar()
         // WHEP sessions live on the web transport: every viewer's peer
-        // connection dies with it (the WS sidecar's rule).
+        // connection dies with it (the WebSocket routes' rule).
         runCatching { whepServer.stop() }
     }
 
@@ -1907,7 +1881,6 @@ class StreamingManager(
 
     companion object {
         private const val TAG = "StreamingManager"
-        private const val WS_PORT_OFFSET = 1
 
         /** Poll cadence of the adaptive encoded-bitrate evaluation loop. */
         private const val ENCODED_ADAPTIVE_INTERVAL_MS = 2_000L

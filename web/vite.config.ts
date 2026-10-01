@@ -16,6 +16,9 @@ export default defineConfig({
       '/stream': 'http://localhost:8080',
       '/audio': 'http://localhost:8080',
       '/snapshot': 'http://localhost:8080',
+      // Same-origin WebSocket routes (WebCodecs video, talkback): the proxy
+      // must carry the upgrade handshake, not just the HTTP GET.
+      '/ws': { target: 'http://localhost:8080', ws: true },
     },
   },
 })
