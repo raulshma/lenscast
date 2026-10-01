@@ -343,7 +343,7 @@ export function useAppState() {
       focusMode: 'AUTO', focusDistance: null, whiteBalance: 'AUTO',
       colorTemperature: null, zoomRatio: 1.0, frameRate: 30,
       resolution: 'FHD_1080P', stabilization: true, hdrMode: 'OFF', sceneMode: null,
-      nightVisionMode: 'OFF',
+      nightVisionMode: 'OFF', outputRotation: 0, orientationLocked: false,
     }
     await saveSettings({ camera: defaults })
     fetchSettings()

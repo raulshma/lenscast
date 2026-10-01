@@ -58,6 +58,8 @@ const CAMERA_KEYS = [
   'hdrMode',
   'sceneMode',
   'nightVisionMode',
+  'outputRotation',
+  'orientationLocked',
 ]
 
 const STREAMING_KEYS = [
@@ -590,6 +592,8 @@ describe('API_DEFAULTS lockstep with the fixtures', () => {
     expect(camera.hdrMode).toBe(API_DEFAULTS.cameraHdrMode)
     expect(camera.sceneMode).toBe(API_DEFAULTS.cameraSceneMode)
     expect(camera.nightVisionMode).toBe(API_DEFAULTS.cameraNightVisionMode)
+    expect(camera.outputRotation).toBe(API_DEFAULTS.cameraOutputRotation)
+    expect(camera.orientationLocked).toBe(API_DEFAULTS.cameraOrientationLocked)
     // Known divergence, kept intentionally: the Kotlin DTO default follows
     // StreamDefaults.STREAM_FPS (24) while the web select falls back to 30.
     // Locked loosely instead of by equality — the fixture fps must stay a

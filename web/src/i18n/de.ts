@@ -116,6 +116,8 @@ export const de: Partial<Record<MessageKey, string>> = {
   'zoomframe.title': 'Zoom & Bildraum',
   'zoomframe.zoom': 'Zoom',
   'zoomframe.frameRate': 'Bildrate',
+  'zoomframe.rotation': 'Ausgaberotation',
+  'zoomframe.orientationLocked': 'Ausrichtung fixieren',
 
   // ── Effects card ──
   'effects.title': 'Effekte',

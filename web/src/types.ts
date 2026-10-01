@@ -73,7 +73,15 @@ export interface CameraSettings {
   hdrMode: HdrMode
   sceneMode: string | null
   nightVisionMode: NightVisionMode
+  outputRotation: OutputRotation
+  orientationLocked: boolean
 }
+
+// The output-orientation correction for a mounted phone (issue #6) —
+// clockwise degrees applied to every output (streams, snapshots, recordings).
+export type OutputRotation = 0 | 90 | 180 | 270
+
+export const OUTPUT_ROTATION_OPTIONS: OutputRotation[] = [0, 90, 180, 270]
 
 // The backup destinations, matching the server's BackupTargetPolicy wire names.
 export type BackupTarget = 'webdav' | 'telegram'

@@ -34,6 +34,8 @@ data class CameraSettingsDto(
     val hdrMode: String = "OFF",
     val sceneMode: String? = null,
     val nightVisionMode: String = "OFF",
+    val outputRotation: Int = 0,
+    val orientationLocked: Boolean = false,
 )
 
 @JsonClass(generateAdapter = true)

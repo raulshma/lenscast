@@ -11,6 +11,7 @@ import com.raulshma.lenscast.camera.model.CameraSettings
 import com.raulshma.lenscast.camera.model.MaskingType
 import com.raulshma.lenscast.camera.model.MaskingZone
 import com.raulshma.lenscast.camera.model.MotionZone
+import com.raulshma.lenscast.camera.model.OutputRotationPolicy
 import com.raulshma.lenscast.camera.model.OverlaySettings
 import com.raulshma.lenscast.data.SettingsDataStore
 import com.raulshma.lenscast.streaming.model.CameraSettingsDto
@@ -267,6 +268,8 @@ class SettingsWebHandler(
                 hdrMode = parseEnum(cam.hdrMode, current.hdrMode),
                 sceneMode = cam.sceneMode,
                 nightVisionMode = parseEnum(cam.nightVisionMode, current.nightVisionMode),
+                outputRotation = OutputRotationPolicy.coerce(cam.outputRotation),
+                orientationLocked = cam.orientationLocked,
             )
             settingsDataStore.saveSettings(newSettings)
         }
@@ -477,6 +480,8 @@ class SettingsWebHandler(
         hdrMode = settings.hdrMode.name,
         sceneMode = settings.sceneMode,
         nightVisionMode = settings.nightVisionMode.name,
+        outputRotation = settings.outputRotation,
+        orientationLocked = settings.orientationLocked,
     )
 
     private fun toZoneDto(zone: MaskingZone) = MaskingZoneDto(

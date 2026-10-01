@@ -670,9 +670,12 @@ object OpenApiSpec {
             "hdrMode" to stringSchema(),
             "sceneMode" to stringSchema(),
             "nightVisionMode" to stringSchema(),
+            "outputRotation" to intSchema(),
+            "orientationLocked" to boolSchema(),
             required = listOf(
                 "exposureCompensation", "focusMode", "whiteBalance", "zoomRatio",
                 "frameRate", "resolution", "stabilization", "hdrMode", "nightVisionMode",
+                "outputRotation", "orientationLocked",
             ),
         ),
         "StreamingSettingsDto" to schema(
