@@ -66,6 +66,15 @@
 # only reads those from AAR dependencies, and this is an app module.
 -keep class **JsonAdapter { <init>(...); }
 -keepnames @com.squareup.moshi.JsonClass class *
+# Generated adapters invoke the DTO's synthetic defaults constructor
+# reflectively (getDeclaredConstructor(..., int, DefaultConstructorMarker))
+# whenever any field with a default value is absent from the JSON. R8 sees no
+# direct-code reference to that constructor and removes it in minified
+# builds, so every deserialization that hits the fallback path throws
+# NoSuchMethodException. Keep all constructors of @JsonClass classes.
+-keepclassmembers @com.squareup.moshi.JsonClass class * {
+    <init>(...);
+}
 -keepattributes *Annotation*,Signature,EnclosingMethod,InnerClasses
 
 # ── App model classes: Compose state, Moshi DTOs, enums ──
