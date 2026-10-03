@@ -290,7 +290,7 @@ export const zh: Partial<Record<MessageKey, string>> = {
   'whip.pushFailed': 'WHIP 推流失败',
   'whip.stunInvalid': '请只输入 host[:port]——不要带协议前缀；服务器会自行组装 stun: URI。',
   'whip.stunSet': '配置一个 STUN 服务器用于一次性 ICE 收集。',
-  'whip.stunEmpty': '留空表示仅使用主机候选（仅限局域网访问）；默认值为 {default}。',
+  'whip.stunEmpty': '留空表示仅使用主机候选（仅限局域网访问）；如需通过公网推流，请设置 STUN 服务器。',
 
   // ── RTMP card ──
   'rtmp.title': 'RTMP 推流',

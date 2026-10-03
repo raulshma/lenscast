@@ -22,9 +22,16 @@ Web dashboard
 
 Automation
 • Object detection gate (optional): the open-source EfficientDet-Lite0 model — Apache-2.0, downloaded on demand with a pinned SHA-256 from TensorFlow's official hosting — triggers MQTT alerts or recording when configured objects appear
+• Sound-event gate (optional): the open-source YAMNet model — Apache-2.0, also downloaded on demand with a pinned SHA-256 — triggers alerts or recording when configured sounds are detected
 • Interval photography and scheduled or continuous recording
 • Quiet hours for notifications
 
-No ads, no tracking, no cloud. All processing stays on your device; the web dashboard is served by a built-in HTTP server on your local network.
+Optional network services (all off by default; each runs only when you enable and configure it)
+• Telegram backup: auto-uploads new captures to the Telegram chat you choose (api.telegram.org)
+• Web Push notifications: delivers encrypted detection alerts through your browser vendor's push service (such as Google's FCM or Mozilla's autopush)
+• Model downloads: the optional detection models above are fetched on demand from TensorFlow's official hosting on Google Cloud storage
+• STUN server for WebRTC streaming (WHIP push / WHEP viewing): blank by default, so streaming stays on your local network without contacting any third-party server
+
+No ads, no tracking, no cloud defaults. All processing stays on your device; the web dashboard is served by a built-in HTTP server on your local network.
 
 Note: the F-Droid build ships without the in-app self-updater; updates come from F-Droid.

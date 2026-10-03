@@ -84,7 +84,7 @@ export interface WhipStunHintSet {
 export const WHIP_STUN_HINTS_EN: WhipStunHintSet = {
   invalid: 'Enter a bare host[:port] — drop the scheme; the server assembles the stun: URI.',
   present: 'One STUN server for one-shot ICE gathering.',
-  empty: 'Empty means host candidates only (LAN-only reachability); the default is {default}.',
+  empty: 'Empty means host candidates only (LAN-only reachability); set a STUN server when pushing across the internet.',
 }
 
 /**
@@ -92,13 +92,14 @@ export const WHIP_STUN_HINTS_EN: WhipStunHintSet = {
  * bare `host[:port]` (it assembles the `stun:` URI for iceServers itself),
  * so a pasted `stun:` or `https://` prefix is flagged before the save — and
  * a blank value is valid: it means no iceServers, i.e. host candidates only
- * (LAN-only reachability).
+ * (LAN-only reachability). The blank-default world (the shipped default) has
+ * no server to show as the placeholder, so an example stands in.
  */
 export function whipStunField(value: string, defaultStun: string, hints: WhipStunHintSet = WHIP_STUN_HINTS_EN): WhipStunFieldView {
   const trimmed = value.trim()
   const invalid = /^(stun|stuns|http|https):/i.test(trimmed)
   return {
-    placeholder: defaultStun,
+    placeholder: defaultStun || 'stun.example.com:3478',
     invalid,
     hint: invalid
       ? hints.invalid

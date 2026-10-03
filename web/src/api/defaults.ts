@@ -46,7 +46,7 @@ export const API_DEFAULTS = {
   whipEnabled: false,
   whipUrl: '',
   whipToken: '',
-  whipStunServer: 'stun.l.google.com:19302',
+  whipStunServer: '',
   // SRT push output (StreamingSettingsDto.srtEnabled; store default false).
   srtEnabled: false,
 

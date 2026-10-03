@@ -299,6 +299,17 @@ dependencies {
     // same plain-library story as tasks-vision above — no Play-services
     // dependency, fdroid-safe.
     implementation(libs.mediapipe.tasks.audio)
+    // tasks-core queues usage statistics for upload to Google through
+    // com.google.android.datatransport's CCT (Firebase logging) backend every
+    // time a task runner is created (RemoteLoggingClient → COREML_ON_DEVICE_
+    // SOLUTIONS log source). Strip the transport jars from every
+    // configuration — tasks-core is their only consumer on the runtime
+    // classpath — and satisfy the prebuilt AAR's linkage with the no-op
+    // stubs under src/main/java/com/google/android/datatransport/, so the
+    // events are dropped instead of transmitted. Verified after every bump
+    // of the mediaPipe version by string-scanning the release APK for
+    // transport-backend-cct / COREML_ON_DEVICE_SOLUTIONS.
+    configurations.all { exclude(group = "com.google.android.datatransport") }
     implementation(libs.nanohttpd)
     implementation(libs.nanohttpd.ws)
     implementation(libs.datastore.preferences)

@@ -22,9 +22,16 @@ Web-Dashboard
 
 Automatisierung
 • Objekterkennungs-Gate (optional): das Open-Source-Modell EfficientDet-Lite0 — Apache-2.0, bei Bedarf mit fixiertem SHA-256 von TensorFlows offiziellem Hosting heruntergeladen — löst MQTT-Benachrichtigungen oder Aufnahmen aus, wenn konfigurierte Objekte erscheinen
+• Klang-Ereignis-Gate (optional): das Open-Source-Modell YAMNet — Apache-2.0, ebenfalls bei Bedarf mit fixiertem SHA-256 heruntergeladen — löst Benachrichtigungen oder Aufnahmen aus, wenn konfigurierte Geräusche erkannt werden
 • Intervallfotografie sowie geplante oder kontinuierliche Aufnahme
 • Ruhezeiten für Benachrichtigungen
 
-Keine Werbung, kein Tracking, keine Cloud. Die gesamte Verarbeitung bleibt auf deinem Gerät; das Web-Dashboard wird von einem integrierten HTTP-Server in deinem lokalen Netzwerk ausgeliefert.
+Optionale Netzwerkdienste (alle standardmäßig aus; jeder läuft nur, wenn du ihn aktivierst und konfigurierst)
+• Telegram-Backup: lädt neue Aufnahmen automatisch in den von dir gewählten Telegram-Chat hoch (api.telegram.org)
+• Web-Push-Benachrichtigungen: stellt verschlüsselte Erkennungsalarme über den Push-Dienst deines Browser-Anbieters zu (z. B. Googles FCM oder Mozillas autopush)
+• Modell-Downloads: die optionalen Erkennungsmodelle oben werden bei Bedarf von TensorFlows offiziellem Hosting auf Google-Cloud-Speicher geladen
+• STUN-Server für WebRTC-Streaming (WHIP-Push / WHEP-Wiedergabe): standardmäßig leer, damit das Streaming ohne Kontakt zu Drittanbietern im lokalen Netzwerk bleibt
+
+Keine Werbung, kein Tracking, keine Cloud von Haus aus. Die gesamte Verarbeitung bleibt auf deinem Gerät; das Web-Dashboard wird von einem integrierten HTTP-Server in deinem lokalen Netzwerk ausgeliefert.
 
 Hinweis: Der F-Droid-Build enthält den In-App-Self-Updater nicht; Updates kommen über F-Droid.

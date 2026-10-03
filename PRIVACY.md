@@ -16,7 +16,11 @@ no telemetry, no analytics, and no crash reporting SDK.
   backup and device transfer — they never leave the device that produced
   them.
 - No analytics, no telemetry, no advertising identifiers, no crash
-  reports. Nothing phones home to the developers.
+  reports. Nothing phones home to the developers. The MediaPipe Tasks
+  library used for on-device detection ships with a usage-stats uploader
+  (Google's datatransport/CCT); LensCast compiles it out in every build
+  flavor — the transport jars are excluded and replaced by no-op stubs,
+  so no usage event is ever created or transmitted.
 
 ## Optional network features — off unless you configure them
 
@@ -27,8 +31,12 @@ user-configured**; LensCast never enables egress on its own:
 - **RTMP / WHIP push streaming** — pushes your live stream to the media
   server URL you enter (e.g. YouTube, Twitch, nginx-rtmp, MediaMTX,
   Cloudflare). Off by default; only connects to the endpoint you set.
+  WebRTC (WHIP push and WHEP dashboard viewing) uses no STUN server by
+  default (host candidates only, LAN reachability); if you set a STUN
+  server, ICE queries only that server.
 - **WebDAV / Telegram backup** — auto-uploads new captures to the WebDAV
-  collection or Telegram chat you configure, with an optional Wi-Fi-only
+  collection or Telegram chat you configure (api.telegram.org for
+  Telegram), with an optional Wi-Fi-only
   mode. Note: uploads are sent as readable files (decrypted), so the
   remote copy is not encrypted-media-at-rest.
 - **Webhook / MQTT alerts** — pushes detection-event payloads (including
@@ -45,7 +53,8 @@ user-configured**; LensCast never enables egress on its own:
 Two optional ML models (object detection, EfficientDet-Lite0, and sound
 classification, YAMNet) are **not bundled in the APK**. If you enable
 those features, the model file is downloaded once on first use from
-GitHub releases / TensorFlow's official hosting and is verified against a
+GitHub releases / TensorFlow's official hosting (EfficientDet-Lite0;
+YAMNet from `storage.googleapis.com`) and is verified against a
 **pinned SHA-256** before use. The download happens only when you enable
 the feature; the source sees an anonymous file request.
 

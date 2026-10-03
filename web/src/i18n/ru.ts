@@ -291,7 +291,7 @@ export const ru: Partial<Record<MessageKey, string>> = {
   'whip.pushFailed': 'Сбой WHIP-публикации',
   'whip.stunInvalid': 'Введите только host[:port] — без схемы; сервер сам собирает stun:-URI.',
   'whip.stunSet': 'Один STUN-сервер для разового сбора ICE.',
-  'whip.stunEmpty': 'Пусто — только host-кандидаты (доступ только по LAN); по умолчанию {default}.',
+  'whip.stunEmpty': 'Пусто — только host-кандидаты (доступ только по LAN); укажите STUN-сервер для публикации через интернет.',
 
   // ── RTMP card ──
   'rtmp.title': 'RTMP-публикация',

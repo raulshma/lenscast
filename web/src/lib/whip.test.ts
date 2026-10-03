@@ -47,11 +47,15 @@ describe('whipStunField', () => {
     expect(whipStunField('', DEFAULT_STUN).placeholder).toBe(DEFAULT_STUN)
   })
 
+  it('falls back to an example placeholder when the default is blank', () => {
+    expect(whipStunField('', '').placeholder).toBe('stun.example.com:3478')
+  })
+
   it('explains that empty means LAN-only host candidates', () => {
     const view = whipStunField('', DEFAULT_STUN)
     expect(view.invalid).toBe(false)
     expect(view.hint).toContain('host candidates only')
-    expect(view.hint).toContain(DEFAULT_STUN)
+    expect(view.hint).toContain('set a STUN server')
   })
 
   it('accepts bare host[:port] values', () => {

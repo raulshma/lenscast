@@ -108,9 +108,9 @@ data class StreamingSettingsDto(
      */
     val whipToken: String = "",
     /**
-     * The one STUN server for one-shot ICE gathering, `host[:port]` (the
-     * default is Google's public resolver); blank means no iceServers — host
-     * candidates only, i.e. LAN-only reachability.
+     * The one STUN server for one-shot ICE gathering, `host[:port]`; blank
+     * (the default) means no iceServers — host candidates only, i.e.
+     * LAN-only reachability with no third-party STUN contact.
      */
     val whipStunServer: String = StreamDefaults.WHIP_STUN_SERVER,
     /**

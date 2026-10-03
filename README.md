@@ -192,6 +192,7 @@ LensCast is an Android camera application with live video/audio streaming to web
 **Web UI**
 - SolidJS, Tailwind CSS v4, DaisyUI v5, Vite, TypeScript
 - Built output embedded directly into Android assets at build time
+- Self-hosted fonts (Inter, JetBrains Mono via Fontsource; OFL — license texts bundled at `web/public/licenses/`) so the dashboard makes no third-party font requests
 
 ---
 
@@ -331,4 +332,4 @@ web/                 SolidJS web UI for remote control
 
 ## License
 
-This project is licensed under the GNU General Public License v3.0 — see the [LICENSE](LICENSE) file for details.
+This project is licensed under the GNU General Public License v3.0 or later — see the [LICENSE](LICENSE) file for details.

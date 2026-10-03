@@ -37,7 +37,7 @@
     "whipEnabled": false,
     "whipUrl": "",
     "whipToken": "",
-    "whipStunServer": "stun.l.google.com:19302",
+    "whipStunServer": "",
     "srtEnabled": false,
     "srtUrl": "",
     "adaptiveBitrateEnabled": false,

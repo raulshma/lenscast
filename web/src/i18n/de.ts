@@ -292,7 +292,7 @@ export const de: Partial<Record<MessageKey, string>> = {
   'whip.pushFailed': 'WHIP-Push fehlgeschlagen',
   'whip.stunInvalid': 'Nur host[:port] ohne Schema eintragen; der Server baut die stun:-URI selbst.',
   'whip.stunSet': 'Ein STUN-Server für das einmalige ICE-Gathering.',
-  'whip.stunEmpty': 'Leer bedeutet nur Host-Kandidaten (nur LAN erreichbar); der Standard ist {default}.',
+  'whip.stunEmpty': 'Leer bedeutet nur Host-Kandidaten (nur LAN erreichbar); setze einen STUN-Server, wenn du über das Internet pusht.',
 
   // ── RTMP card ──
   'rtmp.title': 'RTMP-Push',

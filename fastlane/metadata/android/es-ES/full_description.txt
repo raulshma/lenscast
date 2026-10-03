@@ -24,7 +24,14 @@ Automatización
 • Filtro de detección de objetos (opcional): el modelo de código abierto EfficientDet-Lite0 — Apache-2.0, descargado a demanda con SHA-256 fijado desde el alojamiento oficial de TensorFlow — dispara alertas MQTT o grabación cuando aparecen los objetos configurados
 • Fotografía por intervalos y grabación programada o continua
 • Horas de silencio para las notificaciones
+• Filtro de eventos de sonido (opcional): el modelo de código abierto YAMNet — Apache-2.0, también descargado a demanda con SHA-256 fijado — dispara alertas o grabación cuando se detectan los sonidos configurados
 
-Sin anuncios, sin rastreo, sin nube. Todo el procesamiento permanece en tu dispositivo; el panel web lo sirve un servidor HTTP integrado en tu red local.
+Servicios de red opcionales (todos desactivados por defecto; cada uno funciona solo cuando lo activas y configuras)
+• Copia de seguridad por Telegram: sube automáticamente nuevas capturas al chat de Telegram que elijas (api.telegram.org)
+• Notificaciones Web Push: entrega alertas de detección cifradas a través del servicio push del proveedor de tu navegador (como FCM de Google o autopush de Mozilla)
+• Descargas de modelos: los modelos de detección opcionales de arriba se descargan a demanda desde el alojamiento oficial de TensorFlow en el almacenamiento de Google Cloud
+• Servidor STUN para streaming WebRTC (publicación WHIP / visualización WHEP): vacío por defecto, de modo que el streaming se queda en tu red local sin contactar con ningún servidor de terceros
+
+Sin anuncios, sin rastreo, sin nube por defecto. Todo el procesamiento permanece en tu dispositivo; el panel web lo sirve un servidor HTTP integrado en tu red local.
 
 Nota: la compilación de F-Droid se distribuye sin el actualizador integrado; las actualizaciones llegan desde F-Droid.

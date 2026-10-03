@@ -292,7 +292,7 @@ export const en: Record<string, string> = {
   'whip.pushFailed': 'WHIP push failed',
   'whip.stunInvalid': 'Enter a bare host[:port] — drop the scheme; the server assembles the stun: URI.',
   'whip.stunSet': 'One STUN server for one-shot ICE gathering.',
-  'whip.stunEmpty': 'Empty means host candidates only (LAN-only reachability); the default is {default}.',
+  'whip.stunEmpty': 'Empty means host candidates only (LAN-only reachability); set a STUN server when pushing across the internet.',
 
   // ── RTMP card ──
   'rtmp.title': 'RTMP Push',

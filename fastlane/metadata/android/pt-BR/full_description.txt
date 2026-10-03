@@ -23,8 +23,15 @@ Painel web
 Automação
 • Filtro de detecção de objetos (opcional): o modelo de código aberto EfficientDet-Lite0 — Apache-2.0, baixado sob demanda com SHA-256 fixado da hospedagem oficial do TensorFlow — dispara alertas MQTT ou gravação quando os objetos configurados aparecem
 • Fotografia por intervalos e gravação agendada ou contínua
+• Filtro de eventos de som (opcional): o modelo de código aberto YAMNet — Apache-2.0, também baixado sob demanda com SHA-256 fixado — dispara alertas ou gravação quando os sons configurados são detectados
 • Horário de silêncio para notificações
 
-Sem anúncios, sem rastreamento, sem nuvem. Todo o processamento fica no seu aparelho; o painel web é servido por um servidor HTTP embutido na sua rede local.
+Serviços de rede opcionais (todos desativados por padrão; cada um só funciona quando você ativa e configura)
+• Backup pelo Telegram: envia automaticamente novas capturas para o chat do Telegram que você escolher (api.telegram.org)
+• Notificações Web Push: entrega alertas de detecção criptografados pelo serviço de push do fornecedor do seu navegador (como o FCM do Google ou o autopush da Mozilla)
+• Downloads de modelos: os modelos de detecção opcionais acima são baixados sob demanda da hospedagem oficial do TensorFlow no armazenamento do Google Cloud
+• Servidor STUN para streaming WebRTC (publicação WHIP / visualização WHEP): em branco por padrão, de modo que o streaming fica na sua rede local sem contatar nenhum servidor de terceiros
+
+Sem anúncios, sem rastreamento, sem nuvem por padrão. Todo o processamento fica no seu aparelho; o painel web é servido por um servidor HTTP embutido na sua rede local.
 
 Observação: a compilação do F-Droid não inclui o atualizador integrado; as atualizações vêm do F-Droid.

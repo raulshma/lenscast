@@ -290,7 +290,7 @@ export const fr: Partial<Record<MessageKey, string>> = {
   'whip.pushFailed': 'Échec du push WHIP',
   'whip.stunInvalid': 'Saisissez un host[:port] seul — sans schéma ; le serveur construit l’URI stun:.',
   'whip.stunSet': 'Un serveur STUN pour la collecte ICE en une fois.',
-  'whip.stunEmpty': 'Vide signifie uniquement des candidats hôtes (LAN uniquement) ; la valeur par défaut est {default}.',
+  'whip.stunEmpty': 'Vide signifie uniquement des candidats hôtes (LAN uniquement) ; définissez un serveur STUN pour pousser via internet.',
 
   // ── RTMP card ──
   'rtmp.title': 'Push RTMP',

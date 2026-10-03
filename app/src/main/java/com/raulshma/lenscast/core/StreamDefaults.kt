@@ -192,12 +192,14 @@ object StreamDefaults {
     const val HLS_DVR_SEGMENTS_MAX = 120
     const val HLS_DVR_SEGMENTS_DEFAULT = 0
 
-    // WHIP push (streaming/whip/): the default STUN server (blank setting =
-    // no iceServers, host candidates only, LAN-only reachability) and the
-    // dedicated audio capture's rate — libwebrtc encodes it as 16 kHz mono
-    // Opus at its default ~32 kbps mono bitrate. The STUN setting doubles as
-    // the WHEP viewer endpoint's ICE configuration.
-    const val WHIP_STUN_SERVER = "stun.l.google.com:19302"
+    // WHIP push (streaming/whip/): the STUN default is blank (no iceServers,
+    // host candidates only, LAN-only reachability) so a fresh install never
+    // contacts Google's STUN resolver — neither for WHIP push nor for the
+    // WHEP viewer endpoint, which shares this setting as its ICE config.
+    // Users pushing to a remote ingest behind NAT opt in by setting a server.
+    // The dedicated audio capture's rate: libwebrtc encodes it as 16 kHz mono
+    // Opus at its default ~32 kbps mono bitrate.
+    const val WHIP_STUN_SERVER = ""
     const val WHIP_AUDIO_SAMPLE_RATE_HZ = 16_000
 
     // WHEP viewer endpoint (streaming/whep/): the concurrent-viewer cap —

@@ -130,4 +130,4 @@ Before pushing the branch:
 ## Licensing
 
 By contributing, you agree your contributions are licensed under the
-project's [GPL-3.0-only license](LICENSE).
+project's [GPL-3.0-or-later license](LICENSE).
