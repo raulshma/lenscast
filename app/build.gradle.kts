@@ -146,8 +146,8 @@ android {
         minSdk = 23
         targetSdk = 36
         // versionCode = major*10_000 + minor*1_000 + patch*10 + abiIndex,
-        // abiIndex being armeabi-v7a=1, arm64-v8a=2, x86_64=3 — 0.1.4 ships
-        // 1041/1042/1043 (one APK per ABI; F-Droid needs distinct codes per
+        // abiIndex being armeabi-v7a=1, arm64-v8a=2, x86_64=3 — 0.1.5 ships
+        // 1051/1052/1053 (one APK per ABI; F-Droid needs distinct codes per
         // APK, and per-ABI APKs shrink downloads from 36 MB to ~9 MB). The
         // in-app updater compares versionName semantically.
         //
@@ -160,7 +160,7 @@ android {
         // working; the literal is the x86_64 default (highest abiIndex =
         // the code checkupdates expects as "current"), and prop-less local
         // builds (all three ABIs) use it as-is.
-        versionCode = 1043
+        versionCode = 1053
         val propVersionCode = project.findProperty("versionCode")?.toString()?.toInt()
         val abiOffset = when (project.findProperty("abiFilter")) {
             "armeabi-v7a" -> 2
@@ -168,10 +168,10 @@ android {
             // x86_64 and prop-less local builds keep the literal above.
             else -> 0
         }
-        versionCode = propVersionCode ?: (1043 - abiOffset)
+        versionCode = propVersionCode ?: (1053 - abiOffset)
         // Literal-first for the same reason: fdroidserver's checkupdates
         // parser reads `versionName = <literal>` from this file.
-        versionName = "0.1.4"
+        versionName = "0.1.5"
         project.findProperty("versionName")?.let { versionName = it as String }
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"

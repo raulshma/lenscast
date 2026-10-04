@@ -1,0 +1,5 @@
+Since 0.1.4:
+• Privacy: stripped MediaPipe's usage-stats uploader (Google's datatransport/CCT telemetry) from every build — the object-detection and sound-event gates never contact Google
+• Web dashboard: Inter and JetBrains Mono fonts are now bundled — the page renders identically offline and on isolated LANs instead of loading Google Fonts
+• Streaming: the STUN server default is blank — WebRTC (WHIP push, WHEP viewing) stays on your local network by default; set a STUN server to push across the internet
+• Listing: license corrected to GPL-3.0-or-later, and the optional network services (Telegram backup, Web Push, on-demand model downloads, STUN) are now described in the app listing
