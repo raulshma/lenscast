@@ -42,6 +42,44 @@
     <string name="camera_connection_quality_title">Qualidade da conexão</string>
     <string name="camera_quality_label">Qualidade</string>
     <string name="camera_per_client_stats">Estatísticas por cliente</string>
+    <string name="camera_wifi_banner_active">Fora do Wi-Fi</string>
+    <string name="camera_wifi_banner_idle">Fora do Wi-Fi — o servidor pode não estar acessível</string>
+    <string name="camera_server_status_live">Transmissão ao vivo ativa</string>
+    <string name="camera_server_status_ready">Servidor pronto</string>
+    <string name="camera_server_status_offline">Off-line</string>
+    <string name="camera_stream_start_cd">Iniciar transmissão %1$s</string>
+    <string name="camera_stream_stop_cd">Parar transmissão %1$s</string>
+    <string name="camera_stream_kind_web">web</string>
+    <string name="camera_stream_kind_rtsp">RTSP</string>
+    <string name="camera_thermal_moderate">Temperatura: moderada</string>
+    <string name="camera_thermal_severe">Temperatura: alta</string>
+    <string name="camera_thermal_critical">Temperatura: crítica!</string>
+    <string name="camera_quality_abbr_excellent">EXC</string>
+    <string name="camera_quality_abbr_good">BOM</string>
+    <string name="camera_quality_abbr_fair">RAZ</string>
+    <string name="camera_quality_abbr_poor">FRACO</string>
+    <string name="camera_quality_abbr_critical">CRIT</string>
+    <string name="camera_stat_bandwidth">Largura de banda</string>
+    <string name="camera_stat_min_throughput">Taxa mín.</string>
+    <string name="camera_stat_avg_throughput">Taxa média</string>
+    <string name="camera_stat_latency">Latência</string>
+    <string name="camera_stat_avg_frame">Quadro médio</string>
+    <string name="camera_stat_clients">Clientes</string>
+    <string name="camera_stat_total_sent">Total enviado</string>
+    <string name="camera_stat_frames">Quadros</string>
+    <string name="camera_stat_throughput">Taxa</string>
+    <string name="camera_stat_frame_size">Tamanho do quadro</string>
+    <string name="camera_client_stat_header">Cliente %1$s:</string>
+    <plurals name="camera_server_status_viewers">
+        <item quantity="one">%1$d espectador conectado</item>
+        <item quantity="many">%1$d espectadores conectados</item>
+        <item quantity="other">%1$d espectadores conectados</item>
+    </plurals>
+    <plurals name="camera_client_summary">
+        <item quantity="one">%1$d cliente · %2$d kbps</item>
+        <item quantity="many">%1$d clientes · %2$d kbps</item>
+        <item quantity="other">%1$d clientes · %2$d kbps</item>
+    </plurals>
 
     <!-- ── Painel de conexão ── -->
     <string name="camera_connect_title">Conectar a esta câmera</string>

@@ -120,6 +120,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -553,7 +554,12 @@ private fun ImmersiveCameraView(
                     )
                     Spacer(modifier = Modifier.width(6.dp))
                     Text(
-                        text = CameraDashboardPolicy.wifiBannerMessage(streamStatus.isActive),
+                        text = stringResource(
+                            when (CameraDashboardPolicy.wifiBannerVariant(streamStatus.isActive)) {
+                                CameraDashboardPolicy.WifiBannerVariant.STREAM_ACTIVE -> R.string.camera_wifi_banner_active
+                                CameraDashboardPolicy.WifiBannerVariant.STREAM_IDLE -> R.string.camera_wifi_banner_idle
+                            }
+                        ),
                         style = MaterialTheme.typography.labelSmall,
                         color = Color.White
                     )
@@ -587,9 +593,9 @@ private fun ImmersiveCameraView(
                 .fillMaxWidth()
         )
 
-        CameraDashboardPolicy.thermalBanner(thermalState)?.let { banner ->
+        CameraDashboardPolicy.thermalBanner(thermalState)?.let { severity ->
             ThermalWarningOverlay(
-                banner = banner,
+                severity = severity,
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .navigationBarsPadding()
@@ -998,7 +1004,7 @@ private fun ShutterRow(
                         visual = CameraDashboardPolicy.StreamShutterVisual.of(
                             isStreaming = isWebStreaming,
                             isEnabled = isWebEnabled,
-                            streamName = "web",
+                            kind = CameraDashboardPolicy.StreamKind.WEB,
                         ),
                         icon = if (isWebStreaming) Icons.Default.Stop else Icons.Default.Wifi,
                         onClick = onWebStreamToggle,
@@ -1047,7 +1053,7 @@ private fun ShutterRow(
                         visual = CameraDashboardPolicy.StreamShutterVisual.of(
                             isStreaming = isRtspStreaming,
                             isEnabled = isRtspEnabled,
-                            streamName = "RTSP",
+                            kind = CameraDashboardPolicy.StreamKind.RTSP,
                         ),
                         icon = if (isRtspStreaming) Icons.Default.Stop else Icons.Default.Videocam,
                         onClick = onRtspStreamToggle,
@@ -1088,8 +1094,14 @@ private fun StreamShutterButton(
     icon: ImageVector,
     onClick: () -> Unit,
 ) {
-    // The verdict and strings are the policy's; only the theme-adjacent
-    // container-color mapping stays here.
+    // The verdict is the policy's; the localized label and the theme-adjacent
+    // container-color mapping stay here.
+    val streamNoun = stringResource(
+        when (visual.kind) {
+            CameraDashboardPolicy.StreamKind.WEB -> R.string.camera_stream_kind_web
+            CameraDashboardPolicy.StreamKind.RTSP -> R.string.camera_stream_kind_rtsp
+        }
+    )
     Surface(
         modifier = Modifier.size(52.dp),
         color = when (visual.container) {
@@ -1107,7 +1119,14 @@ private fun StreamShutterButton(
         Box(contentAlignment = Alignment.Center) {
             Icon(
                 imageVector = icon,
-                contentDescription = visual.contentDescription,
+                contentDescription = stringResource(
+                    if (visual.container == CameraDashboardPolicy.StreamShutterContainer.RECORDING) {
+                        R.string.camera_stream_stop_cd
+                    } else {
+                        R.string.camera_stream_start_cd
+                    },
+                    streamNoun,
+                ),
                 tint = visual.tint,
                 modifier = Modifier.size(24.dp)
             )
@@ -1838,11 +1857,25 @@ private fun ServerStatusButton(
                             Spacer(modifier = Modifier.height(2.dp))
                         }
                         Text(
-                            CameraDashboardPolicy.serverStatusText(
-                                clientCount = streamStatus.clientCount,
-                                isActive = streamStatus.isActive,
-                                isServerRunning = streamStatus.isServerRunning,
-                            ),
+                            run {
+                                val status = CameraDashboardPolicy.serverStatusLine(
+                                    clientCount = streamStatus.clientCount,
+                                    isActive = streamStatus.isActive,
+                                    isServerRunning = streamStatus.isServerRunning,
+                                )
+                                when (status.tier) {
+                                    CameraDashboardPolicy.ServerStatusTier.LIVE ->
+                                        if (status.viewerCount > 0) {
+                                            pluralStringResource(
+                                                R.plurals.camera_server_status_viewers, status.viewerCount, status.viewerCount,
+                                            )
+                                        } else {
+                                            stringResource(R.string.camera_server_status_live)
+                                        }
+                                    CameraDashboardPolicy.ServerStatusTier.READY -> stringResource(R.string.camera_server_status_ready)
+                                    CameraDashboardPolicy.ServerStatusTier.OFFLINE -> stringResource(R.string.camera_server_status_offline)
+                                }
+                            },
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
                         )
@@ -1953,12 +1986,12 @@ private fun ServerStatusButton(
 
 @Composable
 private fun ThermalWarningOverlay(
-    banner: CameraDashboardPolicy.ThermalBanner,
+    severity: CameraDashboardPolicy.ThermalSeverity,
     modifier: Modifier = Modifier,
 ) {
-    // The verdict and label are the policy's; only the theme-adjacent color
-    // mapping stays here.
-    val color = when (banner.severity) {
+    // The verdict is the policy's; the localized label and the theme-adjacent
+    // color mapping stay here.
+    val color = when (severity) {
         CameraDashboardPolicy.ThermalSeverity.MODERATE -> LensOrange
         CameraDashboardPolicy.ThermalSeverity.SEVERE -> LensRed
         CameraDashboardPolicy.ThermalSeverity.CRITICAL -> MaterialTheme.colorScheme.error
@@ -1969,7 +2002,13 @@ private fun ThermalWarningOverlay(
         shape = RoundedCornerShape(8.dp)
     ) {
         Text(
-            text = banner.label,
+            text = stringResource(
+                when (severity) {
+                    CameraDashboardPolicy.ThermalSeverity.MODERATE -> R.string.camera_thermal_moderate
+                    CameraDashboardPolicy.ThermalSeverity.SEVERE -> R.string.camera_thermal_severe
+                    CameraDashboardPolicy.ThermalSeverity.CRITICAL -> R.string.camera_thermal_critical
+                }
+            ),
             modifier = Modifier.padding(horizontal = 12.dp, vertical = 5.dp),
             style = MaterialTheme.typography.labelSmall,
             color = Color.White
@@ -2156,7 +2195,15 @@ private fun ConnectionQualityIndicator(
     var expanded by remember { mutableStateOf(false) }
     val badge = CameraDashboardPolicy.qualityBadge(qualityLevel)
     val dotColor = badge.color
-    val label = badge.abbreviation
+    val label = stringResource(
+        when (qualityLevel) {
+            NetworkQualityLevel.EXCELLENT -> R.string.camera_quality_abbr_excellent
+            NetworkQualityLevel.GOOD -> R.string.camera_quality_abbr_good
+            NetworkQualityLevel.FAIR -> R.string.camera_quality_abbr_fair
+            NetworkQualityLevel.POOR -> R.string.camera_quality_abbr_poor
+            NetworkQualityLevel.CRITICAL -> R.string.camera_quality_abbr_critical
+        }
+    )
 
     Box(modifier = modifier) {
         Surface(
@@ -2196,7 +2243,9 @@ private fun ConnectionQualityIndicator(
                 )
                 if (activeClients > 0) {
                     Text(
-                        text = CameraDashboardPolicy.clientSummary(activeClients, minThroughputKbps),
+                        text = pluralStringResource(
+                            R.plurals.camera_client_summary, activeClients, activeClients, minThroughputKbps,
+                        ),
                         style = MaterialTheme.typography.labelSmall.copy(
                             fontFamily = FontFamily.Monospace,
                             color = Color.White.copy(alpha = 0.5f)
@@ -2231,7 +2280,7 @@ private fun ConnectionQualityIndicator(
                         estimatedBandwidthKbps = estimatedBandwidthKbps,
                         stats = stats,
                     ).forEach { row ->
-                        ConnectionStatRow(label = row.label, value = row.value)
+                        ConnectionStatRow(label = stringResource(row.labelRes), value = row.value)
                     }
 
                     if (stats.clientDetails.isNotEmpty()) {
@@ -2246,14 +2295,17 @@ private fun ConnectionQualityIndicator(
                         Spacer(modifier = Modifier.height(4.dp))
                         stats.clientDetails.forEach { (clientId, detail) ->
                             Text(
-                                text = CameraDashboardPolicy.clientStatHeader(clientId),
+                                text = stringResource(
+                                    R.string.camera_client_stat_header,
+                                    CameraDashboardPolicy.clientIdPrefix(clientId),
+                                ),
                                 style = MaterialTheme.typography.labelSmall.copy(
                                     fontWeight = FontWeight.Medium,
                                     color = Color.White.copy(alpha = 0.7f)
                                 )
                             )
                             CameraDashboardPolicy.clientStatRows(detail).forEach { row ->
-                                ConnectionStatRow(label = row.label, value = row.value)
+                                ConnectionStatRow(label = stringResource(row.labelRes), value = row.value)
                             }
                         }
                     }

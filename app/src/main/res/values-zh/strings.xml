@@ -42,6 +42,40 @@
     <string name="camera_connection_quality_title">连接质量</string>
     <string name="camera_quality_label">画质</string>
     <string name="camera_per_client_stats">各客户端统计</string>
+    <string name="camera_wifi_banner_active">未连接 Wi-Fi</string>
+    <string name="camera_wifi_banner_idle">未连接 Wi-Fi — 服务器可能无法访问</string>
+    <string name="camera_server_status_live">直播进行中</string>
+    <string name="camera_server_status_ready">服务器就绪</string>
+    <string name="camera_server_status_offline">离线</string>
+    <string name="camera_stream_start_cd">开始 %1$s 串流</string>
+    <string name="camera_stream_stop_cd">停止 %1$s 串流</string>
+    <string name="camera_stream_kind_web">Web</string>
+    <string name="camera_stream_kind_rtsp">RTSP</string>
+    <string name="camera_thermal_moderate">温度：中等</string>
+    <string name="camera_thermal_severe">温度：较高</string>
+    <string name="camera_thermal_critical">温度：严重！</string>
+    <string name="camera_quality_abbr_excellent">优</string>
+    <string name="camera_quality_abbr_good">良</string>
+    <string name="camera_quality_abbr_fair">中</string>
+    <string name="camera_quality_abbr_poor">差</string>
+    <string name="camera_quality_abbr_critical">危</string>
+    <string name="camera_stat_bandwidth">带宽</string>
+    <string name="camera_stat_min_throughput">最低吞吐量</string>
+    <string name="camera_stat_avg_throughput">平均吞吐量</string>
+    <string name="camera_stat_latency">延迟</string>
+    <string name="camera_stat_avg_frame">平均帧</string>
+    <string name="camera_stat_clients">客户端</string>
+    <string name="camera_stat_total_sent">总发送量</string>
+    <string name="camera_stat_frames">帧数</string>
+    <string name="camera_stat_throughput">吞吐量</string>
+    <string name="camera_stat_frame_size">帧大小</string>
+    <string name="camera_client_stat_header">客户端 %1$s：</string>
+    <plurals name="camera_server_status_viewers">
+        <item quantity="other">%1$d 位观看者已连接</item>
+    </plurals>
+    <plurals name="camera_client_summary">
+        <item quantity="other">%1$d 个客户端 · %2$d kbps</item>
+    </plurals>
 
     <!-- ── 连接面板 ── -->
     <string name="camera_connect_title">连接到此相机</string>

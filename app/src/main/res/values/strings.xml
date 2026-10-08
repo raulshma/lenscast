@@ -46,6 +46,42 @@
     <string name="camera_connection_quality_title">Connection Quality</string>
     <string name="camera_quality_label">Quality</string>
     <string name="camera_per_client_stats">Per-Client Stats</string>
+    <string name="camera_wifi_banner_active">Not on WiFi</string>
+    <string name="camera_wifi_banner_idle">Not on WiFi — server may not be reachable</string>
+    <string name="camera_server_status_live">Live stream active</string>
+    <string name="camera_server_status_ready">Server ready</string>
+    <string name="camera_server_status_offline">Offline</string>
+    <string name="camera_stream_start_cd">Start %1$s stream</string>
+    <string name="camera_stream_stop_cd">Stop %1$s stream</string>
+    <string name="camera_stream_kind_web">web</string>
+    <string name="camera_stream_kind_rtsp">RTSP</string>
+    <string name="camera_thermal_moderate">Thermal: Moderate</string>
+    <string name="camera_thermal_severe">Thermal: Severe</string>
+    <string name="camera_thermal_critical">Thermal: Critical!</string>
+    <string name="camera_quality_abbr_excellent">EXC</string>
+    <string name="camera_quality_abbr_good">GOOD</string>
+    <string name="camera_quality_abbr_fair">FAIR</string>
+    <string name="camera_quality_abbr_poor">POOR</string>
+    <string name="camera_quality_abbr_critical">CRIT</string>
+    <string name="camera_stat_bandwidth">Bandwidth</string>
+    <string name="camera_stat_min_throughput">Min Throughput</string>
+    <string name="camera_stat_avg_throughput">Avg Throughput</string>
+    <string name="camera_stat_latency">Latency</string>
+    <string name="camera_stat_avg_frame">Avg Frame</string>
+    <string name="camera_stat_clients">Clients</string>
+    <string name="camera_stat_total_sent">Total Sent</string>
+    <string name="camera_stat_frames">Frames</string>
+    <string name="camera_stat_throughput">Throughput</string>
+    <string name="camera_stat_frame_size">Frame Size</string>
+    <string name="camera_client_stat_header">Client %1$s:</string>
+    <plurals name="camera_server_status_viewers">
+        <item quantity="one">%1$d viewer connected</item>
+        <item quantity="other">%1$d viewers connected</item>
+    </plurals>
+    <plurals name="camera_client_summary">
+        <item quantity="one">%1$d client · %2$d kbps</item>
+        <item quantity="other">%1$d clients · %2$d kbps</item>
+    </plurals>
 
     <!-- ── Connect sheet ── -->
     <string name="camera_connect_title">Connect to this camera</string>

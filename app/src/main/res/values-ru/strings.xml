@@ -42,6 +42,46 @@
     <string name="camera_connection_quality_title">Качество соединения</string>
     <string name="camera_quality_label">Качество</string>
     <string name="camera_per_client_stats">Статистика по клиентам</string>
+    <string name="camera_wifi_banner_active">Нет Wi-Fi</string>
+    <string name="camera_wifi_banner_idle">Нет Wi-Fi — сервер может быть недоступен</string>
+    <string name="camera_server_status_live">Идёт прямая трансляция</string>
+    <string name="camera_server_status_ready">Сервер готов</string>
+    <string name="camera_server_status_offline">Не в сети</string>
+    <string name="camera_stream_start_cd">Запустить %1$s-поток</string>
+    <string name="camera_stream_stop_cd">Остановить %1$s-поток</string>
+    <string name="camera_stream_kind_web">веб</string>
+    <string name="camera_stream_kind_rtsp">RTSP</string>
+    <string name="camera_thermal_moderate">Температура: умеренная</string>
+    <string name="camera_thermal_severe">Температура: высокая</string>
+    <string name="camera_thermal_critical">Температура: критическая!</string>
+    <string name="camera_quality_abbr_excellent">ОТЛ</string>
+    <string name="camera_quality_abbr_good">ХОР</string>
+    <string name="camera_quality_abbr_fair">СРЕД</string>
+    <string name="camera_quality_abbr_poor">СЛАБ</string>
+    <string name="camera_quality_abbr_critical">КРИТ</string>
+    <string name="camera_stat_bandwidth">Пропускная способность</string>
+    <string name="camera_stat_min_throughput">Мин. скорость</string>
+    <string name="camera_stat_avg_throughput">Ср. скорость</string>
+    <string name="camera_stat_latency">Задержка</string>
+    <string name="camera_stat_avg_frame">Ср. кадр</string>
+    <string name="camera_stat_clients">Клиенты</string>
+    <string name="camera_stat_total_sent">Всего отправлено</string>
+    <string name="camera_stat_frames">Кадры</string>
+    <string name="camera_stat_throughput">Скорость</string>
+    <string name="camera_stat_frame_size">Размер кадра</string>
+    <string name="camera_client_stat_header">Клиент %1$s:</string>
+    <plurals name="camera_server_status_viewers">
+        <item quantity="one">%1$d зритель подключён</item>
+        <item quantity="few">%1$d зрителя подключены</item>
+        <item quantity="many">%1$d зрителей подключено</item>
+        <item quantity="other">%1$d зрителя подключены</item>
+    </plurals>
+    <plurals name="camera_client_summary">
+        <item quantity="one">%1$d клиент · %2$d kbps</item>
+        <item quantity="few">%1$d клиента · %2$d kbps</item>
+        <item quantity="many">%1$d клиентов · %2$d kbps</item>
+        <item quantity="other">%1$d клиента · %2$d kbps</item>
+    </plurals>
 
     <!-- ── Панель подключения ── -->
     <string name="camera_connect_title">Подключиться к этой камере</string>

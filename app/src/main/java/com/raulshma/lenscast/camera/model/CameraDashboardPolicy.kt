@@ -1,6 +1,7 @@
 package com.raulshma.lenscast.camera.model
 
 import androidx.compose.ui.graphics.Color
+import com.raulshma.lenscast.R
 import com.raulshma.lenscast.core.NetworkQualityMonitor.ClientStatsSnapshot
 import com.raulshma.lenscast.core.NetworkQualityMonitor.NetworkQualityLevel
 import com.raulshma.lenscast.core.NetworkQualityMonitor.NetworkStatsSnapshot
@@ -9,14 +10,16 @@ import java.util.Locale
 
 /**
  * The pure camera-dashboard verdicts and display formats: the wifi banner
- * predicate + message, the server-status tier and status text ladders, the
- * stream-shutter button's shared web/RTSP ladder, the thermal banner, the
- * network-quality badge, the connection panel's visibility verdict and stat
- * rows, the client summary line, byte formatting, and the slider
- * endpoint/value labels. The screen only maps policy data onto colors and
- * composables — every branch here is JVM-testable. Ladder colors that depend
- * on the theme (or the theme-adjacent overlay palette) are expressed as named
- * tiers; fixed colors are plain [Color] values, which the JVM can evaluate.
+ * predicate + variant, the server-status tier and status-line ladders, the
+ * stream-shutter button's shared web/RTSP ladder, the thermal ladder, the
+ * network-quality badge color ladder, the connection panel's visibility
+ * verdict and stat rows, byte formatting, and the slider endpoint/value
+ * labels. The screen only maps policy data onto colors, string resources,
+ * and composables — every branch here is JVM-testable, and no user-facing
+ * prose lives here (l10n strings are the screen's [R.string] lookups).
+ * Ladder colors that depend on the theme (or the theme-adjacent overlay
+ * palette) are expressed as named tiers; fixed colors are plain [Color]
+ * values, which the JVM can evaluate.
  */
 object CameraDashboardPolicy {
 
@@ -26,9 +29,11 @@ object CameraDashboardPolicy {
     fun shouldShowWifiBanner(wifiConnected: Boolean, isServerRunning: Boolean): Boolean =
         !wifiConnected && isServerRunning
 
-    /** Shorter message while a stream is live — reachability still matters less than the live session. */
-    fun wifiBannerMessage(streamActive: Boolean): String =
-        if (streamActive) "Not on WiFi" else "Not on WiFi — server may not be reachable"
+    /** Shorter banner while a stream is live — reachability still matters less than the live session. */
+    enum class WifiBannerVariant { STREAM_ACTIVE, STREAM_IDLE }
+
+    fun wifiBannerVariant(streamActive: Boolean): WifiBannerVariant =
+        if (streamActive) WifiBannerVariant.STREAM_ACTIVE else WifiBannerVariant.STREAM_IDLE
 
     // ── Server status ──
 
@@ -41,24 +46,27 @@ object CameraDashboardPolicy {
         else -> ServerStatusTier.OFFLINE
     }
 
-    /** The status text ladder: connected viewers win over live, live over ready. */
-    fun serverStatusText(clientCount: Int, isActive: Boolean, isServerRunning: Boolean): String = when {
-        clientCount > 0 -> "$clientCount viewer(s) connected"
-        isActive -> "Live stream active"
-        isServerRunning -> "Server ready"
-        else -> "Offline"
-    }
+    /** The status line's data: the tier picks the text ladder, connected viewers win over plain live. */
+    data class ServerStatusLine(val tier: ServerStatusTier, val viewerCount: Int)
+
+    fun serverStatusLine(clientCount: Int, isActive: Boolean, isServerRunning: Boolean): ServerStatusLine = ServerStatusLine(
+        tier = serverStatusTier(isActive, isServerRunning),
+        viewerCount = clientCount,
+    )
 
     // ── Stream shutter button ──
 
     /** The stream-shutter button's background as named tiers; the screen maps each tier onto its color. */
     enum class StreamShutterContainer { RECORDING, ENABLED, DISABLED }
 
-    /** The shared web/RTSP shutter button's state: container tier, icon tint, label, and click gate. */
+    /** The stream-shutter buttons' stream identity, for the screen's localized label lookups. */
+    enum class StreamKind { WEB, RTSP }
+
+    /** The shared web/RTSP shutter button's state: container tier, icon tint, stream kind, and click gate. */
     data class StreamShutterVisual(
         val container: StreamShutterContainer,
         val tint: Color,
-        val contentDescription: String,
+        val kind: StreamKind,
         val clickEnabled: Boolean,
     ) {
         companion object {
@@ -66,11 +74,12 @@ object CameraDashboardPolicy {
             /**
              * The web/RTSP shutter buttons' one ladder: streaming red beats the
              * enabled dim, which beats the disabled ghost; the tint stays white
-             * while the stream is usable; Stop vs Start by state; the click
-             * passes only when the stream is enabled (a live stream stays
-             * stoppable even after its toggle is disabled).
+             * while the stream is usable; Stop vs Start by state (the screen
+             * reads it off the RECORDING tier); the click passes only when the
+             * stream is enabled (a live stream stays stoppable even after its
+             * toggle is disabled).
              */
-            fun of(isStreaming: Boolean, isEnabled: Boolean, streamName: String): StreamShutterVisual =
+            fun of(isStreaming: Boolean, isEnabled: Boolean, kind: StreamKind): StreamShutterVisual =
                 StreamShutterVisual(
                     container = when {
                         isStreaming -> StreamShutterContainer.RECORDING
@@ -78,7 +87,7 @@ object CameraDashboardPolicy {
                         else -> StreamShutterContainer.DISABLED
                     },
                     tint = if (isEnabled || isStreaming) Color.White else Color.White.copy(alpha = 0.35f),
-                    contentDescription = "${if (isStreaming) "Stop" else "Start"} $streamName stream",
+                    kind = kind,
                     clickEnabled = isEnabled,
                 )
         }
@@ -86,34 +95,29 @@ object CameraDashboardPolicy {
 
     // ── Thermal banner ──
 
-    /** The thermal ladder as named tiers; the screen maps each tier onto its color. */
+    /** The thermal ladder as named tiers; the screen maps each tier onto its color and label. */
     enum class ThermalSeverity { MODERATE, SEVERE, CRITICAL }
 
-    data class ThermalBanner(val severity: ThermalSeverity, val label: String)
-
     /** Null for NORMAL/LIGHT — no banner below moderate warming. */
-    fun thermalBanner(state: ThermalState): ThermalBanner? = when (state) {
-        ThermalState.MODERATE -> ThermalBanner(ThermalSeverity.MODERATE, "Thermal: Moderate")
-        ThermalState.SEVERE -> ThermalBanner(ThermalSeverity.SEVERE, "Thermal: Severe")
-        ThermalState.CRITICAL -> ThermalBanner(ThermalSeverity.CRITICAL, "Thermal: Critical!")
+    fun thermalBanner(state: ThermalState): ThermalSeverity? = when (state) {
+        ThermalState.MODERATE -> ThermalSeverity.MODERATE
+        ThermalState.SEVERE -> ThermalSeverity.SEVERE
+        ThermalState.CRITICAL -> ThermalSeverity.CRITICAL
         else -> null
     }
 
     // ── Network quality ──
 
-    data class QualityBadge(val color: Color, val abbreviation: String)
+    /** The collapsed badge's color ladder; the screen reads the label off [NetworkQualityLevel] itself. */
+    data class QualityBadge(val color: Color)
 
     fun qualityBadge(level: NetworkQualityLevel): QualityBadge = when (level) {
-        NetworkQualityLevel.EXCELLENT -> QualityBadge(Color(0xFF4CAF50), "EXC")
-        NetworkQualityLevel.GOOD -> QualityBadge(Color(0xFF8BC34A), "GOOD")
-        NetworkQualityLevel.FAIR -> QualityBadge(Color(0xFFFFC107), "FAIR")
-        NetworkQualityLevel.POOR -> QualityBadge(Color(0xFFFF9800), "POOR")
-        NetworkQualityLevel.CRITICAL -> QualityBadge(Color(0xFFF44336), "CRIT")
+        NetworkQualityLevel.EXCELLENT -> QualityBadge(Color(0xFF4CAF50))
+        NetworkQualityLevel.GOOD -> QualityBadge(Color(0xFF8BC34A))
+        NetworkQualityLevel.FAIR -> QualityBadge(Color(0xFFFFC107))
+        NetworkQualityLevel.POOR -> QualityBadge(Color(0xFFFF9800))
+        NetworkQualityLevel.CRITICAL -> QualityBadge(Color(0xFFF44336))
     }
-
-    /** The collapsed per-client line; the screen hides it while no client is connected. */
-    fun clientSummary(activeClients: Int, minThroughputKbps: Int): String =
-        "$activeClients client${if (activeClients != 1) "s" else ""} · ${minThroughputKbps}kbps"
 
     // ── Connection panel ──
 
@@ -124,8 +128,8 @@ object CameraDashboardPolicy {
     /** The collapsed indicator's quality/fps line under the badge. */
     fun qualitySummary(quality: Int, fps: Int): String = "${quality}q ${fps}fps"
 
-    /** One label/value cell of the expanded panel, in render order. */
-    data class ConnectionStatRow(val label: String, val value: String)
+    /** One label/value cell of the expanded panel, in render order; the screen resolves [labelRes]. */
+    data class ConnectionStatRow(val labelRes: Int, val value: String)
 
     /**
      * The expanded panel's stat rows, from Bandwidth down to Total Sent (the
@@ -134,25 +138,25 @@ object CameraDashboardPolicy {
      */
     fun connectionStatRows(estimatedBandwidthKbps: Int, stats: NetworkStatsSnapshot): List<ConnectionStatRow> =
         listOf(
-            ConnectionStatRow("Bandwidth", "$estimatedBandwidthKbps kbps"),
-            ConnectionStatRow("Min Throughput", "${stats.minThroughputKbps} kbps"),
-            ConnectionStatRow("Avg Throughput", "${stats.avgThroughputKbps} kbps"),
-            ConnectionStatRow("Latency", "${stats.worstLatencyMs} ms"),
-            ConnectionStatRow("Avg Frame", formatBytes(stats.avgFrameSizeBytes.toLong())),
-            ConnectionStatRow("Clients", "${stats.activeClients}"),
-            ConnectionStatRow("Total Sent", formatBytes(stats.totalBytesSent)),
+            ConnectionStatRow(R.string.camera_stat_bandwidth, "$estimatedBandwidthKbps kbps"),
+            ConnectionStatRow(R.string.camera_stat_min_throughput, "${stats.minThroughputKbps} kbps"),
+            ConnectionStatRow(R.string.camera_stat_avg_throughput, "${stats.avgThroughputKbps} kbps"),
+            ConnectionStatRow(R.string.camera_stat_latency, "${stats.worstLatencyMs} ms"),
+            ConnectionStatRow(R.string.camera_stat_avg_frame, formatBytes(stats.avgFrameSizeBytes.toLong())),
+            ConnectionStatRow(R.string.camera_stat_clients, "${stats.activeClients}"),
+            ConnectionStatRow(R.string.camera_stat_total_sent, formatBytes(stats.totalBytesSent)),
         )
 
-    /** The per-client header with the id truncated to its first eight characters. */
-    fun clientStatHeader(clientId: String): String = "Client ${clientId.take(8)}:"
+    /** The per-client header's id, truncated to its first eight characters. */
+    fun clientIdPrefix(clientId: String): String = clientId.take(8)
 
     /** One client's stat rows inside the expanded panel; its frame size goes through [formatBytes]. */
     fun clientStatRows(detail: ClientStatsSnapshot): List<ConnectionStatRow> =
         listOf(
-            ConnectionStatRow("  Frames", "${detail.framesSent}"),
-            ConnectionStatRow("  Throughput", "${detail.avgThroughputKbps} kbps"),
-            ConnectionStatRow("  Latency", "${detail.lastSendDurationMs} ms"),
-            ConnectionStatRow("  Frame Size", formatBytes(detail.lastFrameSizeBytes.toLong())),
+            ConnectionStatRow(R.string.camera_stat_frames, "${detail.framesSent}"),
+            ConnectionStatRow(R.string.camera_stat_throughput, "${detail.avgThroughputKbps} kbps"),
+            ConnectionStatRow(R.string.camera_stat_latency, "${detail.lastSendDurationMs} ms"),
+            ConnectionStatRow(R.string.camera_stat_frame_size, formatBytes(detail.lastFrameSizeBytes.toLong())),
         )
 
     // ── Formats ──

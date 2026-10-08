@@ -1,6 +1,7 @@
 package com.raulshma.lenscast.camera.model
 
 import androidx.compose.ui.graphics.Color
+import com.raulshma.lenscast.R
 import com.raulshma.lenscast.core.NetworkQualityMonitor.ClientStatsSnapshot
 import com.raulshma.lenscast.core.NetworkQualityMonitor.NetworkQualityLevel
 import com.raulshma.lenscast.core.NetworkQualityMonitor.NetworkStatsSnapshot
@@ -26,10 +27,13 @@ class CameraDashboardPolicyTest {
 
     @Test
     fun `wifi banner shortens while a stream is live`() {
-        assertEquals("Not on WiFi", CameraDashboardPolicy.wifiBannerMessage(streamActive = true))
         assertEquals(
-            "Not on WiFi — server may not be reachable",
-            CameraDashboardPolicy.wifiBannerMessage(streamActive = false),
+            CameraDashboardPolicy.WifiBannerVariant.STREAM_ACTIVE,
+            CameraDashboardPolicy.wifiBannerVariant(streamActive = true),
+        )
+        assertEquals(
+            CameraDashboardPolicy.WifiBannerVariant.STREAM_IDLE,
+            CameraDashboardPolicy.wifiBannerVariant(streamActive = false),
         )
     }
 
@@ -56,56 +60,68 @@ class CameraDashboardPolicyTest {
     }
 
     @Test
-    fun `server status text ladder covers all four branches`() {
-        assertEquals("2 viewer(s) connected", CameraDashboardPolicy.serverStatusText(2, isActive = true, isServerRunning = true))
-        assertEquals("Live stream active", CameraDashboardPolicy.serverStatusText(0, isActive = true, isServerRunning = true))
-        assertEquals("Server ready", CameraDashboardPolicy.serverStatusText(0, isActive = false, isServerRunning = true))
-        assertEquals("Offline", CameraDashboardPolicy.serverStatusText(0, isActive = false, isServerRunning = false))
+    fun `server status line ladder covers all four branches`() {
+        assertEquals(
+            CameraDashboardPolicy.ServerStatusLine(CameraDashboardPolicy.ServerStatusTier.LIVE, 2),
+            CameraDashboardPolicy.serverStatusLine(2, isActive = true, isServerRunning = true),
+        )
+        assertEquals(
+            CameraDashboardPolicy.ServerStatusLine(CameraDashboardPolicy.ServerStatusTier.LIVE, 0),
+            CameraDashboardPolicy.serverStatusLine(0, isActive = true, isServerRunning = true),
+        )
+        assertEquals(
+            CameraDashboardPolicy.ServerStatusLine(CameraDashboardPolicy.ServerStatusTier.READY, 0),
+            CameraDashboardPolicy.serverStatusLine(0, isActive = false, isServerRunning = true),
+        )
+        assertEquals(
+            CameraDashboardPolicy.ServerStatusLine(CameraDashboardPolicy.ServerStatusTier.OFFLINE, 0),
+            CameraDashboardPolicy.serverStatusLine(0, isActive = false, isServerRunning = false),
+        )
     }
 
     // ── stream shutter button ──
 
     @Test
-    fun `stream shutter visual is recording red with a stop label while streaming`() {
+    fun `stream shutter visual is recording red with the web kind while streaming`() {
         val visual = CameraDashboardPolicy.StreamShutterVisual.of(
-            isStreaming = true, isEnabled = true, streamName = "web",
+            isStreaming = true, isEnabled = true, kind = CameraDashboardPolicy.StreamKind.WEB,
         )
         assertEquals(CameraDashboardPolicy.StreamShutterContainer.RECORDING, visual.container)
         assertEquals(Color.White, visual.tint)
-        assertEquals("Stop web stream", visual.contentDescription)
+        assertEquals(CameraDashboardPolicy.StreamKind.WEB, visual.kind)
         assertTrue(visual.clickEnabled)
     }
 
     @Test
     fun `stream shutter visual stays stoppable while streaming with the toggle disabled`() {
         val visual = CameraDashboardPolicy.StreamShutterVisual.of(
-            isStreaming = true, isEnabled = false, streamName = "RTSP",
+            isStreaming = true, isEnabled = false, kind = CameraDashboardPolicy.StreamKind.RTSP,
         )
         assertEquals(CameraDashboardPolicy.StreamShutterContainer.RECORDING, visual.container)
         assertEquals(Color.White, visual.tint)
-        assertEquals("Stop RTSP stream", visual.contentDescription)
+        assertEquals(CameraDashboardPolicy.StreamKind.RTSP, visual.kind)
         assertFalse(visual.clickEnabled)
     }
 
     @Test
     fun `stream shutter visual dims while enabled and idle`() {
         val visual = CameraDashboardPolicy.StreamShutterVisual.of(
-            isStreaming = false, isEnabled = true, streamName = "web",
+            isStreaming = false, isEnabled = true, kind = CameraDashboardPolicy.StreamKind.WEB,
         )
         assertEquals(CameraDashboardPolicy.StreamShutterContainer.ENABLED, visual.container)
         assertEquals(Color.White, visual.tint)
-        assertEquals("Start web stream", visual.contentDescription)
+        assertEquals(CameraDashboardPolicy.StreamKind.WEB, visual.kind)
         assertTrue(visual.clickEnabled)
     }
 
     @Test
     fun `stream shutter visual ghosts and gates the click while disabled`() {
         val visual = CameraDashboardPolicy.StreamShutterVisual.of(
-            isStreaming = false, isEnabled = false, streamName = "RTSP",
+            isStreaming = false, isEnabled = false, kind = CameraDashboardPolicy.StreamKind.RTSP,
         )
         assertEquals(CameraDashboardPolicy.StreamShutterContainer.DISABLED, visual.container)
         assertEquals(Color.White.copy(alpha = 0.35f), visual.tint)
-        assertEquals("Start RTSP stream", visual.contentDescription)
+        assertEquals(CameraDashboardPolicy.StreamKind.RTSP, visual.kind)
         assertFalse(visual.clickEnabled)
     }
 
@@ -120,15 +136,15 @@ class CameraDashboardPolicyTest {
     @Test
     fun `thermal banner labels every moderate-or-worse state`() {
         assertEquals(
-            CameraDashboardPolicy.ThermalBanner(CameraDashboardPolicy.ThermalSeverity.MODERATE, "Thermal: Moderate"),
+            CameraDashboardPolicy.ThermalSeverity.MODERATE,
             CameraDashboardPolicy.thermalBanner(ThermalState.MODERATE),
         )
         assertEquals(
-            CameraDashboardPolicy.ThermalBanner(CameraDashboardPolicy.ThermalSeverity.SEVERE, "Thermal: Severe"),
+            CameraDashboardPolicy.ThermalSeverity.SEVERE,
             CameraDashboardPolicy.thermalBanner(ThermalState.SEVERE),
         )
         assertEquals(
-            CameraDashboardPolicy.ThermalBanner(CameraDashboardPolicy.ThermalSeverity.CRITICAL, "Thermal: Critical!"),
+            CameraDashboardPolicy.ThermalSeverity.CRITICAL,
             CameraDashboardPolicy.thermalBanner(ThermalState.CRITICAL),
         )
     }
@@ -136,33 +152,27 @@ class CameraDashboardPolicyTest {
     // ── network quality ──
 
     @Test
-    fun `quality badge covers every level with its color and abbreviation`() {
+    fun `quality badge covers every level with its color`() {
         assertEquals(
-            CameraDashboardPolicy.QualityBadge(Color(0xFF4CAF50), "EXC"),
+            CameraDashboardPolicy.QualityBadge(Color(0xFF4CAF50)),
             CameraDashboardPolicy.qualityBadge(NetworkQualityLevel.EXCELLENT),
         )
         assertEquals(
-            CameraDashboardPolicy.QualityBadge(Color(0xFF8BC34A), "GOOD"),
+            CameraDashboardPolicy.QualityBadge(Color(0xFF8BC34A)),
             CameraDashboardPolicy.qualityBadge(NetworkQualityLevel.GOOD),
         )
         assertEquals(
-            CameraDashboardPolicy.QualityBadge(Color(0xFFFFC107), "FAIR"),
+            CameraDashboardPolicy.QualityBadge(Color(0xFFFFC107)),
             CameraDashboardPolicy.qualityBadge(NetworkQualityLevel.FAIR),
         )
         assertEquals(
-            CameraDashboardPolicy.QualityBadge(Color(0xFFFF9800), "POOR"),
+            CameraDashboardPolicy.QualityBadge(Color(0xFFFF9800)),
             CameraDashboardPolicy.qualityBadge(NetworkQualityLevel.POOR),
         )
         assertEquals(
-            CameraDashboardPolicy.QualityBadge(Color(0xFFF44336), "CRIT"),
+            CameraDashboardPolicy.QualityBadge(Color(0xFFF44336)),
             CameraDashboardPolicy.qualityBadge(NetworkQualityLevel.CRITICAL),
         )
-    }
-
-    @Test
-    fun `client summary pluralizes the client count`() {
-        assertEquals("1 client · 2500kbps", CameraDashboardPolicy.clientSummary(1, 2500))
-        assertEquals("3 clients · 2500kbps", CameraDashboardPolicy.clientSummary(3, 2500))
     }
 
     // ── connection panel ──
@@ -198,13 +208,13 @@ class CameraDashboardPolicyTest {
         )
         assertEquals(
             listOf(
-                CameraDashboardPolicy.ConnectionStatRow("Bandwidth", "8000 kbps"),
-                CameraDashboardPolicy.ConnectionStatRow("Min Throughput", "1200 kbps"),
-                CameraDashboardPolicy.ConnectionStatRow("Avg Throughput", "2400 kbps"),
-                CameraDashboardPolicy.ConnectionStatRow("Latency", "45 ms"),
-                CameraDashboardPolicy.ConnectionStatRow("Avg Frame", "2 MB"),
-                CameraDashboardPolicy.ConnectionStatRow("Clients", "2"),
-                CameraDashboardPolicy.ConnectionStatRow("Total Sent", "1 MB"),
+                CameraDashboardPolicy.ConnectionStatRow(R.string.camera_stat_bandwidth, "8000 kbps"),
+                CameraDashboardPolicy.ConnectionStatRow(R.string.camera_stat_min_throughput, "1200 kbps"),
+                CameraDashboardPolicy.ConnectionStatRow(R.string.camera_stat_avg_throughput, "2400 kbps"),
+                CameraDashboardPolicy.ConnectionStatRow(R.string.camera_stat_latency, "45 ms"),
+                CameraDashboardPolicy.ConnectionStatRow(R.string.camera_stat_avg_frame, "2 MB"),
+                CameraDashboardPolicy.ConnectionStatRow(R.string.camera_stat_clients, "2"),
+                CameraDashboardPolicy.ConnectionStatRow(R.string.camera_stat_total_sent, "1 MB"),
             ),
             CameraDashboardPolicy.connectionStatRows(estimatedBandwidthKbps = 8000, stats = stats),
         )
@@ -212,7 +222,7 @@ class CameraDashboardPolicyTest {
 
     @Test
     fun `client stat rows truncate the id header and list the frame stats`() {
-        assertEquals("Client 1a2b3c4d:", CameraDashboardPolicy.clientStatHeader("1a2b3c4d5e6f7a7b"))
+        assertEquals("1a2b3c4d", CameraDashboardPolicy.clientIdPrefix("1a2b3c4d5e6f7a7b"))
         val detail = ClientStatsSnapshot(
             framesSent = 1200L,
             bytesSent = 2048L,
@@ -222,10 +232,10 @@ class CameraDashboardPolicyTest {
         )
         assertEquals(
             listOf(
-                CameraDashboardPolicy.ConnectionStatRow("  Frames", "1200"),
-                CameraDashboardPolicy.ConnectionStatRow("  Throughput", "900 kbps"),
-                CameraDashboardPolicy.ConnectionStatRow("  Latency", "33 ms"),
-                CameraDashboardPolicy.ConnectionStatRow("  Frame Size", "2 KB"),
+                CameraDashboardPolicy.ConnectionStatRow(R.string.camera_stat_frames, "1200"),
+                CameraDashboardPolicy.ConnectionStatRow(R.string.camera_stat_throughput, "900 kbps"),
+                CameraDashboardPolicy.ConnectionStatRow(R.string.camera_stat_latency, "33 ms"),
+                CameraDashboardPolicy.ConnectionStatRow(R.string.camera_stat_frame_size, "2 KB"),
             ),
             CameraDashboardPolicy.clientStatRows(detail),
         )
