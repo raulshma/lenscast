@@ -1,0 +1,4 @@
+Since 0.1.5:
+• Localization: the camera dashboard is now fully translated — the Web/RTSP stream buttons' screen-reader labels, the thermal warning banner, the server status line, the quality badge, and the connection stats panel were still hardcoded in English
+• Proper plurals in every language: "2 viewers connected" instead of "2 viewer(s) connected", with correct Russian and Chinese plural forms
+• No other changes — this release carries no new permissions, no new network endpoints, and no behavior changes
