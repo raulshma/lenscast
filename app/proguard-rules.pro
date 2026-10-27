@@ -106,3 +106,10 @@
     public static **[] values();
     <fields>;
 }
+
+# MediaPipe Graph initialization uses Flogger stack-based caller lookup.
+-keep class com.google.common.flogger.** { *; }
+-keepattributes SourceFile,LineNumberTable,EnclosingMethod,InnerClasses
+
+# MediaPipe/protobuf runtime looks up generated message fields by name.
+-keep class com.google.protobuf.** { *; }
