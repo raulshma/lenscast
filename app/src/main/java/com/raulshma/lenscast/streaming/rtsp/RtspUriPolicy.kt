@@ -90,9 +90,17 @@ object RtspUriPolicy {
     /** Extract + normalize in one step — the form every check consumes. */
     fun normalizedPath(requestUri: String): String = normalizeRtspPath(extractRtspPath(requestUri))
 
-    /** Strips scheme/authority from an absolute rtsp:// URI; anything not starting with / gets one. */
+    /**
+     * Strips scheme/authority from an absolute rtsp:// or rtsps:// URI;
+     * anything not starting with / gets one. Both schemes must strip — the
+     * TLS listener serves the same grammar on rtsps:// URLs, and an
+     * unstripped `rtsps://host:port/stream` would normalize to a bogus path
+     * and 404 every method (issue #11).
+     */
     fun extractRtspPath(requestUri: String): String {
-        val path = if (requestUri.startsWith("rtsp://", ignoreCase = true)) {
+        val path = if (requestUri.startsWith("rtsp://", ignoreCase = true) ||
+            requestUri.startsWith("rtsps://", ignoreCase = true)
+        ) {
             val schemeSep = requestUri.indexOf("://")
             val afterScheme = if (schemeSep >= 0) requestUri.substring(schemeSep + 3) else requestUri
             val slashIndex = afterScheme.indexOf('/')

@@ -43,9 +43,30 @@ class RtspUriPolicyTest {
         assertEquals("/stream", RtspUriPolicy.extractRtspPath("RTSP://host/stream"))
         assertEquals("/", RtspUriPolicy.extractRtspPath("rtsp://host"))
         assertEquals("/", RtspUriPolicy.extractRtspPath("rtsp://"))
+        // The TLS twin scheme strips identically — the listener serves the
+        // same grammar under TLS (issue #11).
+        assertEquals("/stream", RtspUriPolicy.extractRtspPath("rtsps://host:8554/stream"))
+        assertEquals("/stream", RtspUriPolicy.extractRtspPath("RTSPS://host:8554/stream"))
+        assertEquals("/stream/trackID=0", RtspUriPolicy.extractRtspPath("rtsps://host:8554/stream/trackID=0"))
+        assertEquals("/", RtspUriPolicy.extractRtspPath("rtsps://host"))
         // Non-absolute input passes through with a guaranteed leading slash.
         assertEquals("/trackID=0", RtspUriPolicy.extractRtspPath("trackID=0"))
         assertEquals("/stream", RtspUriPolicy.extractRtspPath("/stream"))
+    }
+
+    // ── rtsps:// acceptance (issue #11) ──
+
+    @Test
+    fun `rtsps absolute uris pass every method's acceptance set`() {
+        val options = "rtsps://192.168.50.20:8554/stream"
+        assertTrue(RtspUriPolicy.isRequestUriAllowed("OPTIONS", options))
+        assertTrue(RtspUriPolicy.isRequestUriAllowed("DESCRIBE", options))
+        assertTrue(RtspUriPolicy.isRequestUriAllowed("SETUP", "rtsps://192.168.50.20:8554/stream/trackID=0"))
+        assertTrue(RtspUriPolicy.isRequestUriAllowed("SETUP", "rtsps://192.168.50.20:8554/stream/trackID=1"))
+        assertTrue(RtspUriPolicy.isRequestUriAllowed("PLAY", options))
+        assertTrue(RtspUriPolicy.isRequestUriAllowed("TEARDOWN", options))
+        // The exact wire shape from issue #11 normalizes to the stream path.
+        assertEquals("/stream", RtspUriPolicy.normalizedPath("rtsps://192.168.50.20:8554/stream"))
     }
 
     // ── isAggregateOrStreamUri ──

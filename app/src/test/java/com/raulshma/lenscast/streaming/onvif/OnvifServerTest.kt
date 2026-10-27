@@ -96,6 +96,19 @@ class OnvifServerTest {
     }
 
     @Test
+    fun `https mode switches the advertised rtsp uri to rtsps`() {
+        val stream = server(httpsEnabled = { true }).handle(
+            "<s:Envelope><s:Body><trt:GetStreamUri/></s:Body></s:Envelope>",
+        )
+        assertTrue(stream.contains("<tt:Uri>rtsps://192.168.1.5:8554/stream</tt:Uri>"))
+        // Plain mode keeps rtsp://.
+        val plain = server().handle(
+            "<s:Envelope><s:Body><trt:GetStreamUri/></s:Body></s:Envelope>",
+        )
+        assertTrue(plain.contains("<tt:Uri>rtsp://192.168.1.5:8554/stream</tt:Uri>"))
+    }
+
+    @Test
     fun `the profile advertises the configured codec`() {
         val h264 = server().handle("<s:Envelope><s:Body><trt:GetProfiles/></s:Body></s:Envelope>")
         assertTrue(h264.contains("<tt:Encoding>H264</tt:Encoding>"))

@@ -130,13 +130,16 @@ class OnvifServer(
         "${webScheme()}://${host()}:${webPort()}$DEVICE_SERVICE_PATH"
 
     private fun rtspUri(): String =
-        "rtsp://${host()}:${rtspPort()}/${RtspUriPolicy.DEFAULT_STREAM_PATH}"
+        "${rtspScheme()}://${host()}:${rtspPort()}/${RtspUriPolicy.DEFAULT_STREAM_PATH}"
 
     private fun snapshotUri(): String =
         "${webScheme()}://${host()}:${webPort()}/snapshot"
 
     /** HTTPS mode serves the web port as TLS-only, so every advertised web URL must match. */
     private fun webScheme(): String = if (httpsEnabled()) "https" else "http"
+
+    /** HTTPS mode also flips the RTSP listener to TLS on the same port — advertise rtsps:// then. */
+    private fun rtspScheme(): String = if (httpsEnabled()) "rtsps" else "rtsp"
 
     /** Bracketed IPv6, plain IPv4 — the same URL-host rule NetworkUtils owns. */
     private fun host(): String =

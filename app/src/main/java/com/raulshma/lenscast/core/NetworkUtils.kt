@@ -60,11 +60,6 @@ object NetworkUtils {
         return "${if (ssl) "https" else "http"}://${formatHostForUrl(ip)}:$port/hls/playlist.m3u8"
     }
 
-    fun getRtspUrl(port: Int, path: String = "live"): String? {
-        val ip = getLocalIpAddress() ?: return null
-        return "rtsp://${formatHostForUrl(ip)}:$port/$path"
-    }
-
     fun isWifiConnected(context: Context): Boolean {
         val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
         val network = cm.activeNetwork ?: return false
