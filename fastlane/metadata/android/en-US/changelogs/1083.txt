@@ -1,0 +1,4 @@
+Since 0.1.7:
+• RTSP: secure rtsps:// (TLS) camera URLs are now accepted alongside rtsp://
+• Fix: ML object detection works again in release builds - R8 no longer strips the Flogger/protobuf metadata the detector needs
+• Maintenance: web tooling security bumps (vite 6.4.5, undici 8.12.3, vitest 4.1.12)
