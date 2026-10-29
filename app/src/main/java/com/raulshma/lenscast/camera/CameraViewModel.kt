@@ -306,6 +306,9 @@ class CameraViewModel(
             val result = cameraService.initialize()
             Log.d(TAG, "initializeCamera: result=${result.isSuccess}, exception=${result.exceptionOrNull()?.message}")
             if (result.isSuccess) {
+                // A successful init refills the retry budget: the budget caps
+                // consecutive failures, not failures per session.
+                retryCount = 0
                 _cameraState.value = CameraState.Ready
             } else {
                 _cameraState.value = CameraState.Error(
@@ -321,6 +324,12 @@ class CameraViewModel(
         if (CameraInitRetry.shouldRetry(retryCount)) {
             retryCount++
             initializeCamera()
+        } else {
+            // Never a silent no-op: an exhausted budget tells the user so.
+            _cameraState.value = CameraState.Error(
+                "Camera did not recover after $retryCount retries. Restart the app, and check " +
+                    "the camera permission and the system camera-access toggle."
+            )
         }
     }
 

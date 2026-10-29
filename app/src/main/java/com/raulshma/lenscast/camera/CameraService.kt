@@ -322,10 +322,25 @@ class CameraService(private val context: Context) {
         try {
             Log.d(TAG, "Starting camera initialization...")
             _cameraState.value = CameraState.Initializing
-            val future = ProcessCameraProvider.getInstance(context)
-            val provider = withTimeoutOrNull(10_000L) {
-                future.await()
-            } ?: throw Exception("Camera initialization timed out")
+            var provider = awaitProvider()
+            // CameraX is a process-global singleton that snapshots the camera
+            // list once at construction. A first snapshot taken while camera
+            // access was not effective (permission not granted yet, the system
+            // camera-access toggle off, a HAL restart) stays empty for the
+            // life of the process — every later bind fails with
+            // "No available camera can be found Cams:0". The only in-process
+            // cure is shutting the singleton down so the next getInstance
+            // re-queries the camera list.
+            if (provider.availableCameraInfos.isEmpty()) {
+                Log.w(TAG, "CameraX reports an empty camera list; forcing provider re-initialization")
+                provider = recoverProvider()
+                if (provider.availableCameraInfos.isEmpty()) {
+                    throw Exception(
+                        "No cameras are available to the system. Check the camera permission " +
+                            "and the system camera-access toggle, or let the device cool down, then retry."
+                    )
+                }
+            }
             cameraProvider = provider
             enumerateCameras(provider)
             _cameraState.value = CameraState.Ready
@@ -338,8 +353,39 @@ class CameraService(private val context: Context) {
         }
     }
 
+    private suspend fun awaitProvider(): ProcessCameraProvider {
+        val future = ProcessCameraProvider.getInstance(context)
+        return withTimeoutOrNull(10_000L) {
+            future.await()
+        } ?: throw Exception("Camera initialization timed out")
+    }
+
+    /**
+     * Tear the CameraX singleton down and rebuild it, so its camera-list
+     * snapshot is retaken against the current camera-access state.
+     */
+    private suspend fun recoverProvider(): ProcessCameraProvider {
+        try {
+            cameraProvider?.shutdownAsync()?.await()
+        } catch (e: Exception) {
+            Log.w(TAG, "CameraX shutdown during recovery failed; re-initializing anyway", e)
+        }
+        cameraProvider = null
+        return awaitProvider()
+    }
+
     private fun ensureCameraProviderAvailable(): ProcessCameraProvider? {
         cameraProvider?.let { return it }
+
+        // Never construct the provider without the permission: its first
+        // camera-list snapshot would be empty and stay empty for the whole
+        // process (see [initialize]). Fail fast into the retryable error
+        // path instead.
+        if (!hasCameraPermission()) {
+            Log.w(TAG, "ensureCameraProviderAvailable: CAMERA permission not granted; refusing to initialize")
+            _cameraState.value = CameraState.Error(CAMERA_PERMISSION_REQUIRED_MESSAGE)
+            return null
+        }
 
         return try {
             Log.d(TAG, "ensureCameraProviderAvailable: initializing camera provider")
@@ -355,6 +401,11 @@ class CameraService(private val context: Context) {
             null
         }
     }
+
+    private fun hasCameraPermission(): Boolean =
+        androidx.core.content.ContextCompat.checkSelfPermission(
+            context, android.Manifest.permission.CAMERA,
+        ) == android.content.pm.PackageManager.PERMISSION_GRANTED
 
     private fun shouldAttachPreview(): Boolean {
         return previewRequested && currentPreviewView != null && isActivityForeground
@@ -850,6 +901,14 @@ class CameraService(private val context: Context) {
                 correctivePhotoConfigRebind = false
                 rebindUseCases()
             }
+
+            // A successful bind IS camera readiness. The service only used to
+            // post Ready from initialize(), so a bind that recovered after a
+            // failure left the state stuck on Error — the sticky UI rule then
+            // hid a working camera behind the error screen, and the
+            // watchdog's recovery verification (which reads Ready) failed
+            // even when frames flowed.
+            _cameraState.value = CameraState.Ready
         } catch (e: Exception) {
             Log.e(TAG, "bindUseCases: failed to bind camera", e)
             _cameraState.value = CameraState.Error("Failed to start camera: ${e.message}")
@@ -1349,6 +1408,10 @@ class CameraService(private val context: Context) {
         private const val CONTROLS_APPLY_DELAY_MS = 400L
         internal const val MAX_ANALYSIS_WIDTH = 1280
         internal const val MAX_ANALYSIS_HEIGHT = 720
+
+        /** Fail-fast line for bind attempts before the CAMERA permission exists. */
+        private const val CAMERA_PERMISSION_REQUIRED_MESSAGE =
+            "Camera permission is not granted. Grant it, then retry."
     }
 }
 

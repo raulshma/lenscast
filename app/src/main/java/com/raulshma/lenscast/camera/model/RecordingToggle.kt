@@ -59,9 +59,11 @@ fun stickyCameraState(current: CameraState, incoming: CameraState): CameraState 
     if (incoming is CameraState.Idle) current else incoming
 
 /**
- * The camera-init retry budget: at most [MAX_RETRIES] re-initializations per
- * process — a retry past the budget is a no-op instead of a forever restart
- * loop. [attempt] is the number of retries already spent.
+ * The camera-init retry budget: at most [MAX_RETRIES] consecutive
+ * re-initializations — a retry past the budget surfaces a restart hint
+ * instead of looping forever. The caller resets the spent count on every
+ * successful init, so the budget caps consecutive failures, not failures
+ * per session. [attempt] is the number of retries already spent.
  */
 object CameraInitRetry {
     const val MAX_RETRIES = 3

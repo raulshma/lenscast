@@ -3,12 +3,12 @@ package com.raulshma.lenscast.streaming
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.ImageFormat
-import android.graphics.Matrix
 import android.graphics.Rect
 import android.graphics.YuvImage
 import android.util.Log
 import com.raulshma.lenscast.camera.model.OverlaySettings
 import com.raulshma.lenscast.core.StreamDefaults
+import com.raulshma.lenscast.core.YuvConverter
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -77,7 +77,6 @@ class FramePipeline(
 
     private val maxBufferSize = 4 * 1024 * 1024
     private var reusableBuffer = ByteArrayOutputStream(256 * 1024)
-    private var reusableYuvBuffer = ByteArrayOutputStream(256 * 1024)
     private val bufferLock = Any()
 
     init {
@@ -115,7 +114,11 @@ class FramePipeline(
         // adaptive module's driven state must reflect flowing frames alone.
         val quality = qualityPolicy.resolveQuality(jpegQuality)
 
-        val queued = queue.trySend(YuvFrame(yuvData.copyOf(), width, height, rotation, quality, overlay, clientCount))
+        // No defensive copy: the source array is freshly allocated per frame
+        // by the camera's NV21 conversion and never written afterward — every
+        // consumer (this pipeline, the snapshot store, motion, the encoded
+        // hub, ML) either reads it or copies it into its own buffer.
+        val queued = queue.trySend(YuvFrame(yuvData, width, height, rotation, quality, overlay, clientCount))
         if (queued.isFailure) {
             droppedFrameCount.incrementAndGet()
             return false
@@ -165,12 +168,19 @@ class FramePipeline(
 
     private fun yuvToJpeg(yuvData: ByteArray, width: Int, height: Int, quality: Int, rotation: Int = 0): ByteArray? {
         return try {
+            // One NV21 rotate + one JPEG encode. The historical path here
+            // (encode → decode → Matrix rotate → encode) tripled the
+            // per-frame pixel work on the exact frames that always carry a
+            // 90° sensor rotation (portrait phones) and stacked generational
+            // JPEG artifacts into every stream.
             if (rotation != 0) {
-                val bitmap = yuvToRotatedBitmap(yuvData, width, height, quality, rotation) ?: return null
+                val rotated = YuvConverter.rotateNv21(yuvData, width, height, rotation)
+                val rotatedWidth = if (rotation == 90 || rotation == 270) height else width
+                val rotatedHeight = if (rotation == 90 || rotation == 270) width else height
+                val yuvImage = YuvImage(rotated, ImageFormat.NV21, rotatedWidth, rotatedHeight, null)
                 synchronized(bufferLock) {
                     reusableBuffer.reset()
-                    bitmap.compress(Bitmap.CompressFormat.JPEG, quality, reusableBuffer)
-                    bitmap.recycle()
+                    yuvImage.compressToJpeg(Rect(0, 0, rotatedWidth, rotatedHeight), quality, reusableBuffer)
                     val result = reusableBuffer.toByteArray()
                     capBuffer(reusableBuffer)
                     result
@@ -187,28 +197,6 @@ class FramePipeline(
             }
         } catch (e: Exception) {
             Log.e(TAG, "YUV to JPEG conversion failed", e)
-            null
-        }
-    }
-
-    private fun yuvToRotatedBitmap(yuvData: ByteArray, width: Int, height: Int, quality: Int, rotation: Int): Bitmap? {
-        return try {
-            val yuvImage = YuvImage(yuvData, ImageFormat.NV21, width, height, null)
-            val jpegData: ByteArray
-            synchronized(bufferLock) {
-                reusableYuvBuffer.reset()
-                yuvImage.compressToJpeg(Rect(0, 0, width, height), quality, reusableYuvBuffer)
-                jpegData = reusableYuvBuffer.toByteArray()
-                capBuffer(reusableYuvBuffer)
-            }
-            val bitmap = BitmapFactory.decodeByteArray(jpegData, 0, jpegData.size) ?: return null
-            val matrix = Matrix()
-            matrix.postRotate(rotation.toFloat())
-            val rotated = Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
-            if (rotated !== bitmap) bitmap.recycle()
-            rotated
-        } catch (e: Exception) {
-            Log.e(TAG, "YUV to rotated bitmap conversion failed", e)
             null
         }
     }
