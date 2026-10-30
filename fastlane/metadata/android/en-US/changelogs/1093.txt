@@ -1,0 +1,6 @@
+Since 0.1.8:
+• Streaming: the stream overlay is now stamped into the encoded frames, so RTSP viewers and shared-encode outputs show the same overlay as the web view
+• Camera: new Quit menu item stops streaming and tears down gracefully before the app exits
+• Settings: server changes apply after a short debounce, so the transport restarts once instead of on every keystroke
+• Streaming: a stop grace period keeps the stream service from bouncing during transient restarts
+• Camera: more robust startup with clearer error handling and permission checks
