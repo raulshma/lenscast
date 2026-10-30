@@ -19,6 +19,7 @@ import com.raulshma.lenscast.streaming.rtsp.RtspResolution
 import com.raulshma.lenscast.streaming.rtsp.RtspVideoCodec
 import com.raulshma.lenscast.streaming.srt.SrtStatus
 import com.raulshma.lenscast.streaming.whip.WhipStatus
+import io.mockk.clearMocks
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.every
@@ -198,6 +199,7 @@ class SettingsApplierTest {
             streamWatchdog = streamWatchdog,
             mqttAlertPublisher = mqttAlertPublisher,
             onvifServer = onvifServer,
+            serverApplyDebounceMs = 0,
         ).start(scope)
     }
 
@@ -312,6 +314,58 @@ class SettingsApplierTest {
             streamingManager.setTlsEnabled(true)
             streamingManager.setPort(8080)
             streamingManager.ensureServerRunning()
+        }
+    }
+
+    @Test
+    fun `a slider burst of port values lands as one debounced restart`() {
+        // Issue #14: the Streaming Port slider emits one value per frame, and
+        // the old per-emission apply restarted the transport dozens of times
+        // per drag — the churn whose service teardown raced the next start's
+        // foreground obligation and crashed the app. The settle window must
+        // collapse the whole drag into the final value's single restart.
+        scope.cancel() // silence the immediate-apply applier from setup
+        val burstPort = MutableStateFlow(8080)
+        val burstHttps = MutableStateFlow(false)
+        every { settingsDataStore.streamingPort } returns burstPort
+        every { settingsDataStore.httpsEnabled } returns burstHttps
+        clearMocks(streamingManager)
+        val burstScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        try {
+            SettingsApplier(
+                settingsDataStore = settingsDataStore,
+                cameraService = cameraService,
+                streamingManager = streamingManager,
+                streamWatchdog = streamWatchdog,
+                mqttAlertPublisher = mqttAlertPublisher,
+                onvifServer = onvifServer,
+                serverApplyDebounceMs = 400,
+            ).start(burstScope)
+            eventually {
+                verify(exactly = 1) { streamingManager.setPort(8080) }
+                verify(exactly = 1) { streamingManager.ensureServerRunning() }
+            }
+            // A drag: one emission per frame, each inside the previous one's
+            // settle window.
+            burstPort.value = 9000
+            Thread.sleep(30)
+            burstPort.value = 11000
+            Thread.sleep(30)
+            burstPort.value = 13000
+            Thread.sleep(150) // still inside the settle window
+            verify(exactly = 1) { streamingManager.setPort(any()) }
+            verify(exactly = 1) { streamingManager.ensureServerRunning() }
+            eventually {
+                verify(exactly = 1) { streamingManager.setPort(13000) }
+                verify(exactly = 2) { streamingManager.ensureServerRunning() }
+            }
+            Thread.sleep(200) // outlive the settle: no trailing applies behind the last one
+            verify(exactly = 0) { streamingManager.setPort(9000) }
+            verify(exactly = 0) { streamingManager.setPort(11000) }
+            verify(exactly = 1) { streamingManager.setPort(13000) }
+            verify(exactly = 2) { streamingManager.ensureServerRunning() }
+        } finally {
+            burstScope.cancel()
         }
     }
 

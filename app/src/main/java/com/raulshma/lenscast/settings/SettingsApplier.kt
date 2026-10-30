@@ -39,6 +39,13 @@ class SettingsApplier(
     private val streamWatchdog: StreamWatchdog,
     private val mqttAlertPublisher: MqttAlertPublisher,
     private val onvifServer: OnvifServer,
+    // Trailing-edge settle window for the port/TLS restart cycle (issue #14):
+    // a slider emits one value per frame, and every emission restarts the
+    // transport — dozens of stop/start cycles per drag whose service teardown
+    // can interleave with the next start's foreground obligation and kill the
+    // process. The window applies the last value once, after the stream
+    // settles. 0 applies immediately (tests).
+    private val serverApplyDebounceMs: Long = SERVER_APPLY_DEBOUNCE_MS,
 ) {
 
     fun start(scope: CoroutineScope) {
@@ -62,6 +69,10 @@ class SettingsApplier(
             ) { port, https ->
                 ServerSettings(port, https)
             }.collectLatest { server ->
+                // One transport restart per settled value, not one per frame:
+                // collectLatest cancels this settle on the next emission, so a
+                // slider drag lands a single stop → recreate → start cycle.
+                if (serverApplyDebounceMs > 0) delay(serverApplyDebounceMs)
                 streamingManager.setTlsEnabled(server.https)
                 streamingManager.setPort(server.port)
                 streamingManager.ensureServerRunning()
@@ -543,5 +554,12 @@ class SettingsApplier(
 
         /** The RTSP session sampler's cadence: prompt enough for a client event, cheap enough to idle on. */
         private const val RTSP_CLIENT_POLL_MS = 2_000L
+
+        /**
+         * The port/TLS settle window: comfortably under a second so a manual
+         * port entry lands promptly, long enough that one slider drag's
+         * per-frame emissions collapse into a single restart.
+         */
+        private const val SERVER_APPLY_DEBOUNCE_MS = 300L
     }
 }
