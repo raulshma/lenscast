@@ -2,6 +2,7 @@ package com.raulshma.lenscast.streaming
 
 import com.raulshma.lenscast.streaming.rtsp.EncodedNalUnit
 import android.util.Log
+import com.raulshma.lenscast.camera.model.OverlaySettings
 import com.raulshma.lenscast.core.StreamDefaults
 import com.raulshma.lenscast.core.YuvConverter
 import com.raulshma.lenscast.streaming.hls.HlsVideoSink
@@ -107,6 +108,15 @@ internal class EncodedStreamHub(
     private val srtSink: EncodedSink = NoopSink,
     /** The low-res sub-stream's video sink (the RTSP server's /sub fan-out); unused while the sub is disabled. */
     private val subVideoSink: (List<EncodedNalUnit>) -> Unit = {},
+    /** The video encoder factory — the production MediaCodec pair, faked in JVM tests. */
+    private val encoderFactory: (RtspVideoCodec) -> VideoEncoder = DEFAULT_ENCODER_FACTORY,
+    /**
+     * The burned-in text overlay ([EncodedOverlayCompositor], issue #15):
+     * stamps the configured overlay lines onto every frame just before
+     * encode, so RTSP and every output riding this shared encode shows the
+     * same overlay the MJPEG stream does. Faked in JVM tests.
+     */
+    private val overlayCompositor: EncodedOverlayCompositor = EncodedOverlayCompositor(),
 ) : EncodedSource {
 
     /** The fan-out's no-op sink — the default keeps every existing construction site compiling. */
@@ -182,11 +192,11 @@ internal class EncodedStreamHub(
      * under [stateLock] (creation and wiring race with start/stop otherwise).
      */
     private fun encoderForLocked(codec: RtspVideoCodec): VideoEncoder = when (codec) {
-        RtspVideoCodec.H264 -> h264Encoder ?: H264Encoder().also {
+        RtspVideoCodec.H264 -> h264Encoder ?: encoderFactory(codec).also {
             it.onEncodedFrame = { units -> fanOutVideo(RtspVideoCodec.H264, units) }
             h264Encoder = it
         }
-        RtspVideoCodec.H265 -> h265Encoder ?: H265Encoder().also {
+        RtspVideoCodec.H265 -> h265Encoder ?: encoderFactory(codec).also {
             it.onEncodedFrame = { units -> fanOutVideo(RtspVideoCodec.H265, units) }
             h265Encoder = it
         }
@@ -263,7 +273,7 @@ internal class EncodedStreamHub(
             return
         }
         if (subEncoder != null) return
-        val encoder = H264Encoder()
+        val encoder = encoderFactory(RtspVideoCodec.H264)
         encoder.onEncodedFrame = { units -> subVideoSink(units) }
         encoder.configure(
             StreamDefaults.RTSP_SUB_VIDEO_WIDTH,
@@ -386,6 +396,13 @@ internal class EncodedStreamHub(
             effectiveHeight = height
             frameData = yuvData
         }
+        // The frame the sub-stream scales from. When no rotation applies it
+        // still aliases the camera's own analysis array — which the MJPEG
+        // pipeline and the WHIP/WHEP taps read after this fan-out — so the
+        // overlay compositors must blend into their own copy in that case
+        // (frameData === yuvData is exactly the shared condition per target).
+        val rotated = frameData
+        val overlayActive = overlayCompositor.overlayEnabled()
 
         if (effectiveWidth != videoWidth || effectiveHeight != videoHeight) {
             // The hub encodes the CONFIGURED size, whatever the camera's
@@ -399,25 +416,44 @@ internal class EncodedStreamHub(
         }
 
         acceptedFrames.incrementAndGet()
-        encoder.encodeFrame(frameData)
+        encoder.encodeFrame(
+            if (overlayActive) {
+                overlayCompositor.applyTo(frameData, videoWidth, videoHeight, now, frameData === yuvData)
+            } else {
+                frameData
+            },
+        )
 
-        // The sub-stream's feed: the same rotated frame aspect-filled onto
-        // the fixed VGA (640×480) size, encoded by its own H.264 instance — one extra
-        // small-scale + small encode, only while opted in and running.
+        // The sub-stream's feed: the rotated frame aspect-filled onto the
+        // fixed VGA (640×480) size, encoded by its own H.264 instance — one
+        // extra small-scale + small encode, only while opted in and running.
+        // Scaled from [rotated], NOT from the possibly re-scaled main frame:
+        // its dimensions moved under frameData, and feeding scaleNv21 the
+        // stale source dims corrupted /sub whenever the encode resolution
+        // differed from the analysis resolution.
         val sub = subEncoder
         if (sub != null && !sub.isEncoderLagged()) {
-            val subFrame = if (effectiveWidth != StreamDefaults.RTSP_SUB_VIDEO_WIDTH ||
+            var subFrame = if (effectiveWidth != StreamDefaults.RTSP_SUB_VIDEO_WIDTH ||
                 effectiveHeight != StreamDefaults.RTSP_SUB_VIDEO_HEIGHT
             ) {
                 YuvConverter.scaleNv21(
-                    frameData,
+                    rotated,
                     effectiveWidth,
                     effectiveHeight,
                     StreamDefaults.RTSP_SUB_VIDEO_WIDTH,
                     StreamDefaults.RTSP_SUB_VIDEO_HEIGHT,
                 )
             } else {
-                frameData
+                rotated
+            }
+            if (overlayActive) {
+                subFrame = overlayCompositor.applyTo(
+                    subFrame,
+                    StreamDefaults.RTSP_SUB_VIDEO_WIDTH,
+                    StreamDefaults.RTSP_SUB_VIDEO_HEIGHT,
+                    now,
+                    subFrame === yuvData,
+                )
             }
             sub.encodeFrame(subFrame)
         }
@@ -426,6 +462,15 @@ internal class EncodedStreamHub(
     /** Live frame-rate change: throttle interval now, encoder at its next (re)configure. */
     fun setFrameRate(fps: Int) {
         frameRate = FrameTiming.effectiveFps(fps)
+    }
+
+    /**
+     * The overlay settings land on the compositor — the next pushed frame
+     * re-renders its cached strip (only when the rendered content actually
+     * changed). Volatile retained-setter, like [setVideoResolution].
+     */
+    fun setOverlaySettings(settings: OverlaySettings) {
+        overlayCompositor.setOverlaySettings(settings)
     }
 
     /** Live bitrate change: MediaCodec `setParameters` now, retained for the next (re)configure. */
@@ -626,5 +671,13 @@ internal class EncodedStreamHub(
 
         /** Minimum spacing between frame-path policy evaluations. */
         private const val FRAME_PATH_REFRESH_INTERVAL_MS = 500L
+
+        /** The production MediaCodec encoders — the seam JVM tests substitute fakes for. */
+        private val DEFAULT_ENCODER_FACTORY: (RtspVideoCodec) -> VideoEncoder = { codec ->
+            when (codec) {
+                RtspVideoCodec.H264 -> H264Encoder()
+                RtspVideoCodec.H265 -> H265Encoder()
+            }
+        }
     }
 }

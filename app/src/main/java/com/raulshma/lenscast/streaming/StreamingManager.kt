@@ -1638,6 +1638,10 @@ class StreamingManager(
 
     fun setOverlaySettings(settings: OverlaySettings) {
         currentOverlaySettings = settings
+        // The encoded path burns the same overlay into its shared encode
+        // (RTSP/HLS/WS/RTMP/SRT); the MJPEG path keeps reading the volatile
+        // per frame.
+        encodedHub.setOverlaySettings(settings)
         Log.d(TAG, "Overlay settings updated: enabled=${settings.enabled}, position=${settings.position}")
     }
 

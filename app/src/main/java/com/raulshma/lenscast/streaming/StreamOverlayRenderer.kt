@@ -14,7 +14,6 @@ import com.raulshma.lenscast.camera.model.OverlaySettings
 object StreamOverlayRenderer {
 
     private const val TAG = "StreamOverlayRenderer"
-    private const val REFERENCE_WIDTH = 1920f
 
     private val reusableRect = android.graphics.Rect()
 
@@ -38,11 +37,6 @@ object StreamOverlayRenderer {
         if (!settings.enabled && !settings.maskingEnabled) return bitmap
 
         return try {
-            val scale = bitmap.width / REFERENCE_WIDTH
-            val fontSize = (settings.fontSize * scale).coerceAtLeast(12f).toInt()
-            val padding = (settings.padding * scale).coerceAtLeast(2f).toInt()
-            val lineHeight = (settings.lineHeight * scale).coerceAtLeast(1f).toInt()
-
             val mutableBitmap = bitmap.copy(Bitmap.Config.ARGB_8888, true)
             val canvas = Canvas(mutableBitmap)
 
@@ -51,7 +45,7 @@ object StreamOverlayRenderer {
             }
 
             if (settings.enabled) {
-                applyTextOverlay(canvas, settings, clientCount, scale, fontSize, padding, lineHeight)
+                drawTextOverlay(canvas, settings, clientCount, System.currentTimeMillis())
             }
 
             mutableBitmap
@@ -162,65 +156,84 @@ object StreamOverlayRenderer {
         }
     }
 
-    private fun applyTextOverlay(
-        canvas: Canvas,
+    /**
+     * The text overlay box rasterized standalone: exactly the size
+     * [OverlayLayoutPolicy.buildOverlayLines] content measures to, background
+     * round-rect and all lines drawn from origin (0,0), scaled relative to
+     * [targetWidth] like the frame it is meant for. Shared by both outputs —
+     * the MJPEG path draws it onto the frame canvas at the computed position,
+     * the encoded path converts it to a YUVA strip and blends it into NV21 —
+     * so a timestamp looks identical on either stream. Returns null when
+     * nothing renders (overlay disabled, or no lines); the caller recycles
+     * the bitmap.
+     */
+    fun renderTextOverlayBitmap(
         settings: OverlaySettings,
-        clientCount: Int,
-        scale: Float,
-        fontSize: Int,
-        padding: Int,
-        lineHeight: Int,
-    ) {
-        val lines = OverlayLayoutPolicy.buildOverlayLines(settings, clientCount)
-        if (lines.isEmpty()) return
+        targetWidth: Int,
+        clientCount: Int = 0,
+        nowMs: Long = System.currentTimeMillis(),
+    ): Bitmap? {
+        if (!settings.enabled) return null
+        val lines = OverlayLayoutPolicy.buildOverlayLines(settings, clientCount, nowMs)
+        if (lines.isEmpty()) return null
+
+        val scale = targetWidth / OverlayLayoutPolicy.REFERENCE_WIDTH
+        val fontSize = (settings.fontSize * scale).coerceAtLeast(12f).toInt()
+        val padding = (settings.padding * scale).coerceAtLeast(2f).toInt()
+        val lineHeight = (settings.lineHeight * scale).coerceAtLeast(1f).toInt()
 
         textPaint.color = parseColor(settings.textColor, Color.WHITE)
         textPaint.textSize = fontSize.toFloat()
-
         bgPaint.color = parseColor(settings.backgroundColor, Color.parseColor("#80000000"))
 
-        var maxWidth = 0
-        var totalHeight = 0
-        synchronized(reusableRect) {
+        return synchronized(reusableRect) {
+            var maxWidth = 0
+            var totalHeight = 0
             for ((i, line) in lines.withIndex()) {
                 textPaint.getTextBounds(line, 0, line.length, reusableRect)
                 if (reusableRect.width() > maxWidth) maxWidth = reusableRect.width()
                 totalHeight += reusableRect.height()
                 if (i < lines.size - 1) totalHeight += lineHeight
             }
-        }
-        totalHeight += padding * 2
-        val bgWidth = maxWidth + padding * 2
+            totalHeight += padding * 2
+            val bgWidth = maxWidth + padding * 2
 
+            val box = Bitmap.createBitmap(bgWidth, totalHeight, Bitmap.Config.ARGB_8888)
+            val canvas = Canvas(box)
+            canvas.drawRoundRect(
+                RectF(0f, 0f, bgWidth.toFloat(), totalHeight.toFloat()),
+                4f * scale,
+                4f * scale,
+                bgPaint,
+            )
+            var y = padding
+            for (line in lines) {
+                textPaint.getTextBounds(line, 0, line.length, reusableRect)
+                y += reusableRect.height()
+                canvas.drawText(line, padding.toFloat(), y.toFloat(), textPaint)
+                y += lineHeight
+            }
+            box
+        }
+    }
+
+    /** The MJPEG path: draw the rendered box at the pure position math's rect. */
+    private fun drawTextOverlay(
+        canvas: Canvas,
+        settings: OverlaySettings,
+        clientCount: Int,
+        nowMs: Long,
+    ) {
+        val box = renderTextOverlayBitmap(settings, canvas.width, clientCount, nowMs) ?: return
         val position = OverlayLayoutPolicy.computeOverlayPosition(
             settings.position,
             canvas.width,
             canvas.height,
-            bgWidth,
-            totalHeight,
+            box.width,
+            box.height,
         )
-
-        canvas.drawRoundRect(
-            RectF(
-                position.left.toFloat(),
-                position.top.toFloat(),
-                (position.left + bgWidth).toFloat(),
-                (position.top + totalHeight).toFloat(),
-            ),
-            4f * scale,
-            4f * scale,
-            bgPaint,
-        )
-
-        var y = position.top + padding
-        synchronized(reusableRect) {
-            for (line in lines) {
-                textPaint.getTextBounds(line, 0, line.length, reusableRect)
-                y += reusableRect.height()
-                canvas.drawText(line, (position.left + padding).toFloat(), y.toFloat(), textPaint)
-                y += lineHeight
-            }
-        }
+        canvas.drawBitmap(box, position.left.toFloat(), position.top.toFloat(), null)
+        box.recycle()
     }
 
     private fun parseColor(hex: String, fallback: Int): Int {

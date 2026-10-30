@@ -1,6 +1,9 @@
 package com.raulshma.lenscast.camera
 
 import android.Manifest
+import android.app.Activity
+import android.content.Context
+import android.content.ContextWrapper
 import android.content.pm.PackageManager
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -70,6 +73,7 @@ import androidx.compose.material.icons.filled.Iso
 import androidx.compose.material.icons.filled.NightsStay
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.PowerSettingsNew
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.Tune
@@ -197,6 +201,13 @@ private fun QuickSettingIcon.vector(): ImageVector = when (this) {
     QuickSettingIcon.STABILIZATION -> Icons.Default.Handyman
     QuickSettingIcon.NIGHT_VISION -> Icons.Default.NightsStay
     QuickSettingIcon.TORCH -> Icons.Default.FlashlightOn
+}
+
+/** The Activity behind a composition context (possibly wrapper-wrapped) — the quit's finishAffinity target. */
+private tailrec fun Context.findActivity(): Activity? = when (this) {
+    is Activity -> this
+    is ContextWrapper -> baseContext.findActivity()
+    else -> null
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -353,6 +364,13 @@ fun CameraScreen(
                 onNavigateToGallery = onNavigateToGallery,
                 onNavigateToCapture = onNavigateToCapture,
                 onNavigateToSettings = onNavigateToSettings,
+                onQuitApplication = {
+                    // finishAffinity empties the task first, so the process
+                    // kill cannot leave the system to relaunch the activity;
+                    // the teardown order is quitApplication's.
+                    context.findActivity()?.finishAffinity()
+                    app.quitApplication()
+                },
                 onCopyStreamUrl = { viewModel.copyStreamUrl() },
                 onCopyRtspUrl = { viewModel.copyRtspUrl() },
                 onShowConnect = { showConnectSheet = true },
@@ -436,6 +454,7 @@ private fun ImmersiveCameraView(
     onNavigateToGallery: () -> Unit,
     onNavigateToCapture: () -> Unit,
     onNavigateToSettings: () -> Unit,
+    onQuitApplication: () -> Unit,
     onCopyStreamUrl: () -> Unit,
     onCopyRtspUrl: () -> Unit,
     onShowConnect: () -> Unit,
@@ -524,6 +543,7 @@ private fun ImmersiveCameraView(
             onNavigateToGallery = onNavigateToGallery,
             onNavigateToCapture = onNavigateToCapture,
             onNavigateToSettings = onNavigateToSettings,
+            onQuitApplication = onQuitApplication,
             onToggleQuickSettings = onToggleQuickSettings,
             onCopyStreamUrl = onCopyStreamUrl,
             onCopyRtspUrl = onCopyRtspUrl,
@@ -661,6 +681,7 @@ private fun CameraTopOverlay(
     onNavigateToGallery: () -> Unit,
     onNavigateToCapture: () -> Unit,
     onNavigateToSettings: () -> Unit,
+    onQuitApplication: () -> Unit,
     onToggleQuickSettings: () -> Unit,
     onCopyStreamUrl: () -> Unit,
     onCopyRtspUrl: () -> Unit,
@@ -803,6 +824,28 @@ private fun CameraTopOverlay(
                         onClick = {
                             menuExpanded = false
                             onNavigateToSettings()
+                        }
+                    )
+                    DropdownMenuItem(
+                        text = {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(
+                                    Icons.Default.PowerSettingsNew,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(18.dp),
+                                    tint = MaterialTheme.colorScheme.error
+                                )
+                                Spacer(modifier = Modifier.width(12.dp))
+                                Text(
+                                    stringResource(R.string.camera_menu_quit),
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.error
+                                )
+                            }
+                        },
+                        onClick = {
+                            menuExpanded = false
+                            onQuitApplication()
                         }
                     )
                 }

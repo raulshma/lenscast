@@ -273,6 +273,133 @@ object YuvConverter {
         return nv12
     }
 
+    /**
+     * ARGB pixels (as from `Bitmap.getPixels`) into the encoded-path overlay
+     * strip format: one interleaved Y,U,V,A byte per pixel, BT.601 studio
+     * swing (Y 16..235, chroma around 128) to match the camera NV21 range the
+     * encoders receive. The conversion runs once per overlay re-render — the
+     * per-frame blend ([blendNv21Overlay]) only reads the strip.
+     */
+    fun argbToYuvaStrip(pixels: IntArray, width: Int, height: Int): ByteArray {
+        val strip = ByteArray(width * height * 4)
+        var s = 0
+        for (p in pixels) {
+            val a = (p ushr 24) and 0xFF
+            val r = (p ushr 16) and 0xFF
+            val g = (p ushr 8) and 0xFF
+            val b = p and 0xFF
+            strip[s] = bt601Y(r, g, b)
+            strip[s + 1] = bt601U(r, g, b)
+            strip[s + 2] = bt601V(r, g, b)
+            strip[s + 3] = a.toByte()
+            s += 4
+        }
+        return strip
+    }
+
+    // BT.601 studio-swing fixed point (coefficients ×2^16, swing offset
+    // folded into the rounding constant): white lands at Y=235 like the
+    // camera's own NV21 range, black at Y=16.
+    private fun bt601Y(r: Int, g: Int, b: Int): Byte =
+        (16829 * r + 33039 * g + 6416 * b + 1_081_344 shr 16).coerceIn(16, 235).toByte()
+
+    private fun bt601U(r: Int, g: Int, b: Int): Byte =
+        (-9714 * r - 19070 * g + 28784 * b + 8_421_376 shr 16).coerceIn(0, 255).toByte()
+
+    private fun bt601V(r: Int, g: Int, b: Int): Byte =
+        (28784 * r - 24103 * g - 4681 * b + 8_421_376 shr 16).coerceIn(0, 255).toByte()
+
+    /**
+     * Alpha-blends an overlay strip ([argbToYuvaStrip] format) into an NV21
+     * frame, in place — the caller must own the array (the hub blends into
+     * encoder-private buffers and copies first when a frame aliases the
+     * camera's own array, which the MJPEG pipeline and the WHIP/WHEP taps
+     * still read). The strip lands at ([desiredLeft], [desiredTop]), snapped
+     * onto the even chroma lattice and clamped to the frame; a strip that
+     * fits nowhere leaves the frame untouched and returns false.
+     *
+     * Per 2×2 luma block the chroma is the alpha-weighted average of the
+     * strip pixels covering it, so text edges stay chroma-clean. Alpha 0
+     * pixels skip without touching the frame — a fully transparent strip is
+     * a cheap no-op.
+     */
+    fun blendNv21Overlay(
+        frame: ByteArray,
+        frameWidth: Int,
+        frameHeight: Int,
+        strip: ByteArray,
+        stripWidth: Int,
+        stripHeight: Int,
+        desiredLeft: Int,
+        desiredTop: Int,
+    ): Boolean {
+        if (frameWidth < 2 || frameHeight < 2 || stripWidth < 2 || stripHeight < 2) return false
+        if (frame.size < frameWidth * frameHeight * 3 / 2) return false
+
+        // Snap onto the 2×2 lattice: even origin, even size, inside the frame.
+        val left = desiredLeft.coerceIn(0, frameWidth - 2) and (Int.MAX_VALUE xor 1)
+        val top = desiredTop.coerceIn(0, frameHeight - 2) and (Int.MAX_VALUE xor 1)
+        val width = minOf(stripWidth, frameWidth - left) and (Int.MAX_VALUE xor 1)
+        val height = minOf(stripHeight, frameHeight - top) and (Int.MAX_VALUE xor 1)
+        if (width < 2 || height < 2) return false
+
+        val ySize = frameWidth * frameHeight
+
+        // Luma: per-pixel alpha blend.
+        for (y in top until top + height) {
+            val frameRow = y * frameWidth + left
+            val stripRow = (y - top) * stripWidth
+            for (x in 0 until width) {
+                val s = (stripRow + x) * 4
+                val a = strip[s + 3].toInt() and 0xFF
+                if (a == 0) continue
+                val dst = frameRow + x
+                if (a == 0xFF) {
+                    frame[dst] = strip[s]
+                } else {
+                    val srcY = strip[s].toInt() and 0xFF
+                    val dstY = frame[dst].toInt() and 0xFF
+                    frame[dst] = ((srcY * a + dstY * (255 - a) + 127) / 255).toByte()
+                }
+            }
+        }
+
+        // Chroma: one alpha-weighted sample per covered 2×2 block (V then U,
+        // NV21 interleave). The block's average alpha drives the blend, its
+        // alpha-weighted average chroma drives the source color, so text
+        // edges stay chroma-clean.
+        for (cy in top / 2 until (top + height) / 2) {
+            val frameCol = ySize + cy * frameWidth + left
+            val stripRow = (cy * 2 - top) * stripWidth
+            for (cx in 0 until width / 2) {
+                var uAcc = 0
+                var vAcc = 0
+                var aAcc = 0
+                for (dy in 0 until 2) {
+                    val rowBase = stripRow + dy * stripWidth + cx * 2
+                    for (dx in 0 until 2) {
+                        val s = (rowBase + dx) * 4
+                        val a = strip[s + 3].toInt() and 0xFF
+                        uAcc += (strip[s + 1].toInt() and 0xFF) * a
+                        vAcc += (strip[s + 2].toInt() and 0xFF) * a
+                        aAcc += a
+                    }
+                }
+                if (aAcc == 0) continue
+                val avgA = aAcc / 4
+                val srcU = uAcc / aAcc
+                val srcV = vAcc / aAcc
+                val dst = frameCol + cx * 2
+                // NV21 stores V first, U second.
+                val dstV = frame[dst].toInt() and 0xFF
+                val dstU = frame[dst + 1].toInt() and 0xFF
+                frame[dst] = ((srcV * avgA + dstV * (255 - avgA) + 127) / 255).toByte()
+                frame[dst + 1] = ((srcU * avgA + dstU * (255 - avgA) + 127) / 255).toByte()
+            }
+        }
+        return true
+    }
+
     /** NV21 → I420: deinterleaves the VU pairs into separate U and V planes. */
     fun nv21ToI420(nv21: ByteArray, width: Int, height: Int): ByteArray {
         val ySize = width * height

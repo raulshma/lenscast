@@ -19,8 +19,11 @@
 </p>
 
 <p align="center">
+  <a href="https://github.com/raulshma/lenscast/releases/latest">
+    <img alt="Latest GitHub release" src="https://img.shields.io/github/v/release/raulshma/lenscast?style=for-the-badge&color=181717&logo=github&logoColor=white&label=GitHub"/>
+  </a>
   <a href="https://f-droid.org/packages/com.raulshma.lenscast/">
-    <img alt="Get it on F-Droid" src="https://fdroid.gitlab.io/artwork/badge/get-it-on.png" height="75"/>
+    <img alt="Latest release on F-Droid" src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Ff-droid.org%2Fapi%2Fv1%2Fpackages%2Fcom.raulshma.lenscast&query=%24.packages%5B0%5D.versionName&prefix=v&label=F-Droid&style=for-the-badge&color=1976D2&logo=fdroid&logoColor=white"/>
   </a>
 </p>
 
@@ -73,7 +76,7 @@ LensCast is an Android camera application with live video/audio streaming to web
 - ONVIF Profile S device service (off by default): WS-Discovery answers probes on UDP 239.255.255.250:3702 and a SOAP endpoint at `/onvif/device_service` serves the standard device/media queries, so ONVIF NVRs such as Home Assistant can discover the camera automatically — unauthenticated by design (LAN device metadata and stream URIs only; RTSP keeps its own auth), see [NVR integration](docs/nvr-integration.md)
 - Live audio streaming with configurable bitrate (32–320 kbps), channels (mono/stereo), and echo cancellation
 - Adaptive bitrate control that dynamically adjusts JPEG quality and frame rate based on network quality and thermal state
-- Stream overlays with configurable timestamp, branding text, custom text, and viewer count display
+- Stream overlays with configurable timestamp, branding text, and custom text — burned into both the web M-JPEG stream and the shared encode that feeds RTSP, HLS, WS video, RTMP, and SRT (the viewer-count line is web-stream-only)
 - Privacy masking zones with blackout, pixelate, or blur effects on user-defined regions
 - Optional HTTP Basic Authentication for secure access (web and RTSP)
 - mDNS / NSD service discovery so clients can find the stream on the local network automatically

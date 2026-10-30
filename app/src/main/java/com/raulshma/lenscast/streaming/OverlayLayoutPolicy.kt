@@ -32,6 +32,14 @@ data class PixelRect(
  */
 object OverlayLayoutPolicy {
 
+    /**
+     * The width every overlay font-size/padding scaling is relative to — the
+     * MJPEG canvas and the encoded path both divide their target width by
+     * this, so the same settings render proportionally identical text on
+     * either output.
+     */
+    const val REFERENCE_WIDTH = 1920f
+
     /** The text overlay box's inset from the frame edge, in pixels. */
     const val OVERLAY_MARGIN_PX = 16
 

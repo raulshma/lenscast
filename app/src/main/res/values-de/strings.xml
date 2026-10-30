@@ -21,6 +21,7 @@
     <string name="camera_menu_camera_controls">Kamerasteuerung</string>
     <string name="camera_menu_capture_tools">Aufnahmewerkzeuge</string>
     <string name="camera_menu_settings">Einstellungen</string>
+    <string name="camera_menu_quit">Anwendung beenden</string>
     <string name="camera_collapse_quick_settings_cd">Schnelleinstellungen einklappen</string>
     <string name="camera_stop_recording_cd">Aufnahme stoppen</string>
     <string name="camera_record_video_cd">Video aufnehmen</string>

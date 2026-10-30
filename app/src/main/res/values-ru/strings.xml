@@ -21,6 +21,7 @@
     <string name="camera_menu_camera_controls">Управление камерой</string>
     <string name="camera_menu_capture_tools">Инструменты съёмки</string>
     <string name="camera_menu_settings">Настройки</string>
+    <string name="camera_menu_quit">Закрыть приложение</string>
     <string name="camera_collapse_quick_settings_cd">Свернуть быстрые настройки</string>
     <string name="camera_stop_recording_cd">Остановить запись</string>
     <string name="camera_record_video_cd">Записать видео</string>

@@ -351,6 +351,21 @@ H.264, `LCHC` + hvcC for HEVC) so legacy WS clients fail cleanly instead of
 misconfiguring a decoder (the shipped web player reads `LCCF` only; a
 Chromium-side hvcC path is future work).
 
+The frame path also stamps the configured stream overlay into every frame
+just before encode — the `EncodedOverlayCompositor` blends the same lines
+the MJPEG path renders into the NV21 array, so RTSP and every output riding
+this shared encode (HLS, WS video, RTMP, SRT) burn the timestamp in at the
+source (WHIP/WHEP encode separately and are not stamped). The blend never
+mutates the camera's own analysis array — when rotation and dimensions make
+the frame alias it, the compositor blends into a per-size reusable copy,
+because the MJPEG pipeline and the WHIP/WHEP taps still read that array
+after the fan-out. The sub-stream scales the ROTATED frame, not the
+possibly re-scaled main frame: its dimensions move under `frameData`, and
+feeding the sub scale the stale source dims corrupted `/sub` whenever the
+encode resolution differed from the analysis resolution. The encoder
+instantiation is a constructor seam (`encoderFactory`), so the frame path —
+including the overlay stamping — is JVM-tested with fake encoders.
+
 ### H264 Stream Assembler
 **`streaming/rtsp/H264StreamAssembler.kt`** — the wire-format core of the
 H.264 encoder path: holds the latest SPS/PPS from both MediaCodec CSD
@@ -1192,11 +1207,31 @@ on, so the connection config cannot drift between them.
 the overlay line selection (`buildOverlayLines` — timestamp, branding,
 status, and the overlay-side viewer pluralization), and the text-overlay
 position rect (`computeOverlayPosition` over the named
-`OVERLAY_MARGIN_PX`).
-`StreamOverlayRenderer` keeps only the Bitmap/Canvas adapter work and
+`OVERLAY_MARGIN_PX`), plus `REFERENCE_WIDTH` — the width both outputs scale
+font sizes against, so identical settings render proportionally identical
+text on the MJPEG canvas and the encoded frames.
+`StreamOverlayRenderer` keeps the Bitmap/Canvas adapter work
+(`renderTextOverlayBitmap` rasterizes the overlay box standalone — the one
+styling source the MJPEG canvas draws and the encoded path converts) and
 delegates every number — and every line decision — to the policy, so the
 privacy-critical rect math and the overlay text are JVM-tested without a
 device.
+
+### Encoded Overlay Compositor
+**`streaming/EncodedOverlayCompositor.kt`** — the encoded path's twin of the
+MJPEG overlay pass: blends the configured overlay lines into the NV21 frames
+`EncodedStreamHub` feeds its encoders, so RTSP (and every output riding the
+shared encode) shows the same timestamp/branding/custom text the web stream
+does. The cost split keeps the frame path cheap: rasterization and ARGB→
+YUVA conversion (BT.601 studio swing, `YuvConverter.argbToYuvaStrip`) run
+only when the rendered content can have changed — a new timestamp second, a
+settings swap, a different encode size (the MJPEG web viewer count is
+deliberately NOT rendered on this path); between renders the per-size cached
+strip alpha-blends into the frame via the pure
+`YuvConverter.blendNv21Overlay`, and a disabled overlay is one volatile
+read. The rasterization seam (the shared text-box bitmap in production,
+fakes in tests) and the blend math are both JVM-tested; the visual parity
+between the two paths is the reason the text-box bitmap is shared.
 
 ### Status Snapshot Builder
 **`streaming/web/StatusSnapshotBuilder.kt`** — the pure `/api/status`

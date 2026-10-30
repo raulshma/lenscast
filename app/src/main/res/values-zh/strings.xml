@@ -21,6 +21,7 @@
     <string name="camera_menu_camera_controls">相机控制</string>
     <string name="camera_menu_capture_tools">拍摄工具</string>
     <string name="camera_menu_settings">设置</string>
+    <string name="camera_menu_quit">退出应用</string>
     <string name="camera_collapse_quick_settings_cd">收起快速设置</string>
     <string name="camera_stop_recording_cd">停止录像</string>
     <string name="camera_record_video_cd">录制视频</string>

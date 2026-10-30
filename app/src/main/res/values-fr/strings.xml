@@ -21,6 +21,7 @@
     <string name="camera_menu_camera_controls">Contrôles de la caméra</string>
     <string name="camera_menu_capture_tools">Outils de capture</string>
     <string name="camera_menu_settings">Paramètres</string>
+    <string name="camera_menu_quit">Quitter l\'application</string>
     <string name="camera_collapse_quick_settings_cd">Réduire les réglages rapides</string>
     <string name="camera_stop_recording_cd">Arrêter l\'enregistrement</string>
     <string name="camera_record_video_cd">Enregistrer une vidéo</string>

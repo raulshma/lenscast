@@ -57,6 +57,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlin.system.exitProcess
 
 class MainApplication : Application(), SingletonImageLoader.Factory {
     val cameraService: CameraService by lazy { CameraService(this) }
@@ -330,6 +331,26 @@ class MainApplication : Application(), SingletonImageLoader.Factory {
     fun ensureServerForeground() = serverForegroundController.sync()
 
     /**
+     * The user quit (the camera screen's overflow menu): the best-effort
+     * graceful teardown before the process kill — a live recording stops
+     * first (its finalize must not be cut short mid-write), then the one
+     * server stop ladder ([StreamToggle.stopServer] — every output, the
+     * transport, mDNS and the session, dropping the foreground service,
+     * wake lock and monitors while the journal and widget collectors observe
+     * the transitions) — then [exitProcess], which is the point of the menu
+     * item: the death is deliberate, so nothing here can postpone it beyond
+     * the teardown's grace window.
+     */
+    fun quitApplication() {
+        appScope.launch {
+            runCatching { recordingController.stop() }
+            runCatching { streamToggle.stopServer() }
+            delay(QUIT_TEARDOWN_GRACE_MS)
+            exitProcess(0)
+        }
+    }
+
+    /**
      * The installation-scoped MQTT client id / HA unique-id stem. ANDROID_ID
      * is stable per app install; a read failure falls back to a persisted
      * random id — a constant would give every such install the same MQTT
@@ -508,5 +529,8 @@ class MainApplication : Application(), SingletonImageLoader.Factory {
     companion object {
         private const val DEVICE_ID_PREFS = "lenscast_device_id"
         private const val DEVICE_ID_KEY = "fallback_device_id"
+
+        /** The teardown window between the stop ladder and the process kill. */
+        private const val QUIT_TEARDOWN_GRACE_MS = 500L
     }
 }
