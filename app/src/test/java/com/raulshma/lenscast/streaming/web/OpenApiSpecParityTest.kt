@@ -149,6 +149,7 @@ class OpenApiSpecParityTest {
     /** A real router whose handlers are relaxed stubs — dispatch is exercised, not plumbing. */
     private fun stubbedRouter(): ApiRouter = ApiRouter(
         settings = mockk(relaxed = true),
+        automation = mockk(relaxed = true),
         status = mockk(relaxed = true),
         stream = mockk(relaxed = true),
         capture = mockk(relaxed = true),

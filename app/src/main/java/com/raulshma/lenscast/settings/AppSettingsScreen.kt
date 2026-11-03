@@ -1,6 +1,7 @@
 package com.raulshma.lenscast.settings
 
 import androidx.activity.ComponentActivity
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -16,6 +17,8 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
@@ -83,6 +86,7 @@ internal val storageQuotaSliderRange: ClosedFloatingPointRange<Float> =
 fun AppSettingsScreen(
     onNavigateBack: () -> Unit,
     onOpenEventLog: (() -> Unit)? = null,
+    onOpenAutomation: (() -> Unit)? = null,
 ) {
     val context = LocalContext.current
     val activity = context as ComponentActivity
@@ -317,6 +321,34 @@ fun AppSettingsScreen(
                     showPreview = showPreview,
                     onTogglePreview = { viewModel.updateShowPreview(it) },
                 )
+            }
+
+            item {
+                // The automation screen's entry row — one nav hop like the
+                // event log above; the callback is null-gated so preview
+                // surfaces can omit the row.
+                if (onOpenAutomation != null) {
+                    SettingsSection(title = stringResource(R.string.automation_entry_title)) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable(onClick = onOpenAutomation),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                text = stringResource(R.string.automation_entry_description),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.weight(1f),
+                            )
+                            Icon(
+                                Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                                contentDescription = stringResource(R.string.automation_open_cd),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                }
             }
 
             item {

@@ -9,6 +9,8 @@ import android.util.Log
  */
 class ApiRouter(
     private val settings: SettingsWebHandler,
+    /** GET/PUT /api/automation — the time-of-day automation state (session-auth-only writes, like settings). */
+    private val automation: AutomationWebHandler,
     private val status: StatusWebHandler,
     private val stream: StreamWebHandler,
     private val capture: CaptureWebHandler,
@@ -58,6 +60,7 @@ class ApiRouter(
     private suspend fun routeGet(r: ApiRequest): ApiResponse? = when (r.path) {
         "/api/settings" -> ApiResponse.ok(settings.get())
         "/api/settings/export" -> ApiResponse.ok(settings.export())
+        "/api/automation" -> ApiResponse.ok(automation.get())
         "/api/status" -> ApiResponse.ok(status.get())
         "/api/camera/lenses" -> ApiResponse.ok(lens.getLenses())
         "/api/stream/clients" -> ApiResponse.ok(stream.listClients())
@@ -93,6 +96,7 @@ class ApiRouter(
     private suspend fun routeWrite(r: ApiRequest): ApiResponse? = when (r.path) {
         "/api/settings" -> ApiResponse.ok(settings.put(r.body))
         "/api/settings/import" -> ApiResponse.ok(settings.import(r.body))
+        "/api/automation" -> ApiResponse.ok(automation.put(r.body))
         "/api/settings/ml-model/download" -> ApiResponse.ok(settings.downloadModel())
         "/api/settings/audio-model/download" -> ApiResponse.ok(settings.downloadAudioModel())
         "/api/stream/start", "/api/stream/resume" -> ApiResponse.ok(stream.startAll())
@@ -185,6 +189,7 @@ class ApiRouter(
             // GET reads
             Route(ApiMethod.GET, "/api/settings"),
             Route(ApiMethod.GET, "/api/settings/export"),
+            Route(ApiMethod.GET, "/api/automation"),
             Route(ApiMethod.GET, "/api/status"),
             Route(ApiMethod.GET, "/api/camera/lenses"),
             Route(ApiMethod.GET, "/api/stream/clients"),
@@ -206,6 +211,8 @@ class ApiRouter(
             // Writes (PUT shares the POST dispatch; both verbs are accepted)
             Route(ApiMethod.PUT, "/api/settings"),
             Route(ApiMethod.POST, "/api/settings"),
+            Route(ApiMethod.PUT, "/api/automation"),
+            Route(ApiMethod.POST, "/api/automation"),
             Route(ApiMethod.POST, "/api/settings/import"),
             Route(ApiMethod.POST, "/api/settings/ml-model/download"),
             Route(ApiMethod.POST, "/api/settings/audio-model/download"),

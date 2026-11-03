@@ -20,6 +20,7 @@ import RtmpCard from './RtmpCard'
 import AuthCard from './AuthCard'
 import AuditCard from './AuditCard'
 import ConfigBackupCard from './ConfigBackupCard'
+import AutomationCard from './AutomationCard'
 
 interface Props {
   settings: () => AllSettings | null
@@ -434,6 +435,10 @@ export default function AppSettingsPanel(props: Props) {
         updateStreamingAndSave={props.updateStreamingAndSave}
         updateStreamingDebounced={props.updateStreamingDebounced}
       />
+
+      {/* Time-of-day automation rules (GET/PUT /api/automation): the card
+          fetches and saves its own document, so it rides no settings prop. */}
+      <AutomationCard readOnly={props.readOnly} />
 
       {/* #/events deep links scroll the feed into view via this anchor. */}
       <div id="event-feed-anchor">

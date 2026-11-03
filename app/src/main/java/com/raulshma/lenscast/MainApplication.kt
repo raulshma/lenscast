@@ -6,6 +6,9 @@ import coil3.ImageLoader
 import coil3.SingletonImageLoader
 import coil3.request.crossfade
 import coil3.video.VideoFrameDecoder
+import com.raulshma.lenscast.automation.AutomationActionExecutor
+import com.raulshma.lenscast.automation.schedule.AutomationFireJournal
+import com.raulshma.lenscast.automation.schedule.AutomationScheduler
 import com.raulshma.lenscast.camera.CameraService
 import com.raulshma.lenscast.camera.model.StreamToggle
 import com.raulshma.lenscast.capture.BackupWorker
@@ -285,6 +288,18 @@ class MainApplication : Application(), SingletonImageLoader.Factory {
     val updateDownloader: UpdateDownloader by lazy { UpdateDownloader(this) }
     val updateInstaller: UpdateInstaller by lazy { UpdateInstaller(this) }
     val streamStateJournal: StreamStateJournal by lazy { StreamStateJournal(this) }
+    // The automation scheduler's once-per-day dedup journal: the rules live
+    // in DataStore and survive every process start, so the journal is the
+    // half that records which occurrences already ran — the boot-time
+    // catch-up reads it and never double-fires them.
+    val automationFireJournal: AutomationFireJournal by lazy { AutomationFireJournal(this) }
+    // The in-app time-of-day scheduler: the second front-end over the
+    // executor's seams (the receiver is the first, constructing one per
+    // broadcast; the scheduler owns one for its lifetime — both are
+    // stateless routes onto the same seam graph).
+    val automationScheduler: AutomationScheduler by lazy {
+        AutomationScheduler(settingsDataStore, automationFireJournal, AutomationActionExecutor(this))
+    }
     // The one siren auto-stop timer for the whole process: the detection
     // coordinator's deterrence and the automation receiver's SET_SIREN must
     // land on the same timer, or a stale one owner's timer could cut the
@@ -316,6 +331,7 @@ class MainApplication : Application(), SingletonImageLoader.Factory {
         serverForegroundController.start(appScope)
         wireFramePump()
         initializeStreamStateJournal()
+        initializeAutomationScheduler()
         initializeTamperMonitor()
         initializeDetectionMicWatch()
         initializeWidgetRefresh()
@@ -381,6 +397,17 @@ class MainApplication : Application(), SingletonImageLoader.Factory {
             rtspActive = streamingManager.isRtspRunning,
             scope = appScope,
         ).start()
+    }
+
+    /**
+     * The time-of-day scheduler is app-runtime composition, not screen state:
+     * rules must fire even when no screen has composed (headless start via
+     * the tile or the Web API). start() is idempotent and its immediate first
+     * evaluation IS the boot catch-up — the persisted rules plus the fire
+     * journal mean a process restart never replays an occurrence.
+     */
+    private fun initializeAutomationScheduler() {
+        automationScheduler.start()
     }
 
     /**

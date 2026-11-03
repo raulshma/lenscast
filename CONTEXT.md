@@ -1337,3 +1337,192 @@ or any app-module dependency by design, keeping the wear APK minimal and
 its manifest INTERNET-only), `WearRemoteController` drives the
 stream/recording lifecycle actions, and `WearSettingsStore` holds the phone
 base URL and credentials locally on the watch.
+
+### Automation Rule
+**`automation/schedule/AutomationRule.kt`** — one time-of-day rule as the
+user configured it ("on these days at this minute, run these actions"): a
+stable `id` (the Fire Journal's key; the store decode mints a fresh UUID
+for an absent one, because an id-less rule could never be journaled and
+would re-fire on every poll tick), a free-form `name`, a per-rule `enabled`
+kill switch independent of the master toggle, a reserved `triggerType`
+discriminator (only `time_of_day` is defined today; the sanitize step
+resets anything else to it, so an unknown future trigger degrades to a time
+trigger instead of firing on the wrong cue), a local `minuteOfDay`
+0..1439, a `daysMask` in the Motion Arming Policy bit convention (bit 0 =
+Monday … bit 6 = Sunday, 127 = every day — one mask semantics, not two),
+and the ordered action list. Deliberately a plain wire/persistence shape:
+every decision (when a rule is due, what its actions mean) lives in the
+Automation Schedule Policy and the Automation Action Catalog, keeping the
+scheduling surface JVM-testable. Persisted through the Settings Store's
+`AutomationRuleJson` codec, which guarantees a total decode (a malformed
+payload degrades to an empty list) and hands every rule through
+`sanitizeRules` before it is trusted — the data-class defaults are
+decode-fallbacks, not trusted wire values.
+
+### Automation Action Spec
+**`automation/schedule/AutomationRule.kt` (`AutomationActionSpec`)** — one
+step inside an Automation Rule: a catalog action id plus its parameters,
+all serialized as strings so the persisted shape never needs schema
+versioning when an action gains a parameter. Validity and typing are the
+Automation Action Catalog's job at sanitize time: an id outside the catalog
+drops the whole action, and so does an unknown param key (a schema
+violation, not a value problem — a writer that believed in a parameter this
+build has never heard of cannot be trusted on the others); present values
+are parsed and clamped to the param's documented bounds, absent optional
+params stay absent (the executor's "leave unchanged" semantics), and
+absent or invalid required values fold to the documented default.
+
+### Automation Action Catalog
+**`automation/schedule/AutomationActionCatalog.kt`** — ids, param schemas
+(names/kinds/bounds/defaults/autoAtZero) and catch-up classes are
+single-sourced here; per-type EXECUTION and pretty labels dispatch at the
+executor/UI seams by design (exhaustive `when`s over a closed set), so
+adding an action touches the catalog plus those seams. Eleven action types
+(`camera_exposure`, `camera_ev`, `camera_zoom`, `camera_fps`, `camera_lens`,
+`torch`, `stream`, `capture_photo`, `recording`, `siren`, `detection`),
+each with its parameter schema (wire name, BOOL/INT/FLOAT kind, bounds,
+optionality, default, and the `autoAtZero` pin — true exactly on
+`camera_exposure.iso`/`exposure_time_ms`, whose "0" means auto, so clients
+may render an Auto toggle for them; the duration params' "0" means "no
+limit", an ordinary value), its catch-up class (STATEFUL converges on a
+setting so it always rides the catch-up; ONESHOT — only `capture_photo` —
+is a moment effect and fires only inside the one-shot grace), and an
+`interruptsStream` flag (only `camera_lens`) that is a UI warning flag
+only: the executor does NOT force a teardown — the lens switch goes through
+`CameraService.selectLens`, whose `CameraSessionArbiter` rebinds
+immediately when the camera is free (a brief preview/stream interruption)
+and defers to the next natural rebind while an exclusive session
+(recording) is active.
+Additive-only by contract: ids and param names are persisted forever and
+pinned by a JVM test, so a typo fails a test instead of silently disabling
+a feature. Documented sentinels: `iso`/`exposure_time_ms` "0" mean auto,
+`recording.duration_seconds` "0" means unbounded, and
+`siren.duration_seconds` absent means run-until-stopped while "0" means an
+explicit no-limit. `sanitizeAction` is the one validate-and-canonicalize
+ladder (the Settings Store's codec, the Web API PUT, and the schedule
+policy's filter all ride it), and GET `/api/automation` publishes the
+catalog read-only as device truth — the Automation Web Handler's rule
+editor renders bounds and kinds from it and never sends it back.
+
+### Automation Schedule Policy
+**`automation/schedule/AutomationSchedulePolicy.kt`** — the pure decision
+half of the time-of-day engine, no Android imports (the poller/executor
+owns the clock, the journal, and the runtime seams). Its verdicts:
+`occurrenceKey` = `epochDay * 1440 + minuteOfDay`, one monotonic minute
+counter that makes "did today's occurrence already fire?" one integer
+comparison instead of a date+time dance — each local day's minute is its
+own occurrence, so midnight wrap is implicit; `dueRules` (master toggle on,
+rule enabled, day mask covers the ISO day index via Motion Arming Policy,
+occurrence key strictly newer than the journaled one, occurrence time
+actually arrived; STATEFUL actions ride any lateness while ONESHOT ones
+must be within the grace, measured in the same wall-clock minute space as
+the keys because a real-epoch comparison would smear the window by the zone
+offset); `sanitizeRule`/`sanitizeRules` (minute clamped, a zero day mask
+refused because the enabled toggle already expresses disarm, name trimmed,
+unknown trigger reset, unknown actions dropped, and the caps applied to the
+*sanitized* list so a rule keeps its max executable actions rather than
+losing valid ones to unknown noise ahead of them); and `mergeCameraSettings`
+(one catalog action folded into CameraSettings: the "0" auto sentinels fold
+to null, milliseconds convert to nanoseconds, and an absent optional param
+leaves its field unchanged). A rule whose whole action list is filtered
+away never fires partially and is not journaled, so its one-shot can still
+catch up on a later tick within grace.
+
+### Automation Scheduler
+**`automation/schedule/AutomationScheduler.kt`** — the shell around the
+Automation Schedule Policy, owning the clock, the poll loop, and the Fire
+Journal (the same pure-policy/thin-shell split as StreamingManager's
+eco-idle monitor over Eco Idle Policy). It re-evaluates every
+`StreamDefaults.AUTOMATION_POLL_SECONDS` (30 s) on its own SupervisorJob
+scope for the process lifetime — started once from MainApplication, never
+cancelled, exactly like Stream Watchdog — and restarts the tick loop
+immediately whenever the persisted rules or the master toggle change. The
+first evaluation is immediate: it IS the boot catch-up (process start →
+DataStore rules survive → the first pass fires everything the process
+missed), which is why no boot receiver is needed. Each fired rule runs
+through the Automation Action Runner one at a time (one failing rule never
+loses the others), and every attempt is journaled after the run regardless
+of failure — a persistently failing action must not tight-loop the poll
+cadence re-running it every tick. The local epochDay derivation is DST-safe
+(zone + DST offsets, floorDiv).
+
+### Automation Action Runner
+**`automation/schedule/AutomationScheduler.kt`
+(`fun interface AutomationActionRunner`)** — the scheduler's execution seam:
+`run(fired)` hands one fired rule at a time from the evaluation loop to the
+runtime, and the scheduler knows nothing about what the actions do. The
+Automation Action Executor is the production implementation (by delegation,
+so the receiver-facing methods stay its primary surface); tests substitute
+a fake.
+
+### Automation Fire Journal
+**`automation/schedule/AutomationFireJournal.kt`** — the persisted half of
+the scheduler's dedup: an atomic-write file in
+`filesDir/automation/fire_journal.json` (the Stream State Journal shape)
+recording, per rule id, the occurrence key of the last occurrence that
+actually fired. The rules themselves live in the Settings Store and survive
+every process start, so without the journal the boot-time first pass would
+replay every rule whose minute had already passed (a reboot, a crash, or
+the user swiping the app away would re-run the whole day). Keyed on the
+stable rule id, it covers rule edits the same way — renaming or re-timing a
+rule never erases the fact that its occurrence fired — which is what lets
+the scheduler need no boot receiver: the catch-up IS the first poll
+evaluation, and the journal keeps it honest. `load` is a deliberate
+per-tick disk read (the file is tiny — one small long per rule id) and
+`record` merges over the freshly-read disk state under a lock; a missing or
+malformed file means "nothing has fired", so a corrupt journal costs at
+most one re-fire, never a lost one.
+
+### Automation Action Executor
+**`automation/AutomationActionExecutor.kt`** — the one execution seam for
+automation commands, shared by two front-ends so a broadcast command and a
+scheduled rule can never drift apart: the AutomationReceiver (the external
+broadcast surface) and the Automation Scheduler (which implements the
+Automation Action Runner by delegation). Every action id resolves through
+the Automation Action Catalog and routes through the app's shared seams —
+Stream Toggle (via `BootResumePolicy`, the QS-tile verdict), Recording
+Controller, Photo Capture Manager, CameraService, SirenPlayer with the
+app's one SirenAutoStop timer — never a second implementation. Camera-valued
+actions (`camera_*`, `torch`) merge into the persisted CameraSettings via
+`mergeCameraSettings` and the Settings Applier applies them in place with
+no stream interruption; `camera_lens` switches on Main, clamped into the
+live lens inventory (empty inventory and a missing index skip silently);
+`detection` writes the motion/sound toggles to the Settings Store; unknown
+ids skip silently as the last gate. Deliberately stateless and cheap to
+construct — a front-end builds an instance per command against
+MainApplication's lazy seam graph, so the composition root gains no new
+member. The torch mode split is deliberate: see Torch (LIVE vs PERSISTED).
+
+### Torch Strength Policy
+**`camera/model/TorchStrengthPolicy.kt`** — the pure decisions for the API
+35+ per-level torch: `CameraManager.turnOnTorchWithStrengthLevel` plus the
+`FLASH_INFO_STRENGTH_MAXIMUM_LEVEL` characteristic let a multi-level flash
+run below full power, where `CameraControl.enableTorch` is binary.
+`effectiveLevel` is the no-op ladder — every rung returns null, "don't call
+the strength API; plain enableTorch already gives the user everything the
+device can do": SDK < 35, no requested strength (the persisted default),
+an unknown device max level, or a single-level flash (max ≤ 1); otherwise
+the request clamped into 1..deviceMax. The device's real max always wins at
+apply time — the catalog/persistence bound 1..8 (`MAX_REQUESTED_LEVEL`) is
+what the settings layer may store, not an apply-time ceiling.
+CameraService queries the bound camera's max level into a
+`torchStrengthMaxLevel` StateFlow, drives the strength only while the torch
+should be ON (the strength API switches the torch on as a side effect when
+it was off), and re-asserts it on the same `applyCameraControls` seam that
+keeps the binary torch alive across rebinds; `CameraSettings.torchStrength`
+(null = device default) carries the persisted request, and the automation
+editor caps its strength slider at the live device verdict.
+
+### Torch (LIVE vs PERSISTED)
+**`automation/AutomationActionExecutor.kt` (`setTorchLive` vs the
+scheduler's camera-settings path)** — two torch modes on purpose. The
+receiver's SET_TORCH is LIVE deterrence: drive
+`CameraService.setTorchEnabled` on Main, persist nothing — the persisted
+setting may disagree with reality, which is exactly why a toggle computes
+its target from the live `isTorchOn()` read, never the setting. A scheduler
+`torch` action is PERSISTED: it converges
+`CameraSettings.torchEnabled`/`torchStrength` through the Settings Store so
+the Settings Applier applies it and a device restart or a settings
+re-apply restores what the rule asked for. Detection deterrence stays LIVE
+like the receiver; neither mode touches the other's semantics, and manual
+LED control is unchanged.

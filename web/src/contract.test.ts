@@ -3,6 +3,7 @@ import {
   type AllSettings,
   type AuditLogResponse,
   type AuthConfig,
+  type AutomationStateDto,
   type DetectionStats,
   type DetectionTestResponse,
   type DeviceStatus,
@@ -32,6 +33,7 @@ import auditLogFixture from '../contract/audit-log.json'
 import authConfigFixture from '../contract/auth-config.json'
 import systemFixture from '../contract/system.json'
 import detectionStatsFixture from '../contract/detection-stats.json'
+import automationFixture from '../contract/automation.json'
 
 // The checked-in JSON files in web/contract/ are the shared DTO contract:
 // app's DtoContractFixtureTest serializes the Kotlin DTOs (through the
@@ -60,6 +62,21 @@ const CAMERA_KEYS = [
   'nightVisionMode',
   'outputRotation',
   'orientationLocked',
+]
+
+/** The catalog ids GET /api/automation publishes today (AutomationActionCatalog). */
+const AUTOMATION_CATALOG_IDS = [
+  'camera_exposure',
+  'camera_ev',
+  'camera_zoom',
+  'camera_fps',
+  'camera_lens',
+  'torch',
+  'stream',
+  'capture_photo',
+  'recording',
+  'siren',
+  'detection',
 ]
 
 const STREAMING_KEYS = [
@@ -393,6 +410,59 @@ describe('DTO contract fixtures', () => {
       ])
     }
   })
+
+  it('automation fixture assigns to AutomationStateDto', () => {
+    const automation: AutomationStateDto = automationFixture as AutomationStateDto
+    expectKeys(automation as unknown as Record<string, unknown>, ['enabled', 'rules', 'catalog'])
+    expect(automation.rules.length).toBeGreaterThan(0)
+    for (const rule of automation.rules) {
+      expectKeys(rule as unknown as Record<string, unknown>, [
+        'id',
+        'name',
+        'enabled',
+        'minuteOfDay',
+        'daysMask',
+        'actions',
+      ])
+      expect(rule.minuteOfDay).toBeGreaterThanOrEqual(0)
+      expect(rule.minuteOfDay).toBeLessThanOrEqual(1439)
+      expect(rule.daysMask).toBeGreaterThanOrEqual(1)
+      expect(rule.daysMask).toBeLessThanOrEqual(127)
+      for (const action of rule.actions) {
+        expectKeys(action as unknown as Record<string, unknown>, ['type', 'params'])
+        expect(AUTOMATION_CATALOG_IDS).toContain(action.type)
+      }
+    }
+    expect(automation.catalog.length).toBeGreaterThan(0)
+    // The rule editor renders generically from this catalog — every id the
+    // Android side ships must be present, and every param spec must carry
+    // the fields the per-param editors key off (min/max ride alongside the
+    // INT/FLOAT bounds; nullable bounds are omitted on the wire, while the
+    // non-nullable autoAtZero boolean always serializes).
+    expect(automation.catalog.map((entry) => entry.id)).toEqual(expect.arrayContaining(AUTOMATION_CATALOG_IDS))
+    for (const entry of automation.catalog) {
+      expectKeys(entry as unknown as Record<string, unknown>, ['id', 'params', 'catchUp', 'interruptsStream'])
+      expect(['STATEFUL', 'ONESHOT']).toContain(entry.catchUp)
+      for (const param of entry.params) {
+        expectKeys(param as unknown as Record<string, unknown>, ['name', 'kind', 'optional', 'defaultValue', 'autoAtZero'])
+        expect(['BOOL', 'INT', 'FLOAT']).toContain(param.kind)
+        if (param.kind !== 'BOOL') {
+          expect(param.min).not.toBeNull()
+          expect(param.max).not.toBeNull()
+        }
+      }
+    }
+    // The auto sentinel is catalog-driven (isAutoSentinelParam): exactly the
+    // camera_exposure auto params carry autoAtZero — "0" on
+    // recording.duration_seconds is the no-limit sentinel, NOT auto.
+    const cameraExposure = automation.catalog.find((entry) => entry.id === 'camera_exposure')
+    expect(cameraExposure).toBeDefined()
+    expect(cameraExposure!.params.map((param) => param.name)).toEqual(['iso', 'exposure_time_ms'])
+    for (const param of cameraExposure!.params) {
+      expect(param.autoAtZero).toBe(true)
+    }
+    expect(automation.catalog.find((entry) => entry.id === 'recording')?.params.find((param) => param.name === 'duration_seconds')?.autoAtZero).toBe(false)
+  })
 })
 
 describe('API_DEFAULTS lockstep with the fixtures', () => {
@@ -584,6 +654,24 @@ describe('API_DEFAULTS lockstep with the fixtures', () => {
     expect(API_DEFAULTS.continuousSegmentMaxMinutes).toBe(60)
     expect(streaming.continuousSegmentMinutes).toBeGreaterThanOrEqual(API_DEFAULTS.continuousSegmentMinMinutes)
     expect(streaming.continuousSegmentMinutes).toBeLessThanOrEqual(API_DEFAULTS.continuousSegmentMaxMinutes)
+  })
+
+  it('automation fallbacks match the automation fixture defaults', () => {
+    const automation: AutomationStateDto = automationFixture as AutomationStateDto
+    // The master toggle defaults to off (AutomationStateDto.enabled); the
+    // fixture carries a representative enabled=true device rather than the
+    // fresh-install shape, so its enabled flag is only pinned to its type.
+    expect(API_DEFAULTS.automationEnabled).toBe(false)
+    expect(typeof automation.enabled).toBe('boolean')
+    // The pre-fetch fallback shape mirrors the DTO's empty collections.
+    expect(Array.isArray(API_DEFAULTS.automationRules)).toBe(true)
+    expect((API_DEFAULTS.automationRules as readonly unknown[]).length).toBe(0)
+    expect(Array.isArray(API_DEFAULTS.automationCatalog)).toBe(true)
+    expect((API_DEFAULTS.automationCatalog as readonly unknown[]).length).toBe(0)
+    // The client-side add-affordance caps mirror StreamDefaults' automation
+    // bounds (AUTOMATION_MAX_RULES / AUTOMATION_MAX_ACTIONS_PER_RULE).
+    expect(API_DEFAULTS.automationMaxRules).toBe(16)
+    expect(API_DEFAULTS.automationMaxActionsPerRule).toBe(8)
   })
 
   it('camera fallbacks match the settings fixture defaults', () => {

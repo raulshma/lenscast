@@ -1,6 +1,7 @@
 package com.raulshma.lenscast.streaming.model
 
 import com.raulshma.lenscast.core.AppJson
+import com.raulshma.lenscast.automation.schedule.AutomationActionCatalog
 import com.raulshma.lenscast.capture.model.DetectionEventDeepLink
 import com.raulshma.lenscast.streaming.web.AuthWebHandler
 import com.squareup.moshi.Types
@@ -448,6 +449,56 @@ class DtoContractFixtureTest {
         assertMatchesFixture(
             "detection-stats.json",
             moshi.adapter(DetectionStatsResponseDto::class.java).toJson(stats),
+        )
+    }
+
+    @Test
+    fun `automation state response matches the automation fixture`() {
+        // The settings fixture procedure, automation-shaped: the DTO defaults
+        // instance with the uninformative-empty surfaces populated — one
+        // representative rule and the real catalog content, which is exactly
+        // what GET /api/automation publishes (the catalog is device truth,
+        // not client-chosen). A catalog or rule-shape change fails here until
+        // the fixture — and with it the web side — moves in lockstep.
+        val state = AutomationStateDto(
+            enabled = true,
+            rules = listOf(
+                AutomationRuleDto(
+                    id = "1f0a9c2e-4b7d-4e8a-9c3f-6d5b8a7e2c41",
+                    name = "Weekday sunrise",
+                    enabled = true,
+                    minuteOfDay = 420,
+                    daysMask = 31,
+                    actions = listOf(
+                        AutomationActionDto(type = "torch", params = mapOf("enabled" to "true")),
+                        AutomationActionDto(type = "stream", params = mapOf("enabled" to "true")),
+                    ),
+                ),
+            ),
+            // The same mapping AutomationWebHandler.get publishes; the two
+            // must stay byte-identical for the fixture to describe the wire.
+            catalog = AutomationActionCatalog.ACTION_TYPES.map { type ->
+                AutomationCatalogActionDto(
+                    id = type.id,
+                    params = type.params.map { param ->
+                        AutomationCatalogParamDto(
+                            name = param.name,
+                            kind = param.kind.name,
+                            min = param.min,
+                            max = param.max,
+                            optional = param.optional,
+                            defaultValue = param.defaultValue,
+                            autoAtZero = param.autoAtZero,
+                        )
+                    },
+                    catchUp = type.catchUp.name,
+                    interruptsStream = type.interruptsStream,
+                )
+            },
+        )
+        assertMatchesFixture(
+            "automation.json",
+            moshi.adapter(AutomationStateDto::class.java).toJson(state),
         )
     }
 }

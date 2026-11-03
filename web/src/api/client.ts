@@ -417,6 +417,32 @@ export async function clearAuditLog(): Promise<{ success: boolean }> {
   return requestJson('/api/audit', { method: 'DELETE' })
 }
 
+// ── Automation (time-of-day rules; the settings-section PUT convention) ──
+
+/**
+ * GET /api/automation — the whole automation surface in one document: the
+ * master toggle, the configured rules, and the read-only action catalog the
+ * rule editor renders from.
+ */
+export async function getAutomation(): Promise<import('../types').AutomationStateDto> {
+  return requestJson('/api/automation')
+}
+
+/**
+ * PUT /api/automation — persists the master toggle and the full rule list
+ * wholesale (a rule absent from the document is gone). The response is a
+ * fresh GET-shaped read, so callers replace their local state with the
+ * server's sanitized truth (clamped minutes/masks, canonical action params,
+ * minted ids) rather than keeping what they sent.
+ */
+export async function putAutomation(update: import('../types').AutomationUpdateRequestDto): Promise<import('../types').AutomationStateDto> {
+  return requestJson('/api/automation', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(update),
+  })
+}
+
 // ── Web Push (browser subscriptions; the phone publishes to them) ──
 
 /** The VAPID server key: base64url, 65-byte uncompressed P-256 point — the subscription's applicationServerKey. */

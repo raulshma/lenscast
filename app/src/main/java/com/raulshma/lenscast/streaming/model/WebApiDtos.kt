@@ -928,3 +928,119 @@ data class LabeledCountDto(
     val label: String,
     val count: Int,
 )
+
+// ── Automation DTOs ──
+
+/**
+ * One step inside an [AutomationRuleDto]: a catalog action id plus its raw
+ * parameters. Everything is a string on the wire (the same convention as the
+ * persisted [com.raulshma.lenscast.automation.schedule.AutomationActionSpec])
+ * so the shape never needs versioning when an action gains a parameter —
+ * validity and typing are the catalog's job at sanitize time.
+ */
+@JsonClass(generateAdapter = true)
+data class AutomationActionDto(
+    /** Catalog id, e.g. `"torch"`; an id outside the catalog is dropped on save. */
+    val type: String = "",
+    /** Raw parameter values, all serialized as strings; clamped to the catalog bounds on save. */
+    val params: Map<String, String> = emptyMap(),
+)
+
+/**
+ * One time-of-day automation rule as the dashboard configured it. The
+ * domain's `triggerType` is deliberately omitted from the wire: only
+ * `time_of_day` exists today (one source:
+ * [com.raulshma.lenscast.automation.schedule.AutomationRule.TRIGGER_TIME_OF_DAY]),
+ * and the sanitize step resets anything else to it — so a future trigger
+ * written by a newer app version degrades to a time trigger instead of
+ * needing a wire field the current clients could set wrong.
+ */
+@JsonClass(generateAdapter = true)
+data class AutomationRuleDto(
+    /**
+     * Stable identity (the fire-journal key). Blank/absent on a new rule lets
+     * the device mint a UUID — a rule without an id could never be journaled
+     * and would re-fire on every poll tick.
+     */
+    val id: String = "",
+    /** Free-form display label; trimmed on save, never interpreted. */
+    val name: String = "",
+    /** Per-rule kill switch, independent of the master automation toggle. */
+    val enabled: Boolean = true,
+    /** Local wall-clock minute 0..1439; clamped into that span on save. */
+    val minuteOfDay: Int = 0,
+    /** One bit per ISO day index (bit 0 = Monday … bit 6 = Sunday); clamped to 1..127 on save. */
+    val daysMask: Int = 127,
+    /** The ordered action list; each entry is validated against the catalog on save. */
+    val actions: List<AutomationActionDto> = emptyList(),
+)
+
+/**
+ * One parameter of a catalog action, as GET /api/automation publishes it: the
+ * schema a rule editor needs to render and validate inputs. A mirror of
+ * [com.raulshma.lenscast.automation.schedule.AutomationParamSpec] — read-only,
+ * the catalog is device truth and never accepted back on the wire.
+ */
+@JsonClass(generateAdapter = true)
+data class AutomationCatalogParamDto(
+    /** The exact wire key inside [AutomationActionDto.params]. */
+    val name: String = "",
+    /** How the string value is interpreted: `"BOOL"` | `"INT"` | `"FLOAT"`. */
+    val kind: String = "BOOL",
+    /** Lower bound, or null for unbounded. */
+    val min: Double? = null,
+    /** Upper bound, or null for unbounded. */
+    val max: Double? = null,
+    /** When true, an absent parameter means "leave the current setting unchanged". */
+    val optional: Boolean = false,
+    /** The value an absent required or invalid value folds to; empty for optional params with no persisted default. */
+    val defaultValue: String = "",
+    /**
+     * '0' is the auto/unlimited sentinel — clients may render an Auto toggle;
+     * false = ordinary value.
+     */
+    val autoAtZero: Boolean = false,
+)
+
+/**
+ * One action the automation engine can execute, as GET /api/automation
+ * publishes it. A mirror of
+ * [com.raulshma.lenscast.automation.schedule.AutomationActionType] —
+ * read-only, the catalog is device truth and never accepted back on the wire.
+ */
+@JsonClass(generateAdapter = true)
+data class AutomationCatalogActionDto(
+    /** The action id an [AutomationActionDto.type] must name. */
+    val id: String = "",
+    /** The parameter schema, in display/contract order. */
+    val params: List<AutomationCatalogParamDto> = emptyList(),
+    /** What happens when the rule fires late: `"STATEFUL"` | `"ONESHOT"`. */
+    val catchUp: String = "STATEFUL",
+    /** Whether applying the action tears down/rebinds the live stream. */
+    val interruptsStream: Boolean = false,
+)
+
+/**
+ * GET /api/automation — the whole automation surface in one document: the
+ * master toggle, the configured rules, and the action catalog the rule editor
+ * renders from. The catalog is read-only on the wire.
+ */
+@JsonClass(generateAdapter = true)
+data class AutomationStateDto(
+    val enabled: Boolean = false,
+    val rules: List<AutomationRuleDto> = emptyList(),
+    val catalog: List<AutomationCatalogActionDto> = emptyList(),
+)
+
+/**
+ * PUT /api/automation body: the master toggle plus the full rule list (the
+ * document persists wholesale, like the settings sections). The catalog is
+ * read-only on the wire and never accepted here; every rule is sanitized
+ * through [com.raulshma.lenscast.automation.schedule.AutomationSchedulePolicy]
+ * before it persists.
+ */
+@JsonClass(generateAdapter = true)
+data class AutomationUpdateRequestDto(
+    val enabled: Boolean = false,
+    val rules: List<AutomationRuleDto> = emptyList(),
+)

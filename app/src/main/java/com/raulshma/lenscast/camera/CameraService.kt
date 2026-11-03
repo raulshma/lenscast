@@ -42,6 +42,7 @@ import com.raulshma.lenscast.camera.model.FrameErrorPolicy
 import com.raulshma.lenscast.camera.model.PhotoCapturePlan
 import com.raulshma.lenscast.camera.model.OutputRotationPolicy
 import com.raulshma.lenscast.camera.model.PhotoAspectRatioPolicy
+import com.raulshma.lenscast.camera.model.TorchStrengthPolicy
 import com.raulshma.lenscast.core.YuvConverter
 import com.raulshma.lenscast.camera.model.WhiteBalance
 import com.raulshma.lenscast.camera.model.HdrMode
@@ -153,6 +154,15 @@ class CameraService(private val context: Context) {
     private val _availableIsoRange =
         MutableStateFlow<ClosedRange<Int>>(CameraSettings.ISO_RANGE_MIN..CameraSettings.ISO_RANGE_MAX)
     val availableIsoRange: StateFlow<ClosedRange<Int>> = _availableIsoRange.asStateFlow()
+
+    // The bound camera's torch strength ceiling (API 35+
+    // FLASH_INFO_STRENGTH_MAXIMUM_LEVEL), the same ladder shape as the ranges
+    // above: null until a bind proves the device supports per-level torch at
+    // all (pre-35, no flash unit, missing key, or failed query), and the
+    // device's real max replaces it at bind time. Ladder semantics in
+    // TorchStrengthPolicy.
+    private val _torchStrengthMaxLevel = MutableStateFlow<Int?>(null)
+    val torchStrengthMaxLevel: StateFlow<Int?> = _torchStrengthMaxLevel.asStateFlow()
 
     private var sensorExposureTimeRange: LongRange = 1L..1_000_000_000L
 
@@ -883,6 +893,32 @@ class CameraService(private val context: Context) {
                 } catch (e: Exception) {
                     Log.w(TAG, "Failed to query sensor ranges", e)
                 }
+
+                // Torch strength ceiling for the API 35+ per-level torch API.
+                // Read from the BOUND camera's own characteristics — the same
+                // camera whose flash unit backs enableTorch (the torch lives
+                // on the logical camera, not the selected physical lens), so
+                // the id is resolved the Camera2CameraInfo way rather than the
+                // physical-lens fallback the sensor ranges above use. Null
+                // (pre-35, no flash unit, missing key, failed query) means the
+                // TorchStrengthPolicy ladder never calls the strength API and
+                // plain enableTorch stays the whole story.
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.VANILLA_ICE_CREAM &&
+                    cam.cameraInfo.hasFlashUnit()
+                ) {
+                    try {
+                        val cameraManager =
+                            context.getSystemService(Context.CAMERA_SERVICE) as android.hardware.camera2.CameraManager
+                        val torchChars =
+                            cameraManager.getCameraCharacteristics(Camera2CameraInfo.from(cam.cameraInfo).cameraId)
+                        _torchStrengthMaxLevel.value =
+                            torchChars.get(CameraCharacteristics.FLASH_INFO_STRENGTH_MAXIMUM_LEVEL)
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Failed to query torch strength max level", e)
+                    }
+                } else {
+                    _torchStrengthMaxLevel.value = null
+                }
             }
 
             // CameraX drops control calls issued synchronously inside the
@@ -1227,6 +1263,18 @@ class CameraService(private val context: Context) {
         try {
             if (cam.cameraInfo.hasFlashUnit()) {
                 cam.cameraControl.enableTorch(settings.torchEnabled)
+                // Per-level torch strength (API 35+): driven ONLY while the
+                // torch should be ON — turnOnTorchWithStrengthLevel switches
+                // the flash on as a side effect when it was off, so a
+                // torch-off apply never touches it. Riding this seam means the
+                // level re-asserts on every settings emission and after every
+                // rebind, exactly like the binary torch above. The policy's
+                // null verdict (unsupported SDK, single-level flash, unknown
+                // max) skips silently — enableTorch already did everything
+                // the device can do.
+                if (settings.torchEnabled && settings.torchStrength != null) {
+                    applyTorchStrength(cam, settings.torchStrength)
+                }
             }
         } catch (e: Exception) {
             Log.w(TAG, "Torch failed", e)
@@ -1337,6 +1385,34 @@ class CameraService(private val context: Context) {
             camera2Control.setCaptureRequestOptions(builder.build())
         } catch (e: Exception) {
             Log.w(TAG, "Advanced settings failed", e)
+        }
+    }
+
+    /**
+     * The strength half of the torch apply: the API 35+
+     * [android.hardware.camera2.CameraManager.turnOnTorchWithStrengthLevel]
+     * path, translated by [TorchStrengthPolicy] (null verdict = skip
+     * silently). Runs on the BOUND camera's camera2 id — the same camera
+     * whose flash unit backs enableTorch — resolved through
+     * Camera2CameraInfo. The CameraManager-level API needs no bound session,
+     * but failures (unknown id, hardware quirk, the torch having been killed
+     * underneath us) are logged and swallowed: the binary torch above already
+     * put light on the subject, strength is the refinement.
+     */
+    private fun applyTorchStrength(cam: Camera, requestedStrength: Int?) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.VANILLA_ICE_CREAM) return
+        val level = TorchStrengthPolicy.effectiveLevel(
+            requestedStrength,
+            _torchStrengthMaxLevel.value,
+            Build.VERSION.SDK_INT,
+        ) ?: return
+        runCatching {
+            val torchCameraId = Camera2CameraInfo.from(cam.cameraInfo).cameraId
+            val cameraManager =
+                context.getSystemService(Context.CAMERA_SERVICE) as android.hardware.camera2.CameraManager
+            cameraManager.turnOnTorchWithStrengthLevel(torchCameraId, level)
+        }.onFailure { e ->
+            Log.w(TAG, "Torch strength failed (level=$level)", e)
         }
     }
 

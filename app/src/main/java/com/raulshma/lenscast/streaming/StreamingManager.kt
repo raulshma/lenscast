@@ -19,6 +19,7 @@ import com.raulshma.lenscast.streaming.web.ApiRouter
 import com.raulshma.lenscast.streaming.web.AuditLog
 import com.raulshma.lenscast.streaming.web.AuditWebHandler
 import com.raulshma.lenscast.streaming.web.AuthWebHandler
+import com.raulshma.lenscast.streaming.web.AutomationWebHandler
 import com.raulshma.lenscast.streaming.web.CaptureWebHandler
 import com.raulshma.lenscast.streaming.web.DetectionEventsWebHandler
 import com.raulshma.lenscast.streaming.web.DetectionTestWebHandler
@@ -1886,6 +1887,7 @@ class StreamingManager(
             subscriptions = app.pushSubscriptionStore,
             vapidKeys = app.vapidKeys,
         )
+        val automationHandler = AutomationWebHandler(app.settingsDataStore)
         return WebApiStack(
             router = ApiRouter(
                 settings = SettingsWebHandler(
@@ -1893,6 +1895,7 @@ class StreamingManager(
                     detectionModelStore = app.detectionModelStore,
                     audioModelStore = app.audioModelStore,
                 ),
+                automation = automationHandler,
                 status = statusHandler,
                 stream = StreamWebHandler(this, app.streamingSession),
                 capture = CaptureWebHandler(app.photoCaptureManager),
@@ -1926,6 +1929,7 @@ class StreamingManager(
             system = systemHandler,
             push = pushHandler,
             unifiedPush = unifiedPushHandler,
+            automation = automationHandler,
         )
     }
 

@@ -2,6 +2,7 @@ package com.raulshma.lenscast.streaming
 
 import com.raulshma.lenscast.capture.PhotoCaptureManager
 import com.raulshma.lenscast.streaming.web.ApiRouter
+import com.raulshma.lenscast.streaming.web.AutomationWebHandler
 import com.raulshma.lenscast.streaming.web.AuditLog
 import com.raulshma.lenscast.streaming.web.AuditWebHandler
 import com.raulshma.lenscast.streaming.web.AuthWebHandler
@@ -33,4 +34,6 @@ data class WebApiStack(
     val system: SystemWebHandler,
     val push: PushWebHandler,
     val unifiedPush: UnifiedPushWebHandler,
+    /** GET/PUT /api/automation — the time-of-day automation state and rule list. */
+    val automation: AutomationWebHandler,
 )

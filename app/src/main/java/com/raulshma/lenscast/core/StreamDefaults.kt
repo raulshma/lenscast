@@ -217,4 +217,19 @@ object StreamDefaults {
     const val SRT_KEEPALIVE_INTERVAL_MS = 5_000
     const val SRT_TS_PACKETS_PER_DATAGRAM = 7
     const val SRT_TS_PAYLOAD_BYTES = SRT_TS_PACKETS_PER_DATAGRAM * 188
+
+    // Time-of-day automation (automation/schedule/). POLL_SECONDS is the
+    // background check cadence — each tick evaluates which rules are due.
+    // ONESHOT_GRACE_MS is how far past the scheduled minute a one-shot action
+    // (a photo capture) may still fire: it exists so a device that was asleep
+    // or process-dead at the exact minute still catches up, while a stale
+    // occurrence from hours ago does not replay. The two caps bound the
+    // persisted rule list and each rule's action list, so a corrupted or
+    // hostile payload can never inflate the decode or the per-tick work.
+    // Rule minute bounds reuse MINUTES_PER_DAY, day-mask bounds reuse
+    // MOTION_ARM_DAYS_MASK_* — the same ISO day-bit convention.
+    const val AUTOMATION_POLL_SECONDS = 30
+    const val AUTOMATION_ONESHOT_GRACE_MS = 10 * 60 * 1000L
+    const val AUTOMATION_MAX_RULES = 16
+    const val AUTOMATION_MAX_ACTIONS_PER_RULE = 8
 }

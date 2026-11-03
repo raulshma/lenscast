@@ -30,6 +30,7 @@ import com.raulshma.lenscast.capture.ml.DetectionModelStore
 import com.raulshma.lenscast.capture.model.SoundClassPolicy
 import com.raulshma.lenscast.core.StreamDefaults
 import com.raulshma.lenscast.core.push.VapidSubjectPolicy
+import com.raulshma.lenscast.ui.components.DayMaskChips
 
 /**
  * The detection (motion + sound), watchdog, and backup settings sections.
@@ -132,13 +133,14 @@ fun DetectionSettingsSection(viewModel: SettingsViewModel, onOpenEventLog: (() -
                     steps = 95,
                     onValueChange = { viewModel.updateMotionArmEndMinute(it.toInt()) }
                 )
-                ArmDayChips(
+                DayMaskChips(
                     daysMask = armDaysMask,
                     onToggleDay = { isoDay ->
                         viewModel.updateMotionArmDaysMask(
                             MotionArmingPolicy.toggleDay(armDaysMask, isoDay),
                         )
-                    }
+                    },
+                    title = stringResource(R.string.detection_arm_days),
                 )
             }
         }
@@ -390,43 +392,6 @@ fun DetectionSettingsSection(viewModel: SettingsViewModel, onOpenEventLog: (() -
                 state = modelState,
                 onDownload = { viewModel.downloadDetectionModel() },
             )
-        }
-    }
-}
-
-/**
- * The arm schedule's day-of-week chips: one chip per ISO day (Monday first),
- * selected when its bit is set in the persisted mask. Toggling reports the
- * ISO day index; the caller folds it into the mask.
- */
-@Composable
-private fun ArmDayChips(daysMask: Int, onToggleDay: (isoDayIndex: Int) -> Unit) {
-    val labels = listOf(
-        stringResource(R.string.detection_day_mon),
-        stringResource(R.string.detection_day_tue),
-        stringResource(R.string.detection_day_wed),
-        stringResource(R.string.detection_day_thu),
-        stringResource(R.string.detection_day_fri),
-        stringResource(R.string.detection_day_sat),
-        stringResource(R.string.detection_day_sun),
-    )
-    Column(modifier = Modifier.fillMaxWidth()) {
-        Text(
-            text = stringResource(R.string.detection_arm_days),
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurface,
-        )
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-        ) {
-            labels.forEachIndexed { index, label ->
-                FilterChip(
-                    label = label,
-                    selected = (daysMask and MotionArmingPolicy.dayBit(index)) != 0,
-                    onClick = { onToggleDay(index) }
-                )
-            }
         }
     }
 }

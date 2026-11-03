@@ -23,6 +23,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import com.raulshma.lenscast.MainApplication
 import com.raulshma.lenscast.MainActivity
+import com.raulshma.lenscast.automation.AutomationScreen
 import com.raulshma.lenscast.camera.CameraScreen
 import com.raulshma.lenscast.capture.CaptureScreen
 import com.raulshma.lenscast.capture.DETECTION_EVENTS_ROUTE
@@ -106,6 +107,15 @@ fun NavigationGraph() {
                         AppSettingsScreen(
                             onNavigateBack = { navController.popBackStack() },
                             onOpenEventLog = { navController.navigate(DETECTION_EVENTS_ROUTE) },
+                            onOpenAutomation = { navController.navigate("automation") },
+                        )
+                    }
+                }
+
+                composable("automation") {
+                    CompositionLocalProvider(LocalAnimatedVisibilityScope provides this@composable) {
+                        AutomationScreen(
+                            onNavigateBack = { navController.popBackStack() },
                         )
                     }
                 }

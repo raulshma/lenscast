@@ -15,6 +15,7 @@ import com.raulshma.lenscast.capture.model.DetectionEventDeepLink
 import com.raulshma.lenscast.core.DetectionAlert
 import com.raulshma.lenscast.core.EventKind
 import com.raulshma.lenscast.core.JpegDownscaler
+import com.raulshma.lenscast.core.LocalWallClock
 import com.raulshma.lenscast.core.SirenAutoStop
 import com.raulshma.lenscast.core.StreamDefaults
 import com.raulshma.lenscast.core.WebhookNotifier
@@ -743,16 +744,17 @@ class DetectionCoordinator(
 
     private fun currentMinuteOfDay(): Int {
         val calendar = java.util.Calendar.getInstance().apply { timeInMillis = nowMs() }
-        return calendar.get(java.util.Calendar.HOUR_OF_DAY) * 60 + calendar.get(java.util.Calendar.MINUTE)
+        return LocalWallClock.minuteOfDay(calendar)
     }
 
     /**
      * The ISO day index the arm-schedule mask bits reference (0 = Monday …
-     * 6 = Sunday), derived from Calendar's 1=Sunday..7=Saturday numbering.
+     * 6 = Sunday) — the shared [LocalWallClock] derivation, the same numbers
+     * the automation scheduler reads.
      */
     private fun currentIsoDayIndex(): Int {
         val calendar = java.util.Calendar.getInstance().apply { timeInMillis = nowMs() }
-        return (calendar.get(java.util.Calendar.DAY_OF_WEEK) + 5) % 7
+        return LocalWallClock.isoDayIndex(calendar)
     }
 
     /**

@@ -3058,3 +3058,206 @@ button.timeline-segment {
 .multicam-mini-btn:disabled:hover {
   filter: none;
 }
+
+/* ═══════════════════════════════════════════════
+   AUTOMATION CARD (rule list + rule editor dialog)
+   ═══════════════════════════════════════════════ */
+
+/* One rule row in the list: name + time header, kill switch, day summary,
+   per-action summary lines, edit/delete. */
+.automation-rule-row {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  margin-top: 8px;
+  background: var(--lc-surface-2);
+  border: 1px solid var(--lc-border);
+  border-radius: var(--lc-radius-lg, 12px);
+}
+
+.automation-rule-row:first-of-type {
+  margin-top: 0;
+}
+
+.automation-rule-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.automation-rule-title {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
+}
+
+.automation-rule-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--lc-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.automation-rule-time {
+  font-family: var(--lc-mono);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--lc-accent);
+  flex-shrink: 0;
+}
+
+/* A killed rule renders inert but keeps its content for context. */
+.automation-rule-disabled .automation-rule-name,
+.automation-rule-disabled .automation-summary-lines {
+  opacity: 0.5;
+}
+
+.automation-rule-days {
+  display: flex;
+  align-items: center;
+}
+
+.automation-rule-everyday {
+  font-size: 12px;
+  color: var(--lc-text-dim);
+}
+
+.automation-day-chips {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.automation-day-chip {
+  padding: 2px 7px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  border-radius: 999px;
+  background: var(--lc-accent-bg);
+  color: var(--lc-accent);
+  border: 1px solid var(--lc-border);
+}
+
+.automation-summary-lines {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 12px;
+  color: var(--lc-text-dim);
+}
+
+.automation-summary-line::before {
+  content: '·';
+  margin-right: 6px;
+  color: var(--lc-text-muted);
+}
+
+.automation-summary-empty {
+  font-size: 12px;
+  font-style: italic;
+  color: var(--lc-text-muted);
+}
+
+.automation-rule-buttons {
+  display: flex;
+  gap: 8px;
+}
+
+.automation-rule-buttons .card-btn {
+  padding: 6px 12px;
+  font-size: 12px;
+}
+
+.automation-add-rule {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.automation-cap-note {
+  font-size: 12px;
+  color: var(--lc-text-muted);
+}
+
+/* The rule editor: a full-screen dialog twin of the shortcuts modal, wide
+   enough for the param sliders. */
+.automation-editor-modal {
+  margin: auto;
+  width: min(560px, calc(100vw - 32px));
+  max-height: calc(100vh - 32px);
+  display: flex;
+  flex-direction: column;
+  background: var(--lc-surface);
+  border: 1px solid var(--lc-border);
+  border-radius: var(--lc-radius-lg);
+  box-shadow: var(--lc-shadow-lg);
+  animation: fade-in 0.2s ease;
+}
+
+.automation-editor-save {
+  padding: 6px 14px;
+  font-size: 13px;
+}
+
+.automation-editor-body {
+  overflow-y: auto;
+  padding: 14px 16px 20px;
+  display: flex;
+  flex-direction: column;
+}
+
+/* One action block inside the editor's action list. */
+.automation-action-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px;
+  margin-top: 8px;
+  background: var(--lc-surface-2);
+  border: 1px solid var(--lc-border);
+  border-radius: var(--lc-radius-lg, 12px);
+}
+
+.automation-action-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.automation-action-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--lc-text);
+}
+
+/* Nested rows under a configure gate sit indented and dimmed one step. */
+.automation-param-nested {
+  margin-left: 12px;
+  padding-left: 10px;
+  border-left: 2px solid var(--lc-surface-3);
+}
+
+.automation-add-action {
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+}
+
+.automation-add-action .field-select {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.automation-param-hint {
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--lc-text-muted);
+}

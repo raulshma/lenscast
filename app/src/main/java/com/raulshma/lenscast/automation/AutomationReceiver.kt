@@ -6,9 +6,6 @@ import android.content.Intent
 import android.util.Log
 import com.raulshma.lenscast.MainApplication
 import com.raulshma.lenscast.automation.AutomationIntentPolicy.AutomationAction
-import com.raulshma.lenscast.capture.model.RecordingConfig
-import com.raulshma.lenscast.capture.model.RecordingQuality
-import com.raulshma.lenscast.streaming.BootResumePolicy
 import com.raulshma.lenscast.streaming.StreamWidgetProvider
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -24,6 +21,15 @@ import kotlinx.coroutines.launch
  * README. Every action routes through the one shared seam (Stream Toggle,
  * Recording Controller, Photo Capture Manager, CameraService, SirenPlayer) —
  * the receiver is a front-end, never a second implementation.
+ *
+ * The shell is deliberately thin: onReceive resolves the broadcast through
+ * [AutomationIntentPolicy] (the wire verdicts — the action routing, the
+ * `enabled` toggle target, the clamped recording duration, the siren
+ * auto-stop delay) and hands each verdict to [AutomationActionExecutor],
+ * the one execution seam the coming in-app scheduler drives too. The
+ * executor is constructed per broadcast here: it is stateless and cheap
+ * (it only routes calls onto the app's shared seam graph), so MainApplication —
+ * the composition root — gains no new member for it.
  *
  * Exported but permission-guarded (`com.raulshma.lenscast.permission.AUTOMATION`,
  * declared in the manifest) — an open receiver would let any installed app
@@ -43,6 +49,9 @@ class AutomationReceiver : BroadcastReceiver() {
         fun complete() {
             if (finished.compareAndSet(false, true)) pendingResult.finish()
         }
+        // Per-broadcast executor: stateless and cheap, so it needs no scope
+        // lifetime and the composition root gains nothing (see class KDoc).
+        val executor = AutomationActionExecutor(app)
         scope.launch {
             // True when the async photo capture's callbacks own the finish
             // (the capture was queued): the coroutine body returning early
@@ -50,35 +59,26 @@ class AutomationReceiver : BroadcastReceiver() {
             var completionOwnedByCallbacks = false
             try {
                 when (AutomationIntentPolicy.route(intent.action)) {
-                    AutomationAction.START_STREAM -> BootResumePolicy.execute(
-                        app.streamToggle,
-                        BootResumePolicy.tileStart(app.streamStateJournal.load()),
-                    )
-                    AutomationAction.STOP_STREAM -> app.streamToggle.stopServer()
+                    AutomationAction.START_STREAM -> executor.startStream()
+                    AutomationAction.STOP_STREAM -> executor.stopStream()
                     AutomationAction.CAPTURE_PHOTO -> {
-                        // Null means the use case could not be acquired — no
-                        // callback will ever fire, so the finally completes.
-                        completionOwnedByCallbacks = runCatching {
-                            app.photoCaptureManager.captureToGallery(
-                                onSaved = { _, _ -> complete() },
-                                onError = { exception ->
-                                    Log.w(TAG, "Automation capture failed: ${exception.message}")
-                                    complete()
-                                },
-                            )
-                        }.getOrNull() != null
+                        // False means the use case could not be acquired (or
+                        // the capture never started) — no callback will ever
+                        // fire, so the finally completes.
+                        completionOwnedByCallbacks = executor.capturePhoto(
+                            onSaved = { _, _ -> complete() },
+                            onError = { exception ->
+                                Log.w(TAG, "Automation capture failed: ${exception.message}")
+                                complete()
+                            },
+                        )
                     }
-                    AutomationAction.START_RECORDING -> app.recordingController.start(
-                        RecordingConfig(
-                            durationSeconds = AutomationIntentPolicy.recordingDurationSeconds(
-                                intent.getIntExtra(EXTRA_DURATION_SECONDS, 0),
-                            ),
-                            repeatIntervalSeconds = 0,
-                            quality = RecordingQuality.HIGH,
-                            includeAudio = app.settingsDataStore.recordingAudioEnabled.value,
+                    AutomationAction.START_RECORDING -> executor.startRecording(
+                        AutomationIntentPolicy.recordingDurationSeconds(
+                            intent.getIntExtra(EXTRA_DURATION_SECONDS, 0),
                         ),
                     )
-                    AutomationAction.STOP_RECORDING -> app.recordingController.stop()
+                    AutomationAction.STOP_RECORDING -> executor.stopRecording()
                     AutomationAction.SET_TORCH -> {
                         // Toggle semantics read the live torch, not the
                         // persisted setting: deterrence (ACTION_TORCH) drives
@@ -90,10 +90,7 @@ class AutomationReceiver : BroadcastReceiver() {
                             enabledExtraValue = intent.getBooleanExtra(EXTRA_ENABLED, false),
                             currentState = !app.cameraService.isTorchOn(),
                         )
-                        kotlinx.coroutines.withContext(Dispatchers.Main) {
-                            runCatching { app.cameraService.setTorchEnabled(enable) }
-                                .onFailure { Log.w(TAG, "Automation torch failed: ${it.message}") }
-                        }
+                        executor.setTorchLive(enable)
                     }
                     AutomationAction.SET_SIREN -> {
                         val siren = app.streamingManager.sirenController()
@@ -102,24 +99,15 @@ class AutomationReceiver : BroadcastReceiver() {
                             enabledExtraValue = intent.getBooleanExtra(EXTRA_ENABLED, false),
                             currentState = !siren.isRunning(),
                         )
-                        if (enable) {
-                            siren.start()
-                            // Only an explicit duration command touches the
-                            // timer: a re-arm can extend a running siren's
-                            // stop, but a bare toggle-on must not cancel an
-                            // already-armed stop. Absent extra = run until
-                            // stopped; a 0-valued extra = explicit "no limit".
-                            val autoStopDelayMs = AutomationIntentPolicy.sirenAutoStopDelayMs(
-                                hasDurationExtra = intent.hasExtra(EXTRA_DURATION_SECONDS),
-                                rawDurationSeconds = intent.getIntExtra(EXTRA_DURATION_SECONDS, 0),
-                            )
-                            if (autoStopDelayMs != null) {
-                                app.sirenAutoStop.armAfterStart(autoStopDelayMs) { siren.stop() }
-                            }
-                        } else {
-                            app.sirenAutoStop.cancel()
-                            siren.stop()
-                        }
+                        // Only an explicit duration command touches the
+                        // timer: absent extra = run until stopped (the
+                        // executor leaves an already-armed stop alone), a
+                        // 0-valued extra = explicit "no limit".
+                        val autoStopDelayMs = AutomationIntentPolicy.sirenAutoStopDelayMs(
+                            hasDurationExtra = intent.hasExtra(EXTRA_DURATION_SECONDS),
+                            rawDurationSeconds = intent.getIntExtra(EXTRA_DURATION_SECONDS, 0),
+                        )
+                        executor.setSiren(enable, autoStopDelayMs)
                     }
                     // Unlisted actions touch nothing — the policy's route is
                     // the in-code allow-list behind the manifest permission

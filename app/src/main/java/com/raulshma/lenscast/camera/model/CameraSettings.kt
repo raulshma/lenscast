@@ -43,6 +43,11 @@ data class CameraSettings(
     // this before it leaves the device. Ladder + semantics in OutputRotationPolicy.
     val outputRotation: Int = 0,
     val orientationLocked: Boolean = false,
+    // Torch brightness override for API 35+ torch-strength control, 1..8
+    // (the catalog bound in AutomationActionCatalog). null = the device's
+    // default strength — the automation torch action only sets it when its
+    // optional strength parameter is present.
+    val torchStrength: Int? = null,
 ) {
     companion object {
         // Persistence/validation bounds — the single home, referenced by the

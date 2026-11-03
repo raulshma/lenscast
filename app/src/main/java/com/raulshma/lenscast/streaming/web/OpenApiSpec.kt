@@ -184,6 +184,28 @@ object OpenApiSpec {
             ),
         )
 
+        // ── automation ──
+        path(
+            "/api/automation",
+            "get" to operation(
+                listOf("automation"),
+                "The automation state: the master toggle, the configured rules, and the read-only action catalog",
+                mapOf("200" to ok("AutomationStateDto")),
+            ),
+            "put" to operation(
+                listOf("automation"),
+                "Save the master toggle and the rule list (catalog is read-only; rules sanitize through the schedule policy)",
+                mapOf("200" to ok("AutomationStateDto")),
+                requestBody = jsonBody("AutomationUpdateRequestDto"),
+            ),
+            "post" to operation(
+                listOf("automation"),
+                "Save the automation state (alias of PUT)",
+                mapOf("200" to ok("AutomationStateDto")),
+                requestBody = jsonBody("AutomationUpdateRequestDto"),
+            ),
+        )
+
         // ── status / system ──
         path(
             "/api/status",
@@ -599,11 +621,11 @@ object OpenApiSpec {
             ),
             "servers" to listOf(mapOf("url" to "/", "description" to "The device (http://<phone-ip>:8080 by default)")),
             "tags" to listOf(
-                mapOf("name" to "settings"), mapOf("name" to "status"), mapOf("name" to "stream"),
-                mapOf("name" to "camera"), mapOf("name" to "capture"), mapOf("name" to "recording"),
-                mapOf("name" to "gallery"), mapOf("name" to "detection"), mapOf("name" to "deterrence"),
-                mapOf("name" to "auth"), mapOf("name" to "audit"), mapOf("name" to "system"),
-                mapOf("name" to "push"), mapOf("name" to "spec"),
+                mapOf("name" to "settings"), mapOf("name" to "automation"), mapOf("name" to "status"),
+                mapOf("name" to "stream"), mapOf("name" to "camera"), mapOf("name" to "capture"),
+                mapOf("name" to "recording"), mapOf("name" to "gallery"), mapOf("name" to "detection"),
+                mapOf("name" to "deterrence"), mapOf("name" to "auth"), mapOf("name" to "audit"),
+                mapOf("name" to "system"), mapOf("name" to "push"), mapOf("name" to "spec"),
             ),
             "paths" to paths,
             "components" to mapOf(
@@ -679,6 +701,57 @@ object OpenApiSpec {
             "settings" to ref("SettingsResponseDto"),
             required = listOf("schemaVersion", "exportedAtMs", "app", "settings"),
             fixture = "settings-export.json",
+        ),
+        "AutomationStateDto" to schema(
+            "enabled" to boolSchema("The master automation toggle"),
+            "rules" to arrayOf(ref("AutomationRuleDto")),
+            "catalog" to arrayOf(ref("AutomationCatalogActionDto")),
+            required = listOf("enabled", "rules", "catalog"),
+            fixture = "automation.json",
+        ),
+        "AutomationUpdateRequestDto" to schema(
+            "enabled" to boolSchema(),
+            "rules" to arrayOf(ref("AutomationRuleDto")),
+            description = "The PUT body: the toggle and the full rule list persist wholesale. The catalog is read-only on the wire and never accepted here.",
+        ),
+        "AutomationRuleDto" to schema(
+            "id" to stringSchema("Stable identity (the fire-journal key); blank/absent lets the device mint a UUID"),
+            "name" to stringSchema("Free-form display label; trimmed on save"),
+            "enabled" to boolSchema("Per-rule kill switch, independent of the master toggle"),
+            "minuteOfDay" to intSchema("Local wall-clock minute 0..1439; clamped on save"),
+            "daysMask" to intSchema("One bit per ISO day index, bit 0 = Monday … bit 6 = Sunday; clamped to 1..127 on save"),
+            "actions" to arrayOf(ref("AutomationActionDto")),
+            required = listOf("id", "name", "enabled", "minuteOfDay", "daysMask", "actions"),
+            description = "No triggerType field rides the wire: only time_of_day exists today " +
+                "(one source: AutomationRule.TRIGGER_TIME_OF_DAY); an unknown future trigger degrades " +
+                "to it on save instead of firing on the wrong cue.",
+        ),
+        "AutomationActionDto" to schema(
+            "type" to stringSchema("Catalog id, e.g. `torch`; an id outside the catalog is dropped on save"),
+            "params" to mapOf(
+                "type" to "object",
+                "additionalProperties" to stringSchema("All values serialized as strings; parsed and clamped to the catalog bounds on save"),
+            ),
+            required = listOf("type", "params"),
+        ),
+        "AutomationCatalogActionDto" to schema(
+            "id" to stringSchema("The action id an AutomationActionDto.type must name"),
+            "params" to arrayOf(ref("AutomationCatalogParamDto")),
+            "catchUp" to stringSchema("What happens when the rule fires late: `STATEFUL` (always rides catch-up) | `ONESHOT` (grace window only)"),
+            "interruptsStream" to boolSchema("UI warning flag; the executor does not force a teardown — " +
+                "the lens switch rebinds when the camera is free (brief interruption) and defers to the " +
+                "next natural rebind while a recording is active"),
+            required = listOf("id", "params", "catchUp", "interruptsStream"),
+        ),
+        "AutomationCatalogParamDto" to schema(
+            "name" to stringSchema("The exact wire key inside AutomationActionDto.params"),
+            "kind" to stringSchema("How the string value is interpreted: `BOOL` | `INT` | `FLOAT`"),
+            "min" to mapOf("type" to "number", "description" to "Lower bound; null when unbounded"),
+            "max" to mapOf("type" to "number", "description" to "Upper bound; null when unbounded"),
+            "optional" to boolSchema("When true, an absent parameter means leave the current setting unchanged"),
+            "defaultValue" to stringSchema("The value an absent required or invalid value folds to; empty for optional params with no persisted default"),
+            "autoAtZero" to boolSchema("'0' is the auto/unlimited sentinel — clients may render an Auto toggle; false = ordinary value"),
+            required = listOf("name", "kind", "optional", "defaultValue", "autoAtZero"),
         ),
         "CameraSettingsDto" to schema(
             "exposureCompensation" to intSchema(),

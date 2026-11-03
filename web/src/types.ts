@@ -766,3 +766,113 @@ export const DEFAULT_OVERLAY_SETTINGS: Partial<StreamingSettings> = {
   overlayLineHeight: 4,
 }
 
+// ── Automation (time-of-day rules; GET/PUT /api/automation) ──
+// Mirrors the app's AutomationWebHandler DTOs (WebApiDtos.kt): the whole
+// automation surface in one document — master toggle, configured rules, and
+// the read-only action catalog the rule editor renders from.
+
+/** How a catalog param's string value is interpreted (AutomationParamSpec.kind). */
+export type AutomationParamKind = 'BOOL' | 'INT' | 'FLOAT'
+
+/** What happens when a rule fires late (AutomationActionType catch-up policy). */
+export type AutomationCatchUp = 'STATEFUL' | 'ONESHOT'
+
+/**
+ * One step inside an AutomationRuleDto: a catalog action id plus its raw
+ * parameters. Everything is a string on the wire (the same convention as the
+ * persisted AutomationActionSpec) so the shape never needs versioning when an
+ * action gains a parameter — validity and typing are the catalog's job at
+ * sanitize time.
+ */
+export interface AutomationActionDto {
+  /** Catalog id, e.g. `"torch"`; an id outside the catalog is dropped on save. */
+  type: string
+  /** Raw parameter values, all serialized as strings; clamped to the catalog bounds on save. */
+  params: Record<string, string>
+}
+
+/**
+ * One time-of-day automation rule as the dashboard configured it. The
+ * domain's `triggerType` is deliberately omitted from the wire: only
+ * `time_of_day` exists today, and the sanitize step resets anything else to
+ * it. A blank `id` on write lets the device mint the fire-journal UUID.
+ */
+export interface AutomationRuleDto {
+  /** Stable identity (the fire-journal key); blank on a new rule. */
+  id: string
+  /** Free-form display label; trimmed on save, never interpreted. */
+  name: string
+  /** Per-rule kill switch, independent of the master automation toggle. */
+  enabled: boolean
+  /** Local wall-clock minute 0..1439; clamped into that span on save. */
+  minuteOfDay: number
+  /**
+   * One bit per ISO day index: bit 0 = Monday … bit 6 = Sunday (127 = every
+   * day); clamped to 1..127 on save.
+   */
+  daysMask: number
+  /** The ordered action list; each entry is validated against the catalog on save. */
+  actions: AutomationActionDto[]
+}
+
+/**
+ * One parameter of a catalog action, as GET /api/automation publishes it: the
+ * schema a rule editor needs to render and validate inputs. Read-only — the
+ * catalog is device truth and never accepted back on the wire.
+ */
+export interface AutomationCatalogParamDto {
+  /** The exact wire key inside AutomationActionDto.params. */
+  name: string
+  /** How the string value is interpreted. */
+  kind: AutomationParamKind
+  /** Lower bound, or null for unbounded; omitted on the wire when null. */
+  min?: number | null
+  /** Upper bound, or null for unbounded; omitted on the wire when null. */
+  max?: number | null
+  /** When true, an absent parameter means "leave the current setting unchanged". */
+  optional: boolean
+  /** The value an absent required or invalid value folds to; empty for optional params with no persisted default. */
+  defaultValue: string
+  /**
+   * '0' is the auto/unlimited sentinel — clients may render an Auto toggle;
+   * false = ordinary value. Always serialized (a non-nullable Kotlin boolean,
+   * unlike the nullable min/max which are omitted on the wire when null).
+   */
+  autoAtZero: boolean
+}
+
+/** One action the automation engine can execute, as GET /api/automation publishes it. */
+export interface AutomationCatalogActionDto {
+  /** The action id an AutomationActionDto.type must name. */
+  id: string
+  /** The parameter schema, in display/contract order. */
+  params: AutomationCatalogParamDto[]
+  /** What happens when the rule fires late. */
+  catchUp: AutomationCatchUp
+  /**
+   * UI warning flag; the executor does not force a teardown — the lens switch
+   * rebinds when the camera is free (brief interruption) and defers to the
+   * next natural rebind while a recording is active.
+   */
+  interruptsStream: boolean
+}
+
+/** GET /api/automation — the master toggle, the rules, and the action catalog. */
+export interface AutomationStateDto {
+  enabled: boolean
+  rules: AutomationRuleDto[]
+  catalog: AutomationCatalogActionDto[]
+}
+
+/**
+ * PUT /api/automation body: the master toggle plus the full rule list (the
+ * document persists wholesale, like the settings sections). The catalog is
+ * read-only on the wire and never accepted here; the response is a fresh
+ * GET-shaped read, so the client sees the sanitized truth rather than what
+ * it sent.
+ */
+export interface AutomationUpdateRequestDto {
+  enabled: boolean
+  rules: AutomationRuleDto[]
+}
+

@@ -19,6 +19,7 @@ import org.junit.Test
 class ApiRouterTest {
 
     private val settings = mockk<SettingsWebHandler>(relaxed = true)
+    private val automation = mockk<AutomationWebHandler>(relaxed = true)
     private val status = mockk<StatusWebHandler>(relaxed = true)
     private val stream = mockk<StreamWebHandler>(relaxed = true)
     private val capture = mockk<CaptureWebHandler>(relaxed = true)
@@ -39,6 +40,7 @@ class ApiRouterTest {
 
     private fun router() = ApiRouter(
         settings = settings,
+        automation = automation,
         status = status,
         stream = stream,
         capture = capture,

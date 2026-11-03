@@ -21,6 +21,7 @@ import com.raulshma.lenscast.camera.model.HdrMode
 import com.raulshma.lenscast.camera.model.NightVisionMode
 import com.raulshma.lenscast.camera.model.OutputRotationPolicy
 import com.raulshma.lenscast.camera.model.SelfTimerMode
+import com.raulshma.lenscast.camera.model.TorchStrengthPolicy
 import com.raulshma.lenscast.camera.model.MaskingType
 import com.raulshma.lenscast.camera.model.MaskingZone
 import com.raulshma.lenscast.camera.model.MotionZone
@@ -30,6 +31,9 @@ import com.raulshma.lenscast.camera.model.PhotoAspectRatio
 import com.raulshma.lenscast.camera.model.Resolution
 import com.raulshma.lenscast.camera.model.WhiteBalance
 import com.raulshma.lenscast.camera.model.PhotoCapturePlan
+import com.raulshma.lenscast.automation.schedule.AutomationActionSpec
+import com.raulshma.lenscast.automation.schedule.AutomationRule
+import com.raulshma.lenscast.automation.schedule.AutomationSchedulePolicy
 import com.raulshma.lenscast.capture.model.FlashMode
 import com.raulshma.lenscast.capture.model.SoundClassPolicy
 import com.raulshma.lenscast.core.AppJson
@@ -231,6 +235,9 @@ private object Keys {
     val EVENT_RETENTION_DAYS = intPreferencesKey("event_retention_days")
     val STORAGE_QUOTA_MB = intPreferencesKey("storage_quota_mb")
     val MEDIA_ENCRYPTION_ENABLED = stringPreferencesKey("media_encryption_enabled")
+    val AUTOMATION_ENABLED = stringPreferencesKey("automation_enabled")
+    val AUTOMATION_RULES = stringPreferencesKey("automation_rules")
+    val TORCH_STRENGTH = intPreferencesKey("torch_strength")
 }
 
 /**
@@ -710,6 +717,28 @@ internal val autoDeterrenceCooldownSecondsPref = intPref(
     ),
 )
 
+/**
+ * The time-of-day automation master toggle, off by default: a fresh install
+ * must not start executing rules the user has never seen.
+ */
+internal val automationEnabledPref = boolPref(Keys.AUTOMATION_ENABLED, defaultTrue = false)
+
+/**
+ * The time-of-day rule list, the JSON-list pattern of [motionZonesPref]: a
+ * Moshi codec behind AppJson's one instance with a total decode (malformed
+ * payload → empty list) and "persist a valid value" on both sides — decode
+ * mints ids for rules that lost theirs and sanitizes the whole list, encode
+ * sanitizes before writing, so no writer (settings screen, Web API, backup
+ * restore) can persist an out-of-bounds rule or an unknown action.
+ */
+internal val automationRulesPref = SettingPref(
+    default = emptyList<AutomationRule>(),
+    decode = { prefs -> parseAutomationRules(prefs[Keys.AUTOMATION_RULES]) },
+    encode = { prefs, rules ->
+        prefs[Keys.AUTOMATION_RULES] = serializeAutomationRules(rules)
+    },
+)
+
 internal val backupEnabledPref = boolPref(Keys.BACKUP_ENABLED, defaultTrue = false)
 
 internal val backupWifiOnlyPref = boolPref(Keys.BACKUP_WIFI_ONLY, defaultTrue = true)
@@ -881,6 +910,8 @@ private fun decodeCameraSettings(prefs: Preferences): CameraSettings = CameraSet
     sceneMode = prefs[Keys.SCENE_MODE],
     nightVisionMode = parseEnum(prefs[Keys.NIGHT_VISION_MODE], NightVisionMode.OFF),
     torchEnabled = readBool(prefs, Keys.TORCH_ENABLED, defaultTrue = false),
+    // Absent = device default strength; a present key is the API 35+ override.
+    torchStrength = prefs[Keys.TORCH_STRENGTH],
     outputRotation = OutputRotationPolicy.coerce(prefs[Keys.OUTPUT_ROTATION] ?: 0),
     orientationLocked = readBool(prefs, Keys.ORIENTATION_LOCKED, defaultTrue = false),
 )
@@ -925,6 +956,20 @@ private fun encodeCameraSettings(prefs: MutablePreferences, settings: CameraSett
     }
     prefs[Keys.NIGHT_VISION_MODE] = settings.nightVisionMode.name
     writeBool(prefs, Keys.TORCH_ENABLED, settings.torchEnabled)
+    // Optional like sceneMode: written only when set, removed when null so a
+    // cleared strength decodes back to the device default, never a stale key.
+    // The write clamps into the persistence bound (1..MAX_REQUESTED_LEVEL):
+    // every other bounded CameraSettings field clamps at the store, so a
+    // writer that sends a raw out-of-span strength still persists a valid
+    // one — the device's real max keeps winning at apply time.
+    if (settings.torchStrength != null) {
+        prefs[Keys.TORCH_STRENGTH] = settings.torchStrength.coerceIn(
+            TorchStrengthPolicy.MIN_LEVEL,
+            TorchStrengthPolicy.MAX_REQUESTED_LEVEL,
+        )
+    } else {
+        prefs.remove(Keys.TORCH_STRENGTH)
+    }
     prefs[Keys.OUTPUT_ROTATION] = OutputRotationPolicy.coerce(settings.outputRotation)
     writeBool(prefs, Keys.ORIENTATION_LOCKED, settings.orientationLocked)
 }
@@ -1132,6 +1177,104 @@ internal fun serializeMotionZones(zones: List<MotionZone>): String {
     }
 }
 
+/**
+ * The persisted automation-rule JSON shapes, behind [AppJson]'s one Moshi
+ * instance. New persistence (no legacy payload to stay decode-compatible
+ * with), but the same nullable-field + total-decode conventions as the
+ * masking/motion codecs: every field is nullable so an absent key folds to
+ * [AutomationRule]'s documented default (fresh UUID for an absent id), a
+ * malformed payload degrades to an empty rule list instead of killing the
+ * whole store decode, and params ride a string map so the shape never needs
+ * versioning when an action gains a parameter.
+ */
+@JsonClass(generateAdapter = true)
+internal data class AutomationRuleJson(
+    val id: String? = null,
+    val name: String? = null,
+    val enabled: Boolean? = null,
+    val triggerType: String? = null,
+    val minuteOfDay: Int? = null,
+    val daysMask: Int? = null,
+    val actions: List<AutomationActionJson>? = null,
+)
+
+@JsonClass(generateAdapter = true)
+internal data class AutomationActionJson(
+    val type: String? = null,
+    val params: Map<String, String>? = null,
+)
+
+private val automationRulesType = Types.newParameterizedType(
+    List::class.java,
+    AutomationRuleJson::class.java,
+)
+
+private val automationRulesAdapter by lazy {
+    AppJson.moshi.adapter<List<AutomationRuleJson>>(automationRulesType)
+}
+
+/**
+ * The automation-rule persistence codec: total decode to [AutomationRule]s,
+ * then straight through [AutomationSchedulePolicy.sanitizeRules] — which
+ * mints nothing but clamps every field, drops unknown actions, and caps the
+ * list — so a decoded rule list is always executable as-is. The id mint
+ * happens here (upstream of the sanitize, per its contract): a rule without
+ * an id could never be journaled and would re-fire on every poll tick.
+ * Internal so JVM tests can pin the shape and the malformed handling
+ * without a Context or DataStore.
+ */
+internal fun parseAutomationRules(jsonString: String?): List<AutomationRule> {
+    if (jsonString.isNullOrEmpty()) return emptyList()
+    return try {
+        val defaults = AutomationRule()
+        val dtos = automationRulesAdapter.fromJson(jsonString) ?: return emptyList()
+        val rules = dtos.map { dto ->
+            AutomationRule(
+                id = dto.id?.takeIf { it.isNotBlank() } ?: java.util.UUID.randomUUID().toString(),
+                name = dto.name ?: defaults.name,
+                enabled = dto.enabled ?: defaults.enabled,
+                triggerType = dto.triggerType ?: defaults.triggerType,
+                minuteOfDay = dto.minuteOfDay ?: defaults.minuteOfDay,
+                daysMask = dto.daysMask ?: defaults.daysMask,
+                actions = dto.actions.orEmpty().map { action ->
+                    AutomationActionSpec(
+                        type = action.type ?: "",
+                        params = action.params ?: emptyMap(),
+                    )
+                },
+            )
+        }
+        AutomationSchedulePolicy.sanitizeRules(rules)
+    } catch (e: Exception) {
+        Log.e("SettingsDataStore", "Failed to parse automation rules", e)
+        emptyList()
+    }
+}
+
+internal fun serializeAutomationRules(rules: List<AutomationRule>): String {
+    return try {
+        // The save-side clamp owner, same as the overlay/masking saves:
+        // whatever the writer sent, a valid value is what lands on disk.
+        val dtos = AutomationSchedulePolicy.sanitizeRules(rules).map { rule ->
+            AutomationRuleJson(
+                id = rule.id,
+                name = rule.name,
+                enabled = rule.enabled,
+                triggerType = rule.triggerType,
+                minuteOfDay = rule.minuteOfDay,
+                daysMask = rule.daysMask,
+                actions = rule.actions.map { action ->
+                    AutomationActionJson(type = action.type, params = action.params)
+                },
+            )
+        }
+        automationRulesAdapter.toJson(dtos)
+    } catch (e: Exception) {
+        Log.e("SettingsDataStore", "Failed to serialize automation rules", e)
+        "[]"
+    }
+}
+
 class SettingsDataStore(
     private val context: Context,
     private val shareInScope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
@@ -1320,6 +1463,10 @@ class SettingsDataStore(
     val sirenDurationSeconds: StateFlow<Int> = sirenDurationSecondsPref.shared()
 
     val autoDeterrenceCooldownSeconds: StateFlow<Int> = autoDeterrenceCooldownSecondsPref.shared()
+
+    val automationEnabled: StateFlow<Boolean> = automationEnabledPref.shared()
+
+    val automationRules: StateFlow<List<AutomationRule>> = automationRulesPref.shared()
 
     val backupEnabled: StateFlow<Boolean> = backupEnabledPref.shared()
 
@@ -1573,6 +1720,10 @@ class SettingsDataStore(
 
     suspend fun saveAutoDeterrenceCooldownSeconds(seconds: Int) =
         autoDeterrenceCooldownSecondsPref.save(seconds)
+
+    suspend fun saveAutomationEnabled(enabled: Boolean) = automationEnabledPref.save(enabled)
+
+    suspend fun saveAutomationRules(rules: List<AutomationRule>) = automationRulesPref.save(rules)
 
     suspend fun saveBackupEnabled(enabled: Boolean) = backupEnabledPref.save(enabled)
 

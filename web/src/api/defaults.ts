@@ -181,6 +181,17 @@ export const API_DEFAULTS = {
   // Opt-in media-at-rest encryption (StreamingSettingsDto.mediaEncryptionEnabled).
   mediaEncryptionEnabled: false,
 
+  // Automation (AutomationStateDto): the master toggle and rule list default
+  // off/empty; the catalog is device truth and only ever arrives from GET,
+  // so its empty-list default is the pre-fetch fallback shape. The caps
+  // mirror StreamDefaults' automation bounds — the UI greys the add
+  // affordances out at them (AUTOMATION_MAX_RULES / MAX_ACTIONS_PER_RULE).
+  automationEnabled: false,
+  automationRules: [],
+  automationCatalog: [],
+  automationMaxRules: 16,
+  automationMaxActionsPerRule: 8,
+
   // Overlay block (OverlaySettings.DEFAULT, embedded in StreamingSettingsDto)
   overlayEnabled: false,
   overlayPosition: 'TOP_LEFT',
