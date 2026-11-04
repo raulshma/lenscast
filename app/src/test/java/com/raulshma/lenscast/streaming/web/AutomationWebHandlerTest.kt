@@ -1,0 +1,113 @@
+package com.raulshma.lenscast.streaming.web
+
+import android.app.Application
+import com.raulshma.lenscast.core.AppJson
+import com.raulshma.lenscast.data.SettingsDataStore
+import com.raulshma.lenscast.streaming.model.AutomationStateDto
+import java.util.UUID
+import kotlinx.coroutines.runBlocking
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertTrue
+import org.junit.Before
+import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.RuntimeEnvironment
+import org.robolectric.annotation.Config
+
+/**
+ * Robolectric pass over the REAL [AutomationWebHandler] against the REAL
+ * [SettingsDataStore] (Preferences DataStore on a per-test temp dir): the PUT
+ * contract the web dashboard depends on.
+ *
+ * **The regression this pins:** a rule saved through the API used to persist
+ * without an id — the store decode minted an ephemeral identity on every
+ * read, so the fire journal keyed entries on ids that vanished at the next
+ * decode, the dedupe/cooldown guarantees collapsed, and the PUT response
+ * could echo the pre-write rules (the flows re-decode on a collector's beat
+ * after the save lands). The handler now mints blank wire ids at the
+ * boundary (the in-app save path's convention) and both routes answer from a
+ * fresh disk read.
+ *
+ * **Covered here** (all real code paths): blank-id minting, the sanitizer's
+ * clamps as the client sees them, PUT answering with exactly what a
+ * subsequent GET reads (same ids — the freshness contract), explicit ids
+ * surviving a re-save, and the persisted JSON carrying an id per rule (the
+ * store invariant, asserted through the handler here and at the codec level
+ * in SettingsDataStoreAutomationPrefsTest).
+ */
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [34], application = AutomationWebHandlerTest.PlainApplication::class)
+class AutomationWebHandlerTest {
+
+    class PlainApplication : Application()
+
+    private lateinit var handler: AutomationWebHandler
+
+    private val stateAdapter = AppJson.moshi.adapter(AutomationStateDto::class.java)
+
+    @Before
+    fun setUp() {
+        handler = AutomationWebHandler(SettingsDataStore(RuntimeEnvironment.getApplication()))
+    }
+
+    private fun putOneRule(id: String = ""): AutomationStateDto = runBlocking {
+        stateAdapter.fromJson(
+            handler.put(
+                // One deliberately invalid rule: blank id, unknown trigger,
+                // unknown condition/action, out-of-bounds fields.
+                """{"enabled":true,"rules":[{"id":"$id","name":"Probe","enabled":true,""" +
+                    """"triggerType":"not_a_trigger","minuteOfDay":2500,"daysMask":0,""" +
+                    """"conditions":[{"type":"nope"}],"cooldownSeconds":-5,"actions":[""" +
+                    """{"type":"torch","params":{"enabled":"true","strength":"99"}},{"type":"nope"}]}]}""",
+            ),
+        )!!
+    }
+
+    @Test
+    fun `put mints ids clamps fields and answers with the persisted truth`() = runBlocking {
+        val response = putOneRule()
+        val rule = response.rules.single()
+
+        // The wire's blank id minted into a real UUID...
+        UUID.fromString(rule.id)
+        // ...the clamps applied as the client sees them...
+        assertEquals(1_439, rule.minuteOfDay)
+        assertEquals(1, rule.daysMask)
+        assertEquals(0, rule.cooldownSeconds)
+        assertEquals(listOf("torch"), rule.actions.map { it.type })
+        assertEquals("8", rule.actions.single().params["strength"])
+        assertTrue(response.enabled)
+        // ...and the answer IS the disk state: a fresh GET reads the same id.
+        assertEquals(listOf(rule.id), stateAdapter.fromJson(handler.get())!!.rules.map { it.id })
+    }
+
+    @Test
+    fun `put with a blank id keeps the identity stable across re-saves and reads`() = runBlocking {
+        val first = putOneRule().rules.single().id
+        // The dashboard's edit flow: echo the id the device minted back on
+        // the next save. The id must survive — a new one would orphan the
+        // rule's fire-journal entries.
+        val second = putOneRule(id = first).rules.single().id
+        assertEquals(first, second)
+        assertEquals(first, stateAdapter.fromJson(handler.get())!!.rules.single().id)
+    }
+
+    @Test
+    fun `put answers with the new rules even when the flows lag the write`() = runBlocking {
+        // Prime the flows with one rule, then replace the list wholesale.
+        val first = putOneRule().rules.single().id
+        val body = """{"enabled":true,"rules":[{"id":"","name":"Second","enabled":true,""" +
+            """"actions":[{"type":"torch","params":{"enabled":"true"}}]}]}"""
+        val response = stateAdapter.fromJson(handler.put(body))!!
+        // The response is a disk read taken after the save: the OLD rule is
+        // gone (the wholesale convention) and the new id is minted — no
+        // echo of the pre-write list.
+        assertEquals(listOf("Second"), response.rules.map { it.name })
+        val newId = response.rules.single().id
+        UUID.fromString(newId)
+        assertNotEquals(first, newId)
+        assertEquals(listOf(newId), stateAdapter.fromJson(handler.get())!!.rules.map { it.id })
+    }
+}

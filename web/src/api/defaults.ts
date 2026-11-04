@@ -182,15 +182,21 @@ export const API_DEFAULTS = {
   mediaEncryptionEnabled: false,
 
   // Automation (AutomationStateDto): the master toggle and rule list default
-  // off/empty; the catalog is device truth and only ever arrives from GET,
-  // so its empty-list default is the pre-fetch fallback shape. The caps
+  // off/empty; the catalogs are device truth and only ever arrive from GET,
+  // so their empty-list defaults are the pre-fetch fallback shape. The caps
   // mirror StreamDefaults' automation bounds — the UI greys the add
-  // affordances out at them (AUTOMATION_MAX_RULES / MAX_ACTIONS_PER_RULE).
+  // affordances out at them (AUTOMATION_MAX_RULES / MAX_ACTIONS_PER_RULE /
+  // MAX_CONDITIONS_PER_RULE), and the cooldown bounds mirror the rule
+  // sanitizer's clamp span.
   automationEnabled: false,
   automationRules: [],
   automationCatalog: [],
   automationMaxRules: 16,
   automationMaxActionsPerRule: 8,
+  automationMaxConditionsPerRule: 8,
+  automationCooldownMinSeconds: 0,
+  automationCooldownMaxSeconds: 86_400,
+  automationCooldownDefaultSeconds: 60,
 
   // Overlay block (OverlaySettings.DEFAULT, embedded in StreamingSettingsDto)
   overlayEnabled: false,

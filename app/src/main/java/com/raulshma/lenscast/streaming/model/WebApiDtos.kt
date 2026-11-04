@@ -947,13 +947,27 @@ data class AutomationActionDto(
 )
 
 /**
- * One time-of-day automation rule as the dashboard configured it. The
- * domain's `triggerType` is deliberately omitted from the wire: only
- * `time_of_day` exists today (one source:
- * [com.raulshma.lenscast.automation.schedule.AutomationRule.TRIGGER_TIME_OF_DAY]),
- * and the sanitize step resets anything else to it — so a future trigger
- * written by a newer app version degrades to a time trigger instead of
- * needing a wire field the current clients could set wrong.
+ * One precondition inside an [AutomationRuleDto] (the rule's "ONLY WHEN"
+ * clause): a catalog condition id plus its raw parameters — the same string
+ * convention as [AutomationActionDto]; validity is the condition catalog's
+ * job at sanitize time, and an unknown condition is dropped on save.
+ */
+@JsonClass(generateAdapter = true)
+data class AutomationConditionDto(
+    /** Condition catalog id, e.g. `"time_window"`; unknown ids are dropped on save. */
+    val type: String = "",
+    /** Raw parameter values, all serialized as strings; clamped to the catalog bounds on save. */
+    val params: Map<String, String> = emptyMap(),
+)
+
+/**
+ * One automation rule as the dashboard configured it: WHEN
+ * [triggerType] [+ ONLY WHEN [conditions]], THEN [actions]. A mirror of
+ * [com.raulshma.lenscast.automation.schedule.AutomationRule]; every field is
+ * sanitized through
+ * [com.raulshma.lenscast.automation.schedule.AutomationSchedulePolicy] on
+ * save, so an unknown trigger degrades to `time_of_day`, unknown
+ * conditions/actions drop, and every bound clamps.
  */
 @JsonClass(generateAdapter = true)
 data class AutomationRuleDto(
@@ -967,10 +981,34 @@ data class AutomationRuleDto(
     val name: String = "",
     /** Per-rule kill switch, independent of the master automation toggle. */
     val enabled: Boolean = true,
-    /** Local wall-clock minute 0..1439; clamped into that span on save. */
+    /**
+     * Which cue fires the rule — a trigger catalog id
+     * (`time_of_day`, `motion_detected`, `sound_detected`, `tamper_detected`,
+     * `charging_changed`, `battery_level`, `streaming_changed`,
+     * `viewers_changed`, `app_started`); anything else folds to
+     * `time_of_day` on save.
+     */
+    val triggerType: String = "time_of_day",
+    /**
+     * The `time_of_day` fire minute, local wall-clock 0..1439; clamped into
+     * that span on save. Meaningless for event triggers (the editor hides
+     * it) but kept top-level so the original time-only wire shape never
+     * migrated.
+     */
     val minuteOfDay: Int = 0,
-    /** One bit per ISO day index (bit 0 = Monday … bit 6 = Sunday); clamped to 1..127 on save. */
+    /**
+     * The `time_of_day` day mask: one bit per ISO day index (bit 0 = Monday
+     * … bit 6 = Sunday); clamped to 1..127 on save.
+     */
     val daysMask: Int = 127,
+    /** Parameters for non-time triggers (e.g. `battery_level`'s `level`); clamped on save. */
+    val triggerParams: Map<String, String> = emptyMap(),
+    /** Preconditions that must hold when the trigger fires; unknown conditions drop on save. */
+    val conditions: List<AutomationConditionDto> = emptyList(),
+    /** How multiple conditions combine: `"all"` | `"any"`; anything else folds to `all`. */
+    val conditionMode: String = "all",
+    /** Minimum seconds between two firings (event rules); clamped to 0..86400 on save. */
+    val cooldownSeconds: Int = 60,
     /** The ordered action list; each entry is validated against the catalog on save. */
     val actions: List<AutomationActionDto> = emptyList(),
 )
@@ -1021,15 +1059,47 @@ data class AutomationCatalogActionDto(
 )
 
 /**
+ * One trigger a rule may fire on, as GET /api/automation publishes it. A
+ * mirror of [com.raulshma.lenscast.automation.schedule.AutomationTriggerType]
+ * — read-only device truth. `time_of_day`'s params list is empty: its
+ * parameters are the rule's own `minuteOfDay`/`daysMask` fields, which the
+ * editor renders as its dedicated time inputs.
+ */
+@JsonClass(generateAdapter = true)
+data class AutomationCatalogTriggerDto(
+    /** The trigger id an [AutomationRuleDto.triggerType] must name. */
+    val id: String = "",
+    /** The parameter schema, in display/contract order. */
+    val params: List<AutomationCatalogParamDto> = emptyList(),
+)
+
+/**
+ * One precondition a rule may require, as GET /api/automation publishes it.
+ * A mirror of
+ * [com.raulshma.lenscast.automation.schedule.AutomationConditionType] —
+ * read-only device truth.
+ */
+@JsonClass(generateAdapter = true)
+data class AutomationCatalogConditionDto(
+    /** The condition id an [AutomationConditionDto.type] must name. */
+    val id: String = "",
+    /** The parameter schema, in display/contract order. */
+    val params: List<AutomationCatalogParamDto> = emptyList(),
+)
+
+/**
  * GET /api/automation — the whole automation surface in one document: the
- * master toggle, the configured rules, and the action catalog the rule editor
- * renders from. The catalog is read-only on the wire.
+ * master toggle, the configured rules, and the three catalogs (actions,
+ * triggers, conditions) the rule editor renders from. The catalogs are
+ * read-only on the wire.
  */
 @JsonClass(generateAdapter = true)
 data class AutomationStateDto(
     val enabled: Boolean = false,
     val rules: List<AutomationRuleDto> = emptyList(),
     val catalog: List<AutomationCatalogActionDto> = emptyList(),
+    val triggers: List<AutomationCatalogTriggerDto> = emptyList(),
+    val conditions: List<AutomationCatalogConditionDto> = emptyList(),
 )
 
 /**

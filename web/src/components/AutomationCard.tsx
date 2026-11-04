@@ -4,7 +4,12 @@ import { API_DEFAULTS } from '../api/defaults'
 import { getAutomation, putAutomation } from '../api/client'
 import { t } from '../lib/i18n'
 import {
+  AUTOMATION_ALL_DAYS_MASK,
+  automationConditionLabelKey,
+  automationConditionSummaryLines,
   automationSummaryLines,
+  automationTriggerLabelKey,
+  automationTriggerSummaryLines,
   formatMinuteOfDay,
   isEveryDayMask,
   newAutomationRule,
@@ -40,6 +45,16 @@ export default function AutomationCard(props: Props) {
 
   const readOnly = () => props.readOnly?.() ?? false
   const atRuleCap = () => (state()?.rules.length ?? 0) >= API_DEFAULTS.automationMaxRules
+
+  /** A time-window condition's persisted day mask (the sanitize default when absent). */
+  const conditionDaysMask = (condition: { params: Record<string, string> }): number => {
+    const parsed = Number.parseInt(condition.params['days_mask'] ?? '', 10)
+    return Number.isFinite(parsed) ? parsed : AUTOMATION_ALL_DAYS_MASK
+  }
+
+  /** The armed ISO day indices (0 = Monday … 6 = Sunday) in a day mask. */
+  const armedDaysOf = (daysMask: number): number[] =>
+    ARM_DAY_LABELS.map((_, i) => i).filter((i) => isDayArmed(daysMask, i))
 
   onMount(() => {
     void reload()
@@ -173,7 +188,14 @@ export default function AutomationCard(props: Props) {
               <div class="automation-rule-head">
                 <div class="automation-rule-title">
                   <span class="automation-rule-name">{rule.name || t('automation.ruleUnnamed')}</span>
-                  <span class="automation-rule-time">{formatMinuteOfDay(rule.minuteOfDay)}</span>
+                  {/* Time rules show the classic HH:mm; event rules show their
+                      localized trigger label (their "when …" detail rides the
+                      trigger summary line below). */}
+                  <span class="automation-rule-time">
+                    {rule.triggerType === 'time_of_day'
+                      ? formatMinuteOfDay(rule.minuteOfDay)
+                      : t(automationTriggerLabelKey(rule.triggerType))}
+                  </span>
                 </div>
                 <label class="toggle-switch" for={`automation-rule-toggle-${rule.id}`}>
                   <input
@@ -187,24 +209,59 @@ export default function AutomationCard(props: Props) {
                 </label>
               </div>
 
-              <div class="automation-rule-days">
-                <Show
-                  when={!isEveryDayMask(rule.daysMask)}
-                  fallback={<span class="automation-rule-everyday">{t('automation.daysEveryDay')}</span>}
-                >
-                  <span class="automation-day-chips">
-                    <For each={ARM_DAY_LABELS}>
-                      {(label, i) => (
-                        <Show when={isDayArmed(rule.daysMask, i())}>
-                          <span class="automation-day-chip active">{label}</span>
-                        </Show>
-                      )}
-                    </For>
-                  </span>
-                </Show>
-              </div>
+              <Show when={rule.triggerType === 'time_of_day'}>
+                <div class="automation-rule-days">
+                  <Show
+                    when={!isEveryDayMask(rule.daysMask)}
+                    fallback={<span class="automation-rule-everyday">{t('automation.daysEveryDay')}</span>}
+                  >
+                    <span class="automation-day-chips">
+                      <For each={ARM_DAY_LABELS}>
+                        {(label, i) => (
+                          <Show when={isDayArmed(rule.daysMask, i())}>
+                            <span class="automation-day-chip active">{label}</span>
+                          </Show>
+                        )}
+                      </For>
+                    </span>
+                  </Show>
+                </div>
+              </Show>
 
               <div class="automation-summary-lines">
+                <For each={automationTriggerSummaryLines(rule)}>
+                  {(line) => <div class="automation-summary-line">{t(line.key, line.params)}</div>}
+                </For>
+                <Show when={rule.conditions.length > 0}>
+                  <div class="automation-summary-line automation-summary-conditions">
+                    {t('automation.ruleConditions')}
+                    <For each={rule.conditions}>
+                      {(condition) => (
+                        <div class="automation-summary-line automation-summary-condition">
+                          {t(automationConditionLabelKey(condition.type))}
+                          <For each={automationConditionSummaryLines(condition)}>
+                            {(line) => <span> · {t(line.key, line.params)}</span>}
+                          </For>
+                          {/* The time window's day suffix needs the localized
+                              day chips' labels, so it composes here. */}
+                          <Show when={condition.type === 'time_window' && !isEveryDayMask(conditionDaysMask(condition))}>
+                            <span>
+                              {' · '}
+                              <For each={armedDaysOf(conditionDaysMask(condition))}>
+                                {(day, i) => (
+                                  <>
+                                    <Show when={i() > 0}>, </Show>
+                                    {ARM_DAY_LABELS[day]}
+                                  </>
+                                )}
+                              </For>
+                            </span>
+                          </Show>
+                        </div>
+                      )}
+                    </For>
+                  </div>
+                </Show>
                 <Show
                   when={rule.actions.length > 0}
                   fallback={<span class="automation-summary-empty">{t('automation.ruleNoActions')}</span>}
@@ -270,6 +327,8 @@ export default function AutomationCard(props: Props) {
             draft={draft}
             isNew={isNewRule()}
             catalog={state()?.catalog ?? []}
+            triggers={state()?.triggers ?? []}
+            conditions={state()?.conditions ?? []}
             saving={saving()}
             onClose={() => setEditing(null)}
             onSave={handleEditorSave}

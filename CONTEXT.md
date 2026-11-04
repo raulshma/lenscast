@@ -1339,25 +1339,36 @@ stream/recording lifecycle actions, and `WearSettingsStore` holds the phone
 base URL and credentials locally on the watch.
 
 ### Automation Rule
-**`automation/schedule/AutomationRule.kt`** — one time-of-day rule as the
-user configured it ("on these days at this minute, run these actions"): a
-stable `id` (the Fire Journal's key; the store decode mints a fresh UUID
-for an absent one, because an id-less rule could never be journaled and
-would re-fire on every poll tick), a free-form `name`, a per-rule `enabled`
-kill switch independent of the master toggle, a reserved `triggerType`
-discriminator (only `time_of_day` is defined today; the sanitize step
-resets anything else to it, so an unknown future trigger degrades to a time
-trigger instead of firing on the wrong cue), a local `minuteOfDay`
-0..1439, a `daysMask` in the Motion Arming Policy bit convention (bit 0 =
-Monday … bit 6 = Sunday, 127 = every day — one mask semantics, not two),
-and the ordered action list. Deliberately a plain wire/persistence shape:
-every decision (when a rule is due, what its actions mean) lives in the
-Automation Schedule Policy and the Automation Action Catalog, keeping the
-scheduling surface JVM-testable. Persisted through the Settings Store's
-`AutomationRuleJson` codec, which guarantees a total decode (a malformed
-payload degrades to an empty list) and hands every rule through
-`sanitizeRules` before it is trusted — the data-class defaults are
-decode-fallbacks, not trusted wire values.
+**`automation/schedule/AutomationRule.kt`** — one if/then rule as the user
+configured it (WHEN a trigger, ONLY WHEN optional conditions, THEN
+actions): a stable `id` (the Fire Journal's key; the writers mint it — the
+web handler and the in-app ViewModel at save, the store's serializer
+persisting one for any writer that sent none, so a null id never lands on
+disk, and the store decode mints for legacy payloads without one — because
+an id-less rule could never be journaled and would re-fire, and an id that
+re-minted on every decode would orphan its journal entries just the same),
+a free-form `name`, a per-rule `enabled`
+kill switch independent of the master toggle, a `triggerType` discriminator
+out of the Automation Trigger Catalog (`time_of_day` is the default, so old
+time-only payloads decode unchanged; the sanitize step resets anything else
+to it, so an unknown future trigger degrades to a time trigger instead of
+firing on the wrong cue), the trigger's own `triggerParams` string map
+(time_of_day ignores it — its "params" stay the top-level local
+`minuteOfDay` 0..1439 and `daysMask` in the Motion Arming Policy bit
+convention: bit 0 = Monday … bit 6 = Sunday, 127 = every day, one mask
+semantics, not two), the ordered `conditions` list of
+`AutomationConditionSpec`s (an EMPTY list is unconditional) with a
+`conditionMode` of `"all"` (default) or `"any"`, a `cooldownSeconds` floor
+for event triggers (0..86400, default
+`StreamDefaults.AUTOMATION_COOLDOWN_DEFAULT_SECONDS` = 60), and the ordered
+action list. Deliberately a plain wire/persistence shape: every decision
+(when a rule is due, what its entries mean) lives in the Automation
+Schedule Policy and the three catalogs, keeping the scheduling surface
+JVM-testable. Persisted through the Settings Store's `AutomationRuleJson`
+codec, which guarantees a total decode (a malformed payload degrades to an
+empty list; a pre-if/then payload's new fields fold to their defaults) and
+hands every rule through `sanitizeRules` before it is trusted — the
+data-class defaults are decode-fallbacks, not trusted wire values.
 
 ### Automation Action Spec
 **`automation/schedule/AutomationRule.kt` (`AutomationActionSpec`)** — one
@@ -1401,50 +1412,155 @@ a feature. Documented sentinels: `iso`/`exposure_time_ms` "0" mean auto,
 explicit no-limit. `sanitizeAction` is the one validate-and-canonicalize
 ladder (the Settings Store's codec, the Web API PUT, and the schedule
 policy's filter all ride it), and GET `/api/automation` publishes the
-catalog read-only as device truth — the Automation Web Handler's rule
-editor renders bounds and kinds from it and never sends it back.
+catalog read-only as device truth (alongside the trigger and condition
+catalogs) — the Automation Web Handler's rule editor renders bounds and
+kinds from it and never sends it back.
+
+### Automation Trigger Catalog
+**`automation/schedule/AutomationTriggerCatalog.kt`** — the WHEN side's
+closed vocabulary, mirroring the Automation Action Catalog's shape (same
+`AutomationParamSpec` schema type, additive-only ids pinned by a JVM test,
+per-type label dispatch at the UI seams). Nine trigger ids: `time_of_day`
+(the default; special-cased — its "params" are the rule's top-level
+`minuteOfDay`/`daysMask`, so old payloads decode unchanged),
+`motion_detected`, `sound_detected`, `tamper_detected` (the three
+parameterless detection events), `charging_changed` (`charging` BOOL,
+default true = on the connect edge), `battery_level` (`level` INT 1..99
+default 20, `when_below` BOOL default true — the threshold-CROSSING
+verdict, not a level poll: fires when the previous level was on one side
+and the current is on the other; the first level after process start has
+no previous and never fires), `streaming_changed` (`streaming` BOOL),
+`viewers_changed` (`connected` BOOL — the viewer 0↔≥1 edge), and
+`app_started` (no params). It also defines the sealed `AutomationEvent`
+hierarchy the wiring hands the scheduler (`AppStarted`, `MotionDetected`,
+`SoundDetected`, `TamperDetected`, `ChargingChanged(charging)`,
+`BatteryLevelChanged(previous, current)`, `StreamingChanged(streaming)`,
+`ViewersChanged(connected)`) and `triggerMatches`' raw material:
+`sanitizeParams(triggerId, raw)` returns null for an unknown id or an
+unknown param key — a writer that believed in a parameter this build has
+never heard of cannot be trusted, so the whole params map degrades to the
+schema defaults (required params fold in) and the rule survives.
+
+### Automation Condition Catalog
+**`automation/schedule/AutomationConditionCatalog.kt`** — the ONLY WHEN
+side's closed vocabulary, same catalog discipline as the trigger catalog:
+eleven condition ids with param schemas, additive-only and test-pinned.
+`time_window` (`start_minute` 0..1439 default 0, `end_minute` default 1439,
+`days_mask` 1..127 default 127 — a start > end window wraps across
+midnight via the same `MinuteWindow.covers` the arm schedule uses, while
+start == end covers nothing), `charging`/`wifi_connected` (BOOL state
+matches), `battery_level`/`viewers` (optional inclusive `min_`/`max_`
+ranges — one-sided when only one bound is present; an unknown battery
+level is never met rather than guessed), `power_save`, `streaming`,
+`torch`, `recording`, `thermal` (normal vs throttling), and
+`motion_detection` (the toggle state). `sanitizeCondition` drops an
+unknown id or unknown param key entirely — an unknown condition is
+*never met*, the safe direction (a rule with degraded conditions asks
+for less firing, not more).
+
+### Automation Sensor Snapshot
+**`automation/schedule/AutomationSensorSnapshot.kt`** — the pure data
+class both rule families evaluate conditions against: the clock triple
+(`minuteOfDay`/`epochDay`/`isoDayIndex`, the same wall-clock space the
+schedule policy keys occurrences in) plus the live-state fields —
+`charging`, `batteryLevel: Int?` (null = unknown), `powerSave`,
+`wifiConnected`, `streamingActive`, `viewerCount`, `torchOn`,
+`recordingActive`, `thermalNormal`, `motionDetectionEnabled`. Built by the
+`AutomationSensorSnapshotProvider` fun interface, whose production
+implementation lives in the Automation Event Wiring (it reads the app's
+existing flows/pulls — PowerManager, ConnectivityMonitor, ThermalMonitor,
+StreamingManager, CameraService, RecordingController, the Settings Store)
+and whose tests substitute a fixed snapshot, keeping the condition policy
+JVM-testable with no Android imports.
+
+### Automation Condition Policy
+**`automation/schedule/AutomationConditionPolicy.kt`** — the pure verdict
+over a snapshot: `isMet(condition, snapshot)` per condition (the catalog
+schema resolved through the shared AutomationParamValues codec; unknown
+condition id → false) and `conditionsMet(rule, snapshot)` (empty list →
+true; `"any"` → at least one; else every one). Both rule families gate on
+it — the schedule policy's `dueRules`/`eventDue` call it before any action
+runs, so conditions are always evaluated against a FRESH snapshot at the
+moment of firing, never a cached one.
 
 ### Automation Schedule Policy
 **`automation/schedule/AutomationSchedulePolicy.kt`** — the pure decision
-half of the time-of-day engine, no Android imports (the poller/executor
-owns the clock, the journal, and the runtime seams). Its verdicts:
-`occurrenceKey` = `epochDay * 1440 + minuteOfDay`, one monotonic minute
-counter that makes "did today's occurrence already fire?" one integer
-comparison instead of a date+time dance — each local day's minute is its
-own occurrence, so midnight wrap is implicit; `dueRules` (master toggle on,
-rule enabled, day mask covers the ISO day index via Motion Arming Policy,
-occurrence key strictly newer than the journaled one, occurrence time
-actually arrived; STATEFUL actions ride any lateness while ONESHOT ones
-must be within the grace, measured in the same wall-clock minute space as
-the keys because a real-epoch comparison would smear the window by the zone
-offset); `sanitizeRule`/`sanitizeRules` (minute clamped, a zero day mask
-refused because the enabled toggle already expresses disarm, name trimmed,
-unknown trigger reset, unknown actions dropped, and the caps applied to the
-*sanitized* list so a rule keeps its max executable actions rather than
-losing valid ones to unknown noise ahead of them); and `mergeCameraSettings`
-(one catalog action folded into CameraSettings: the "0" auto sentinels fold
-to null, milliseconds convert to nanoseconds, and an absent optional param
-leaves its field unchanged). A rule whose whole action list is filtered
-away never fires partially and is not journaled, so its one-shot can still
-catch up on a later tick within grace.
+half of the engine, no Android imports (the scheduler owns the clock, the
+journal, and the runtime seams; the snapshot arrives as a parameter). Its
+verdicts: `occurrenceKey` = `epochDay * 1440 + minuteOfDay`, one monotonic
+minute counter that makes "did today's occurrence already fire?" one
+integer comparison instead of a date+time dance — each local day's minute
+is its own occurrence, so midnight wrap is implicit; `dueRules` for time
+rules (master toggle on, rule enabled, day mask covers the ISO day index
+via Motion Arming Policy, occurrence key strictly newer than the journaled
+one, occurrence time actually arrived, Automation Condition Policy met —
+an unmet-condition rule stays DUE and unjournaled, firing on a later tick
+the same day once conditions turn true; STATEFUL actions ride any lateness
+while ONESHOT ones must be within the grace, measured in the same
+wall-clock minute space as the keys because a real-epoch comparison would
+smear the window by the zone offset); `eventDue` + `triggerMatches` for
+event rules (the trigger matches the AutomationEvent — including the
+battery-crossing verdict computed purely from
+`BatteryLevelChanged(previous, current)` — the Automation Condition Policy
+holds on the snapshot taken at event time, and the per-rule cooldown has
+elapsed: the journal is consulted with the dual-value convention below, a
+time-occurrence key never suppresses an event fire); `sanitizeRule`/
+`sanitizeRules` (minute clamped, a zero day mask refused because the
+enabled toggle already expresses disarm, name trimmed, unknown trigger
+reset to `time_of_day`, trigger params sanitized against the trigger
+catalog, conditions sanitized against the condition catalog and capped at
+`AUTOMATION_MAX_CONDITIONS_PER_RULE`, `conditionMode` defaulted to "all",
+`cooldownSeconds` clamped to 0..86400, unknown actions dropped, and the
+caps applied to the *sanitized* list so a rule keeps its max executable
+entries rather than losing valid ones to unknown noise ahead of them); and
+`mergeCameraSettings` (one catalog action folded into CameraSettings: the
+"0" auto sentinels fold to null, milliseconds convert to nanoseconds, and
+an absent optional param leaves its field unchanged). A rule whose whole
+action list is filtered away never fires partially and is not journaled,
+so its one-shot can still catch up on a later tick within grace. Event
+rules have no catch-up filter: an event is NOW, so all actions run —
+including ONESHOT ones.
+
+### EVENT_JOURNAL_THRESHOLD (journal dual-value convention)
+**`AutomationSchedulePolicy.EVENT_JOURNAL_THRESHOLD` (10⁹)** — one journal
+file (`Map<String, Long>` per rule id), two value spaces: time fires store
+occurrence keys (`epochDay * 1440 + minuteOfDay`, values under ~3×10⁷),
+event fires store wall-clock epoch-ms timestamps (values ≥ ~10¹²). The
+magnitude split is the discriminator, so the journal keeps its on-disk
+shape and schema forever: `eventDue` reads only entries at-or-above the
+threshold as cooldown timestamps (anything below is ancient history —
+"long expired"), and `dueRules` reads only entries below it as occurrence
+keys. The payoff: switching a rule's trigger kind between the two families
+can never wedge it — an old time occurrence can't suppress an event fire
+and an event timestamp can't block a scheduled minute.
 
 ### Automation Scheduler
 **`automation/schedule/AutomationScheduler.kt`** — the shell around the
-Automation Schedule Policy, owning the clock, the poll loop, and the Fire
-Journal (the same pure-policy/thin-shell split as StreamingManager's
-eco-idle monitor over Eco Idle Policy). It re-evaluates every
-`StreamDefaults.AUTOMATION_POLL_SECONDS` (30 s) on its own SupervisorJob
-scope for the process lifetime — started once from MainApplication, never
-cancelled, exactly like Stream Watchdog — and restarts the tick loop
-immediately whenever the persisted rules or the master toggle change. The
-first evaluation is immediate: it IS the boot catch-up (process start →
-DataStore rules survive → the first pass fires everything the process
-missed), which is why no boot receiver is needed. Each fired rule runs
-through the Automation Action Runner one at a time (one failing rule never
-loses the others), and every attempt is journaled after the run regardless
-of failure — a persistently failing action must not tight-loop the poll
-cadence re-running it every tick. The local epochDay derivation is DST-safe
-(zone + DST offsets, floorDiv).
+Automation Schedule Policy, owning the clock, the poll loop, the event
+entry point, and the Fire Journal (the same pure-policy/thin-shell split
+as StreamingManager's eco-idle monitor over Eco Idle Policy). It
+re-evaluates every `StreamDefaults.AUTOMATION_POLL_SECONDS` (30 s) on its
+own SupervisorJob scope for the process lifetime — started once from
+MainApplication, never cancelled, exactly like Stream Watchdog — and
+restarts the tick loop immediately whenever the persisted rules or the
+master toggle change. The first evaluation is immediate: it IS the boot
+catch-up (process start → DataStore rules survive → the first pass fires
+everything the process missed), which is why no boot receiver is needed.
+Live events arrive on `onEvent(event)` and evaluate `eventDue` against the
+cached rules; both paths serialize through one evaluation Mutex so a time
+tick and an event fire (or two events) can never interleave their
+rule runs — actions from different rules execute in a defined order. The
+AutomationSensorSnapshotProvider seam is a constructor parameter (tests
+pin a fixed snapshot); the wall-clock snapshot is re-taken per evaluation
+with runCatching→skip per rule so one failing provider read never kills
+the pass. `app_started` fires exactly ONCE per process: a one-shot flag
+inside the rules collector guards it, because any rules edit restarts the
+inner `collectLatest` loop and would otherwise re-fire the trigger. Each
+fired rule runs through the Automation Action Runner one at a time (one
+failing rule never loses the others), and every attempt is journaled after
+the run regardless of failure — a persistently failing action must not
+tight-loop the poll cadence re-running it every tick. The local epochDay
+derivation is DST-safe (zone + DST offsets, floorDiv).
 
 ### Automation Action Runner
 **`automation/schedule/AutomationScheduler.kt`
@@ -1459,19 +1575,40 @@ a fake.
 **`automation/schedule/AutomationFireJournal.kt`** — the persisted half of
 the scheduler's dedup: an atomic-write file in
 `filesDir/automation/fire_journal.json` (the Stream State Journal shape)
-recording, per rule id, the occurrence key of the last occurrence that
-actually fired. The rules themselves live in the Settings Store and survive
-every process start, so without the journal the boot-time first pass would
-replay every rule whose minute had already passed (a reboot, a crash, or
-the user swiping the app away would re-run the whole day). Keyed on the
-stable rule id, it covers rule edits the same way — renaming or re-timing a
-rule never erases the fact that its occurrence fired — which is what lets
-the scheduler need no boot receiver: the catch-up IS the first poll
-evaluation, and the journal keeps it honest. `load` is a deliberate
-per-tick disk read (the file is tiny — one small long per rule id) and
-`record` merges over the freshly-read disk state under a lock; a missing or
-malformed file means "nothing has fired", so a corrupt journal costs at
-most one re-fire, never a lost one.
+recording, per rule id, the last thing that actually fired — the
+occurrence key for time rules, the wall-clock epoch-ms timestamp for event
+rules (the dual-value convention is EVENT_JOURNAL_THRESHOLD above; the
+file shape stays `Map<String, Long>` either way). The rules themselves
+live in the Settings Store and survive every process start, so without the
+journal the boot-time first pass would replay every rule whose minute had
+already passed (a reboot, a crash, or the user swiping the app away would
+re-run the whole day) and event rules would re-fire on every restart
+inside their cooldown. Keyed on the stable rule id, it covers rule edits
+the same way — renaming or re-timing a rule never erases the fact that it
+fired — which is what lets the scheduler need no boot receiver: the
+catch-up IS the first poll evaluation, and the journal keeps it honest.
+`load` is a deliberate per-tick disk read (the file is tiny — one small
+long per rule id) and `record` merges over the freshly-read disk state
+under a lock; a missing or malformed file means "nothing has fired", so a
+corrupt journal costs at most one re-fire, never a lost one.
+
+### Automation Event Wiring
+**`automation/AutomationEventWiring.kt`** — the live-event half of the
+engine's inputs, started from MainApplication next to the scheduler: five
+collectors that translate the app's existing streams into
+`AutomationEvent`s for `scheduler.onEvent`. Detection events ride the
+Detection Event Store's flow, decoded by wire name into motion/sound/
+tamper (unknown kinds dropped); power arrives from PowerManager as
+charger connect/disconnect EDGES (seeded from the live state once at
+start, so the current state never replays as a spurious edge) and
+battery-percentage changes (the crossing verdict stays in the policy —
+the wiring only forwards previous/current); streaming start/stop edges
+and the viewer 0↔≥1 edge come from StreamingManager's flows, likewise
+seed-suppressed. The wiring also owns the production
+AutomationSensorSnapshotProvider (see Automation Sensor Snapshot), so
+the engine's entire Android surface is this one file plus the scheduler
+hook — everything else in `automation/schedule/` stays pure and
+JVM-tested.
 
 ### Automation Action Executor
 **`automation/AutomationActionExecutor.kt`** — the one execution seam for

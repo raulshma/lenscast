@@ -32,6 +32,7 @@ import com.raulshma.lenscast.camera.model.Resolution
 import com.raulshma.lenscast.camera.model.WhiteBalance
 import com.raulshma.lenscast.camera.model.PhotoCapturePlan
 import com.raulshma.lenscast.automation.schedule.AutomationActionSpec
+import com.raulshma.lenscast.automation.schedule.AutomationConditionSpec
 import com.raulshma.lenscast.automation.schedule.AutomationRule
 import com.raulshma.lenscast.automation.schedule.AutomationSchedulePolicy
 import com.raulshma.lenscast.capture.model.FlashMode
@@ -1195,11 +1196,21 @@ internal data class AutomationRuleJson(
     val triggerType: String? = null,
     val minuteOfDay: Int? = null,
     val daysMask: Int? = null,
+    val triggerParams: Map<String, String>? = null,
+    val conditions: List<AutomationConditionJson>? = null,
+    val conditionMode: String? = null,
+    val cooldownSeconds: Int? = null,
     val actions: List<AutomationActionJson>? = null,
 )
 
 @JsonClass(generateAdapter = true)
 internal data class AutomationActionJson(
+    val type: String? = null,
+    val params: Map<String, String>? = null,
+)
+
+@JsonClass(generateAdapter = true)
+internal data class AutomationConditionJson(
     val type: String? = null,
     val params: Map<String, String>? = null,
 )
@@ -1236,6 +1247,17 @@ internal fun parseAutomationRules(jsonString: String?): List<AutomationRule> {
                 triggerType = dto.triggerType ?: defaults.triggerType,
                 minuteOfDay = dto.minuteOfDay ?: defaults.minuteOfDay,
                 daysMask = dto.daysMask ?: defaults.daysMask,
+                // Every new field folds to its documented default when
+                // absent, so pre-if/then payloads decode unchanged.
+                triggerParams = dto.triggerParams ?: defaults.triggerParams,
+                conditions = dto.conditions.orEmpty().map { condition ->
+                    AutomationConditionSpec(
+                        type = condition.type ?: "",
+                        params = condition.params ?: emptyMap(),
+                    )
+                },
+                conditionMode = dto.conditionMode ?: defaults.conditionMode,
+                cooldownSeconds = dto.cooldownSeconds ?: defaults.cooldownSeconds,
                 actions = dto.actions.orEmpty().map { action ->
                     AutomationActionSpec(
                         type = action.type ?: "",
@@ -1257,12 +1279,24 @@ internal fun serializeAutomationRules(rules: List<AutomationRule>): String {
         // whatever the writer sent, a valid value is what lands on disk.
         val dtos = AutomationSchedulePolicy.sanitizeRules(rules).map { rule ->
             AutomationRuleJson(
-                id = rule.id,
+                // The save-side identity owner: a rule without an id could
+                // never be journaled and would re-fire on every poll tick,
+                // so a null id never lands on disk — writers mint their own
+                // (the web handler, like the in-app ViewModel) and this mint
+                // catches any writer that did not. The decode mint above
+                // remains for payloads persisted before this invariant.
+                id = rule.id ?: java.util.UUID.randomUUID().toString(),
                 name = rule.name,
                 enabled = rule.enabled,
                 triggerType = rule.triggerType,
                 minuteOfDay = rule.minuteOfDay,
                 daysMask = rule.daysMask,
+                triggerParams = rule.triggerParams,
+                conditions = rule.conditions.map { condition ->
+                    AutomationConditionJson(type = condition.type, params = condition.params)
+                },
+                conditionMode = rule.conditionMode,
+                cooldownSeconds = rule.cooldownSeconds,
                 actions = rule.actions.map { action ->
                     AutomationActionJson(type = action.type, params = action.params)
                 },
@@ -1724,6 +1758,18 @@ class SettingsDataStore(
     suspend fun saveAutomationEnabled(enabled: Boolean) = automationEnabledPref.save(enabled)
 
     suspend fun saveAutomationRules(rules: List<AutomationRule>) = automationRulesPref.save(rules)
+
+    /**
+     * The automation master toggle and rule list, read fresh from disk. The
+     * shared StateFlows above re-decode on a collector's beat after a save
+     * completes, so a write path that answers with the persisted truth (PUT
+     * /api/automation) reads through here instead of racing its own write —
+     * the same disk-over-flow convention as the startup-critical [diskValue]
+     * reads.
+     */
+    suspend fun automationEnabledFromDisk(): Boolean = automationEnabledPref.diskValue()
+
+    suspend fun automationRulesFromDisk(): List<AutomationRule> = automationRulesPref.diskValue()
 
     suspend fun saveBackupEnabled(enabled: Boolean) = backupEnabledPref.save(enabled)
 

@@ -7,8 +7,12 @@ import androidx.lifecycle.viewModelScope
 import com.raulshma.lenscast.R
 import com.raulshma.lenscast.automation.schedule.AutomationActionCatalog
 import com.raulshma.lenscast.automation.schedule.AutomationActionSpec
+import com.raulshma.lenscast.automation.schedule.AutomationConditionCatalog
+import com.raulshma.lenscast.automation.schedule.AutomationConditionSpec
+import com.raulshma.lenscast.automation.schedule.AutomationParamSpec
 import com.raulshma.lenscast.automation.schedule.AutomationRule
 import com.raulshma.lenscast.automation.schedule.AutomationSchedulePolicy
+import com.raulshma.lenscast.automation.schedule.AutomationTriggerCatalog
 import com.raulshma.lenscast.capture.MotionArmingPolicy
 import com.raulshma.lenscast.camera.CameraService
 import com.raulshma.lenscast.core.StreamDefaults
@@ -126,31 +130,58 @@ class AutomationViewModel(
         ): List<AutomationRule> = rules.map { if (it.id == ruleId) it.copy(enabled = enabled) else it }
 
         /**
-         * One canonical param write on an action spec: a null/empty value
-         * removes the key (absent optional param = "leave unchanged"), any
-         * other value is stored verbatim — callers pass already-canonical
-         * strings from [canonicalIntValue]/[canonicalFloatValue].
-         */
-        fun withActionParam(
-            action: AutomationActionSpec,
-            name: String,
-            value: String?,
-        ): AutomationActionSpec {
-            val params = action.params.toMutableMap()
-            if (value.isNullOrEmpty()) params.remove(name) else params[name] = value
-            return action.copy(params = params)
-        }
-
-        /**
          * The params a freshly picked action starts with: every required param
          * at its catalog default, optional ones absent (their absence IS the
          * "leave unchanged" semantics the executor honors).
          */
         fun defaultActionParams(typeId: String): Map<String, String> =
-            AutomationActionCatalog.typeFor(typeId)?.params
+            defaultSpecParams(AutomationActionCatalog.typeFor(typeId)?.params)
+
+        /** [defaultActionParams] over the trigger catalog. */
+        fun defaultTriggerParams(typeId: String): Map<String, String> =
+            defaultSpecParams(AutomationTriggerCatalog.typeFor(typeId)?.params)
+
+        /** [defaultActionParams] over the condition catalog. */
+        fun defaultConditionParams(typeId: String): Map<String, String> =
+            defaultSpecParams(AutomationConditionCatalog.typeFor(typeId)?.params)
+
+        /** The shared required-params-at-defaults fold behind all three catalogs. */
+        private fun defaultSpecParams(params: List<AutomationParamSpec>?): Map<String, String> =
+            params
                 ?.filterNot { it.optional }
                 ?.associate { it.name to it.defaultValue }
                 ?: emptyMap()
+
+        /**
+         * One canonical param write on a string-typed params map: a null/empty
+         * value removes the key (absent optional param = "leave unchanged"),
+         * any other value is stored verbatim — callers pass already-canonical
+         * strings from [canonicalIntValue]/[canonicalFloatValue]. The shared
+         * write behind the action/trigger/condition spec copies below.
+         */
+        fun withSpecParam(
+            params: Map<String, String>,
+            name: String,
+            value: String?,
+        ): Map<String, String> {
+            val mutable = params.toMutableMap()
+            if (value.isNullOrEmpty()) mutable.remove(name) else mutable[name] = value
+            return mutable
+        }
+
+        /** [withSpecParam] folded onto an action spec copy. */
+        fun withActionParam(
+            action: AutomationActionSpec,
+            name: String,
+            value: String?,
+        ): AutomationActionSpec = action.copy(params = withSpecParam(action.params, name, value))
+
+        /** [withSpecParam] folded onto a condition spec copy. */
+        fun withConditionParam(
+            condition: AutomationConditionSpec,
+            name: String,
+            value: String?,
+        ): AutomationConditionSpec = condition.copy(params = withSpecParam(condition.params, name, value))
 
         /**
          * INT slider value → canonical wire string (whole number, no
@@ -220,6 +251,82 @@ class AutomationViewModel(
         /** The armed ISO day indices (0 = Monday … 6 = Sunday) in a day mask. */
         fun armedDays(daysMask: Int): List<Int> =
             (0..6).filter { MotionArmingPolicy.isArmedDay(daysMask, it) }
+
+        // ── trigger/condition display strings (id → resource, JVM-tested) ──
+
+        /** Trigger id → pretty picker label; unknown ids fall to the unknown line. */
+        private val TRIGGER_TYPE_LABELS: Map<String, Int> = mapOf(
+            AutomationTriggerCatalog.TIME_OF_DAY to R.string.automation_trigger_time_of_day,
+            AutomationTriggerCatalog.MOTION_DETECTED to R.string.automation_trigger_motion,
+            AutomationTriggerCatalog.SOUND_DETECTED to R.string.automation_trigger_sound,
+            AutomationTriggerCatalog.TAMPER_DETECTED to R.string.automation_trigger_tamper,
+            AutomationTriggerCatalog.CHARGING_CHANGED to R.string.automation_trigger_charging,
+            AutomationTriggerCatalog.BATTERY_LEVEL to R.string.automation_trigger_battery,
+            AutomationTriggerCatalog.STREAMING_CHANGED to R.string.automation_trigger_streaming,
+            AutomationTriggerCatalog.VIEWERS_CHANGED to R.string.automation_trigger_viewers,
+            AutomationTriggerCatalog.APP_STARTED to R.string.automation_trigger_app_started,
+        )
+
+        /** Condition id → pretty picker label; unknown ids fall to the unknown line. */
+        private val CONDITION_TYPE_LABELS: Map<String, Int> = mapOf(
+            AutomationConditionCatalog.TIME_WINDOW to R.string.automation_condition_time_window,
+            AutomationConditionCatalog.CHARGING to R.string.automation_condition_charging,
+            AutomationConditionCatalog.BATTERY_LEVEL to R.string.automation_condition_battery,
+            AutomationConditionCatalog.POWER_SAVE to R.string.automation_condition_power_save,
+            AutomationConditionCatalog.WIFI_CONNECTED to R.string.automation_condition_wifi,
+            AutomationConditionCatalog.STREAMING to R.string.automation_condition_streaming,
+            AutomationConditionCatalog.VIEWERS to R.string.automation_condition_viewers,
+            AutomationConditionCatalog.TORCH to R.string.automation_condition_torch,
+            AutomationConditionCatalog.RECORDING to R.string.automation_condition_recording,
+            AutomationConditionCatalog.THERMAL to R.string.automation_condition_thermal,
+            AutomationConditionCatalog.MOTION_DETECTION to R.string.automation_condition_motion_detection,
+        )
+
+        /** The pretty picker label for one catalog trigger id. */
+        fun triggerTypeLabelRes(triggerTypeId: String): Int =
+            TRIGGER_TYPE_LABELS[triggerTypeId] ?: R.string.automation_action_unknown
+
+        /** The pretty picker label for one catalog condition id. */
+        fun conditionTypeLabelRes(conditionTypeId: String): Int =
+            CONDITION_TYPE_LABELS[conditionTypeId] ?: R.string.automation_action_unknown
+
+        /** The param-label source for trigger param editor rows. */
+        fun triggerParamLabelRes(triggerTypeId: String, paramName: String): Int =
+            TRIGGER_PARAM_LABEL_OVERRIDES["$triggerTypeId/$paramName"]
+                ?: PARAM_LABELS[paramName]
+                ?: R.string.automation_param_enabled
+
+        /** The param-label source for condition param editor rows. */
+        fun conditionParamLabelRes(conditionTypeId: String, paramName: String): Int =
+            CONDITION_PARAM_LABEL_OVERRIDES["$conditionTypeId/$paramName"]
+                ?: PARAM_LABELS[paramName]
+                ?: R.string.automation_param_enabled
+
+        private val TRIGGER_PARAM_LABEL_OVERRIDES: Map<String, Int> = mapOf(
+            "battery_level/level" to R.string.automation_param_battery_threshold,
+            "battery_level/when_below" to R.string.automation_param_when_below,
+            "charging_changed/charging" to R.string.automation_param_charging_plugged,
+            "streaming_changed/streaming" to R.string.automation_param_streaming_active,
+            "viewers_changed/connected" to R.string.automation_param_viewers_connected,
+        )
+
+        private val CONDITION_PARAM_LABEL_OVERRIDES: Map<String, Int> = mapOf(
+            "time_window/start_minute" to R.string.automation_param_window_start,
+            "time_window/end_minute" to R.string.automation_param_window_end,
+            "time_window/days_mask" to R.string.automation_param_window_days,
+            "charging/charging" to R.string.automation_param_charging_plugged,
+            "battery_level/min_level" to R.string.automation_param_battery_min,
+            "battery_level/max_level" to R.string.automation_param_battery_max,
+            "power_save/enabled" to R.string.automation_param_power_save_on,
+            "wifi_connected/connected" to R.string.automation_param_wifi_connected,
+            "streaming/active" to R.string.automation_param_streaming_active,
+            "viewers/min_count" to R.string.automation_param_viewers_min,
+            "viewers/max_count" to R.string.automation_param_viewers_max,
+            "torch/on" to R.string.automation_param_torch_on,
+            "recording/active" to R.string.automation_param_recording_active,
+            "thermal/normal" to R.string.automation_param_thermal_normal,
+            "motion_detection/enabled" to R.string.automation_param_motion,
+        )
 
         // ── action display strings (id → resource, JVM-tested) ──
 
@@ -380,6 +487,184 @@ class AutomationViewModel(
                 else -> lines.add(AutomationSummaryLine(R.string.automation_action_unknown))
             }
             return lines
+        }
+
+        /**
+         * The rule-card summary lines for a rule's TRIGGER. Time-of-day rules
+         * read [] (their card subtitle is the existing HH:mm · days label);
+         * every event trigger renders one "when …" line built purely from the
+         * catalog id and params, reading through the same defaults the
+         * engine's evaluation reads ([AutomationParamValues]-canonical maps).
+         */
+        fun triggerSummaryLines(rule: AutomationRule): List<AutomationSummaryLine> {
+            val params = rule.triggerParams
+            val type = rule.triggerType
+            val bool = { name: String, default: Boolean ->
+                params[name]?.let { it == "true" } ?: default
+            }
+            return when (type) {
+                AutomationTriggerCatalog.TIME_OF_DAY -> emptyList()
+                AutomationTriggerCatalog.MOTION_DETECTED -> listOf(
+                    AutomationSummaryLine(R.string.automation_summary_trigger_motion),
+                )
+                AutomationTriggerCatalog.SOUND_DETECTED -> listOf(
+                    AutomationSummaryLine(R.string.automation_summary_trigger_sound),
+                )
+                AutomationTriggerCatalog.TAMPER_DETECTED -> listOf(
+                    AutomationSummaryLine(R.string.automation_summary_trigger_tamper),
+                )
+                AutomationTriggerCatalog.CHARGING_CHANGED ->
+                    listOf(
+                        if (bool("charging", true)) {
+                            AutomationSummaryLine(R.string.automation_summary_trigger_charging_on)
+                        } else {
+                            AutomationSummaryLine(R.string.automation_summary_trigger_charging_off)
+                        },
+                    )
+                AutomationTriggerCatalog.BATTERY_LEVEL -> {
+                    val level = params["level"]?.toIntOrNull() ?: 20
+                    listOf(
+                        if (bool("when_below", true)) {
+                            AutomationSummaryLine(R.string.automation_summary_trigger_battery_below, listOf(level.toString()))
+                        } else {
+                            AutomationSummaryLine(R.string.automation_summary_trigger_battery_above, listOf(level.toString()))
+                        },
+                    )
+                }
+                AutomationTriggerCatalog.STREAMING_CHANGED ->
+                    listOf(
+                        if (bool("streaming", true)) {
+                            AutomationSummaryLine(R.string.automation_summary_trigger_stream_start)
+                        } else {
+                            AutomationSummaryLine(R.string.automation_summary_trigger_stream_stop)
+                        },
+                    )
+                AutomationTriggerCatalog.VIEWERS_CHANGED ->
+                    listOf(
+                        if (bool("connected", true)) {
+                            AutomationSummaryLine(R.string.automation_summary_trigger_viewer_join)
+                        } else {
+                            AutomationSummaryLine(R.string.automation_summary_trigger_viewer_leave)
+                        },
+                    )
+                AutomationTriggerCatalog.APP_STARTED -> listOf(
+                    AutomationSummaryLine(R.string.automation_summary_trigger_app_started),
+                )
+                else -> emptyList()
+            }
+        }
+
+        /**
+         * The rule-card summary lines for one precondition. The time window's
+         * day-mask suffix is NOT rendered here — days need localized day
+         * labels, so the screen composes that one line itself (reusing
+         * [isEveryDay]/[armedDays]) while the window span renders through the
+         * shared [formatMinuteOfDay].
+         */
+        fun conditionSummaryLines(condition: AutomationConditionSpec): List<AutomationSummaryLine> {
+            val params = condition.params
+            return when (condition.type) {
+                AutomationConditionCatalog.TIME_WINDOW -> {
+                    val start = params["start_minute"]?.toIntOrNull() ?: 0
+                    val end = params["end_minute"]?.toIntOrNull()
+                        ?: (StreamDefaults.MINUTES_PER_DAY - 1)
+                    listOf(
+                        AutomationSummaryLine(
+                            R.string.automation_summary_condition_time_window,
+                            listOf(formatMinuteOfDay(start), formatMinuteOfDay(end)),
+                        ),
+                    )
+                }
+                AutomationConditionCatalog.CHARGING -> listOf(
+                    if (params["charging"] != "false") {
+                        AutomationSummaryLine(R.string.automation_summary_condition_charging_on)
+                    } else {
+                        AutomationSummaryLine(R.string.automation_summary_condition_charging_off)
+                    },
+                )
+                AutomationConditionCatalog.BATTERY_LEVEL -> {
+                    val min = params["min_level"]?.toIntOrNull()
+                    val max = params["max_level"]?.toIntOrNull()
+                    listOf(
+                        when {
+                            min != null && max != null ->
+                                AutomationSummaryLine(R.string.automation_summary_condition_battery_between, listOf(min.toString(), max.toString()))
+                            min != null ->
+                                AutomationSummaryLine(R.string.automation_summary_condition_battery_min, listOf(min.toString()))
+                            max != null ->
+                                AutomationSummaryLine(R.string.automation_summary_condition_battery_max, listOf(max.toString()))
+                            else ->
+                                AutomationSummaryLine(R.string.automation_summary_condition_battery_any)
+                        },
+                    )
+                }
+                AutomationConditionCatalog.POWER_SAVE -> listOf(
+                    if (params["enabled"] == "true") {
+                        AutomationSummaryLine(R.string.automation_summary_condition_power_save_on)
+                    } else {
+                        AutomationSummaryLine(R.string.automation_summary_condition_power_save_off)
+                    },
+                )
+                AutomationConditionCatalog.WIFI_CONNECTED -> listOf(
+                    if (params["connected"] != "false") {
+                        AutomationSummaryLine(R.string.automation_summary_condition_wifi_on)
+                    } else {
+                        AutomationSummaryLine(R.string.automation_summary_condition_wifi_off)
+                    },
+                )
+                AutomationConditionCatalog.STREAMING -> listOf(
+                    if (params["active"] != "false") {
+                        AutomationSummaryLine(R.string.automation_summary_condition_streaming_on)
+                    } else {
+                        AutomationSummaryLine(R.string.automation_summary_condition_streaming_off)
+                    },
+                )
+                AutomationConditionCatalog.VIEWERS -> {
+                    val min = params["min_count"]?.toIntOrNull()
+                    val max = params["max_count"]?.toIntOrNull()
+                    listOf(
+                        when {
+                            min != null && max != null ->
+                                AutomationSummaryLine(R.string.automation_summary_condition_viewers_between, listOf(min.toString(), max.toString()))
+                            min != null ->
+                                AutomationSummaryLine(R.string.automation_summary_condition_viewers_min, listOf(min.toString()))
+                            max != null ->
+                                AutomationSummaryLine(R.string.automation_summary_condition_viewers_max, listOf(max.toString()))
+                            else ->
+                                AutomationSummaryLine(R.string.automation_summary_condition_viewers_any)
+                        },
+                    )
+                }
+                AutomationConditionCatalog.TORCH -> listOf(
+                    if (params["on"] != "false") {
+                        AutomationSummaryLine(R.string.automation_summary_condition_torch_on)
+                    } else {
+                        AutomationSummaryLine(R.string.automation_summary_condition_torch_off)
+                    },
+                )
+                AutomationConditionCatalog.RECORDING -> listOf(
+                    if (params["active"] != "false") {
+                        AutomationSummaryLine(R.string.automation_summary_condition_recording_on)
+                    } else {
+                        AutomationSummaryLine(R.string.automation_summary_condition_recording_off)
+                    },
+                )
+                AutomationConditionCatalog.THERMAL -> listOf(
+                    if (params["normal"] != "false") {
+                        AutomationSummaryLine(R.string.automation_summary_condition_thermal_normal)
+                    } else {
+                        AutomationSummaryLine(R.string.automation_summary_condition_thermal_throttling)
+                    },
+                )
+                AutomationConditionCatalog.MOTION_DETECTION -> listOf(
+                    if (params["enabled"] != "false") {
+                        AutomationSummaryLine(R.string.automation_summary_condition_motion_on)
+                    } else {
+                        AutomationSummaryLine(R.string.automation_summary_condition_motion_off)
+                    },
+                )
+                else -> emptyList()
+            }
         }
     }
 }

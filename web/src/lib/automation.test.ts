@@ -2,18 +2,25 @@ import { describe, expect, it } from 'vitest'
 import {
   AUTO_SENTINEL_PARAM_NAMES,
   automationActionLabelKey,
+  automationConditionLabelKey,
+  automationConditionSummaryLines,
   automationParamLabelKey,
   automationSummaryLines,
+  automationTriggerLabelKey,
+  automationTriggerSummaryLines,
   canonicalFloatValue,
   canonicalIntValue,
   canonicalParamValue,
   defaultActionParams,
+  defaultConditionParams,
+  defaultTriggerParams,
   formatMinuteOfDay,
   isAutoSentinelParam,
   isEveryDayMask,
   newAutomationRule,
   paramSliderBounds,
   parseMinuteOfDay,
+  withSpecParam,
 } from './automation'
 import type { AutomationCatalogActionDto } from '../types'
 
@@ -226,10 +233,28 @@ describe('automation rule construction', () => {
       id: '',
       name: '',
       enabled: true,
+      triggerType: 'time_of_day',
       minuteOfDay: 480,
       daysMask: 127,
+      triggerParams: {},
+      conditions: [],
+      conditionMode: 'all',
+      cooldownSeconds: 60,
       actions: [],
     })
+  })
+
+  it('withSpecParam writes, overwrites and removes keys immutably', () => {
+    expect(withSpecParam({}, 'level', '20')).toEqual({ level: '20' })
+    expect(withSpecParam({ level: '20' }, 'level', '35')).toEqual({ level: '35' })
+    // Null/empty remove the key (the optional-param "leave unchanged" shape).
+    expect(withSpecParam({ level: '20' }, 'level', null)).toEqual({})
+    expect(withSpecParam({ level: '20' }, 'level', '')).toEqual({})
+    expect(withSpecParam({ level: '20' }, 'level', undefined)).toEqual({})
+    // The input map is never mutated.
+    const original = { level: '20' }
+    expect(withSpecParam(original, 'level', '35')).toEqual({ level: '35' })
+    expect(original).toEqual({ level: '20' })
   })
 
   it('slider bounds fall back safely around the catalog values', () => {
@@ -237,5 +262,214 @@ describe('automation rule construction', () => {
     expect(paramSliderBounds({ min: null, max: 1000 })).toEqual({ min: 0, max: 1000 })
     expect(paramSliderBounds({ min: -12, max: null })).toEqual({ min: -12, max: 100 })
     expect(paramSliderBounds({})).toEqual({ min: 0, max: 100 })
+  })
+})
+
+describe('automation trigger and condition label keys', () => {
+  it('every trigger id gets its catalog key, unknown ids fall back', () => {
+    expect(automationTriggerLabelKey('time_of_day')).toBe('automation.trigger.time_of_day')
+    expect(automationTriggerLabelKey('motion_detected')).toBe('automation.trigger.motion_detected')
+    expect(automationTriggerLabelKey('battery_level')).toBe('automation.trigger.battery_level')
+    expect(automationTriggerLabelKey('app_started')).toBe('automation.trigger.app_started')
+    expect(automationTriggerLabelKey('teleport_event')).toBe('automation.action.unknown')
+  })
+
+  it('every condition id gets its catalog key, unknown ids fall back', () => {
+    expect(automationConditionLabelKey('time_window')).toBe('automation.condition.time_window')
+    expect(automationConditionLabelKey('battery_level')).toBe('automation.condition.battery_level')
+    expect(automationConditionLabelKey('motion_detection')).toBe('automation.condition.motion_detection')
+    expect(automationConditionLabelKey('moon_phase')).toBe('automation.action.unknown')
+  })
+
+  it('param labels resolve the typeId/paramName override ladder before the bare-name fallback', () => {
+    // Trigger overrides — "connected" reads as viewer presence, not Wi-Fi.
+    expect(automationParamLabelKey('battery_level', 'level')).toBe('automation.param.batteryThreshold')
+    expect(automationParamLabelKey('battery_level', 'when_below')).toBe('automation.param.whenBelow')
+    expect(automationParamLabelKey('charging_changed', 'charging')).toBe('automation.param.chargingPlugged')
+    expect(automationParamLabelKey('streaming_changed', 'streaming')).toBe('automation.param.streamingActive')
+    expect(automationParamLabelKey('viewers_changed', 'connected')).toBe('automation.param.viewersConnected')
+    // Condition overrides — the same bare names now resolve per-condition.
+    expect(automationParamLabelKey('wifi_connected', 'connected')).toBe('automation.param.wifiConnected')
+    expect(automationParamLabelKey('time_window', 'start_minute')).toBe('automation.param.windowStart')
+    expect(automationParamLabelKey('time_window', 'end_minute')).toBe('automation.param.windowEnd')
+    expect(automationParamLabelKey('time_window', 'days_mask')).toBe('automation.param.windowDays')
+    expect(automationParamLabelKey('battery_level', 'min_level')).toBe('automation.param.batteryMin')
+    expect(automationParamLabelKey('battery_level', 'max_level')).toBe('automation.param.batteryMax')
+    expect(automationParamLabelKey('power_save', 'enabled')).toBe('automation.param.powerSaveOn')
+    expect(automationParamLabelKey('viewers', 'min_count')).toBe('automation.param.viewersMin')
+    expect(automationParamLabelKey('viewers', 'max_count')).toBe('automation.param.viewersMax')
+    expect(automationParamLabelKey('torch', 'on')).toBe('automation.param.torchOn')
+    expect(automationParamLabelKey('recording', 'active')).toBe('automation.param.recordingActive')
+    expect(automationParamLabelKey('thermal', 'normal')).toBe('automation.param.thermalNormal')
+    expect(automationParamLabelKey('motion_detection', 'enabled')).toBe('automation.param.motion')
+    // Unknown type + bare name rides the existing fallback ladder.
+    expect(automationParamLabelKey('mystery_trigger', 'charging')).toBe('automation.param.enabled')
+  })
+
+  it('fresh trigger params seed required params at their defaults, optional ones absent', () => {
+    const chargingCatalog = {
+      params: [{ name: 'charging', kind: 'BOOL' as const, optional: false, defaultValue: 'true', autoAtZero: false }],
+    }
+    expect(defaultTriggerParams(chargingCatalog)).toEqual({ charging: 'true' })
+    const batteryCatalog = {
+      params: [
+        { name: 'level', kind: 'INT' as const, min: 1, max: 99, optional: false, defaultValue: '20', autoAtZero: false },
+        { name: 'when_below', kind: 'BOOL' as const, optional: true, defaultValue: 'true', autoAtZero: false },
+      ],
+    }
+    expect(defaultTriggerParams(batteryCatalog)).toEqual({ level: '20' })
+    expect(defaultTriggerParams(undefined)).toEqual({})
+  })
+
+  it('fresh condition params seed required params at their defaults, optional ones absent', () => {
+    const timeWindowCatalog = {
+      params: [
+        { name: 'start_minute', kind: 'INT' as const, min: 0, max: 1439, optional: true, defaultValue: '0', autoAtZero: false },
+        { name: 'end_minute', kind: 'INT' as const, min: 0, max: 1439, optional: true, defaultValue: '1439', autoAtZero: false },
+        { name: 'days_mask', kind: 'INT' as const, min: 1, max: 127, optional: true, defaultValue: '127', autoAtZero: false },
+      ],
+    }
+    expect(defaultConditionParams(timeWindowCatalog)).toEqual({})
+    expect(defaultConditionParams({ params: [] })).toEqual({})
+    expect(defaultConditionParams(undefined)).toEqual({})
+  })
+})
+
+describe('automation trigger summaries', () => {
+  it('time-of-day rules render no trigger line (the card shows HH:mm · days)', () => {
+    expect(automationTriggerSummaryLines({ triggerType: 'time_of_day', triggerParams: {} })).toEqual([])
+  })
+
+  it('paramless detection triggers render one line each', () => {
+    expect(automationTriggerSummaryLines({ triggerType: 'motion_detected', triggerParams: {} })).toEqual([
+      { key: 'automation.summary.triggerMotion' },
+    ])
+    expect(automationTriggerSummaryLines({ triggerType: 'sound_detected', triggerParams: {} })).toEqual([
+      { key: 'automation.summary.triggerSound' },
+    ])
+    expect(automationTriggerSummaryLines({ triggerType: 'tamper_detected', triggerParams: {} })).toEqual([
+      { key: 'automation.summary.triggerTamper' },
+    ])
+    expect(automationTriggerSummaryLines({ triggerType: 'app_started', triggerParams: {} })).toEqual([
+      { key: 'automation.summary.triggerAppStarted' },
+    ])
+  })
+
+  it('charging and streaming follow their BOOL param with the on default', () => {
+    expect(automationTriggerSummaryLines({ triggerType: 'charging_changed', triggerParams: { charging: 'true' } })).toEqual([
+      { key: 'automation.summary.triggerChargingOn' },
+    ])
+    expect(automationTriggerSummaryLines({ triggerType: 'charging_changed', triggerParams: { charging: 'false' } })).toEqual([
+      { key: 'automation.summary.triggerChargingOff' },
+    ])
+    // Absent folds to the "on" verdict, like the Kotlin default.
+    expect(automationTriggerSummaryLines({ triggerType: 'charging_changed', triggerParams: {} })).toEqual([
+      { key: 'automation.summary.triggerChargingOn' },
+    ])
+    expect(automationTriggerSummaryLines({ triggerType: 'streaming_changed', triggerParams: { streaming: 'false' } })).toEqual([
+      { key: 'automation.summary.triggerStreamStop' },
+    ])
+    expect(automationTriggerSummaryLines({ triggerType: 'viewers_changed', triggerParams: { connected: 'false' } })).toEqual([
+      { key: 'automation.summary.triggerViewerLeave' },
+    ])
+  })
+
+  it('battery renders below/above with the level, defaulting like the engine', () => {
+    expect(automationTriggerSummaryLines({ triggerType: 'battery_level', triggerParams: { level: '15', when_below: 'true' } })).toEqual([
+      { key: 'automation.summary.triggerBatteryBelow', params: { value: 15 } },
+    ])
+    expect(automationTriggerSummaryLines({ triggerType: 'battery_level', triggerParams: { level: '80', when_below: 'false' } })).toEqual([
+      { key: 'automation.summary.triggerBatteryAbove', params: { value: 80 } },
+    ])
+    const defaulted = automationTriggerSummaryLines({ triggerType: 'battery_level', triggerParams: {} })
+    expect(defaulted).toEqual([{ key: 'automation.summary.triggerBatteryBelow', params: { value: 20 } }])
+    // A malformed level folds to the default, never NaN.
+    expect(automationTriggerSummaryLines({ triggerType: 'battery_level', triggerParams: { level: 'bogus' } })).toEqual([
+      { key: 'automation.summary.triggerBatteryBelow', params: { value: 20 } },
+    ])
+  })
+
+  it('unknown trigger types render no line (the card already shows the unknown label)', () => {
+    expect(automationTriggerSummaryLines({ triggerType: 'mystery', triggerParams: {} })).toEqual([])
+  })
+})
+
+describe('automation condition summaries', () => {
+  it('time windows render the formatted span with minute defaults', () => {
+    expect(automationConditionSummaryLines({ type: 'time_window', params: { start_minute: '1320', end_minute: '360' } })).toEqual([
+      { key: 'automation.summary.conditionTimeWindow', params: { start: '22:00', end: '06:00' } },
+    ])
+    // Absent minutes fold to the catalog defaults (00:00 → 23:59).
+    expect(automationConditionSummaryLines({ type: 'time_window', params: {} })).toEqual([
+      { key: 'automation.summary.conditionTimeWindow', params: { start: '00:00', end: '23:59' } },
+    ])
+  })
+
+  it('BOOL conditions follow their param with the engine defaults', () => {
+    expect(automationConditionSummaryLines({ type: 'charging', params: { charging: 'true' } })).toEqual([
+      { key: 'automation.summary.conditionChargingOn' },
+    ])
+    expect(automationConditionSummaryLines({ type: 'charging', params: { charging: 'false' } })).toEqual([
+      { key: 'automation.summary.conditionChargingOff' },
+    ])
+    // power_save defaults to OFF (the engine's "enabled" default is "false").
+    expect(automationConditionSummaryLines({ type: 'power_save', params: {} })).toEqual([
+      { key: 'automation.summary.conditionPowerSaveOff' },
+    ])
+    expect(automationConditionSummaryLines({ type: 'power_save', params: { enabled: 'true' } })).toEqual([
+      { key: 'automation.summary.conditionPowerSaveOn' },
+    ])
+    expect(automationConditionSummaryLines({ type: 'wifi_connected', params: { connected: 'false' } })).toEqual([
+      { key: 'automation.summary.conditionWifiOff' },
+    ])
+    expect(automationConditionSummaryLines({ type: 'streaming', params: { active: 'false' } })).toEqual([
+      { key: 'automation.summary.conditionStreamingOff' },
+    ])
+    expect(automationConditionSummaryLines({ type: 'torch', params: { on: 'false' } })).toEqual([
+      { key: 'automation.summary.conditionTorchOff' },
+    ])
+    expect(automationConditionSummaryLines({ type: 'recording', params: { active: 'true' } })).toEqual([
+      { key: 'automation.summary.conditionRecordingOn' },
+    ])
+    expect(automationConditionSummaryLines({ type: 'thermal', params: { normal: 'false' } })).toEqual([
+      { key: 'automation.summary.conditionThermalThrottling' },
+    ])
+    expect(automationConditionSummaryLines({ type: 'motion_detection', params: { enabled: 'false' } })).toEqual([
+      { key: 'automation.summary.conditionMotionOff' },
+    ])
+  })
+
+  it('battery renders between/min/max/any shapes off the present bounds', () => {
+    expect(automationConditionSummaryLines({ type: 'battery_level', params: { min_level: '20', max_level: '80' } })).toEqual([
+      { key: 'automation.summary.conditionBatteryBetween', params: { min: 20, max: 80 } },
+    ])
+    expect(automationConditionSummaryLines({ type: 'battery_level', params: { min_level: '20' } })).toEqual([
+      { key: 'automation.summary.conditionBatteryMin', params: { value: 20 } },
+    ])
+    expect(automationConditionSummaryLines({ type: 'battery_level', params: { max_level: '80' } })).toEqual([
+      { key: 'automation.summary.conditionBatteryMax', params: { value: 80 } },
+    ])
+    expect(automationConditionSummaryLines({ type: 'battery_level', params: {} })).toEqual([
+      { key: 'automation.summary.conditionBatteryAny' },
+    ])
+  })
+
+  it('viewers renders between/min/max/any shapes off the present bounds', () => {
+    expect(automationConditionSummaryLines({ type: 'viewers', params: { min_count: '1', max_count: '5' } })).toEqual([
+      { key: 'automation.summary.conditionViewersBetween', params: { min: 1, max: 5 } },
+    ])
+    expect(automationConditionSummaryLines({ type: 'viewers', params: { min_count: '2' } })).toEqual([
+      { key: 'automation.summary.conditionViewersMin', params: { value: 2 } },
+    ])
+    expect(automationConditionSummaryLines({ type: 'viewers', params: { max_count: '0' } })).toEqual([
+      { key: 'automation.summary.conditionViewersMax', params: { value: 0 } },
+    ])
+    expect(automationConditionSummaryLines({ type: 'viewers', params: {} })).toEqual([
+      { key: 'automation.summary.conditionViewersAny' },
+    ])
+  })
+
+  it('unknown condition types render no line (the card already shows the unknown label)', () => {
+    expect(automationConditionSummaryLines({ type: 'mystery', params: {} })).toEqual([])
   })
 })

@@ -5,8 +5,20 @@
       "id": "1f0a9c2e-4b7d-4e8a-9c3f-6d5b8a7e2c41",
       "name": "Weekday sunrise",
       "enabled": true,
+      "triggerType": "time_of_day",
       "minuteOfDay": 420,
       "daysMask": 31,
+      "triggerParams": {},
+      "conditions": [
+        {
+          "type": "charging",
+          "params": {
+            "charging": "true"
+          }
+        }
+      ],
+      "conditionMode": "all",
+      "cooldownSeconds": 60,
       "actions": [
         {
           "type": "torch",
@@ -19,6 +31,46 @@
           "params": {
             "enabled": "true"
           }
+        }
+      ]
+    },
+    {
+      "id": "8c3d1f6a-2e94-4b05-a7c8-5d1e9f3b7a02",
+      "name": "Night motion deterrent",
+      "enabled": true,
+      "triggerType": "motion_detected",
+      "minuteOfDay": 0,
+      "daysMask": 127,
+      "triggerParams": {},
+      "conditions": [
+        {
+          "type": "time_window",
+          "params": {
+            "start_minute": "1320",
+            "end_minute": "360",
+            "days_mask": "127"
+          }
+        },
+        {
+          "type": "streaming",
+          "params": {
+            "active": "true"
+          }
+        }
+      ],
+      "conditionMode": "all",
+      "cooldownSeconds": 120,
+      "actions": [
+        {
+          "type": "siren",
+          "params": {
+            "enabled": "true",
+            "duration_seconds": "10"
+          }
+        },
+        {
+          "type": "capture_photo",
+          "params": {}
         }
       ]
     }
@@ -222,6 +274,261 @@
       ],
       "catchUp": "STATEFUL",
       "interruptsStream": false
+    }
+  ],
+  "triggers": [
+    {
+      "id": "time_of_day",
+      "params": []
+    },
+    {
+      "id": "motion_detected",
+      "params": []
+    },
+    {
+      "id": "sound_detected",
+      "params": []
+    },
+    {
+      "id": "tamper_detected",
+      "params": []
+    },
+    {
+      "id": "charging_changed",
+      "params": [
+        {
+          "name": "charging",
+          "kind": "BOOL",
+          "optional": false,
+          "defaultValue": "true",
+          "autoAtZero": false
+        }
+      ]
+    },
+    {
+      "id": "battery_level",
+      "params": [
+        {
+          "name": "level",
+          "kind": "INT",
+          "min": 1.0,
+          "max": 99.0,
+          "optional": false,
+          "defaultValue": "20",
+          "autoAtZero": false
+        },
+        {
+          "name": "when_below",
+          "kind": "BOOL",
+          "optional": false,
+          "defaultValue": "true",
+          "autoAtZero": false
+        }
+      ]
+    },
+    {
+      "id": "streaming_changed",
+      "params": [
+        {
+          "name": "streaming",
+          "kind": "BOOL",
+          "optional": false,
+          "defaultValue": "true",
+          "autoAtZero": false
+        }
+      ]
+    },
+    {
+      "id": "viewers_changed",
+      "params": [
+        {
+          "name": "connected",
+          "kind": "BOOL",
+          "optional": false,
+          "defaultValue": "true",
+          "autoAtZero": false
+        }
+      ]
+    },
+    {
+      "id": "app_started",
+      "params": []
+    }
+  ],
+  "conditions": [
+    {
+      "id": "time_window",
+      "params": [
+        {
+          "name": "start_minute",
+          "kind": "INT",
+          "min": 0.0,
+          "max": 1439.0,
+          "optional": false,
+          "defaultValue": "0",
+          "autoAtZero": false
+        },
+        {
+          "name": "end_minute",
+          "kind": "INT",
+          "min": 0.0,
+          "max": 1439.0,
+          "optional": false,
+          "defaultValue": "1439",
+          "autoAtZero": false
+        },
+        {
+          "name": "days_mask",
+          "kind": "INT",
+          "min": 1.0,
+          "max": 127.0,
+          "optional": false,
+          "defaultValue": "127",
+          "autoAtZero": false
+        }
+      ]
+    },
+    {
+      "id": "charging",
+      "params": [
+        {
+          "name": "charging",
+          "kind": "BOOL",
+          "optional": false,
+          "defaultValue": "true",
+          "autoAtZero": false
+        }
+      ]
+    },
+    {
+      "id": "battery_level",
+      "params": [
+        {
+          "name": "min_level",
+          "kind": "INT",
+          "min": 0.0,
+          "max": 100.0,
+          "optional": true,
+          "defaultValue": "",
+          "autoAtZero": false
+        },
+        {
+          "name": "max_level",
+          "kind": "INT",
+          "min": 0.0,
+          "max": 100.0,
+          "optional": true,
+          "defaultValue": "",
+          "autoAtZero": false
+        }
+      ]
+    },
+    {
+      "id": "power_save",
+      "params": [
+        {
+          "name": "enabled",
+          "kind": "BOOL",
+          "optional": false,
+          "defaultValue": "false",
+          "autoAtZero": false
+        }
+      ]
+    },
+    {
+      "id": "wifi_connected",
+      "params": [
+        {
+          "name": "connected",
+          "kind": "BOOL",
+          "optional": false,
+          "defaultValue": "true",
+          "autoAtZero": false
+        }
+      ]
+    },
+    {
+      "id": "streaming",
+      "params": [
+        {
+          "name": "active",
+          "kind": "BOOL",
+          "optional": false,
+          "defaultValue": "true",
+          "autoAtZero": false
+        }
+      ]
+    },
+    {
+      "id": "viewers",
+      "params": [
+        {
+          "name": "min_count",
+          "kind": "INT",
+          "min": 0.0,
+          "max": 99.0,
+          "optional": true,
+          "defaultValue": "",
+          "autoAtZero": false
+        },
+        {
+          "name": "max_count",
+          "kind": "INT",
+          "min": 0.0,
+          "max": 99.0,
+          "optional": true,
+          "defaultValue": "",
+          "autoAtZero": false
+        }
+      ]
+    },
+    {
+      "id": "torch",
+      "params": [
+        {
+          "name": "on",
+          "kind": "BOOL",
+          "optional": false,
+          "defaultValue": "true",
+          "autoAtZero": false
+        }
+      ]
+    },
+    {
+      "id": "recording",
+      "params": [
+        {
+          "name": "active",
+          "kind": "BOOL",
+          "optional": false,
+          "defaultValue": "true",
+          "autoAtZero": false
+        }
+      ]
+    },
+    {
+      "id": "thermal",
+      "params": [
+        {
+          "name": "normal",
+          "kind": "BOOL",
+          "optional": false,
+          "defaultValue": "true",
+          "autoAtZero": false
+        }
+      ]
+    },
+    {
+      "id": "motion_detection",
+      "params": [
+        {
+          "name": "enabled",
+          "kind": "BOOL",
+          "optional": false,
+          "defaultValue": "true",
+          "autoAtZero": false
+        }
+      ]
     }
   ]
 }

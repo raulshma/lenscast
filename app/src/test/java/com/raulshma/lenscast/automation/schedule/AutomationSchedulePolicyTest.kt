@@ -12,8 +12,9 @@ import org.junit.Test
  * The schedule policy's verdicts, mirroring
  * [com.raulshma.lenscast.capture.MotionArmingPolicyTest]: the occurrence-key
  * arithmetic, the due/after-journal/day-mask matrix, the STATEFUL/ONESHOT
- * catch-up split, the rule sanitizer's clamps, and the camera-settings merge
- * for every camera action type — all pure JVM.
+ * catch-up split, the event trigger matching and cooldown verdicts, the rule
+ * sanitizer's clamps, and the camera-settings merge for every camera action
+ * type — all pure JVM.
  */
 class AutomationSchedulePolicyTest {
 
@@ -24,31 +25,76 @@ class AutomationSchedulePolicyTest {
 
     private fun rule(
         id: String? = "rule-1",
+        triggerType: String = AutomationRule.TRIGGER_TIME_OF_DAY,
         minuteOfDay: Int = 600,
         daysMask: Int = ALL_DAYS,
         enabled: Boolean = true,
+        triggerParams: Map<String, String> = emptyMap(),
+        conditions: List<AutomationConditionSpec> = emptyList(),
+        conditionMode: String = AutomationRule.CONDITION_MODE_ALL,
+        cooldownSeconds: Int = StreamDefaults.AUTOMATION_COOLDOWN_DEFAULT_SECONDS,
         actions: List<AutomationActionSpec> = listOf(
             AutomationActionSpec("stream", mapOf("enabled" to "true")),
         ),
     ) = AutomationRule(
         id = id,
+        triggerType = triggerType,
         minuteOfDay = minuteOfDay,
         daysMask = daysMask,
         enabled = enabled,
+        triggerParams = triggerParams,
+        conditions = conditions,
+        conditionMode = conditionMode,
+        cooldownSeconds = cooldownSeconds,
         actions = actions,
+    )
+
+    private fun snapshot(
+        minuteOfDay: Int = 600,
+        epochDay: Long = day,
+        isoDayIndex: Int = 0,
+        charging: Boolean = false,
+        batteryLevel: Int? = 80,
+        powerSave: Boolean = false,
+        wifiConnected: Boolean = true,
+        streamingActive: Boolean = true,
+        viewerCount: Int = 0,
+        torchOn: Boolean = false,
+        recordingActive: Boolean = false,
+        thermalNormal: Boolean = true,
+        motionDetectionEnabled: Boolean = true,
+    ) = AutomationSensorSnapshot(
+        minuteOfDay = minuteOfDay,
+        epochDay = epochDay,
+        isoDayIndex = isoDayIndex,
+        charging = charging,
+        batteryLevel = batteryLevel,
+        powerSave = powerSave,
+        wifiConnected = wifiConnected,
+        streamingActive = streamingActive,
+        viewerCount = viewerCount,
+        torchOn = torchOn,
+        recordingActive = recordingActive,
+        thermalNormal = thermalNormal,
+        motionDetectionEnabled = motionDetectionEnabled,
     )
 
     private fun due(
         rules: List<AutomationRule> = listOf(rule()),
-        minuteOfDay: Int = 600,
         enabled: Boolean = true,
         journal: Map<String, Long> = emptyMap(),
-        isoDayIndex: Int = 0,
-        epochDay: Long = day,
+        at: AutomationSensorSnapshot = snapshot(),
         graceMs: Long = StreamDefaults.AUTOMATION_ONESHOT_GRACE_MS,
-    ) = AutomationSchedulePolicy.dueRules(
-        rules, enabled, minuteOfDay, epochDay, isoDayIndex, journal, graceMs,
-    )
+    ) = AutomationSchedulePolicy.dueRules(rules, enabled, at, journal, graceMs)
+
+    private fun eventFired(
+        event: AutomationEvent,
+        rules: List<AutomationRule> = listOf(rule(triggerType = AutomationTriggerCatalog.MOTION_DETECTED)),
+        enabled: Boolean = true,
+        journal: Map<String, Long> = emptyMap(),
+        nowMs: Long = 1_800_000_000_000L,
+        at: AutomationSensorSnapshot = snapshot(),
+    ) = AutomationSchedulePolicy.eventDue(rules, enabled, event, at, journal, nowMs)
 
     // ── occurrenceKey ──
 
@@ -76,20 +122,20 @@ class AutomationSchedulePolicyTest {
 
     @Test
     fun `rule is not due before its minute`() {
-        assertTrue(due(minuteOfDay = 599).isEmpty())
+        assertTrue(due(at = snapshot(minuteOfDay = 599)).isEmpty())
     }
 
     @Test
     fun `rule is still due later the same day (catch-up)`() {
-        assertEquals(1, due(minuteOfDay = 900).size)
+        assertEquals(1, due(at = snapshot(minuteOfDay = 900)).size)
     }
 
     @Test
     fun `off day is never due`() {
         val mondayOnly = 0b0000001
-        assertEquals(1, due(isoDayIndex = 0, rules = listOf(rule(daysMask = mondayOnly))).size)
-        assertTrue(due(isoDayIndex = 2, rules = listOf(rule(daysMask = mondayOnly))).isEmpty())
-        assertTrue(due(isoDayIndex = 6, rules = listOf(rule(daysMask = mondayOnly))).isEmpty())
+        assertEquals(1, due(at = snapshot(isoDayIndex = 0), rules = listOf(rule(daysMask = mondayOnly))).size)
+        assertTrue(due(at = snapshot(isoDayIndex = 2), rules = listOf(rule(daysMask = mondayOnly))).isEmpty())
+        assertTrue(due(at = snapshot(isoDayIndex = 6), rules = listOf(rule(daysMask = mondayOnly))).isEmpty())
     }
 
     @Test
@@ -106,7 +152,70 @@ class AutomationSchedulePolicyTest {
     fun `a rule scheduled later today is not due yet`() {
         // The occurrence key sits in today's future; the time-arrived check
         // holds it back even with an empty journal.
-        assertTrue(due(minuteOfDay = 0).isEmpty())
+        assertTrue(due(at = snapshot(minuteOfDay = 0)).isEmpty())
+    }
+
+    @Test
+    fun `event rules never ride the time tick`() {
+        // An event rule's minuteOfDay is meaningless (default 0) — evaluating
+        // it here would fire every event rule at midnight of every day.
+        assertTrue(
+            due(rules = listOf(rule(triggerType = AutomationTriggerCatalog.MOTION_DETECTED))).isEmpty(),
+        )
+    }
+
+    // ── Time rules with preconditions ──
+
+    @Test
+    fun `a time rule with unmet conditions stays due for a later tick`() {
+        val chargingOnly = listOf(
+            rule(conditions = listOf(chargingCondition(required = true))),
+        )
+        // Unmet now: nothing fires, nothing journals.
+        assertTrue(due(rules = chargingOnly).isEmpty())
+        // Met on a later tick the same day: the rule fires (catch-up).
+        assertEquals(
+            1,
+            due(rules = chargingOnly, at = snapshot(minuteOfDay = 700, charging = true)).size,
+        )
+    }
+
+    @Test
+    fun `condition mode all demands every condition`() {
+        val rules = listOf(
+            rule(
+                conditions = listOf(
+                    chargingCondition(required = true),
+                    streamingCondition(required = false),
+                ),
+                conditionMode = AutomationRule.CONDITION_MODE_ALL,
+            ),
+        )
+        assertTrue(due(rules = rules).isEmpty())
+        assertEquals(1, due(rules = rules, at = snapshot(charging = true, streamingActive = false)).size)
+    }
+
+    @Test
+    fun `condition mode any admits one matching condition`() {
+        val rules = listOf(
+            rule(
+                conditions = listOf(
+                    chargingCondition(required = true),
+                    streamingCondition(required = false),
+                ),
+                conditionMode = AutomationRule.CONDITION_MODE_ANY,
+            ),
+        )
+        assertEquals(1, due(rules = rules, at = snapshot(charging = true, streamingActive = true)).size)
+        assertEquals(1, due(rules = rules, at = snapshot(charging = false, streamingActive = false)).size)
+        // Neither condition met: held.
+        assertTrue(due(rules = rules, at = snapshot(charging = false, streamingActive = true)).isEmpty())
+    }
+
+    @Test
+    fun `an empty condition list fires under either mode`() {
+        assertEquals(1, due(rules = listOf(rule(conditionMode = AutomationRule.CONDITION_MODE_ANY))).size)
+        assertEquals(1, due(rules = listOf(rule(conditionMode = AutomationRule.CONDITION_MODE_ALL))).size)
     }
 
     // ── Journal ──
@@ -132,6 +241,16 @@ class AutomationSchedulePolicyTest {
     }
 
     @Test
+    fun `an event-kind journal value does not block a time fire`() {
+        // The rule used to be event-triggered and journaled a wall-clock ms;
+        // that record is not a time occurrence key and must be inert here.
+        assertEquals(
+            1,
+            due(journal = mapOf("rule-1" to AutomationSchedulePolicy.EVENT_JOURNAL_THRESHOLD)).size,
+        )
+    }
+
+    @Test
     fun `rules without an id are never blocked by the journal`() {
         assertEquals(1, due(rules = listOf(rule(id = null))).size)
     }
@@ -141,7 +260,7 @@ class AutomationSchedulePolicyTest {
     @Test
     fun `stateful actions fire hours past the occurrence`() {
         // 800 minutes late — lateness is schedule-time, so no wall clock needed.
-        val fired = due(minuteOfDay = 1_400)
+        val fired = due(at = snapshot(minuteOfDay = 1_400))
         assertEquals(listOf("stream"), fired.single().actions.map { it.type })
     }
 
@@ -151,8 +270,7 @@ class AutomationSchedulePolicyTest {
         // convergence must not be skipped just because the tick is late.
         val nextDay = day + 1
         val fired = due(
-            minuteOfDay = 700,
-            epochDay = nextDay,
+            at = snapshot(minuteOfDay = 700, epochDay = nextDay),
             journal = mapOf("rule-1" to day * StreamDefaults.MINUTES_PER_DAY + 600),
         )
         assertEquals(listOf("rule-1"), fired.map { it.rule.id })
@@ -162,14 +280,14 @@ class AutomationSchedulePolicyTest {
     fun `one-shot fires at the last minute of the grace window`() {
         val rules = listOf(rule(actions = listOf(AutomationActionSpec("capture_photo"))))
         // Exactly grace (10 min) late: 10 * 60_000 <= grace holds.
-        val fired = due(rules = rules, minuteOfDay = 610)
+        val fired = due(rules = rules, at = snapshot(minuteOfDay = 610))
         assertEquals(listOf("capture_photo"), fired.single().actions.map { it.type })
     }
 
     @Test
     fun `one-shot past grace is dropped and a one-shot-only rule never fires`() {
         val rules = listOf(rule(actions = listOf(AutomationActionSpec("capture_photo"))))
-        assertTrue(due(rules = rules, minuteOfDay = 611).isEmpty())
+        assertTrue(due(rules = rules, at = snapshot(minuteOfDay = 611)).isEmpty())
     }
 
     @Test
@@ -182,7 +300,7 @@ class AutomationSchedulePolicyTest {
                 ),
             ),
         )
-        val fired = due(rules = rules, minuteOfDay = 611)
+        val fired = due(rules = rules, at = snapshot(minuteOfDay = 611))
         assertEquals(listOf("torch"), fired.single().actions.map { it.type })
     }
 
@@ -190,6 +308,253 @@ class AutomationSchedulePolicyTest {
     fun `unknown action types are filtered at the last gate`() {
         val fired = due(rules = listOf(rule(actions = listOf(AutomationActionSpec("bogus")))))
         assertTrue(fired.isEmpty())
+    }
+
+    // ── Event path: trigger matching ──
+
+    @Test
+    fun `motion rule fires on motion only`() {
+        assertEquals(1, eventFired(AutomationEvent.MotionDetected).size)
+        assertTrue(eventFired(AutomationEvent.SoundDetected).isEmpty())
+        assertTrue(eventFired(AutomationEvent.AppStarted).isEmpty())
+    }
+
+    @Test
+    fun `time rules never match an event`() {
+        assertTrue(
+            eventFired(
+                AutomationEvent.MotionDetected,
+                rules = listOf(rule()), // default trigger: time_of_day
+            ).isEmpty(),
+        )
+    }
+
+    @Test
+    fun `charging rule matches by polarity`() {
+        val onPlug = listOf(rule(triggerType = AutomationTriggerCatalog.CHARGING_CHANGED))
+        assertEquals(
+            1,
+            eventFired(AutomationEvent.ChargingChanged(charging = true), rules = onPlug).size,
+        )
+        assertTrue(
+            eventFired(AutomationEvent.ChargingChanged(charging = false), rules = onPlug).isEmpty(),
+        )
+        // Inverted polarity: fires on unplug.
+        val onUnplug = listOf(
+            rule(
+                triggerType = AutomationTriggerCatalog.CHARGING_CHANGED,
+                triggerParams = mapOf("charging" to "false"),
+            ),
+        )
+        assertEquals(
+            1,
+            eventFired(AutomationEvent.ChargingChanged(charging = false), rules = onUnplug).size,
+        )
+        assertTrue(
+            eventFired(AutomationEvent.ChargingChanged(charging = true), rules = onUnplug).isEmpty(),
+        )
+    }
+
+    @Test
+    fun `streaming and viewer rules match by state`() {
+        val onStart = listOf(rule(triggerType = AutomationTriggerCatalog.STREAMING_CHANGED))
+        assertEquals(
+            1,
+            eventFired(AutomationEvent.StreamingChanged(streaming = true), rules = onStart).size,
+        )
+        assertTrue(
+            eventFired(AutomationEvent.StreamingChanged(streaming = false), rules = onStart).isEmpty(),
+        )
+
+        val onJoin = listOf(rule(triggerType = AutomationTriggerCatalog.VIEWERS_CHANGED))
+        assertEquals(
+            1,
+            eventFired(AutomationEvent.ViewersChanged(connected = true), rules = onJoin).size,
+        )
+        assertTrue(
+            eventFired(AutomationEvent.ViewersChanged(connected = false), rules = onJoin).isEmpty(),
+        )
+    }
+
+    @Test
+    fun `battery rule fires only on its threshold crossing`() {
+        fun batteryRule(whenBelow: Boolean) = rule(
+            triggerType = AutomationTriggerCatalog.BATTERY_LEVEL,
+            triggerParams = mapOf("level" to "20", "when_below" to whenBelow.toString()),
+        )
+
+        // Crossing below: 21 → 20 fires; steady 20 → 20 and 19 → 21 don't.
+        assertEquals(
+            1,
+            eventFired(
+                AutomationEvent.BatteryLevelChanged(previous = 21, current = 20),
+                rules = listOf(batteryRule(whenBelow = true)),
+            ).size,
+        )
+        assertTrue(
+            eventFired(
+                AutomationEvent.BatteryLevelChanged(previous = 20, current = 20),
+                rules = listOf(batteryRule(whenBelow = true)),
+            ).isEmpty(),
+        )
+        assertTrue(
+            eventFired(
+                AutomationEvent.BatteryLevelChanged(previous = 18, current = 22),
+                rules = listOf(batteryRule(whenBelow = true)),
+            ).isEmpty(),
+        )
+        // Unknown previous level (first read of the process) never fires.
+        assertTrue(
+            eventFired(
+                AutomationEvent.BatteryLevelChanged(previous = null, current = 19),
+                rules = listOf(batteryRule(whenBelow = true)),
+            ).isEmpty(),
+        )
+        // Crossing above: 19 → 21 fires (the level moves strictly past 20).
+        assertEquals(
+            1,
+            eventFired(
+                AutomationEvent.BatteryLevelChanged(previous = 19, current = 21),
+                rules = listOf(batteryRule(whenBelow = false)),
+            ).size,
+        )
+        assertTrue(
+            eventFired(
+                AutomationEvent.BatteryLevelChanged(previous = 22, current = 21),
+                rules = listOf(batteryRule(whenBelow = false)),
+            ).isEmpty(),
+        )
+    }
+
+    @Test
+    fun `detection rules each match only their own event`() {
+        val rules = listOf(
+            rule(id = "m", triggerType = AutomationTriggerCatalog.MOTION_DETECTED),
+            rule(id = "s", triggerType = AutomationTriggerCatalog.SOUND_DETECTED),
+            rule(id = "t", triggerType = AutomationTriggerCatalog.TAMPER_DETECTED),
+        )
+        assertEquals(listOf("m"), eventFired(AutomationEvent.MotionDetected, rules = rules).map { it.rule.id })
+        assertEquals(listOf("s"), eventFired(AutomationEvent.SoundDetected, rules = rules).map { it.rule.id })
+        assertEquals(listOf("t"), eventFired(AutomationEvent.TamperDetected, rules = rules).map { it.rule.id })
+    }
+
+    @Test
+    fun `app started fires exactly on the app-started event`() {
+        val rules = listOf(rule(triggerType = AutomationTriggerCatalog.APP_STARTED))
+        assertEquals(1, eventFired(AutomationEvent.AppStarted, rules = rules).size)
+    }
+
+    // ── Event path: gates ──
+
+    @Test
+    fun `master toggle off blocks event fires too`() {
+        assertTrue(
+            eventFired(AutomationEvent.MotionDetected, enabled = false).isEmpty(),
+        )
+    }
+
+    @Test
+    fun `disabled event rule never fires`() {
+        assertTrue(
+            eventFired(
+                AutomationEvent.MotionDetected,
+                rules = listOf(rule(triggerType = AutomationTriggerCatalog.MOTION_DETECTED, enabled = false)),
+            ).isEmpty(),
+        )
+    }
+
+    @Test
+    fun `null-id event rule is skipped defensively`() {
+        // A null-id rule could never be journaled; the store mints ids so
+        // this is unreachable — skipping keeps a hot event loop impossible.
+        assertTrue(
+            eventFired(
+                AutomationEvent.MotionDetected,
+                rules = listOf(rule(id = null, triggerType = AutomationTriggerCatalog.MOTION_DETECTED)),
+            ).isEmpty(),
+        )
+    }
+
+    @Test
+    fun `event conditions are checked at event time`() {
+        val rules = listOf(
+            rule(
+                triggerType = AutomationTriggerCatalog.MOTION_DETECTED,
+                conditions = listOf(streamingCondition(required = true)),
+            ),
+        )
+        assertTrue(eventFired(AutomationEvent.MotionDetected, rules = rules, at = snapshot(streamingActive = false)).isEmpty())
+        assertEquals(1, eventFired(AutomationEvent.MotionDetected, rules = rules, at = snapshot(streamingActive = true)).size)
+    }
+
+    @Test
+    fun `event rules run their full action list with no catch-up filter`() {
+        val rules = listOf(
+            rule(
+                triggerType = AutomationTriggerCatalog.MOTION_DETECTED,
+                actions = listOf(AutomationActionSpec("capture_photo")),
+            ),
+        )
+        val fired = eventFired(AutomationEvent.MotionDetected, rules = rules)
+        assertEquals(listOf("capture_photo"), fired.single().actions.map { it.type })
+    }
+
+    // ── Event path: cooldown ──
+
+    @Test
+    fun `cooldown blocks a refire inside the window`() {
+        val now = 1_800_000_000_000L
+        val rules = listOf(
+            rule(triggerType = AutomationTriggerCatalog.MOTION_DETECTED, cooldownSeconds = 120),
+        )
+        // Last fired 60 s ago with a 120 s cooldown: held.
+        assertTrue(
+            eventFired(
+                AutomationEvent.MotionDetected,
+                rules = rules,
+                journal = mapOf("rule-1" to now - 60_000L),
+                nowMs = now,
+            ).isEmpty(),
+        )
+        // Exactly the cooldown ago: elapsed (now - journaled >= window).
+        assertEquals(
+            1,
+            eventFired(
+                AutomationEvent.MotionDetected,
+                rules = rules,
+                journal = mapOf("rule-1" to now - 120_000L),
+                nowMs = now,
+            ).size,
+        )
+    }
+
+    @Test
+    fun `zero cooldown admits every event`() {
+        val now = 1_800_000_000_000L
+        assertEquals(
+            1,
+            eventFired(
+                AutomationEvent.MotionDetected,
+                rules = listOf(rule(triggerType = AutomationTriggerCatalog.MOTION_DETECTED, cooldownSeconds = 0)),
+                journal = mapOf("rule-1" to now),
+                nowMs = now,
+            ).size,
+        )
+    }
+
+    @Test
+    fun `an occurrence-key journal value is not a cooldown record`() {
+        // The rule used to be a time trigger; its journaled occurrence key is
+        // below the event threshold and must not read as "fired a millisecond
+        // after the epoch".
+        assertEquals(
+            1,
+            eventFired(
+                AutomationEvent.MotionDetected,
+                rules = listOf(rule(triggerType = AutomationTriggerCatalog.MOTION_DETECTED)),
+                journal = mapOf("rule-1" to day * StreamDefaults.MINUTES_PER_DAY + 600),
+            ).size,
+        )
     }
 
     // ── sanitizeRule ──
@@ -208,14 +573,87 @@ class AutomationSchedulePolicyTest {
     @Test
     fun `sanitizeRule trims the name and resets an unknown trigger type`() {
         val sanitized = AutomationSchedulePolicy.sanitizeRule(
-            AutomationRule(name = "  Night lock  ", triggerType = "motion_event"),
+            AutomationRule(name = "  Night lock  ", triggerType = "teleport_event"),
         )
         assertEquals("Night lock", sanitized.name)
         assertEquals(AutomationRule.TRIGGER_TIME_OF_DAY, sanitized.triggerType)
         val kept = AutomationSchedulePolicy.sanitizeRule(
-            AutomationRule(triggerType = AutomationRule.TRIGGER_TIME_OF_DAY),
+            AutomationRule(triggerType = AutomationTriggerCatalog.MOTION_DETECTED),
         )
-        assertEquals(AutomationRule.TRIGGER_TIME_OF_DAY, kept.triggerType)
+        assertEquals(AutomationTriggerCatalog.MOTION_DETECTED, kept.triggerType)
+    }
+
+    @Test
+    fun `sanitizeRule canonicalizes trigger params and degrades unknown keys to defaults`() {
+        val clamped = AutomationSchedulePolicy.sanitizeRule(
+            rule(
+                triggerType = AutomationTriggerCatalog.BATTERY_LEVEL,
+                triggerParams = mapOf("level" to "5000", "when_below" to "TRUE"),
+            ),
+        )
+        assertEquals("99", clamped.triggerParams["level"])
+        assertEquals("true", clamped.triggerParams["when_below"])
+
+        // An unknown key means the payload's shape is not trusted: the map
+        // degrades to the schema's documented defaults, the rule survives.
+        val degraded = AutomationSchedulePolicy.sanitizeRule(
+            rule(
+                triggerType = AutomationTriggerCatalog.BATTERY_LEVEL,
+                triggerParams = mapOf("threshold_pct" to "5"),
+            ),
+        )
+        assertEquals("20", degraded.triggerParams["level"])
+        assertEquals("true", degraded.triggerParams["when_below"])
+    }
+
+    @Test
+    fun `sanitizeRule drops unknown conditions and caps the count`() {
+        val conditions = List(12) { chargingCondition(required = true) }
+        val sanitized = AutomationSchedulePolicy.sanitizeRule(
+            rule(
+                conditions = listOf(AutomationConditionSpec("bogus")) + conditions,
+            ),
+        )
+        assertEquals(StreamDefaults.AUTOMATION_MAX_CONDITIONS_PER_RULE, sanitized.conditions.size)
+        assertTrue(sanitized.conditions.all { it.type == AutomationConditionCatalog.CHARGING })
+    }
+
+    @Test
+    fun `sanitizeRule clamps condition params`() {
+        val sanitized = AutomationSchedulePolicy.sanitizeRule(
+            rule(
+                conditions = listOf(
+                    AutomationConditionSpec(
+                        AutomationConditionCatalog.TIME_WINDOW,
+                        mapOf("start_minute" to "5000", "end_minute" to "-3", "days_mask" to "0"),
+                    ),
+                ),
+            ),
+        )
+        val window = sanitized.conditions.single()
+        assertEquals("1439", window.params["start_minute"])
+        assertEquals("0", window.params["end_minute"])
+        assertEquals("1", window.params["days_mask"])
+    }
+
+    @Test
+    fun `sanitizeRule folds condition mode and clamps cooldown`() {
+        val folded = AutomationSchedulePolicy.sanitizeRule(rule(conditionMode = "some"))
+        assertEquals(AutomationRule.CONDITION_MODE_ALL, folded.conditionMode)
+        assertEquals(
+            AutomationRule.CONDITION_MODE_ANY,
+            AutomationSchedulePolicy.sanitizeRule(rule(conditionMode = "any")).conditionMode,
+        )
+
+        assertEquals(
+            StreamDefaults.AUTOMATION_COOLDOWN_MAX_SECONDS,
+            AutomationSchedulePolicy.sanitizeRule(rule(cooldownSeconds = 500_000)).cooldownSeconds,
+        )
+        // Below the floor clamps to 0 (fire every event), not to the default.
+        assertEquals(
+            StreamDefaults.AUTOMATION_COOLDOWN_MIN_SECONDS,
+            AutomationSchedulePolicy.sanitizeRule(rule(cooldownSeconds = -1)).cooldownSeconds,
+        )
     }
 
     @Test
@@ -384,4 +822,16 @@ class AutomationSchedulePolicyTest {
             )
         }
     }
+
+    // ── helpers ──
+
+    private fun chargingCondition(required: Boolean) = AutomationConditionSpec(
+        AutomationConditionCatalog.CHARGING,
+        mapOf("charging" to required.toString()),
+    )
+
+    private fun streamingCondition(required: Boolean) = AutomationConditionSpec(
+        AutomationConditionCatalog.STREAMING,
+        mapOf("active" to required.toString()),
+    )
 }

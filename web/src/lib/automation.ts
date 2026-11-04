@@ -10,7 +10,10 @@
 import type {
   AutomationActionDto,
   AutomationCatalogActionDto,
+  AutomationCatalogConditionDto,
   AutomationCatalogParamDto,
+  AutomationCatalogTriggerDto,
+  AutomationConditionDto,
   AutomationRuleDto,
 } from '../types'
 
@@ -27,6 +30,34 @@ export const AUTOMATION_ACTION_TYPES = [
   'recording',
   'siren',
   'detection',
+] as const
+
+/** Every trigger catalog id the label tables cover (AutomationTriggerCatalog). */
+export const AUTOMATION_TRIGGER_TYPES = [
+  'time_of_day',
+  'motion_detected',
+  'sound_detected',
+  'tamper_detected',
+  'charging_changed',
+  'battery_level',
+  'streaming_changed',
+  'viewers_changed',
+  'app_started',
+] as const
+
+/** Every condition catalog id the label tables cover (AutomationConditionCatalog). */
+export const AUTOMATION_CONDITION_TYPES = [
+  'time_window',
+  'charging',
+  'battery_level',
+  'power_save',
+  'wifi_connected',
+  'streaming',
+  'viewers',
+  'torch',
+  'recording',
+  'thermal',
+  'motion_detection',
 ] as const
 
 /** Every day armed — the day-mask default (MotionArmingPolicy.ALL_DAYS_MASK). */
@@ -75,15 +106,70 @@ export function automationActionLabelKey(typeId: string): string {
     : 'automation.action.unknown'
 }
 
+/** The i18n key for one trigger id (AutomationViewModel.triggerTypeLabelRes). */
+export function automationTriggerLabelKey(triggerTypeId: string): string {
+  return (AUTOMATION_TRIGGER_TYPES as readonly string[]).includes(triggerTypeId)
+    ? `automation.trigger.${triggerTypeId}`
+    : 'automation.action.unknown'
+}
+
+/** The i18n key for one condition id (AutomationViewModel.conditionTypeLabelRes). */
+export function automationConditionLabelKey(conditionTypeId: string): string {
+  return (AUTOMATION_CONDITION_TYPES as readonly string[]).includes(conditionTypeId)
+    ? `automation.condition.${conditionTypeId}`
+    : 'automation.action.unknown'
+}
+
+/**
+ * The "typeId/paramName" label overrides — names that read differently per
+ * catalog type ("connected" is Wi-Fi for one condition and viewer presence
+ * for one trigger). Checked before the bare-name fallback, the same ladder
+ * as AutomationViewModel.PARAM_LABEL_OVERRIDES.
+ */
+const PARAM_LABEL_OVERRIDES: Record<string, string> = {
+  'camera_lens/index': 'automation.param.lensIndex',
+  'torch/enabled': 'automation.param.torch',
+  'stream/enabled': 'automation.param.stream',
+  'recording/enabled': 'automation.param.recording',
+  'siren/enabled': 'automation.param.siren',
+  // Triggers
+  'battery_level/level': 'automation.param.batteryThreshold',
+  'battery_level/when_below': 'automation.param.whenBelow',
+  'charging_changed/charging': 'automation.param.chargingPlugged',
+  'streaming_changed/streaming': 'automation.param.streamingActive',
+  'viewers_changed/connected': 'automation.param.viewersConnected',
+  // Conditions
+  'time_window/start_minute': 'automation.param.windowStart',
+  'time_window/end_minute': 'automation.param.windowEnd',
+  'time_window/days_mask': 'automation.param.windowDays',
+  'charging/charging': 'automation.param.chargingPlugged',
+  'battery_level/min_level': 'automation.param.batteryMin',
+  'battery_level/max_level': 'automation.param.batteryMax',
+  'power_save/enabled': 'automation.param.powerSaveOn',
+  'wifi_connected/connected': 'automation.param.wifiConnected',
+  'streaming/active': 'automation.param.streamingActive',
+  'viewers/min_count': 'automation.param.viewersMin',
+  'viewers/max_count': 'automation.param.viewersMax',
+  'torch/on': 'automation.param.torchOn',
+  'recording/active': 'automation.param.recordingActive',
+  'thermal/normal': 'automation.param.thermalNormal',
+  'motion_detection/enabled': 'automation.param.motion',
+}
+
 /** The i18n key for one param row label (AutomationViewModel.paramLabelRes). */
 export function automationParamLabelKey(typeId: string, paramName: string): string {
+  return PARAM_LABEL_OVERRIDES[`${typeId}/${paramName}`] ?? automationParamLabelFallback(paramName)
+}
+
+/** The bare-name fallback behind the override ladder. */
+function automationParamLabelFallback(paramName: string): string {
   switch (paramName) {
     case 'iso':
       return 'automation.param.iso'
     case 'exposure_time_ms':
       return 'automation.param.exposureTime'
     case 'index':
-      return typeId === 'camera_lens' ? 'automation.param.lensIndex' : 'automation.param.evIndex'
+      return 'automation.param.evIndex'
     case 'ratio':
       return 'automation.param.zoomRatio'
     case 'fps':
@@ -96,19 +182,6 @@ export function automationParamLabelKey(typeId: string, paramName: string): stri
       return 'automation.param.motion'
     case 'sound_enabled':
       return 'automation.param.sound'
-    case 'enabled':
-      switch (typeId) {
-        case 'torch':
-          return 'automation.param.torch'
-        case 'stream':
-          return 'automation.param.stream'
-        case 'recording':
-          return 'automation.param.recording'
-        case 'siren':
-          return 'automation.param.siren'
-        default:
-          return 'automation.param.enabled'
-      }
     default:
       return 'automation.param.enabled'
   }
@@ -280,21 +353,205 @@ export function paramSliderBounds(spec: Pick<AutomationCatalogParamDto, 'min' | 
  * unchanged" semantics the executor honors) — AutomationViewModel.defaultActionParams.
  */
 export function defaultActionParams(catalogAction: Pick<AutomationCatalogActionDto, 'params'> | undefined): Record<string, string> {
-  const params: Record<string, string> = {}
-  for (const spec of catalogAction?.params ?? []) {
-    if (!spec.optional) params[spec.name] = spec.defaultValue
-  }
-  return params
+  return defaultSpecParams(catalogAction?.params)
 }
 
-/** A fresh rule: 08:00, every day, no actions yet, blank id (the device mints the fire-journal UUID on save) — AutomationScreen.RuleDraft.new(). */
+/** [defaultActionParams] over the trigger catalog. */
+export function defaultTriggerParams(catalogTrigger: Pick<AutomationCatalogTriggerDto, 'params'> | undefined): Record<string, string> {
+  return defaultSpecParams(catalogTrigger?.params)
+}
+
+/** [defaultActionParams] over the condition catalog. */
+export function defaultConditionParams(catalogCondition: Pick<AutomationCatalogConditionDto, 'params'> | undefined): Record<string, string> {
+  return defaultSpecParams(catalogCondition?.params)
+}
+
+/** The shared required-params-at-defaults fold behind all three catalogs. */
+function defaultSpecParams(params: AutomationCatalogParamDto[] | undefined): Record<string, string> {
+  const defaults: Record<string, string> = {}
+  for (const spec of params ?? []) {
+    if (!spec.optional) defaults[spec.name] = spec.defaultValue
+  }
+  return defaults
+}
+
+/** One canonical param write on a params map: null/empty removes the key (AutomationViewModel.withSpecParam). */
+export function withSpecParam(
+  params: Record<string, string>,
+  name: string,
+  value: string | null | undefined,
+): Record<string, string> {
+  const next = { ...params }
+  if (value == null || value === '') delete next[name]
+  else next[name] = value
+  return next
+}
+
+/** A fresh rule: 08:00 every day, time trigger, no conditions/actions yet, blank id (the device mints the fire-journal UUID on save) — AutomationScreen.RuleDraft.new(). */
 export function newAutomationRule(): AutomationRuleDto {
   return {
     id: '',
     name: '',
     enabled: true,
+    triggerType: 'time_of_day',
     minuteOfDay: 8 * 60,
     daysMask: AUTOMATION_ALL_DAYS_MASK,
+    triggerParams: {},
+    conditions: [],
+    conditionMode: 'all',
+    cooldownSeconds: 60,
     actions: [],
+  }
+}
+
+// ── trigger / condition summaries ──
+
+/** The effective BOOL reading of one trigger/condition param, defaulting like the engine's evaluation (AutomationParamValues.paramValue). */
+function boolParam(params: Record<string, string>, name: string, fallback: boolean): boolean {
+  const raw = params[name]
+  if (raw != null) return raw === 'true'
+  return fallback
+}
+
+function intParam(params: Record<string, string>, name: string): number | null {
+  const raw = params[name]
+  if (raw == null) return null
+  const parsed = parseInt(raw, 10)
+  return Number.isFinite(parsed) ? parsed : null
+}
+
+/**
+ * The rule-card summary line for a rule's TRIGGER: [] for time-of-day rules
+ * (their card shows the classic HH:mm · days label) and one "when …" line for
+ * every event trigger (AutomationViewModel.triggerSummaryLines).
+ */
+export function automationTriggerSummaryLines(rule: Pick<AutomationRuleDto, 'triggerType' | 'triggerParams'>): AutomationSummaryLine[] {
+  const params = rule.triggerParams ?? {}
+  switch (rule.triggerType) {
+    case 'time_of_day':
+      return []
+    case 'motion_detected':
+      return [{ key: 'automation.summary.triggerMotion' }]
+    case 'sound_detected':
+      return [{ key: 'automation.summary.triggerSound' }]
+    case 'tamper_detected':
+      return [{ key: 'automation.summary.triggerTamper' }]
+    case 'charging_changed':
+      return [
+        boolParam(params, 'charging', true)
+          ? { key: 'automation.summary.triggerChargingOn' }
+          : { key: 'automation.summary.triggerChargingOff' },
+      ]
+    case 'battery_level': {
+      const level = intParam(params, 'level') ?? 20
+      return [
+        boolParam(params, 'when_below', true)
+          ? { key: 'automation.summary.triggerBatteryBelow', params: { value: level } }
+          : { key: 'automation.summary.triggerBatteryAbove', params: { value: level } },
+      ]
+    }
+    case 'streaming_changed':
+      return [
+        boolParam(params, 'streaming', true)
+          ? { key: 'automation.summary.triggerStreamStart' }
+          : { key: 'automation.summary.triggerStreamStop' },
+      ]
+    case 'viewers_changed':
+      return [
+        boolParam(params, 'connected', true)
+          ? { key: 'automation.summary.triggerViewerJoin' }
+          : { key: 'automation.summary.triggerViewerLeave' },
+      ]
+    case 'app_started':
+      return [{ key: 'automation.summary.triggerAppStarted' }]
+    default:
+      return []
+  }
+}
+
+/**
+ * The rule-card summary lines for one precondition. The time window's
+ * day-mask suffix renders in the caller (it needs the localized day chips'
+ * labels), exactly like the app screen composes that one line itself —
+ * AutomationViewModel.conditionSummaryLines.
+ */
+export function automationConditionSummaryLines(condition: Pick<AutomationConditionDto, 'type' | 'params'>): AutomationSummaryLine[] {
+  const params = condition.params ?? {}
+  switch (condition.type) {
+    case 'time_window': {
+      const start = formatMinuteOfDay(intParam(params, 'start_minute') ?? 0)
+      const end = formatMinuteOfDay(intParam(params, 'end_minute') ?? 1439)
+      return [{ key: 'automation.summary.conditionTimeWindow', params: { start, end } }]
+    }
+    case 'charging':
+      return [
+        boolParam(params, 'charging', true)
+          ? { key: 'automation.summary.conditionChargingOn' }
+          : { key: 'automation.summary.conditionChargingOff' },
+      ]
+    case 'battery_level': {
+      const min = intParam(params, 'min_level')
+      const max = intParam(params, 'max_level')
+      if (min != null && max != null) {
+        return [{ key: 'automation.summary.conditionBatteryBetween', params: { min, max } }]
+      }
+      if (min != null) return [{ key: 'automation.summary.conditionBatteryMin', params: { value: min } }]
+      if (max != null) return [{ key: 'automation.summary.conditionBatteryMax', params: { value: max } }]
+      return [{ key: 'automation.summary.conditionBatteryAny' }]
+    }
+    case 'power_save':
+      return [
+        boolParam(params, 'enabled', false)
+          ? { key: 'automation.summary.conditionPowerSaveOn' }
+          : { key: 'automation.summary.conditionPowerSaveOff' },
+      ]
+    case 'wifi_connected':
+      return [
+        boolParam(params, 'connected', true)
+          ? { key: 'automation.summary.conditionWifiOn' }
+          : { key: 'automation.summary.conditionWifiOff' },
+      ]
+    case 'streaming':
+      return [
+        boolParam(params, 'active', true)
+          ? { key: 'automation.summary.conditionStreamingOn' }
+          : { key: 'automation.summary.conditionStreamingOff' },
+      ]
+    case 'viewers': {
+      const min = intParam(params, 'min_count')
+      const max = intParam(params, 'max_count')
+      if (min != null && max != null) {
+        return [{ key: 'automation.summary.conditionViewersBetween', params: { min, max } }]
+      }
+      if (min != null) return [{ key: 'automation.summary.conditionViewersMin', params: { value: min } }]
+      if (max != null) return [{ key: 'automation.summary.conditionViewersMax', params: { value: max } }]
+      return [{ key: 'automation.summary.conditionViewersAny' }]
+    }
+    case 'torch':
+      return [
+        boolParam(params, 'on', true)
+          ? { key: 'automation.summary.conditionTorchOn' }
+          : { key: 'automation.summary.conditionTorchOff' },
+      ]
+    case 'recording':
+      return [
+        boolParam(params, 'active', true)
+          ? { key: 'automation.summary.conditionRecordingOn' }
+          : { key: 'automation.summary.conditionRecordingOff' },
+      ]
+    case 'thermal':
+      return [
+        boolParam(params, 'normal', true)
+          ? { key: 'automation.summary.conditionThermalNormal' }
+          : { key: 'automation.summary.conditionThermalThrottling' },
+      ]
+    case 'motion_detection':
+      return [
+        boolParam(params, 'enabled', true)
+          ? { key: 'automation.summary.conditionMotionOn' }
+          : { key: 'automation.summary.conditionMotionOff' },
+      ]
+    default:
+      return []
   }
 }

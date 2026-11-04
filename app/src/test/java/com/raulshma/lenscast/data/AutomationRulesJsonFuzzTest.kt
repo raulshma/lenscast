@@ -1,7 +1,9 @@
 package com.raulshma.lenscast.data
 
 import com.raulshma.lenscast.automation.schedule.AutomationActionCatalog
+import com.raulshma.lenscast.automation.schedule.AutomationConditionCatalog
 import com.raulshma.lenscast.automation.schedule.AutomationRule
+import com.raulshma.lenscast.automation.schedule.AutomationTriggerCatalog
 import com.raulshma.lenscast.core.StreamDefaults
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
@@ -50,16 +52,42 @@ class AutomationRulesJsonFuzzTest {
         )
         rules.forEach { rule ->
             assertTrue("blank id", !rule.id.isNullOrBlank())
-            assertEquals(
+            // An unknown trigger folds to time_of_day; anything that survives
+            // decode must be a catalog kind.
+            assertNotNull(
                 "unknown trigger survived: ${rule.triggerType}",
-                AutomationRule.TRIGGER_TIME_OF_DAY,
-                rule.triggerType,
+                AutomationTriggerCatalog.typeFor(rule.triggerType),
             )
             assertTrue("minute out of range: ${rule.minuteOfDay}", rule.minuteOfDay in 0..StreamDefaults.MINUTES_PER_DAY - 1)
             assertTrue(
                 "day mask out of range: ${rule.daysMask}",
                 rule.daysMask in StreamDefaults.MOTION_ARM_DAYS_MASK_MIN..StreamDefaults.MOTION_ARM_DAYS_MASK_MAX,
             )
+            assertTrue(
+                "condition cap exceeded: ${rule.conditions.size}",
+                rule.conditions.size <= StreamDefaults.AUTOMATION_MAX_CONDITIONS_PER_RULE,
+            )
+            assertTrue(
+                "unknown condition mode survived: ${rule.conditionMode}",
+                rule.conditionMode == AutomationRule.CONDITION_MODE_ALL ||
+                    rule.conditionMode == AutomationRule.CONDITION_MODE_ANY,
+            )
+            assertTrue(
+                "cooldown out of range: ${rule.cooldownSeconds}",
+                rule.cooldownSeconds in StreamDefaults.AUTOMATION_COOLDOWN_MIN_SECONDS..StreamDefaults.AUTOMATION_COOLDOWN_MAX_SECONDS,
+            )
+            rule.conditions.forEach { condition ->
+                val type = AutomationConditionCatalog.typeFor(condition.type)
+                assertNotNull("unknown condition type survived: ${condition.type}", type)
+                type!!
+                val known = type.params.associateBy { it.name }
+                condition.params.forEach { (name, value) ->
+                    val param = known[name]
+                    assertNotNull("unknown param $name survived on ${condition.type}", param)
+                    param!!
+                    assertCanonicalValue(param, value, condition.type)
+                }
+            }
             assertTrue("action cap exceeded: ${rule.actions.size}", rule.actions.size <= StreamDefaults.AUTOMATION_MAX_ACTIONS_PER_RULE)
             rule.actions.forEach { action ->
                 val type = AutomationActionCatalog.typeFor(action.type)
@@ -70,22 +98,31 @@ class AutomationRulesJsonFuzzTest {
                     val param = known[name]
                     assertNotNull("unknown param $name survived on ${action.type}", param)
                     param!!
-                    when (param.kind) {
-                        com.raulshma.lenscast.automation.schedule.ParamKind.BOOL ->
-                            assertTrue("non-canonical BOOL '$value'", value == "true" || value == "false")
-                        else -> {
-                            val parsed = value.toDoubleOrNull()
-                            assertNotNull("non-canonical numeric '$value'", parsed)
-                            parsed!!
-                            val min = param.min
-                            val max = param.max
-                            if (min != null) assertTrue("'$value' below min", parsed >= min)
-                            if (max != null) assertTrue("'$value' above max", parsed <= max)
-                            if (parsed == kotlin.math.floor(parsed) && kotlin.math.abs(parsed) < 1e15) {
-                                assertTrue("non-canonical integral '$value'", !value.contains('.'))
-                            }
-                        }
-                    }
+                    assertCanonicalValue(param, value, action.type)
+                }
+            }
+        }
+    }
+
+    /** One param's canonical in-bounds rendering, shared by both spec kinds. */
+    private fun assertCanonicalValue(
+        param: com.raulshma.lenscast.automation.schedule.AutomationParamSpec,
+        value: String,
+        typeId: String,
+    ) {
+        when (param.kind) {
+            com.raulshma.lenscast.automation.schedule.ParamKind.BOOL ->
+                assertTrue("non-canonical BOOL '$value'", value == "true" || value == "false")
+            else -> {
+                val parsed = value.toDoubleOrNull()
+                assertNotNull("non-canonical numeric '$value'", parsed)
+                parsed!!
+                val min = param.min
+                val max = param.max
+                if (min != null) assertTrue("'$value' below min on $typeId", parsed >= min)
+                if (max != null) assertTrue("'$value' above max on $typeId", parsed <= max)
+                if (parsed == kotlin.math.floor(parsed) && kotlin.math.abs(parsed) < 1e15) {
+                    assertTrue("non-canonical integral '$value'", !value.contains('.'))
                 }
             }
         }
@@ -102,6 +139,38 @@ class AutomationRulesJsonFuzzTest {
         assertEquals(1, rules.size)
         assertEquals("r1", rules.single().id)
         assertEquals("torch", rules.single().actions.single().type)
+        assertSanitized(rules)
+    }
+
+    @Test(timeout = 10_000)
+    fun `a pre-if-then payload decodes with the new fields defaulted`() {
+        // The exact shape the previous app version persisted: no triggerParams,
+        // conditions, conditionMode, or cooldownSeconds keys at all.
+        val rules = parseHostile(
+            """[{"id":"r1","name":"Old","enabled":true,"triggerType":"time_of_day",""" +
+                """"minuteOfDay":420,"daysMask":31,"actions":[{"type":"stream","params":{"enabled":"true"}}]}]""",
+        )
+        assertEquals(1, rules.size)
+        val rule = rules.single()
+        assertEquals(emptyMap<String, String>(), rule.triggerParams)
+        assertEquals(emptyList<Any>(), rule.conditions)
+        assertEquals(AutomationRule.CONDITION_MODE_ALL, rule.conditionMode)
+        assertEquals(StreamDefaults.AUTOMATION_COOLDOWN_DEFAULT_SECONDS, rule.cooldownSeconds)
+        assertSanitized(rules)
+    }
+
+    @Test(timeout = 10_000)
+    fun `an event rule with trigger params and conditions parses sanitized`() {
+        val rules = parseHostile(
+            """[{"id":"r2","name":"Night motion","triggerType":"motion_detected",""" +
+                """"triggerParams":{},"conditions":[{"type":"time_window","params":{"start_minute":"1320","end_minute":"360","days_mask":"127"}}],""" +
+                """"conditionMode":"all","cooldownSeconds":120,"actions":[{"type":"siren","params":{"enabled":"true"}}]}]""",
+        )
+        assertEquals(1, rules.size)
+        val rule = rules.single()
+        assertEquals(AutomationTriggerCatalog.MOTION_DETECTED, rule.triggerType)
+        assertEquals(1, rule.conditions.size)
+        assertEquals(120, rule.cooldownSeconds)
         assertSanitized(rules)
     }
 
@@ -127,6 +196,17 @@ class AutomationRulesJsonFuzzTest {
             """[{"minuteOfDay":"noon"}]""",
             """[{"minuteOfDay":1.5}]""",
             """[{"daysMask":"all"}]""",
+            """[{"triggerParams":"level=5"}]""",
+            """[{"triggerParams":{"level":5}}]""",
+            """[{"conditions":"time_window"}]""",
+            """[{"conditions":[42]}]""",
+            """[{"conditions":[{"type":"bogus"}]}]""",
+            """[{"conditionMode":3}]""",
+            """[{"conditionMode":"some"}]""",
+            """[{"cooldownSeconds":"slow"}]""",
+            """[{"cooldownSeconds":1.5}]""",
+            """[{"cooldownSeconds":-1}]""",
+            """[{"cooldownSeconds":99999999999}]""",
             """[{"actions":{"type":"torch"}}]""",
             """[{"actions":[42]}]""",
             """[{"actions":[{"type":42}]}]""",
@@ -136,7 +216,7 @@ class AutomationRulesJsonFuzzTest {
             """[{"actions":[{"type":"torch","params":{"bogus":"1"}}]}]""",
             """[null]""",
             """[[]]""",
-            """[{"id":null,"name":null,"enabled":null,"triggerType":null,"minuteOfDay":null,"daysMask":null,"actions":null}]""",
+            """[{"id":null,"name":null,"enabled":null,"triggerType":null,"minuteOfDay":null,"daysMask":null,"triggerParams":null,"conditions":null,"conditionMode":null,"cooldownSeconds":null,"actions":null}]""",
             """[{"id":""},{"id":"   "}]""",
             "null", "true", "42", "\"a string\"", "[]", "{}", "[",
         )

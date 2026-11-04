@@ -611,4 +611,96 @@
     <string name="automation_summary_motion_off">Детекция движения выключена</string>
     <string name="automation_summary_sound_on">Детекция звука включена</string>
     <string name="automation_summary_sound_off">Детекция звука выключена</string>
+
+    <!-- Триггеры «когда …» -->
+    <string name="automation_trigger_time_of_day">По расписанию</string>
+    <string name="automation_trigger_motion">Обнаружено движение</string>
+    <string name="automation_trigger_sound">Обнаружен звук</string>
+    <string name="automation_trigger_tamper">Вскрытие (отключение питания)</string>
+    <string name="automation_trigger_charging">Подключение / отключение зарядки</string>
+    <string name="automation_trigger_battery">Порог заряда батареи</string>
+    <string name="automation_trigger_streaming">Старт / остановка трансляции</string>
+    <string name="automation_trigger_viewers">Зритель подключился / отключился</string>
+    <string name="automation_trigger_app_started">Запуск приложения</string>
+    <string name="automation_summary_trigger_motion">При обнаружении движения</string>
+    <string name="automation_summary_trigger_sound">При обнаружении звука</string>
+    <string name="automation_summary_trigger_tamper">При вскрытии (отключении питания)</string>
+    <string name="automation_summary_trigger_charging_on">При подключении зарядки</string>
+    <string name="automation_summary_trigger_charging_off">При отключении зарядки</string>
+    <string name="automation_summary_trigger_battery_below">Когда заряд батареи падает до %1$s%%</string>
+    <string name="automation_summary_trigger_battery_above">Когда заряд батареи поднимается выше %1$s%%</string>
+    <string name="automation_summary_trigger_stream_start">При запуске трансляции</string>
+    <string name="automation_summary_trigger_stream_stop">При остановке трансляции</string>
+    <string name="automation_summary_trigger_viewer_join">Когда подключается зритель</string>
+    <string name="automation_summary_trigger_viewer_leave">Когда уходит последний зритель</string>
+    <string name="automation_summary_trigger_app_started">При запуске приложения</string>
+
+    <!-- Параметры триггеров -->
+    <string name="automation_param_battery_threshold">Заряд батареи (%)</string>
+    <string name="automation_param_when_below">При падении</string>
+    <string name="automation_param_charging_plugged">Зарядка</string>
+    <string name="automation_param_streaming_active">Трансляция</string>
+    <string name="automation_param_viewers_connected">Зритель присутствует</string>
+
+    <!-- Предусловия (только если …) -->
+    <string name="automation_condition_time_window">Интервал времени</string>
+    <string name="automation_condition_charging">Состояние зарядки</string>
+    <string name="automation_condition_battery">Заряд батареи</string>
+    <string name="automation_condition_power_save">Энергосбережение</string>
+    <string name="automation_condition_wifi">Wi-Fi подключён</string>
+    <string name="automation_condition_streaming">Идёт трансляция</string>
+    <string name="automation_condition_viewers">Число зрителей</string>
+    <string name="automation_condition_torch">Фонарик включён</string>
+    <string name="automation_condition_recording">Идёт запись</string>
+    <string name="automation_condition_thermal">Термический режим в норме</string>
+    <string name="automation_condition_motion_detection">Детекция движения включена</string>
+    <string name="automation_param_window_start">С (минута дня)</string>
+    <string name="automation_param_window_end">До (минута дня)</string>
+    <string name="automation_param_window_days">Дни</string>
+    <string name="automation_param_battery_min">Минимум (%)</string>
+    <string name="automation_param_battery_max">Максимум (%)</string>
+    <string name="automation_param_power_save_on">Энергосбережение включено</string>
+    <string name="automation_param_wifi_connected">Подключено</string>
+    <string name="automation_param_viewers_min">Минимум зрителей</string>
+    <string name="automation_param_viewers_max">Максимум зрителей</string>
+    <string name="automation_param_torch_on">Фонарик включён</string>
+    <string name="automation_param_recording_active">Запись</string>
+    <string name="automation_param_thermal_normal">Норма</string>
+    <string name="automation_summary_condition_time_window">С %1$s до %2$s</string>
+    <string name="automation_summary_condition_charging_on">Пока идёт зарядка</string>
+    <string name="automation_summary_condition_charging_off">Пока работает от батареи</string>
+    <string name="automation_summary_condition_battery_between">Заряд %1$s–%2$s%%</string>
+    <string name="automation_summary_condition_battery_min">Заряд ≥ %1$s%%</string>
+    <string name="automation_summary_condition_battery_max">Заряд ≤ %1$s%%</string>
+    <string name="automation_summary_condition_battery_any">Заряд: любой уровень</string>
+    <string name="automation_summary_condition_power_save_on">Пока включено энергосбережение</string>
+    <string name="automation_summary_condition_power_save_off">Пока энергосбережение выключено</string>
+    <string name="automation_summary_condition_wifi_on">Пока Wi-Fi подключён</string>
+    <string name="automation_summary_condition_wifi_off">Пока Wi-Fi отключён</string>
+    <string name="automation_summary_condition_streaming_on">Пока идёт трансляция</string>
+    <string name="automation_summary_condition_streaming_off">Пока трансляции нет</string>
+    <string name="automation_summary_condition_viewers_between">Зрителей %1$s–%2$s</string>
+    <string name="automation_summary_condition_viewers_min">Зрителей ≥ %1$s</string>
+    <string name="automation_summary_condition_viewers_max">Зрителей ≤ %1$s</string>
+    <string name="automation_summary_condition_viewers_any">Зрители: любое количество</string>
+    <string name="automation_summary_condition_torch_on">Пока включён фонарик</string>
+    <string name="automation_summary_condition_torch_off">Пока фонарик выключен</string>
+    <string name="automation_summary_condition_recording_on">Пока идёт запись</string>
+    <string name="automation_summary_condition_recording_off">Пока записи нет</string>
+    <string name="automation_summary_condition_thermal_normal">Пока температура в норме</string>
+    <string name="automation_summary_condition_thermal_throttling">Пока идёт троттлинг</string>
+    <string name="automation_summary_condition_motion_on">Пока включена детекция движения</string>
+    <string name="automation_summary_condition_motion_off">Пока детекция движения выключена</string>
+
+    <!-- Редактор: триггер / условия / пауза -->
+    <string name="automation_rule_conditions_title">Только если:</string>
+    <string name="automation_editor_trigger_title">Когда (триггер)</string>
+    <string name="automation_editor_change_trigger">Изменить</string>
+    <string name="automation_editor_conditions_title">Только если (условия)</string>
+    <string name="automation_editor_no_conditions">Нет условий — срабатывает на каждое событие</string>
+    <string name="automation_editor_match_any">Достаточно ЛЮБОГО условия (ИЛИ)</string>
+    <string name="automation_editor_add_condition">Добавить условие</string>
+    <string name="automation_editor_remove_condition_cd">Удалить условие</string>
+    <string name="automation_editor_cooldown">Пауза между срабатываниями (секунды)</string>
+    <string name="automation_editor_window_wrap_hint">Окно, переходящее через полночь (от &gt; до), продолжается на следующий день</string>
 </resources>

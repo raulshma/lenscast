@@ -189,7 +189,7 @@ object OpenApiSpec {
             "/api/automation",
             "get" to operation(
                 listOf("automation"),
-                "The automation state: the master toggle, the configured rules, and the read-only action catalog",
+                "The automation state: the master toggle, the configured rules, and the read-only catalogs (actions, triggers, conditions)",
                 mapOf("200" to ok("AutomationStateDto")),
             ),
             "put" to operation(
@@ -706,25 +706,57 @@ object OpenApiSpec {
             "enabled" to boolSchema("The master automation toggle"),
             "rules" to arrayOf(ref("AutomationRuleDto")),
             "catalog" to arrayOf(ref("AutomationCatalogActionDto")),
-            required = listOf("enabled", "rules", "catalog"),
+            "triggers" to arrayOf(ref("AutomationCatalogTriggerDto")),
+            "conditions" to arrayOf(ref("AutomationCatalogConditionDto")),
+            required = listOf("enabled", "rules", "catalog", "triggers", "conditions"),
             fixture = "automation.json",
         ),
         "AutomationUpdateRequestDto" to schema(
             "enabled" to boolSchema(),
             "rules" to arrayOf(ref("AutomationRuleDto")),
-            description = "The PUT body: the toggle and the full rule list persist wholesale. The catalog is read-only on the wire and never accepted here.",
+            description = "The PUT body: the toggle and the full rule list persist wholesale. The catalogs are read-only on the wire and never accepted here.",
         ),
         "AutomationRuleDto" to schema(
             "id" to stringSchema("Stable identity (the fire-journal key); blank/absent lets the device mint a UUID"),
             "name" to stringSchema("Free-form display label; trimmed on save"),
             "enabled" to boolSchema("Per-rule kill switch, independent of the master toggle"),
-            "minuteOfDay" to intSchema("Local wall-clock minute 0..1439; clamped on save"),
-            "daysMask" to intSchema("One bit per ISO day index, bit 0 = Monday … bit 6 = Sunday; clamped to 1..127 on save"),
+            "triggerType" to stringSchema("A trigger catalog id (time_of_day, motion_detected, sound_detected, " +
+                "tamper_detected, charging_changed, battery_level, streaming_changed, viewers_changed, app_started); " +
+                "an unknown id folds to time_of_day on save"),
+            "minuteOfDay" to intSchema("The time_of_day fire minute, local wall-clock 0..1439; clamped on save"),
+            "daysMask" to intSchema("The time_of_day day mask: one bit per ISO day index, bit 0 = Monday … bit 6 = Sunday; clamped to 1..127 on save"),
+            "triggerParams" to mapOf(
+                "type" to "object",
+                "additionalProperties" to stringSchema("Parameters for non-time triggers (e.g. battery_level's level); " +
+                    "string values, parsed and clamped to the trigger catalog bounds on save"),
+            ),
+            "conditions" to arrayOf(ref("AutomationConditionDto")),
+            "conditionMode" to stringSchema("How multiple conditions combine: `all` | `any`; anything else folds to `all` on save"),
+            "cooldownSeconds" to intSchema("Minimum seconds between two firings of an event-triggered rule; clamped to 0..86400 on save"),
             "actions" to arrayOf(ref("AutomationActionDto")),
-            required = listOf("id", "name", "enabled", "minuteOfDay", "daysMask", "actions"),
-            description = "No triggerType field rides the wire: only time_of_day exists today " +
-                "(one source: AutomationRule.TRIGGER_TIME_OF_DAY); an unknown future trigger degrades " +
-                "to it on save instead of firing on the wrong cue.",
+            required = listOf("id", "name", "enabled", "triggerType", "minuteOfDay", "daysMask",
+                "triggerParams", "conditions", "conditionMode", "cooldownSeconds", "actions"),
+            description = "WHEN triggerType (+ ONLY WHEN conditions) THEN actions. Event-triggered rules have no " +
+                "catch-up semantics — they fire in the present — and re-fire after their cooldown elapses; " +
+                "time_of_day rules keep the once-per-day occurrence keys.",
+        ),
+        "AutomationConditionDto" to schema(
+            "type" to stringSchema("Condition catalog id, e.g. `time_window`; an id outside the catalog is dropped on save"),
+            "params" to mapOf(
+                "type" to "object",
+                "additionalProperties" to stringSchema("All values serialized as strings; parsed and clamped to the catalog bounds on save"),
+            ),
+            required = listOf("type", "params"),
+        ),
+        "AutomationCatalogTriggerDto" to schema(
+            "id" to stringSchema("The trigger id an AutomationRuleDto.triggerType must name"),
+            "params" to arrayOf(ref("AutomationCatalogParamDto")),
+            required = listOf("id", "params"),
+        ),
+        "AutomationCatalogConditionDto" to schema(
+            "id" to stringSchema("The condition id an AutomationConditionDto.type must name"),
+            "params" to arrayOf(ref("AutomationCatalogParamDto")),
+            required = listOf("id", "params"),
         ),
         "AutomationActionDto" to schema(
             "type" to stringSchema("Catalog id, e.g. `torch`; an id outside the catalog is dropped on save"),

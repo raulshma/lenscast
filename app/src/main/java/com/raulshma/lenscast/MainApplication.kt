@@ -7,6 +7,8 @@ import coil3.SingletonImageLoader
 import coil3.request.crossfade
 import coil3.video.VideoFrameDecoder
 import com.raulshma.lenscast.automation.AutomationActionExecutor
+import com.raulshma.lenscast.automation.AutomationEventWiring
+import com.raulshma.lenscast.automation.AutomationSnapshotProvider
 import com.raulshma.lenscast.automation.schedule.AutomationFireJournal
 import com.raulshma.lenscast.automation.schedule.AutomationScheduler
 import com.raulshma.lenscast.camera.CameraService
@@ -291,14 +293,42 @@ class MainApplication : Application(), SingletonImageLoader.Factory {
     // The automation scheduler's once-per-day dedup journal: the rules live
     // in DataStore and survive every process start, so the journal is the
     // half that records which occurrences already ran — the boot-time
-    // catch-up reads it and never double-fires them.
+    // catch-up reads it and never double-fires them. Values carry both
+    // record kinds (time occurrence keys and event-fire timestamps); the
+    // schedule policy separates them by magnitude.
     val automationFireJournal: AutomationFireJournal by lazy { AutomationFireJournal(this) }
-    // The in-app time-of-day scheduler: the second front-end over the
-    // executor's seams (the receiver is the first, constructing one per
-    // broadcast; the scheduler owns one for its lifetime — both are
-    // stateless routes onto the same seam graph).
+    // The in-app automation scheduler (time rules on the 30 s poll, event
+    // rules on the wiring's cues): the second front-end over the executor's
+    // seams (the receiver is the first, constructing one per broadcast; the
+    // scheduler owns one for its lifetime — both are stateless routes onto
+    // the same seam graph).
     val automationScheduler: AutomationScheduler by lazy {
-        AutomationScheduler(settingsDataStore, automationFireJournal, AutomationActionExecutor(this))
+        AutomationScheduler(
+            settingsDataStore,
+            automationFireJournal,
+            AutomationActionExecutor(this),
+            AutomationSnapshotProvider(
+                powerManager,
+                connectivityMonitor,
+                thermalMonitor,
+                streamingManager,
+                cameraService,
+                recordingController,
+                settingsDataStore,
+            ),
+        )
+    }
+    // The scheduler's event plumbing: detection events, charger edges,
+    // battery level changes, stream start/stop and viewer join/leave —
+    // started in onCreate alongside the loop so event rules fire headless.
+    val automationEventWiring: AutomationEventWiring by lazy {
+        AutomationEventWiring(
+            scheduler = automationScheduler,
+            detectionEventStore = detectionEventStore,
+            powerManager = powerManager,
+            streamingManager = streamingManager,
+            scope = appScope,
+        )
     }
     // The one siren auto-stop timer for the whole process: the detection
     // coordinator's deterrence and the automation receiver's SET_SIREN must
@@ -408,6 +438,7 @@ class MainApplication : Application(), SingletonImageLoader.Factory {
      */
     private fun initializeAutomationScheduler() {
         automationScheduler.start()
+        automationEventWiring.start()
     }
 
     /**

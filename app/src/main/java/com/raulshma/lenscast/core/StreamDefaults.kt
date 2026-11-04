@@ -232,4 +232,14 @@ object StreamDefaults {
     const val AUTOMATION_ONESHOT_GRACE_MS = 10 * 60 * 1000L
     const val AUTOMATION_MAX_RULES = 16
     const val AUTOMATION_MAX_ACTIONS_PER_RULE = 8
+
+    // Event-trigger rule caps: a rule may carry at most this many
+    // preconditions (the "ONLY WHEN" clause), and its cooldown — the minimum
+    // seconds between two firings, enforced from the persisted fire journal —
+    // is bounded so a hostile payload can neither tight-loop (0 allowed, an
+    // event rule may legitimately fire back-to-back) nor lock out forever.
+    const val AUTOMATION_MAX_CONDITIONS_PER_RULE = 8
+    const val AUTOMATION_COOLDOWN_MIN_SECONDS = 0
+    const val AUTOMATION_COOLDOWN_MAX_SECONDS = 86_400
+    const val AUTOMATION_COOLDOWN_DEFAULT_SECONDS = 60
 }

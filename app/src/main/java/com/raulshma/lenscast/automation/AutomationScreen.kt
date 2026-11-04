@@ -57,8 +57,11 @@ import com.raulshma.lenscast.MainApplication
 import com.raulshma.lenscast.R
 import com.raulshma.lenscast.automation.schedule.AutomationActionCatalog
 import com.raulshma.lenscast.automation.schedule.AutomationActionSpec
+import com.raulshma.lenscast.automation.schedule.AutomationConditionCatalog
+import com.raulshma.lenscast.automation.schedule.AutomationConditionSpec
 import com.raulshma.lenscast.automation.schedule.AutomationParamSpec
 import com.raulshma.lenscast.automation.schedule.AutomationRule
+import com.raulshma.lenscast.automation.schedule.AutomationTriggerCatalog
 import com.raulshma.lenscast.automation.schedule.ParamKind
 import com.raulshma.lenscast.capture.MotionArmingPolicy
 import com.raulshma.lenscast.core.StreamDefaults
@@ -79,27 +82,45 @@ private data class RuleDraft(
     val id: String?,
     val name: String,
     val enabled: Boolean,
+    val triggerType: String,
     val minuteOfDay: Int,
     val daysMask: Int,
+    val triggerParams: Map<String, String>,
+    val conditions: List<AutomationConditionSpec>,
+    val conditionMode: String,
+    val cooldownSeconds: Int,
     val actions: List<AutomationActionSpec>,
 ) {
+    /** Whether the editor renders the time picker + day chips (vs trigger params). */
+    val isTimeTrigger: Boolean get() = triggerType == AutomationTriggerCatalog.TIME_OF_DAY
+
     fun toRule(): AutomationRule = AutomationRule(
         id = id,
         name = name,
         enabled = enabled,
+        triggerType = triggerType,
         minuteOfDay = minuteOfDay,
         daysMask = daysMask,
+        triggerParams = triggerParams,
+        conditions = conditions,
+        conditionMode = conditionMode,
+        cooldownSeconds = cooldownSeconds,
         actions = actions,
     )
 
     companion object {
-        /** A fresh rule: 08:00, every day, no actions yet. */
+        /** A fresh rule: 08:00 every day, time trigger, no conditions/actions yet. */
         fun new(): RuleDraft = RuleDraft(
             id = null,
             name = "",
             enabled = true,
+            triggerType = AutomationTriggerCatalog.TIME_OF_DAY,
             minuteOfDay = DEFAULT_MINUTE_OF_DAY,
             daysMask = MotionArmingPolicy.ALL_DAYS_MASK,
+            triggerParams = emptyMap(),
+            conditions = emptyList(),
+            conditionMode = AutomationRule.CONDITION_MODE_ALL,
+            cooldownSeconds = StreamDefaults.AUTOMATION_COOLDOWN_DEFAULT_SECONDS,
             actions = emptyList(),
         )
 
@@ -107,8 +128,13 @@ private data class RuleDraft(
             id = rule.id,
             name = rule.name,
             enabled = rule.enabled,
+            triggerType = rule.triggerType,
             minuteOfDay = rule.minuteOfDay,
             daysMask = rule.daysMask,
+            triggerParams = rule.triggerParams,
+            conditions = rule.conditions,
+            conditionMode = rule.conditionMode,
+            cooldownSeconds = rule.cooldownSeconds,
             actions = rule.actions,
         )
 
@@ -284,7 +310,7 @@ private fun AutomationRuleCard(
                         color = MaterialTheme.colorScheme.onSurface,
                     )
                     Text(
-                        text = ruleScheduleLabel(rule.minuteOfDay, rule.daysMask),
+                        text = ruleTriggerLabel(rule),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         fontFamily = FontFamily.Monospace,
@@ -293,6 +319,33 @@ private fun AutomationRuleCard(
                 Switch(checked = rule.enabled, onCheckedChange = onToggleEnabled)
             }
             Spacer(modifier = Modifier.height(6.dp))
+            if (rule.conditions.isNotEmpty()) {
+                Text(
+                    text = stringResource(R.string.automation_rule_conditions_title),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                rule.conditions.forEach { condition ->
+                    AutomationViewModel.conditionSummaryLines(condition).forEach { line ->
+                        Text(
+                            text = stringResource(line.res, *line.args.toTypedArray()),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    // The time window's day suffix needs localized day labels,
+                    // so it composes here rather than in the pure helper.
+                    if (condition.type == AutomationConditionCatalog.TIME_WINDOW &&
+                        !AutomationViewModel.isEveryDay(conditionWindowDaysMask(condition))
+                    ) {
+                        Text(
+                            text = conditionWindowDaysLabel(condition),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+            }
             if (rule.actions.isEmpty()) {
                 Text(
                     text = stringResource(R.string.automation_rule_no_actions),
@@ -345,6 +398,32 @@ private fun ruleScheduleLabel(minuteOfDay: Int, daysMask: Int): String {
     return "${AutomationViewModel.formatMinuteOfDay(minuteOfDay)} · $dayText"
 }
 
+/**
+ * A rule card's trigger subtitle: the classic "HH:mm · days" for time rules,
+ * the localized trigger label for event rules (their param detail rides the
+ * "when …" summary line below).
+ */
+@Composable
+private fun ruleTriggerLabel(rule: AutomationRule): String =
+    if (rule.triggerType == AutomationTriggerCatalog.TIME_OF_DAY) {
+        ruleScheduleLabel(rule.minuteOfDay, rule.daysMask)
+    } else {
+        stringResource(AutomationViewModel.triggerTypeLabelRes(rule.triggerType))
+    }
+
+/** A time-window condition's persisted day mask (the sanitize default when absent). */
+private fun conditionWindowDaysMask(condition: AutomationConditionSpec): Int =
+    condition.params["days_mask"]?.toIntOrNull()
+        ?: StreamDefaults.MOTION_ARM_DAYS_MASK_DEFAULT
+
+/** "Mon, Wed" over a time-window condition's day mask (composable labels). */
+@Composable
+private fun conditionWindowDaysLabel(condition: AutomationConditionSpec): String {
+    val labels = ArrayList<String>()
+    for (day in AutomationViewModel.armedDays(conditionWindowDaysMask(condition))) labels.add(dayLabel(day))
+    return labels.joinToString(", ")
+}
+
 @Composable
 private fun dayLabel(isoDayIndex: Int): String = when (isoDayIndex) {
     0 -> stringResource(R.string.detection_day_mon)
@@ -373,6 +452,8 @@ private fun AutomationRuleEditor(
 ) {
     var showTimePicker by remember { mutableStateOf(false) }
     var showActionPicker by remember { mutableStateOf(false) }
+    var showTriggerPicker by remember { mutableStateOf(false) }
+    var showConditionPicker by remember { mutableStateOf(false) }
 
     Dialog(
         onDismissRequest = onDismiss,
@@ -422,41 +503,146 @@ private fun AutomationRuleEditor(
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
+                // ── WHEN (the trigger) ──
+                Text(
+                    text = stringResource(R.string.automation_editor_trigger_title),
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Text(
-                        text = stringResource(R.string.automation_editor_time_label),
+                        text = stringResource(AutomationViewModel.triggerTypeLabelRes(draft.triggerType)),
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurface,
                     )
-                    OutlinedButton(onClick = { showTimePicker = true }) {
-                        Icon(
-                            Icons.Default.Schedule,
-                            contentDescription = null,
-                            modifier = Modifier.size(18.dp),
-                        )
-                        Text(
-                            text = AutomationViewModel.formatMinuteOfDay(draft.minuteOfDay),
-                            modifier = Modifier.padding(start = 4.dp),
-                            fontFamily = FontFamily.Monospace,
-                        )
+                    OutlinedButton(onClick = { showTriggerPicker = true }) {
+                        Text(stringResource(R.string.automation_editor_change_trigger))
                     }
                 }
-                DayMaskChips(
-                    daysMask = draft.daysMask,
-                    onToggleDay = { isoDay ->
-                        onDraftChange(draft.copy(daysMask = MotionArmingPolicy.toggleDay(draft.daysMask, isoDay)))
-                    },
-                    title = stringResource(R.string.automation_editor_days_title),
-                )
+                if (draft.isTimeTrigger) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            text = stringResource(R.string.automation_editor_time_label),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurface,
+                        )
+                        OutlinedButton(onClick = { showTimePicker = true }) {
+                            Icon(
+                                Icons.Default.Schedule,
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp),
+                            )
+                            Text(
+                                text = AutomationViewModel.formatMinuteOfDay(draft.minuteOfDay),
+                                modifier = Modifier.padding(start = 4.dp),
+                                fontFamily = FontFamily.Monospace,
+                            )
+                        }
+                    }
+                    DayMaskChips(
+                        daysMask = draft.daysMask,
+                        onToggleDay = { isoDay ->
+                            onDraftChange(draft.copy(daysMask = MotionArmingPolicy.toggleDay(draft.daysMask, isoDay)))
+                        },
+                        title = stringResource(R.string.automation_editor_days_title),
+                    )
+                } else {
+                    // Event triggers render their catalog param editors, then
+                    // the re-fire cooldown slider.
+                    (AutomationTriggerCatalog.typeFor(draft.triggerType)?.params ?: emptyList()).forEach { spec ->
+                        AutomationParamEditor(
+                            typeId = draft.triggerType,
+                            spec = spec,
+                            value = draft.triggerParams[spec.name],
+                            torchStrengthMaxLevel = null,
+                            onChange = { next ->
+                                onDraftChange(
+                                    draft.copy(
+                                        triggerParams = AutomationViewModel.withSpecParam(draft.triggerParams, spec.name, next),
+                                    ),
+                                )
+                            },
+                            labelFor = AutomationViewModel::triggerParamLabelRes,
+                        )
+                    }
+                    CooldownEditor(
+                        cooldownSeconds = draft.cooldownSeconds,
+                        onChange = { onDraftChange(draft.copy(cooldownSeconds = it)) },
+                    )
+                }
                 SwitchSetting(
                     title = stringResource(R.string.automation_editor_enabled),
                     checked = draft.enabled,
                     onCheckedChange = { onDraftChange(draft.copy(enabled = it)) },
                 )
+                // ── ONLY WHEN (the preconditions) ──
+                Text(
+                    text = stringResource(R.string.automation_editor_conditions_title),
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+                if (draft.conditions.isEmpty()) {
+                    Text(
+                        text = stringResource(R.string.automation_editor_no_conditions),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                } else {
+                    SwitchSetting(
+                        title = stringResource(R.string.automation_editor_match_any),
+                        checked = draft.conditionMode == AutomationRule.CONDITION_MODE_ANY,
+                        onCheckedChange = { any ->
+                            onDraftChange(
+                                draft.copy(
+                                    conditionMode = if (any) {
+                                        AutomationRule.CONDITION_MODE_ANY
+                                    } else {
+                                        AutomationRule.CONDITION_MODE_ALL
+                                    },
+                                ),
+                            )
+                        },
+                    )
+                    draft.conditions.forEachIndexed { index, condition ->
+                        AutomationConditionEditorCard(
+                            condition = condition,
+                            onChange = { next ->
+                                onDraftChange(
+                                    draft.copy(conditions = draft.conditions.toMutableList().also { it[index] = next }),
+                                )
+                            },
+                            onRemove = {
+                                onDraftChange(
+                                    draft.copy(conditions = draft.conditions.filterIndexed { i, _ -> i != index }),
+                                )
+                            },
+                        )
+                    }
+                }
+                OutlinedButton(
+                    onClick = { showConditionPicker = true },
+                    enabled = draft.conditions.size < StreamDefaults.AUTOMATION_MAX_CONDITIONS_PER_RULE,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Icon(
+                        Icons.Default.Add,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp),
+                    )
+                    Text(
+                        text = stringResource(R.string.automation_editor_add_condition),
+                        modifier = Modifier.padding(start = 8.dp),
+                    )
+                }
+                // ── THEN (the actions) ──
                 Text(
                     text = stringResource(R.string.automation_editor_actions_title),
                     style = MaterialTheme.typography.titleSmall,
@@ -522,6 +708,214 @@ private fun AutomationRuleEditor(
             onDismiss = { showActionPicker = false },
         )
     }
+    if (showTriggerPicker) {
+        AutomationTriggerPickerDialog(
+            onPick = { typeId ->
+                showTriggerPicker = false
+                onDraftChange(
+                    draft.copy(
+                        triggerType = typeId,
+                        triggerParams = AutomationViewModel.defaultTriggerParams(typeId),
+                    ),
+                )
+            },
+            onDismiss = { showTriggerPicker = false },
+        )
+    }
+    if (showConditionPicker) {
+        AutomationConditionPickerDialog(
+            onPick = { typeId ->
+                showConditionPicker = false
+                onDraftChange(
+                    draft.copy(
+                        conditions = draft.conditions +
+                            AutomationConditionSpec(typeId, AutomationViewModel.defaultConditionParams(typeId)),
+                    ),
+                )
+            },
+            onDismiss = { showConditionPicker = false },
+        )
+    }
+}
+
+/**
+ * The event-rule cooldown editor: one INT slider over the engine's clamp span,
+ * its display ceiling shortened to an hour (the persisted bound allows a day;
+ * no useful cooldown needs a slider that wide).
+ */
+@Composable
+private fun CooldownEditor(
+    cooldownSeconds: Int,
+    onChange: (Int) -> Unit,
+) {
+    val maxF = 3_600f.coerceAtMost(StreamDefaults.AUTOMATION_COOLDOWN_MAX_SECONDS.toFloat())
+    val current = cooldownSeconds.coerceIn(0, maxF.toInt()).toFloat()
+    SliderSetting(
+        title = stringResource(R.string.automation_editor_cooldown),
+        value = current,
+        range = 0f..maxF,
+        steps = maxF.toInt() - 1,
+        onValueChange = { value ->
+            onChange(AutomationViewModel.canonicalIntValue(value).toInt())
+        },
+    )
+}
+
+/**
+ * One condition inside the editor: the pretty type label, remove affordance,
+ * and one param editor per catalog param (no torch-strength special-casing —
+ * no condition has a strength param).
+ */
+@Composable
+private fun AutomationConditionEditorCard(
+    condition: AutomationConditionSpec,
+    onChange: (AutomationConditionSpec) -> Unit,
+    onRemove: () -> Unit,
+) {
+    val type = AutomationConditionCatalog.typeFor(condition.type)
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = MaterialTheme.shapes.medium,
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = stringResource(AutomationViewModel.conditionTypeLabelRes(condition.type)),
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.weight(1f),
+                )
+                IconButton(onClick = onRemove) {
+                    Icon(
+                        Icons.Default.Close,
+                        contentDescription = stringResource(R.string.automation_editor_remove_condition_cd),
+                    )
+                }
+            }
+            (type?.params ?: emptyList()).forEach { spec ->
+                if (condition.type == AutomationConditionCatalog.TIME_WINDOW && spec.name == "days_mask") {
+                    // The day mask renders as chips, not a raw number slider.
+                    DayMaskChips(
+                        daysMask = conditionWindowDaysMask(condition),
+                        onToggleDay = { isoDay ->
+                            onChange(
+                                AutomationViewModel.withConditionParam(
+                                    condition,
+                                    "days_mask",
+                                    MotionArmingPolicy.toggleDay(conditionWindowDaysMask(condition), isoDay).toString(),
+                                ),
+                            )
+                        },
+                        title = stringResource(R.string.automation_editor_days_title),
+                    )
+                    return@forEach
+                }
+                AutomationParamEditor(
+                    typeId = condition.type,
+                    spec = spec,
+                    value = condition.params[spec.name],
+                    torchStrengthMaxLevel = null,
+                    onChange = { next ->
+                        onChange(AutomationViewModel.withConditionParam(condition, spec.name, next))
+                    },
+                    labelFor = AutomationViewModel::conditionParamLabelRes,
+                )
+                if (condition.type == AutomationConditionCatalog.TIME_WINDOW && spec.name == "end_minute") {
+                    // The window wraps midnight when start > end — say so once,
+                    // after both bounds have rendered.
+                    Text(
+                        text = stringResource(R.string.automation_editor_window_wrap_hint),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        }
+    }
+}
+
+/** The trigger picker: every catalog trigger, pretty-labeled, in contract order. */
+@Composable
+private fun AutomationTriggerPickerDialog(
+    onPick: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.automation_editor_change_trigger)) },
+        confirmButton = {},
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(R.string.automation_cancel))
+            }
+        },
+        text = {
+            Column(
+                modifier = Modifier
+                    .heightIn(max = 420.dp)
+                    .verticalScroll(rememberScrollState()),
+            ) {
+                AutomationTriggerCatalog.ACTION_TYPES.forEach { type ->
+                    TextButton(
+                        onClick = { onPick(type.id) },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text(
+                            text = stringResource(AutomationViewModel.triggerTypeLabelRes(type.id)),
+                            color = MaterialTheme.colorScheme.onSurface,
+                        )
+                    }
+                }
+            }
+        },
+    )
+}
+
+/** The condition picker: every catalog condition, pretty-labeled, in contract order. */
+@Composable
+private fun AutomationConditionPickerDialog(
+    onPick: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.automation_editor_add_condition)) },
+        confirmButton = {},
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(R.string.automation_cancel))
+            }
+        },
+        text = {
+            Column(
+                modifier = Modifier
+                    .heightIn(max = 420.dp)
+                    .verticalScroll(rememberScrollState()),
+            ) {
+                AutomationConditionCatalog.CONDITIONS.forEach { type ->
+                    TextButton(
+                        onClick = { onPick(type.id) },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text(
+                            text = stringResource(AutomationViewModel.conditionTypeLabelRes(type.id)),
+                            color = MaterialTheme.colorScheme.onSurface,
+                        )
+                    }
+                }
+            }
+        },
+    )
 }
 
 /**
@@ -605,6 +999,9 @@ private fun AutomationActionEditorCard(
  * - Other optional numerics (torch strength, durations): configure switch,
  *   then the slider; duration rows note the "0 = no limit" sentinel.
  * - Required numerics: the slider directly.
+ *
+ * [labelFor] selects the label source per catalog (action, trigger, or
+ * condition overrides); the editor body is catalog-agnostic.
  */
 @Composable
 private fun AutomationParamEditor(
@@ -613,8 +1010,9 @@ private fun AutomationParamEditor(
     value: String?,
     torchStrengthMaxLevel: Int?,
     onChange: (String?) -> Unit,
+    labelFor: (typeId: String, paramName: String) -> Int = AutomationViewModel::paramLabelRes,
 ) {
-    val label = stringResource(AutomationViewModel.paramLabelRes(typeId, spec.name))
+    val label = stringResource(labelFor(typeId, spec.name))
     when (spec.kind) {
         ParamKind.BOOL -> {
             if (spec.optional) {

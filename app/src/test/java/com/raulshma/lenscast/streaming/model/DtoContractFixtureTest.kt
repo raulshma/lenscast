@@ -2,6 +2,8 @@ package com.raulshma.lenscast.streaming.model
 
 import com.raulshma.lenscast.core.AppJson
 import com.raulshma.lenscast.automation.schedule.AutomationActionCatalog
+import com.raulshma.lenscast.automation.schedule.AutomationConditionCatalog
+import com.raulshma.lenscast.automation.schedule.AutomationTriggerCatalog
 import com.raulshma.lenscast.capture.model.DetectionEventDeepLink
 import com.raulshma.lenscast.streaming.web.AuthWebHandler
 import com.squareup.moshi.Types
@@ -455,11 +457,12 @@ class DtoContractFixtureTest {
     @Test
     fun `automation state response matches the automation fixture`() {
         // The settings fixture procedure, automation-shaped: the DTO defaults
-        // instance with the uninformative-empty surfaces populated — one
-        // representative rule and the real catalog content, which is exactly
-        // what GET /api/automation publishes (the catalog is device truth,
-        // not client-chosen). A catalog or rule-shape change fails here until
-        // the fixture — and with it the web side — moves in lockstep.
+        // instance with the uninformative-empty surfaces populated — two
+        // representative rules (one time, one event-with-conditions) and the
+        // real catalog content, which is exactly what GET /api/automation
+        // publishes (the catalogs are device truth, not client-chosen). A
+        // catalog or rule-shape change fails here until the fixture — and
+        // with it the web side — moves in lockstep.
         val state = AutomationStateDto(
             enabled = true,
             rules = listOf(
@@ -467,11 +470,40 @@ class DtoContractFixtureTest {
                     id = "1f0a9c2e-4b7d-4e8a-9c3f-6d5b8a7e2c41",
                     name = "Weekday sunrise",
                     enabled = true,
+                    triggerType = "time_of_day",
                     minuteOfDay = 420,
                     daysMask = 31,
+                    triggerParams = emptyMap(),
+                    conditions = listOf(
+                        AutomationConditionDto(type = "charging", params = mapOf("charging" to "true")),
+                    ),
+                    conditionMode = "all",
+                    cooldownSeconds = 60,
                     actions = listOf(
                         AutomationActionDto(type = "torch", params = mapOf("enabled" to "true")),
                         AutomationActionDto(type = "stream", params = mapOf("enabled" to "true")),
+                    ),
+                ),
+                AutomationRuleDto(
+                    id = "8c3d1f6a-2e94-4b05-a7c8-5d1e9f3b7a02",
+                    name = "Night motion deterrent",
+                    enabled = true,
+                    triggerType = "motion_detected",
+                    minuteOfDay = 0,
+                    daysMask = 127,
+                    triggerParams = emptyMap(),
+                    conditions = listOf(
+                        AutomationConditionDto(
+                            type = "time_window",
+                            params = mapOf("start_minute" to "1320", "end_minute" to "360", "days_mask" to "127"),
+                        ),
+                        AutomationConditionDto(type = "streaming", params = mapOf("active" to "true")),
+                    ),
+                    conditionMode = "all",
+                    cooldownSeconds = 120,
+                    actions = listOf(
+                        AutomationActionDto(type = "siren", params = mapOf("enabled" to "true", "duration_seconds" to "10")),
+                        AutomationActionDto(type = "capture_photo"),
                     ),
                 ),
             ),
@@ -493,6 +525,38 @@ class DtoContractFixtureTest {
                     },
                     catchUp = type.catchUp.name,
                     interruptsStream = type.interruptsStream,
+                )
+            },
+            triggers = AutomationTriggerCatalog.ACTION_TYPES.map { type ->
+                AutomationCatalogTriggerDto(
+                    id = type.id,
+                    params = type.params.map { param ->
+                        AutomationCatalogParamDto(
+                            name = param.name,
+                            kind = param.kind.name,
+                            min = param.min,
+                            max = param.max,
+                            optional = param.optional,
+                            defaultValue = param.defaultValue,
+                            autoAtZero = param.autoAtZero,
+                        )
+                    },
+                )
+            },
+            conditions = AutomationConditionCatalog.CONDITIONS.map { type ->
+                AutomationCatalogConditionDto(
+                    id = type.id,
+                    params = type.params.map { param ->
+                        AutomationCatalogParamDto(
+                            name = param.name,
+                            kind = param.kind.name,
+                            min = param.min,
+                            max = param.max,
+                            optional = param.optional,
+                            defaultValue = param.defaultValue,
+                            autoAtZero = param.autoAtZero,
+                        )
+                    },
                 )
             },
         )

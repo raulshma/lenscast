@@ -1,33 +1,44 @@
-# Scheduled Automation
+# Automation: If/Then Rules
 
-LensCast can run the camera on a schedule: time-of-day rules — "on these
-days at this minute, run these actions" — that switch camera settings, the
-torch, the stream, recording, the siren, and the detection toggles without
-anyone touching the device. The classic use case is a mounted security
-phone whose camera needs one configuration at night and another by day.
+LensCast runs the camera on if/then rules: **WHEN** something happens (a
+scheduled minute, a detection event, a power or streaming edge), **ONLY
+WHEN** optional preconditions hold (charging, Wi-Fi, a time window, …,
+combinable ALL/ANY), **THEN** run actions — camera settings, the torch, the
+stream, recording, the siren, the detection toggles — without anyone
+touching the device. The classic use case is a mounted security phone whose
+camera needs one configuration at night and another by day, and whose siren
+should fire on motion — but only at night, and only while streaming.
 
 Configure it in the app under **App settings → Automation**: a master
-switch plus one card per rule (up to **16 rules**, up to **8 actions**
-each), edited in a full-screen editor with a time picker, day chips, and
-action editors rendered from the action catalog. Rules stay visible and
-editable while the engine is off; a banner explains they will not fire
+switch plus one card per rule (up to **16 rules**, up to **8 actions** and
+**8 conditions** each), edited in a full-screen editor with a trigger
+picker, the time picker and day chips for time-of-day rules, per-trigger
+param editors, the condition list with an ALL/ANY toggle, the cooldown
+slider, and action editors rendered from the catalogs. Rules stay visible
+and editable while the engine is off; a banner explains they will not fire
 until it is on. Rules persist in app settings (DataStore) and survive
 restarts.
 
-The engine lives in `automation/schedule/` (a pure scheduling policy plus a
-thin poll-loop shell), behind the same execution seam the broadcast
-receiver drives — see the [Automation section of the
+The engine lives in `automation/schedule/` (pure policies plus a thin
+scheduler shell), behind the same execution seam the broadcast receiver
+drives — see the [Automation section of the
 README](../README.md#automation) for the external `action.*` broadcasts,
 which are unchanged by this feature.
 
-## The Day / Night recipe
+## Recipes
 
-Two rules cover the headline case (times are local wall clock):
+The headline Day / Night pair (times are local wall clock):
 
-| Rule  | Time  | Days      | Actions                                                             |
-|-------|-------|-----------|---------------------------------------------------------------------|
-| Night | 18:00 | every day | `camera_exposure` ISO 4000 + exposure 175 ms · `torch` on, strength 1 |
-| Day   | 07:00 | every day | `camera_exposure` ISO auto (0) + exposure auto (0) · `torch` off    |
+| Rule  | Trigger | Only when | Actions                                                                |
+|-------|---------|-----------|------------------------------------------------------------------------|
+| Night | 18:00 daily | — | `camera_exposure` ISO 4000 + exposure 175 ms · `torch` on, strength 1 |
+| Day   | 07:00 daily | — | `camera_exposure` ISO auto (0) + exposure auto (0) · `torch` off      |
+
+And an if/then rule the old time-only engine could not express:
+
+| Rule | Trigger | Only when | Actions |
+|------|---------|-----------|---------|
+| Night deterrent | `motion_detected` | time window 22:00–06:00 AND streaming active (ALL) | `siren` 10 s · `capture_photo` (re-fire cooldown 120 s) |
 
 Two calibration notes the catalog applies honestly:
 
@@ -38,41 +49,142 @@ Two calibration notes the catalog applies honestly:
   Android 15+ with a multi-level flash); elsewhere the strength is ignored
   and the torch is plain on/off — which is everything that device can do.
 
-## How scheduling works
+## Rule anatomy
 
-- **Time model.** A rule fires at one local-wall-clock minute
-  (`minuteOfDay`, 0–1439) on the days set in its day mask — bit 0 = Monday
-  … bit 6 = Sunday, `127` = every day, the same convention as the motion
-  arm schedule. There is no window that crosses midnight: each local day's
-  minute is its own occurrence, so midnight wrap needs no special case.
-- **A poll loop, not alarms.** An app-scoped coroutine re-evaluates the
-  rules every **30 seconds** (and immediately whenever the rules or the
-  master toggle change). No exact-alarm permissions, no boot receiver.
+A rule is one JSON document (same shape on DataStore, the web API, and the
+fixtures): `id`, `name`, `enabled`, then the WHEN/ONLY WHEN/THEN fields —
+
+- **Trigger** — `triggerType` plus `triggerParams`. `time_of_day` (the
+  default, so old payloads decode unchanged) keeps its top-level
+  `minuteOfDay` (0–1439) and `daysMask` (bit 0 = Monday … bit 6 = Sunday,
+  127 = every day — the motion arm schedule's convention); every other
+  trigger carries its params in `triggerParams` (a charger-connect rule is
+  `triggerType: "charging_changed", triggerParams: {"charging": "true"}`).
+- **Conditions** — `conditions: [{type, params}]` plus `conditionMode`
+  (`"all"` = every condition must hold, the default; `"any"` = one
+  suffices). An empty list means unconditional. Unknown/unmet conditions
+  never fire the rule.
+- **Cooldown** — `cooldownSeconds` (0–86400, default 60) for event
+  triggers: the persisted minimum time between two firings of this rule.
+- **Actions** — up to 8 catalog actions, executed in order.
+
+Everything is sanitized before a rule is trusted (on DataStore decode, on
+the web PUT, on an in-app save): minute into 0–1439, mask into 1–127,
+unknown trigger kinds reset to `time_of_day`, trigger/condition params
+folded to their documented defaults when unknown, unknown conditions and
+actions dropped, the caps applied to the sanitized lists (a rule always
+keeps its maximum *executable* entries), and the cooldown clamped. Invalid
+values degrade to the documented behavior instead of firing something
+unexpected.
+
+## How the engine works
+
+One scheduler (`AutomationScheduler`) drives both rule families. A
+**30-second poll loop** re-evaluates time-of-day rules (and immediately
+whenever rules or the master toggle change); **live events** — detections,
+power edges, streaming lifecycle — arrive through `AutomationEventWiring`
+and are pushed in via `onEvent`. Time ticks and event fires share a mutex,
+so two rules' actions never interleave. Actions always run through the one
+Automation Action Executor the broadcast receiver uses.
+
+### Time-of-day rules (WHEN = scheduled minute)
+
+- The classic model, unchanged: one local-wall-clock minute per armed day,
+  no window crossing midnight — each local day's minute is its own
+  occurrence. An app-scoped coroutine re-evaluates every 30 s; no
+  exact-alarm permissions, no boot receiver.
 - **Catch-up.** The first evaluation after process start runs immediately —
-  that first pass *is* the boot catch-up: rules the device missed while the
-  process was dead or the tick was deferred still fire. What fires late
-  depends on the action's catch-up class: setting-convergence actions
-  (everything except photo capture) are **STATEFUL** and fire no matter how
-  late the tick is; the one moment-effect action (`capture_photo`) is
-  **ONESHOT** and only fires within a **10-minute grace** of its scheduled
-  instant. A rule whose whole action list is filtered out by the grace is
-  not journaled, so its photo can still catch up on a later tick within
-  grace.
+  that first pass *is* the boot catch-up. What fires late depends on the
+  action's catch-up class: setting-convergence actions (everything except
+  photo capture) are **STATEFUL** and fire no matter how late the tick is;
+  the one moment-effect action (`capture_photo`) is **ONESHOT** and only
+  fires within a **10-minute grace** of its scheduled instant. A rule whose
+  whole action list is filtered out by the grace is not journaled, so its
+  photo can still catch up on a later tick within grace.
+- **Conditions gate the tick, not the schedule.** A time rule whose
+  conditions are unmet stays *due* (unjournaled) and fires on a later tick
+  the same day once they become met — the occurrence key only stamps when
+  it actually fires. ONESHOT grace still ages from the scheduled minute.
 - **The fire journal prevents double-fires.** Each rule's last fired
-  occurrence (a per-day minute key: `epochDay * 1440 + minuteOfDay`) is
-  recorded in `filesDir/automation/fire_journal.json`, keyed by the rule's
-  stable id. A restart — or re-timing or renaming a rule — never replays an
-  occurrence that already ran; a rule fires only when its occurrence key is
-  strictly newer than the journaled one. A corrupt journal costs at most
-  one re-fire, never a lost one.
-- **Everything is sanitized.** Before a rule is trusted (on decode, on the
-  web PUT, on an in-app save) it is clamped into shape: minute into 0–1439,
-  day mask into 1–127, name trimmed, unknown trigger kinds reset to
-  `time_of_day` (the only trigger defined today — the field is reserved for
-  future kinds), unknown actions dropped, and the caps applied to the
-  sanitized list, so a rule always keeps its maximum *executable* actions.
-  Invalid parameter values fold to their documented defaults instead of
-  firing something unexpected.
+  occurrence is recorded in `filesDir/automation/fire_journal.json`, keyed
+  by the rule's stable id. A restart — or re-timing or renaming a rule —
+  never replays an occurrence that already ran. A corrupt journal costs at
+  most one re-fire, never a lost one.
+
+### Event rules (WHEN = something happened)
+
+- **The wiring** (`automation/AutomationEventWiring.kt`, started from
+  `MainApplication` with the scheduler) subscribes the app's existing
+  streams and maps them onto a small sealed event set: detection events
+  from the event store (motion / sound / tamper), charger
+  connect/disconnect edges and battery-percentage changes (from
+  PowerManager), streaming start/stop edges, and the viewer 0↔≥1 edge
+  (from StreamingManager). StateFlow seeds are read once at start so the
+  current state never replays as a spurious edge.
+- **Evaluation.** When an event arrives, the scheduler takes a fresh
+  **sensor snapshot** (`AutomationSensorSnapshot`: clock, charging,
+  battery level, power save, Wi-Fi, streaming, viewer count, torch,
+  recording, thermal, motion-detection toggle) and a rule fires when its
+  trigger matches the event, its conditions hold on *that* snapshot, and
+  its cooldown has elapsed. All actions run in the present — there is no
+  catch-up filter and no grace: the event *is* now.
+- **Cooldown.** The journal stores the wall-clock fire time (epoch ms) for
+  event rules; a rule re-fires only after `cooldownSeconds` have passed.
+  This survives restarts like every journal value.
+- **One journal, two value spaces.** Time fires store per-day occurrence
+  keys (`epochDay * 1440 + minuteOfDay`, values under ~3×10⁷); event fires
+  store epoch-ms timestamps (values ≥ 10⁹). The magnitude split
+  (`EVENT_JOURNAL_THRESHOLD`) means switching a rule's trigger kind never
+  wedges it — an old occurrence key can never suppress an event fire and
+  vice versa.
+- **`app_started`** fires once per process, after the first rules load —
+  guarded by a one-shot flag, so editing rules (which restarts the
+  scheduler's inner collector) never re-fires it. Conditions still gate it.
+
+## Trigger catalog
+
+Nine trigger ids (AutomationTriggerCatalog; published read-only by GET
+`/api/automation` as `triggers`). `time_of_day` is special-cased: its
+"params" are the rule's top-level `minuteOfDay`/`daysMask`.
+
+| Trigger id | Fires when | Params |
+|------------|------------|--------|
+| `time_of_day` | The armed local minute begins (the 30 s poll may fire it up to 30 s late) | `minuteOfDay`, `daysMask` (top-level fields) |
+| `motion_detected` | A motion detection event | — |
+| `sound_detected` | A sound detection event | — |
+| `tamper_detected` | A tamper (power-cut) event | — |
+| `charging_changed` | The charger connect/disconnect edge | `charging` BOOL (default true = on connect; false = on disconnect) |
+| `battery_level` | The battery percentage **crosses** a threshold | `level` INT 1–99 (default 20), `when_below` BOOL (default true = crossing downward; false = crossing upward) |
+| `streaming_changed` | Streaming starts/stops | `streaming` BOOL (default true = on start) |
+| `viewers_changed` | The viewer count crosses 0↔≥1 | `connected` BOOL (default true = first viewer joins; false = last viewer leaves) |
+| `app_started` | The process starts (once per process, after rules load) | — |
+
+Battery crossing is edge-detected, not polled: it fires when the previous
+level was above `level` and the current is at or below it (`when_below`
+true), or the mirror image — not on every one-percent wiggle at the
+boundary. The very first level seen after process start (unknown previous)
+never fires.
+
+## Condition catalog
+
+Eleven condition ids (AutomationConditionCatalog; published as
+`conditions`). Conditions are evaluated against a fresh snapshot at fire
+time — for time rules, on each tick; for event rules, at the event. An
+unknown condition id is simply never met.
+
+| Condition id | Holds when | Params |
+|--------------|------------|--------|
+| `time_window` | The snapshot minute is inside the window, on an armed day | `start_minute` INT 0–1439 (default 0), `end_minute` INT 0–1439 (default 1439), `days_mask` INT 1–127 (default 127). A window with start > end wraps across midnight (22:00→06:00); start == end covers nothing |
+| `charging` | Charger state matches | `charging` BOOL (default true) |
+| `battery_level` | The battery percentage is inside an optional inclusive range | `min_level`/`max_level` INT 0–100, optional; unknown battery level → unmet |
+| `power_save` | Power-save mode matches | `enabled` BOOL (default false) |
+| `wifi_connected` | Wi-Fi connectivity matches | `connected` BOOL (default true) |
+| `streaming` | Streaming state matches | `active` BOOL (default true) |
+| `viewers` | The viewer count is inside an optional inclusive range | `min_count`/`max_count` INT 0–99, optional |
+| `torch` | Torch state matches | `on` BOOL (default true) |
+| `recording` | Recording state matches | `active` BOOL (default true) |
+| `thermal` | Thermal state matches (normal vs throttling) | `normal` BOOL (default true) |
+| `motion_detection` | The motion-detection toggle matches | `enabled` BOOL (default true) |
 
 ## Action catalog
 
@@ -138,10 +250,11 @@ PUT /api/automation        # POST accepted as an alias
 ```
 
 - `GET` returns the engine state: `{"enabled": …, "rules": […],
-  "catalog": […]}`. The `catalog` is the device's action catalog published
-  read-only (ids, param names, kinds, bounds, defaults, catch-up class,
-  stream-interruption flag), so a client — e.g. a dashboard — can render
-  rule editors dynamically instead of hardcoding the eleven actions.
+  "catalog": […], "triggers": […], "conditions": […]}`. The three catalogs
+  are the device's truth published read-only — actions (ids, param kinds,
+  bounds, defaults, catch-up class, stream-interruption flag), triggers,
+  and conditions (ids + param schemas) — so a client can render rule
+  editors dynamically instead of hardcoding them.
 - `PUT` takes `{"enabled": …, "rules": […]}` wholesale (a rule absent from
   the document is deleted, the settings-section convention), sanitizes
   server-side, and answers with a fresh read of the sanitized truth — minted
@@ -154,9 +267,9 @@ PUT /api/automation        # POST accepted as an alias
 The built-in dashboard ships an **Automation card** on its settings page
 (`AutomationCard` / `AutomationRuleEditor` in `web/src/components/`): the
 same master switch, rule list, and rule editor as the in-app screen, with
-the action editors rendered from the `catalog` the GET response publishes —
-pretty labels from a small id map, everything else generic. Viewer sessions
-see the card read-only.
+trigger/condition/action editors rendered from the catalogs the GET
+response publishes — pretty labels from small id maps, everything else
+generic. Viewer sessions see the card read-only.
 
 ## What does not change
 
@@ -169,4 +282,4 @@ see the card read-only.
   `com.raulshma.lenscast.permission.AUTOMATION` permission guard. The
   receiver and the scheduler are two front-ends over one shared executor
   (`automation/AutomationActionExecutor.kt`), so a broadcast command and a
-  scheduled rule can never drift apart.
+  rule action can never drift apart.

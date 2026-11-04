@@ -792,10 +792,23 @@ export interface AutomationActionDto {
 }
 
 /**
- * One time-of-day automation rule as the dashboard configured it. The
- * domain's `triggerType` is deliberately omitted from the wire: only
- * `time_of_day` exists today, and the sanitize step resets anything else to
- * it. A blank `id` on write lets the device mint the fire-journal UUID.
+ * One precondition inside an AutomationRuleDto (the rule's "ONLY WHEN"
+ * clause): a catalog condition id plus its raw parameters — the same string
+ * convention as AutomationActionDto; an unknown condition is dropped on save.
+ */
+export interface AutomationConditionDto {
+  /** Condition catalog id, e.g. `"time_window"`; unknown ids are dropped on save. */
+  type: string
+  /** Raw parameter values, all serialized as strings; clamped to the catalog bounds on save. */
+  params: Record<string, string>
+}
+
+/**
+ * One automation rule as the dashboard configured it: WHEN triggerType
+ * (+ ONLY WHEN conditions) THEN actions. Every field is sanitized through
+ * the schedule policy on save: an unknown trigger folds to time_of_day,
+ * unknown conditions/actions drop, and every bound clamps. A blank `id` on
+ * write lets the device mint the fire-journal UUID.
  */
 export interface AutomationRuleDto {
   /** Stable identity (the fire-journal key); blank on a new rule. */
@@ -804,13 +817,27 @@ export interface AutomationRuleDto {
   name: string
   /** Per-rule kill switch, independent of the master automation toggle. */
   enabled: boolean
-  /** Local wall-clock minute 0..1439; clamped into that span on save. */
+  /** Which cue fires the rule — a trigger catalog id; unknown folds to time_of_day on save. */
+  triggerType: string
+  /**
+   * The time_of_day fire minute, local wall-clock 0..1439; clamped into that
+   * span on save. Meaningless for event triggers (the editor hides it) but
+   * kept top-level so the original time-only wire shape never migrated.
+   */
   minuteOfDay: number
   /**
-   * One bit per ISO day index: bit 0 = Monday … bit 6 = Sunday (127 = every
-   * day); clamped to 1..127 on save.
+   * The time_of_day day mask: one bit per ISO day index (bit 0 = Monday …
+   * bit 6 = Sunday, 127 = every day); clamped to 1..127 on save.
    */
   daysMask: number
+  /** Parameters for non-time triggers (e.g. battery_level's level); clamped on save. */
+  triggerParams: Record<string, string>
+  /** Preconditions that must hold when the trigger fires; unknown conditions drop on save. */
+  conditions: AutomationConditionDto[]
+  /** How multiple conditions combine: `"all"` | `"any"`; anything else folds to `all`. */
+  conditionMode: string
+  /** Minimum seconds between two firings (event rules); clamped to 0..86400 on save. */
+  cooldownSeconds: number
   /** The ordered action list; each entry is validated against the catalog on save. */
   actions: AutomationActionDto[]
 }
@@ -857,11 +884,33 @@ export interface AutomationCatalogActionDto {
   interruptsStream: boolean
 }
 
-/** GET /api/automation — the master toggle, the rules, and the action catalog. */
+/**
+ * One trigger a rule may fire on, as GET /api/automation publishes it —
+ * read-only device truth. time_of_day's params list is empty: its parameters
+ * are the rule's own minuteOfDay/daysMask fields.
+ */
+export interface AutomationCatalogTriggerDto {
+  /** The trigger id an AutomationRuleDto.triggerType must name. */
+  id: string
+  /** The parameter schema, in display/contract order. */
+  params: AutomationCatalogParamDto[]
+}
+
+/** One precondition a rule may require, as GET /api/automation publishes it — read-only device truth. */
+export interface AutomationCatalogConditionDto {
+  /** The condition id an AutomationConditionDto.type must name. */
+  id: string
+  /** The parameter schema, in display/contract order. */
+  params: AutomationCatalogParamDto[]
+}
+
+/** GET /api/automation — the master toggle, the rules, and the three read-only catalogs. */
 export interface AutomationStateDto {
   enabled: boolean
   rules: AutomationRuleDto[]
   catalog: AutomationCatalogActionDto[]
+  triggers: AutomationCatalogTriggerDto[]
+  conditions: AutomationCatalogConditionDto[]
 }
 
 /**

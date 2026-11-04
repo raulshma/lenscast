@@ -1,13 +1,18 @@
 package com.raulshma.lenscast.data
 
 import androidx.datastore.preferences.core.emptyPreferences
+import androidx.datastore.preferences.core.stringPreferencesKey
 import com.raulshma.lenscast.automation.schedule.AutomationActionSpec
+import com.raulshma.lenscast.automation.schedule.AutomationConditionCatalog
+import com.raulshma.lenscast.automation.schedule.AutomationConditionSpec
 import com.raulshma.lenscast.automation.schedule.AutomationRule
+import com.raulshma.lenscast.automation.schedule.AutomationTriggerCatalog
 import com.raulshma.lenscast.camera.model.CameraSettings
 import com.raulshma.lenscast.core.StreamDefaults
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -87,6 +92,28 @@ class SettingsDataStoreAutomationPrefsTest {
     }
 
     @Test
+    fun `encode persists an id for every rule — a null id never lands on disk`() {
+        // The save-side identity owner: a rule persisted without an id
+        // re-mints on every decode, orphaning its fire-journal entries and
+        // re-firing the rule whenever its trigger is still due. Whatever the
+        // writer sent, an id lands in the persisted JSON itself — one id
+        // field per rule, not something only the decode mint supplies.
+        val encoded = automationRulesPref.encodeTo(
+            listOf(AutomationRule(name = "Minted"), AutomationRule(id = "kept", name = "Kept")),
+        )
+        val json = encoded[stringPreferencesKey("automation_rules")]
+        assertNotNull(json)
+        assertEquals(2, """"id":""".toRegex().findAll(json!!).count())
+        // The explicit id survives verbatim; the minted one is a real UUID.
+        assertTrue(json.contains(""""id":"kept""""))
+        UUID.fromString(""""id":"([^"]+)"""".toRegex().find(json)!!.groupValues[1])
+        // And decoding what landed on disk keeps both identities.
+        val decoded = automationRulesPref.decode(encoded)
+        assertEquals("kept", decoded[1].id)
+        assertEquals(decoded[0].id, automationRulesPref.decode(encoded)[0].id)
+    }
+
+    @Test
     fun `decode folds absent fields to the rule defaults`() {
         val rule = parseAutomationRules("""[{"name":"Only"}]""").single()
         assertEquals("Only", rule.name)
@@ -94,8 +121,46 @@ class SettingsDataStoreAutomationPrefsTest {
         assertEquals(AutomationRule.TRIGGER_TIME_OF_DAY, rule.triggerType)
         assertEquals(0, rule.minuteOfDay)
         assertEquals(StreamDefaults.MOTION_ARM_DAYS_MASK_DEFAULT, rule.daysMask)
+        assertEquals(emptyMap<String, String>(), rule.triggerParams)
+        assertEquals(emptyList<AutomationConditionSpec>(), rule.conditions)
+        assertEquals(AutomationRule.CONDITION_MODE_ALL, rule.conditionMode)
+        assertEquals(StreamDefaults.AUTOMATION_COOLDOWN_DEFAULT_SECONDS, rule.cooldownSeconds)
         assertEquals(emptyList<AutomationActionSpec>(), rule.actions)
         UUID.fromString(rule.id)
+    }
+
+    @Test
+    fun `if-then rules round trip through the persisted json`() {
+        val rules = listOf(
+            AutomationRule(
+                id = "rule-3",
+                name = "Night motion",
+                triggerType = AutomationTriggerCatalog.MOTION_DETECTED,
+                triggerParams = emptyMap(),
+                conditions = listOf(
+                    AutomationConditionSpec(
+                        AutomationConditionCatalog.TIME_WINDOW,
+                        mapOf("start_minute" to "1320", "end_minute" to "360", "days_mask" to "127"),
+                    ),
+                ),
+                conditionMode = AutomationRule.CONDITION_MODE_ALL,
+                cooldownSeconds = 120,
+                actions = listOf(AutomationActionSpec("siren", mapOf("enabled" to "true", "duration_seconds" to "10"))),
+            ),
+            AutomationRule(
+                id = "rule-4",
+                name = "Low battery",
+                triggerType = AutomationTriggerCatalog.BATTERY_LEVEL,
+                triggerParams = mapOf("level" to "20", "when_below" to "true"),
+                conditions = listOf(
+                    AutomationConditionSpec(AutomationConditionCatalog.STREAMING, mapOf("active" to "true")),
+                ),
+                conditionMode = AutomationRule.CONDITION_MODE_ANY,
+                cooldownSeconds = 600,
+                actions = listOf(AutomationActionSpec("capture_photo")),
+            ),
+        )
+        assertEquals(rules, automationRulesPref.roundTrip(rules))
     }
 
     @Test

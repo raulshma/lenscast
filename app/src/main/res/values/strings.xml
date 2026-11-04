@@ -604,4 +604,96 @@
     <string name="automation_summary_motion_off">Detection motion off</string>
     <string name="automation_summary_sound_on">Detection sound on</string>
     <string name="automation_summary_sound_off">Detection sound off</string>
+
+    <!-- If/then triggers ("when …") -->
+    <string name="automation_trigger_time_of_day">At a scheduled time</string>
+    <string name="automation_trigger_motion">Motion detected</string>
+    <string name="automation_trigger_sound">Sound detected</string>
+    <string name="automation_trigger_tamper">Tamper (power cut)</string>
+    <string name="automation_trigger_charging">Charger connect / disconnect</string>
+    <string name="automation_trigger_battery">Battery level crossing</string>
+    <string name="automation_trigger_streaming">Streaming start / stop</string>
+    <string name="automation_trigger_viewers">Viewer join / leave</string>
+    <string name="automation_trigger_app_started">App starts</string>
+    <string name="automation_summary_trigger_motion">When motion is detected</string>
+    <string name="automation_summary_trigger_sound">When sound is detected</string>
+    <string name="automation_summary_trigger_tamper">On tamper (power cut)</string>
+    <string name="automation_summary_trigger_charging_on">When the charger connects</string>
+    <string name="automation_summary_trigger_charging_off">When the charger disconnects</string>
+    <string name="automation_summary_trigger_battery_below">When battery drops to %1$s%%</string>
+    <string name="automation_summary_trigger_battery_above">When battery rises above %1$s%%</string>
+    <string name="automation_summary_trigger_stream_start">When streaming starts</string>
+    <string name="automation_summary_trigger_stream_stop">When streaming stops</string>
+    <string name="automation_summary_trigger_viewer_join">When a viewer connects</string>
+    <string name="automation_summary_trigger_viewer_leave">When the last viewer leaves</string>
+    <string name="automation_summary_trigger_app_started">When the app starts</string>
+
+    <!-- Trigger params -->
+    <string name="automation_param_battery_threshold">Battery level (%)</string>
+    <string name="automation_param_when_below">When dropping</string>
+    <string name="automation_param_charging_plugged">Charging</string>
+    <string name="automation_param_streaming_active">Streaming</string>
+    <string name="automation_param_viewers_connected">Viewer present</string>
+
+    <!-- Preconditions ("only when …") -->
+    <string name="automation_condition_time_window">Time window</string>
+    <string name="automation_condition_charging">Charging state</string>
+    <string name="automation_condition_battery">Battery level</string>
+    <string name="automation_condition_power_save">Power save</string>
+    <string name="automation_condition_wifi">Wi-Fi connected</string>
+    <string name="automation_condition_streaming">Streaming active</string>
+    <string name="automation_condition_viewers">Viewer count</string>
+    <string name="automation_condition_torch">Torch on</string>
+    <string name="automation_condition_recording">Recording active</string>
+    <string name="automation_condition_thermal">Thermally normal</string>
+    <string name="automation_condition_motion_detection">Motion detection enabled</string>
+    <string name="automation_param_window_start">From (minute of day)</string>
+    <string name="automation_param_window_end">Until (minute of day)</string>
+    <string name="automation_param_window_days">Days</string>
+    <string name="automation_param_battery_min">Minimum (%)</string>
+    <string name="automation_param_battery_max">Maximum (%)</string>
+    <string name="automation_param_power_save_on">Power save on</string>
+    <string name="automation_param_wifi_connected">Connected</string>
+    <string name="automation_param_viewers_min">Minimum viewers</string>
+    <string name="automation_param_viewers_max">Maximum viewers</string>
+    <string name="automation_param_torch_on">Torch on</string>
+    <string name="automation_param_recording_active">Recording</string>
+    <string name="automation_param_thermal_normal">Normal</string>
+    <string name="automation_summary_condition_time_window">Between %1$s and %2$s</string>
+    <string name="automation_summary_condition_charging_on">While charging</string>
+    <string name="automation_summary_condition_charging_off">While on battery</string>
+    <string name="automation_summary_condition_battery_between">Battery %1$s–%2$s%%</string>
+    <string name="automation_summary_condition_battery_min">Battery ≥ %1$s%%</string>
+    <string name="automation_summary_condition_battery_max">Battery ≤ %1$s%%</string>
+    <string name="automation_summary_condition_battery_any">Battery: any level</string>
+    <string name="automation_summary_condition_power_save_on">While power save is on</string>
+    <string name="automation_summary_condition_power_save_off">While power save is off</string>
+    <string name="automation_summary_condition_wifi_on">While Wi-Fi is connected</string>
+    <string name="automation_summary_condition_wifi_off">While Wi-Fi is disconnected</string>
+    <string name="automation_summary_condition_streaming_on">While streaming</string>
+    <string name="automation_summary_condition_streaming_off">While not streaming</string>
+    <string name="automation_summary_condition_viewers_between">Viewers %1$s–%2$s</string>
+    <string name="automation_summary_condition_viewers_min">Viewers ≥ %1$s</string>
+    <string name="automation_summary_condition_viewers_max">Viewers ≤ %1$s</string>
+    <string name="automation_summary_condition_viewers_any">Viewers: any count</string>
+    <string name="automation_summary_condition_torch_on">While the torch is on</string>
+    <string name="automation_summary_condition_torch_off">While the torch is off</string>
+    <string name="automation_summary_condition_recording_on">While recording</string>
+    <string name="automation_summary_condition_recording_off">While not recording</string>
+    <string name="automation_summary_condition_thermal_normal">While thermally normal</string>
+    <string name="automation_summary_condition_thermal_throttling">While thermally throttling</string>
+    <string name="automation_summary_condition_motion_on">While motion detection is on</string>
+    <string name="automation_summary_condition_motion_off">While motion detection is off</string>
+
+    <!-- Editor: trigger / conditions / cooldown -->
+    <string name="automation_rule_conditions_title">Only when:</string>
+    <string name="automation_editor_trigger_title">When (trigger)</string>
+    <string name="automation_editor_change_trigger">Change</string>
+    <string name="automation_editor_conditions_title">Only when (conditions)</string>
+    <string name="automation_editor_no_conditions">No conditions — fires on every trigger</string>
+    <string name="automation_editor_match_any">Match ANY condition (OR)</string>
+    <string name="automation_editor_add_condition">Add condition</string>
+    <string name="automation_editor_remove_condition_cd">Remove condition</string>
+    <string name="automation_editor_cooldown">Re-fire cooldown (seconds)</string>
+    <string name="automation_editor_window_wrap_hint">A window that crosses midnight (from &gt; until) wraps to the next day</string>
 </resources>

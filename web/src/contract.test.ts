@@ -79,6 +79,34 @@ const AUTOMATION_CATALOG_IDS = [
   'detection',
 ]
 
+/** The trigger catalog ids GET /api/automation publishes (AutomationTriggerCatalog). */
+const AUTOMATION_TRIGGER_IDS = [
+  'time_of_day',
+  'motion_detected',
+  'sound_detected',
+  'tamper_detected',
+  'charging_changed',
+  'battery_level',
+  'streaming_changed',
+  'viewers_changed',
+  'app_started',
+]
+
+/** The condition catalog ids GET /api/automation publishes (AutomationConditionCatalog). */
+const AUTOMATION_CONDITION_IDS = [
+  'time_window',
+  'charging',
+  'battery_level',
+  'power_save',
+  'wifi_connected',
+  'streaming',
+  'viewers',
+  'torch',
+  'recording',
+  'thermal',
+  'motion_detection',
+]
+
 const STREAMING_KEYS = [
   'port',
   'webStreamingEnabled',
@@ -413,17 +441,26 @@ describe('DTO contract fixtures', () => {
 
   it('automation fixture assigns to AutomationStateDto', () => {
     const automation: AutomationStateDto = automationFixture as AutomationStateDto
-    expectKeys(automation as unknown as Record<string, unknown>, ['enabled', 'rules', 'catalog'])
+    expectKeys(automation as unknown as Record<string, unknown>, ['enabled', 'rules', 'catalog', 'triggers', 'conditions'])
     expect(automation.rules.length).toBeGreaterThan(0)
     for (const rule of automation.rules) {
       expectKeys(rule as unknown as Record<string, unknown>, [
         'id',
         'name',
         'enabled',
+        'triggerType',
         'minuteOfDay',
         'daysMask',
+        'triggerParams',
+        'conditions',
+        'conditionMode',
+        'cooldownSeconds',
         'actions',
       ])
+      expect(AUTOMATION_TRIGGER_IDS).toContain(rule.triggerType)
+      expect(['all', 'any']).toContain(rule.conditionMode)
+      expect(rule.cooldownSeconds).toBeGreaterThanOrEqual(0)
+      expect(rule.cooldownSeconds).toBeLessThanOrEqual(86400)
       expect(rule.minuteOfDay).toBeGreaterThanOrEqual(0)
       expect(rule.minuteOfDay).toBeLessThanOrEqual(1439)
       expect(rule.daysMask).toBeGreaterThanOrEqual(1)
@@ -431,6 +468,10 @@ describe('DTO contract fixtures', () => {
       for (const action of rule.actions) {
         expectKeys(action as unknown as Record<string, unknown>, ['type', 'params'])
         expect(AUTOMATION_CATALOG_IDS).toContain(action.type)
+      }
+      for (const condition of rule.conditions) {
+        expectKeys(condition as unknown as Record<string, unknown>, ['type', 'params'])
+        expect(AUTOMATION_CONDITION_IDS).toContain(condition.type)
       }
     }
     expect(automation.catalog.length).toBeGreaterThan(0)
@@ -462,6 +503,29 @@ describe('DTO contract fixtures', () => {
       expect(param.autoAtZero).toBe(true)
     }
     expect(automation.catalog.find((entry) => entry.id === 'recording')?.params.find((param) => param.name === 'duration_seconds')?.autoAtZero).toBe(false)
+    // The trigger and condition catalogs are device truth like the action
+    // catalog (the editor renders them generically); every id the Android
+    // side ships must be present with param specs in the same shape.
+    expect(automation.triggers.map((entry) => entry.id)).toEqual(expect.arrayContaining(AUTOMATION_TRIGGER_IDS))
+    for (const entry of automation.triggers) {
+      expectKeys(entry as unknown as Record<string, unknown>, ['id', 'params'])
+      for (const param of entry.params) {
+        expectKeys(param as unknown as Record<string, unknown>, ['name', 'kind', 'optional', 'defaultValue', 'autoAtZero'])
+        expect(['BOOL', 'INT', 'FLOAT']).toContain(param.kind)
+      }
+    }
+    expect(automation.conditions.map((entry) => entry.id)).toEqual(expect.arrayContaining(AUTOMATION_CONDITION_IDS))
+    for (const entry of automation.conditions) {
+      expectKeys(entry as unknown as Record<string, unknown>, ['id', 'params'])
+      for (const param of entry.params) {
+        expectKeys(param as unknown as Record<string, unknown>, ['name', 'kind', 'optional', 'defaultValue', 'autoAtZero'])
+        expect(['BOOL', 'INT', 'FLOAT']).toContain(param.kind)
+        if (param.kind !== 'BOOL') {
+          expect(param.min).not.toBeNull()
+          expect(param.max).not.toBeNull()
+        }
+      }
+    }
   })
 })
 
@@ -669,9 +733,19 @@ describe('API_DEFAULTS lockstep with the fixtures', () => {
     expect(Array.isArray(API_DEFAULTS.automationCatalog)).toBe(true)
     expect((API_DEFAULTS.automationCatalog as readonly unknown[]).length).toBe(0)
     // The client-side add-affordance caps mirror StreamDefaults' automation
-    // bounds (AUTOMATION_MAX_RULES / AUTOMATION_MAX_ACTIONS_PER_RULE).
+    // bounds (AUTOMATION_MAX_RULES / MAX_ACTIONS_PER_RULE /
+    // MAX_CONDITIONS_PER_RULE), and the cooldown bounds mirror the rule
+    // sanitizer's clamp span plus its default.
     expect(API_DEFAULTS.automationMaxRules).toBe(16)
     expect(API_DEFAULTS.automationMaxActionsPerRule).toBe(8)
+    expect(API_DEFAULTS.automationMaxConditionsPerRule).toBe(8)
+    expect(API_DEFAULTS.automationCooldownMinSeconds).toBe(0)
+    expect(API_DEFAULTS.automationCooldownMaxSeconds).toBe(86_400)
+    expect(API_DEFAULTS.automationCooldownDefaultSeconds).toBe(60)
+    // The fixture's event rule pins the cooldown default's wire shape.
+    const nightMotion = automation.rules.find((rule) => rule.triggerType === 'motion_detected')
+    expect(nightMotion).toBeDefined()
+    expect(nightMotion!.cooldownSeconds).toBe(120)
   })
 
   it('camera fallbacks match the settings fixture defaults', () => {

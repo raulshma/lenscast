@@ -2,7 +2,10 @@ package com.raulshma.lenscast.automation
 
 import com.raulshma.lenscast.R
 import com.raulshma.lenscast.automation.schedule.AutomationActionSpec
+import com.raulshma.lenscast.automation.schedule.AutomationConditionCatalog
+import com.raulshma.lenscast.automation.schedule.AutomationConditionSpec
 import com.raulshma.lenscast.automation.schedule.AutomationRule
+import com.raulshma.lenscast.automation.schedule.AutomationTriggerCatalog
 import com.raulshma.lenscast.core.StreamDefaults
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -318,5 +321,187 @@ class AutomationUiModelTest {
         assertEquals(listOf(0, 2), AutomationViewModel.armedDays(mondayAndWednesday))
         assertTrue(AutomationViewModel.isEveryDay(127))
         assertFalse(AutomationViewModel.isEveryDay(mondayAndWednesday))
+    }
+
+    // ── trigger + condition labels & summaries ──
+
+    @Test
+    fun `trigger labels resolve every catalog id and fall to unknown`() {
+        assertEquals(
+            R.string.automation_trigger_motion,
+            AutomationViewModel.triggerTypeLabelRes("motion_detected"),
+        )
+        assertEquals(
+            R.string.automation_trigger_time_of_day,
+            AutomationViewModel.triggerTypeLabelRes("time_of_day"),
+        )
+        assertEquals(
+            R.string.automation_action_unknown,
+            AutomationViewModel.triggerTypeLabelRes("bogus"),
+        )
+        AutomationTriggerCatalog.ACTION_TYPES.forEach { type ->
+            AutomationViewModel.triggerTypeLabelRes(type.id) // every id resolvable
+        }
+    }
+
+    @Test
+    fun `condition labels resolve every catalog id and fall to unknown`() {
+        assertEquals(
+            R.string.automation_condition_time_window,
+            AutomationViewModel.conditionTypeLabelRes("time_window"),
+        )
+        assertEquals(
+            R.string.automation_action_unknown,
+            AutomationViewModel.conditionTypeLabelRes("bogus"),
+        )
+        AutomationConditionCatalog.CONDITIONS.forEach { type ->
+            AutomationViewModel.conditionTypeLabelRes(type.id)
+        }
+    }
+
+    @Test
+    fun `time rule trigger summary is empty and event triggers render when-lines`() {
+        assertEquals(
+            emptyList<AutomationSummaryLine>(),
+            AutomationViewModel.triggerSummaryLines(AutomationRule(triggerType = "time_of_day")),
+        )
+        val motion = AutomationViewModel.triggerSummaryLines(
+            AutomationRule(triggerType = AutomationTriggerCatalog.MOTION_DETECTED),
+        )
+        assertEquals(1, motion.size)
+        assertEquals(R.string.automation_summary_trigger_motion, motion.single().res)
+        assertTrue(motion.single().args.isEmpty())
+    }
+
+    @Test
+    fun `battery trigger summary reads the threshold and direction`() {
+        val below = AutomationViewModel.triggerSummaryLines(
+            AutomationRule(
+                triggerType = AutomationTriggerCatalog.BATTERY_LEVEL,
+                triggerParams = mapOf("level" to "20", "when_below" to "true"),
+            ),
+        ).single()
+        assertEquals(R.string.automation_summary_trigger_battery_below, below.res)
+        assertEquals(listOf("20"), below.args)
+
+        val above = AutomationViewModel.triggerSummaryLines(
+            AutomationRule(
+                triggerType = AutomationTriggerCatalog.BATTERY_LEVEL,
+                triggerParams = mapOf("level" to "80", "when_below" to "false"),
+            ),
+        ).single()
+        assertEquals(R.string.automation_summary_trigger_battery_above, above.res)
+        assertEquals(listOf("80"), above.args)
+    }
+
+    @Test
+    fun `charging trigger summary follows its polarity param`() {
+        val on = AutomationViewModel.triggerSummaryLines(
+            AutomationRule(triggerType = AutomationTriggerCatalog.CHARGING_CHANGED),
+        ).single()
+        assertEquals(R.string.automation_summary_trigger_charging_on, on.res)
+
+        val off = AutomationViewModel.triggerSummaryLines(
+            AutomationRule(
+                triggerType = AutomationTriggerCatalog.CHARGING_CHANGED,
+                triggerParams = mapOf("charging" to "false"),
+            ),
+        ).single()
+        assertEquals(R.string.automation_summary_trigger_charging_off, off.res)
+    }
+
+    @Test
+    fun `time window condition summary renders the formatted span`() {
+        val line = AutomationViewModel.conditionSummaryLines(
+            AutomationConditionSpec(
+                AutomationConditionCatalog.TIME_WINDOW,
+                mapOf("start_minute" to "1320", "end_minute" to "360", "days_mask" to "127"),
+            ),
+        ).single()
+        assertEquals(R.string.automation_summary_condition_time_window, line.res)
+        assertEquals(listOf("22:00", "06:00"), line.args)
+    }
+
+    @Test
+    fun `battery condition summary picks the bound shape`() {
+        fun lineFor(vararg params: Pair<String, String>) = AutomationViewModel.conditionSummaryLines(
+            AutomationConditionSpec(AutomationConditionCatalog.BATTERY_LEVEL, mapOf(*params)),
+        ).single()
+
+        assertEquals(
+            R.string.automation_summary_condition_battery_between,
+            lineFor("min_level" to "20", "max_level" to "80").res,
+        )
+        assertEquals(
+            R.string.automation_summary_condition_battery_min,
+            lineFor("min_level" to "20").res,
+        )
+        assertEquals(
+            R.string.automation_summary_condition_battery_max,
+            lineFor("max_level" to "80").res,
+        )
+        assertEquals(
+            R.string.automation_summary_condition_battery_any,
+            lineFor().res,
+        )
+    }
+
+    @Test
+    fun `boolean condition summaries follow their polarity`() {
+        fun lineFor(type: String, vararg params: Pair<String, String>) = AutomationViewModel.conditionSummaryLines(
+            AutomationConditionSpec(type, mapOf(*params)),
+        ).single()
+
+        assertEquals(R.string.automation_summary_condition_charging_on, lineFor(AutomationConditionCatalog.CHARGING).res)
+        assertEquals(
+            R.string.automation_summary_condition_charging_off,
+            lineFor(AutomationConditionCatalog.CHARGING, "charging" to "false").res,
+        )
+        assertEquals(
+            R.string.automation_summary_condition_power_save_on,
+            lineFor(AutomationConditionCatalog.POWER_SAVE, "enabled" to "true").res,
+        )
+        assertEquals(R.string.automation_summary_condition_power_save_off, lineFor(AutomationConditionCatalog.POWER_SAVE).res)
+    }
+
+    @Test
+    fun `unknown condition id renders no summary lines`() {
+        assertTrue(AutomationViewModel.conditionSummaryLines(AutomationConditionSpec("bogus")).isEmpty())
+    }
+
+    @Test
+    fun `default trigger and condition params carry required defaults only`() {
+        assertEquals(
+            mapOf("level" to "20", "when_below" to "true"),
+            AutomationViewModel.defaultTriggerParams(AutomationTriggerCatalog.BATTERY_LEVEL),
+        )
+        assertEquals(emptyMap<String, String>(), AutomationViewModel.defaultTriggerParams(AutomationTriggerCatalog.TIME_OF_DAY))
+        assertEquals(
+            mapOf("start_minute" to "0", "end_minute" to "1439", "days_mask" to "127"),
+            AutomationViewModel.defaultConditionParams(AutomationConditionCatalog.TIME_WINDOW),
+        )
+        // Optional condition params stay absent: absence IS "unbounded".
+        assertEquals(
+            emptyMap<String, String>(),
+            AutomationViewModel.defaultConditionParams(AutomationConditionCatalog.BATTERY_LEVEL),
+        )
+    }
+
+    @Test
+    fun `withSpecParam writes and removes keys across the three spec kinds`() {
+        val params = mapOf("a" to "1")
+        assertEquals(mapOf("a" to "2"), AutomationViewModel.withSpecParam(params, "a", "2"))
+        assertEquals(emptyMap<String, String>(), AutomationViewModel.withSpecParam(params, "a", null))
+        assertEquals(emptyMap<String, String>(), AutomationViewModel.withSpecParam(params, "a", ""))
+
+        val action = AutomationActionSpec("torch", params)
+        assertEquals("2", AutomationViewModel.withActionParam(action, "a", "2").params["a"])
+        assertFalse(AutomationViewModel.withActionParam(action, "a", null).params.containsKey("a"))
+
+        val rule = AutomationRule(triggerParams = params)
+        assertEquals("2", AutomationViewModel.withSpecParam(rule.triggerParams, "a", "2")["a"])
+
+        val condition = AutomationConditionSpec(AutomationConditionCatalog.CHARGING, params)
+        assertEquals("2", AutomationViewModel.withConditionParam(condition, "a", "2").params["a"])
     }
 }

@@ -587,4 +587,96 @@
     <string name="automation_summary_motion_off">移动侦测关</string>
     <string name="automation_summary_sound_on">声音侦测开</string>
     <string name="automation_summary_sound_off">声音侦测关</string>
+
+    <!-- 如果/那么触发器 -->
+    <string name="automation_trigger_time_of_day">在计划的时间</string>
+    <string name="automation_trigger_motion">检测到移动</string>
+    <string name="automation_trigger_sound">检测到声音</string>
+    <string name="automation_trigger_tamper">篡改(断电)</string>
+    <string name="automation_trigger_charging">接入 / 断开充电</string>
+    <string name="automation_trigger_battery">电量阈值越过</string>
+    <string name="automation_trigger_streaming">直播开始 / 停止</string>
+    <string name="automation_trigger_viewers">观众加入 / 离开</string>
+    <string name="automation_trigger_app_started">应用启动</string>
+    <string name="automation_summary_trigger_motion">当检测到移动时</string>
+    <string name="automation_summary_trigger_sound">当检测到声音时</string>
+    <string name="automation_summary_trigger_tamper">发生篡改(断电)时</string>
+    <string name="automation_summary_trigger_charging_on">当接入充电时</string>
+    <string name="automation_summary_trigger_charging_off">当断开充电时</string>
+    <string name="automation_summary_trigger_battery_below">当电量降至 %1$s%% 时</string>
+    <string name="automation_summary_trigger_battery_above">当电量升到 %1$s%% 以上时</string>
+    <string name="automation_summary_trigger_stream_start">当直播开始时</string>
+    <string name="automation_summary_trigger_stream_stop">当直播停止时</string>
+    <string name="automation_summary_trigger_viewer_join">当有观众加入时</string>
+    <string name="automation_summary_trigger_viewer_leave">当最后一位观众离开时</string>
+    <string name="automation_summary_trigger_app_started">当应用启动时</string>
+
+    <!-- 触发器参数 -->
+    <string name="automation_param_battery_threshold">电量(%)</string>
+    <string name="automation_param_when_below">在下降时</string>
+    <string name="automation_param_charging_plugged">充电中</string>
+    <string name="automation_param_streaming_active">直播中</string>
+    <string name="automation_param_viewers_connected">有观众在线</string>
+
+    <!-- 前提条件(仅当 …) -->
+    <string name="automation_condition_time_window">时间段</string>
+    <string name="automation_condition_charging">充电状态</string>
+    <string name="automation_condition_battery">电量水平</string>
+    <string name="automation_condition_power_save">省电模式</string>
+    <string name="automation_condition_wifi">已连接 Wi-Fi</string>
+    <string name="automation_condition_streaming">直播中</string>
+    <string name="automation_condition_viewers">观众人数</string>
+    <string name="automation_condition_torch">手电筒开启</string>
+    <string name="automation_condition_recording">录像中</string>
+    <string name="automation_condition_thermal">温度正常</string>
+    <string name="automation_condition_motion_detection">移动侦测已启用</string>
+    <string name="automation_param_window_start">开始(当天分钟数)</string>
+    <string name="automation_param_window_end">结束(当天分钟数)</string>
+    <string name="automation_param_window_days">星期</string>
+    <string name="automation_param_battery_min">最小值(%)</string>
+    <string name="automation_param_battery_max">最大值(%)</string>
+    <string name="automation_param_power_save_on">省电模式开启</string>
+    <string name="automation_param_wifi_connected">已连接</string>
+    <string name="automation_param_viewers_min">最少观众</string>
+    <string name="automation_param_viewers_max">最多观众</string>
+    <string name="automation_param_torch_on">手电筒开启</string>
+    <string name="automation_param_recording_active">录像中</string>
+    <string name="automation_param_thermal_normal">正常</string>
+    <string name="automation_summary_condition_time_window">%1$s 到 %2$s 之间</string>
+    <string name="automation_summary_condition_charging_on">充电期间</string>
+    <string name="automation_summary_condition_charging_off">使用电池期间</string>
+    <string name="automation_summary_condition_battery_between">电量 %1$s–%2$s%%</string>
+    <string name="automation_summary_condition_battery_min">电量 ≥ %1$s%%</string>
+    <string name="automation_summary_condition_battery_max">电量 ≤ %1$s%%</string>
+    <string name="automation_summary_condition_battery_any">电量:任意水平</string>
+    <string name="automation_summary_condition_power_save_on">省电模式开启期间</string>
+    <string name="automation_summary_condition_power_save_off">省电模式关闭期间</string>
+    <string name="automation_summary_condition_wifi_on">Wi-Fi 已连接期间</string>
+    <string name="automation_summary_condition_wifi_off">Wi-Fi 未连接期间</string>
+    <string name="automation_summary_condition_streaming_on">直播期间</string>
+    <string name="automation_summary_condition_streaming_off">非直播期间</string>
+    <string name="automation_summary_condition_viewers_between">观众 %1$s–%2$s 人</string>
+    <string name="automation_summary_condition_viewers_min">观众 ≥ %1$s 人</string>
+    <string name="automation_summary_condition_viewers_max">观众 ≤ %1$s 人</string>
+    <string name="automation_summary_condition_viewers_any">观众:任意人数</string>
+    <string name="automation_summary_condition_torch_on">手电筒开启期间</string>
+    <string name="automation_summary_condition_torch_off">手电筒关闭期间</string>
+    <string name="automation_summary_condition_recording_on">录像期间</string>
+    <string name="automation_summary_condition_recording_off">非录像期间</string>
+    <string name="automation_summary_condition_thermal_normal">温度正常期间</string>
+    <string name="automation_summary_condition_thermal_throttling">热降频期间</string>
+    <string name="automation_summary_condition_motion_on">移动侦测开启期间</string>
+    <string name="automation_summary_condition_motion_off">移动侦测关闭期间</string>
+
+    <!-- 编辑器:触发器 / 条件 / 冷却 -->
+    <string name="automation_rule_conditions_title">仅当:</string>
+    <string name="automation_editor_trigger_title">当(触发器)</string>
+    <string name="automation_editor_change_trigger">更改</string>
+    <string name="automation_editor_conditions_title">仅当(前提条件)</string>
+    <string name="automation_editor_no_conditions">无条件 — 每个事件都触发</string>
+    <string name="automation_editor_match_any">满足任一条件即可(或)</string>
+    <string name="automation_editor_add_condition">添加条件</string>
+    <string name="automation_editor_remove_condition_cd">移除条件</string>
+    <string name="automation_editor_cooldown">重新触发冷却(秒)</string>
+    <string name="automation_editor_window_wrap_hint">跨越午夜的时间窗口(开始 &gt; 结束)会延续到第二天</string>
 </resources>

@@ -592,4 +592,96 @@
     <string name="automation_summary_motion_off">Bewegungserkennung aus</string>
     <string name="automation_summary_sound_on">Tonererkennung an</string>
     <string name="automation_summary_sound_off">Tonererkennung aus</string>
+
+    <!-- Wenn/Dann-Auslöser -->
+    <string name="automation_trigger_time_of_day">Zu einer geplanten Zeit</string>
+    <string name="automation_trigger_motion">Bewegung erkannt</string>
+    <string name="automation_trigger_sound">Ton erkannt</string>
+    <string name="automation_trigger_tamper">Manipulation (Stromtrennung)</string>
+    <string name="automation_trigger_charging">Ladegerät angeschlossen / getrennt</string>
+    <string name="automation_trigger_battery">Akkustand-Schwelle</string>
+    <string name="automation_trigger_streaming">Stream-Start / -Stopp</string>
+    <string name="automation_trigger_viewers">Zuschauer kommt / geht</string>
+    <string name="automation_trigger_app_started">App-Start</string>
+    <string name="automation_summary_trigger_motion">Wenn Bewegung erkannt wird</string>
+    <string name="automation_summary_trigger_sound">Wenn Ton erkannt wird</string>
+    <string name="automation_summary_trigger_tamper">Bei Manipulation (Stromtrennung)</string>
+    <string name="automation_summary_trigger_charging_on">Wenn das Ladegerät angeschlossen wird</string>
+    <string name="automation_summary_trigger_charging_off">Wenn das Ladegerät getrennt wird</string>
+    <string name="automation_summary_trigger_battery_below">Wenn der Akku auf %1$s%% fällt</string>
+    <string name="automation_summary_trigger_battery_above">Wenn der Akku über %1$s%% steigt</string>
+    <string name="automation_summary_trigger_stream_start">Wenn der Stream startet</string>
+    <string name="automation_summary_trigger_stream_stop">Wenn der Stream stoppt</string>
+    <string name="automation_summary_trigger_viewer_join">Wenn sich ein Zuschauer verbindet</string>
+    <string name="automation_summary_trigger_viewer_leave">Wenn der letzte Zuschauer geht</string>
+    <string name="automation_summary_trigger_app_started">Beim Start der App</string>
+
+    <!-- Auslöser-Parameter -->
+    <string name="automation_param_battery_threshold">Akkustand (%)</string>
+    <string name="automation_param_when_below">Beim Fallen</string>
+    <string name="automation_param_charging_plugged">Lädt</string>
+    <string name="automation_param_streaming_active">Streaming</string>
+    <string name="automation_param_viewers_connected">Zuschauer anwesend</string>
+
+    <!-- Vorbedingungen (nur wenn …) -->
+    <string name="automation_condition_time_window">Zeitfenster</string>
+    <string name="automation_condition_charging">Ladestatus</string>
+    <string name="automation_condition_battery">Akkustand</string>
+    <string name="automation_condition_power_save">Energiesparmodus</string>
+    <string name="automation_condition_wifi">WLAN verbunden</string>
+    <string name="automation_condition_streaming">Streaming aktiv</string>
+    <string name="automation_condition_viewers">Zuschaueranzahl</string>
+    <string name="automation_condition_torch">Taschenlampe an</string>
+    <string name="automation_condition_recording">Aufnahme aktiv</string>
+    <string name="automation_condition_thermal">Thermisch unauffällig</string>
+    <string name="automation_condition_motion_detection">Bewegungserkennung aktiviert</string>
+    <string name="automation_param_window_start">Von (Tagesminute)</string>
+    <string name="automation_param_window_end">Bis (Tagesminute)</string>
+    <string name="automation_param_window_days">Tage</string>
+    <string name="automation_param_battery_min">Minimum (%)</string>
+    <string name="automation_param_battery_max">Maximum (%)</string>
+    <string name="automation_param_power_save_on">Energiesparmodus an</string>
+    <string name="automation_param_wifi_connected">Verbunden</string>
+    <string name="automation_param_viewers_min">Minimum Zuschauer</string>
+    <string name="automation_param_viewers_max">Maximum Zuschauer</string>
+    <string name="automation_param_torch_on">Taschenlampe an</string>
+    <string name="automation_param_recording_active">Aufnahme</string>
+    <string name="automation_param_thermal_normal">Normal</string>
+    <string name="automation_summary_condition_time_window">Zwischen %1$s und %2$s</string>
+    <string name="automation_summary_condition_charging_on">Während des Ladens</string>
+    <string name="automation_summary_condition_charging_off">Im Akkubetrieb</string>
+    <string name="automation_summary_condition_battery_between">Akku %1$s–%2$s%%</string>
+    <string name="automation_summary_condition_battery_min">Akku ≥ %1$s%%</string>
+    <string name="automation_summary_condition_battery_max">Akku ≤ %1$s%%</string>
+    <string name="automation_summary_condition_battery_any">Akku: beliebiger Stand</string>
+    <string name="automation_summary_condition_power_save_on">Bei eingeschaltetem Energiesparmodus</string>
+    <string name="automation_summary_condition_power_save_off">Bei ausgeschaltetem Energiesparmodus</string>
+    <string name="automation_summary_condition_wifi_on">Bei verbundenem WLAN</string>
+    <string name="automation_summary_condition_wifi_off">Ohne WLAN-Verbindung</string>
+    <string name="automation_summary_condition_streaming_on">Während des Streamings</string>
+    <string name="automation_summary_condition_streaming_off">Ohne Streaming</string>
+    <string name="automation_summary_condition_viewers_between">Zuschauer %1$s–%2$s</string>
+    <string name="automation_summary_condition_viewers_min">Zuschauer ≥ %1$s</string>
+    <string name="automation_summary_condition_viewers_max">Zuschauer ≤ %1$s</string>
+    <string name="automation_summary_condition_viewers_any">Zuschauer: beliebige Anzahl</string>
+    <string name="automation_summary_condition_torch_on">Bei eingeschalteter Taschenlampe</string>
+    <string name="automation_summary_condition_torch_off">Bei ausgeschalteter Taschenlampe</string>
+    <string name="automation_summary_condition_recording_on">Während der Aufnahme</string>
+    <string name="automation_summary_condition_recording_off">Ohne Aufnahme</string>
+    <string name="automation_summary_condition_thermal_normal">Bei normaler Temperatur</string>
+    <string name="automation_summary_condition_thermal_throttling">Bei thermischer Drosselung</string>
+    <string name="automation_summary_condition_motion_on">Bei aktivierter Bewegungserkennung</string>
+    <string name="automation_summary_condition_motion_off">Bei deaktivierter Bewegungserkennung</string>
+
+    <!-- Editor: Auslöser / Bedingungen / Wiederholungssperre -->
+    <string name="automation_rule_conditions_title">Nur wenn:</string>
+    <string name="automation_editor_trigger_title">Wenn (Auslöser)</string>
+    <string name="automation_editor_change_trigger">Ändern</string>
+    <string name="automation_editor_conditions_title">Nur wenn (Bedingungen)</string>
+    <string name="automation_editor_no_conditions">Keine Bedingungen — löst bei jedem Ereignis aus</string>
+    <string name="automation_editor_match_any">IRGENDEINE Bedingung erfüllt (ODER)</string>
+    <string name="automation_editor_add_condition">Bedingung hinzufügen</string>
+    <string name="automation_editor_remove_condition_cd">Bedingung entfernen</string>
+    <string name="automation_editor_cooldown">Wiederholungssperre (Sekunden)</string>
+    <string name="automation_editor_window_wrap_hint">Ein Zeitfenster über Mitternacht hinaus (von &gt; bis) reicht in den nächsten Tag</string>
 </resources>
