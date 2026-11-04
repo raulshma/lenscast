@@ -9,6 +9,7 @@ import com.raulshma.lenscast.automation.schedule.AutomationActionCatalog
 import com.raulshma.lenscast.automation.schedule.AutomationActionSpec
 import com.raulshma.lenscast.automation.schedule.AutomationConditionCatalog
 import com.raulshma.lenscast.automation.schedule.AutomationConditionSpec
+import com.raulshma.lenscast.automation.schedule.AutomationFireJournal
 import com.raulshma.lenscast.automation.schedule.AutomationParamSpec
 import com.raulshma.lenscast.automation.schedule.AutomationRule
 import com.raulshma.lenscast.automation.schedule.AutomationSchedulePolicy
@@ -17,11 +18,16 @@ import com.raulshma.lenscast.capture.MotionArmingPolicy
 import com.raulshma.lenscast.camera.CameraService
 import com.raulshma.lenscast.core.StreamDefaults
 import com.raulshma.lenscast.data.SettingsDataStore
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import java.time.Instant
+import java.time.ZoneId
+import java.time.temporal.ChronoUnit
 import java.util.UUID
 
 /**
@@ -36,12 +42,38 @@ data class AutomationSummaryLine(
 )
 
 /**
+ * The display bucket of a rule's last-fired instant — the pure half of the
+ * rule card's "Last ran …" line, resolved to strings by the screen
+ * (Today/Yesterday carry the local minute-of-day for their HH:mm templates;
+ * [AutomationLastFiredLabel.Earlier] carries the epoch instant for a
+ * locale-formatted date).
+ */
+sealed interface AutomationLastFiredLabel {
+    data class Today(val minuteOfDay: Int) : AutomationLastFiredLabel
+    data class Yesterday(val minuteOfDay: Int) : AutomationLastFiredLabel
+    data class Earlier(val epochMillis: Long, val minuteOfDay: Int) : AutomationLastFiredLabel
+}
+
+/**
+ * A humanized duration — the pure half of the cooldown readout: seconds
+ * under a minute, minutes under an hour, hours above. The screen renders the
+ * count through its per-unit template ("45 s" / "5 min" / "2 h").
+ */
+sealed interface AutomationDurationLabel {
+    data class Seconds(val count: Int) : AutomationDurationLabel
+    data class Minutes(val count: Int) : AutomationDurationLabel
+    data class Hours(val count: Int) : AutomationDurationLabel
+}
+
+/**
  * Write-side ViewModel for the automation (schedule-rules) screen. Persisted
  * values are exposed straight from the Settings Store — the store is the
  * single source of truth and there is no mirror state to drift, the same
- * contract as [com.raulshma.lenscast.settings.SettingsViewModel]. The only
- * derived read is [canAddRule], so the screen can grey the add button out at
- * [StreamDefaults.AUTOMATION_MAX_RULES].
+ * contract as [com.raulshma.lenscast.settings.SettingsViewModel]. The derived
+ * reads are [canAddRule] (the screen greys the add button out at
+ * [StreamDefaults.AUTOMATION_MAX_RULES]) and [lastFiredKeys] (the fire
+ * journal's read side, polled on the engine's cadence while the screen
+ * shows).
  *
  * Every write funnels through [AutomationSchedulePolicy.sanitizeRules] before
  * it reaches the store, so an edit is clamped into the persisted/usable shape
@@ -52,6 +84,7 @@ data class AutomationSummaryLine(
 class AutomationViewModel(
     private val cameraService: CameraService,
     private val settingsDataStore: SettingsDataStore,
+    private val fireJournal: AutomationFireJournal,
 ) : ViewModel() {
 
     // Read-side state straight from the Settings Store — no per-ViewModel
@@ -67,6 +100,20 @@ class AutomationViewModel(
         .map { it.size < StreamDefaults.AUTOMATION_MAX_RULES }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), true)
 
+    /**
+     * Rule id → last fired occurrence key, re-read from the fire journal on a
+     * beat matching the engine's own poll cadence (the journal is a tiny
+     * per-rule long map on disk — its load is the designed read path). Only
+     * collected while the screen is subscribed, so nothing polls in the
+     * background.
+     */
+    val lastFiredKeys: StateFlow<Map<String, Long>> = flow {
+        while (true) {
+            emit(fireJournal.load())
+            delay(FIRE_POLL_MILLIS)
+        }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyMap())
+
     fun setEnabled(enabled: Boolean) = save { settingsDataStore.saveAutomationEnabled(enabled) }
 
     fun addRule(rule: AutomationRule) =
@@ -81,6 +128,9 @@ class AutomationViewModel(
     fun setRuleEnabled(ruleId: String, enabled: Boolean) =
         persistRules(withRuleEnabled(settingsDataStore.automationRules.value, ruleId, enabled))
 
+    fun duplicateRule(rule: AutomationRule, copyName: String) =
+        persistRules(withRuleDuplicated(settingsDataStore.automationRules.value, rule, copyName))
+
     /** The single persist seam: every rules write sanitizes, then saves. */
     private fun persistRules(rules: List<AutomationRule>) = save {
         settingsDataStore.saveAutomationRules(AutomationSchedulePolicy.sanitizeRules(rules))
@@ -93,16 +143,28 @@ class AutomationViewModel(
     class Factory(
         private val cameraService: CameraService,
         private val settingsDataStore: SettingsDataStore,
+        private val fireJournal: AutomationFireJournal,
     ) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
         override fun <T : ViewModel> create(modelClass: Class<T>): T {
-            return AutomationViewModel(cameraService, settingsDataStore) as T
+            return AutomationViewModel(cameraService, settingsDataStore, fireJournal) as T
         }
     }
 
     companion object {
 
+        /** The last-fired poll beat, matching the scheduler's own poll cadence. */
+        private val FIRE_POLL_MILLIS = StreamDefaults.AUTOMATION_POLL_SECONDS * 1_000L
+
         // ── pure rule-list transforms (JVM-tested) ──
+
+        /**
+         * Whether a draft may save: the engine fires nothing without at least
+         * one action, so an action-less rule is the one invalid shape. The
+         * editor's Save gate and its inline THEN-section error share this
+         * verdict.
+         */
+        fun isValidDraft(draft: AutomationRule): Boolean = draft.actions.isNotEmpty()
 
         /**
          * Append [rule] unless the list is already at [StreamDefaults.AUTOMATION_MAX_RULES].
@@ -112,6 +174,33 @@ class AutomationViewModel(
         fun withRuleAdded(rules: List<AutomationRule>, rule: AutomationRule): List<AutomationRule> =
             if (rules.size >= StreamDefaults.AUTOMATION_MAX_RULES) rules
             else rules + rule.copy(id = rule.id ?: UUID.randomUUID().toString())
+
+        /**
+         * A duplicate of [source], inserted right after it: a fresh UUID (the
+         * journal key must never be shared — a duplicate would inherit the
+         * original's dedupe history), the [copyName] the caller resolved
+         * ("Copy of …" needs localized resources, so the screen renders it),
+         * and a fresh enabled state. At the cap this is a no-op, like
+         * [withRuleAdded].
+         */
+        fun withRuleDuplicated(
+            rules: List<AutomationRule>,
+            source: AutomationRule,
+            copyName: String,
+        ): List<AutomationRule> {
+            val id = source.id ?: return rules
+            if (rules.size >= StreamDefaults.AUTOMATION_MAX_RULES) return rules
+            val index = rules.indexOfFirst { it.id == id }
+            if (index < 0) return rules
+            val copy = source.copy(
+                id = UUID.randomUUID().toString(),
+                name = copyName,
+                enabled = true,
+            )
+            return rules.toMutableList().apply { add(index + 1, copy) }
+        }
+
+
 
         /** Replace the entry with [rule]'s id; unknown or id-less rules are no-ops. */
         fun withRuleUpdated(rules: List<AutomationRule>, rule: AutomationRule): List<AutomationRule> {
@@ -251,6 +340,39 @@ class AutomationViewModel(
         /** The armed ISO day indices (0 = Monday … 6 = Sunday) in a day mask. */
         fun armedDays(daysMask: Int): List<Int> =
             (0..6).filter { MotionArmingPolicy.isArmedDay(daysMask, it) }
+
+        /**
+         * The "Last ran …" bucket for a rule's decoded fire instant vs [nowMs]
+         * in [zone]: today and yesterday carry the local minute-of-day for
+         * their HH:mm templates; anything older carries the epoch instant for
+         * a locale-formatted date. A non-positive instant (never fired) is
+         * null — the card shows nothing.
+         */
+        fun lastFiredLabel(lastFiredAtMs: Long, nowMs: Long, zone: ZoneId): AutomationLastFiredLabel? {
+            if (lastFiredAtMs <= 0) return null
+            val fired = Instant.ofEpochMilli(lastFiredAtMs).atZone(zone)
+            val dayGap = ChronoUnit.DAYS.between(fired.toLocalDate(), Instant.ofEpochMilli(nowMs).atZone(zone).toLocalDate())
+            val minuteOfDay = fired.hour * 60 + fired.minute
+            return when {
+                dayGap <= 0L -> AutomationLastFiredLabel.Today(minuteOfDay)
+                dayGap == 1L -> AutomationLastFiredLabel.Yesterday(minuteOfDay)
+                else -> AutomationLastFiredLabel.Earlier(lastFiredAtMs, minuteOfDay)
+            }
+        }
+
+        /**
+         * Humanize a duration: seconds under a minute, minutes under an hour
+         * (rounded, minimum 1), hours above (rounded). The cooldown presets
+         * land exactly; slider values land on the nearest unit.
+         */
+        fun humanizeDuration(seconds: Int): AutomationDurationLabel {
+            val clamped = seconds.coerceAtLeast(0)
+            return when {
+                clamped < 60 -> AutomationDurationLabel.Seconds(clamped)
+                clamped < 3_600 -> AutomationDurationLabel.Minutes(((clamped + 30) / 60).coerceAtLeast(1))
+                else -> AutomationDurationLabel.Hours(((clamped + 1_800) / 3_600).coerceAtLeast(1))
+            }
+        }
 
         // ── trigger/condition display strings (id → resource, JVM-tested) ──
 

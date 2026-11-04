@@ -1887,7 +1887,7 @@ class StreamingManager(
             subscriptions = app.pushSubscriptionStore,
             vapidKeys = app.vapidKeys,
         )
-        val automationHandler = AutomationWebHandler(app.settingsDataStore)
+        val automationHandler = AutomationWebHandler(app.settingsDataStore, app.automationFireJournal)
         return WebApiStack(
             router = ApiRouter(
                 settings = SettingsWebHandler(

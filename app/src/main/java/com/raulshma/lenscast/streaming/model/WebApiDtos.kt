@@ -1011,6 +1011,13 @@ data class AutomationRuleDto(
     val cooldownSeconds: Int = 60,
     /** The ordered action list; each entry is validated against the catalog on save. */
     val actions: List<AutomationActionDto> = emptyList(),
+    /**
+     * Epoch milliseconds (UTC) of the rule's last actual firing, decoded from
+     * the fire journal and formatted client-side; null/absent = never fired
+     * (or no journal record of the rule's current trigger kind). Read-only:
+     * PUT bodies ignore it, and the field only ever appears in responses.
+     */
+    val lastFiredAt: Long? = null,
 )
 
 /**

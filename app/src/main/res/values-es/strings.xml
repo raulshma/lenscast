@@ -636,8 +636,8 @@
     <string name="automation_condition_recording">Grabación activa</string>
     <string name="automation_condition_thermal">Sin sobrecalentamiento</string>
     <string name="automation_condition_motion_detection">Detección de movimiento activada</string>
-    <string name="automation_param_window_start">Desde (minuto del día)</string>
-    <string name="automation_param_window_end">Hasta (minuto del día)</string>
+    <string name="automation_param_window_start">Desde</string>
+    <string name="automation_param_window_end">Hasta</string>
     <string name="automation_param_window_days">Días</string>
     <string name="automation_param_battery_min">Mínimo (%)</string>
     <string name="automation_param_battery_max">Máximo (%)</string>
@@ -685,4 +685,91 @@
     <string name="automation_editor_remove_condition_cd">Quitar condición</string>
     <string name="automation_editor_cooldown">Enfriamiento entre disparos (segundos)</string>
     <string name="automation_editor_window_wrap_hint">Una franja que cruza la medianoche (desde &gt; hasta) continúa al día siguiente</string>
+
+    <!-- Automatización: tarjeta del motor, tarjetas de reglas, estado vacío -->
+    <string name="automation_master_section_title">Motor</string>
+    <string name="automation_rules_count">%1$d de %2$d reglas</string>
+    <string name="automation_empty_title">Aún no hay reglas</string>
+    <string name="automation_empty_body">Las reglas controlan la cámara por ti: cambian de modo según un horario, inician una grabación al detectar movimiento o hacen sonar la sirena de noche.</string>
+    <string name="automation_card_when">CUANDO</string>
+    <string name="automation_card_only">SOLO CUANDO</string>
+    <string name="automation_card_then">ENTONCES</string>
+    <string name="automation_last_fired_today">Se ejecutó hoy a las %1$s</string>
+    <string name="automation_last_fired_yesterday">Se ejecutó ayer a las %1$s</string>
+    <string name="automation_last_fired_on">Se ejecutó el %1$s a las %2$s</string>
+    <string name="automation_rule_menu_cd">Más opciones</string>
+    <string name="automation_rule_duplicate_cd">Duplicar regla</string>
+    <string name="automation_delete_confirm_title">¿Eliminar regla?</string>
+    <string name="automation_delete_confirm_body">«%1$s» dejará de ejecutarse. Esta acción no se puede deshacer.</string>
+    <string name="automation_delete_confirm_ok">Eliminar</string>
+    <string name="automation_rule_copy_of">Copia de %1$s</string>
+    <string name="automation_rule_copy">Copia de regla</string>
+
+    <!-- Automatización: duraciones (lectura y preajustes de enfriamiento) -->
+    <string name="automation_duration_seconds">%1$d s</string>
+    <string name="automation_duration_minutes">%1$d min</string>
+    <string name="automation_duration_hours">%1$d h</string>
+
+    <!-- Editor de automatización: protección, vista previa, orden -->
+    <string name="automation_editor_discard_title">¿Descartar cambios?</string>
+    <string name="automation_editor_discard_body">Los cambios en esta regla no se han guardado.</string>
+    <string name="automation_editor_discard_ok">Descartar</string>
+    <string name="automation_editor_need_action">Añade al menos una acción para guardar esta regla</string>
+    <string name="automation_editor_preview_title">Vista previa</string>
+    <string name="automation_editor_preview_always">Siempre — sin condiciones</string>
+    <string name="automation_editor_match_any_hint">La regla se activa cuando alguna (o todas) las condiciones indicadas se cumplen al activarse</string>
+    <string name="automation_editor_move_up_cd">Mover arriba</string>
+    <string name="automation_editor_move_down_cd">Mover abajo</string>
+    <string name="automation_join_and">y</string>
+    <string name="automation_join_or">o</string>
+
+    <!-- Automatización: grupos del selector -->
+    <string name="automation_group_schedule">Horario</string>
+    <string name="automation_group_device_events">Eventos del dispositivo</string>
+    <string name="automation_group_power">Energía</string>
+    <string name="automation_group_stream_app">Stream y aplicación</string>
+    <string name="automation_group_camera">Cámara</string>
+    <string name="automation_group_light_sound">Luz y sonido</string>
+    <string name="automation_group_stream_capture">Stream y captura</string>
+    <string name="automation_group_detection">Detección</string>
+    <string name="automation_group_time">Hora</string>
+    <string name="automation_group_connectivity">Conectividad</string>
+    <string name="automation_group_device_state">Estado del dispositivo</string>
+
+    <!-- Automatización: descripciones del selector, disparadores -->
+    <string name="automation_trigger_desc_time_of_day">Se activa una vez al día a la hora fijada en los días elegidos</string>
+    <string name="automation_trigger_desc_motion">Se activa cuando el detector de movimiento ve movimiento</string>
+    <string name="automation_trigger_desc_sound">Se activa cuando el detector de sonido oye un ruido</string>
+    <string name="automation_trigger_desc_tamper">Se activa cuando salta la detección de manipulación (corte de corriente)</string>
+    <string name="automation_trigger_desc_charging">Se activa al conectar o desconectar el cargador</string>
+    <string name="automation_trigger_desc_battery">Se activa cuando la batería cruza un nivel elegido</string>
+    <string name="automation_trigger_desc_streaming">Se activa cuando el stream empieza o se detiene</string>
+    <string name="automation_trigger_desc_viewers">Se activa cuando un espectador abre o cierra el stream</string>
+    <string name="automation_trigger_desc_app_started">Se activa una vez cada vez que se inicia la aplicación</string>
+
+    <!-- Automatización: descripciones del selector, acciones -->
+    <string name="automation_action_desc_camera_exposure">Fija el ISO y la velocidad de obturación manualmente, o vuelve a automático</string>
+    <string name="automation_action_desc_camera_ev">Ajusta la compensación de exposición arriba o abajo</string>
+    <string name="automation_action_desc_camera_zoom">Fija el nivel de zoom</string>
+    <string name="automation_action_desc_camera_fps">Cambia la velocidad de fotogramas del stream</string>
+    <string name="automation_action_desc_camera_lens">Cambia entre las lentes del dispositivo (interrumpe brevemente el stream)</string>
+    <string name="automation_action_desc_torch">Enciende el flash como luz o disuasorio</string>
+    <string name="automation_action_desc_stream">Inicia o detiene el stream en directo</string>
+    <string name="automation_action_desc_capture_photo">Captura una foto en el momento en que se activa la regla</string>
+    <string name="automation_action_desc_recording">Inicia o detiene una grabación, opcionalmente con límite de tiempo</string>
+    <string name="automation_action_desc_siren">Hace sonar la sirena durante un tiempo fijado (o hasta detenerla)</string>
+    <string name="automation_action_desc_detection">Activa o desactiva la detección de movimiento y/o sonido</string>
+
+    <!-- Automatización: descripciones del selector, condiciones -->
+    <string name="automation_condition_desc_time_window">Solo dentro de una franja diaria, opcionalmente en días elegidos</string>
+    <string name="automation_condition_desc_charging">Solo con el cargador conectado (o desconectado)</string>
+    <string name="automation_condition_desc_battery">Solo mientras la batería está por encima y/o por debajo de un nivel</string>
+    <string name="automation_condition_desc_power_save">Solo con el ahorro de energía activado (o desactivado)</string>
+    <string name="automation_condition_desc_wifi">Solo con Wi-Fi conectado (o desconectado)</string>
+    <string name="automation_condition_desc_streaming">Solo mientras el stream está (o no está) en directo</string>
+    <string name="automation_condition_desc_viewers">Solo mientras el número de espectadores está en un rango</string>
+    <string name="automation_condition_desc_torch">Solo con la linterna encendida (o apagada)</string>
+    <string name="automation_condition_desc_recording">Solo mientras hay (o no hay) una grabación activa</string>
+    <string name="automation_condition_desc_thermal">Solo mientras el dispositivo está (o no está) limitando el rendimiento</string>
+    <string name="automation_condition_desc_motion_detection">Solo con la detección de movimiento activada (o desactivada)</string>
 </resources>

@@ -3,6 +3,8 @@ package com.raulshma.lenscast.automation.schedule
 import com.raulshma.lenscast.camera.model.CameraSettings
 import com.raulshma.lenscast.capture.MotionArmingPolicy
 import com.raulshma.lenscast.core.StreamDefaults
+import java.time.LocalDate
+import java.time.ZoneId
 
 /**
  * The pure decision half of the automation engine — which rules are due,
@@ -52,6 +54,30 @@ object AutomationSchedulePolicy {
      */
     fun occurrenceKey(rule: AutomationRule, epochDay: Long): Long =
         epochDay * StreamDefaults.MINUTES_PER_DAY + rule.minuteOfDay
+
+    /**
+     * The wall-clock instant (epoch milliseconds) a journaled value records,
+     * or null when the value is neither a sane occurrence key nor a sane
+     * event timestamp. Time-occurrence keys ([occurrenceKey]'s output, below
+     * [EVENT_JOURNAL_THRESHOLD]) decode back to the local wall-clock minute
+     * they were minted from, in [zone]; event values (at or above the
+     * threshold) are epoch milliseconds already and pass through unchanged.
+     * The GET /api/automation surface uses this to publish "last fired" per
+     * rule without leaking the journal's internal encoding; a negative key
+     * decodes to null so a corrupt journal can never surface as a bogus
+     * timestamp.
+     */
+    fun decodeOccurrenceKey(key: Long, zone: ZoneId): Long? {
+        if (key < 0) return null
+        if (key >= EVENT_JOURNAL_THRESHOLD) return key
+        val epochDay = key / StreamDefaults.MINUTES_PER_DAY
+        val minuteOfDay = (key % StreamDefaults.MINUTES_PER_DAY).toInt()
+        return LocalDate.ofEpochDay(epochDay)
+            .atStartOfDay(zone)
+            .plusMinutes(minuteOfDay.toLong())
+            .toInstant()
+            .toEpochMilli()
+    }
 
     /**
      * One rule's firing: the rule plus the actions still allowed to run.

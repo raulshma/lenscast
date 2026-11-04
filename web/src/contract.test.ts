@@ -457,6 +457,10 @@ describe('DTO contract fixtures', () => {
         'cooldownSeconds',
         'actions',
       ])
+      // lastFiredAt is optional (Moshi omits the null on the wire) — the
+      // fixture models both shapes: a decoded stamp on one rule, a
+      // never-fired rule without the key.
+      expect(rule.lastFiredAt == null || rule.lastFiredAt >= 0).toBe(true)
       expect(AUTOMATION_TRIGGER_IDS).toContain(rule.triggerType)
       expect(['all', 'any']).toContain(rule.conditionMode)
       expect(rule.cooldownSeconds).toBeGreaterThanOrEqual(0)
@@ -474,6 +478,10 @@ describe('DTO contract fixtures', () => {
         expect(AUTOMATION_CONDITION_IDS).toContain(condition.type)
       }
     }
+    // The fixture pins both last-fired wire shapes: one rule with a decoded
+    // stamp, one that has never fired (key omitted = null).
+    expect(automation.rules[0].lastFiredAt).toBeGreaterThanOrEqual(0)
+    expect(automation.rules[1]?.lastFiredAt ?? null).toBeNull()
     expect(automation.catalog.length).toBeGreaterThan(0)
     // The rule editor renders generically from this catalog — every id the
     // Android side ships must be present, and every param spec must carry

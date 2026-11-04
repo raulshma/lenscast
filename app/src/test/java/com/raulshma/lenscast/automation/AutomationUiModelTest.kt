@@ -9,8 +9,12 @@ import com.raulshma.lenscast.automation.schedule.AutomationTriggerCatalog
 import com.raulshma.lenscast.core.StreamDefaults
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.time.Instant
+import java.time.ZoneId
 
 /**
  * Pure JVM tests for the automation screen's UI-model helpers: the
@@ -503,5 +507,122 @@ class AutomationUiModelTest {
 
         val condition = AutomationConditionSpec(AutomationConditionCatalog.CHARGING, params)
         assertEquals("2", AutomationViewModel.withConditionParam(condition, "a", "2").params["a"])
+    }
+
+    // ── duplication ──
+
+    @Test
+    fun `duplicate inserts after the source with a fresh id enabled and the copy name`() {
+        val a = AutomationRule(id = "a", name = "A", enabled = false)
+        val b = AutomationRule(id = "b", name = "B")
+        val duplicated = AutomationViewModel.withRuleDuplicated(listOf(a, b), a, "Copy of A")
+        assertEquals(3, duplicated.size)
+        assertEquals("a", duplicated[0].id)
+        // A fresh UUID: the journal key must never be shared with the source.
+        assertNotEquals("a", duplicated[1].id)
+        assertFalse(duplicated[1].id.isNullOrBlank())
+        assertEquals("Copy of A", duplicated[1].name)
+        assertTrue(duplicated[1].enabled)
+        assertEquals("b", duplicated[2].id)
+    }
+
+    @Test
+    fun `duplicate ignores id-less unknown and at-cap sources`() {
+        val a = AutomationRule(id = "a", name = "A")
+        assertEquals(
+            listOf(a),
+            AutomationViewModel.withRuleDuplicated(listOf(a), AutomationRule(name = "no-id"), "x"),
+        )
+        assertEquals(
+            listOf(a),
+            AutomationViewModel.withRuleDuplicated(listOf(a), AutomationRule(id = "zz"), "x"),
+        )
+        var rules = listOf(a)
+        repeat(StreamDefaults.AUTOMATION_MAX_RULES - 1) {
+            rules = AutomationViewModel.withRuleAdded(rules, AutomationRule(name = "r$it"))
+        }
+        assertEquals(StreamDefaults.AUTOMATION_MAX_RULES, rules.size)
+        assertEquals(rules, AutomationViewModel.withRuleDuplicated(rules, a, "Copy"))
+    }
+
+    // ── draft validation ──
+
+    @Test
+    fun `isValidDraft requires at least one action`() {
+        // The engine fires nothing from an action-less rule — the editor's
+        // Save gate and its inline error share this verdict.
+        assertTrue(AutomationViewModel.isValidDraft(AutomationRule(name = "A", actions = listOf(AutomationActionSpec("torch")))))
+        assertFalse(AutomationViewModel.isValidDraft(AutomationRule(name = "A")))
+        assertFalse(AutomationViewModel.isValidDraft(AutomationRule(name = "A", actions = emptyList())))
+    }
+
+    // ── last-fired buckets ──
+
+    @Test
+    fun `last fired buckets today yesterday earlier and never`() {
+        val zone = ZoneId.of("UTC")
+        // Fixed "now": 2026-11-04T12:00:00Z.
+        val now = Instant.parse("2026-11-04T12:00:00Z").toEpochMilli()
+
+        val today = AutomationViewModel.lastFiredLabel(now - 90_000L, now, zone)
+        assertTrue(today is AutomationLastFiredLabel.Today)
+        // 11:58:30 → minute-of-day 718.
+        assertEquals(11 * 60 + 58, (today as AutomationLastFiredLabel.Today).minuteOfDay)
+
+        val yesterdayMs = Instant.parse("2026-11-03T23:59:00Z").toEpochMilli()
+        val yesterday = AutomationViewModel.lastFiredLabel(yesterdayMs, now, zone)
+        assertTrue(yesterday is AutomationLastFiredLabel.Yesterday)
+        assertEquals(23 * 60 + 59, (yesterday as AutomationLastFiredLabel.Yesterday).minuteOfDay)
+
+        val earlierMs = Instant.parse("2026-11-01T08:15:00Z").toEpochMilli()
+        val earlier = AutomationViewModel.lastFiredLabel(earlierMs, now, zone)
+        assertTrue(earlier is AutomationLastFiredLabel.Earlier)
+        assertEquals(8 * 60 + 15, (earlier as AutomationLastFiredLabel.Earlier).minuteOfDay)
+        assertEquals(earlierMs, (earlier as AutomationLastFiredLabel.Earlier).epochMillis)
+
+        // Never fired (and nonsense) renders nothing.
+        assertNull(AutomationViewModel.lastFiredLabel(0L, now, zone))
+        assertNull(AutomationViewModel.lastFiredLabel(-5L, now, zone))
+    }
+
+    @Test
+    fun `last fired buckets follow the zone day boundary`() {
+        // 2026-11-03T23:30Z is already Nov 4 in Berlin (UTC+1 in November):
+        // against a 01:00Z "now", Berlin says today while UTC says yesterday.
+        val fired = Instant.parse("2026-11-03T23:30:00Z").toEpochMilli()
+        val now = Instant.parse("2026-11-04T01:00:00Z").toEpochMilli()
+        assertTrue(AutomationViewModel.lastFiredLabel(fired, now, ZoneId.of("UTC")) is AutomationLastFiredLabel.Yesterday)
+        assertTrue(
+            AutomationViewModel.lastFiredLabel(fired, now, ZoneId.of("Europe/Berlin"))
+                is AutomationLastFiredLabel.Today,
+        )
+    }
+
+    // ── humanized durations ──
+
+    @Test
+    fun `humanized durations round to the nearest unit with a floor of one`() {
+        assertEquals(AutomationDurationLabel.Seconds(0), AutomationViewModel.humanizeDuration(0))
+        assertEquals(AutomationDurationLabel.Seconds(59), AutomationViewModel.humanizeDuration(59))
+        // Minutes: round-half-up, never zero.
+        assertEquals(AutomationDurationLabel.Minutes(1), AutomationViewModel.humanizeDuration(60))
+        assertEquals(AutomationDurationLabel.Minutes(1), AutomationViewModel.humanizeDuration(61))
+        assertEquals(AutomationDurationLabel.Minutes(2), AutomationViewModel.humanizeDuration(90))
+        assertEquals(AutomationDurationLabel.Minutes(60), AutomationViewModel.humanizeDuration(3_599))
+        // Hours from a full hour up.
+        assertEquals(AutomationDurationLabel.Hours(1), AutomationViewModel.humanizeDuration(3_600))
+        assertEquals(AutomationDurationLabel.Hours(2), AutomationViewModel.humanizeDuration(5_400))
+        assertEquals(AutomationDurationLabel.Hours(2), AutomationViewModel.humanizeDuration(7_200))
+        // Negative input clamps to zero seconds.
+        assertEquals(AutomationDurationLabel.Seconds(0), AutomationViewModel.humanizeDuration(-30))
+    }
+
+    @Test
+    fun `cooldown presets land exactly on their unit`() {
+        assertEquals(AutomationDurationLabel.Seconds(30), AutomationViewModel.humanizeDuration(30))
+        assertEquals(AutomationDurationLabel.Minutes(5), AutomationViewModel.humanizeDuration(300))
+        assertEquals(AutomationDurationLabel.Minutes(15), AutomationViewModel.humanizeDuration(900))
+        assertEquals(AutomationDurationLabel.Minutes(30), AutomationViewModel.humanizeDuration(1_800))
+        assertEquals(AutomationDurationLabel.Hours(1), AutomationViewModel.humanizeDuration(3_600))
     }
 }

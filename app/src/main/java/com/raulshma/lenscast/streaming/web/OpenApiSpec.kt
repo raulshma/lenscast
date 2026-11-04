@@ -734,6 +734,9 @@ object OpenApiSpec {
             "conditionMode" to stringSchema("How multiple conditions combine: `all` | `any`; anything else folds to `all` on save"),
             "cooldownSeconds" to intSchema("Minimum seconds between two firings of an event-triggered rule; clamped to 0..86400 on save"),
             "actions" to arrayOf(ref("AutomationActionDto")),
+            "lastFiredAt" to intSchema("Epoch milliseconds (UTC) of the rule's last actual firing, decoded from the " +
+                "device's fire journal; null/absent = never fired. Read-only — PUT bodies ignore it") +
+                mapOf("nullable" to true),
             required = listOf("id", "name", "enabled", "triggerType", "minuteOfDay", "daysMask",
                 "triggerParams", "conditions", "conditionMode", "cooldownSeconds", "actions"),
             description = "WHEN triggerType (+ ONLY WHEN conditions) THEN actions. Event-triggered rules have no " +

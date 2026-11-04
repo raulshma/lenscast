@@ -654,8 +654,8 @@
     <string name="automation_condition_recording">Идёт запись</string>
     <string name="automation_condition_thermal">Термический режим в норме</string>
     <string name="automation_condition_motion_detection">Детекция движения включена</string>
-    <string name="automation_param_window_start">С (минута дня)</string>
-    <string name="automation_param_window_end">До (минута дня)</string>
+    <string name="automation_param_window_start">С</string>
+    <string name="automation_param_window_end">До</string>
     <string name="automation_param_window_days">Дни</string>
     <string name="automation_param_battery_min">Минимум (%)</string>
     <string name="automation_param_battery_max">Максимум (%)</string>
@@ -703,4 +703,91 @@
     <string name="automation_editor_remove_condition_cd">Удалить условие</string>
     <string name="automation_editor_cooldown">Пауза между срабатываниями (секунды)</string>
     <string name="automation_editor_window_wrap_hint">Окно, переходящее через полночь (от &gt; до), продолжается на следующий день</string>
+
+    <!-- Экран автоматизации: карточка движка, карточки правил, пустое состояние -->
+    <string name="automation_master_section_title">Движок</string>
+    <string name="automation_rules_count">Правил: %1$d из %2$d</string>
+    <string name="automation_empty_title">Правил пока нет</string>
+    <string name="automation_empty_body">Правила управляют камерой за вас — переключают режимы по расписанию, начинают запись при обнаружении движения или включают сирену ночью.</string>
+    <string name="automation_card_when">КОГДА</string>
+    <string name="automation_card_only">ТОЛЬКО КОГДА</string>
+    <string name="automation_card_then">ТОГДА</string>
+    <string name="automation_last_fired_today">Последний запуск сегодня в %1$s</string>
+    <string name="automation_last_fired_yesterday">Последний запуск вчера в %1$s</string>
+    <string name="automation_last_fired_on">Последний запуск %1$s в %2$s</string>
+    <string name="automation_rule_menu_cd">Дополнительные действия</string>
+    <string name="automation_rule_duplicate_cd">Дублировать правило</string>
+    <string name="automation_delete_confirm_title">Удалить правило?</string>
+    <string name="automation_delete_confirm_body">«%1$s» больше не будет запускаться. Это действие нельзя отменить.</string>
+    <string name="automation_delete_confirm_ok">Удалить</string>
+    <string name="automation_rule_copy_of">Копия «%1$s»</string>
+    <string name="automation_rule_copy">Копия правила</string>
+
+    <!-- Автоматизация: длительности (показ и предустановки паузы) -->
+    <string name="automation_duration_seconds">%1$d с</string>
+    <string name="automation_duration_minutes">%1$d мин</string>
+    <string name="automation_duration_hours">%1$d ч</string>
+
+    <!-- Редактор автоматизации: защита, предпросмотр, порядок -->
+    <string name="automation_editor_discard_title">Отменить изменения?</string>
+    <string name="automation_editor_discard_body">Внесённые изменения не сохранены.</string>
+    <string name="automation_editor_discard_ok">Отменить</string>
+    <string name="automation_editor_need_action">Добавьте хотя бы одно действие, чтобы сохранить правило</string>
+    <string name="automation_editor_preview_title">Предпросмотр</string>
+    <string name="automation_editor_preview_always">Всегда — без условий</string>
+    <string name="automation_editor_match_any_hint">Правило срабатывает, когда при запуске выполняется любое (или все) из перечисленных условий</string>
+    <string name="automation_editor_move_up_cd">Вверх</string>
+    <string name="automation_editor_move_down_cd">Вниз</string>
+    <string name="automation_join_and">и</string>
+    <string name="automation_join_or">или</string>
+
+    <!-- Автоматизация: группы выбора -->
+    <string name="automation_group_schedule">Расписание</string>
+    <string name="automation_group_device_events">События устройства</string>
+    <string name="automation_group_power">Питание</string>
+    <string name="automation_group_stream_app">Трансляция и приложение</string>
+    <string name="automation_group_camera">Камера</string>
+    <string name="automation_group_light_sound">Свет и звук</string>
+    <string name="automation_group_stream_capture">Трансляция и съёмка</string>
+    <string name="automation_group_detection">Обнаружение</string>
+    <string name="automation_group_time">Время</string>
+    <string name="automation_group_connectivity">Подключение</string>
+    <string name="automation_group_device_state">Состояние устройства</string>
+
+    <!-- Автоматизация: описания выбора, триггеры -->
+    <string name="automation_trigger_desc_time_of_day">Срабатывает раз в день в заданное время в выбранные дни</string>
+    <string name="automation_trigger_desc_motion">Срабатывает, когда детектор движения замечает движение</string>
+    <string name="automation_trigger_desc_sound">Срабатывает, когда детектор звука улавливает шум</string>
+    <string name="automation_trigger_desc_tamper">Срабатывает при срабатывании датчика вмешательства (отключение питания)</string>
+    <string name="automation_trigger_desc_charging">Срабатывает при подключении или отключении зарядного устройства</string>
+    <string name="automation_trigger_desc_battery">Срабатывает, когда батарея пересекает заданный уровень</string>
+    <string name="automation_trigger_desc_streaming">Срабатывает при запуске или остановке трансляции</string>
+    <string name="automation_trigger_desc_viewers">Срабатывает, когда зритель открывает или закрывает трансляцию</string>
+    <string name="automation_trigger_desc_app_started">Срабатывает один раз при каждом запуске приложения</string>
+
+    <!-- Автоматизация: описания выбора, действия -->
+    <string name="automation_action_desc_camera_exposure">Задать ISO и выдержку вручную или вернуть автоматический режим</string>
+    <string name="automation_action_desc_camera_ev">Сдвинуть экспокоррекцию вверх или вниз</string>
+    <string name="automation_action_desc_camera_zoom">Задать уровень зума</string>
+    <string name="automation_action_desc_camera_fps">Изменить частоту кадров трансляции</string>
+    <string name="automation_action_desc_camera_lens">Переключить между объективами устройства (кратко прерывает трансляцию)</string>
+    <string name="automation_action_desc_torch">Включить вспышку как освещение или средство отпугивания</string>
+    <string name="automation_action_desc_stream">Запустить или остановить трансляцию</string>
+    <string name="automation_action_desc_capture_photo">Снять фото в момент срабатывания правила</string>
+    <string name="automation_action_desc_recording">Начать или остановить запись, с опциональным лимитом времени</string>
+    <string name="automation_action_desc_siren">Включить сирену на заданное время (или до остановки)</string>
+    <string name="automation_action_desc_detection">Включить или выключить обнаружение движения и/или звука</string>
+
+    <!-- Автоматизация: описания выбора, условия -->
+    <string name="automation_condition_desc_time_window">Только в пределах ежедневного интервала, при желании в выбранные дни</string>
+    <string name="automation_condition_desc_charging">Только при подключённом (или отключённом) зарядном устройстве</string>
+    <string name="automation_condition_desc_battery">Только когда батарея выше и/или ниже заданного уровня</string>
+    <string name="automation_condition_desc_power_save">Только при включённом (или выключенном) энергосбережении</string>
+    <string name="automation_condition_desc_wifi">Только при подключённом (или отключённом) Wi-Fi</string>
+    <string name="automation_condition_desc_streaming">Только пока трансляция идёт (или не идёт)</string>
+    <string name="automation_condition_desc_viewers">Только пока число зрителей в заданном диапазоне</string>
+    <string name="automation_condition_desc_torch">Только при включённом (или выключенном) фонарике</string>
+    <string name="automation_condition_desc_recording">Только пока запись идёт (или не идёт)</string>
+    <string name="automation_condition_desc_thermal">Только при наличии (или отсутствии) троттлинга</string>
+    <string name="automation_condition_desc_motion_detection">Только при включённом (или выключенном) обнаружении движения</string>
 </resources>

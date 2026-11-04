@@ -630,8 +630,8 @@
     <string name="automation_condition_recording">录像中</string>
     <string name="automation_condition_thermal">温度正常</string>
     <string name="automation_condition_motion_detection">移动侦测已启用</string>
-    <string name="automation_param_window_start">开始(当天分钟数)</string>
-    <string name="automation_param_window_end">结束(当天分钟数)</string>
+    <string name="automation_param_window_start">开始</string>
+    <string name="automation_param_window_end">结束</string>
     <string name="automation_param_window_days">星期</string>
     <string name="automation_param_battery_min">最小值(%)</string>
     <string name="automation_param_battery_max">最大值(%)</string>
@@ -679,4 +679,91 @@
     <string name="automation_editor_remove_condition_cd">移除条件</string>
     <string name="automation_editor_cooldown">重新触发冷却(秒)</string>
     <string name="automation_editor_window_wrap_hint">跨越午夜的时间窗口(开始 &gt; 结束)会延续到第二天</string>
+
+    <!-- 自动化屏幕:引擎卡片、规则卡片、空状态 -->
+    <string name="automation_master_section_title">引擎</string>
+    <string name="automation_rules_count">%1$d / %2$d 条规则</string>
+    <string name="automation_empty_title">还没有规则</string>
+    <string name="automation_empty_body">让规则替你控制相机——按时间表切换模式、检测到移动时开始录制,或在夜间鸣响警笛。</string>
+    <string name="automation_card_when">当</string>
+    <string name="automation_card_only">仅当</string>
+    <string name="automation_card_then">则</string>
+    <string name="automation_last_fired_today">今天 %1$s 最后运行</string>
+    <string name="automation_last_fired_yesterday">昨天 %1$s 最后运行</string>
+    <string name="automation_last_fired_on">%1$s %2$s 最后运行</string>
+    <string name="automation_rule_menu_cd">更多操作</string>
+    <string name="automation_rule_duplicate_cd">复制规则</string>
+    <string name="automation_delete_confirm_title">删除规则?</string>
+    <string name="automation_delete_confirm_body">“%1$s”将停止运行。此操作无法撤消。</string>
+    <string name="automation_delete_confirm_ok">删除</string>
+    <string name="automation_rule_copy_of">%1$s 的副本</string>
+    <string name="automation_rule_copy">规则副本</string>
+
+    <!-- 自动化:时长(冷却显示与预设) -->
+    <string name="automation_duration_seconds">%1$d 秒</string>
+    <string name="automation_duration_minutes">%1$d 分钟</string>
+    <string name="automation_duration_hours">%1$d 小时</string>
+
+    <!-- 自动化编辑器:保护、预览、排序 -->
+    <string name="automation_editor_discard_title">放弃更改?</string>
+    <string name="automation_editor_discard_body">对此规则的修改尚未保存。</string>
+    <string name="automation_editor_discard_ok">放弃</string>
+    <string name="automation_editor_need_action">请至少添加一个操作才能保存此规则</string>
+    <string name="automation_editor_preview_title">预览</string>
+    <string name="automation_editor_preview_always">始终——无条件</string>
+    <string name="automation_editor_match_any_hint">触发时,任一(或全部)列出的条件成立即触发规则</string>
+    <string name="automation_editor_move_up_cd">上移</string>
+    <string name="automation_editor_move_down_cd">下移</string>
+    <string name="automation_join_and">和</string>
+    <string name="automation_join_or">或</string>
+
+    <!-- 自动化:选择器分组 -->
+    <string name="automation_group_schedule">计划</string>
+    <string name="automation_group_device_events">设备事件</string>
+    <string name="automation_group_power">电源</string>
+    <string name="automation_group_stream_app">推流与应用</string>
+    <string name="automation_group_camera">相机</string>
+    <string name="automation_group_light_sound">灯光与声音</string>
+    <string name="automation_group_stream_capture">推流与拍摄</string>
+    <string name="automation_group_detection">检测</string>
+    <string name="automation_group_time">时间</string>
+    <string name="automation_group_connectivity">连接</string>
+    <string name="automation_group_device_state">设备状态</string>
+
+    <!-- 自动化:选择器描述,触发器 -->
+    <string name="automation_trigger_desc_time_of_day">每天在指定时间的所选日期触发一次</string>
+    <string name="automation_trigger_desc_motion">检测器发现移动时触发</string>
+    <string name="automation_trigger_desc_sound">检测器听到声音时触发</string>
+    <string name="automation_trigger_desc_tamper">防拆检测触发时触发(断电)</string>
+    <string name="automation_trigger_desc_charging">充电器插入或拔出时触发</string>
+    <string name="automation_trigger_desc_battery">电量越过设定值时触发</string>
+    <string name="automation_trigger_desc_streaming">推流开始或停止时触发</string>
+    <string name="automation_trigger_desc_viewers">观看者打开或关闭推流时触发</string>
+    <string name="automation_trigger_desc_app_started">每次应用启动时触发一次</string>
+
+    <!-- 自动化:选择器描述,操作 -->
+    <string name="automation_action_desc_camera_exposure">手动设置 ISO 和快门速度,或恢复自动</string>
+    <string name="automation_action_desc_camera_ev">上调或下调曝光补偿</string>
+    <string name="automation_action_desc_camera_zoom">设置变焦级别</string>
+    <string name="automation_action_desc_camera_fps">更改推流帧率</string>
+    <string name="automation_action_desc_camera_lens">在设备镜头间切换(会短暂中断推流)</string>
+    <string name="automation_action_desc_torch">打开闪光灯作为照明或威慑</string>
+    <string name="automation_action_desc_stream">开始或停止直播推流</string>
+    <string name="automation_action_desc_capture_photo">规则触发的瞬间拍摄一张照片</string>
+    <string name="automation_action_desc_recording">开始或停止录制,可限时</string>
+    <string name="automation_action_desc_siren">鸣响警笛指定时长(或直到停止)</string>
+    <string name="automation_action_desc_detection">开启或关闭移动和/或声音检测</string>
+
+    <!-- 自动化:选择器描述,条件 -->
+    <string name="automation_condition_desc_time_window">仅限每日时间段内,可选仅限所选日期</string>
+    <string name="automation_condition_desc_charging">仅在充电器已插入(或未插入)时</string>
+    <string name="automation_condition_desc_battery">仅当电量高于和/或低于某值时</string>
+    <string name="automation_condition_desc_power_save">仅在省电模式开启(或关闭)时</string>
+    <string name="automation_condition_desc_wifi">仅在 Wi-Fi 已连接(或未连接)时</string>
+    <string name="automation_condition_desc_streaming">仅在推流(或未)进行时</string>
+    <string name="automation_condition_desc_viewers">仅当观看人数在范围内时</string>
+    <string name="automation_condition_desc_torch">仅在手电筒开启(或关闭)时</string>
+    <string name="automation_condition_desc_recording">仅在录制(或未)进行时</string>
+    <string name="automation_condition_desc_thermal">仅在设备降频(或未降频)时</string>
+    <string name="automation_condition_desc_motion_detection">仅在移动检测开启(或关闭)时</string>
 </resources>

@@ -5,8 +5,6 @@
  * (the store clamps a zero mask back up, so a "clear the last day" tap would
  * silently do nothing). Pinned by armDays.test.ts against the Kotlin tests.
  */
-export const ARM_DAY_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'] as const
-
 /** Bit position for one ISO day index (0 = Monday … 6 = Sunday), clamped like the server's dayBit. */
 export function dayBit(isoDayIndex: number): number {
   return 1 << Math.min(Math.max(isoDayIndex, 0), 6)

@@ -3261,3 +3261,525 @@ button.timeline-segment {
   font-size: 11px;
   color: var(--lc-text-muted);
 }
+
+/* ── Automation card: structured rule rows ── */
+
+/* The badge + name zone of a rule card — a real button so the whole area
+   taps to edit (the switch and the action row stay separate targets). */
+.automation-rule-main {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 0;
+  background: none;
+  border: none;
+  text-align: left;
+  cursor: pointer;
+  color: inherit;
+  font: inherit;
+}
+
+.automation-rule-main:disabled {
+  cursor: not-allowed;
+}
+
+.automation-rule-main:not(:disabled):hover .automation-rule-name {
+  color: var(--lc-accent);
+}
+
+.automation-rule-heading {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.automation-rule-sub {
+  font-size: 12px;
+  color: var(--lc-text-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The colored trigger badge (icon in a tinted round chip). */
+.automation-rule-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 999px;
+  flex-shrink: 0;
+}
+
+.automation-badge-trigger {
+  background: var(--lc-accent-bg);
+  color: var(--lc-accent);
+}
+
+.automation-badge-condition {
+  background: var(--lc-info-bg);
+  color: var(--lc-info);
+}
+
+.automation-badge-action {
+  background: var(--lc-success-bg);
+  color: var(--lc-success);
+}
+
+/* The WHEN / ONLY WHEN / THEN summary rows under a card's header. */
+.automation-when-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.automation-when-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.automation-when-label {
+  flex-shrink: 0;
+  width: 64px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.automation-when-text {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.automation-when .automation-when-label,
+.automation-when .automation-when-text {
+  color: var(--lc-accent);
+}
+
+.automation-onlywhen .automation-when-label {
+  color: var(--lc-info);
+}
+
+.automation-onlywhen .automation-when-text {
+  color: var(--lc-text-dim);
+}
+
+.automation-then .automation-when-label {
+  color: var(--lc-success);
+}
+
+.automation-then .automation-when-text {
+  color: var(--lc-text);
+}
+
+.automation-then-missing {
+  font-style: italic;
+  color: var(--lc-danger) !important;
+}
+
+/* The "Last ran …" line: a small clock glyph plus the localized stamp. */
+.automation-lastfired {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--lc-text-muted);
+}
+
+.automation-lastfired svg {
+  width: 13px;
+  height: 13px;
+  flex-shrink: 0;
+}
+
+/* The empty state: icon block, explanation, first CTA. */
+.automation-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 28px 16px;
+  margin-top: 12px;
+  text-align: center;
+  border: 1px dashed var(--lc-border);
+  border-radius: var(--lc-radius-lg, 12px);
+  background: var(--lc-surface-2);
+}
+
+.automation-empty-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 56px;
+  height: 56px;
+  border-radius: 999px;
+  background: var(--lc-accent-bg);
+  color: var(--lc-accent);
+}
+
+.automation-empty-icon svg {
+  width: 28px;
+  height: 28px;
+}
+
+.automation-empty-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--lc-text);
+}
+
+.automation-empty-body {
+  max-width: 380px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--lc-text-dim);
+}
+
+/* ── Automation editor: WHEN / ONLY WHEN / THEN sections ── */
+
+.automation-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--lc-border);
+}
+
+.automation-section-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.automation-section-head svg {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+}
+
+.automation-section-count {
+  margin-left: auto;
+  font-family: var(--lc-mono);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--lc-text-muted);
+}
+
+.automation-section-when .automation-section-head {
+  color: var(--lc-accent);
+}
+
+.automation-section-onlywhen .automation-section-head {
+  color: var(--lc-info);
+}
+
+.automation-section-then .automation-section-head {
+  color: var(--lc-success);
+}
+
+.automation-enabled-row {
+  margin-top: 10px;
+}
+
+/* The tappable trigger row inside the WHEN section (icon + label + desc +
+   "Change" hint) — the old bare select's replacement. */
+.automation-trigger-pick {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 10px 12px;
+  background: var(--lc-surface-2);
+  border: 1px solid var(--lc-border);
+  border-radius: var(--lc-radius-sm, 8px);
+  text-align: left;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.automation-trigger-pick:hover {
+  border-color: var(--lc-border-hover);
+}
+
+.automation-trigger-pick-change {
+  margin-left: auto;
+  flex-shrink: 0;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--lc-accent);
+}
+
+/* ── The grouped catalog picker dialog ── */
+
+.automation-picker-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 220;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: rgba(0, 0, 0, 0.6);
+  animation: fade-in 0.15s ease;
+}
+
+.automation-picker-modal {
+  display: flex;
+  flex-direction: column;
+  width: min(440px, calc(100vw - 32px));
+  max-height: min(520px, calc(100vh - 32px));
+  background: var(--lc-surface);
+  border: 1px solid var(--lc-border);
+  border-radius: var(--lc-radius-lg);
+  box-shadow: var(--lc-shadow-lg);
+}
+
+.automation-picker-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 12px 14px 10px;
+  border-bottom: 1px solid var(--lc-border);
+}
+
+.automation-picker-head h3 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--lc-text);
+}
+
+.automation-picker-body {
+  overflow-y: auto;
+  padding: 10px 14px 16px;
+}
+
+.automation-picker-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 10px;
+}
+
+.automation-picker-group:first-child {
+  margin-top: 0;
+}
+
+.automation-picker-group-title {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--lc-text-muted);
+  padding: 4px 2px;
+}
+
+.automation-picker-option {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 9px 10px;
+  background: transparent;
+  border: none;
+  border-radius: var(--lc-radius-sm, 8px);
+  text-align: left;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.automation-picker-option:hover {
+  background: var(--lc-surface-2);
+}
+
+.automation-picker-option.selected {
+  background: var(--lc-accent-bg);
+}
+
+.automation-picker-option-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 999px;
+  background: var(--lc-surface-3);
+  color: var(--lc-accent);
+  flex-shrink: 0;
+}
+
+.automation-picker-option.selected .automation-picker-option-icon {
+  background: var(--lc-accent-bg);
+}
+
+.automation-picker-option-text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.automation-picker-option-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--lc-text);
+}
+
+.automation-picker-option-desc {
+  font-size: 11px;
+  color: var(--lc-text-muted);
+  overflow-wrap: anywhere;
+}
+
+.automation-picker-option-check {
+  width: 16px;
+  height: 16px;
+  margin-left: auto;
+  flex-shrink: 0;
+  color: var(--lc-accent);
+}
+
+/* ── Cooldown presets + readout ── */
+
+.automation-cooldown-readout {
+  font-family: var(--lc-mono);
+  color: var(--lc-accent);
+}
+
+.automation-cooldown-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 6px 0;
+}
+
+.automation-cooldown-chip {
+  padding: 4px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  font-family: var(--lc-mono);
+  color: var(--lc-text-dim);
+  background: var(--lc-surface-2);
+  border: 1px solid var(--lc-border);
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.automation-cooldown-chip:hover {
+  border-color: var(--lc-border-hover);
+}
+
+.automation-cooldown-chip.active {
+  color: var(--lc-accent);
+  background: var(--lc-accent-bg);
+  border-color: var(--lc-accent-dim);
+}
+
+/* ── Reorder arrows on action/condition cards ── */
+
+.automation-reorder {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: auto;
+}
+
+.automation-action-row .automation-reorder ~ .navbar-icon-btn {
+  margin-left: 2px;
+}
+
+/* The small action/condition icon in an editor card's header. */
+.automation-action-icon {
+  display: inline-flex;
+  align-items: center;
+  color: var(--lc-accent);
+}
+
+/* ── Time-window fields + live preview + save gate ── */
+
+.automation-window-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.automation-window-fields {
+  display: flex;
+  gap: 10px;
+}
+
+.automation-window-fields .automation-time-field {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.automation-time-field {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.automation-time-input {
+  max-width: 130px;
+  text-align: center;
+  font-family: var(--lc-mono);
+}
+
+/* The live preview card at the editor's bottom. */
+.automation-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 16px;
+  padding: 12px 14px;
+  background: var(--lc-surface-3);
+  border: 1px solid var(--lc-border);
+  border-radius: var(--lc-radius-sm, 8px);
+}
+
+.automation-preview-title {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--lc-text-muted);
+}
+
+.automation-editor-error {
+  padding: 8px 10px;
+  font-size: 12px;
+  color: var(--lc-danger);
+  background: var(--lc-danger-bg);
+  border-radius: var(--lc-radius-sm, 8px);
+}
+
+/* The full-width "Add condition" / "Add action" buttons (the old
+   select+button pairs' replacement). */
+.automation-add-spec-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 100%;
+  padding: 8px;
+  font-size: 12px;
+  border-style: dashed;
+}

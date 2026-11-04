@@ -5,11 +5,13 @@ import com.raulshma.lenscast.automation.schedule.AutomationActionSpec
 import com.raulshma.lenscast.automation.schedule.AutomationParamSpec
 import com.raulshma.lenscast.automation.schedule.AutomationConditionCatalog
 import com.raulshma.lenscast.automation.schedule.AutomationConditionSpec
+import com.raulshma.lenscast.automation.schedule.AutomationFireJournal
 import com.raulshma.lenscast.automation.schedule.AutomationRule
 import com.raulshma.lenscast.automation.schedule.AutomationSchedulePolicy
 import com.raulshma.lenscast.automation.schedule.AutomationTriggerCatalog
 import com.raulshma.lenscast.core.AppJson
 import com.raulshma.lenscast.data.SettingsDataStore
+import java.time.ZoneId
 import com.raulshma.lenscast.streaming.model.AutomationActionDto
 import com.raulshma.lenscast.streaming.model.AutomationCatalogActionDto
 import com.raulshma.lenscast.streaming.model.AutomationCatalogConditionDto
@@ -22,9 +24,10 @@ import com.raulshma.lenscast.streaming.model.AutomationUpdateRequestDto
 
 /**
  * /api/automation — JSON-in/JSON-out mapping between the Web API DTOs and the
- * Settings Store's automation surface: the master toggle, the rule list, and
- * the three read-only catalogs (actions, triggers, conditions) the rule
- * editor renders from.
+ * Settings Store's automation surface: the master toggle, the rule list (each
+ * with `lastFiredAt` decoded from the shared fire journal), and the three
+ * read-only catalogs (actions, triggers, conditions) the rule editor renders
+ * from.
  *
  * Any authenticated session may GET the document (the /api/settings precedent:
  * viewer reads ride the default gate, only the three admin-only reads are
@@ -38,6 +41,7 @@ import com.raulshma.lenscast.streaming.model.AutomationUpdateRequestDto
  */
 class AutomationWebHandler(
     private val settingsDataStore: SettingsDataStore,
+    private val fireJournal: AutomationFireJournal,
 ) {
 
     private val stateAdapter by lazy { AppJson.moshi.adapter(AutomationStateDto::class.java) }
@@ -92,6 +96,7 @@ class AutomationWebHandler(
             buildState(
                 enabled = settingsDataStore.automationEnabledFromDisk(),
                 rules = settingsDataStore.automationRulesFromDisk(),
+                journal = fireJournal.load(),
             ),
         )
     }
@@ -102,12 +107,17 @@ class AutomationWebHandler(
             buildState(
                 enabled = settingsDataStore.automationEnabledFromDisk(),
                 rules = settingsDataStore.automationRulesFromDisk(),
+                journal = fireJournal.load(),
             ),
         )
         return state
     }
 
-    private fun buildState(enabled: Boolean, rules: List<AutomationRule>): AutomationStateDto {
+    private fun buildState(
+        enabled: Boolean,
+        rules: List<AutomationRule>,
+        journal: Map<String, Long>,
+    ): AutomationStateDto {
         return AutomationStateDto(
             enabled = enabled,
             rules = rules.map { rule ->
@@ -127,6 +137,11 @@ class AutomationWebHandler(
                     actions = rule.actions.map { action ->
                         AutomationActionDto(type = action.type, params = action.params)
                     },
+                    // "Last ran" as clients see it: the journal's occurrence
+                    // key decoded to a wall-clock instant (null = never
+                    // fired, so the key stays off the wire).
+                    lastFiredAt = rule.id?.let(journal::get)
+                        ?.let { AutomationSchedulePolicy.decodeOccurrenceKey(it, ZoneId.systemDefault()) },
                 )
             },
             // The catalogs are device truth, published read-only: the rule

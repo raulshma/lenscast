@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { ARM_DAY_LABELS, dayBit, isDayArmed, toggleArmDayMask } from './armDays'
+import { dayBit, isDayArmed, toggleArmDayMask } from './armDays'
 
 // Mirrors MotionArmingPolicyTest's day-mask cases so the chip verdict cannot
 // drift from the server's clamp behavior.
@@ -16,10 +16,11 @@ describe('arm day mask', () => {
     expect(isDayArmed(0b0000010, 2)).toBe(false)
   })
 
-  it('chip labels cover Monday through Sunday in bit order', () => {
-    expect(ARM_DAY_LABELS).toHaveLength(7)
-    expect(ARM_DAY_LABELS[0]).toBe('Mon')
-    expect(ARM_DAY_LABELS[6]).toBe('Sun')
+  it('the ISO day index space is Monday through Sunday', () => {
+    // Chip labels are localized (automation.day.*) — the mask math pins the
+    // 0..6 index space itself.
+    expect([0, 1, 2, 3, 4, 5, 6].every((day) => isDayArmed(0b1111111, day))).toBe(true)
+    expect([0, 1, 2, 3, 4, 5, 6].filter((day) => isDayArmed(0b0011111, day))).toEqual([0, 1, 2, 3, 4])
   })
 
   it('toggling a day flips its bit but never clears the last armed day', () => {

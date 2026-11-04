@@ -16,6 +16,7 @@ import type {
   AutomationConditionDto,
   AutomationRuleDto,
 } from '../types'
+import { isDayArmed } from '../armDays'
 
 /** Every catalog action id the label/summary tables below cover (AutomationActionCatalog). */
 export const AUTOMATION_ACTION_TYPES = [
@@ -97,6 +98,19 @@ export function isAutoSentinelParam(
 export interface AutomationSummaryLine {
   key: string
   params?: Record<string, string | number>
+}
+
+/**
+ * Render summary lines through a t() and comma-join them — the one
+ * summary-text shape behind the card's WHEN/ONLY WHEN/THEN rows and the
+ * editor's live preview (the two surfaces must render identically). t is a
+ * parameter, keeping this module free of i18n imports like the rest.
+ */
+export function joinSummaryLines(
+  lines: AutomationSummaryLine[],
+  t: (key: string, params?: Record<string, string | number>) => string,
+): string {
+  return lines.map((line) => t(line.key, line.params)).join(', ')
 }
 
 /** The i18n key for one catalog action id (AutomationViewModel.actionTypeLabelRes); unknown ids fall to the shared "unknown" key. */
@@ -315,6 +329,20 @@ export function parseMinuteOfDay(value: string): number | null {
 /** True when the mask arms all seven days — the compact "Every day" shape (AutomationViewModel.isEveryDay). */
 export function isEveryDayMask(daysMask: number): boolean {
   return daysMask === AUTOMATION_ALL_DAYS_MASK
+}
+
+/** A time-window condition's persisted day mask (the sanitize default when absent) — the app's conditionWindowDaysMask. */
+export function conditionDaysMask(condition: { params: Record<string, string> }): number {
+  const parsed = Number.parseInt(condition.params['days_mask'] ?? '', 10)
+  return Number.isFinite(parsed) ? parsed : AUTOMATION_ALL_DAYS_MASK
+}
+
+/** "Mon, Wed" over a day mask with the localized day labels (t supplied — no i18n import here). */
+export function dayListLabel(daysMask: number, t: (key: string) => string): string {
+  return [0, 1, 2, 3, 4, 5, 6]
+    .filter((day) => isDayArmed(daysMask, day))
+    .map((day) => t(automationDayLabelKey(day)))
+    .join(', ')
 }
 
 // ── canonical param values ──
@@ -554,4 +582,157 @@ export function automationConditionSummaryLines(condition: Pick<AutomationCondit
     default:
       return []
   }
+}
+
+// ── picker groups (UI-side constants; the engine catalogs are untouched) ──
+// The same grouping the app's AutomationVisuals renders: ids land in labeled
+// groups so the pickers read as a menu, not a flat dump of catalog ids.
+
+/** One labeled group of catalog ids in a picker (AutomationVisuals.PickerGroup). */
+export interface AutomationPickerGroup {
+  /** The i18n key of the group heading. */
+  titleKey: string
+  /** The catalog ids in display order. */
+  ids: readonly string[]
+}
+
+export const AUTOMATION_TRIGGER_GROUPS: readonly AutomationPickerGroup[] = [
+  { titleKey: 'automation.group.schedule', ids: ['time_of_day'] },
+  { titleKey: 'automation.group.deviceEvents', ids: ['motion_detected', 'sound_detected', 'tamper_detected'] },
+  { titleKey: 'automation.group.power', ids: ['charging_changed', 'battery_level'] },
+  { titleKey: 'automation.group.streamApp', ids: ['streaming_changed', 'viewers_changed', 'app_started'] },
+]
+
+export const AUTOMATION_ACTION_GROUPS: readonly AutomationPickerGroup[] = [
+  { titleKey: 'automation.group.camera', ids: ['camera_exposure', 'camera_ev', 'camera_zoom', 'camera_fps', 'camera_lens'] },
+  { titleKey: 'automation.group.lightSound', ids: ['torch', 'siren'] },
+  { titleKey: 'automation.group.streamCapture', ids: ['stream', 'capture_photo', 'recording'] },
+  { titleKey: 'automation.group.detection', ids: ['detection'] },
+]
+
+export const AUTOMATION_CONDITION_GROUPS: readonly AutomationPickerGroup[] = [
+  { titleKey: 'automation.group.time', ids: ['time_window'] },
+  { titleKey: 'automation.group.power', ids: ['charging', 'battery_level', 'power_save'] },
+  { titleKey: 'automation.group.connectivity', ids: ['wifi_connected'] },
+  { titleKey: 'automation.group.deviceState', ids: ['streaming', 'viewers', 'torch', 'recording', 'thermal', 'motion_detection'] },
+]
+
+/**
+ * The grouped picker model for one catalog: the static groups filtered to the
+ * ids the device actually publishes, plus any unknown id parked under a
+ * trailing "Other" group so a stale-firmware catalog still renders fully.
+ */
+export function groupedPickerOptions(
+  groups: readonly AutomationPickerGroup[],
+  availableIds: readonly string[],
+): { titleKey: string; ids: string[] }[] {
+  const known = new Set(groups.flatMap((group) => group.ids))
+  const result = groups
+    .map((group) => ({ titleKey: group.titleKey, ids: group.ids.filter((id) => availableIds.includes(id)) }))
+    .filter((group) => group.ids.length > 0)
+  const leftover = availableIds.filter((id) => !known.has(id))
+  if (leftover.length > 0) result.push({ titleKey: 'automation.group.other', ids: leftover })
+  return result
+}
+
+/** The i18n key of one picker option's one-line description. */
+export function automationDescKey(kind: 'trigger' | 'action' | 'condition', typeId: string): string {
+  return `automation.${kind}Desc.${typeId}`
+}
+
+/** The i18n key of one ISO day's label (0 = Monday … 6 = Sunday) — the localized replacement for armDays' hardcoded English labels. */
+export function automationDayLabelKey(isoDayIndex: number): string {
+  return `automation.day.${Math.min(Math.max(Math.round(isoDayIndex), 0), 6)}`
+}
+
+// ── cooldown humanizing ──
+
+/** The cooldown preset chips (seconds) — exactly the app's CooldownEditor presets. */
+export const AUTOMATION_COOLDOWN_PRESETS: readonly number[] = [30, 60, 300, 900, 1_800, 3_600]
+
+/**
+ * Humanize a duration for the cooldown readout and preset chips: seconds
+ * under a minute, minutes under an hour (rounded half-up, minimum 1), hours
+ * above — AutomationViewModel.humanizeDuration, so the two UIs read the same
+ * "5 min" the same way. Returns a summary line (key + params) for t().
+ */
+export function humanizeDuration(seconds: number): AutomationSummaryLine {
+  const clamped = Math.max(Math.round(seconds), 0)
+  if (clamped < 60) return { key: 'automation.duration.seconds', params: { value: clamped } }
+  if (clamped < 3_600) {
+    return { key: 'automation.duration.minutes', params: { value: Math.max(Math.floor((clamped + 30) / 60), 1) } }
+  }
+  return { key: 'automation.duration.hours', params: { value: Math.max(Math.floor((clamped + 1_800) / 3_600), 1) } }
+}
+
+// ── fire status ──
+
+/** The "Last ran …" bucket for a rule's lastFiredAt instant (AutomationLastFiredLabel). */
+export type AutomationLastFiredLabel =
+  | { kind: 'today'; minuteOfDay: number }
+  | { kind: 'yesterday'; minuteOfDay: number }
+  | { kind: 'earlier'; epochMillis: number; minuteOfDay: number }
+
+/**
+ * The card's last-fired bucket for an epoch-millis instant vs [nowMs], in the
+ * browser's local zone (the JVM twin decodes through ZoneId.systemDefault):
+ * today/yesterday carry the minute-of-day for the HH:mm templates, anything
+ * older carries the epoch instant for a locale-formatted date. A non-positive
+ * instant (never fired) is null — the card shows nothing.
+ */
+export function lastFiredLabel(lastFiredAtMs: number, nowMs: number): AutomationLastFiredLabel | null {
+  if (lastFiredAtMs <= 0) return null
+  const fired = new Date(lastFiredAtMs)
+  const startOfDay = (value: Date) => new Date(value.getFullYear(), value.getMonth(), value.getDate()).getTime()
+  const dayGap = Math.round((startOfDay(new Date(nowMs)) - startOfDay(fired)) / 86_400_000)
+  const minuteOfDay = fired.getHours() * 60 + fired.getMinutes()
+  if (dayGap <= 0) return { kind: 'today', minuteOfDay }
+  if (dayGap === 1) return { kind: 'yesterday', minuteOfDay }
+  return { kind: 'earlier', epochMillis: lastFiredAtMs, minuteOfDay }
+}
+
+// ── rule-list transforms ──
+
+/** A fresh fire-journal UUID (crypto.randomUUID, with a fallback for non-secure contexts). */
+export function newRuleId(): string {
+  try {
+    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') return crypto.randomUUID()
+  } catch {
+    // Non-secure context: fall through to the hand-rolled id.
+  }
+  return `rule-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`
+}
+
+/**
+ * A duplicate of the rule with [sourceId], inserted right after it: a fresh
+ * id (the journal key must never be shared — a duplicate would inherit the
+ * original's dedupe history), the caller-resolved [copyName], a fresh enabled
+ * state and a cleared fire status. At [cap] (or for an unknown id) this is a
+ * no-op, like the app's withRuleDuplicated.
+ */
+export function withRuleDuplicated(
+  rules: AutomationRuleDto[],
+  sourceId: string,
+  copyName: string,
+  cap: number,
+): AutomationRuleDto[] {
+  const index = rules.findIndex((rule) => rule.id === sourceId)
+  if (index < 0 || rules.length >= cap) return rules
+  const copy: AutomationRuleDto = { ...rules[index], id: newRuleId(), name: copyName, enabled: true, lastFiredAt: null }
+  return [...rules.slice(0, index + 1), copy, ...rules.slice(index + 1)]
+}
+
+/** A rule is saveable only with at least one action (the app editor's gate). */
+export function isRuleValid(rule: Pick<AutomationRuleDto, 'actions'>): boolean {
+  return rule.actions.length > 0
+}
+
+/** Splice one entry one slot up (delta -1) or down (+1); out-of-range is a no-op (the app's ReorderButtons list splice). */
+export function moveSpec<T>(list: T[], index: number, delta: number): T[] {
+  const target = index + delta
+  if (target < 0 || target >= list.length) return list
+  const next = [...list]
+  const [entry] = next.splice(index, 1)
+  next.splice(target, 0, entry)
+  return next
 }

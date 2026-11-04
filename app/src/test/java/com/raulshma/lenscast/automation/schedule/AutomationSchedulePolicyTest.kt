@@ -2,6 +2,8 @@ package com.raulshma.lenscast.automation.schedule
 
 import com.raulshma.lenscast.camera.model.CameraSettings
 import com.raulshma.lenscast.core.StreamDefaults
+import java.time.LocalDate
+import java.time.ZoneId
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -109,6 +111,30 @@ class AutomationSchedulePolicyTest {
             StreamDefaults.MINUTES_PER_DAY.toLong(),
             AutomationSchedulePolicy.occurrenceKey(rule(minuteOfDay = 0), 1L),
         )
+    }
+
+    @Test
+    fun `decode occurrence key round-trips to the wall-clock instant`() {
+        val utc = ZoneId.of("UTC")
+        val key = AutomationSchedulePolicy.occurrenceKey(rule(minuteOfDay = 600), day)
+        assertEquals(
+            LocalDate.ofEpochDay(day).atStartOfDay(utc).plusMinutes(600).toInstant().toEpochMilli(),
+            AutomationSchedulePolicy.decodeOccurrenceKey(key, utc),
+        )
+        // The zone decides the instant, not the key: the same key decodes
+        // through Berlin's offset.
+        val berlin = ZoneId.of("Europe/Berlin")
+        assertEquals(
+            LocalDate.ofEpochDay(day).atStartOfDay(berlin).plusMinutes(600).toInstant().toEpochMilli(),
+            AutomationSchedulePolicy.decodeOccurrenceKey(key, berlin),
+        )
+    }
+
+    @Test
+    fun `decode passes event timestamps through and rejects negative keys`() {
+        val eventMs = 1_800_000_000_000L
+        assertEquals(eventMs, AutomationSchedulePolicy.decodeOccurrenceKey(eventMs, ZoneId.of("UTC")))
+        assertNull(AutomationSchedulePolicy.decodeOccurrenceKey(-1L, ZoneId.of("UTC")))
     }
 
     // ── Due verdict ──

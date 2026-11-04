@@ -1,9 +1,14 @@
 import { describe, expect, it } from 'vitest'
 import {
+  AUTOMATION_ACTION_GROUPS,
+  AUTOMATION_CONDITION_GROUPS,
+  AUTOMATION_COOLDOWN_PRESETS,
+  AUTOMATION_TRIGGER_GROUPS,
   AUTO_SENTINEL_PARAM_NAMES,
   automationActionLabelKey,
   automationConditionLabelKey,
   automationConditionSummaryLines,
+  automationDayLabelKey,
   automationParamLabelKey,
   automationSummaryLines,
   automationTriggerLabelKey,
@@ -15,14 +20,20 @@ import {
   defaultConditionParams,
   defaultTriggerParams,
   formatMinuteOfDay,
+  groupedPickerOptions,
+  humanizeDuration,
   isAutoSentinelParam,
   isEveryDayMask,
+  isRuleValid,
+  lastFiredLabel,
+  moveSpec,
   newAutomationRule,
   paramSliderBounds,
   parseMinuteOfDay,
+  withRuleDuplicated,
   withSpecParam,
 } from './automation'
-import type { AutomationCatalogActionDto } from '../types'
+import type { AutomationCatalogActionDto, AutomationRuleDto } from '../types'
 
 
 /** Assert the list holds exactly one line and return it — the Kotlin tests' `.single()`. */
@@ -471,5 +482,159 @@ describe('automation condition summaries', () => {
 
   it('unknown condition types render no line (the card already shows the unknown label)', () => {
     expect(automationConditionSummaryLines({ type: 'mystery', params: {} })).toEqual([])
+  })
+})
+
+// ── picker groups ──
+
+describe('picker groups', () => {
+  it('every catalog id is grouped exactly once within its catalog (the picker can never hide or duplicate an option)', () => {
+    // The three id spaces overlap by design (torch / recording / battery_level
+    // exist in two catalogs), so uniqueness holds per catalog, not across.
+    for (const groups of [AUTOMATION_TRIGGER_GROUPS, AUTOMATION_ACTION_GROUPS, AUTOMATION_CONDITION_GROUPS]) {
+      const grouped = groups.flatMap((g) => g.ids)
+      expect(new Set(grouped).size).toBe(grouped.length)
+    }
+    // The known catalog ids (the app's AutomationVisuals coverage).
+    const knownTriggers = ['time_of_day', 'motion_detected', 'sound_detected', 'tamper_detected', 'charging_changed', 'battery_level', 'streaming_changed', 'viewers_changed', 'app_started']
+    const knownActions = ['camera_exposure', 'camera_ev', 'camera_zoom', 'camera_fps', 'camera_lens', 'torch', 'stream', 'capture_photo', 'recording', 'siren', 'detection']
+    const knownConditions = ['time_window', 'charging', 'battery_level', 'power_save', 'wifi_connected', 'streaming', 'viewers', 'torch', 'recording', 'thermal', 'motion_detection']
+    expect(AUTOMATION_TRIGGER_GROUPS.flatMap((g) => g.ids).sort()).toEqual([...knownTriggers].sort())
+    expect(AUTOMATION_ACTION_GROUPS.flatMap((g) => g.ids).sort()).toEqual([...knownActions].sort())
+    expect(AUTOMATION_CONDITION_GROUPS.flatMap((g) => g.ids).sort()).toEqual([...knownConditions].sort())
+  })
+
+  it('groupedPickerOptions filters to the ids the device publishes and parks unknowns under "Other"', () => {
+    const groups = groupedPickerOptions(AUTOMATION_TRIGGER_GROUPS, ['time_of_day', 'motion_detected', 'mystery_trigger'])
+    expect(groups.map((g) => g.titleKey)).toEqual(['automation.group.schedule', 'automation.group.deviceEvents', 'automation.group.other'])
+    expect(groups[0].ids).toEqual(['time_of_day'])
+    expect(groups[1].ids).toEqual(['motion_detected'])
+    expect(groups[2].ids).toEqual(['mystery_trigger'])
+    // A fully-known catalog renders no "Other" group.
+    const all = groupedPickerOptions(AUTOMATION_ACTION_GROUPS, AUTOMATION_ACTION_GROUPS.flatMap((g) => g.ids))
+    expect(all).toHaveLength(4)
+    expect(all.at(-1)!.titleKey).not.toBe('automation.group.other')
+    // Empty catalog renders no groups at all.
+    expect(groupedPickerOptions(AUTOMATION_CONDITION_GROUPS, [])).toEqual([])
+  })
+})
+
+// ── cooldown humanizing ──
+
+describe('humanizeDuration', () => {
+  it('rounds to the nearest unit with a floor of one (the JVM twin AutomationViewModel.humanizeDuration)', () => {
+    expect(humanizeDuration(0)).toEqual({ key: 'automation.duration.seconds', params: { value: 0 } })
+    expect(humanizeDuration(59)).toEqual({ key: 'automation.duration.seconds', params: { value: 59 } })
+    expect(humanizeDuration(60)).toEqual({ key: 'automation.duration.minutes', params: { value: 1 } })
+    expect(humanizeDuration(61)).toEqual({ key: 'automation.duration.minutes', params: { value: 1 } })
+    expect(humanizeDuration(90)).toEqual({ key: 'automation.duration.minutes', params: { value: 2 } })
+    expect(humanizeDuration(3599)).toEqual({ key: 'automation.duration.minutes', params: { value: 60 } })
+    expect(humanizeDuration(3600)).toEqual({ key: 'automation.duration.hours', params: { value: 1 } })
+    expect(humanizeDuration(5400)).toEqual({ key: 'automation.duration.hours', params: { value: 2 } })
+    expect(humanizeDuration(-30)).toEqual({ key: 'automation.duration.seconds', params: { value: 0 } })
+  })
+
+  it('the preset chips land exactly on their unit', () => {
+    expect(humanizeDuration(30).key).toBe('automation.duration.seconds')
+    expect(humanizeDuration(300)).toEqual({ key: 'automation.duration.minutes', params: { value: 5 } })
+    expect(humanizeDuration(900)).toEqual({ key: 'automation.duration.minutes', params: { value: 15 } })
+    expect(humanizeDuration(1800)).toEqual({ key: 'automation.duration.minutes', params: { value: 30 } })
+    expect(humanizeDuration(3600)).toEqual({ key: 'automation.duration.hours', params: { value: 1 } })
+    expect(AUTOMATION_COOLDOWN_PRESETS).toEqual([30, 60, 300, 900, 1800, 3600])
+  })
+})
+
+// ── fire status ──
+
+describe('lastFiredLabel', () => {
+  // Constructed in local time, so the buckets hold in every timezone.
+  const now = new Date(2026, 10, 4, 12, 0, 0).getTime()
+  const todayMs = new Date(2026, 10, 4, 11, 58, 30).getTime()
+  const yesterdayMs = new Date(2026, 10, 3, 23, 59).getTime()
+  const earlierMs = new Date(2026, 10, 1, 8, 15).getTime()
+
+  it('buckets today by the local minute-of-day', () => {
+    expect(lastFiredLabel(todayMs, now)).toEqual({ kind: 'today', minuteOfDay: 11 * 60 + 58 })
+    // Same-day earlier instant (negative gap) still reads today.
+    expect(lastFiredLabel(now - 1000, now)?.kind).toBe('today')
+  })
+
+  it('buckets yesterday and earlier', () => {
+    expect(lastFiredLabel(yesterdayMs, now)).toEqual({ kind: 'yesterday', minuteOfDay: 23 * 60 + 59 })
+    const earlier = lastFiredLabel(earlierMs, now)
+    expect(earlier).toEqual({ kind: 'earlier', epochMillis: earlierMs, minuteOfDay: 8 * 60 + 15 })
+  })
+
+  it('a non-positive instant is never fired (null)', () => {
+    expect(lastFiredLabel(0, now)).toBeNull()
+    expect(lastFiredLabel(-5, now)).toBeNull()
+  })
+
+  it('buckets by the calendar day, not a fixed 24h window', () => {
+    // 00:30 today against 01:00 today is "today" — and a different calendar
+    // day is always yesterday/earlier, however close the instants are.
+    const earlyToday = new Date(2026, 10, 4, 0, 30).getTime()
+    const nowLate = new Date(2026, 10, 4, 1, 0).getTime()
+    expect(lastFiredLabel(earlyToday, nowLate)?.kind).toBe('today')
+    // 23:30 yesterday against 01:00 the day after tomorrow is "earlier".
+    const yesterdayLate = new Date(2026, 10, 3, 23, 30).getTime()
+    const nowLater = new Date(2026, 10, 5, 1, 0).getTime()
+    expect(lastFiredLabel(yesterdayLate, nowLater)?.kind).toBe('earlier')
+  })
+})
+
+// ── rule-list transforms ──
+
+describe('withRuleDuplicated', () => {
+  const a: AutomationRuleDto = { ...newAutomationRule(), id: 'a', name: 'A', enabled: false, lastFiredAt: 1234 }
+  const b: AutomationRuleDto = { ...newAutomationRule(), id: 'b', name: 'B' }
+
+  it('inserts after the source with a fresh id, the copy name, enabled and cleared fire status', () => {
+    const rules = withRuleDuplicated([a, b], 'a', 'Copy of A', 16)
+    expect(rules).toHaveLength(3)
+    expect(rules[0].id).toBe('a')
+    expect(rules[1].id).not.toBe('a')
+    expect(rules[1].id).not.toBe('')
+    expect(rules[1].name).toBe('Copy of A')
+    expect(rules[1].enabled).toBe(true)
+    expect(rules[1].lastFiredAt).toBeNull()
+    expect(rules[2].id).toBe('b')
+    // The source rule itself is untouched.
+    expect(rules[0]).toEqual(a)
+  })
+
+  it('is a no-op for an unknown id or at the cap', () => {
+    expect(withRuleDuplicated([a], 'zz', 'X', 16)).toEqual([a])
+    const full = Array.from({ length: 16 }, (_, i) => ({ ...newAutomationRule(), id: `r${i}` }))
+    expect(withRuleDuplicated(full, 'r0', 'Copy', 16)).toEqual(full)
+  })
+})
+
+describe('moveSpec', () => {
+  it('splices one slot up and down, no-op out of range', () => {
+    expect(moveSpec(['a', 'b', 'c'], 1, -1)).toEqual(['b', 'a', 'c'])
+    expect(moveSpec(['a', 'b', 'c'], 1, 1)).toEqual(['a', 'c', 'b'])
+    expect(moveSpec(['a', 'b'], 0, -1)).toEqual(['a', 'b'])
+    expect(moveSpec(['a', 'b'], 1, 1)).toEqual(['a', 'b'])
+    // The input list is never mutated.
+    const list = ['a', 'b', 'c']
+    moveSpec(list, 0, 1)
+    expect(list).toEqual(['a', 'b', 'c'])
+  })
+})
+
+describe('isRuleValid', () => {
+  it('gates on at least one action', () => {
+    expect(isRuleValid({ actions: [] })).toBe(false)
+    expect(isRuleValid({ actions: [{ type: 'torch', params: { enabled: 'true' } }] })).toBe(true)
+  })
+})
+
+describe('automationDayLabelKey', () => {
+  it('clamps the ISO index into 0..6', () => {
+    expect(automationDayLabelKey(0)).toBe('automation.day.0')
+    expect(automationDayLabelKey(6)).toBe('automation.day.6')
+    expect(automationDayLabelKey(-3)).toBe('automation.day.0')
+    expect(automationDayLabelKey(9)).toBe('automation.day.6')
   })
 })

@@ -483,6 +483,7 @@ class DtoContractFixtureTest {
                         AutomationActionDto(type = "torch", params = mapOf("enabled" to "true")),
                         AutomationActionDto(type = "stream", params = mapOf("enabled" to "true")),
                     ),
+                    lastFiredAt = 1_793_862_000_000L,
                 ),
                 AutomationRuleDto(
                     id = "8c3d1f6a-2e94-4b05-a7c8-5d1e9f3b7a02",
@@ -505,6 +506,8 @@ class DtoContractFixtureTest {
                         AutomationActionDto(type = "siren", params = mapOf("enabled" to "true", "duration_seconds" to "10")),
                         AutomationActionDto(type = "capture_photo"),
                     ),
+                    // Never fired: lastFiredAt stays null, and AppJson omits
+                    // the null on the wire — the fixture pins both shapes.
                 ),
             ),
             // The same mapping AutomationWebHandler.get publishes; the two

@@ -647,8 +647,8 @@
     <string name="automation_condition_recording">Recording active</string>
     <string name="automation_condition_thermal">Thermally normal</string>
     <string name="automation_condition_motion_detection">Motion detection enabled</string>
-    <string name="automation_param_window_start">From (minute of day)</string>
-    <string name="automation_param_window_end">Until (minute of day)</string>
+    <string name="automation_param_window_start">From</string>
+    <string name="automation_param_window_end">Until</string>
     <string name="automation_param_window_days">Days</string>
     <string name="automation_param_battery_min">Minimum (%)</string>
     <string name="automation_param_battery_max">Maximum (%)</string>
@@ -696,4 +696,91 @@
     <string name="automation_editor_remove_condition_cd">Remove condition</string>
     <string name="automation_editor_cooldown">Re-fire cooldown (seconds)</string>
     <string name="automation_editor_window_wrap_hint">A window that crosses midnight (from &gt; until) wraps to the next day</string>
+
+    <!-- Automation screen: engine card, rule cards, empty state -->
+    <string name="automation_master_section_title">Engine</string>
+    <string name="automation_rules_count">%1$d of %2$d rules</string>
+    <string name="automation_empty_title">No rules yet</string>
+    <string name="automation_empty_body">Rules run the camera for you — switch modes on a schedule, start recording when motion is detected, or sound the siren at night.</string>
+    <string name="automation_card_when">WHEN</string>
+    <string name="automation_card_only">ONLY WHEN</string>
+    <string name="automation_card_then">THEN</string>
+    <string name="automation_last_fired_today">Last ran today at %1$s</string>
+    <string name="automation_last_fired_yesterday">Last ran yesterday at %1$s</string>
+    <string name="automation_last_fired_on">Last ran %1$s at %2$s</string>
+    <string name="automation_rule_menu_cd">More options</string>
+    <string name="automation_rule_duplicate_cd">Duplicate rule</string>
+    <string name="automation_delete_confirm_title">Delete rule?</string>
+    <string name="automation_delete_confirm_body">“%1$s” will stop running. This cannot be undone.</string>
+    <string name="automation_delete_confirm_ok">Delete</string>
+    <string name="automation_rule_copy_of">Copy of %1$s</string>
+    <string name="automation_rule_copy">Rule copy</string>
+
+    <!-- Automation durations (cooldown readout and presets) -->
+    <string name="automation_duration_seconds">%1$d s</string>
+    <string name="automation_duration_minutes">%1$d min</string>
+    <string name="automation_duration_hours">%1$d h</string>
+
+    <!-- Automation editor: guards, preview, reorder -->
+    <string name="automation_editor_discard_title">Discard changes?</string>
+    <string name="automation_editor_discard_body">Your edits to this rule have not been saved.</string>
+    <string name="automation_editor_discard_ok">Discard</string>
+    <string name="automation_editor_need_action">Add at least one action to save this rule</string>
+    <string name="automation_editor_preview_title">Preview</string>
+    <string name="automation_editor_preview_always">Always — no conditions</string>
+    <string name="automation_editor_match_any_hint">The rule fires when any (or every) listed condition holds at fire time</string>
+    <string name="automation_editor_move_up_cd">Move up</string>
+    <string name="automation_editor_move_down_cd">Move down</string>
+    <string name="automation_join_and">and</string>
+    <string name="automation_join_or">or</string>
+
+    <!-- Automation picker groups -->
+    <string name="automation_group_schedule">Schedule</string>
+    <string name="automation_group_device_events">Device events</string>
+    <string name="automation_group_power">Power</string>
+    <string name="automation_group_stream_app">Stream &amp; app</string>
+    <string name="automation_group_camera">Camera</string>
+    <string name="automation_group_light_sound">Light &amp; sound</string>
+    <string name="automation_group_stream_capture">Stream &amp; capture</string>
+    <string name="automation_group_detection">Detection</string>
+    <string name="automation_group_time">Time</string>
+    <string name="automation_group_connectivity">Connectivity</string>
+    <string name="automation_group_device_state">Device state</string>
+
+    <!-- Automation picker descriptions: triggers -->
+    <string name="automation_trigger_desc_time_of_day">Fires once a day at a fixed time on the chosen days</string>
+    <string name="automation_trigger_desc_motion">Fires when the motion detector sees movement</string>
+    <string name="automation_trigger_desc_sound">Fires when the sound detector hears a noise</string>
+    <string name="automation_trigger_desc_tamper">Fires when tamper detection trips (power cut)</string>
+    <string name="automation_trigger_desc_charging">Fires when the charger is plugged in or unplugged</string>
+    <string name="automation_trigger_desc_battery">Fires when the battery crosses a chosen level</string>
+    <string name="automation_trigger_desc_streaming">Fires when streaming starts or stops</string>
+    <string name="automation_trigger_desc_viewers">Fires when a viewer opens or closes the stream</string>
+    <string name="automation_trigger_desc_app_started">Fires once each time the app starts</string>
+
+    <!-- Automation picker descriptions: actions -->
+    <string name="automation_action_desc_camera_exposure">Set manual ISO and shutter speed, or return to auto</string>
+    <string name="automation_action_desc_camera_ev">Nudge the exposure compensation up or down</string>
+    <string name="automation_action_desc_camera_zoom">Set the zoom level</string>
+    <string name="automation_action_desc_camera_fps">Change the stream’s frame rate</string>
+    <string name="automation_action_desc_camera_lens">Switch between the device’s lenses (briefly interrupts the stream)</string>
+    <string name="automation_action_desc_torch">Turn the flash on as a light or deterrent</string>
+    <string name="automation_action_desc_stream">Start or stop the live stream</string>
+    <string name="automation_action_desc_capture_photo">Capture a photo the moment the rule fires</string>
+    <string name="automation_action_desc_recording">Start or stop a recording, optionally time-limited</string>
+    <string name="automation_action_desc_siren">Sound the siren for a set time (or until stopped)</string>
+    <string name="automation_action_desc_detection">Turn motion and/or sound detection on or off</string>
+
+    <!-- Automation picker descriptions: conditions -->
+    <string name="automation_condition_desc_time_window">Only within a daily time span, optionally on chosen days</string>
+    <string name="automation_condition_desc_charging">Only while the charger is plugged in (or unplugged)</string>
+    <string name="automation_condition_desc_battery">Only while the battery is above and/or below a level</string>
+    <string name="automation_condition_desc_power_save">Only while battery saver is on (or off)</string>
+    <string name="automation_condition_desc_wifi">Only while Wi-Fi is connected (or disconnected)</string>
+    <string name="automation_condition_desc_streaming">Only while the stream is (or is not) live</string>
+    <string name="automation_condition_desc_viewers">Only while the viewer count is in a range</string>
+    <string name="automation_condition_desc_torch">Only while the torch is on (or off)</string>
+    <string name="automation_condition_desc_recording">Only while a recording is (or is not) active</string>
+    <string name="automation_condition_desc_thermal">Only while the device is (or is not) throttling</string>
+    <string name="automation_condition_desc_motion_detection">Only while motion detection is on (or off)</string>
 </resources>

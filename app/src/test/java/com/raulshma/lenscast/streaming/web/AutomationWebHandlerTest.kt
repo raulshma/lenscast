@@ -1,13 +1,18 @@
 package com.raulshma.lenscast.streaming.web
 
 import android.app.Application
+import com.raulshma.lenscast.automation.schedule.AutomationFireJournal
+import com.raulshma.lenscast.automation.schedule.AutomationRule
+import com.raulshma.lenscast.automation.schedule.AutomationSchedulePolicy
 import com.raulshma.lenscast.core.AppJson
 import com.raulshma.lenscast.data.SettingsDataStore
 import com.raulshma.lenscast.streaming.model.AutomationStateDto
+import java.time.ZoneId
 import java.util.UUID
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -35,7 +40,10 @@ import org.robolectric.annotation.Config
  * subsequent GET reads (same ids — the freshness contract), explicit ids
  * surviving a re-save, and the persisted JSON carrying an id per rule (the
  * store invariant, asserted through the handler here and at the codec level
- * in SettingsDataStoreAutomationPrefsTest).
+ * in SettingsDataStoreAutomationPrefsTest), and GET exposing the fire
+ * journal as a decoded `lastFiredAt` per rule (null until a fire is
+ * recorded; both journal value kinds decode through
+ * AutomationSchedulePolicy.decodeOccurrenceKey).
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34], application = AutomationWebHandlerTest.PlainApplication::class)
@@ -45,11 +53,14 @@ class AutomationWebHandlerTest {
 
     private lateinit var handler: AutomationWebHandler
 
+    private lateinit var journal: AutomationFireJournal
+
     private val stateAdapter = AppJson.moshi.adapter(AutomationStateDto::class.java)
 
     @Before
     fun setUp() {
-        handler = AutomationWebHandler(SettingsDataStore(RuntimeEnvironment.getApplication()))
+        journal = AutomationFireJournal(RuntimeEnvironment.getApplication())
+        handler = AutomationWebHandler(SettingsDataStore(RuntimeEnvironment.getApplication()), journal)
     }
 
     private fun putOneRule(id: String = ""): AutomationStateDto = runBlocking {
@@ -109,5 +120,31 @@ class AutomationWebHandlerTest {
         UUID.fromString(newId)
         assertNotEquals(first, newId)
         assertEquals(listOf(newId), stateAdapter.fromJson(handler.get())!!.rules.map { it.id })
+    }
+
+    @Test
+    fun `get exposes the decoded fire journal as lastFiredAt`() = runBlocking {
+        // No journal record yet: the field reads null ("never fired"), which
+        // Moshi keeps off the wire.
+        val ruleId = putOneRule().rules.single().id
+        assertNull(stateAdapter.fromJson(handler.get())!!.rules.single().lastFiredAt)
+
+        // An event-kind journal value (epoch millis, ≥ the threshold) passes
+        // through unchanged.
+        val eventMs = 1_700_000_012_345L
+        journal.record(ruleId, eventMs)
+        assertEquals(eventMs, stateAdapter.fromJson(handler.get())!!.rules.single().lastFiredAt)
+
+        // A time-occurrence key decodes to its local wall-clock instant —
+        // the same decode the UI and the web client see.
+        val key = AutomationSchedulePolicy.occurrenceKey(
+            AutomationRule(id = ruleId, minuteOfDay = 8 * 60),
+            epochDay = 20_000L,
+        )
+        journal.record(ruleId, key)
+        assertEquals(
+            AutomationSchedulePolicy.decodeOccurrenceKey(key, ZoneId.systemDefault()),
+            stateAdapter.fromJson(handler.get())!!.rules.single().lastFiredAt,
+        )
     }
 }

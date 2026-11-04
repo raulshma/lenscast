@@ -840,6 +840,12 @@ export interface AutomationRuleDto {
   cooldownSeconds: number
   /** The ordered action list; each entry is validated against the catalog on save. */
   actions: AutomationActionDto[]
+  /**
+   * Epoch milliseconds (UTC) of the rule's last actual firing, decoded from
+   * the device's fire journal; null/absent = never fired. Read-only — PUT
+   * bodies ignore it (the response is a fresh GET-shaped read).
+   */
+  lastFiredAt?: number | null
 }
 
 /**

@@ -1,20 +1,24 @@
-import { createSignal, For, onMount, Show } from 'solid-js'
+import { createSignal, For, Show } from 'solid-js'
 import type { AutomationRuleDto, AutomationStateDto } from '../types'
 import { API_DEFAULTS } from '../api/defaults'
 import { getAutomation, putAutomation } from '../api/client'
-import { t } from '../lib/i18n'
+import { formatDate, t } from '../lib/i18n'
+import { createVisiblePoll } from '../hooks/visiblePoll'
 import {
-  AUTOMATION_ALL_DAYS_MASK,
-  automationConditionLabelKey,
   automationConditionSummaryLines,
   automationSummaryLines,
   automationTriggerLabelKey,
   automationTriggerSummaryLines,
+  conditionDaysMask,
+  dayListLabel,
   formatMinuteOfDay,
   isEveryDayMask,
+  joinSummaryLines,
+  lastFiredLabel,
   newAutomationRule,
+  withRuleDuplicated,
 } from '../lib/automation'
-import { ARM_DAY_LABELS, isDayArmed } from '../armDays'
+import { AutomationBoltGlyph, AutomationClockGlyph, AutomationIcon } from '../lib/automationIcons'
 import SettingsCard from './SettingsCard'
 import ToggleRow from './ToggleRow'
 import AutomationRuleEditor from './AutomationRuleEditor'
@@ -26,13 +30,14 @@ interface Props {
 
 /**
  * The Automation settings card — the web surface of GET/PUT /api/automation:
- * the master engine switch, one row per time-of-day rule (name, HH:mm, day
- * summary, per-action summary lines, per-rule kill switch, edit/delete) and
- * the catalog-driven rule editor dialog. The card fetches its own document
- * (the RecordingTimeline precedent for self-contained cards) and every
- * mutation PUTs the whole { enabled, rules } document, replacing the local
- * state with the response's sanitized truth — clamped minutes/masks,
- * canonical action params, minted ids.
+ * the master engine switch, one structured card per rule (trigger badge, the
+ * WHEN / ONLY WHEN / THEN summary rows, the last-fired line, per-rule kill
+ * switch, duplicate/delete) and the catalog-driven rule editor dialog. The
+ * card fetches its own document (the RecordingTimeline precedent for
+ * self-contained cards), refetches on a 60s visibility-gated poll so the fire
+ * status stays live, and every mutation PUTs the whole { enabled, rules }
+ * document, replacing the local state with the response's sanitized truth —
+ * clamped minutes/masks, canonical action params, minted ids.
  */
 export default function AutomationCard(props: Props) {
   const [state, setState] = createSignal<AutomationStateDto | null>(null)
@@ -46,37 +51,85 @@ export default function AutomationCard(props: Props) {
   const readOnly = () => props.readOnly?.() ?? false
   const atRuleCap = () => (state()?.rules.length ?? 0) >= API_DEFAULTS.automationMaxRules
 
-  /** A time-window condition's persisted day mask (the sanitize default when absent). */
-  const conditionDaysMask = (condition: { params: Record<string, string> }): number => {
-    const parsed = Number.parseInt(condition.params['days_mask'] ?? '', 10)
-    return Number.isFinite(parsed) ? parsed : AUTOMATION_ALL_DAYS_MASK
+  /** The WHEN row text: "HH:mm · days" for time rules, the "when …" line for events. */
+  const whenText = (rule: AutomationRuleDto): string => {
+    if (rule.triggerType === 'time_of_day') {
+      const dayText = isEveryDayMask(rule.daysMask)
+        ? t('automation.daysEveryDay')
+        : dayListLabel(rule.daysMask, t)
+      return `${formatMinuteOfDay(rule.minuteOfDay)} · ${dayText}`
+    }
+    return joinSummaryLines(automationTriggerSummaryLines(rule), t)
   }
 
-  /** The armed ISO day indices (0 = Monday … 6 = Sunday) in a day mask. */
-  const armedDaysOf = (daysMask: number): number[] =>
-    ARM_DAY_LABELS.map((_, i) => i).filter((i) => isDayArmed(daysMask, i))
+  /** The ONLY WHEN row: all conditions joined by the mode's localized joiner. */
+  const onlyWhenText = (rule: AutomationRuleDto): string => {
+    const joiner = rule.conditionMode === 'any' ? t('automation.joinOr') : t('automation.joinAnd')
+    return rule.conditions
+      .map((condition) => {
+        const summary = automationConditionText(condition)
+        if (condition.type === 'time_window' && !isEveryDayMask(conditionDaysMask(condition))) {
+          return `${summary} · ${dayListLabel(conditionDaysMask(condition), t)}`
+        }
+        return summary
+      })
+      .join(` ${joiner} `)
+  }
 
-  onMount(() => {
-    void reload()
-  })
+  /** One condition's summary (label-less, self-descriptive — the app's conditionText). */
+  const automationConditionText = (condition: { type: string; params: Record<string, string> }): string =>
+    joinSummaryLines(automationConditionSummaryLines(condition), t)
 
-  async function reload() {
-    setLoadError('')
-    try {
-      setState(await getAutomation())
-    } catch (error) {
-      setLoadError(error instanceof Error && error.message ? error.message : t('automation.loadFailed'))
+  /** The THEN row: the merged action summaries, or the missing-actions warning. */
+  const thenText = (rule: AutomationRuleDto): string =>
+    rule.actions.length === 0
+      ? t('automation.ruleNoActions')
+      : joinSummaryLines(rule.actions.flatMap((action) => automationSummaryLines(action)), t)
+
+  /** The card's "Last ran …" line for the rule's fire status, null when it never fired. */
+  const lastFiredText = (rule: AutomationRuleDto): string | null => {
+    const label = rule.lastFiredAt != null ? lastFiredLabel(rule.lastFiredAt, Date.now()) : null
+    if (!label) return null
+    const time = formatMinuteOfDay(label.minuteOfDay)
+    switch (label.kind) {
+      case 'today':
+        return t('automation.lastFired.today', { time })
+      case 'yesterday':
+        return t('automation.lastFired.yesterday', { time })
+      case 'earlier':
+        return t('automation.lastFired.on', { date: formatDate(label.epochMillis, { dateStyle: 'medium' }), time })
     }
   }
 
-  /** The one persist seam: PUT the whole document, adopt the sanitized response. */
-  async function persist(enabled: boolean, rules: AutomationRuleDto[]) {
+  // The initial fetch plus a 60s visibility-gated poll: the fire journal only
+  // changes device-side, so the last-fired lines stay live without a poll
+  // ladder. A failed background refetch keeps the stale rules on screen.
+  createVisiblePoll(
+    () => void reload(true),
+    60_000,
+  )
+
+  async function reload(silent = false) {
+    if (!silent) setLoadError('')
+    try {
+      setState(await getAutomation())
+    } catch (error) {
+      if (!silent || !state()) {
+        setLoadError(error instanceof Error && error.message ? error.message : t('automation.loadFailed'))
+      }
+    }
+  }
+
+  /** The one persist seam: PUT the whole document, adopt the sanitized response. True = the response was adopted. */
+  async function persist(enabled: boolean, rules: AutomationRuleDto[]): Promise<boolean> {
     setSaving(true)
     setSaveError('')
     try {
       setState(await putAutomation({ enabled, rules }))
+      return true
     } catch (error) {
       setSaveError(error instanceof Error && error.message ? error.message : t('automation.saveFailed'))
+      return false
     } finally {
       setSaving(false)
     }
@@ -96,7 +149,16 @@ export default function AutomationCard(props: Props) {
   function removeRule(rule: AutomationRuleDto) {
     const current = state()
     if (!current || readOnly() || saving()) return
+    // The Gallery/AuditCard precedent: destructive, so a confirm guards it.
+    if (!window.confirm(t('automation.deleteConfirm', { name: rule.name || t('automation.ruleUnnamed') }))) return
     void persist(current.enabled, current.rules.filter((entry) => entry.id !== rule.id))
+  }
+
+  function duplicateRule(rule: AutomationRuleDto) {
+    const current = state()
+    if (!current || readOnly() || saving() || atRuleCap()) return
+    const copyName = rule.name ? t('automation.ruleCopyOf', { name: rule.name }) : t('automation.ruleCopy')
+    void persist(current.enabled, withRuleDuplicated(current.rules, rule.id, copyName, API_DEFAULTS.automationMaxRules))
   }
 
   function editRule(rule: AutomationRuleDto) {
@@ -114,28 +176,32 @@ export default function AutomationCard(props: Props) {
     setEditing(newAutomationRule())
   }
 
-  function handleEditorSave(rule: AutomationRuleDto) {
+  /**
+   * The editor hands back its draft; the editor stays open until the PUT
+   * succeeds (a failed save keeps the edits on screen with the error
+   * visible in the card behind). A blank id is a fresh draft (the device
+   * mints the fire-journal UUID on save); anything else updates the rule
+   * with that id. The add path is capped client-side like the app's
+   * withRuleAdded.
+   */
+  async function handleEditorSave(rule: AutomationRuleDto): Promise<boolean> {
     const current = state()
-    setEditing(null)
-    if (!current || saving()) return
-    // A blank id is a fresh draft (the device mints the fire-journal UUID on
-    // save); anything else updates the rule with that id. The add path is
-    // capped client-side like the app's withRuleAdded.
+    if (!current || saving()) return false
+    let rules: AutomationRuleDto[]
     if (rule.id !== '') {
-      void persist(current.enabled, current.rules.map((entry) => (entry.id === rule.id ? rule : entry)))
-    } else if (current.rules.length < API_DEFAULTS.automationMaxRules) {
-      void persist(current.enabled, [...current.rules, rule])
+      rules = current.rules.map((entry) => (entry.id === rule.id ? rule : entry))
+    } else {
+      if (current.rules.length >= API_DEFAULTS.automationMaxRules) return false
+      rules = [...current.rules, rule]
     }
+    const ok = await persist(current.enabled, rules)
+    if (ok) setEditing(null)
+    return ok
   }
 
   return (
     <SettingsCard
-      icon={
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-          <circle cx="12" cy="12" r="9" />
-          <path d="M12 7v5l3 3" />
-        </svg>
-      }
+      icon={<AutomationClockGlyph />}
       title={t('automation.title')}
     >
       <Show when={!state() && !loadError()}>
@@ -180,23 +246,58 @@ export default function AutomationCard(props: Props) {
               <span>{t('automation.engineOffBanner')}</span>
             </div>
           </Show>
+          <Show when={state()!.rules.length > 0}>
+            <span class="automation-cap-note">
+              {t('automation.rulesCount', { count: state()!.rules.length, total: API_DEFAULTS.automationMaxRules })}
+            </span>
+          </Show>
         </div>
+
+        {/* The empty state: what rules do, plus the first CTA — the add
+            button below stays for the non-empty list. */}
+        <Show when={state()!.rules.length === 0}>
+          <div class="automation-empty">
+            <span class="automation-empty-icon" aria-hidden="true">
+              <AutomationBoltGlyph />
+            </span>
+            <span class="automation-empty-title">{t('automation.emptyTitle')}</span>
+            <span class="automation-empty-body">{t('automation.emptyBody')}</span>
+            <button class="card-btn card-btn-primary" onClick={addRule} disabled={readOnly() || saving() || atRuleCap()}>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M12 5v14M5 12h14" />
+              </svg>
+              {t('automation.addRule')}
+            </button>
+          </div>
+        </Show>
 
         <For each={state()!.rules}>
           {(rule) => (
             <div class="automation-rule-row" classList={{ 'automation-rule-disabled': !rule.enabled }}>
               <div class="automation-rule-head">
-                <div class="automation-rule-title">
-                  <span class="automation-rule-name">{rule.name || t('automation.ruleUnnamed')}</span>
-                  {/* Time rules show the classic HH:mm; event rules show their
-                      localized trigger label (their "when …" detail rides the
-                      trigger summary line below). */}
-                  <span class="automation-rule-time">
-                    {rule.triggerType === 'time_of_day'
-                      ? formatMinuteOfDay(rule.minuteOfDay)
-                      : t(automationTriggerLabelKey(rule.triggerType))}
+                {/* The badge + name zone taps to edit; the switch and the
+                    button row stay separate targets. */}
+                <button
+                  type="button"
+                  class="automation-rule-main"
+                  onClick={() => editRule(rule)}
+                  disabled={readOnly()}
+                  title={t('automation.editRuleAria')}
+                >
+                  <span class="automation-rule-badge automation-badge-trigger" aria-hidden="true">
+                    <AutomationIcon kind="trigger" typeId={rule.triggerType} />
                   </span>
-                </div>
+                  <span class="automation-rule-heading">
+                    <span class="automation-rule-name">{rule.name || t('automation.ruleUnnamed')}</span>
+                    {/* Time rules show the classic HH:mm · days; event rules
+                        show their localized trigger label. */}
+                    <span class="automation-rule-sub">
+                      {rule.triggerType === 'time_of_day'
+                        ? whenText(rule)
+                        : t(automationTriggerLabelKey(rule.triggerType))}
+                    </span>
+                  </span>
+                </button>
                 <label class="toggle-switch" for={`automation-rule-toggle-${rule.id}`}>
                   <input
                     id={`automation-rule-toggle-${rule.id}`}
@@ -209,66 +310,32 @@ export default function AutomationCard(props: Props) {
                 </label>
               </div>
 
-              <Show when={rule.triggerType === 'time_of_day'}>
-                <div class="automation-rule-days">
-                  <Show
-                    when={!isEveryDayMask(rule.daysMask)}
-                    fallback={<span class="automation-rule-everyday">{t('automation.daysEveryDay')}</span>}
-                  >
-                    <span class="automation-day-chips">
-                      <For each={ARM_DAY_LABELS}>
-                        {(label, i) => (
-                          <Show when={isDayArmed(rule.daysMask, i())}>
-                            <span class="automation-day-chip active">{label}</span>
-                          </Show>
-                        )}
-                      </For>
-                    </span>
-                  </Show>
-                </div>
-              </Show>
-
-              <div class="automation-summary-lines">
-                <For each={automationTriggerSummaryLines(rule)}>
-                  {(line) => <div class="automation-summary-line">{t(line.key, line.params)}</div>}
-                </For>
-                <Show when={rule.conditions.length > 0}>
-                  <div class="automation-summary-line automation-summary-conditions">
-                    {t('automation.ruleConditions')}
-                    <For each={rule.conditions}>
-                      {(condition) => (
-                        <div class="automation-summary-line automation-summary-condition">
-                          {t(automationConditionLabelKey(condition.type))}
-                          <For each={automationConditionSummaryLines(condition)}>
-                            {(line) => <span> · {t(line.key, line.params)}</span>}
-                          </For>
-                          {/* The time window's day suffix needs the localized
-                              day chips' labels, so it composes here. */}
-                          <Show when={condition.type === 'time_window' && !isEveryDayMask(conditionDaysMask(condition))}>
-                            <span>
-                              {' · '}
-                              <For each={armedDaysOf(conditionDaysMask(condition))}>
-                                {(day, i) => (
-                                  <>
-                                    <Show when={i() > 0}>, </Show>
-                                    {ARM_DAY_LABELS[day]}
-                                  </>
-                                )}
-                              </For>
-                            </span>
-                          </Show>
-                        </div>
-                      )}
-                    </For>
+              <div class="automation-when-rows">
+                <Show when={rule.triggerType !== 'time_of_day'}>
+                  <div class="automation-when-row automation-when">
+                    <span class="automation-when-label">{t('automation.when')}</span>
+                    <span class="automation-when-text">{whenText(rule)}</span>
                   </div>
                 </Show>
-                <Show
-                  when={rule.actions.length > 0}
-                  fallback={<span class="automation-summary-empty">{t('automation.ruleNoActions')}</span>}
-                >
-                  <For each={rule.actions.flatMap((action) => automationSummaryLines(action))}>
-                    {(line) => <div class="automation-summary-line">{t(line.key, line.params)}</div>}
-                  </For>
+                <Show when={rule.conditions.length > 0}>
+                  <div class="automation-when-row automation-onlywhen">
+                    <span class="automation-when-label">{t('automation.onlyWhen')}</span>
+                    <span class="automation-when-text">{onlyWhenText(rule)}</span>
+                  </div>
+                </Show>
+                <div class="automation-when-row automation-then">
+                  <span class="automation-when-label">{t('automation.then')}</span>
+                  <span class="automation-when-text" classList={{ 'automation-then-missing': rule.actions.length === 0 }}>
+                    {thenText(rule)}
+                  </span>
+                </div>
+                <Show when={lastFiredText(rule)} keyed>
+                  {(text) => (
+                    <div class="automation-lastfired">
+                      <AutomationClockGlyph />
+                      <span>{text}</span>
+                    </div>
+                  )}
                 </Show>
               </div>
 
@@ -279,6 +346,13 @@ export default function AutomationCard(props: Props) {
                     <path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z" />
                   </svg>
                   {t('automation.edit')}
+                </button>
+                <button class="card-btn card-btn-ghost" onClick={() => duplicateRule(rule)} disabled={readOnly() || saving() || atRuleCap()} title={t('automation.duplicateRuleAria')} aria-label={t('automation.duplicateRuleAria')}>
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <rect x="9" y="9" width="12" height="12" rx="2" />
+                    <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" />
+                  </svg>
+                  {t('automation.duplicate')}
                 </button>
                 <button class="card-btn card-btn-danger" onClick={() => removeRule(rule)} disabled={readOnly() || saving()} title={t('automation.deleteRuleAria')} aria-label={t('automation.deleteRuleAria')}>
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -291,17 +365,19 @@ export default function AutomationCard(props: Props) {
           )}
         </For>
 
-        <div class="field-group automation-add-rule">
-          <button class="card-btn card-btn-primary" onClick={addRule} disabled={readOnly() || saving() || atRuleCap()}>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M12 5v14M5 12h14" />
-            </svg>
-            {t('automation.addRule')}
-          </button>
-          <Show when={atRuleCap()}>
-            <span class="automation-cap-note">{t('automation.maxRulesReached', { count: API_DEFAULTS.automationMaxRules })}</span>
-          </Show>
-        </div>
+        <Show when={state()!.rules.length > 0}>
+          <div class="field-group automation-add-rule">
+            <button class="card-btn card-btn-primary" onClick={addRule} disabled={readOnly() || saving() || atRuleCap()}>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M12 5v14M5 12h14" />
+              </svg>
+              {t('automation.addRule')}
+            </button>
+            <Show when={atRuleCap()}>
+              <span class="automation-cap-note">{t('automation.maxRulesReached', { count: API_DEFAULTS.automationMaxRules })}</span>
+            </Show>
+          </div>
+        </Show>
 
         <Show when={saving()}>
           <div class="status-banner status-banner-info stream-mode-hint" role="note">

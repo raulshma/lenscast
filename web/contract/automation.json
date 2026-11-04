@@ -32,7 +32,8 @@
             "enabled": "true"
           }
         }
-      ]
+      ],
+      "lastFiredAt": 1793862000000
     },
     {
       "id": "8c3d1f6a-2e94-4b05-a7c8-5d1e9f3b7a02",

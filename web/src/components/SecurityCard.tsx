@@ -1,10 +1,11 @@
 import { createSignal, createEffect, For, Show } from 'solid-js'
 import type { AllSettings, DeviceStatus, MotionZone } from '../types'
 import { API_DEFAULTS } from '../api/defaults'
-import { ARM_DAY_LABELS, isDayArmed, toggleArmDayMask } from '../armDays'
+import { isDayArmed, toggleArmDayMask } from '../armDays'
 import SettingsCard from './SettingsCard'
 import ToggleRow from './ToggleRow'
 import { downloadDetectionModel, sendTestAlert, setSiren, setTorch } from '../api/client'
+import { automationDayLabelKey } from '../lib/automation'
 import { t } from '../lib/i18n'
 
 interface Props {
@@ -93,7 +94,7 @@ export default function SecurityCard(props: Props) {
   const quietHoursOn = () => stream()?.alertQuietHoursEnabled ?? API_DEFAULTS.alertQuietHoursEnabled
   // Day-of-week arm mask helpers: bit 0 = Monday … bit 6 = Sunday.
   const armDaysMask = () => stream()?.motionArmDaysMask ?? API_DEFAULTS.motionArmDaysMask
-  const armedDayCount = () => ARM_DAY_LABELS.reduce((n, _, i) => n + (isDayArmed(armDaysMask(), i) ? 1 : 0), 0)
+  const armedDayCount = () => [0, 1, 2, 3, 4, 5, 6].filter((day) => isDayArmed(armDaysMask(), day)).length
 
   function toggleArmDay(isoDayIndex: number) {
     const next = toggleArmDayMask(armDaysMask(), isoDayIndex)
@@ -314,15 +315,15 @@ export default function SecurityCard(props: Props) {
               <span class="field-value">{armedDayCount()}/7</span>
             </div>
             <div class="arm-days-row" role="group" aria-label={t('security.armDaysAria')}>
-              <For each={ARM_DAY_LABELS}>
-                {(label, i) => (
+              <For each={[0, 1, 2, 3, 4, 5, 6]}>
+                {(day) => (
                   <button
                     type="button"
                     class="arm-day-chip"
-                    classList={{ active: isDayArmed(armDaysMask(), i()) }}
-                    onClick={() => toggleArmDay(i())}
+                    classList={{ active: isDayArmed(armDaysMask(), day) }}
+                    onClick={() => toggleArmDay(day)}
                   >
-                    {label}
+                    {t(automationDayLabelKey(day))}
                   </button>
                 )}
               </For>
