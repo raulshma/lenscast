@@ -3,7 +3,7 @@ package com.raulshma.lenscast.automation.schedule
 import com.raulshma.lenscast.camera.model.CameraSettings
 import com.raulshma.lenscast.core.StreamDefaults
 import java.time.LocalDate
-import java.time.ZoneId
+import java.util.TimeZone
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -35,6 +35,8 @@ class AutomationSchedulePolicyTest {
         conditions: List<AutomationConditionSpec> = emptyList(),
         conditionMode: String = AutomationRule.CONDITION_MODE_ALL,
         cooldownSeconds: Int = StreamDefaults.AUTOMATION_COOLDOWN_DEFAULT_SECONDS,
+        missedRunPolicy: String = AutomationRule.MISSED_RUN_CATCH_UP,
+        missedWindowMinutes: Int = StreamDefaults.AUTOMATION_MISSED_WINDOW_DEFAULT_MINUTES,
         actions: List<AutomationActionSpec> = listOf(
             AutomationActionSpec("stream", mapOf("enabled" to "true")),
         ),
@@ -48,6 +50,8 @@ class AutomationSchedulePolicyTest {
         conditions = conditions,
         conditionMode = conditionMode,
         cooldownSeconds = cooldownSeconds,
+        missedRunPolicy = missedRunPolicy,
+        missedWindowMinutes = missedWindowMinutes,
         actions = actions,
     )
 
@@ -115,17 +119,17 @@ class AutomationSchedulePolicyTest {
 
     @Test
     fun `decode occurrence key round-trips to the wall-clock instant`() {
-        val utc = ZoneId.of("UTC")
+        val utc = TimeZone.getTimeZone("UTC")
         val key = AutomationSchedulePolicy.occurrenceKey(rule(minuteOfDay = 600), day)
         assertEquals(
-            LocalDate.ofEpochDay(day).atStartOfDay(utc).plusMinutes(600).toInstant().toEpochMilli(),
+            LocalDate.ofEpochDay(day).atStartOfDay(utc.toZoneId()).plusMinutes(600).toInstant().toEpochMilli(),
             AutomationSchedulePolicy.decodeOccurrenceKey(key, utc),
         )
         // The zone decides the instant, not the key: the same key decodes
         // through Berlin's offset.
-        val berlin = ZoneId.of("Europe/Berlin")
+        val berlin = TimeZone.getTimeZone("Europe/Berlin")
         assertEquals(
-            LocalDate.ofEpochDay(day).atStartOfDay(berlin).plusMinutes(600).toInstant().toEpochMilli(),
+            LocalDate.ofEpochDay(day).atStartOfDay(berlin.toZoneId()).plusMinutes(600).toInstant().toEpochMilli(),
             AutomationSchedulePolicy.decodeOccurrenceKey(key, berlin),
         )
     }
@@ -133,8 +137,8 @@ class AutomationSchedulePolicyTest {
     @Test
     fun `decode passes event timestamps through and rejects negative keys`() {
         val eventMs = 1_800_000_000_000L
-        assertEquals(eventMs, AutomationSchedulePolicy.decodeOccurrenceKey(eventMs, ZoneId.of("UTC")))
-        assertNull(AutomationSchedulePolicy.decodeOccurrenceKey(-1L, ZoneId.of("UTC")))
+        assertEquals(eventMs, AutomationSchedulePolicy.decodeOccurrenceKey(eventMs, TimeZone.getTimeZone("UTC")))
+        assertNull(AutomationSchedulePolicy.decodeOccurrenceKey(-1L, TimeZone.getTimeZone("UTC")))
     }
 
     // ── Due verdict ──
@@ -334,6 +338,82 @@ class AutomationSchedulePolicyTest {
     fun `unknown action types are filtered at the last gate`() {
         val fired = due(rules = listOf(rule(actions = listOf(AutomationActionSpec("bogus")))))
         assertTrue(fired.isEmpty())
+    }
+
+    // ── Missed-run policy ──
+
+    @Test
+    fun `skip policy fires in the scheduled minute but never late`() {
+        val rules = listOf(rule(missedRunPolicy = AutomationRule.MISSED_RUN_SKIP))
+        assertEquals(1, due(rules = rules, at = snapshot(minuteOfDay = 600)).size)
+        assertTrue(due(rules = rules, at = snapshot(minuteOfDay = 601)).isEmpty())
+        // Hours late — a late boot's first evaluation — still nothing:
+        // "at the scheduled time or not at all".
+        assertTrue(due(rules = rules, at = snapshot(minuteOfDay = 1_400)).isEmpty())
+    }
+
+    @Test
+    fun `window policy bounds the catch-up span and the boundary is inclusive`() {
+        val rules = listOf(rule(missedRunPolicy = AutomationRule.MISSED_RUN_WINDOW, missedWindowMinutes = 30))
+        assertEquals(listOf("stream"), due(rules = rules, at = snapshot(minuteOfDay = 630)).single().actions.map { it.type })
+        assertTrue(due(rules = rules, at = snapshot(minuteOfDay = 631)).isEmpty())
+    }
+
+    @Test
+    fun `window policy lets a one-shot ride past the global grace`() {
+        val rules = listOf(
+            rule(
+                missedRunPolicy = AutomationRule.MISSED_RUN_WINDOW,
+                missedWindowMinutes = 30,
+                actions = listOf(AutomationActionSpec("capture_photo")),
+            ),
+        )
+        // 20 minutes late: a catch_up one-shot-only rule would have dropped
+        // past the 10-minute grace, but the rule window is the authority.
+        val fired = due(rules = rules, at = snapshot(minuteOfDay = 620))
+        assertEquals(listOf("capture_photo"), fired.single().actions.map { it.type })
+    }
+
+    @Test
+    fun `catch_up policy keeps the per-action grace for one-shots`() {
+        val rules = listOf(
+            rule(
+                missedRunPolicy = AutomationRule.MISSED_RUN_CATCH_UP,
+                missedWindowMinutes = 60,
+                actions = listOf(AutomationActionSpec("capture_photo")),
+            ),
+        )
+        // The window minutes are meaningless outside window mode: the
+        // one-shot obeys the global 10-minute grace.
+        assertTrue(due(rules = rules, at = snapshot(minuteOfDay = 611)).isEmpty())
+        assertEquals(
+            listOf("capture_photo"),
+            due(rules = rules, at = snapshot(minuteOfDay = 610)).single().actions.map { it.type },
+        )
+    }
+
+    @Test
+    fun `deferred conditions plus skip policy means the rule never fires that day`() {
+        val rules = listOf(
+            rule(
+                missedRunPolicy = AutomationRule.MISSED_RUN_SKIP,
+                conditions = listOf(AutomationConditionSpec("charging", mapOf("charging" to "true"))),
+            ),
+        )
+        // Conditions unmet at the scheduled minute...
+        assertTrue(due(rules = rules, at = snapshot(minuteOfDay = 600, charging = false)).isEmpty())
+        // ...met ten minutes later: the scheduled moment has passed, so the
+        // skip policy holds — no same-day deferred fire.
+        assertTrue(due(rules = rules, at = snapshot(minuteOfDay = 610, charging = true)).isEmpty())
+    }
+
+    @Test
+    fun `deferred conditions still fire under the default catch_up policy`() {
+        val rules = listOf(
+            rule(conditions = listOf(AutomationConditionSpec("charging", mapOf("charging" to "true")))),
+        )
+        assertTrue(due(rules = rules, at = snapshot(minuteOfDay = 600, charging = false)).isEmpty())
+        assertEquals(1, due(rules = rules, at = snapshot(minuteOfDay = 610, charging = true)).size)
     }
 
     // ── Event path: trigger matching ──
@@ -713,6 +793,33 @@ class AutomationSchedulePolicyTest {
         val sanitized = AutomationSchedulePolicy.sanitizeRules(List(20) { index -> rule(id = "r$index") })
         assertEquals(StreamDefaults.AUTOMATION_MAX_RULES, sanitized.size)
         assertEquals("r0", sanitized.first().id)
+    }
+
+    @Test
+    fun `sanitizeRule folds an unknown missed-run policy and clamps the window`() {
+        // An unknown future policy degrades to the historical catch-up
+        // behavior instead of silently skipping or widening fires.
+        assertEquals(
+            AutomationRule.MISSED_RUN_CATCH_UP,
+            AutomationSchedulePolicy.sanitizeRule(rule(missedRunPolicy = "fire_anyway")).missedRunPolicy,
+        )
+        val skip = AutomationSchedulePolicy.sanitizeRule(rule(missedRunPolicy = AutomationRule.MISSED_RUN_SKIP))
+        assertEquals(AutomationRule.MISSED_RUN_SKIP, skip.missedRunPolicy)
+        val window = AutomationSchedulePolicy.sanitizeRule(
+            rule(missedRunPolicy = AutomationRule.MISSED_RUN_WINDOW, missedWindowMinutes = 0),
+        )
+        assertEquals(AutomationRule.MISSED_RUN_WINDOW, window.missedRunPolicy)
+        // Zero would be SKIP by another name — the floor stays at one minute.
+        assertEquals(StreamDefaults.AUTOMATION_MISSED_WINDOW_MIN_MINUTES, window.missedWindowMinutes)
+        val capped = AutomationSchedulePolicy.sanitizeRule(
+            rule(missedRunPolicy = AutomationRule.MISSED_RUN_WINDOW, missedWindowMinutes = 100_000),
+        )
+        assertEquals(StreamDefaults.AUTOMATION_MISSED_WINDOW_MAX_MINUTES, capped.missedWindowMinutes)
+        // A window within the span passes through untouched.
+        val passThrough = AutomationSchedulePolicy.sanitizeRule(
+            rule(missedRunPolicy = AutomationRule.MISSED_RUN_WINDOW, missedWindowMinutes = 45),
+        )
+        assertEquals(45, passThrough.missedWindowMinutes)
     }
 
     // ── mergeCameraSettings ──

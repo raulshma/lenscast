@@ -479,6 +479,8 @@ class DtoContractFixtureTest {
                     ),
                     conditionMode = "all",
                     cooldownSeconds = 60,
+                    missedRunPolicy = "window",
+                    missedWindowMinutes = 30,
                     actions = listOf(
                         AutomationActionDto(type = "torch", params = mapOf("enabled" to "true")),
                         AutomationActionDto(type = "stream", params = mapOf("enabled" to "true")),

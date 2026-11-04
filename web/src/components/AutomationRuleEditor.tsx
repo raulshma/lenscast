@@ -12,12 +12,14 @@ import {
   AUTOMATION_ACTION_GROUPS,
   AUTOMATION_CONDITION_GROUPS,
   AUTOMATION_COOLDOWN_PRESETS,
+  AUTOMATION_MISSED_WINDOW_PRESETS,
   AUTOMATION_TRIGGER_GROUPS,
   automationActionLabelKey,
   automationConditionLabelKey,
   automationConditionSummaryLines,
   automationDayLabelKey,
   automationDescKey,
+  automationMissedRunSummaryLine,
   automationParamLabelKey,
   automationTriggerLabelKey,
   automationTriggerSummaryLines,
@@ -111,6 +113,11 @@ export default function AutomationRuleEditor(props: Props) {
   const [specsVersion, setSpecsVersion] = createSignal(0)
   const [conditionMode, setConditionMode] = createSignal(props.draft.conditionMode)
   const [cooldownSeconds, setCooldownSeconds] = createSignal(props.draft.cooldownSeconds)
+  // The missed-run policy rides along even for event triggers (the editor
+  // only renders it for time rules) — the device folds it on save, so a
+  // stale value can never wedge anything.
+  const [missedRunPolicy, setMissedRunPolicy] = createSignal(props.draft.missedRunPolicy)
+  const [missedWindowMinutes, setMissedWindowMinutes] = createSignal(props.draft.missedWindowMinutes)
   // The open catalog picker (null = closed); the inline save gate; the
   // unsaved-edits guard; and the in-flight save flag (Save stays disabled
   // until the PUT resolves).
@@ -275,6 +282,8 @@ export default function AutomationRuleEditor(props: Props) {
       conditions: conditions().map((condition) => ({ type: condition.type, params: { ...condition.params } })),
       conditionMode: conditionMode(),
       cooldownSeconds: cooldownSeconds(),
+      missedRunPolicy: missedRunPolicy(),
+      missedWindowMinutes: missedWindowMinutes(),
       actions: actions().map((action) => ({ type: action.type, params: { ...action.params } })),
     }
   }
@@ -455,6 +464,63 @@ export default function AutomationRuleEditor(props: Props) {
                   }} />
                 </div>
               </div>
+
+              {/* The missed-run policy: the time rules' timing knob, the mirror
+                  of the event branch's cooldown. Only time rules can miss. */}
+              <div class="field-group">
+                <div class="field-row">
+                  <span class="field-label">{t('automation.editor.missedRun')}</span>
+                </div>
+                <div class="automation-cooldown-presets" role="group" aria-label={t('automation.editor.missedRun')}>
+                  <For each={API_DEFAULTS.automationMissedRunPolicies}>
+                    {(policy) => (
+                      <button
+                        type="button"
+                        class="automation-cooldown-chip"
+                        classList={{ active: missedRunPolicy() === policy }}
+                        onClick={() => {
+                          setMissedRunPolicy(policy)
+                          setDirty(true)
+                        }}
+                      >
+                        {t(`automation.missed.${policy}`)}
+                      </button>
+                    )}
+                  </For>
+                </div>
+                <div class="automation-param-hint">{t('automation.editor.missedRunHint')}</div>
+                <Show when={missedRunPolicy() === 'window'}>
+                  <div class="field-row" style={{ 'margin-top': '8px' }}>
+                    <span class="field-label">{t('automation.editor.missedWindow')}</span>
+                    <span class="field-value automation-cooldown-readout">
+                      {(() => {
+                        const line = humanizeDuration(missedWindowMinutes() * 60)
+                        return t(line.key, line.params)
+                      })()}
+                    </span>
+                  </div>
+                  <div class="automation-cooldown-presets" role="group" aria-label={t('automation.editor.missedWindow')}>
+                    <For each={AUTOMATION_MISSED_WINDOW_PRESETS}>
+                      {(minutes) => {
+                        const line = humanizeDuration(minutes * 60)
+                        return (
+                          <button
+                            type="button"
+                            class="automation-cooldown-chip"
+                            classList={{ active: missedWindowMinutes() === minutes }}
+                            onClick={() => {
+                              setMissedWindowMinutes(minutes)
+                              setDirty(true)
+                            }}
+                          >
+                            {t(line.key, line.params)}
+                          </button>
+                        )
+                      }}
+                    </For>
+                  </div>
+                </Show>
+              </div>
             </Show>
 
             <div class="field-row field-row-toggle automation-enabled-row">
@@ -590,6 +656,18 @@ export default function AutomationRuleEditor(props: Props) {
               <span class="automation-when-label">{t('automation.then')}</span>
               <span class="automation-when-text">{previewThenText()}</span>
             </div>
+            <Show when={automationMissedRunSummaryLine({
+              triggerType: triggerType(),
+              missedRunPolicy: missedRunPolicy(),
+              missedWindowMinutes: missedWindowMinutes(),
+            })} keyed>
+              {(line) => (
+                <div class="automation-when-row automation-onlywhen">
+                  <span class="automation-when-label">{t('automation.ifMissed')}</span>
+                  <span class="automation-when-text">{t(line.key, line.params)}</span>
+                </div>
+              )}
+            </Show>
           </div>
         </div>
       </div>

@@ -105,6 +105,8 @@ class AutomationSchedulerTest {
         triggerType: String = AutomationRule.TRIGGER_TIME_OF_DAY,
         enabled: Boolean = true,
         cooldownSeconds: Int = com.raulshma.lenscast.core.StreamDefaults.AUTOMATION_COOLDOWN_DEFAULT_SECONDS,
+        missedRunPolicy: String = AutomationRule.MISSED_RUN_CATCH_UP,
+        missedWindowMinutes: Int = com.raulshma.lenscast.core.StreamDefaults.AUTOMATION_MISSED_WINDOW_DEFAULT_MINUTES,
         conditions: List<AutomationConditionSpec> = emptyList(),
         actions: List<AutomationActionSpec> = listOf(
             AutomationActionSpec("stream", mapOf("enabled" to "true")),
@@ -116,6 +118,8 @@ class AutomationSchedulerTest {
         enabled = enabled,
         minuteOfDay = minuteOfDayAt(noon),
         cooldownSeconds = cooldownSeconds,
+        missedRunPolicy = missedRunPolicy,
+        missedWindowMinutes = missedWindowMinutes,
         conditions = conditions,
         actions = actions,
     )
@@ -231,6 +235,37 @@ class AutomationSchedulerTest {
         val runner = FakeRunner()
         scheduler(journal(), runner).evaluate(listOf(rule()), enabled = true)
         assertEquals(listOf("rule-1"), runner.firedIds)
+    }
+
+    @Test
+    fun `skip policy swallows the boot catch-up and stays unjournaled`() = runBlocking {
+        // The process "starts" 20 minutes past the scheduled minute: the
+        // catch-up shape. Skip means at the scheduled time or not at all.
+        now = noon + 20 * 60_000
+        val target = journal()
+        val runner = FakeRunner()
+        scheduler(target, runner).evaluate(
+            listOf(rule(missedRunPolicy = AutomationRule.MISSED_RUN_SKIP)),
+            enabled = true,
+        )
+        assertTrue(runner.firedIds.isEmpty())
+        assertTrue(target.load().isEmpty())
+    }
+
+    @Test
+    fun `window policy bounds the boot catch-up and journals the late fire`() = runBlocking {
+        // 20 minutes late but inside the 30-minute window: the rule fires
+        // once, and the journaled occurrence blocks every later tick.
+        now = noon + 20 * 60_000
+        val target = journal()
+        val runner = FakeRunner()
+        val schedule = rule(missedRunPolicy = AutomationRule.MISSED_RUN_WINDOW, missedWindowMinutes = 30)
+        scheduler(target, runner).evaluate(listOf(schedule), enabled = true)
+        assertEquals(listOf("rule-1"), runner.firedIds)
+        now = noon + 25 * 60_000
+        val runner2 = FakeRunner()
+        scheduler(target, runner2).evaluate(listOf(schedule), enabled = true)
+        assertTrue(runner2.firedIds.isEmpty())
     }
 
     // ── Dedup (direct evaluate + real journal) ──

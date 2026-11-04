@@ -11,7 +11,7 @@ import com.raulshma.lenscast.automation.schedule.AutomationSchedulePolicy
 import com.raulshma.lenscast.automation.schedule.AutomationTriggerCatalog
 import com.raulshma.lenscast.core.AppJson
 import com.raulshma.lenscast.data.SettingsDataStore
-import java.time.ZoneId
+import java.util.TimeZone
 import com.raulshma.lenscast.streaming.model.AutomationActionDto
 import com.raulshma.lenscast.streaming.model.AutomationCatalogActionDto
 import com.raulshma.lenscast.streaming.model.AutomationCatalogConditionDto
@@ -58,7 +58,8 @@ class AutomationWebHandler(
      * savers — the response is a fresh disk read, not the shared flows (which
      * update on a collector's beat and once raced this very write), so the
      * client sees the persisted sanitized truth (clamped minutes/masks/
-     * cooldowns, canonical trigger/condition/action params, minted ids)
+     * cooldowns/missed-run windows, folded condition modes and missed-run
+     * policies, canonical trigger/condition/action params, minted ids)
      * rather than what it sent.
      */
     suspend fun put(body: String): String {
@@ -79,6 +80,8 @@ class AutomationWebHandler(
                 },
                 conditionMode = dto.conditionMode,
                 cooldownSeconds = dto.cooldownSeconds,
+                missedRunPolicy = dto.missedRunPolicy,
+                missedWindowMinutes = dto.missedWindowMinutes,
                 actions = dto.actions.map { action ->
                     AutomationActionSpec(type = action.type, params = action.params)
                 },
@@ -134,6 +137,8 @@ class AutomationWebHandler(
                     },
                     conditionMode = rule.conditionMode,
                     cooldownSeconds = rule.cooldownSeconds,
+                    missedRunPolicy = rule.missedRunPolicy,
+                    missedWindowMinutes = rule.missedWindowMinutes,
                     actions = rule.actions.map { action ->
                         AutomationActionDto(type = action.type, params = action.params)
                     },
@@ -141,7 +146,7 @@ class AutomationWebHandler(
                     // key decoded to a wall-clock instant (null = never
                     // fired, so the key stays off the wire).
                     lastFiredAt = rule.id?.let(journal::get)
-                        ?.let { AutomationSchedulePolicy.decodeOccurrenceKey(it, ZoneId.systemDefault()) },
+                        ?.let { AutomationSchedulePolicy.decodeOccurrenceKey(it, TimeZone.getDefault()) },
                 )
             },
             // The catalogs are device truth, published read-only: the rule

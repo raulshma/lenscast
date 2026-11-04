@@ -686,6 +686,12 @@
     <string name="automation_editor_add_condition">Ajouter une condition</string>
     <string name="automation_editor_remove_condition_cd">Supprimer la condition</string>
     <string name="automation_editor_cooldown">Délai entre déclenchements (secondes)</string>
+    <string name="automation_editor_missed_run">Si l\'heure est manquée</string>
+    <string name="automation_editor_missed_run_hint">Que faire lorsque la règle ne peut pas s\'exécuter à sa minute prévue : l\'appareil était éteint ou les conditions n\'ont été remplies que plus tard</string>
+    <string name="automation_missed_catch_up">Toujours rattraper</string>
+    <string name="automation_missed_skip">Ignorer</string>
+    <string name="automation_missed_window">Dans une fenêtre</string>
+    <string name="automation_editor_missed_window">Fenêtre de rattrapage</string>
     <string name="automation_editor_window_wrap_hint">Une plage qui franchit minuit (de &gt; à) se poursuit le lendemain</string>
 
     <!-- Automatisation : carte du moteur, cartes de règles, état vide -->
@@ -696,6 +702,10 @@
     <string name="automation_card_when">QUAND</string>
     <string name="automation_card_only">SEULEMENT SI</string>
     <string name="automation_card_then">ALORS</string>
+    <string name="automation_card_missed">SI MANQUÉ</string>
+    <string name="automation_missed_skip_summary">Ignore si le moment prévu est passé</string>
+    <string name="automation_missed_window_summary_minutes">Rattrape sous %1$s min</string>
+    <string name="automation_missed_window_summary_hours">Rattrape sous %1$s h</string>
     <string name="automation_last_fired_today">Dernière exécution aujourd’hui à %1$s</string>
     <string name="automation_last_fired_yesterday">Dernière exécution hier à %1$s</string>
     <string name="automation_last_fired_on">Dernière exécution le %1$s à %2$s</string>

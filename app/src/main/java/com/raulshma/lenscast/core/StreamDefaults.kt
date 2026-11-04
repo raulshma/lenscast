@@ -242,4 +242,14 @@ object StreamDefaults {
     const val AUTOMATION_COOLDOWN_MIN_SECONDS = 0
     const val AUTOMATION_COOLDOWN_MAX_SECONDS = 86_400
     const val AUTOMATION_COOLDOWN_DEFAULT_SECONDS = 60
+
+    // Missed-run policy ("window" mode): how many minutes past its scheduled
+    // instant a time rule may still fire. Bounded in minute-space — the same
+    // units the occurrence keys measure lateness in — with 1440 (a full day)
+    // as the ceiling, so a window can never reach into the next occurrence.
+    // The default shapes the editor's initial window pick; 1 is the floor
+    // (a zero-minute window is what "skip" already means).
+    const val AUTOMATION_MISSED_WINDOW_MIN_MINUTES = 1
+    const val AUTOMATION_MISSED_WINDOW_MAX_MINUTES = 1_440
+    const val AUTOMATION_MISSED_WINDOW_DEFAULT_MINUTES = 30
 }

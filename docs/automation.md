@@ -66,6 +66,14 @@ fixtures): `id`, `name`, `enabled`, then the WHEN/ONLY WHEN/THEN fields —
   never fire the rule.
 - **Cooldown** — `cooldownSeconds` (0–86400, default 60) for event
   triggers: the persisted minimum time between two firings of this rule.
+- **Missed-run policy** — `missedRunPolicy` for `time_of_day` triggers:
+  what happens when the scheduled moment passes without a firing (the
+  device was off, or the ONLY WHEN conditions were only met later).
+  `"catch_up"` (the default — old payloads decode unchanged) keeps the
+  historical behavior; `"skip"` means *at the scheduled time or not at
+  all*; `"window"` bounds the catch-up to `missedWindowMinutes` (1–1440,
+  default 30) past the scheduled minute. Unknown policies fold to
+  `"catch_up"`. Meaningless for event triggers — they fire in the present.
 - **Actions** — up to 8 catalog actions, executed in order.
 
 Everything is sanitized before a rule is trusted (on DataStore decode, on
@@ -73,9 +81,9 @@ the web PUT, on an in-app save): minute into 0–1439, mask into 1–127,
 unknown trigger kinds reset to `time_of_day`, trigger/condition params
 folded to their documented defaults when unknown, unknown conditions and
 actions dropped, the caps applied to the sanitized lists (a rule always
-keeps its maximum *executable* entries), and the cooldown clamped. Invalid
-values degrade to the documented behavior instead of firing something
-unexpected.
+keeps its maximum *executable* entries), the cooldown clamped, the
+missed-run policy folded and its window clamped. Invalid values degrade
+to the documented behavior instead of firing something unexpected.
 
 ## How the engine works
 
@@ -95,16 +103,29 @@ Automation Action Executor the broadcast receiver uses.
   exact-alarm permissions, no boot receiver.
 - **Catch-up.** The first evaluation after process start runs immediately —
   that first pass *is* the boot catch-up. What fires late depends on the
-  action's catch-up class: setting-convergence actions (everything except
-  photo capture) are **STATEFUL** and fire no matter how late the tick is;
-  the one moment-effect action (`capture_photo`) is **ONESHOT** and only
-  fires within a **10-minute grace** of its scheduled instant. A rule whose
-  whole action list is filtered out by the grace is not journaled, so its
-  photo can still catch up on a later tick within grace.
+  rule's **missed-run policy** (`missedRunPolicy`). In the default
+  `"catch_up"` mode it depends on the action's catch-up class:
+  setting-convergence actions (everything except photo capture) are
+  **STATEFUL** and fire no matter how late the tick is; the one
+  moment-effect action (`capture_photo`) is **ONESHOT** and only fires
+  within a **10-minute grace** of its scheduled instant. In `"window"`
+  mode the rule's own window is the authority — it fires only within
+  `missedWindowMinutes` of the scheduled minute and every action rides
+  inside it (a rule may *widen* a one-shot's grace, never exceed the
+  window). `"skip"` fires only in the scheduled minute itself. Lateness is
+  measured in wall-clock minute space (the same units as the occurrence
+  keys), never against a real epoch clock, so a zone offset can't smear a
+  window. A rule whose whole action list is filtered out is not journaled,
+  so its one-shot can still catch up on a later tick within grace.
 - **Conditions gate the tick, not the schedule.** A time rule whose
   conditions are unmet stays *due* (unjournaled) and fires on a later tick
   the same day once they become met — the occurrence key only stamps when
-  it actually fires. ONESHOT grace still ages from the scheduled minute.
+  it actually fires. ONESHOT grace still ages from the scheduled minute —
+  and the deferred fire flows through the same minutes-late computation as
+  a late boot, so the rule's missed-run policy governs both: with
+  `"skip"` a rule whose conditions are met past the scheduled minute never
+  fires that day ("at the scheduled time or not at all"); with `"window"`
+  the deferred fire must still land inside the window.
 - **The fire journal prevents double-fires.** Each rule's last fired
   occurrence is recorded in `filesDir/automation/fire_journal.json`, keyed
   by the rule's stable id. A restart — or re-timing or renaming a rule —
@@ -258,8 +279,8 @@ PUT /api/automation        # POST accepted as an alias
 - `PUT` takes `{"enabled": …, "rules": […]}` wholesale (a rule absent from
   the document is deleted, the settings-section convention), sanitizes
   server-side, and answers with a fresh read of the sanitized truth — minted
-  rule ids, clamped minutes/masks, canonical params — rather than what was
-  sent.
+  rule ids, clamped minutes/masks, folded missed-run policies with clamped
+  windows, canonical params — rather than what was sent.
 - Auth matches `PUT /api/settings`: any authenticated session may read;
   writes are config writes, so a read-only viewer session is denied and the
   optional API token stays read-only here.

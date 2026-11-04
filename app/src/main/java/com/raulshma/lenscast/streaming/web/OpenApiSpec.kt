@@ -733,15 +733,20 @@ object OpenApiSpec {
             "conditions" to arrayOf(ref("AutomationConditionDto")),
             "conditionMode" to stringSchema("How multiple conditions combine: `all` | `any`; anything else folds to `all` on save"),
             "cooldownSeconds" to intSchema("Minimum seconds between two firings of an event-triggered rule; clamped to 0..86400 on save"),
+            "missedRunPolicy" to stringSchema("What a time_of_day rule does when its scheduled moment passes without a firing " +
+                "(device off, or ONLY WHEN conditions met later the same day): `catch_up` (fire however late — stateful " +
+                "actions always, one-shots within the global grace) | `skip` (at the scheduled time or not at all) | " +
+                "`window` (fire within missedWindowMinutes; every action rides). Anything else folds to catch_up on save. " +
+                "Meaningless for event triggers"),
+            "missedWindowMinutes" to intSchema("The window missed-run-policy catch-up span in minutes; clamped to 1..1440 on save. " +
+                "Meaningless in the other modes"),
             "actions" to arrayOf(ref("AutomationActionDto")),
             "lastFiredAt" to intSchema("Epoch milliseconds (UTC) of the rule's last actual firing, decoded from the " +
                 "device's fire journal; null/absent = never fired. Read-only — PUT bodies ignore it") +
                 mapOf("nullable" to true),
             required = listOf("id", "name", "enabled", "triggerType", "minuteOfDay", "daysMask",
-                "triggerParams", "conditions", "conditionMode", "cooldownSeconds", "actions"),
-            description = "WHEN triggerType (+ ONLY WHEN conditions) THEN actions. Event-triggered rules have no " +
-                "catch-up semantics — they fire in the present — and re-fire after their cooldown elapses; " +
-                "time_of_day rules keep the once-per-day occurrence keys.",
+                "triggerParams", "conditions", "conditionMode", "cooldownSeconds", "missedRunPolicy",
+                "missedWindowMinutes", "actions"),
         ),
         "AutomationConditionDto" to schema(
             "type" to stringSchema("Condition catalog id, e.g. `time_window`; an id outside the catalog is dropped on save"),

@@ -778,6 +778,15 @@ export type AutomationParamKind = 'BOOL' | 'INT' | 'FLOAT'
 export type AutomationCatchUp = 'STATEFUL' | 'ONESHOT'
 
 /**
+ * What a time_of_day rule does when its scheduled moment passes without a
+ * firing — the rule-level mirror of the per-action AutomationCatchUp.
+ * `catch_up` (the default) keeps the historical behavior; `skip` never fires
+ * late; `window` fires within AutomationRuleDto.missedWindowMinutes with
+ * every action riding (the rule window overrides the per-action grace).
+ */
+export type AutomationMissedRunPolicy = 'catch_up' | 'skip' | 'window'
+
+/**
  * One step inside an AutomationRuleDto: a catalog action id plus its raw
  * parameters. Everything is a string on the wire (the same convention as the
  * persisted AutomationActionSpec) so the shape never needs versioning when an
@@ -838,6 +847,17 @@ export interface AutomationRuleDto {
   conditionMode: string
   /** Minimum seconds between two firings (event rules); clamped to 0..86400 on save. */
   cooldownSeconds: number
+  /**
+   * What a time_of_day rule does when its scheduled moment passes without a
+   * firing (device off, or ONLY WHEN conditions met later the same day):
+   * `catch_up` fires however late (stateful actions always, one-shots within
+   * the global grace), `skip` means "at the scheduled time or not at all",
+   * `window` bounds the catch-up to missedWindowMinutes. Anything else folds
+   * to catch_up on save. Meaningless for event triggers.
+   */
+  missedRunPolicy: AutomationMissedRunPolicy
+  /** The `window` policy's catch-up span in minutes; clamped to 1..1440 on save. */
+  missedWindowMinutes: number
   /** The ordered action list; each entry is validated against the catalog on save. */
   actions: AutomationActionDto[]
   /**

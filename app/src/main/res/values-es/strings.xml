@@ -684,6 +684,12 @@
     <string name="automation_editor_add_condition">Añadir condición</string>
     <string name="automation_editor_remove_condition_cd">Quitar condición</string>
     <string name="automation_editor_cooldown">Enfriamiento entre disparos (segundos)</string>
+    <string name="automation_editor_missed_run">Si se pierde la hora</string>
+    <string name="automation_editor_missed_run_hint">Qué hacer cuando la regla no puede ejecutarse en su minuto programado: el dispositivo estaba apagado o las condiciones solo se cumplieron más tarde</string>
+    <string name="automation_missed_catch_up">Ponerse al día siempre</string>
+    <string name="automation_missed_skip">Omitir</string>
+    <string name="automation_missed_window">Dentro de una ventana</string>
+    <string name="automation_editor_missed_window">Ventana de recuperación</string>
     <string name="automation_editor_window_wrap_hint">Una franja que cruza la medianoche (desde &gt; hasta) continúa al día siguiente</string>
 
     <!-- Automatización: tarjeta del motor, tarjetas de reglas, estado vacío -->
@@ -694,6 +700,10 @@
     <string name="automation_card_when">CUANDO</string>
     <string name="automation_card_only">SOLO CUANDO</string>
     <string name="automation_card_then">ENTONCES</string>
+    <string name="automation_card_missed">SI SE PIERDE</string>
+    <string name="automation_missed_skip_summary">Se omite si pasó el momento programado</string>
+    <string name="automation_missed_window_summary_minutes">Se pone al día en %1$s min</string>
+    <string name="automation_missed_window_summary_hours">Se pone al día en %1$s h</string>
     <string name="automation_last_fired_today">Se ejecutó hoy a las %1$s</string>
     <string name="automation_last_fired_yesterday">Se ejecutó ayer a las %1$s</string>
     <string name="automation_last_fired_on">Se ejecutó el %1$s a las %2$s</string>

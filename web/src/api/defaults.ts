@@ -197,6 +197,14 @@ export const API_DEFAULTS = {
   automationCooldownMinSeconds: 0,
   automationCooldownMaxSeconds: 86_400,
   automationCooldownDefaultSeconds: 60,
+  // Missed-run policy (time_of_day rules): the mode values and the window
+  // clamp span mirror StreamDefaults' AUTOMATION_MISSED_WINDOW_* — the
+  // editor's window presets are the same spans the app editor chips offer.
+  automationMissedRunPolicies: ['catch_up', 'skip', 'window'],
+  automationMissedWindowMinMinutes: 1,
+  automationMissedWindowMaxMinutes: 1_440,
+  automationMissedWindowDefaultMinutes: 30,
+  automationMissedWindowPresets: [5, 15, 30, 60, 180],
 
   // Overlay block (OverlaySettings.DEFAULT, embedded in StreamingSettingsDto)
   overlayEnabled: false,

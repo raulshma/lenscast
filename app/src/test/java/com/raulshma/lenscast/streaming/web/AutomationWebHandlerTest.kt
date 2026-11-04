@@ -7,7 +7,7 @@ import com.raulshma.lenscast.automation.schedule.AutomationSchedulePolicy
 import com.raulshma.lenscast.core.AppJson
 import com.raulshma.lenscast.data.SettingsDataStore
 import com.raulshma.lenscast.streaming.model.AutomationStateDto
-import java.time.ZoneId
+import java.util.TimeZone
 import java.util.UUID
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
@@ -67,10 +67,12 @@ class AutomationWebHandlerTest {
         stateAdapter.fromJson(
             handler.put(
                 // One deliberately invalid rule: blank id, unknown trigger,
-                // unknown condition/action, out-of-bounds fields.
+                // unknown condition/action, out-of-bounds fields — and an
+                // unknown missed-run policy with an out-of-span window.
                 """{"enabled":true,"rules":[{"id":"$id","name":"Probe","enabled":true,""" +
                     """"triggerType":"not_a_trigger","minuteOfDay":2500,"daysMask":0,""" +
-                    """"conditions":[{"type":"nope"}],"cooldownSeconds":-5,"actions":[""" +
+                    """"conditions":[{"type":"nope"}],"cooldownSeconds":-5,""" +
+                    """"missedRunPolicy":"fire_anyway","missedWindowMinutes":99999,"actions":[""" +
                     """{"type":"torch","params":{"enabled":"true","strength":"99"}},{"type":"nope"}]}]}""",
             ),
         )!!
@@ -87,11 +89,30 @@ class AutomationWebHandlerTest {
         assertEquals(1_439, rule.minuteOfDay)
         assertEquals(1, rule.daysMask)
         assertEquals(0, rule.cooldownSeconds)
+        // ...the unknown missed-run policy folded to the historical default
+        // and the window clamped into its span...
+        assertEquals("catch_up", rule.missedRunPolicy)
+        assertEquals(1_440, rule.missedWindowMinutes)
         assertEquals(listOf("torch"), rule.actions.map { it.type })
         assertEquals("8", rule.actions.single().params["strength"])
         assertTrue(response.enabled)
         // ...and the answer IS the disk state: a fresh GET reads the same id.
         assertEquals(listOf(rule.id), stateAdapter.fromJson(handler.get())!!.rules.map { it.id })
+    }
+
+    @Test
+    fun `put round-trips a valid missed-run policy through the disk`() = runBlocking {
+        val body = """{"enabled":true,"rules":[{"id":"","name":"Strict","enabled":true,""" +
+            """"triggerType":"time_of_day","minuteOfDay":420,"daysMask":127,""" +
+            """"missedRunPolicy":"window","missedWindowMinutes":45,""" +
+            """"actions":[{"type":"torch","params":{"enabled":"true"}}]}]}"""
+        val response = stateAdapter.fromJson(handler.put(body))!!
+        assertEquals("window", response.rules.single().missedRunPolicy)
+        assertEquals(45, response.rules.single().missedWindowMinutes)
+        // The GET agrees — the persisted shape, not just the response.
+        val fresh = stateAdapter.fromJson(handler.get())!!.rules.single()
+        assertEquals("window", fresh.missedRunPolicy)
+        assertEquals(45, fresh.missedWindowMinutes)
     }
 
     @Test
@@ -143,7 +164,7 @@ class AutomationWebHandlerTest {
         )
         journal.record(ruleId, key)
         assertEquals(
-            AutomationSchedulePolicy.decodeOccurrenceKey(key, ZoneId.systemDefault()),
+            AutomationSchedulePolicy.decodeOccurrenceKey(key, TimeZone.getDefault()),
             stateAdapter.fromJson(handler.get())!!.rules.single().lastFiredAt,
         )
     }

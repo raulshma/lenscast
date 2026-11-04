@@ -1360,7 +1360,14 @@ semantics, not two), the ordered `conditions` list of
 `AutomationConditionSpec`s (an EMPTY list is unconditional) with a
 `conditionMode` of `"all"` (default) or `"any"`, a `cooldownSeconds` floor
 for event triggers (0..86400, default
-`StreamDefaults.AUTOMATION_COOLDOWN_DEFAULT_SECONDS` = 60), and the ordered
+`StreamDefaults.AUTOMATION_COOLDOWN_DEFAULT_SECONDS` = 60), a
+`missedRunPolicy` for time triggers — what happens when the scheduled
+moment passes without a firing (`"catch_up"` = the historical catch-up
+behavior and the fold target for anything unknown; `"skip"` = at the
+scheduled time or not at all; `"window"` = fire within
+`missedWindowMinutes` 1..1440 of the scheduled minute with every action
+riding, the rule window overriding the per-action ONESHOT grace; only
+time rules can miss, events fire in the present) — and the ordered
 action list. Deliberately a plain wire/persistence shape: every decision
 (when a rule is due, what its entries mean) lives in the Automation
 Schedule Policy and the three catalogs, keeping the scheduling surface
@@ -1495,10 +1502,14 @@ rules (master toggle on, rule enabled, day mask covers the ISO day index
 via Motion Arming Policy, occurrence key strictly newer than the journaled
 one, occurrence time actually arrived, Automation Condition Policy met —
 an unmet-condition rule stays DUE and unjournaled, firing on a later tick
-the same day once conditions turn true; STATEFUL actions ride any lateness
-while ONESHOT ones must be within the grace, measured in the same
-wall-clock minute space as the keys because a real-epoch comparison would
-smear the window by the zone offset); `eventDue` + `triggerMatches` for
+the same day once conditions turn true; the rule's missed-run policy gates
+both late boots and deferred fires the same way — SKIP fires only in the
+scheduled minute itself, WINDOW only within its missedWindowMinutes, and
+the default CATCH_UP keeps the per-action split: STATEFUL actions ride any
+lateness while ONESHOT ones must be within the grace (inside a WINDOW the
+rule window is the authority and every action rides), all measured in the
+same wall-clock minute space as the keys because a real-epoch comparison
+would smear the window by the zone offset); `eventDue` + `triggerMatches` for
 event rules (the trigger matches the AutomationEvent — including the
 battery-crossing verdict computed purely from
 `BatteryLevelChanged(previous, current)` — the Automation Condition Policy
@@ -1510,7 +1521,9 @@ enabled toggle already expresses disarm, name trimmed, unknown trigger
 reset to `time_of_day`, trigger params sanitized against the trigger
 catalog, conditions sanitized against the condition catalog and capped at
 `AUTOMATION_MAX_CONDITIONS_PER_RULE`, `conditionMode` defaulted to "all",
-`cooldownSeconds` clamped to 0..86400, unknown actions dropped, and the
+`cooldownSeconds` clamped to 0..86400, `missedRunPolicy` folded to
+"catch_up" unless it is exactly "skip" or "window" with
+`missedWindowMinutes` clamped to 1..1440, unknown actions dropped, and the
 caps applied to the *sanitized* list so a rule keeps its max executable
 entries rather than losing valid ones to unknown noise ahead of them); and
 `mergeCameraSettings` (one catalog action folded into CameraSettings: the

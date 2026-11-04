@@ -19,6 +19,8 @@
       ],
       "conditionMode": "all",
       "cooldownSeconds": 60,
+      "missedRunPolicy": "window",
+      "missedWindowMinutes": 30,
       "actions": [
         {
           "type": "torch",
@@ -61,6 +63,8 @@
       ],
       "conditionMode": "all",
       "cooldownSeconds": 120,
+      "missedRunPolicy": "catch_up",
+      "missedWindowMinutes": 30,
       "actions": [
         {
           "type": "siren",

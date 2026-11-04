@@ -455,6 +455,8 @@ describe('DTO contract fixtures', () => {
         'conditions',
         'conditionMode',
         'cooldownSeconds',
+        'missedRunPolicy',
+        'missedWindowMinutes',
         'actions',
       ])
       // lastFiredAt is optional (Moshi omits the null on the wire) — the
@@ -465,6 +467,11 @@ describe('DTO contract fixtures', () => {
       expect(['all', 'any']).toContain(rule.conditionMode)
       expect(rule.cooldownSeconds).toBeGreaterThanOrEqual(0)
       expect(rule.cooldownSeconds).toBeLessThanOrEqual(86400)
+      // The missed-run policy folds to catch_up on save; the window clamp
+      // mirrors StreamDefaults' AUTOMATION_MISSED_WINDOW_* span.
+      expect(['catch_up', 'skip', 'window']).toContain(rule.missedRunPolicy)
+      expect(rule.missedWindowMinutes).toBeGreaterThanOrEqual(1)
+      expect(rule.missedWindowMinutes).toBeLessThanOrEqual(1_440)
       expect(rule.minuteOfDay).toBeGreaterThanOrEqual(0)
       expect(rule.minuteOfDay).toBeLessThanOrEqual(1439)
       expect(rule.daysMask).toBeGreaterThanOrEqual(1)
@@ -750,10 +757,23 @@ describe('API_DEFAULTS lockstep with the fixtures', () => {
     expect(API_DEFAULTS.automationCooldownMinSeconds).toBe(0)
     expect(API_DEFAULTS.automationCooldownMaxSeconds).toBe(86_400)
     expect(API_DEFAULTS.automationCooldownDefaultSeconds).toBe(60)
+    // The missed-run window presets clamp span and default mirror
+    // StreamDefaults' AUTOMATION_MISSED_WINDOW_* and the app editor's chips.
+    expect(API_DEFAULTS.automationMissedRunPolicies).toEqual(['catch_up', 'skip', 'window'])
+    expect(API_DEFAULTS.automationMissedWindowMinMinutes).toBe(1)
+    expect(API_DEFAULTS.automationMissedWindowMaxMinutes).toBe(1_440)
+    expect(API_DEFAULTS.automationMissedWindowDefaultMinutes).toBe(30)
+    // The fixture's time rule pins a non-default window policy's wire shape;
+    // its event rule pins the meaningless-for-events default.
+    const sunrise = automation.rules.find((rule) => rule.triggerType === 'time_of_day')
+    expect(sunrise).toBeDefined()
+    expect(sunrise!.missedRunPolicy).toBe('window')
+    expect(sunrise!.missedWindowMinutes).toBe(30)
     // The fixture's event rule pins the cooldown default's wire shape.
     const nightMotion = automation.rules.find((rule) => rule.triggerType === 'motion_detected')
     expect(nightMotion).toBeDefined()
     expect(nightMotion!.cooldownSeconds).toBe(120)
+    expect(nightMotion!.missedRunPolicy).toBe('catch_up')
   })
 
   it('camera fallbacks match the settings fixture defaults', () => {

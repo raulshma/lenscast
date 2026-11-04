@@ -94,10 +94,9 @@ import com.raulshma.lenscast.settings.SwitchSetting
 import com.raulshma.lenscast.ui.components.AutomationTimeField
 import com.raulshma.lenscast.ui.components.DayMaskChips
 import com.raulshma.lenscast.ui.components.LensCastTopBar
-import java.time.Instant
-import java.time.ZoneId
-import java.time.format.DateTimeFormatter
-import java.time.format.FormatStyle
+import java.text.DateFormat
+import java.util.Date
+import java.util.TimeZone
 
 /**
  * The screen-local editing draft of one rule. The editor mutates this shape
@@ -116,6 +115,8 @@ private data class RuleDraft(
     val conditions: List<AutomationConditionSpec>,
     val conditionMode: String,
     val cooldownSeconds: Int,
+    val missedRunPolicy: String,
+    val missedWindowMinutes: Int,
     val actions: List<AutomationActionSpec>,
 ) {
     /** Whether the editor renders the time field + day chips (vs trigger params). */
@@ -132,6 +133,8 @@ private data class RuleDraft(
         conditions = conditions,
         conditionMode = conditionMode,
         cooldownSeconds = cooldownSeconds,
+        missedRunPolicy = missedRunPolicy,
+        missedWindowMinutes = missedWindowMinutes,
         actions = actions,
     )
 
@@ -148,6 +151,8 @@ private data class RuleDraft(
             conditions = emptyList(),
             conditionMode = AutomationRule.CONDITION_MODE_ALL,
             cooldownSeconds = StreamDefaults.AUTOMATION_COOLDOWN_DEFAULT_SECONDS,
+            missedRunPolicy = AutomationRule.MISSED_RUN_CATCH_UP,
+            missedWindowMinutes = StreamDefaults.AUTOMATION_MISSED_WINDOW_DEFAULT_MINUTES,
             actions = emptyList(),
         )
 
@@ -162,6 +167,8 @@ private data class RuleDraft(
             conditions = rule.conditions,
             conditionMode = rule.conditionMode,
             cooldownSeconds = rule.cooldownSeconds,
+            missedRunPolicy = rule.missedRunPolicy,
+            missedWindowMinutes = rule.missedWindowMinutes,
             actions = rule.actions,
         )
 
@@ -470,6 +477,18 @@ private fun AutomationRuleCard(
                     MaterialTheme.colorScheme.onSurface
                 },
             )
+            // IF MISSED: the missed-run policy, only when it deviates from
+            // the historical catch-up default (and only for time rules —
+            // events cannot miss).
+            AutomationViewModel.missedRunSummaryLine(rule)?.let { line ->
+                Spacer(modifier = Modifier.height(6.dp))
+                SummaryRow(
+                    label = stringResource(R.string.automation_card_missed),
+                    text = stringResource(line.res, *line.args.toTypedArray()),
+                    tint = MaterialTheme.colorScheme.secondary,
+                    textColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
             // The trust signal: when this rule last actually fired (decoded
             // from the journal; omitted when it never has).
             if (lastFiredKey != null) {
@@ -702,12 +721,12 @@ private fun dayLabel(isoDayIndex: Int): String = when (isoDayIndex) {
 @Composable
 private fun lastFiredText(lastFiredKey: Long, nowMs: Long): String? {
     val decoded = remember(lastFiredKey) {
-        AutomationSchedulePolicy.decodeOccurrenceKey(lastFiredKey, ZoneId.systemDefault())
+        AutomationSchedulePolicy.decodeOccurrenceKey(lastFiredKey, TimeZone.getDefault())
     } ?: return null
     val label = AutomationViewModel.lastFiredLabel(
         decoded,
         nowMs,
-        ZoneId.systemDefault(),
+        TimeZone.getDefault(),
     ) ?: return null
     return when (label) {
         is AutomationLastFiredLabel.Today ->
@@ -721,9 +740,11 @@ private fun lastFiredText(lastFiredKey: Long, nowMs: Long): String? {
                 AutomationViewModel.formatMinuteOfDay(label.minuteOfDay),
             )
         is AutomationLastFiredLabel.Earlier -> {
+            // java.text's localized MEDIUM date is the minSdk-23 equivalent of
+            // DateTimeFormatter.ofLocalizedDate(FormatStyle.MEDIUM) — java.time
+            // is API 26+ (see GalleryDates for the convention).
             val date = remember(label.epochMillis) {
-                DateTimeFormatter.ofLocalizedDate(FormatStyle.MEDIUM)
-                    .format(Instant.ofEpochMilli(label.epochMillis).atZone(ZoneId.systemDefault()).toLocalDate())
+                DateFormat.getDateInstance(DateFormat.MEDIUM).format(Date(label.epochMillis))
             }
             stringResource(
                 R.string.automation_last_fired_on,
@@ -884,6 +905,15 @@ private fun AutomationRuleEditor(
                             update(draft.copy(daysMask = MotionArmingPolicy.toggleDay(draft.daysMask, isoDay)))
                         },
                         title = stringResource(R.string.automation_editor_days_title),
+                    )
+                    // Event rules render the cooldown instead — the trigger
+                    // kinds split their timing knobs: time rules own the
+                    // missed-run policy, events the re-fire cooldown.
+                    MissedRunEditor(
+                        policy = draft.missedRunPolicy,
+                        windowMinutes = draft.missedWindowMinutes,
+                        onPolicyChange = { update(draft.copy(missedRunPolicy = it)) },
+                        onWindowChange = { update(draft.copy(missedWindowMinutes = it)) },
                     )
                 } else {
                     // Event triggers render their catalog param editors, then
@@ -1211,6 +1241,14 @@ private fun AutomationPreviewCard(draft: RuleDraft) {
                 tint = MaterialTheme.colorScheme.tertiary,
                 textColor = MaterialTheme.colorScheme.onSurface,
             )
+            AutomationViewModel.missedRunSummaryLine(draft.toRule())?.let { line ->
+                SummaryRow(
+                    label = stringResource(R.string.automation_card_missed),
+                    text = stringResource(line.res, *line.args.toTypedArray()),
+                    tint = MaterialTheme.colorScheme.secondary,
+                    textColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
         }
     }
 }
@@ -1652,6 +1690,93 @@ private fun humanizedDuration(seconds: Int): String =
         is AutomationDurationLabel.Hours ->
             stringResource(R.string.automation_duration_hours, label.count)
     }
+
+/**
+ * The time-rule missed-run editor: the three policy chips — always catch up
+ * (the historical default), skip ("at the scheduled time or not at all"),
+ * within a window — and, in window mode, the catch-up preset chips with a
+ * humanized readout. The mirror knob of the event rules'
+ * [CooldownEditor]: only time rules can miss a run, only events re-fire.
+ */
+@Composable
+private fun MissedRunEditor(
+    policy: String,
+    windowMinutes: Int,
+    onPolicyChange: (String) -> Unit,
+    onWindowChange: (Int) -> Unit,
+) {
+    val presets = remember { listOf(5, 15, 30, 60, 180) }
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Text(
+            text = stringResource(R.string.automation_editor_missed_run),
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurface,
+        )
+        Text(
+            text = stringResource(R.string.automation_editor_missed_run_hint),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(modifier = Modifier.height(4.dp))
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            FilterChip(
+                label = stringResource(R.string.automation_missed_catch_up),
+                selected = policy == AutomationRule.MISSED_RUN_CATCH_UP,
+                onClick = { onPolicyChange(AutomationRule.MISSED_RUN_CATCH_UP) },
+            )
+            FilterChip(
+                label = stringResource(R.string.automation_missed_skip),
+                selected = policy == AutomationRule.MISSED_RUN_SKIP,
+                onClick = { onPolicyChange(AutomationRule.MISSED_RUN_SKIP) },
+            )
+            FilterChip(
+                label = stringResource(R.string.automation_missed_window),
+                selected = policy == AutomationRule.MISSED_RUN_WINDOW,
+                onClick = { onPolicyChange(AutomationRule.MISSED_RUN_WINDOW) },
+            )
+        }
+        if (policy == AutomationRule.MISSED_RUN_WINDOW) {
+            Spacer(modifier = Modifier.height(4.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = stringResource(R.string.automation_editor_missed_window),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+                Text(
+                    text = humanizedDuration(windowMinutes * 60),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                    fontFamily = FontFamily.Monospace,
+                )
+            }
+            Spacer(modifier = Modifier.height(4.dp))
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                presets.forEach { minutes ->
+                    FilterChip(
+                        label = humanizedDuration(minutes * 60),
+                        selected = windowMinutes == minutes,
+                        onClick = { onWindowChange(minutes) },
+                    )
+                }
+            }
+        }
+    }
+}
 
 /**
  * The param editor for one [AutomationParamSpec]:

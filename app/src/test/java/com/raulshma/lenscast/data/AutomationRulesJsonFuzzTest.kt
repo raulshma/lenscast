@@ -76,6 +76,17 @@ class AutomationRulesJsonFuzzTest {
                 "cooldown out of range: ${rule.cooldownSeconds}",
                 rule.cooldownSeconds in StreamDefaults.AUTOMATION_COOLDOWN_MIN_SECONDS..StreamDefaults.AUTOMATION_COOLDOWN_MAX_SECONDS,
             )
+            assertTrue(
+                "unknown missed-run policy survived: ${rule.missedRunPolicy}",
+                rule.missedRunPolicy == AutomationRule.MISSED_RUN_CATCH_UP ||
+                    rule.missedRunPolicy == AutomationRule.MISSED_RUN_SKIP ||
+                    rule.missedRunPolicy == AutomationRule.MISSED_RUN_WINDOW,
+            )
+            assertTrue(
+                "missed window out of range: ${rule.missedWindowMinutes}",
+                rule.missedWindowMinutes in
+                    StreamDefaults.AUTOMATION_MISSED_WINDOW_MIN_MINUTES..StreamDefaults.AUTOMATION_MISSED_WINDOW_MAX_MINUTES,
+            )
             rule.conditions.forEach { condition ->
                 val type = AutomationConditionCatalog.typeFor(condition.type)
                 assertNotNull("unknown condition type survived: ${condition.type}", type)
@@ -207,6 +218,14 @@ class AutomationRulesJsonFuzzTest {
             """[{"cooldownSeconds":1.5}]""",
             """[{"cooldownSeconds":-1}]""",
             """[{"cooldownSeconds":99999999999}]""",
+            """[{"missedRunPolicy":42}]""",
+            """[{"missedRunPolicy":"whenever"}]""",
+            """[{"missedRunPolicy":"skip"}]""",
+            """[{"missedWindowMinutes":"later"}]""",
+            """[{"missedWindowMinutes":0}]""",
+            """[{"missedWindowMinutes":-30}]""",
+            """[{"missedWindowMinutes":99999999999}]""",
+            """[{"missedRunPolicy":"window","missedWindowMinutes":1e400}]""",
             """[{"actions":{"type":"torch"}}]""",
             """[{"actions":[42]}]""",
             """[{"actions":[{"type":42}]}]""",
@@ -216,7 +235,7 @@ class AutomationRulesJsonFuzzTest {
             """[{"actions":[{"type":"torch","params":{"bogus":"1"}}]}]""",
             """[null]""",
             """[[]]""",
-            """[{"id":null,"name":null,"enabled":null,"triggerType":null,"minuteOfDay":null,"daysMask":null,"triggerParams":null,"conditions":null,"conditionMode":null,"cooldownSeconds":null,"actions":null}]""",
+            """[{"id":null,"name":null,"enabled":null,"triggerType":null,"minuteOfDay":null,"daysMask":null,"triggerParams":null,"conditions":null,"conditionMode":null,"cooldownSeconds":null,"missedRunPolicy":null,"missedWindowMinutes":null,"actions":null}]""",
             """[{"id":""},{"id":"   "}]""",
             "null", "true", "42", "\"a string\"", "[]", "{}", "[",
         )

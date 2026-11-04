@@ -125,8 +125,34 @@ class SettingsDataStoreAutomationPrefsTest {
         assertEquals(emptyList<AutomationConditionSpec>(), rule.conditions)
         assertEquals(AutomationRule.CONDITION_MODE_ALL, rule.conditionMode)
         assertEquals(StreamDefaults.AUTOMATION_COOLDOWN_DEFAULT_SECONDS, rule.cooldownSeconds)
+        // The missed-run fields fold too: pre-missed-run payloads decode
+        // as the historical catch-up behavior.
+        assertEquals(AutomationRule.MISSED_RUN_CATCH_UP, rule.missedRunPolicy)
+        assertEquals(StreamDefaults.AUTOMATION_MISSED_WINDOW_DEFAULT_MINUTES, rule.missedWindowMinutes)
         assertEquals(emptyList<AutomationActionSpec>(), rule.actions)
         UUID.fromString(rule.id)
+    }
+
+    @Test
+    fun `missed-run policy round trips through the persisted json`() {
+        val rules = listOf(
+            AutomationRule(
+                id = "rule-5",
+                name = "Sunrise or nothing",
+                minuteOfDay = 360,
+                missedRunPolicy = AutomationRule.MISSED_RUN_SKIP,
+                actions = listOf(AutomationActionSpec("stream", mapOf("enabled" to "true"))),
+            ),
+            AutomationRule(
+                id = "rule-6",
+                name = "Morning within the hour",
+                minuteOfDay = 420,
+                missedRunPolicy = AutomationRule.MISSED_RUN_WINDOW,
+                missedWindowMinutes = 60,
+                actions = listOf(AutomationActionSpec("torch", mapOf("enabled" to "true"))),
+            ),
+        )
+        assertEquals(rules, automationRulesPref.roundTrip(rules))
     }
 
     @Test

@@ -1200,6 +1200,8 @@ internal data class AutomationRuleJson(
     val conditions: List<AutomationConditionJson>? = null,
     val conditionMode: String? = null,
     val cooldownSeconds: Int? = null,
+    val missedRunPolicy: String? = null,
+    val missedWindowMinutes: Int? = null,
     val actions: List<AutomationActionJson>? = null,
 )
 
@@ -1258,6 +1260,8 @@ internal fun parseAutomationRules(jsonString: String?): List<AutomationRule> {
                 },
                 conditionMode = dto.conditionMode ?: defaults.conditionMode,
                 cooldownSeconds = dto.cooldownSeconds ?: defaults.cooldownSeconds,
+                missedRunPolicy = dto.missedRunPolicy ?: defaults.missedRunPolicy,
+                missedWindowMinutes = dto.missedWindowMinutes ?: defaults.missedWindowMinutes,
                 actions = dto.actions.orEmpty().map { action ->
                     AutomationActionSpec(
                         type = action.type ?: "",
@@ -1297,6 +1301,8 @@ internal fun serializeAutomationRules(rules: List<AutomationRule>): String {
                 },
                 conditionMode = rule.conditionMode,
                 cooldownSeconds = rule.cooldownSeconds,
+                missedRunPolicy = rule.missedRunPolicy,
+                missedWindowMinutes = rule.missedWindowMinutes,
                 actions = rule.actions.map { action ->
                     AutomationActionJson(type = action.type, params = action.params)
                 },

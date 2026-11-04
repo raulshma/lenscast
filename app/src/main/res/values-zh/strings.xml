@@ -678,6 +678,12 @@
     <string name="automation_editor_add_condition">添加条件</string>
     <string name="automation_editor_remove_condition_cd">移除条件</string>
     <string name="automation_editor_cooldown">重新触发冷却(秒)</string>
+    <string name="automation_editor_missed_run">错过定时时间时</string>
+    <string name="automation_editor_missed_run_hint">当规则无法在预定的分钟运行时怎么办——设备已关机,或条件在之后才满足</string>
+    <string name="automation_missed_catch_up">始终补跑</string>
+    <string name="automation_missed_skip">跳过</string>
+    <string name="automation_missed_window">窗口期内</string>
+    <string name="automation_editor_missed_window">补跑窗口</string>
     <string name="automation_editor_window_wrap_hint">跨越午夜的时间窗口(开始 &gt; 结束)会延续到第二天</string>
 
     <!-- 自动化屏幕:引擎卡片、规则卡片、空状态 -->
@@ -688,6 +694,10 @@
     <string name="automation_card_when">当</string>
     <string name="automation_card_only">仅当</string>
     <string name="automation_card_then">则</string>
+    <string name="automation_card_missed">若错过</string>
+    <string name="automation_missed_skip_summary">预定时刻已过则跳过</string>
+    <string name="automation_missed_window_summary_minutes">%1$s 分钟内补跑</string>
+    <string name="automation_missed_window_summary_hours">%1$s 小时内补跑</string>
     <string name="automation_last_fired_today">今天 %1$s 最后运行</string>
     <string name="automation_last_fired_yesterday">昨天 %1$s 最后运行</string>
     <string name="automation_last_fired_on">%1$s %2$s 最后运行</string>

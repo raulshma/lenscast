@@ -702,6 +702,12 @@
     <string name="automation_editor_add_condition">Добавить условие</string>
     <string name="automation_editor_remove_condition_cd">Удалить условие</string>
     <string name="automation_editor_cooldown">Пауза между срабатываниями (секунды)</string>
+    <string name="automation_editor_missed_run">Если время пропущено</string>
+    <string name="automation_editor_missed_run_hint">Что делать, если правило не может сработать в назначенную минуту — устройство было выключено или условия выполнились позже</string>
+    <string name="automation_missed_catch_up">Всегда догонять</string>
+    <string name="automation_missed_skip">Пропустить</string>
+    <string name="automation_missed_window">В пределах окна</string>
+    <string name="automation_editor_missed_window">Окно догона</string>
     <string name="automation_editor_window_wrap_hint">Окно, переходящее через полночь (от &gt; до), продолжается на следующий день</string>
 
     <!-- Экран автоматизации: карточка движка, карточки правил, пустое состояние -->
@@ -712,6 +718,10 @@
     <string name="automation_card_when">КОГДА</string>
     <string name="automation_card_only">ТОЛЬКО КОГДА</string>
     <string name="automation_card_then">ТОГДА</string>
+    <string name="automation_card_missed">ЕСЛИ ПРОПУЩЕНО</string>
+    <string name="automation_missed_skip_summary">Пропускает, если назначенный момент прошёл</string>
+    <string name="automation_missed_window_summary_minutes">Срабатывает в течение %1$s мин</string>
+    <string name="automation_missed_window_summary_hours">Срабатывает в течение %1$s ч</string>
     <string name="automation_last_fired_today">Последний запуск сегодня в %1$s</string>
     <string name="automation_last_fired_yesterday">Последний запуск вчера в %1$s</string>
     <string name="automation_last_fired_on">Последний запуск %1$s в %2$s</string>

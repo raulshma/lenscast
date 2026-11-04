@@ -428,6 +428,10 @@ export function newAutomationRule(): AutomationRuleDto {
     conditions: [],
     conditionMode: 'all',
     cooldownSeconds: 60,
+    missedRunPolicy: 'catch_up',
+    // StreamDefaults.AUTOMATION_MISSED_WINDOW_DEFAULT_MINUTES — the sanitizer
+    // clamps on save, so this shapes the fresh-rule editor only.
+    missedWindowMinutes: 30,
     actions: [],
   }
 }
@@ -663,6 +667,41 @@ export function humanizeDuration(seconds: number): AutomationSummaryLine {
     return { key: 'automation.duration.minutes', params: { value: Math.max(Math.floor((clamped + 30) / 60), 1) } }
   }
   return { key: 'automation.duration.hours', params: { value: Math.max(Math.floor((clamped + 1_800) / 3_600), 1) } }
+}
+
+// ── missed-run policy ──
+
+/** The missed-run window preset chips (minutes) — exactly the app editor's presets. */
+export const AUTOMATION_MISSED_WINDOW_PRESETS: readonly number[] = [5, 15, 30, 60, 180]
+
+/**
+ * The rule-card/preview "IF MISSED" summary line for a rule's missed-run
+ * policy, or null when the row stays off the card: the default catch_up
+ * policy is the historical behavior and gets no line, and event triggers
+ * cannot miss (AutomationViewModel.missedRunSummaryLine). The window lands
+ * in the same rounded unit humanizeDuration picks — hours above the hour,
+ * minutes below (a sanitized rule never lands under a minute).
+ */
+export function automationMissedRunSummaryLine(
+  rule: Pick<AutomationRuleDto, 'triggerType' | 'missedRunPolicy' | 'missedWindowMinutes'>,
+): AutomationSummaryLine | null {
+  if (rule.triggerType !== 'time_of_day') return null
+  switch (rule.missedRunPolicy) {
+    case 'skip':
+      return { key: 'automation.missed.skipSummary' }
+    case 'window': {
+      const label = humanizeDuration(rule.missedWindowMinutes * 60)
+      return {
+        key:
+          label.key === 'automation.duration.hours'
+            ? 'automation.missed.windowSummaryHours'
+            : 'automation.missed.windowSummaryMinutes',
+        params: label.params,
+      }
+    }
+    default:
+      return null
+  }
 }
 
 // ── fire status ──

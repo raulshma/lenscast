@@ -683,6 +683,12 @@
     <string name="automation_editor_add_condition">Bedingung hinzufügen</string>
     <string name="automation_editor_remove_condition_cd">Bedingung entfernen</string>
     <string name="automation_editor_cooldown">Wiederholungssperre (Sekunden)</string>
+    <string name="automation_editor_missed_run">Wenn die Zeit verpasst wurde</string>
+    <string name="automation_editor_missed_run_hint">Was passiert, wenn die Regel zur geplanten Minute nicht laufen kann — das Gerät war aus, oder die Bedingungen waren erst später erfüllt</string>
+    <string name="automation_missed_catch_up">Immer nachholen</string>
+    <string name="automation_missed_skip">Überspringen</string>
+    <string name="automation_missed_window">Innerhalb eines Zeitfensters</string>
+    <string name="automation_editor_missed_window">Nachholfenster</string>
     <string name="automation_editor_window_wrap_hint">Ein Zeitfenster über Mitternacht hinaus (von &gt; bis) reicht in den nächsten Tag</string>
 
     <!-- Automatisierung: Engine-Karte, Regelkarten, Leerer Zustand -->
@@ -693,6 +699,10 @@
     <string name="automation_card_when">WENN</string>
     <string name="automation_card_only">NUR WENN</string>
     <string name="automation_card_then">DANN</string>
+    <string name="automation_card_missed">FALLS VERPASST</string>
+    <string name="automation_missed_skip_summary">Überspringt, wenn der geplante Moment verstrichen ist</string>
+    <string name="automation_missed_window_summary_minutes">Holt innerhalb von %1$s Min. auf</string>
+    <string name="automation_missed_window_summary_hours">Holt innerhalb von %1$s h auf</string>
     <string name="automation_last_fired_today">Zuletzt heute um %1$s ausgeführt</string>
     <string name="automation_last_fired_yesterday">Zuletzt gestern um %1$s ausgeführt</string>
     <string name="automation_last_fired_on">Zuletzt ausgeführt am %1$s um %2$s</string>

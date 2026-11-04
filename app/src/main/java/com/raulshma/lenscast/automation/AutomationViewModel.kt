@@ -18,6 +18,7 @@ import com.raulshma.lenscast.capture.MotionArmingPolicy
 import com.raulshma.lenscast.camera.CameraService
 import com.raulshma.lenscast.core.StreamDefaults
 import com.raulshma.lenscast.data.SettingsDataStore
+import com.raulshma.lenscast.gallery.GalleryDates
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -25,9 +26,8 @@ import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
-import java.time.Instant
-import java.time.ZoneId
-import java.time.temporal.ChronoUnit
+import java.util.Calendar
+import java.util.TimeZone
 import java.util.UUID
 
 /**
@@ -347,12 +347,17 @@ class AutomationViewModel(
          * their HH:mm templates; anything older carries the epoch instant for
          * a locale-formatted date. A non-positive instant (never fired) is
          * null — the card shows nothing.
+         *
+         * Local days and minute-of-day come from [GalleryDates]/[Calendar] —
+         * java.time is API 26+ and minSdk is 23 (the GalleryDates doc spells
+         * out the convention); the epoch-day gap matches
+         * `ChronoUnit.DAYS.between`'s local-date difference exactly.
          */
-        fun lastFiredLabel(lastFiredAtMs: Long, nowMs: Long, zone: ZoneId): AutomationLastFiredLabel? {
+        fun lastFiredLabel(lastFiredAtMs: Long, nowMs: Long, zone: TimeZone): AutomationLastFiredLabel? {
             if (lastFiredAtMs <= 0) return null
-            val fired = Instant.ofEpochMilli(lastFiredAtMs).atZone(zone)
-            val dayGap = ChronoUnit.DAYS.between(fired.toLocalDate(), Instant.ofEpochMilli(nowMs).atZone(zone).toLocalDate())
-            val minuteOfDay = fired.hour * 60 + fired.minute
+            val dayGap = GalleryDates.epochDayOf(nowMs, zone) - GalleryDates.epochDayOf(lastFiredAtMs, zone)
+            val fired = Calendar.getInstance(zone).apply { timeInMillis = lastFiredAtMs }
+            val minuteOfDay = fired.get(Calendar.HOUR_OF_DAY) * 60 + fired.get(Calendar.MINUTE)
             return when {
                 dayGap <= 0L -> AutomationLastFiredLabel.Today(minuteOfDay)
                 dayGap == 1L -> AutomationLastFiredLabel.Yesterday(minuteOfDay)
@@ -371,6 +376,41 @@ class AutomationViewModel(
                 clamped < 60 -> AutomationDurationLabel.Seconds(clamped)
                 clamped < 3_600 -> AutomationDurationLabel.Minutes(((clamped + 30) / 60).coerceAtLeast(1))
                 else -> AutomationDurationLabel.Hours(((clamped + 1_800) / 3_600).coerceAtLeast(1))
+            }
+        }
+
+        /**
+         * The rule-card/preview "IF MISSED" summary line for a rule's
+         * missed-run policy, or null when the row stays off the card: the
+         * default catch-up policy is the historical behavior and gets no line,
+         * and event triggers cannot miss (an event fires in the present). The
+         * window lands in the same rounded unit [humanizeDuration] picks —
+         * hours above the hour, minutes below (a sanitized rule never lands
+         * under a minute, so the seconds template has no case here).
+         */
+        fun missedRunSummaryLine(rule: AutomationRule): AutomationSummaryLine? {
+            if (rule.triggerType != AutomationTriggerCatalog.TIME_OF_DAY) return null
+            return when (rule.missedRunPolicy) {
+                AutomationRule.MISSED_RUN_SKIP ->
+                    AutomationSummaryLine(R.string.automation_missed_skip_summary)
+                AutomationRule.MISSED_RUN_WINDOW ->
+                    when (val label = humanizeDuration(rule.missedWindowMinutes * 60)) {
+                        is AutomationDurationLabel.Hours -> AutomationSummaryLine(
+                            R.string.automation_missed_window_summary_hours,
+                            listOf(label.count.toString()),
+                        )
+                        is AutomationDurationLabel.Minutes -> AutomationSummaryLine(
+                            R.string.automation_missed_window_summary_minutes,
+                            listOf(label.count.toString()),
+                        )
+                        // A sanitized rule never lands under a minute; an
+                        // unsanitized draft floors at 1, the readout's own rule.
+                        is AutomationDurationLabel.Seconds -> AutomationSummaryLine(
+                            R.string.automation_missed_window_summary_minutes,
+                            listOf("1"),
+                        )
+                    }
+                else -> null
             }
         }
 

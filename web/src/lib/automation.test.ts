@@ -3,12 +3,14 @@ import {
   AUTOMATION_ACTION_GROUPS,
   AUTOMATION_CONDITION_GROUPS,
   AUTOMATION_COOLDOWN_PRESETS,
+  AUTOMATION_MISSED_WINDOW_PRESETS,
   AUTOMATION_TRIGGER_GROUPS,
   AUTO_SENTINEL_PARAM_NAMES,
   automationActionLabelKey,
   automationConditionLabelKey,
   automationConditionSummaryLines,
   automationDayLabelKey,
+  automationMissedRunSummaryLine,
   automationParamLabelKey,
   automationSummaryLines,
   automationTriggerLabelKey,
@@ -33,7 +35,7 @@ import {
   withRuleDuplicated,
   withSpecParam,
 } from './automation'
-import type { AutomationCatalogActionDto, AutomationRuleDto } from '../types'
+import type { AutomationCatalogActionDto, AutomationMissedRunPolicy, AutomationRuleDto } from '../types'
 
 
 /** Assert the list holds exactly one line and return it — the Kotlin tests' `.single()`. */
@@ -251,6 +253,8 @@ describe('automation rule construction', () => {
       conditions: [],
       conditionMode: 'all',
       cooldownSeconds: 60,
+      missedRunPolicy: 'catch_up',
+      missedWindowMinutes: 30,
       actions: [],
     })
   })
@@ -541,6 +545,51 @@ describe('humanizeDuration', () => {
     expect(humanizeDuration(1800)).toEqual({ key: 'automation.duration.minutes', params: { value: 30 } })
     expect(humanizeDuration(3600)).toEqual({ key: 'automation.duration.hours', params: { value: 1 } })
     expect(AUTOMATION_COOLDOWN_PRESETS).toEqual([30, 60, 300, 900, 1800, 3600])
+  })
+})
+
+describe('automationMissedRunSummaryLine', () => {
+  const timeRule = (policy: AutomationMissedRunPolicy, windowMinutes = 30) => ({
+    triggerType: 'time_of_day',
+    missedRunPolicy: policy,
+    missedWindowMinutes: windowMinutes,
+  })
+
+  it('the default catch_up policy and event rules get no card line', () => {
+    expect(automationMissedRunSummaryLine(timeRule('catch_up'))).toBeNull()
+    expect(
+      automationMissedRunSummaryLine({ triggerType: 'motion_detected', missedRunPolicy: 'skip', missedWindowMinutes: 5 }),
+    ).toBeNull()
+    // An unknown wire policy is the catch_up shape — no line (sanitize folds
+    // it before any card could render it).
+    expect(automationMissedRunSummaryLine(timeRule('anything_else' as AutomationMissedRunPolicy))).toBeNull()
+  })
+
+  it('skip renders its summary line', () => {
+    expect(automationMissedRunSummaryLine(timeRule('skip'))).toEqual({ key: 'automation.missed.skipSummary' })
+  })
+
+  it('window renders through the same rounded unit as the readout (AutomationViewModel.missedRunSummaryLine)', () => {
+    expect(automationMissedRunSummaryLine(timeRule('window', 5))).toEqual({
+      key: 'automation.missed.windowSummaryMinutes',
+      params: { value: 5 },
+    })
+    expect(automationMissedRunSummaryLine(timeRule('window', 30))).toEqual({
+      key: 'automation.missed.windowSummaryMinutes',
+      params: { value: 30 },
+    })
+    expect(automationMissedRunSummaryLine(timeRule('window', 60))).toEqual({
+      key: 'automation.missed.windowSummaryHours',
+      params: { value: 1 },
+    })
+    expect(automationMissedRunSummaryLine(timeRule('window', 180))).toEqual({
+      key: 'automation.missed.windowSummaryHours',
+      params: { value: 3 },
+    })
+  })
+
+  it('the window presets mirror the app editor chips', () => {
+    expect(AUTOMATION_MISSED_WINDOW_PRESETS).toEqual([5, 15, 30, 60, 180])
   })
 })
 

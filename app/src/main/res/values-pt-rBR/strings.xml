@@ -686,6 +686,12 @@
     <string name="automation_editor_add_condition">Adicionar condição</string>
     <string name="automation_editor_remove_condition_cd">Remover condição</string>
     <string name="automation_editor_cooldown">Intervalo entre disparos (segundos)</string>
+    <string name="automation_editor_missed_run">Se o horário for perdido</string>
+    <string name="automation_editor_missed_run_hint">O que fazer quando a regra não puder ser executada no minuto agendado — o dispositivo estava desligado ou as condições só foram atendidas mais tarde</string>
+    <string name="automation_missed_catch_up">Sempre recuperar</string>
+    <string name="automation_missed_skip">Ignorar</string>
+    <string name="automation_missed_window">Dentro de uma janela</string>
+    <string name="automation_editor_missed_window">Janela de recuperação</string>
     <string name="automation_editor_window_wrap_hint">Uma janela que atravessa a meia-noite (de &gt; até) continua no dia seguinte</string>
 
     <!-- Automação: cartão do motor, cartões de regras, estado vazio -->
@@ -696,6 +702,10 @@
     <string name="automation_card_when">QUANDO</string>
     <string name="automation_card_only">SOMENTE QUANDO</string>
     <string name="automation_card_then">ENTÃO</string>
+    <string name="automation_card_missed">SE PERDIDO</string>
+    <string name="automation_missed_skip_summary">Ignora se o momento agendado passou</string>
+    <string name="automation_missed_window_summary_minutes">Recupera em até %1$s min</string>
+    <string name="automation_missed_window_summary_hours">Recupera em até %1$s h</string>
     <string name="automation_last_fired_today">Executada pela última vez hoje às %1$s</string>
     <string name="automation_last_fired_yesterday">Executada pela última vez ontem às %1$s</string>
     <string name="automation_last_fired_on">Executada pela última vez em %1$s às %2$s</string>

@@ -14,7 +14,7 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.time.Instant
-import java.time.ZoneId
+import java.util.TimeZone
 
 /**
  * Pure JVM tests for the automation screen's UI-model helpers: the
@@ -560,7 +560,7 @@ class AutomationUiModelTest {
 
     @Test
     fun `last fired buckets today yesterday earlier and never`() {
-        val zone = ZoneId.of("UTC")
+        val zone = TimeZone.getTimeZone("UTC")
         // Fixed "now": 2026-11-04T12:00:00Z.
         val now = Instant.parse("2026-11-04T12:00:00Z").toEpochMilli()
 
@@ -591,9 +591,9 @@ class AutomationUiModelTest {
         // against a 01:00Z "now", Berlin says today while UTC says yesterday.
         val fired = Instant.parse("2026-11-03T23:30:00Z").toEpochMilli()
         val now = Instant.parse("2026-11-04T01:00:00Z").toEpochMilli()
-        assertTrue(AutomationViewModel.lastFiredLabel(fired, now, ZoneId.of("UTC")) is AutomationLastFiredLabel.Yesterday)
+        assertTrue(AutomationViewModel.lastFiredLabel(fired, now, TimeZone.getTimeZone("UTC")) is AutomationLastFiredLabel.Yesterday)
         assertTrue(
-            AutomationViewModel.lastFiredLabel(fired, now, ZoneId.of("Europe/Berlin"))
+            AutomationViewModel.lastFiredLabel(fired, now, TimeZone.getTimeZone("Europe/Berlin"))
                 is AutomationLastFiredLabel.Today,
         )
     }
@@ -624,5 +624,60 @@ class AutomationUiModelTest {
         assertEquals(AutomationDurationLabel.Minutes(15), AutomationViewModel.humanizeDuration(900))
         assertEquals(AutomationDurationLabel.Minutes(30), AutomationViewModel.humanizeDuration(1_800))
         assertEquals(AutomationDurationLabel.Hours(1), AutomationViewModel.humanizeDuration(3_600))
+    }
+
+    // ── missed-run summary line ──
+
+    @Test
+    fun `the default catch_up policy and event rules get no card line`() {
+        assertNull(
+            AutomationViewModel.missedRunSummaryLine(
+                AutomationRule(triggerType = AutomationTriggerCatalog.TIME_OF_DAY),
+            ),
+        )
+        assertNull(
+            AutomationViewModel.missedRunSummaryLine(
+                AutomationRule(triggerType = AutomationTriggerCatalog.MOTION_DETECTED, missedRunPolicy = "skip"),
+            ),
+        )
+        // An unknown policy is the catch_up shape — sanitize folds it before
+        // any card could render it.
+        assertNull(
+            AutomationViewModel.missedRunSummaryLine(
+                AutomationRule(triggerType = AutomationTriggerCatalog.TIME_OF_DAY, missedRunPolicy = "whenever"),
+            ),
+        )
+    }
+
+    @Test
+    fun `skip renders its summary line`() {
+        val line = AutomationViewModel.missedRunSummaryLine(
+            AutomationRule(triggerType = AutomationTriggerCatalog.TIME_OF_DAY, missedRunPolicy = AutomationRule.MISSED_RUN_SKIP),
+        )!!
+        assertEquals(R.string.automation_missed_skip_summary, line.res)
+        assertTrue(line.args.isEmpty())
+    }
+
+    @Test
+    fun `window renders through the same rounded unit as the readout`() {
+        val minutes = AutomationViewModel.missedRunSummaryLine(
+            AutomationRule(
+                triggerType = AutomationTriggerCatalog.TIME_OF_DAY,
+                missedRunPolicy = AutomationRule.MISSED_RUN_WINDOW,
+                missedWindowMinutes = 30,
+            ),
+        )!!
+        assertEquals(R.string.automation_missed_window_summary_minutes, minutes.res)
+        assertEquals(listOf("30"), minutes.args)
+
+        val hours = AutomationViewModel.missedRunSummaryLine(
+            AutomationRule(
+                triggerType = AutomationTriggerCatalog.TIME_OF_DAY,
+                missedRunPolicy = AutomationRule.MISSED_RUN_WINDOW,
+                missedWindowMinutes = 180,
+            ),
+        )!!
+        assertEquals(R.string.automation_missed_window_summary_hours, hours.res)
+        assertEquals(listOf("3"), hours.args)
     }
 }

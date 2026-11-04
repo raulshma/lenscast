@@ -6,6 +6,7 @@ import { formatDate, t } from '../lib/i18n'
 import { createVisiblePoll } from '../hooks/visiblePoll'
 import {
   automationConditionSummaryLines,
+  automationMissedRunSummaryLine,
   automationSummaryLines,
   automationTriggerLabelKey,
   automationTriggerSummaryLines,
@@ -329,6 +330,16 @@ export default function AutomationCard(props: Props) {
                     {thenText(rule)}
                   </span>
                 </div>
+                {/* IF MISSED: the missed-run policy, only when it deviates from
+                    the historical catch-up default (time rules only). */}
+                <Show when={automationMissedRunSummaryLine(rule)} keyed>
+                  {(line) => (
+                    <div class="automation-when-row automation-onlywhen">
+                      <span class="automation-when-label">{t('automation.ifMissed')}</span>
+                      <span class="automation-when-text">{t(line.key, line.params)}</span>
+                    </div>
+                  )}
+                </Show>
                 <Show when={lastFiredText(rule)} keyed>
                   {(text) => (
                     <div class="automation-lastfired">

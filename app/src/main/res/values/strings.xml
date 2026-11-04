@@ -695,6 +695,12 @@
     <string name="automation_editor_add_condition">Add condition</string>
     <string name="automation_editor_remove_condition_cd">Remove condition</string>
     <string name="automation_editor_cooldown">Re-fire cooldown (seconds)</string>
+    <string name="automation_editor_missed_run">If the time is missed</string>
+    <string name="automation_editor_missed_run_hint">What to do when the rule can\'t run at its scheduled minute — the device was off, or the conditions were only met later</string>
+    <string name="automation_missed_catch_up">Always catch up</string>
+    <string name="automation_missed_skip">Skip</string>
+    <string name="automation_missed_window">Within a window</string>
+    <string name="automation_editor_missed_window">Catch-up window</string>
     <string name="automation_editor_window_wrap_hint">A window that crosses midnight (from &gt; until) wraps to the next day</string>
 
     <!-- Automation screen: engine card, rule cards, empty state -->
@@ -705,6 +711,10 @@
     <string name="automation_card_when">WHEN</string>
     <string name="automation_card_only">ONLY WHEN</string>
     <string name="automation_card_then">THEN</string>
+    <string name="automation_card_missed">IF MISSED</string>
+    <string name="automation_missed_skip_summary">Skips if the scheduled moment passed</string>
+    <string name="automation_missed_window_summary_minutes">Catches up within %1$s min</string>
+    <string name="automation_missed_window_summary_hours">Catches up within %1$s h</string>
     <string name="automation_last_fired_today">Last ran today at %1$s</string>
     <string name="automation_last_fired_yesterday">Last ran yesterday at %1$s</string>
     <string name="automation_last_fired_on">Last ran %1$s at %2$s</string>

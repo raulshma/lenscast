@@ -1009,6 +1009,21 @@ data class AutomationRuleDto(
     val conditionMode: String = "all",
     /** Minimum seconds between two firings (event rules); clamped to 0..86400 on save. */
     val cooldownSeconds: Int = 60,
+    /**
+     * What a `time_of_day` rule does when its scheduled moment passes without
+     * a firing (device off, or ONLY WHEN conditions met later the same day):
+     * `"catch_up"` (fire however late — stateful actions always, one-shots
+     * within the global grace) | `"skip"` (at the scheduled time or not at
+     * all) | `"window"` (fire within [missedWindowMinutes] of the scheduled
+     * minute; every action rides). Anything else folds to `catch_up` on save.
+     * Meaningless for event triggers.
+     */
+    val missedRunPolicy: String = "catch_up",
+    /**
+     * The `"window"` missed-run-policy catch-up span in minutes; clamped to
+     * 1..1440 on save. Meaningless in the other modes.
+     */
+    val missedWindowMinutes: Int = 30,
     /** The ordered action list; each entry is validated against the catalog on save. */
     val actions: List<AutomationActionDto> = emptyList(),
     /**

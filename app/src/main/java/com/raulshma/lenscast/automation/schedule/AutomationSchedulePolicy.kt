@@ -3,8 +3,8 @@ package com.raulshma.lenscast.automation.schedule
 import com.raulshma.lenscast.camera.model.CameraSettings
 import com.raulshma.lenscast.capture.MotionArmingPolicy
 import com.raulshma.lenscast.core.StreamDefaults
-import java.time.LocalDate
-import java.time.ZoneId
+import com.raulshma.lenscast.gallery.GalleryDates
+import java.util.TimeZone
 
 /**
  * The pure decision half of the automation engine — which rules are due,
@@ -66,17 +66,18 @@ object AutomationSchedulePolicy {
      * rule without leaking the journal's internal encoding; a negative key
      * decodes to null so a corrupt journal can never surface as a bogus
      * timestamp.
+     *
+     * Local midnight comes from [GalleryDates] — java.time is API 26+ and
+     * minSdk is 23 (the GalleryDates doc spells out the convention) — and
+     * the minute rides on top as plain duration milliseconds, the same
+     * arithmetic `ZonedDateTime.plusMinutes` would have performed.
      */
-    fun decodeOccurrenceKey(key: Long, zone: ZoneId): Long? {
+    fun decodeOccurrenceKey(key: Long, zone: TimeZone): Long? {
         if (key < 0) return null
         if (key >= EVENT_JOURNAL_THRESHOLD) return key
         val epochDay = key / StreamDefaults.MINUTES_PER_DAY
         val minuteOfDay = (key % StreamDefaults.MINUTES_PER_DAY).toInt()
-        return LocalDate.ofEpochDay(epochDay)
-            .atStartOfDay(zone)
-            .plusMinutes(minuteOfDay.toLong())
-            .toInstant()
-            .toEpochMilli()
+        return GalleryDates.dayStartMillis(epochDay, zone) + minuteOfDay * 60_000L
     }
 
     /**
@@ -105,19 +106,27 @@ object AutomationSchedulePolicy {
      * Preconditions-unmet is deliberately NOT a journal write: the rule
      * stays due on the next tick and fires the moment its conditions become
      * met (later the same day), which is what "ONLY WHEN" should mean for a
-     * scheduled rule.
+     * scheduled rule — and because the deferred fire then flows through the
+     * same minutes-late computation as a late boot, the rule's missed-run
+     * policy governs both: [AutomationRule.MISSED_RUN_SKIP] fires only in
+     * the scheduled minute itself ("at the scheduled time or not at all"),
+     * [AutomationRule.MISSED_RUN_WINDOW] fires only within
+     * [AutomationRule.missedWindowMinutes] of it.
      *
-     * Catch-up: STATEFUL actions (setting convergence) are always included
-     * when the rule fires, no matter how late the tick is; ONESHOT actions
+     * Catch-up: in the default [AutomationRule.MISSED_RUN_CATCH_UP] mode,
+     * STATEFUL actions (setting convergence) are always included when the
+     * rule fires, no matter how late the tick is, and ONESHOT actions
      * (moment effects like a photo) only when the rule is within [graceMs]
-     * of its scheduled instant. Lateness is measured in the same wall-clock
-     * minute space as the occurrence keys — `currentKey - key` is the
-     * minutes-late count — not against a real epoch clock: a wall-clock
-     * comparison would smear the window by the zone offset on non-UTC
-     * devices, since the occurrence is a local-time figure. A rule whose
-     * whole action list is filtered away is dropped entirely — it never
-     * fires partially, and it is not journaled, so its one-shot can still
-     * catch up on a later tick within grace.
+     * of its scheduled instant. In WINDOW mode the rule's own window is the
+     * authority — every action rides inside it, a rule may widen the
+     * one-shot grace but never shrink the rule-wide bound. Lateness is
+     * measured in the same wall-clock minute space as the occurrence keys —
+     * `currentKey - key` is the minutes-late count — not against a real
+     * epoch clock: a wall-clock comparison would smear the window by the
+     * zone offset on non-UTC devices, since the occurrence is a local-time
+     * figure. A rule whose whole action list is filtered away is dropped
+     * entirely — it never fires partially, and it is not journaled, so its
+     * one-shot can still catch up on a later tick within grace.
      */
     fun dueRules(
         rules: List<AutomationRule>,
@@ -143,13 +152,34 @@ object AutomationSchedulePolicy {
             // Non-negative by the check above: the occurrence is never in
             // the future when lateness is computed.
             val minutesLate = currentKey - key
+            // The rule's missed-run policy is the rule-level bound on
+            // lateness, covering both late boots and deferred fires
+            // (conditions met past the scheduled minute). SKIP fires only
+            // inside the scheduled minute itself; WINDOW inside its span;
+            // CATCH_UP (the default, and the folded shape of anything
+            // unknown) carries no rule-level bound. An unknown policy
+            // reaching this far cannot be distinguished from CATCH_UP —
+            // sanitize already folds it — so only the two explicit
+            // late-hating modes gate here.
+            when (rule.missedRunPolicy) {
+                AutomationRule.MISSED_RUN_SKIP -> if (minutesLate > 0) continue
+                AutomationRule.MISSED_RUN_WINDOW ->
+                    if (minutesLate > rule.missedWindowMinutes) continue
+            }
             val actions = rule.actions.filter { action ->
                 when (AutomationActionCatalog.typeFor(action.type)?.catchUp) {
                     // Unknown action ids have no catch-up class — they cannot
                     // be executed, so they cannot catch up either. (Sanitizing
                     // upstream should have dropped them; this is the last gate.)
                     CatchUpClass.STATEFUL -> true
-                    CatchUpClass.ONESHOT -> minutesLate * 60_000L <= graceMs
+                    // Inside a rule-set window the window is the authority —
+                    // the per-action grace does not further restrict it (a
+                    // rule may widen a one-shot's catch-up, and the rule-wide
+                    // bound above already caps it). Only the default
+                    // CATCH_UP mode consults the global grace.
+                    CatchUpClass.ONESHOT ->
+                        rule.missedRunPolicy == AutomationRule.MISSED_RUN_WINDOW ||
+                            minutesLate * 60_000L <= graceMs
                     null -> false
                 }
             }
@@ -275,7 +305,14 @@ object AutomationSchedulePolicy {
      * [StreamDefaults.AUTOMATION_MAX_CONDITIONS_PER_RULE]; mode folded to
      * ALL unless it is exactly ANY; cooldown clamped into the
      * [StreamDefaults.AUTOMATION_COOLDOWN_MIN_SECONDS]..[StreamDefaults.AUTOMATION_COOLDOWN_MAX_SECONDS]
-     * span; and the action list sanitized through the catalog (unknown
+     * span; the missed-run policy folded to
+     * [AutomationRule.MISSED_RUN_CATCH_UP] unless it is exactly SKIP or
+     * WINDOW (an unknown future policy degrades to the historical catch-up
+     * behavior instead of silently skipping or widening fires) with the
+     * window clamped into the
+     * [StreamDefaults.AUTOMATION_MISSED_WINDOW_MIN_MINUTES]..[StreamDefaults.AUTOMATION_MISSED_WINDOW_MAX_MINUTES]
+     * span — zero would be SKIP by another name, so the floor stays at one
+     * minute and SKIP remains the only spelling of "not at all"; and the action list sanitized through the catalog (unknown
      * actions dropped) then capped at
      * [StreamDefaults.AUTOMATION_MAX_ACTIONS_PER_RULE] — the cap applies to
      * the sanitized list, so the rule keeps its max *executable* actions
@@ -311,6 +348,14 @@ object AutomationSchedulePolicy {
             cooldownSeconds = rule.cooldownSeconds.coerceIn(
                 StreamDefaults.AUTOMATION_COOLDOWN_MIN_SECONDS,
                 StreamDefaults.AUTOMATION_COOLDOWN_MAX_SECONDS,
+            ),
+            missedRunPolicy = when (rule.missedRunPolicy) {
+                AutomationRule.MISSED_RUN_SKIP, AutomationRule.MISSED_RUN_WINDOW -> rule.missedRunPolicy
+                else -> AutomationRule.MISSED_RUN_CATCH_UP
+            },
+            missedWindowMinutes = rule.missedWindowMinutes.coerceIn(
+                StreamDefaults.AUTOMATION_MISSED_WINDOW_MIN_MINUTES,
+                StreamDefaults.AUTOMATION_MISSED_WINDOW_MAX_MINUTES,
             ),
             actions = rule.actions
                 .mapNotNull(AutomationActionCatalog::sanitizeAction)
