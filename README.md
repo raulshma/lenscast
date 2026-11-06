@@ -11,7 +11,7 @@
 </div>
 
 <p align="center">
-  <img alt="API" src="https://img.shields.io/badge/Api%2026+-50f270?logo=android&logoColor=black&style=for-the-badge"/>
+  <img alt="API" src="https://img.shields.io/badge/Api%2023+-50f270?logo=android&logoColor=black&style=for-the-badge"/>
   <img alt="Kotlin" src="https://img.shields.io/badge/Kotlin-7F52FF?logo=kotlin&logoColor=white&style=for-the-badge"/>
   <img alt="Jetpack Compose" src="https://img.shields.io/badge/Jetpack%20Compose-4285F4?logo=jetpackcompose&logoColor=white&style=for-the-badge"/>
   <img alt="Material 3" src="https://custom-icon-badges.demolab.com/badge/material%20you-lightblue?style=for-the-badge&logoColor=333&logo=material-you"/>
@@ -61,7 +61,7 @@ LensCast is an Android camera application with live video/audio streaming to web
 - Color temperature adjustment (2000K–9000K) for manual white balance
 - Viewfinder aids: composition grid lines (3×3 / 4×4 / golden ratio), a two-axis spirit level (green when near-level), a self-timer (3 s / 10 s, tap-to-cancel), and pro tools computed from the live analysis stream — luma histogram, over/under-exposure zebras, and focus peaking
 - Photo capture quality: JPEG quality setting (60–100) with a maximize-quality capture mode, RAW+JPEG (DNG) capture on cameras that support it (per-shot toggle, fail-closed on capability check), and opt-in EXIF tagging — GPS geotag (runtime location permission requested only when the setting is first enabled) plus artist/comment metadata
-- Localized UI: the app screens ship in English, German, Spanish, French, Russian, Simplified Chinese, and Brazilian Portuguese
+- Localized UI: the app screens and the web dashboard ship in English, German, Spanish, French, Russian, Simplified Chinese, and Brazilian Portuguese
 
 ### Live Streaming
 - HTTPS mode with a self-signed on-device certificate (fingerprint shown for one-tap verification) — encrypts streams and enables in-browser microphone talkback
@@ -130,7 +130,7 @@ LensCast is an Android camera application with live video/audio streaming to web
 ### Automation
 - Broadcast intents for automation apps, adb, and scripts: start/stop streaming, capture a photo, start/stop recording, set torch, set siren — `com.raulshma.lenscast.action.*`, see `automation/AutomationReceiver.kt`. Optional extras: `enabled` (boolean) makes SET_TORCH/SET_SIREN set an explicit on/off state instead of toggling, and `durationSeconds` (integer) bounds a START_RECORDING clip (0–3600) or auto-stops a SET_SIREN start (a new duration command re-arms the timer, extending a running siren)
 - The receiver is exported but permission-guarded: a sending app must declare `<uses-permission android:name="com.raulshma.lenscast.permission.AUTOMATION" />` — a `dangerous`-level permission, so a helper app must also request it at runtime (like camera access); it is not granted automatically at install. Senders that cannot hold permissions — Tasker/MacroDroid intent actions — can still reach it over adb (`adb shell am broadcast`, which sends as the exempt shell uid) or from a tiny helper app that declares and runtime-requests the permission
-- Scheduled automation rules (off by default): fully-featured if/then rules — **WHEN** a trigger, **ONLY WHEN** optional preconditions, **THEN** actions — configured in-app under **App settings → Automation** (master switch, rule cards, and a full-screen editor with a trigger picker, catalog-driven trigger/condition/action editors, an ALL/ANY condition toggle, and a per-rule cooldown; up to 16 rules with 8 conditions and 8 actions each). Nine trigger kinds: `time_of_day` (a local wall-clock minute 0–1439 plus a day mask — bit 0 = Monday … bit 6 = Sunday, 127 = every day, the arm schedule's convention), detection events (`motion_detected` / `sound_detected` / `tamper_detected`), power edges (`charging_changed`, `battery_level` threshold crossing), streaming lifecycle (`streaming_changed`, `viewers_changed` 0↔≥1), and `app_started` (once per process). Eleven condition kinds gate any rule on live state — time window (midnight-wrapping, day-masked), charging, battery range, power save, Wi-Fi, streaming, viewer range, torch, recording, thermal, motion detection — combined ALL or ANY, evaluated against a fresh sensor snapshot at fire time. The engine is an app-scoped 30 s poll for time rules plus pushed events (serialized behind one mutex, no boot receiver, no exact alarms): time rules keep their boot catch-up semantics, tunable per rule — the missed-run policy (`catch_up` = the default, stateful actions (setting convergence) fire no matter how late the tick is, the one moment-effect action (photo capture) only catches up within a 10-minute grace; `skip` = at the scheduled time or not at all; `window` = fire within a per-rule window (1–1440 min, presets 5/15/30/60/180) with every action riding; deferred fires — conditions met past the scheduled minute — obey the same policy) — while event rules run immediately with all actions (no catch-up filter), gated by a per-rule persisted cooldown (0–86400 s, default 60). A persisted fire journal (`filesDir/automation/fire_journal.json`) keeps restarts and rule edits from double-firing — time rules store per-day occurrence keys, event rules store epoch-ms timestamps, and the magnitude split means switching a rule's trigger kind never wedges it. Everything is sanitized on every save path: unknown trigger kinds degrade to `time_of_day` (so old payloads decode unchanged), invalid params fold to documented defaults
+- Scheduled automation rules (off by default): fully-featured if/then rules — **WHEN** a trigger, **ONLY WHEN** optional preconditions, **THEN** actions — configured in-app under **App settings → Automation** (master switch, rule cards with WHEN / ONLY WHEN / THEN summaries, and a full-screen editor with a trigger picker, catalog-driven trigger/condition/action editors whose lists reorder in place, an ALL/ANY condition toggle, a per-rule cooldown, a live rule preview, and a rotation-proof draft that asks before discarding unsaved edits; up to 16 rules with 8 conditions and 8 actions each). Nine trigger kinds: `time_of_day` (a local wall-clock minute 0–1439 plus a day mask — bit 0 = Monday … bit 6 = Sunday, 127 = every day, the arm schedule's convention), detection events (`motion_detected` / `sound_detected` / `tamper_detected`), power edges (`charging_changed`, `battery_level` threshold crossing), streaming lifecycle (`streaming_changed`, `viewers_changed` 0↔≥1), and `app_started` (once per process). Eleven condition kinds gate any rule on live state — time window (midnight-wrapping, day-masked), charging, battery range, power save, Wi-Fi, streaming, viewer range, torch, recording, thermal, motion detection — combined ALL or ANY, evaluated against a fresh sensor snapshot at fire time. The engine is an app-scoped 30 s poll for time rules plus pushed events (serialized behind one mutex, no boot receiver, no exact alarms): time rules keep their boot catch-up semantics, tunable per rule — the missed-run policy (`catch_up` = the default, stateful actions (setting convergence) fire no matter how late the tick is, the one moment-effect action (photo capture) only catches up within a 10-minute grace; `skip` = at the scheduled time or not at all; `window` = fire within a per-rule window (1–1440 min, presets 5/15/30/60/180) with every action riding; deferred fires — conditions met past the scheduled minute — obey the same policy) — while event rules run immediately with all actions (no catch-up filter), gated by a per-rule persisted cooldown (0–86400 s, default 60). A persisted fire journal (`filesDir/automation/fire_journal.json`) keeps restarts and rule edits from double-firing — time rules store per-day occurrence keys, event rules store epoch-ms timestamps, and the magnitude split means switching a rule's trigger kind never wedges it. Everything is sanitized on every save path: unknown trigger kinds degrade to `time_of_day` (so old payloads decode unchanged), invalid params fold to documented defaults
 - Eleven catalog-typed action types, sanitized and clamped on every save path: `camera_exposure` (ISO/exposure time, "0" = auto), `camera_ev`, `camera_zoom`, `camera_fps`, `camera_lens`, `torch`, `stream`, `capture_photo`, `recording` (optional bounded duration), `siren`, and `detection` (motion/sound toggles). Camera-valued actions merge into the persisted camera settings and are applied in place with no stream interruption — only a lens switch rebinds, briefly restarting the preview/stream (flagged in the editor) — and the torch action takes an optional strength level on Android 15+ (API 35) devices with a multi-level flash (1–8; the device's real maximum wins at apply time; below that the torch is plain on/off)
 - The headline recipe (the Day/Night security cam): a **Night** rule at 18:00 every day — `camera_exposure` ISO 4000 + exposure 175 ms, `torch` on at strength 1; a **Day** rule at 07:00 — `camera_exposure` ISO auto (0) + exposure auto (0), `torch` off. And an if/then rule the time-only engine could not express: **Night deterrent** — WHEN `motion_detected`, ONLY WHEN the 22:00–06:00 time window AND streaming (ALL), THEN `siren` 10 s + photo, re-fire cooldown 120 s. (The catalog bounds ISO at 0–10000 as a sanity ceiling — the reporter's 4000 fits — and the device's live sensor range always wins at apply; strength needs the API 35+ multi-level-flash hardware above.) Manual LED control and the detection coordinator's auto-siren/auto-torch deterrence are unchanged, as is the broadcast surface
 - Web control: `GET/PUT /api/automation` (session-auth like `/api/settings` — viewers read-only, API tokens read-only). GET publishes the state plus three read-only catalogs — actions (ids, param kinds/bounds/defaults, catch-up class, stream-interruption flag), triggers, and conditions — so a client can render rule editors entirely from device truth; PUT takes `{enabled, rules}` wholesale, sanitizes server-side, and answers the sanitized truth. The built-in dashboard ships this today as an Automation card on its settings page — the same rule list and editor as the in-app screen, rendered generically from the published catalogs — see [Automation: If/Then Rules](docs/automation.md)
@@ -187,9 +187,11 @@ LensCast is an Android camera application with live video/audio streaming to web
 - [NVR integration](docs/nvr-integration.md) — Home Assistant (generic camera + ONVIF), VLC/ffmpeg, Frigate, and detection webhook recipes
 - [RTMP push](docs/rtmp.md) — push-publishing the stream to YouTube, Twitch, nginx-rtmp, and other RTMP(S) servers
 - [SRT push](docs/srt.md) — push-publishing the stream over Secure Reliable Transport (UDP) to SRT listeners
-- [Scheduled automation](docs/automation.md) — time-of-day rules that drive the camera, torch, stream, recording, siren, and detection toggles: the Day/Night recipe, scheduling and catch-up semantics, the action catalog, torch-strength requirements, and the `/api/automation` web API
+- [Automation: If/Then Rules](docs/automation.md) — WHEN / ONLY WHEN / THEN rules over time-of-day, detection, power, and streaming triggers: the Day/Night recipe, condition combinations, missed-run (catch-up) semantics, the action catalog, torch-strength requirements, and the `/api/automation` web API
 - [UnifiedPush](docs/unifiedpush.md) — alerting an Android receiver through a UnifiedPush distributor: pairing, registration API, payload, and the `android-connector` recipe
+- [High frame rate / slow motion](docs/high-frame-rate.md) — a feasibility note: why the frame-rate ceiling stays at 60 fps and what a real slow-motion implementation would take
 - [Wear companion](wear/README.md) — the Wear OS module: watch-side stream toggle, photo capture, and snapshot view over the LAN API
+- [F-Droid distribution](docs/fdroid.md) — how the `fdroid` flavor builds (no self-updater), the per-release auto-update flow, and the one-time fdroiddata submission
 - [Contributing](CONTRIBUTING.md) — build prerequisites, test commands, architecture onboarding, and the release checklist
 - [Security](SECURITY.md) — threat model, known risk envelope, and how to report vulnerabilities
 - [Privacy](PRIVACY.md) — what LensCast does (and never does) with your data
@@ -216,10 +218,10 @@ LensCast is an Android camera application with live video/audio streaming to web
 
 ## Requirements
 
-- Android 6.0 (API 23) or later (ML object detection requires Android 7.0 / API 24+)
+- Android 6.0 (API 23) or later (ML object detection and sound classification require Android 7.0 / API 24+; the Wear companion requires Android 8.0 / API 26+)
 - WiFi connection for streaming
 - Camera and microphone permissions
-- Node.js 20+ and npm (for building the web UI)
+- Node.js 22+ and npm (for building the web UI)
 - JDK 21 (for building the Android app — matches the Gradle daemon toolchain in `gradle/gradle-daemon-jvm.properties`)
 
 ---
@@ -231,7 +233,7 @@ LensCast is an Android camera application with live video/audio streaming to web
 
   - Android Studio or Gradle CLI
   - JDK 21
-  - Node.js 20+ with npm
+  - Node.js 22+ with npm
 </details>
 
 ### Build Commands
@@ -264,18 +266,18 @@ npm install
 npm run dev    # Starts dev server on port 3000 with proxy to Android device
 ```
 
-The Vite dev server proxies `/api`, `/stream`, `/audio`, and `/snapshot` requests to `localhost:8080` for local development against a running LensCast instance.
+The Vite dev server proxies `/api`, `/stream`, `/audio`, `/snapshot`, and the `/ws` WebSocket routes to `localhost:8080` for local development against a running LensCast instance.
 
 ---
 
 ## CI/CD
 
-A CI workflow (`.github/workflows/ci.yml`) runs on every push to main, every pull request, and every release branch (`v*`, `release/**`): web UI typecheck + vitest, JVM unit tests for both flavors, a store-flavor debug build, and the Wear companion's unit tests + debug build.
+A CI workflow (`.github/workflows/ci.yml`) runs on every push to main, every pull request, and every release branch (`v*`, `release/**`): web UI typecheck + vitest, JVM unit tests for both flavors, a store-flavor lint + debug build, and the Wear companion's unit tests + debug build.
 
 A GitHub Actions workflow (`.github/workflows/release.yml`) automates release builds:
 - Triggers on pushes to `v*` or `release/**` branches, or via manual dispatch
 - Runs the full test suite (web, app, wear) before any signed build
-- Builds the **store flavor** (with the in-app updater) as one signed APK per ABI (`armeabi-v7a`, `arm64-v8a`, `x86_64`) with distinct `versionCode`s (`major*10000 + minor*1000 + patch*10 + abiIndex`); the `fdroid` flavor is built by F-Droid's own recipe and distributed on F-Droid ([get it here](https://f-droid.org/packages/com.raulshma.lenscast/)), not shipped here
+- Builds the **store flavor** (with the in-app updater) as one signed APK per ABI (`armeabi-v7a`, `arm64-v8a`, `x86_64`) with distinct `versionCode`s (`major*10000 + minor*1000 + patch*10 + abiIndex`); the `fdroid` flavor is built by F-Droid's own recipe and distributed on F-Droid ([get it here](https://f-droid.org/packages/com.raulshma.lenscast/)), not shipped here (see [F-Droid distribution](docs/fdroid.md) for the per-release flow)
 - Publishes them to a **draft** GitHub Release with automatic semantic version tagging — verify the assets, then publish
 - The `versionCode`/`versionName` literals in `app/build.gradle.kts` (which F-Droid's update checker reads) must be bumped in the same release — the workflow overrides them per build via `-PversionCode`/`-PversionName` but does not rewrite the tag's literals
 
@@ -292,11 +294,15 @@ A GitHub Actions workflow (`.github/workflows/release.yml`) automates release bu
 | `CHANGE_WIFI_MULTICAST_STATE` | mDNS service discovery |
 | `FOREGROUND_SERVICE` / `FOREGROUND_SERVICE_CAMERA` / `FOREGROUND_SERVICE_MICROPHONE` | Background streaming and recording |
 | `FOREGROUND_SERVICE_CONNECTED_DEVICE` | Keeping the camera web server and its outbound alert delivery alive between streams |
+| `RECEIVE_BOOT_COMPLETED` | Resuming streams after boot (when the setting is enabled) |
+| `BIND_QUICK_SETTINGS_TILE` | The stream Quick Settings tile |
 | `WAKE_LOCK` | Keeping the device awake during long sessions |
 | `REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` | Requesting Doze mode exemption |
 | `READ_MEDIA_IMAGES` / `READ_MEDIA_VIDEO` | Accessing captured media in gallery |
 | `POST_NOTIFICATIONS` | Foreground service notifications and local detection alerts |
 | `ACCESS_COARSE_LOCATION` | Optional EXIF GPS geotagging of photos (runtime-requested only when the setting is first enabled) |
+| `REQUEST_INSTALL_PACKAGES` | Installing self-update APKs — declared only in the store flavor (the F-Droid flavor omits it) |
+| `com.raulshma.lenscast.permission.AUTOMATION` | Custom permission guarding the broadcast-receiver automation API — senders must declare it and be granted it at runtime |
 
 ---
 
@@ -313,16 +319,21 @@ app/src/main/java/com/raulshma/lenscast/
 ├── gallery/         Media gallery grid, viewer with pager, and media management
 ├── streaming/       HTTP server, MJPEG/audio/RTSP streaming, web API controller
 │   ├── model/       Web API DTOs
+│   ├── web/         Web API router and per-route handlers (auth, automation, detection events, …)
+│   ├── hls/         HLS playlist generation and MPEG-TS packetization (the iOS playback rung)
+│   ├── ws/          WebSocket media routes (WebCodecs video, talkback)
 │   ├── onvif/       ONVIF Profile S device service and WS-Discovery responder
+│   ├── rtsp/        RTSP server, H.264/H.265 encoders, AAC encoder, RTP packetizers
 │   ├── rtmp/        RTMP push publisher (AMF0, chunk protocol, FLV media tags)
 │   ├── srt/         SRT push publisher (caller handshake, MPEG-TS muxer, ACK/NAK stats)
+│   ├── webrtc/      Shared libwebrtc plumbing behind the WHEP and WHIP endpoints
 │   ├── whep/        WebRTC viewer endpoint (WHEP: SDP offer/answer, session registry)
-│   ├── whip/        WHIP push publisher (libwebrtc offer/answer, signaling)
-│   └── rtsp/        RTSP server, H.264/H.265 encoders, AAC encoder, RTP packetizers
+│   └── whip/        WHIP push publisher (libwebrtc offer/answer, signaling)
 ├── settings/        Camera settings and app settings screens with ViewModels
 ├── navigation/      Compose navigation graph with shared element transitions
-├── core/            Power management, thermal monitoring, network monitoring, media crypto
+├── core/            Power management, thermal monitoring, network monitoring, media crypto, MQTT and alert-push publishers
 ├── data/            DataStore settings persistence, capture history store
+├── update/          In-app self-update: GitHub release check, SHA-256 integrity gate, APK install
 └── ui/              Theme, shared components, and animation utilities
 
 wear/                Wear OS companion module (watch-side remote control)
@@ -332,6 +343,7 @@ web/                 SolidJS web UI for remote control
 │   ├── lib/         Pure dashboard logic (timeline math, stats mapping, forecasts)
 │   ├── api/         HTTP API client
 │   ├── hooks/       Application state management and utilities
+│   ├── i18n/        Dashboard translation catalogs (en, de, es, fr, pt-BR, ru, zh)
 │   └── types.ts     TypeScript type definitions and constants
 └── vite.config.ts   Build config (outputs to Android assets)
 ```
