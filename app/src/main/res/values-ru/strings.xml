@@ -364,6 +364,9 @@
     <string name="settings_disable_battery_opt">Отключить оптимизацию батареи</string>
     <string name="settings_disable_battery_opt_description">Не даёт системе останавливать приложение в фоне</string>
     <string name="settings_resume_on_boot">Возобновлять трансляции после перезагрузки</string>
+
+    <string name="settings_keep_awake">Не давать устройству засыпать</string>
+    <string name="settings_keep_awake_description">Держит CPU активной, пока приложение работает, поэтому правила автоматизации срабатывают по расписанию даже при заблокированном экране. Расходует больше батареи; при выходе из приложения удержание снимается. Глубокий Doze (без зарядки и в покое) всё же может приостановить его — сочетайте с отключением оптимизации батареи выше.</string>
     <string name="settings_section_rtsp">RTSP-поток</string>
     <string name="settings_enable_rtsp">Включить RTSP-трансляцию</string>
     <string name="settings_rtsp_port">Порт RTSP</string>

@@ -140,6 +140,22 @@ class StreamingSessionTest {
         }
     }
 
+    /** Retries a mockk [verify] until the async loop's first tick has landed. */
+    private fun verifyUntil(deadlineMs: Long = 10_000, block: () -> Unit) {
+        val deadline = System.currentTimeMillis() + deadlineMs
+        var lastFailure: AssertionError? = null
+        while (System.currentTimeMillis() < deadline) {
+            try {
+                block()
+                return
+            } catch (e: AssertionError) {
+                lastFailure = e
+                Thread.sleep(10)
+            }
+        }
+        throw lastFailure ?: AssertionError("verification never landed")
+    }
+
     // ── begin ──
 
     @Test
@@ -199,6 +215,16 @@ class StreamingSessionTest {
         // mode instead of dropping the process to background network.
         val last = startedServiceIntents().last()
         assertEquals(StreamingService.ACTION_SERVER, last.action)
+    }
+
+    @Test
+    fun `begin's poll loop renews the wake lock on its first tick`() {
+        runWithMainPumped { session.begin() }
+        // The optimization poll's launch path runs one tick immediately —
+        // the cadence itself stays real-time (see the header note) — and the
+        // tick must re-arm the streaming lock before its 60-minute budget
+        // can lapse (renew no-ops or release+re-acquires inside PowerManager).
+        verifyUntil { verify(exactly = 1) { powerManager.renewWakeLock() } }
     }
 
     // ── end ──

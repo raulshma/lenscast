@@ -11,7 +11,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material3.Button
 import androidx.compose.material3.LinearProgressIndicator
@@ -23,7 +22,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.foundation.text.KeyboardActions
@@ -156,6 +154,7 @@ fun AppSettingsScreen(
     val mdnsEnabled by viewModel.mdnsEnabled.collectAsState()
     val isIgnoringBatteryOptimizations by viewModel.isIgnoringBatteryOptimizations
     val resumeStreamsOnBoot by viewModel.resumeStreamsOnBoot.collectAsState()
+    val keepAwakeEnabled by viewModel.keepAwakeEnabled.collectAsState()
     val continuousRecording by viewModel.continuousRecording.collectAsState()
     val continuousSegmentMinutes by viewModel.continuousSegmentMinutes.collectAsState()
     val ecoIdleFpsEnabled by viewModel.ecoIdleFpsEnabled.collectAsState()
@@ -480,29 +479,18 @@ fun AppSettingsScreen(
 
             item {
                 SettingsSection(title = stringResource(R.string.settings_section_background)) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = stringResource(R.string.settings_disable_battery_opt),
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurface,
-                            )
-                            Text(
-                                text = stringResource(R.string.settings_disable_battery_opt_description),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                        Spacer(modifier = Modifier.width(12.dp))
-                        Switch(
-                            checked = isIgnoringBatteryOptimizations,
-                            onCheckedChange = { viewModel.requestIgnoreBatteryOptimization(activity) }
-                        )
-                    }
+                    SwitchSetting(
+                        title = stringResource(R.string.settings_disable_battery_opt),
+                        description = stringResource(R.string.settings_disable_battery_opt_description),
+                        checked = isIgnoringBatteryOptimizations,
+                        onCheckedChange = { viewModel.requestIgnoreBatteryOptimization(activity) }
+                    )
+                    SwitchSetting(
+                        title = stringResource(R.string.settings_keep_awake),
+                        description = stringResource(R.string.settings_keep_awake_description),
+                        checked = keepAwakeEnabled,
+                        onCheckedChange = { viewModel.updateKeepAwakeEnabled(it) }
+                    )
                     SwitchSetting(
                         title = stringResource(R.string.settings_resume_on_boot),
                         checked = resumeStreamsOnBoot,

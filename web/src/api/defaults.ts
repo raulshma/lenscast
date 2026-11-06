@@ -122,6 +122,7 @@ export const API_DEFAULTS = {
   alertQuietHoursEnabled: false,
   alertQuietHoursStartMinute: 1320,
   alertQuietHoursEndMinute: 420,
+  keepAwakeEnabled: true,
   tamperDetectionEnabled: false,
   mqttEnabled: false,
   mqttTelemetryEnabled: false,

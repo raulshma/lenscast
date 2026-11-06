@@ -27,6 +27,7 @@ import com.raulshma.lenscast.capture.TimelapseComposer
 import com.raulshma.lenscast.capture.ml.AudioModelStore
 import com.raulshma.lenscast.capture.ml.DetectionModelStore
 import com.raulshma.lenscast.core.ConnectivityMonitor
+import com.raulshma.lenscast.core.KeepAwakeController
 import com.raulshma.lenscast.core.KeystoreMediaKeyProvider
 import com.raulshma.lenscast.core.MediaCrypto
 import com.raulshma.lenscast.core.PowerManager
@@ -375,6 +376,7 @@ class MainApplication : Application(), SingletonImageLoader.Factory, AppGraph {
         wireFramePump()
         initializeStreamStateJournal()
         initializeAutomationScheduler()
+        initializeKeepAwake()
         initializeTamperMonitor()
         initializeDetectionMicWatch()
         initializeWidgetRefresh()
@@ -452,6 +454,24 @@ class MainApplication : Application(), SingletonImageLoader.Factory, AppGraph {
     private fun initializeAutomationScheduler() {
         automationScheduler.start()
         automationEventWiring.start()
+    }
+
+    /**
+     * Keep-awake is app-runtime composition, not screen state: the
+     * security-phone use case needs the CPU awake while the screen is locked
+     * — the automation engine is a 30-second poll loop with no alarms, and
+     * without the hold a suspended CPU silently stops every rule, detection
+     * path and stream at once. The hold rides the keep-awake setting (on by
+     * default); quitting is the exit ladder's process death, which releases
+     * every wakelock — the controller needs no teardown.
+     */
+    private fun initializeKeepAwake() {
+        KeepAwakeController(
+            keepAwakeEnabledFromDisk = { settingsDataStore.keepAwakeEnabledFromDisk() },
+            keepAwakeEnabled = settingsDataStore.keepAwakeEnabled,
+            powerManager = powerManager,
+            scope = appScope,
+        ).start()
     }
 
     /**

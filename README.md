@@ -168,7 +168,8 @@ LensCast is an Android camera application with live video/audio streaming to web
 - Eco idle-fps mode (opt-in, `ecoIdleFpsEnabled`): while on battery, thermal is normal, and no stream consumer is connected, the frame rate drops to a low idle floor and live-audio encoding pauses — the first viewer, charger, or thermal event restores the full rate (with a cooldown so flapping clients can't thrash)
 - Charge diagnostics for 24/7 devices: `GET /api/system` battery detail also carries the charge counter (mAh), the signed instant current (µA), and — on Android 14+ — the charge-cycle count, when the hardware reports them
 - Power save mode detection and Doze mode awareness
-- Wake lock management for long-duration streaming and recording sessions
+- Wake lock management for long-duration streaming and recording sessions: the live session's partial wake lock is renewed by its 30-second poll well before its 60-minute budget lapses, so a locked device streams (and automates) indefinitely
+- Keep awake (on by default, `keepAwakeEnabled`): a process-lifetime partial wake lock so the security-phone posture survives the screen locking — automation rules fire on schedule and event rules fire in the present while the app runs, no streaming required; quitting the app releases the hold, and deep doze (unplugged + stationary) still calls for the battery-optimization exemption below
 - Battery optimization exemption request for uninterrupted background operation
 
 ### Networking

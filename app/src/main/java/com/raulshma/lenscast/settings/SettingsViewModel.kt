@@ -157,6 +157,7 @@ class SettingsViewModel(
     val httpsEnabled: StateFlow<Boolean> = settingsDataStore.httpsEnabled
     val audioDeviceId: StateFlow<String> = settingsDataStore.audioDeviceId
     val resumeStreamsOnBoot: StateFlow<Boolean> = settingsDataStore.resumeStreamsOnBoot
+    val keepAwakeEnabled: StateFlow<Boolean> = settingsDataStore.keepAwakeEnabled
 
     // Auth state comes straight from the Settings Store — no writable mirror.
     // Typing responsiveness comes from the store flow re-emit on save.
@@ -424,6 +425,8 @@ class SettingsViewModel(
     fun updateAudioDeviceId(id: String) = save { settingsDataStore.saveAudioDeviceId(id) }
 
     fun updateResumeStreamsOnBoot(enabled: Boolean) = save { settingsDataStore.saveResumeStreamsOnBoot(enabled) }
+
+    fun updateKeepAwakeEnabled(enabled: Boolean) = save { settingsDataStore.saveKeepAwakeEnabled(enabled) }
 
     fun updateCaptureRetentionDays(days: Int) = save { settingsDataStore.saveCaptureRetentionDays(days) }
 

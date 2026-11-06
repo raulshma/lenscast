@@ -58,6 +58,7 @@ export default function AppSettingsPanel(props: Props) {
   const mediaEncryption = streamToggle(streaming, 'mediaEncryptionEnabled', save)
   const httpsToggle = streamToggle(streaming, 'httpsEnabled', save)
   const rtspSubStream = streamToggle(streaming, 'rtspSubStreamEnabled', save)
+  const keepAwake = streamToggle(streaming, 'keepAwakeEnabled', save)
 
   return (
     <section class="settings-panel" id="app-settings-panel">
@@ -460,6 +461,28 @@ export default function AppSettingsPanel(props: Props) {
       />
 
       <RecordingTimeline />
+
+      {/* Keep awake (the security-phone posture): the CPU hold that lets the
+          automation engine keep ticking while the screen is locked. */}
+      <SettingsCard
+        icon={
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+            <path d="M18.36 6.64a9 9 0 11-12.73 0" />
+            <line x1="12" y1="2" x2="12" y2="12" />
+          </svg>
+        }
+        title={t('keepawake.title')}
+      >
+        <div class="field-group">
+          <ToggleRow
+            id="keep-awake-toggle-app"
+            label={t('keepawake.enable')}
+            checked={keepAwake.checked()}
+            onToggle={keepAwake.onToggle}
+            hint={t('keepawake.desc')}
+          />
+        </div>
+      </SettingsCard>
 
       <SystemPanel />
 

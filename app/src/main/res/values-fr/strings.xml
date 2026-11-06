@@ -348,6 +348,9 @@
     <string name="settings_disable_battery_opt">Désactiver l\'optimisation de la batterie</string>
     <string name="settings_disable_battery_opt_description">Empêche le système d\'arrêter l\'application en arrière-plan</string>
     <string name="settings_resume_on_boot">Reprendre les flux au démarrage de l\'appareil</string>
+
+    <string name="settings_keep_awake">Garder l\'appareil actif</string>
+    <string name="settings_keep_awake_description">Maintient le CPU éveillé tant que l\'application tourne, afin que les règles d\'automatisation se déclenchent à l\'heure même écran verrouillé. Consomme plus de batterie ; quitter l\'application libère le maintien. Le Doze profond (débranché et immobile) peut quand même le suspendre — associez-le à l\'exemption d\'optimisation de la batterie ci-dessus.</string>
     <string name="settings_section_rtsp">Flux RTSP</string>
     <string name="settings_enable_rtsp">Activer la diffusion RTSP</string>
     <string name="settings_rtsp_port">Port RTSP</string>

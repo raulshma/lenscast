@@ -345,6 +345,9 @@
     <string name="settings_disable_battery_opt">Akkuoptimierung deaktivieren</string>
     <string name="settings_disable_battery_opt_description">Verhindert, dass das System die App im Hintergrund stoppt</string>
     <string name="settings_resume_on_boot">Streams beim Neustart fortsetzen</string>
+
+    <string name="settings_keep_awake">Gerät wach halten</string>
+    <string name="settings_keep_awake_description">Hält die CPU wach, solange die App läuft, sodass Automatisierungsregeln auch bei gesperrtem Bildschirm pünktlich auslösen. Verbraucht mehr Akku; beim Beenden der App wird die Sperre freigegeben. Tiefes Doze (nicht am Strom und unbewegt) kann sie trotzdem aussetzen — kombiniere sie mit der Ausnahme von der Akkuoptimierung oben.</string>
     <string name="settings_section_rtsp">RTSP-Stream</string>
     <string name="settings_enable_rtsp">RTSP-Streaming aktivieren</string>
     <string name="settings_rtsp_port">RTSP-Port</string>

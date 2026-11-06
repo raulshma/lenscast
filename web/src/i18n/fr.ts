@@ -276,6 +276,12 @@ export const fr: Partial<Record<MessageKey, string>> = {
   'https.serve': 'Servir le tableau de bord en HTTPS',
   'https.desc': 'Certificat auto-signé. Acceptez une fois l’avertissement du navigateur, puis vérifiez l’empreinte affichée sur l’écran « Se connecter » du téléphone. Active les flux chiffrés et le talkback au micro.',
 
+  // ── Keep awake card ──
+  'keepawake.title': 'Maintenir actif',
+  'keepawake.enable': 'Garder l’appareil actif',
+  'keepawake.desc': 'Maintient le CPU éveillé tant que l’application tourne, afin que les règles d’automatisation se déclenchent à l’heure même écran verrouillé — la posture du téléphone de sécurité monté. Coûte un peu de batterie ; quitter l’application libère le maintien.',
+
+
   // ── RTSP card ──
   'rtsp.title': 'Flux RTSP',
   'rtsp.enable': 'Activer la diffusion RTSP',

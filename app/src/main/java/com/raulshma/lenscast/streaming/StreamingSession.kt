@@ -337,6 +337,11 @@ class StreamingSession(
         optimizationJob = scope.launch {
             while (true) {
                 powerManager.refreshBatteryState()
+                // A live session must never outlive its wake lock: the renew
+                // call no-ops until the lock is halfway to its timeout, and
+                // re-acquires if it was lost — a suspended CPU stalls the
+                // frame pump and every detection path with it.
+                powerManager.renewWakeLock()
                 streamingManager.applyBatteryOptimization(powerManager.optimizationResult.value)
                 delay(OPTIMIZATION_POLL_MS)
             }

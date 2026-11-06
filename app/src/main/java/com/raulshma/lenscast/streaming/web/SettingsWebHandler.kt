@@ -207,6 +207,7 @@ class SettingsWebHandler(
                 alertQuietHoursEnabled = store.alertQuietHoursEnabled.value,
                 alertQuietHoursStartMinute = store.alertQuietHoursStartMinute.value,
                 alertQuietHoursEndMinute = store.alertQuietHoursEndMinute.value,
+                keepAwakeEnabled = store.keepAwakeEnabled.value,
                 tamperDetectionEnabled = store.tamperDetectionEnabled.value,
                 mqttEnabled = store.mqttEnabled.value,
                 mqttBrokerHost = store.mqttBrokerHost.value,
@@ -368,6 +369,7 @@ class SettingsWebHandler(
             settingsDataStore.saveAlertQuietHoursEnabled(stream.alertQuietHoursEnabled)
             settingsDataStore.saveAlertQuietHoursStartMinute(stream.alertQuietHoursStartMinute)
             settingsDataStore.saveAlertQuietHoursEndMinute(stream.alertQuietHoursEndMinute)
+            settingsDataStore.saveKeepAwakeEnabled(stream.keepAwakeEnabled)
             settingsDataStore.saveTamperDetectionEnabled(stream.tamperDetectionEnabled)
             settingsDataStore.saveMqttEnabled(stream.mqttEnabled)
             settingsDataStore.saveMqttBrokerHost(stream.mqttBrokerHost)

@@ -236,6 +236,7 @@ private object Keys {
     val MEDIA_ENCRYPTION_ENABLED = stringPreferencesKey("media_encryption_enabled")
     val AUTOMATION_ENABLED = stringPreferencesKey("automation_enabled")
     val AUTOMATION_RULES = stringPreferencesKey("automation_rules")
+    val KEEP_AWAKE_ENABLED = stringPreferencesKey("keep_awake_enabled")
     val TORCH_STRENGTH = intPreferencesKey("torch_strength")
 }
 
@@ -766,6 +767,15 @@ internal val httpsEnabledPref = boolPref(Keys.HTTPS_ENABLED, defaultTrue = false
 internal val audioDeviceIdPref = stringPref(Keys.AUDIO_DEVICE_ID, "")
 
 internal val resumeStreamsOnBootPref = boolPref(Keys.RESUME_STREAMS_ON_BOOT, defaultTrue = false)
+
+/**
+ * The keep-awake master toggle, on by default: the app's posture is
+ * unattended operation (a mounted security phone must not go dark because
+ * the screen locked), quitting is an explicit act, so staying awake is the
+ * default and the battery cost is what the user opts out of — the mirror of
+ * the automation toggle's fresh-install conservatism.
+ */
+internal val keepAwakeEnabledPref = boolPref(Keys.KEEP_AWAKE_ENABLED, defaultTrue = true)
 
 /** Local detection notifications: on by default — the channel is opt-out. */
 internal val detectionNotificationsEnabledPref =
@@ -1463,6 +1473,11 @@ class SettingsDataStore(
     /** Startup-critical: suspends on the disk value, immune to the flow's default-first race. */
     suspend fun resumeStreamsOnBootNow(): Boolean = resumeStreamsOnBootPref.diskValue()
 
+    val keepAwakeEnabled: StateFlow<Boolean> = keepAwakeEnabledPref.shared()
+
+    /** Startup-critical: suspends on the disk value, immune to the flow's default-first race. */
+    suspend fun keepAwakeEnabledFromDisk(): Boolean = keepAwakeEnabledPref.diskValue()
+
     val detectionNotificationsEnabled: StateFlow<Boolean> = detectionNotificationsEnabledPref.shared()
 
     val tamperDetectionEnabled: StateFlow<Boolean> = tamperDetectionEnabledPref.shared()
@@ -1688,6 +1703,8 @@ class SettingsDataStore(
         autoDeterrenceCooldownSecondsPref.save(seconds)
 
     suspend fun saveAutomationEnabled(enabled: Boolean) = automationEnabledPref.save(enabled)
+
+    suspend fun saveKeepAwakeEnabled(enabled: Boolean) = keepAwakeEnabledPref.save(enabled)
 
     suspend fun saveAutomationRules(rules: List<AutomationRule>) = automationRulesPref.save(rules)
 

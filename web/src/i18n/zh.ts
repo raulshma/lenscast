@@ -276,6 +276,12 @@ export const zh: Partial<Record<MessageKey, string>> = {
   'https.serve': '通过 HTTPS 提供面板',
   'https.desc': '自签名证书。接受一次浏览器警告，然后核对手机「连接」页显示的指纹。启用加密直播和麦克风喊话。',
 
+  // ── Keep awake card ──
+  'keepawake.title': '保持唤醒',
+  'keepawake.enable': '保持设备唤醒',
+  'keepawake.desc': '应用运行期间保持 CPU 唤醒，即使屏幕锁定，自动化规则也会准时触发——这是固定安防手机的使用姿态。会消耗一些电量；退出应用后即释放。',
+
+
   // ── RTSP card ──
   'rtsp.title': 'RTSP 视频流',
   'rtsp.enable': '启用 RTSP 直播',

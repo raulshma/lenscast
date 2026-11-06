@@ -263,6 +263,14 @@ data class StreamingSettingsDto(
     val alertQuietHoursEnabled: Boolean = false,
     val alertQuietHoursStartMinute: Int = StreamDefaults.QUIET_HOURS_START_MINUTE_DEFAULT,
     val alertQuietHoursEndMinute: Int = StreamDefaults.QUIET_HOURS_END_MINUTE_DEFAULT,
+    /**
+     * The keep-awake hold behind the security-phone posture: while on, the
+     * device CPU stays awake for the process's whole life, so the automation
+     * engine (a poll loop with no alarms) keeps ticking with the screen
+     * locked. On by default — unattended operation is the app's purpose, and
+     * quitting releases the hold with the process.
+     */
+    val keepAwakeEnabled: Boolean = true,
     val tamperDetectionEnabled: Boolean = false,
     val mqttEnabled: Boolean = false,
     val mqttBrokerHost: String = "",

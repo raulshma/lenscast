@@ -1708,6 +1708,21 @@ StreamingManager, CameraService, RecordingController, the Settings Store)
 and whose tests substitute a fixed snapshot, keeping the condition policy
 JVM-testable with no Android imports.
 
+### Keep Awake
+**`core/KeepAwakeController.kt`** — the keep-awake setting's runtime arm and
+the app's awake posture: while `keepAwakeEnabled` (on by default — the
+security-phone posture is the default and quitting is the explicit act) the
+controller holds a `PARTIAL_WAKE_LOCK` (`"LensCast::KeepAwake"`, no timeout,
+its own slot in `core/PowerManager.kt`) for the process's whole life, so the
+automation engine's 30-second poll and every in-process event stream keep
+running with the screen locked. Process death is the release guarantee; the
+collector reads the disk value first and skips the flow's first emission, so
+the eager shared flow's stale default never produces a hold. Deliberately a
+second slot beside the streaming session's own wake lock — a session end
+releases only its own hold, and the streaming lock is re-armed by the
+session's 30-second poll (`renewWakeLock`) before its 60-minute budget
+lapses, independent of this hold.
+
 ### Automation Condition Policy
 **`automation/schedule/AutomationConditionPolicy.kt`** — the pure verdict
 over a snapshot: `isMet(condition, snapshot)` per condition (the catalog

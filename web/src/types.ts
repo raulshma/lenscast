@@ -238,6 +238,13 @@ export interface StreamingSettings {
   alertQuietHoursEnabled: boolean
   alertQuietHoursStartMinute: number
   alertQuietHoursEndMinute: number
+  /**
+   * The keep-awake hold behind the security-phone posture: while on, the
+   * device CPU stays awake for the process's whole life, so the automation
+   * engine keeps ticking with the screen locked. On by default — quitting
+   * the app releases the hold with the process.
+   */
+  keepAwakeEnabled: boolean
   tamperDetectionEnabled: boolean
   mqttEnabled: boolean
   mqttBrokerHost: string

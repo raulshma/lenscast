@@ -884,6 +884,7 @@ object OpenApiSpec {
             "motionRecordingEnabled" to boolSchema(),
             "soundDetectionEnabled" to boolSchema(),
             "tamperDetectionEnabled" to boolSchema(),
+            "keepAwakeEnabled" to boolSchema("Keep the CPU awake for the process's whole life (the security-phone posture); released on quit"),
             "webhookEnabled" to boolSchema(),
             "webhookUrl" to stringSchema(),
             "watchdogEnabled" to boolSchema(),

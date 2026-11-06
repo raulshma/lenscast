@@ -202,6 +202,24 @@ class SettingsWebHandlerSecretTest {
     }
 
     @Test
+    fun `put round-trips the keep-awake toggle both ways`() = runBlocking {
+        // Pin the start state (the class's tests share one DataStore file).
+        store.saveKeepAwakeEnabled(true)
+        awaitUntil("keepAwakeEnabled start state never propagated") { store.keepAwakeEnabled.value }
+
+        handler.put("""{"streaming":{"port":8102,"keepAwakeEnabled":false}}""")
+        awaitUntil("keepAwakeEnabled=off never propagated") { !store.keepAwakeEnabled.value }
+        val off = responseAdapter.fromJson(handler.get())!!
+        assertFalse("the GET surface kept a stale keep-awake value", off.streaming.keepAwakeEnabled)
+
+        // …and the toggle rides back up the same wholesale-persist path.
+        handler.put("""{"streaming":{"port":8103,"keepAwakeEnabled":true}}""")
+        awaitUntil("keepAwakeEnabled=on never propagated") { store.keepAwakeEnabled.value }
+        val on = responseAdapter.fromJson(handler.get())!!
+        assertTrue(on.streaming.keepAwakeEnabled)
+    }
+
+    @Test
     fun `put with presented secrets overwrites the stored credentials`() = runBlocking {
         plantAllSecrets()
 

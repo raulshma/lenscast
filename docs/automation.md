@@ -93,7 +93,9 @@ whenever rules or the master toggle change); **live events** — detections,
 power edges, streaming lifecycle — arrive through `AutomationEventWiring`
 and are pushed in via `onEvent`. Time ticks and event fires share a mutex,
 so two rules' actions never interleave. Actions always run through the one
-Automation Action Executor the broadcast receiver uses.
+Automation Action Executor the broadcast receiver uses. What keeps the CPU
+awake underneath all of that — locked screens, overnight streams — is the
+[keep-awake hold](#when-the-device-is-locked).
 
 ### Time-of-day rules (WHEN = scheduled minute)
 
@@ -161,6 +163,36 @@ Automation Action Executor the broadcast receiver uses.
 - **`app_started`** fires once per process, after the first rules load —
   guarded by a one-shot flag, so editing rules (which restarts the
   scheduler's inner collector) never re-fires it. Conditions still gate it.
+
+## When the device is locked
+
+The engine is a 30-second poll loop plus in-process event streams — no
+exact-alarm permissions, no boot receiver — so "does it work while locked?"
+is really a power question: it runs exactly as long as the CPU is awake.
+Two holds answer that, both in `core/PowerManager.kt`:
+
+- **The keep-awake hold (on by default).** While the app process runs, a
+  partial wakelock (`LensCast::KeepAwake`, held by the Keep Awake
+  controller for the process's whole life) keeps the CPU awake with the
+  screen locked and dark: time rules fire on their minute, event rules fire
+  in the present, and a headless stream pumps frames. The toggle lives in
+  **App settings → Background** (and on the web dashboard; `keepAwakeEnabled`
+  on the wire). On is the default — the mounted security phone is the app's
+  purpose, quitting is the explicit act, and the battery cost is what you
+  opt out of. Quitting (the camera screen's Quit, force stop) releases the
+  hold with the process; from then until the process starts again, the
+  missed-run policy above is the catch-up contract. One OS caveat: deep
+  doze — unplugged, stationary, idle — can suspend the CPU even under a
+  held wakelock, so the battery-optimization exemption (the row just above
+  the toggle in the same settings section) completes the setup for a phone
+  that might sit unplugged.
+- **The streaming hold, renewed.** A live session takes its own partial
+  wakelock and its 30-second battery poll re-arms it well before the
+  60-minute acquire budget lapses (`renewWakeLock`), so a locked device
+  streaming overnight never loses the CPU mid-stream — and never silently
+  stops automating, since the engine shares that awake CPU. A lock that was
+  lost (expired timeout racing the poll, an external release) is
+  re-acquired on the next tick.
 
 ## Trigger catalog
 

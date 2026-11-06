@@ -345,6 +345,9 @@
     <string name="settings_disable_battery_opt">Desactivar la optimización de batería</string>
     <string name="settings_disable_battery_opt_description">Evita que el sistema detenga la app en segundo plano</string>
     <string name="settings_resume_on_boot">Reanudar transmisiones al arrancar</string>
+
+    <string name="settings_keep_awake">Mantener el dispositivo despierto</string>
+    <string name="settings_keep_awake_description">Mantiene la CPU despierta mientras la app esté en ejecución, para que las reglas de automatización se activen puntualmente aun con la pantalla bloqueada. Consume más batería; al salir de la app se libera. El Doze profundo (sin cargar y en reposo) puede suspenderla igualmente: combínala con la excepción de optimización de batería de arriba.</string>
     <string name="settings_section_rtsp">Flujo RTSP</string>
     <string name="settings_enable_rtsp">Activar transmisión RTSP</string>
     <string name="settings_rtsp_port">Puerto RTSP</string>

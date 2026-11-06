@@ -345,6 +345,9 @@
     <string name="settings_disable_battery_opt">Disable Battery Optimization</string>
     <string name="settings_disable_battery_opt_description">Prevents the system from stopping the app in the background</string>
     <string name="settings_resume_on_boot">Resume Streams on Boot</string>
+
+    <string name="settings_keep_awake">Keep Device Awake</string>
+    <string name="settings_keep_awake_description">Holds the CPU awake while the app runs, so automation rules fire on schedule even with the screen locked. Uses more battery; released when you quit the app. Deep doze (unplugged and stationary) can still suspend it — pair it with the battery-optimization exemption above.</string>
     <string name="settings_section_rtsp">RTSP Stream</string>
     <string name="settings_enable_rtsp">Enable RTSP Streaming</string>
     <string name="settings_rtsp_port">RTSP Port</string>

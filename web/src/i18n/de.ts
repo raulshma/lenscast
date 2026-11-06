@@ -278,6 +278,12 @@ export const de: Partial<Record<MessageKey, string>> = {
   'https.serve': 'Dashboard über HTTPS ausliefern',
   'https.desc': 'Selbstsigniertes Zertifikat. Die Browser-Warnung einmal akzeptieren und den Fingerabdruck vom Verbindungsbildschirm des Telefons prüfen. Aktiviert verschlüsselte Streams und Mikrofon-Gegensprechen.',
 
+  // ── Keep awake card ──
+  'keepawake.title': 'Wach halten',
+  'keepawake.enable': 'Gerät wach halten',
+  'keepawake.desc': 'Hält die CPU wach, solange die App läuft, sodass Automatisierungsregeln auch bei gesperrtem Bildschirm pünktlich auslösen — die Haltung des fest montierten Sicherheitsphones. Kostet etwas Akku; beim Beenden der App wird die Sperre freigegeben.',
+
+
   // ── RTSP card ──
   'rtsp.title': 'RTSP-Stream',
   'rtsp.enable': 'RTSP-Streaming aktivieren',

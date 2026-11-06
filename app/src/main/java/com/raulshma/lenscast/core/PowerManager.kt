@@ -10,6 +10,7 @@ import android.content.IntentFilter
 import android.net.Uri
 import android.os.Build
 import android.os.PowerManager as AndroidPowerManager
+import android.os.SystemClock
 import android.provider.Settings
 import android.util.Log
 import kotlinx.coroutines.channels.BufferOverflow
@@ -36,6 +37,12 @@ class PowerManager(private val context: Context) {
 
     private var wakeLock: AndroidPowerManager.WakeLock? = null
     @Volatile private var wakeLockAcquired = false
+    @Volatile private var wakeLockAcquiredAtMs = 0L
+
+    // The always-on slot behind the keep-awake setting: held for the process
+    // lifetime, never touched by the streaming session's own lock management.
+    private var keepAwakeLock: AndroidPowerManager.WakeLock? = null
+    @Volatile private var keepAwakeAcquired = false
 
     // Null until the first battery read — the event payload omits the field
     // for an unknown level rather than reporting a fabricated percent.
@@ -129,12 +136,35 @@ class PowerManager(private val context: Context) {
             wakeLock = powerManager.newWakeLock(
                 AndroidPowerManager.PARTIAL_WAKE_LOCK, "$tag::Partial"
             ).apply {
-                acquire(WAKELOCK_TIMEOUT_MS)
+                acquire(WakeLockRenewPolicy.TIMEOUT_MS)
             }
             wakeLockAcquired = true
-            Log.d(TAG, "Wake lock acquired with timeout ${WAKELOCK_TIMEOUT_MS}ms")
+            wakeLockAcquiredAtMs = SystemClock.elapsedRealtime()
+            Log.d(TAG, "Wake lock acquired with timeout ${WakeLockRenewPolicy.TIMEOUT_MS}ms")
         } catch (e: Exception) {
             Log.e(TAG, "Failed to acquire wake lock", e)
+        }
+    }
+
+    /**
+     * Re-arm the streaming wake lock before its timeout can expire: a
+     * session outlives the acquire budget, and a suspended CPU stalls the
+     * frame pump, the automation engine and every detection path at once.
+     * The ladder — young lock left alone, past the halfway mark released
+     * and re-acquired, a lost lock re-acquired — lives in
+     * [WakeLockRenewPolicy]; this is the Android arm that applies its
+     * verdict to the real lock.
+     */
+    fun renewWakeLock() {
+        val elapsedMs = SystemClock.elapsedRealtime() - wakeLockAcquiredAtMs
+        when (WakeLockRenewPolicy.resolve(wakeLockAcquired, elapsedMs)) {
+            WakeLockRenewPolicy.Action.ACQUIRE -> acquireWakeLock()
+            WakeLockRenewPolicy.Action.KEEP -> Unit
+            WakeLockRenewPolicy.Action.REARM -> {
+                Log.d(TAG, "Renewing wake lock after ${elapsedMs}ms")
+                releaseWakeLock()
+                acquireWakeLock()
+            }
         }
     }
 
@@ -152,6 +182,46 @@ class PowerManager(private val context: Context) {
         }
         wakeLock = null
         wakeLockAcquired = false
+        wakeLockAcquiredAtMs = 0L
+    }
+
+    /**
+     * The process-lifetime hold behind the keep-awake setting (the security
+     * phone posture). No timeout: process death is the release guarantee,
+     * and the keep-awake collector releases on toggle-off. A separate slot
+     * from the streaming wake lock on purpose — a session end releases only
+     * its own hold, never this one.
+     */
+    @SuppressLint("WakelockTimeout")
+    fun acquireKeepAwake() {
+        if (keepAwakeAcquired) return
+        try {
+            keepAwakeLock = powerManager.newWakeLock(
+                AndroidPowerManager.PARTIAL_WAKE_LOCK, KEEP_AWAKE_TAG
+            ).apply {
+                acquire()
+            }
+            keepAwakeAcquired = true
+            Log.d(TAG, "Keep-awake wake lock acquired (no timeout)")
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to acquire keep-awake wake lock", e)
+        }
+    }
+
+    fun releaseKeepAwake() {
+        if (!keepAwakeAcquired) return
+        keepAwakeLock?.let {
+            try {
+                if (it.isHeld) {
+                    it.release()
+                    Log.d(TAG, "Keep-awake wake lock released")
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Keep-awake wake lock already released", e)
+            }
+        }
+        keepAwakeLock = null
+        keepAwakeAcquired = false
     }
 
     fun isIgnoringBatteryOptimizations(): Boolean {
@@ -229,6 +299,7 @@ class PowerManager(private val context: Context) {
 
     fun release() {
         releaseWakeLock()
+        releaseKeepAwake()
         if (receiverRegistered) {
             try {
                 context.unregisterReceiver(powerSaveReceiver)
@@ -241,7 +312,7 @@ class PowerManager(private val context: Context) {
 
     companion object {
         private const val TAG = "PowerManager"
-        private const val WAKELOCK_TIMEOUT_MS = 60 * 60 * 1000L
+        private const val KEEP_AWAKE_TAG = "LensCast::KeepAwake"
 
         /**
          * The percent a non-null surface reads while the real level is still

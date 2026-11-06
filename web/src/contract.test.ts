@@ -216,6 +216,7 @@ const STREAMING_KEYS = [
   'alertQuietHoursEnabled',
   'alertQuietHoursStartMinute',
   'alertQuietHoursEndMinute',
+  'keepAwakeEnabled',
   'tamperDetectionEnabled',
   'mqttEnabled',
   'mqttBrokerHost',
@@ -670,6 +671,7 @@ describe('API_DEFAULTS lockstep with the fixtures', () => {
     expect(streaming.alertQuietHoursEnabled).toBe(API_DEFAULTS.alertQuietHoursEnabled)
     expect(streaming.alertQuietHoursStartMinute).toBe(API_DEFAULTS.alertQuietHoursStartMinute)
     expect(streaming.alertQuietHoursEndMinute).toBe(API_DEFAULTS.alertQuietHoursEndMinute)
+    expect(streaming.keepAwakeEnabled).toBe(API_DEFAULTS.keepAwakeEnabled)
     expect(streaming.tamperDetectionEnabled).toBe(API_DEFAULTS.tamperDetectionEnabled)
     expect(streaming.mqttEnabled).toBe(API_DEFAULTS.mqttEnabled)
     expect(streaming.mqttBrokerHost).toBe(API_DEFAULTS.mqttBrokerHost)

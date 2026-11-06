@@ -341,6 +341,9 @@
     <string name="settings_disable_battery_opt">禁用电池优化</string>
     <string name="settings_disable_battery_opt_description">防止系统在后台停止应用</string>
     <string name="settings_resume_on_boot">开机后恢复直播</string>
+
+    <string name="settings_keep_awake">保持设备唤醒</string>
+    <string name="settings_keep_awake_description">应用运行期间保持 CPU 唤醒，即使屏幕锁定，自动化规则也会准时触发。耗电较多；退出应用后即释放。深度休眠（未充电且静止）仍可能将其挂起——请配合上方的电池优化豁免一起使用。</string>
     <string name="settings_section_rtsp">RTSP 视频流</string>
     <string name="settings_enable_rtsp">启用 RTSP 直播</string>
     <string name="settings_rtsp_port">RTSP 端口</string>

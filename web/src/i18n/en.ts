@@ -278,6 +278,11 @@ export const en: Record<string, string> = {
   'https.serve': 'Serve Dashboard over HTTPS',
   'https.desc': "Self-signed certificate. Accept the browser warning once, then verify the fingerprint shown on the phone's Connect sheet. Enables encrypted streams and microphone talkback.",
 
+  // ── Keep awake card ──
+  'keepawake.title': 'Keep Awake',
+  'keepawake.enable': 'Keep the device awake',
+  'keepawake.desc': 'Holds the CPU awake while the app runs, so automation rules fire on schedule even with the screen locked — the mounted security-phone posture. Costs some battery; released when you quit the app.',
+
   // ── RTSP card ──
   'rtsp.title': 'RTSP Stream',
   'rtsp.enable': 'Enable RTSP Streaming',

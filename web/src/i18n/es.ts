@@ -276,6 +276,12 @@ export const es: Partial<Record<MessageKey, string>> = {
   'https.serve': 'Servir el panel por HTTPS',
   'https.desc': 'Certificado autofirmado. Acepta una vez la advertencia del navegador y verifica la huella mostrada en la pantalla «Conectar» del teléfono. Activa transmisiones cifradas y talkback por micrófono.',
 
+  // ── Keep awake card ──
+  'keepawake.title': 'Mantener despierto',
+  'keepawake.enable': 'Mantener el dispositivo despierto',
+  'keepawake.desc': 'Mantiene la CPU despierta mientras la app esté en ejecución, para que las reglas de automatización se activen puntualmente aun con la pantalla bloqueada — la postura del teléfono de seguridad montado. Consume algo de batería; al salir de la app se libera.',
+
+
   // ── RTSP card ──
   'rtsp.title': 'Transmisión RTSP',
   'rtsp.enable': 'Activar transmisión RTSP',
