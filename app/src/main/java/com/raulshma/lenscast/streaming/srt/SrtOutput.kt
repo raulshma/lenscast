@@ -1,153 +1,117 @@
 package com.raulshma.lenscast.streaming.srt
 
-import android.util.Log
 import com.raulshma.lenscast.streaming.EncodedSource
+import com.raulshma.lenscast.streaming.PushConnectConfig
+import com.raulshma.lenscast.streaming.PushOutput
 import com.raulshma.lenscast.streaming.rtsp.EncodedNalUnit
-import com.raulshma.lenscast.streaming.rtsp.RtspVideoCodec
-import java.util.concurrent.atomic.AtomicBoolean
 
 /**
- * The SRT push output — [com.raulshma.lenscast.streaming.rtmp.RtmpOutput]'s
- * SRT twin: the retained URL (settings land even while the output is stopped,
- * so the next start picks them up), the enabled gate, the start-time
- * validation ladder (a usable `srt://` URL parsed by the pure [SrtUrl], plus
- * the H.264 video codec — MPEG-TS carries HEVC, but the shared encode path's
- * TS muxing and every consumer here are H.264-pinned, so a push under H.265
- * is refused with a readable error), and the publisher lifecycle with
- * restart-on-URL-change. The URL is a write-only credential over the Web API
- * (userinfo and streamid never echo — [SrtUrl.redacted] is the only
- * rendering that reaches a log). The manager keeps the public surface and
- * the hub fan-out; everything "the SRT output" means sits behind this narrow
- * class, JVM-tested behind the [SrtPublisherHandle] seam.
+ * SRT's retained push config: just the push URL — userinfo and streamid
+ * travel inside it, and the parsed [SrtUrl] carries everything else the
+ * publisher connects with.
+ */
+internal data class SrtPushConfig(
+    override val url: String = "",
+) : PushConnectConfig
+
+/**
+ * The SRT push output — the SRT configuration of the shared deep
+ * [PushOutput] module (the RtspOutput-pattern collapse of the push twins):
+ * the retained URL (settings land even while the output is stopped, so the
+ * next start picks them up), the enabled gate, the start-time validation
+ * ladder (a usable `srt://` URL parsed by the pure [SrtUrl], plus the H.264
+ * codec gate — MPEG-TS carries HEVC, but the shared encode path's TS muxing
+ * and every consumer here are H.264-pinned, so a push under H.265 is
+ * refused with a readable error), and the publisher lifecycle with
+ * restart-on-URL-change. The URL is a write-only credential over the Web
+ * API (userinfo and streamid never echo — [SrtUrl.redacted] is the only
+ * rendering that reaches a log, handed to the deep module as its
+ * `describeTarget` redaction seam). This file carries only the
+ * transport-typed wiring — parse, codec gate, status constructors, the
+ * [SrtPublisherHandle] seam, the hub-fed media feed, and the wire-stats
+ * read — while every lifecycle decision lives in the deep module. The
+ * manager keeps the public surface and the hub fan-out.
  */
 internal class SrtOutput(
+    /** The encoded-stream hub: the codec gate reads the shared encode path's codec from it. */
     private val source: EncodedSource,
     /** The status mirror after every transition, so the owner's flows follow the output. */
-    private val onStatusChanged: (SrtStatus) -> Unit,
-    private val publisherFactory: (url: SrtUrl, onStatus: (SrtStatus) -> Unit) -> SrtPublisherHandle,
+    onStatusChanged: (SrtStatus) -> Unit,
+    /** The publisher handle seam — the transport's factory, unchanged by the collapse. */
+    publisherFactory: (url: SrtUrl, onStatus: (SrtStatus) -> Unit) -> SrtPublisherHandle,
+    /** The transition epilogue (hub refresh + streaming state), run by the deep module's manager-driven start/stop. */
+    private val settle: () -> Unit,
 ) {
 
-    /** The output's start verdict: Started, or Rejected with the readable reason. */
-    sealed class StartResult {
-        data object Started : StartResult()
-        data class Rejected(val reason: String) : StartResult()
-    }
-
-    /** The output is switched on — start() while disabled refuses. */
-    private val enabled = AtomicBoolean(false)
-
-    /** The output is live: started and not yet stopped, even while connecting/reconnecting. */
-    private val active = AtomicBoolean(false)
-
-    @Volatile
-    private var url: String = ""
-
-    @Volatile
-    private var publisher: SrtPublisherHandle? = null
-
-    @Volatile
-    private var statusValue: SrtStatus = SrtStatus.Idle
-
-    // ── flags & state reads ──
+    private val output = PushOutput(
+        label = "SRT",
+        tag = TAG,
+        onStatusChanged = onStatusChanged,
+        settle = settle,
+        initialConfig = SrtPushConfig(),
+        parse = SrtUrl::parse,
+        invalidUrlMessage = "Invalid SRT URL — expected srt://host:port?streamid=… (port defaults to 9710)",
+        videoCodec = { source.videoCodec },
+        describeTarget = { it.redacted() },
+        idleStatus = SrtStatus.Idle,
+        errorStatus = { reason -> SrtStatus.Error(reason) },
+        publisherFactory = { _, parsed, onStatus -> publisherFactory(parsed, onStatus) },
+        startPublisher = { it.start() },
+        stopPublisher = { it.stop() },
+    )
 
     /** Switches the output on/off; true when the flag actually changed. Disabling stops a live output. */
-    fun setEnabled(on: Boolean): Boolean {
-        val changed = enabled.getAndSet(on) != on
-        if (changed && !on) stop()
-        return changed
-    }
+    fun setEnabled(on: Boolean): Boolean = output.setEnabled(on)
 
-    fun isEnabled(): Boolean = enabled.get()
+    fun isEnabled(): Boolean = output.isEnabled()
 
     /** True from [start] until [stop] — the owner's "SRT output live" answer. */
-    fun isActive(): Boolean = active.get()
+    fun isActive(): Boolean = output.isActive()
 
     /** The configured push URL, retained even while stopped. */
-    fun configuredUrl(): String = url
+    fun configuredUrl(): String = output.retainedConfig().url
 
-    fun status(): SrtStatus = statusValue
-
-    /** The live wire stats (RTT, loss counts) — the status surfaces' read seam. */
-    fun stats(): SrtStats = publisher?.stats() ?: SrtStats()
-
-    // ── lifecycle ──
+    fun status(): SrtStatus = output.status()
 
     /**
-     * Starts the push (no-op when already live). The validation ladder runs
-     * synchronously — a disabled output, an unusable URL, or the H.265 codec
-     * refusal each answer [StartResult.Rejected] with the readable reason
-     * and leave the status line carrying it; only a passing ladder starts
-     * the publisher (whose handshake is asynchronous and auto-reconnecting).
+     * Starts the push (no-op when already live); the validation ladder runs
+     * synchronously in the deep module and a refusal leaves the status line
+     * carrying the readable reason.
      */
-    fun start(): StartResult {
-        if (active.get()) return StartResult.Started
-        if (!enabled.get()) {
-            return reject("SRT push is disabled")
-        }
-        val parsed = SrtUrl.parse(url)
-            ?: return reject("Invalid SRT URL — expected srt://host:port?streamid=… (port defaults to 9710)")
-        if (source.videoCodec != RtspVideoCodec.H264) {
-            return reject(
-                "SRT push requires the H.264 video codec — the encoded path is currently H.265; " +
-                    "switch the RTSP video codec to H.264 in streaming settings",
-            )
-        }
-        active.set(true)
-        val handle = publisherFactory(parsed, ::publishStatus)
-        publisher = handle
-        handle.start()
-        Log.i(TAG, "SRT output started toward ${parsed.redacted()}")
-        return StartResult.Started
-    }
+    fun start(): PushOutput.StartResult = output.start()
 
     /** Stops the publisher (shutdown notice + socket release) — no-op when already stopped. */
-    fun stop() {
-        if (!active.getAndSet(false)) return
-        publisher?.stop()
-        publisher = null
-        publishStatus(SrtStatus.Idle)
-        Log.i(TAG, "SRT output stopped")
-    }
+    fun stop() = output.stop()
+
+    /** The hook-less stop, for the manager's codec-gate path (it writes its own Error and settles itself). */
+    fun stopQuietly() = output.stopQuietly()
 
     /**
-     * A new push URL lands immediately; a live output restarts on it (the
-     * publisher's handshake parameters are per-attempt). A same-URL call is
-     * a no-op, so a settings re-emission never churns a live output.
+     * A new push URL lands immediately; a live output restarts on it through
+     * the deep module's config-change path (the publisher's handshake
+     * parameters are per-attempt). A same-URL call is a no-op, so a
+     * settings re-emission never churns a live output.
      */
     fun setUrl(newUrl: String) {
-        val trimmed = newUrl.trim()
-        if (trimmed == url) return
-        url = trimmed
-        if (enabled.get() && active.get()) {
-            stop()
-            start()
-        }
+        output.update { it.copy(url = newUrl.trim()) }
     }
 
     // ── the encoded-stream hub's sink ──
 
     /** One encoded H.264 access unit from the encoded-stream hub. No-op while stopped. */
     fun feedEncodedVideo(nalUnits: List<EncodedNalUnit>) {
-        publisher?.feedVideo(nalUnits)
+        output.currentPublisher()?.feedVideo(nalUnits)
     }
 
     /** One AAC access unit from the encoded-stream hub. No-op while stopped. */
     fun feedEncodedAudio(aacData: ByteArray) {
-        publisher?.feedAudio(aacData)
+        output.currentPublisher()?.feedAudio(aacData)
     }
 
-    // ── internals ──
+    // ── reads ──
 
-    private fun reject(reason: String): StartResult.Rejected {
-        publishStatus(SrtStatus.Error(reason))
-        Log.w(TAG, "SRT start refused: $reason")
-        return StartResult.Rejected(reason)
-    }
-
-    private fun publishStatus(status: SrtStatus) {
-        statusValue = status
-        onStatusChanged(status)
-    }
+    /** The live wire stats (RTT, loss counts) — the status surfaces' read seam. */
+    fun stats(): SrtStats = output.currentPublisher()?.stats() ?: SrtStats()
 
     private companion object {
         private const val TAG = "SrtOutput"

@@ -1,6 +1,5 @@
 package com.raulshma.lenscast.data
 
-import com.squareup.moshi.JsonClass
 
 import android.content.Context
 import android.util.Log
@@ -31,8 +30,6 @@ import com.raulshma.lenscast.camera.model.PhotoAspectRatio
 import com.raulshma.lenscast.camera.model.Resolution
 import com.raulshma.lenscast.camera.model.WhiteBalance
 import com.raulshma.lenscast.camera.model.PhotoCapturePlan
-import com.raulshma.lenscast.automation.schedule.AutomationActionSpec
-import com.raulshma.lenscast.automation.schedule.AutomationConditionSpec
 import com.raulshma.lenscast.automation.schedule.AutomationRule
 import com.raulshma.lenscast.automation.schedule.AutomationSchedulePolicy
 import com.raulshma.lenscast.capture.model.FlashMode
@@ -46,6 +43,7 @@ import com.raulshma.lenscast.core.push.VapidSubjectPolicy
 import com.raulshma.lenscast.streaming.rtsp.RtspInputFormat
 import com.raulshma.lenscast.streaming.rtsp.RtspResolution
 import com.raulshma.lenscast.streaming.rtsp.RtspVideoCodec
+import com.squareup.moshi.JsonClass
 import com.squareup.moshi.Types
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -1179,95 +1177,42 @@ internal fun serializeMotionZones(zones: List<MotionZone>): String {
 }
 
 /**
- * The persisted automation-rule JSON shapes, behind [AppJson]'s one Moshi
- * instance. New persistence (no legacy payload to stay decode-compatible
- * with), but the same nullable-field + total-decode conventions as the
- * masking/motion codecs: every field is nullable so an absent key folds to
- * [AutomationRule]'s documented default (fresh UUID for an absent id), a
- * malformed payload degrades to an empty rule list instead of killing the
- * whole store decode, and params ride a string map so the shape never needs
- * versioning when an action gains a parameter.
+ * The automation-rule persistence codec, behind [AppJson]'s one Moshi
+ * instance. The persisted shape IS the domain [AutomationRule] (@JsonClass,
+ * one declaration — there is no separate persistence mirror to keep in
+ * lockstep). The same total-decode conventions as the masking/motion codecs
+ * hold: Moshi codegen folds every absent key to the data class's documented
+ * default (so pre-if/then payloads decode unchanged), a malformed payload
+ * degrades to an empty rule list instead of killing the whole store decode,
+ * and params ride a string map so the shape never needs versioning when an
+ * action gains a parameter. [AutomationRule.lastFiredAt] never persists:
+ * the sanitize below resets it, and this serializer never sees it set.
  */
-@JsonClass(generateAdapter = true)
-internal data class AutomationRuleJson(
-    val id: String? = null,
-    val name: String? = null,
-    val enabled: Boolean? = null,
-    val triggerType: String? = null,
-    val minuteOfDay: Int? = null,
-    val daysMask: Int? = null,
-    val triggerParams: Map<String, String>? = null,
-    val conditions: List<AutomationConditionJson>? = null,
-    val conditionMode: String? = null,
-    val cooldownSeconds: Int? = null,
-    val missedRunPolicy: String? = null,
-    val missedWindowMinutes: Int? = null,
-    val actions: List<AutomationActionJson>? = null,
-)
-
-@JsonClass(generateAdapter = true)
-internal data class AutomationActionJson(
-    val type: String? = null,
-    val params: Map<String, String>? = null,
-)
-
-@JsonClass(generateAdapter = true)
-internal data class AutomationConditionJson(
-    val type: String? = null,
-    val params: Map<String, String>? = null,
-)
-
 private val automationRulesType = Types.newParameterizedType(
     List::class.java,
-    AutomationRuleJson::class.java,
+    AutomationRule::class.java,
 )
 
 private val automationRulesAdapter by lazy {
-    AppJson.moshi.adapter<List<AutomationRuleJson>>(automationRulesType)
+    AppJson.moshi.adapter<List<AutomationRule>>(automationRulesType)
 }
 
 /**
  * The automation-rule persistence codec: total decode to [AutomationRule]s,
  * then straight through [AutomationSchedulePolicy.sanitizeRules] — which
- * mints nothing but clamps every field, drops unknown actions, and caps the
- * list — so a decoded rule list is always executable as-is. The id mint
- * happens here (upstream of the sanitize, per its contract): a rule without
- * an id could never be journaled and would re-fire on every poll tick.
- * Internal so JVM tests can pin the shape and the malformed handling
- * without a Context or DataStore.
+ * clamps every field, drops unknown actions, caps the list, and strips a
+ * smuggled `lastFiredAt` — so a decoded rule list is always executable
+ * as-is. The id mint happens here (upstream of the sanitize, per its
+ * contract): a rule without an id could never be journaled and would
+ * re-fire on every poll tick. Internal so JVM tests can pin the shape and
+ * the malformed handling without a Context or DataStore.
  */
 internal fun parseAutomationRules(jsonString: String?): List<AutomationRule> {
     if (jsonString.isNullOrEmpty()) return emptyList()
     return try {
-        val defaults = AutomationRule()
-        val dtos = automationRulesAdapter.fromJson(jsonString) ?: return emptyList()
-        val rules = dtos.map { dto ->
-            AutomationRule(
-                id = dto.id?.takeIf { it.isNotBlank() } ?: java.util.UUID.randomUUID().toString(),
-                name = dto.name ?: defaults.name,
-                enabled = dto.enabled ?: defaults.enabled,
-                triggerType = dto.triggerType ?: defaults.triggerType,
-                minuteOfDay = dto.minuteOfDay ?: defaults.minuteOfDay,
-                daysMask = dto.daysMask ?: defaults.daysMask,
-                // Every new field folds to its documented default when
-                // absent, so pre-if/then payloads decode unchanged.
-                triggerParams = dto.triggerParams ?: defaults.triggerParams,
-                conditions = dto.conditions.orEmpty().map { condition ->
-                    AutomationConditionSpec(
-                        type = condition.type ?: "",
-                        params = condition.params ?: emptyMap(),
-                    )
-                },
-                conditionMode = dto.conditionMode ?: defaults.conditionMode,
-                cooldownSeconds = dto.cooldownSeconds ?: defaults.cooldownSeconds,
-                missedRunPolicy = dto.missedRunPolicy ?: defaults.missedRunPolicy,
-                missedWindowMinutes = dto.missedWindowMinutes ?: defaults.missedWindowMinutes,
-                actions = dto.actions.orEmpty().map { action ->
-                    AutomationActionSpec(
-                        type = action.type ?: "",
-                        params = action.params ?: emptyMap(),
-                    )
-                },
+        val rules = automationRulesAdapter.fromJson(jsonString).orEmpty().map { rule ->
+            rule.copy(
+                id = rule.id?.takeIf { it.isNotBlank() } ?: java.util.UUID.randomUUID().toString(),
             )
         }
         AutomationSchedulePolicy.sanitizeRules(rules)
@@ -1281,34 +1226,15 @@ internal fun serializeAutomationRules(rules: List<AutomationRule>): String {
     return try {
         // The save-side clamp owner, same as the overlay/masking saves:
         // whatever the writer sent, a valid value is what lands on disk.
-        val dtos = AutomationSchedulePolicy.sanitizeRules(rules).map { rule ->
-            AutomationRuleJson(
-                // The save-side identity owner: a rule without an id could
-                // never be journaled and would re-fire on every poll tick,
-                // so a null id never lands on disk — writers mint their own
-                // (the web handler, like the in-app ViewModel) and this mint
-                // catches any writer that did not. The decode mint above
-                // remains for payloads persisted before this invariant.
-                id = rule.id ?: java.util.UUID.randomUUID().toString(),
-                name = rule.name,
-                enabled = rule.enabled,
-                triggerType = rule.triggerType,
-                minuteOfDay = rule.minuteOfDay,
-                daysMask = rule.daysMask,
-                triggerParams = rule.triggerParams,
-                conditions = rule.conditions.map { condition ->
-                    AutomationConditionJson(type = condition.type, params = condition.params)
-                },
-                conditionMode = rule.conditionMode,
-                cooldownSeconds = rule.cooldownSeconds,
-                missedRunPolicy = rule.missedRunPolicy,
-                missedWindowMinutes = rule.missedWindowMinutes,
-                actions = rule.actions.map { action ->
-                    AutomationActionJson(type = action.type, params = action.params)
-                },
-            )
+        val sanitized = AutomationSchedulePolicy.sanitizeRules(rules).map { rule ->
+            // The save-side identity owner: a rule persisted without an id
+            // re-mints on every decode, orphaning its fire-journal entries and
+            // re-firing the rule whenever its trigger is still due. Whatever
+            // the writer sent, an id lands in the persisted JSON itself — one
+            // id field per rule, not something only the decode mint supplies.
+            rule.copy(id = rule.id ?: java.util.UUID.randomUUID().toString())
         }
-        automationRulesAdapter.toJson(dtos)
+        automationRulesAdapter.toJson(sanitized)
     } catch (e: Exception) {
         Log.e("SettingsDataStore", "Failed to serialize automation rules", e)
         "[]"

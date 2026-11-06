@@ -18,7 +18,7 @@ import androidx.camera.video.Recording
 import androidx.camera.video.VideoCapture
 import androidx.camera.video.VideoRecordEvent
 import androidx.core.content.ContextCompat
-import com.raulshma.lenscast.MainApplication
+import com.raulshma.lenscast.AppGraph
 import com.raulshma.lenscast.capture.model.CaptureMediaFormat
 import com.raulshma.lenscast.core.ForegroundNotifications
 import com.raulshma.lenscast.core.MicAccess
@@ -64,7 +64,7 @@ class RecordingService : Service() {
     /** The encrypted path's in-flight CameraX temp output, if any. */
     private var pendingTempFile: File? = null
 
-    private val app: MainApplication by lazy { applicationContext as MainApplication }
+    private val app: AppGraph by lazy { applicationContext as AppGraph }
     private val recordingController: RecordingController by lazy { app.recordingController }
 
     override fun onBind(intent: Intent?): IBinder? = null

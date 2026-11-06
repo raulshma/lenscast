@@ -12,6 +12,7 @@ import java.util.UUID
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -38,12 +39,15 @@ import org.robolectric.annotation.Config
  * **Covered here** (all real code paths): blank-id minting, the sanitizer's
  * clamps as the client sees them, PUT answering with exactly what a
  * subsequent GET reads (same ids — the freshness contract), explicit ids
- * surviving a re-save, and the persisted JSON carrying an id per rule (the
- * store invariant, asserted through the handler here and at the codec level
- * in SettingsDataStoreAutomationPrefsTest), and GET exposing the fire
+ * surviving a re-save, the persisted JSON carrying an id per rule (the store
+ * invariant, asserted through the handler here and at the codec level
+ * in SettingsDataStoreAutomationPrefsTest), GET exposing the fire
  * journal as a decoded `lastFiredAt` per rule (null until a fire is
  * recorded; both journal value kinds decode through
- * AutomationSchedulePolicy.decodeOccurrenceKey).
+ * AutomationSchedulePolicy.decodeOccurrenceKey), GET emitting a non-null id
+ * for every rule (a null id never serializes on the read side), and a
+ * client-echoed `lastFiredAt` in a PUT body never surviving the save (the
+ * read-only transport decoration, stripped by the sanitizer).
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34], application = AutomationWebHandlerTest.PlainApplication::class)
@@ -84,7 +88,7 @@ class AutomationWebHandlerTest {
         val rule = response.rules.single()
 
         // The wire's blank id minted into a real UUID...
-        UUID.fromString(rule.id)
+        UUID.fromString(requireNotNull(rule.id))
         // ...the clamps applied as the client sees them...
         assertEquals(1_439, rule.minuteOfDay)
         assertEquals(1, rule.daysMask)
@@ -117,7 +121,7 @@ class AutomationWebHandlerTest {
 
     @Test
     fun `put with a blank id keeps the identity stable across re-saves and reads`() = runBlocking {
-        val first = putOneRule().rules.single().id
+        val first = requireNotNull(putOneRule().rules.single().id)
         // The dashboard's edit flow: echo the id the device minted back on
         // the next save. The id must survive — a new one would orphan the
         // rule's fire-journal entries.
@@ -138,7 +142,7 @@ class AutomationWebHandlerTest {
         // echo of the pre-write list.
         assertEquals(listOf("Second"), response.rules.map { it.name })
         val newId = response.rules.single().id
-        UUID.fromString(newId)
+        UUID.fromString(requireNotNull(newId))
         assertNotEquals(first, newId)
         assertEquals(listOf(newId), stateAdapter.fromJson(handler.get())!!.rules.map { it.id })
     }
@@ -147,7 +151,7 @@ class AutomationWebHandlerTest {
     fun `get exposes the decoded fire journal as lastFiredAt`() = runBlocking {
         // No journal record yet: the field reads null ("never fired"), which
         // Moshi keeps off the wire.
-        val ruleId = putOneRule().rules.single().id
+        val ruleId = requireNotNull(putOneRule().rules.single().id)
         assertNull(stateAdapter.fromJson(handler.get())!!.rules.single().lastFiredAt)
 
         // An event-kind journal value (epoch millis, ≥ the threshold) passes
@@ -167,5 +171,94 @@ class AutomationWebHandlerTest {
             AutomationSchedulePolicy.decodeOccurrenceKey(key, TimeZone.getDefault()),
             stateAdapter.fromJson(handler.get())!!.rules.single().lastFiredAt,
         )
+    }
+
+    @Test
+    fun `get emits an id for every rule — null never serializes`() = runBlocking {
+        // Two rules through the real save path (the second via a wholesale
+        // replace, both ids minted by the handler), then the RAW GET body:
+        // every rule object must carry an "id" key and no id may be null —
+        // the disk invariant (the store mints) showing through the wire.
+        val first = requireNotNull(putOneRule().rules.single().id)
+        val second = requireNotNull(
+            stateAdapter.fromJson(
+                handler.put(
+                    """{"enabled":true,"rules":[""" +
+                        """{"id":"$first","name":"Probe","enabled":true,"actions":[{"type":"torch","params":{"enabled":"true"}}]},""" +
+                        """{"id":"","name":"Second","enabled":true,"actions":[{"type":"stream","params":{"enabled":"true"}}]}]}""",
+                ),
+            )!!.rules.last().id,
+        )
+
+        val rawGet = handler.get()
+        val rulesArray = com.squareup.moshi.Moshi.Builder().build()
+            .adapter<Map<String, Any?>>(
+                com.squareup.moshi.Types.newParameterizedType(
+                    Map::class.java, String::class.java, Any::class.java,
+                ),
+            )
+            .fromJson(rawGet)!!["rules"] as List<*>
+        assertEquals(2, rulesArray.size)
+        for (rule in rulesArray) {
+            val map = rule as Map<*, *>
+            val id = map["id"]
+            assertNotNull("a rule serialized without an id key", id)
+            assertTrue("a rule serialized a blank id", (id as String).isNotBlank())
+        }
+
+        // And the typed read agrees: both ids are non-null persisted truth.
+        val ids = stateAdapter.fromJson(rawGet)!!.rules.map { it.id }
+        assertEquals(listOf(first, second), ids)
+    }
+
+    @Test
+    fun `a client-echoed lastFiredAt never survives the save`() = runBlocking {
+        // The dashboard echoes the response rule back on edit (including the
+        // read-only fire stamp). The stamp is a GET decoration, not
+        // configuration: the sanitizer must strip it, and the GET that
+        // follows (no journal record for a minted id) answers null — the
+        // claimed instant never round-trips.
+        val response = stateAdapter.fromJson(
+            handler.put(
+                """{"enabled":true,"rules":[{"id":"","name":"Smuggler","enabled":true,""" +
+                    """"lastFiredAt":1234567890123,""" +
+                    """"actions":[{"type":"torch","params":{"enabled":"true"}}]}]}""",
+            ),
+        )!!
+        val ruleId = requireNotNull(response.rules.single().id)
+        UUID.fromString(ruleId)
+        assertNull("the smuggled lastFiredAt survived the PUT", response.rules.single().lastFiredAt)
+        assertNull(stateAdapter.fromJson(handler.get())!!.rules.single().lastFiredAt)
+
+        // Even with a REAL journal record the response shows the decoded
+        // journal value, not the client's claimed one.
+        val realMs = 1_700_000_000_000L
+        journal.record(ruleId, realMs)
+        assertEquals(realMs, stateAdapter.fromJson(handler.get())!!.rules.single().lastFiredAt)
+    }
+
+    @Test
+    fun `get publishes the editor contract — limits groups and icons on every entry`() = runBlocking {
+        putOneRule()
+        val state = stateAdapter.fromJson(handler.get())!!
+        // Limits: present and populated from StreamDefaults.
+        assertTrue(state.limits.maxRules > 0)
+        assertTrue(state.limits.cooldownPresetSeconds.isNotEmpty())
+        assertTrue(state.limits.missedWindowPresetMinutes.isNotEmpty())
+        // Catalogs: every entry grouped and badged (the contract test in
+        // DtoContractFixtureTest pins the vocabulary membership; here the
+        // through-the-wire shapes).
+        for (entry in state.catalog) {
+            assertTrue(entry.group.isNotBlank())
+            assertTrue(entry.icon.isNotBlank())
+        }
+        for (entry in state.triggers) {
+            assertTrue(entry.group.isNotBlank())
+            assertTrue(entry.icon.isNotBlank())
+        }
+        for (entry in state.conditions) {
+            assertTrue(entry.group.isNotBlank())
+            assertTrue(entry.icon.isNotBlank())
+        }
     }
 }

@@ -48,7 +48,7 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.compose.runtime.DisposableEffect
-import com.raulshma.lenscast.MainApplication
+import com.raulshma.lenscast.AppGraph
 import com.raulshma.lenscast.R
 import com.raulshma.lenscast.streaming.rtsp.RtspInputFormat
 import com.raulshma.lenscast.streaming.rtmp.RtmpStatus
@@ -90,7 +90,7 @@ fun AppSettingsScreen(
 ) {
     val context = LocalContext.current
     val activity = context as ComponentActivity
-    val app = context.applicationContext as MainApplication
+    val app = context.applicationContext as AppGraph
     val viewModel: SettingsViewModel = viewModel(
         factory = SettingsViewModel.Factory(
             app.cameraService, app.settingsDataStore, app.powerManager,
@@ -763,7 +763,7 @@ fun AppSettingsScreen(
                         onCheckedChange = { viewModel.updateStreamAudioEnabled(it) }
                     )
                     // Preferred microphone: blank = platform default.
-                    val app = context.applicationContext as MainApplication
+                    val app = context.applicationContext as AppGraph
                     val audioDevices = remember { app.streamingManager.audioInputDevices() }
                     val selectedAudioDevice by viewModel.audioDeviceId.collectAsState()
                     val defaultAudioLabel = stringResource(R.string.settings_audio_default)

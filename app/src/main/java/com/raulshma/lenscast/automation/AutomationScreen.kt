@@ -58,7 +58,6 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.saveable.Saver
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -74,7 +73,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.raulshma.lenscast.MainApplication
+import com.raulshma.lenscast.AppGraph
 import com.raulshma.lenscast.R
 import com.raulshma.lenscast.automation.schedule.AutomationActionCatalog
 import com.raulshma.lenscast.automation.schedule.AutomationActionSpec
@@ -86,7 +85,6 @@ import com.raulshma.lenscast.automation.schedule.AutomationSchedulePolicy
 import com.raulshma.lenscast.automation.schedule.AutomationTriggerCatalog
 import com.raulshma.lenscast.automation.schedule.ParamKind
 import com.raulshma.lenscast.capture.MotionArmingPolicy
-import com.raulshma.lenscast.core.AppJson
 import com.raulshma.lenscast.core.StreamDefaults
 import com.raulshma.lenscast.settings.FilterChip
 import com.raulshma.lenscast.settings.SettingsSection
@@ -98,125 +96,11 @@ import java.text.DateFormat
 import java.util.Date
 import java.util.TimeZone
 
-/**
- * The screen-local editing draft of one rule. The editor mutates this shape
- * freely (name typing, param toggles) and only the committed save becomes an
- * [AutomationRule] — the ViewModel's sanitize pass then clamps it into the
- * persisted shape. [id] is null for a rule the store has never seen.
- */
-private data class RuleDraft(
-    val id: String?,
-    val name: String,
-    val enabled: Boolean,
-    val triggerType: String,
-    val minuteOfDay: Int,
-    val daysMask: Int,
-    val triggerParams: Map<String, String>,
-    val conditions: List<AutomationConditionSpec>,
-    val conditionMode: String,
-    val cooldownSeconds: Int,
-    val missedRunPolicy: String,
-    val missedWindowMinutes: Int,
-    val actions: List<AutomationActionSpec>,
-) {
-    /** Whether the editor renders the time field + day chips (vs trigger params). */
-    val isTimeTrigger: Boolean get() = triggerType == AutomationTriggerCatalog.TIME_OF_DAY
-
-    fun toRule(): AutomationRule = AutomationRule(
-        id = id,
-        name = name,
-        enabled = enabled,
-        triggerType = triggerType,
-        minuteOfDay = minuteOfDay,
-        daysMask = daysMask,
-        triggerParams = triggerParams,
-        conditions = conditions,
-        conditionMode = conditionMode,
-        cooldownSeconds = cooldownSeconds,
-        missedRunPolicy = missedRunPolicy,
-        missedWindowMinutes = missedWindowMinutes,
-        actions = actions,
-    )
-
-    companion object {
-        /** A fresh rule: 08:00 every day, time trigger, no conditions/actions yet. */
-        fun new(): RuleDraft = RuleDraft(
-            id = null,
-            name = "",
-            enabled = true,
-            triggerType = AutomationTriggerCatalog.TIME_OF_DAY,
-            minuteOfDay = DEFAULT_MINUTE_OF_DAY,
-            daysMask = MotionArmingPolicy.ALL_DAYS_MASK,
-            triggerParams = emptyMap(),
-            conditions = emptyList(),
-            conditionMode = AutomationRule.CONDITION_MODE_ALL,
-            cooldownSeconds = StreamDefaults.AUTOMATION_COOLDOWN_DEFAULT_SECONDS,
-            missedRunPolicy = AutomationRule.MISSED_RUN_CATCH_UP,
-            missedWindowMinutes = StreamDefaults.AUTOMATION_MISSED_WINDOW_DEFAULT_MINUTES,
-            actions = emptyList(),
-        )
-
-        fun from(rule: AutomationRule): RuleDraft = RuleDraft(
-            id = rule.id,
-            name = rule.name,
-            enabled = rule.enabled,
-            triggerType = rule.triggerType,
-            minuteOfDay = rule.minuteOfDay,
-            daysMask = rule.daysMask,
-            triggerParams = rule.triggerParams,
-            conditions = rule.conditions,
-            conditionMode = rule.conditionMode,
-            cooldownSeconds = rule.cooldownSeconds,
-            missedRunPolicy = rule.missedRunPolicy,
-            missedWindowMinutes = rule.missedWindowMinutes,
-            actions = rule.actions,
-        )
-
-        private const val DEFAULT_MINUTE_OF_DAY = 8 * 60
-    }
-}
-
-/** One ↑/↓ reorder step on an editor spec list: move [index] to [toIndex]. */
-private fun <T> List<T>.moved(index: Int, toIndex: Int): List<T> =
-    toMutableList().apply { add(toIndex, removeAt(index)) }
-
-/**
- * Rotation/process-death proof for the open editor: the draft serializes
- * through the same Moshi adapter the store persists with, so an open editor
- * survives configuration changes and process restore instead of silently
- * discarding every in-progress edit. A corrupt snapshot degrades to "editor
- * closed" — the pre-saver behavior — never to a half-valid draft.
- */
-private val ruleDraftJsonAdapter by lazy { AppJson.moshi.adapter(AutomationRule::class.java) }
-
-private val RuleDraftSaver: Saver<RuleDraft?, String> = Saver(
-    save = { draft -> draft?.let { ruleDraftJsonAdapter.toJson(it.toRule()) } },
-    restore = { json ->
-        try {
-            ruleDraftJsonAdapter.fromJson(json)?.let(RuleDraft::from)
-        } catch (_: Exception) {
-            null
-        }
-    },
-)
-
-/**
- * Fallback auto-sentinel names for action ids the catalog does not list
- * (legacy persisted actions): for every listed id the catalog's
- * [AutomationParamSpec.autoAtZero] is the authority.
- */
-private val AUTO_SENTINEL_PARAM_NAMES = setOf("iso", "exposure_time_ms")
-
-/**
- * Whether this param renders the Auto toggle ("0" = the auto sentinel): the
- * catalog's [AutomationParamSpec.autoAtZero] decides for every listed action
- * id; an id missing from the catalog (legacy persisted action) keeps the old
- * name-set behavior so its editors still render sanely.
- */
-private fun isAutoSentinelParam(typeId: String, spec: AutomationParamSpec): Boolean =
-    AutomationActionCatalog.typeFor(typeId)
-        ?.params?.firstOrNull { it.name == spec.name }?.autoAtZero
-        ?: (spec.name in AUTO_SENTINEL_PARAM_NAMES)
+// The rule editor's non-UI state — the RuleDraft shape and its rule
+// conversion, the rotation-proof Saver, the auto-sentinel verdict, the
+// time-window day mask, and the cooldown/window presets — lives in the
+// screen's RuleDraft/RuleDraftSaver/RuleEditorState module (same package),
+// JVM-tested like the ViewModel companion. This file renders it.
 
 /**
  * The automation screen: the engine card (master switch + rule count), then
@@ -230,7 +114,7 @@ private fun isAutoSentinelParam(typeId: String, spec: AutomationParamSpec): Bool
 @Composable
 fun AutomationScreen(onNavigateBack: () -> Unit) {
     val context = LocalContext.current
-    val app = context.applicationContext as MainApplication
+    val app = context.applicationContext as AppGraph
     val viewModel: AutomationViewModel = viewModel(
         factory = AutomationViewModel.Factory(app.cameraService, app.settingsDataStore, app.automationFireJournal)
     )
@@ -692,11 +576,6 @@ private fun ruleScheduleLabel(minuteOfDay: Int, daysMask: Int): String {
     }
     return "${AutomationViewModel.formatMinuteOfDay(minuteOfDay)} · $dayText"
 }
-
-/** A time-window condition's persisted day mask (the sanitize default when absent). */
-private fun conditionWindowDaysMask(condition: AutomationConditionSpec): Int =
-    condition.params["days_mask"]?.toIntOrNull()
-        ?: StreamDefaults.MOTION_ARM_DAYS_MASK_DEFAULT
 
 /** "Mon, Wed" over a time-window condition's day mask (composable labels). */
 @Composable
@@ -1630,8 +1509,8 @@ private fun CooldownEditor(
     cooldownSeconds: Int,
     onChange: (Int) -> Unit,
 ) {
-    val maxSeconds = 3_600
-    val presets = remember { listOf(30, 60, 300, 900, 1_800, 3_600) }
+    val maxSeconds = AUTOMATION_COOLDOWN_DISPLAY_MAX_SECONDS
+    val presets = AUTOMATION_COOLDOWN_PRESET_SECONDS
     val maxF = maxSeconds.toFloat()
     Column(modifier = Modifier.fillMaxWidth()) {
         Row(
@@ -1705,7 +1584,7 @@ private fun MissedRunEditor(
     onPolicyChange: (String) -> Unit,
     onWindowChange: (Int) -> Unit,
 ) {
-    val presets = remember { listOf(5, 15, 30, 60, 180) }
+    val presets = AUTOMATION_MISSED_WINDOW_PRESET_MINUTES
     Column(modifier = Modifier.fillMaxWidth()) {
         Text(
             text = stringResource(R.string.automation_editor_missed_run),

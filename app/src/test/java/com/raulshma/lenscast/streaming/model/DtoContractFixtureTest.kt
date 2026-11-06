@@ -1,15 +1,21 @@
 package com.raulshma.lenscast.streaming.model
 
 import com.raulshma.lenscast.core.AppJson
-import com.raulshma.lenscast.automation.schedule.AutomationActionCatalog
-import com.raulshma.lenscast.automation.schedule.AutomationConditionCatalog
-import com.raulshma.lenscast.automation.schedule.AutomationTriggerCatalog
+import com.raulshma.lenscast.automation.schedule.AutomationActionSpec
+import com.raulshma.lenscast.automation.schedule.AutomationConditionSpec
+import com.raulshma.lenscast.automation.schedule.AutomationIconVocabulary
+import com.raulshma.lenscast.automation.schedule.AutomationRule
+import com.raulshma.lenscast.automation.schedule.AutomationSchedulePolicy
 import com.raulshma.lenscast.capture.model.DetectionEventDeepLink
+import com.raulshma.lenscast.streaming.web.AutomationWebHandler
 import com.raulshma.lenscast.streaming.web.AuthWebHandler
 import com.squareup.moshi.Types
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
+import java.util.TimeZone
 
 /**
  * The Kotlin↔web DTO lockstep, tested at the seam. Each test serializes a
@@ -456,118 +462,114 @@ class DtoContractFixtureTest {
 
     @Test
     fun `automation state response matches the automation fixture`() {
-        // The settings fixture procedure, automation-shaped: the DTO defaults
-        // instance with the uninformative-empty surfaces populated — two
-        // representative rules (one time, one event-with-conditions) and the
-        // real catalog content, which is exactly what GET /api/automation
-        // publishes (the catalogs are device truth, not client-chosen). A
-        // catalog or rule-shape change fails here until the fixture — and
-        // with it the web side — moves in lockstep.
-        val state = AutomationStateDto(
+        // The settings fixture procedure, automation-shaped — but built by
+        // the REAL GET mapping (AutomationWebHandler.buildState), so the
+        // fixture describes the wire by construction, not by a parallel hand
+        // mapping. Two representative rules (one time, one
+        // event-with-conditions — the second carrying a client-smuggled
+        // lastFiredAt the sanitizer must have stripped) and the real catalog
+        // + limits content: exactly what GET /api/automation publishes. A
+        // catalog, limits or rule-shape change fails here until the fixture —
+        // and with it the web side — moves in lockstep.
+        val state = AutomationWebHandler.buildState(
             enabled = true,
-            rules = listOf(
-                AutomationRuleDto(
-                    id = "1f0a9c2e-4b7d-4e8a-9c3f-6d5b8a7e2c41",
-                    name = "Weekday sunrise",
-                    enabled = true,
-                    triggerType = "time_of_day",
-                    minuteOfDay = 420,
-                    daysMask = 31,
-                    triggerParams = emptyMap(),
-                    conditions = listOf(
-                        AutomationConditionDto(type = "charging", params = mapOf("charging" to "true")),
-                    ),
-                    conditionMode = "all",
-                    cooldownSeconds = 60,
-                    missedRunPolicy = "window",
-                    missedWindowMinutes = 30,
-                    actions = listOf(
-                        AutomationActionDto(type = "torch", params = mapOf("enabled" to "true")),
-                        AutomationActionDto(type = "stream", params = mapOf("enabled" to "true")),
-                    ),
-                    lastFiredAt = 1_793_862_000_000L,
-                ),
-                AutomationRuleDto(
-                    id = "8c3d1f6a-2e94-4b05-a7c8-5d1e9f3b7a02",
-                    name = "Night motion deterrent",
-                    enabled = true,
-                    triggerType = "motion_detected",
-                    minuteOfDay = 0,
-                    daysMask = 127,
-                    triggerParams = emptyMap(),
-                    conditions = listOf(
-                        AutomationConditionDto(
-                            type = "time_window",
-                            params = mapOf("start_minute" to "1320", "end_minute" to "360", "days_mask" to "127"),
+            rules = AutomationSchedulePolicy.sanitizeRules(
+                listOf(
+                    AutomationRule(
+                        id = "1f0a9c2e-4b7d-4e8a-9c3f-6d5b8a7e2c41",
+                        name = "Weekday sunrise",
+                        enabled = true,
+                        triggerType = "time_of_day",
+                        minuteOfDay = 420,
+                        daysMask = 31,
+                        conditions = listOf(
+                            AutomationConditionSpec(type = "charging", params = mapOf("charging" to "true")),
                         ),
-                        AutomationConditionDto(type = "streaming", params = mapOf("active" to "true")),
+                        conditionMode = "all",
+                        cooldownSeconds = 60,
+                        missedRunPolicy = "window",
+                        missedWindowMinutes = 30,
+                        actions = listOf(
+                            AutomationActionSpec(type = "torch", params = mapOf("enabled" to "true")),
+                            AutomationActionSpec(type = "stream", params = mapOf("enabled" to "true")),
+                        ),
                     ),
-                    conditionMode = "all",
-                    cooldownSeconds = 120,
-                    actions = listOf(
-                        AutomationActionDto(type = "siren", params = mapOf("enabled" to "true", "duration_seconds" to "10")),
-                        AutomationActionDto(type = "capture_photo"),
+                    AutomationRule(
+                        id = "8c3d1f6a-2e94-4b05-a7c8-5d1e9f3b7a02",
+                        name = "Night motion deterrent",
+                        enabled = true,
+                        triggerType = "motion_detected",
+                        cooldownSeconds = 120,
+                        conditions = listOf(
+                            AutomationConditionSpec(
+                                type = "time_window",
+                                params = mapOf("start_minute" to "1320", "end_minute" to "360", "days_mask" to "127"),
+                            ),
+                            AutomationConditionSpec(type = "streaming", params = mapOf("active" to "true")),
+                        ),
+                        actions = listOf(
+                            AutomationActionSpec(type = "siren", params = mapOf("enabled" to "true", "duration_seconds" to "10")),
+                            AutomationActionSpec(type = "capture_photo"),
+                        ),
+                        // Never fired: lastFiredAt stays null, and AppJson
+                        // omits the null on the wire — the fixture pins both
+                        // shapes (and the GET decoration below is what puts
+                        // the stamp on the first rule).
                     ),
-                    // Never fired: lastFiredAt stays null, and AppJson omits
-                    // the null on the wire — the fixture pins both shapes.
                 ),
             ),
-            // The same mapping AutomationWebHandler.get publishes; the two
-            // must stay byte-identical for the fixture to describe the wire.
-            catalog = AutomationActionCatalog.ACTION_TYPES.map { type ->
-                AutomationCatalogActionDto(
-                    id = type.id,
-                    params = type.params.map { param ->
-                        AutomationCatalogParamDto(
-                            name = param.name,
-                            kind = param.kind.name,
-                            min = param.min,
-                            max = param.max,
-                            optional = param.optional,
-                            defaultValue = param.defaultValue,
-                            autoAtZero = param.autoAtZero,
-                        )
-                    },
-                    catchUp = type.catchUp.name,
-                    interruptsStream = type.interruptsStream,
-                )
-            },
-            triggers = AutomationTriggerCatalog.ACTION_TYPES.map { type ->
-                AutomationCatalogTriggerDto(
-                    id = type.id,
-                    params = type.params.map { param ->
-                        AutomationCatalogParamDto(
-                            name = param.name,
-                            kind = param.kind.name,
-                            min = param.min,
-                            max = param.max,
-                            optional = param.optional,
-                            defaultValue = param.defaultValue,
-                            autoAtZero = param.autoAtZero,
-                        )
-                    },
-                )
-            },
-            conditions = AutomationConditionCatalog.CONDITIONS.map { type ->
-                AutomationCatalogConditionDto(
-                    id = type.id,
-                    params = type.params.map { param ->
-                        AutomationCatalogParamDto(
-                            name = param.name,
-                            kind = param.kind.name,
-                            min = param.min,
-                            max = param.max,
-                            optional = param.optional,
-                            defaultValue = param.defaultValue,
-                            autoAtZero = param.autoAtZero,
-                        )
-                    },
-                )
-            },
+            journal = mapOf("1f0a9c2e-4b7d-4e8a-9c3f-6d5b8a7e2c41" to 1_793_862_000_000L),
+            zone = TimeZone.getTimeZone("UTC"),
         )
+        assertEquals(1_793_862_000_000L, state.rules[0].lastFiredAt)
+        assertNull(state.rules[1].lastFiredAt)
         assertMatchesFixture(
             "automation.json",
             moshi.adapter(AutomationStateDto::class.java).toJson(state),
         )
+    }
+
+    @Test
+    fun `the published limits groups and icons cover every catalog entry`() {
+        // The editor contract the web consumes: every catalog entry ships a
+        // picker group and an icon kind (no entry renders ungrouped or
+        // badge-less on either client), the icon kind is inside the closed
+        // vocabulary both renderers translate, and the limits block carries
+        // every enforced bound plus non-empty preset chips inside it.
+        val state = AutomationWebHandler.buildState(enabled = false, rules = emptyList(), journal = emptyMap())
+
+        val limits = state.limits
+        assertTrue(limits.maxRules > 0)
+        assertTrue(limits.maxActionsPerRule > 0)
+        assertTrue(limits.maxConditionsPerRule > 0)
+        assertTrue(limits.cooldownMinSeconds <= limits.cooldownDefaultSeconds)
+        assertTrue(limits.cooldownDefaultSeconds <= limits.cooldownMaxSeconds)
+        assertTrue(limits.missedWindowMinMinutes <= limits.missedWindowDefaultMinutes)
+        assertTrue(limits.missedWindowDefaultMinutes <= limits.missedWindowMaxMinutes)
+        assertTrue(limits.cooldownPresetSeconds.isNotEmpty())
+        assertTrue(limits.missedWindowPresetMinutes.isNotEmpty())
+        for (preset in limits.cooldownPresetSeconds) {
+            assertTrue("cooldown preset out of the clamp span: $preset", preset in limits.cooldownMinSeconds..limits.cooldownMaxSeconds)
+        }
+        for (preset in limits.missedWindowPresetMinutes) {
+            assertTrue("missed-window preset out of the clamp span: $preset", preset in limits.missedWindowMinMinutes..limits.missedWindowMaxMinutes)
+        }
+
+        val catalogChecks = buildList {
+            state.catalog.forEach { add("action" to Triple(it.id, it.group, it.icon)) }
+            state.triggers.forEach { add("trigger" to Triple(it.id, it.group, it.icon)) }
+            state.conditions.forEach { add("condition" to Triple(it.id, it.group, it.icon)) }
+        }
+        for ((surface, ids) in catalogChecks) {
+            val (entryId, entryGroup, entryIcon) = ids
+            assertTrue(
+                "$surface $entryId published without a group",
+                entryGroup.isNotBlank(),
+            )
+            assertTrue(
+                "$surface $entryId published an icon kind outside the closed vocabulary: $entryIcon",
+                entryIcon in AutomationIconVocabulary.ALL,
+            )
+        }
     }
 }

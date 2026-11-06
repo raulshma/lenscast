@@ -1,13 +1,21 @@
 package com.raulshma.lenscast.streaming.whip
 
+import com.raulshma.lenscast.streaming.PushStatus
+
 /**
  * The WHIP push output's lifecycle state — what the settings screen's status
  * row and the `/api/status` snapshot report. [Error] carries the readable
  * message (invalid URL, rejected offer, failed ICE) so a failed push surfaces
  * why, not just that. The [RtmpStatus] twin minus the codec gate: libwebrtc
  * encodes its own H.264, so the RTMP-only H.265 refusal never applies here.
+ *
+ * The exact public shape is the web contract (same names, same
+ * constructors, same `wireName` values), so this extends the shared
+ * [PushStatus] base without changing anything the consumers see — the deep
+ * [com.raulshma.lenscast.streaming.PushOutput] module holds statuses through
+ * that base.
  */
-sealed class WhipStatus(val wireName: String) {
+sealed class WhipStatus(wireName: String) : PushStatus(wireName) {
 
     /** Not started (or stopped). */
     data object Idle : WhipStatus("idle")

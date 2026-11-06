@@ -7,6 +7,7 @@ import com.raulshma.lenscast.automation.schedule.AutomationTriggerCatalog
 import com.raulshma.lenscast.core.StreamDefaults
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.util.Random
@@ -52,6 +53,10 @@ class AutomationRulesJsonFuzzTest {
         )
         rules.forEach { rule ->
             assertTrue("blank id", !rule.id.isNullOrBlank())
+            // The GET-side fire-stamp decoration never survives a decode —
+            // a hostile payload cannot smuggle a claimed last-fired instant
+            // into the engine's view of a rule.
+            assertNull("a decoded rule carried lastFiredAt", rule.lastFiredAt)
             // An unknown trigger folds to time_of_day; anything that survives
             // decode must be a catalog kind.
             assertNotNull(
@@ -226,6 +231,9 @@ class AutomationRulesJsonFuzzTest {
             """[{"missedWindowMinutes":-30}]""",
             """[{"missedWindowMinutes":99999999999}]""",
             """[{"missedRunPolicy":"window","missedWindowMinutes":1e400}]""",
+            """[{"lastFiredAt":"soon"}]""",
+            """[{"lastFiredAt":1234567890123}]""",
+            """[{"lastFiredAt":null}]""",
             """[{"actions":{"type":"torch"}}]""",
             """[{"actions":[42]}]""",
             """[{"actions":[{"type":42}]}]""",

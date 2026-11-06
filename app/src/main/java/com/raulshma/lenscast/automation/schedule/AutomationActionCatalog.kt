@@ -48,7 +48,9 @@ enum class CatchUpClass { STATEFUL, ONESHOT }
 
 /**
  * One automation action the engine can execute: its id, parameter schema,
- * catch-up class, and whether applying it interrupts the live stream.
+ * catch-up class, whether applying it interrupts the live stream, and the
+ * published picker decorations ([group] and [icon] — see
+ * [AutomationIconVocabulary] for the icon kind's closed meaning).
  *
  * [interruptsStream] is a UI warning flag only — the executor does NOT
  * force a teardown/rebind around the actions it marks. The one flagged type
@@ -62,6 +64,10 @@ data class AutomationActionType(
     val params: List<AutomationParamSpec>,
     val catchUp: CatchUpClass,
     val interruptsStream: Boolean = false,
+    /** The picker group this entry lists under — a semantic id, never renamed. */
+    val group: String,
+    /** The published icon kind (a closed vocabulary; see [AutomationIconVocabulary]). */
+    val icon: String,
 )
 
 /**
@@ -78,8 +84,19 @@ data class AutomationActionType(
  * Sentinels documented per entry: `iso`/`exposure_time_ms` "0" mean auto;
  * `recording.duration_seconds` "0" means unbounded; `siren.duration_seconds`
  * absent means run-until-stopped while "0" means an explicit no-limit.
+ * GET /api/automation also publishes each entry's picker `group` and `icon`
+ * kind, so both editors (app screen and web dashboard) group and badge the
+ * entries from this one source.
  */
 object AutomationActionCatalog {
+
+    // Picker group ids — semantic, wire-published (the catalog DTO's
+    // `group`), never renamed; the labels live on the clients (string
+    // resources / i18n keys keyed off the id).
+    const val GROUP_CAMERA = "camera"
+    const val GROUP_LIGHT_SOUND = "light_sound"
+    const val GROUP_STREAM_CAPTURE = "stream_capture"
+    const val GROUP_DETECTION = "detection"
 
     /**
      * Every executable action, in display/contract order. Additive only:
@@ -111,6 +128,8 @@ object AutomationActionCatalog {
                 ),
             ),
             catchUp = CatchUpClass.STATEFUL,
+            group = GROUP_CAMERA,
+            icon = AutomationIconVocabulary.EXPOSURE,
         ),
         AutomationActionType(
             id = "camera_ev",
@@ -122,6 +141,8 @@ object AutomationActionCatalog {
                 ),
             ),
             catchUp = CatchUpClass.STATEFUL,
+            group = GROUP_CAMERA,
+            icon = AutomationIconVocabulary.TONALITY,
         ),
         AutomationActionType(
             id = "camera_zoom",
@@ -133,6 +154,8 @@ object AutomationActionCatalog {
                 ),
             ),
             catchUp = CatchUpClass.STATEFUL,
+            group = GROUP_CAMERA,
+            icon = AutomationIconVocabulary.ZOOM,
         ),
         AutomationActionType(
             id = "camera_fps",
@@ -144,6 +167,8 @@ object AutomationActionCatalog {
                 ),
             ),
             catchUp = CatchUpClass.STATEFUL,
+            group = GROUP_CAMERA,
+            icon = AutomationIconVocabulary.SPEED,
         ),
         AutomationActionType(
             id = "camera_lens",
@@ -161,6 +186,8 @@ object AutomationActionCatalog {
             ),
             catchUp = CatchUpClass.STATEFUL,
             interruptsStream = true,
+            group = GROUP_CAMERA,
+            icon = AutomationIconVocabulary.LENS,
         ),
         AutomationActionType(
             id = "torch",
@@ -178,6 +205,8 @@ object AutomationActionCatalog {
                 ),
             ),
             catchUp = CatchUpClass.STATEFUL,
+            group = GROUP_LIGHT_SOUND,
+            icon = AutomationIconVocabulary.TORCH,
         ),
         AutomationActionType(
             id = "stream",
@@ -189,11 +218,15 @@ object AutomationActionCatalog {
                 ),
             ),
             catchUp = CatchUpClass.STATEFUL,
+            group = GROUP_STREAM_CAPTURE,
+            icon = AutomationIconVocabulary.BROADCAST,
         ),
         AutomationActionType(
             id = "capture_photo",
             params = emptyList(),
             catchUp = CatchUpClass.ONESHOT,
+            group = GROUP_STREAM_CAPTURE,
+            icon = AutomationIconVocabulary.CAMERA,
         ),
         AutomationActionType(
             id = "recording",
@@ -212,6 +245,8 @@ object AutomationActionCatalog {
                 ),
             ),
             catchUp = CatchUpClass.STATEFUL,
+            group = GROUP_STREAM_CAPTURE,
+            icon = AutomationIconVocabulary.VIDEOCAM,
         ),
         AutomationActionType(
             id = "siren",
@@ -230,6 +265,8 @@ object AutomationActionCatalog {
                 ),
             ),
             catchUp = CatchUpClass.STATEFUL,
+            group = GROUP_LIGHT_SOUND,
+            icon = AutomationIconVocabulary.SIREN,
         ),
         AutomationActionType(
             id = "detection",
@@ -246,6 +283,8 @@ object AutomationActionCatalog {
                 ),
             ),
             catchUp = CatchUpClass.STATEFUL,
+            group = GROUP_DETECTION,
+            icon = AutomationIconVocabulary.RADAR,
         ),
     )
 

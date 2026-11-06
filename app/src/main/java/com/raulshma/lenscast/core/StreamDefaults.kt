@@ -243,6 +243,13 @@ object StreamDefaults {
     const val AUTOMATION_COOLDOWN_MAX_SECONDS = 86_400
     const val AUTOMATION_COOLDOWN_DEFAULT_SECONDS = 60
 
+    // The cooldown preset chips both editors (app screen and web dashboard)
+    // offer, in display order — the ONE source the GET /api/automation limits
+    // publish, so the web chips cannot drift from the app's. The last entry
+    // matches the cooldown editors' display ceiling (an hour; the persisted
+    // bound allows a day).
+    val AUTOMATION_COOLDOWN_PRESET_SECONDS: List<Int> = listOf(30, 60, 300, 900, 1_800, 3_600)
+
     // Missed-run policy ("window" mode): how many minutes past its scheduled
     // instant a time rule may still fire. Bounded in minute-space — the same
     // units the occurrence keys measure lateness in — with 1440 (a full day)
@@ -252,4 +259,9 @@ object StreamDefaults {
     const val AUTOMATION_MISSED_WINDOW_MIN_MINUTES = 1
     const val AUTOMATION_MISSED_WINDOW_MAX_MINUTES = 1_440
     const val AUTOMATION_MISSED_WINDOW_DEFAULT_MINUTES = 30
+
+    // The missed-window preset chips both editors (app screen and web
+    // dashboard) offer, in display order — the ONE source the GET
+    // /api/automation limits publish, all inside the clamp span above.
+    val AUTOMATION_MISSED_WINDOW_PRESET_MINUTES: List<Int> = listOf(5, 15, 30, 60, 180)
 }

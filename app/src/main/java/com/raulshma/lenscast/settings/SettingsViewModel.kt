@@ -14,6 +14,7 @@ import com.raulshma.lenscast.camera.model.SelfTimerMode
 import com.raulshma.lenscast.camera.model.QuickSettingCatalog
 import com.raulshma.lenscast.camera.model.QuickSettingType
 import com.raulshma.lenscast.core.PowerManager
+import com.raulshma.lenscast.core.SecretUpdate
 import com.raulshma.lenscast.core.parseEnum
 import com.raulshma.lenscast.capture.ml.AudioModelStore
 import com.raulshma.lenscast.capture.ml.DetectionModelStore
@@ -288,9 +289,9 @@ class SettingsViewModel(
 
     fun updateWhipUrl(url: String) = save { settingsDataStore.saveWhipUrl(url) }
 
-    /** Write-only like the stream-auth password: an empty field keeps the stored token. */
+    /** Write-only (Secret / SecretUpdate): an empty field keeps the stored token. */
     fun updateWhipToken(token: String) {
-        if (token.isNotEmpty()) save { settingsDataStore.saveWhipToken(token) }
+        if (SecretUpdate.overwrites(token)) save { settingsDataStore.saveWhipToken(token) }
     }
 
     fun updateWhipStunServer(server: String) = save { settingsDataStore.saveWhipStunServer(server) }
@@ -434,8 +435,9 @@ class SettingsViewModel(
         save { settingsDataStore.saveMediaEncryptionEnabled(enabled) }
 
 
+    /** Write-only (Secret / SecretUpdate): an empty field keeps the stored password. */
     fun updateBackupWebdavPassword(password: String) {
-        if (password.isNotEmpty()) save { settingsDataStore.saveBackupWebdavPassword(password) }
+        if (SecretUpdate.overwrites(password)) save { settingsDataStore.saveBackupWebdavPassword(password) }
     }
 
     fun updateAuthEnabled(enabled: Boolean) {

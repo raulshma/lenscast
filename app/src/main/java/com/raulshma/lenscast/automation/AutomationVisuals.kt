@@ -36,15 +36,22 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import com.raulshma.lenscast.R
 import com.raulshma.lenscast.automation.schedule.AutomationActionCatalog
 import com.raulshma.lenscast.automation.schedule.AutomationConditionCatalog
+import com.raulshma.lenscast.automation.schedule.AutomationIconVocabulary
 import com.raulshma.lenscast.automation.schedule.AutomationTriggerCatalog
 
 /**
  * The display-only visual identity of the three automation catalogs: a badge
  * icon, a one-line picker description, and the picker grouping per catalog
- * id. The engine catalogs stay untouched (they are device truth on the wire);
- * this object only decorates them, and every accessor falls back to a plain
- * entry for an id it does not know, so a future catalog id renders in the
- * pickers (generic look) instead of crashing or hiding.
+ * id. The GROUPING and the ICON KINDS are not hand lists here anymore — both
+ * are device truth published on the wire (each catalog entry carries its
+ * `group` id and its `icon` kind, see AutomationIconVocabulary); this object
+ * only translates: group ids → localized titles, icon kinds → drawables,
+ * catalog ids → one-line descriptions. A picker group's member list is the
+ * catalog's own display order filtered by the group id, so adding a catalog
+ * entry with a known group/icon kind renders everywhere with zero edits
+ * here. Every accessor falls back to a plain entry for an id (or a kind) it
+ * does not know, so a future catalog entry still renders in the pickers
+ * (generic look) instead of crashing or hiding.
  */
 internal object AutomationVisuals {
 
@@ -56,153 +63,151 @@ internal object AutomationVisuals {
 
     private val FALLBACK = EntryVisual(Icons.Filled.Adjust, R.string.automation_action_unknown)
 
+    /** The group id → localized title mapping, in display order (the ids and member lists come from the catalogs). */
+    private val TRIGGER_GROUP_TITLES: List<Pair<String, Int>> = listOf(
+        AutomationTriggerCatalog.GROUP_SCHEDULE to R.string.automation_group_schedule,
+        AutomationTriggerCatalog.GROUP_DEVICE_EVENTS to R.string.automation_group_device_events,
+        AutomationTriggerCatalog.GROUP_POWER to R.string.automation_group_power,
+        AutomationTriggerCatalog.GROUP_STREAM_APP to R.string.automation_group_stream_app,
+    )
+
+    private val ACTION_GROUP_TITLES: List<Pair<String, Int>> = listOf(
+        AutomationActionCatalog.GROUP_CAMERA to R.string.automation_group_camera,
+        AutomationActionCatalog.GROUP_LIGHT_SOUND to R.string.automation_group_light_sound,
+        AutomationActionCatalog.GROUP_STREAM_CAPTURE to R.string.automation_group_stream_capture,
+        AutomationActionCatalog.GROUP_DETECTION to R.string.automation_group_detection,
+    )
+
+    private val CONDITION_GROUP_TITLES: List<Pair<String, Int>> = listOf(
+        AutomationConditionCatalog.GROUP_TIME to R.string.automation_group_time,
+        AutomationConditionCatalog.GROUP_POWER to R.string.automation_group_power,
+        AutomationConditionCatalog.GROUP_CONNECTIVITY to R.string.automation_group_connectivity,
+        AutomationConditionCatalog.GROUP_DEVICE_STATE to R.string.automation_group_device_state,
+    )
+
+    /**
+     * Derive one catalog's picker groups: the titles above, in order, each
+     * listing the catalog's own entries in catalog order filtered by the
+     * group id. A group with no entries disappears (the catalogs are the
+     * single source — an empty group would be a hand-list ghost).
+     */
+    private fun groups(
+        entries: List<Pair<String, String>>, // (id, group) in catalog display order
+        titles: List<Pair<String, Int>>,
+    ): List<PickerGroup> =
+        titles.mapNotNull { (groupId, titleRes) ->
+            val ids = entries.filter { it.second == groupId }.map { it.first }
+            if (ids.isEmpty()) null else PickerGroup(titleRes, ids)
+        }
+
     // ── triggers ──
 
+    /** Icon kind → drawable/description (AutomationIconVocabulary is the closed kind set). */
     private val TRIGGER_VISUALS: Map<String, EntryVisual> = mapOf(
-        AutomationTriggerCatalog.TIME_OF_DAY to EntryVisual(
+        AutomationIconVocabulary.SCHEDULE to EntryVisual(
             Icons.Filled.Schedule, R.string.automation_trigger_desc_time_of_day,
         ),
-        AutomationTriggerCatalog.MOTION_DETECTED to EntryVisual(
+        AutomationIconVocabulary.SENSOR to EntryVisual(
             Icons.Filled.Sensors, R.string.automation_trigger_desc_motion,
         ),
-        AutomationTriggerCatalog.SOUND_DETECTED to EntryVisual(
+        AutomationIconVocabulary.SOUND to EntryVisual(
             Icons.Filled.GraphicEq, R.string.automation_trigger_desc_sound,
         ),
-        AutomationTriggerCatalog.TAMPER_DETECTED to EntryVisual(
+        AutomationIconVocabulary.SHIELD to EntryVisual(
             Icons.Filled.Security, R.string.automation_trigger_desc_tamper,
         ),
-        AutomationTriggerCatalog.CHARGING_CHANGED to EntryVisual(
+        AutomationIconVocabulary.POWER to EntryVisual(
             Icons.Filled.Power, R.string.automation_trigger_desc_charging,
         ),
-        AutomationTriggerCatalog.BATTERY_LEVEL to EntryVisual(
+        AutomationIconVocabulary.BATTERY_ALERT to EntryVisual(
             Icons.Filled.BatteryAlert, R.string.automation_trigger_desc_battery,
         ),
-        AutomationTriggerCatalog.STREAMING_CHANGED to EntryVisual(
+        AutomationIconVocabulary.CAST to EntryVisual(
             Icons.Filled.Cast, R.string.automation_trigger_desc_streaming,
         ),
-        AutomationTriggerCatalog.VIEWERS_CHANGED to EntryVisual(
+        AutomationIconVocabulary.EYE to EntryVisual(
             Icons.Filled.Visibility, R.string.automation_trigger_desc_viewers,
         ),
-        AutomationTriggerCatalog.APP_STARTED to EntryVisual(
+        AutomationIconVocabulary.ROCKET to EntryVisual(
             Icons.Filled.RocketLaunch, R.string.automation_trigger_desc_app_started,
         ),
     )
 
     fun triggerVisual(typeId: String): EntryVisual =
-        TRIGGER_VISUALS[typeId] ?: FALLBACK
+        AutomationTriggerCatalog.typeFor(typeId)?.icon?.let { TRIGGER_VISUALS[it] } ?: FALLBACK
 
-    val TRIGGER_GROUPS: List<PickerGroup> = listOf(
-        PickerGroup(R.string.automation_group_schedule, listOf(AutomationTriggerCatalog.TIME_OF_DAY)),
-        PickerGroup(
-            R.string.automation_group_device_events,
-            listOf(
-                AutomationTriggerCatalog.MOTION_DETECTED,
-                AutomationTriggerCatalog.SOUND_DETECTED,
-                AutomationTriggerCatalog.TAMPER_DETECTED,
-            ),
-        ),
-        PickerGroup(
-            R.string.automation_group_power,
-            listOf(AutomationTriggerCatalog.CHARGING_CHANGED, AutomationTriggerCatalog.BATTERY_LEVEL),
-        ),
-        PickerGroup(
-            R.string.automation_group_stream_app,
-            listOf(
-                AutomationTriggerCatalog.STREAMING_CHANGED,
-                AutomationTriggerCatalog.VIEWERS_CHANGED,
-                AutomationTriggerCatalog.APP_STARTED,
-            ),
-        ),
+    val TRIGGER_GROUPS: List<PickerGroup> = groups(
+        AutomationTriggerCatalog.ACTION_TYPES.map { it.id to it.group },
+        TRIGGER_GROUP_TITLES,
     )
 
     // ── actions ──
 
     private val ACTION_VISUALS: Map<String, EntryVisual> = mapOf(
-        "camera_exposure" to EntryVisual(Icons.Filled.Exposure, R.string.automation_action_desc_camera_exposure),
-        "camera_ev" to EntryVisual(Icons.Filled.Tonality, R.string.automation_action_desc_camera_ev),
-        "camera_zoom" to EntryVisual(Icons.Filled.ZoomIn, R.string.automation_action_desc_camera_zoom),
-        "camera_fps" to EntryVisual(Icons.Filled.Speed, R.string.automation_action_desc_camera_fps),
-        "camera_lens" to EntryVisual(Icons.Filled.Lens, R.string.automation_action_desc_camera_lens),
-        "torch" to EntryVisual(Icons.Filled.FlashlightOn, R.string.automation_action_desc_torch),
-        "stream" to EntryVisual(Icons.Filled.WifiTethering, R.string.automation_action_desc_stream),
-        "capture_photo" to EntryVisual(Icons.Filled.PhotoCamera, R.string.automation_action_desc_capture_photo),
-        "recording" to EntryVisual(Icons.Filled.Videocam, R.string.automation_action_desc_recording),
-        "siren" to EntryVisual(Icons.Filled.NotificationsActive, R.string.automation_action_desc_siren),
-        "detection" to EntryVisual(Icons.Filled.Radar, R.string.automation_action_desc_detection),
+        AutomationIconVocabulary.EXPOSURE to EntryVisual(Icons.Filled.Exposure, R.string.automation_action_desc_camera_exposure),
+        AutomationIconVocabulary.TONALITY to EntryVisual(Icons.Filled.Tonality, R.string.automation_action_desc_camera_ev),
+        AutomationIconVocabulary.ZOOM to EntryVisual(Icons.Filled.ZoomIn, R.string.automation_action_desc_camera_zoom),
+        AutomationIconVocabulary.SPEED to EntryVisual(Icons.Filled.Speed, R.string.automation_action_desc_camera_fps),
+        AutomationIconVocabulary.LENS to EntryVisual(Icons.Filled.Lens, R.string.automation_action_desc_camera_lens),
+        AutomationIconVocabulary.TORCH to EntryVisual(Icons.Filled.FlashlightOn, R.string.automation_action_desc_torch),
+        AutomationIconVocabulary.BROADCAST to EntryVisual(Icons.Filled.WifiTethering, R.string.automation_action_desc_stream),
+        AutomationIconVocabulary.CAMERA to EntryVisual(Icons.Filled.PhotoCamera, R.string.automation_action_desc_capture_photo),
+        AutomationIconVocabulary.VIDEOCAM to EntryVisual(Icons.Filled.Videocam, R.string.automation_action_desc_recording),
+        AutomationIconVocabulary.SIREN to EntryVisual(Icons.Filled.NotificationsActive, R.string.automation_action_desc_siren),
+        AutomationIconVocabulary.RADAR to EntryVisual(Icons.Filled.Radar, R.string.automation_action_desc_detection),
     )
 
     fun actionVisual(typeId: String): EntryVisual =
-        ACTION_VISUALS[typeId] ?: FALLBACK
+        AutomationActionCatalog.typeFor(typeId)?.icon?.let { ACTION_VISUALS[it] } ?: FALLBACK
 
-    val ACTION_GROUPS: List<PickerGroup> = listOf(
-        PickerGroup(
-            R.string.automation_group_camera,
-            listOf("camera_exposure", "camera_ev", "camera_zoom", "camera_fps", "camera_lens"),
-        ),
-        PickerGroup(R.string.automation_group_light_sound, listOf("torch", "siren")),
-        PickerGroup(R.string.automation_group_stream_capture, listOf("stream", "capture_photo", "recording")),
-        PickerGroup(R.string.automation_group_detection, listOf("detection")),
+    val ACTION_GROUPS: List<PickerGroup> = groups(
+        AutomationActionCatalog.ACTION_TYPES.map { it.id to it.group },
+        ACTION_GROUP_TITLES,
     )
 
     // ── conditions ──
 
     private val CONDITION_VISUALS: Map<String, EntryVisual> = mapOf(
-        AutomationConditionCatalog.TIME_WINDOW to EntryVisual(
+        AutomationIconVocabulary.TIME_WINDOW to EntryVisual(
             Icons.Filled.AccessTime, R.string.automation_condition_desc_time_window,
         ),
-        AutomationConditionCatalog.CHARGING to EntryVisual(
+        AutomationIconVocabulary.POWER to EntryVisual(
             Icons.Filled.Power, R.string.automation_condition_desc_charging,
         ),
-        AutomationConditionCatalog.BATTERY_LEVEL to EntryVisual(
+        AutomationIconVocabulary.BATTERY to EntryVisual(
             Icons.Filled.BatteryStd, R.string.automation_condition_desc_battery,
         ),
-        AutomationConditionCatalog.POWER_SAVE to EntryVisual(
+        AutomationIconVocabulary.BATTERY_SAVER to EntryVisual(
             Icons.Filled.BatterySaver, R.string.automation_condition_desc_power_save,
         ),
-        AutomationConditionCatalog.WIFI_CONNECTED to EntryVisual(
+        AutomationIconVocabulary.WIFI to EntryVisual(
             Icons.Filled.Wifi, R.string.automation_condition_desc_wifi,
         ),
-        AutomationConditionCatalog.STREAMING to EntryVisual(
+        AutomationIconVocabulary.STREAM to EntryVisual(
             Icons.Filled.Stream, R.string.automation_condition_desc_streaming,
         ),
-        AutomationConditionCatalog.VIEWERS to EntryVisual(
+        AutomationIconVocabulary.PEOPLE to EntryVisual(
             Icons.Filled.Groups, R.string.automation_condition_desc_viewers,
         ),
-        AutomationConditionCatalog.TORCH to EntryVisual(
+        AutomationIconVocabulary.LIGHTBULB to EntryVisual(
             Icons.Filled.Lightbulb, R.string.automation_condition_desc_torch,
         ),
-        AutomationConditionCatalog.RECORDING to EntryVisual(
+        AutomationIconVocabulary.RECORD to EntryVisual(
             Icons.Filled.FiberManualRecord, R.string.automation_condition_desc_recording,
         ),
-        AutomationConditionCatalog.THERMAL to EntryVisual(
+        AutomationIconVocabulary.THERMOSTAT to EntryVisual(
             Icons.Filled.DeviceThermostat, R.string.automation_condition_desc_thermal,
         ),
-        AutomationConditionCatalog.MOTION_DETECTION to EntryVisual(
+        AutomationIconVocabulary.RADAR to EntryVisual(
             Icons.Filled.Radar, R.string.automation_condition_desc_motion_detection,
         ),
     )
 
     fun conditionVisual(typeId: String): EntryVisual =
-        CONDITION_VISUALS[typeId] ?: FALLBACK
+        AutomationConditionCatalog.typeFor(typeId)?.icon?.let { CONDITION_VISUALS[it] } ?: FALLBACK
 
-    val CONDITION_GROUPS: List<PickerGroup> = listOf(
-        PickerGroup(R.string.automation_group_time, listOf(AutomationConditionCatalog.TIME_WINDOW)),
-        PickerGroup(
-            R.string.automation_group_power,
-            listOf(AutomationConditionCatalog.CHARGING, AutomationConditionCatalog.BATTERY_LEVEL, AutomationConditionCatalog.POWER_SAVE),
-        ),
-        PickerGroup(
-            R.string.automation_group_connectivity,
-            listOf(AutomationConditionCatalog.WIFI_CONNECTED, AutomationConditionCatalog.STREAMING, AutomationConditionCatalog.VIEWERS),
-        ),
-        PickerGroup(
-            R.string.automation_group_device_state,
-            listOf(
-                AutomationConditionCatalog.TORCH,
-                AutomationConditionCatalog.RECORDING,
-                AutomationConditionCatalog.THERMAL,
-                AutomationConditionCatalog.MOTION_DETECTION,
-            ),
-        ),
+    val CONDITION_GROUPS: List<PickerGroup> = groups(
+        AutomationConditionCatalog.CONDITIONS.map { it.id to it.group },
+        CONDITION_GROUP_TITLES,
     )
 }

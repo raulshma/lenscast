@@ -35,7 +35,7 @@ import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.raulshma.lenscast.MainApplication
+import com.raulshma.lenscast.AppGraph
 import com.raulshma.lenscast.R
 import com.raulshma.lenscast.ui.components.LensCastTopBar
 
@@ -46,7 +46,7 @@ fun GalleryScreen(
     onViewMedia: (String) -> Unit,
 ) {
     val context = LocalContext.current
-    val app = context.applicationContext as MainApplication
+    val app = context.applicationContext as AppGraph
     val viewModel: GalleryViewModel = viewModel(
         factory = GalleryViewModel.Factory(app.captureHistoryStore, app.decryptedPhotoCache, app.appScope)
     )

@@ -271,16 +271,31 @@ PUT /api/automation        # POST accepted as an alias
 ```
 
 - `GET` returns the engine state: `{"enabled": …, "rules": […],
-  "catalog": […], "triggers": […], "conditions": […]}`. The three catalogs
-  are the device's truth published read-only — actions (ids, param kinds,
-  bounds, defaults, catch-up class, stream-interruption flag), triggers,
-  and conditions (ids + param schemas) — so a client can render rule
-  editors dynamically instead of hardcoding them.
+  "catalog": […], "triggers": […], "conditions": […], "limits": {…}}`.
+  The rule shape in `rules` IS the app's one `AutomationRule` declaration
+  (the same class the app persists — there is no separate wire clone);
+  each rule additionally carries the read-only `lastFiredAt` fire stamp
+  decoded from the device's fire journal (null/absent = never fired). The
+  three catalogs are the device's truth published read-only — actions (ids,
+  param kinds, bounds, defaults, catch-up class, stream-interruption flag),
+  triggers, and conditions (ids + param schemas) — and each catalog entry
+  carries its picker `group` (a semantic id, e.g. `camera` or `schedule`)
+  and its `icon` kind (a small closed vocabulary: the app maps kind →
+  drawable, the web maps kind → glyph), so every client groups and badges
+  the pickers identically from the one source. The `limits` block publishes
+  the editor contract's bounds, defaults and preset chips from
+  StreamDefaults (`maxRules`, `maxActionsPerRule`, `maxConditionsPerRule`,
+  the cooldown and missed-window clamps and defaults, and the two preset
+  lists) — read-only, like the catalogs.
 - `PUT` takes `{"enabled": …, "rules": […]}` wholesale (a rule absent from
   the document is deleted, the settings-section convention), sanitizes
   server-side, and answers with a fresh read of the sanitized truth — minted
-  rule ids, clamped minutes/masks, folded missed-run policies with clamped
-  windows, canonical params — rather than what was sent.
+  rule ids (a blank `id` is the new-rule shape; every persisted rule carries
+  a minted, non-blank id, so GET responses always emit one), clamped
+  minutes/masks, folded missed-run policies with clamped windows, canonical
+  params — rather than what was sent. A client echoing a rule's
+  `lastFiredAt` back in a PUT body has it discarded: the fire stamp is a
+  GET decoration, never persisted.
 - Auth matches `PUT /api/settings`: any authenticated session may read;
   writes are config writes, so a read-only viewer session is denied and the
   optional API token stays read-only here.
@@ -289,7 +304,10 @@ The built-in dashboard ships an **Automation card** on its settings page
 (`AutomationCard` / `AutomationRuleEditor` in `web/src/components/`): the
 same master switch, rule list, and rule editor as the in-app screen, with
 trigger/condition/action editors rendered from the catalogs the GET
-response publishes — pretty labels from small id maps, everything else
+response publishes — the picker groups and icons come from the entries'
+published `group`/`icon`, the cap counters, cooldown/window bounds and
+preset chips from the `limits` block (pre-fetch fallbacks are pinned to the
+checked-in contract fixture by `web/src/contract.test.ts`), everything else
 generic. Viewer sessions see the card read-only.
 
 ## What does not change

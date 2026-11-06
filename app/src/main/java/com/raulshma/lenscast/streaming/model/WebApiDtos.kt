@@ -1,6 +1,8 @@
 package com.raulshma.lenscast.streaming.model
 import com.squareup.moshi.JsonClass
 
+import com.raulshma.lenscast.automation.schedule.AutomationRule
+import com.raulshma.lenscast.core.Secret
 import com.raulshma.lenscast.capture.ml.DetectionModelStore
 import com.raulshma.lenscast.camera.model.MaskingZone
 import com.raulshma.lenscast.camera.model.MotionZone
@@ -92,8 +94,13 @@ data class StreamingSettingsDto(
      * H.264 codec), a readable error beats silently "fixing" a pasted target.
      */
     val rtmpEnabled: Boolean = false,
-    /** The push target: `rtmp(s)://[user:pass@]host[:port]/app/streamKey`. */
-    val rtmpUrl: String = "",
+    /**
+     * The push target: `rtmp(s)://[user:pass@]host[:port]/app/streamKey`.
+     * A [Secret]: the URL embeds the stream key, a credential that never
+     * round-trips (see docs/rtmp.md) — accepted on PUT, always blank in
+     * responses; an empty update keeps the stored URL.
+     */
+    val rtmpUrl: Secret = Secret(""),
     /**
      * The WHIP push output (WebRTC-HTTP egress, RFC 9725), off by default.
      * Like the RTMP push URL it round-trips over the Web API, but the
@@ -103,10 +110,11 @@ data class StreamingSettingsDto(
     /** The WHIP endpoint: `http(s)://[user:pass@]host[:port]/endpoint`. */
     val whipUrl: String = "",
     /**
-     * Write-only, like [mqttPassword]: the WHIP bearer token is accepted on
-     * PUT, persisted raw, and always serialized blank in responses.
+     * The WHIP bearer token. A [Secret]: accepted on PUT, persisted raw, and
+     * always serialized blank in responses; an empty update keeps the
+     * stored token.
      */
-    val whipToken: String = "",
+    val whipToken: Secret = Secret(""),
     /**
      * The one STUN server for one-shot ICE gathering, `host[:port]`; blank
      * (the default) means no iceServers — host candidates only, i.e.
@@ -121,10 +129,10 @@ data class StreamingSettingsDto(
     val srtEnabled: Boolean = false,
     /**
      * The SRT push target: `srt://[user:pass@]host[:port][?streamid=…]`.
-     * Write-only, like [rtmpUrl]: the userinfo and stream id are
-     * credentials, so PUT carries it and responses are always blank.
+     * A [Secret]: the userinfo and stream id are credentials, so PUT carries
+     * it and responses are always blank; an empty update keeps the stored URL.
      */
-    val srtUrl: String = "",
+    val srtUrl: Secret = Secret(""),
     val adaptiveBitrateEnabled: Boolean = false,
     /**
      * The adaptive ENCODED-video bitrate: measured encoded-sink throughput
@@ -222,16 +230,17 @@ data class StreamingSettingsDto(
     val backupWebdavUrl: String = "",
     val backupWebdavUsername: String = "",
     /**
-     * Write-only, like the stream-auth password: requests carry it, responses
-     * always serialize it blank — the stored secret never round-trips.
+     * The WebDAV password. A [Secret]: requests carry it, responses always
+     * serialize it blank — the stored secret never round-trips; an empty
+     * update keeps the stored password.
      */
-    val backupWebdavPassword: String = "",
+    val backupWebdavPassword: Secret = Secret(""),
     val telegramChatId: String = "",
     /**
-     * Write-only, exactly like [backupWebdavPassword]: accepted on PUT, never
-     * serialized back out.
+     * The Telegram bot token. A [Secret]: accepted on PUT, never serialized
+     * back out; an empty update keeps the stored token.
      */
-    val telegramBotToken: String = "",
+    val telegramBotToken: Secret = Secret(""),
     /** Whether the read-only API token path is armed. */
     val apiTokenEnabled: Boolean = false,
     /** True when a token hash is stored; the token and the hash never round-trip. */
@@ -239,9 +248,11 @@ data class StreamingSettingsDto(
     /**
      * Write-only plaintext token: the dashboard generates it client-side and
      * sends it once; the server stores only its SHA-256 hex hash and this
-     * field always serializes blank.
+     * field always serializes blank (a [Secret]). The one layered exception
+     * to the plain keep-or-overwrite rule — a hash-and-gate on the enable
+     * flag — lives in the PUT path (see the Web API Settings Handler).
      */
-    val apiToken: String = "",
+    val apiToken: Secret = Secret(""),
     val httpsEnabled: Boolean = false,
     val audioDeviceId: String = "",
     val detectionNotificationsEnabled: Boolean = true,
@@ -258,10 +269,11 @@ data class StreamingSettingsDto(
     val mqttBrokerPort: Int = StreamDefaults.MQTT_PORT_DEFAULT,
     val mqttUsername: String = "",
     /**
-     * Write-only, like [backupWebdavPassword]: accepted on PUT, always
-     * serialized blank in responses.
+     * The MQTT broker password. A [Secret]: accepted on PUT, always
+     * serialized blank in responses; an empty update keeps the stored
+     * password.
      */
-    val mqttPassword: String = "",
+    val mqttPassword: Secret = Secret(""),
     val mqttTls: Boolean = false,
     val mqttDiscoveryPrefix: String = StreamDefaults.MQTT_DISCOVERY_PREFIX_DEFAULT,
     /**
@@ -930,120 +942,22 @@ data class LabeledCountDto(
 )
 
 // ── Automation DTOs ──
+//
+// The rule itself is NOT cloned here: the wire shape IS the domain
+// `com.raulshma.lenscast.automation.schedule.AutomationRule` (@JsonClass,
+// same field names), embedded directly in [AutomationStateDto] and
+// [AutomationUpdateRequestDto]. Only the read-only catalog projections and
+// the envelope documents live here.
 
 /**
- * One step inside an [AutomationRuleDto]: a catalog action id plus its raw
- * parameters. Everything is a string on the wire (the same convention as the
- * persisted [com.raulshma.lenscast.automation.schedule.AutomationActionSpec])
- * so the shape never needs versioning when an action gains a parameter —
- * validity and typing are the catalog's job at sanitize time.
- */
-@JsonClass(generateAdapter = true)
-data class AutomationActionDto(
-    /** Catalog id, e.g. `"torch"`; an id outside the catalog is dropped on save. */
-    val type: String = "",
-    /** Raw parameter values, all serialized as strings; clamped to the catalog bounds on save. */
-    val params: Map<String, String> = emptyMap(),
-)
-
-/**
- * One precondition inside an [AutomationRuleDto] (the rule's "ONLY WHEN"
- * clause): a catalog condition id plus its raw parameters — the same string
- * convention as [AutomationActionDto]; validity is the condition catalog's
- * job at sanitize time, and an unknown condition is dropped on save.
- */
-@JsonClass(generateAdapter = true)
-data class AutomationConditionDto(
-    /** Condition catalog id, e.g. `"time_window"`; unknown ids are dropped on save. */
-    val type: String = "",
-    /** Raw parameter values, all serialized as strings; clamped to the catalog bounds on save. */
-    val params: Map<String, String> = emptyMap(),
-)
-
-/**
- * One automation rule as the dashboard configured it: WHEN
- * [triggerType] [+ ONLY WHEN [conditions]], THEN [actions]. A mirror of
- * [com.raulshma.lenscast.automation.schedule.AutomationRule]; every field is
- * sanitized through
- * [com.raulshma.lenscast.automation.schedule.AutomationSchedulePolicy] on
- * save, so an unknown trigger degrades to `time_of_day`, unknown
- * conditions/actions drop, and every bound clamps.
- */
-@JsonClass(generateAdapter = true)
-data class AutomationRuleDto(
-    /**
-     * Stable identity (the fire-journal key). Blank/absent on a new rule lets
-     * the device mint a UUID — a rule without an id could never be journaled
-     * and would re-fire on every poll tick.
-     */
-    val id: String = "",
-    /** Free-form display label; trimmed on save, never interpreted. */
-    val name: String = "",
-    /** Per-rule kill switch, independent of the master automation toggle. */
-    val enabled: Boolean = true,
-    /**
-     * Which cue fires the rule — a trigger catalog id
-     * (`time_of_day`, `motion_detected`, `sound_detected`, `tamper_detected`,
-     * `charging_changed`, `battery_level`, `streaming_changed`,
-     * `viewers_changed`, `app_started`); anything else folds to
-     * `time_of_day` on save.
-     */
-    val triggerType: String = "time_of_day",
-    /**
-     * The `time_of_day` fire minute, local wall-clock 0..1439; clamped into
-     * that span on save. Meaningless for event triggers (the editor hides
-     * it) but kept top-level so the original time-only wire shape never
-     * migrated.
-     */
-    val minuteOfDay: Int = 0,
-    /**
-     * The `time_of_day` day mask: one bit per ISO day index (bit 0 = Monday
-     * … bit 6 = Sunday); clamped to 1..127 on save.
-     */
-    val daysMask: Int = 127,
-    /** Parameters for non-time triggers (e.g. `battery_level`'s `level`); clamped on save. */
-    val triggerParams: Map<String, String> = emptyMap(),
-    /** Preconditions that must hold when the trigger fires; unknown conditions drop on save. */
-    val conditions: List<AutomationConditionDto> = emptyList(),
-    /** How multiple conditions combine: `"all"` | `"any"`; anything else folds to `all`. */
-    val conditionMode: String = "all",
-    /** Minimum seconds between two firings (event rules); clamped to 0..86400 on save. */
-    val cooldownSeconds: Int = 60,
-    /**
-     * What a `time_of_day` rule does when its scheduled moment passes without
-     * a firing (device off, or ONLY WHEN conditions met later the same day):
-     * `"catch_up"` (fire however late — stateful actions always, one-shots
-     * within the global grace) | `"skip"` (at the scheduled time or not at
-     * all) | `"window"` (fire within [missedWindowMinutes] of the scheduled
-     * minute; every action rides). Anything else folds to `catch_up` on save.
-     * Meaningless for event triggers.
-     */
-    val missedRunPolicy: String = "catch_up",
-    /**
-     * The `"window"` missed-run-policy catch-up span in minutes; clamped to
-     * 1..1440 on save. Meaningless in the other modes.
-     */
-    val missedWindowMinutes: Int = 30,
-    /** The ordered action list; each entry is validated against the catalog on save. */
-    val actions: List<AutomationActionDto> = emptyList(),
-    /**
-     * Epoch milliseconds (UTC) of the rule's last actual firing, decoded from
-     * the fire journal and formatted client-side; null/absent = never fired
-     * (or no journal record of the rule's current trigger kind). Read-only:
-     * PUT bodies ignore it, and the field only ever appears in responses.
-     */
-    val lastFiredAt: Long? = null,
-)
-
-/**
- * One parameter of a catalog action, as GET /api/automation publishes it: the
- * schema a rule editor needs to render and validate inputs. A mirror of
- * [com.raulshma.lenscast.automation.schedule.AutomationParamSpec] — read-only,
- * the catalog is device truth and never accepted back on the wire.
+ * One parameter of a catalog entry, as GET /api/automation publishes it: the
+ * schema a rule editor needs to render and validate inputs. A projection of
+ * [com.raulshma.lenscast.automation.schedule.AutomationParamSpec] —
+ * read-only, the catalog is device truth and never accepted back on the wire.
  */
 @JsonClass(generateAdapter = true)
 data class AutomationCatalogParamDto(
-    /** The exact wire key inside [AutomationActionDto.params]. */
+    /** The exact wire key inside the rule's `params` maps. */
     val name: String = "",
     /** How the string value is interpreted: `"BOOL"` | `"INT"` | `"FLOAT"`. */
     val kind: String = "BOOL",
@@ -1064,13 +978,15 @@ data class AutomationCatalogParamDto(
 
 /**
  * One action the automation engine can execute, as GET /api/automation
- * publishes it. A mirror of
+ * publishes it. A projection of
  * [com.raulshma.lenscast.automation.schedule.AutomationActionType] —
  * read-only, the catalog is device truth and never accepted back on the wire.
+ * `group` and `icon` carry the picker decorations so both editors (app screen
+ * and web dashboard) group and badge the entries from this one source.
  */
 @JsonClass(generateAdapter = true)
 data class AutomationCatalogActionDto(
-    /** The action id an [AutomationActionDto.type] must name. */
+    /** The action id an `AutomationRule.actions[].type` must name. */
     val id: String = "",
     /** The parameter schema, in display/contract order. */
     val params: List<AutomationCatalogParamDto> = emptyList(),
@@ -1078,61 +994,131 @@ data class AutomationCatalogActionDto(
     val catchUp: String = "STATEFUL",
     /** Whether applying the action tears down/rebinds the live stream. */
     val interruptsStream: Boolean = false,
+    /**
+     * The picker group this entry lists under — a semantic id
+     * (`"camera"`, `"light_sound"`, `"stream_capture"`, `"detection"`),
+     * the single source both editors derive their grouped pickers from.
+     */
+    val group: String = "",
+    /** The icon kind — a closed vocabulary (AutomationIconVocabulary); clients map kind → glyph. */
+    val icon: String = "",
 )
 
 /**
  * One trigger a rule may fire on, as GET /api/automation publishes it. A
- * mirror of [com.raulshma.lenscast.automation.schedule.AutomationTriggerType]
- * — read-only device truth. `time_of_day`'s params list is empty: its
+ * projection of
+ * [com.raulshma.lenscast.automation.schedule.AutomationTriggerType] —
+ * read-only device truth. `time_of_day`'s params list is empty: its
  * parameters are the rule's own `minuteOfDay`/`daysMask` fields, which the
  * editor renders as its dedicated time inputs.
  */
 @JsonClass(generateAdapter = true)
 data class AutomationCatalogTriggerDto(
-    /** The trigger id an [AutomationRuleDto.triggerType] must name. */
+    /** The trigger id an `AutomationRule.triggerType` must name. */
     val id: String = "",
     /** The parameter schema, in display/contract order. */
     val params: List<AutomationCatalogParamDto> = emptyList(),
+    /**
+     * The picker group this entry lists under — a semantic id
+     * (`"schedule"`, `"device_events"`, `"power"`, `"stream_app"`).
+     */
+    val group: String = "",
+    /** The icon kind — a closed vocabulary (AutomationIconVocabulary); clients map kind → glyph. */
+    val icon: String = "",
 )
 
 /**
  * One precondition a rule may require, as GET /api/automation publishes it.
- * A mirror of
+ * A projection of
  * [com.raulshma.lenscast.automation.schedule.AutomationConditionType] —
  * read-only device truth.
  */
 @JsonClass(generateAdapter = true)
 data class AutomationCatalogConditionDto(
-    /** The condition id an [AutomationConditionDto.type] must name. */
+    /** The condition id an `AutomationRule.conditions[].type` must name. */
     val id: String = "",
     /** The parameter schema, in display/contract order. */
     val params: List<AutomationCatalogParamDto> = emptyList(),
+    /**
+     * The picker group this entry lists under — a semantic id
+     * (`"time"`, `"power"`, `"connectivity"`, `"device_state"`).
+     */
+    val group: String = "",
+    /** The icon kind — a closed vocabulary (AutomationIconVocabulary); clients map kind → glyph. */
+    val icon: String = "",
+)
+
+/**
+ * The editor contract's machine-published bounds, defaults and preset chips,
+ * as GET /api/automation's `limits` block: the ONE Kotlin source
+ * (StreamDefaults' automation constants) projected onto the wire, so the web
+ * dashboard can stop hand-mirroring the numbers — its pre-fetch fallbacks
+ * are pinned to this block by the three-way contract fixtures. Read-only:
+ * never accepted back on the wire.
+ *
+ * There is deliberately no separate cap for `conditions` beyond
+ * [com.raulshma.lenscast.core.StreamDefaults.AUTOMATION_MAX_CONDITIONS_PER_RULE]
+ * (real, enforced by the sanitizer) and no limit that is not actually
+ * enforced in code — only real constants are published.
+ */
+@JsonClass(generateAdapter = true)
+data class AutomationLimitsDto(
+    /** The persisted rule list's cap (StreamDefaults.AUTOMATION_MAX_RULES). */
+    val maxRules: Int = 0,
+    /** Each rule's action list cap (StreamDefaults.AUTOMATION_MAX_ACTIONS_PER_RULE). */
+    val maxActionsPerRule: Int = 0,
+    /** Each rule's condition ("ONLY WHEN") list cap (StreamDefaults.AUTOMATION_MAX_CONDITIONS_PER_RULE). */
+    val maxConditionsPerRule: Int = 0,
+    /** The event-rule cooldown clamp floor, seconds (StreamDefaults.AUTOMATION_COOLDOWN_MIN_SECONDS). */
+    val cooldownMinSeconds: Int = 0,
+    /** The event-rule cooldown clamp ceiling, seconds (StreamDefaults.AUTOMATION_COOLDOWN_MAX_SECONDS). */
+    val cooldownMaxSeconds: Int = 0,
+    /** The cooldown a fresh rule starts at (StreamDefaults.AUTOMATION_COOLDOWN_DEFAULT_SECONDS). */
+    val cooldownDefaultSeconds: Int = 0,
+    /** The cooldown preset chips, seconds, in display order (StreamDefaults.AUTOMATION_COOLDOWN_PRESET_SECONDS). */
+    val cooldownPresetSeconds: List<Int> = emptyList(),
+    /** The missed-run window clamp floor, minutes (StreamDefaults.AUTOMATION_MISSED_WINDOW_MIN_MINUTES). */
+    val missedWindowMinMinutes: Int = 0,
+    /** The missed-run window clamp ceiling, minutes (StreamDefaults.AUTOMATION_MISSED_WINDOW_MAX_MINUTES). */
+    val missedWindowMaxMinutes: Int = 0,
+    /** The window a fresh rule starts at (StreamDefaults.AUTOMATION_MISSED_WINDOW_DEFAULT_MINUTES). */
+    val missedWindowDefaultMinutes: Int = 0,
+    /** The missed-window preset chips, minutes, in display order (StreamDefaults.AUTOMATION_MISSED_WINDOW_PRESET_MINUTES). */
+    val missedWindowPresetMinutes: List<Int> = emptyList(),
 )
 
 /**
  * GET /api/automation — the whole automation surface in one document: the
- * master toggle, the configured rules, and the three catalogs (actions,
- * triggers, conditions) the rule editor renders from. The catalogs are
+ * master toggle, the configured rules (the domain
+ * [com.raulshma.lenscast.automation.schedule.AutomationRule] directly — one
+ * declaration, no wire clone), the three catalogs (actions, triggers,
+ * conditions) the rule editor renders from, and the `limits` block that
+ * publishes the editor bounds/defaults/presets. The catalogs and limits are
  * read-only on the wire.
  */
 @JsonClass(generateAdapter = true)
 data class AutomationStateDto(
     val enabled: Boolean = false,
-    val rules: List<AutomationRuleDto> = emptyList(),
+    val rules: List<AutomationRule> = emptyList(),
     val catalog: List<AutomationCatalogActionDto> = emptyList(),
     val triggers: List<AutomationCatalogTriggerDto> = emptyList(),
     val conditions: List<AutomationCatalogConditionDto> = emptyList(),
+    val limits: AutomationLimitsDto = AutomationLimitsDto(),
 )
 
 /**
  * PUT /api/automation body: the master toggle plus the full rule list (the
- * document persists wholesale, like the settings sections). The catalog is
- * read-only on the wire and never accepted here; every rule is sanitized
- * through [com.raulshma.lenscast.automation.schedule.AutomationSchedulePolicy]
+ * document persists wholesale, like the settings sections). The rules ride
+ * the domain [com.raulshma.lenscast.automation.schedule.AutomationRule]
+ * directly; a null/blank `id` lets the device mint the fire-journal UUID,
+ * and a client-echoed `lastFiredAt` is ignored (the sanitizer resets it).
+ * The catalog and limits are read-only on the wire and never accepted here;
+ * every rule is sanitized through
+ * [com.raulshma.lenscast.automation.schedule.AutomationSchedulePolicy]
  * before it persists.
  */
 @JsonClass(generateAdapter = true)
 data class AutomationUpdateRequestDto(
     val enabled: Boolean = false,
-    val rules: List<AutomationRuleDto> = emptyList(),
+    val rules: List<AutomationRule> = emptyList(),
 )

@@ -796,6 +796,22 @@ class AutomationSchedulePolicyTest {
     }
 
     @Test
+    fun `sanitizeRule strips a client-supplied lastFiredAt`() {
+        // The fire stamp is a read-only GET decoration (the web handler's
+        // copy(lastFiredAt=…) decodes the journal), never configuration: a
+        // client echoing a response rule back in a PUT body cannot smuggle a
+        // claimed last-fired instant into persistence or the engine.
+        val smuggled = AutomationSchedulePolicy.sanitizeRule(
+            rule(id = "r1").copy(lastFiredAt = 1_234_567_890_123L),
+        )
+        assertNull(smuggled.lastFiredAt)
+        assertNull(
+            AutomationSchedulePolicy.sanitizeRules(listOf(rule(id = "r2").copy(lastFiredAt = 42L)))
+                .single().lastFiredAt,
+        )
+    }
+
+    @Test
     fun `sanitizeRule folds an unknown missed-run policy and clamps the window`() {
         // An unknown future policy degrades to the historical catch-up
         // behavior instead of silently skipping or widening fires.

@@ -182,12 +182,13 @@ export const API_DEFAULTS = {
   mediaEncryptionEnabled: false,
 
   // Automation (AutomationStateDto): the master toggle and rule list default
-  // off/empty; the catalogs are device truth and only ever arrive from GET,
-  // so their empty-list defaults are the pre-fetch fallback shape. The caps
-  // mirror StreamDefaults' automation bounds — the UI greys the add
-  // affordances out at them (AUTOMATION_MAX_RULES / MAX_ACTIONS_PER_RULE /
-  // MAX_CONDITIONS_PER_RULE), and the cooldown bounds mirror the rule
-  // sanitizer's clamp span.
+  // off/empty; the catalogs and the `limits` block are device truth and only
+  // ever arrive from GET, so their empty-list/zero defaults are the pre-fetch
+  // fallback shape. Every numeric value below mirrors StreamDefaults'
+  // automation constants — the ONE Kotlin source GET publishes as the
+  // `limits` block — and src/contract.test.ts pins each of them to the
+  // checked-in fixture's limits, so a Kotlin-side change that skips the
+  // fixture fails the fence on both sides.
   automationEnabled: false,
   automationRules: [],
   automationCatalog: [],
@@ -197,6 +198,7 @@ export const API_DEFAULTS = {
   automationCooldownMinSeconds: 0,
   automationCooldownMaxSeconds: 86_400,
   automationCooldownDefaultSeconds: 60,
+  automationCooldownPresets: [30, 60, 300, 900, 1_800, 3_600],
   // Missed-run policy (time_of_day rules): the mode values and the window
   // clamp span mirror StreamDefaults' AUTOMATION_MISSED_WINDOW_* — the
   // editor's window presets are the same spans the app editor chips offer.

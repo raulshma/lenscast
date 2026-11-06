@@ -64,21 +64,34 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlin.system.exitProcess
 
-class MainApplication : Application(), SingletonImageLoader.Factory {
-    val cameraService: CameraService by lazy { CameraService(this) }
-    val streamingManager: StreamingManager by lazy { StreamingManager(this, thermalMonitor) }
-    val settingsDataStore: SettingsDataStore by lazy { SettingsDataStore(this) }
+class MainApplication : Application(), SingletonImageLoader.Factory, AppGraph {
+    override val cameraService: CameraService by lazy { CameraService(this) }
+    override val streamingManager: StreamingManager by lazy {
+        StreamingManager(
+            this,
+            thermalMonitor,
+            // The Web API stack is composed in the app tier (WebApiStackBuilder
+            // — the builder pulls ~15 graph collaborators the manager must not
+            // reach into the composition root for). The manager hands itself
+            // to the factory at the stack's first request (today, the
+            // transport's eager initial server build, mid-construction) — so
+            // the builder must take the manager as a value; reading
+            // `streamingManager` here would re-enter this lazy and recurse.
+            webApiStackFactory = { manager -> buildWebApiStack(manager, this) },
+        )
+    }
+    override val settingsDataStore: SettingsDataStore by lazy { SettingsDataStore(this) }
     // The single media-at-rest key (Android Keystore, generated once) behind
     // the opt-in capture encryption; every encrypt/decrypt site resolves
     // through this one provider.
-    val mediaKeyProvider: MediaCrypto.KeyProvider by lazy { KeystoreMediaKeyProvider() }
+    override val mediaKeyProvider: MediaCrypto.KeyProvider by lazy { KeystoreMediaKeyProvider() }
     // The decrypted-photo cache the gallery's Coil loading rides when media
     // encryption is on (photos only — videos play through the decrypting
     // stream and preview as a placeholder).
-    val decryptedPhotoCache: DecryptedPhotoCache by lazy {
+    override val decryptedPhotoCache: DecryptedPhotoCache by lazy {
         DecryptedPhotoCache(this, CaptureMediaResolver(contentResolver, mediaKeyProvider))
     }
-    val captureHistoryStore: CaptureHistoryStore by lazy {
+    override val captureHistoryStore: CaptureHistoryStore by lazy {
         CaptureHistoryStore(
             this,
             retentionDays = { settingsDataStore.captureRetentionDays.value },
@@ -88,11 +101,11 @@ class MainApplication : Application(), SingletonImageLoader.Factory {
             onEntriesDeleted = { deleted -> decryptedPhotoCache.deleteAll(deleted) },
         )
     }
-    val recordingController: RecordingController by lazy { RecordingController(this) }
+    override val recordingController: RecordingController by lazy { RecordingController(this) }
     // The one timelapse pipeline, shared by the capture screen's manual
     // assembly and the interval worker's on-completion auto-assembly — one
     // place owns the MediaStore + encryption publish seam.
-    val timelapseComposer: TimelapseComposer by lazy {
+    override val timelapseComposer: TimelapseComposer by lazy {
         TimelapseComposer(
             this,
             captureHistoryStore,
@@ -100,7 +113,7 @@ class MainApplication : Application(), SingletonImageLoader.Factory {
             mediaKeyProvider = mediaKeyProvider,
         )
     }
-    val photoCaptureManager: PhotoCaptureManager by lazy {
+    override val photoCaptureManager: PhotoCaptureManager by lazy {
         PhotoCaptureManager(
             this,
             cameraService,
@@ -109,18 +122,18 @@ class MainApplication : Application(), SingletonImageLoader.Factory {
             mediaKeyProvider = mediaKeyProvider,
         )
     }
-    val powerManager: PowerManager by lazy { PowerManager(this) }
-    val thermalMonitor: ThermalMonitor by lazy { ThermalMonitor(this) }
-    val connectivityMonitor: ConnectivityMonitor by lazy { ConnectivityMonitor(this) }
+    override val powerManager: PowerManager by lazy { PowerManager(this) }
+    override val thermalMonitor: ThermalMonitor by lazy { ThermalMonitor(this) }
+    override val connectivityMonitor: ConnectivityMonitor by lazy { ConnectivityMonitor(this) }
     // Watchdog and session reference the manager and each other; every such
     // edge is a provider resolved on first use. A direct reference would
     // re-enter streamingManager's lazy initializer mid-construction (the
     // manager builds the Web API stack, which builds the watchdog) and
     // recurse until the heap dies at launch.
-    val streamWatchdog: StreamWatchdog by lazy {
+    override val streamWatchdog: StreamWatchdog by lazy {
         StreamWatchdog(cameraService, { streamingManager }, streamingSession)
     }
-    val streamingSession: StreamingSession by lazy {
+    override val streamingSession: StreamingSession by lazy {
         StreamingSession(
             this, cameraService, { streamingManager }, powerManager, thermalMonitor,
         ) { streamWatchdog }
@@ -217,12 +230,12 @@ class MainApplication : Application(), SingletonImageLoader.Factory {
     // The VAPID identity for Web Push: one persistent P-256 pair, load-once
     // like the TLS identity — a rotated key silently orphans every browser
     // subscription bound to the old public key.
-    val vapidKeys: com.raulshma.lenscast.core.push.VapidKeys by lazy {
+    override val vapidKeys: com.raulshma.lenscast.core.push.VapidKeys by lazy {
         com.raulshma.lenscast.core.push.VapidKeys.loadOrCreate(
             com.raulshma.lenscast.core.push.VapidKeys.keyFile(this),
         )
     }
-    val pushSubscriptionStore: com.raulshma.lenscast.core.push.PushSubscriptionStore by lazy {
+    override val pushSubscriptionStore: com.raulshma.lenscast.core.push.PushSubscriptionStore by lazy {
         com.raulshma.lenscast.core.push.PushSubscriptionStore(this)
     }
     // The Web Push alert sink reads its config live per dispatch (the same
@@ -249,16 +262,16 @@ class MainApplication : Application(), SingletonImageLoader.Factory {
     // The ML detection model lives in app-private storage, not the APK; one
     // store owns the download + integrity so the coordinator's gate and the
     // settings screen share one state.
-    val detectionModelStore: DetectionModelStore by lazy {
+    override val detectionModelStore: DetectionModelStore by lazy {
         DetectionModelStore(java.io.File(filesDir, DetectionModelStore.DEFAULT_DIR_NAME))
     }
     // The YAMNet audio-classification model: the same on-demand contract, one
     // store per model — the coordinator's classifier and the settings row
     // share this state.
-    val audioModelStore: AudioModelStore by lazy {
+    override val audioModelStore: AudioModelStore by lazy {
         AudioModelStore(java.io.File(filesDir, AudioModelStore.DEFAULT_DIR_NAME))
     }
-    val detectionCoordinator: DetectionCoordinator by lazy {
+    override val detectionCoordinator: DetectionCoordinator by lazy {
         DetectionCoordinator(
             appContext = this,
             settingsDataStore = settingsDataStore,
@@ -278,17 +291,17 @@ class MainApplication : Application(), SingletonImageLoader.Factory {
             sirenAutoStop = sirenAutoStop,
         )
     }
-    val tlsCertManager: TlsCertManager by lazy { TlsCertManager(this) }
-    val updateChecker: UpdateChecker by lazy { UpdateChecker(this) }
-    val updateNotifier: UpdateNotifier by lazy { UpdateNotifier(this) }
+    override val tlsCertManager: TlsCertManager by lazy { TlsCertManager(this) }
+    override val updateChecker: UpdateChecker by lazy { UpdateChecker(this) }
+    override val updateNotifier: UpdateNotifier by lazy { UpdateNotifier(this) }
     val updateCheckPipeline: UpdateCheckPipeline by lazy {
         UpdateCheckPipeline.production(updateChecker, updateNotifier, settingsDataStore)
     }
     // App-owned like the checker and notifier above, so the settings screen's
     // ViewModel factory pulls every update collaborator off the Application
     // instead of constructing per-composition adapters.
-    val updateDownloader: UpdateDownloader by lazy { UpdateDownloader(this) }
-    val updateInstaller: UpdateInstaller by lazy { UpdateInstaller(this) }
+    override val updateDownloader: UpdateDownloader by lazy { UpdateDownloader(this) }
+    override val updateInstaller: UpdateInstaller by lazy { UpdateInstaller(this) }
     val streamStateJournal: StreamStateJournal by lazy { StreamStateJournal(this) }
     // The automation scheduler's once-per-day dedup journal: the rules live
     // in DataStore and survive every process start, so the journal is the
@@ -296,7 +309,7 @@ class MainApplication : Application(), SingletonImageLoader.Factory {
     // catch-up reads it and never double-fires them. Values carry both
     // record kinds (time occurrence keys and event-fire timestamps); the
     // schedule policy separates them by magnitude.
-    val automationFireJournal: AutomationFireJournal by lazy { AutomationFireJournal(this) }
+    override val automationFireJournal: AutomationFireJournal by lazy { AutomationFireJournal(this) }
     // The in-app automation scheduler (time rules on the 30 s poll, event
     // rules on the wiring's cues): the second front-end over the executor's
     // seams (the receiver is the first, constructing one per broadcast; the
@@ -342,7 +355,7 @@ class MainApplication : Application(), SingletonImageLoader.Factory {
     // in-memory list — owned here like every other collaborator. The
     // retention provider is read per sweep, so a settings change takes
     // effect on the next open/append without re-creating the store.
-    val detectionEventStore: DetectionEventStore by lazy {
+    override val detectionEventStore: DetectionEventStore by lazy {
         DetectionEventStore.get(this, retentionDays = { settingsDataStore.eventRetentionDays.value })
     }
     // One toggle over one transports adapter — the boot receiver and the
@@ -352,7 +365,7 @@ class MainApplication : Application(), SingletonImageLoader.Factory {
         StreamToggle(StreamingTransports(streamingManager, streamingSession))
     }
     /** App-lifetime scope for work that must outlive a ViewModel or screen. */
-    val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    override val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
     override fun onCreate() {
         super.onCreate()
@@ -374,7 +387,7 @@ class MainApplication : Application(), SingletonImageLoader.Factory {
      * (for example a boot-time or broadcast-start server); the server keeps
      * running and the next user visit restores guaranteed alert delivery.
      */
-    fun ensureServerForeground() = serverForegroundController.sync()
+    override fun ensureServerForeground() = serverForegroundController.sync()
 
     /**
      * The user quit (the camera screen's overflow menu): the best-effort
@@ -387,7 +400,7 @@ class MainApplication : Application(), SingletonImageLoader.Factory {
      * item: the death is deliberate, so nothing here can postpone it beyond
      * the teardown's grace window.
      */
-    fun quitApplication() {
+    override fun quitApplication() {
         appScope.launch {
             runCatching { recordingController.stop() }
             runCatching { streamToggle.stopServer() }

@@ -42,6 +42,9 @@ import java.util.concurrent.atomic.AtomicBoolean
  * ([DetectorInitGate]); a missing model file never does. The caller decides
  * the fail-open semantics; the class allow-list lives in
  * [DetectionClassPolicy].
+ *
+ * The class doubles as the production [ObjectClassifier] adapter — the
+ * coordinator's gate ladder holds the interface, this engine the machinery.
  */
 class ObjectDetectionEngine(
     /** Application context; MediaPipe's task factory is context-based. */
@@ -52,7 +55,7 @@ class ObjectDetectionEngine(
      */
     private val modelFileProvider: () -> File?,
     private val clockMs: () -> Long = { System.currentTimeMillis() },
-) {
+) : ObjectClassifier {
 
     /**
      * One classification attempt. [Success] means inference actually ran —
@@ -90,7 +93,7 @@ class ObjectDetectionEngine(
      * inference executor; this method is intentionally blocking and must not
      * run on the frame path.
      */
-    fun classify(frame: AnalysisFrame): Classification {
+    override fun classify(frame: AnalysisFrame): Classification {
         if (closed) return Classification.Unavailable
         val detector = detectorOrNull() ?: return Classification.Unavailable
         val bitmap = try {

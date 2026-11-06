@@ -4,6 +4,7 @@ import {
   type AuditLogResponse,
   type AuthConfig,
   type AutomationStateDto,
+  type AutomationIconVocabulary,
   type DetectionStats,
   type DetectionTestResponse,
   type DeviceStatus,
@@ -106,6 +107,27 @@ const AUTOMATION_CONDITION_IDS = [
   'thermal',
   'motion_detection',
 ]
+
+/**
+ * The closed icon-kind vocabulary (types.ts AutomationIconVocabulary — the
+ * app's AutomationIconVocabulary). Every catalog entry's `icon` must be one
+ * of these: both renderers (app drawables, web glyphs) translate kinds, so
+ * an entry outside the set would badge as the generic fallback on a device.
+ */
+const AUTOMATION_ICON_VOCABULARY: readonly AutomationIconVocabulary[] = [
+  'schedule', 'time_window', 'sensor', 'sound', 'radar',
+  'power', 'battery_alert', 'battery', 'battery_saver', 'shield',
+  'cast', 'eye', 'rocket', 'broadcast', 'stream', 'people', 'wifi',
+  'exposure', 'tonality', 'zoom', 'speed', 'lens', 'camera',
+  'torch', 'lightbulb', 'siren', 'videocam', 'record', 'thermostat',
+]
+
+/** The documented picker group ids per catalog (WebApiDtos/catalog docs). */
+const AUTOMATION_GROUP_IDS = {
+  catalog: ['camera', 'light_sound', 'stream_capture', 'detection'],
+  triggers: ['schedule', 'device_events', 'power', 'stream_app'],
+  conditions: ['time', 'power', 'connectivity', 'device_state'],
+}
 
 const STREAMING_KEYS = [
   'port',
@@ -441,7 +463,7 @@ describe('DTO contract fixtures', () => {
 
   it('automation fixture assigns to AutomationStateDto', () => {
     const automation: AutomationStateDto = automationFixture as AutomationStateDto
-    expectKeys(automation as unknown as Record<string, unknown>, ['enabled', 'rules', 'catalog', 'triggers', 'conditions'])
+    expectKeys(automation as unknown as Record<string, unknown>, ['enabled', 'rules', 'catalog', 'triggers', 'conditions', 'limits'])
     expect(automation.rules.length).toBeGreaterThan(0)
     for (const rule of automation.rules) {
       expectKeys(rule as unknown as Record<string, unknown>, [
@@ -497,8 +519,14 @@ describe('DTO contract fixtures', () => {
     // non-nullable autoAtZero boolean always serializes).
     expect(automation.catalog.map((entry) => entry.id)).toEqual(expect.arrayContaining(AUTOMATION_CATALOG_IDS))
     for (const entry of automation.catalog) {
-      expectKeys(entry as unknown as Record<string, unknown>, ['id', 'params', 'catchUp', 'interruptsStream'])
+      expectKeys(entry as unknown as Record<string, unknown>, ['id', 'params', 'catchUp', 'interruptsStream', 'group', 'icon'])
       expect(['STATEFUL', 'ONESHOT']).toContain(entry.catchUp)
+      // The picker decorations are device truth: every entry grouped and
+      // badged, the group inside the documented set, the icon inside the
+      // closed vocabulary both renderers translate (no entry without).
+      expect(entry.group).not.toBe('')
+      expect(AUTOMATION_GROUP_IDS.catalog).toContain(entry.group)
+      expect(AUTOMATION_ICON_VOCABULARY).toContain(entry.icon)
       for (const param of entry.params) {
         expectKeys(param as unknown as Record<string, unknown>, ['name', 'kind', 'optional', 'defaultValue', 'autoAtZero'])
         expect(['BOOL', 'INT', 'FLOAT']).toContain(param.kind)
@@ -508,6 +536,38 @@ describe('DTO contract fixtures', () => {
         }
       }
     }
+    // The same completeness contract for the trigger and condition catalogs.
+    expect(automation.triggers.map((entry) => entry.id)).toEqual(expect.arrayContaining(AUTOMATION_TRIGGER_IDS))
+    expect(automation.conditions.map((entry) => entry.id)).toEqual(expect.arrayContaining(AUTOMATION_CONDITION_IDS))
+    for (const [entries, documentedGroups] of [
+      [automation.triggers, AUTOMATION_GROUP_IDS.triggers],
+      [automation.conditions, AUTOMATION_GROUP_IDS.conditions],
+    ] as const) {
+      for (const entry of entries) {
+        expectKeys(entry as unknown as Record<string, unknown>, ['id', 'params', 'group', 'icon'])
+        expect(entry.group).not.toBe('')
+        expect(documentedGroups).toContain(entry.group)
+        expect(AUTOMATION_ICON_VOCABULARY).toContain(entry.icon)
+        for (const param of entry.params) {
+          expectKeys(param as unknown as Record<string, unknown>, ['name', 'kind', 'optional', 'defaultValue', 'autoAtZero'])
+          expect(['BOOL', 'INT', 'FLOAT']).toContain(param.kind)
+        }
+      }
+    }
+    // The published limits: the ONE Kotlin source (StreamDefaults) projected
+    // onto the wire — the fence the web fallbacks pin to below.
+    const limits = automation.limits
+    expect(limits.maxRules).toBe(16)
+    expect(limits.maxActionsPerRule).toBe(8)
+    expect(limits.maxConditionsPerRule).toBe(8)
+    expect(limits.cooldownMinSeconds).toBe(0)
+    expect(limits.cooldownMaxSeconds).toBe(86_400)
+    expect(limits.cooldownDefaultSeconds).toBe(60)
+    expect(limits.cooldownPresetSeconds).toEqual([30, 60, 300, 900, 1_800, 3_600])
+    expect(limits.missedWindowMinMinutes).toBe(1)
+    expect(limits.missedWindowMaxMinutes).toBe(1_440)
+    expect(limits.missedWindowDefaultMinutes).toBe(30)
+    expect(limits.missedWindowPresetMinutes).toEqual([5, 15, 30, 60, 180])
     // The auto sentinel is catalog-driven (isAutoSentinelParam): exactly the
     // camera_exposure auto params carry autoAtZero — "0" on
     // recording.duration_seconds is the no-limit sentinel, NOT auto.
@@ -518,29 +578,6 @@ describe('DTO contract fixtures', () => {
       expect(param.autoAtZero).toBe(true)
     }
     expect(automation.catalog.find((entry) => entry.id === 'recording')?.params.find((param) => param.name === 'duration_seconds')?.autoAtZero).toBe(false)
-    // The trigger and condition catalogs are device truth like the action
-    // catalog (the editor renders them generically); every id the Android
-    // side ships must be present with param specs in the same shape.
-    expect(automation.triggers.map((entry) => entry.id)).toEqual(expect.arrayContaining(AUTOMATION_TRIGGER_IDS))
-    for (const entry of automation.triggers) {
-      expectKeys(entry as unknown as Record<string, unknown>, ['id', 'params'])
-      for (const param of entry.params) {
-        expectKeys(param as unknown as Record<string, unknown>, ['name', 'kind', 'optional', 'defaultValue', 'autoAtZero'])
-        expect(['BOOL', 'INT', 'FLOAT']).toContain(param.kind)
-      }
-    }
-    expect(automation.conditions.map((entry) => entry.id)).toEqual(expect.arrayContaining(AUTOMATION_CONDITION_IDS))
-    for (const entry of automation.conditions) {
-      expectKeys(entry as unknown as Record<string, unknown>, ['id', 'params'])
-      for (const param of entry.params) {
-        expectKeys(param as unknown as Record<string, unknown>, ['name', 'kind', 'optional', 'defaultValue', 'autoAtZero'])
-        expect(['BOOL', 'INT', 'FLOAT']).toContain(param.kind)
-        if (param.kind !== 'BOOL') {
-          expect(param.min).not.toBeNull()
-          expect(param.max).not.toBeNull()
-        }
-      }
-    }
   })
 })
 
@@ -747,22 +784,26 @@ describe('API_DEFAULTS lockstep with the fixtures', () => {
     expect((API_DEFAULTS.automationRules as readonly unknown[]).length).toBe(0)
     expect(Array.isArray(API_DEFAULTS.automationCatalog)).toBe(true)
     expect((API_DEFAULTS.automationCatalog as readonly unknown[]).length).toBe(0)
-    // The client-side add-affordance caps mirror StreamDefaults' automation
-    // bounds (AUTOMATION_MAX_RULES / MAX_ACTIONS_PER_RULE /
-    // MAX_CONDITIONS_PER_RULE), and the cooldown bounds mirror the rule
-    // sanitizer's clamp span plus its default.
-    expect(API_DEFAULTS.automationMaxRules).toBe(16)
-    expect(API_DEFAULTS.automationMaxActionsPerRule).toBe(8)
-    expect(API_DEFAULTS.automationMaxConditionsPerRule).toBe(8)
-    expect(API_DEFAULTS.automationCooldownMinSeconds).toBe(0)
-    expect(API_DEFAULTS.automationCooldownMaxSeconds).toBe(86_400)
-    expect(API_DEFAULTS.automationCooldownDefaultSeconds).toBe(60)
-    // The missed-run window presets clamp span and default mirror
-    // StreamDefaults' AUTOMATION_MISSED_WINDOW_* and the app editor's chips.
+    // THE FENCE: every numeric automation fallback is now pinned to the
+    // fixture's published `limits` block (one Kotlin source — StreamDefaults
+    // — projected onto the wire). A Kotlin-side constant change that skips
+    // the fixture fails DtoContractFixtureTest; a hand-edited fallback that
+    // skips the fixture fails HERE — the hand-mirror can no longer drift.
+    const limits = automation.limits
+    expect(API_DEFAULTS.automationMaxRules).toBe(limits.maxRules)
+    expect(API_DEFAULTS.automationMaxActionsPerRule).toBe(limits.maxActionsPerRule)
+    expect(API_DEFAULTS.automationMaxConditionsPerRule).toBe(limits.maxConditionsPerRule)
+    expect(API_DEFAULTS.automationCooldownMinSeconds).toBe(limits.cooldownMinSeconds)
+    expect(API_DEFAULTS.automationCooldownMaxSeconds).toBe(limits.cooldownMaxSeconds)
+    expect(API_DEFAULTS.automationCooldownDefaultSeconds).toBe(limits.cooldownDefaultSeconds)
+    expect([...API_DEFAULTS.automationCooldownPresets]).toEqual(limits.cooldownPresetSeconds)
+    expect(API_DEFAULTS.automationMissedWindowMinMinutes).toBe(limits.missedWindowMinMinutes)
+    expect(API_DEFAULTS.automationMissedWindowMaxMinutes).toBe(limits.missedWindowMaxMinutes)
+    expect(API_DEFAULTS.automationMissedWindowDefaultMinutes).toBe(limits.missedWindowDefaultMinutes)
+    expect([...API_DEFAULTS.automationMissedWindowPresets]).toEqual(limits.missedWindowPresetMinutes)
+    // The missed-run policies are the rule vocabulary (AutomationRule's
+    // MISSED_RUN_* constants), not limits — pinned as the closed set.
     expect(API_DEFAULTS.automationMissedRunPolicies).toEqual(['catch_up', 'skip', 'window'])
-    expect(API_DEFAULTS.automationMissedWindowMinMinutes).toBe(1)
-    expect(API_DEFAULTS.automationMissedWindowMaxMinutes).toBe(1_440)
-    expect(API_DEFAULTS.automationMissedWindowDefaultMinutes).toBe(30)
     // The fixture's time rule pins a non-default window policy's wire shape;
     // its event rule pins the meaningless-for-events default.
     const sunrise = automation.rules.find((rule) => rule.triggerType === 'time_of_day')

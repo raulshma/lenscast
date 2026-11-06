@@ -41,7 +41,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.raulshma.lenscast.MainApplication
+import com.raulshma.lenscast.AppGraph
 import com.raulshma.lenscast.R
 import com.raulshma.lenscast.capture.model.FlashMode
 import com.raulshma.lenscast.capture.model.RecordingConfig
@@ -61,7 +61,7 @@ fun CaptureScreen(
     onNavigateBack: () -> Unit,
 ) {
     val context = LocalContext.current
-    val app = context.applicationContext as MainApplication
+    val app = context.applicationContext as AppGraph
     val viewModel: CaptureViewModel = viewModel(
         factory = CaptureViewModel.Factory(
             context, app.captureHistoryStore, app.settingsDataStore,

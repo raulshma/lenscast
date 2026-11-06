@@ -21,7 +21,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
-import com.raulshma.lenscast.MainApplication
+import com.raulshma.lenscast.AppGraph
 import com.raulshma.lenscast.MainActivity
 import com.raulshma.lenscast.automation.AutomationScreen
 import com.raulshma.lenscast.camera.CameraScreen
@@ -55,7 +55,7 @@ private val ViewerSyncSaver: Saver<ViewerSync, Boolean> = Saver(
 fun NavigationGraph() {
     val navController = rememberNavController()
     val context = LocalContext.current
-    val app = context.applicationContext as MainApplication
+    val app = context.applicationContext as AppGraph
 
     // Handle notification deep links
     val activity = context as? MainActivity

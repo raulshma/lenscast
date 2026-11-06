@@ -72,7 +72,7 @@ class StreamingServer(
     // transport only translates POST /whep + DELETE /whep/{id} onto it — the
     // SDP offer/answer and the session registry live behind the seam.
     private val whepServer: com.raulshma.lenscast.streaming.whep.WhepServer? = null,
-) : NanoWSD(port) {
+) : NanoWSD(port), WebServerHandle {
 
     val isSecure: Boolean = tlsServerSocketFactory != null
 
@@ -116,7 +116,10 @@ class StreamingServer(
      */
     private var startAttempted = false
 
-    fun updateFrame(jpegData: ByteArray) = mjpegPump.updateFrame(jpegData)
+    // The [WebServerHandle] members: the exact surface [StreamingManager]'s
+    // web transport drives — the interface adds nothing new, it only lets
+    // [WebTransport] swap real servers for fakes in the JVM tests.
+    override fun updateFrame(jpegData: ByteArray) = mjpegPump.updateFrame(jpegData)
 
     /**
      * NanoHTTPD auto-gzips every text response when the client accepts
@@ -139,7 +142,7 @@ class StreamingServer(
         return mime.lowercase().contains("text/") || mime.lowercase().contains("/json")
     }
 
-    fun setWebStreamingEnabled(enabled: Boolean) = mjpegPump.setEnabled(enabled)
+    override fun setWebStreamingEnabled(enabled: Boolean) = mjpegPump.setEnabled(enabled)
 
     /**
      * Tells every open dashboard that the listener about to replace this one
@@ -147,20 +150,20 @@ class StreamingServer(
      * sitting on a dead socket after a TLS toggle. True when the notice was
      * queued for at least one dashboard.
      */
-    fun notifyTransportSwitch(scheme: String): Boolean = sseStatusStream.notifyTransportSwitch(scheme)
+    override fun notifyTransportSwitch(scheme: String): Boolean = sseStatusStream.notifyTransportSwitch(scheme)
 
-    fun getClientCount(): Int = mjpegPump.getClientCount()
+    override fun getClientCount(): Int = mjpegPump.getClientCount()
 
-    fun httpClientIds(): List<String> = mjpegPump.clientIds()
+    override fun httpClientIds(): List<String> = mjpegPump.clientIds()
 
-    fun kickHttpClient(clientId: String): Boolean = mjpegPump.kickClient(clientId)
+    override fun kickHttpClient(clientId: String): Boolean = mjpegPump.kickClient(clientId)
 
     /** The encoded hub's WS video fan-out sink (same-port `/ws/video` clients). */
-    fun feedVideo(nalUnits: List<com.raulshma.lenscast.streaming.rtsp.EncodedNalUnit>) =
+    override fun feedVideo(nalUnits: List<com.raulshma.lenscast.streaming.rtsp.EncodedNalUnit>) =
         wsMedia.feedVideo(nalUnits)
 
     /** Live `/ws/video` client count — the encoded-stream policy's WS input. */
-    fun videoClientCount(): Int = wsMedia.videoClientCount()
+    override fun videoClientCount(): Int = wsMedia.videoClientCount()
 
     /**
      * The NanoWSD upgrade hook: every `Connection: upgrade` request lands
@@ -547,7 +550,7 @@ class StreamingServer(
         return body
     }
 
-    fun startServer(): Boolean {
+    override fun startServer(): Boolean {
         startAttempted = true
         return try {
             start()
@@ -560,7 +563,7 @@ class StreamingServer(
         }
     }
 
-    fun stopServer() {
+    override fun stopServer() {
         // Release every instance a start was attempted for, not just the ones
         // that reported running: a bind failure can leave the socket owned by
         // an instance `isRunning` never saw, and the next create → bind would

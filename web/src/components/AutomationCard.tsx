@@ -1,6 +1,5 @@
 import { createSignal, For, Show } from 'solid-js'
 import type { AutomationRuleDto, AutomationStateDto } from '../types'
-import { API_DEFAULTS } from '../api/defaults'
 import { getAutomation, putAutomation } from '../api/client'
 import { formatDate, t } from '../lib/i18n'
 import { createVisiblePoll } from '../hooks/visiblePoll'
@@ -12,6 +11,7 @@ import {
   automationTriggerSummaryLines,
   conditionDaysMask,
   dayListLabel,
+  automationLimits,
   formatMinuteOfDay,
   isEveryDayMask,
   joinSummaryLines,
@@ -50,7 +50,12 @@ export default function AutomationCard(props: Props) {
   const [isNewRule, setIsNewRule] = createSignal(false)
 
   const readOnly = () => props.readOnly?.() ?? false
-  const atRuleCap = () => (state()?.rules.length ?? 0) >= API_DEFAULTS.automationMaxRules
+  // The editor contract's caps/presets: device truth once fetched
+  // (AutomationStateDto.limits), the contract-test-pinned fallback before.
+  const limits = () => automationLimits(state())
+  const atRuleCap = () => (state()?.rules.length ?? 0) >= limits().maxRules
+  /** The published icon kind of a rule's trigger, resolved from the fetched catalog. */
+  const triggerIcon = (typeId: string): string => state()?.triggers.find((entry) => entry.id === typeId)?.icon ?? ''
 
   /** The WHEN row text: "HH:mm · days" for time rules, the "when …" line for events. */
   const whenText = (rule: AutomationRuleDto): string => {
@@ -159,7 +164,7 @@ export default function AutomationCard(props: Props) {
     const current = state()
     if (!current || readOnly() || saving() || atRuleCap()) return
     const copyName = rule.name ? t('automation.ruleCopyOf', { name: rule.name }) : t('automation.ruleCopy')
-    void persist(current.enabled, withRuleDuplicated(current.rules, rule.id, copyName, API_DEFAULTS.automationMaxRules))
+    void persist(current.enabled, withRuleDuplicated(current.rules, rule.id, copyName, limits().maxRules))
   }
 
   function editRule(rule: AutomationRuleDto) {
@@ -192,7 +197,7 @@ export default function AutomationCard(props: Props) {
     if (rule.id !== '') {
       rules = current.rules.map((entry) => (entry.id === rule.id ? rule : entry))
     } else {
-      if (current.rules.length >= API_DEFAULTS.automationMaxRules) return false
+      if (current.rules.length >= limits().maxRules) return false
       rules = [...current.rules, rule]
     }
     const ok = await persist(current.enabled, rules)
@@ -249,7 +254,7 @@ export default function AutomationCard(props: Props) {
           </Show>
           <Show when={state()!.rules.length > 0}>
             <span class="automation-cap-note">
-              {t('automation.rulesCount', { count: state()!.rules.length, total: API_DEFAULTS.automationMaxRules })}
+              {t('automation.rulesCount', { count: state()!.rules.length, total: limits().maxRules })}
             </span>
           </Show>
         </div>
@@ -286,7 +291,7 @@ export default function AutomationCard(props: Props) {
                   title={t('automation.editRuleAria')}
                 >
                   <span class="automation-rule-badge automation-badge-trigger" aria-hidden="true">
-                    <AutomationIcon kind="trigger" typeId={rule.triggerType} />
+                    <AutomationIcon icon={triggerIcon(rule.triggerType)} />
                   </span>
                   <span class="automation-rule-heading">
                     <span class="automation-rule-name">{rule.name || t('automation.ruleUnnamed')}</span>
@@ -385,7 +390,7 @@ export default function AutomationCard(props: Props) {
               {t('automation.addRule')}
             </button>
             <Show when={atRuleCap()}>
-              <span class="automation-cap-note">{t('automation.maxRulesReached', { count: API_DEFAULTS.automationMaxRules })}</span>
+              <span class="automation-cap-note">{t('automation.maxRulesReached', { count: limits().maxRules })}</span>
             </Show>
           </div>
         </Show>
@@ -416,6 +421,7 @@ export default function AutomationCard(props: Props) {
             catalog={state()?.catalog ?? []}
             triggers={state()?.triggers ?? []}
             conditions={state()?.conditions ?? []}
+            limits={limits()}
             saving={saving()}
             onClose={() => setEditing(null)}
             onSave={handleEditorSave}

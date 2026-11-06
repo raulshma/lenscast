@@ -14,8 +14,11 @@ import type {
   AutomationCatalogParamDto,
   AutomationCatalogTriggerDto,
   AutomationConditionDto,
+  AutomationLimitsDto,
   AutomationRuleDto,
+  AutomationStateDto,
 } from '../types'
+import { API_DEFAULTS } from '../api/defaults'
 import { isDayArmed } from '../armDays'
 
 /** Every catalog action id the label/summary tables below cover (AutomationActionCatalog). */
@@ -588,9 +591,12 @@ export function automationConditionSummaryLines(condition: Pick<AutomationCondit
   }
 }
 
-// ── picker groups (UI-side constants; the engine catalogs are untouched) ──
-// The same grouping the app's AutomationVisuals renders: ids land in labeled
-// groups so the pickers read as a menu, not a flat dump of catalog ids.
+// ── picker groups (derived from the device-published catalogs) ──
+// The GROUPING is device truth now: every catalog entry GET /api/automation
+// publishes carries its `group` (a semantic id — the same grouping the app's
+// AutomationVisuals renders from the same catalogs). This module only
+// translates group ids → localized headings and buckets the entries in
+// catalog display order — no hand-maintained member-id lists anymore.
 
 /** One labeled group of catalog ids in a picker (AutomationVisuals.PickerGroup). */
 export interface AutomationPickerGroup {
@@ -600,43 +606,49 @@ export interface AutomationPickerGroup {
   ids: readonly string[]
 }
 
-export const AUTOMATION_TRIGGER_GROUPS: readonly AutomationPickerGroup[] = [
-  { titleKey: 'automation.group.schedule', ids: ['time_of_day'] },
-  { titleKey: 'automation.group.deviceEvents', ids: ['motion_detected', 'sound_detected', 'tamper_detected'] },
-  { titleKey: 'automation.group.power', ids: ['charging_changed', 'battery_level'] },
-  { titleKey: 'automation.group.streamApp', ids: ['streaming_changed', 'viewers_changed', 'app_started'] },
-]
+/** The published group id → heading-key translation; the fallback parks unknown ids under "Other". */
+const GROUP_TITLE_KEYS: Record<string, string> = {
+  // Triggers
+  schedule: 'automation.group.schedule',
+  device_events: 'automation.group.deviceEvents',
+  power: 'automation.group.power',
+  stream_app: 'automation.group.streamApp',
+  // Actions
+  camera: 'automation.group.camera',
+  light_sound: 'automation.group.lightSound',
+  stream_capture: 'automation.group.streamCapture',
+  detection: 'automation.group.detection',
+  // Conditions
+  time: 'automation.group.time',
+  connectivity: 'automation.group.connectivity',
+  device_state: 'automation.group.deviceState',
+}
 
-export const AUTOMATION_ACTION_GROUPS: readonly AutomationPickerGroup[] = [
-  { titleKey: 'automation.group.camera', ids: ['camera_exposure', 'camera_ev', 'camera_zoom', 'camera_fps', 'camera_lens'] },
-  { titleKey: 'automation.group.lightSound', ids: ['torch', 'siren'] },
-  { titleKey: 'automation.group.streamCapture', ids: ['stream', 'capture_photo', 'recording'] },
-  { titleKey: 'automation.group.detection', ids: ['detection'] },
-]
-
-export const AUTOMATION_CONDITION_GROUPS: readonly AutomationPickerGroup[] = [
-  { titleKey: 'automation.group.time', ids: ['time_window'] },
-  { titleKey: 'automation.group.power', ids: ['charging', 'battery_level', 'power_save'] },
-  { titleKey: 'automation.group.connectivity', ids: ['wifi_connected'] },
-  { titleKey: 'automation.group.deviceState', ids: ['streaming', 'viewers', 'torch', 'recording', 'thermal', 'motion_detection'] },
-]
+const OTHER_GROUP_TITLE_KEY = 'automation.group.other'
 
 /**
- * The grouped picker model for one catalog: the static groups filtered to the
- * ids the device actually publishes, plus any unknown id parked under a
- * trailing "Other" group so a stale-firmware catalog still renders fully.
+ * The grouped picker model for one device-published catalog: entries bucket
+ * by their `group` in first-appearance (catalog display) order, so the
+ * pickers read as a menu — not a flat dump of catalog ids — with zero
+ * client-side member lists to drift. A stale-firmware group id this build
+ * has no heading for parks its entries under the trailing "Other" group.
  */
-export function groupedPickerOptions(
-  groups: readonly AutomationPickerGroup[],
-  availableIds: readonly string[],
-): { titleKey: string; ids: string[] }[] {
-  const known = new Set(groups.flatMap((group) => group.ids))
-  const result = groups
-    .map((group) => ({ titleKey: group.titleKey, ids: group.ids.filter((id) => availableIds.includes(id)) }))
-    .filter((group) => group.ids.length > 0)
-  const leftover = availableIds.filter((id) => !known.has(id))
-  if (leftover.length > 0) result.push({ titleKey: 'automation.group.other', ids: leftover })
-  return result
+export function catalogPickerGroups(
+  entries: readonly { id: string; group?: string }[],
+): AutomationPickerGroup[] {
+  const groups: { titleKey: string; ids: string[] }[] = []
+  const indexByTitleKey = new Map<string, number>()
+  for (const entry of entries) {
+    const titleKey = (entry.group != null && GROUP_TITLE_KEYS[entry.group]) || OTHER_GROUP_TITLE_KEY
+    const existing = indexByTitleKey.get(titleKey)
+    if (existing != null) {
+      groups[existing].ids.push(entry.id)
+    } else {
+      indexByTitleKey.set(titleKey, groups.length)
+      groups.push({ titleKey, ids: [entry.id] })
+    }
+  }
+  return groups
 }
 
 /** The i18n key of one picker option's one-line description. */
@@ -649,10 +661,34 @@ export function automationDayLabelKey(isoDayIndex: number): string {
   return `automation.day.${Math.min(Math.max(Math.round(isoDayIndex), 0), 6)}`
 }
 
-// ── cooldown humanizing ──
+// ── editor limits (device-published; pre-fetch fallbacks pinned by the contract test) ──
 
-/** The cooldown preset chips (seconds) — exactly the app's CooldownEditor presets. */
-export const AUTOMATION_COOLDOWN_PRESETS: readonly number[] = [30, 60, 300, 900, 1_800, 3_600]
+/**
+ * The limits resolution the components ride: the fetched state's `limits`
+ * block is device truth (one Kotlin source — StreamDefaults — published by
+ * GET /api/automation); before the first fetch (or for a hypothetical
+ * document without the block) the API_DEFAULTS-derived fallback shapes the
+ * UI, and the contract test pins those fallback values to the checked-in
+ * fixture's limits so the two cannot drift.
+ */
+export function automationLimits(state?: Pick<AutomationStateDto, 'limits'> | null): AutomationLimitsDto {
+  return state?.limits ?? API_DEFAULTS_DERIVED_LIMITS
+}
+
+/** The pre-fetch fallback limits, derived from API_DEFAULTS (contract-test-pinned to the fixture). */
+const API_DEFAULTS_DERIVED_LIMITS: AutomationLimitsDto = {
+  maxRules: API_DEFAULTS.automationMaxRules,
+  maxActionsPerRule: API_DEFAULTS.automationMaxActionsPerRule,
+  maxConditionsPerRule: API_DEFAULTS.automationMaxConditionsPerRule,
+  cooldownMinSeconds: API_DEFAULTS.automationCooldownMinSeconds,
+  cooldownMaxSeconds: API_DEFAULTS.automationCooldownMaxSeconds,
+  cooldownDefaultSeconds: API_DEFAULTS.automationCooldownDefaultSeconds,
+  cooldownPresetSeconds: [...API_DEFAULTS.automationCooldownPresets],
+  missedWindowMinMinutes: API_DEFAULTS.automationMissedWindowMinMinutes,
+  missedWindowMaxMinutes: API_DEFAULTS.automationMissedWindowMaxMinutes,
+  missedWindowDefaultMinutes: API_DEFAULTS.automationMissedWindowDefaultMinutes,
+  missedWindowPresetMinutes: [...API_DEFAULTS.automationMissedWindowPresets],
+}
 
 /**
  * Humanize a duration for the cooldown readout and preset chips: seconds
@@ -670,9 +706,6 @@ export function humanizeDuration(seconds: number): AutomationSummaryLine {
 }
 
 // ── missed-run policy ──
-
-/** The missed-run window preset chips (minutes) — exactly the app editor's presets. */
-export const AUTOMATION_MISSED_WINDOW_PRESETS: readonly number[] = [5, 15, 30, 60, 180]
 
 /**
  * The rule-card/preview "IF MISSED" summary line for a rule's missed-run

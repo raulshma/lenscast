@@ -767,9 +767,11 @@ export const DEFAULT_OVERLAY_SETTINGS: Partial<StreamingSettings> = {
 }
 
 // ── Automation (time-of-day rules; GET/PUT /api/automation) ──
-// Mirrors the app's AutomationWebHandler DTOs (WebApiDtos.kt): the whole
-// automation surface in one document — master toggle, configured rules, and
-// the read-only action catalog the rule editor renders from.
+// Mirrors the app's automation wire shape (AutomationWebHandler/WebApiDtos.kt
+// + the domain AutomationRule — the ONE declaration: the domain shape IS the
+// wire shape): the whole automation surface in one document — master toggle,
+// configured rules, the read-only catalogs the rule editor renders from, and
+// the `limits` block that publishes the editor bounds/defaults/presets.
 
 /** How a catalog param's string value is interpreted (AutomationParamSpec.kind). */
 export type AutomationParamKind = 'BOOL' | 'INT' | 'FLOAT'
@@ -814,10 +816,12 @@ export interface AutomationConditionDto {
 
 /**
  * One automation rule as the dashboard configured it: WHEN triggerType
- * (+ ONLY WHEN conditions) THEN actions. Every field is sanitized through
- * the schedule policy on save: an unknown trigger folds to time_of_day,
- * unknown conditions/actions drop, and every bound clamps. A blank `id` on
- * write lets the device mint the fire-journal UUID.
+ * (+ ONLY WHEN conditions) THEN actions. This is the app's ONE rule
+ * declaration (the domain AutomationRule — no wire clone). Every field is
+ * sanitized through the schedule policy on save: an unknown trigger folds to
+ * time_of_day, unknown conditions/actions drop, and every bound clamps. A
+ * blank `id` on write lets the device mint the fire-journal UUID; GET
+ * responses always carry the persisted, minted, non-blank id.
  */
 export interface AutomationRuleDto {
   /** Stable identity (the fire-journal key); blank on a new rule. */
@@ -862,14 +866,47 @@ export interface AutomationRuleDto {
   actions: AutomationActionDto[]
   /**
    * Epoch milliseconds (UTC) of the rule's last actual firing, decoded from
-   * the device's fire journal; null/absent = never fired. Read-only — PUT
-   * bodies ignore it (the response is a fresh GET-shaped read).
+   * the device's fire journal; null/absent = never fired. Read-only — a
+   * client echoing it back in a PUT body has it reset by the sanitizer (it
+   * never persists); the response is a fresh GET-shaped read.
    */
   lastFiredAt?: number | null
 }
 
 /**
- * One parameter of a catalog action, as GET /api/automation publishes it: the
+ * The editor contract's published bounds, defaults and preset chips
+ * (AutomationLimitsDto — one Kotlin source in StreamDefaults), as GET
+ * /api/automation's `limits` block. Read-only: never accepted back on the
+ * wire. The dashboard's pre-fetch fallbacks (API_DEFAULTS) are pinned to
+ * this block by the contract fixtures.
+ */
+export interface AutomationLimitsDto {
+  /** The persisted rule list's cap (StreamDefaults.AUTOMATION_MAX_RULES). */
+  maxRules: number
+  /** Each rule's action list cap (StreamDefaults.AUTOMATION_MAX_ACTIONS_PER_RULE). */
+  maxActionsPerRule: number
+  /** Each rule's condition ("ONLY WHEN") list cap (StreamDefaults.AUTOMATION_MAX_CONDITIONS_PER_RULE). */
+  maxConditionsPerRule: number
+  /** The event-rule cooldown clamp floor, seconds. */
+  cooldownMinSeconds: number
+  /** The event-rule cooldown clamp ceiling, seconds. */
+  cooldownMaxSeconds: number
+  /** The cooldown a fresh rule starts at. */
+  cooldownDefaultSeconds: number
+  /** The cooldown preset chips, seconds, in display order. */
+  cooldownPresetSeconds: number[]
+  /** The missed-run window clamp floor, minutes. */
+  missedWindowMinMinutes: number
+  /** The missed-run window clamp ceiling, minutes. */
+  missedWindowMaxMinutes: number
+  /** The window a fresh rule starts at. */
+  missedWindowDefaultMinutes: number
+  /** The missed-window preset chips, minutes, in display order. */
+  missedWindowPresetMinutes: number[]
+}
+
+/**
+ * One parameter of a catalog entry, as GET /api/automation publishes it: the
  * schema a rule editor needs to render and validate inputs. Read-only — the
  * catalog is device truth and never accepted back on the wire.
  */
@@ -894,7 +931,11 @@ export interface AutomationCatalogParamDto {
   autoAtZero: boolean
 }
 
-/** One action the automation engine can execute, as GET /api/automation publishes it. */
+/**
+ * One action the automation engine can execute, as GET /api/automation
+ * publishes it. `group` and `icon` are the picker decorations as device
+ * truth — both editors (app and web) group and badge from this one source.
+ */
 export interface AutomationCatalogActionDto {
   /** The action id an AutomationActionDto.type must name. */
   id: string
@@ -908,6 +949,10 @@ export interface AutomationCatalogActionDto {
    * next natural rebind while a recording is active.
    */
   interruptsStream: boolean
+  /** The picker group this entry lists under (e.g. `"camera"`, `"stream_capture"`). */
+  group: string
+  /** The icon kind (AutomationIconVocabulary's closed set); the web maps kind → glyph. */
+  icon: string
 }
 
 /**
@@ -920,6 +965,10 @@ export interface AutomationCatalogTriggerDto {
   id: string
   /** The parameter schema, in display/contract order. */
   params: AutomationCatalogParamDto[]
+  /** The picker group this entry lists under (e.g. `"schedule"`, `"power"`). */
+  group: string
+  /** The icon kind (AutomationIconVocabulary's closed set); the web maps kind → glyph. */
+  icon: string
 }
 
 /** One precondition a rule may require, as GET /api/automation publishes it — read-only device truth. */
@@ -928,21 +977,64 @@ export interface AutomationCatalogConditionDto {
   id: string
   /** The parameter schema, in display/contract order. */
   params: AutomationCatalogParamDto[]
+  /** The picker group this entry lists under (e.g. `"time"`, `"connectivity"`). */
+  group: string
+  /** The icon kind (AutomationIconVocabulary's closed set); the web maps kind → glyph. */
+  icon: string
 }
 
-/** GET /api/automation — the master toggle, the rules, and the three read-only catalogs. */
+/**
+ * The closed vocabulary of published icon kinds (AutomationIconVocabulary) —
+ * the app maps kind → Material drawable, the web maps kind → inline SVG
+ * glyph. Pinned by the contract test: every catalog entry's `icon` must be
+ * one of these.
+ */
+export type AutomationIconVocabulary =
+  | 'schedule'
+  | 'time_window'
+  | 'sensor'
+  | 'sound'
+  | 'radar'
+  | 'power'
+  | 'battery_alert'
+  | 'battery'
+  | 'battery_saver'
+  | 'shield'
+  | 'cast'
+  | 'eye'
+  | 'rocket'
+  | 'broadcast'
+  | 'stream'
+  | 'people'
+  | 'wifi'
+  | 'exposure'
+  | 'tonality'
+  | 'zoom'
+  | 'speed'
+  | 'lens'
+  | 'camera'
+  | 'torch'
+  | 'lightbulb'
+  | 'siren'
+  | 'videocam'
+  | 'record'
+  | 'thermostat'
+
+/** GET /api/automation — the master toggle, the rules, the three read-only catalogs, and the published editor limits. */
 export interface AutomationStateDto {
   enabled: boolean
   rules: AutomationRuleDto[]
   catalog: AutomationCatalogActionDto[]
   triggers: AutomationCatalogTriggerDto[]
   conditions: AutomationCatalogConditionDto[]
+  limits: AutomationLimitsDto
 }
 
 /**
  * PUT /api/automation body: the master toggle plus the full rule list (the
- * document persists wholesale, like the settings sections). The catalog is
- * read-only on the wire and never accepted here; the response is a fresh
+ * document persists wholesale, like the settings sections). The catalogs and
+ * limits are read-only on the wire and never accepted here; a client-echoed
+ * `lastFiredAt` is reset by the sanitizer; the response is a fresh
  * GET-shaped read, so the client sees the sanitized truth rather than what
  * it sent.
  */

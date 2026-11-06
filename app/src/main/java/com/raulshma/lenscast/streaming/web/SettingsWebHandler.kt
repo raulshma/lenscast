@@ -5,6 +5,8 @@ import com.raulshma.lenscast.core.BackupTargetPolicy
 import com.raulshma.lenscast.core.StreamAuthCrypto
 import com.raulshma.lenscast.core.parseEnum
 import com.raulshma.lenscast.core.parseEnumOrNull
+import com.raulshma.lenscast.core.Secret
+import com.raulshma.lenscast.core.SecretUpdate
 import com.raulshma.lenscast.capture.ml.AudioModelStore
 import com.raulshma.lenscast.capture.ml.DetectionModelStore
 import com.raulshma.lenscast.camera.model.CameraSettings
@@ -59,10 +61,10 @@ class SettingsWebHandler(
      * restoring via POST /api/settings/import on this or another device.
      *
      * What the export carries: exactly what GET /api/settings returns — the
-     * write-only credentials (stream-auth password hash, WebDAV password,
-     * Telegram bot token, MQTT password, WHIP bearer token, API token, and
-     * the RTMP push URL, whose stream key is embedded in it) are
-     * blank, but `webhookHeaders` is a user-authored header map that
+     * write-only credentials (WebDAV password, Telegram bot token, MQTT
+     * password, WHIP bearer token, API token, and the RTMP push URL, whose
+     * stream key is embedded in it) serialize blank through the [Secret]
+     * wire type, but `webhookHeaders` is a user-authored header map that
      * round-trips in full and frequently contains an Authorization header.
      * The file is configuration, not a sanitized share artifact — treat it
      * as such.
@@ -124,18 +126,16 @@ class SettingsWebHandler(
                 rtspResolution = store.rtspResolution.value.wireName,
                 rtspVideoCodec = store.rtspVideoCodec.value.wireName,
                 rtmpEnabled = store.rtmpEnabled.value,
-                // Write-only, like whipToken: the URL embeds the stream key,
-                // a credential that never round-trips (see docs/rtmp.md).
-                rtmpUrl = "",
+                // Every secret below is a plain copy of its stored value: the
+                // Secret wire type (App Json) serializes all of them blank, so
+                // no stored credential ever round-trips (see core/Secret.kt).
+                rtmpUrl = Secret(store.rtmpUrl.value),
                 whipEnabled = store.whipEnabled.value,
                 whipUrl = store.whipUrl.value,
-                // Write-only, like mqttPassword: blank in every response.
-                whipToken = "",
+                whipToken = Secret(store.whipToken.value),
                 whipStunServer = store.whipStunServer.value,
                 srtEnabled = store.srtEnabled.value,
-                // Write-only, like rtmpUrl: the userinfo/streamid are
-                // credentials; blank in every response.
-                srtUrl = "",
+                srtUrl = Secret(store.srtUrl.value),
                 adaptiveBitrateEnabled = store.adaptiveBitrateEnabled.value,
                 adaptiveEncodedBitrateEnabled = store.encodedAdaptiveBitrateEnabled.value,
                 rtspSubStreamEnabled = store.rtspSubStreamEnabled.value,
@@ -192,17 +192,15 @@ class SettingsWebHandler(
                 backupTarget = BackupTargetPolicy.parse(store.backupTarget.value).wireName,
                 backupWebdavUrl = store.backupWebdavUrl.value,
                 backupWebdavUsername = store.backupWebdavUsername.value,
-                // Write-only, like the stream-auth password: blank in every
-                // response; an empty update keeps the stored secret.
-                backupWebdavPassword = "",
+                backupWebdavPassword = Secret(store.backupWebdavPassword.value),
                 telegramChatId = store.telegramChatId.value,
-                // Write-only, exactly like backupWebdavPassword.
-                telegramBotToken = "",
+                telegramBotToken = Secret(store.telegramBotToken.value),
                 apiTokenEnabled = store.apiTokenEnabled.value,
                 apiTokenConfigured = store.apiTokenHash.value.isNotBlank(),
-                // Write-only plaintext: the stored value is the SHA-256 hex
-                // hash, and neither it nor the token ever round-trips.
-                apiToken = "",
+                // The token's stored form is the SHA-256 hash, and there is
+                // no plaintext to copy — the field stays empty here; the
+                // Secret adapter would blank it regardless.
+                apiToken = Secret(""),
                 httpsEnabled = store.httpsEnabled.value,
                 audioDeviceId = store.audioDeviceId.value,
                 detectionNotificationsEnabled = store.detectionNotificationsEnabled.value,
@@ -214,8 +212,7 @@ class SettingsWebHandler(
                 mqttBrokerHost = store.mqttBrokerHost.value,
                 mqttBrokerPort = store.mqttBrokerPort.value,
                 mqttUsername = store.mqttUsername.value,
-                // Write-only, like backupWebdavPassword: blank in every response.
-                mqttPassword = "",
+                mqttPassword = Secret(store.mqttPassword.value),
                 mqttTls = store.mqttTls.value,
                 mqttDiscoveryPrefix = store.mqttDiscoveryPrefix.value,
                 mqttTelemetryEnabled = store.mqttTelemetryEnabled.value,
@@ -300,13 +297,10 @@ class SettingsWebHandler(
             RtspVideoCodec.fromWireNameOrNull(stream.rtspVideoCodec)
                 ?.let { settingsDataStore.saveRtspVideoCodec(it) }
             settingsDataStore.saveRtmpEnabled(stream.rtmpEnabled)
-            // RTMP push: write-only like the WHIP token below — the URL
-            // embeds the stream key, so responses never carry it and an
-            // empty update keeps the stored one. A presented value is judged
-            // at start time by RtmpUrl.parse (plus the H.264 codec gate).
-            if (stream.rtmpUrl.isNotEmpty()) {
-                settingsDataStore.saveRtmpUrl(stream.rtmpUrl)
-            }
+            // RTMP push: write-only (Secret) — an empty update keeps the
+            // stored URL. A presented value is judged at start time by
+            // RtmpUrl.parse (plus the H.264 codec gate).
+            saveSecret(stream.rtmpUrl.value) { settingsDataStore.saveRtmpUrl(it) }
             // WHIP push: endpoint/STUN round-trip; validity is judged at
             // start time by the output (a readable error beats silently
             // "fixing" a URL the user mistyped).
@@ -315,11 +309,9 @@ class SettingsWebHandler(
             settingsDataStore.saveWhipStunServer(stream.whipStunServer)
             // SRT push: the enable toggle round-trips; the write-only URL is
             // judged at start time by SrtUrl.parse, exactly like the RTMP
-            // push URL (an empty update keeps the stored credential).
+            // push URL (Secret — an empty update keeps the stored one).
             settingsDataStore.saveSrtEnabled(stream.srtEnabled)
-            if (stream.srtUrl.isNotEmpty()) {
-                settingsDataStore.saveSrtUrl(stream.srtUrl)
-            }
+            saveSecret(stream.srtUrl.value) { settingsDataStore.saveSrtUrl(it) }
             settingsDataStore.saveAdaptiveBitrateEnabled(stream.adaptiveBitrateEnabled)
             settingsDataStore.saveEncodedAdaptiveBitrateEnabled(stream.adaptiveEncodedBitrateEnabled)
             settingsDataStore.saveRtspSubStreamEnabled(stream.rtspSubStreamEnabled)
@@ -409,42 +401,46 @@ class SettingsWebHandler(
             settingsDataStore.saveContinuousSegmentMinutes(stream.continuousSegmentMinutes)
             settingsDataStore.saveOnvifEnabled(stream.onvifEnabled)
             settingsDataStore.saveEcoIdleFpsEnabled(stream.ecoIdleFpsEnabled)
-            // Same write-only contract as the WebDAV password: an empty value
-            // keeps the stored credential.
-            if (stream.mqttPassword.isNotEmpty()) {
-                settingsDataStore.saveMqttPassword(stream.mqttPassword)
-            }
-            // Same write-only contract as the MQTT password: an empty value
-            // keeps the stored WHIP bearer token.
-            if (stream.whipToken.isNotEmpty()) {
-                settingsDataStore.saveWhipToken(stream.whipToken)
-            }
-            // An empty password on update means "keep the stored one" so the
-            // dashboard never needs to round-trip the secret.
-            if (stream.backupWebdavPassword.isNotEmpty()) {
-                settingsDataStore.saveBackupWebdavPassword(stream.backupWebdavPassword)
-            }
-            // Same write-only contract as the WebDAV password.
-            if (stream.telegramBotToken.isNotEmpty()) {
-                settingsDataStore.saveTelegramBotToken(stream.telegramBotToken)
-            }
-            // The token flag only turns on with a token in hand: an enable
-            // with no plaintext and no stored hash would arm the token path
-            // without a credential, so every presented token header would
-            // 401 (the gate fails closed on a blank hash). Disabling always
-            // goes through.
-            val tokenConfigured = stream.apiToken.isNotEmpty() ||
-                settingsDataStore.apiTokenHash.value.isNotBlank()
+            // The write-only secrets (Secret / SecretUpdate): an empty update
+            // keeps the stored credential — the dashboard never round-trips
+            // them, so it can only present a fresh value, never echo one.
+            saveSecret(stream.mqttPassword.value) { settingsDataStore.saveMqttPassword(it) }
+            saveSecret(stream.whipToken.value) { settingsDataStore.saveWhipToken(it) }
+            saveSecret(stream.backupWebdavPassword.value) { settingsDataStore.saveBackupWebdavPassword(it) }
+            saveSecret(stream.telegramBotToken.value) { settingsDataStore.saveTelegramBotToken(it) }
+            // The apiToken is the ONE exception layered on the same entry
+            // point: the stored form is the SHA-256 hex hash of the
+            // plaintext, and its enable flag is hash-and-gated — the flag
+            // only turns on when a usable credential would exist after the
+            // update (a presented token, or a stored hash). An enable with no
+            // plaintext and no stored hash would arm the token path without a
+            // credential, so every presented token header would 401 (the gate
+            // fails closed on a blank hash). Disabling always goes through.
+            val tokenConfigured = SecretUpdate.willHaveSecret(
+                stream.apiToken.value,
+                settingsDataStore.apiTokenHash.value,
+            )
             settingsDataStore.saveApiTokenEnabled(stream.apiTokenEnabled && tokenConfigured)
-            // A non-empty apiToken is the write-only plaintext: hash it here,
-            // store only the hash, and never hand either back over the wire.
-            // An empty value keeps the stored hash (disable via apiTokenEnabled).
-            if (stream.apiToken.isNotEmpty()) {
-                settingsDataStore.saveApiTokenHash(StreamAuthCrypto.sha256Hex(stream.apiToken))
+            // A non-empty token is the write-only plaintext: hash it here,
+            // store only the hash, and never hand either back over the wire
+            // (the Secret adapter blanks the response). An empty value keeps
+            // the stored hash (disable via apiTokenEnabled).
+            if (SecretUpdate.overwrites(stream.apiToken.value)) {
+                settingsDataStore.saveApiTokenHash(StreamAuthCrypto.sha256Hex(stream.apiToken.value))
             }
         }
 
         return successAdapter.toJson(SuccessResponse())
+    }
+
+    /**
+     * The SecretUpdate write-side guard in one place: an empty or absent
+     * update never touches the stored credential, a presented value lands
+     * through [save]. The apiToken stays outside it — its stored form is
+     * the hash, its own exception layered below.
+     */
+    private suspend fun saveSecret(incoming: String, save: suspend (String) -> Unit) {
+        if (SecretUpdate.overwrites(incoming)) save(incoming)
     }
 
     /**

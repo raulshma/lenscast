@@ -4,16 +4,12 @@ import type {
   AutomationCatalogConditionDto,
   AutomationCatalogParamDto,
   AutomationCatalogTriggerDto,
+  AutomationLimitsDto,
   AutomationRuleDto,
 } from '../types'
 import { API_DEFAULTS } from '../api/defaults'
 import { t } from '../lib/i18n'
 import {
-  AUTOMATION_ACTION_GROUPS,
-  AUTOMATION_CONDITION_GROUPS,
-  AUTOMATION_COOLDOWN_PRESETS,
-  AUTOMATION_MISSED_WINDOW_PRESETS,
-  AUTOMATION_TRIGGER_GROUPS,
   automationActionLabelKey,
   automationConditionLabelKey,
   automationConditionSummaryLines,
@@ -25,13 +21,13 @@ import {
   automationTriggerSummaryLines,
   automationSummaryLines,
   canonicalParamValue,
+  catalogPickerGroups,
   conditionDaysMask,
   dayListLabel,
   defaultActionParams,
   defaultConditionParams,
   defaultTriggerParams,
   formatMinuteOfDay,
-  groupedPickerOptions,
   humanizeDuration,
   isAutoSentinelParam,
   isEveryDayMask,
@@ -41,7 +37,7 @@ import {
   parseMinuteOfDay,
   withSpecParam,
 } from '../lib/automation'
-import { AutomationClockGlyph, AutomationIcon, type AutomationIconKind } from '../lib/automationIcons'
+import { AutomationClockGlyph, AutomationIcon } from '../lib/automationIcons'
 import { isDayArmed, toggleArmDayMask } from '../armDays'
 
 interface Props {
@@ -55,6 +51,8 @@ interface Props {
   triggers: AutomationCatalogTriggerDto[]
   /** The condition catalog (ONLY WHEN picker + param editors). */
   conditions: AutomationCatalogConditionDto[]
+  /** The device-published editor limits (cap counters, cooldown/window bounds and preset chips). */
+  limits: AutomationLimitsDto
   saving: boolean
   onClose: () => void
   /** Resolves true when the PUT succeeded — only then does the card close the editor; a failed save keeps the edits on screen. */
@@ -142,8 +140,8 @@ export default function AutomationRuleEditor(props: Props) {
     props.conditions.find((entry) => entry.id === typeId)
 
   const isTimeTrigger = () => triggerType() === 'time_of_day'
-  const atActionCap = () => actions().length >= API_DEFAULTS.automationMaxActionsPerRule
-  const atConditionCap = () => conditions().length >= API_DEFAULTS.automationMaxConditionsPerRule
+  const atActionCap = () => actions().length >= props.limits.maxActionsPerRule
+  const atConditionCap = () => conditions().length >= props.limits.maxConditionsPerRule
   const saveDisabled = () => props.saving || submitting() || actions().length === 0
 
   // Adding an action clears the inline save gate live.
@@ -203,17 +201,30 @@ export default function AutomationRuleEditor(props: Props) {
     setDirty(true)
   }
 
-  /** The picker dialog's option model for one target. */
+  /**
+   * The picker dialog's option model for one target: groups derived from the
+   * device-published catalog entries' `group` field (device truth — the same
+   * grouping the app screen renders from the same catalogs), in catalog
+   * display order.
+   */
   const pickerGroups = (target: PickerTarget) => {
     switch (target) {
       case 'trigger':
-        return groupedPickerOptions(AUTOMATION_TRIGGER_GROUPS, props.triggers.map((entry) => entry.id))
+        return catalogPickerGroups(props.triggers)
       case 'condition':
-        return groupedPickerOptions(AUTOMATION_CONDITION_GROUPS, props.conditions.map((entry) => entry.id))
+        return catalogPickerGroups(props.conditions)
       case 'action':
-        return groupedPickerOptions(AUTOMATION_ACTION_GROUPS, props.catalog.map((entry) => entry.id))
+        return catalogPickerGroups(props.catalog)
     }
   }
+
+  /** The published icon kind of one catalog entry, resolved per picker target. */
+  const iconFor = (target: PickerTarget, typeId: string): string =>
+    target === 'trigger'
+      ? props.triggers.find((entry) => entry.id === typeId)?.icon ?? ''
+      : target === 'condition'
+        ? props.conditions.find((entry) => entry.id === typeId)?.icon ?? ''
+        : props.catalog.find((entry) => entry.id === typeId)?.icon ?? ''
 
   /** One picker pick: the trigger picker swaps the WHEN, the other two append a spec. */
   function pickOption(target: PickerTarget, typeId: string) {
@@ -362,7 +373,7 @@ export default function AutomationRuleEditor(props: Props) {
                 the grouped picker (the old bare select's replacement). */}
             <button type="button" class="automation-trigger-pick" onClick={() => setPicker('trigger')}>
               <span class="automation-rule-badge automation-badge-trigger" aria-hidden="true">
-                <AutomationIcon kind="trigger" typeId={triggerType()} />
+                <AutomationIcon icon={triggerFor(triggerType())?.icon ?? ''} />
               </span>
               <span class="automation-picker-option-text">
                 <span class="automation-picker-option-label">{t(automationTriggerLabelKey(triggerType()))}</span>
@@ -397,7 +408,7 @@ export default function AutomationRuleEditor(props: Props) {
                       </span>
                     </div>
                     <div class="automation-cooldown-presets" role="group" aria-label={t('automation.editor.cooldown')}>
-                      <For each={AUTOMATION_COOLDOWN_PRESETS}>
+                      <For each={props.limits.cooldownPresetSeconds}>
                         {(seconds) => {
                           const line = humanizeDuration(seconds)
                           return (
@@ -420,10 +431,10 @@ export default function AutomationRuleEditor(props: Props) {
                       id="automation-rule-cooldown"
                       type="range"
                       class="custom-range"
-                      min={API_DEFAULTS.automationCooldownMinSeconds}
+                      min={props.limits.cooldownMinSeconds}
                       max={COOLDOWN_SLIDER_MAX}
                       step={30}
-                      value={Math.min(Math.max(cooldownSeconds(), API_DEFAULTS.automationCooldownMinSeconds), COOLDOWN_SLIDER_MAX)}
+                      value={Math.min(Math.max(cooldownSeconds(), props.limits.cooldownMinSeconds), COOLDOWN_SLIDER_MAX)}
                       onInput={(e) => {
                         const parsed = Number.parseInt(e.currentTarget.value, 10)
                         if (Number.isFinite(parsed)) {
@@ -500,7 +511,7 @@ export default function AutomationRuleEditor(props: Props) {
                     </span>
                   </div>
                   <div class="automation-cooldown-presets" role="group" aria-label={t('automation.editor.missedWindow')}>
-                    <For each={AUTOMATION_MISSED_WINDOW_PRESETS}>
+                    <For each={props.limits.missedWindowPresetMinutes}>
                       {(minutes) => {
                         const line = humanizeDuration(minutes * 60)
                         return (
@@ -548,7 +559,7 @@ export default function AutomationRuleEditor(props: Props) {
               </svg>
               <span>{t('automation.onlyWhen')}</span>
               <span class="automation-section-count">
-                {conditions().length}/{API_DEFAULTS.automationMaxConditionsPerRule}
+                {conditions().length}/{props.limits.maxConditionsPerRule}
               </span>
             </div>
 
@@ -606,7 +617,7 @@ export default function AutomationRuleEditor(props: Props) {
               </svg>
               <span>{t('automation.then')}</span>
               <span class="automation-section-count">
-                {actions().length}/{API_DEFAULTS.automationMaxActionsPerRule}
+                {actions().length}/{props.limits.maxActionsPerRule}
               </span>
             </div>
 
@@ -704,8 +715,7 @@ export default function AutomationRuleEditor(props: Props) {
                                 : t(automationActionLabelKey(typeId))
                           return (
                             <AutomationPickerOption
-                              typeId={typeId}
-                              kind={target}
+                              icon={iconFor(target, typeId)}
                               label={label}
                               description={t(automationDescKey(target, typeId))}
                               selected={target === 'trigger' && typeId === triggerType()}
@@ -779,10 +789,9 @@ function AutomationTimeField(props: {
   )
 }
 
-/** One picker row: icon, label, one-line description, check on the current selection. */
+/** One picker row: icon (the entry's published kind), label, one-line description, check on the current selection. */
 function AutomationPickerOption(props: {
-  typeId: string
-  kind: AutomationIconKind
+  icon: string
   label: string
   description: string
   selected: boolean
@@ -791,7 +800,7 @@ function AutomationPickerOption(props: {
   return (
     <button type="button" class="automation-picker-option" classList={{ selected: props.selected }} onClick={props.onPick}>
       <span class="automation-picker-option-icon" aria-hidden="true">
-        <AutomationIcon kind={props.kind} typeId={props.typeId} />
+        <AutomationIcon icon={props.icon} />
       </span>
       <span class="automation-picker-option-text">
         <span class="automation-picker-option-label">{props.label}</span>
@@ -828,7 +837,7 @@ function AutomationActionEditorCard(props: {
     <div class="automation-action-row">
       <div class="automation-action-head">
         <span class="automation-action-icon" aria-hidden="true">
-          <AutomationIcon kind="action" typeId={props.typeId} />
+          <AutomationIcon icon={props.catalogAction?.icon ?? ''} />
         </span>
         <span class="automation-action-label">{t(automationActionLabelKey(props.typeId))}</span>
         <span class="automation-reorder">
@@ -918,7 +927,7 @@ function AutomationConditionEditorCard(props: {
     <div class="automation-action-row">
       <div class="automation-action-head">
         <span class="automation-action-icon" aria-hidden="true">
-          <AutomationIcon kind="condition" typeId={props.typeId} />
+          <AutomationIcon icon={props.catalogCondition?.icon ?? ''} />
         </span>
         <span class="automation-action-label">{t(automationConditionLabelKey(props.typeId))}</span>
         <span class="automation-reorder">

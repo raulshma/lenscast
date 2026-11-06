@@ -332,7 +332,7 @@ private fun PhotoViewer(
 @Composable
 private fun VideoViewer(filePath: String, encrypted: Boolean) {
     val context = androidx.compose.ui.platform.LocalContext.current
-    val app = context.applicationContext as com.raulshma.lenscast.MainApplication
+    val app = context.applicationContext as com.raulshma.lenscast.AppGraph
     val resolved = resolveMediaModel(filePath)
     val exoPlayer = androidx.compose.runtime.remember {
         androidx.media3.exoplayer.ExoPlayer.Builder(context).build().apply {

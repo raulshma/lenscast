@@ -3,14 +3,20 @@ package com.raulshma.lenscast.automation.schedule
 import com.raulshma.lenscast.core.StreamDefaults
 
 /**
- * One automation precondition a rule may require: its id and parameter
- * schema — the condition-side twin of [AutomationActionType]. Conditions are
- * evaluated against an [AutomationSensorSnapshot] at fire time; the verdicts
- * live in [AutomationConditionPolicy], the schema lives here.
+ * One automation precondition a rule may require: its id, parameter schema,
+ * and the published picker decorations ([group] and [icon] — see
+ * [AutomationIconVocabulary] for the icon kind's closed meaning) — the
+ * condition-side twin of [AutomationActionType]. Conditions are evaluated
+ * against an [AutomationSensorSnapshot] at fire time; the verdicts live in
+ * [AutomationConditionPolicy], the schema lives here.
  */
 data class AutomationConditionType(
     val id: String,
     val params: List<AutomationParamSpec>,
+    /** The picker group this entry lists under — a semantic id, never renamed. */
+    val group: String,
+    /** The published icon kind (a closed vocabulary; see [AutomationIconVocabulary]). */
+    val icon: String,
 )
 
 /**
@@ -24,7 +30,9 @@ data class AutomationConditionType(
  * this" (`charging.charging = "false"` demands the device be *un*plugged);
  * numeric-range conditions take optional bounds where an absent bound means
  * "unbounded on that side" and both-absent means the condition is trivially
- * met.
+ * met. GET /api/automation also publishes each entry's picker `group` and
+ * `icon` kind, so both editors group and badge the entries from this one
+ * source.
  */
 object AutomationConditionCatalog {
 
@@ -42,6 +50,14 @@ object AutomationConditionCatalog {
     const val RECORDING = "recording"
     const val THERMAL = "thermal"
     const val MOTION_DETECTION = "motion_detection"
+
+    // Picker group ids — semantic, wire-published (the catalog DTO's
+    // `group`), never renamed; the labels live on the clients (string
+    // resources / i18n keys keyed off the id).
+    const val GROUP_TIME = "time"
+    const val GROUP_POWER = "power"
+    const val GROUP_CONNECTIVITY = "connectivity"
+    const val GROUP_DEVICE_STATE = "device_state"
 
     val CONDITIONS: List<AutomationConditionType> = listOf(
         AutomationConditionType(
@@ -72,6 +88,8 @@ object AutomationConditionCatalog {
                     defaultValue = "127",
                 ),
             ),
+            group = GROUP_TIME,
+            icon = AutomationIconVocabulary.TIME_WINDOW,
         ),
         AutomationConditionType(
             id = CHARGING,
@@ -85,6 +103,8 @@ object AutomationConditionCatalog {
                     defaultValue = "true",
                 ),
             ),
+            group = GROUP_POWER,
+            icon = AutomationIconVocabulary.POWER,
         ),
         AutomationConditionType(
             id = BATTERY_LEVEL,
@@ -106,6 +126,8 @@ object AutomationConditionCatalog {
                     defaultValue = "",
                 ),
             ),
+            group = GROUP_POWER,
+            icon = AutomationIconVocabulary.BATTERY,
         ),
         AutomationConditionType(
             id = POWER_SAVE,
@@ -119,6 +141,8 @@ object AutomationConditionCatalog {
                     defaultValue = "false",
                 ),
             ),
+            group = GROUP_POWER,
+            icon = AutomationIconVocabulary.BATTERY_SAVER,
         ),
         AutomationConditionType(
             id = WIFI_CONNECTED,
@@ -132,6 +156,8 @@ object AutomationConditionCatalog {
                     defaultValue = "true",
                 ),
             ),
+            group = GROUP_CONNECTIVITY,
+            icon = AutomationIconVocabulary.WIFI,
         ),
         AutomationConditionType(
             id = STREAMING,
@@ -145,6 +171,8 @@ object AutomationConditionCatalog {
                     defaultValue = "true",
                 ),
             ),
+            group = GROUP_CONNECTIVITY,
+            icon = AutomationIconVocabulary.STREAM,
         ),
         AutomationConditionType(
             id = VIEWERS,
@@ -166,6 +194,8 @@ object AutomationConditionCatalog {
                     defaultValue = "",
                 ),
             ),
+            group = GROUP_CONNECTIVITY,
+            icon = AutomationIconVocabulary.PEOPLE,
         ),
         AutomationConditionType(
             id = TORCH,
@@ -179,6 +209,8 @@ object AutomationConditionCatalog {
                     defaultValue = "true",
                 ),
             ),
+            group = GROUP_DEVICE_STATE,
+            icon = AutomationIconVocabulary.LIGHTBULB,
         ),
         AutomationConditionType(
             id = RECORDING,
@@ -192,6 +224,8 @@ object AutomationConditionCatalog {
                     defaultValue = "true",
                 ),
             ),
+            group = GROUP_DEVICE_STATE,
+            icon = AutomationIconVocabulary.RECORD,
         ),
         AutomationConditionType(
             id = THERMAL,
@@ -205,6 +239,8 @@ object AutomationConditionCatalog {
                     defaultValue = "true",
                 ),
             ),
+            group = GROUP_DEVICE_STATE,
+            icon = AutomationIconVocabulary.THERMOSTAT,
         ),
         AutomationConditionType(
             id = MOTION_DETECTION,
@@ -218,6 +254,8 @@ object AutomationConditionCatalog {
                     defaultValue = "true",
                 ),
             ),
+            group = GROUP_DEVICE_STATE,
+            icon = AutomationIconVocabulary.RADAR,
         ),
     )
 

@@ -40,6 +40,9 @@ import java.util.concurrent.atomic.AtomicBoolean
  * (label + score percent) goes to [listener]; thresholding and the
  * allow-list are [com.raulshma.lenscast.capture.model.SoundClassPolicy]'s,
  * not the engine's.
+ *
+ * The class doubles as the production [SoundClassifier] adapter — the
+ * coordinator's audio feed holds the interface, this engine the machinery.
  */
 class SoundClassificationEngine(
     /** Application context; MediaPipe's task factory is context-based. */
@@ -57,7 +60,7 @@ class SoundClassificationEngine(
      * audio thread.
      */
     private val listener: (label: String?, scorePercent: Float) -> Unit,
-) {
+) : SoundClassifier {
 
     private val initStarted = AtomicBoolean(false)
     private val lock = Any()
@@ -104,7 +107,7 @@ class SoundClassificationEngine(
      * pointer math, and inference happens on the worker. Chunks whose frames
      * do not divide evenly keep their remainder for the next feed.
      */
-    fun feed(pcm16: ByteArray, sampleRateHz: Int = inputFormat.sampleRateHz, channelCount: Int = inputFormat.channelCount) {
+    override fun feed(pcm16: ByteArray, sampleRateHz: Int, channelCount: Int) {
         if (closed || pcm16.isEmpty()) return
         inputFormat = AudioFormat(sampleRateHz.coerceAtLeast(1), channelCount.coerceAtLeast(1))
         val bytesPerFrame = inputFormat.channelCount * 2

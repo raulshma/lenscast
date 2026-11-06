@@ -38,7 +38,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import com.raulshma.lenscast.MainApplication
+import com.raulshma.lenscast.AppGraph
 import com.raulshma.lenscast.R
 import com.raulshma.lenscast.core.EventKind
 import kotlinx.coroutines.Dispatchers
@@ -64,7 +64,7 @@ fun DetectionEventsScreen(
     onNavigateBack: () -> Unit,
 ) {
     val context = LocalContext.current
-    val store = (context.applicationContext as MainApplication).detectionEventStore
+    val store = (context.applicationContext as AppGraph).detectionEventStore
     val scope = rememberCoroutineScope()
     var filter by remember { mutableStateOf<String?>(null) }
     var events by remember { mutableStateOf(store.events()) }

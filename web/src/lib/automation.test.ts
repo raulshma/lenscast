@@ -1,11 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
-  AUTOMATION_ACTION_GROUPS,
-  AUTOMATION_CONDITION_GROUPS,
-  AUTOMATION_COOLDOWN_PRESETS,
-  AUTOMATION_MISSED_WINDOW_PRESETS,
-  AUTOMATION_TRIGGER_GROUPS,
   AUTO_SENTINEL_PARAM_NAMES,
+  automationLimits,
   automationActionLabelKey,
   automationConditionLabelKey,
   automationConditionSummaryLines,
@@ -21,8 +17,8 @@ import {
   defaultActionParams,
   defaultConditionParams,
   defaultTriggerParams,
+  catalogPickerGroups,
   formatMinuteOfDay,
-  groupedPickerOptions,
   humanizeDuration,
   isAutoSentinelParam,
   isEveryDayMask,
@@ -36,6 +32,9 @@ import {
   withSpecParam,
 } from './automation'
 import type { AutomationCatalogActionDto, AutomationMissedRunPolicy, AutomationRuleDto } from '../types'
+import { API_DEFAULTS } from '../api/defaults'
+import automationFixture from '../../contract/automation.json'
+import type { AutomationCatalogConditionDto, AutomationCatalogTriggerDto } from '../types'
 
 
 /** Assert the list holds exactly one line and return it — the Kotlin tests' `.single()`. */
@@ -489,37 +488,88 @@ describe('automation condition summaries', () => {
   })
 })
 
-// ── picker groups ──
+// ── picker groups (derived from the device-published catalogs) ──
+
+const fixtureTriggers = automationFixture.triggers as AutomationCatalogTriggerDto[]
+const fixtureConditions = automationFixture.conditions as AutomationCatalogConditionDto[]
+const fixtureActions = automationFixture.catalog as AutomationCatalogActionDto[]
 
 describe('picker groups', () => {
-  it('every catalog id is grouped exactly once within its catalog (the picker can never hide or duplicate an option)', () => {
+  it('catalogPickerGroups buckets every device-published entry exactly once (per-group catalog order)', () => {
     // The three id spaces overlap by design (torch / recording / battery_level
     // exist in two catalogs), so uniqueness holds per catalog, not across.
-    for (const groups of [AUTOMATION_TRIGGER_GROUPS, AUTOMATION_ACTION_GROUPS, AUTOMATION_CONDITION_GROUPS]) {
+    // Groups appear in first-appearance (catalog display) order and each
+    // group's ids preserve the catalog's relative order — the same derivation
+    // the app's AutomationVisuals runs over the same published groups.
+    for (const entries of [fixtureTriggers, fixtureActions, fixtureConditions]) {
+      const groups = catalogPickerGroups(entries)
       const grouped = groups.flatMap((g) => g.ids)
       expect(new Set(grouped).size).toBe(grouped.length)
+      expect([...grouped].sort()).toEqual(entries.map((e) => e.id).sort())
+      for (const group of groups) {
+        const catalogOrder = entries.map((e) => e.id).filter((id) => group.ids.includes(id))
+        expect(group.ids).toEqual(catalogOrder)
+      }
     }
-    // The known catalog ids (the app's AutomationVisuals coverage).
-    const knownTriggers = ['time_of_day', 'motion_detected', 'sound_detected', 'tamper_detected', 'charging_changed', 'battery_level', 'streaming_changed', 'viewers_changed', 'app_started']
-    const knownActions = ['camera_exposure', 'camera_ev', 'camera_zoom', 'camera_fps', 'camera_lens', 'torch', 'stream', 'capture_photo', 'recording', 'siren', 'detection']
-    const knownConditions = ['time_window', 'charging', 'battery_level', 'power_save', 'wifi_connected', 'streaming', 'viewers', 'torch', 'recording', 'thermal', 'motion_detection']
-    expect(AUTOMATION_TRIGGER_GROUPS.flatMap((g) => g.ids).sort()).toEqual([...knownTriggers].sort())
-    expect(AUTOMATION_ACTION_GROUPS.flatMap((g) => g.ids).sort()).toEqual([...knownActions].sort())
-    expect(AUTOMATION_CONDITION_GROUPS.flatMap((g) => g.ids).sort()).toEqual([...knownConditions].sort())
   })
 
-  it('groupedPickerOptions filters to the ids the device publishes and parks unknowns under "Other"', () => {
-    const groups = groupedPickerOptions(AUTOMATION_TRIGGER_GROUPS, ['time_of_day', 'motion_detected', 'mystery_trigger'])
-    expect(groups.map((g) => g.titleKey)).toEqual(['automation.group.schedule', 'automation.group.deviceEvents', 'automation.group.other'])
-    expect(groups[0].ids).toEqual(['time_of_day'])
-    expect(groups[1].ids).toEqual(['motion_detected'])
-    expect(groups[2].ids).toEqual(['mystery_trigger'])
-    // A fully-known catalog renders no "Other" group.
-    const all = groupedPickerOptions(AUTOMATION_ACTION_GROUPS, AUTOMATION_ACTION_GROUPS.flatMap((g) => g.ids))
-    expect(all).toHaveLength(4)
-    expect(all.at(-1)!.titleKey).not.toBe('automation.group.other')
-    // Empty catalog renders no groups at all.
-    expect(groupedPickerOptions(AUTOMATION_CONDITION_GROUPS, [])).toEqual([])
+  it('the derived groups carry the app-matching headings for the known group ids', () => {
+    expect(catalogPickerGroups(fixtureTriggers).map((g) => g.titleKey)).toEqual([
+      'automation.group.schedule',
+      'automation.group.deviceEvents',
+      'automation.group.power',
+      'automation.group.streamApp',
+    ])
+    expect(catalogPickerGroups(fixtureActions).map((g) => g.titleKey)).toEqual([
+      'automation.group.camera',
+      'automation.group.lightSound',
+      'automation.group.streamCapture',
+      'automation.group.detection',
+    ])
+    expect(catalogPickerGroups(fixtureConditions).map((g) => g.titleKey)).toEqual([
+      'automation.group.time',
+      'automation.group.power',
+      'automation.group.connectivity',
+      'automation.group.deviceState',
+    ])
+  })
+
+  it('a group id this build has no heading for parks under "Other"; an empty catalog renders nothing', () => {
+    const groups = catalogPickerGroups([
+      { id: 'time_of_day', group: 'schedule' },
+      { id: 'mystery', group: 'new_firmware_group' },
+    ])
+    expect(groups.map((g) => g.titleKey)).toEqual(['automation.group.schedule', 'automation.group.other'])
+    expect(groups[1].ids).toEqual(['mystery'])
+    expect(catalogPickerGroups([])).toEqual([])
+  })
+})
+
+// ── editor limits ──
+
+describe('automationLimits', () => {
+  const FALLBACK = {
+    maxRules: 16,
+    maxActionsPerRule: 8,
+    maxConditionsPerRule: 8,
+    cooldownMinSeconds: 0,
+    cooldownMaxSeconds: 86_400,
+    cooldownDefaultSeconds: 60,
+    cooldownPresetSeconds: [30, 60, 300, 900, 1800, 3600],
+    missedWindowMinMinutes: 1,
+    missedWindowMaxMinutes: 1440,
+    missedWindowDefaultMinutes: 30,
+    missedWindowPresetMinutes: [5, 15, 30, 60, 180],
+  }
+
+  it('falls back to the contract-pinned API_DEFAULTS before the first fetch', () => {
+    expect(automationLimits(null)).toEqual(FALLBACK)
+    expect(automationLimits(undefined)).toEqual(FALLBACK)
+  })
+
+  it('adopts the device-published limits block once fetched (device truth wins)', () => {
+    const device = { ...FALLBACK, maxRules: 4, cooldownPresetSeconds: [10, 20] }
+    expect(automationLimits({ limits: device })).toEqual(device)
   })
 })
 
@@ -544,7 +594,9 @@ describe('humanizeDuration', () => {
     expect(humanizeDuration(900)).toEqual({ key: 'automation.duration.minutes', params: { value: 15 } })
     expect(humanizeDuration(1800)).toEqual({ key: 'automation.duration.minutes', params: { value: 30 } })
     expect(humanizeDuration(3600)).toEqual({ key: 'automation.duration.hours', params: { value: 1 } })
-    expect(AUTOMATION_COOLDOWN_PRESETS).toEqual([30, 60, 300, 900, 1800, 3600])
+    // The pre-fetch fallback presets are pinned to the device truth by the
+    // contract test (web/src/contract.test.ts, against the fixture limits).
+    expect([...API_DEFAULTS.automationCooldownPresets]).toEqual([30, 60, 300, 900, 1800, 3600])
   })
 })
 
@@ -589,7 +641,8 @@ describe('automationMissedRunSummaryLine', () => {
   })
 
   it('the window presets mirror the app editor chips', () => {
-    expect(AUTOMATION_MISSED_WINDOW_PRESETS).toEqual([5, 15, 30, 60, 180])
+    // Contract-test-pinned fallbacks (see contract.test.ts).
+    expect([...API_DEFAULTS.automationMissedWindowPresets]).toEqual([5, 15, 30, 60, 180])
   })
 })
 

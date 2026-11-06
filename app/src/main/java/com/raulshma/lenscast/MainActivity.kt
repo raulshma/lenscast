@@ -26,7 +26,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
-        val app = application as MainApplication
+        val app = application as AppGraph
         app.cameraService.setLifecycleOwner(this)
 
         lifecycle.addObserver(LifecycleEventObserver { _, event ->

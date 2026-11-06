@@ -104,7 +104,9 @@
         }
       ],
       "catchUp": "STATEFUL",
-      "interruptsStream": false
+      "interruptsStream": false,
+      "group": "camera",
+      "icon": "exposure"
     },
     {
       "id": "camera_ev",
@@ -120,7 +122,9 @@
         }
       ],
       "catchUp": "STATEFUL",
-      "interruptsStream": false
+      "interruptsStream": false,
+      "group": "camera",
+      "icon": "tonality"
     },
     {
       "id": "camera_zoom",
@@ -136,7 +140,9 @@
         }
       ],
       "catchUp": "STATEFUL",
-      "interruptsStream": false
+      "interruptsStream": false,
+      "group": "camera",
+      "icon": "zoom"
     },
     {
       "id": "camera_fps",
@@ -152,7 +158,9 @@
         }
       ],
       "catchUp": "STATEFUL",
-      "interruptsStream": false
+      "interruptsStream": false,
+      "group": "camera",
+      "icon": "speed"
     },
     {
       "id": "camera_lens",
@@ -168,7 +176,9 @@
         }
       ],
       "catchUp": "STATEFUL",
-      "interruptsStream": true
+      "interruptsStream": true,
+      "group": "camera",
+      "icon": "lens"
     },
     {
       "id": "torch",
@@ -191,7 +201,9 @@
         }
       ],
       "catchUp": "STATEFUL",
-      "interruptsStream": false
+      "interruptsStream": false,
+      "group": "light_sound",
+      "icon": "torch"
     },
     {
       "id": "stream",
@@ -205,13 +217,17 @@
         }
       ],
       "catchUp": "STATEFUL",
-      "interruptsStream": false
+      "interruptsStream": false,
+      "group": "stream_capture",
+      "icon": "broadcast"
     },
     {
       "id": "capture_photo",
       "params": [],
       "catchUp": "ONESHOT",
-      "interruptsStream": false
+      "interruptsStream": false,
+      "group": "stream_capture",
+      "icon": "camera"
     },
     {
       "id": "recording",
@@ -234,7 +250,9 @@
         }
       ],
       "catchUp": "STATEFUL",
-      "interruptsStream": false
+      "interruptsStream": false,
+      "group": "stream_capture",
+      "icon": "videocam"
     },
     {
       "id": "siren",
@@ -257,7 +275,9 @@
         }
       ],
       "catchUp": "STATEFUL",
-      "interruptsStream": false
+      "interruptsStream": false,
+      "group": "light_sound",
+      "icon": "siren"
     },
     {
       "id": "detection",
@@ -278,25 +298,35 @@
         }
       ],
       "catchUp": "STATEFUL",
-      "interruptsStream": false
+      "interruptsStream": false,
+      "group": "detection",
+      "icon": "radar"
     }
   ],
   "triggers": [
     {
       "id": "time_of_day",
-      "params": []
+      "params": [],
+      "group": "schedule",
+      "icon": "schedule"
     },
     {
       "id": "motion_detected",
-      "params": []
+      "params": [],
+      "group": "device_events",
+      "icon": "sensor"
     },
     {
       "id": "sound_detected",
-      "params": []
+      "params": [],
+      "group": "device_events",
+      "icon": "sound"
     },
     {
       "id": "tamper_detected",
-      "params": []
+      "params": [],
+      "group": "device_events",
+      "icon": "shield"
     },
     {
       "id": "charging_changed",
@@ -308,7 +338,9 @@
           "defaultValue": "true",
           "autoAtZero": false
         }
-      ]
+      ],
+      "group": "power",
+      "icon": "power"
     },
     {
       "id": "battery_level",
@@ -329,7 +361,9 @@
           "defaultValue": "true",
           "autoAtZero": false
         }
-      ]
+      ],
+      "group": "power",
+      "icon": "battery_alert"
     },
     {
       "id": "streaming_changed",
@@ -341,7 +375,9 @@
           "defaultValue": "true",
           "autoAtZero": false
         }
-      ]
+      ],
+      "group": "stream_app",
+      "icon": "cast"
     },
     {
       "id": "viewers_changed",
@@ -353,11 +389,15 @@
           "defaultValue": "true",
           "autoAtZero": false
         }
-      ]
+      ],
+      "group": "stream_app",
+      "icon": "eye"
     },
     {
       "id": "app_started",
-      "params": []
+      "params": [],
+      "group": "stream_app",
+      "icon": "rocket"
     }
   ],
   "conditions": [
@@ -391,7 +431,9 @@
           "defaultValue": "127",
           "autoAtZero": false
         }
-      ]
+      ],
+      "group": "time",
+      "icon": "time_window"
     },
     {
       "id": "charging",
@@ -403,7 +445,9 @@
           "defaultValue": "true",
           "autoAtZero": false
         }
-      ]
+      ],
+      "group": "power",
+      "icon": "power"
     },
     {
       "id": "battery_level",
@@ -426,7 +470,9 @@
           "defaultValue": "",
           "autoAtZero": false
         }
-      ]
+      ],
+      "group": "power",
+      "icon": "battery"
     },
     {
       "id": "power_save",
@@ -438,7 +484,9 @@
           "defaultValue": "false",
           "autoAtZero": false
         }
-      ]
+      ],
+      "group": "power",
+      "icon": "battery_saver"
     },
     {
       "id": "wifi_connected",
@@ -450,7 +498,9 @@
           "defaultValue": "true",
           "autoAtZero": false
         }
-      ]
+      ],
+      "group": "connectivity",
+      "icon": "wifi"
     },
     {
       "id": "streaming",
@@ -462,7 +512,9 @@
           "defaultValue": "true",
           "autoAtZero": false
         }
-      ]
+      ],
+      "group": "connectivity",
+      "icon": "stream"
     },
     {
       "id": "viewers",
@@ -485,7 +537,9 @@
           "defaultValue": "",
           "autoAtZero": false
         }
-      ]
+      ],
+      "group": "connectivity",
+      "icon": "people"
     },
     {
       "id": "torch",
@@ -497,7 +551,9 @@
           "defaultValue": "true",
           "autoAtZero": false
         }
-      ]
+      ],
+      "group": "device_state",
+      "icon": "lightbulb"
     },
     {
       "id": "recording",
@@ -509,7 +565,9 @@
           "defaultValue": "true",
           "autoAtZero": false
         }
-      ]
+      ],
+      "group": "device_state",
+      "icon": "record"
     },
     {
       "id": "thermal",
@@ -521,7 +579,9 @@
           "defaultValue": "true",
           "autoAtZero": false
         }
-      ]
+      ],
+      "group": "device_state",
+      "icon": "thermostat"
     },
     {
       "id": "motion_detection",
@@ -533,7 +593,35 @@
           "defaultValue": "true",
           "autoAtZero": false
         }
-      ]
+      ],
+      "group": "device_state",
+      "icon": "radar"
     }
-  ]
+  ],
+  "limits": {
+    "maxRules": 16,
+    "maxActionsPerRule": 8,
+    "maxConditionsPerRule": 8,
+    "cooldownMinSeconds": 0,
+    "cooldownMaxSeconds": 86400,
+    "cooldownDefaultSeconds": 60,
+    "cooldownPresetSeconds": [
+      30,
+      60,
+      300,
+      900,
+      1800,
+      3600
+    ],
+    "missedWindowMinMinutes": 1,
+    "missedWindowMaxMinutes": 1440,
+    "missedWindowDefaultMinutes": 30,
+    "missedWindowPresetMinutes": [
+      5,
+      15,
+      30,
+      60,
+      180
+    ]
+  }
 }

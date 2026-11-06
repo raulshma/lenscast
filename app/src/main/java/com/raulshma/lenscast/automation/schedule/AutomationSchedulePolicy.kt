@@ -317,7 +317,11 @@ object AutomationSchedulePolicy {
      * [StreamDefaults.AUTOMATION_MAX_ACTIONS_PER_RULE] — the cap applies to
      * the sanitized list, so the rule keeps its max *executable* actions
      * rather than losing valid ones to unknown noise ahead of them. The id
-     * is preserved untouched — identity is not the sanitizer's to change.
+     * is preserved untouched — identity is not the sanitizer's to change —
+     * and [AutomationRule.lastFiredAt] is reset to null: the fire stamp is a
+     * GET-response decoration, so a client echoing a response rule back in a
+     * PUT body (or a hostile persisted payload carrying the key) cannot
+     * smuggle a claimed last-fired instant into persistence.
      */
     fun sanitizeRule(rule: AutomationRule): AutomationRule {
         val triggerType = if (AutomationTriggerCatalog.typeFor(rule.triggerType) != null) {
@@ -360,6 +364,7 @@ object AutomationSchedulePolicy {
             actions = rule.actions
                 .mapNotNull(AutomationActionCatalog::sanitizeAction)
                 .take(StreamDefaults.AUTOMATION_MAX_ACTIONS_PER_RULE),
+            lastFiredAt = null,
         )
     }
 

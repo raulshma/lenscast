@@ -5,7 +5,9 @@ import android.util.Log
 import com.raulshma.lenscast.capture.ml.AnalysisFrame
 import com.raulshma.lenscast.capture.ml.AudioModelStore
 import com.raulshma.lenscast.capture.ml.DetectionModelStore
+import com.raulshma.lenscast.capture.ml.ObjectClassifier
 import com.raulshma.lenscast.capture.ml.ObjectDetectionEngine
+import com.raulshma.lenscast.capture.ml.SoundClassifier
 import com.raulshma.lenscast.capture.ml.SoundClassificationEngine
 import com.raulshma.lenscast.capture.model.DetectionClassPolicy
 import com.raulshma.lenscast.capture.model.SoundClassPolicy
@@ -65,7 +67,13 @@ import java.util.UUID
  * The deterrence runtime (siren handle, torch control, latest web frame) is
  * not touched at composition — first touch is a detection event — so the
  * collaborators arrive as lazy provider lambdas wired by the composition
- * root, resolving on first event with no construction-order cycle.
+ * root, resolving on first event with no construction-order cycle. The
+ * alert fan-out rides the [DetectionSink] list (constructor default: the
+ * four adapters in `DetectionSinks.kt` over this class's own notifier/
+ * publisher/sender/notification dependencies), so a new sink is a list
+ * entry, not an edit to the dispatch — each sink answers its own go/no-go
+ * and the claimed [DetectionEventAction]s feed the event log with the exact
+ * strings the feed has always persisted.
  */
 class DetectionCoordinator(
     private val settingsDataStore: SettingsDataStore,
@@ -100,6 +108,43 @@ class DetectionCoordinator(
     private val batteryPercent: () -> Int? = { null },
     private val sirenAutoStop: SirenAutoStop,
     private val nowMs: () -> Long = System::currentTimeMillis,
+    /**
+     * The ML object-detection gate's classifier seam
+     * ([ObjectClassifier]): the MediaPipe-backed engine by default —
+     * resolved lazily, exactly like the old `mlEngine by lazy` — and a
+     * fake for JVM tests pinning the submit ladder.
+     */
+    private val objectClassifier: ObjectClassifier? = null,
+    /**
+     * The sound-classification seam ([SoundClassifier]): the YAMNet-backed
+     * engine by default — resolved lazily on first fed chunk, exactly like
+     * the old `soundClassifier by lazy` — and a fake for JVM tests.
+     */
+    private val soundClassifier: SoundClassifier? = null,
+    /**
+     * The analysis-frame source the ML gate classifies (a defensive copy is
+     * taken on the motion call stack). Defaults to the streaming manager's
+     * retained frame; tests inject a static frame to keep StreamingManager
+     * out of the ladder pins.
+     */
+    private val analysisFrameProvider: () -> AnalysisFrame? = { streamingManager()?.latestAnalysisFrame() },
+    /**
+     * The alert fan-out, in dispatch order: webhook, MQTT, Web Push, local
+     * notification. The default builds this class's four adapters over the
+     * dependencies above — the same sequence the god-method used to spell
+     * out inline — so a fifth sink is a list entry here, not an edit to the
+     * dispatch body.
+     */
+    private val sinks: List<DetectionSink> = listOf(
+        WebhookDetectionSink(webhookNotifier) { settingsDataStore.webhookHeaders.value },
+        MqttDetectionSink(mqttPublisher),
+        WebPushDetectionSink(webPushSender),
+        NotificationDetectionSink(
+            notifier = detectionNotifier,
+            store = settingsDataStore,
+            minuteOfDay = { minuteOfDayFrom(nowMs()) },
+        ),
+    ),
     private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
 ) {
 
@@ -120,9 +165,11 @@ class DetectionCoordinator(
      * The engine is built on first gated motion event; the model file (not
      * bundled in the APK) is resolved through [DetectionModelStore] per init
      * attempt, so a model downloaded later is picked up on the next event.
+     * The injected [objectClassifier] seam short-circuits the construction
+     * (tests pin the submit ladder on fakes; the real engine stays unbuilt).
      */
-    private val mlEngine by lazy {
-        ObjectDetectionEngine(
+    private val mlEngine: ObjectClassifier by lazy {
+        objectClassifier ?: ObjectDetectionEngine(
             context = appContext,
             modelFileProvider = { detectionModelStore.resolveModelFile() },
         )
@@ -184,10 +231,14 @@ class DetectionCoordinator(
     /**
      * Built on first fed audio chunk while enabled; the YAMNet file (not
      * bundled) resolves through [AudioModelStore] per init attempt, so a
-     * download landing later is picked up by the next window.
+     * download landing later is picked up by the next window. The injected
+     * [soundClassifier] seam short-circuits the construction (tests pin the
+     * feed gating on fakes; the real engine stays unbuilt). The member keeps
+     * the old `soundClassifier by lazy` timing — built on first use, so the
+     * window listener can reference this instance.
      */
-    private val soundClassifier by lazy {
-        SoundClassificationEngine(
+    private val soundEngine: SoundClassifier by lazy {
+        soundClassifier ?: SoundClassificationEngine(
             context = appContext,
             modelFileProvider = { audioModelStore.resolveModelFile() },
         ) { label, scorePercent -> onSoundWindow(label, scorePercent) }
@@ -220,7 +271,7 @@ class DetectionCoordinator(
         }
         requestAudioModelDownloadIfNeeded()
         try {
-            soundClassifier.feed(pcm16, sampleRateHz, channelCount)
+            soundEngine.feed(pcm16, sampleRateHz, channelCount)
         } catch (_: Exception) {
             // Never onto the audio path.
         }
@@ -313,8 +364,10 @@ class DetectionCoordinator(
 
     /**
      * The motion arm-schedule verdict, consulted before the ML gate so a
-     * schedule-disarmed window costs no inference. [onEvent] re-derives it
-     * for the dispatch itself.
+     * schedule-disarmed window costs no inference, and re-derived by
+     * [onEvent] for the dispatch itself (the settings can flip between the
+     * two reads, so the dispatch trusts its own fresh verdict). The one
+     * home of the seven-argument [MotionArmingPolicy.isArmed] call.
      */
     private fun motionArmedNow(): Boolean = MotionArmingPolicy.isArmed(
         detectionEnabled = true,
@@ -341,7 +394,7 @@ class DetectionCoordinator(
             val now = nowMs()
             val busy = mlInferring.get()
             val throttled = now - mlLastSubmitMs < ML_MIN_INTERVAL_MS
-            val frame = if (busy || throttled) null else streamingManager()?.latestAnalysisFrame()
+            val frame = if (busy || throttled) null else analysisFrameProvider()
             if (frame == null) {
                 null
             } else {
@@ -407,9 +460,11 @@ class DetectionCoordinator(
      * notification — so a new integration can be verified end to end without
      * waiting for a real event. Never recorded to the event log, never gated
      * by the arm schedule or the ML gate, never fires the deterrence
-     * automation or a recording. Returns the sinks that actually dispatched
-     * (the same action names the event log uses), read from each sink's own
-     * go/no-go verdict.
+     * automation or a recording — and deliberately NOT routed through
+     * [sinks]: the test alert exists to prove the sinks fire, so unlike the
+     * real fan-out it posts even inside a quiet window. Returns the sinks
+     * that actually dispatched (the same action wire names the event log
+     * uses), read from each sink's own go/no-go verdict.
      */
     suspend fun dispatchTestAlert(): List<String> {
         val store = settingsDataStore
@@ -428,8 +483,10 @@ class DetectionCoordinator(
             headers = WebhookNotifier.parseHeaders(store.webhookHeaders.value),
             deepLink = DetectionEventDeepLink.EVENTS,
         )
-        if (webhookDispatched) dispatched.add(ACTION_WEBHOOK)
-        if (mqttPublisher()?.notifyEvent(alert, deepLink = DetectionEventDeepLink.EVENTS) == true) dispatched.add(ACTION_MQTT)
+        if (webhookDispatched) dispatched.add(DetectionEventAction.WEBHOOK.wireName)
+        if (mqttPublisher()?.notifyEvent(alert, deepLink = DetectionEventDeepLink.EVENTS) == true) {
+            dispatched.add(DetectionEventAction.MQTT.wireName)
+        }
         // Same claim contract: push fires only when a gate is on and at
         // least one target on that transport is subscribed (the verdict is
         // the sender's own).
@@ -439,10 +496,10 @@ class DetectionCoordinator(
             clipAvailable = false,
             deepLink = DetectionEventDeepLink.EVENTS,
         ) == true
-        if (pushed) dispatched.add(ACTION_PUSH)
+        if (pushed) dispatched.add(DetectionEventAction.PUSH.wireName)
         val notified = store.detectionNotificationsEnabled.value &&
             detectionNotifier()?.notify(EventKind.TEST, emptyList(), alert.snapshotJpegBase64) == true
-        if (notified) dispatched.add(ACTION_NOTIFY)
+        if (notified) dispatched.add(DetectionEventAction.NOTIFY.wireName)
         Log.d(TAG, "Test alert dispatched: $dispatched")
         return dispatched
     }
@@ -462,18 +519,10 @@ class DetectionCoordinator(
         val eventTimeMs = nowMs()
         val eventId = UUID.randomUUID().toString()
         val store = settingsDataStore
-        val armed = !respectSchedule || MotionArmingPolicy.isArmed(
-            detectionEnabled = true,
-            scheduleEnabled = store.motionArmScheduleEnabled.value,
-            startMinute = store.motionArmStartMinute.value,
-            endMinute = store.motionArmEndMinute.value,
-            minuteOfDay = currentMinuteOfDay(),
-            daysMask = store.motionArmDaysMask.value,
-            isoDayIndex = currentIsoDayIndex(),
-        )
+        val armed = !respectSchedule || motionArmedNow()
         Log.d(TAG, "Detection event (${kind.wireName}=${String.format(java.util.Locale.US, "%.1f", value)}, zones=$zones, armed=$armed)")
 
-        val dispatchedActions = mutableListOf<String>()
+        val dispatchedActions = mutableListOf<DetectionEventAction>()
         if (kind == EventKind.MOTION || kind == EventKind.SOUND) {
             val isSound = kind == EventKind.SOUND
             val action = DetectionEventPolicy.recordingAction(
@@ -496,7 +545,7 @@ class DetectionCoordinator(
                         .onFailure { Log.w(TAG, "Bounded recording start failed: ${it.message}") }
                         .isSuccess
                     if (started) {
-                        dispatchedActions.add(ACTION_RECORDING)
+                        dispatchedActions.add(DetectionEventAction.RECORDING)
                         // The event is already on disk when the clip link
                         // lands: the watcher updates it once the recording
                         // finalizes (the same post-event-update path other
@@ -513,7 +562,7 @@ class DetectionCoordinator(
                 )
             ) {
                 runCatching { photoCaptureManager.captureToGallery() }
-                    .onSuccess { dispatchedActions.add(ACTION_PHOTO) }
+                    .onSuccess { dispatchedActions.add(DetectionEventAction.PHOTO) }
                     .onFailure { Log.w(TAG, "Auto-photo after detection failed: ${it.message}") }
             }
         }
@@ -537,52 +586,22 @@ class DetectionCoordinator(
                     snapshotJpegBase64 = snapshot,
                     timestampMs = eventTimeMs,
                 )
-                // "Webhook" is claimed from the notifier's own go/no-go at
-                // dispatch time: the settings can flip while the snapshot
-                // encodes, and the log must follow the verdict the notifier
-                // actually acted on, not a pre-encode one.
-                // The deep link is the events feed: at dispatch moment the
-                // bounded recording's clip is not linked yet (it links when
-                // the recording finalizes — see [watchMotionClip]) — the
-                // persisted event's feed url upgrades to the gallery link,
-                // while these dispatch-moment sinks carry "#/events".
-                val webhookDispatched = webhookNotifier.notifyEvent(
-                    alert,
-                    headers = WebhookNotifier.parseHeaders(store.webhookHeaders.value),
-                    deepLink = DetectionEventDeepLink.EVENTS,
-                )
-                if (webhookDispatched) dispatchedActions.add(ACTION_WEBHOOK)
-                // Same claim contract as the webhook: the MQTT verdict is the
-                // publisher's own would-publish decision.
-                val mqttPublished =
-                    mqttPublisher()?.notifyEvent(alert, deepLink = DetectionEventDeepLink.EVENTS) == true
-                if (mqttPublished) dispatchedActions.add(ACTION_MQTT)
-                // The Web Push sink rides the same verdict contract: "push"
-                // is claimed when a transport gate is on and at least one
-                // target on that transport received a dispatch. One plaintext
-                // JSON is encrypted per target and POSTed to every enabled
-                // endpoint; failures log and never touch the rest of the
-                // fan-out.
-                val pushed = webPushSender()?.notifyEvent(
-                    alert,
-                    eventId = eventId,
-                    clipAvailable = dispatchedActions.contains(ACTION_RECORDING),
-                    deepLink = DetectionEventDeepLink.EVENTS,
-                ) == true
-                if (pushed) dispatchedActions.add(ACTION_PUSH)
-                // The local alert claims only when the platform accepted the
-                // post (the runtime permission gates it on API 33+). Quiet
-                // hours hold the notification only — webhook and MQTT above
-                // already dispatched, and the event still logs.
-                val notified = store.detectionNotificationsEnabled.value &&
-                    !QuietHoursPolicy.isQuiet(
-                        enabled = store.alertQuietHoursEnabled.value,
-                        startMinute = store.alertQuietHoursStartMinute.value,
-                        endMinute = store.alertQuietHoursEndMinute.value,
-                        minuteOfDay = currentMinuteOfDay(),
-                    ) &&
-                    detectionNotifier()?.notify(kind, zones, snapshot) == true
-                if (notified) dispatchedActions.add(ACTION_NOTIFY)
+                // The fan-out: every sink gets the same alert and answers its
+                // own go/no-go at dispatch time (the settings can flip while
+                // the snapshot encodes, and the log must follow the verdict
+                // each sink actually acted on, not a pre-encode one). The
+                // list order is the historical sequence — webhook, MQTT,
+                // Web Push, local notification — and a sink that returns
+                // false claims nothing. The quiet-hours hold lives inside
+                // the notification sink: it silences the phone only — the
+                // remote sinks above already dispatched, and the event
+                // still logs.
+                val clipAvailable = dispatchedActions.contains(DetectionEventAction.RECORDING)
+                sinks.forEach { sink ->
+                    if (sink.dispatch(alert, eventId, clipAvailable)) {
+                        dispatchedActions.add(sink.action)
+                    }
+                }
                 // The deterrence verdict lands before the log write so the
                 // recorded entry lists every action the event dispatched.
                 runAutoDeterrence(dispatchedActions)
@@ -594,7 +613,10 @@ class DetectionCoordinator(
                             source = SOURCE,
                             timestampMs = eventTimeMs,
                             snapshotJpegBase64 = snapshot,
-                            dispatchedActions = dispatchedActions.toList(),
+                            // The persisted protocol stays the string list it
+                            // always was: the enum's wire names ARE the old
+                            // ACTION_* constants, byte for byte.
+                            dispatchedActions = dispatchedActions.map { it.wireName },
                             zones = zones,
                             labels = labels,
                         ),
@@ -605,7 +627,7 @@ class DetectionCoordinator(
     }
 
     /** The auto-siren/auto-torch half of the dispatch, behind the cooldown. */
-    private suspend fun runAutoDeterrence(dispatchedActions: MutableList<String>) {
+    private suspend fun runAutoDeterrence(dispatchedActions: MutableList<DetectionEventAction>) {
         val store = settingsDataStore
         // Decide and claim under one lock: two near-simultaneous events must
         // not both pass the cooldown check and double-fire.
@@ -631,7 +653,7 @@ class DetectionCoordinator(
             if (siren != null) {
                 runCatching { siren.start() }
                     .onSuccess {
-                        dispatchedActions.add(ACTION_SIREN)
+                        dispatchedActions.add(DetectionEventAction.SIREN)
                         deterred = true
                         // The timer replaces (never stacks) per run: the siren
                         // duration can outlive the cooldown, so an uncancelled
@@ -656,7 +678,7 @@ class DetectionCoordinator(
                         .isSuccess
                 }
                 if (flipped) {
-                    dispatchedActions.add(ACTION_TORCH)
+                    dispatchedActions.add(DetectionEventAction.TORCH)
                     deterred = true
                 }
             }
@@ -742,20 +764,14 @@ class DetectionCoordinator(
         }
     }
 
-    private fun currentMinuteOfDay(): Int {
-        val calendar = java.util.Calendar.getInstance().apply { timeInMillis = nowMs() }
-        return LocalWallClock.minuteOfDay(calendar)
-    }
+    private fun currentMinuteOfDay(): Int = minuteOfDayFrom(nowMs())
 
     /**
      * The ISO day index the arm-schedule mask bits reference (0 = Monday …
      * 6 = Sunday) — the shared [LocalWallClock] derivation, the same numbers
      * the automation scheduler reads.
      */
-    private fun currentIsoDayIndex(): Int {
-        val calendar = java.util.Calendar.getInstance().apply { timeInMillis = nowMs() }
-        return LocalWallClock.isoDayIndex(calendar)
-    }
+    private fun currentIsoDayIndex(): Int = isoDayIndexFrom(nowMs())
 
     /**
      * Trigger-time snapshot: the latest M-JPEG frame re-encoded at
@@ -792,14 +808,17 @@ class DetectionCoordinator(
         /** Clock-granularity slack when matching history entries to the recording's start stamp. */
         private const val CLIP_TIMESTAMP_SLACK_MS = 1_000L
 
-        /** Event-log names for the dispatched actions, surfaced in the web feed. */
-        const val ACTION_RECORDING = "recording"
-        const val ACTION_PHOTO = "photo"
-        const val ACTION_WEBHOOK = "webhook"
-        const val ACTION_MQTT = "mqtt"
-        const val ACTION_PUSH = "push"
-        const val ACTION_NOTIFY = "notify"
-        const val ACTION_SIREN = "siren"
-        const val ACTION_TORCH = "torch"
+        /**
+         * Minute-of-day over the caller's clock — the shared [LocalWallClock]
+         * derivation, companion-level so the [sinks] constructor default's
+         * quiet-hours lambda can reach it (constructor defaults cannot touch
+         * instance members).
+         */
+        private fun minuteOfDayFrom(nowMsValue: Long): Int =
+            LocalWallClock.minuteOfDay(java.util.Calendar.getInstance().apply { timeInMillis = nowMsValue })
+
+        /** The companion twin of [currentIsoDayIndex], same constructor-default rationale. */
+        private fun isoDayIndexFrom(nowMsValue: Long): Int =
+            LocalWallClock.isoDayIndex(java.util.Calendar.getInstance().apply { timeInMillis = nowMsValue })
     }
 }

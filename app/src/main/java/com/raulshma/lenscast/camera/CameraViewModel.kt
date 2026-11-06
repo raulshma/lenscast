@@ -97,6 +97,13 @@ class CameraViewModel(
     private val _hasAudioPermission = MutableStateFlow(false)
     val hasAudioPermission: StateFlow<Boolean> = _hasAudioPermission.asStateFlow()
 
+    // The POST_NOTIFICATIONS ask-once budget: the verdict is
+    // NotificationPermissionPolicy's, this state only makes "asked before"
+    // survive recompositions and configuration changes with the screen's
+    // ViewModel (the old home was a process-global var in the screen).
+    private val _notificationPermissionAsked = MutableStateFlow(false)
+    val notificationPermissionAsked: StateFlow<Boolean> = _notificationPermissionAsked.asStateFlow()
+
     private val _isFrontCamera = MutableStateFlow(false)
     val isFrontCamera: StateFlow<Boolean> = _isFrontCamera.asStateFlow()
 
@@ -297,6 +304,11 @@ class CameraViewModel(
         if (granted && _streamStatus.value.isActive && streamAudioEnabled.value) {
             streamingManager.setStreamAudioEnabled(true)
         }
+    }
+
+    /** Consumes the notification ask-once budget (the screen marks on its first composition, before any verdict). */
+    fun markNotificationPermissionAsked() {
+        _notificationPermissionAsked.value = true
     }
 
     private fun initializeCamera() {
@@ -522,6 +534,14 @@ class CameraViewModel(
 
     fun getConnectInfo(): com.raulshma.lenscast.streaming.StreamingManager.ConnectInfo =
         streamingManager.getConnectInfo()
+
+    /**
+     * The web identity's TLS certificate fingerprint (empty until the TLS
+     * server has built its identity). The connect sheet reads it through
+     * here — once per open — instead of reaching around this ViewModel into
+     * the app-scoped manager.
+     */
+    fun tlsCertificateFingerprint(): String = streamingManager.tlsCertificateFingerprint()
 
     fun copyHlsUrl() {
         val info = streamingManager.getConnectInfo()

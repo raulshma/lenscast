@@ -1,147 +1,108 @@
 package com.raulshma.lenscast.streaming.rtmp
 
-import android.util.Log
 import com.raulshma.lenscast.streaming.EncodedSource
+import com.raulshma.lenscast.streaming.PushConnectConfig
+import com.raulshma.lenscast.streaming.PushOutput
 import com.raulshma.lenscast.streaming.rtsp.EncodedNalUnit
-import com.raulshma.lenscast.streaming.rtsp.RtspVideoCodec
-import java.util.concurrent.atomic.AtomicBoolean
 
 /**
- * The RTMP push output, pulled out of [com.raulshma.lenscast.streaming.StreamingManager]
- * — [com.raulshma.lenscast.streaming.RtspOutput]'s twin for push: the retained
- * URL (settings land even while the output is stopped, so the next start picks
- * them up), the enabled gate, the start-time validation ladder (usable URL,
- * H.264 video codec — H.265 has no standard RTMP mapping, so a push under
- * H.265 is refused with a readable error instead of publishing garbage), and
- * the publisher lifecycle with restart-on-URL-change. The manager keeps the
- * public surface and the fan-out; everything "the RTMP output" means sits
- * behind this narrow class, JVM-tested behind the [RtmpPublisherHandle] seam
- * with a fake publisher and a fake [EncodedSource].
+ * RTMP's retained push config: just the push URL — the credentials live in
+ * it (the stream key is the last path segment) and the parsed [RtmpUrl]
+ * carries everything else the publisher connects with.
+ */
+internal data class RtmpPushConfig(
+    override val url: String = "",
+) : PushConnectConfig
+
+/**
+ * The RTMP push output — the RTMP configuration of the shared deep
+ * [PushOutput] module (the RtspOutput-pattern collapse of the push twins):
+ * the retained URL (settings land even while the output is stopped, so the
+ * next start picks them up), the enabled gate, the start-time validation
+ * ladder (usable URL parsed by the pure [RtmpUrl], plus the H.264 codec
+ * gate — H.265 has no standard RTMP mapping, so a push under H.265 is
+ * refused with a readable error instead of publishing garbage), and the
+ * publisher lifecycle with restart-on-URL-change. This file carries only
+ * the transport-typed wiring — the parse function, the codec gate over the
+ * encoded hub's [EncodedSource], the status constructors, the
+ * [RtmpPublisherHandle] seam, and the hub-fed media feed — while every
+ * lifecycle decision lives in the deep module. The manager keeps the public
+ * surface and the fan-out.
  */
 internal class RtmpOutput(
+    /** The encoded-stream hub: the codec gate reads the shared encode path's codec from it. */
     private val source: EncodedSource,
     /** The status mirror after every transition, so the owner's flows follow the output. */
-    private val onStatusChanged: (RtmpStatus) -> Unit,
-    private val publisherFactory: (url: RtmpUrl, onStatus: (RtmpStatus) -> Unit) -> RtmpPublisherHandle,
+    onStatusChanged: (RtmpStatus) -> Unit,
+    /** The publisher handle seam — the transport's factory, unchanged by the collapse. */
+    publisherFactory: (url: RtmpUrl, onStatus: (RtmpStatus) -> Unit) -> RtmpPublisherHandle,
+    /** The transition epilogue (hub refresh + streaming state), run by the deep module's manager-driven start/stop. */
+    private val settle: () -> Unit,
 ) {
 
-    /** The output's start verdict: Started, or Rejected with the readable reason. */
-    sealed class StartResult {
-        data object Started : StartResult()
-        data class Rejected(val reason: String) : StartResult()
-    }
-
-    /** The output is switched on — start() while disabled refuses. */
-    private val enabled = AtomicBoolean(false)
-
-    /** The output is live: started and not yet stopped, even while connecting/reconnecting. */
-    private val active = AtomicBoolean(false)
-
-    @Volatile
-    private var url: String = ""
-
-    @Volatile
-    private var publisher: RtmpPublisherHandle? = null
-
-    @Volatile
-    private var statusValue: RtmpStatus = RtmpStatus.Idle
-
-    // ── flags & state reads ──
+    private val output = PushOutput(
+        label = "RTMP",
+        tag = TAG,
+        onStatusChanged = onStatusChanged,
+        settle = settle,
+        initialConfig = RtmpPushConfig(),
+        parse = RtmpUrl::parse,
+        invalidUrlMessage = "Invalid RTMP URL — expected rtmp://host/app/stream-key (or rtmps://…)",
+        videoCodec = { source.videoCodec },
+        describeTarget = { "${it.hostAndPort}/${it.app}" },
+        idleStatus = RtmpStatus.Idle,
+        errorStatus = { reason -> RtmpStatus.Error(reason) },
+        publisherFactory = { _, parsed, onStatus -> publisherFactory(parsed, onStatus) },
+        startPublisher = { it.start() },
+        stopPublisher = { it.stop() },
+    )
 
     /** Switches the output on/off; true when the flag actually changed. Disabling stops a live output. */
-    fun setEnabled(on: Boolean): Boolean {
-        val changed = enabled.getAndSet(on) != on
-        if (changed && !on) stop()
-        return changed
-    }
+    fun setEnabled(on: Boolean): Boolean = output.setEnabled(on)
 
-    fun isEnabled(): Boolean = enabled.get()
+    fun isEnabled(): Boolean = output.isEnabled()
 
     /** True from [start] until [stop] — the owner's "RTMP output live" answer. */
-    fun isActive(): Boolean = active.get()
+    fun isActive(): Boolean = output.isActive()
 
     /** The configured push URL, retained even while stopped. */
-    fun configuredUrl(): String = url
+    fun configuredUrl(): String = output.retainedConfig().url
 
-    fun status(): RtmpStatus = statusValue
-
-    // ── lifecycle ──
+    fun status(): RtmpStatus = output.status()
 
     /**
-     * Starts the push (no-op when already live). The validation ladder runs
-     * synchronously — a disabled output, an unusable URL, or the H.265 codec
-     * refusal each answer [StartResult.Rejected] with the readable reason and
-     * leave the status line carrying it; only a passing ladder starts the
-     * publisher (whose connect is asynchronous and auto-reconnecting).
+     * Starts the push (no-op when already live); the validation ladder runs
+     * synchronously in the deep module and a refusal leaves the status line
+     * carrying the readable reason.
      */
-    fun start(): StartResult {
-        if (active.get()) return StartResult.Started
-        if (!enabled.get()) {
-            return reject("RTMP push is disabled")
-        }
-        val parsed = RtmpUrl.parse(url)
-            ?: return reject("Invalid RTMP URL — expected rtmp://host/app/stream-key (or rtmps://…)")
-        if (source.videoCodec != RtspVideoCodec.H264) {
-            return reject(
-                "RTMP push requires the H.264 video codec — the encoded path is currently H.265; " +
-                    "switch the RTSP video codec to H.264 in streaming settings",
-            )
-        }
-        active.set(true)
-        val handle = publisherFactory(parsed, ::publishStatus)
-        publisher = handle
-        handle.start()
-        Log.i(TAG, "RTMP output started toward ${parsed.hostAndPort}/${parsed.app}")
-        return StartResult.Started
-    }
+    fun start(): PushOutput.StartResult = output.start()
 
     /** Stops the publisher (clean close) — no-op when already stopped. */
-    fun stop() {
-        if (!active.getAndSet(false)) return
-        publisher?.stop()
-        publisher = null
-        publishStatus(RtmpStatus.Idle)
-        Log.i(TAG, "RTMP output stopped")
-    }
+    fun stop() = output.stop()
+
+    /** The hook-less stop, for the manager's codec-gate path (it writes its own Error and settles itself). */
+    fun stopQuietly() = output.stopQuietly()
 
     /**
-     * A new push URL lands immediately; a live output restarts on it (the
-     * publisher's connect parameters are per-attempt). A same-URL call is a
-     * no-op, so a settings re-emission never churns a live output.
+     * A new push URL lands immediately; a live output restarts on it through
+     * the deep module's config-change path (the publisher's connect
+     * parameters are per-attempt). A same-URL call is a no-op, so a
+     * settings re-emission never churns a live output.
      */
     fun setUrl(newUrl: String) {
-        val trimmed = newUrl.trim()
-        if (trimmed == url) return
-        url = trimmed
-        if (enabled.get() && active.get()) {
-            stop()
-            start()
-        }
+        output.update { it.copy(url = newUrl.trim()) }
     }
 
     // ── the encoded-stream hub's sink ──
 
     /** One encoded H.264 access unit from the encoded-stream hub. No-op while stopped. */
     fun feedEncodedVideo(nalUnits: List<EncodedNalUnit>) {
-        publisher?.feedVideo(nalUnits)
+        output.currentPublisher()?.feedVideo(nalUnits)
     }
 
     /** One AAC access unit from the encoded-stream hub. No-op while stopped. */
     fun feedEncodedAudio(aacData: ByteArray) {
-        publisher?.feedAudio(aacData)
-    }
-
-    // ── internals ──
-
-    private fun reject(reason: String): StartResult.Rejected {
-        publishStatus(RtmpStatus.Error(reason))
-        Log.w(TAG, "RTMP start refused: $reason")
-        return StartResult.Rejected(reason)
-    }
-
-    private fun publishStatus(status: RtmpStatus) {
-        statusValue = status
-        onStatusChanged(status)
+        output.currentPublisher()?.feedAudio(aacData)
     }
 
     private companion object {

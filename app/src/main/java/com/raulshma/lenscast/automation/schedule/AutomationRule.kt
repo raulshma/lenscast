@@ -5,12 +5,15 @@ import com.squareup.moshi.JsonClass
 
 /**
  * One automation rule as the user configured it: "WHEN <trigger> [and ONLY
- * WHEN <conditions>] run <actions>". Persisted through the Settings Store's
- * Moshi codec (see `SettingsDataStore.AutomationRuleJson`), which guarantees
- * a total decode — a malformed payload degrades to an empty list and every
- * field folds to its default — and hands every rule through
- * [AutomationSchedulePolicy.sanitizeRules] before it is trusted, so the
- * defaults here are decode-fallbacks, not trusted wire values.
+ * WHEN <conditions>] run <actions>". This is the ONE declaration of the
+ * automation rule shape: the domain value, the persistence shape (the
+ * Settings Store's Moshi codec serializes it directly), and the Web API wire
+ * shape (GET/PUT `/api/automation` embeds it in the state document and the
+ * update request) — there is no separate wire DTO to keep in lockstep. The
+ * store codec guarantees a total decode — a malformed payload degrades to an
+ * empty list and every missing field folds to its default — and hands every
+ * rule through [AutomationSchedulePolicy.sanitizeRules] before it is trusted,
+ * so the defaults here are decode-fallbacks, not trusted wire values.
  *
  * The class is a plain wire/persistence shape on purpose: all decisions
  * (when a rule is due, whether its conditions hold, what its actions mean)
@@ -19,9 +22,16 @@ import com.squareup.moshi.JsonClass
  * whole scheduling surface JVM-testable.
  *
  * @param id Stable identity, used as the fire-journal key so an occurrence
- *   fires once. Absent only on freshly constructed values; the store
- *   decode mints a fresh UUID for it (a rule without an id could never be
- *   journaled and would re-fire on every poll tick or event).
+ *   fires once. Absent or blank only on freshly constructed values and in
+ *   PUT request bodies (the web editor sends `""` for a new rule): the
+ *   writers mint a fresh UUID for it — the web handler and the in-app
+ *   ViewModel at save, the store decode for legacy payloads without one, the
+ *   store serializer for any writer that sent none — so a persisted rule
+ *   always carries an id (a rule without one could never be journaled and
+ *   would re-fire on every poll tick or event). GET responses always emit
+ *   the persisted, minted, non-blank id — `null` never serializes on the
+ *   read side, and Moshi keeps an absent optional id off the wire on the
+ *   write side.
  * @param name Free-form display label; trimmed, never interpreted.
  * @param enabled Per-rule kill switch, independent of the master
  *   automation toggle.
@@ -68,6 +78,14 @@ import com.squareup.moshi.JsonClass
  *   modes.
  * @param actions The ordered action list; each entry is validated against
  *   the [AutomationActionCatalog] before execution.
+ * @param lastFiredAt Read-only transport decoration: the epoch milliseconds
+ *   (UTC) of the rule's last actual firing, decoded from the fire journal by
+ *   the GET response builder (`copy(lastFiredAt = …)`); null = never fired,
+ *   so the field stays off the wire. It is NOT configuration — never set by
+ *   a writer, never persisted non-null: [AutomationSchedulePolicy.sanitizeRule]
+ *   resets it to null, so a client echoing it back in a PUT body (or a
+ *   hand-crafted persisted payload carrying it) cannot smuggle a fire stamp
+ *   into storage or into the engine's view of a rule.
  */
 @JsonClass(generateAdapter = true)
 data class AutomationRule(
@@ -84,6 +102,7 @@ data class AutomationRule(
     val missedRunPolicy: String = MISSED_RUN_CATCH_UP,
     val missedWindowMinutes: Int = StreamDefaults.AUTOMATION_MISSED_WINDOW_DEFAULT_MINUTES,
     val actions: List<AutomationActionSpec> = emptyList(),
+    val lastFiredAt: Long? = null,
 ) {
     companion object {
         /** The time-of-day trigger kind — the original (and fallback) kind. */

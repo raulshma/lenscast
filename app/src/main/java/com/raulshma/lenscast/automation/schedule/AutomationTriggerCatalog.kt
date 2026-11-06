@@ -40,14 +40,20 @@ sealed interface AutomationEvent {
 }
 
 /**
- * One automation trigger a rule may fire on: its id and parameter schema —
- * the trigger-side twin of [AutomationActionType]. Triggers carry no
- * catch-up class (catch-up is a *firing* concept and event triggers fire in
- * the present, never late) and no stream-interrupt flag (they do not run).
+ * One automation trigger a rule may fire on: its id, parameter schema, and
+ * the published picker decorations ([group] and [icon] — see
+ * [AutomationIconVocabulary] for the icon kind's closed meaning) — the
+ * trigger-side twin of [AutomationActionType]. Triggers carry no catch-up
+ * class (catch-up is a *firing* concept and event triggers fire in the
+ * present, never late) and no stream-interrupt flag (they do not run).
  */
 data class AutomationTriggerType(
     val id: String,
     val params: List<AutomationParamSpec>,
+    /** The picker group this entry lists under — a semantic id, never renamed. */
+    val group: String,
+    /** The published icon kind (a closed vocabulary; see [AutomationIconVocabulary]). */
+    val icon: String,
 )
 
 /**
@@ -61,7 +67,9 @@ data class AutomationTriggerType(
  * [AutomationRule.minuteOfDay]/[AutomationRule.daysMask] fields, so its
  * params list is empty and neither the editor nor the sanitizer reads
  * `triggerParams` for it. Every other entry reads its parameters from
- * [AutomationRule.triggerParams].
+ * [AutomationRule.triggerParams]. GET /api/automation also publishes each
+ * entry's picker `group` and `icon` kind, so both editors group and badge
+ * the entries from this one source.
  */
 object AutomationTriggerCatalog {
 
@@ -78,14 +86,42 @@ object AutomationTriggerCatalog {
     const val VIEWERS_CHANGED = "viewers_changed"
     const val APP_STARTED = "app_started"
 
+    // Picker group ids — semantic, wire-published (the catalog DTO's
+    // `group`), never renamed; the labels live on the clients (string
+    // resources / i18n keys keyed off the id).
+    const val GROUP_SCHEDULE = "schedule"
+    const val GROUP_DEVICE_EVENTS = "device_events"
+    const val GROUP_POWER = "power"
+    const val GROUP_STREAM_APP = "stream_app"
+
     val ACTION_TYPES: List<AutomationTriggerType> = listOf(
         // Params live on the rule's minuteOfDay/daysMask fields (persistence
         // compatibility with the original time-only rules), so the schema
         // here is empty and the editor renders its dedicated time inputs.
-        AutomationTriggerType(id = TIME_OF_DAY, params = emptyList()),
-        AutomationTriggerType(id = MOTION_DETECTED, params = emptyList()),
-        AutomationTriggerType(id = SOUND_DETECTED, params = emptyList()),
-        AutomationTriggerType(id = TAMPER_DETECTED, params = emptyList()),
+        AutomationTriggerType(
+            id = TIME_OF_DAY,
+            params = emptyList(),
+            group = GROUP_SCHEDULE,
+            icon = AutomationIconVocabulary.SCHEDULE,
+        ),
+        AutomationTriggerType(
+            id = MOTION_DETECTED,
+            params = emptyList(),
+            group = GROUP_DEVICE_EVENTS,
+            icon = AutomationIconVocabulary.SENSOR,
+        ),
+        AutomationTriggerType(
+            id = SOUND_DETECTED,
+            params = emptyList(),
+            group = GROUP_DEVICE_EVENTS,
+            icon = AutomationIconVocabulary.SOUND,
+        ),
+        AutomationTriggerType(
+            id = TAMPER_DETECTED,
+            params = emptyList(),
+            group = GROUP_DEVICE_EVENTS,
+            icon = AutomationIconVocabulary.SHIELD,
+        ),
         AutomationTriggerType(
             id = CHARGING_CHANGED,
             params = listOf(
@@ -98,6 +134,8 @@ object AutomationTriggerCatalog {
                     defaultValue = "true",
                 ),
             ),
+            group = GROUP_POWER,
+            icon = AutomationIconVocabulary.POWER,
         ),
         AutomationTriggerType(
             id = BATTERY_LEVEL,
@@ -119,6 +157,8 @@ object AutomationTriggerCatalog {
                     defaultValue = "true",
                 ),
             ),
+            group = GROUP_POWER,
+            icon = AutomationIconVocabulary.BATTERY_ALERT,
         ),
         AutomationTriggerType(
             id = STREAMING_CHANGED,
@@ -132,6 +172,8 @@ object AutomationTriggerCatalog {
                     defaultValue = "true",
                 ),
             ),
+            group = GROUP_STREAM_APP,
+            icon = AutomationIconVocabulary.CAST,
         ),
         AutomationTriggerType(
             id = VIEWERS_CHANGED,
@@ -145,8 +187,15 @@ object AutomationTriggerCatalog {
                     defaultValue = "true",
                 ),
             ),
+            group = GROUP_STREAM_APP,
+            icon = AutomationIconVocabulary.EYE,
         ),
-        AutomationTriggerType(id = APP_STARTED, params = emptyList()),
+        AutomationTriggerType(
+            id = APP_STARTED,
+            params = emptyList(),
+            group = GROUP_STREAM_APP,
+            icon = AutomationIconVocabulary.ROCKET,
+        ),
     )
 
     private val byId: Map<String, AutomationTriggerType> = ACTION_TYPES.associateBy { it.id }

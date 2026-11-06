@@ -181,7 +181,39 @@ fail-open. Surviving events carry the class labels into every sink and watch
 the Recording Controller for the bounded recording they started, linking the
 finalized clip (`clipMediaId`/`clipFileName`) back into the persisted event;
 while the continuous loop holds the recorder the clip start is skipped and
-the link fields stay null.
+the link fields stay null. The fan-out itself is a `DetectionSink` list
+(see Detection Sinks) dispatched in order after the recording/photo half —
+a new sink is a list entry in the constructor default, not an edit to the
+dispatch — and the claimed actions ride the log as the
+`DetectionEventAction` enum's wire names, byte-identical to the old
+`ACTION_*` strings the feed has always persisted. The gate's classifier
+side is seamed the same way: the coordinator holds `ObjectClassifier` /
+`SoundClassifier` (capture/ml) with the MediaPipe engines as constructor
+defaults, and the submit ladder (throttle / single-flight / fail-open) is
+pinned by `DetectionCoordinatorTest` against fakes.
+
+### Detection Sinks
+**`capture/DetectionSinks.kt`** — the alert fan-out seam:
+`DetectionSink` is one dispatch destination for a detection event's alert
+(`suspend fun dispatch(alert, eventId, clipAvailable): Boolean` plus the
+`DetectionEventAction` it claims on a `true` verdict), and the file holds
+the four adapters over the coordinator's existing dependencies:
+`WebhookDetectionSink` (the notifier's JSON POST with the settings'
+custom headers), `MqttDetectionSink` (the publisher's event publish),
+`WebPushDetectionSink` (the only sink consuming `eventId` and the
+`clipAvailable` hint), and `NotificationDetectionSink` (the heads-up
+post, gated by the notifications toggle and — sink-private — the
+QuietHoursPolicy window: quiet hours silence the phone, not the
+integrations). The contract: every sink gets the same `DetectionAlert`
+(one snapshot encode feeds the whole fan-out), answers its own go/no-go at
+dispatch time (a `false` claims nothing on the log; the settings can flip
+while the snapshot encodes), and must not throw — a throw aborts the
+coordinator's remaining fan-out AND the event-log write (pinned by test;
+the real sinks are fail-open by contract). The coordinator builds the four
+adapters as its constructor default in the historical order — webhook,
+MQTT, Web Push, local notification — so the composition root's wiring is
+untouched; the dashboard's "send test alert" deliberately bypasses the
+list (it posts even inside a quiet window and never logs).
 
 ### Detection Model Store
 **`capture/ml/DetectionModelStore.kt`** — the on-demand home of the ML
@@ -476,12 +508,56 @@ the web route's DELETE. It is the notification tap-through target
 (`DETECTION_EVENTS_ROUTE` in the Navigation Graph) and owns no copy of the
 event data.
 
+### App Graph
+**`AppGraph.kt`** — the app's dependency seam: the process-lifetime
+collaborators the composition root owns, declared as an interface so screens,
+ViewModel factories, services, workers, and streaming components resolve them
+without reaching into the composition-root class. Before it, every consumer
+did `context.applicationContext as MainApplication`, pulling its
+collaborators off the Application at runtime — the dependency direction
+inverted; now consumers cast to `AppGraph` and depend on the graph's types.
+`MainApplication` implements the interface directly — its existing lazy
+`val`s are the overrides, so singleton identity and lazy-init timing are
+unchanged — and the Application class is only the graph's Android host (the
+class the OS instantiates). The surface is exactly the members consumers
+pull; composition-only wiring no consumer reads (the Settings Applier, the
+push sender, the update pipeline) stays off it and private to the host. The
+deliberate `as? MainApplication` cold-start guards in the boot/tile/widget
+receivers keep their Application-class cast: those guards exist to fail
+early in a process that has no composition root yet (or a Robolectric
+minimal application), which an interface cast would silently weaken.
+
+### Web API Stack Builder
+**`WebApiStackBuilder.kt`** — the Web API stack's composition root: builds
+the `WebApiStack` (one handler module per domain — see Web API Handlers) by
+pulling the app-tier collaborators off the App Graph and the manager-owned
+pieces (the siren player, the Web Auth Gate, the context, via the manager's
+`appContext()`) off the Streaming Manager. It used to be a private
+`buildWebApiStack()` inside StreamingManager, which made the streaming class
+a second composition root carrying ~15 app-tier dependencies and a
+self-reference through the status handler. The manager now receives the
+builder as a required `webApiStackFactory: (StreamingManager) -> WebApiStack`
+constructor parameter and keeps the lazy `webApiStack` property — built
+once, at the stack's first request (today the transport's eager initial
+server build, mid-manager-construction), with the manager handed in as the
+status/stream handlers' self-reference, the `this` capture the builder
+always relied on. Passing the manager as a value is not a nicety: the first
+request lands while the manager's construction is still on the stack, so a
+builder that resolved the manager through the graph's
+`streamingManager` lazy would re-enter it mid-initialization and recurse
+until the heap dies. No default factory — one living in StreamingManager
+would re-create the app-tier coupling this move retires.
+
 ### Streaming Manager
 **`streaming/StreamingManager.kt`** — owns live streaming runtime state (web
-MJPEG stream, RTSP server, audio streaming, mDNS). Its thermal monitor and its
-Web API stack are constructor-owned; `StreamingServer` instances *receive* the
+MJPEG stream, RTSP server, audio streaming, mDNS). Its thermal monitor is
+constructor-owned and its Web API stack is a constructor-injected factory
+(see Web API Stack Builder) held in the manager's lazy `webApiStack`;
+`StreamingServer` instances *receive* the
 `WebApiStack` and the `NetworkQualityMonitor` at construction — the transport
-layer never grows its own handlers. Its setters are its applied interface; the
+layer never grows its own handlers. The web transport itself — the HTTP/HTTPS
+listener and its replace cycle — is delegated to the Web Transport module (see
+Web Transport); the manager keeps the public setters and the status mirror. Its setters are its applied interface; the
 Settings Applier is their intended caller. One user-facing frame rate fans out
 internally via `setFrameRate()` (M-JPEG interval, adaptive default, RTSP), and
 one camera frame fans out internally via `pushFrame()` (web pipeline, RTSP
@@ -491,8 +567,32 @@ changes funnel through one internal policy: live-update when the running
 server supports it, restart when it doesn't. Auth settings are read live
 wherever they're consumed — the Web Auth Gate reference and the RTSP
 auth-spec provider both read the applied value directly, so server
-recreation re-applies nothing. It is also the composition root
-that builds the Web API stack.
+recreation re-applies nothing.
+
+### Web Transport
+**`streaming/WebTransport.kt`** — the web transport: the phone's HTTP/HTTPS
+listener (MJPEG, Web API, WS sidecar, WHEP, HLS) and its replace cycle,
+pulled out of Streaming Manager as the last transport without an output
+module (the Rtsp Output/Push Transport Outputs pattern). It retains the
+(port, TLS) config — settings land here even while stopped, so the next
+start picks them all up — and owns the stop → swap → start-if-was-running
+cycle, the scheme derivation, and the server state mirror; the manager keeps
+its public surface (setters, ensureServerRunning, the URL builders) and its
+fan-out. The replace cycle's bug-prevention choreography is the module's
+contract: everything runs under one lock (an unsynchronized create-then-start
+race once failed an HTTPS toggle with EADDRINUSE); the replacement is
+resolved — including the TLS fallback-to-plain verdict — before the old
+listener is stopped, so the transport-switch announcement names the scheme
+the new listener will really speak; the announcement goes to the live
+instance *before* teardown (the SSE frames must reach the socket first) and
+only on an actual scheme change; every stop releases the port even after a
+failed start (NanoHTTPD binds before it reports, so a failed candidate holds
+its socket), and a stop that only cleans up after a failed start is WHEP-silent — WHEP
+sessions arm only with a serving transport and die with every stop of one.
+The server itself sits behind the **Web Server Handle**
+(`streaming/WebServerHandle.kt`) — the narrow start/stop/port interface the
+real `StreamingServer` adapter implements; the JVM suite drives the replace
+cycle through a fake handle, two adapters justifying the seam.
 
 ### Web Push
 **`core/push/`** — the phone-as-publisher half of Web Push, all
@@ -519,6 +619,37 @@ registration surface (`GET /api/push/unifiedpush`, token-writable `POST` and
 `/remove`), while `PushWebHandler` stays session-only and kind-scoped to
 browser rows.
 
+### Secret Wire Type
+**`core/Secret.kt`** — the write-only-credential convention owned in ONE
+place: `Secret` is a plain identity class riding the settings DTO's
+secret fields (rtmpUrl, whipToken, srtUrl, mqttPassword, backupWebdavPassword,
+telegramBotToken, apiToken — the TS mirror's unchanged `string`), and
+`SecretWireAdapter` (registered once on App Json, the single Moshi
+instance) serializes every one of them blank, so GET — and with it the
+settings export envelope — can copy the stored values straight into the
+response and still never emit a credential. The update half is
+`SecretUpdate`: `resolve(incoming, stored)` is the keep-or-overwrite rule
+(empty/absent keeps, a presented value overwrites, whitespace is content),
+`overwrites` is the write-side guard, and the settings PUT loop, the import
+path that reuses it, and the in-app SettingsViewModel all decide through it
+instead of hand-rolled `isNotEmpty` guards. Serialization through a Moshi
+instance that did not register the adapter fails closed (adapter-not-found),
+never leaks. Two shapes were evaluated and rejected: a Moshi
+`@JsonQualifier` annotation cannot work — KSP2 cannot run
+moshi-kotlin-codegen's qualifier path at all (square/moshi#1874) — and a
+`@JvmInline value class` breaks the codegen decode path, because the
+generated adapter resolves the DTO constructor reflectively with the
+declared parameter types while a value-class parameter erases to its
+underlying `String` on the JVM (NoSuchMethodException on the first decode
+of any DTO carrying a secret field). The identity class is the shape whose
+JVM constructor signature equals its declared one. The one layered
+exception is the **apiToken**: the store holds only the SHA-256 hash of the
+plaintext, and the enable flag is hash-and-gated —
+`SecretUpdate.willHaveSecret` arms it only when a usable credential would
+exist after the update (fails closed on a blank hash) — documented at its
+site in the Web API Settings Handler. The auth-config route's password pair
+predates the type and keeps its own handler-side contract (Web Auth Gate).
+
 ### Web API Handlers
 **`streaming/web/`** — the JSON-in/JSON-out surface behind the streaming
 server's `/api/*` routes, split one handler per domain: `SettingsWebHandler`
@@ -533,7 +664,15 @@ persists wholesale, so the envelope remains the lossless path), `StatusWebHandle
 aggregation, plus the live camera-control truth — torch, zoom, selected
 lens, and the device's real control ranges — so the dashboard mirrors the
 device instead of hardcoding bounds), `StreamWebHandler`
-(lifecycle), `CaptureWebHandler`, `LensWebHandler`,
+(lifecycle), `CaptureWebHandler`, `AutomationWebHandler`
+(GET/PUT `/api/automation` — the rule's ONE declaration: the state
+document embeds the domain `AutomationRule`s directly, decorated only
+with the fire-journal-derived `lastFiredAt`; PUT mints blank wire ids
+and sanitizes before saving, and both routes answer from a fresh disk
+read so the client sees the persisted truth, not what it sent; the
+read-only catalogs publish their picker `group`/`icon` kinds and the
+`limits` block publishes StreamDefaults' editor bounds — see
+Automation Limits), `LensWebHandler`,
 `IntervalCaptureWebHandler`, `RecordingWebHandler` (observes the Recording
 Controller), `GalleryWebHandler` (media resolution/thumbnails),
 `DeterrenceWebHandler` (the siren route), `DetectionEventsWebHandler` (the
@@ -770,8 +909,38 @@ codec-aware: RTSP always receives, the HLS TS muxer flips its PMT stream
 type and the WS sidecar sends the `LCHC` hvcC config (see Encoded Stream
 Hub), while the RTMP and SRT pushes are gated off at the hub's fan-out.
 
+### Push Transport Outputs
+**`streaming/PushOutput.kt`** — the deep module the three push transports
+are configurations of (the `RtspOutput` pattern collapsed across the
+twins). `PushOutput<C, P, H, S>` owns everything "a push output" means:
+the retained connect config (`RtmpPushConfig`/`SrtPushConfig`/
+`WhipPushConfig` — small value classes over `PushConnectConfig`; settings
+land even while stopped, so the next start picks them all up), the enabled
+gate, the start-time validation ladder (enabled → URL parse → optional
+H.264 codec gate), the publisher lifecycle with restart-on-config-change
+through one `update(trigger, transform)` entry, and the status mirror. The
+per-transport configuration points: `parse` (the pure `RtmpUrl`/`SrtUrl`/
+`WhipUrl` decode), `videoCodec` (the H.264 gate — RTMP and SRT gate, WHIP
+passes null), `publisherFactory` + `startPublisher`/`stopPublisher` (the
+per-transport handle seams, untouched), `describeTarget` (the log
+redaction seam — SRT's `SrtUrl.redacted`), `idleStatus`/`errorStatus` (the
+transport status constructors), and `beforeStart` (WHIP's frame-rate
+handoff). The manager-driven `start`/`stop` run an injected `settle`
+epilogue (the encoded-hub refresh + streaming-state mirror; WHIP settles
+the streaming state only) — internal restarts and disable-stops settle
+quietly, exactly the pre-collapse ordering. The WHIP mic-arbitration
+restart rides `PushRestartTrigger.WHILE_ACTIVE`: the verdict is a
+publisher-construction input, so `onMicVerdictChanged` restarts a live
+output without a config field moving. The `RtmpStatus`/`SrtStatus`/
+`WhipStatus` wire contracts are unchanged; they extend the shared
+`PushStatus` base. `StreamingManager`'s push setters keep their names and
+semantics; the JVM suites are `PushOutputTest` (the shared lifecycle run
+against all three configurations) plus the per-transport suites
+(transport-distinct wiring only).
+
 ### RTMP Push Output
-**`streaming/rtmp/`** — `RtspOutput`'s push twin: `RtmpOutput` owns the
+**`streaming/rtmp/`** — the RTMP configuration of the shared
+`PushOutput` module (see Push Transport Outputs): `RtmpOutput` supplies the
 retained URL (settings land even while the output is stopped, so the next
 start picks them up), the enabled gate, the start-time validation ladder
 (a usable URL parsed by the pure `RtmpUrl`, plus the H.264 codec — H.265
@@ -785,18 +954,36 @@ Web API (the stream key is its last path segment), and a portless
 authority defaults to 1935 for `rtmp` and 443 for `rtmps`. StreamingManager
 keeps the public surface and the hub fan-out.
 
+### SRT Push Output
+**`streaming/srt/`** — the SRT configuration of the shared `PushOutput`
+module, the RTMP twin over MPEG-TS/UDP: `SrtOutput` supplies the retained
+`srt://` URL (parsed by the pure `SrtUrl`, port defaulting to 9710), the
+same H.264 codec gate (the shared TS muxing is H.264-pinned even though
+MPEG-TS itself carries HEVC), and the publisher lifecycle with
+restart-on-URL-change; `SrtPublisher` handshakes and streams with a
+capped-backoff auto-reconnect. The URL is a write-only credential over the
+Web API — userinfo and streamid never echo; `SrtUrl.redacted` is the only
+rendering that reaches a log, handed to the deep module as its
+`describeTarget` redaction seam. `SrtOutput.stats()` is the wire-stats
+read seam (RTT, loss counts) for the status surfaces.
+
 ### WHIP Push Output
-**`streaming/whip/`** — `RtmpOutput`'s WebRTC twin (RFC 9725): `WhipOutput`
-owns the retained endpoint/token/STUN settings, the enabled gate, and the
-start-time validation ladder (enabled + a usable URL parsed by the pure
-`WhipUrl` — no codec gate, because libwebrtc encodes its own H.264 from the
-NV21 analysis tap, independent of the RTSP codec). The publisher is one
-WHIP session: ICE one-shot with a ~3 s gather cap (blank STUN = host
-candidates only, LAN reach), SDP offer/answer against the endpoint with
-the optional bearer token, a DELETE teardown of the session resource, and
-the status mirrored onto the snapshot exactly like RTMP's. The endpoint
-carries no embedded secret so it round-trips; the token is write-only like
-every other credential.
+**`streaming/whip/`** — the WHIP configuration of the shared `PushOutput`
+module (see Push Transport Outputs), the WebRTC push (RFC 9725):
+`WhipOutput` supplies the retained endpoint/token/STUN settings, the
+enabled gate, and the start-time validation ladder (enabled + a usable URL
+parsed by the pure `WhipUrl` — no codec gate, because libwebrtc encodes
+its own H.264 from the NV21 analysis tap, independent of the RTSP codec),
+plus the mic-arbitration verdict: evaluated at publisher-construction
+time, with `onMicVerdictChanged` routing the verdict flip through the deep
+module's WHILE_ACTIVE restart (a live push rebuilds with the fresh
+verdict; a stopped one only remembers it). The publisher is one WHIP
+session: ICE one-shot with a ~3 s gather cap (blank STUN = host candidates
+only, LAN reach), SDP offer/answer against the endpoint with the optional
+bearer token, a DELETE teardown of the session resource, and the status
+mirrored onto the snapshot exactly like RTMP's. The endpoint carries no
+embedded secret so it round-trips; the token is write-only like every
+other credential.
 
 ### WHEP Viewer Endpoint
 **`streaming/whep/`** — the WHIP push's egress twin: browsers POST an SDP
@@ -1368,14 +1555,24 @@ scheduled time or not at all; `"window"` = fire within
 `missedWindowMinutes` 1..1440 of the scheduled minute with every action
 riding, the rule window overriding the per-action ONESHOT grace; only
 time rules can miss, events fire in the present) — and the ordered
-action list. Deliberately a plain wire/persistence shape: every decision
-(when a rule is due, what its entries mean) lives in the Automation
-Schedule Policy and the three catalogs, keeping the scheduling surface
-JVM-testable. Persisted through the Settings Store's `AutomationRuleJson`
-codec, which guarantees a total decode (a malformed payload degrades to an
-empty list; a pre-if/then payload's new fields fold to their defaults) and
-hands every rule through `sanitizeRules` before it is trusted — the
-data-class defaults are decode-fallbacks, not trusted wire values.
+action list — and `lastFiredAt`, a read-only TRANSPORT decoration: the GET
+response builder (`AutomationWebHandler.buildState`'s
+`copy(lastFiredAt = …)`) decodes it from the Fire Journal for the
+dashboard's "Last ran" line; `sanitizeRules` resets it to null, so a
+client echoing a response rule back in a PUT body cannot smuggle a claimed
+fire instant into persistence, and the field never lands on disk.
+Deliberately a plain wire/persistence shape: every decision (when a rule is
+due, what its entries mean) lives in the Automation Schedule Policy and the
+three catalogs, keeping the scheduling surface JVM-testable. ONE
+declaration: the domain class (@JsonClass) IS both the persistence shape
+and the wire shape — the Settings Store serializes it directly through the
+shared Moshi codec and GET/PUT `/api/automation` embeds it in the state and
+update documents; the former `AutomationRuleDto`/`AutomationRuleJson`
+clones are gone. The store codec still guarantees a total decode (a
+malformed payload degrades to an empty list; a pre-if/then payload's new
+fields fold to their defaults) and hands every rule through `sanitizeRules`
+before it is trusted — the data-class defaults are decode-fallbacks, not
+trusted wire values.
 
 ### Automation Action Spec
 **`automation/schedule/AutomationRule.kt` (`AutomationActionSpec`)** — one
@@ -1420,8 +1617,10 @@ explicit no-limit. `sanitizeAction` is the one validate-and-canonicalize
 ladder (the Settings Store's codec, the Web API PUT, and the schedule
 policy's filter all ride it), and GET `/api/automation` publishes the
 catalog read-only as device truth (alongside the trigger and condition
-catalogs) — the Automation Web Handler's rule editor renders bounds and
-kinds from it and never sends it back.
+catalogs) — now carrying each entry's picker `group` (semantic ids:
+`camera`/`light_sound`/`stream_capture`/`detection`) and `icon` kind, so
+both editors group and badge the entries from this one source and never
+send them back.
 
 ### Automation Trigger Catalog
 **`automation/schedule/AutomationTriggerCatalog.kt`** — the WHEN side's
@@ -1446,7 +1645,10 @@ hierarchy the wiring hands the scheduler (`AppStarted`, `MotionDetected`,
 `sanitizeParams(triggerId, raw)` returns null for an unknown id or an
 unknown param key — a writer that believed in a parameter this build has
 never heard of cannot be trusted, so the whole params map degrades to the
-schema defaults (required params fold in) and the rule survives.
+schema defaults (required params fold in) and the rule survives. Like the
+other two catalogs, every entry carries a picker `group`
+(`schedule`/`device_events`/`power`/`stream_app`) and an
+Automation Icon Vocabulary `icon` kind, published on the wire.
 
 ### Automation Condition Catalog
 **`automation/schedule/AutomationConditionCatalog.kt`** — the ONLY WHEN
@@ -1463,7 +1665,33 @@ level is never met rather than guessed), `power_save`, `streaming`,
 `motion_detection` (the toggle state). `sanitizeCondition` drops an
 unknown id or unknown param key entirely — an unknown condition is
 *never met*, the safe direction (a rule with degraded conditions asks
-for less firing, not more).
+for less firing, not more). Like the other two catalogs, every entry
+carries a picker `group` (`time`/`power`/`connectivity`/`device_state`)
+and an Automation Icon Vocabulary `icon` kind, published on the wire.
+
+### Automation Limits
+**`streaming/model/WebApiDtos.kt` (`AutomationLimitsDto`), sourced from
+`core/StreamDefaults`** — the editor contract's bounds/defaults/presets as
+ONE Kotlin source: GET `/api/automation`'s `limits` block projects the
+StreamDefaults automation constants onto the wire (`maxRules` 16,
+`maxActionsPerRule`/`maxConditionsPerRule` 8, the cooldown clamp
+0..86400 with default 60 and the preset chips
+`AUTOMATION_COOLDOWN_PRESET_SECONDS` = 30/60/300/900/1800/3600, the
+missed-run window clamp 1..1440 with default 30 and the preset chips
+`AUTOMATION_MISSED_WINDOW_PRESET_MINUTES` = 5/15/30/60/180). Only what the
+sanitizer actually enforces is published — no invented caps. Read-only:
+the catalogs and limits are never accepted back on the wire. The web
+dashboard's pre-fetch fallbacks (`web/src/api/defaults.ts`) are pinned to
+this block by the three-way contract fixtures
+(`DtoContractFixtureTest` ↔ `web/contract/automation.json` ↔
+`web/src/contract.test.ts`), which is the fence that retired the old
+hand-mirror. The icon KINDS and picker GROUPS ride the same principle:
+`automation/schedule/AutomationIconVocabulary.kt` is the closed 29-kind
+set every catalog entry publishes (the app's `AutomationVisuals` maps
+kind → drawable, the web's `automationIcons.tsx` maps kind → glyph), and
+the `group` ids (`AutomationTriggerCatalog.GROUP_*` and friends) are the
+one grouping both editors render from — `AutomationVisuals` derives its
+member lists by filtering the catalogs, no hand lists.
 
 ### Automation Sensor Snapshot
 **`automation/schedule/AutomationSensorSnapshot.kt`** — the pure data
@@ -1643,6 +1871,40 @@ construct — a front-end builds an instance per command against
 MainApplication's lazy seam graph, so the composition root gains no new
 member. The torch mode split is deliberate: see Torch (LIVE vs PERSISTED).
 
+### Automation Rule Editor State
+**`automation/RuleDraft.kt`, `automation/RuleDraftSaver.kt`,
+`automation/RuleEditorState.kt`** — the automation rule editor's non-UI
+half, extracted out of AutomationScreen so it is JVM-tested like the
+Automation ViewModel's companion instead of stranded in composition. The
+`RuleDraft` is the screen-local editing shape, a field-for-field mirror of
+the Automation Rule (a third copy of the rule shape on purpose: the editor
+mutates the draft freely and only the committed save projects to a rule,
+which the sanitize pass then clamps); `new()` starts a fresh rule at 08:00
+every day with the StreamDefaults cooldown/missed-window defaults (the web
+editor's twin picks the same 08:00), `from`/`toRule` are the only
+conversions. The Saver is the editor's rotation/process-death proof: the
+draft serializes through the store's own Automation Rule Moshi codec —
+same adapter, same persisted field names, so an in-flight snapshot written
+by an older build still restores — and a corrupt snapshot degrades to
+"editor closed", never a half-valid draft (`encodeRuleDraftJson` /
+`decodeRuleDraftJson` are the testable pure halves; the Compose `Saver` is
+the thin wrapper). `isAutoSentinelParam` decides whether a param row
+renders the Auto toggle ("0" = the sentinel): the Automation Action
+Catalog's `autoAtZero` flag is the sole authority — the screen's old
+hardcoded fallback name-set is gone because the catalog fully covers it
+(ISO and exposure time are exactly the two `autoAtZero` specs), unlike the
+web client, which keeps a name-set fallback for its fetched-catalog
+misses. `conditionWindowDaysMask` reads a time-window condition's
+persisted day mask in the Motion Arming Policy bit convention, folding an
+absent or unparseable value to the every-day default the catalog
+documents. The cooldown and missed-window preset chips and the cooldown
+display ceiling (the persisted bound allows a day; the slider stops at an
+hour, a wider persisted value renders pinned at the ceiling) live here as
+named constants instead of inline literals — the web client pins the same
+preset lists, and each list's default rides the StreamDefaults constant
+rather than a second literal. `moved` is the one spec-list reorder step
+the editor's ↑/↓ buttons use.
+
 ### Torch Strength Policy
 **`camera/model/TorchStrengthPolicy.kt`** — the pure decisions for the API
 35+ per-level torch: `CameraManager.turnOnTorchWithStrengthLevel` plus the
@@ -1676,3 +1938,33 @@ the Settings Applier applies it and a device restart or a settings
 re-apply restores what the rule asked for. Detection deterrence stays LIVE
 like the receiver; neither mode touches the other's semantics, and manual
 LED control is unchanged.
+
+### Notification Permission Policy
+**`camera/model/NotificationPermissionPolicy.kt`** — the pure POST_NOTIFICATIONS
+ask-once decision behind the camera screen's first-launch permission pass
+(detection alerts need the permission on API 33+). The verdict was stranded
+in composition behind a process-global `var` guard in CameraScreen; it now
+lives here with the once-flag in CameraViewModel's state (surviving
+recompositions and rotation with the screen's ViewModel), mirroring the
+audio path's `MicAccess.shouldAutoRequest`. The pinned ladder: the budget is
+spent on the FIRST fresh composition even when no dialog can show (below API
+33 or already granted), the dialog launches only when `shouldAsk(granted,
+askedBefore, apiLevel)` holds, the launcher result is ignored (a denial buys
+silence — a later revocation in system settings never re-prompts within the
+flag's lifetime), and a spent budget is never re-marked.
+
+### Connect Info Policy
+**`camera/model/ConnectInfoPolicy.kt`** — the pure derivations the connect
+sheet's composition used to inline: `currentPort(httpUrl)` (the port the
+sheet's USB `adb forward` instruction quotes) and `isSecureHttp(httpUrl)`
+(the case-sensitive `https://` gate for showing the TLS fingerprint). This
+is a truth seam, not idealized URL parsing: the port slice is text after the
+FIRST colon up to the FIRST slash, `toIntOrNull`-parsed (signs survive, no
+range check) with `StreamDefaults.WEB_PORT` as the fallthrough — which means
+every schemed URL (`scheme://host:port/path`, the only shape the Streaming
+Manager builds, IPv4 or bracketed IPv6) resolves to the DEFAULT port, since
+the slice starts at `//` and ends at its own leading slash. A custom server
+port is quoted only from a scheme-less `host:port(/path)` string. The TLS
+fingerprint itself flows through CameraViewModel (`tlsCertificateFingerprint`
+— read once per sheet open); the screen no longer reaches around the
+ViewModel into the app-scoped manager.

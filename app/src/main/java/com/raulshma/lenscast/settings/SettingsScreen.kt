@@ -39,7 +39,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.raulshma.lenscast.MainApplication
+import com.raulshma.lenscast.AppGraph
 import com.raulshma.lenscast.R
 import com.raulshma.lenscast.camera.model.CameraDashboardPolicy
 import com.raulshma.lenscast.camera.model.CameraSettings
@@ -82,7 +82,7 @@ fun CameraSettingsScreen(
 ) {
     val context = LocalContext.current
     val activity = context as ComponentActivity
-    val app = context.applicationContext as MainApplication
+    val app = context.applicationContext as AppGraph
     val viewModel: SettingsViewModel = viewModel(
         factory = SettingsViewModel.Factory(
             app.cameraService, app.settingsDataStore, app.powerManager,

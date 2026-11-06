@@ -228,6 +228,43 @@ class SettingsDataStoreAutomationPrefsTest {
         assertEquals(listOf(AutomationRule(id = "r1")), decoded)
     }
 
+    @Test
+    fun `a client-supplied lastFiredAt never persists`() {
+        // The fire stamp is a GET-response decoration (the web handler's
+        // copy(lastFiredAt=…)), never configuration: a client echoing a
+        // response rule back in a PUT body (or a hand-crafted persisted
+        // payload carrying the key) must not smuggle a claimed last-fired
+        // instant into storage.
+        val decoded = parseAutomationRules(
+            """[{"id":"r1","name":"Smuggled","lastFiredAt":1234567890123,""" +
+                """"actions":[{"type":"torch","params":{"enabled":"true"}}]}]""",
+        )
+        assertNull(decoded.single().lastFiredAt)
+
+        // The encode side strips too (sanitize runs there): the persisted
+        // JSON carries no lastFiredAt key even when the writer set one.
+        val json = parseAutomationRules(
+            serializeAutomationRules(
+                listOf(
+                    AutomationRule(
+                        id = "r2",
+                        name = "Stamped",
+                        lastFiredAt = 9876543210987L,
+                        actions = listOf(AutomationActionSpec("torch", mapOf("enabled" to "true"))),
+                    ),
+                ),
+            ),
+        ).single()
+        assertNull(json.lastFiredAt)
+        val persisted = automationRulesPref.encodeTo(
+            listOf(AutomationRule(id = "r3", lastFiredAt = 1L, actions = listOf(AutomationActionSpec("stream", mapOf("enabled" to "true"))))),
+        )
+        assertFalse(
+            "the persisted JSON carries a lastFiredAt key",
+            persisted[stringPreferencesKey("automation_rules")]!!.contains("lastFiredAt"),
+        )
+    }
+
     // ── torchStrength ──
 
     @Test

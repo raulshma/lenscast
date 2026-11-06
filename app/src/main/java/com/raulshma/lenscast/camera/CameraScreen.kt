@@ -135,16 +135,18 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.compose.LocalLifecycleOwner
-import com.raulshma.lenscast.MainApplication
+import com.raulshma.lenscast.AppGraph
 import com.raulshma.lenscast.R
 import java.util.Locale
 import com.raulshma.lenscast.camera.model.CameraDashboardPolicy
 import com.raulshma.lenscast.camera.model.CameraLensInfo
 import com.raulshma.lenscast.camera.model.CameraSettings
 import com.raulshma.lenscast.camera.model.CameraState
+import com.raulshma.lenscast.camera.model.ConnectInfoPolicy
 import com.raulshma.lenscast.camera.model.GridViewPolicy
 import com.raulshma.lenscast.camera.model.LevelIndicatorPolicy
 import com.raulshma.lenscast.camera.model.LensLabelKind
+import com.raulshma.lenscast.camera.model.NotificationPermissionPolicy
 import com.raulshma.lenscast.camera.model.PreviewGestures
 import com.raulshma.lenscast.camera.model.ProToolsPolicy
 import com.raulshma.lenscast.camera.model.QuickSettingCatalog
@@ -157,7 +159,6 @@ import com.raulshma.lenscast.camera.model.ZoomPresetsPolicy
 import com.raulshma.lenscast.capture.model.FlashMode
 import com.raulshma.lenscast.core.MicAccess
 import com.raulshma.lenscast.core.NetworkQualityMonitor.NetworkQualityLevel
-import com.raulshma.lenscast.core.StreamDefaults
 import com.raulshma.lenscast.core.ThermalState
 import com.raulshma.lenscast.gallery.formatDuration
 import com.raulshma.lenscast.ui.theme.LensOrange
@@ -182,11 +183,6 @@ private val LevelAlignedColor = Color(0xFF4CAF50)
 private val ZebraOverColor = Color(0x66FF3B30)
 private val ZebraUnderColor = Color(0x660A84FF)
 private val PeakingColor = Color(0x99FFD60A)
-
-// One POST_NOTIFICATIONS ask per process: LaunchedEffect(Unit) re-runs on
-// every fresh composition (each navigation back), which would re-prompt
-// after a denial instead of the documented first-launch one-shot.
-private var notificationPermissionAsked = false
 
 /** The quick-setting controls' icon selectors, mapped to material vectors at this seam. */
 private fun QuickSettingIcon.vector(): ImageVector = when (this) {
@@ -218,7 +214,7 @@ fun CameraScreen(
     onNavigateToGallery: () -> Unit,
 ) {
     val context = LocalContext.current
-    val app = context.applicationContext as MainApplication
+    val app = context.applicationContext as AppGraph
     val viewModel: CameraViewModel = viewModel(
         factory = CameraViewModel.Factory(
             context, app.cameraService, app.streamingManager,
@@ -259,19 +255,29 @@ fun CameraScreen(
     }
     // Detection alerts ride the same first-launch permission pass: a one-shot
     // POST_NOTIFICATIONS ask on API 33+, silently skipped when already granted
-    // and asked once per process (notificationPermissionAsked guard above).
+    // and never repeated after a denial — the ask-once verdict is
+    // NotificationPermissionPolicy's, the once-flag lives in the ViewModel's
+    // state (the old home was a process-global var in this file).
     val notificationPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
     ) { }
     LaunchedEffect(Unit) {
-        if (notificationPermissionAsked) return@LaunchedEffect
-        notificationPermissionAsked = true
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-            ContextCompat.checkSelfPermission(
-                context, Manifest.permission.POST_NOTIFICATIONS,
-            ) != PackageManager.PERMISSION_GRANTED
+        // Fresh StateFlow read rather than a composition-collected delegate:
+        // the old global was visible to the next fresh composition
+        // immediately, and the ask-once guard must stay that airtight.
+        val askedBefore = viewModel.notificationPermissionAsked.value
+        if (NotificationPermissionPolicy.shouldMarkAsked(askedBefore)) {
+            viewModel.markNotificationPermissionAsked()
+        }
+        if (NotificationPermissionPolicy.shouldAsk(
+                granted = ContextCompat.checkSelfPermission(
+                    context, NotificationPermissionPolicy.PERMISSION,
+                ) == PackageManager.PERMISSION_GRANTED,
+                askedBefore = askedBefore,
+                apiLevel = Build.VERSION.SDK_INT,
+            )
         ) {
-            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+            notificationPermissionLauncher.launch(NotificationPermissionPolicy.PERMISSION)
         }
     }
 
@@ -383,15 +389,16 @@ fun CameraScreen(
                     onDismissRequest = { showConnectSheet = false },
                 ) {
                     val info = remember(showConnectSheet) { viewModel.getConnectInfo() }
+                    // The fingerprint flows through the ViewModel (which owns
+                    // the StreamingManager); the TLS gate is the policy's
+                    // scheme verdict, read once per sheet open as before.
                     val tlsFingerprint = remember(showConnectSheet) {
-                        (context.applicationContext as MainApplication)
-                            .streamingManager.tlsCertificateFingerprint()
-                            .takeIf { info.httpUrl.startsWith("https://") }
+                        viewModel.tlsCertificateFingerprint()
+                            .takeIf { ConnectInfoPolicy.isSecureHttp(info.httpUrl) }
                     }
                     ConnectSheet(
                         info = info,
-                        currentPort = info.httpUrl.substringAfter(":", "").substringBefore("/")
-                            .toIntOrNull() ?: StreamDefaults.WEB_PORT,
+                        currentPort = ConnectInfoPolicy.currentPort(info.httpUrl),
                         onCopyHttp = { viewModel.copyStreamUrl() },
                         onCopyHls = { viewModel.copyHlsUrl() },
                         onCopyRtsp = { viewModel.copyRtspUrl() },

@@ -704,20 +704,23 @@ object OpenApiSpec {
         ),
         "AutomationStateDto" to schema(
             "enabled" to boolSchema("The master automation toggle"),
-            "rules" to arrayOf(ref("AutomationRuleDto")),
+            "rules" to arrayOf(ref("AutomationRule")),
             "catalog" to arrayOf(ref("AutomationCatalogActionDto")),
             "triggers" to arrayOf(ref("AutomationCatalogTriggerDto")),
             "conditions" to arrayOf(ref("AutomationCatalogConditionDto")),
-            required = listOf("enabled", "rules", "catalog", "triggers", "conditions"),
+            "limits" to ref("AutomationLimitsDto"),
+            required = listOf("enabled", "rules", "catalog", "triggers", "conditions", "limits"),
             fixture = "automation.json",
         ),
         "AutomationUpdateRequestDto" to schema(
             "enabled" to boolSchema(),
-            "rules" to arrayOf(ref("AutomationRuleDto")),
-            description = "The PUT body: the toggle and the full rule list persist wholesale. The catalogs are read-only on the wire and never accepted here.",
+            "rules" to arrayOf(ref("AutomationRule")),
+            description = "The PUT body: the toggle and the full rule list persist wholesale. The catalogs and limits " +
+                "are read-only on the wire and never accepted here.",
         ),
-        "AutomationRuleDto" to schema(
-            "id" to stringSchema("Stable identity (the fire-journal key); blank/absent lets the device mint a UUID"),
+        "AutomationRule" to schema(
+            "id" to stringSchema("Stable identity (the fire-journal key); blank/absent lets the device mint a UUID. " +
+                "Every persisted rule carries a minted, non-blank id, so GET responses always emit one"),
             "name" to stringSchema("Free-form display label; trimmed on save"),
             "enabled" to boolSchema("Per-rule kill switch, independent of the master toggle"),
             "triggerType" to stringSchema("A trigger catalog id (time_of_day, motion_detected, sound_detected, " +
@@ -730,7 +733,7 @@ object OpenApiSpec {
                 "additionalProperties" to stringSchema("Parameters for non-time triggers (e.g. battery_level's level); " +
                     "string values, parsed and clamped to the trigger catalog bounds on save"),
             ),
-            "conditions" to arrayOf(ref("AutomationConditionDto")),
+            "conditions" to arrayOf(ref("AutomationConditionSpec")),
             "conditionMode" to stringSchema("How multiple conditions combine: `all` | `any`; anything else folds to `all` on save"),
             "cooldownSeconds" to intSchema("Minimum seconds between two firings of an event-triggered rule; clamped to 0..86400 on save"),
             "missedRunPolicy" to stringSchema("What a time_of_day rule does when its scheduled moment passes without a firing " +
@@ -740,15 +743,18 @@ object OpenApiSpec {
                 "Meaningless for event triggers"),
             "missedWindowMinutes" to intSchema("The window missed-run-policy catch-up span in minutes; clamped to 1..1440 on save. " +
                 "Meaningless in the other modes"),
-            "actions" to arrayOf(ref("AutomationActionDto")),
+            "actions" to arrayOf(ref("AutomationActionSpec")),
             "lastFiredAt" to intSchema("Epoch milliseconds (UTC) of the rule's last actual firing, decoded from the " +
-                "device's fire journal; null/absent = never fired. Read-only — PUT bodies ignore it") +
+                "device's fire journal; null/absent = never fired. Read-only — a client echoing it back in a PUT " +
+                "body has it reset by the sanitizer; it never persists") +
                 mapOf("nullable" to true),
             required = listOf("id", "name", "enabled", "triggerType", "minuteOfDay", "daysMask",
                 "triggerParams", "conditions", "conditionMode", "cooldownSeconds", "missedRunPolicy",
                 "missedWindowMinutes", "actions"),
+            description = "The ONE automation rule declaration: the domain shape IS the wire and persistence shape " +
+                "(no separate DTO clone). Every field is sanitized through the schedule policy on save.",
         ),
-        "AutomationConditionDto" to schema(
+        "AutomationConditionSpec" to schema(
             "type" to stringSchema("Condition catalog id, e.g. `time_window`; an id outside the catalog is dropped on save"),
             "params" to mapOf(
                 "type" to "object",
@@ -756,17 +762,7 @@ object OpenApiSpec {
             ),
             required = listOf("type", "params"),
         ),
-        "AutomationCatalogTriggerDto" to schema(
-            "id" to stringSchema("The trigger id an AutomationRuleDto.triggerType must name"),
-            "params" to arrayOf(ref("AutomationCatalogParamDto")),
-            required = listOf("id", "params"),
-        ),
-        "AutomationCatalogConditionDto" to schema(
-            "id" to stringSchema("The condition id an AutomationConditionDto.type must name"),
-            "params" to arrayOf(ref("AutomationCatalogParamDto")),
-            required = listOf("id", "params"),
-        ),
-        "AutomationActionDto" to schema(
+        "AutomationActionSpec" to schema(
             "type" to stringSchema("Catalog id, e.g. `torch`; an id outside the catalog is dropped on save"),
             "params" to mapOf(
                 "type" to "object",
@@ -774,17 +770,52 @@ object OpenApiSpec {
             ),
             required = listOf("type", "params"),
         ),
+        "AutomationCatalogTriggerDto" to schema(
+            "id" to stringSchema("The trigger id an AutomationRule.triggerType must name"),
+            "params" to arrayOf(ref("AutomationCatalogParamDto")),
+            "group" to stringSchema("The picker group this entry lists under: `schedule` | `device_events` | `power` | `stream_app` — device truth, so both editors group identically"),
+            "icon" to stringSchema("The icon kind (AutomationIconVocabulary's closed set — e.g. `schedule`, `sensor`, `shield`); clients map kind → glyph"),
+            required = listOf("id", "params", "group", "icon"),
+        ),
+        "AutomationCatalogConditionDto" to schema(
+            "id" to stringSchema("The condition id an AutomationRule.conditions[].type must name"),
+            "params" to arrayOf(ref("AutomationCatalogParamDto")),
+            "group" to stringSchema("The picker group this entry lists under: `time` | `power` | `connectivity` | `device_state`"),
+            "icon" to stringSchema("The icon kind (AutomationIconVocabulary's closed set)"),
+            required = listOf("id", "params", "group", "icon"),
+        ),
         "AutomationCatalogActionDto" to schema(
-            "id" to stringSchema("The action id an AutomationActionDto.type must name"),
+            "id" to stringSchema("The action id an AutomationRule.actions[].type must name"),
             "params" to arrayOf(ref("AutomationCatalogParamDto")),
             "catchUp" to stringSchema("What happens when the rule fires late: `STATEFUL` (always rides catch-up) | `ONESHOT` (grace window only)"),
             "interruptsStream" to boolSchema("UI warning flag; the executor does not force a teardown — " +
                 "the lens switch rebinds when the camera is free (brief interruption) and defers to the " +
                 "next natural rebind while a recording is active"),
-            required = listOf("id", "params", "catchUp", "interruptsStream"),
+            "group" to stringSchema("The picker group this entry lists under: `camera` | `light_sound` | `stream_capture` | `detection`"),
+            "icon" to stringSchema("The icon kind (AutomationIconVocabulary's closed set)"),
+            required = listOf("id", "params", "catchUp", "interruptsStream", "group", "icon"),
+        ),
+        "AutomationLimitsDto" to schema(
+            "maxRules" to intSchema("The persisted rule list's cap (StreamDefaults.AUTOMATION_MAX_RULES)"),
+            "maxActionsPerRule" to intSchema("Each rule's action list cap (StreamDefaults.AUTOMATION_MAX_ACTIONS_PER_RULE)"),
+            "maxConditionsPerRule" to intSchema("Each rule's ONLY WHEN condition list cap (StreamDefaults.AUTOMATION_MAX_CONDITIONS_PER_RULE)"),
+            "cooldownMinSeconds" to intSchema("The event-rule cooldown clamp floor, seconds"),
+            "cooldownMaxSeconds" to intSchema("The event-rule cooldown clamp ceiling, seconds"),
+            "cooldownDefaultSeconds" to intSchema("The cooldown a fresh rule starts at"),
+            "cooldownPresetSeconds" to arrayOf(intSchema("A cooldown preset chip, seconds, in display order")),
+            "missedWindowMinMinutes" to intSchema("The missed-run window clamp floor, minutes"),
+            "missedWindowMaxMinutes" to intSchema("The missed-run window clamp ceiling, minutes"),
+            "missedWindowDefaultMinutes" to intSchema("The window a fresh rule starts at"),
+            "missedWindowPresetMinutes" to arrayOf(intSchema("A missed-window preset chip, minutes, in display order")),
+            required = listOf("maxRules", "maxActionsPerRule", "maxConditionsPerRule",
+                "cooldownMinSeconds", "cooldownMaxSeconds", "cooldownDefaultSeconds", "cooldownPresetSeconds",
+                "missedWindowMinMinutes", "missedWindowMaxMinutes", "missedWindowDefaultMinutes", "missedWindowPresetMinutes"),
+            description = "The editor contract's published bounds, defaults and preset chips — ONE Kotlin source " +
+                "(StreamDefaults' automation constants), read-only on the wire; clients pin their pre-fetch " +
+                "fallbacks to this block through the contract fixtures.",
         ),
         "AutomationCatalogParamDto" to schema(
-            "name" to stringSchema("The exact wire key inside AutomationActionDto.params"),
+            "name" to stringSchema("The exact wire key inside a rule spec's params"),
             "kind" to stringSchema("How the string value is interpreted: `BOOL` | `INT` | `FLOAT`"),
             "min" to mapOf("type" to "number", "description" to "Lower bound; null when unbounded"),
             "max" to mapOf("type" to "number", "description" to "Upper bound; null when unbounded"),

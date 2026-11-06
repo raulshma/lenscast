@@ -5,7 +5,7 @@ import android.util.Log
 import androidx.work.CoroutineWorker
 import androidx.work.ForegroundInfo
 import androidx.work.WorkerParameters
-import com.raulshma.lenscast.MainApplication
+import com.raulshma.lenscast.AppGraph
 import com.raulshma.lenscast.core.ForegroundNotifications
 import com.raulshma.lenscast.capture.model.TimelapseCompletionPolicy
 import kotlinx.coroutines.Dispatchers
@@ -27,7 +27,7 @@ class IntervalCaptureWorker(
 ) : CoroutineWorker(context, params) {
 
     override suspend fun doWork(): Result {
-        val app = applicationContext as MainApplication
+        val app = applicationContext as AppGraph
 
         if (isStopped) return Result.success()
 
@@ -114,7 +114,7 @@ class IntervalCaptureWorker(
      * worker's own background thread (MediaCodec work); a failure is logged
      * and swallowed — the photos are safe either way.
      */
-    private suspend fun maybeAssembleTimelapse(app: MainApplication, seriesCaptures: Int) {
+    private suspend fun maybeAssembleTimelapse(app: AppGraph, seriesCaptures: Int) {
         val verdict = TimelapseCompletionPolicy.onSeriesComplete(
             autoTimelapseEnabled = app.settingsDataStore.autoTimelapseEnabled.value,
             availablePhotos = seriesCaptures,
@@ -137,7 +137,7 @@ class IntervalCaptureWorker(
         }
     }
 
-    private suspend fun captureImage(app: MainApplication, flashMode: String): Boolean =
+    private suspend fun captureImage(app: AppGraph, flashMode: String): Boolean =
         withContext(Dispatchers.Main) {
             suspendCancellableCoroutine { continuation ->
                 val fileName = app.photoCaptureManager.captureToGallery(
