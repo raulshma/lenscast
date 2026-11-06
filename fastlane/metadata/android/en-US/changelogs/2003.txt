@@ -1,0 +1,8 @@
+Since 0.1.9:
+• Automation: new if/then rules engine — up to 16 rules, each running up to 8 actions (camera settings, torch, stream, recording, siren, detection toggles) without touching the phone
+• Automation: event triggers and ONLY WHEN conditions — rules fire on motion, sound, tamper, power and streaming edges, gated by conditions like charging, Wi-Fi, a time window or streaming active, combinable ALL/ANY
+• Automation: time-of-day rules gain boot catch-up, fire history, per-rule cooldowns, and a per-rule missed-run policy (catch up, skip, or fire within a window after the scheduled moment)
+• Automation: redesigned automation screen — structured rule cards with WHEN / ONLY WHEN / THEN summaries, a fuller editor with grouped pickers, reorderable conditions and actions, live rule preview, a discard guard and a rotation-proof draft
+• Background: new Keep Awake setting (on by default) holds a wake lock while the app runs, so a mounted security phone keeps firing rules after the screen locks — quitting the app releases it
+• Streaming fix: the session wake lock is now renewed during long streams, so a locked phone no longer goes dark after the first streaming hour
+• Under the hood: nine modules refactored behind seams (push transports, web transport, detection alert sinks, settings credentials, camera policies) with no user-visible behavior change
