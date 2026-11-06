@@ -26,23 +26,40 @@ This project is set up for the official F-Droid repository (f-droid.org).
 
 ## Submitting / updating
 
+After the initial submission, releases need **no manual F-Droid step**: the
+recipe sets `AutoUpdateMode: Version` with `UpdateCheckMode: Tags`, so
+fdroidserver's auto update checker picks up each new `v<version>` tag,
+parses the `versionCode`/`versionName` literals from `app/build.gradle.kts`
+at the tag, and generates one build per `VercodeOperation` entry
+(`%c - 2` / `%c - 1` / `%c` → the three ABI codes). No fdroiddata MR is
+needed per release; the build lands in the repo a few days after the tag
+is pushed.
+
+Per release:
+
 1. Cut the release the usual way: bump the `versionCode`/`versionName`
    defaults in `app/build.gradle.kts`, add the changelog at
    `fastlane/metadata/android/en-US/changelogs/<versionCode>.txt`,
    commit, and push the `v<version>` branch (CI tags and publishes).
-2. Update `fdroid/com.raulshma.lenscast.yml`: add a `Builds` entry for the
-   new tag and bump `CurrentVersion`/`CurrentVersionCode`.
-3. Open (or update) a merge request against
-   [fdroid/fdroiddata](https://gitlab.com/fdroid/fdroiddata) adding the
-   recipe as `metadata/com.raulshma.lenscast.yml`, plus
-   `metadata/com.raulshma.lenscast/en-US/icon.png` (and changelog files).
-   You need a GitLab account; fork fdroiddata, commit, MR.
-4. In the MR description, mention:
-   - The runtime model download (Apache-2.0, SHA-pinned, optional feature).
-   - That the fdroid flavor excludes the self-updater.
-5. Maintainers run `fdroid checkbuild` / verify on their build server; the
-   app appears in the repo after the next index signing (typically a few
-   days after merge).
+2. Keep the repo-side mirror `fdroid/com.raulshma.lenscast.yml` in sync:
+   add `Builds` entries for the new tag and bump
+   `CurrentVersion`/`CurrentVersionCode`. These mirror what the checker
+   generates (same flavor, ABI splits and gradleprops); the pinned commit
+   is repo-side documentation only.
+
+Initial submission (once): open a merge request against
+[fdroid/fdroiddata](https://gitlab.com/fdroid/fdroiddata) adding the
+recipe as `metadata/com.raulshma.lenscast.yml`, plus
+`metadata/com.raulshma.lenscast/en-US/icon.png` (and changelog files).
+You need a GitLab account; fork fdroiddata, commit, MR. In the MR
+description, mention:
+
+- The runtime model download (Apache-2.0, SHA-pinned, optional feature).
+- That the fdroid flavor excludes the self-updater.
+
+Maintainers run `fdroid checkbuild` / verify on their build server; the
+app appears in the repo after the next index signing (typically a few
+days after merge).
 
 ## Local verification
 
