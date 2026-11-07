@@ -1922,12 +1922,15 @@ the editor's ↑/↓ buttons use.
 
 ### Torch Strength Policy
 **`camera/model/TorchStrengthPolicy.kt`** — the pure decisions for the API
-35+ per-level torch: `CameraManager.turnOnTorchWithStrengthLevel` plus the
-`FLASH_INFO_STRENGTH_MAXIMUM_LEVEL` characteristic let a multi-level flash
+33+ per-level torch: `CameraManager.turnOnTorchWithStrengthLevel` plus the
+`FLASH_INFO_STRENGTH_MAXIMUM_LEVEL` characteristic (both Android 13 — not
+CameraX's API-35-only `setTorchStrengthLevel` wrapper, which rides the
+different `CaptureRequest.FLASH_STRENGTH_LEVEL` key; sourcing in
+`docs/research/torch-strength.md`) let a multi-level flash
 run below full power, where `CameraControl.enableTorch` is binary.
 `effectiveLevel` is the no-op ladder — every rung returns null, "don't call
 the strength API; plain enableTorch already gives the user everything the
-device can do": SDK < 35, no requested strength (the persisted default),
+device can do": SDK < 33, no requested strength (the persisted default),
 an unknown device max level, or a single-level flash (max ≤ 1); otherwise
 the request clamped into 1..deviceMax. The device's real max always wins at
 apply time — the catalog/persistence bound 1..8 (`MAX_REQUESTED_LEVEL`) is

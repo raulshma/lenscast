@@ -54,7 +54,9 @@
       Guards the exported AutomationReceiver, so arbitrary apps cannot drive
       the camera, the recorder, or the siren. Dangerous level: a sender app
       is granted it only after a runtime request (Android 6+), never at
-      install; adb sends as the exempt shell uid.
+      install; adb senders need a one-time
+      `pm grant com.android.shell com.raulshma.lenscast.permission.AUTOMATION`
+      first — the shell uid is NOT exempt from custom permissions.
     -->
     <permission
         android:name="com.raulshma.lenscast.permission.AUTOMATION"

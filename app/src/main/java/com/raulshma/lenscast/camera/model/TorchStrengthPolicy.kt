@@ -1,10 +1,11 @@
 package com.raulshma.lenscast.camera.model
 
 /**
- * Pure decisions for the API 35+ torch strength API.
+ * Pure decisions for the API 33+ torch strength API.
  *
- * Why this exists: `CameraControl.enableTorch` is binary — on or off. API 35
- * added `CameraManager.turnOnTorchWithStrengthLevel(cameraId, level)` plus the
+ * Why this exists: `CameraControl.enableTorch` is binary — on or off. API 33
+ * (Android 13) added `CameraManager.turnOnTorchWithStrengthLevel(cameraId, level)`
+ * plus the
  * `FLASH_INFO_STRENGTH_MAXIMUM_LEVEL` characteristic, which let a multi-level
  * flash run below full power. The strength path is CameraManager-level (it
  * works without a bound camera and turns the torch ON as a side effect when
@@ -12,10 +13,17 @@ package com.raulshma.lenscast.camera.model
  * ON, riding the same `applyCameraControls` re-assert seam that keeps the
  * binary torch alive across rebinds.
  *
+ * Why 33, not CameraX's gate: CameraX 1.5's `CameraControl.setTorchStrengthLevel`
+ * wraps only the API 35 `CaptureRequest.FLASH_STRENGTH_LEVEL` request key and is
+ * API-35-only, but the CameraManager pair this policy drives exists since
+ * Android 13 — that mismatch is exactly how a "35" gate once locked out
+ * capable Android 13 devices (issue #16; full sourcing in
+ * docs/research/torch-strength.md).
+ *
  * The no-op ladder (every rung returns null = "don't call the strength API;
  * plain enableTorch already gives the user everything the device can do"):
  *
- * 1. Unsupported SDK (< 35) — the strength API does not exist.
+ * 1. Unsupported SDK (< 33) — the strength API does not exist.
  * 2. No requested strength ([requestedStrength] null — the persisted default,
  *    "device default brightness").
  * 3. The device's max level is unknown ([deviceMaxLevel] null — the
@@ -29,7 +37,7 @@ package com.raulshma.lenscast.camera.model
  *    hardware actually supports.
  */
 object TorchStrengthPolicy {
-    /** The strength floor per the API 35 contract (FLASH_INFO_STRENGTH_DEFAULT_LEVEL is 1-based). */
+    /** The strength floor per the API 33 contract (FLASH_INFO_STRENGTH_DEFAULT_LEVEL is 1-based). */
     const val MIN_LEVEL = 1
 
     /**
@@ -41,7 +49,7 @@ object TorchStrengthPolicy {
     const val MAX_REQUESTED_LEVEL = 8
 
     /** True when this device/API level can control torch strength at all. */
-    fun isSupported(sdkInt: Int): Boolean = sdkInt >= 35
+    fun isSupported(sdkInt: Int): Boolean = sdkInt >= 33
 
     /**
      * The level to request, or null for "don't call the strength API".

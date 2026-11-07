@@ -197,7 +197,7 @@ object AutomationActionCatalog {
                     min = null, max = null,
                     optional = false, defaultValue = "true",
                 ),
-                // API 35+ devices only; absent = device default strength.
+                // API 33+ devices with a multi-level flash; absent = device default strength.
                 AutomationParamSpec(
                     name = "strength", kind = ParamKind.INT,
                     min = 1.0, max = 8.0,

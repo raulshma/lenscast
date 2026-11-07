@@ -155,10 +155,10 @@ class CameraService(private val context: Context) {
         MutableStateFlow<ClosedRange<Int>>(CameraSettings.ISO_RANGE_MIN..CameraSettings.ISO_RANGE_MAX)
     val availableIsoRange: StateFlow<ClosedRange<Int>> = _availableIsoRange.asStateFlow()
 
-    // The bound camera's torch strength ceiling (API 35+
+    // The bound camera's torch strength ceiling (API 33+
     // FLASH_INFO_STRENGTH_MAXIMUM_LEVEL), the same ladder shape as the ranges
     // above: null until a bind proves the device supports per-level torch at
-    // all (pre-35, no flash unit, missing key, or failed query), and the
+    // all (pre-33, no flash unit, missing key, or failed query), and the
     // device's real max replaces it at bind time. Ladder semantics in
     // TorchStrengthPolicy.
     private val _torchStrengthMaxLevel = MutableStateFlow<Int?>(null)
@@ -894,16 +894,16 @@ class CameraService(private val context: Context) {
                     Log.w(TAG, "Failed to query sensor ranges", e)
                 }
 
-                // Torch strength ceiling for the API 35+ per-level torch API.
+                // Torch strength ceiling for the API 33+ per-level torch API.
                 // Read from the BOUND camera's own characteristics — the same
                 // camera whose flash unit backs enableTorch (the torch lives
                 // on the logical camera, not the selected physical lens), so
                 // the id is resolved the Camera2CameraInfo way rather than the
                 // physical-lens fallback the sensor ranges above use. Null
-                // (pre-35, no flash unit, missing key, failed query) means the
+                // (pre-33, no flash unit, missing key, failed query) means the
                 // TorchStrengthPolicy ladder never calls the strength API and
                 // plain enableTorch stays the whole story.
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.VANILLA_ICE_CREAM &&
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
                     cam.cameraInfo.hasFlashUnit()
                 ) {
                     try {
@@ -1263,7 +1263,7 @@ class CameraService(private val context: Context) {
         try {
             if (cam.cameraInfo.hasFlashUnit()) {
                 cam.cameraControl.enableTorch(settings.torchEnabled)
-                // Per-level torch strength (API 35+): driven ONLY while the
+                // Per-level torch strength (API 33+): driven ONLY while the
                 // torch should be ON — turnOnTorchWithStrengthLevel switches
                 // the flash on as a side effect when it was off, so a
                 // torch-off apply never touches it. Riding this seam means the
@@ -1389,7 +1389,7 @@ class CameraService(private val context: Context) {
     }
 
     /**
-     * The strength half of the torch apply: the API 35+
+     * The strength half of the torch apply: the API 33+
      * [android.hardware.camera2.CameraManager.turnOnTorchWithStrengthLevel]
      * path, translated by [TorchStrengthPolicy] (null verdict = skip
      * silently). Runs on the BOUND camera's camera2 id — the same camera
@@ -1400,7 +1400,7 @@ class CameraService(private val context: Context) {
      * put light on the subject, strength is the refinement.
      */
     private fun applyTorchStrength(cam: Camera, requestedStrength: Int?) {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.VANILLA_ICE_CREAM) return
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return
         val level = TorchStrengthPolicy.effectiveLevel(
             requestedStrength,
             _torchStrengthMaxLevel.value,
@@ -1411,6 +1411,15 @@ class CameraService(private val context: Context) {
             val cameraManager =
                 context.getSystemService(Context.CAMERA_SERVICE) as android.hardware.camera2.CameraManager
             cameraManager.turnOnTorchWithStrengthLevel(torchCameraId, level)
+            // Read-back verification (the check CTS performs): diagnostic
+            // only — a mismatch is logged, never retried or re-derived, since
+            // the level re-asserts on the next settings apply anyway. HALs
+            // that lag the set answer with the stale level; the log line is
+            // how we find out on real devices.
+            val applied = cameraManager.getTorchStrengthLevel(torchCameraId)
+            if (applied != level) {
+                Log.w(TAG, "Torch strength read-back mismatch (set=$level device=$applied)")
+            }
         }.onFailure { e ->
             Log.w(TAG, "Torch strength failed (level=$level)", e)
         }

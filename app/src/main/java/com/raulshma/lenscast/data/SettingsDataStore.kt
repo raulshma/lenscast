@@ -919,7 +919,7 @@ private fun decodeCameraSettings(prefs: Preferences): CameraSettings = CameraSet
     sceneMode = prefs[Keys.SCENE_MODE],
     nightVisionMode = parseEnum(prefs[Keys.NIGHT_VISION_MODE], NightVisionMode.OFF),
     torchEnabled = readBool(prefs, Keys.TORCH_ENABLED, defaultTrue = false),
-    // Absent = device default strength; a present key is the API 35+ override.
+    // Absent = device default strength; a present key is the API 33+ override.
     torchStrength = prefs[Keys.TORCH_STRENGTH],
     outputRotation = OutputRotationPolicy.coerce(prefs[Keys.OUTPUT_ROTATION] ?: 0),
     orientationLocked = readBool(prefs, Keys.ORIENTATION_LOCKED, defaultTrue = false),

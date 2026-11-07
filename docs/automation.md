@@ -46,7 +46,7 @@ Two calibration notes the catalog applies honestly:
   enough for the 4000-class night sensors — the device's live ISO range
   (`SENSOR_INFO_SENSITIVITY_RANGE`, read at bind) wins again at apply time.
 - `torch` strength 1 requires the torch-strength hardware (see below:
-  Android 15+ with a multi-level flash); elsewhere the strength is ignored
+  Android 13+ with a multi-level flash); elsewhere the strength is ignored
   and the torch is plain on/off — which is everything that device can do.
 
 ## Rule anatomy
@@ -253,7 +253,7 @@ apply time.
 | `camera_zoom`    | Zoom ratio | `ratio` FLOAT 1–10 |
 | `camera_fps`     | Camera frame rate | `fps` INT 1–120 |
 | `camera_lens`    | Switches the lens — rebinds the camera, briefly interrupting the preview/stream (flagged in the editor) | `index` INT 0–8, clamped to the device's lens inventory |
-| `torch`          | Torch on/off, optionally at a brightness level | `enabled` BOOL (default true); `strength` INT 1–8, optional, API 35+ multi-level flash only |
+| `torch`          | Torch on/off, optionally at a brightness level | `enabled` BOOL (default true); `strength` INT 1–8, optional, API 33+ multi-level flash only |
 | `stream`         | Starts/stops streaming | `enabled` BOOL (default true) |
 | `capture_photo`  | Captures one photo to the gallery — the only ONESHOT action | — |
 | `recording`      | Starts/stops a recording | `enabled` BOOL; `duration_seconds` INT 0–86400, optional (0 = unbounded) |
@@ -278,15 +278,19 @@ Execution semantics worth knowing:
 
 ## Torch strength (device requirements)
 
-Multi-level torch brightness rides Android 15's (API 35+)
+Multi-level torch brightness rides Android 13's (API 33+)
 `CameraManager.turnOnTorchWithStrengthLevel` and the
 `FLASH_INFO_STRENGTH_MAXIMUM_LEVEL` characteristic
-(`camera/model/TorchStrengthPolicy.kt` is the pure no-op ladder):
+(`camera/model/TorchStrengthPolicy.kt` is the pure no-op ladder; API sourcing
+in `docs/research/torch-strength.md`):
 
-- **API 35+ required.** Below that — or on a single-level flash (max level
-  ≤ 1), or when the device's max level is unknown — the strength parameter
+- **API 33+ required.** Below that — or on a single-level flash (max level
+  ≤ 1 — several phones report 1 even on newer Android), or when the device's
+  max level is unknown — the strength parameter
   is ignored and the torch is plain on/off: that already is everything the
-  hardware can do.
+  hardware can do. Which devices report multi-level flash is a HAL decision
+  Samsung et al. vary per model, so support is detected at runtime, not
+  assumed from the Android version.
 - Levels are **1–8** at the persistence/catalog bound; the device's real
   maximum always wins at apply time, so a level above what the hardware
   supports clamps down.
