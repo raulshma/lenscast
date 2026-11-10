@@ -5,9 +5,9 @@ import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
-import com.raulshma.lenscast.R
 import com.raulshma.lenscast.capture.model.IntervalCaptureConfig
 import com.raulshma.lenscast.capture.model.RecordingConfig
+import com.raulshma.lenscast.capture.model.TimelapseState
 import com.raulshma.lenscast.camera.model.RecordingToggle
 import com.raulshma.lenscast.core.MicGate
 import com.raulshma.lenscast.data.SettingsDataStore
@@ -114,10 +114,12 @@ class CaptureViewModel(
         Log.d(TAG, "Interval capture stopped")
     }
 
-    private val _timelapseBusy = MutableStateFlow(false)
-    val timelapseBusy: StateFlow<Boolean> = _timelapseBusy.asStateFlow()
-    private val _timelapseMessage = MutableStateFlow<String?>(null)
-    val timelapseMessage: StateFlow<String?> = _timelapseMessage.asStateFlow()
+    // The manual timelapse run's state machine (Idle / Running / Done) —
+    // the old two-flow shape (busy + message) never reset its message, so a
+    // stale success/failure line persisted into the next run; the machine's
+    // Running re-assert at each run's start is the fix.
+    private val _timelapseState = MutableStateFlow<TimelapseState>(TimelapseState.Idle)
+    val timelapseState: StateFlow<TimelapseState> = _timelapseState.asStateFlow()
 
     /** The persisted auto-assemble-on-completion toggle. */
     val autoTimelapseEnabled: StateFlow<Boolean> = settingsDataStore.autoTimelapseEnabled
@@ -128,8 +130,10 @@ class CaptureViewModel(
 
     /** Assemble the most recent interval photos into an MP4 timelapse. */
     fun assembleTimelapse(lastN: Int = 100, fps: Int = 30) {
-        if (_timelapseBusy.value) return
-        _timelapseBusy.value = true
+        if (_timelapseState.value is TimelapseState.Running) return
+        // Running at the START of each run — the previous run's Done stops
+        // rendering the moment a new one begins.
+        _timelapseState.value = TimelapseState.Running
         viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
             try {
                 // The one timelapse pipeline: source selection, decrypting
@@ -137,30 +141,20 @@ class CaptureViewModel(
                 // publish seam all live in the composer (shared with the
                 // interval worker's auto-assembly). Output never lands in a
                 // legacy public folder as plaintext.
-                when (val result = timelapseComposer?.assembleLatest(lastN, fps)) {
-                    null -> _timelapseMessage.value =
-                        context.getString(R.string.capture_timelapse_failed)
-                    is TimelapseComposer.Result.Saved ->
-                        _timelapseMessage.value =
-                            context.getString(
-                                R.string.capture_timelapse_saved,
-                                result.fileName,
-                                result.frameCount,
-                            )
-                    is TimelapseComposer.Result.NotSaved -> _timelapseMessage.value = when (result.reason) {
-                        TimelapseComposer.Reason.NOT_ENOUGH_SOURCES ->
-                            context.getString(R.string.capture_timelapse_need_photos, TimelapseAssembler.MIN_SOURCES)
-                        TimelapseComposer.Reason.UNREADABLE_SOURCES ->
-                            context.getString(R.string.capture_timelapse_unreadable, result.detail)
-                        else ->
-                            context.getString(R.string.capture_timelapse_failed)
-                    }
-                }
+                val result = timelapseComposer?.assembleLatest(lastN, fps)
+                    // A missing composer is the failed shape (the message
+                    // mapping folds it onto the same "Timelapse failed" text
+                    // the old null branch rendered).
+                    ?: TimelapseComposer.Result.NotSaved(TimelapseComposer.Reason.ASSEMBLY_FAILED)
+                _timelapseState.value = TimelapseState.Done(result)
             } catch (e: Exception) {
                 Log.e(TAG, "Timelapse failed", e)
-                _timelapseMessage.value = context.getString(R.string.capture_timelapse_failed)
-            } finally {
-                _timelapseBusy.value = false
+                _timelapseState.value = TimelapseState.Done(
+                    TimelapseComposer.Result.NotSaved(
+                        TimelapseComposer.Reason.ASSEMBLY_FAILED,
+                        e.message ?: "",
+                    ),
+                )
             }
         }
     }

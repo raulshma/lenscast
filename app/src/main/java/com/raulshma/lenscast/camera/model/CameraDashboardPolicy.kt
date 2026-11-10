@@ -2,6 +2,7 @@ package com.raulshma.lenscast.camera.model
 
 import androidx.compose.ui.graphics.Color
 import com.raulshma.lenscast.R
+import com.raulshma.lenscast.capture.RecordingState
 import com.raulshma.lenscast.core.NetworkQualityMonitor.ClientStatsSnapshot
 import com.raulshma.lenscast.core.NetworkQualityMonitor.NetworkQualityLevel
 import com.raulshma.lenscast.core.NetworkQualityMonitor.NetworkStatsSnapshot
@@ -53,6 +54,25 @@ object CameraDashboardPolicy {
         tier = serverStatusTier(isActive, isServerRunning),
         viewerCount = clientCount,
     )
+
+    // ── Record button ──
+
+    /** The record button's look as named tiers; the screen maps each tier onto its colors and icon. */
+    enum class RecordButtonTier { IDLE, SCHEDULED, RECORDING }
+
+    /**
+     * The record button's visual verdict over the controller's
+     * [RecordingState] — the same state [RecordingToggle.decide] reads, so
+     * the button's look and its tap verdict never disagree: a live recording
+     * (the finalizing drain included) shows the in-progress tier, an armed
+     * schedule the distinct armed tier, idle the plain record affordance.
+     * Visuals only — the tap verdict stays [RecordingToggle]'s.
+     */
+    fun recordButtonTier(state: RecordingState): RecordButtonTier = when (state) {
+        is RecordingState.Recording -> RecordButtonTier.RECORDING
+        is RecordingState.Scheduled -> RecordButtonTier.SCHEDULED
+        RecordingState.Idle -> RecordButtonTier.IDLE
+    }
 
     // ── Stream shutter button ──
 

@@ -48,7 +48,7 @@ fun GalleryScreen(
     val context = LocalContext.current
     val app = context.applicationContext as AppGraph
     val viewModel: GalleryViewModel = viewModel(
-        factory = GalleryViewModel.Factory(app.captureHistoryStore, app.decryptedPhotoCache, app.appScope)
+        factory = GalleryViewModel.Factory(app.captureHistoryStore, app.gallerySession)
     )
 
     val allItems by viewModel.allItems.collectAsState()
@@ -60,28 +60,31 @@ fun GalleryScreen(
     val decryptedPhotos by viewModel.decryptedPhotos.collectAsState()
     val encryptedVideoIds by viewModel.encryptedVideoIds.collectAsState()
 
-    // The trash/undo surface: staged ids + their count drive the snackbar.
-    val pendingUndoCount by viewModel.pendingUndoCount.collectAsState()
-    val stagedIds by viewModel.stagedIds.collectAsState()
+    // The trash/undo surface: each staged set arms one snackbar state holding
+    // the ids that staging burst put in the trash.
+    val undoSnackbar by viewModel.undoSnackbar.collectAsState()
 
     val overview = remember(allItems) { buildGalleryOverview(allItems) }
     val sections = remember(galleryItems) { buildGallerySections(galleryItems) }
 
-    var showBatchDeleteDialog by remember { mutableStateOf(false) }
+    // The batch-delete dialog's snapshot of the selection at open time: the
+    // plural text and the confirm render from it, so the dialog can never
+    // re-label or delete against a selection that moved under it.
+    var pendingDeleteSelection by remember { mutableStateOf<Set<String>?>(null) }
 
     val snackbarHostState = remember { SnackbarHostState() }
-    // One snackbar per staging burst: "N moved to trash" with the Undo action —
-    // undoing restores every id still staged; expiry dismisses on its own.
+    // One snackbar per staged set: "N moved to trash" with the Undo action —
+    // undoing restores exactly the snapshotted ids, never ids staged after
+    // this snackbar appeared; expiry (the set emptying) dismisses on its own.
     // The strings resolve in composition (they are composable reads); the
-    // effect only uses the resolved values.
-    val trashMessage = if (pendingUndoCount > 0) {
-        pluralStringResource(R.plurals.gallery_trash_snackbar, pendingUndoCount, pendingUndoCount)
-    } else {
-        ""
-    }
+    // effect only uses the resolved values and the snapshot.
+    val trashMessage = undoSnackbar?.let {
+        pluralStringResource(R.plurals.gallery_trash_snackbar, it.count, it.count)
+    } ?: ""
     val undoLabel = stringResource(R.string.gallery_undo)
-    LaunchedEffect(pendingUndoCount) {
-        if (pendingUndoCount == 0) {
+    LaunchedEffect(undoSnackbar) {
+        val snapshot = undoSnackbar
+        if (snapshot == null) {
             snackbarHostState.currentSnackbarData?.dismiss()
         } else {
             val result = snackbarHostState.showSnackbar(
@@ -90,30 +93,31 @@ fun GalleryScreen(
                 withDismissAction = true,
             )
             if (result == SnackbarResult.ActionPerformed) {
-                viewModel.undoStaged(stagedIds.toList())
+                viewModel.undoStaged(snapshot.stagedIds.toList())
             }
         }
     }
 
-    if (showBatchDeleteDialog) {
+    val deleteSelection = pendingDeleteSelection
+    if (deleteSelection != null) {
         AlertDialog(
-            onDismissRequest = { showBatchDeleteDialog = false },
+            onDismissRequest = { pendingDeleteSelection = null },
             title = { Text(stringResource(R.string.gallery_delete_selected_title)) },
             text = {
-                Text(pluralStringResource(R.plurals.gallery_delete_selected_message, selectedIds.size, selectedIds.size))
+                Text(pluralStringResource(R.plurals.gallery_delete_selected_message, deleteSelection.size, deleteSelection.size))
             },
             confirmButton = {
                 TextButton(
                     onClick = {
                         viewModel.deleteSelected()
-                        showBatchDeleteDialog = false
+                        pendingDeleteSelection = null
                     },
                 ) {
                     Text(stringResource(R.string.gallery_delete), color = MaterialTheme.colorScheme.error)
                 }
             },
             dismissButton = {
-                TextButton(onClick = { showBatchDeleteDialog = false }) {
+                TextButton(onClick = { pendingDeleteSelection = null }) {
                     Text(stringResource(R.string.gallery_cancel))
                 }
             },
@@ -168,7 +172,11 @@ fun GalleryScreen(
                     onShareSelected = {
                         shareGalleryMedia(context, allItems.filter { it.id in selectedIds })
                     },
-                    onDeleteSelected = { showBatchDeleteDialog = true },
+                    // Open the dialog against the current selection — only
+                    // when non-empty (the pill's own guard stays).
+                    onDeleteSelected = {
+                        pendingDeleteSelection = selectedIds.takeIf { it.isNotEmpty() }
+                    },
                 )
             }
         },

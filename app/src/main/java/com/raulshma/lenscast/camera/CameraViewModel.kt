@@ -18,6 +18,7 @@ import com.raulshma.lenscast.capture.model.FlashMode
 import com.raulshma.lenscast.capture.model.FlashModePolicy
 import com.raulshma.lenscast.camera.model.CameraInitRetry
 import com.raulshma.lenscast.camera.model.CameraLensInfo
+import com.raulshma.lenscast.camera.model.CountdownState
 import com.raulshma.lenscast.camera.model.CameraSettings
 import com.raulshma.lenscast.camera.model.CameraState
 import com.raulshma.lenscast.camera.model.GridStyle
@@ -58,6 +59,9 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.launch
 
 class CameraViewModel(
@@ -182,10 +186,20 @@ class CameraViewModel(
     private val spiritLevelMonitor = SpiritLevelMonitor(context)
     val levelLineState: StateFlow<LevelIndicatorPolicy.LevelLineState?> = spiritLevelMonitor.lineState
 
-    // The self-timer's exposed remaining-seconds state (null = no countdown
-    // running); every verdict is SelfTimerPolicy's, this keeps only the job.
-    private val _selfTimerSecondsRemaining = MutableStateFlow<Int?>(null)
-    val selfTimerSecondsRemaining: StateFlow<Int?> = _selfTimerSecondsRemaining.asStateFlow()
+    // The self-timer countdown's state machine (Idle → Counting → Firing →
+    // Idle); every transition is SelfTimerPolicy's, this holds the state and
+    // the countdown job only. The initial Counting lands synchronously at
+    // start — before the job launches — so an immediate cancel observes a
+    // counting state instead of the pre-write null the old seconds-nullable
+    // shape allowed.
+    private val _selfTimerState = MutableStateFlow<CountdownState>(CountdownState.Idle)
+    val selfTimerState: StateFlow<CountdownState> = _selfTimerState.asStateFlow()
+
+    // Derived remaining-seconds the countdown overlay renders (null when no
+    // countdown is counting — Idle and Firing both render as "none").
+    val selfTimerSecondsRemaining: StateFlow<Int?> = _selfTimerState
+        .map { (it as? CountdownState.Counting)?.secondsRemaining }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, null)
     private var selfTimerJob: Job? = null
 
     // One-shot signal per actual capture (immediate or timer fire) — the
@@ -276,6 +290,18 @@ class CameraViewModel(
             settingsDataStore.spiritLevelEnabled.collect { spiritLevelMonitor.setEnabled(it) }
         }
 
+        // The persisted self-timer mode is the countdown's source of truth:
+        // flipping it to OFF mid-countdown cancels the countdown, whatever
+        // setter path wrote the mode (the settings screen's dropdown today,
+        // any quick-setting write tomorrow).
+        viewModelScope.launch {
+            settingsDataStore.selfTimer.collect { mode ->
+                if (mode == SelfTimerMode.OFF && _selfTimerState.value is CountdownState.Counting) {
+                    cancelSelfTimerCountdown()
+                }
+            }
+        }
+
         checkPermission()
     }
 
@@ -363,6 +389,9 @@ class CameraViewModel(
     fun stopPreview() {
         cameraService.stopPreview()
         cameraService.setProToolsFrameListener(null)
+        // Drop the retained overlay frame with the preview: a re-enabled
+        // preview must not flash the minutes-old analysis result.
+        proToolsFrameAnalyzer.clear()
         spiritLevelMonitor.setPreviewActive(false)
     }
 
@@ -555,8 +584,8 @@ class CameraViewModel(
 
     /**
      * The shutter press: the capture-now/countdown verdict is SelfTimerPolicy's;
-     * a countdown keeps only the job and the remaining-seconds state and fires
-     * the same [capturePhoto] path at the policy's Fire boundary.
+     * a countdown keeps only the job and the state machine and fires the same
+     * [capturePhoto] path at the policy's Fire boundary.
      */
     fun onShutterPress() {
         when (val press = SelfTimerPolicy.onShutterPress(selfTimer.value)) {
@@ -567,9 +596,11 @@ class CameraViewModel(
 
     private fun startSelfTimerCountdown(countdown: SelfTimerPolicy.ShutterPress.StartCountdown) {
         selfTimerJob?.cancel()
+        // Synchronous, before the job launches: an immediate cancel must see
+        // Counting, or it reads Idle and cannot cancel.
+        _selfTimerState.value = CountdownState.Counting(countdown.initialSeconds)
         selfTimerJob = viewModelScope.launch {
             val startedAtMs = SystemClock.elapsedRealtime()
-            _selfTimerSecondsRemaining.value = countdown.initialSeconds
             while (true) {
                 delay(SelfTimerPolicy.TICK_MS)
                 when (
@@ -579,11 +610,12 @@ class CameraViewModel(
                     )
                 ) {
                     is SelfTimerPolicy.Tick.Counting ->
-                        _selfTimerSecondsRemaining.value = tick.secondsRemaining
+                        _selfTimerState.value = CountdownState.Counting(tick.secondsRemaining)
                     SelfTimerPolicy.Tick.Fire -> {
-                        _selfTimerSecondsRemaining.value = null
+                        _selfTimerState.value = CountdownState.Firing
                         selfTimerJob = null
                         capturePhoto()
+                        _selfTimerState.value = CountdownState.Idle
                         return@launch
                     }
                 }
@@ -593,13 +625,18 @@ class CameraViewModel(
 
     /** A tap while the countdown runs cancels it (the verdict is SelfTimerPolicy's). */
     fun cancelSelfTimer() {
-        if (SelfTimerPolicy.onTap(_selfTimerSecondsRemaining.value != null) ==
+        if (SelfTimerPolicy.onTap(_selfTimerState.value is CountdownState.Counting) ==
             SelfTimerPolicy.TapVerdict.CANCEL_COUNTDOWN
         ) {
-            selfTimerJob?.cancel()
-            selfTimerJob = null
-            _selfTimerSecondsRemaining.value = null
+            cancelSelfTimerCountdown()
         }
+    }
+
+    /** The one cancel seam: kill the job and return the machine to Idle. */
+    private fun cancelSelfTimerCountdown() {
+        selfTimerJob?.cancel()
+        selfTimerJob = null
+        _selfTimerState.value = CountdownState.Idle
     }
 
     fun capturePhoto() {

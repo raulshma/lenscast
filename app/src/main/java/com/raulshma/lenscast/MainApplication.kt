@@ -40,6 +40,7 @@ import com.raulshma.lenscast.core.mqtt.MqttAlertPublisher
 import com.raulshma.lenscast.core.mqtt.MqttTopics
 import com.raulshma.lenscast.data.CaptureHistoryStore
 import com.raulshma.lenscast.data.SettingsDataStore
+import com.raulshma.lenscast.gallery.GallerySession
 import com.raulshma.lenscast.core.NetworkUtils
 import com.raulshma.lenscast.settings.SettingsApplier
 import com.raulshma.lenscast.streaming.ServerForegroundController
@@ -100,6 +101,16 @@ class MainApplication : Application(), SingletonImageLoader.Factory, AppGraph {
             // A capture's decrypted-photo cache file dies with the capture —
             // whatever removed it (manual, batch, retention, quota).
             onEntriesDeleted = { deleted -> decryptedPhotoCache.deleteAll(deleted) },
+        )
+    }
+    // The gallery package's one session (undo staging + decryption warm
+    // loop) — the AppGraph member the gallery screens read instead of
+    // reaching into the store and cache separately.
+    override val gallerySession: GallerySession by lazy {
+        GallerySession(
+            captureHistoryStore = captureHistoryStore,
+            photoCache = decryptedPhotoCache,
+            appScope = appScope,
         )
     }
     override val recordingController: RecordingController by lazy { RecordingController(this) }
@@ -576,14 +587,19 @@ class MainApplication : Application(), SingletonImageLoader.Factory, AppGraph {
      * Quick Settings tile or the Web API must not leave the home-screen
      * widget's label stale, so the manager's live output flows re-render the
      * widget on every transition. The refresh is idempotent and cheap, and
-     * the two outputs share one collector.
+     * the collector covers all five live outputs (web, RTSP, and the
+     * RTMP/WHIP/SRT push statuses) — a push-only stream must not leave the
+     * widget reading "Idle" while [StreamingManager.isLiveStreaming] is true.
      */
     private fun initializeWidgetRefresh() {
         appScope.launch {
             combine(
                 streamingManager.isWebStreamingActive,
                 streamingManager.isRtspRunning,
-            ) { webActive, rtspActive -> webActive to rtspActive }
+                streamingManager.rtmpStatus,
+                streamingManager.whipStatus,
+                streamingManager.srtStatus,
+            ) { _, _, _, _, _ -> }
                 .collect {
                     StreamWidgetProvider.refresh(this@MainApplication)
                 }

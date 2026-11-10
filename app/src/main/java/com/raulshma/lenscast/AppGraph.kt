@@ -20,6 +20,7 @@ import com.raulshma.lenscast.core.push.PushSubscriptionStore
 import com.raulshma.lenscast.core.push.VapidKeys
 import com.raulshma.lenscast.data.CaptureHistoryStore
 import com.raulshma.lenscast.data.SettingsDataStore
+import com.raulshma.lenscast.gallery.GallerySession
 import com.raulshma.lenscast.streaming.StreamingManager
 import com.raulshma.lenscast.streaming.StreamingSession
 import com.raulshma.lenscast.update.UpdateChecker
@@ -54,6 +55,14 @@ interface AppGraph {
     val mediaKeyProvider: MediaCrypto.KeyProvider
     val decryptedPhotoCache: DecryptedPhotoCache
     val captureHistoryStore: CaptureHistoryStore
+    /**
+     * The gallery's shared session: the one soft-delete staging truth
+     * (pending set, undo, commit poller) plus the warm-decryption maps.
+     * App-scoped so the gallery and viewer routes act on the same staged set
+     * through one [com.raulshma.lenscast.gallery.GalleryViewModel] family
+     * instead of two NavBackStackEntry-scoped copies.
+     */
+    val gallerySession: GallerySession
     val recordingController: RecordingController
     val timelapseComposer: TimelapseComposer
     val photoCaptureManager: PhotoCaptureManager

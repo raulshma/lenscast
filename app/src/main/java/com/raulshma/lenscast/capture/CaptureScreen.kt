@@ -15,6 +15,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material.icons.filled.Schedule
+import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material3.Button
@@ -46,6 +47,9 @@ import com.raulshma.lenscast.R
 import com.raulshma.lenscast.capture.model.FlashMode
 import com.raulshma.lenscast.capture.model.RecordingConfig
 import com.raulshma.lenscast.capture.model.RecordingQuality
+import com.raulshma.lenscast.capture.model.TimelapseMessage
+import com.raulshma.lenscast.capture.model.TimelapseState
+import com.raulshma.lenscast.capture.model.timelapseMessage
 import com.raulshma.lenscast.gallery.formatDuration
 import com.raulshma.lenscast.settings.DropdownSetting
 import com.raulshma.lenscast.settings.SettingsSection
@@ -122,21 +126,47 @@ fun CaptureScreen(
                             )
                             Text(stringResource(R.string.capture_photo), modifier = Modifier.padding(start = 8.dp))
                         }
+                        // The quick record button reads the controller's full
+                        // state, not the lossy isRecording: an armed schedule
+                        // shows the distinct armed look (Schedule icon on the
+                        // tertiary container, "recording scheduled"
+                        // description) instead of the plain record
+                        // affordance. The tap semantics stay
+                        // RecordingToggle.decide's — a scheduled start stops
+                        // like a live recording, so both armed tiers label
+                        // the button Stop.
                         Button(
                             onClick = { viewModel.toggleRecording() },
                             modifier = Modifier.weight(1f),
-                            colors = if (isRecording) ButtonDefaults.buttonColors(
-                                containerColor = MaterialTheme.colorScheme.error
-                            ) else ButtonDefaults.buttonColors()
+                            colors = when (recordingState) {
+                                is RecordingState.Recording -> ButtonDefaults.buttonColors(
+                                    containerColor = MaterialTheme.colorScheme.error
+                                )
+                                is RecordingState.Scheduled -> ButtonDefaults.buttonColors(
+                                    containerColor = MaterialTheme.colorScheme.tertiaryContainer
+                                )
+                                RecordingState.Idle -> ButtonDefaults.buttonColors()
+                            }
                         ) {
                             Icon(
-                                Icons.Default.Videocam,
-                                contentDescription = null,
+                                when (recordingState) {
+                                    is RecordingState.Recording -> Icons.Default.Stop
+                                    is RecordingState.Scheduled -> Icons.Default.Schedule
+                                    RecordingState.Idle -> Icons.Default.Videocam
+                                },
+                                contentDescription = if (recordingState is RecordingState.Scheduled) {
+                                    stringResource(R.string.capture_recording_scheduled_cd)
+                                } else {
+                                    null
+                                },
                                 modifier = Modifier.size(18.dp)
                             )
                             Text(
-                                if (isRecording) stringResource(R.string.capture_stop)
-                                else stringResource(R.string.capture_record),
+                                if (recordingState is RecordingState.Idle) {
+                                    stringResource(R.string.capture_record)
+                                } else {
+                                    stringResource(R.string.capture_stop)
+                                },
                                 modifier = Modifier.padding(start = 8.dp)
                             )
                         }
@@ -206,8 +236,7 @@ fun CaptureScreen(
                         }
                     }
                     Spacer(modifier = Modifier.height(8.dp))
-                    val timelapseBusy by viewModel.timelapseBusy.collectAsState()
-                    val timelapseMessage by viewModel.timelapseMessage.collectAsState()
+                    val timelapseState by viewModel.timelapseState.collectAsState()
                     // The completion handoff's master toggle: when a series
                     // finishes, the shared composer assembles a timelapse
                     // automatically (bounded by the completion policy).
@@ -219,15 +248,41 @@ fun CaptureScreen(
                     )
                     OutlinedButton(
                         onClick = { viewModel.assembleTimelapse() },
-                        enabled = !timelapseBusy,
+                        enabled = timelapseState !is TimelapseState.Running,
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Text(
-                            if (timelapseBusy) stringResource(R.string.capture_assembling)
-                            else stringResource(R.string.capture_assemble_timelapse)
+                            if (timelapseState is TimelapseState.Running) {
+                                stringResource(R.string.capture_assembling)
+                            } else {
+                                stringResource(R.string.capture_assemble_timelapse)
+                            }
                         )
                     }
-                    timelapseMessage?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+                    // The run's outcome, from the state machine's Done: the
+                    // pure mapping decides which resource each result maps
+                    // onto; Running/Idle render no message line (a Done stops
+                    // showing as soon as the next run goes Running).
+                    (timelapseState as? TimelapseState.Done)?.let { done ->
+                        val message = timelapseMessage(done.result)
+                        val text = when (message) {
+                            is TimelapseMessage.Saved -> stringResource(
+                                R.string.capture_timelapse_saved,
+                                message.fileName,
+                                message.frameCount,
+                            )
+                            is TimelapseMessage.NeedSources -> stringResource(
+                                R.string.capture_timelapse_need_photos,
+                                message.minSources,
+                            )
+                            is TimelapseMessage.Unreadable -> stringResource(
+                                R.string.capture_timelapse_unreadable,
+                                message.detail,
+                            )
+                            TimelapseMessage.Failed -> stringResource(R.string.capture_timelapse_failed)
+                        }
+                        Text(text, style = MaterialTheme.typography.bodySmall)
+                    }
                 }
             }
 

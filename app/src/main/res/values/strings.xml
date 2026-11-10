@@ -25,6 +25,7 @@
     <string name="camera_collapse_quick_settings_cd">Collapse quick settings</string>
     <string name="camera_stop_recording_cd">Stop recording</string>
     <string name="camera_record_video_cd">Record video</string>
+    <string name="camera_recording_scheduled_cd">Recording scheduled</string>
     <string name="camera_capture_photo_cd">Capture photo</string>
     <string name="camera_permission_title">Camera access required</string>
     <string name="camera_permission_rationale">LensCast needs camera access for the live preview and microphone for audio streaming and recordings.</string>
@@ -123,6 +124,7 @@
     <string name="capture_duration">Duration (seconds, 0 = unlimited)</string>
     <string name="capture_repeat_interval">Repeat Interval (seconds, 0 = no repeat)</string>
     <string name="capture_clear_schedule_cd">Clear schedule</string>
+    <string name="capture_recording_scheduled_cd">Recording scheduled</string>
     <string name="capture_recording_elapsed">Recording: %1$s</string>
     <string name="capture_stop_recording">Stop Recording</string>
     <string name="capture_set_start_time">Set Start Time</string>
@@ -263,6 +265,7 @@
     <string name="settings_photo_aspect_16_9">16:9</string>
     <string name="settings_photo_aspect_4_3">4:3</string>
     <string name="settings_gps_geotag">GPS Geotag (EXIF)</string>
+    <string name="settings_gps_geotag_degraded">Location permission not granted; photos get credit-only EXIF tags without GPS.</string>
     <string name="settings_section_night_vision">Night Vision / IR</string>
     <string name="settings_mode">Mode</string>
     <string name="settings_section_scene">Scene</string>

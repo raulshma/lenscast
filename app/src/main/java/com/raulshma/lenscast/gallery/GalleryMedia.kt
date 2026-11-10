@@ -101,6 +101,47 @@ fun buildGallerySections(
  */
 fun resolveMediaModel(filePath: String): Any? = CaptureMediaResolver().displayModel(filePath)
 
+/**
+ * The media viewer's resolved display verdict for one recorded path — the
+ * four-way state the old nullable-model-plus-encrypted-set encoding carried
+ * by branch order, made explicit as a type so the viewer's `when` is
+ * exhaustive and branch order can never re-rank the cases.
+ */
+sealed interface ResolvedMedia {
+    /** Plaintext bytes on disk at [file] — load or play them directly. */
+    data class PlainFile(val file: File) : ResolvedMedia
+
+    /** A recorded `content://`/`file://` URI — loaded as recorded, never probed on disk. */
+    data class SchemeUri(val uri: Uri) : ResolvedMedia
+
+    /**
+     * Encrypted at rest: no loadable model exists for the media — the viewer
+     * plays it through the decrypting stream, and thumbnails stay a
+     * placeholder (the grid keeps consulting the encrypted-id set for that).
+     */
+    data object EncryptedVideo : ResolvedMedia
+
+    /** The backing media cannot be resolved (missing or unreadable). */
+    data object Missing : ResolvedMedia
+}
+
+/**
+ * The viewer's full display verdict for a media page. The encrypted-at-rest
+ * verdict wins by TYPE — [filePath] never resolves past
+ * [ResolvedMedia.EncryptedVideo] when [encryptedAtRest] holds, because
+ * ciphertext must never surface as a plain model — and otherwise the
+ * [resolveMediaModel] scheme ladder maps onto [ResolvedMedia.SchemeUri],
+ * [ResolvedMedia.PlainFile], or [ResolvedMedia.Missing].
+ */
+fun resolveViewerMedia(filePath: String, encryptedAtRest: Boolean): ResolvedMedia = when {
+    encryptedAtRest -> ResolvedMedia.EncryptedVideo
+    else -> when (val model = resolveMediaModel(filePath)) {
+        is Uri -> ResolvedMedia.SchemeUri(model)
+        is File -> ResolvedMedia.PlainFile(model)
+        else -> ResolvedMedia.Missing
+    }
+}
+
 fun shareGalleryMedia(context: Context, items: List<CaptureHistory>) {
     if (items.isEmpty()) return
 

@@ -50,7 +50,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -82,12 +81,22 @@ import com.raulshma.lenscast.capture.model.CaptureType
 import com.raulshma.lenscast.ui.animation.LocalAnimatedVisibilityScope
 import com.raulshma.lenscast.ui.animation.LocalSharedTransitionScope
 
+/**
+ * The viewer's delete dialog snapshot: the item the dialog was opened for —
+ * its id (what the confirm deletes) and its file name (what the text shows).
+ * Taken when the delete button opens the dialog, so a list change while the
+ * dialog is open can neither re-label it with another item's name nor
+ * re-target the confirm at whatever the pager now shows.
+ */
+private data class DeleteTarget(val id: String, val fileName: String)
+
 @Composable
 fun MediaViewerScreen(
     allItems: List<CaptureHistory>,
     initialMediaId: String,
     pagerState: PagerState,
-    onDeleteCurrent: () -> Unit,
+    /** The snapshotted id the delete dialog confirmed against. */
+    onDelete: (String) -> Unit,
     onToggleFavorite: (String) -> Unit = {},
     onNavigateBack: () -> Unit,
     /** Encrypted-at-rest photos' decrypted cache files, keyed by history id. */
@@ -103,25 +112,26 @@ fun MediaViewerScreen(
     }
 
     val context = LocalContext.current
-    var showDeleteDialog by remember { mutableStateOf(false) }
+    var deleteTarget by remember { mutableStateOf<DeleteTarget?>(null) }
     var detailsExpanded by remember { mutableStateOf(true) }
     val coroutineScope = rememberCoroutineScope()
 
     val currentIndex = pagerState.currentPage
     val mediaItem = allItems.getOrElse(currentIndex) { allItems.first() }
 
-    if (showDeleteDialog) {
+    val pendingDelete = deleteTarget
+    if (pendingDelete != null) {
         AlertDialog(
-            onDismissRequest = { showDeleteDialog = false },
+            onDismissRequest = { deleteTarget = null },
             title = { Text(stringResource(R.string.gallery_delete)) },
-            text = { Text(stringResource(R.string.gallery_delete_item_message, mediaItem.fileName)) },
+            text = { Text(stringResource(R.string.gallery_delete_item_message, pendingDelete.fileName)) },
             confirmButton = {
-                TextButton(onClick = { showDeleteDialog = false; onDeleteCurrent() }) {
+                TextButton(onClick = { deleteTarget = null; onDelete(pendingDelete.id) }) {
                     Text(stringResource(R.string.gallery_delete), color = MaterialTheme.colorScheme.error)
                 }
             },
             dismissButton = {
-                TextButton(onClick = { showDeleteDialog = false }) { Text(stringResource(R.string.gallery_cancel)) }
+                TextButton(onClick = { deleteTarget = null }) { Text(stringResource(R.string.gallery_cancel)) }
             },
         )
     }
@@ -195,7 +205,9 @@ fun MediaViewerScreen(
                         tint = if (mediaItem.favorite) MaterialTheme.colorScheme.primary else Color.White,
                     )
                 }
-                IconButton(onClick = { showDeleteDialog = true }) {
+                // The delete dialog snapshots the item it is opened for; the
+                // dialog renders and confirms against that snapshot.
+                IconButton(onClick = { deleteTarget = DeleteTarget(mediaItem.id, mediaItem.fileName) }) {
                     Icon(Icons.Default.Delete, contentDescription = stringResource(R.string.gallery_delete_cd), tint = Color.White)
                 }
             }
@@ -259,9 +271,12 @@ private fun PhotoViewer(
 ) {
     val sharedTransitionScope = LocalSharedTransitionScope.current
     val animatedVisibilityScope = LocalAnimatedVisibilityScope.current
-    var scale by remember { mutableFloatStateOf(1f) }
-    var offsetX by remember { mutableFloatStateOf(0f) }
-    var offsetY by remember { mutableFloatStateOf(0f) }
+    // One holder for the gesture state: the scale/pan triple every handler
+    // writes atomically through [ViewerZoomPolicy.Transform] copies. The
+    // viewport measurement stays a separate state — Transform carries only
+    // the transform the policy returns; the viewport is the input it clamps
+    // against, not part of the output.
+    var transform by remember { mutableStateOf(ViewerZoomPolicy.Transform(1f, 0f, 0f)) }
     var viewport by remember { mutableStateOf(IntSize.Zero) }
     val imageModel = decryptedModel ?: resolveMediaModel(filePath)
 
@@ -273,27 +288,21 @@ private fun PhotoViewer(
                 // The gesture math is ViewerZoomPolicy's — the screen only
                 // normalizes coordinates and applies the returned transform.
                 detectTapGestures(onDoubleTap = {
-                    val next = ViewerZoomPolicy.onDoubleTap(scale)
-                    scale = next.scale
-                    offsetX = next.offsetX
-                    offsetY = next.offsetY
+                    transform = ViewerZoomPolicy.onDoubleTap(transform.scale)
                 })
             }
             .pointerInput(Unit) {
                 detectTransformGestures { _, pan, zoom, _ ->
-                    val next = ViewerZoomPolicy.onTransform(
-                        currentScale = scale,
-                        currentOffsetX = offsetX,
-                        currentOffsetY = offsetY,
+                    transform = ViewerZoomPolicy.onTransform(
+                        currentScale = transform.scale,
+                        currentOffsetX = transform.offsetX,
+                        currentOffsetY = transform.offsetY,
                         zoom = zoom,
                         panX = pan.x,
                         panY = pan.y,
                         viewportWidth = viewport.width.toFloat(),
                         viewportHeight = viewport.height.toFloat(),
                     )
-                    scale = next.scale
-                    offsetX = next.offsetX
-                    offsetY = next.offsetY
                 }
             },
         contentAlignment = Alignment.Center,
@@ -315,10 +324,10 @@ private fun PhotoViewer(
                         } else Modifier
                     )
                     .graphicsLayer {
-                        scaleX = scale
-                        scaleY = scale
-                        translationX = offsetX
-                        translationY = offsetY
+                        scaleX = transform.scale
+                        scaleY = transform.scale
+                        translationX = transform.offsetX
+                        translationY = transform.offsetY
                     }
                     .onSizeChanged { viewport = it },
                 contentScale = ContentScale.Fit,
@@ -333,18 +342,20 @@ private fun PhotoViewer(
 private fun VideoViewer(filePath: String, encrypted: Boolean) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val app = context.applicationContext as com.raulshma.lenscast.AppGraph
-    val resolved = resolveMediaModel(filePath)
+    // The four-way display verdict, resolved as a type: encryption wins by
+    // TYPE inside resolveViewerMedia, so this when is exhaustive and order-free.
+    val resolved = resolveViewerMedia(filePath, encrypted)
     val exoPlayer = androidx.compose.runtime.remember {
         androidx.media3.exoplayer.ExoPlayer.Builder(context).build().apply {
             repeatMode = androidx.media3.common.Player.REPEAT_MODE_OFF
         }
     }
-    androidx.compose.runtime.DisposableEffect(resolved, encrypted) {
-        when {
+    androidx.compose.runtime.DisposableEffect(resolved) {
+        when (resolved) {
             // Encrypted at rest: the media never exists as plaintext bytes the
             // player could open, so playback rides the decrypting DataSource
             // (seeks are sequential decrypt-and-discard — see the source).
-            encrypted -> {
+            ResolvedMedia.EncryptedVideo -> {
                 val resolver = com.raulshma.lenscast.capture.CaptureMediaResolver(
                     context.contentResolver,
                     app.mediaKeyProvider,
@@ -360,18 +371,19 @@ private fun VideoViewer(filePath: String, encrypted: Boolean) {
                 exoPlayer.prepare()
                 exoPlayer.playWhenReady = true
             }
-            resolved is android.net.Uri -> {
-                exoPlayer.setMediaItem(androidx.media3.common.MediaItem.fromUri(resolved))
+            is ResolvedMedia.SchemeUri -> {
+                exoPlayer.setMediaItem(androidx.media3.common.MediaItem.fromUri(resolved.uri))
                 exoPlayer.prepare()
                 exoPlayer.playWhenReady = true
             }
-            resolved is java.io.File -> {
+            is ResolvedMedia.PlainFile -> {
                 exoPlayer.setMediaItem(
-                    androidx.media3.common.MediaItem.fromUri(android.net.Uri.fromFile(resolved))
+                    androidx.media3.common.MediaItem.fromUri(android.net.Uri.fromFile(resolved.file))
                 )
                 exoPlayer.prepare()
                 exoPlayer.playWhenReady = true
             }
+            ResolvedMedia.Missing -> Unit
         }
         onDispose { exoPlayer.stop() }
     }
@@ -380,18 +392,19 @@ private fun VideoViewer(filePath: String, encrypted: Boolean) {
     }
 
     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        if (resolved != null) {
-            AndroidView(
-                modifier = Modifier.fillMaxSize(),
-                factory = { ctx ->
-                    androidx.media3.ui.PlayerView(ctx).apply {
-                        player = exoPlayer
-                        useController = true
-                    }
-                },
-            )
-        } else {
-            ViewerUnavailable(icon = Icons.Default.Videocam, label = stringResource(R.string.gallery_video_unavailable))
+        when (resolved) {
+            ResolvedMedia.Missing ->
+                ViewerUnavailable(icon = Icons.Default.Videocam, label = stringResource(R.string.gallery_video_unavailable))
+            else ->
+                AndroidView(
+                    modifier = Modifier.fillMaxSize(),
+                    factory = { ctx ->
+                        androidx.media3.ui.PlayerView(ctx).apply {
+                            player = exoPlayer
+                            useController = true
+                        }
+                    },
+                )
         }
     }
 }

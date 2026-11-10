@@ -2,6 +2,8 @@ package com.raulshma.lenscast.camera.model
 
 import androidx.compose.ui.graphics.Color
 import com.raulshma.lenscast.R
+import com.raulshma.lenscast.capture.RecordingState
+import com.raulshma.lenscast.capture.model.RecordingConfig
 import com.raulshma.lenscast.core.NetworkQualityMonitor.ClientStatsSnapshot
 import com.raulshma.lenscast.core.NetworkQualityMonitor.NetworkQualityLevel
 import com.raulshma.lenscast.core.NetworkQualityMonitor.NetworkStatsSnapshot
@@ -123,6 +125,35 @@ class CameraDashboardPolicyTest {
         assertEquals(Color.White.copy(alpha = 0.35f), visual.tint)
         assertEquals(CameraDashboardPolicy.StreamKind.RTSP, visual.kind)
         assertFalse(visual.clickEnabled)
+    }
+
+    // ── record button ──
+
+    @Test
+    fun `record button tier ladder is idle then scheduled then recording`() {
+        assertEquals(
+            CameraDashboardPolicy.RecordButtonTier.IDLE,
+            CameraDashboardPolicy.recordButtonTier(RecordingState.Idle),
+        )
+        assertEquals(
+            CameraDashboardPolicy.RecordButtonTier.SCHEDULED,
+            CameraDashboardPolicy.recordButtonTier(
+                RecordingState.Scheduled(startAtMs = 0L, config = RecordingConfig()),
+            ),
+        )
+        assertEquals(
+            CameraDashboardPolicy.RecordButtonTier.RECORDING,
+            CameraDashboardPolicy.recordButtonTier(
+                RecordingState.Recording(startedAtMs = 0L, config = null),
+            ),
+        )
+        assertEquals(
+            // The finalizing drain is still a live recording: in-progress.
+            CameraDashboardPolicy.RecordButtonTier.RECORDING,
+            CameraDashboardPolicy.recordButtonTier(
+                RecordingState.Recording(startedAtMs = 0L, config = null, finalizing = true),
+            ),
+        )
     }
 
     // ── thermal banner ──

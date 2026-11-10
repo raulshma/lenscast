@@ -225,14 +225,26 @@ class CameraService(private val context: Context) {
     fun setZoomRatio(ratio: Float): Boolean {
         val cam = camera ?: return false
         return try {
-            val max = cam.cameraInfo.zoomState.value?.maxZoomRatio
-                ?: com.raulshma.lenscast.camera.model.CameraSettings.ZOOM_RATIO_MAX
-            cam.cameraControl.setZoomRatio(ratio.coerceIn(1f, max))
+            cam.cameraControl.setZoomRatio(clampZoom(ratio, cam))
             true
         } catch (e: Exception) {
             Log.w(TAG, "setZoomRatio failed", e)
             false
         }
+    }
+
+    /**
+     * The one zoom clamp for both zoom paths (the settings-apply path and the
+     * remote one): the live device range, floored at 1x, falling open to the
+     * persistence ceiling before the first zoom state arrives. Sharing the
+     * clamp keeps a zoom preset requested for a wide-range lens from
+     * desyncing when a smaller-range lens is selected — the apply path would
+     * otherwise send the raw persisted ratio past the lens's max.
+     */
+    private fun clampZoom(ratio: Float, cam: Camera): Float {
+        val max = cam.cameraInfo.zoomState.value?.maxZoomRatio
+            ?: CameraSettings.ZOOM_RATIO_MAX
+        return ratio.coerceIn(1f, max)
     }
 
     /**
@@ -1237,17 +1249,25 @@ class CameraService(private val context: Context) {
 
     fun applyPendingResolution() {
         val res = pendingResolution ?: return
-        pendingResolution = null
-        currentResolution = res
+        // Consult BEFORE clearing: a Noop verdict (an exclusive session
+        // started between the park and this flush) must keep the change
+        // parked — a later resume's flush re-reads it. Clearing first would
+        // silently drop the parked change, and [currentResolution] must stay
+        // on the bound size so the settings path keeps seeing the change as
+        // pending.
         when (
             val action = CameraSessionArbiter.decide(
                 demandState(CameraSessionArbiter.Trigger.RebindIfFree)
             )
         ) {
-            is CameraSessionArbiter.BindingAction -> executeBinding(action)
-            else -> {}
+            is CameraSessionArbiter.BindingAction -> {
+                pendingResolution = null
+                currentResolution = res
+                executeBinding(action)
+                Log.d(TAG, "applyPendingResolution: applied deferred resolution $res")
+            }
+            else -> Log.d(TAG, "applyPendingResolution: camera busy; resolution $res stays parked")
         }
-        Log.d(TAG, "applyPendingResolution: applied deferred resolution $res")
     }
 
     @androidx.annotation.OptIn(androidx.camera.camera2.interop.ExperimentalCamera2Interop::class)
@@ -1255,7 +1275,7 @@ class CameraService(private val context: Context) {
         val cam = camera ?: return
 
         try {
-            cam.cameraControl.setZoomRatio(settings.zoomRatio)
+            cam.cameraControl.setZoomRatio(clampZoom(settings.zoomRatio, cam))
         } catch (e: Exception) {
             Log.w(TAG, "Zoom failed", e)
         }

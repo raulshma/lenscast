@@ -66,11 +66,14 @@ fun DetectionEventsScreen(
     val context = LocalContext.current
     val store = (context.applicationContext as AppGraph).detectionEventStore
     val scope = rememberCoroutineScope()
-    var filter by remember { mutableStateOf<String?>(null) }
+    // The active filter as the EventKind itself (null = ALL): the chips toggle
+    // enum values and the list match on the kind's wire name.
+    var filter by remember { mutableStateOf<EventKind?>(null) }
     var events by remember { mutableStateOf(store.events()) }
 
     // Live tail: every record or clip-link update re-reads the store (the
     // flow carries the event, but the filter needs the whole list anyway).
+    // clear() emits nothing on the flow, so its handler re-reads too.
     LaunchedEffect(Unit) {
         store.eventsFlow.collect {
             events = store.events()
@@ -99,9 +102,9 @@ fun DetectionEventsScreen(
             ) {
                 listOf(
                     stringResource(R.string.detection_filter_all) to null,
-                    stringResource(R.string.detection_filter_motion) to EventKind.MOTION.wireName,
-                    stringResource(R.string.detection_filter_sound) to EventKind.SOUND.wireName,
-                    stringResource(R.string.detection_filter_tamper) to EventKind.TAMPER.wireName,
+                    stringResource(R.string.detection_filter_motion) to EventKind.MOTION,
+                    stringResource(R.string.detection_filter_sound) to EventKind.SOUND,
+                    stringResource(R.string.detection_filter_tamper) to EventKind.TAMPER,
                 ).forEach { (label, kind) ->
                     Surface(
                         onClick = { filter = kind },
@@ -138,7 +141,8 @@ fun DetectionEventsScreen(
             }
 
             val filtered = remember(events, filter) {
-                events.filter { filter == null || it.type == filter }
+                val active = filter
+                events.filter { active == null || it.type == active.wireName }
             }
             if (filtered.isEmpty()) {
                 Text(

@@ -162,7 +162,7 @@ fun NavigationGraph() {
                 ) { backStackEntry ->
                     val mediaId = backStackEntry.arguments?.getString("mediaId") ?: ""
                     val galleryViewModel: GalleryViewModel = viewModel(
-                        factory = GalleryViewModel.Factory(app.captureHistoryStore, app.decryptedPhotoCache, app.appScope)
+                        factory = GalleryViewModel.Factory(app.captureHistoryStore, app.gallerySession)
                     )
                     // The viewer's list excludes staged (pending-undo) deletes,
                     // so a staged delete advances the pager like a real one.
@@ -191,8 +191,6 @@ fun NavigationGraph() {
                         }
                     }
 
-                    val currentItem = allItems.getOrNull(pagerState.currentPage)
-
                     CompositionLocalProvider(LocalAnimatedVisibilityScope provides this@composable) {
                         MediaViewerScreen(
                             allItems = allItems,
@@ -201,9 +199,12 @@ fun NavigationGraph() {
                             onNavigateBack = { navController.popBackStack() },
                             decryptedPhotos = decryptedPhotos,
                             encryptedVideoIds = encryptedVideoIds,
-                            onDeleteCurrent = {
+                            onDelete = { id ->
+                                // The dialog confirmed against its snapshotted
+                                // id — the item the user saw, even if the list
+                                // moved under the open dialog.
                                 val currentIdx = pagerState.currentPage
-                                currentItem?.id?.let { galleryViewModel.deleteItem(it) }
+                                galleryViewModel.deleteItem(id)
                                 // The pager lands on the delete-fallback neighbor
                                 // through the resync effect; pop only when the
                                 // gallery is now empty.

@@ -3,56 +3,66 @@ package com.raulshma.lenscast.gallery
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
-import com.raulshma.lenscast.capture.DecryptedPhotoCache
 import com.raulshma.lenscast.capture.model.CaptureHistory
 import com.raulshma.lenscast.capture.model.CaptureType
 import com.raulshma.lenscast.data.CaptureHistoryStore
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
-import kotlinx.coroutines.isActive
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
-import java.io.File
+import kotlinx.coroutines.flow.update
 
 enum class GalleryFilter {
     ALL, PHOTOS, VIDEOS, FAVORITES
 }
 
+/**
+ * The selection bucket behind the grid's select mode: whether the mode is
+ * [active] and which ids are checked. One atomic state so a mode flip and an
+ * id edit can never tear (the old pair of flows could briefly disagree).
+ *
+ * Writers: [GalleryViewModel.setSelectMode], [GalleryViewModel.toggleSelect],
+ * [GalleryViewModel.selectAll], [GalleryViewModel.selectNone],
+ * [GalleryViewModel.deleteSelected]. Readers: the derived
+ * [GalleryViewModel.selectMode]/[GalleryViewModel.selectedIds] maps, consumed
+ * by GalleryScreen and on into GalleryChrome/GalleryGrid.
+ */
+data class SelectionState(
+    val active: Boolean = false,
+    val ids: Set<String> = emptySet(),
+)
+
+/**
+ * One undo snackbar's snapshot of the staged set: taken when a stage armed
+ * the snackbar, so the screen renders the count from it and routes Undo to
+ * exactly [stagedIds] — never to the live set, which the session's commit
+ * poller and later stages keep changing behind the open snackbar.
+ */
+data class UndoSnackbarState(
+    /** The ids this snackbar's Undo unstages, in no particular order. */
+    val stagedIds: Set<String>,
+) {
+    /** The "N moved to trash" count: this snapshot's size. */
+    val count: Int get() = stagedIds.size
+}
+
 class GalleryViewModel(
     private val captureHistoryStore: CaptureHistoryStore,
     /**
-     * The decrypted-photo cache behind Coil when media encryption is on;
-     * null (tests, or encryption never relevant) disables the warm loop.
+     * The app-scoped gallery session: the one staging truth (pending deletes,
+     * undo, commit poller) and the warm-decryption maps, shared by the
+     * gallery and viewer routes' ViewModels so a stage in either is visible
+     * in both the moment it happens. This ViewModel only routes calls to it
+     * and derives what its screens render.
      */
-    private val photoCache: DecryptedPhotoCache? = null,
-    /** The undo window length; injectable so tests can shrink it. */
-    private val stagingWindowMs: Long = DeleteStagingPolicy.DEFAULT_WINDOW_MS,
-    /**
-     * Outlives this ViewModel: the onCleared force-commit must finish after
-     * the screen (and its scope) is gone. The app's own scope in production.
-     */
-    private val appScope: CoroutineScope,
+    private val session: GallerySession,
 ) : ViewModel() {
 
     init {
         captureHistoryStore.refreshFromMediaStore()
-        // The decryption warm loop: encrypted photos become cache files the
-        // grid/viewer can hand Coil; encrypted videos are collected into the
-        // placeholder set (they play through the decrypting stream, but their
-        // thumbnails cannot be framed). All sniff/decrypt IO is off-main.
-        if (photoCache != null) {
-            viewModelScope.launch(Dispatchers.IO) {
-                captureHistoryStore.history.collect { items -> warmDecryption(items) }
-            }
-        }
     }
 
     private val _filter = MutableStateFlow(GalleryFilter.ALL)
@@ -64,62 +74,33 @@ class GalleryViewModel(
 
     val allItems: StateFlow<List<CaptureHistory>> = captureHistoryStore.history
 
-    private val _decryptedPhotos = MutableStateFlow<Map<String, File>>(emptyMap())
-
     /**
      * History id → decrypted cache file, for photos that are encrypted at
-     * rest. Absent ids load through their normal model.
+     * rest. Absent ids load through their normal model. Lives on the shared
+     * session; this is the passthrough both routes read.
      */
-    val decryptedPhotos: StateFlow<Map<String, File>> = _decryptedPhotos.asStateFlow()
-
-    private val _encryptedVideoIds = MutableStateFlow<Set<String>>(emptySet())
+    val decryptedPhotos: StateFlow<Map<String, java.io.File>> = session.decryptedPhotos
 
     /** Videos encrypted at rest: the grid/viewer show a placeholder thumbnail. */
-    val encryptedVideoIds: StateFlow<Set<String>> = _encryptedVideoIds.asStateFlow()
-
-    private suspend fun warmDecryption(items: List<CaptureHistory>) {
-        val cache = photoCache ?: return
-        val photos = mutableMapOf<String, File>()
-        val videos = mutableSetOf<String>()
-        for (item in items) {
-            when (item.type) {
-                CaptureType.PHOTO ->
-                    cache.ensure(item.id, item.fileName, item.filePath)?.let { photos[item.id] = it }
-                CaptureType.VIDEO ->
-                    if (cache.sniffEncrypted(item.filePath)) videos.add(item.id)
-            }
-        }
-        _decryptedPhotos.value = photos
-        _encryptedVideoIds.value = videos
-    }
+    val encryptedVideoIds: StateFlow<Set<String>> = session.encryptedVideoIds
 
     // ── Soft-delete staging ──
     // Deletes are staged (hidden from the list, media untouched) for the undo
     // window with an Undo snackbar; only the commit pass — after expiry or
-    // screen exit — executes the real MediaStore delete. The verdicts are
-    // [DeleteStagingPolicy]'s; this ViewModel owns the timer and the store
-    // call, and mirrors the pending set into a StateFlow so the grid and the
-    // viewer react to a stage/undo the moment it happens.
-
-    /** Pure staging state: the pending set, expiry, undo, and commit verdicts. */
-    private val staging = DeleteStagingPolicy(stagingWindowMs)
-
-    private val _stagedIds = MutableStateFlow<Set<String>>(emptySet())
+    // leaving the gallery area — executes the real MediaStore delete. The
+    // verdicts are [DeleteStagingPolicy]'s, and the policy, the timer, and
+    // the pending-set publication live on the shared [session]; the derived
+    // lists below keep combining the shared staged set so a stage/undo from
+    // either route re-filters both.
 
     /** The ids staged for deletion (hidden, not yet removed from the store). */
-    val stagedIds: StateFlow<Set<String>> = _stagedIds.asStateFlow()
-
-    private val _pendingUndoCount = MutableStateFlow(0)
-    val pendingUndoCount: StateFlow<Int> = _pendingUndoCount.asStateFlow()
-
-    /** The in-flight commit poller; one at a time, restarted per stage. */
-    private var commitJob: Job? = null
+    val stagedIds: StateFlow<Set<String>> = session.stagedIds
 
     val galleryItems: StateFlow<List<CaptureHistory>> = combine(
         allItems,
         _filter,
         _searchQuery,
-        _stagedIds,
+        session.stagedIds,
     ) { history, filter, query, staged ->
         val filtered = when (filter) {
             GalleryFilter.ALL -> history
@@ -140,16 +121,38 @@ class GalleryViewModel(
      */
     val viewerItems: StateFlow<List<CaptureHistory>> = combine(
         allItems,
-        _stagedIds,
+        session.stagedIds,
     ) { history, staged ->
         history.filterNot { it.id in staged }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
-    private val _selectMode = MutableStateFlow(false)
-    val selectMode: StateFlow<Boolean> = _selectMode.asStateFlow()
+    /**
+     * The selection bucket ([SelectionState]); the public single-purpose
+     * flows below are derived maps so the screens keep reading two flows.
+     */
+    private val selection = MutableStateFlow(SelectionState())
 
-    private val _selectedIds = MutableStateFlow<Set<String>>(emptySet())
-    val selectedIds: StateFlow<Set<String>> = _selectedIds.asStateFlow()
+    /** Whether select mode is on (the top bar / bottom bar swap). */
+    val selectMode: StateFlow<Boolean> = selection
+        .map { it.active }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
+
+    /** The checked ids while select mode is on. */
+    val selectedIds: StateFlow<Set<String>> = selection
+        .map { it.ids }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptySet())
+
+    /**
+     * The undo-snackbar render state: each distinct staged set arms one
+     * [UndoSnackbarState] snapshot (an equal set — e.g. a re-stage refreshing
+     * an existing window — arms nothing new). Eagerly, not WhileSubscribed:
+     * the session's commit poller keeps changing the staged set in the
+     * background, and the value must be current whenever the screen (re)reads
+     * it after being away longer than the subscription grace window.
+     */
+    val undoSnackbar: StateFlow<UndoSnackbarState?> = session.stagedIds
+        .map { ids -> if (ids.isEmpty()) null else UndoSnackbarState(ids) }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, null)
 
     fun setFilter(filter: GalleryFilter) {
         _filter.value = filter
@@ -169,108 +172,80 @@ class GalleryViewModel(
         captureHistoryStore.refreshFromMediaStore()
     }
 
+    /** Exiting select mode clears the ids; entering leaves them untouched. */
     fun setSelectMode(enabled: Boolean) {
-        _selectMode.value = enabled
-        if (!enabled) {
-            _selectedIds.value = emptySet()
+        selection.update { current ->
+            if (enabled) current.copy(active = true) else SelectionState(active = false)
         }
     }
 
     fun toggleSelect(id: String) {
-        val current = _selectedIds.value
-        _selectedIds.value = if (id in current) {
-            current - id
-        } else {
-            current + id
+        selection.update { current ->
+            current.copy(ids = if (id in current.ids) current.ids - id else current.ids + id)
         }
     }
 
+    /** Snapshots the current filtered list into the selection. */
     fun selectAll() {
-        _selectedIds.value = galleryItems.value.mapTo(mutableSetOf()) { it.id }
+        selection.update { current ->
+            current.copy(ids = galleryItems.value.mapTo(mutableSetOf()) { it.id })
+        }
     }
 
+    /** Keeps select mode on with an empty selection (the known behavior). */
     fun selectNone() {
-        _selectedIds.value = emptySet()
+        selection.update { it.copy(ids = emptySet()) }
     }
 
     /** Stages one item's delete; the caller shows the Undo snackbar. */
     fun deleteItem(id: String) {
-        stageAndArm(listOf(id))
+        session.stage(listOf(id))
     }
 
     /** Stages the whole selection; the caller shows the batch Undo snackbar. */
     fun deleteSelected() {
-        val ids = _selectedIds.value.toList()
+        val ids = selection.value.ids.toList()
         if (ids.isEmpty()) return
-        stageAndArm(ids)
-        _selectedIds.value = emptySet()
+        session.stage(ids)
+        // The selection clears but select mode stays on (the known behavior).
+        selection.update { it.copy(ids = emptySet()) }
     }
 
-    /** The undo: unstages the ids — they reappear, nothing was ever deleted. */
+    /** The undo: unstages exactly the given ids — they reappear, nothing was ever deleted. */
     fun undoStaged(ids: List<String>) {
-        staging.undo(ids)
-        publishPendingCount()
-    }
-
-    private fun stageAndArm(ids: List<String>) {
-        staging.stage(ids, System.currentTimeMillis())
-        publishPendingCount()
-        armCommitLoop()
-    }
-
-    private fun publishPendingCount() {
-        val pending = staging.pendingIds()
-        _stagedIds.value = pending.toSet()
-        _pendingUndoCount.value = pending.size
-    }
-
-    /**
-     * The one commit timer: polls the staging policy until nothing is pending,
-     * executing each expired id exactly once through the store's batch delete.
-     * Main-dispatcher confined — the policy is not thread-safe, and every
-     * mutator (stage/undo) runs on the ViewModel's main thread anyway.
-     */
-    private fun armCommitLoop() {
-        if (commitJob?.isActive == true) return
-        commitJob = viewModelScope.launch {
-            while (isActive) {
-                val due = staging.dueForCommit(System.currentTimeMillis())
-                if (due.isNotEmpty()) {
-                    withContext(Dispatchers.IO) { captureHistoryStore.deleteAll(due) }
-                    publishPendingCount()
-                }
-                if (staging.pendingIds().isEmpty()) return@launch
-                delay(COMMIT_POLL_MS)
-            }
-        }
+        session.undoStaged(ids)
     }
 
     override fun onCleared() {
         // Screen exit force-commits whatever is still staged — the documented
-        // "delete now" path; leaving the screen is not an undo. The deletes
-        // are ContentResolver IO: they run on the app scope because this
-        // ViewModel (and its Main confinement) end right here.
-        val due = staging.pendingIds()
-        staging.undoAll()
-        if (due.isNotEmpty()) {
-            appScope.launch {
-                captureHistoryStore.deleteAll(due)
-            }
-        }
+        // "delete now" path; leaving the gallery area is not an undo. The
+        // app-scoped session executes it, so the ContentResolver IO outlives
+        // this ViewModel.
+        //
+        // Why this lives in onCleared rather than a DisposableEffect's
+        // onDispose: Navigation Compose keeps only the top destination
+        // composed — pushing the viewer disposes the gallery screen's
+        // composition (the entry stays in the back stack; this ViewModel does
+        // NOT clear), so an onDispose flush would commit items the user just
+        // staged and can still unstage from the grid. onCleared fires exactly
+        // when the gallery entry is destroyed — popped to the camera, or the
+        // activity finishing — the same trigger the old per-ViewModel
+        // force-commit had. Symmetrically, the viewer's ViewModel never
+        // flushes on its clear (pop back to the grid): its staged ids stay
+        // pending in the shared session with a live undo affordance in the
+        // grid, and the session's expiry poller commits them when their
+        // window lapses.
+        session.flush()
     }
 
     class Factory(
         private val captureHistoryStore: CaptureHistoryStore,
-        private val photoCache: DecryptedPhotoCache? = null,
-        private val appScope: CoroutineScope,
+        /** The app-scoped session both gallery-domain routes share. */
+        private val session: GallerySession,
     ) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
         override fun <T : ViewModel> create(modelClass: Class<T>): T {
-            return GalleryViewModel(captureHistoryStore, photoCache, appScope = appScope) as T
+            return GalleryViewModel(captureHistoryStore, session) as T
         }
-    }
-
-    companion object {
-        private const val COMMIT_POLL_MS = 250L
     }
 }

@@ -45,6 +45,15 @@ class ProToolsFrameAnalyzer(
         }
     }
 
+    /**
+     * Drops the retained frame (the preview-stop path calls this): without
+     * the clear, re-enabling preview renders a minutes-old analysis result
+     * for a tick before the first fresh frame lands.
+     */
+    fun clear() {
+        _frame.value = null
+    }
+
     companion object {
         private const val TAG = "ProToolsAnalyzer"
 

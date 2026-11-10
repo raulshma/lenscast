@@ -30,7 +30,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -118,10 +120,24 @@ fun CameraSettingsScreen(
 
     // Opt-in GPS geotag: the runtime ask happens only on the setting's
     // enable transition, never at launch — the same point-of-need pattern
-    // as the camera screen's first-launch POST_NOTIFICATIONS pass.
+    // as the camera screen's first-launch POST_NOTIFICATIONS pass. The
+    // enable persists only on the launcher's grant; a denial leaves the
+    // setting off, so the degraded credit-only EXIF mode stays an explicit
+    // legacy state (flagged by the caption below) instead of something the
+    // toggle can silently fall into.
+    var locationGranted by remember {
+        mutableStateOf(
+            ContextCompat.checkSelfPermission(
+                context, Manifest.permission.ACCESS_COARSE_LOCATION,
+            ) == PackageManager.PERMISSION_GRANTED
+        )
+    }
     val locationPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
-    ) { }
+    ) { granted ->
+        locationGranted = granted
+        if (granted) viewModel.updateGeotagEnabled(true)
+    }
 
     Scaffold(
         topBar = {
@@ -345,19 +361,32 @@ fun CameraSettingsScreen(
                         title = stringResource(R.string.settings_gps_geotag),
                         checked = geotagEnabled,
                         onCheckedChange = { enabled ->
-                            // The ask rides the setting's first enable only;
-                            // a denied grant degrades to credit-only EXIF.
-                            if (enabled && ContextCompat.checkSelfPermission(
-                                    context, Manifest.permission.ACCESS_COARSE_LOCATION,
-                                ) != PackageManager.PERMISSION_GRANTED
-                            ) {
+                            // Enabling without the location permission asks
+                            // first and persists only on grant; a denial
+                            // leaves the setting off. Disabling (and enabling
+                            // with the permission already in hand) persists
+                            // immediately.
+                            if (enabled && !locationGranted) {
                                 locationPermissionLauncher.launch(
                                     Manifest.permission.ACCESS_COARSE_LOCATION
                                 )
+                            } else {
+                                viewModel.updateGeotagEnabled(enabled)
                             }
-                            viewModel.updateGeotagEnabled(enabled)
                         }
                     )
+                    // The legacy degraded state: geotag persisted on but the
+                    // permission never granted (or since revoked) — captures
+                    // fall back to credit-only EXIF. Says so instead of
+                    // degrading silently.
+                    if (geotagEnabled && !locationGranted) {
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = stringResource(R.string.settings_gps_geotag_degraded),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                 }
             }
 

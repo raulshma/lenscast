@@ -74,6 +74,7 @@ import androidx.compose.material.icons.filled.NightsStay
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PowerSettingsNew
+import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.Tune
@@ -112,6 +113,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -228,6 +230,7 @@ fun CameraScreen(
     val streamStatus by viewModel.streamStatus.collectAsState()
     val thermalState by viewModel.thermalState.collectAsState()
     val isRecording by viewModel.isRecording.collectAsState()
+    val recordingState by viewModel.recordingState.collectAsState()
     val recordingElapsedSeconds by viewModel.recordingElapsedSeconds.collectAsState()
     val wifiConnected by viewModel.wifiConnected.collectAsState()
     val availableLenses by viewModel.availableLenses.collectAsState()
@@ -298,7 +301,9 @@ fun CameraScreen(
     var isPinching by remember { mutableStateOf(false) }
     var pinchZoomRatio by remember { mutableFloatStateOf(1f) }
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    var requestedMissingAudioPermission by remember { mutableStateOf(false) }
+    // Saveable: the once-per-session ask budget must survive rotation, or a
+    // configuration change would re-prompt for an already-denied mic.
+    var requestedMissingAudioPermission by rememberSaveable { mutableStateOf(false) }
 
     LaunchedEffect(cameraState, hasAudioPermission) {
         if (MicAccess.shouldAutoRequest(
@@ -331,6 +336,7 @@ fun CameraScreen(
                 streamStatus = streamStatus,
                 thermalState = thermalState,
                 isRecording = isRecording,
+                recordingState = recordingState,
                 recordingElapsedSeconds = recordingElapsedSeconds,
                 wifiConnected = wifiConnected,
                 availableLenses = availableLenses,
@@ -435,6 +441,7 @@ private fun ImmersiveCameraView(
     streamStatus: com.raulshma.lenscast.camera.model.StreamStatus,
     thermalState: ThermalState,
     isRecording: Boolean,
+    recordingState: com.raulshma.lenscast.capture.RecordingState,
     recordingElapsedSeconds: Int,
     wifiConnected: Boolean,
     availableLenses: List<CameraLensInfo>,
@@ -605,7 +612,7 @@ private fun ImmersiveCameraView(
             zoomRange = zoomRange,
             quickSettingsExpanded = quickSettingsExpanded,
             activeSetting = activeSetting,
-            isRecording = isRecording,
+            recordingState = recordingState,
             onWebStreamToggle = onWebStreamToggle,
             onRtspStreamToggle = onRtspStreamToggle,
             onCapture = onCapture,
@@ -895,7 +902,7 @@ private fun CameraBottomOverlay(
     zoomRange: ClosedFloatingPointRange<Float>,
     quickSettingsExpanded: Boolean,
     activeSetting: QuickSettingType?,
-    isRecording: Boolean,
+    recordingState: com.raulshma.lenscast.capture.RecordingState,
     onWebStreamToggle: () -> Unit,
     onRtspStreamToggle: () -> Unit,
     onCapture: () -> Unit,
@@ -953,7 +960,7 @@ private fun CameraBottomOverlay(
             isRtspStreaming = streamStatus.isRtspActive,
             isWebEnabled = streamStatus.isWebEnabled,
             isRtspEnabled = streamStatus.isRtspEnabled,
-            isRecording = isRecording,
+            recordingState = recordingState,
             quickSettingsExpanded = quickSettingsExpanded,
             onWebStreamToggle = onWebStreamToggle,
             onRtspStreamToggle = onRtspStreamToggle,
@@ -1016,7 +1023,7 @@ private fun ShutterRow(
     isRtspStreaming: Boolean,
     isWebEnabled: Boolean,
     isRtspEnabled: Boolean,
-    isRecording: Boolean,
+    recordingState: com.raulshma.lenscast.capture.RecordingState,
     quickSettingsExpanded: Boolean,
     onWebStreamToggle: () -> Unit,
     onRtspStreamToggle: () -> Unit,
@@ -1024,6 +1031,7 @@ private fun ShutterRow(
     onRecord: () -> Unit,
     onToggleQuickSettings: () -> Unit,
 ) {
+    val recordTier = CameraDashboardPolicy.recordButtonTier(recordingState)
     Surface(
         modifier = Modifier
             .fillMaxWidth()
@@ -1114,18 +1122,40 @@ private fun ShutterRow(
                 }
             }
 
+            // The visual verdict is the policy's, read off the controller's
+            // full state — an armed schedule shows the distinct armed look
+            // instead of the plain record affordance. The tap semantics stay
+            // RecordingToggle.decide's (a scheduled start stops like a live
+            // recording); only the look differentiates here.
             Surface(
                 modifier = Modifier.size(52.dp),
-                color = if (isRecording) RecordingRed else OverlayLight,
+                color = when (recordTier) {
+                    CameraDashboardPolicy.RecordButtonTier.RECORDING -> RecordingRed
+                    CameraDashboardPolicy.RecordButtonTier.SCHEDULED -> OverlayLight
+                    CameraDashboardPolicy.RecordButtonTier.IDLE -> OverlayLight
+                },
                 shape = CircleShape,
                 onClick = onRecord
             ) {
                 Box(contentAlignment = Alignment.Center) {
                     Icon(
-                        imageVector = if (isRecording) Icons.Default.Stop else Icons.Default.FiberManualRecord,
-                        contentDescription = if (isRecording) stringResource(R.string.camera_stop_recording_cd)
-                        else stringResource(R.string.camera_record_video_cd),
-                        tint = if (isRecording) Color.White else RecordingRed,
+                        imageVector = when (recordTier) {
+                            CameraDashboardPolicy.RecordButtonTier.RECORDING -> Icons.Default.Stop
+                            CameraDashboardPolicy.RecordButtonTier.SCHEDULED -> Icons.Default.Schedule
+                            CameraDashboardPolicy.RecordButtonTier.IDLE -> Icons.Default.FiberManualRecord
+                        },
+                        contentDescription = stringResource(
+                            when (recordTier) {
+                                CameraDashboardPolicy.RecordButtonTier.RECORDING -> R.string.camera_stop_recording_cd
+                                CameraDashboardPolicy.RecordButtonTier.SCHEDULED -> R.string.camera_recording_scheduled_cd
+                                CameraDashboardPolicy.RecordButtonTier.IDLE -> R.string.camera_record_video_cd
+                            }
+                        ),
+                        tint = when (recordTier) {
+                            CameraDashboardPolicy.RecordButtonTier.RECORDING -> Color.White
+                            CameraDashboardPolicy.RecordButtonTier.SCHEDULED -> LensOrange
+                            CameraDashboardPolicy.RecordButtonTier.IDLE -> RecordingRed
+                        },
                         modifier = Modifier.size(24.dp)
                     )
                 }
