@@ -22,6 +22,34 @@ import java.util.concurrent.atomic.AtomicBoolean
 abstract class PushStatus(val wireName: String)
 
 /**
+ * The push output's derived lifecycle phase: the [PushStatus] × active pair
+ * collapsed into one name. The wire status alone cannot distinguish the two
+ * [PushPhase.Reconnecting]/[PushPhase.Refused] readings of `Error` — a
+ * publisher that keeps failing while the output is on (retrying with capped
+ * backoff) and a start the validation ladder refused (or a stop that followed
+ * an error) both publish `Error` — but the output's [PushOutput.isActive]
+ * flag splits them, and [PushOutput.phase] folds the two facts. Public so the
+ * status snapshot's inputs can carry the typed phase (the wire strings
+ * themselves stay the [PushStatus.wireName] union and never change).
+ */
+enum class PushPhase {
+    /** Stopped with no error on the status line — the fresh or cleanly-stopped output. */
+    Idle,
+
+    /** Live and between attempts: started, the publisher has not (yet) reported a connection. */
+    Connecting,
+
+    /** Live and retrying: the last attempt failed and the auto-reconnect loop keeps going. */
+    Reconnecting,
+
+    /** Live and confirmed: the transport reported media flowing. */
+    Connected,
+
+    /** Not live with the refusal/error on the status line — the refused start or the stopped-after-error output. */
+    Refused,
+}
+
+/**
  * The one field every push transport's retained config carries: the push
  * URL. The deep module's start ladder parses it; the config value classes
  * behind it ([com.raulshma.lenscast.streaming.rtmp.RtmpPushConfig],
@@ -125,6 +153,15 @@ internal class PushOutput<C : PushConnectConfig, P, H, S : PushStatus>(
     private val idleStatus: S,
     /** The transport's Error constructor — published by every refused start. */
     private val errorStatus: (String) -> S,
+    /**
+     * The active-mirror callback, invoked at every [isActive] flip with the
+     * new value (start, stop, disable-stop). The owner derives its
+     * streaming-state flow from it — [isActive] is what `isLiveStreaming`
+     * probes, and the status flows alone cannot reproduce it (an `Error`
+     * status is published by refused starts too, where the output is not
+     * live).
+     */
+    private val onActiveChanged: (Boolean) -> Unit = {},
     /** Builds the publisher handle from the retained config + parsed target — the transport's factory seam. */
     private val publisherFactory: (config: C, parsed: P, onStatus: (S) -> Unit) -> H,
     /** Drives the handle's start (the per-transport handle interfaces stay untouched behind the lambda). */
@@ -186,6 +223,24 @@ internal class PushOutput<C : PushConnectConfig, P, H, S : PushStatus>(
 
     fun status(): S = statusValue
 
+    /**
+     * The [PushPhase] derived from the live status × active pair — the
+     * mapping that names what the wire's `Error` status cannot: retrying
+     * ([PushPhase.Reconnecting], error while the output is on) vs refused or
+     * stopped ([PushPhase.Refused], error while the output is off). The
+     * discriminator is the status's [PushStatus.wireName] — the one field
+     * every transport's status carries; the three sealed status hierarchies
+     * pin the same four wire words (`idle`/`connecting`/`connected`/`error`).
+     * Read with [status] by the status surfaces that want the typed
+     * distinction; the wire snapshot keeps publishing the plain strings.
+     */
+    fun phase(): PushPhase = when (statusValue.wireName) {
+        "idle" -> if (active.get()) PushPhase.Connecting else PushPhase.Idle
+        "connecting" -> PushPhase.Connecting
+        "connected" -> PushPhase.Connected
+        else -> if (active.get()) PushPhase.Reconnecting else PushPhase.Refused
+    }
+
     // ── lifecycle ──
 
     /**
@@ -207,6 +262,7 @@ internal class PushOutput<C : PushConnectConfig, P, H, S : PushStatus>(
     /** Stops the publisher (the transport's clean close) and settles — no-op when already stopped. */
     fun stop() {
         if (!active.getAndSet(false)) return
+        onActiveChanged(false)
         teardownPublisher()
         settle()
     }
@@ -219,6 +275,7 @@ internal class PushOutput<C : PushConnectConfig, P, H, S : PushStatus>(
      */
     fun stopQuietly() {
         if (!active.getAndSet(false)) return
+        onActiveChanged(false)
         teardownPublisher()
     }
 
@@ -288,6 +345,7 @@ internal class PushOutput<C : PushConnectConfig, P, H, S : PushStatus>(
             )
         }
         active.set(true)
+        onActiveChanged(true)
         val handle = publisherFactory(config, parsed, ::publishStatus)
         publisher = handle
         beforeStart(handle)

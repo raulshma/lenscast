@@ -42,9 +42,12 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.flow.StateFlow
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 
@@ -165,6 +168,10 @@ class StreamingManager(
             _isRtspRunning.value = running
             _rtspUrl.value = url
         },
+        // The active mirror feeding the derived isStreaming flow — isActive
+        // is what isLiveStreaming() probes, and a failed bind keeps the two
+        // answers different (live, but no serving socket).
+        onActiveChanged = { active -> _isRtspActive.value = active },
         // rtsps when HTTPS mode is on — the listener and every advertised URL follow.
         secure = { webTransport.tlsEnabled() },
         serverFactory = { port ->
@@ -183,8 +190,11 @@ class StreamingManager(
     // The two hub-consuming push outputs share one settle epilogue — the
     // transition hook the start/stop scaffolding below used to run by hand
     // after every manager-driven start or stop: the outputs run it themselves
-    // now (restarts and disable-stops settle quietly — see PushOutput).
-    private val hubPushSettle: () -> Unit = { encodedHub.refresh(); updateStreamingState() }
+    // now (restarts and disable-stops settle quietly — see PushOutput). The
+    // old streaming-state mirror is gone from it: isStreaming derives from
+    // the outputs' active mirrors, so a push transition lands there without
+    // any settle-time hand write.
+    private val hubPushSettle: () -> Unit = { encodedHub.refresh() }
 
     // The RTMP push output behind this manager's public surface: the retained
     // URL, the enabled gate, the H.264-only validation ladder, and the
@@ -195,6 +205,7 @@ class StreamingManager(
     private val rtmpOutput: RtmpOutput = RtmpOutput(
         source = encodedHub,
         onStatusChanged = { status -> _rtmpStatus.value = status },
+        onActiveChanged = { active -> _rtmpActive.value = active },
         publisherFactory = { url, onStatus -> RtmpPublisher(url, encodedHub, onStatus) },
         settle = hubPushSettle,
     )
@@ -208,6 +219,7 @@ class StreamingManager(
     private val srtOutput: SrtOutput = SrtOutput(
         source = encodedHub,
         onStatusChanged = { status -> _srtStatus.value = status },
+        onActiveChanged = { active -> _srtActive.value = active },
         publisherFactory = { url, onStatus -> SrtPublisher(url, encodedHub, onStatus) },
         settle = hubPushSettle,
     )
@@ -225,10 +237,13 @@ class StreamingManager(
     private val whipOutput: WhipOutput = WhipOutput(
         audioAllowed = ::whipAudioAllowed,
         onStatusChanged = { status -> _whipStatus.value = status },
+        onActiveChanged = { active -> _whipActive.value = active },
         publisherFactory = { url, token, stunServer, audioAllowed, onStatus ->
             WhipPublisher(context, url, token, stunServer, audioAllowed, onStatus)
         },
-        settle = ::updateStreamingState,
+        // No settle epilogue: WHIP consumes no encoded hub (no refresh owed)
+        // and the streaming-state mirror is derived from the active mirrors —
+        // nothing to hand-write on its transitions any more.
     )
 
     // The WHEP viewer endpoint (streaming/whep/): the WebRTC egress twin of
@@ -331,10 +346,37 @@ class StreamingManager(
     // so the two ladders never stack.
 
     private val ecoIdleEnabled = AtomicBoolean(false)
+
+    /**
+     * The eco verdict's applied flag, read lock-free on the per-frame hot
+     * paths (the encoded hub's `audioWanted` verdict reads it for every
+     * frame, as do the mic-arbitration snapshot and the effective-frame-rate
+     * fan-out) — the volatile exists so those reads never contend on
+     * [ecoIdleLock], under which the policy state actually lives. Paired
+     * with [ecoIdleState] (the same fact, as the policy's carried state):
+     * [applyEcoIdleState] is the ONLY writer of either, so the lock-free
+     * mirror can never drift from the verdict ladder's truth.
+     */
     @Volatile private var ecoIdleActive = false
     @Volatile private var userFrameRate = StreamDefaults.STREAM_FPS
+
+    /** The policy-carried eco bookkeeping between evaluations ([EcoIdlePolicy.State]); guarded by [ecoIdleLock]. */
     private var ecoIdleState = EcoIdlePolicy.State()
     private val ecoIdleLock = Any()
+
+    /**
+     * The single writer of the eco-idle pairing: lands the verdict ladder's
+     * next [EcoIdlePolicy.State] and mirrors its `active` bit into the
+     * lock-free [ecoIdleActive] volatile. Must be called under [ecoIdleLock]
+     * (the state's guard); the volatile write is the publish step that makes
+     * the new verdict visible to the per-frame readers. Every
+     * [EcoIdlePolicy.evaluate] application goes through here — the Drop and
+     * Restore branches only decide the side effects around it.
+     */
+    private fun applyEcoIdleState(next: EcoIdlePolicy.State) {
+        ecoIdleState = next
+        ecoIdleActive = next.active
+    }
 
     // Both periodic monitors (eco idle-fps, encoded adaptive bitrate) share
     // one scope; each poll loop lives only while its toggle is on, so a
@@ -385,10 +427,13 @@ class StreamingManager(
                 nowMs = nowMs,
                 state = ecoIdleState,
             )
-            ecoIdleState = decision.nextState
+            // The applied-side-effects gate reads the applied flag BEFORE the
+            // pairing write publishes the new state over it (a Restore only
+            // restores when eco actually was applied).
+            val wasEcoActive = ecoIdleActive
+            applyEcoIdleState(decision.nextState)
             when (decision.verdict) {
                 EcoIdlePolicy.Verdict.Drop -> {
-                    ecoIdleActive = true
                     applyEffectiveFrameRate()
                     // No stream consumers by definition: the viewer-facing
                     // audio state drops, but an armed sound detector keeps
@@ -405,8 +450,7 @@ class StreamingManager(
                     Log.d(TAG, "Eco idle: dropped to ${EcoIdlePolicy.floorFps(userFrameRate)} fps (audio paused)")
                 }
                 EcoIdlePolicy.Verdict.Restore -> {
-                    if (ecoIdleActive) {
-                        ecoIdleActive = false
+                    if (wasEcoActive) {
                         applyEffectiveFrameRate()
                         refreshAudioStreamingState()
                         encodedHub.refresh()
@@ -472,9 +516,6 @@ class StreamingManager(
         networkQualityMonitor.recordEncodedSend(bytes, durationMs)
     }
 
-    private val _isStreaming = MutableStateFlow(false)
-    val isStreaming: StateFlow<Boolean> = _isStreaming
-
     private val _isWebStreamingActive = MutableStateFlow(false)
     val isWebStreamingActive: StateFlow<Boolean> = _isWebStreamingActive
 
@@ -517,12 +558,29 @@ class StreamingManager(
     private val _isRtspRunning = MutableStateFlow(false)
     val isRtspRunning: StateFlow<Boolean> = _isRtspRunning
 
+    /**
+     * The RTSP output's active mirror — written by the output's
+     * [RtspOutput.onActiveChanged] at each [RtspOutput.isActive] flip. Distinct
+     * from [isRtspRunning] (which mirrors a serving `server != null`): the
+     * derived [isStreaming] must read `isActive`, the exact bit
+     * [isLiveStreaming] probes, so a failed bind stays "streaming" here
+     * exactly like the synchronous verdict does.
+     */
+    private val _isRtspActive = MutableStateFlow(false)
+
     private val _isRtmpEnabled = MutableStateFlow(false)
     val isRtmpEnabled: StateFlow<Boolean> = _isRtmpEnabled
 
     /** The RTMP push output's lifecycle state — idle/connecting/connected/error(+message). */
     private val _rtmpStatus = MutableStateFlow<RtmpStatus>(RtmpStatus.Idle)
     val rtmpStatus: StateFlow<RtmpStatus> = _rtmpStatus
+
+    /**
+     * The RTMP push output's active mirror — written by the output's
+     * [PushOutput.onActiveChanged] at each [PushOutput.isActive] flip; one of
+     * the five inputs the derived [isStreaming] combines.
+     */
+    private val _rtmpActive = MutableStateFlow(false)
 
     private val _isWhipEnabled = MutableStateFlow(false)
     val isWhipEnabled: StateFlow<Boolean> = _isWhipEnabled
@@ -531,12 +589,49 @@ class StreamingManager(
     private val _whipStatus = MutableStateFlow<WhipStatus>(WhipStatus.Idle)
     val whipStatus: StateFlow<WhipStatus> = _whipStatus
 
+    /**
+     * The WHIP push output's active mirror — written by the output's
+     * [PushOutput.onActiveChanged] at each [PushOutput.isActive] flip; one of
+     * the five inputs the derived [isStreaming] combines.
+     */
+    private val _whipActive = MutableStateFlow(false)
+
     private val _isSrtEnabled = MutableStateFlow(false)
     val isSrtEnabled: StateFlow<Boolean> = _isSrtEnabled
 
     /** The SRT push output's lifecycle state — idle/connecting/connected/error(+message). */
     private val _srtStatus = MutableStateFlow<SrtStatus>(SrtStatus.Idle)
     val srtStatus: StateFlow<SrtStatus> = _srtStatus
+
+    /**
+     * The SRT push output's active mirror — written by the output's
+     * [PushOutput.onActiveChanged] at each [PushOutput.isActive] flip; one of
+     * the five inputs the derived [isStreaming] combines.
+     */
+    private val _srtActive = MutableStateFlow(false)
+
+    /**
+     * The derived any-output-live state: the exact predicate
+     * [isLiveStreaming] computes synchronously (web active, RTSP active,
+     * RTMP/WHIP/SRT active), as a flow. Every input is a mirror written by
+     * its owner at the transition itself — the web mirror below,
+     * [RtspOutput.onActiveChanged] / [PushOutput.onActiveChanged] for the
+     * outputs — so the flow emits at (a dispatch after) every transition the
+     * old hand-written mirror was called at, with no second writer able to
+     * drift from the synchronous truth. Deliberately [SharingStarted.Eagerly]:
+     * the boot-resume journal writer and the app-runtime collectors subscribe
+     * late or never, and the transitions must still flow.
+     */
+    private val _isStreaming: StateFlow<Boolean> = combine(
+        _isWebStreamingActive,
+        _isRtspActive,
+        _rtmpActive,
+        _whipActive,
+        _srtActive,
+    ) { web, rtsp, rtmp, whip, srt -> web || rtsp || rtmp || whip || srt }
+        .stateIn(monitorScope, SharingStarted.Eagerly, false)
+
+    val isStreaming: StateFlow<Boolean> = _isStreaming
 
     val droppedFrames: StateFlow<Int> = framePipeline.droppedFrames
 
@@ -764,11 +859,18 @@ class StreamingManager(
 
     fun isWebStreamActive(): Boolean = webStreamingActive.get()
 
-    private fun updateStreamingState() {
-        val anyActive =
-            webStreamingActive.get() || rtspOutput.isActive() || rtmpOutput.isActive() ||
-                whipOutput.isActive() || srtOutput.isActive()
-        _isStreaming.value = anyActive
+    /**
+     * The one writer of the web-active mirror: folds [webStreamingActive] —
+     * the hot-path truth the frame fan-out reads lock-free — into
+     * [_isWebStreamingActive], the observable side of the same fact. Called
+     * exactly where the atomic actually moves (a web start's success or
+     * failure, a web stop); the other former call sites of the old
+     * hand-written mirror (RTSP and push transitions) never changed the web
+     * value, so the StateFlow's conflation made their writes no-ops and they
+     * are simply gone. The any-output-live flow needs no hand write at all —
+     * [_isStreaming] derives from the mirrors.
+     */
+    private fun publishWebActiveMirror() {
         _isWebStreamingActive.value = webStreamingActive.get()
     }
 
@@ -980,7 +1082,7 @@ class StreamingManager(
 
         if (!ensureServerRunning()) {
             webStreamingActive.set(false)
-            updateStreamingState()
+            publishWebActiveMirror()
             return false
         }
 
@@ -995,7 +1097,7 @@ class StreamingManager(
             registerMdnsService(webTransport.port())
         }
 
-        updateStreamingState()
+        publishWebActiveMirror()
         Log.d(TAG, "Web streaming started at ${_streamUrl.value}")
         return true
     }
@@ -1011,7 +1113,7 @@ class StreamingManager(
         _clientCount.value = 0
         lastReportedClientCount = -1
         unregisterMdnsService()
-        updateStreamingState()
+        publishWebActiveMirror()
         Log.d(TAG, "Web streaming stopped")
     }
 
@@ -1023,7 +1125,6 @@ class StreamingManager(
         if (rtspOutput.isActive()) return true
         rtspOutput.start()
         encodedHub.refresh()
-        updateStreamingState()
         Log.d(TAG, "RTSP streaming started")
         return true
     }
@@ -1032,7 +1133,6 @@ class StreamingManager(
         if (!rtspOutput.isActive()) return
         rtspOutput.stop()
         encodedHub.refresh()
-        updateStreamingState()
         Log.d(TAG, "RTSP streaming stopped")
     }
 
@@ -1045,8 +1145,8 @@ class StreamingManager(
      * connect itself is asynchronous (Connecting → Connected, auto-reconnect
      * with capped backoff while active). False means refused — read
      * [rtmpStatus] for the reason. Either verdict settles the epilogue
-     * ([encodedHub.refresh] + [updateStreamingState]) inside the output's
-     * own start — the ordering the pre-collapse scaffolding ran by hand.
+     * ([encodedHub.refresh]) inside the output's own start — the ordering the
+     * pre-collapse scaffolding ran by hand.
      */
     fun startRtmpStreaming(): Boolean {
         if (!rtmpOutput.isEnabled()) {
@@ -1097,6 +1197,14 @@ class StreamingManager(
      */
     fun isRtmpActive(): Boolean = rtmpOutput.isActive()
 
+    /**
+     * The RTMP push output's derived [PushPhase] — the status × active pair
+     * named, so the status snapshot's inputs can carry the reconnecting
+     * (error while live) vs refused (error while stopped) distinction the
+     * wire strings cannot.
+     */
+    fun rtmpPhase(): PushPhase = rtmpOutput.phase()
+
     // ── SRT push output: the RTMP twins, MPEG-TS over UDP ──
 
     /**
@@ -1106,8 +1214,8 @@ class StreamingManager(
      * handshake itself is asynchronous (Connecting → Connected,
      * auto-reconnect with capped backoff while active). False means refused
      * — read [srtStatus] for the reason. Either verdict settles the epilogue
-     * ([encodedHub.refresh] + [updateStreamingState]) inside the output's
-     * own start — the ordering the pre-collapse scaffolding ran by hand.
+     * ([encodedHub.refresh]) inside the output's own start — the ordering the
+     * pre-collapse scaffolding ran by hand.
      */
     fun startSrtStreaming(): Boolean {
         if (!srtOutput.isEnabled()) {
@@ -1154,6 +1262,9 @@ class StreamingManager(
      */
     fun isSrtActive(): Boolean = srtOutput.isActive()
 
+    /** The SRT push output's derived [PushPhase] — the [rtmpPhase] twin. */
+    fun srtPhase(): PushPhase = srtOutput.phase()
+
     /** The SRT output's live wire stats (RTT, loss counts) for the status surfaces. */
     fun srtStats(): SrtStats = srtOutput.stats()
 
@@ -1197,6 +1308,9 @@ class StreamingManager(
      * which of the two is happening). The status snapshot's WHIP activity bit.
      */
     fun isWhipActive(): Boolean = whipOutput.isActive()
+
+    /** The WHIP push output's derived [PushPhase] — the [rtmpPhase] twin. */
+    fun whipPhase(): PushPhase = whipOutput.phase()
 
     /** True while the WHIP output is live with the stream-audio toggle on — the mic verdict's WHIP half. */
     fun isWhipAudioActive(): Boolean = whipOutput.isActive() && whipAudioAllowed()
@@ -1653,7 +1767,6 @@ class StreamingManager(
                     "switch back to H.264 and restart the push",
             )
             encodedHub.refresh()
-            updateStreamingState()
         }
         // The SRT push is the same H.264-pinned consumer — stop it the same
         // way, with its own readable reason on its own status line.
@@ -1664,7 +1777,6 @@ class StreamingManager(
                     "switch back to H.264 and restart the push",
             )
             encodedHub.refresh()
-            updateStreamingState()
         }
     }
 

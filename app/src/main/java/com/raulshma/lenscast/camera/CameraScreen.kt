@@ -152,6 +152,7 @@ import com.raulshma.lenscast.camera.model.NotificationPermissionPolicy
 import com.raulshma.lenscast.camera.model.PreviewGestures
 import com.raulshma.lenscast.camera.model.ProToolsPolicy
 import com.raulshma.lenscast.camera.model.QuickSettingCatalog
+import com.raulshma.lenscast.camera.model.QuickSettingsUiState
 import com.raulshma.lenscast.camera.model.QuickSettingDescriptor
 import com.raulshma.lenscast.camera.model.QuickSettingEditor
 import com.raulshma.lenscast.camera.model.QuickSettingIcon
@@ -295,8 +296,13 @@ fun CameraScreen(
         }
     }
 
-    var quickSettingsExpanded by remember { mutableStateOf(false) }
-    var activeSetting by remember { mutableStateOf<QuickSettingType?>(null) }
+    // The quick-settings panel is one sealed machine (Collapsed / Expanded /
+    // Sheet) instead of a boolean + nullable-setting pair — the "sheet open
+    // ⇒ bar expanded" invariant is structural now, and the callbacks below
+    // are its transitions. The sub-composables still take booleans; the
+    // projections are derived here at the call site. Plain remember: the
+    // panel intentionally resets on rotation, as before.
+    var quickSettingsUiState by remember { mutableStateOf<QuickSettingsUiState>(QuickSettingsUiState.Collapsed) }
     var showConnectSheet by remember { mutableStateOf(false) }
     var isPinching by remember { mutableStateOf(false) }
     var pinchZoomRatio by remember { mutableFloatStateOf(1f) }
@@ -347,8 +353,8 @@ fun CameraScreen(
                 showPreview = showPreview,
                 adaptiveBitrateState = adaptiveBitrateState,
                 connectionQualityStats = connectionQualityStats,
-                quickSettingsExpanded = quickSettingsExpanded,
-                activeSetting = activeSetting,
+                quickSettingsExpanded = quickSettingsUiState.isBarExpanded,
+                activeSetting = quickSettingsUiState.openSetting,
                 flashAlpha = flashAlpha,
                 isPinching = isPinching,
                 pinchZoomRatio = pinchZoomRatio,
@@ -357,11 +363,10 @@ fun CameraScreen(
                     pinchZoomRatio = ratio
                 },
                 onToggleQuickSettings = {
-                    quickSettingsExpanded = !quickSettingsExpanded
-                    if (!quickSettingsExpanded) activeSetting = null
+                    quickSettingsUiState = quickSettingsUiState.toggled()
                 },
                 onQuickSettingTap = { type ->
-                    activeSetting = if (activeSetting == type) null else type
+                    quickSettingsUiState = quickSettingsUiState.settingTapped(type)
                 },
                 onCapture = {
                     // The press verdict (capture now vs self-timer countdown)
@@ -413,12 +418,15 @@ fun CameraScreen(
                 }
             }
 
-            if (activeSetting != null) {
+            // The sheet reads its control off the machine's projection; the
+            // dismiss is the sheetDismissed transition (bar stays expanded).
+            val sheetSetting = quickSettingsUiState.openSetting
+            if (sheetSetting != null) {
                 val isoRange by viewModel.availableIsoRange.collectAsState()
                 val zoomRange by viewModel.availableZoomRange.collectAsState()
                 val exposureRange by viewModel.availableExposureRange.collectAsState()
                 QuickSettingSheet(
-                    descriptor = QuickSettingCatalog.descriptorFor(activeSetting!!),
+                    descriptor = QuickSettingCatalog.descriptorFor(sheetSetting),
                     settings = settings,
                     ranges = QuickSettingRanges(
                         iso = isoRange,
@@ -426,7 +434,7 @@ fun CameraScreen(
                         exposure = exposureRange,
                     ),
                     sheetState = sheetState,
-                    onDismiss = { activeSetting = null },
+                    onDismiss = { quickSettingsUiState = quickSettingsUiState.sheetDismissed() },
                     onUpdate = { type, value -> viewModel.updateQuickSetting(type, value) },
                 )
             }

@@ -169,6 +169,32 @@ object WatchdogPolicy {
     )
 
     /**
+     * The watchdog's whole tracking cluster as ONE immutable snapshot — the
+     * frame-stall baselines, the last recovery timestamp, and the exposed
+     * failure reason. The runtime holds a single `@Volatile` instance and
+     * swaps it wholesale (`copy`) at every transition, so a reset site cannot
+     * forget a field the way the five scattered `@Volatile` vars it replaces
+     * could. Deliberately NOT in here: the consecutive-failure and
+     * total-recovery counters — they stay AtomicIntegers on the runtime, the
+     * monitor loop's own tick bookkeeping published into [StreamWatchdog]'s
+     * state at every update; folding them into this pure snapshot would hand
+     * it a concurrency duty its transitions (all single-threaded loop steps
+     * plus a stop from outside) do not share.
+     */
+    data class TrackingSnapshot(
+        /** The processed-frames count the last check left as the stall baseline. */
+        val processedFrameCount: Int = 0,
+        /** The RTSP accepted-frames count the last check left as the stall baseline. */
+        val rtspAcceptedFrames: Long = 0L,
+        /** Wall clock of the last check that touched the frame baselines (the stall window's origin). */
+        val frameCheckTimeMs: Long = 0L,
+        /** When the last successful recovery landed (0 = never). */
+        val recoveryTimestamp: Long = 0L,
+        /** The most recent failure's readable reason; null while clean. */
+        val failureReason: String? = null,
+    )
+
+    /**
      * The frame-tracking update a healthy check leaves behind. With no
      * clients the tracking resets to now (avoiding false stalls once clients
      * reconnect); with clients it advances only when frames are flowing.

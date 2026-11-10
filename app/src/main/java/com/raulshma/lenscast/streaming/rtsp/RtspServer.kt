@@ -475,8 +475,18 @@ class RtspServer(
         private var subRtcpChannel = 1
         private var awaitingSubKeyframe = true
 
-        var isPlaying = false
-            private set
+        /**
+         * The aggregate stream's playing verdict, derived from [state] — the
+         * one encoding of the fact (the stored `isPlaying` flag it replaces
+         * was set/reset alongside the state machine, plus two off-machine
+         * resets that now land as [SessionState.INIT] transitions: the
+         * interleaved-write failure and [close], the TEARDOWN-equivalent
+         * "this connection is done sending" verdicts). Read from the fan-out
+         * threads while the session thread writes [state], like the flag it
+         * replaced — a benign racing read either way.
+         */
+        val isPlaying: Boolean
+            get() = state == SessionState.PLAYING
 
         var isSubWanted = false
             private set
@@ -875,7 +885,6 @@ class RtspServer(
             }
 
             state = SessionState.PLAYING
-            isPlaying = true
             // Every PLAY (re)arms the keyframe wait, then forces a sync frame
             // so a mid-GOP join resolves within one encoder GOP.
             awaitingKeyframe = true
@@ -913,7 +922,6 @@ class RtspServer(
             }
 
             // TEARDOWN is aggregate: both streams end, the session drops to INIT.
-            isPlaying = false
             isSubWanted = false
             state = SessionState.INIT
             sendResponse(
@@ -963,7 +971,10 @@ class RtspServer(
                     output.flush()
                 }
             } catch (_: Exception) {
-                isPlaying = false
+                // The connection is done sending — the TEARDOWN-equivalent
+                // drop to INIT (the old isPlaying = false here), so the
+                // derived isPlaying stops every send tap for this client.
+                state = SessionState.INIT
             }
         }
 
@@ -976,7 +987,9 @@ class RtspServer(
         fun sendSubRtpPacket(packet: ByteArray) = sendInterleaved(subRtpChannel, packet)
 
         fun close() {
-            isPlaying = false
+            // The kicked/closed connection stops playing — the drop to INIT
+            // that feeds the derived isPlaying (the old isPlaying = false).
+            state = SessionState.INIT
             try {
                 socket.close()
             } catch (_: Exception) {

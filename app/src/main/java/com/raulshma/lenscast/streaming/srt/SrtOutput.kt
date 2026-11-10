@@ -3,6 +3,7 @@ package com.raulshma.lenscast.streaming.srt
 import com.raulshma.lenscast.streaming.EncodedSource
 import com.raulshma.lenscast.streaming.PushConnectConfig
 import com.raulshma.lenscast.streaming.PushOutput
+import com.raulshma.lenscast.streaming.PushPhase
 import com.raulshma.lenscast.streaming.rtsp.EncodedNalUnit
 
 /**
@@ -37,9 +38,11 @@ internal class SrtOutput(
     private val source: EncodedSource,
     /** The status mirror after every transition, so the owner's flows follow the output. */
     onStatusChanged: (SrtStatus) -> Unit,
+    /** The active mirror after every [isActive] flip, so the owner's derived streaming flow follows the output. */
+    onActiveChanged: (Boolean) -> Unit = {},
     /** The publisher handle seam — the transport's factory, unchanged by the collapse. */
     publisherFactory: (url: SrtUrl, onStatus: (SrtStatus) -> Unit) -> SrtPublisherHandle,
-    /** The transition epilogue (hub refresh + streaming state), run by the deep module's manager-driven start/stop. */
+    /** The transition epilogue (hub refresh), run by the deep module's manager-driven start/stop. */
     private val settle: () -> Unit,
 ) {
 
@@ -47,6 +50,7 @@ internal class SrtOutput(
         label = "SRT",
         tag = TAG,
         onStatusChanged = onStatusChanged,
+        onActiveChanged = onActiveChanged,
         settle = settle,
         initialConfig = SrtPushConfig(),
         parse = SrtUrl::parse,
@@ -72,6 +76,9 @@ internal class SrtOutput(
     fun configuredUrl(): String = output.retainedConfig().url
 
     fun status(): SrtStatus = output.status()
+
+    /** The derived [PushPhase] — the status × active pair named ([PushOutput.phase]). */
+    fun phase(): PushPhase = output.phase()
 
     /**
      * Starts the push (no-op when already live); the validation ladder runs

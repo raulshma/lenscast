@@ -78,17 +78,21 @@ class WebAuthGate(
         val role: SessionRole = SessionRole.ADMIN,
     )
 
-    @Volatile
-    private var username: String? = null
+    /**
+     * One credential pair — the username and its password hash — held and
+     * swapped as a single value. Private to the gate: the pair only ever
+     * moves as a whole, and the value type kills the half-cleared state the
+     * old independently-nullable fields could represent (a username left
+     * behind with its hash blanked, or the reverse) — [setCredentials] and
+     * [setViewerCredentials] normalize a blank half to a fully-null pair.
+     */
+    private data class Credentials(val username: String, val passwordHash: String)
 
     @Volatile
-    private var passwordHash: String? = null
+    private var admin: Credentials? = null
 
     @Volatile
-    private var viewerUsername: String? = null
-
-    @Volatile
-    private var viewerPasswordHash: String? = null
+    private var viewer: Credentials? = null
 
     /**
      * The live API-token config source. Installed with [setApiTokenProvider]
@@ -113,7 +117,9 @@ class WebAuthGate(
      * True when the token path is armed: presented token headers are then
      * validated (and fail closed). While disarmed they are inert — the
      * transport skips the token ladder, so a stale or garbage header never
-     * 401s a route that is public or cookie-checkable.
+     * 401s a route that is public or cookie-checkable. Armed with a blank
+     * hash stays armed-but-unusable: [authorizeApiToken] fails closed on the
+     * blank hash, and the armed flag itself deliberately does not fold it.
      */
     val isApiTokenArmed: Boolean
         get() = tokenProvider().enabled
@@ -167,31 +173,39 @@ class WebAuthGate(
     private var lastSessionCleanupMillis = 0L
 
     val isEnabled: Boolean
-        get() = !username.isNullOrBlank() && passwordHash != null
+        get() = admin != null
 
+    /**
+     * Lands the admin pair. Blank either half clears the pair entirely — the
+     * blanking convention [isEnabled] always folded to, now structural: there
+     * is no representable half-cleared pair to half-clear into.
+     */
     fun setCredentials(username: String?, passwordHash: String?) {
-        this.username = if (username.isNullOrBlank()) null else username
-        this.passwordHash = if (passwordHash.isNullOrBlank()) null else passwordHash
+        admin = normalize(username, passwordHash)
     }
 
     /**
      * The optional read-only viewer pair; blank values clear it. Same blanking
-     * convention as [setCredentials] — null on either side means no viewer
-     * access, and the pair is only ever set/cleared together by the handler.
+     * convention as [setCredentials] — a blank half means no viewer access at
+     * all, and the pair is only ever set/cleared together by the handler.
      */
     fun setViewerCredentials(username: String?, passwordHash: String?) {
-        this.viewerUsername = if (username.isNullOrBlank()) null else username
-        this.viewerPasswordHash = if (passwordHash.isNullOrBlank()) null else passwordHash
+        viewer = normalize(username, passwordHash)
     }
+
+    /** The blanking convention: a null-or-blank half makes the whole pair null. */
+    private fun normalize(username: String?, passwordHash: String?): Credentials? =
+        if (username.isNullOrBlank() || passwordHash.isNullOrBlank()) null
+        else Credentials(username, passwordHash)
 
     /** True when a usable viewer pair is configured. */
     val isViewerConfigured: Boolean
-        get() = !viewerUsername.isNullOrBlank() && viewerPasswordHash != null
+        get() = viewer != null
 
     /** True when the request may proceed: auth off, or a valid session cookie. */
     fun authenticate(cookieHeader: String?): Boolean {
-        // setCredentials blanks empty values to null, so non-null means enabled.
-        if (username == null) return true
+        // setCredentials blanks a blank half to a null pair, so non-null means enabled.
+        if (admin == null) return true
         val token = tokenFromCookie(cookieHeader) ?: return false
         return validateSession(token)
     }
@@ -202,7 +216,7 @@ class WebAuthGate(
      * cookie folds to ADMIN here because the caller has already rejected it.
      */
     fun sessionRoleFor(cookieHeader: String?): SessionRole {
-        if (username == null) return SessionRole.ADMIN
+        if (admin == null) return SessionRole.ADMIN
         val token = tokenFromCookie(cookieHeader) ?: return SessionRole.ADMIN
         return sessions[token]?.role ?: SessionRole.ADMIN
     }
@@ -215,13 +229,11 @@ class WebAuthGate(
      * usernames exist.
      */
     fun login(clientIp: String?, username: String, password: String): LoginResult {
-        val storedUsername = this.username
-        val storedHash = this.passwordHash
-        if (storedUsername == null || storedHash == null) {
+        val storedAdmin = admin
+        if (storedAdmin == null) {
             return notConfigured()
         }
-        val storedViewerUsername = this.viewerUsername
-        val storedViewerHash = this.viewerPasswordHash
+        val storedViewer = viewer
 
         val now = clock()
         val matchedRole: SessionRole = synchronized(authAttemptsLock) {
@@ -234,11 +246,11 @@ class WebAuthGate(
                 return rateLimited()
             }
             val matched = when {
-                StreamAuthCrypto.constantTimeEquals(username, storedUsername) &&
-                    StreamAuthCrypto.verifyPassword(password, storedHash) -> SessionRole.ADMIN
-                storedViewerUsername != null && storedViewerHash != null &&
-                    StreamAuthCrypto.constantTimeEquals(username, storedViewerUsername) &&
-                    StreamAuthCrypto.verifyPassword(password, storedViewerHash) -> SessionRole.VIEWER
+                StreamAuthCrypto.constantTimeEquals(username, storedAdmin.username) &&
+                    StreamAuthCrypto.verifyPassword(password, storedAdmin.passwordHash) -> SessionRole.ADMIN
+                storedViewer != null &&
+                    StreamAuthCrypto.constantTimeEquals(username, storedViewer.username) &&
+                    StreamAuthCrypto.verifyPassword(password, storedViewer.passwordHash) -> SessionRole.VIEWER
                 else -> null
             }
             if (matched == null) {

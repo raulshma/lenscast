@@ -140,6 +140,14 @@ internal class RtspOutput(
     private val releaseAudio: () -> Unit,
     /** The running/URL mirror after every server transition, so the owner's state flows follow the output. */
     private val onStateChanged: (running: Boolean, url: String) -> Unit,
+    /**
+     * The active mirror after every [isActive] flip, so the owner's derived
+     * streaming-state flow follows the output. Separate from [onStateChanged]
+     * on purpose: that mirror reports a *serving* server (`server != null`),
+     * while `isLiveStreaming` probes [isActive] — live even when the bind
+     * failed. The two answers differ exactly in that failure case.
+     */
+    private val onActiveChanged: (Boolean) -> Unit = {},
     /** The encoded-stream hub's live bitrate seam: the H.264 encoder is the hub's, so a bitrate change lands there, not in any server instance. */
     private val onVideoBitrateChanged: (Int) -> Unit = {},
     /** True while HTTPS/TLS mode is on — the advertised scheme becomes rtsps and the listener wraps in SSL. */
@@ -208,6 +216,7 @@ internal class RtspOutput(
     /** Starts the output (no-op when already live, matching the previous activity guard). */
     fun start() {
         if (active.getAndSet(true)) return
+        onActiveChanged(true)
         startServer()
         notifyState()
     }
@@ -215,6 +224,7 @@ internal class RtspOutput(
     /** Stops the server, releases the audio handle, and hands the capture release decision to the owner. */
     fun stop() {
         if (!active.getAndSet(false)) return
+        onActiveChanged(false)
         stopServer()
         notifyState()
     }

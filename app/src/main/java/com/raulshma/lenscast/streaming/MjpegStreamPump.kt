@@ -22,9 +22,19 @@ class MjpegStreamPump(
     private val clientCount = AtomicInteger(0)
     private val clientCounter = AtomicInteger(0)
     private val liveStreams = java.util.concurrent.ConcurrentHashMap<String, MjpegInputStream>()
-    @Volatile private var latestJpeg: ByteArray? = null
+
+    /**
+     * The latest frame as one immutable holder — the jpeg bytes and the
+     * version that orders them, swapped atomically by [updateFrame] (the old
+     * `latestJpeg`/`latestFrameVersion` pair was two fields the writer had to
+     * bump in step; a holder makes the pairing structural). Volatile: the
+     * snapshot read in [latestFrame] and the wait-loop read in the client
+     * streams never take the lock to look.
+     */
+    private class LatestFrame(val jpeg: ByteArray, val version: Long)
+
     private val frameLock = Object()
-    private var latestFrameVersion = 0L
+    @Volatile private var latest: LatestFrame? = null
     @Volatile private var enabled = true
 
     fun setEnabled(enabled: Boolean) {
@@ -35,13 +45,12 @@ class MjpegStreamPump(
 
     fun updateFrame(jpegData: ByteArray) {
         synchronized(frameLock) {
-            latestJpeg = jpegData
-            latestFrameVersion++
+            latest = LatestFrame(jpegData, (latest?.version ?: 0L) + 1L)
             frameLock.notifyAll()
         }
     }
 
-    fun latestFrame(): ByteArray? = latestJpeg
+    fun latestFrame(): ByteArray? = latest?.jpeg
 
     fun getClientCount(): Int = clientCount.get()
 
@@ -183,16 +192,16 @@ class MjpegStreamPump(
 
             synchronized(frameLock) {
                 while (!closed.get()) {
-                    val nextFrame = latestJpeg
-                    if (nextFrame != null && latestFrameVersion != currentFrameVersion) {
-                        currentFrame = nextFrame
-                        currentFrameVersion = latestFrameVersion
+                    val snapshot = latest
+                    if (snapshot != null && snapshot.version != currentFrameVersion) {
+                        currentFrame = snapshot.jpeg
+                        currentFrameVersion = snapshot.version
                         frameOffset = 0
                         footerOffset = 0
                         headerOffset = 0
-                        headerBytes = buildPartHeader(boundary, isFirstPart, nextFrame.size)
+                        headerBytes = buildPartHeader(boundary, isFirstPart, snapshot.jpeg.size)
                         isFirstPart = false
-                        currentFrameTotalBytes = nextFrame.size + headerBytes.size + MJPEG_FOOTER.size
+                        currentFrameTotalBytes = snapshot.jpeg.size + headerBytes.size + MJPEG_FOOTER.size
                         frameSendStartTime = System.currentTimeMillis()
                         return true
                     }

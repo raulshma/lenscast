@@ -3,6 +3,7 @@ package com.raulshma.lenscast.streaming.rtmp
 import com.raulshma.lenscast.streaming.EncodedSource
 import com.raulshma.lenscast.streaming.PushConnectConfig
 import com.raulshma.lenscast.streaming.PushOutput
+import com.raulshma.lenscast.streaming.PushPhase
 import com.raulshma.lenscast.streaming.rtsp.EncodedNalUnit
 
 /**
@@ -34,9 +35,11 @@ internal class RtmpOutput(
     private val source: EncodedSource,
     /** The status mirror after every transition, so the owner's flows follow the output. */
     onStatusChanged: (RtmpStatus) -> Unit,
+    /** The active mirror after every [isActive] flip, so the owner's derived streaming flow follows the output. */
+    onActiveChanged: (Boolean) -> Unit = {},
     /** The publisher handle seam — the transport's factory, unchanged by the collapse. */
     publisherFactory: (url: RtmpUrl, onStatus: (RtmpStatus) -> Unit) -> RtmpPublisherHandle,
-    /** The transition epilogue (hub refresh + streaming state), run by the deep module's manager-driven start/stop. */
+    /** The transition epilogue (hub refresh), run by the deep module's manager-driven start/stop. */
     private val settle: () -> Unit,
 ) {
 
@@ -44,6 +47,7 @@ internal class RtmpOutput(
         label = "RTMP",
         tag = TAG,
         onStatusChanged = onStatusChanged,
+        onActiveChanged = onActiveChanged,
         settle = settle,
         initialConfig = RtmpPushConfig(),
         parse = RtmpUrl::parse,
@@ -69,6 +73,9 @@ internal class RtmpOutput(
     fun configuredUrl(): String = output.retainedConfig().url
 
     fun status(): RtmpStatus = output.status()
+
+    /** The derived [PushPhase] — the status × active pair named ([PushOutput.phase]). */
+    fun phase(): PushPhase = output.phase()
 
     /**
      * Starts the push (no-op when already live); the validation ladder runs

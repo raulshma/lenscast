@@ -8,6 +8,27 @@ import android.util.Log
 import com.raulshma.lenscast.core.ForegroundNotifications
 
 /**
+ * Which typed foreground start ran last on the runtime service. Pure
+ * bookkeeping — the recorded mode never drives a start/stop decision — it
+ * only makes the implicit "which promotion is live" observable (diagnostics,
+ * and the hook a future mode-handoff fix needs). [ServerOnly] is the
+ * CONNECTED_DEVICE promotion ([ForegroundNotifications.startConnectedDeviceForeground]),
+ * [Streaming] the CAMERA/MICROPHONE one ([ForegroundNotifications.startCameraForeground]);
+ * both share the one notification slot (the registry in
+ * [com.raulshma.lenscast.core.ForegroundNotifications]).
+ */
+enum class ForegroundMode {
+    /** No typed start has succeeded since the last teardown. */
+    None,
+
+    /** The last successful typed start was the server-only CONNECTED_DEVICE promotion. */
+    ServerOnly,
+
+    /** The last successful typed start was the streaming CAMERA/MICROPHONE promotion. */
+    Streaming,
+}
+
+/**
  * The app runtime's one foreground service. Two modes share one notification
  * slot:
  *
@@ -23,6 +44,16 @@ import com.raulshma.lenscast.core.ForegroundNotifications
  * stream notification can outlive each other.
  */
 class StreamingService : Service() {
+
+    /**
+     * The last successful typed foreground start, cleared on teardown
+     * ([onDestroy] funnels both the self-stop of a failed promotion and the
+     * session/server stopService calls). Bookkeeping only: no start/stop
+     * decision reads it. Main-thread service callbacks write it; volatile
+     * keeps a diagnostic reader honest.
+     */
+    @Volatile
+    private var foregroundMode = ForegroundMode.None
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -53,6 +84,11 @@ class StreamingService : Service() {
     }
 
     override fun onDestroy() {
+        // The single teardown funnel: stopSelf (a failed promotion's unwind)
+        // and stopService (the session end / server-gone paths) both land
+        // here, so the recorded mode clears exactly when the notification
+        // goes away.
+        foregroundMode = ForegroundMode.None
         removeForegroundNotification()
         super.onDestroy()
         Log.d(TAG, "StreamingService destroyed")
@@ -106,9 +142,17 @@ class StreamingService : Service() {
                     includeAudio,
                 )
             }
+            // Record only a start that actually succeeded — the typed
+            // startForeground calls above either threw or landed.
+            foregroundMode = if (serverMode) ForegroundMode.ServerOnly else ForegroundMode.Streaming
         }.onFailure {
             // A denied background start or a missing type prerequisite must
             // not take the app down. The next foreground resume re-promotes.
+            // KNOWN SHARP EDGE (follow-up): a failed streaming re-assert
+            // stopSelf()s from here, tearing down a live server-only
+            // notification with it — the teardown below is today's behavior
+            // and stays; the recorded mode clearing through onDestroy is what
+            // makes it visible.
             Log.e(TAG, "Foreground promotion failed: ${it.javaClass.simpleName}")
             stopSelf()
         }

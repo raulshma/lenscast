@@ -5,6 +5,7 @@ import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
+import android.util.Log
 import com.raulshma.lenscast.camera.model.LevelIndicatorPolicy
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -16,8 +17,24 @@ import kotlinx.coroutines.flow.asStateFlow
  * is active, and publishes the policy's rendering verdict per reading. All
  * thresholds and the level math live in the pure [LevelIndicatorPolicy];
  * this owns only the lifecycle-aware listener plumbing.
+ *
+ * There is no stored "registered" mirror of the two gates — the only
+ * registration fact is [registration], the listener handle itself; every
+ * input change recomputes the gate verdict fresh and registers or unregisters
+ * against that handle accordingly.
  */
 class SpiritLevelMonitor(context: Context) : SensorEventListener {
+
+    /**
+     * The one registration fact. [Registration.Attached] holds the sensor the
+     * listener is on; [Registration.NoSensor] is the stable no-sensor verdict
+     * (see [syncRegistration]); [Registration.Detached] is nothing listening.
+     */
+    private sealed interface Registration {
+        data class Attached(val sensor: Sensor) : Registration
+        data object NoSensor : Registration
+        data object Detached : Registration
+    }
 
     private val sensorManager = context.applicationContext
         .getSystemService(Context.SENSOR_SERVICE) as? SensorManager
@@ -30,7 +47,7 @@ class SpiritLevelMonitor(context: Context) : SensorEventListener {
 
     private var settingEnabled = false
     private var previewActive = false
-    private var registered = false
+    private var registration: Registration = Registration.Detached
 
     /** The persisted toggle — (de)registers as the combined gate flips. */
     fun setEnabled(enabled: Boolean) {
@@ -45,18 +62,38 @@ class SpiritLevelMonitor(context: Context) : SensorEventListener {
     }
 
     private fun syncRegistration() {
-        val shouldRegister = settingEnabled && previewActive
         val manager = sensorManager ?: return
-        if (shouldRegister == registered) return
-        val accelerometer = manager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER) ?: return
-        if (shouldRegister) {
-            manager.registerListener(this, accelerometer, SensorManager.SENSOR_DELAY_NORMAL)
-            registered = true
-        } else {
-            manager.unregisterListener(this)
-            registered = false
-            // No stale level line after the sensors stop.
-            _lineState.value = null
+        val shouldRegister = settingEnabled && previewActive
+        when (val current = registration) {
+            is Registration.Attached -> {
+                if (!shouldRegister) {
+                    manager.unregisterListener(this)
+                    registration = Registration.Detached
+                    // No stale level line after the sensors stop.
+                    _lineState.value = null
+                }
+            }
+            Registration.NoSensor -> {
+                // Stable no-op: this device has no accelerometer, and no
+                // input change can conjure one. Never retried, never logged
+                // twice — the gate flipping around it changes nothing.
+            }
+            Registration.Detached -> {
+                if (!shouldRegister) return
+                val accelerometer = manager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
+                if (accelerometer == null) {
+                    // Named case: no accelerometer on this device. The
+                    // verdict is remembered (NoSensor) so each input change
+                    // does not re-query the sensor manager for an answer
+                    // that will stay null — the level overlay stays off
+                    // until a fresh process.
+                    Log.w(TAG, "Spirit level enabled but no accelerometer available; level overlay stays off")
+                    registration = Registration.NoSensor
+                    return
+                }
+                manager.registerListener(this, accelerometer, SensorManager.SENSOR_DELAY_NORMAL)
+                registration = Registration.Attached(accelerometer)
+            }
         }
     }
 
@@ -68,4 +105,8 @@ class SpiritLevelMonitor(context: Context) : SensorEventListener {
     }
 
     override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) = Unit
+
+    private companion object {
+        const val TAG = "SpiritLevelMonitor"
+    }
 }

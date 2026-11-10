@@ -1,5 +1,6 @@
 package com.raulshma.lenscast.streaming.web
 
+import com.raulshma.lenscast.streaming.PushPhase
 import com.raulshma.lenscast.streaming.model.AdaptiveBitrateStatusDto
 import com.raulshma.lenscast.streaming.model.BatteryStatusDto
 import com.raulshma.lenscast.streaming.model.ClientConnectionDetailDto
@@ -19,6 +20,16 @@ import com.raulshma.lenscast.streaming.model.WatchdogStatusDto
  * All inputs are stdlib/Kotlin types plus pure DTO-adjacent mirrors. Enum and
  * state objects are stringified by the caller (`.name` / `.toString()`), so
  * this module never touches Android-tainted types.
+ *
+ * The push outputs' [PushPhase] inputs (RTMP/WHIP/SRT): the typed
+ * reconnecting-vs-refused distinction the wire's `Error` status cannot carry.
+ * The wire union (`idle | connecting | connected | error`) is spec-pinned
+ * ([com.raulshma.lenscast.streaming.web.OpenApiSpec] and the DTO contract), so
+ * the phases never add a wire string — when supplied, the builder folds the
+ * DTO's live bit from the phase (one encoding of the fact, not three), which
+ * is wire-identical to the explicit bit because the phase derives from the
+ * same status × active pair. A null phase (older constructions, tests) keeps
+ * the explicit bit untouched.
  */
 object StatusSnapshotBuilder {
 
@@ -38,16 +49,22 @@ object StatusSnapshotBuilder {
         val rtmpActive: Boolean = false,
         val rtmpStatus: String = "idle",
         val rtmpError: String? = null,
+        /** The RTMP phase ([PushOutput.phase]); folds [rtmpActive] when supplied — see the class doc. */
+        val rtmpPhase: PushPhase? = null,
         /** The WHIP push output: enabled gate, live flag, lifecycle wire name, and error text. */
         val whipEnabled: Boolean = false,
         val whipActive: Boolean = false,
         val whipStatus: String = "idle",
         val whipError: String? = null,
+        /** The WHIP phase ([PushOutput.phase]); folds [whipActive] when supplied — see the class doc. */
+        val whipPhase: PushPhase? = null,
         /** The SRT push output: enabled gate, live flag, lifecycle wire name, and error text. */
         val srtEnabled: Boolean = false,
         val srtActive: Boolean = false,
         val srtStatus: String = "idle",
         val srtError: String? = null,
+        /** The SRT phase ([PushOutput.phase]); folds [srtActive] when supplied — see the class doc. */
+        val srtPhase: PushPhase? = null,
         /** The SRT push's measured round-trip time in ms (from full ACKs); null while not connected. */
         val srtRttMs: Int? = null,
         /** The live WHEP (WebRTC viewer) session count. */
@@ -203,15 +220,15 @@ object StatusSnapshotBuilder {
                 rtspStreamingActive = streaming.rtspStreamingActive,
                 rtspUrl = streaming.rtspUrl,
                 rtmpEnabled = streaming.rtmpEnabled,
-                rtmpActive = streaming.rtmpActive,
+                rtmpActive = streaming.rtmpPhase?.liveOutput() ?: streaming.rtmpActive,
                 rtmpStatus = streaming.rtmpStatus,
                 rtmpError = streaming.rtmpError,
                 whipEnabled = streaming.whipEnabled,
-                whipActive = streaming.whipActive,
+                whipActive = streaming.whipPhase?.liveOutput() ?: streaming.whipActive,
                 whipStatus = streaming.whipStatus,
                 whipError = streaming.whipError,
                 srtEnabled = streaming.srtEnabled,
-                srtActive = streaming.srtActive,
+                srtActive = streaming.srtPhase?.liveOutput() ?: streaming.srtActive,
                 srtStatus = streaming.srtStatus,
                 srtError = streaming.srtError,
                 srtRttMs = streaming.srtRttMs,
@@ -249,4 +266,14 @@ object StatusSnapshotBuilder {
     /** The inclusive min/max pair as the wire range; null when either bound is unknown. */
     private fun range(min: Number?, max: Number?): RangeDto? =
         if (min != null && max != null) RangeDto(min = min.toDouble(), max = max.toDouble()) else null
+
+    /**
+     * The phase's reading of the output's live flag — the inverse face of the
+     * status × active → phase mapping ([PushOutput.phase]): only [PushPhase.Idle]
+     * and [PushPhase.Refused] are not live. This is the builder's one internal
+     * use of the phase (the reconnecting-vs-refused split of the wire's
+     * `Error`), and it is wire-identical to the explicit bit by construction.
+     */
+    private fun PushPhase.liveOutput(): Boolean =
+        this != PushPhase.Idle && this != PushPhase.Refused
 }

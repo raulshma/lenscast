@@ -123,12 +123,14 @@ class PushOutputTest {
         val publishers: MutableList<Recorder>,
         val statuses: MutableList<PushStatus>,
         val settles: MutableList<Unit>,
+        val activeEvents: MutableList<Boolean>,
         val setUrl: (String) -> Unit,
         val configuredUrl: () -> String,
         val setEnabled: (Boolean) -> Boolean,
         val isEnabled: () -> Boolean,
         val isActive: () -> Boolean,
         val status: () -> PushStatus,
+        val phase: () -> PushPhase,
         val start: () -> PushOutput.StartResult,
         val stop: () -> Unit,
         val fireConnecting: () -> Unit,
@@ -140,9 +142,11 @@ class PushOutputTest {
         val publishers = mutableListOf<Recorder>()
         val statuses = mutableListOf<PushStatus>()
         val settles = mutableListOf<Unit>()
+        val activeEvents = mutableListOf<Boolean>()
         val output = RtmpOutput(
             source = FakeSource(codec),
             onStatusChanged = { statuses += it },
+            onActiveChanged = { activeEvents += it },
             publisherFactory = { _, onStatus ->
                 FakeRtmpPublisher(onStatus).also { publishers += it }
             },
@@ -158,12 +162,14 @@ class PushOutputTest {
             publishers = publishers,
             statuses = statuses,
             settles = settles,
+            activeEvents = activeEvents,
             setUrl = output::setUrl,
             configuredUrl = output::configuredUrl,
             setEnabled = output::setEnabled,
             isEnabled = output::isEnabled,
             isActive = output::isActive,
             status = output::status,
+            phase = output::phase,
             start = output::start,
             stop = output::stop,
             fireConnecting = { (publishers.last() as FakeRtmpPublisher).fire(RtmpStatus.Connecting) },
@@ -176,9 +182,11 @@ class PushOutputTest {
         val publishers = mutableListOf<Recorder>()
         val statuses = mutableListOf<PushStatus>()
         val settles = mutableListOf<Unit>()
+        val activeEvents = mutableListOf<Boolean>()
         val output = SrtOutput(
             source = FakeSource(codec),
             onStatusChanged = { statuses += it },
+            onActiveChanged = { activeEvents += it },
             publisherFactory = { _, onStatus ->
                 FakeSrtPublisher(onStatus).also { publishers += it }
             },
@@ -194,12 +202,14 @@ class PushOutputTest {
             publishers = publishers,
             statuses = statuses,
             settles = settles,
+            activeEvents = activeEvents,
             setUrl = output::setUrl,
             configuredUrl = output::configuredUrl,
             setEnabled = output::setEnabled,
             isEnabled = output::isEnabled,
             isActive = output::isActive,
             status = output::status,
+            phase = output::phase,
             start = output::start,
             stop = output::stop,
             fireConnecting = { (publishers.last() as FakeSrtPublisher).fire(SrtStatus.Connecting) },
@@ -212,9 +222,11 @@ class PushOutputTest {
         val publishers = mutableListOf<Recorder>()
         val statuses = mutableListOf<PushStatus>()
         val settles = mutableListOf<Unit>()
+        val activeEvents = mutableListOf<Boolean>()
         val output = WhipOutput(
             audioAllowed = { audioAllowed },
             onStatusChanged = { statuses += it },
+            onActiveChanged = { activeEvents += it },
             publisherFactory = { _, _, _, _, onStatus ->
                 FakeWhipPublisher(onStatus).also { publishers += it }
             },
@@ -230,12 +242,14 @@ class PushOutputTest {
             publishers = publishers,
             statuses = statuses,
             settles = settles,
+            activeEvents = activeEvents,
             setUrl = output::setUrl,
             configuredUrl = output::configuredUrl,
             setEnabled = output::setEnabled,
             isEnabled = output::isEnabled,
             isActive = output::isActive,
             status = output::status,
+            phase = output::phase,
             start = output::start,
             stop = output::stop,
             fireConnecting = { (publishers.last() as FakeWhipPublisher).fire(WhipStatus.Connecting) },
@@ -492,6 +506,58 @@ class PushOutputTest {
             fixture.stop()
             assertEquals(fixture.label, fixture.idle, fixture.status())
             assertEquals(fixture.label, fixture.idle, fixture.statuses.last())
+        }
+    }
+
+    // ── the derived phase ──
+
+    @Test
+    fun `the phase names what the status times active cannot - reconnecting vs refused`() {
+        for (fixture in allFixtures()) {
+            // Fresh: idle and stopped.
+            assertEquals(fixture.label, PushPhase.Idle, fixture.phase())
+
+            // Started, publisher silent: the between-attempts reading.
+            fixture.startPassing()
+            assertEquals(fixture.label, PushPhase.Connecting, fixture.phase())
+
+            // Live and confirmed.
+            fixture.fireConnected()
+            assertEquals(fixture.label, PushPhase.Connected, fixture.phase())
+
+            // Live and failing: the auto-reconnect reading of Error.
+            fixture.fireError("boom")
+            assertEquals(fixture.label, PushPhase.Reconnecting, fixture.phase())
+
+            // Stopped: back to idle, the error is gone from the line.
+            fixture.stop()
+            assertEquals(fixture.label, PushPhase.Idle, fixture.phase())
+
+            // A refused start: Error on the line with nothing live — the
+            // refused reading the wire strings cannot carry.
+            fixture.setEnabled(false)
+            val refused = fixture.start()
+            assertTrue(fixture.label, refused is PushOutput.StartResult.Rejected)
+            assertEquals(fixture.label, PushPhase.Refused, fixture.phase())
+        }
+    }
+
+    @Test
+    fun `the active mirror records every isActive flip and no refused start`() {
+        for (fixture in allFixtures()) {
+            // A refused start never flips the live bit.
+            fixture.start()
+            assertEquals(fixture.label, emptyList<Boolean>(), fixture.activeEvents)
+
+            // Start → stop: exactly one true and one false.
+            fixture.startPassing()
+            fixture.stop()
+            assertEquals(fixture.label, listOf(true, false), fixture.activeEvents)
+
+            // The disable-stop of a live output flips through the quiet path too.
+            fixture.startPassing()
+            fixture.setEnabled(false)
+            assertEquals(fixture.label, listOf(true, false, true, false), fixture.activeEvents)
         }
     }
 

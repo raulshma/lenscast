@@ -73,16 +73,18 @@ class StreamWatchdog(
     private val consecutiveFailures = AtomicInteger(0)
     private val totalRecoveries = AtomicInteger(0)
 
+    /**
+     * The whole tracking cluster as one immutable snapshot
+     * ([WatchdogPolicy.TrackingSnapshot]) — the frame-stall baselines, the
+     * last recovery timestamp, and the exposed failure reason — swapped
+     * wholesale at every transition. The consecutive-failure and
+     * total-recovery counters above stay AtomicIntegers deliberately: they
+     * are the loop's tick bookkeeping, not tracking state (the policy type's
+     * doc records the split). The known [updateState] quirk — a null-status
+     * refresh re-deriving IDLE over FAILED — is untouched here.
+     */
     @Volatile
-    private var lastProcessedFrameCount = 0
-    @Volatile
-    private var lastRtspAcceptedFrames = 0L
-    @Volatile
-    private var lastFrameCheckTimeMs = 0L
-    @Volatile
-    private var lastRecoveryTimestamp = 0L
-    @Volatile
-    private var lastFailureReason: String? = null
+    private var tracking = WatchdogPolicy.TrackingSnapshot()
 
     // Track whether we were previously in an active streaming state
     @Volatile
@@ -125,11 +127,14 @@ class StreamWatchdog(
         }
 
         consecutiveFailures.set(0)
-        lastProcessedFrameCount = streamingManager.processedFrames.value
-        lastRtspAcceptedFrames = streamingManager.getRtspHealth().acceptedFrames
-        lastFrameCheckTimeMs = System.currentTimeMillis()
+        tracking = WatchdogPolicy.TrackingSnapshot(
+            processedFrameCount = streamingManager.processedFrames.value,
+            rtspAcceptedFrames = streamingManager.getRtspHealth().acceptedFrames,
+            frameCheckTimeMs = System.currentTimeMillis(),
+            recoveryTimestamp = tracking.recoveryTimestamp,
+            failureReason = null,
+        )
         wasStreamingActive = true
-        lastFailureReason = null
 
         monitorJob = scope.launch {
             Log.d(TAG, "Watchdog monitoring started (interval=${checkIntervalSeconds}s, maxRetries=$maxRetries)")
@@ -147,7 +152,7 @@ class StreamWatchdog(
 
                 if (failureReason != null) {
                     Log.w(TAG, "Health check failed: $failureReason")
-                    lastFailureReason = failureReason
+                    tracking = tracking.copy(failureReason = failureReason)
                     consecutiveFailures.incrementAndGet()
                 }
 
@@ -175,15 +180,18 @@ class StreamWatchdog(
                         if (outcome.action == TickAction.RESET) {
                             Log.d(TAG, "Recovery successful after $recoveryTier attempt")
                             totalRecoveries.incrementAndGet()
-                            lastRecoveryTimestamp = System.currentTimeMillis()
                             consecutiveFailures.set(0)
-                            lastProcessedFrameCount = streamingManager.processedFrames.value
-                            lastRtspAcceptedFrames = try {
+                            val acceptedFrames = try {
                                 streamingManager.getRtspHealth().acceptedFrames
                             } catch (_: Exception) {
-                                lastRtspAcceptedFrames
+                                tracking.rtspAcceptedFrames
                             }
-                            lastFrameCheckTimeMs = System.currentTimeMillis()
+                            tracking = tracking.copy(
+                                processedFrameCount = streamingManager.processedFrames.value,
+                                rtspAcceptedFrames = acceptedFrames,
+                                frameCheckTimeMs = System.currentTimeMillis(),
+                                recoveryTimestamp = System.currentTimeMillis(),
+                            )
                         } else {
                             Log.w(TAG, "$recoveryTier recovery failed")
                         }
@@ -200,7 +208,7 @@ class StreamWatchdog(
                         Log.d(TAG, "Stream healthy again, resetting failure count")
                         consecutiveFailures.set(0)
                         if (tick.clearsFailureReason) {
-                            lastFailureReason = null
+                            tracking = tracking.copy(failureReason = null)
                         }
                         tick.status?.let(::updateState)
                     }
@@ -223,7 +231,7 @@ class StreamWatchdog(
         monitorJob = null
         wasStreamingActive = false
         consecutiveFailures.set(0)
-        lastFailureReason = null
+        tracking = tracking.copy(failureReason = null)
         updateState(WatchdogStatus.IDLE)
         Log.d(TAG, "Watchdog monitoring stopped")
     }
@@ -250,14 +258,14 @@ class StreamWatchdog(
             liveStreaming = streamingManager.isLiveStreaming(),
             clientCount = streamingManager.clientCount.value,
             processedFrames = streamingManager.processedFrames.value,
-            lastProcessedFrameCount = lastProcessedFrameCount,
-            lastFrameCheckTimeMs = lastFrameCheckTimeMs,
+            lastProcessedFrameCount = tracking.processedFrameCount,
+            lastFrameCheckTimeMs = tracking.frameCheckTimeMs,
             nowMs = System.currentTimeMillis(),
             rtspActive = streamingManager.isRtspRunning.value,
             rtspPlayingClients = rtsp?.playingClients ?: 0,
             rtspHealthy = rtsp?.healthy ?: true,
             rtspAcceptedFrames = rtsp?.acceptedFrames ?: 0L,
-            lastRtspAcceptedFrames = lastRtspAcceptedFrames,
+            lastRtspAcceptedFrames = tracking.rtspAcceptedFrames,
         )
 
         val reason = WatchdogPolicy.evaluate(snapshot)
@@ -265,10 +273,12 @@ class StreamWatchdog(
             return WatchdogPolicy.failureMessage(reason, snapshot)
         }
 
-        WatchdogPolicy.updatedTracking(snapshot)?.let { tracking ->
-            lastProcessedFrameCount = tracking.processedFrameCount
-            lastRtspAcceptedFrames = snapshot.rtspAcceptedFrames
-            lastFrameCheckTimeMs = tracking.frameCheckTimeMs
+        WatchdogPolicy.updatedTracking(snapshot)?.let { update ->
+            tracking = tracking.copy(
+                processedFrameCount = update.processedFrameCount,
+                rtspAcceptedFrames = snapshot.rtspAcceptedFrames,
+                frameCheckTimeMs = update.frameCheckTimeMs,
+            )
         }
         return null
     }
@@ -340,8 +350,8 @@ class StreamWatchdog(
             status = currentStatus,
             consecutiveFailures = consecutiveFailures.get(),
             totalRecoveries = totalRecoveries.get(),
-            lastRecoveryTimestamp = lastRecoveryTimestamp,
-            lastFailureReason = lastFailureReason,
+            lastRecoveryTimestamp = tracking.recoveryTimestamp,
+            lastFailureReason = tracking.failureReason,
         )
     }
 

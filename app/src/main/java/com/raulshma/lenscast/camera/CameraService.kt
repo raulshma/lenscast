@@ -15,7 +15,9 @@ import androidx.camera.core.ImageCapture
 import androidx.camera.core.ImageProxy
 import androidx.camera.core.Preview
 import androidx.camera.core.SurfaceOrientedMeteringPointFactory
-import androidx.camera.core.TorchState
+// Aliased: the model's own TorchState state machine is the published torch
+// fact; this import stays for CameraX's torch-state constant.
+import androidx.camera.core.TorchState as CameraXTorchState
 import androidx.camera.core.resolutionselector.ResolutionSelector
 import androidx.camera.core.resolutionselector.ResolutionStrategy
 import androidx.camera.lifecycle.ProcessCameraProvider
@@ -42,15 +44,23 @@ import com.raulshma.lenscast.camera.model.FrameErrorPolicy
 import com.raulshma.lenscast.camera.model.PhotoCapturePlan
 import com.raulshma.lenscast.camera.model.OutputRotationPolicy
 import com.raulshma.lenscast.camera.model.PhotoAspectRatioPolicy
+import com.raulshma.lenscast.camera.model.SelectedLens
+import com.raulshma.lenscast.camera.model.TorchState
 import com.raulshma.lenscast.camera.model.TorchStrengthPolicy
 import com.raulshma.lenscast.core.YuvConverter
 import com.raulshma.lenscast.camera.model.WhiteBalance
 import com.raulshma.lenscast.camera.model.HdrMode
 import com.raulshma.lenscast.camera.model.NightVisionMode
+import androidx.lifecycle.Observer
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.guava.await
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
@@ -119,7 +129,26 @@ class CameraService(private val context: Context) {
     /** Whether the bound camera can produce RAW+JPEG output (OUTPUT_FORMAT_RAW_JPEG). */
     val isRawCaptureSupported: StateFlow<Boolean> = _isRawCaptureSupported.asStateFlow()
 
-    private var currentCameraSelector: CameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
+    /**
+     * The one selected-lens fact ([SelectedLens]: selector + facing + index,
+     * atomic by construction). Every lens-fact writer updates this single
+     * flow; the facing/index flows below are projections of it, and binds
+     * read the selector straight off its value.
+     */
+    private val _selectedLens = MutableStateFlow(
+        SelectedLens(CameraSelector.DEFAULT_BACK_CAMERA, isFront = false, index = 0)
+    )
+
+    /** The published selected-lens fact; writers are [selectLens], [switchCamera]'s fallback, and [enumerateCameras]. */
+    val selectedLens: StateFlow<SelectedLens> = _selectedLens.asStateFlow()
+
+    /**
+     * The scope behind the derived public flows below (the same Eagerly
+     * stateIn idiom the ViewModels use). Process-lifetime: the service is an
+     * app-graph singleton, so nothing cancels it.
+     */
+    private val derivedFlowsScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+
     private var previewRequested = false
     private var exclusiveSessionRefCount = 0
     private var currentPreviewView: PreviewView? = null
@@ -138,8 +167,11 @@ class CameraService(private val context: Context) {
     private val _cameraState = MutableStateFlow<CameraState>(CameraState.Idle)
     val cameraState: StateFlow<CameraState> = _cameraState.asStateFlow()
 
-    private val _isFrontCamera = MutableStateFlow(false)
-    val isFrontCamera: StateFlow<Boolean> = _isFrontCamera.asStateFlow()
+    // The facing flag is no longer its own store: a projection of the one
+    // selected-lens fact above, so it can never disagree with the selector.
+    val isFrontCamera: StateFlow<Boolean> = _selectedLens
+        .map { it.isFront }
+        .stateIn(derivedFlowsScope, SharingStarted.Eagerly, _selectedLens.value.isFront)
 
     // Defaults are the persistence-side bounds from the CameraSettings
     // companion; the device's live ranges replace them at bind time.
@@ -164,13 +196,48 @@ class CameraService(private val context: Context) {
     private val _torchStrengthMaxLevel = MutableStateFlow<Int?>(null)
     val torchStrengthMaxLevel: StateFlow<Int?> = _torchStrengthMaxLevel.asStateFlow()
 
+    /**
+     * The LIVE torch truth ([TorchState]): the bound camera's cameraInfo
+     * torchState observation republished on every flip, combined with the
+     * strength this service last drove. The persisted torch settings are
+     * intent — remote writers flip the live torch without persisting — so
+     * consumers must read the torch from here, never from a settings read.
+     * [TorchState.Off] while no camera is bound (the live fact dies with the
+     * session). Writers: the torch observation below and the apply seam's
+     * strength bookkeeping.
+     */
+    private val _torchState = MutableStateFlow<TorchState>(TorchState.Off)
+    val torchState: StateFlow<TorchState> = _torchState.asStateFlow()
+
+    /**
+     * The strength level this service last drove onto the torch (the
+     * [applyTorchStrength] verdict that reached the flash), null when the
+     * device default applies — no level driven this torch-on epoch, an
+     * apply-without-strength, or an unbound camera. Fed into [TorchState.from]
+     * by every torch publication.
+     */
+    @Volatile
+    private var drivenTorchStrengthLevel: Int? = null
+
+    /**
+     * The one registration fact of the torch observation: the observer
+     * currently attached to the bound camera's cameraInfo torchState, null
+     * while none is. Attach/detach ride [controlsHandler] — LiveData
+     * observation is main-thread-only, and the bind paths can run off-main
+     * (the frame-error recovery does).
+     */
+    private var torchStateObserver: Observer<Int>? = null
+
     private var sensorExposureTimeRange: LongRange = 1L..1_000_000_000L
 
     private val _availableLenses = MutableStateFlow<List<CameraLensInfo>>(emptyList())
     val availableLenses: StateFlow<List<CameraLensInfo>> = _availableLenses.asStateFlow()
 
-    private val _selectedLensIndex = MutableStateFlow(0)
-    val selectedLensIndex: StateFlow<Int> = _selectedLensIndex.asStateFlow()
+    // Same projection shape as [isFrontCamera]: the inventory index the lens
+    // row highlights, read off the one selected-lens fact.
+    val selectedLensIndex: StateFlow<Int> = _selectedLens
+        .map { it.index }
+        .stateIn(derivedFlowsScope, SharingStarted.Eagerly, _selectedLens.value.index)
 
     fun setLifecycleOwner(owner: LifecycleOwner) {
         lifecycleOwner = owner
@@ -271,8 +338,51 @@ class CameraService(private val context: Context) {
         }
     }
 
-    /** Toggle source of truth: the live CameraX torch, not the persisted setting (deterrence drives torch without persisting). */
-    fun isTorchOn(): Boolean = camera?.cameraInfo?.torchState?.value == TorchState.ON
+    /**
+     * Toggle source of truth: the live CameraX torch, not the persisted setting
+     * (deterrence drives torch without persisting). Derived from the published
+     * [torchState] flow — the single torch fact this service publishes.
+     */
+    fun isTorchOn(): Boolean = _torchState.value is TorchState.On
+
+    /**
+     * Publish the torch fact from the live cameraInfo verdict plus the level
+     * this service last drove — the one mapping ([TorchState.from]) every
+     * publication goes through.
+     */
+    private fun publishTorchState(liveTorchOn: Boolean) {
+        _torchState.value = TorchState.from(liveTorchOn, drivenTorchStrengthLevel)
+    }
+
+    /**
+     * Attach the torch observation to the just-bound camera. The observer
+     * publishes on every flip, and LiveData's initial dispatch publishes the
+     * state the new session came up with; the identity guard drops a stale
+     * attach when a fast rebind replaced the camera before this ran.
+     */
+    private fun observeTorchState(cam: Camera) {
+        val observer = Observer<Int> { live ->
+            publishTorchState(live == CameraXTorchState.ON)
+        }
+        torchStateObserver = observer
+        controlsHandler.post {
+            if (torchStateObserver === observer && camera === cam) {
+                cam.cameraInfo.torchState.observeForever(observer)
+            }
+        }
+    }
+
+    /**
+     * Detach the torch observation from the bound camera's live data. The
+     * live data reference is captured before posting: the camera field may
+     * already be gone (unbind) by the time this lands on the main thread.
+     */
+    private fun stopTorchObservation() {
+        val observer = torchStateObserver ?: return
+        val liveData = camera?.cameraInfo?.torchState
+        torchStateObserver = null
+        liveData?.let { controlsHandler.post { it.removeObserver(observer) } }
+    }
 
     /**
      * The one MeteringDecision → CameraX translation, shared by tap-to-focus
@@ -533,19 +643,34 @@ class CameraService(private val context: Context) {
             // cameras on start causes black screen on many OEM drivers.
             val logicalBackIndex = LensInventory.defaultBackIndex(sorted)
 
-            _selectedLensIndex.value = logicalBackIndex
-
+            // One SelectedLens write for the whole default — selector, facing
+            // and index land together. An empty enumeration leaves it alone:
+            // nothing consumes the index while the inventory is empty, and
+            // the previous selection is what a later rebind would use anyway.
             if (sorted.isNotEmpty()) {
-                currentCameraSelector = sorted[logicalBackIndex].cameraSelector
-                _isFrontCamera.value = sorted[logicalBackIndex].lensFacing == CameraSelector.LENS_FACING_FRONT
+                val defaultLens = sorted[logicalBackIndex]
+                _selectedLens.value = SelectedLens(
+                    defaultLens.cameraSelector,
+                    defaultLens.lensFacing == CameraSelector.LENS_FACING_FRONT,
+                    logicalBackIndex,
+                )
             }
 
             Log.d(TAG, "Enumerated ${sorted.size} cameras, default index=$logicalBackIndex")
         } catch (e: Exception) {
             Log.e(TAG, "Camera enumeration failed, falling back to default", e)
             // Fallback — create basic entries
-            _availableLenses.value = LensInventory.fallbackLenses()
-            _selectedLensIndex.value = 0
+            val fallback = LensInventory.fallbackLenses()
+            _availableLenses.value = fallback
+            // All three facts reset together (the old fallback reset only the
+            // index and left the selector and facing stale): the fallback
+            // inventory's first entry is the default back camera.
+            val fallbackLens = fallback.first()
+            _selectedLens.value = SelectedLens(
+                fallbackLens.cameraSelector,
+                fallbackLens.lensFacing == CameraSelector.LENS_FACING_FRONT,
+                index = 0,
+            )
         }
     }
 
@@ -587,10 +712,14 @@ class CameraService(private val context: Context) {
         }
         val lens = lenses[index]
         Log.d(TAG, "selectLens: switching to lens $index: ${LensInventory.baseLabel(lens)}, provider=${cameraProvider != null}, previewView=${currentPreviewView != null}")
-        
-        _selectedLensIndex.value = index
-        currentCameraSelector = lens.cameraSelector
-        _isFrontCamera.value = lens.lensFacing == CameraSelector.LENS_FACING_FRONT
+
+        // One atomic write: a deferred rebind (or a mid-flight second
+        // selection) can only ever observe a complete lens fact.
+        _selectedLens.value = SelectedLens(
+            lens.cameraSelector,
+            lens.lensFacing == CameraSelector.LENS_FACING_FRONT,
+            index,
+        )
 
         // One arbiter consult: rebind only while the camera is free (demand
         // active, no exclusive session) — the same verdict as switch/recover;
@@ -715,7 +844,7 @@ class CameraService(private val context: Context) {
 
         currentPreviewView = previewView
         previewRequested = true
-        Log.d(TAG, "startPreview: requested with selector=$currentCameraSelector, resolution=$currentResolution")
+        Log.d(TAG, "startPreview: requested with selector=${_selectedLens.value.selector}, resolution=$currentResolution")
 
         val owner = getEffectiveLifecycleOwner()
         if (owner == null) {
@@ -766,7 +895,7 @@ class CameraService(private val context: Context) {
         provider: ProcessCameraProvider,
         owner: LifecycleOwner,
     ) {
-        Log.d(TAG, "bindUseCases: selector=$currentCameraSelector, resolution=$currentResolution, attachPreview=${shouldAttachPreview()}")
+        Log.d(TAG, "bindUseCases: selector=${_selectedLens.value.selector}, resolution=$currentResolution, attachPreview=${shouldAttachPreview()}")
 
         // The photo-use-case decisions (quality clamp, capture mode, RAW
         // output format, capability fold) are the pure Photo Capture Plan's;
@@ -822,7 +951,7 @@ class CameraService(private val context: Context) {
             .setResolutionSelector(analysisResolutionSelector)
             .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
 
-        val selectedLens = _availableLenses.value.getOrNull(_selectedLensIndex.value)
+        val selectedLens = _availableLenses.value.getOrNull(_selectedLens.value.index)
         // setPhysicalCameraId is API 28+; below P the logical camera serves
         // all use cases, which is the pre-multi-lens behavior anyway.
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P && selectedLens?.physicalCameraId != null) {
@@ -853,6 +982,10 @@ class CameraService(private val context: Context) {
             }
 
         try {
+            // Detach the previous session's torch observation first: the old
+            // camera's live data dies with the unbind below, and the attach
+            // must follow the new bind (main-thread posts stay in order).
+            stopTorchObservation()
             provider.unbindAll()
             try {
                 camera = bindLargestCompatible(
@@ -869,6 +1002,11 @@ class CameraService(private val context: Context) {
             }
 
             camera?.let { cam ->
+                // The live torch fact: observe the camera just bound. Every
+                // flip (local enableTorch, a remote writer, the re-asserted
+                // strength) republishes [torchState].
+                observeTorchState(cam)
+
                 // Refresh the live RAW capability from the camera just
                 // bound; if the plan's capability fold changed what should
                 // have been built (first bind starts with no camera to
@@ -987,7 +1125,7 @@ class CameraService(private val context: Context) {
                 provider.unbindAll()
                 val boundCamera = provider.bindToLifecycle(
                     owner,
-                    currentCameraSelector,
+                    _selectedLens.value.selector,
                     *useCases.toTypedArray()
                 )
 
@@ -1016,12 +1154,17 @@ class CameraService(private val context: Context) {
     }
 
     private fun clearBoundUseCases() {
+        stopTorchObservation()
         preview?.surfaceProvider = null
         preview = null
         imageCapture = null
         imageAnalysis = null
         camera = null
         boundPhotoConfig = null
+        // Unbound camera = torch dark: the live fact dies with the session,
+        // and the driven strength goes with it (TorchState's KDoc).
+        drivenTorchStrengthLevel = null
+        _torchState.value = TorchState.Off
     }
 
     /**
@@ -1042,9 +1185,10 @@ class CameraService(private val context: Context) {
         val lenses = _availableLenses.value
         if (lenses.isEmpty()) {
             // Fallback to simple front/back toggle — the pure LensInventory's.
-            val (selector, frontFacing) = LensInventory.fallbackSelector(_isFrontCamera.value)
-            currentCameraSelector = selector
-            _isFrontCamera.value = frontFacing
+            // One SelectedLens write; the index is meaningless while the
+            // inventory is empty and is left as-is.
+            val (selector, frontFacing) = LensInventory.fallbackSelector(_selectedLens.value.isFront)
+            _selectedLens.value = _selectedLens.value.copy(selector = selector, isFront = frontFacing)
             val previewView = currentPreviewView
             if (previewView != null) {
                 startPreview(previewView)
@@ -1064,7 +1208,7 @@ class CameraService(private val context: Context) {
         }
 
         // Cycle to next lens
-        selectLens(LensInventory.nextIndex(_selectedLensIndex.value, lenses.size))
+        selectLens(LensInventory.nextIndex(_selectedLens.value.index, lenses.size))
     }
 
     private val analysisExecutor by lazy {
@@ -1283,6 +1427,11 @@ class CameraService(private val context: Context) {
         try {
             if (cam.cameraInfo.hasFlashUnit()) {
                 cam.cameraControl.enableTorch(settings.torchEnabled)
+                // Bookkeeping only — the re-assert above is unchanged: the
+                // level this apply drives feeds [torchState] (null = device
+                // default), and a torch-off apply — or an on-without-level —
+                // retires any previous level.
+                drivenTorchStrengthLevel = null
                 // Per-level torch strength (API 33+): driven ONLY while the
                 // torch should be ON — turnOnTorchWithStrengthLevel switches
                 // the flash on as a side effect when it was off, so a
@@ -1431,6 +1580,10 @@ class CameraService(private val context: Context) {
             val cameraManager =
                 context.getSystemService(Context.CAMERA_SERVICE) as android.hardware.camera2.CameraManager
             cameraManager.turnOnTorchWithStrengthLevel(torchCameraId, level)
+            // The level that reached the flash is the torch fact's driven
+            // strength (the torchState flow's On payload); a failed drive
+            // leaves the previous value in place.
+            drivenTorchStrengthLevel = level
             // Read-back verification (the check CTS performs): diagnostic
             // only — a mismatch is logged, never retried or re-derived, since
             // the level re-asserts on the next settings apply anyway. HALs

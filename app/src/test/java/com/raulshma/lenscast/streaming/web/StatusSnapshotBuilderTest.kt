@@ -1,5 +1,6 @@
 package com.raulshma.lenscast.streaming.web
 
+import com.raulshma.lenscast.streaming.PushPhase
 import com.raulshma.lenscast.streaming.web.StatusSnapshotBuilder.AdaptiveInputs
 import com.raulshma.lenscast.streaming.web.StatusSnapshotBuilder.BatteryInputs
 import com.raulshma.lenscast.streaming.web.StatusSnapshotBuilder.ClientDetailInputs
@@ -275,5 +276,71 @@ class StatusSnapshotBuilderTest {
         assertEquals(true, response.streaming.whipActive)
         assertEquals("error", response.streaming.whipStatus)
         assertEquals("WHIP server answered 401 to the offer", response.streaming.whipError)
+    }
+
+    @Test
+    fun `a supplied phase folds the live bit and the wire strings stay untouched`() {
+        // Reconnecting (Error + live) and Refused (Error + stopped) both ride
+        // the wire's plain "error" string; the phase only re-derives the live
+        // bit — identically to the explicit input, by construction.
+        val reconnecting = StatusSnapshotBuilder.build(
+            streaming = streaming().copy(
+                rtmpEnabled = true,
+                rtmpActive = true,
+                rtmpStatus = "error",
+                rtmpError = "connect rejected",
+                rtmpPhase = PushPhase.Reconnecting,
+            ),
+            thermal = thermal(),
+            battery = battery(),
+            watchdog = watchdog(),
+            adaptive = adaptive(),
+            network = network(),
+        )
+        assertEquals(true, reconnecting.streaming.rtmpActive)
+        assertEquals("error", reconnecting.streaming.rtmpStatus)
+        assertEquals("connect rejected", reconnecting.streaming.rtmpError)
+
+        val refused = StatusSnapshotBuilder.build(
+            streaming = streaming().copy(
+                rtmpEnabled = true,
+                rtmpActive = false,
+                rtmpStatus = "error",
+                rtmpError = "invalid RTMP URL",
+                rtmpPhase = PushPhase.Refused,
+            ),
+            thermal = thermal(),
+            battery = battery(),
+            watchdog = watchdog(),
+            adaptive = adaptive(),
+            network = network(),
+        )
+        assertEquals(false, refused.streaming.rtmpActive)
+        assertEquals("error", refused.streaming.rtmpStatus)
+        assertEquals("invalid RTMP URL", refused.streaming.rtmpError)
+
+        // Connected and Connecting fold live; Idle folds stopped.
+        assertEquals(
+            true,
+            StatusSnapshotBuilder.build(
+                streaming = streaming().copy(rtmpPhase = PushPhase.Connected),
+                thermal = thermal(),
+                battery = battery(),
+                watchdog = watchdog(),
+                adaptive = adaptive(),
+                network = network(),
+            ).streaming.rtmpActive,
+        )
+        assertEquals(
+            false,
+            StatusSnapshotBuilder.build(
+                streaming = streaming().copy(rtmpPhase = PushPhase.Idle),
+                thermal = thermal(),
+                battery = battery(),
+                watchdog = watchdog(),
+                adaptive = adaptive(),
+                network = network(),
+            ).streaming.rtmpActive,
+        )
     }
 }

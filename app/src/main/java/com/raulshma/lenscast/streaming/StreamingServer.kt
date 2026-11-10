@@ -106,15 +106,36 @@ class StreamingServer(
     private val sseStatusStream = SseStatusStream(webApi.status)
     private val sseDetectionEventStream = SseDetectionEventStream(webApi.detectionEvents)
 
-    private var isRunning = false
-
     /**
-     * True once [start] has been attempted, even if it failed. NanoHTTPD
-     * binds on its server thread before the call reports the failure, so a
-     * failed start can still own a socket; [stopServer] must run for it or
-     * the port stays held until the process dies.
+     * The server's run-state machine — the one encoding behind what used to
+     * be the `isRunning`/`startAttempted` boolean pair (whose four nominal
+     * combinations collapse to three reachable states, since a start that
+     * reports running always counts as attempted):
+     *
+     * - [RunState.NeverTried] — [startServer] never ran (or a previous
+     *   [stopServer] fully succeeded); no socket is held. A fresh instance
+     *   starts here.
+     * - [RunState.FailedStart] — [startServer] was attempted but did not
+     *   report running. NanoHTTPD binds on its server thread before the call
+     *   reports the failure, so a failed start can still own a socket;
+     *   [stopServer] must run for it or the port stays held until the
+     *   process dies.
+     * - [RunState.Running] — [startServer] reported running.
+     *
+     * The deliberate dirty-stopped retryability: [stopServer] moves any
+     * attempted state to [RunState.FailedStart] before releasing, and clears
+     * to [RunState.NeverTried] only when the socket release actually
+     * succeeded — a throwing stop leaves [RunState.FailedStart], so the next
+     * [stopServer] still runs (and the release is retried), exactly the
+     * contract the boolean pair encoded.
      */
-    private var startAttempted = false
+    private enum class RunState {
+        NeverTried,
+        FailedStart,
+        Running,
+    }
+
+    private var runState = RunState.NeverTried
 
     // The [WebServerHandle] members: the exact surface [StreamingManager]'s
     // web transport drives — the interface adds nothing new, it only lets
@@ -551,10 +572,10 @@ class StreamingServer(
     }
 
     override fun startServer(): Boolean {
-        startAttempted = true
+        runState = RunState.FailedStart
         return try {
             start()
-            isRunning = true
+            runState = RunState.Running
             Log.d(TAG, "Streaming server started on port $port")
             true
         } catch (e: Exception) {
@@ -566,17 +587,17 @@ class StreamingServer(
     override fun stopServer() {
         // Release every instance a start was attempted for, not just the ones
         // that reported running: a bind failure can leave the socket owned by
-        // an instance `isRunning` never saw, and the next create → bind would
-        // answer EADDRINUSE. stop() is only safe after start() touched the
-        // thread/socket, hence the attempt flag rather than a bare call.
-        if (!startAttempted && !isRunning) return
-        isRunning = false
+        // an instance the Running state never saw, and the next create → bind
+        // would answer EADDRINUSE. stop() is only safe after start() touched
+        // the thread/socket, hence the NeverTried guard rather than a bare call.
+        if (runState == RunState.NeverTried) return
+        runState = RunState.FailedStart
         runCatching { stop() }
             .onSuccess {
-                // Clear the flag only after the socket release succeeded: a
-                // throwing stop must stay retryable, or the port leaks until
-                // the process dies.
-                startAttempted = false
+                // Clear only after the socket release succeeded: a throwing
+                // stop must stay retryable, or the port leaks until the
+                // process dies.
+                runState = RunState.NeverTried
                 // Sessions live in the manager-owned WebAuthGate — they survive
                 // a server recreation (e.g. a port change) by design.
                 Log.d(TAG, "Streaming server stopped")
