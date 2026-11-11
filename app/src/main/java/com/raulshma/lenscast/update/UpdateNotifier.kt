@@ -9,11 +9,18 @@ import android.os.Build
 import androidx.core.app.NotificationCompat
 import com.raulshma.lenscast.MainActivity
 import com.raulshma.lenscast.core.ForegroundNotifications
+import com.raulshma.lenscast.navigation.Routes
 
 class UpdateNotifier(private val context: Context) {
 
     companion object {
         private const val CHANNEL_ID = "update_channel"
+
+        /**
+         * The deep-link destination extra; its value is a [Routes] string
+         * (the one route vocabulary) and MainActivity re-emits it verbatim
+         * as a navigation event — changing the value is a wire break.
+         */
         const val EXTRA_NAVIGATE_TO = "navigate_to"
     }
 
@@ -24,7 +31,7 @@ class UpdateNotifier(private val context: Context) {
         val pendingIntent = PendingIntent.getActivity(
             context, 0,
             Intent(context, MainActivity::class.java).apply {
-                putExtra(EXTRA_NAVIGATE_TO, "app-settings")
+                putExtra(EXTRA_NAVIGATE_TO, Routes.APP_SETTINGS)
                 flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
             },
             PendingIntent.FLAG_UPDATE_CURRENT or

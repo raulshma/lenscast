@@ -6,6 +6,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.raulshma.lenscast.capture.model.IntervalCaptureConfig
+import com.raulshma.lenscast.capture.model.IntervalCaptureState
 import com.raulshma.lenscast.capture.model.RecordingConfig
 import com.raulshma.lenscast.capture.model.TimelapseState
 import com.raulshma.lenscast.camera.model.RecordingToggle
@@ -54,13 +55,32 @@ class CaptureViewModel(
     val intervalConfig: StateFlow<IntervalCaptureConfig> = _intervalConfig.asStateFlow()
 
     // Interval-capture truth lives in WorkManager; derive directly from the
-    // scheduler's cold flow — no manual mirrors to drift.
+    // scheduler's cold flow — no manual mirrors to drift. The tri-state keeps
+    // "no snapshot observed yet" (Unknown) distinct from a confirmed Stopped,
+    // so the screen never renders a tappable Start while the first
+    // WorkManager read is still in flight.
     private val intervalStatus: StateFlow<IntervalCaptureStatusSnapshot?> =
         IntervalCaptureScheduler.observeStatus(context)
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(SUBSCRIBE_TIMEOUT_MS), null)
 
-    val isIntervalRunning: StateFlow<Boolean> = intervalStatus
-        .map { it?.isRunning == true }
+    val intervalState: StateFlow<IntervalCaptureState> = intervalStatus
+        .map { status ->
+            when (status) {
+                null -> IntervalCaptureState.Unknown
+                else -> if (status.isRunning) IntervalCaptureState.Running(status)
+                else IntervalCaptureState.Stopped
+            }
+        }
+        .stateIn(
+            viewModelScope,
+            SharingStarted.WhileSubscribed(SUBSCRIBE_TIMEOUT_MS),
+            IntervalCaptureState.Unknown,
+        )
+
+    // The boolean view of [intervalState]: Running → true, everything else
+    // false — exactly the pre-tri-state `snapshot?.isRunning == true`.
+    val isIntervalRunning: StateFlow<Boolean> = intervalState
+        .map { it is IntervalCaptureState.Running }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(SUBSCRIBE_TIMEOUT_MS), false)
 
     val recordingState: StateFlow<RecordingState> = recordingController.state

@@ -4,7 +4,6 @@ import android.Manifest
 import android.content.pm.PackageManager
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.activity.ComponentActivity
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -27,7 +26,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -40,6 +39,9 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.raulshma.lenscast.AppGraph
 import com.raulshma.lenscast.R
@@ -83,7 +85,6 @@ fun CameraSettingsScreen(
     onNavigateToAppSettings: () -> Unit = {},
 ) {
     val context = LocalContext.current
-    val activity = context as ComponentActivity
     val app = context.applicationContext as AppGraph
     val viewModel: SettingsViewModel = viewModel(
         factory = SettingsViewModel.Factory(
@@ -93,8 +94,18 @@ fun CameraSettingsScreen(
         )
     )
 
-    LaunchedEffect(activity) {
-        viewModel.refreshBatteryOptimizationStatus()
+    // Re-read on every resume: returning from the system battery-optimization
+    // dialog changes the switch's truth without recomposing this screen. The
+    // same ON_RESUME refresh the app-settings screen runs — both screens
+    // mirror _isIgnoringBatteryOptimizations, so both refresh it the same way
+    // through SettingsViewModel.refreshBatteryOptimizationStatus().
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) viewModel.refreshBatteryOptimizationStatus()
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
     val settings by viewModel.settings.collectAsState()

@@ -14,12 +14,22 @@ import androidx.lifecycle.LifecycleEventObserver
 import com.raulshma.lenscast.navigation.NavigationGraph
 import com.raulshma.lenscast.ui.theme.LensCastTheme
 import com.raulshma.lenscast.update.UpdateNotifier
+import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
 
 class MainActivity : ComponentActivity() {
 
-    private val _navigationEvents = MutableSharedFlow<String>(extraBufferCapacity = 1)
+    // Deep-link destination events, collected by the NavigationGraph. Policy:
+    // extraBufferCapacity 8 with DROP_OLDEST — a burst of intents arriving
+    // before (or faster than) collection can never wedge `tryEmit` (the
+    // old capacity-1 flow silently dropped a second event when the buffer
+    // was full), and when the buffer does fill the oldest uncollected
+    // destination is dropped first, so the freshest intent always wins.
+    private val _navigationEvents = MutableSharedFlow<String>(
+        extraBufferCapacity = 8,
+        onBufferOverflow = BufferOverflow.DROP_OLDEST,
+    )
     val navigationEvents: SharedFlow<String> = _navigationEvents
 
     override fun onCreate(savedInstanceState: Bundle?) {

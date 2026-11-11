@@ -101,18 +101,23 @@ class WearTileService : TileService() {
 
 /**
  * The in-process hand-off between the resumed poll loop and the tile
- * service (same process by default): the latest status plus the published
- * state line, so the publisher can decide whether the tile needs a
- * re-render at all. Volatile fields — written from the poll coroutine,
- * read from the service's binder thread.
+ * service (same process by default): one immutable [CacheState] holder
+ * (latest status plus the published state line) swapped atomically through
+ * a single @Volatile field — written from the poll coroutine, read from the
+ * service's binder thread, a reader can never pair a new line with an old
+ * status. Process death clears it, so the tile honestly renders "Phone
+ * status unknown" rather than a stale guess.
  */
 object WearTileStatusCache {
 
-    @Volatile
-    private var latest: WearStatus? = null
+    /** One immutable hand-off snapshot; swapped whole, never mutated in place. */
+    private data class CacheState(
+        val latest: WearStatus?,
+        val publishedLine: WearTileModels.StateLine?,
+    )
 
     @Volatile
-    private var publishedLine: WearTileModels.StateLine? = null
+    private var state = CacheState(latest = null, publishedLine = null)
 
     /**
      * Publishes one poll result; true when the tile's stream-state line
@@ -120,14 +125,13 @@ object WearTileStatusCache {
      */
     fun publish(status: WearStatus): Boolean {
         val line = WearTileModels.stateLine(status)
-        val changed = line != publishedLine
-        latest = status
-        publishedLine = line
+        val changed = line != state.publishedLine
+        state = CacheState(latest = status, publishedLine = line)
         return changed
     }
 
     /** The last published status, or null before the first poll of this process. */
-    fun current(): WearStatus? = latest
+    fun current(): WearStatus? = state.latest
 }
 
 /** The stream-state line → the tile strings/colors, one home for the ladder. */

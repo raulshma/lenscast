@@ -71,12 +71,12 @@ import kotlinx.coroutines.launch
  */
 class SettingsActivity : ComponentActivity() {
 
-    /** The latest POST_NOTIFICATIONS grant, surfaced in the alerts section. */
-    private val notificationGranted = mutableStateOf<Boolean?>(null)
+    /** The latest POST_NOTIFICATIONS ask verdict, surfaced in the alerts section. */
+    private val notificationGranted = mutableStateOf(PermissionState.Unknown)
 
     private val notificationPermissionLauncher =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-            notificationGranted.value = granted
+            notificationGranted.value = if (granted) PermissionState.Granted else PermissionState.Denied
         }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -95,7 +95,9 @@ class SettingsActivity : ComponentActivity() {
                         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                             notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
                         } else {
-                            notificationGranted.value = true
+                            // Pre-33 the permission is install-time: the ask
+                            // is skipped and the grant is written unconditionally.
+                            notificationGranted.value = PermissionState.Granted
                         }
                     },
                 )
@@ -104,24 +106,38 @@ class SettingsActivity : ComponentActivity() {
     }
 }
 
+/**
+ * The POST_NOTIFICATIONS ask's tri-state as the alerts section renders it:
+ * [Unknown] = unchecked this composition (no ask has been made and no
+ * pre-33 auto-grant has run — the hint keeps its default wording),
+ * [Granted] = the launcher's grant (or the unconditional pre-33 write),
+ * [Denied] = the launcher's denial. The activity writes it (launcher
+ * callback, pre-33 fallback); the alerts hint reads it — the denial wording
+ * renders only on [Denied].
+ */
+enum class PermissionState { Unknown, Granted, Denied }
+
 /** The editable form + test verdict surface, seeded from the stored settings. */
 @Composable
 private fun SettingsScreen(
     settingsStore: WearSettingsStore,
     client: WearApiClient,
-    notificationGranted: MutableState<Boolean?>,
+    notificationGranted: MutableState<PermissionState>,
     onRequestNotificationPermission: () -> Unit,
 ) {
     val scope = rememberCoroutineScope()
 
     // The draft settings: seeded once from DataStore, edited locally, saved
     // explicitly (Save, or the Test button which persists before reaching).
+    // null is the loading encoding — DataStore's first read is still in
+    // flight, and the list renders a small spinner in that frame instead of
+    // nothing; once non-null, the draft is the form's single truth.
     var draft by remember { mutableStateOf<WearSettings?>(null) }
     var testState by remember { mutableStateOf<RequestState<String>>(RequestState.Idle) }
 
     LaunchedEffect(Unit) { draft = settingsStore.current() }
 
-    val settings = draft // one frame while DataStore's first read is in flight
+    val settings = draft // null only while DataStore's first read is in flight
 
     Scaffold(timeText = { TimeText() }) {
         ScalingLazyColumn(
@@ -222,17 +238,17 @@ private fun SettingsScreen(
                     }
                 }
                 item {
-                    val granted = notificationGranted.value
+                    val denied = notificationGranted.value == PermissionState.Denied
                     Text(
                         text = stringResource(
                             when {
-                                settings.alertsEnabled && granted == false -> R.string.settings_alert_permission_denied
+                                settings.alertsEnabled && denied -> R.string.settings_alert_permission_denied
                                 else -> R.string.settings_alerts_hint
                             }
                         ),
                         fontSize = 11.sp,
                         textAlign = TextAlign.Center,
-                        color = if (settings.alertsEnabled && granted == false) {
+                        color = if (settings.alertsEnabled && denied) {
                             MaterialTheme.colors.error
                         } else {
                             MaterialTheme.colors.onBackground.copy(alpha = 0.6f)
@@ -288,6 +304,13 @@ private fun SettingsScreen(
                         )
                     }
                     else -> {}
+                }
+            } else {
+                item {
+                    // The loading frame (draft null above): a small spinner —
+                    // the same affordance the Test button uses — instead of
+                    // an empty list for the one DataStore read.
+                    CircularProgressIndicator()
                 }
             }
         }

@@ -20,6 +20,7 @@ import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -45,6 +46,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.raulshma.lenscast.AppGraph
 import com.raulshma.lenscast.R
 import com.raulshma.lenscast.capture.model.FlashMode
+import com.raulshma.lenscast.capture.model.IntervalCaptureState
 import com.raulshma.lenscast.capture.model.RecordingConfig
 import com.raulshma.lenscast.capture.model.RecordingQuality
 import com.raulshma.lenscast.capture.model.TimelapseMessage
@@ -74,7 +76,7 @@ fun CaptureScreen(
     )
 
     val intervalConfig by viewModel.intervalConfig.collectAsState()
-    val isIntervalRunning by viewModel.isIntervalRunning.collectAsState()
+    val intervalState by viewModel.intervalState.collectAsState()
     val isRecording by viewModel.isRecording.collectAsState()
     val recordingConfig by viewModel.recordingConfig.collectAsState()
     val recordingElapsedMs by viewModel.recordingElapsedMs.collectAsState()
@@ -207,32 +209,51 @@ fun CaptureScreen(
                         }
                     )
                     Spacer(modifier = Modifier.height(4.dp))
-                    if (isIntervalRunning) {
-                        OutlinedButton(
-                            onClick = { viewModel.stopIntervalCapture() },
-                            modifier = Modifier.fillMaxWidth(),
-                            colors = ButtonDefaults.outlinedButtonColors(
-                                contentColor = MaterialTheme.colorScheme.error
-                            )
-                        ) {
-                            Icon(
-                                Icons.Default.Timer,
-                                contentDescription = null,
-                                modifier = Modifier.size(18.dp)
-                            )
-                            Text(stringResource(R.string.capture_stop_interval), modifier = Modifier.padding(start = 8.dp))
+                    // The series' tri-state: Running renders the stop
+                    // affordance, Stopped the tappable start, and Unknown —
+                    // the WorkManager snapshot not yet observed (the first
+                    // frames after entering the screen) — renders start
+                    // disabled-with-progress so the button is never tappable
+                    // while the truth is momentarily unobservable.
+                    when (intervalState) {
+                        is IntervalCaptureState.Running -> {
+                            OutlinedButton(
+                                onClick = { viewModel.stopIntervalCapture() },
+                                modifier = Modifier.fillMaxWidth(),
+                                colors = ButtonDefaults.outlinedButtonColors(
+                                    contentColor = MaterialTheme.colorScheme.error
+                                )
+                            ) {
+                                Icon(
+                                    Icons.Default.Timer,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Text(stringResource(R.string.capture_stop_interval), modifier = Modifier.padding(start = 8.dp))
+                            }
                         }
-                    } else {
-                        Button(
-                            onClick = { viewModel.startIntervalCapture(intervalConfig) },
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Icon(
-                                Icons.Default.Timer,
-                                contentDescription = null,
-                                modifier = Modifier.size(18.dp)
-                            )
-                            Text(stringResource(R.string.capture_start_interval), modifier = Modifier.padding(start = 8.dp))
+                        IntervalCaptureState.Unknown -> {
+                            Button(
+                                onClick = {},
+                                enabled = false,
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                CircularProgressIndicator(modifier = Modifier.size(18.dp))
+                                Text(stringResource(R.string.capture_start_interval), modifier = Modifier.padding(start = 8.dp))
+                            }
+                        }
+                        IntervalCaptureState.Stopped -> {
+                            Button(
+                                onClick = { viewModel.startIntervalCapture(intervalConfig) },
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Icon(
+                                    Icons.Default.Timer,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Text(stringResource(R.string.capture_start_interval), modifier = Modifier.padding(start = 8.dp))
+                            }
                         }
                     }
                     Spacer(modifier = Modifier.height(8.dp))

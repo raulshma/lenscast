@@ -26,7 +26,6 @@ import com.raulshma.lenscast.MainActivity
 import com.raulshma.lenscast.automation.AutomationScreen
 import com.raulshma.lenscast.camera.CameraScreen
 import com.raulshma.lenscast.capture.CaptureScreen
-import com.raulshma.lenscast.capture.DETECTION_EVENTS_ROUTE
 import com.raulshma.lenscast.capture.DetectionEventsScreen
 import com.raulshma.lenscast.gallery.GalleryScreen
 import com.raulshma.lenscast.gallery.GalleryViewModel
@@ -69,7 +68,7 @@ fun NavigationGraph() {
         CompositionLocalProvider(LocalSharedTransitionScope provides this@SharedTransitionLayout) {
             NavHost(
                 navController = navController,
-                startDestination = "camera",
+                startDestination = Routes.CAMERA,
                 enterTransition = {
                     fadeIn(tween(ANIM_DURATION)) + slideInHorizontally(tween(ANIM_DURATION)) { it }
                 },
@@ -83,36 +82,36 @@ fun NavigationGraph() {
                     fadeOut(tween(ANIM_DURATION)) + slideOutHorizontally(tween(ANIM_DURATION)) { it }
                 },
             ) {
-                composable("camera") {
+                composable(Routes.CAMERA) {
                     CompositionLocalProvider(LocalAnimatedVisibilityScope provides this@composable) {
                         CameraScreen(
-                            onNavigateToSettings = { navController.navigate("settings") },
-                            onNavigateToCapture = { navController.navigate("capture") },
-                            onNavigateToGallery = { navController.navigate("gallery") },
+                            onNavigateToSettings = { navController.navigate(Routes.SETTINGS) },
+                            onNavigateToCapture = { navController.navigate(Routes.CAPTURE) },
+                            onNavigateToGallery = { navController.navigate(Routes.GALLERY) },
                         )
                     }
                 }
 
-                composable("settings") {
+                composable(Routes.SETTINGS) {
                     CompositionLocalProvider(LocalAnimatedVisibilityScope provides this@composable) {
                         CameraSettingsScreen(
                             onNavigateBack = { navController.popBackStack() },
-                            onNavigateToAppSettings = { navController.navigate("app-settings") },
+                            onNavigateToAppSettings = { navController.navigate(Routes.APP_SETTINGS) },
                         )
                     }
                 }
 
-                composable("app-settings") {
+                composable(Routes.APP_SETTINGS) {
                     CompositionLocalProvider(LocalAnimatedVisibilityScope provides this@composable) {
                         AppSettingsScreen(
                             onNavigateBack = { navController.popBackStack() },
-                            onOpenEventLog = { navController.navigate(DETECTION_EVENTS_ROUTE) },
-                            onOpenAutomation = { navController.navigate("automation") },
+                            onOpenEventLog = { navController.navigate(Routes.DETECTION_EVENTS) },
+                            onOpenAutomation = { navController.navigate(Routes.AUTOMATION) },
                         )
                     }
                 }
 
-                composable("automation") {
+                composable(Routes.AUTOMATION) {
                     CompositionLocalProvider(LocalAnimatedVisibilityScope provides this@composable) {
                         AutomationScreen(
                             onNavigateBack = { navController.popBackStack() },
@@ -120,7 +119,7 @@ fun NavigationGraph() {
                     }
                 }
 
-                composable("capture") {
+                composable(Routes.CAPTURE) {
                     CompositionLocalProvider(LocalAnimatedVisibilityScope provides this@composable) {
                         CaptureScreen(
                             onNavigateBack = { navController.popBackStack() },
@@ -128,7 +127,7 @@ fun NavigationGraph() {
                     }
                 }
 
-                composable(DETECTION_EVENTS_ROUTE) {
+                composable(Routes.DETECTION_EVENTS) {
                     CompositionLocalProvider(LocalAnimatedVisibilityScope provides this@composable) {
                         DetectionEventsScreen(
                             onNavigateBack = { navController.popBackStack() },
@@ -137,7 +136,7 @@ fun NavigationGraph() {
                 }
 
                 composable(
-                    "gallery",
+                    Routes.GALLERY,
                     enterTransition = {
                         fadeIn(tween(ANIM_DURATION)) + slideInHorizontally(tween(ANIM_DURATION)) { it }
                     },
@@ -148,13 +147,13 @@ fun NavigationGraph() {
                     CompositionLocalProvider(LocalAnimatedVisibilityScope provides this@composable) {
                         GalleryScreen(
                             onNavigateBack = { navController.popBackStack() },
-                            onViewMedia = { mediaId -> navController.navigate("viewer/$mediaId") },
+                            onViewMedia = { mediaId -> navController.navigate(Routes.viewer(mediaId)) },
                         )
                     }
                 }
 
                 composable(
-                    "viewer/{mediaId}",
+                    Routes.VIEWER,
                     enterTransition = { fadeIn(tween(300)) },
                     exitTransition = { fadeOut(tween(300)) },
                     popEnterTransition = { fadeIn(tween(300)) },
