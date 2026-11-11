@@ -22,14 +22,6 @@ class AacFormatTest {
         assertEquals(StreamDefaults.AUDIO_SAMPLE_RATE_HZ, AacFormat.DEFAULT_SAMPLE_RATE_HZ)
     }
 
-    @Test
-    fun `contract - RtspServer advances its audio RTP clock by exactly one AU`() {
-        assertEquals(
-            AacFormat.SAMPLES_PER_ACCESS_UNIT.toLong(),
-            RtspServer.AUDIO_TIMESTAMP_INCREMENT,
-        )
-    }
-
     // ── PCM frame math ──
 
     @Test

@@ -229,6 +229,23 @@ class RtspSessionProtocolTest {
         assertArrayEquals(beInt(0xFFFF_FFFFL), report.copyOfRange(24, 28))  // octets & 0xFFFFFFFF
     }
 
+    @Test
+    fun `sender report masks a long-run wall-clock rtp timestamp past one 32-bit cycle`() {
+        // The wall-clock media clock grows unbounded (hours of streaming);
+        // the SR field carries only the low 32 bits — 5_000_000_000 ticks is
+        // one full cycle plus 705_032_704.
+        val report = RtspSessionProtocol.senderReport(
+            ssrc = 7,
+            rtpTimestamp = 5_000_000_000L,
+            packets = 5_000_000_000L,
+            octets = 5_000_000_000L,
+            wallClockMs = 0L,
+        )
+        assertArrayEquals(beInt(705_032_704L), report.copyOfRange(16, 20))
+        assertArrayEquals(beInt(705_032_704L), report.copyOfRange(20, 24))
+        assertArrayEquals(beInt(705_032_704L), report.copyOfRange(24, 28))
+    }
+
     // ── Interleaved framing ──
 
     @Test

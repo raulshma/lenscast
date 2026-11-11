@@ -830,8 +830,8 @@ resolution, YUV→JPEG conversion with reusable buffers, the conflated queue,
 and the processed/dropped counters. StreamingManager gates activity and feeds
 `server.updateFrame` through the pipeline's listener; the pixel work sits
 behind `push()` without dragging in lifecycle. The accept/reject tick itself
-is the shared `FrameThrottle`, and the fps→interval / 90 kHz RTP increment
-derivations are `streaming/FrameTiming` (`effectiveFps` falls back to
+is the shared `FrameThrottle`, and the fps→interval derivation is
+`streaming/FrameTiming` (`effectiveFps` falls back to
 `StreamDefaults.STREAM_FPS`) — one home each for the web and RTSP push paths.
 
 ### RTSP Server
@@ -846,11 +846,21 @@ the encoder; audio bitrate does not, so it restarts) — the code, not a
 comment, owns the promise. Structural changes restart the server (StreamingManager's
 call). RTP sequence/SSRC state lives
 in per-start `RtpPacketizer`/`AacRtpPacketizer` instances — no global reset
-ritual — over the shared `RtpStreamState` header writer. The video fan-out
+ritual — over the shared `RtpStreamState` header writer. RTP timestamps are
+wall-clock anchored (`RtpTimestampClock` — one shared `RtpEpoch` for video,
+sub, and audio, so A/V stays aligned; the fixed per-delivered-frame increment
+froze players during delivery gaps and fast-forwarded the bursts that
+followed). The video fan-out
 is keyframe-gated per client: every PLAY (re)arms a per-client wait and
 requests a sync frame from the encoded source, and `acceptVideoAu` passes a
 client's first bytes only on the next keyframe AU — a mid-GOP join never
-receives P-frames it cannot decode. YUV rotation and
+receives P-frames it cannot decode. Sending is decoupled from the drain
+thread: each ClientSession owns one bounded queue of whole `$`-framed AUs
+(video RTP + RTCP, audio, sub — one typed queue preserves the
+interleaved-channel ordering) and one daemon writer thread that does the
+blocking socket writes; the drain thread only offers, and a congested client
+drops its oldest AUs under `RtspSendPolicy` instead of stalling the encoder
+and every other sink. YUV rotation and
 conversion live in `core/YuvConverter`, encoder color-format selection in
 `EncoderFormatPolicy`; the session/track state machine stays here, but the
 protocol knowledge behind it is pure: `RtspRequest` (wire parsing),
@@ -860,8 +870,47 @@ protocol knowledge behind it is pure: `RtspRequest` (wire parsing),
 ladder, the Session-header parse, PLAY's RTP-Info, the RTCP sender-report
 bytes, and the `$`-interleaved framing — all byte-pinned by test),
 and `SdpBuilder`. ClientSession only reads requests, asks the authorizer,
-consults the policies, and writes frames — the security surface is
-JVM-tested without a socket.
+consults the policies, and enqueues frames (its writer thread delivers them)
+— the security surface is JVM-tested without a socket.
+
+### RTP Timestamp Clock
+**`streaming/rtsp/RtpTimestampClock.kt`** — the RTSP media clock as pure,
+injectable math: `RtpEpoch` anchors lazily on the first `elapsedMs()` over a
+`nowMs` source (RtspServer passes `SystemClock.elapsedRealtime()`), and
+`RtpTimestampClock(clockHz, epoch)` maps elapsed milliseconds to ticks
+(`elapsed * clockHz / 1000`), clamped strictly increasing (`computed <= last`
+⇒ `last + 1` — the HlsManager anchor shape, so a backwards or stalled clock
+never rewinds or repeats a timestamp). One shared epoch with three clocks —
+video and sub at 90 kHz, audio at the configured AAC sample rate — keeps A/V
+aligned while each stream's tick rate stays its own; `reset()` re-anchors on
+server start. `peekNext()` is the non-anchoring lower bound PLAY's RTP-Info
+reports (a DESCRIBE/PLAY exchange must not start the media clock); `current`
+is the last emitted tick. Timestamps grow unbounded as Longs — the wire
+writers already mask to 32 bits (`RtspSessionProtocol.senderReport`,
+`RtpStreamState`). The retired fixed `90000/fps` per-delivered-AU increment
+(`FrameTiming.rtpClockIncrement`) was the freeze-then-catch-up bug: irregular
+delivery (throttle, lag gate, thermal) made the media clock stop during gaps
+and jump during bursts, so players froze and then fast-forwarded. JVM-pinned
+including the 500 ms-stall regression (a ~45 000-tick jump, not 3 000).
+
+### RTSP Send Policy
+**`streaming/rtsp/RtspSendPolicy.kt`** — the per-client congestion verdict at
+the queue offer, pure and JVM-tested: `onOffer(queueSize, capacity,
+isKeyframeAu, nowMs, lastKeyframeRequestMs)` returns drop count (oldest whole
+AUs, `maxOf(0, size + 1 - capacity)`, capacity clamped ≥1 — the incoming AU
+is never dropped), keyframe-gate re-arm, and keyframe request. Two load-bearing
+rules: a drop re-arms the keyframe gate **unless the incoming AU is itself a
+keyframe** (it is the fresh sync point — rearming past it would stall a whole
+GOP), and keyframe requests ride a 1000 ms cooldown (without it, sustained
+congestion requests a sync frame per drop and the encoder goes all-intra —
+bitrate explosion). The accepted tradeoff: a congested client gets
+GOP-cadence refreshes, not growing latency. The queue bound is 8 AUs
+(~330 ms at 24 fps). Beside it, **`RtspSendTap.kt`** windows the writers'
+real send-time samples (≥100 ms before emitting): per-AU LAN writes finish
+sub-millisecond, and `NetworkQualityMonitor.recordEncodedSend` drops
+`durationMs <= 0` samples — an unwindowed tap at the writer would silently
+disable adaptive encoded bitrate. The tap fires only from the writer threads
+measuring blocking writes, never from the drain thread's offers.
 
 ### RTSP Output
 **`streaming/RtspOutput.kt`** — the manager-side RTSP owner: retained
@@ -1023,15 +1072,18 @@ ladder rides WHEP as the top rung (`web/src/lib/whepClient.ts`).
 
 ### AAC Format
 **`streaming/rtsp/AacFormat.kt`** — one home for the AAC stream's format
-literals and pure capture math: samples-per-AU (1024 — the RTP timestamp
-advance per audio AU, contract-pinned against `RtspServer`), PCM bytes per
+literals and pure capture math: samples-per-AU (1024), PCM bytes per
 sample, the mic probe ladder with default from `StreamDefaults`,
 `resolveBuffers` (frame-aligned read chunk and record buffer sizing, the
 former `AudioStreamingManager` inline math), the AudioSpecificConfig bytes,
 and the SDP fallback hex derived per call from the actual rate/channel count
 (`fallbackAscHex` — never a single historical literal, which advertised stereo
 for the mono default). Encoder, RTP clock,
-SDP, and mic capture reference the same symbols.
+SDP, and mic capture reference the same symbols. The audio RTP clock is
+wall-clock anchored at the configured sample rate (`RtpTimestampClock`) —
+the old per-AU fixed-increment contract against RtspServer was retired with
+the freeze-then-catch-up fix (at a steady 48 kHz the two agree: one AU per
+~21.3 ms ≈ 1024 ticks).
 
 ### Audio Subscriber Pipe
 **`streaming/AudioSubscriberPipe.kt`** — the RTSP audio track's backpressure
@@ -2165,10 +2217,12 @@ contracts.
 | `LatestFrame` | `MjpegStreamPump` (private) | `streaming/MjpegStreamPump.kt` | (jpeg, version) | swapped atomically on every `updateFrame`; readers compare versions |
 | `isStreaming` | `StreamingManager` — derived combine of five active mirrors | `streaming/StreamingManager.kt` | Boolean | mirrors written by their owners at the transition itself (`onActiveChanged` seams); `updateStreamingState` deleted; `isLiveStreaming()` is the same predicate |
 | `applyEcoIdleState` | `StreamingManager` (single writer) | `streaming/StreamingManager.kt` | `EcoIdlePolicy.State` + lock-free `ecoIdleActive` volatile | the only writer of the pairing; the volatile write is the publish step (see Eco Idle Policy) |
-| ClientSession `isPlaying` | `RtspServer.ClientSession` (private `SessionState`) | `streaming/rtsp/RtspServer.kt` | INIT / READY / PLAYING | `isPlaying` is derived (`state == PLAYING`); teardown drops to INIT so send taps stop; the sub SETUP write is demote-safe (INIT→READY only — a SETUP during PLAYING used to demote it and freeze the main stream until a re-PLAY) and TEARDOWN clears `subSetup`, so describe() stops advertising a torn-down /sub |
+| ClientSession `isPlaying` | `RtspServer.ClientSession` (private `SessionState`) | `streaming/rtsp/RtspServer.kt` | INIT / READY / PLAYING | `isPlaying` is derived (`state == PLAYING`); teardown and write failure drop to INIT so the send gates stop; the sub SETUP write is demote-safe (INIT→READY only — a SETUP during PLAYING used to demote it and freeze the main stream until a re-PLAY) and TEARDOWN clears the sub SETUP gate, so describe() stops advertising a torn-down /sub |
+| `RtspSendPolicy.OfferVerdict` | `RtspServer.ClientSession.enqueueAu` (drain thread, per offer) | `streaming/rtsp/RtspSendPolicy.kt` | (dropCount, rearmKeyframe, requestKeyframe) | drop-oldest whole AUs at the 8-AU bound, never the incoming AU; re-arm on drop except when the incoming AU is the keyframe itself; keyframe requests under the 1000 ms cooldown (sustained congestion must not drive the encoder all-intra) |
+| ClientSession writer lifecycle | `RtspServer.ClientSession.writerThread` (@Volatile `Thread?`) | `streaming/rtsp/RtspServer.kt` | absent / alive / dead-until-re-PLAY | `ensureWriter` (both PLAY paths) replaces a dead writer via `isAlive`; `stopWriter` (TEARDOWN/close) nulls + clears + interrupts; a write failure drops the session to INIT and exits the loop — the socket stays for the read loop's timeout/EOF to close (see Deliberately implicit) |
 | `BootResumePolicy.Verdict` | `BootResumePolicy.decide` | `streaming/StreamStateJournal.kt` | NONE / WEB / RTSP / BOTH | boot resume over the persisted journal's web/rtsp flags |
 | `PublisherSession<S>` | `RtmpPublisher`/`SrtPublisher`/`WhipPublisher` delegate start/stop/status to one instance | `streaming/PublisherSession.kt` | started/wanted CAS pair + one supervised reconnect loop + 1 s→30 s capped backoff (reset to 1 s on a clean attempt end) | the skeleton was character-identical in all three publishers (only the status type, the null-message fallback, the log line, and RTMP's compute/increment/delay textual order differed — canonicalized on delay-then-increment, documented identical); the three stop choreographies are opaque per-transport `onStop` hooks (RTMP channel-close-drives-clean-close + 2 s force-close; SRT shutdown-packet + 2 s grace; WHIP `videoSource = null` watch-beat self-teardown) and must not be decomposed further; the scope stays publisher-owned (the hooks launch cleanup on it) and a loop's completion cancels it — a stopped instance stays inert, which is why `PushOutput.startQuietly`'s fresh-publisher-every-start invariant stays unenforced by the type |
-| `RtspSubStreamState` | `RtspServer.ClientSession.sub` (one per connection) | `streaming/rtsp/RtspSubStreamState.kt` | SETUP gate (isSetup) / PLAY gate (isWanted) / keyframe wait / negotiated channel pair | the /sub twin of the aggregate SessionState machine, named and JVM-tested beside `RtspSessionProtocol` — the first JVM pin on the sub session decisions; plain mutable fields on purpose (the session thread and the encoder drain thread race them benignly, exactly as the fields this replaced — volatile/immutable would change which access unit is first delivered after a mid-GOP PLAY); `onPlayArmed` stays adjacent to the caller's `requestSubKeyFrame`, and the demote-safe INIT→READY write stays server-side (the holder has no aggregate knowledge) |
+| `RtspSubStreamState` | `RtspServer.ClientSession.sub` (one per connection) | `streaming/rtsp/RtspSubStreamState.kt` | SETUP gate (isSetup) / PLAY gate (isWanted) / keyframe wait / negotiated channel pair | the /sub twin of the aggregate SessionState machine, named and JVM-tested beside `RtspSessionProtocol` — the first JVM pin on the sub session decisions; plain mutable fields on purpose (the session thread and the encoder drain thread race them benignly, exactly as the fields this replaced — volatile/immutable would change which access unit is first delivered after a mid-GOP PLAY); `onPlayArmed` stays adjacent to the caller's `requestSubKeyFrame`, `onDropRearm` re-arms the wait when the send queue drops queued AUs, and the demote-safe INIT→READY write stays server-side (the holder has no aggregate knowledge) |
 
 ### Automation
 
@@ -2245,6 +2299,8 @@ Machines that stay implicit on purpose — do not re-flag them:
 - AutomationReceiver's goAsync completion ladder (`automation/AutomationReceiver.kt`): finish-once via `finished` + `completionOwnedByCallbacks`; every non-capture path finishes in finally and the capture path's feeder (PhotoCaptureManager) now guarantees the completion signal unconditionally — the ladder is correct as written.
 - The SSE health backstop's redundant writers (`web/src/hooks/useAppState.ts`): `onopen`/`onerror` write `sseConnected` AND the checker republishes the same verdict — deliberate layering, not drift. The event writes make visible transitions instant; removing them to make the checker the only writer was evaluated and rejected (1–2 extra post-reconnect status fetches and up to ~3 s of connection-lost-banner linger — slower truth in exactly the windows the banner exists for). The checker earns its keep for the half-open socket no event ever reports.
 - The PTT phantom label (`web/src/components/StreamPreview.tsx`): during `arming` (the mic-permission dialog window) the button reads "Talking…" with no audio captured — deliberately kept: the busy label doubles as press feedback (a reverting button invites re-presses the latch silently drops), and the honest fix is a third locale key across the seven i18n files — UX work for a future wave, now a one-line change now that `PttPhase` exists.
+- RtspServer's write-failure INIT without a socket close (`streaming/rtsp/RtspServer.kt` `writeLoop`): a failed AU write drops the session to INIT (the old inline `isPlaying = false` verdict) and exits the writer, but leaves the socket to the session read loop's timeout/EOF — exactly the old failure shape; `ensureWriter`'s `isAlive` check replaces the dead writer on the next PLAY.
+- The RTSP send queue's lock-free `size` read at the offer (`RtspServer.ClientSession.enqueueAu`): the 8-AU bound is soft by one AU under a drain/writer race — the policy's room-making (`size + 1 - capacity`) absorbs it; a lock to make the bound hard would re-couple the drain thread to the writer, the exact stall the decoupling removes. The cooldown stamps (`lastKeyframeRequestMs`/`lastSubKeyframeRequestMs`) are drain-thread-only writes, so they stay plain fields.
 
 ### Flagged, not named — closed (wave 7 landed the list)
 

@@ -61,6 +61,16 @@ class RtspSubStreamState {
         awaitingKeyframe = true
     }
 
+    /**
+     * The send queue dropped queued AUs: the next access unit must start at
+     * a fresh sync frame, so the keyframe wait re-arms. Same plain-field
+     * discipline as [onPlayArmed] — consulted on the drain thread between
+     * the gate check and the enqueue.
+     */
+    fun onDropRearm() {
+        awaitingKeyframe = true
+    }
+
     /** Per-AU gate (was acceptSubAu): sub PLAY + own keyframe wait. */
     fun acceptAu(isKeyframeAu: Boolean): Boolean {
         if (!isWanted || !isSetup) return false

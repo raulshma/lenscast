@@ -124,6 +124,41 @@ class RtspSubStreamStateTest {
         assertTrue(sub.acceptAu(isKeyframeAu = false))
     }
 
+    // ── Send-queue drop re-arm ──
+
+    @Test
+    fun `a queue drop re-arms the wait after the gate cleared`() {
+        val sub = RtspSubStreamState()
+        sub.onSetupAccepted()
+        sub.onPlayArmed()
+        assertTrue(sub.acceptAu(isKeyframeAu = true)) // gate cleared, flowing
+        assertTrue(sub.acceptAu(isKeyframeAu = false))
+
+        // The send queue dropped queued AUs: references are gone, so the
+        // next delivery must start at a fresh sync frame.
+        sub.onDropRearm()
+        assertTrue(sub.awaitingKeyframe)
+        assertFalse(sub.acceptAu(isKeyframeAu = false))
+        assertTrue(sub.acceptAu(isKeyframeAu = true))
+        assertFalse(sub.awaitingKeyframe)
+        assertTrue(sub.acceptAu(isKeyframeAu = false))
+    }
+
+    @Test
+    fun `a drop re-arm while not wanted keeps the gate shut for the later play`() {
+        val sub = RtspSubStreamState()
+        sub.onSetupAccepted()
+
+        sub.onDropRearm()
+        assertTrue(sub.awaitingKeyframe)
+        assertFalse(sub.acceptAu(isKeyframeAu = true)) // still not wanted
+
+        sub.onPlayArmed()
+        assertFalse(sub.acceptAu(isKeyframeAu = false))
+        assertTrue(sub.acceptAu(isKeyframeAu = true))
+        assertTrue(sub.acceptAu(isKeyframeAu = false))
+    }
+
     // ── TEARDOWN ──
 
     @Test

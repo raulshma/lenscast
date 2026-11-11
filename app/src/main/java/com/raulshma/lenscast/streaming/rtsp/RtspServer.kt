@@ -1,9 +1,9 @@
 package com.raulshma.lenscast.streaming.rtsp
 
+import android.os.SystemClock
 import android.util.Log
 import com.raulshma.lenscast.core.StreamDefaults
 import com.raulshma.lenscast.streaming.EncodedSource
-import com.raulshma.lenscast.streaming.FrameTiming
 import com.raulshma.lenscast.streaming.RtspHealth
 import com.raulshma.lenscast.streaming.RtspServerHandle
 import java.io.OutputStream
@@ -19,6 +19,8 @@ import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.LinkedBlockingQueue
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
@@ -59,8 +61,17 @@ class RtspServer(
     private var videoPacketizer: VideoPacketizer = RtpPacketizer()
     private var subVideoPacketizer: VideoPacketizer = RtpPacketizer()
     private var audioPacketizer = AacRtpPacketizer()
-    private var audioTimestamp: Long = 0
-    private var subRtpTimestamp: Long = 0
+
+    // One wall-clock epoch shared by all three media clocks keeps A/V aligned;
+    // each clock scales the elapsed span to its own rate (90 kHz video, the
+    // configured AAC sample rate audio). The fixed per-frame increment these
+    // replace froze players through delivery gaps and fast-forwarded bursts
+    // (issue #17) — the timestamps now owe real elapsed time, whatever the
+    // throttle/lag gate/thermal adaptation did to the cadence.
+    private var rtpEpoch = RtpEpoch { SystemClock.elapsedRealtime() }
+    private var videoClock = RtpTimestampClock(VIDEO_RTP_CLOCK_HZ, rtpEpoch)
+    private var subClock = RtpTimestampClock(VIDEO_RTP_CLOCK_HZ, rtpEpoch)
+    private var audioClock = RtpTimestampClock(StreamDefaults.AUDIO_SAMPLE_RATE_HZ.toLong(), rtpEpoch)
 
     private val clients = ConcurrentHashMap<String, ClientSession>()
     private val sessionIdCounter = AtomicInteger(0)
@@ -74,12 +85,6 @@ class RtspServer(
     // One immutable config value replaces the old order-sensitive setter bag.
     @Volatile
     private var config = RtspConfig()
-
-    private var rtpTimestamp: Long = 0
-    private val timestampIncrement: Long
-        get() = FrameTiming.rtpClockIncrement(config.videoFrameRate)
-
-    private val lastFrameTime = AtomicLong(0)
 
     private val distributedAus = AtomicLong(0)
     private val distributedPackets = AtomicLong(0)
@@ -108,9 +113,12 @@ class RtspServer(
 
         return try {
             serverSocket = openBoundSocket()
-            rtpTimestamp = 0
-            subRtpTimestamp = 0
-            audioTimestamp = 0
+            rtpEpoch.reset()
+            videoClock.reset()
+            subClock.reset()
+            // The audio rate is a NEEDS_RESTART field, so the configured rate
+            // is authoritative for this run's audio clock.
+            audioClock = RtpTimestampClock(config.audioSampleRateHz.toLong(), rtpEpoch)
             firstKeyframeLogged = false
             lastSenderReportTime = 0L
             distributedAus.set(0)
@@ -194,8 +202,8 @@ class RtspServer(
     /**
      * Live-update with a new config. The encoder-side hot-swaps (video
      * bitrate, input format) live in the encoded-stream hub; this retained
-     * config drives the RTP timestamp increment, the SDP, and the audio
-     * track gate. NEEDS_RESTART fields stay the output's restart decision.
+     * config drives the SDP and the audio track gate. NEEDS_RESTART fields
+     * stay the output's restart decision.
      */
     override fun apply(update: RtspConfig) {
         config = normalize(update)
@@ -213,7 +221,7 @@ class RtspServer(
         }
         if (nalUnits.isEmpty()) return
 
-        rtpTimestamp += timestampIncrement
+        val rtpTimestamp = videoClock.next()
 
         if (nalUnits.any { it.isKeyFrame } && !firstKeyframeLogged) {
             firstKeyframeLogged = true
@@ -254,15 +262,14 @@ class RtspServer(
 
         val isKeyframeAu = nalUnits.any { it.isKeyFrame }
 
-        // The RTP fan-out doubles as the adaptive encoded-bitrate tap: bytes
-        // actually handed to playing clients over the fan-out's wall time —
-        // honest bytes/time at the send seam (blocking socket writes included).
-        var sentBytes = 0L
-        val sendStartNanos = System.nanoTime()
         // One packetization per AU: the packetizer's sequence state is shared,
         // so per-client packetizing would advance the seq N times per frame —
         // every client after the first would see sequence gaps. All playing
-        // clients receive the same packets.
+        // clients receive the same packets. The fan-out only enqueues: each
+        // client's writer thread owns the blocking socket writes, so one slow
+        // client can no longer stall the drain thread (and every other sink).
+        // The adaptive encoded-bitrate tap moved to the writers with them —
+        // it must measure real blocking writes, not queue offers.
         val packets = videoPacketizer.packetizeAccessUnit(nalUnits.map { it.data }, rtpTimestamp)
         distributedPackets.addAndGet(packets.size.toLong())
         for (client in clients.values) {
@@ -270,28 +277,19 @@ class RtspServer(
             // for the next keyframe AU before its first byte — P-frames
             // referencing unseen frames are undecodable filler.
             if (!client.acceptVideoAu(isKeyframeAu)) continue
-            if (senderReport != null) client.sendVideoRtcpPacket(senderReport)
-            for (packet in packets) {
-                client.sendRtpPacket(packet)
-            }
-            client.onVideoAuDelivered()
-            sentBytes += packets.sumOf { it.size }
-        }
-        val sendDurationMs = (System.nanoTime() - sendStartNanos) / 1_000_000
-        if (sentBytes > 0) {
-            encodedSendTap?.invoke(sentBytes.coerceAtMost(Int.MAX_VALUE.toLong()).toInt(), sendDurationMs)
+            client.enqueueVideoAu(packets, senderReport, isKeyframeAu)
         }
     }
 
     /** One encoded AAC access unit from the hub: the RTP audio fan-out. */
     override fun feedAudio(aacData: ByteArray) {
         if (!running.get()) return
-        audioTimestamp += AUDIO_TIMESTAMP_INCREMENT
+        val audioTimestamp = audioClock.next()
 
         for (client in clients.values) {
             if (client.isPlaying && client.isAudioSetup) {
                 val packet = audioPacketizer.packetize(aacData, audioTimestamp)
-                client.sendAudioRtpPacket(packet)
+                client.enqueueAudioPacket(packet)
             }
         }
     }
@@ -307,25 +305,15 @@ class RtspServer(
         val hasSubListeners = clients.values.any { it.sub.isWanted }
         if (!hasSubListeners) return
 
-        subRtpTimestamp += timestampIncrement
+        val subRtpTimestamp = subClock.next()
         val isKeyframeAu = nalUnits.any { it.isKeyFrame }
 
-        var sentBytes = 0L
-        val sendStartNanos = System.nanoTime()
         // Same once-per-AU packetization discipline as the main fan-out — the
         // sub packetizer's sequence state is shared across sub clients.
         val packets = subVideoPacketizer.packetizeAccessUnit(nalUnits.map { it.data }, subRtpTimestamp)
         for (client in clients.values) {
             if (!client.sub.acceptAu(isKeyframeAu)) continue
-            for (packet in packets) {
-                client.sendSubRtpPacket(packet)
-            }
-            client.onVideoAuDelivered()
-            sentBytes += packets.sumOf { it.size }
-        }
-        val sendDurationMs = (System.nanoTime() - sendStartNanos) / 1_000_000
-        if (sentBytes > 0) {
-            encodedSendTap?.invoke(sentBytes.coerceAtMost(Int.MAX_VALUE.toLong()).toInt(), sendDurationMs)
+            client.enqueueSubAu(packets, isKeyframeAu)
         }
     }
 
@@ -450,6 +438,22 @@ class RtspServer(
         /** Video AUs actually delivered to this client (main + sub), for the clients list. */
         private val framesSent = AtomicLong(0)
 
+        // ── Per-client send decoupling (issue #17) ──
+        // One bounded queue of whole AUs in wire order (video RTP + RTCP,
+        // audio, sub — a single typed queue preserves the interleaved-channel
+        // ordering) and one daemon writer thread that owns the blocking
+        // socket writes. The drain thread only offers; a congested client
+        // drops its oldest AUs instead of stalling the encoder and every
+        // other sink. The queue bound is RtspSendPolicy.DEFAULT_CAPACITY_AUS.
+        private val sendQueue = LinkedBlockingQueue<RtspQueuedAu>()
+        @Volatile private var writerThread: Thread? = null
+        private var lastKeyframeRequestMs = -1L
+        private var lastSubKeyframeRequestMs = -1L
+        // The adaptive encoded-bitrate tap fires here, at the real blocking
+        // writes — windowed, because per-AU LAN writes finish sub-millisecond
+        // and NetworkQualityMonitor drops durationMs <= 0 samples.
+        private val sendTap = RtspSendTap { bytes, ms -> encodedSendTap?.invoke(bytes, ms) }
+
         private val tracks = mutableMapOf<Int, TrackState>()
 
         init {
@@ -506,10 +510,6 @@ class RtspServer(
                 awaitingKeyframe = false
             }
             return true
-        }
-
-        fun onVideoAuDelivered() {
-            framesSent.incrementAndGet()
         }
 
         /** The Web API clients-list entry for this connection. */
@@ -857,7 +857,7 @@ class RtspServer(
 
                 val streamBase = buildAbsoluteRtspUrl("/${RtspUriPolicy.SUB_STREAM_PATH}")
                 val nextSeq = (subVideoPacketizer.currentSeq + 1) and 0xFFFF
-                val nextRtpTime = (subRtpTimestamp + timestampIncrement) and 0xFFFFFFFFL
+                val nextRtpTime = subClock.peekNext() and 0xFFFFFFFFL
                 sendResponse(
                     output, "200 OK", mapOf(
                         "Session" to rtspSessionId,
@@ -868,6 +868,7 @@ class RtspServer(
                         )
                     )
                 )
+                ensureWriter()
                 return
             }
 
@@ -884,12 +885,12 @@ class RtspServer(
 
             val streamBase = buildAbsoluteRtspUrl("/${RtspUriPolicy.DEFAULT_STREAM_PATH}")
             val nextSeq = (videoPacketizer.currentSeq + 1) and 0xFFFF
-            val nextRtpTime = (rtpTimestamp + timestampIncrement) and 0xFFFFFFFFL
+            val nextRtpTime = videoClock.peekNext() and 0xFFFFFFFFL
             val audioEntry = if (isAudioSetup && config.audioEnabled) {
                 RtspSessionProtocol.RtpInfoEntry(
                     url = buildAbsoluteRtspUrl("/${RtspUriPolicy.DEFAULT_STREAM_PATH}/trackID=${RtspUriPolicy.AUDIO_TRACK_ID}"),
                     seq = audioPacketizer.currentSeq,
-                    rtpTime = audioTimestamp,
+                    rtpTime = audioClock.current,
                 )
             } else {
                 null
@@ -905,6 +906,7 @@ class RtspServer(
                     )
                 )
             )
+            ensureWriter()
         }
 
         private fun handleTeardown(output: OutputStream, headers: Map<String, String>) {
@@ -921,6 +923,7 @@ class RtspServer(
             // response bytes are untouched.
             sub.onTeardown()
             state = SessionState.INIT
+            stopWriter()
             sendResponse(
                 output, "200 OK", mapOf(
                     "Session" to rtspSessionId
@@ -955,38 +958,124 @@ class RtspServer(
             return "${urlScheme()}://${RtspAddressing.urlHost(advertisedHost())}:$port$normalizedPath"
         }
 
+        // ── The send seam: enqueue on the drain thread, write on the writer ──
+
+        /** One main-stream video AU (plus its RTCP sender report when due). */
+        fun enqueueVideoAu(packets: List<ByteArray>, senderReport: ByteArray?, isKeyframeAu: Boolean) {
+            val frames = buildList {
+                if (senderReport != null) add(RtspSessionProtocol.interleavedFrame(videoRtcpChannel, senderReport))
+                for (packet in packets) add(RtspSessionProtocol.interleavedFrame(videoRtpChannel, packet))
+            }
+            enqueueAu(RtspQueuedAu(frames, isKeyframe = isKeyframeAu, isVideoAu = true), isSub = false)
+        }
+
+        /** One audio packet — rides the same queue, never counts as a frame. */
+        fun enqueueAudioPacket(packet: ByteArray) {
+            val frame = RtspSessionProtocol.interleavedFrame(audioRtpChannel, packet)
+            enqueueAu(RtspQueuedAu(listOf(frame), isKeyframe = false, isVideoAu = false), isSub = false)
+        }
+
+        /** One sub-stream video AU on the sub's own interleaved channel. */
+        fun enqueueSubAu(packets: List<ByteArray>, isKeyframeAu: Boolean) {
+            val frames = packets.map { RtspSessionProtocol.interleavedFrame(sub.rtpChannel, it) }
+            enqueueAu(RtspQueuedAu(frames, isKeyframe = isKeyframeAu, isVideoAu = true), isSub = true)
+        }
+
         /**
-         * Writes one `$`-framed interleaved packet in a single write() call;
-         * the frame bytes come from [RtspSessionProtocol.interleavedFrame].
+         * The congestion verdict applied at the offer: drop the oldest whole
+         * AUs to make room, re-arm the stream's keyframe gate when the drop
+         * may have broken the queued reference chain, and ask the encoder
+         * for a sync frame under the policy's cooldown — then the
+         * non-blocking offer. queue.size is a lock-free read; the bound is
+         * soft by one AU under race, which the policy's room-making absorbs.
          */
-        private fun sendInterleaved(channel: Int, packet: ByteArray) {
-            val output = outputStream ?: return
-            val frame = RtspSessionProtocol.interleavedFrame(channel, packet)
-            try {
-                synchronized(output) {
-                    output.write(frame)
-                    output.flush()
+        private fun enqueueAu(au: RtspQueuedAu, isSub: Boolean) {
+            val nowMs = System.currentTimeMillis()
+            val verdict = RtspSendPolicy.onOffer(
+                queueSize = sendQueue.size,
+                capacity = RtspSendPolicy.DEFAULT_CAPACITY_AUS,
+                isKeyframeAu = au.isKeyframe,
+                nowMs = nowMs,
+                lastKeyframeRequestMs = if (isSub) lastSubKeyframeRequestMs else lastKeyframeRequestMs,
+            )
+            repeat(verdict.dropCount) { sendQueue.poll() }
+            if (verdict.rearmKeyframe) {
+                if (isSub) sub.onDropRearm() else awaitingKeyframe = true
+            }
+            if (verdict.requestKeyframe) {
+                if (isSub) {
+                    lastSubKeyframeRequestMs = nowMs
+                    encodedSource.requestSubKeyFrame()
+                } else {
+                    lastKeyframeRequestMs = nowMs
+                    encodedSource.requestKeyFrame()
                 }
-            } catch (_: Exception) {
-                // The connection is done sending — the TEARDOWN-equivalent
-                // drop to INIT (the old isPlaying = false here), so the
-                // derived isPlaying stops every send tap for this client.
-                state = SessionState.INIT
+            }
+            sendQueue.offer(au)
+        }
+
+        /**
+         * Idempotent writer start, called at the end of both PLAY paths. A
+         * writer that died on a write failure is replaced here — the field
+         * may still point at the dead thread (only [stopWriter] nulls it).
+         */
+        private fun ensureWriter() {
+            val existing = writerThread
+            if (existing != null && existing.isAlive) return
+            writerThread = Thread({ writeLoop() }, "RtspClient-Writer-$sessionId").apply {
+                isDaemon = true
+                priority = Thread.NORM_PRIORITY - 1
+                start()
             }
         }
 
-        fun sendRtpPacket(packet: ByteArray) = sendInterleaved(videoRtpChannel, packet)
+        private fun stopWriter() {
+            val writer = writerThread ?: return
+            writerThread = null
+            sendQueue.clear()
+            writer.interrupt()
+        }
 
-        fun sendAudioRtpPacket(packet: ByteArray) = sendInterleaved(audioRtpChannel, packet)
-
-        fun sendVideoRtcpPacket(packet: ByteArray) = sendInterleaved(videoRtcpChannel, packet)
-
-        fun sendSubRtpPacket(packet: ByteArray) = sendInterleaved(sub.rtpChannel, packet)
+        /**
+         * The only blocking-write site for this client: one AU per lock
+         * acquisition (an RTSP response may interleave between AUs, never
+         * inside one), real send time measured into the windowed tap, and
+         * the frame counter advanced on delivery — not on offer.
+         */
+        private fun writeLoop() {
+            while (running.get() && !socket.isClosed) {
+                val au = try {
+                    sendQueue.poll(500, TimeUnit.MILLISECONDS) ?: continue
+                } catch (_: InterruptedException) {
+                    break
+                }
+                val output = outputStream ?: break
+                val startNanos = System.nanoTime()
+                try {
+                    synchronized(output) {
+                        for (frame in au.frames) {
+                            output.write(frame)
+                        }
+                        output.flush()
+                    }
+                } catch (_: Exception) {
+                    // The connection is done sending — the TEARDOWN-equivalent
+                    // drop to INIT (the old isPlaying = false here), so the
+                    // derived isPlaying stops every send tap for this client.
+                    state = SessionState.INIT
+                    break
+                }
+                sendTap.record(au.bytes, System.nanoTime() - startNanos)
+                if (au.isVideoAu) framesSent.incrementAndGet()
+            }
+            sendQueue.clear()
+        }
 
         fun close() {
             // The kicked/closed connection stops playing — the drop to INIT
             // that feeds the derived isPlaying (the old isPlaying = false).
             state = SessionState.INIT
+            stopWriter()
             try {
                 socket.close()
             } catch (_: Exception) {
@@ -1054,12 +1143,8 @@ class RtspServer(
         // generous against every real request, hostile-input bound otherwise.
         private const val MAX_REQUEST_LINES = 64
 
-        /**
-         * RTP timestamp advance per audio access unit. Internal so the contract
-         * test pins it to [AacFormat.SAMPLES_PER_ACCESS_UNIT] — the packetizer
-         * and the encoder must agree on the AU size by construction.
-         */
-        internal val AUDIO_TIMESTAMP_INCREMENT = AacFormat.SAMPLES_PER_ACCESS_UNIT.toLong()
+        /** The RTP media clock rate for video (main and sub), per RFC 3551. */
+        private const val VIDEO_RTP_CLOCK_HZ = 90_000L
 
         private val RFC_1123_FORMAT = object : ThreadLocal<SimpleDateFormat>() {
             override fun initialValue(): SimpleDateFormat {

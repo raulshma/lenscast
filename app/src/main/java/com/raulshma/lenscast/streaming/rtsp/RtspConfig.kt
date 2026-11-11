@@ -47,8 +47,9 @@ enum class RtspChangeScope {
  * live MediaCodec `setParameters`, the way frame rate and input format do —
  * while the config's [RtspConfig.videoBitrate] feeds the SDP's `b=AS` line
  * through the live config [RtspServer.apply] retains. Input-format changes
- * reconfigure in the hub, the frame rate flows into the RTP timestamp
- * increment through the live config getter, and the authorizer reads the auth
+ * reconfigure in the hub, the frame rate is read live by the encoder and the
+ * throttle (the RTP timestamps are wall-clock anchored and frame-rate
+ * independent), and the authorizer reads the auth
  * spec live — all HOT_SWAP, all restart-free.
  */
 enum class RtspField(val scope: RtspChangeScope) {

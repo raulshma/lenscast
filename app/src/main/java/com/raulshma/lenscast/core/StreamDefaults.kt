@@ -43,7 +43,7 @@ object StreamDefaults {
     const val WATCHDOG_CHECK_INTERVAL_MAX_SECONDS = 30
 
     // RTSP output bounds. VIDEO_BITRATE_* is the H.264 encoder ceiling;
-    // RTSP_FPS_* is the encoder/RTP timestamp ceiling — the persisted frame
+    // RTSP_FPS_* is the encoder ceiling — the persisted frame
     // rate setting may range wider (CameraSettings.FRAME_RATE_MAX), the RTSP
     // output clamps to this.
     const val VIDEO_BITRATE_MIN = 500_000
