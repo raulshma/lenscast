@@ -222,10 +222,13 @@ class MediaCodecEncoderHarnessTest {
         assertFalse(harness.isRunning)
         assertNull(harness.activeCodec)
 
-        // stop after a failed start is a no-op — the codec is never touched.
+        // stop after a failed start is a no-op — the harness is Idle. The
+        // failed attempt released its own codec (the release the old guard
+        // skipped leaked one instance per failure), but never a codec-stop:
+        // a codec that never started has nothing to stop.
         assertFalse(harness.stop())
         assertEquals(0, codec.stopCount)
-        assertEquals(0, codec.releaseCount)
+        assertEquals(1, codec.releaseCount)
     }
 
     @Test
@@ -390,17 +393,72 @@ class MediaCodecEncoderHarnessTest {
     }
 
     @Test
-    fun `requestStop ends the loops without teardown - the aac end-of-stream path`() {
+    fun `requestStop defers the release and the next stop tears the draining codec down`() {
         val codec = FakeCodec()
         val harness = harnessFor(codec)
 
         assertTrue(harness.start())
         harness.requestStop()
 
-        // The guard is already off, so stop() does nothing — pinning the
-        // pre-harness end-of-stream behavior exactly.
+        // The loops are off (isRunning is the feed loops' gate), but the
+        // codec is still live in the Draining phase: stop() must run the
+        // teardown the EOF path deferred — this is the release the old
+        // boolean skipped (one leaked MediaCodec per mic restart).
+        assertFalse(harness.isRunning)
+        assertTrue(harness.stop())
+        assertEquals(1, codec.stopCount)
+        assertEquals(1, codec.releaseCount)
+        assertNull(harness.activeCodec)
+        // And a second stop is idle again.
         assertFalse(harness.stop())
-        assertEquals(0, codec.releaseCount)
+    }
+
+    @Test
+    fun `start after requestStop tears the superseded generation down before rebuilding`() {
+        val generations = listOf(FakeCodec(), FakeCodec())
+        val index = AtomicInteger(0)
+        val harness = MediaCodecEncoderHarness(
+            tag = "HarnessTest",
+            threadName = "HarnessTestOutput",
+            startedMessage = { "harness started" },
+            startFailureMessage = "harness start failed",
+            outputErrorMessage = "harness output error",
+            createCodec = { generations[index.getAndIncrement()] },
+            configureCodec = { codecLike -> (codecLike as FakeCodec).recordConfigure() },
+            onFormatChanged = { },
+            onOutput = { _, _ -> },
+        )
+
+        assertTrue(harness.start())
+        harness.requestStop()
+        // The reattach after an EOF (the hub's isRunning probe is false):
+        // the EOF'd codec must be released, not dropped on the floor with
+        // only its reference nulled.
+        assertTrue(harness.start())
+
+        assertEquals(1, generations[0].stopCount)
+        assertEquals(1, generations[0].releaseCount)
+        assertSame(generations[1], harness.activeCodec)
+        assertTrue(harness.isRunning)
+        assertEquals(1, generations[1].startCount)
+
+        harness.stop()
+    }
+
+    @Test
+    fun `a failed start releases the attempt's codec`() {
+        val codec = FakeCodec(startError = IllegalStateException("no encoder"))
+        val harness = harnessFor(codec)
+
+        assertFalse(harness.start())
+
+        // The attempt allocated a codec the guard never published ([codec]
+        // only assigns after start succeeds) — it must not leak.
+        assertEquals(1, codec.releaseCount)
+        assertNull(harness.activeCodec)
+        assertFalse(harness.isRunning)
+        // The harness is Idle again, so a later stop is a no-op.
+        assertFalse(harness.stop())
     }
 
     // ── shared MediaCodec timings ──

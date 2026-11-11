@@ -4,7 +4,6 @@ import android.util.Log
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.launch
 
 /**
@@ -16,10 +15,18 @@ import kotlinx.coroutines.launch
  * quits through an exit ladder), so the hold never has to guess whether the
  * app is still in use.
  *
- * The start read suspends on the disk value before collecting the flow, so
- * a user who turned the setting off never gets one tick of the hold while
- * the eager shared flow still serves its default — the same
- * disk-over-flow convention as every startup-critical read.
+ * The startup reconcile is a two-phase machine: the disk read seeds the hold
+ * (a user who turned the setting off never gets one tick of it while the
+ * eager shared flow still serves its default — the disk-over-flow convention
+ * as every startup-critical read), and then every flow emission reconciles
+ * against that seed — including the first. The first emission is the only
+ * one that can still be `stateIn`'s pre-DataStore default, so it is trusted
+ * only when a fresh disk read (taken at collect time, with any write that
+ * landed in the startup gap already persisted) says the same thing. The old
+ * blanket `drop(1)` had the opposite bug: it discarded a real toggle that
+ * landed between the disk read and the first emission — a StateFlow does
+ * not re-emit an unchanged value — and stranded the hold at the stale value
+ * until the next toggle.
  */
 class KeepAwakeController(
     private val keepAwakeEnabledFromDisk: suspend () -> Boolean,
@@ -37,12 +44,12 @@ class KeepAwakeController(
                 Log.d(TAG, "Keep-awake on at start: holding")
                 powerManager.acquireKeepAwake()
             }
-            // The first collected emission is skipped: it is either the disk
-            // truth just applied above (a no-op repeat) or the eager flow's
-            // stale default racing the startup read — and a StateFlow always
-            // re-emits its conflated current value, so the real state arrives
-            // one emission later at worst.
-            keepAwakeEnabled.drop(1).collect { enabled ->
+            var startupConfirmed = false
+            keepAwakeEnabled.collect { enabled ->
+                if (!startupConfirmed) {
+                    if (keepAwakeEnabledFromDisk() == enabled) startupConfirmed = true
+                    else return@collect
+                }
                 if (enabled == holding) return@collect
                 holding = enabled
                 if (enabled) {

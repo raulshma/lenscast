@@ -1,4 +1,4 @@
-import { createEffect, createSignal, For, onCleanup, Show } from 'solid-js'
+import { createEffect, createMemo, createSignal, For, onCleanup, Show } from 'solid-js'
 import type {
   AutomationCatalogActionDto,
   AutomationCatalogConditionDto,
@@ -121,7 +121,6 @@ export default function AutomationRuleEditor(props: Props) {
   // until the PUT resolves).
   const [picker, setPicker] = createSignal<PickerTarget | null>(null)
   const [needAction, setNeedAction] = createSignal(false)
-  const [dirty, setDirty] = createSignal(false)
   const [submitting, setSubmitting] = createSignal(false)
   // The raw <input type="time"> text, so partial keystrokes survive (the
   // minuteOfDay signal only moves on a valid full "HH:mm").
@@ -131,6 +130,22 @@ export default function AutomationRuleEditor(props: Props) {
   // editor root because spec rows are keyed by stable identity, not per
   // param change.
   const lastManualByParam = new Map<string, number>()
+
+  // Dirty is DERIVED, not tracked: the editor's whole state lives in the
+  // signals above, so "unsaved edits" is one structural compare of the
+  // rule the pieces build right now against the one the editor opened
+  // with. Fifteen hand-placed setDirty(true) sites used to carry this —
+  // the next mutator could forget one and let a close path discard real
+  // edits with no confirm (exactly the loss the guard exists to prevent).
+  // Editing IS dirtying; a new mutator needs no dirty bookkeeping at all.
+  // specsVersion is read because the param records mutate in place (a
+  // plain non-reactive `let` + counter): without it, param-only edits
+  // would never re-evaluate the compare.
+  const openedRuleJson = JSON.stringify(buildRule())
+  const dirty = createMemo(() => {
+    specsVersion()
+    return JSON.stringify(buildRule()) !== openedRuleJson
+  })
 
   const catalogFor = (typeId: string): AutomationCatalogActionDto | undefined =>
     props.catalog.find((entry) => entry.id === typeId)
@@ -152,53 +167,44 @@ export default function AutomationRuleEditor(props: Props) {
   function setTriggerParam(paramName: string, value: string | null) {
     triggerParams = withSpecParam(triggerParams, paramName, value)
     setSpecsVersion((v) => v + 1)
-    setDirty(true)
   }
 
   function setSpecParam(spec: DraftSpec, paramName: string, value: string | null) {
     if (value == null || value === '') delete spec.params[paramName]
     else spec.params[paramName] = value
     setSpecsVersion((v) => v + 1)
-    setDirty(true)
   }
 
   function changeTrigger(typeId: string) {
     setTriggerType(typeId)
     triggerParams = defaultTriggerParams(triggerFor(typeId))
     setSpecsVersion((v) => v + 1)
-    setDirty(true)
   }
 
   function removeAction(index: number) {
     setActions((prev) => prev.filter((_, i) => i !== index))
-    setDirty(true)
   }
 
   function addAction(typeId: string) {
     if (!typeId || atActionCap()) return
     setActions((prev) => [...prev, { type: typeId, params: defaultActionParams(catalogFor(typeId)), key: nextKey++ }])
-    setDirty(true)
   }
 
   function moveAction(index: number, delta: number) {
     setActions((prev) => moveSpec(prev, index, delta))
-    setDirty(true)
   }
 
   function removeCondition(index: number) {
     setConditions((prev) => prev.filter((_, i) => i !== index))
-    setDirty(true)
   }
 
   function addCondition(typeId: string) {
     if (!typeId || atConditionCap()) return
     setConditions((prev) => [...prev, { type: typeId, params: defaultConditionParams(conditionFor(typeId)), key: nextKey++ }])
-    setDirty(true)
   }
 
   function moveCondition(index: number, delta: number) {
     setConditions((prev) => moveSpec(prev, index, delta))
-    setDirty(true)
   }
 
   /**
@@ -306,8 +312,8 @@ export default function AutomationRuleEditor(props: Props) {
     }
     setSubmitting(true)
     try {
-      const ok = await props.onSave(buildRule())
-      if (ok) setDirty(false) // the card closes the editor on success
+      await props.onSave(buildRule())
+      // Resolving true closes the editor — there is no dirty state to clear.
     } finally {
       setSubmitting(false)
     }
@@ -357,7 +363,6 @@ export default function AutomationRuleEditor(props: Props) {
               value={name()}
               onInput={(e) => {
                 setName(e.currentTarget.value)
-                setDirty(true)
               }}
               placeholder={t('automation.ruleUnnamed')}
             />
@@ -418,7 +423,6 @@ export default function AutomationRuleEditor(props: Props) {
                               classList={{ active: cooldownSeconds() === seconds }}
                               onClick={() => {
                                 setCooldownSeconds(seconds)
-                                setDirty(true)
                               }}
                             >
                               {t(line.key, line.params)}
@@ -439,7 +443,6 @@ export default function AutomationRuleEditor(props: Props) {
                         const parsed = Number.parseInt(e.currentTarget.value, 10)
                         if (Number.isFinite(parsed)) {
                           setCooldownSeconds(parsed)
-                          setDirty(true)
                         }
                       }}
                     />
@@ -454,7 +457,6 @@ export default function AutomationRuleEditor(props: Props) {
                   label={t('automation.editor.time')}
                   onCommit={(minute) => {
                     setMinuteOfDay(minute)
-                    setDirty(true)
                   }}
                   text={timeText()}
                   onText={(text) => setTimeText(text)}
@@ -471,7 +473,6 @@ export default function AutomationRuleEditor(props: Props) {
                 <div class="arm-days-row" role="group" aria-label={t('automation.daysAria')}>
                   <DayChips mask={daysMask()} onToggle={(day) => {
                     setDaysMask(toggleArmDayMask(daysMask(), day))
-                    setDirty(true)
                   }} />
                 </div>
               </div>
@@ -491,7 +492,6 @@ export default function AutomationRuleEditor(props: Props) {
                         classList={{ active: missedRunPolicy() === policy }}
                         onClick={() => {
                           setMissedRunPolicy(policy)
-                          setDirty(true)
                         }}
                       >
                         {t(`automation.missed.${policy}`)}
@@ -521,7 +521,6 @@ export default function AutomationRuleEditor(props: Props) {
                             classList={{ active: missedWindowMinutes() === minutes }}
                             onClick={() => {
                               setMissedWindowMinutes(minutes)
-                              setDirty(true)
                             }}
                           >
                             {t(line.key, line.params)}
@@ -543,7 +542,6 @@ export default function AutomationRuleEditor(props: Props) {
                   checked={enabled()}
                   onChange={() => {
                     setEnabled(!enabled())
-                    setDirty(true)
                   }}
                 />
                 <span class="toggle-slider" />
@@ -574,7 +572,6 @@ export default function AutomationRuleEditor(props: Props) {
                       checked={conditionMode() === 'any'}
                       onChange={() => {
                         setConditionMode(conditionMode() === 'any' ? 'all' : 'any')
-                        setDirty(true)
                       }}
                     />
                     <span class="toggle-slider" />

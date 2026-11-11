@@ -13,6 +13,7 @@ import com.raulshma.lenscast.capture.model.CaptureType
 import com.raulshma.lenscast.capture.model.RecordingTrigger
 import com.raulshma.lenscast.core.AppJson
 import com.raulshma.lenscast.core.StreamDefaults
+import com.raulshma.lenscast.core.writeAtomicallyOrWarn
 import com.squareup.moshi.Types
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -78,12 +79,12 @@ class CaptureHistoryStore(
     private fun save() {
         val snapshot = _history.value
         ioExecutor.execute {
-            try {
-                val json = adapter.toJson(snapshot)
-                historyFile.writeText(json)
-            } catch (e: Exception) {
-                Log.e(TAG, "Failed to save capture history", e)
-            }
+            // Atomic tmp+rename like every other file-backed store: a crash
+            // mid-write must not leave a half-written capture_history.json.
+            historyFile.writeAtomicallyOrWarn(
+                adapter.toJson(snapshot),
+                warn = "Failed to save capture history",
+            )
         }
     }
 

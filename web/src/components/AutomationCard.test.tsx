@@ -228,4 +228,20 @@ describe('AutomationCard editor flow', () => {
     await waitFor(() => expect(screen.queryByText('Preview')).toBeNull())
     expect(confirmSpy).not.toHaveBeenCalled()
   })
+
+  it('a non-name edit (cooldown) dirties the editor too — dirty is derived from the whole rule', async () => {
+    // Rule 1 is the event trigger — the branch that renders the cooldown
+    // slider (time rules render the time field instead).
+    await openEditor(1)
+    // Move the cooldown slider off the loaded value: the derive must see a
+    // signal other than the name. (The retired hand-placed setDirty(true)
+    // covered this by convention; the structural compare covers it by
+    // construction.)
+    const slider = document.getElementById('automation-rule-cooldown') as HTMLInputElement
+    expect(slider).toBeTruthy()
+    fireEvent.input(slider, { target: { value: '300' } })
+    fireEvent.keyDown(document, { key: 'Escape' })
+    expect(confirmSpy).toHaveBeenCalledTimes(1)
+    expect(screen.getByText('Preview')).toBeTruthy() // declining keeps it open
+  })
 })

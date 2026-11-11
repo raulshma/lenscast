@@ -9,6 +9,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.runBlocking
 import org.junit.Test
+import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * The keep-awake hold's collector logic over a mockk [PowerManager] seam
@@ -123,6 +124,50 @@ class KeepAwakeControllerTest {
             controller.start()
             Thread.sleep(200)
             verify(exactly = 1) { powerManager.acquireKeepAwake() }
+        } finally {
+            scope.cancel()
+        }
+    }
+
+    @Test
+    fun `a toggle landing in the startup gap is not lost`() {
+        // The race the blanket drop(1) had: the startup disk read returns
+        // the pre-write value, then the write lands, and the flow's first
+        // emission carries the post-write value. A StateFlow never re-emits
+        // it, so the dropped emission stranded the hold until the next
+        // toggle. The disk-confirmed first emission must apply it instead:
+        // the re-read at collect time sees the write and trusts the value.
+        //
+        // Deterministic simulation: the startup read (call 1) answers the
+        // pre-write value; the first emission's confirm re-read (call 2)
+        // lands the write first — exactly the gap ordering, without relying
+        // on thread interleaving.
+        var diskValue = false
+        val reads = AtomicInteger(0)
+        val scope = CoroutineScope(Job() + Dispatchers.Default)
+        try {
+            val controller = KeepAwakeController(
+                keepAwakeEnabledFromDisk = {
+                    when (reads.incrementAndGet()) {
+                        1 -> false
+                        else -> {
+                            // The write lands in the gap: the disk now holds
+                            // what the first emission carries.
+                            diskValue = true
+                            diskValue
+                        }
+                    }
+                },
+                keepAwakeEnabled = MutableStateFlow(true),
+                powerManager = powerManager,
+                scope = scope,
+            )
+            controller.start()
+
+            awaitUntil {
+                runCatching { verify(exactly = 1) { powerManager.acquireKeepAwake() } }.isSuccess
+            }
+            verify(exactly = 0) { powerManager.releaseKeepAwake() }
         } finally {
             scope.cancel()
         }

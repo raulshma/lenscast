@@ -5,12 +5,12 @@ import android.media.MediaFormat
 import android.os.Bundle
 import android.util.Log
 import java.nio.ByteBuffer
-import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicReference
 
 /**
  * One MediaCodec lifecycle harness behind [H264Encoder] and [AacEncoder].
- * Both encoders used to hand-roll the identical scaffold — the AtomicBoolean
- * running guard, the create → configure → start ladder returning Boolean with
+ * Both encoders used to hand-roll the identical scaffold — the running
+ * guard, the create → configure → start ladder returning Boolean with
  * the guard flipped off on failure, the output-drain loop with its 10ms
  * dequeue poll, INFO_OUTPUT_FORMAT_CHANGED branch, and two-clause exception
  * ladder, and the join-then-release teardown. This class owns that scaffold;
@@ -18,11 +18,20 @@ import java.util.concurrent.atomic.AtomicBoolean
  * CSD interpretation, input feeding, and the frame callbacks — plugged in as
  * the constructor strategies below.
  *
+ * The guard is an explicit three-phase machine ([Phase]) rather than the old
+ * boolean: the AAC input stream's end-of-file path ([requestStop]) stops the
+ * loops WITHOUT teardown — the codec stays allocated until the owner's next
+ * [stop] (or the next [start] superseding the generation) releases it. A
+ * boolean could not represent "loops exited, codec still live", so every EOF
+ * used to leak one MediaCodec instance per mic restart; the phase makes the
+ * draining state nameable and its teardown mandatory.
+ *
  * [CodecLike] is the test seam for the Android-bound MediaCodec: production
  * wraps the real codec in [MediaCodecAdapter], JVM tests drive a fake, so the
  * lifecycle invariants (start idempotence, stop-after-failed-start safety,
- * drain exception classification) are pinned without a device. The seam
- * mirrors exactly the MediaCodec calls the encoder pair makes — nothing more.
+ * EOF-drain teardown, drain exception classification) are pinned without a
+ * device. The seam mirrors exactly the MediaCodec calls the encoder pair
+ * makes — nothing more.
  */
 internal class MediaCodecEncoderHarness(
     private val tag: String,
@@ -56,29 +65,54 @@ internal class MediaCodecEncoderHarness(
         var presentationTimeUs: Long = 0
     }
 
-    private val running = AtomicBoolean(false)
+    /**
+     * The harness's lifecycle phase:
+     * - [Idle] — no live codec; [start] builds one.
+     * - [Running] — codec started, drain thread up; [requestStop] leaves
+     *   this phase for [Draining], and a second [start] here is a no-op.
+     * - [Draining] — the EOF path's stop: loops exited, codec still
+     *   allocated until the next [stop]/[start] releases it. The phase the
+     *   old boolean could not represent, which is where the codecs leaked.
+     */
+    private enum class Phase { Idle, Running, Draining }
+
+    private val phase = AtomicReference(Phase.Idle)
     private var codec: CodecLike? = null
     private var outputThread: Thread? = null
 
+    /**
+     * The loop gate, consumed by the drain loop and the encoders' feed loops
+     * — true only while [Phase.Running]; a draining harness reports not
+     * running (which is exactly the hub's re-attach probe semantics).
+     */
     val isRunning: Boolean
-        get() = running.get()
+        get() = phase.get() == Phase.Running
 
-    /** The live codec handle — non-null from a successful [start] until [stop]. */
+    /** The live codec handle — non-null from a successful [start] until [stop] releases it. */
     val activeCodec: CodecLike?
         get() = codec
 
     /**
      * The guarded create → configure → start ladder. Idempotent: a start
-     * while already running reports success without touching the codec. Any
-     * failure along the ladder flips the running guard back off, so a later
-     * [stop] — and a later [start] retry — stay safe.
+     * while already running reports success without touching the codec. A
+     * start while [Phase.Draining] first tears down the EOF-superseded
+     * generation, then builds the new one. Any failure along the ladder
+     * releases the attempt's codec and drops back to [Phase.Idle], so a
+     * later [stop] — and a later [start] retry — stay safe.
      */
     fun start(): Boolean {
-        if (running.getAndSet(true)) return true
+        val previous = phase.getAndSet(Phase.Running)
+        if (previous == Phase.Running) return true
+
+        // A previous stream's EOF ([requestStop]) leaves its codec live:
+        // tear that generation down before building the new one, or every
+        // reattach after a mic restart drops one codec on the floor.
+        if (previous == Phase.Draining) teardown()
         codec = null
 
+        var attempt: CodecLike? = null
         return try {
-            val codec = createCodec()
+            val codec = createCodec().also { attempt = it }
             configureCodec(codec)
             codec.start()
             this.codec = codec
@@ -92,7 +126,11 @@ internal class MediaCodecEncoderHarness(
             true
         } catch (e: Exception) {
             Log.e(tag, startFailureMessage, e)
-            running.set(false)
+            // The attempt's codec is live memory even though the guard never
+            // published it ([codec] only assigns after start succeeds) —
+            // release it, or every failed start leaks one codec instance.
+            attempt?.let { failed -> runCatching { failed.release() } }
+            phase.set(Phase.Idle)
             false
         }
     }
@@ -100,12 +138,33 @@ internal class MediaCodecEncoderHarness(
     /**
      * Teardown: joins the drain thread ([STOP_JOIN_TIMEOUT_MS], the encoders'
      * original bound), then stop/release under the same silent catch-all.
-     * Only tears down when the encoder was running; the result says which
-     * happened, so encoders can gate their own stop-side state on it.
+     * Tears down a [Phase.Running] harness and a [Phase.Draining] one (the
+     * EOF path's deferred release); the result says which happened, so
+     * encoders can gate their own stop-side state on it.
      */
     fun stop(): Boolean {
-        if (!running.getAndSet(false)) return false
+        return when (phase.getAndSet(Phase.Idle)) {
+            Phase.Idle -> false
+            Phase.Running, Phase.Draining -> {
+                teardown()
+                true
+            }
+        }
+    }
 
+    /**
+     * Ends the drain (and any encoder-side feed) loops and moves the machine
+     * to [Phase.Draining] — the AAC input-stream end-of-file path asks for
+     * the stop this way, and the codec's release is deferred to the owner's
+     * next [stop] or [start]. The loops poll the same phase they always
+     * polled ([isRunning] goes false either way).
+     */
+    fun requestStop() {
+        phase.compareAndSet(Phase.Running, Phase.Draining)
+    }
+
+    /** The join-then-release teardown, shared by [stop] and a Draining [start]. */
+    private fun teardown() {
         try {
             outputThread?.join(STOP_JOIN_TIMEOUT_MS)
         } catch (_: InterruptedException) {
@@ -120,16 +179,6 @@ internal class MediaCodecEncoderHarness(
         } catch (_: Exception) {
         }
         codec = null
-        return true
-    }
-
-    /**
-     * Ends the drain (and any encoder-side feed) loops without teardown —
-     * the AAC input-stream end-of-file path flips the same guard the loops
-     * poll, exactly as the pre-harness encoders did.
-     */
-    fun requestStop() {
-        running.set(false)
     }
 
     /**
@@ -142,7 +191,7 @@ internal class MediaCodecEncoderHarness(
     private fun drainOutput(codec: CodecLike) {
         val bufferInfo = OutputInfo()
 
-        while (running.get()) {
+        while (phase.get() == Phase.Running) {
             try {
                 val outputBufferIndex = codec.dequeueOutput(bufferInfo, DEQUEUE_TIMEOUT_US)
 
@@ -156,7 +205,7 @@ internal class MediaCodecEncoderHarness(
                     outputBufferIndex == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> onFormatChanged(codec)
                 }
             } catch (e: IllegalStateException) {
-                if (running.get()) Log.e(tag, outputErrorMessage, e)
+                if (phase.get() == Phase.Running) Log.e(tag, outputErrorMessage, e)
                 break
             } catch (_: Exception) {
                 break

@@ -76,7 +76,16 @@ export default function Gallery(props: {
   // the header JSX (the Show gate and the option list).
   const captureDays = createMemo(() => listCaptureDays(items(), Date.now()))
 
+  // One fetch owner at a time: each fetch takes a generation number, and a
+  // superseded fetch (a newer filter/query/page trigger fired while it was
+  // in flight) drops its result instead of writing it. Without the guard,
+  // two rapid trigger flips raced — type-then-filter, say — and whichever
+  // response resolved LAST wrote the grid, so the abandoned request's items
+  // could render under the new filter (the header count disagreeing with
+  // the query badge). Same shape as RecordingTimeline's day-guard.
+  let fetchGeneration = 0
   async function fetchGallery(resetPage = false) {
+    const generation = ++fetchGeneration
     if (resetPage) setPage(0)
     const currentPage = resetPage ? 0 : page()
     setLoading(currentPage === 0)
@@ -85,6 +94,7 @@ export default function Gallery(props: {
       const f = filter()
       const q = query().trim()
       const res = await api.getGallery(f === 'ALL' ? undefined : f, currentPage, PAGE_SIZE, q || undefined)
+      if (generation !== fetchGeneration) return
       if (currentPage === 0) {
         setItems(res.items)
       } else {
@@ -93,9 +103,10 @@ export default function Gallery(props: {
       setHasMore(res.hasMore)
       setTotalItems(res.total)
     } catch (e: any) {
+      if (generation !== fetchGeneration) return
       setError(e.message || t('gallery.loadFailed'))
     } finally {
-      setLoading(false)
+      if (generation === fetchGeneration) setLoading(false)
     }
   }
 

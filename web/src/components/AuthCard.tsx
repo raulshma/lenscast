@@ -53,16 +53,29 @@ export default function AuthCard() {
   const [pairingJson, setPairingJson] = createSignal('')
   const [tokenBusy, setTokenBusy] = createSignal(false)
   const [tokenMsg, setTokenMsg] = createSignal('')
+  // The config mirror's two-phase machine per editable group (admin /
+  // viewer): Synced-with-server vs Locally-dirty-unsaved. The 10 s poll
+  // overwrites a group only while it is synced — the dirty bit is what
+  // stops the poll from reverting mid-keystroke typing or snapping an
+  // unsaved toggle back. Save clears it (the refresh that follows re-bases
+  // the mirror on server truth); the password fields need no bit — they are
+  // write-only drafts the poll never touches.
+  const [adminDirty, setAdminDirty] = createSignal(false)
+  const [viewerDirty, setViewerDirty] = createSignal(false)
 
   async function refresh() {
     try {
       const sessionsBody = await getAuthSessions()
       setSessions(sessionsBody.sessions ?? [])
       const config = await getAuthConfig()
-      setEnabled(config.enabled ?? false)
-      setUsername(config.username ?? '')
-      setViewerEnabled(config.viewerEnabled ?? false)
-      setViewerUsername(config.viewerUsername ?? '')
+      if (!adminDirty()) {
+        setEnabled(config.enabled ?? false)
+        setUsername(config.username ?? '')
+      }
+      if (!viewerDirty()) {
+        setViewerEnabled(config.viewerEnabled ?? false)
+        setViewerUsername(config.viewerUsername ?? '')
+      }
       const settings = await getSettings()
       setTokenEnabled(settings.streaming?.apiTokenEnabled ?? false)
       setTokenConfigured(settings.streaming?.apiTokenConfigured ?? false)
@@ -175,6 +188,9 @@ export default function AuthCard() {
         // Password rotation revoked all sessions, including this one.
         await login(username(), enteredPassword).catch(() => {})
       }
+      // The edits are server truth now: back to synced, and the refresh
+      // re-bases the mirror.
+      setAdminDirty(false)
       await refresh()
     } catch (e: any) {
       setMsg(e?.message || t('auth.updateFailed'))
@@ -211,6 +227,8 @@ export default function AuthCard() {
       })
       setViewerMsg(t('auth.viewerUpdated'))
       setViewerPasswordDraft('')
+      // The viewer group is server truth now: back to synced.
+      setViewerDirty(false)
       await refresh()
     } catch (e: any) {
       setViewerMsg(e?.message || t('auth.updateFailed'))
@@ -239,7 +257,10 @@ export default function AuthCard() {
               id="auth-enabled-toggle"
               type="checkbox"
               checked={enabled()}
-              onChange={() => setEnabled(!enabled())}
+              onChange={() => {
+                setEnabled(!enabled())
+                setAdminDirty(true)
+              }}
             />
             <span class="toggle-slider" />
           </label>
@@ -252,7 +273,10 @@ export default function AuthCard() {
             placeholder={t('auth.usernamePlaceholder')}
             autocomplete="off"
             value={username()}
-            onInput={(e) => setUsername(e.currentTarget.value)}
+            onInput={(e) => {
+              setUsername(e.currentTarget.value)
+              setAdminDirty(true)
+            }}
           />
           <input
             id="auth-password"
@@ -286,7 +310,10 @@ export default function AuthCard() {
               id="viewer-enabled-toggle"
               type="checkbox"
               checked={viewerEnabled()}
-              onChange={() => setViewerEnabled(!viewerEnabled())}
+              onChange={() => {
+                setViewerEnabled(!viewerEnabled())
+                setViewerDirty(true)
+              }}
             />
             <span class="toggle-slider" />
           </label>
@@ -299,7 +326,10 @@ export default function AuthCard() {
             placeholder={t('auth.viewerUsername')}
             autocomplete="off"
             value={viewerUsername()}
-            onInput={(e) => setViewerUsername(e.currentTarget.value)}
+            onInput={(e) => {
+              setViewerUsername(e.currentTarget.value)
+              setViewerDirty(true)
+            }}
           />
           <input
             id="viewer-password"

@@ -43,10 +43,25 @@ class WsMediaRoutes(
 ) {
 
     private val videoClients = CopyOnWriteArrayList<VideoSocket>()
-    @Volatile private var cachedSps: ByteArray? = null
-    @Volatile private var cachedPps: ByteArray? = null
-    @Volatile private var cachedVps: ByteArray? = null
-    @Volatile private var cachedCodecIsHevc = false
+
+    /**
+     * The cached parameter sets + their codec identity as ONE immutable
+     * record, published by a single volatile-reference swap. The retired
+     * four-field cluster (three nullable arrays + a boolean) could be read
+     * torn by a WS handshake joining mid codec flip — the HEVC flag already
+     * written, the AVC SPS still cached — and the mismatched config frame
+     * fails the client's decoder config step. Atomic now: a reader sees
+     * either the whole AVC config or the whole HEVC one.
+     */
+    data class CachedVideoConfig(
+        val isHevc: Boolean,
+        /** HEVC only — the AVC pair carries no VPS. */
+        val vps: ByteArray?,
+        val sps: ByteArray,
+        val pps: ByteArray,
+    )
+
+    @Volatile private var cachedVideoConfig: CachedVideoConfig? = null
 
     /** The fan-out sink; wired once by the Streaming Manager at the RTSP output. */
     fun videoSink(): (List<com.raulshma.lenscast.streaming.rtsp.EncodedNalUnit>) -> Unit =
@@ -61,16 +76,10 @@ class WsMediaRoutes(
         // re-configures joining clients automatically.
         val hevcSets = WsVideoProtocol.extractHevcParameterSets(raw)
         when {
-            hevcSets != null -> {
-                cachedVps = hevcSets.vps
-                cachedSps = hevcSets.sps
-                cachedPps = hevcSets.pps
-                cachedCodecIsHevc = true
-            }
+            hevcSets != null -> cachedVideoConfig =
+                CachedVideoConfig(isHevc = true, vps = hevcSets.vps, sps = hevcSets.sps, pps = hevcSets.pps)
             else -> WsVideoProtocol.extractParameterSets(raw)?.let { (sps, pps) ->
-                cachedSps = sps
-                cachedPps = pps
-                cachedCodecIsHevc = false
+                cachedVideoConfig = CachedVideoConfig(isHevc = false, vps = null, sps = sps, pps = pps)
             }
         }
         if (videoClients.isEmpty()) return
@@ -119,28 +128,20 @@ class WsMediaRoutes(
         }
 
         override fun onOpen() {
-            val sps = cachedSps
-            val pps = cachedPps
-            if (cachedCodecIsHevc) {
-                val vps = cachedVps
-                if (vps != null && sps != null && pps != null) {
-                    runCatching {
-                        sendFrame(
-                            WebSocketFrame(
-                                WebSocketFrame.OpCode.Binary, true,
-                                WsVideoProtocol.hevcVideoConfig(vps, sps, pps),
-                            )
-                        )
-                    }
-                }
-            } else if (sps != null && pps != null) {
-                runCatching {
-                    sendFrame(
-                        WebSocketFrame(
-                            WebSocketFrame.OpCode.Binary, true,
-                            WsVideoProtocol.videoConfig(sps, pps),
-                        )
-                    )
+            // One atomic read: the config is either the whole AVC one or the
+            // whole HEVC one — never a flip-torn mix (see CachedVideoConfig).
+            when (val config = cachedVideoConfig) {
+                null -> Unit // joined before the first keyframe: config follows the next AU
+                else -> runCatching {
+                    val payload =
+                        if (config.isHevc) {
+                            val vps = config.vps
+                            if (vps == null) return@runCatching
+                            WsVideoProtocol.hevcVideoConfig(vps, config.sps, config.pps)
+                        } else {
+                            WsVideoProtocol.videoConfig(config.sps, config.pps)
+                        }
+                    sendFrame(WebSocketFrame(WebSocketFrame.OpCode.Binary, true, payload))
                 }
             }
             Log.d(TAG, "WS video client connected (${videoClients.size})")

@@ -676,12 +676,19 @@ private fun AutomationRuleEditor(
     onDismiss: () -> Unit,
     onSave: (RuleDraft) -> Unit,
 ) {
-    // NOT keyed on draft: update() rewrites the draft on every edit, which
-    // would reset a remember(draft) flag back to false and make the discard
-    // guard unreachable. Reset happens naturally when the editor leaves
-    // composition (editorDraft = null).
-    var modified by remember { mutableStateOf(false) }
-    var showDiscardConfirm by remember { mutableStateOf(false) }
+    // The editor's four-phase machine: Closed / Open·clean / Open·dirty /
+    // Open·dirty·confirming-discard. The draft rides the parent's saveable
+    // editorDraft, so the dirty and confirming flags are saveable too —
+    // they are the draft's shadow, and a configuration change must never
+    // split truth from dirtiness. (Plain remember here reset `modified` on
+    // rotation while the draft came back dirty: attemptClose then dismissed
+    // silently and destroyed exactly the edits the discard guard exists to
+    // protect.) NOT keyed on draft: update() rewrites the draft on every
+    // edit, which would reset a remember(draft) flag back to false and make
+    // the discard guard unreachable. Reset happens naturally when the editor
+    // leaves composition (editorDraft = null).
+    var modified by rememberSaveable { mutableStateOf(false) }
+    var showDiscardConfirm by rememberSaveable { mutableStateOf(false) }
     // The ONE picker slot: the former three show*Picker booleans could only
     // stay exclusive through the UI flow (no dialog offered a path to open a
     // second one); the enum makes that exclusivity structural — one state

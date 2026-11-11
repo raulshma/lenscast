@@ -104,7 +104,6 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
-import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -158,6 +157,7 @@ import com.raulshma.lenscast.camera.model.QuickSettingEditor
 import com.raulshma.lenscast.camera.model.QuickSettingIcon
 import com.raulshma.lenscast.camera.model.QuickSettingRanges
 import com.raulshma.lenscast.camera.model.QuickSettingType
+import com.raulshma.lenscast.camera.model.ZoomIndicatorState
 import com.raulshma.lenscast.camera.model.ZoomPresetsPolicy
 import com.raulshma.lenscast.capture.model.FlashMode
 import com.raulshma.lenscast.core.MicAccess
@@ -304,8 +304,10 @@ fun CameraScreen(
     // panel intentionally resets on rotation, as before.
     var quickSettingsUiState by remember { mutableStateOf<QuickSettingsUiState>(QuickSettingsUiState.Collapsed) }
     var showConnectSheet by remember { mutableStateOf(false) }
-    var isPinching by remember { mutableStateOf(false) }
-    var pinchZoomRatio by remember { mutableFloatStateOf(1f) }
+    // The pinch-zoom indicator as one machine (ZoomIndicatorState): the
+    // gesture layer's writes and the retire timer's write all land here, so
+    // the show/hide contract can't split across a flag + a float again.
+    var zoomIndicator by remember { mutableStateOf(ZoomIndicatorState.Hidden) }
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     // Saveable: the once-per-session ask budget must survive rotation, or a
     // configuration change would re-prompt for an already-denied mic.
@@ -356,11 +358,11 @@ fun CameraScreen(
                 quickSettingsExpanded = quickSettingsUiState.isBarExpanded,
                 activeSetting = quickSettingsUiState.openSetting,
                 flashAlpha = flashAlpha,
-                isPinching = isPinching,
-                pinchZoomRatio = pinchZoomRatio,
+                isPinching = zoomIndicator.isVisible,
+                pinchZoomRatio = zoomIndicator.ratio,
                 onPinchStateChange = { pinching, ratio ->
-                    isPinching = pinching
-                    pinchZoomRatio = ratio
+                    zoomIndicator =
+                        if (pinching) zoomIndicator.onPinch(ratio) else zoomIndicator.onRetire()
                 },
                 onToggleQuickSettings = {
                     quickSettingsUiState = quickSettingsUiState.toggled()
@@ -1660,10 +1662,16 @@ private fun CameraPreview(
         )
     }
 
-    LaunchedEffect(isPinching) {
-        if (!isPinching) {
+    // The indicator retires INDICATOR_HIDE_DELAY_MS after the LAST zoom
+    // event: both state fields are in the key, so every pinch write re-arms
+    // the deadline and the fire lands once the fingers settle. (The old
+    // effect keyed on the flag alone and only ran its body while already
+    // hidden — nothing else ever wrote `false`, so the exit transition was
+    // dead and the pill never left the viewfinder.)
+    LaunchedEffect(isPinching, pinchZoomRatio) {
+        if (isPinching) {
             delay(PreviewGestures.INDICATOR_HIDE_DELAY_MS)
-            onPinchStateChange(false, settings.zoomRatio)
+            onPinchStateChange(false, pinchZoomRatio)
         }
     }
 }

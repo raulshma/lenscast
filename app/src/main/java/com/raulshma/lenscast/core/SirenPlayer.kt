@@ -19,11 +19,12 @@ class SirenPlayer {
 
     fun start() {
         if (!running.compareAndSet(false, true)) return
+        var player: AudioTrack? = null
         try {
             val minBuf = AudioTrack.getMinBufferSize(
                 SAMPLE_RATE_HZ, AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_16BIT,
             )
-            val player = AudioTrack.Builder()
+            player = AudioTrack.Builder()
                 .setAudioAttributes(
                     AudioAttributes.Builder()
                         .setUsage(AudioAttributes.USAGE_ALARM)
@@ -74,6 +75,12 @@ class SirenPlayer {
         } catch (e: Exception) {
             Log.w(TAG, "Siren start failed", e)
             running.set(false)
+            // The failed start owns the track it already built (assigned to
+            // [track] before play()): stop()'s release never runs for a
+            // start that never reached playing, so release here or the
+            // ALARM-stream handle leaks until GC.
+            track = null
+            runCatching { player?.release() }
         }
     }
 
