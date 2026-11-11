@@ -1723,7 +1723,9 @@ class StreamingManager(
      * The persisted RTSP resolution fans out to both sides of the encoded
      * path: the output's retained [com.raulshma.lenscast.streaming.rtsp.RtspConfig]
      * (whose diff restarts a live server — a dimension change cannot hot-swap)
-     * and the hub's retained encoder dimensions for its next configure.
+     * and the hub's retained encoder dimensions for its next configure. The
+     * resolution's aspect also steers the camera's streaming analysis window,
+     * applied by the Settings Applier's dedicated camera seam.
      */
     fun setRtspResolution(resolution: RtspResolution) {
         rtspOutput.setResolution(resolution)

@@ -860,7 +860,7 @@ object OpenApiSpec {
             "rtspEnabled" to boolSchema(),
             "rtspPort" to intSchema(),
             "rtspInputFormat" to stringSchema(),
-            "rtspResolution" to stringSchema("`480p` | `720p` | `1080p`"),
+            "rtspResolution" to stringSchema("`480p` | `720p` | `720p43` | `1080p` | `1080p43`"),
             "rtspVideoCodec" to stringSchema("`h264` | `h265`"),
             "rtmpEnabled" to boolSchema(),
             "rtmpUrl" to stringSchema("Write-only: responses are blank"),

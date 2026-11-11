@@ -385,9 +385,11 @@ export default function AppSettingsPanel(props: Props) {
                 props.updateStreamingAndSave({ rtspResolution: e.currentTarget.value as RtspResolution })
               }}
             >
-              <option value="480p">480p</option>
+              <option value="480p">480p (4:3)</option>
               <option value="720p">720p</option>
+              <option value="720p43">720p (4:3)</option>
               <option value="1080p">1080p</option>
+              <option value="1080p43">1080p (4:3)</option>
             </select>
           </div>
 

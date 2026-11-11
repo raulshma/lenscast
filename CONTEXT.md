@@ -881,16 +881,25 @@ web/mDNS concerns the way `FramePipeline` absorbed the web frame path.
 
 ### RTSP Resolution
 **`streaming/rtsp/RtspResolution.kt`** — the RTSP output's resolution choices
-as the one pure wire-name → (width, height) mapper: 480p, 720p (the
-default), 1080p, with the tolerant `fromWireName` fallback-to-default
-decode. Persisted as `rtsp_resolution` and applied by the Settings Applier
-onto the encoded-stream hub's retained dimensions; a width/height change is
-NEEDS_RESTART because MediaCodec dimensions are set at `configure`. The
-entries deliberately do not use the camera `Resolution` enum — the RTSP
-output encodes a fixed-size stream of its own choosing, independent of the
-preview's capture resolution: incoming frames are aspect-filled onto the
-configured size (`YuvConverter.scaleNv21`), so the stream is exactly that
-size whatever the camera analysis produces.
+as the one pure wire-name → (width, height, aspect) mapper: 480p (4:3),
+720p (the default), 720p43, 1080p, 1080p43, with the tolerant
+`fromWireName` fallback-to-default decode. Persisted as `rtsp_resolution`
+and applied by the Settings Applier onto the encoded-stream hub's retained
+dimensions; a width/height change is NEEDS_RESTART because MediaCodec
+dimensions are set at `configure`. The entries deliberately do not use the
+camera `Resolution` enum — the RTSP output encodes a fixed-size stream of
+its own choosing, independent of the preview's capture resolution. The
+*aspect* does cross into the camera, though: a dedicated Settings Applier
+collector lands it on CameraService's `setStreamAspectRatio` seam, and the
+streaming analysis window follows (960×720 for 4:3, the 1280×720 ceiling
+for 16:9 — `analysisSizeFor`), so a 4:3 tier encodes the full sensor width
+instead of cropping 16:9 analysis frames. Incoming frames are aspect-filled
+onto the configured size (`YuvConverter.scaleNv21`), so the stream is
+exactly that size whatever the camera analysis produces. Two accepted
+crops: a sensor without a 4:3 analysis mode falls back (CameraX
+closest-lower-then-higher) to a 16:9 frame that aspect-fills with a centered
+horizontal crop, and a small capture (SD_480P's 720×480) passes through
+unchanged and aspect-fills the same way — no distortion either way.
 
 ### RTSP Video Codec
 **`streaming/rtsp/RtspVideoCodec.kt`** — the wire name → codec mapper

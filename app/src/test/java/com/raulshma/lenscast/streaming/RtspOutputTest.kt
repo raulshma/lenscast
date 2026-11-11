@@ -518,6 +518,32 @@ class RtspOutputTest {
         assertEquals(0, server.applyCalls.size)
     }
 
+    @Test
+    fun `a four-three resolution change restarts a live output with both dimensions`() {
+        val h = Harness()
+        h.startEnabled()
+
+        h.output.setResolution(RtspResolution.P720_43)
+
+        assertEquals(2, h.servers.size)
+        val config = h.servers[1].startCalls.single()
+        assertEquals(960, config.videoWidth)
+        assertEquals(720, config.videoHeight)
+    }
+
+    @Test
+    fun `a four-three resolution change while stopped is retained for the next start`() {
+        val h = Harness()
+        h.output.setEnabled(true)
+
+        h.output.setResolution(RtspResolution.P1080_43)
+
+        assertEquals(0, h.servers.size)
+        val config = h.startEnabled().startCalls.single()
+        assertEquals(1440, config.videoWidth)
+        assertEquals(1080, config.videoHeight)
+    }
+
     // ── port ──
 
     @Test

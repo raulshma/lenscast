@@ -406,7 +406,8 @@ internal val rtspPortPref = intPref(
 internal val rtspInputFormatPref = enumPref(Keys.RTSP_INPUT_FORMAT, RtspInputFormat.AUTO)
 
 /**
- * The RTSP output resolution, stored as its wire name ("480p"/"720p"/"1080p");
+ * The RTSP output resolution, stored as its wire name
+ * ("480p"/"720p"/"720p43"/"1080p"/"1080p43");
  * the decode folds an absent or unknown value back to the default through the
  * pure [RtspResolution.fromWireName] mapper.
  */

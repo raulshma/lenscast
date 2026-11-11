@@ -466,9 +466,31 @@ class YuvConverterTest {
     fun `encode-path resolution ladders produce the configured sizes`() {
         val src = patternNv21(1280, 720)
         val before = src.copyOf()
-        for (target in listOf(640 to 480, 1920 to 1080, 1280 to 720)) {
+        for (target in listOf(640 to 480, 1920 to 1080, 1280 to 720, 960 to 720, 1440 to 1080)) {
             val out = YuvConverter.scaleNv21(src, 1280, 720, target.first, target.second)
             assertEquals("$target size", target.first * target.second * 3 / 2, out.size)
+        }
+        assertArrayEquals("input must not be mutated", before, src)
+    }
+
+    @Test
+    fun `four-three analysis to four-three encode upscales without cropping`() {
+        // 960x720 → 1440x1080: aspects match, so the scale-to-cover window is
+        // the full source — every output pixel maps the direct src lattice.
+        val w = 960
+        val h = 720
+        val ow = 1440
+        val oh = 1080
+        val src = patternNv21(w, h)
+        val before = src.copyOf()
+        val out = YuvConverter.scaleNv21(src, w, h, ow, oh)
+
+        assertEquals(ow * oh * 3 / 2, out.size)
+        for (y in intArrayOf(0, 539, 1079)) {
+            for (x in intArrayOf(0, 719, 1439)) {
+                val expected = src[(y * h / oh) * w + (x * w / ow)]
+                assertEquals("Y($x,$y)", expected, out[y * ow + x])
+            }
         }
         assertArrayEquals("input must not be mutated", before, src)
     }

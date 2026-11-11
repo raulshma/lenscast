@@ -10,7 +10,7 @@ export type OverlayPosition = 'TOP_LEFT' | 'TOP_RIGHT' | 'BOTTOM_LEFT' | 'BOTTOM
 export type MaskingType = 'BLACKOUT' | 'PIXELATE' | 'BLUR'
 export type RtspInputFormat = 'AUTO' | 'NV21' | 'NV12' | 'I420'
 /** The RTSP output resolution wire names, mirroring the server's RtspResolution mapper. */
-export type RtspResolution = '480p' | '720p' | '1080p'
+export type RtspResolution = '480p' | '720p' | '720p43' | '1080p' | '1080p43'
 
 /** The RTSP output codec wire names, mirroring the server's RtspVideoCodec mapper. */
 export type RtspVideoCodec = 'h264' | 'h265'

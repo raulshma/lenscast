@@ -6,6 +6,7 @@ import com.raulshma.lenscast.camera.model.MotionZone
 import com.raulshma.lenscast.camera.model.OverlaySettings
 import com.raulshma.lenscast.camera.model.PhotoAspectRatio
 import com.raulshma.lenscast.camera.model.PhotoCapturePlan
+import com.raulshma.lenscast.camera.model.StreamAspect
 import com.raulshma.lenscast.core.StreamWatchdog
 import com.raulshma.lenscast.core.mqtt.MqttAlertPublisher
 import com.raulshma.lenscast.core.mqtt.MqttTopics
@@ -415,6 +416,37 @@ class SettingsApplierTest {
             verify(exactly = 1) { streamingManager.setRtspSubStreamEnabled(true) }
             verify(exactly = 2) { streamingManager.setRtspSubStreamEnabled(any()) }
         }
+    }
+
+    // ── encode resolution aspect → camera analysis seam ──
+
+    @Test
+    fun `the encode resolution's aspect lands on the camera analysis seam`() {
+        eventually {
+            coVerify(exactly = 1) { cameraService.setStreamAspectRatio(StreamAspect.WIDE_16_9) }
+        }
+        rtspResolution.value = RtspResolution.P720_43
+        eventually {
+            coVerify(exactly = 1) { cameraService.setStreamAspectRatio(StreamAspect.STANDARD_4_3) }
+        }
+        // A same-aspect tier change still emits — the seam itself dedupes.
+        rtspResolution.value = RtspResolution.P1080_43
+        eventually {
+            verify(exactly = 1) { streamingManager.setRtspResolution(RtspResolution.P1080_43) }
+            coVerify(exactly = 2) { cameraService.setStreamAspectRatio(StreamAspect.STANDARD_4_3) }
+        }
+    }
+
+    @Test
+    fun `an unrelated rtsp field change does not re-fire the camera aspect`() {
+        eventually {
+            coVerify(exactly = 1) { cameraService.setStreamAspectRatio(StreamAspect.WIDE_16_9) }
+        }
+        rtspPort.value = 9555
+        eventually {
+            verify(exactly = 1) { streamingManager.setRtspPort(9555) }
+        }
+        coVerify(exactly = 1) { cameraService.setStreamAspectRatio(any()) }
     }
 
     // ── push outputs: RTMP / WHIP / SRT lifecycle rule ──

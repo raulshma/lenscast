@@ -79,7 +79,7 @@ data class StreamingSettingsDto(
     val rtspEnabled: Boolean = false,
     val rtspPort: Int = StreamDefaults.RTSP_PORT,
     val rtspInputFormat: String = "",
-    /** The RTSP output resolution wire name: "480p" | "720p" | "1080p". */
+    /** The RTSP output resolution wire name: "480p" | "720p" | "720p43" | "1080p" | "1080p43". */
     val rtspResolution: String = RtspResolution.DEFAULT_WIRE_NAME,
     /**
      * The RTSP video codec wire name: "h264" | "h265". Persisted as

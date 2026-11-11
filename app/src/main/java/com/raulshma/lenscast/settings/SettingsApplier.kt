@@ -156,6 +156,17 @@ class SettingsApplier(
             }
         }
 
+        // The encode resolution's aspect steers the camera's streaming
+        // analysis window (issue #17): a 4:3 tier analyzes 4:3 frames so the
+        // encode aspect-fills without cropping. A dedicated single-flow rule
+        // like the sub-stream's — the RTSP group above fires on any of five
+        // settings, and the camera seam only cares when the aspect moves.
+        scope.launch {
+            settingsDataStore.rtspResolution.collectLatest { resolution ->
+                cameraService.setStreamAspectRatio(resolution.aspect)
+            }
+        }
+
         // The RTSP low-res sub-stream: a single-flow rule like ONVIF's — the
         // toggle lands on the hub (a refresh starts/stops its second encoder)
         // and /sub serves or 404s on the next request.

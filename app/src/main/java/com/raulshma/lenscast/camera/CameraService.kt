@@ -46,6 +46,7 @@ import com.raulshma.lenscast.camera.model.OutputRotationPolicy
 import com.raulshma.lenscast.camera.model.PhotoAspectRatioPolicy
 import com.raulshma.lenscast.camera.model.SelectedLens
 import com.raulshma.lenscast.camera.model.SessionDemand
+import com.raulshma.lenscast.camera.model.StreamAspect
 import com.raulshma.lenscast.camera.model.TorchState
 import com.raulshma.lenscast.camera.model.TorchStrengthPolicy
 import com.raulshma.lenscast.core.YuvConverter
@@ -183,6 +184,11 @@ class CameraService(private val context: Context) {
     }
 
     private var activeSettings = CameraSettings()
+
+    // The streaming analysis window's aspect, steered by the encode
+    // resolution's aspect through the Settings Applier. Read live at bind
+    // time, so a busy camera picks a change up at the next natural rebind.
+    @Volatile private var streamAspect: StreamAspect = StreamAspect.WIDE_16_9
 
     private val controlsHandler = android.os.Handler(android.os.Looper.getMainLooper())
 
@@ -870,6 +876,7 @@ class CameraService(private val context: Context) {
             captureResolution.height,
             MAX_ANALYSIS_WIDTH,
             MAX_ANALYSIS_HEIGHT,
+            streamAspect,
         )
         return Size(width, height)
     }
@@ -1387,6 +1394,30 @@ class CameraService(private val context: Context) {
         bound.outputRotation != requested.outputRotation || bound.orientationLocked != requested.orientationLocked
 
     @androidx.annotation.OptIn(androidx.camera.camera2.interop.ExperimentalCamera2Interop::class)
+    /**
+     * The streaming analysis aspect, applied by the Settings Applier when the
+     * encode resolution's aspect moves. Mirrors the output-rotation seam: a
+     * free camera rebinds now, a busy one picks the change up at the next
+     * natural rebind — [getStreamingAnalysisResolution] reads the field live,
+     * so nothing needs parking.
+     */
+    suspend fun setStreamAspectRatio(aspect: StreamAspect) {
+        if (aspect == streamAspect) return
+        streamAspect = aspect
+        when (
+            val action = CameraSessionArbiter.decide(
+                demandState(CameraSessionArbiter.Trigger.RebindIfFree)
+            )
+        ) {
+            is CameraSessionArbiter.BindingAction -> {
+                withContext(Dispatchers.Main) {
+                    executeBinding(action)
+                }
+            }
+            else -> Log.d(TAG, "setStreamAspectRatio: deferring $aspect rebind until next active session")
+        }
+    }
+
     suspend fun applySettings(settings: CameraSettings) {
         val boundSettings = activeSettings
         activeSettings = settings
@@ -1716,6 +1747,8 @@ class CameraService(private val context: Context) {
         private const val CONTROLS_APPLY_DELAY_MS = 400L
         internal const val MAX_ANALYSIS_WIDTH = 1280
         internal const val MAX_ANALYSIS_HEIGHT = 720
+        internal const val FOUR_THREE_ANALYSIS_WIDTH = 960
+        internal const val FOUR_THREE_ANALYSIS_HEIGHT = 720
 
         /** Fail-fast line for bind attempts before the CAMERA permission exists. */
         private const val CAMERA_PERMISSION_REQUIRED_MESSAGE =
@@ -1757,26 +1790,26 @@ internal fun <T> subsetsOf(items: List<T>, size: Int): List<List<T>> {
 }
 
 /**
- * The streaming analysis size: small captures pass through, large 4:3
- * captures drop to 960x720, everything else to the ceiling. Pure ints —
- * the `Size` wrapping stays at the call site.
+ * The streaming analysis size: small captures pass through; large captures
+ * drop to the desired aspect's window — 960x720 for 4:3 (the full sensor
+ * width), the 16:9 ceiling otherwise. The aspect is the encode resolution's,
+ * not the capture's: a 4:3 encode tier must not crop 16:9 analysis frames.
+ * Pure ints — the `Size` wrapping stays at the call site.
  */
 internal fun analysisSizeFor(
     captureWidth: Int,
     captureHeight: Int,
     maxWidth: Int,
     maxHeight: Int,
+    aspect: StreamAspect = StreamAspect.WIDE_16_9,
 ): Pair<Int, Int> {
     if (captureWidth <= maxWidth && captureHeight <= maxHeight) {
         return captureWidth to captureHeight
     }
 
-    val isFourThree = captureWidth * 3 >= captureHeight * 4 - 8 &&
-        captureWidth * 3 <= captureHeight * 4 + 8
-
-    return if (isFourThree) {
-        960 to 720
-    } else {
-        maxWidth to maxHeight
+    return when (aspect) {
+        StreamAspect.WIDE_16_9 -> maxWidth to maxHeight
+        StreamAspect.STANDARD_4_3 ->
+            CameraService.FOUR_THREE_ANALYSIS_WIDTH to CameraService.FOUR_THREE_ANALYSIS_HEIGHT
     }
 }
