@@ -25,6 +25,7 @@
     <string name="camera_collapse_quick_settings_cd">Recolher configurações rápidas</string>
     <string name="camera_stop_recording_cd">Parar gravação</string>
     <string name="camera_record_video_cd">Gravar vídeo</string>
+    <string name="camera_recording_scheduled_cd">Gravação agendada</string>
     <string name="camera_capture_photo_cd">Capturar foto</string>
     <string name="camera_permission_title">É necessário acesso à câmera</string>
     <string name="camera_permission_rationale">O LensCast precisa de acesso à câmera para a prévia ao vivo e ao microfone para a transmissão de áudio e as gravações.</string>
@@ -121,6 +122,7 @@
     <string name="capture_duration">Duração (segundos, 0 = ilimitada)</string>
     <string name="capture_repeat_interval">Intervalo de repetição (segundos, 0 = sem repetição)</string>
     <string name="capture_clear_schedule_cd">Limpar agendamento</string>
+    <string name="capture_recording_scheduled_cd">Gravação agendada</string>
     <string name="capture_recording_elapsed">Gravando: %1$s</string>
     <string name="capture_stop_recording">Parar gravação</string>
     <string name="capture_set_start_time">Definir horário de início</string>
@@ -266,6 +268,7 @@
     <string name="settings_photo_aspect_16_9">16:9</string>
     <string name="settings_photo_aspect_4_3">4:3</string>
     <string name="settings_gps_geotag">Geotag por GPS (EXIF)</string>
+    <string name="settings_gps_geotag_degraded">Permissão de localização não concedida; as fotos recebem tags EXIF apenas com a menção de crédito, sem GPS.</string>
     <string name="settings_section_night_vision">Visão noturna / IR</string>
     <string name="settings_mode">Modo</string>
     <string name="settings_section_scene">Cena</string>

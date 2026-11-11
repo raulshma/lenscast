@@ -25,6 +25,7 @@
     <string name="camera_collapse_quick_settings_cd">Schnelleinstellungen einklappen</string>
     <string name="camera_stop_recording_cd">Aufnahme stoppen</string>
     <string name="camera_record_video_cd">Video aufnehmen</string>
+    <string name="camera_recording_scheduled_cd">Aufnahme geplant</string>
     <string name="camera_capture_photo_cd">Foto aufnehmen</string>
     <string name="camera_permission_title">Kamerazugriff erforderlich</string>
     <string name="camera_permission_rationale">LensCast benötigt Kamerazugriff für die Live-Vorschau und das Mikrofon für Audio-Streaming und Aufnahmen.</string>
@@ -119,6 +120,7 @@
     <string name="capture_duration">Dauer (Sekunden, 0 = unbegrenzt)</string>
     <string name="capture_repeat_interval">Wiederholungsintervall (Sekunden, 0 = keine Wiederholung)</string>
     <string name="capture_clear_schedule_cd">Zeitplan löschen</string>
+    <string name="capture_recording_scheduled_cd">Aufnahme geplant</string>
     <string name="capture_recording_elapsed">Aufnahme: %1$s</string>
     <string name="capture_stop_recording">Aufnahme stoppen</string>
     <string name="capture_set_start_time">Startzeit festlegen</string>
@@ -264,6 +266,7 @@
     <string name="settings_photo_aspect_16_9">16:9</string>
     <string name="settings_photo_aspect_4_3">4:3</string>
     <string name="settings_gps_geotag">GPS-Geotag (EXIF)</string>
+    <string name="settings_gps_geotag_degraded">Standortberechtigung nicht erteilt; Fotos erhalten nur EXIF-Tags mit Quellenangabe, ohne GPS.</string>
     <string name="settings_section_night_vision">Nachtsicht / IR</string>
     <string name="settings_mode">Modus</string>
     <string name="settings_section_scene">Szene</string>

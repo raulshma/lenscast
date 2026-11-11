@@ -25,6 +25,7 @@
     <string name="camera_collapse_quick_settings_cd">Свернуть быстрые настройки</string>
     <string name="camera_stop_recording_cd">Остановить запись</string>
     <string name="camera_record_video_cd">Записать видео</string>
+    <string name="camera_recording_scheduled_cd">Запись запланирована</string>
     <string name="camera_capture_photo_cd">Сделать фото</string>
     <string name="camera_permission_title">Требуется доступ к камере</string>
     <string name="camera_permission_rationale">LensCast нужен доступ к камере для живого предпросмотра и к микрофону для трансляции и записи звука.</string>
@@ -125,6 +126,7 @@
     <string name="capture_duration">Длительность (в секундах, 0 = без ограничения)</string>
     <string name="capture_repeat_interval">Интервал повтора (в секундах, 0 = без повтора)</string>
     <string name="capture_clear_schedule_cd">Очистить расписание</string>
+    <string name="capture_recording_scheduled_cd">Запись запланирована</string>
     <string name="capture_recording_elapsed">Запись: %1$s</string>
     <string name="capture_stop_recording">Остановить запись</string>
     <string name="capture_set_start_time">Задать время начала</string>
@@ -282,6 +284,7 @@
     <string name="settings_photo_aspect_16_9">16:9</string>
     <string name="settings_photo_aspect_4_3">4:3</string>
     <string name="settings_gps_geotag">Геометки GPS (EXIF)</string>
+    <string name="settings_gps_geotag_degraded">Доступ к местоположению не выдан; фотографии получают EXIF-теги только с указанием авторства, без GPS.</string>
     <string name="settings_section_night_vision">Ночное зрение / ИК</string>
     <string name="settings_mode">Режим</string>
     <string name="settings_section_scene">Сцена</string>
