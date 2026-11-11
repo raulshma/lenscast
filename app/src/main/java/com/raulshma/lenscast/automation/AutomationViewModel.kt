@@ -14,6 +14,8 @@ import com.raulshma.lenscast.automation.schedule.AutomationParamSpec
 import com.raulshma.lenscast.automation.schedule.AutomationRule
 import com.raulshma.lenscast.automation.schedule.AutomationSchedulePolicy
 import com.raulshma.lenscast.automation.schedule.AutomationTriggerCatalog
+import com.raulshma.lenscast.automation.schedule.AutomationTriggerKind
+import com.raulshma.lenscast.automation.schedule.MissedRunPolicy
 import com.raulshma.lenscast.capture.MotionArmingPolicy
 import com.raulshma.lenscast.camera.CameraService
 import com.raulshma.lenscast.core.StreamDefaults
@@ -389,11 +391,11 @@ class AutomationViewModel(
          * under a minute, so the seconds template has no case here).
          */
         fun missedRunSummaryLine(rule: AutomationRule): AutomationSummaryLine? {
-            if (rule.triggerType != AutomationTriggerCatalog.TIME_OF_DAY) return null
+            if (rule.triggerType != AutomationTriggerKind.TIME_OF_DAY) return null
             return when (rule.missedRunPolicy) {
-                AutomationRule.MISSED_RUN_SKIP ->
+                MissedRunPolicy.SKIP ->
                     AutomationSummaryLine(R.string.automation_missed_skip_summary)
-                AutomationRule.MISSED_RUN_WINDOW ->
+                MissedRunPolicy.WINDOW ->
                     when (val label = humanizeDuration(rule.missedWindowMinutes * 60)) {
                         is AutomationDurationLabel.Hours -> AutomationSummaryLine(
                             R.string.automation_missed_window_summary_hours,
@@ -665,17 +667,17 @@ class AutomationViewModel(
                 params[name]?.let { it == "true" } ?: default
             }
             return when (type) {
-                AutomationTriggerCatalog.TIME_OF_DAY -> emptyList()
-                AutomationTriggerCatalog.MOTION_DETECTED -> listOf(
+                AutomationTriggerKind.TIME_OF_DAY -> emptyList()
+                AutomationTriggerKind.MOTION_DETECTED -> listOf(
                     AutomationSummaryLine(R.string.automation_summary_trigger_motion),
                 )
-                AutomationTriggerCatalog.SOUND_DETECTED -> listOf(
+                AutomationTriggerKind.SOUND_DETECTED -> listOf(
                     AutomationSummaryLine(R.string.automation_summary_trigger_sound),
                 )
-                AutomationTriggerCatalog.TAMPER_DETECTED -> listOf(
+                AutomationTriggerKind.TAMPER_DETECTED -> listOf(
                     AutomationSummaryLine(R.string.automation_summary_trigger_tamper),
                 )
-                AutomationTriggerCatalog.CHARGING_CHANGED ->
+                AutomationTriggerKind.CHARGING_CHANGED ->
                     listOf(
                         if (bool("charging", true)) {
                             AutomationSummaryLine(R.string.automation_summary_trigger_charging_on)
@@ -683,7 +685,7 @@ class AutomationViewModel(
                             AutomationSummaryLine(R.string.automation_summary_trigger_charging_off)
                         },
                     )
-                AutomationTriggerCatalog.BATTERY_LEVEL -> {
+                AutomationTriggerKind.BATTERY_LEVEL -> {
                     val level = params["level"]?.toIntOrNull() ?: 20
                     listOf(
                         if (bool("when_below", true)) {
@@ -693,7 +695,7 @@ class AutomationViewModel(
                         },
                     )
                 }
-                AutomationTriggerCatalog.STREAMING_CHANGED ->
+                AutomationTriggerKind.STREAMING_CHANGED ->
                     listOf(
                         if (bool("streaming", true)) {
                             AutomationSummaryLine(R.string.automation_summary_trigger_stream_start)
@@ -701,7 +703,7 @@ class AutomationViewModel(
                             AutomationSummaryLine(R.string.automation_summary_trigger_stream_stop)
                         },
                     )
-                AutomationTriggerCatalog.VIEWERS_CHANGED ->
+                AutomationTriggerKind.VIEWERS_CHANGED ->
                     listOf(
                         if (bool("connected", true)) {
                             AutomationSummaryLine(R.string.automation_summary_trigger_viewer_join)
@@ -709,7 +711,7 @@ class AutomationViewModel(
                             AutomationSummaryLine(R.string.automation_summary_trigger_viewer_leave)
                         },
                     )
-                AutomationTriggerCatalog.APP_STARTED -> listOf(
+                AutomationTriggerKind.APP_STARTED -> listOf(
                     AutomationSummaryLine(R.string.automation_summary_trigger_app_started),
                 )
                 else -> emptyList()

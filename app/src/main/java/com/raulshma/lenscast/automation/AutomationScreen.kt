@@ -83,6 +83,9 @@ import com.raulshma.lenscast.automation.schedule.AutomationParamSpec
 import com.raulshma.lenscast.automation.schedule.AutomationRule
 import com.raulshma.lenscast.automation.schedule.AutomationSchedulePolicy
 import com.raulshma.lenscast.automation.schedule.AutomationTriggerCatalog
+import com.raulshma.lenscast.automation.schedule.AutomationTriggerKind
+import com.raulshma.lenscast.automation.schedule.ConditionMode
+import com.raulshma.lenscast.automation.schedule.MissedRunPolicy
 import com.raulshma.lenscast.automation.schedule.ParamKind
 import com.raulshma.lenscast.capture.MotionArmingPolicy
 import com.raulshma.lenscast.core.StreamDefaults
@@ -309,7 +312,7 @@ private fun AutomationRuleCard(
                 ) {
                     Box(modifier = Modifier.size(38.dp), contentAlignment = Alignment.Center) {
                         Icon(
-                            AutomationVisuals.triggerVisual(rule.triggerType).icon,
+                            AutomationVisuals.triggerVisual(rule.triggerType.id).icon,
                             contentDescription = null,
                             modifier = Modifier.size(20.dp),
                             tint = MaterialTheme.colorScheme.onPrimaryContainer,
@@ -324,7 +327,7 @@ private fun AutomationRuleCard(
                         color = MaterialTheme.colorScheme.onSurface,
                     )
                     Text(
-                        text = stringResource(AutomationViewModel.triggerTypeLabelRes(rule.triggerType)),
+                        text = stringResource(AutomationViewModel.triggerTypeLabelRes(rule.triggerType.id)),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -344,7 +347,7 @@ private fun AutomationRuleCard(
                 Spacer(modifier = Modifier.height(6.dp))
                 SummaryRow(
                     label = stringResource(R.string.automation_card_only),
-                    text = onlyWhenText(rule.conditions, rule.conditionMode),
+                    text = onlyWhenText(rule.conditions, rule.conditionMode.id),
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     textColor = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -519,16 +522,21 @@ private fun resolveLines(lines: List<AutomationSummaryLine>): String {
 /** The WHEN row: "HH:mm · days" for time rules, the "when …" line for events. */
 @Composable
 private fun whenText(rule: AutomationRule): String =
-    if (rule.triggerType == AutomationTriggerCatalog.TIME_OF_DAY) {
+    if (rule.triggerType == AutomationTriggerKind.TIME_OF_DAY) {
         ruleScheduleLabel(rule.minuteOfDay, rule.daysMask)
     } else {
         resolveLines(AutomationViewModel.triggerSummaryLines(rule))
     }
 
-/** The ONLY WHEN row: all conditions joined by the mode's localized joiner. */
+/**
+ * The ONLY WHEN row: all conditions joined by the mode's localized joiner.
+ * [conditionMode] is the string wire id — either the rule's own enum id
+ * (`rule.conditionMode.id`) or the draft's mirrored string, so the card and
+ * the editor preview share one joiner.
+ */
 @Composable
 private fun onlyWhenText(conditions: List<AutomationConditionSpec>, conditionMode: String): String {
-    val joiner = if (conditionMode == AutomationRule.CONDITION_MODE_ANY) {
+    val joiner = if (conditionMode == ConditionMode.ANY.id) {
         stringResource(R.string.automation_join_or)
     } else {
         stringResource(R.string.automation_join_and)
@@ -635,6 +643,24 @@ private fun lastFiredText(lastFiredKey: Long, nowMs: Long): String? {
 }
 
 /**
+ * Which catalog picker dialog the rule editor currently shows. Exactly one
+ * may be open at a time — the editor's [Picker]-typed state makes the
+ * exclusivity structural (the dialogs render from one state value, so
+ * opening one closes the others) instead of relying on UI flow. `null` =
+ * no picker open.
+ */
+private enum class Picker {
+    /** The THEN action picker (`automation_editor_add_action`). */
+    Action,
+
+    /** The WHEN trigger picker (`automation_editor_trigger_title`). */
+    Trigger,
+
+    /** The ONLY WHEN condition picker (`automation_editor_add_condition`). */
+    Condition,
+}
+
+/**
  * The rule editor: a full-screen dialog holding the name, the WHEN trigger
  * (grouped picker + time field / day chips / event params + cooldown
  * presets), the ONLY WHEN conditions and THEN actions (each with reorder and
@@ -656,9 +682,13 @@ private fun AutomationRuleEditor(
     // composition (editorDraft = null).
     var modified by remember { mutableStateOf(false) }
     var showDiscardConfirm by remember { mutableStateOf(false) }
-    var showActionPicker by remember(draft) { mutableStateOf(false) }
-    var showTriggerPicker by remember(draft) { mutableStateOf(false) }
-    var showConditionPicker by remember(draft) { mutableStateOf(false) }
+    // The ONE picker slot: the former three show*Picker booleans could only
+    // stay exclusive through the UI flow (no dialog offered a path to open a
+    // second one); the enum makes that exclusivity structural — one state
+    // value selects at most one dialog. Keyed on draft like the booleans
+    // were: a new draft identity resets the slot to closed. (showDiscardConfirm
+    // stays a separate boolean — it is a modal over the editor, not a picker.)
+    var activePicker by rememberSaveable(draft) { mutableStateOf<Picker?>(null) }
 
     fun update(next: RuleDraft) {
         modified = true
@@ -736,7 +766,7 @@ private fun AutomationRuleEditor(
                 // The whole trigger row is tappable and opens the grouped
                 // picker: icon, label, description, and the change hint.
                 Surface(
-                    onClick = { showTriggerPicker = true },
+                    onClick = { activePicker = Picker.Trigger },
                     modifier = Modifier.fillMaxWidth(),
                     shape = MaterialTheme.shapes.medium,
                     color = MaterialTheme.colorScheme.surfaceContainerHigh,
@@ -834,14 +864,14 @@ private fun AutomationRuleEditor(
                 } else {
                     SwitchSetting(
                         title = stringResource(R.string.automation_editor_match_any),
-                        checked = draft.conditionMode == AutomationRule.CONDITION_MODE_ANY,
+                        checked = draft.conditionMode == ConditionMode.ANY.id,
                         onCheckedChange = { any ->
                             update(
                                 draft.copy(
                                     conditionMode = if (any) {
-                                        AutomationRule.CONDITION_MODE_ANY
+                                        ConditionMode.ANY.id
                                     } else {
-                                        AutomationRule.CONDITION_MODE_ALL
+                                        ConditionMode.ALL.id
                                     },
                                 ),
                             )
@@ -877,7 +907,7 @@ private fun AutomationRuleEditor(
                     )
                 }
                 OutlinedButton(
-                    onClick = { showConditionPicker = true },
+                    onClick = { activePicker = Picker.Condition },
                     enabled = draft.conditions.size < StreamDefaults.AUTOMATION_MAX_CONDITIONS_PER_RULE,
                     modifier = Modifier.fillMaxWidth(),
                 ) {
@@ -923,7 +953,7 @@ private fun AutomationRuleEditor(
                     )
                 }
                 OutlinedButton(
-                    onClick = { showActionPicker = true },
+                    onClick = { activePicker = Picker.Action },
                     enabled = draft.actions.size < StreamDefaults.AUTOMATION_MAX_ACTIONS_PER_RULE,
                     modifier = Modifier.fillMaxWidth(),
                 ) {
@@ -975,13 +1005,15 @@ private fun AutomationRuleEditor(
         )
     }
 
-    if (showActionPicker) {
-        AutomationOptionPickerDialog(
+    // The three pickers render from the ONE slot: exactly one branch can be
+    // active, so opening one structurally closes the others.
+    when (activePicker) {
+        Picker.Action -> AutomationOptionPickerDialog(
             title = stringResource(R.string.automation_editor_add_action),
             groups = actionPickerGroups(),
             selectedId = null,
             onPick = { typeId ->
-                showActionPicker = false
+                activePicker = null
                 update(
                     draft.copy(
                         actions = draft.actions +
@@ -989,16 +1021,14 @@ private fun AutomationRuleEditor(
                     ),
                 )
             },
-            onDismiss = { showActionPicker = false },
+            onDismiss = { activePicker = null },
         )
-    }
-    if (showTriggerPicker) {
-        AutomationOptionPickerDialog(
+        Picker.Trigger -> AutomationOptionPickerDialog(
             title = stringResource(R.string.automation_editor_trigger_title),
             groups = triggerPickerGroups(),
             selectedId = draft.triggerType,
             onPick = { typeId ->
-                showTriggerPicker = false
+                activePicker = null
                 update(
                     draft.copy(
                         triggerType = typeId,
@@ -1006,16 +1036,14 @@ private fun AutomationRuleEditor(
                     ),
                 )
             },
-            onDismiss = { showTriggerPicker = false },
+            onDismiss = { activePicker = null },
         )
-    }
-    if (showConditionPicker) {
-        AutomationOptionPickerDialog(
+        Picker.Condition -> AutomationOptionPickerDialog(
             title = stringResource(R.string.automation_editor_add_condition),
             groups = conditionPickerGroups(),
             selectedId = null,
             onPick = { typeId ->
-                showConditionPicker = false
+                activePicker = null
                 update(
                     draft.copy(
                         conditions = draft.conditions +
@@ -1023,8 +1051,9 @@ private fun AutomationRuleEditor(
                     ),
                 )
             },
-            onDismiss = { showConditionPicker = false },
+            onDismiss = { activePicker = null },
         )
+        null -> Unit
     }
 }
 
@@ -1605,21 +1634,21 @@ private fun MissedRunEditor(
         ) {
             FilterChip(
                 label = stringResource(R.string.automation_missed_catch_up),
-                selected = policy == AutomationRule.MISSED_RUN_CATCH_UP,
-                onClick = { onPolicyChange(AutomationRule.MISSED_RUN_CATCH_UP) },
+                selected = policy == MissedRunPolicy.CATCH_UP.id,
+                onClick = { onPolicyChange(MissedRunPolicy.CATCH_UP.id) },
             )
             FilterChip(
                 label = stringResource(R.string.automation_missed_skip),
-                selected = policy == AutomationRule.MISSED_RUN_SKIP,
-                onClick = { onPolicyChange(AutomationRule.MISSED_RUN_SKIP) },
+                selected = policy == MissedRunPolicy.SKIP.id,
+                onClick = { onPolicyChange(MissedRunPolicy.SKIP.id) },
             )
             FilterChip(
                 label = stringResource(R.string.automation_missed_window),
-                selected = policy == AutomationRule.MISSED_RUN_WINDOW,
-                onClick = { onPolicyChange(AutomationRule.MISSED_RUN_WINDOW) },
+                selected = policy == MissedRunPolicy.WINDOW.id,
+                onClick = { onPolicyChange(MissedRunPolicy.WINDOW.id) },
             )
         }
-        if (policy == AutomationRule.MISSED_RUN_WINDOW) {
+        if (policy == MissedRunPolicy.WINDOW.id) {
             Spacer(modifier = Modifier.height(4.dp))
             Row(
                 modifier = Modifier.fillMaxWidth(),

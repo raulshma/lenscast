@@ -102,10 +102,10 @@ class AutomationSchedulerTest {
 
     private fun rule(
         id: String? = "rule-1",
-        triggerType: String = AutomationRule.TRIGGER_TIME_OF_DAY,
+        triggerType: AutomationTriggerKind = AutomationTriggerKind.TIME_OF_DAY,
         enabled: Boolean = true,
         cooldownSeconds: Int = com.raulshma.lenscast.core.StreamDefaults.AUTOMATION_COOLDOWN_DEFAULT_SECONDS,
-        missedRunPolicy: String = AutomationRule.MISSED_RUN_CATCH_UP,
+        missedRunPolicy: MissedRunPolicy = MissedRunPolicy.CATCH_UP,
         missedWindowMinutes: Int = com.raulshma.lenscast.core.StreamDefaults.AUTOMATION_MISSED_WINDOW_DEFAULT_MINUTES,
         conditions: List<AutomationConditionSpec> = emptyList(),
         actions: List<AutomationActionSpec> = listOf(
@@ -126,7 +126,7 @@ class AutomationSchedulerTest {
 
     private fun eventRule(
         id: String? = "rule-1",
-        triggerType: String = AutomationTriggerCatalog.MOTION_DETECTED,
+        triggerType: AutomationTriggerKind = AutomationTriggerKind.MOTION_DETECTED,
         enabled: Boolean = true,
         cooldownSeconds: Int = 0,
         conditions: List<AutomationConditionSpec> = emptyList(),
@@ -245,7 +245,7 @@ class AutomationSchedulerTest {
         val target = journal()
         val runner = FakeRunner()
         scheduler(target, runner).evaluate(
-            listOf(rule(missedRunPolicy = AutomationRule.MISSED_RUN_SKIP)),
+            listOf(rule(missedRunPolicy = MissedRunPolicy.SKIP)),
             enabled = true,
         )
         assertTrue(runner.firedIds.isEmpty())
@@ -259,7 +259,7 @@ class AutomationSchedulerTest {
         now = noon + 20 * 60_000
         val target = journal()
         val runner = FakeRunner()
-        val schedule = rule(missedRunPolicy = AutomationRule.MISSED_RUN_WINDOW, missedWindowMinutes = 30)
+        val schedule = rule(missedRunPolicy = MissedRunPolicy.WINDOW, missedWindowMinutes = 30)
         scheduler(target, runner).evaluate(listOf(schedule), enabled = true)
         assertEquals(listOf("rule-1"), runner.firedIds)
         now = noon + 25 * 60_000
@@ -444,7 +444,7 @@ class AutomationSchedulerTest {
     @Test
     fun `app started fires once through rules-loaded changes`() = runBlocking {
         now = noon
-        rulesFlow.value = listOf(eventRule(triggerType = AutomationTriggerCatalog.APP_STARTED))
+        rulesFlow.value = listOf(eventRule(triggerType = AutomationTriggerKind.APP_STARTED))
         enabledFlow.value = true
         val runner = FakeRunner()
         scheduler(journal(), runner).start()
@@ -453,7 +453,7 @@ class AutomationSchedulerTest {
         assertEquals(listOf("rule-1"), fired.map { it.id })
         // A rules edit restarts the collectLatest body; the one-shot flag
         // must keep AppStarted from re-firing.
-        rulesFlow.value = listOf(eventRule(triggerType = AutomationTriggerCatalog.APP_STARTED, cooldownSeconds = 0))
+        rulesFlow.value = listOf(eventRule(triggerType = AutomationTriggerKind.APP_STARTED, cooldownSeconds = 0))
         enabledFlow.value = false
         enabledFlow.value = true
         Thread.sleep(300)

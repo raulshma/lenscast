@@ -68,7 +68,7 @@ val AUTOMATION_COOLDOWN_PRESET_SECONDS: List<Int> = listOf(
 
 /**
  * The missed-window preset chips (minutes) for a time rule's
- * [com.raulshma.lenscast.automation.schedule.AutomationRule.MISSED_RUN_WINDOW]
+ * [com.raulshma.lenscast.automation.schedule.MissedRunPolicy.WINDOW]
  * catch-up span — the same preset discipline as [AUTOMATION_COOLDOWN_PRESET_SECONDS],
  * with the default from [StreamDefaults.AUTOMATION_MISSED_WINDOW_DEFAULT_MINUTES].
  */

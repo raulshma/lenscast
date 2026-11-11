@@ -5,9 +5,9 @@ import com.raulshma.lenscast.automation.schedule.AutomationParamSpec
 import com.raulshma.lenscast.automation.schedule.AutomationConditionCatalog
 import com.raulshma.lenscast.automation.schedule.AutomationFireJournal
 import com.raulshma.lenscast.automation.schedule.AutomationRule
+import com.raulshma.lenscast.automation.schedule.AutomationRuleJson
 import com.raulshma.lenscast.automation.schedule.AutomationSchedulePolicy
 import com.raulshma.lenscast.automation.schedule.AutomationTriggerCatalog
-import com.raulshma.lenscast.core.AppJson
 import com.raulshma.lenscast.core.StreamDefaults
 import com.raulshma.lenscast.data.SettingsDataStore
 import java.util.TimeZone
@@ -46,8 +46,14 @@ class AutomationWebHandler(
     private val fireJournal: AutomationFireJournal,
 ) {
 
-    private val stateAdapter by lazy { AppJson.moshi.adapter(AutomationStateDto::class.java) }
-    private val updateAdapter by lazy { AppJson.moshi.adapter(AutomationUpdateRequestDto::class.java) }
+    // The rule graph's adapters ride [AutomationRuleJson] — AppJson plus the
+    // vocabulary enums' wire-id adapters — so the embedded AutomationRules
+    // encode their triggerType/conditionMode/missedRunPolicy as the exact
+    // canonical string ids the wire has always carried. Plain AppJson would
+    // emit the enums' NAMES here, a wire break against the contract fixture
+    // and every persisted document.
+    private val stateAdapter by lazy { AutomationRuleJson.moshi.adapter(AutomationStateDto::class.java) }
+    private val updateAdapter by lazy { AutomationRuleJson.moshi.adapter(AutomationUpdateRequestDto::class.java) }
 
     /**
      * PUT /api/automation — persists the master toggle and the rule list

@@ -6,6 +6,8 @@ import com.raulshma.lenscast.automation.schedule.AutomationConditionCatalog
 import com.raulshma.lenscast.automation.schedule.AutomationConditionSpec
 import com.raulshma.lenscast.automation.schedule.AutomationRule
 import com.raulshma.lenscast.automation.schedule.AutomationTriggerCatalog
+import com.raulshma.lenscast.automation.schedule.AutomationTriggerKind
+import com.raulshma.lenscast.automation.schedule.MissedRunPolicy
 import com.raulshma.lenscast.core.StreamDefaults
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -367,10 +369,10 @@ class AutomationUiModelTest {
     fun `time rule trigger summary is empty and event triggers render when-lines`() {
         assertEquals(
             emptyList<AutomationSummaryLine>(),
-            AutomationViewModel.triggerSummaryLines(AutomationRule(triggerType = "time_of_day")),
+            AutomationViewModel.triggerSummaryLines(AutomationRule(triggerType = AutomationTriggerKind.TIME_OF_DAY)),
         )
         val motion = AutomationViewModel.triggerSummaryLines(
-            AutomationRule(triggerType = AutomationTriggerCatalog.MOTION_DETECTED),
+            AutomationRule(triggerType = AutomationTriggerKind.MOTION_DETECTED),
         )
         assertEquals(1, motion.size)
         assertEquals(R.string.automation_summary_trigger_motion, motion.single().res)
@@ -381,7 +383,7 @@ class AutomationUiModelTest {
     fun `battery trigger summary reads the threshold and direction`() {
         val below = AutomationViewModel.triggerSummaryLines(
             AutomationRule(
-                triggerType = AutomationTriggerCatalog.BATTERY_LEVEL,
+                triggerType = AutomationTriggerKind.BATTERY_LEVEL,
                 triggerParams = mapOf("level" to "20", "when_below" to "true"),
             ),
         ).single()
@@ -390,7 +392,7 @@ class AutomationUiModelTest {
 
         val above = AutomationViewModel.triggerSummaryLines(
             AutomationRule(
-                triggerType = AutomationTriggerCatalog.BATTERY_LEVEL,
+                triggerType = AutomationTriggerKind.BATTERY_LEVEL,
                 triggerParams = mapOf("level" to "80", "when_below" to "false"),
             ),
         ).single()
@@ -401,13 +403,13 @@ class AutomationUiModelTest {
     @Test
     fun `charging trigger summary follows its polarity param`() {
         val on = AutomationViewModel.triggerSummaryLines(
-            AutomationRule(triggerType = AutomationTriggerCatalog.CHARGING_CHANGED),
+            AutomationRule(triggerType = AutomationTriggerKind.CHARGING_CHANGED),
         ).single()
         assertEquals(R.string.automation_summary_trigger_charging_on, on.res)
 
         val off = AutomationViewModel.triggerSummaryLines(
             AutomationRule(
-                triggerType = AutomationTriggerCatalog.CHARGING_CHANGED,
+                triggerType = AutomationTriggerKind.CHARGING_CHANGED,
                 triggerParams = mapOf("charging" to "false"),
             ),
         ).single()
@@ -632,19 +634,21 @@ class AutomationUiModelTest {
     fun `the default catch_up policy and event rules get no card line`() {
         assertNull(
             AutomationViewModel.missedRunSummaryLine(
-                AutomationRule(triggerType = AutomationTriggerCatalog.TIME_OF_DAY),
+                AutomationRule(triggerType = AutomationTriggerKind.TIME_OF_DAY),
             ),
         )
         assertNull(
             AutomationViewModel.missedRunSummaryLine(
-                AutomationRule(triggerType = AutomationTriggerCatalog.MOTION_DETECTED, missedRunPolicy = "skip"),
+                AutomationRule(triggerType = AutomationTriggerKind.MOTION_DETECTED, missedRunPolicy = MissedRunPolicy.SKIP),
             ),
         )
-        // An unknown policy is the catch_up shape — sanitize folds it before
-        // any card could render it.
+        // The catch_up shape gets no line — and an unknown wire policy can
+        // never reach a card at all: the decode folds it to catch_up (pinned
+        // by SettingsDataStoreAutomationPrefsTest) and the card renders
+        // nothing for that shape, as asserted here.
         assertNull(
             AutomationViewModel.missedRunSummaryLine(
-                AutomationRule(triggerType = AutomationTriggerCatalog.TIME_OF_DAY, missedRunPolicy = "whenever"),
+                AutomationRule(triggerType = AutomationTriggerKind.TIME_OF_DAY, missedRunPolicy = MissedRunPolicy.CATCH_UP),
             ),
         )
     }
@@ -652,7 +656,7 @@ class AutomationUiModelTest {
     @Test
     fun `skip renders its summary line`() {
         val line = AutomationViewModel.missedRunSummaryLine(
-            AutomationRule(triggerType = AutomationTriggerCatalog.TIME_OF_DAY, missedRunPolicy = AutomationRule.MISSED_RUN_SKIP),
+            AutomationRule(triggerType = AutomationTriggerKind.TIME_OF_DAY, missedRunPolicy = MissedRunPolicy.SKIP),
         )!!
         assertEquals(R.string.automation_missed_skip_summary, line.res)
         assertTrue(line.args.isEmpty())
@@ -662,8 +666,8 @@ class AutomationUiModelTest {
     fun `window renders through the same rounded unit as the readout`() {
         val minutes = AutomationViewModel.missedRunSummaryLine(
             AutomationRule(
-                triggerType = AutomationTriggerCatalog.TIME_OF_DAY,
-                missedRunPolicy = AutomationRule.MISSED_RUN_WINDOW,
+                triggerType = AutomationTriggerKind.TIME_OF_DAY,
+                missedRunPolicy = MissedRunPolicy.WINDOW,
                 missedWindowMinutes = 30,
             ),
         )!!
@@ -672,8 +676,8 @@ class AutomationUiModelTest {
 
         val hours = AutomationViewModel.missedRunSummaryLine(
             AutomationRule(
-                triggerType = AutomationTriggerCatalog.TIME_OF_DAY,
-                missedRunPolicy = AutomationRule.MISSED_RUN_WINDOW,
+                triggerType = AutomationTriggerKind.TIME_OF_DAY,
+                missedRunPolicy = MissedRunPolicy.WINDOW,
                 missedWindowMinutes = 180,
             ),
         )!!

@@ -27,15 +27,15 @@ class AutomationSchedulePolicyTest {
 
     private fun rule(
         id: String? = "rule-1",
-        triggerType: String = AutomationRule.TRIGGER_TIME_OF_DAY,
+        triggerType: AutomationTriggerKind = AutomationTriggerKind.TIME_OF_DAY,
         minuteOfDay: Int = 600,
         daysMask: Int = ALL_DAYS,
         enabled: Boolean = true,
         triggerParams: Map<String, String> = emptyMap(),
         conditions: List<AutomationConditionSpec> = emptyList(),
-        conditionMode: String = AutomationRule.CONDITION_MODE_ALL,
+        conditionMode: ConditionMode = ConditionMode.ALL,
         cooldownSeconds: Int = StreamDefaults.AUTOMATION_COOLDOWN_DEFAULT_SECONDS,
-        missedRunPolicy: String = AutomationRule.MISSED_RUN_CATCH_UP,
+        missedRunPolicy: MissedRunPolicy = MissedRunPolicy.CATCH_UP,
         missedWindowMinutes: Int = StreamDefaults.AUTOMATION_MISSED_WINDOW_DEFAULT_MINUTES,
         actions: List<AutomationActionSpec> = listOf(
             AutomationActionSpec("stream", mapOf("enabled" to "true")),
@@ -95,7 +95,7 @@ class AutomationSchedulePolicyTest {
 
     private fun eventFired(
         event: AutomationEvent,
-        rules: List<AutomationRule> = listOf(rule(triggerType = AutomationTriggerCatalog.MOTION_DETECTED)),
+        rules: List<AutomationRule> = listOf(rule(triggerType = AutomationTriggerKind.MOTION_DETECTED)),
         enabled: Boolean = true,
         journal: Map<String, Long> = emptyMap(),
         nowMs: Long = 1_800_000_000_000L,
@@ -190,7 +190,7 @@ class AutomationSchedulePolicyTest {
         // An event rule's minuteOfDay is meaningless (default 0) — evaluating
         // it here would fire every event rule at midnight of every day.
         assertTrue(
-            due(rules = listOf(rule(triggerType = AutomationTriggerCatalog.MOTION_DETECTED))).isEmpty(),
+            due(rules = listOf(rule(triggerType = AutomationTriggerKind.MOTION_DETECTED))).isEmpty(),
         )
     }
 
@@ -218,7 +218,7 @@ class AutomationSchedulePolicyTest {
                     chargingCondition(required = true),
                     streamingCondition(required = false),
                 ),
-                conditionMode = AutomationRule.CONDITION_MODE_ALL,
+                conditionMode = ConditionMode.ALL,
             ),
         )
         assertTrue(due(rules = rules).isEmpty())
@@ -233,7 +233,7 @@ class AutomationSchedulePolicyTest {
                     chargingCondition(required = true),
                     streamingCondition(required = false),
                 ),
-                conditionMode = AutomationRule.CONDITION_MODE_ANY,
+                conditionMode = ConditionMode.ANY,
             ),
         )
         assertEquals(1, due(rules = rules, at = snapshot(charging = true, streamingActive = true)).size)
@@ -244,8 +244,8 @@ class AutomationSchedulePolicyTest {
 
     @Test
     fun `an empty condition list fires under either mode`() {
-        assertEquals(1, due(rules = listOf(rule(conditionMode = AutomationRule.CONDITION_MODE_ANY))).size)
-        assertEquals(1, due(rules = listOf(rule(conditionMode = AutomationRule.CONDITION_MODE_ALL))).size)
+        assertEquals(1, due(rules = listOf(rule(conditionMode = ConditionMode.ANY))).size)
+        assertEquals(1, due(rules = listOf(rule(conditionMode = ConditionMode.ALL))).size)
     }
 
     // ── Journal ──
@@ -344,7 +344,7 @@ class AutomationSchedulePolicyTest {
 
     @Test
     fun `skip policy fires in the scheduled minute but never late`() {
-        val rules = listOf(rule(missedRunPolicy = AutomationRule.MISSED_RUN_SKIP))
+        val rules = listOf(rule(missedRunPolicy = MissedRunPolicy.SKIP))
         assertEquals(1, due(rules = rules, at = snapshot(minuteOfDay = 600)).size)
         assertTrue(due(rules = rules, at = snapshot(minuteOfDay = 601)).isEmpty())
         // Hours late — a late boot's first evaluation — still nothing:
@@ -354,7 +354,7 @@ class AutomationSchedulePolicyTest {
 
     @Test
     fun `window policy bounds the catch-up span and the boundary is inclusive`() {
-        val rules = listOf(rule(missedRunPolicy = AutomationRule.MISSED_RUN_WINDOW, missedWindowMinutes = 30))
+        val rules = listOf(rule(missedRunPolicy = MissedRunPolicy.WINDOW, missedWindowMinutes = 30))
         assertEquals(listOf("stream"), due(rules = rules, at = snapshot(minuteOfDay = 630)).single().actions.map { it.type })
         assertTrue(due(rules = rules, at = snapshot(minuteOfDay = 631)).isEmpty())
     }
@@ -363,7 +363,7 @@ class AutomationSchedulePolicyTest {
     fun `window policy lets a one-shot ride past the global grace`() {
         val rules = listOf(
             rule(
-                missedRunPolicy = AutomationRule.MISSED_RUN_WINDOW,
+                missedRunPolicy = MissedRunPolicy.WINDOW,
                 missedWindowMinutes = 30,
                 actions = listOf(AutomationActionSpec("capture_photo")),
             ),
@@ -378,7 +378,7 @@ class AutomationSchedulePolicyTest {
     fun `catch_up policy keeps the per-action grace for one-shots`() {
         val rules = listOf(
             rule(
-                missedRunPolicy = AutomationRule.MISSED_RUN_CATCH_UP,
+                missedRunPolicy = MissedRunPolicy.CATCH_UP,
                 missedWindowMinutes = 60,
                 actions = listOf(AutomationActionSpec("capture_photo")),
             ),
@@ -396,7 +396,7 @@ class AutomationSchedulePolicyTest {
     fun `deferred conditions plus skip policy means the rule never fires that day`() {
         val rules = listOf(
             rule(
-                missedRunPolicy = AutomationRule.MISSED_RUN_SKIP,
+                missedRunPolicy = MissedRunPolicy.SKIP,
                 conditions = listOf(AutomationConditionSpec("charging", mapOf("charging" to "true"))),
             ),
         )
@@ -437,7 +437,7 @@ class AutomationSchedulePolicyTest {
 
     @Test
     fun `charging rule matches by polarity`() {
-        val onPlug = listOf(rule(triggerType = AutomationTriggerCatalog.CHARGING_CHANGED))
+        val onPlug = listOf(rule(triggerType = AutomationTriggerKind.CHARGING_CHANGED))
         assertEquals(
             1,
             eventFired(AutomationEvent.ChargingChanged(charging = true), rules = onPlug).size,
@@ -448,7 +448,7 @@ class AutomationSchedulePolicyTest {
         // Inverted polarity: fires on unplug.
         val onUnplug = listOf(
             rule(
-                triggerType = AutomationTriggerCatalog.CHARGING_CHANGED,
+                triggerType = AutomationTriggerKind.CHARGING_CHANGED,
                 triggerParams = mapOf("charging" to "false"),
             ),
         )
@@ -463,7 +463,7 @@ class AutomationSchedulePolicyTest {
 
     @Test
     fun `streaming and viewer rules match by state`() {
-        val onStart = listOf(rule(triggerType = AutomationTriggerCatalog.STREAMING_CHANGED))
+        val onStart = listOf(rule(triggerType = AutomationTriggerKind.STREAMING_CHANGED))
         assertEquals(
             1,
             eventFired(AutomationEvent.StreamingChanged(streaming = true), rules = onStart).size,
@@ -472,7 +472,7 @@ class AutomationSchedulePolicyTest {
             eventFired(AutomationEvent.StreamingChanged(streaming = false), rules = onStart).isEmpty(),
         )
 
-        val onJoin = listOf(rule(triggerType = AutomationTriggerCatalog.VIEWERS_CHANGED))
+        val onJoin = listOf(rule(triggerType = AutomationTriggerKind.VIEWERS_CHANGED))
         assertEquals(
             1,
             eventFired(AutomationEvent.ViewersChanged(connected = true), rules = onJoin).size,
@@ -485,7 +485,7 @@ class AutomationSchedulePolicyTest {
     @Test
     fun `battery rule fires only on its threshold crossing`() {
         fun batteryRule(whenBelow: Boolean) = rule(
-            triggerType = AutomationTriggerCatalog.BATTERY_LEVEL,
+            triggerType = AutomationTriggerKind.BATTERY_LEVEL,
             triggerParams = mapOf("level" to "20", "when_below" to whenBelow.toString()),
         )
 
@@ -535,9 +535,9 @@ class AutomationSchedulePolicyTest {
     @Test
     fun `detection rules each match only their own event`() {
         val rules = listOf(
-            rule(id = "m", triggerType = AutomationTriggerCatalog.MOTION_DETECTED),
-            rule(id = "s", triggerType = AutomationTriggerCatalog.SOUND_DETECTED),
-            rule(id = "t", triggerType = AutomationTriggerCatalog.TAMPER_DETECTED),
+            rule(id = "m", triggerType = AutomationTriggerKind.MOTION_DETECTED),
+            rule(id = "s", triggerType = AutomationTriggerKind.SOUND_DETECTED),
+            rule(id = "t", triggerType = AutomationTriggerKind.TAMPER_DETECTED),
         )
         assertEquals(listOf("m"), eventFired(AutomationEvent.MotionDetected, rules = rules).map { it.rule.id })
         assertEquals(listOf("s"), eventFired(AutomationEvent.SoundDetected, rules = rules).map { it.rule.id })
@@ -546,7 +546,7 @@ class AutomationSchedulePolicyTest {
 
     @Test
     fun `app started fires exactly on the app-started event`() {
-        val rules = listOf(rule(triggerType = AutomationTriggerCatalog.APP_STARTED))
+        val rules = listOf(rule(triggerType = AutomationTriggerKind.APP_STARTED))
         assertEquals(1, eventFired(AutomationEvent.AppStarted, rules = rules).size)
     }
 
@@ -564,7 +564,7 @@ class AutomationSchedulePolicyTest {
         assertTrue(
             eventFired(
                 AutomationEvent.MotionDetected,
-                rules = listOf(rule(triggerType = AutomationTriggerCatalog.MOTION_DETECTED, enabled = false)),
+                rules = listOf(rule(triggerType = AutomationTriggerKind.MOTION_DETECTED, enabled = false)),
             ).isEmpty(),
         )
     }
@@ -576,7 +576,7 @@ class AutomationSchedulePolicyTest {
         assertTrue(
             eventFired(
                 AutomationEvent.MotionDetected,
-                rules = listOf(rule(id = null, triggerType = AutomationTriggerCatalog.MOTION_DETECTED)),
+                rules = listOf(rule(id = null, triggerType = AutomationTriggerKind.MOTION_DETECTED)),
             ).isEmpty(),
         )
     }
@@ -585,7 +585,7 @@ class AutomationSchedulePolicyTest {
     fun `event conditions are checked at event time`() {
         val rules = listOf(
             rule(
-                triggerType = AutomationTriggerCatalog.MOTION_DETECTED,
+                triggerType = AutomationTriggerKind.MOTION_DETECTED,
                 conditions = listOf(streamingCondition(required = true)),
             ),
         )
@@ -597,7 +597,7 @@ class AutomationSchedulePolicyTest {
     fun `event rules run their full action list with no catch-up filter`() {
         val rules = listOf(
             rule(
-                triggerType = AutomationTriggerCatalog.MOTION_DETECTED,
+                triggerType = AutomationTriggerKind.MOTION_DETECTED,
                 actions = listOf(AutomationActionSpec("capture_photo")),
             ),
         )
@@ -611,7 +611,7 @@ class AutomationSchedulePolicyTest {
     fun `cooldown blocks a refire inside the window`() {
         val now = 1_800_000_000_000L
         val rules = listOf(
-            rule(triggerType = AutomationTriggerCatalog.MOTION_DETECTED, cooldownSeconds = 120),
+            rule(triggerType = AutomationTriggerKind.MOTION_DETECTED, cooldownSeconds = 120),
         )
         // Last fired 60 s ago with a 120 s cooldown: held.
         assertTrue(
@@ -641,7 +641,7 @@ class AutomationSchedulePolicyTest {
             1,
             eventFired(
                 AutomationEvent.MotionDetected,
-                rules = listOf(rule(triggerType = AutomationTriggerCatalog.MOTION_DETECTED, cooldownSeconds = 0)),
+                rules = listOf(rule(triggerType = AutomationTriggerKind.MOTION_DETECTED, cooldownSeconds = 0)),
                 journal = mapOf("rule-1" to now),
                 nowMs = now,
             ).size,
@@ -657,7 +657,7 @@ class AutomationSchedulePolicyTest {
             1,
             eventFired(
                 AutomationEvent.MotionDetected,
-                rules = listOf(rule(triggerType = AutomationTriggerCatalog.MOTION_DETECTED)),
+                rules = listOf(rule(triggerType = AutomationTriggerKind.MOTION_DETECTED)),
                 journal = mapOf("rule-1" to day * StreamDefaults.MINUTES_PER_DAY + 600),
             ).size,
         )
@@ -677,23 +677,27 @@ class AutomationSchedulePolicyTest {
     }
 
     @Test
-    fun `sanitizeRule trims the name and resets an unknown trigger type`() {
+    fun `sanitizeRule trims the name and keeps a catalog trigger type`() {
+        // The unknown-trigger fold itself moved to the JSON decode (the
+        // vocabulary enum's parse folds an unknown wire id to time_of_day,
+        // pinned by SettingsDataStoreAutomationPrefsTest); the sanitizer
+        // keeps the final guard for a decoded constant.
         val sanitized = AutomationSchedulePolicy.sanitizeRule(
-            AutomationRule(name = "  Night lock  ", triggerType = "teleport_event"),
+            AutomationRule(name = "  Night lock  ", triggerType = AutomationTriggerKind.MOTION_DETECTED),
         )
         assertEquals("Night lock", sanitized.name)
-        assertEquals(AutomationRule.TRIGGER_TIME_OF_DAY, sanitized.triggerType)
-        val kept = AutomationSchedulePolicy.sanitizeRule(
-            AutomationRule(triggerType = AutomationTriggerCatalog.MOTION_DETECTED),
+        assertEquals(AutomationTriggerKind.MOTION_DETECTED, sanitized.triggerType)
+        val fallback = AutomationSchedulePolicy.sanitizeRule(
+            AutomationRule(triggerType = AutomationTriggerKind.TIME_OF_DAY),
         )
-        assertEquals(AutomationTriggerCatalog.MOTION_DETECTED, kept.triggerType)
+        assertEquals(AutomationTriggerKind.TIME_OF_DAY, fallback.triggerType)
     }
 
     @Test
     fun `sanitizeRule canonicalizes trigger params and degrades unknown keys to defaults`() {
         val clamped = AutomationSchedulePolicy.sanitizeRule(
             rule(
-                triggerType = AutomationTriggerCatalog.BATTERY_LEVEL,
+                triggerType = AutomationTriggerKind.BATTERY_LEVEL,
                 triggerParams = mapOf("level" to "5000", "when_below" to "TRUE"),
             ),
         )
@@ -704,7 +708,7 @@ class AutomationSchedulePolicyTest {
         // degrades to the schema's documented defaults, the rule survives.
         val degraded = AutomationSchedulePolicy.sanitizeRule(
             rule(
-                triggerType = AutomationTriggerCatalog.BATTERY_LEVEL,
+                triggerType = AutomationTriggerKind.BATTERY_LEVEL,
                 triggerParams = mapOf("threshold_pct" to "5"),
             ),
         )
@@ -743,12 +747,18 @@ class AutomationSchedulePolicyTest {
     }
 
     @Test
-    fun `sanitizeRule folds condition mode and clamps cooldown`() {
-        val folded = AutomationSchedulePolicy.sanitizeRule(rule(conditionMode = "some"))
-        assertEquals(AutomationRule.CONDITION_MODE_ALL, folded.conditionMode)
+    fun `sanitizeRule keeps the condition mode and clamps cooldown`() {
+        // The unknown-mode fold moved to the JSON decode (ConditionMode.parse
+        // maps anything that is not the exact ANY id to ALL, pinned by
+        // SettingsDataStoreAutomationPrefsTest); the sanitizer keeps the
+        // final guard over decoded constants.
         assertEquals(
-            AutomationRule.CONDITION_MODE_ANY,
-            AutomationSchedulePolicy.sanitizeRule(rule(conditionMode = "any")).conditionMode,
+            ConditionMode.ALL,
+            AutomationSchedulePolicy.sanitizeRule(rule(conditionMode = ConditionMode.ALL)).conditionMode,
+        )
+        assertEquals(
+            ConditionMode.ANY,
+            AutomationSchedulePolicy.sanitizeRule(rule(conditionMode = ConditionMode.ANY)).conditionMode,
         )
 
         assertEquals(
@@ -812,28 +822,30 @@ class AutomationSchedulePolicyTest {
     }
 
     @Test
-    fun `sanitizeRule folds an unknown missed-run policy and clamps the window`() {
-        // An unknown future policy degrades to the historical catch-up
-        // behavior instead of silently skipping or widening fires.
+    fun `sanitizeRule keeps a missed-run policy and clamps the window`() {
+        // The unknown-policy fold itself moved to the JSON decode
+        // (MissedRunPolicy.parse folds an unknown wire id to catch_up, pinned
+        // by SettingsDataStoreAutomationPrefsTest); the sanitizer keeps the
+        // final guard over decoded constants.
         assertEquals(
-            AutomationRule.MISSED_RUN_CATCH_UP,
-            AutomationSchedulePolicy.sanitizeRule(rule(missedRunPolicy = "fire_anyway")).missedRunPolicy,
+            MissedRunPolicy.CATCH_UP,
+            AutomationSchedulePolicy.sanitizeRule(rule(missedRunPolicy = MissedRunPolicy.CATCH_UP)).missedRunPolicy,
         )
-        val skip = AutomationSchedulePolicy.sanitizeRule(rule(missedRunPolicy = AutomationRule.MISSED_RUN_SKIP))
-        assertEquals(AutomationRule.MISSED_RUN_SKIP, skip.missedRunPolicy)
+        val skip = AutomationSchedulePolicy.sanitizeRule(rule(missedRunPolicy = MissedRunPolicy.SKIP))
+        assertEquals(MissedRunPolicy.SKIP, skip.missedRunPolicy)
         val window = AutomationSchedulePolicy.sanitizeRule(
-            rule(missedRunPolicy = AutomationRule.MISSED_RUN_WINDOW, missedWindowMinutes = 0),
+            rule(missedRunPolicy = MissedRunPolicy.WINDOW, missedWindowMinutes = 0),
         )
-        assertEquals(AutomationRule.MISSED_RUN_WINDOW, window.missedRunPolicy)
+        assertEquals(MissedRunPolicy.WINDOW, window.missedRunPolicy)
         // Zero would be SKIP by another name — the floor stays at one minute.
         assertEquals(StreamDefaults.AUTOMATION_MISSED_WINDOW_MIN_MINUTES, window.missedWindowMinutes)
         val capped = AutomationSchedulePolicy.sanitizeRule(
-            rule(missedRunPolicy = AutomationRule.MISSED_RUN_WINDOW, missedWindowMinutes = 100_000),
+            rule(missedRunPolicy = MissedRunPolicy.WINDOW, missedWindowMinutes = 100_000),
         )
         assertEquals(StreamDefaults.AUTOMATION_MISSED_WINDOW_MAX_MINUTES, capped.missedWindowMinutes)
         // A window within the span passes through untouched.
         val passThrough = AutomationSchedulePolicy.sanitizeRule(
-            rule(missedRunPolicy = AutomationRule.MISSED_RUN_WINDOW, missedWindowMinutes = 45),
+            rule(missedRunPolicy = MissedRunPolicy.WINDOW, missedWindowMinutes = 45),
         )
         assertEquals(45, passThrough.missedWindowMinutes)
     }

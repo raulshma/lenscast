@@ -188,7 +188,7 @@ class AutomationConditionPolicyTest {
                 condition(AutomationConditionCatalog.CHARGING, mapOf("charging" to "true")),
                 condition(AutomationConditionCatalog.WIFI_CONNECTED, mapOf("connected" to "true")),
             ),
-            conditionMode = AutomationRule.CONDITION_MODE_ALL,
+            conditionMode = ConditionMode.ALL,
         )
         assertTrue(AutomationConditionPolicy.conditionsMet(rule, snapshot(charging = true)))
         assertFalse(AutomationConditionPolicy.conditionsMet(rule, snapshot(charging = false)))
@@ -201,7 +201,7 @@ class AutomationConditionPolicyTest {
                 condition(AutomationConditionCatalog.CHARGING, mapOf("charging" to "true")),
                 condition(AutomationConditionCatalog.STREAMING, mapOf("active" to "true")),
             ),
-            conditionMode = AutomationRule.CONDITION_MODE_ANY,
+            conditionMode = ConditionMode.ANY,
         )
         assertTrue(AutomationConditionPolicy.conditionsMet(rule, snapshot(charging = true)))
         assertTrue(AutomationConditionPolicy.conditionsMet(rule, snapshot(streamingActive = true)))
@@ -210,8 +210,8 @@ class AutomationConditionPolicyTest {
 
     @Test
     fun `no conditions means met under either mode`() {
-        val all = AutomationRule(conditionMode = AutomationRule.CONDITION_MODE_ALL)
-        val any = AutomationRule(conditionMode = AutomationRule.CONDITION_MODE_ANY)
+        val all = AutomationRule(conditionMode = ConditionMode.ALL)
+        val any = AutomationRule(conditionMode = ConditionMode.ANY)
         // An empty ANY must not read vacuously false and silently disable
         // the rule.
         assertTrue(AutomationConditionPolicy.conditionsMet(all, snapshot()))

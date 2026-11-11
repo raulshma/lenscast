@@ -379,6 +379,17 @@ class MainApplication : Application(), SingletonImageLoader.Factory, AppGraph {
     /** App-lifetime scope for work that must outlive a ViewModel or screen. */
     override val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
+    /**
+     * The single-owner guard for the quit ladder ([quitApplication]): the
+     * first invocation flips it and owns the teardown; every re-invocation
+     * while the ladder runs or after it returns (exitProcess pending) is a
+     * no-op. @Volatile: quit calls can arrive from any thread (main UI, a
+     * broadcast receiver, a web handler), and the flag must be visible
+     * across them without a lock the ladder would then hold.
+     */
+    @Volatile
+    private var isQuitting = false
+
     override fun onCreate() {
         super.onCreate()
         connectivityMonitor.start()
@@ -403,17 +414,27 @@ class MainApplication : Application(), SingletonImageLoader.Factory, AppGraph {
     override fun ensureServerForeground() = serverForegroundController.sync()
 
     /**
-     * The user quit (the camera screen's overflow menu): the best-effort
-     * graceful teardown before the process kill — a live recording stops
-     * first (its finalize must not be cut short mid-write), then the one
-     * server stop ladder ([StreamToggle.stopServer] — every output, the
-     * transport, mDNS and the session, dropping the foreground service,
-     * wake lock and monitors while the journal and widget collectors observe
-     * the transitions) — then [exitProcess], which is the point of the menu
-     * item: the death is deliberate, so nothing here can postpone it beyond
-     * the teardown's grace window.
+     * The user quit (the camera screen's overflow menu — the only caller
+     * today, though the web/automation surfaces could call it): the
+     * best-effort graceful teardown before the process kill — a live
+     * recording stops first (its finalize must not be cut short mid-write),
+     * then the one server stop ladder ([StreamToggle.stopServer] — every
+     * output, the transport, mDNS and the session, dropping the foreground
+     * service, wake lock and monitors while the journal and widget
+     * collectors observe the transitions) — then [exitProcess], which is the
+     * point of the menu item: the death is deliberate, so nothing here can
+     * postpone it beyond the teardown's grace window.
+     *
+     * Single-owner guard: [isQuitting] is set by the FIRST invocation and
+     * every later one no-ops, so a re-entry while the ladder runs (a second
+     * menu tap, a broadcast racing the menu) cannot run the stop ladder
+     * twice — a double stop would re-enter the recording finalize and the
+     * server teardown mid-flight — nor queue a second [exitProcess] behind
+     * the pending one.
      */
     override fun quitApplication() {
+        if (isQuitting) return
+        isQuitting = true
         appScope.launch {
             runCatching { recordingController.stop() }
             runCatching { streamToggle.stopServer() }

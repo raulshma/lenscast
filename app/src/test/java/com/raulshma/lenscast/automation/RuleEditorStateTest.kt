@@ -9,6 +9,9 @@ import com.raulshma.lenscast.automation.schedule.AutomationConditionCatalog
 import com.raulshma.lenscast.automation.schedule.AutomationConditionSpec
 import com.raulshma.lenscast.automation.schedule.AutomationRule
 import com.raulshma.lenscast.automation.schedule.AutomationTriggerCatalog
+import com.raulshma.lenscast.automation.schedule.AutomationTriggerKind
+import com.raulshma.lenscast.automation.schedule.ConditionMode
+import com.raulshma.lenscast.automation.schedule.MissedRunPolicy
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -36,13 +39,13 @@ class RuleEditorStateTest {
         assertEquals(ruleDefaults.id, fresh.id)
         assertEquals(ruleDefaults.name, fresh.name)
         assertEquals(ruleDefaults.enabled, fresh.enabled)
-        assertEquals(ruleDefaults.triggerType, fresh.triggerType)
+        assertEquals(ruleDefaults.triggerType.id, fresh.triggerType)
         assertEquals(ruleDefaults.daysMask, fresh.daysMask)
         assertEquals(ruleDefaults.triggerParams, fresh.triggerParams)
         assertEquals(ruleDefaults.conditions, fresh.conditions)
-        assertEquals(ruleDefaults.conditionMode, fresh.conditionMode)
+        assertEquals(ruleDefaults.conditionMode.id, fresh.conditionMode)
         assertEquals(ruleDefaults.cooldownSeconds, fresh.cooldownSeconds)
-        assertEquals(ruleDefaults.missedRunPolicy, fresh.missedRunPolicy)
+        assertEquals(ruleDefaults.missedRunPolicy.id, fresh.missedRunPolicy)
         assertEquals(ruleDefaults.missedWindowMinutes, fresh.missedWindowMinutes)
         assertEquals(ruleDefaults.actions, fresh.actions)
         // The one deliberate difference: a fresh editor starts at 08:00, not
@@ -65,10 +68,10 @@ class RuleEditorStateTest {
             id = "r-1",
             name = "Evening torch",
             enabled = false,
-            triggerType = AutomationTriggerCatalog.TIME_OF_DAY,
+            triggerType = AutomationTriggerKind.TIME_OF_DAY,
             minuteOfDay = 1_320,
             daysMask = 0b0111110,
-            missedRunPolicy = AutomationRule.MISSED_RUN_WINDOW,
+            missedRunPolicy = MissedRunPolicy.WINDOW,
             missedWindowMinutes = 15,
         )
         assertEquals(rule, RuleDraft.from(rule).toRule())
@@ -82,7 +85,7 @@ class RuleEditorStateTest {
             id = "r-2",
             name = "",
             enabled = true,
-            triggerType = AutomationTriggerCatalog.MOTION_DETECTED,
+            triggerType = AutomationTriggerKind.MOTION_DETECTED,
             minuteOfDay = 0,
             daysMask = 62,
             triggerParams = mapOf("charging" to "true"),
@@ -96,9 +99,9 @@ class RuleEditorStateTest {
                     params = mapOf("charging" to "false"),
                 ),
             ),
-            conditionMode = AutomationRule.CONDITION_MODE_ANY,
+            conditionMode = ConditionMode.ANY,
             cooldownSeconds = 900,
-            missedRunPolicy = AutomationRule.MISSED_RUN_SKIP,
+            missedRunPolicy = MissedRunPolicy.SKIP,
             missedWindowMinutes = 30,
             actions = listOf(
                 AutomationActionSpec(type = "torch", params = mapOf("enabled" to "true", "strength" to "3")),
@@ -117,7 +120,7 @@ class RuleEditorStateTest {
             AutomationRule(
                 id = null,
                 name = "Draft in flight",
-                triggerType = AutomationTriggerCatalog.BATTERY_LEVEL,
+                triggerType = AutomationTriggerKind.BATTERY_LEVEL,
                 triggerParams = mapOf("level" to "15"),
                 conditions = listOf(
                     AutomationConditionSpec(
@@ -169,9 +172,9 @@ class RuleEditorStateTest {
         assertFalse(restored.enabled)
         assertEquals(1_320, restored.minuteOfDay)
         assertEquals(62, restored.daysMask)
-        assertEquals(AutomationRule.CONDITION_MODE_ANY, restored.conditionMode)
+        assertEquals(ConditionMode.ANY.id, restored.conditionMode)
         assertEquals(900, restored.cooldownSeconds)
-        assertEquals(AutomationRule.MISSED_RUN_WINDOW, restored.missedRunPolicy)
+        assertEquals(MissedRunPolicy.WINDOW.id, restored.missedRunPolicy)
         assertEquals(15, restored.missedWindowMinutes)
         assertEquals(listOf(AutomationActionSpec(type = "torch", params = mapOf("enabled" to "true"))), restored.actions)
         assertEquals(RuleDraft.from(restored.toRule()), restored)

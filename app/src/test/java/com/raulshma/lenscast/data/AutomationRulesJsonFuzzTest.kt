@@ -4,6 +4,9 @@ import com.raulshma.lenscast.automation.schedule.AutomationActionCatalog
 import com.raulshma.lenscast.automation.schedule.AutomationConditionCatalog
 import com.raulshma.lenscast.automation.schedule.AutomationRule
 import com.raulshma.lenscast.automation.schedule.AutomationTriggerCatalog
+import com.raulshma.lenscast.automation.schedule.AutomationTriggerKind
+import com.raulshma.lenscast.automation.schedule.ConditionMode
+import com.raulshma.lenscast.automation.schedule.MissedRunPolicy
 import com.raulshma.lenscast.core.StreamDefaults
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
@@ -61,7 +64,7 @@ class AutomationRulesJsonFuzzTest {
             // decode must be a catalog kind.
             assertNotNull(
                 "unknown trigger survived: ${rule.triggerType}",
-                AutomationTriggerCatalog.typeFor(rule.triggerType),
+                AutomationTriggerCatalog.typeFor(rule.triggerType.id),
             )
             assertTrue("minute out of range: ${rule.minuteOfDay}", rule.minuteOfDay in 0..StreamDefaults.MINUTES_PER_DAY - 1)
             assertTrue(
@@ -74,8 +77,8 @@ class AutomationRulesJsonFuzzTest {
             )
             assertTrue(
                 "unknown condition mode survived: ${rule.conditionMode}",
-                rule.conditionMode == AutomationRule.CONDITION_MODE_ALL ||
-                    rule.conditionMode == AutomationRule.CONDITION_MODE_ANY,
+                rule.conditionMode == ConditionMode.ALL ||
+                    rule.conditionMode == ConditionMode.ANY,
             )
             assertTrue(
                 "cooldown out of range: ${rule.cooldownSeconds}",
@@ -83,9 +86,9 @@ class AutomationRulesJsonFuzzTest {
             )
             assertTrue(
                 "unknown missed-run policy survived: ${rule.missedRunPolicy}",
-                rule.missedRunPolicy == AutomationRule.MISSED_RUN_CATCH_UP ||
-                    rule.missedRunPolicy == AutomationRule.MISSED_RUN_SKIP ||
-                    rule.missedRunPolicy == AutomationRule.MISSED_RUN_WINDOW,
+                rule.missedRunPolicy == MissedRunPolicy.CATCH_UP ||
+                    rule.missedRunPolicy == MissedRunPolicy.SKIP ||
+                    rule.missedRunPolicy == MissedRunPolicy.WINDOW,
             )
             assertTrue(
                 "missed window out of range: ${rule.missedWindowMinutes}",
@@ -170,7 +173,7 @@ class AutomationRulesJsonFuzzTest {
         val rule = rules.single()
         assertEquals(emptyMap<String, String>(), rule.triggerParams)
         assertEquals(emptyList<Any>(), rule.conditions)
-        assertEquals(AutomationRule.CONDITION_MODE_ALL, rule.conditionMode)
+        assertEquals(ConditionMode.ALL, rule.conditionMode)
         assertEquals(StreamDefaults.AUTOMATION_COOLDOWN_DEFAULT_SECONDS, rule.cooldownSeconds)
         assertSanitized(rules)
     }
@@ -184,7 +187,7 @@ class AutomationRulesJsonFuzzTest {
         )
         assertEquals(1, rules.size)
         val rule = rules.single()
-        assertEquals(AutomationTriggerCatalog.MOTION_DETECTED, rule.triggerType)
+        assertEquals(AutomationTriggerKind.MOTION_DETECTED, rule.triggerType)
         assertEquals(1, rule.conditions.size)
         assertEquals(120, rule.cooldownSeconds)
         assertSanitized(rules)

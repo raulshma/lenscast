@@ -15,6 +15,16 @@ import com.squareup.moshi.JsonClass
  * rule through [AutomationSchedulePolicy.sanitizeRules] before it is trusted,
  * so the defaults here are decode-fallbacks, not trusted wire values.
  *
+ * The three vocabulary fields ([triggerType], [conditionMode],
+ * [missedRunPolicy]) are typed enums ([AutomationTriggerKind],
+ * [ConditionMode], [MissedRunPolicy]) whose constants carry their exact
+ * canonical wire id; they serialize through [AutomationRuleJson]'s Moshi
+ * instance as those ids, so the persisted JSON and the web API keep the
+ * byte-compatible string shape they had when the fields were `String`s — and
+ * an unknown id decodes to the same fallback the sanitizer used to fold it
+ * to ([AutomationTriggerKind.parse], [ConditionMode.parse],
+ * [MissedRunPolicy.parse]).
+ *
  * The class is a plain wire/persistence shape on purpose: all decisions
  * (when a rule is due, whether its conditions hold, what its actions mean)
  * live in the pure [AutomationSchedulePolicy], [AutomationTriggerCatalog],
@@ -36,17 +46,18 @@ import com.squareup.moshi.JsonClass
  * @param enabled Per-rule kill switch, independent of the master
  *   automation toggle.
  * @param triggerType Which cue fires the rule — an
- *   [AutomationTriggerCatalog] id. The historically-first kind is
- *   [TRIGGER_TIME_OF_DAY]; the sanitize step resets anything outside the
- *   catalog to it, so an unknown future trigger written by a newer app
- *   version degrades to a time trigger instead of firing on the wrong cue
- *   or being dropped wholesale.
- * @param minuteOfDay The [TRIGGER_TIME_OF_DAY] fire minute, local wall-clock
- *   0..1439; sanitized into that span before use. Kept top-level (rather
- *   than inside [triggerParams]) so the persisted shape of the original
- *   time-only rules never migrates.
- * @param daysMask The [TRIGGER_TIME_OF_DAY] day mask: one bit per ISO day
- *   index (bit 0 = Monday … bit 6 = Sunday), the
+ *   [AutomationTriggerCatalog] id as [AutomationTriggerKind]. The
+ *   historically-first kind is [AutomationTriggerKind.TIME_OF_DAY]; an
+ *   unknown wire id decodes to it (and the sanitize step resets anything
+ *   outside the catalog to it as the last gate), so an unknown future
+ *   trigger written by a newer app version degrades to a time trigger
+ *   instead of firing on the wrong cue or being dropped wholesale.
+ * @param minuteOfDay The [AutomationTriggerKind.TIME_OF_DAY] fire minute,
+ *   local wall-clock 0..1439; sanitized into that span before use. Kept
+ *   top-level (rather than inside [triggerParams]) so the persisted shape of
+ *   the original time-only rules never migrates.
+ * @param daysMask The [AutomationTriggerKind.TIME_OF_DAY] day mask: one bit
+ *   per ISO day index (bit 0 = Monday … bit 6 = Sunday), the
  *   [com.raulshma.lenscast.capture.MotionArmingPolicy] convention the arm
  *   schedule already persists — one mask semantics, not two. Clamped to
  *   1..127 (at least one day) by the sanitize step.
@@ -56,23 +67,24 @@ import com.squareup.moshi.JsonClass
  *   (the "ONLY WHEN" clause); each validated against the
  *   [AutomationConditionCatalog] before use.
  * @param conditionMode How multiple [conditions] combine —
- *   [CONDITION_MODE_ALL] (every condition must hold) or
- *   [CONDITION_MODE_ANY] (at least one); anything else folds to ALL.
+ *   [ConditionMode.ALL] (every condition must hold) or [ConditionMode.ANY]
+ *   (at least one); anything else decodes (and sanitizes) to ALL.
  * @param cooldownSeconds Minimum seconds between two firings of this rule,
  *   enforced from the persisted fire journal. Bounds and default live in
  *   [com.raulshma.lenscast.core.StreamDefaults]' AUTOMATION_COOLDOWN_*.
  *   Consulted only by event triggers — a time rule's once-per-day occurrence
  *   key is its own dedupe.
- * @param missedRunPolicy What happens when a [TRIGGER_TIME_OF_DAY] rule's
- *   scheduled moment passes without a firing — the device was off, or the
- *   ONLY WHEN conditions were unmet then became met later the same day.
- *   [MISSED_RUN_CATCH_UP] (the default) keeps the historical behavior:
+ * @param missedRunPolicy What happens when a [AutomationTriggerKind.TIME_OF_DAY]
+ *   rule's scheduled moment passes without a firing — the device was off, or
+ *   the ONLY WHEN conditions were unmet then became met later the same day.
+ *   [MissedRunPolicy.CATCH_UP] (the default) keeps the historical behavior:
  *   stateful actions fire however late, one-shot actions within the global
- *   grace. [MISSED_RUN_SKIP] means "at the scheduled time or not at all".
- *   [MISSED_RUN_WINDOW] bounds the catch-up to [missedWindowMinutes] past the
- *   scheduled minute and lets every action ride inside it. Anything else
- *   folds to CATCH_UP. Only time rules can miss — events fire in the present.
- * @param missedWindowMinutes The [MISSED_RUN_WINDOW] catch-up span in
+ *   grace. [MissedRunPolicy.SKIP] means "at the scheduled time or not at
+ *   all". [MissedRunPolicy.WINDOW] bounds the catch-up to
+ *   [missedWindowMinutes] past the scheduled minute and lets every action
+ *   ride inside it. Anything else decodes (and sanitizes) to CATCH_UP. Only
+ *   time rules can miss — events fire in the present.
+ * @param missedWindowMinutes The [MissedRunPolicy.WINDOW] catch-up span in
  *   minutes, the same wall-clock-minute space the occurrence keys measure
  *   lateness in; clamped by the sanitize step. Meaningless in the other two
  *   modes.
@@ -92,44 +104,18 @@ data class AutomationRule(
     val id: String? = null,
     val name: String = "",
     val enabled: Boolean = true,
-    val triggerType: String = TRIGGER_TIME_OF_DAY,
+    val triggerType: AutomationTriggerKind = AutomationTriggerKind.TIME_OF_DAY,
     val minuteOfDay: Int = 0,
     val daysMask: Int = 127,
     val triggerParams: Map<String, String> = emptyMap(),
     val conditions: List<AutomationConditionSpec> = emptyList(),
-    val conditionMode: String = CONDITION_MODE_ALL,
+    val conditionMode: ConditionMode = ConditionMode.ALL,
     val cooldownSeconds: Int = StreamDefaults.AUTOMATION_COOLDOWN_DEFAULT_SECONDS,
-    val missedRunPolicy: String = MISSED_RUN_CATCH_UP,
+    val missedRunPolicy: MissedRunPolicy = MissedRunPolicy.CATCH_UP,
     val missedWindowMinutes: Int = StreamDefaults.AUTOMATION_MISSED_WINDOW_DEFAULT_MINUTES,
     val actions: List<AutomationActionSpec> = emptyList(),
     val lastFiredAt: Long? = null,
-) {
-    companion object {
-        /** The time-of-day trigger kind — the original (and fallback) kind. */
-        const val TRIGGER_TIME_OF_DAY = AutomationTriggerCatalog.TIME_OF_DAY
-
-        /** Every [condition] must hold for the rule to fire. */
-        const val CONDITION_MODE_ALL = "all"
-
-        /** At least one [condition] must hold for the rule to fire. */
-        const val CONDITION_MODE_ANY = "any"
-
-        /**
-         * Missed-run policy: fire however late the tick is (stateful
-         * actions; one-shots within the global grace) — the default.
-         */
-        const val MISSED_RUN_CATCH_UP = "catch_up"
-
-        /** Missed-run policy: at the scheduled time or not at all. */
-        const val MISSED_RUN_SKIP = "skip"
-
-        /**
-         * Missed-run policy: fire late only within [missedWindowMinutes] of
-         * the scheduled minute; every action rides inside the window.
-         */
-        const val MISSED_RUN_WINDOW = "window"
-    }
-}
+)
 
 /**
  * One precondition inside an [AutomationRule]: a catalog condition id plus

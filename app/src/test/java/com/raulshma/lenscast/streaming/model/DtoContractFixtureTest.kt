@@ -5,7 +5,11 @@ import com.raulshma.lenscast.automation.schedule.AutomationActionSpec
 import com.raulshma.lenscast.automation.schedule.AutomationConditionSpec
 import com.raulshma.lenscast.automation.schedule.AutomationIconVocabulary
 import com.raulshma.lenscast.automation.schedule.AutomationRule
+import com.raulshma.lenscast.automation.schedule.AutomationRuleJson
 import com.raulshma.lenscast.automation.schedule.AutomationSchedulePolicy
+import com.raulshma.lenscast.automation.schedule.AutomationTriggerKind
+import com.raulshma.lenscast.automation.schedule.ConditionMode
+import com.raulshma.lenscast.automation.schedule.MissedRunPolicy
 import com.raulshma.lenscast.capture.model.DetectionEventDeepLink
 import com.raulshma.lenscast.streaming.web.AutomationWebHandler
 import com.raulshma.lenscast.streaming.web.AuthWebHandler
@@ -479,15 +483,15 @@ class DtoContractFixtureTest {
                         id = "1f0a9c2e-4b7d-4e8a-9c3f-6d5b8a7e2c41",
                         name = "Weekday sunrise",
                         enabled = true,
-                        triggerType = "time_of_day",
+                        triggerType = AutomationTriggerKind.TIME_OF_DAY,
                         minuteOfDay = 420,
                         daysMask = 31,
                         conditions = listOf(
                             AutomationConditionSpec(type = "charging", params = mapOf("charging" to "true")),
                         ),
-                        conditionMode = "all",
+                        conditionMode = ConditionMode.ALL,
                         cooldownSeconds = 60,
-                        missedRunPolicy = "window",
+                        missedRunPolicy = MissedRunPolicy.WINDOW,
                         missedWindowMinutes = 30,
                         actions = listOf(
                             AutomationActionSpec(type = "torch", params = mapOf("enabled" to "true")),
@@ -498,7 +502,7 @@ class DtoContractFixtureTest {
                         id = "8c3d1f6a-2e94-4b05-a7c8-5d1e9f3b7a02",
                         name = "Night motion deterrent",
                         enabled = true,
-                        triggerType = "motion_detected",
+                        triggerType = AutomationTriggerKind.MOTION_DETECTED,
                         cooldownSeconds = 120,
                         conditions = listOf(
                             AutomationConditionSpec(
@@ -523,9 +527,12 @@ class DtoContractFixtureTest {
         )
         assertEquals(1_793_862_000_000L, state.rules[0].lastFiredAt)
         assertNull(state.rules[1].lastFiredAt)
+        // The automation graph serializes through AutomationRuleJson — the
+        // vocabulary enums' wire-id adapters — exactly like the handler's own
+        // response adapter, so the fixture pins the same bytes GET publishes.
         assertMatchesFixture(
             "automation.json",
-            moshi.adapter(AutomationStateDto::class.java).toJson(state),
+            AutomationRuleJson.moshi.adapter(AutomationStateDto::class.java).toJson(state),
         )
     }
 

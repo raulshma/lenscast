@@ -7,6 +7,9 @@ import com.raulshma.lenscast.automation.schedule.AutomationConditionCatalog
 import com.raulshma.lenscast.automation.schedule.AutomationConditionSpec
 import com.raulshma.lenscast.automation.schedule.AutomationRule
 import com.raulshma.lenscast.automation.schedule.AutomationTriggerCatalog
+import com.raulshma.lenscast.automation.schedule.AutomationTriggerKind
+import com.raulshma.lenscast.automation.schedule.ConditionMode
+import com.raulshma.lenscast.automation.schedule.MissedRunPolicy
 import com.raulshma.lenscast.camera.model.CameraSettings
 import com.raulshma.lenscast.core.StreamDefaults
 import org.junit.Assert.assertEquals
@@ -118,16 +121,16 @@ class SettingsDataStoreAutomationPrefsTest {
         val rule = parseAutomationRules("""[{"name":"Only"}]""").single()
         assertEquals("Only", rule.name)
         assertEquals(true, rule.enabled)
-        assertEquals(AutomationRule.TRIGGER_TIME_OF_DAY, rule.triggerType)
+        assertEquals(AutomationTriggerKind.TIME_OF_DAY, rule.triggerType)
         assertEquals(0, rule.minuteOfDay)
         assertEquals(StreamDefaults.MOTION_ARM_DAYS_MASK_DEFAULT, rule.daysMask)
         assertEquals(emptyMap<String, String>(), rule.triggerParams)
         assertEquals(emptyList<AutomationConditionSpec>(), rule.conditions)
-        assertEquals(AutomationRule.CONDITION_MODE_ALL, rule.conditionMode)
+        assertEquals(ConditionMode.ALL, rule.conditionMode)
         assertEquals(StreamDefaults.AUTOMATION_COOLDOWN_DEFAULT_SECONDS, rule.cooldownSeconds)
         // The missed-run fields fold too: pre-missed-run payloads decode
         // as the historical catch-up behavior.
-        assertEquals(AutomationRule.MISSED_RUN_CATCH_UP, rule.missedRunPolicy)
+        assertEquals(MissedRunPolicy.CATCH_UP, rule.missedRunPolicy)
         assertEquals(StreamDefaults.AUTOMATION_MISSED_WINDOW_DEFAULT_MINUTES, rule.missedWindowMinutes)
         assertEquals(emptyList<AutomationActionSpec>(), rule.actions)
         UUID.fromString(rule.id)
@@ -140,14 +143,14 @@ class SettingsDataStoreAutomationPrefsTest {
                 id = "rule-5",
                 name = "Sunrise or nothing",
                 minuteOfDay = 360,
-                missedRunPolicy = AutomationRule.MISSED_RUN_SKIP,
+                missedRunPolicy = MissedRunPolicy.SKIP,
                 actions = listOf(AutomationActionSpec("stream", mapOf("enabled" to "true"))),
             ),
             AutomationRule(
                 id = "rule-6",
                 name = "Morning within the hour",
                 minuteOfDay = 420,
-                missedRunPolicy = AutomationRule.MISSED_RUN_WINDOW,
+                missedRunPolicy = MissedRunPolicy.WINDOW,
                 missedWindowMinutes = 60,
                 actions = listOf(AutomationActionSpec("torch", mapOf("enabled" to "true"))),
             ),
@@ -156,12 +159,60 @@ class SettingsDataStoreAutomationPrefsTest {
     }
 
     @Test
+    fun `unknown vocabulary ids decode to the sanitize fallbacks and re-serialize canonically`() {
+        // The vocabulary fields' wire tolerance, pinned end to end: before
+        // the typed conversion an unknown triggerType / conditionMode /
+        // missedRunPolicy survived decode as a string and folded at
+        // sanitizeRule; the typed decode performs the SAME folds (same
+        // fallbacks, via the enums' tolerant parse) and the wire adapter
+        // writes only the canonical ids back, so an unknown spelling never
+        // persists or rides a GET response.
+        val rules = parseAutomationRules(
+            """[{"id":"r-unknown","name":"Foreign","enabled":true,""" +
+                """"triggerType":"teleport_event","minuteOfDay":420,"daysMask":127,""" +
+                """"conditionMode":"some","missedRunPolicy":"fire_anyway","missedWindowMinutes":45,""" +
+                """"actions":[{"type":"torch","params":{"enabled":"true"}}]}]""",
+        )
+        val rule = rules.single()
+        assertEquals(AutomationTriggerKind.TIME_OF_DAY, rule.triggerType)
+        assertEquals(ConditionMode.ALL, rule.conditionMode)
+        assertEquals(MissedRunPolicy.CATCH_UP, rule.missedRunPolicy)
+
+        // The persisted JSON carries the canonical ids only: the unknown
+        // spellings are gone from what lands on disk.
+        val json = serializeAutomationRules(rules)
+        assertTrue(json.contains(""""triggerType":"time_of_day""""))
+        assertTrue(json.contains(""""conditionMode":"all""""))
+        assertTrue(json.contains(""""missedRunPolicy":"catch_up""""))
+        assertFalse(json.contains("teleport_event"))
+        assertFalse(json.contains("fire_anyway"))
+        assertFalse(json.contains(""":""some""""))
+        // The fold is stable: decoding the canonical re-serialization yields
+        // the same rules again.
+        assertEquals(rules, parseAutomationRules(json))
+    }
+
+    @Test
+    fun `canonical vocabulary ids round-trip byte-identically through the codec`() {
+        // The wire/persistence compatibility guarantee of the typed
+        // conversion: every id the old String fields wrote serializes back
+        // as the exact same bytes — decode → serialize reproduces the
+        // persisted JSON verbatim (same keys, same order, same id strings).
+        val json =
+            """[{"id":"r-bytes","name":"Night","enabled":true,"triggerType":"time_of_day",""" +
+                """"minuteOfDay":1320,"daysMask":31,"triggerParams":{},"conditions":[],""" +
+                """"conditionMode":"any","cooldownSeconds":120,"missedRunPolicy":"window",""" +
+                """"missedWindowMinutes":45,"actions":[{"type":"torch","params":{"enabled":"true","strength":"8"}}]}]"""
+        assertEquals(json, serializeAutomationRules(parseAutomationRules(json)))
+    }
+
+    @Test
     fun `if-then rules round trip through the persisted json`() {
         val rules = listOf(
             AutomationRule(
                 id = "rule-3",
                 name = "Night motion",
-                triggerType = AutomationTriggerCatalog.MOTION_DETECTED,
+                triggerType = AutomationTriggerKind.MOTION_DETECTED,
                 triggerParams = emptyMap(),
                 conditions = listOf(
                     AutomationConditionSpec(
@@ -169,19 +220,19 @@ class SettingsDataStoreAutomationPrefsTest {
                         mapOf("start_minute" to "1320", "end_minute" to "360", "days_mask" to "127"),
                     ),
                 ),
-                conditionMode = AutomationRule.CONDITION_MODE_ALL,
+                conditionMode = ConditionMode.ALL,
                 cooldownSeconds = 120,
                 actions = listOf(AutomationActionSpec("siren", mapOf("enabled" to "true", "duration_seconds" to "10"))),
             ),
             AutomationRule(
                 id = "rule-4",
                 name = "Low battery",
-                triggerType = AutomationTriggerCatalog.BATTERY_LEVEL,
+                triggerType = AutomationTriggerKind.BATTERY_LEVEL,
                 triggerParams = mapOf("level" to "20", "when_below" to "true"),
                 conditions = listOf(
                     AutomationConditionSpec(AutomationConditionCatalog.STREAMING, mapOf("active" to "true")),
                 ),
-                conditionMode = AutomationRule.CONDITION_MODE_ANY,
+                conditionMode = ConditionMode.ANY,
                 cooldownSeconds = 600,
                 actions = listOf(AutomationActionSpec("capture_photo")),
             ),

@@ -3,8 +3,9 @@ package com.raulshma.lenscast.streaming.web
 import android.app.Application
 import com.raulshma.lenscast.automation.schedule.AutomationFireJournal
 import com.raulshma.lenscast.automation.schedule.AutomationRule
+import com.raulshma.lenscast.automation.schedule.AutomationRuleJson
 import com.raulshma.lenscast.automation.schedule.AutomationSchedulePolicy
-import com.raulshma.lenscast.core.AppJson
+import com.raulshma.lenscast.automation.schedule.MissedRunPolicy
 import com.raulshma.lenscast.data.SettingsDataStore
 import com.raulshma.lenscast.streaming.model.AutomationStateDto
 import java.util.TimeZone
@@ -59,7 +60,10 @@ class AutomationWebHandlerTest {
 
     private lateinit var journal: AutomationFireJournal
 
-    private val stateAdapter = AppJson.moshi.adapter(AutomationStateDto::class.java)
+    // The rule graph's adapters ride AutomationRuleJson (the vocabulary
+    // enums' wire-id adapters) exactly like the handler's own adapters —
+    // plain AppJson would emit enum NAMES, not the canonical wire ids.
+    private val stateAdapter = AutomationRuleJson.moshi.adapter(AutomationStateDto::class.java)
 
     @Before
     fun setUp() {
@@ -95,7 +99,7 @@ class AutomationWebHandlerTest {
         assertEquals(0, rule.cooldownSeconds)
         // ...the unknown missed-run policy folded to the historical default
         // and the window clamped into its span...
-        assertEquals("catch_up", rule.missedRunPolicy)
+        assertEquals(MissedRunPolicy.CATCH_UP, rule.missedRunPolicy)
         assertEquals(1_440, rule.missedWindowMinutes)
         assertEquals(listOf("torch"), rule.actions.map { it.type })
         assertEquals("8", rule.actions.single().params["strength"])
@@ -111,11 +115,11 @@ class AutomationWebHandlerTest {
             """"missedRunPolicy":"window","missedWindowMinutes":45,""" +
             """"actions":[{"type":"torch","params":{"enabled":"true"}}]}]}"""
         val response = stateAdapter.fromJson(handler.put(body))!!
-        assertEquals("window", response.rules.single().missedRunPolicy)
+        assertEquals(MissedRunPolicy.WINDOW, response.rules.single().missedRunPolicy)
         assertEquals(45, response.rules.single().missedWindowMinutes)
         // The GET agrees — the persisted shape, not just the response.
         val fresh = stateAdapter.fromJson(handler.get())!!.rules.single()
-        assertEquals("window", fresh.missedRunPolicy)
+        assertEquals(MissedRunPolicy.WINDOW, fresh.missedRunPolicy)
         assertEquals(45, fresh.missedWindowMinutes)
     }
 

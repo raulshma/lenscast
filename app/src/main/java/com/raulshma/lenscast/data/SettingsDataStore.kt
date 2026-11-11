@@ -31,6 +31,7 @@ import com.raulshma.lenscast.camera.model.Resolution
 import com.raulshma.lenscast.camera.model.WhiteBalance
 import com.raulshma.lenscast.camera.model.PhotoCapturePlan
 import com.raulshma.lenscast.automation.schedule.AutomationRule
+import com.raulshma.lenscast.automation.schedule.AutomationRuleJson
 import com.raulshma.lenscast.automation.schedule.AutomationSchedulePolicy
 import com.raulshma.lenscast.capture.model.FlashMode
 import com.raulshma.lenscast.capture.model.SoundClassPolicy
@@ -1204,7 +1205,12 @@ private val automationRulesType = Types.newParameterizedType(
 )
 
 private val automationRulesAdapter by lazy {
-    AppJson.moshi.adapter<List<AutomationRule>>(automationRulesType)
+    // The rule graph's adapters ride AutomationRuleJson — AppJson plus the
+    // vocabulary enums' wire-id adapters — so the persisted triggerType/
+    // conditionMode/missedRunPolicy stay the exact canonical string ids the
+    // String fields wrote (plain AppJson would emit the enums' NAMES, a
+    // byte break against every existing document).
+    AutomationRuleJson.moshi.adapter<List<AutomationRule>>(automationRulesType)
 }
 
 /**

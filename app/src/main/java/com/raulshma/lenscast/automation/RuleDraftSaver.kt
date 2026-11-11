@@ -2,25 +2,27 @@ package com.raulshma.lenscast.automation
 
 import androidx.compose.runtime.saveable.Saver
 import com.raulshma.lenscast.automation.schedule.AutomationRule
-import com.raulshma.lenscast.core.AppJson
+import com.raulshma.lenscast.automation.schedule.AutomationRuleJson
 
 /**
  * Rotation/process-death proof for the open editor: the draft serializes
- * through the same Moshi adapter the store persists with
+ * through the same Moshi adapter shape the store persists with
  * ([com.raulshma.lenscast.data.SettingsDataStore]'s AutomationRule codec
- * shape), so an open editor survives configuration changes and process
- * restore instead of silently discarding every in-progress edit. A corrupt
- * snapshot degrades to "editor closed" — the pre-saver behavior — never to a
- * half-valid draft.
+ * shape — both build from [AutomationRuleJson], the rule graph's Moshi
+ * instance with the vocabulary enums' wire-id adapters), so an open editor
+ * survives configuration changes and process restore instead of silently
+ * discarding every in-progress edit. A corrupt snapshot degrades to "editor
+ * closed" — the pre-saver behavior — never to a half-valid draft.
  *
  * The pure halves ([encodeRuleDraftJson]/[decodeRuleDraftJson]) exist so the
  * wire round trip is JVM-testable; the Compose [RuleDraftSaver] is the thin
  * rememberSaveable wrapper around them. The saved bytes are the
  * [AutomationRule] projection of the draft, unchanged from the screen-local
- * version this module was extracted from — an in-flight snapshot written by
- * an older build restores identically.
+ * version this module was extracted from — the enum fields serialize as
+ * their canonical string ids, so an in-flight snapshot written by an older
+ * build (String-field vocabulary) restores identically.
  */
-private val ruleDraftJsonAdapter by lazy { AppJson.moshi.adapter(AutomationRule::class.java) }
+private val ruleDraftJsonAdapter by lazy { AutomationRuleJson.moshi.adapter(AutomationRule::class.java) }
 
 /** The saved snapshot for [draft]: its [RuleDraft.toRule] projection as Moshi JSON. */
 fun encodeRuleDraftJson(draft: RuleDraft): String = ruleDraftJsonAdapter.toJson(draft.toRule())

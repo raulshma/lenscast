@@ -45,6 +45,7 @@ import com.raulshma.lenscast.camera.model.PhotoCapturePlan
 import com.raulshma.lenscast.camera.model.OutputRotationPolicy
 import com.raulshma.lenscast.camera.model.PhotoAspectRatioPolicy
 import com.raulshma.lenscast.camera.model.SelectedLens
+import com.raulshma.lenscast.camera.model.SessionDemand
 import com.raulshma.lenscast.camera.model.TorchState
 import com.raulshma.lenscast.camera.model.TorchStrengthPolicy
 import com.raulshma.lenscast.core.YuvConverter
@@ -149,9 +150,38 @@ class CameraService(private val context: Context) {
      */
     private val derivedFlowsScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
-    private var previewRequested = false
-    private var exclusiveSessionRefCount = 0
-    private var currentPreviewView: PreviewView? = null
+    /**
+     * The one session-demand record ([SessionDemand]): WHAT the camera session
+     * is being asked to do — preview, exclusivity, keep-alive, foreground, and
+     * whether a view surface exists — as one immutable value. Every writer
+     * goes through [updateDemand]'s single copy-on-write seam; every reader
+     * (including the frame-analysis thread's cross-thread arbiter consults)
+     * sees whole-record snapshots instead of the old statement-at-a-time
+     * loose fields. The BINDING side — the bound provider/use cases above —
+     * stays in plain fields: it is what the camera is bound WITH, not what it
+     * is asked to do.
+     */
+    private var sessionDemand = SessionDemand()
+
+    /**
+     * The single mutation seam for [sessionDemand]: copies the record, swaps
+     * it in wholesale, and returns the new value — the post-write refcounts
+     * the keep-alive lifecycle toggles and the logs read off it. The old
+     * discipline is preserved: all writers run on Main (RecordingService's
+     * service callbacks, StreamingSession's and PhotoCaptureManager's explicit
+     * Main hops, MainActivity's lifecycle observer, the Compose preview
+     * start/stop), and a plain unsynchronized var under that single-writer
+     * confinement gives the same benign-staleness reads the loose fields had —
+     * with each multi-fact write now atomic instead of statement-at-a-time.
+     */
+    private fun updateDemand(
+        transform: (SessionDemand) -> SessionDemand,
+    ): SessionDemand {
+        val updated = transform(sessionDemand)
+        sessionDemand = updated
+        return updated
+    }
+
     private var activeSettings = CameraSettings()
 
     private val controlsHandler = android.os.Handler(android.os.Looper.getMainLooper())
@@ -162,7 +192,6 @@ class CameraService(private val context: Context) {
     private var lastFocusApplied: CameraSettings? = null
 
     private val keepAliveLifecycle = KeepAliveLifecycle()
-    private var keepAliveRefCount = 0
 
     private val _cameraState = MutableStateFlow<CameraState>(CameraState.Idle)
     val cameraState: StateFlow<CameraState> = _cameraState.asStateFlow()
@@ -244,35 +273,39 @@ class CameraService(private val context: Context) {
     }
 
     fun acquireKeepAlive() {
-        keepAliveRefCount++
-        if (keepAliveRefCount == 1) {
+        val updated = updateDemand { it.copy(keepAliveRefCount = it.keepAliveRefCount + 1) }
+        if (updated.keepAliveRefCount == 1) {
             keepAliveLifecycle.activate()
             Log.d(TAG, "Keep-alive lifecycle activated")
         }
-        Log.d(TAG, "Keep-alive ref count: $keepAliveRefCount")
+        Log.d(TAG, "Keep-alive ref count: ${updated.keepAliveRefCount}")
     }
 
     fun releaseKeepAlive() {
-        keepAliveRefCount = max(0, keepAliveRefCount - 1)
-        if (keepAliveRefCount == 0) {
+        val updated = updateDemand { it.copy(keepAliveRefCount = max(0, it.keepAliveRefCount - 1)) }
+        if (updated.keepAliveRefCount == 0) {
             keepAliveLifecycle.deactivate()
             Log.d(TAG, "Keep-alive lifecycle deactivated")
         }
-        Log.d(TAG, "Keep-alive ref count: $keepAliveRefCount")
+        Log.d(TAG, "Keep-alive ref count: ${updated.keepAliveRefCount}")
     }
 
     fun beginExclusiveSession() {
-        exclusiveSessionRefCount++
-        Log.d(TAG, "Exclusive camera session started (count=$exclusiveSessionRefCount)")
+        val updated = updateDemand {
+            it.copy(exclusiveSessionRefCount = it.exclusiveSessionRefCount + 1)
+        }
+        Log.d(TAG, "Exclusive camera session started (count=${updated.exclusiveSessionRefCount})")
     }
 
     fun endExclusiveSession() {
-        exclusiveSessionRefCount = max(0, exclusiveSessionRefCount - 1)
-        Log.d(TAG, "Exclusive camera session ended (count=$exclusiveSessionRefCount)")
+        val updated = updateDemand {
+            it.copy(exclusiveSessionRefCount = max(0, it.exclusiveSessionRefCount - 1))
+        }
+        Log.d(TAG, "Exclusive camera session ended (count=${updated.exclusiveSessionRefCount})")
     }
 
     fun getEffectiveLifecycleOwner(): LifecycleOwner? {
-        return if (keepAliveRefCount > 0) keepAliveLifecycle else lifecycleOwner
+        return if (sessionDemand.keepAliveRefCount > 0) keepAliveLifecycle else lifecycleOwner
     }
 
     fun tapToFocus(x: Float, y: Float) {
@@ -540,27 +573,34 @@ class CameraService(private val context: Context) {
         ) == android.content.pm.PackageManager.PERMISSION_GRANTED
 
     private fun shouldAttachPreview(): Boolean {
-        return previewRequested && currentPreviewView != null && isActivityForeground
+        val demand = sessionDemand
+        return demand.previewRequested && demand.currentPreviewView != null &&
+            demand.isActivityForeground
     }
 
     /**
-     * The one snapshot of the demand/lifecycle heap the arbiter's verdicts
-     * read, built fresh at every entry point after its fields are mutated —
-     * the consult sees exactly the state the old inline gates re-assembled
-     * by hand from different subsets of these fields.
+     * The one mapping of [sessionDemand] into the arbiter's
+     * [CameraSessionArbiter.CameraDemandState], built fresh at every entry
+     * point after the writer's [updateDemand] — the consult sees exactly the
+     * state the old inline gates re-assembled by hand from different subsets
+     * of the loose fields. No demand fact is read outside the record here
+     * (`pendingResolution` is the settings side's parked change, not session
+     * demand, and stays its own field).
      */
     private fun demandState(
         trigger: CameraSessionArbiter.Trigger,
-    ): CameraSessionArbiter.CameraDemandState =
-        CameraSessionArbiter.CameraDemandState(
-            previewRequested = previewRequested,
-            keepAliveRefCount = keepAliveRefCount,
-            exclusiveSessionRefCount = exclusiveSessionRefCount,
-            activityForeground = isActivityForeground,
-            previewSurfaceAttached = currentPreviewView != null,
+    ): CameraSessionArbiter.CameraDemandState {
+        val demand = sessionDemand
+        return CameraSessionArbiter.CameraDemandState(
+            previewRequested = demand.previewRequested,
+            keepAliveRefCount = demand.keepAliveRefCount,
+            exclusiveSessionRefCount = demand.exclusiveSessionRefCount,
+            activityForeground = demand.isActivityForeground,
+            previewSurfaceAttached = demand.currentPreviewView != null,
             resolutionChangePending = pendingResolution != null,
             trigger = trigger,
         )
+    }
 
     @androidx.camera.camera2.interop.ExperimentalCamera2Interop
     private fun enumerateCameras(provider: ProcessCameraProvider) {
@@ -711,7 +751,7 @@ class CameraService(private val context: Context) {
             return
         }
         val lens = lenses[index]
-        Log.d(TAG, "selectLens: switching to lens $index: ${LensInventory.baseLabel(lens)}, provider=${cameraProvider != null}, previewView=${currentPreviewView != null}")
+        Log.d(TAG, "selectLens: switching to lens $index: ${LensInventory.baseLabel(lens)}, provider=${cameraProvider != null}, previewView=${sessionDemand.currentPreviewView != null}")
 
         // One atomic write: a deferred rebind (or a mid-flight second
         // selection) can only ever observe a complete lens fact.
@@ -762,7 +802,7 @@ class CameraService(private val context: Context) {
      */
     private fun executeBinding(action: CameraSessionArbiter.BindingAction) {
         val provider = ensureCameraProviderAvailable()
-        Log.d(TAG, "rebindUseCases: provider=${provider != null}, refCount=$keepAliveRefCount, previewRequested=$previewRequested, lifecycleOwner=${lifecycleOwner != null}")
+        Log.d(TAG, "rebindUseCases: provider=${provider != null}, refCount=${sessionDemand.keepAliveRefCount}, previewRequested=${sessionDemand.previewRequested}, lifecycleOwner=${lifecycleOwner != null}")
 
         if (provider == null) {
             Log.w(TAG, "rebindUseCases: cameraProvider is null, cannot rebind")
@@ -842,8 +882,10 @@ class CameraService(private val context: Context) {
             return
         }
 
-        currentPreviewView = previewView
-        previewRequested = true
+        // One atomic demand write (the old two-statement write of the view and
+        // the flag is one copy now): the view surface exists and the preview is
+        // requested land together.
+        updateDemand { it.copy(currentPreviewView = previewView, previewRequested = true) }
         Log.d(TAG, "startPreview: requested with selector=${_selectedLens.value.selector}, resolution=$currentResolution")
 
         val owner = getEffectiveLifecycleOwner()
@@ -856,9 +898,11 @@ class CameraService(private val context: Context) {
     }
 
     fun stopPreview() {
-        previewRequested = false
+        // One atomic demand write: preview demand AND the view reference are
+        // dropped together (unlike onActivityStop, which detaches the surface
+        // but keeps the view — the arbiter's ActivityStopping contract).
+        updateDemand { it.copy(previewRequested = false, currentPreviewView = null) }
         preview?.surfaceProvider = null
-        currentPreviewView = null
 
         // One consult on the post-stop state: the old exclusive-session early
         // return is the arbiter's Noop now, and the no-demand unbind (or the
@@ -962,7 +1006,7 @@ class CameraService(private val context: Context) {
             Log.d(TAG, "bindUseCases: applied physicalCameraId $physId to all use cases")
         }
 
-        val previewView = currentPreviewView
+        val previewView = sessionDemand.currentPreviewView
         preview = if (shouldAttachPreview() && previewView != null) {
             previewBuilder.build().also {
                 Log.d(TAG, "bindUseCases: setting surfaceProvider")
@@ -1189,7 +1233,7 @@ class CameraService(private val context: Context) {
             // inventory is empty and is left as-is.
             val (selector, frontFacing) = LensInventory.fallbackSelector(_selectedLens.value.isFront)
             _selectedLens.value = _selectedLens.value.copy(selector = selector, isFront = frontFacing)
-            val previewView = currentPreviewView
+            val previewView = sessionDemand.currentPreviewView
             if (previewView != null) {
                 startPreview(previewView)
             } else {
@@ -1598,10 +1642,8 @@ class CameraService(private val context: Context) {
         }
     }
 
-    private var isActivityForeground = true
-
     fun onActivityResume() {
-        isActivityForeground = true
+        updateDemand { it.copy(isActivityForeground = true) }
         // One arbiter consult. Its demand input is previewRequested ALONE
         // (see the arbiter) — keep-alive-only sessions are not restored here;
         // that asymmetry is preserved, not fixed.
@@ -1623,7 +1665,7 @@ class CameraService(private val context: Context) {
     }
 
     fun onActivityStop() {
-        isActivityForeground = false
+        updateDemand { it.copy(isActivityForeground = false) }
         when (
             CameraSessionArbiter.decide(demandState(CameraSessionArbiter.Trigger.ActivityStopping))
         ) {
@@ -1643,9 +1685,17 @@ class CameraService(private val context: Context) {
         clearBoundUseCases()
         _cameraState.value = CameraState.Idle
         _isRawCaptureSupported.value = false
-        previewRequested = false
-        exclusiveSessionRefCount = 0
-        currentPreviewView = null
+        // Demand reset. PRESERVED un-paired combo — a known, visible decision,
+        // not something to "fix" here: previewRequested, exclusiveSessionRefCount
+        // and currentPreviewView are cleared but keepAliveRefCount is NOT.
+        // Stale keep-alive demand survives teardown (a post-release acquire
+        // would inherit the old count and keep the KeepAliveLifecycle
+        // considered active via getEffectiveLifecycleOwner). The behavior is
+        // kept EXACTLY as the loose fields left it; pairing the reset is a
+        // deliberate behavior change for whoever takes it.
+        updateDemand {
+            it.copy(previewRequested = false, exclusiveSessionRefCount = 0, currentPreviewView = null)
+        }
         lastFocusApplied = null
         try {
             analysisExecutor.shutdown()

@@ -108,12 +108,12 @@ object AutomationSchedulePolicy {
      * met (later the same day), which is what "ONLY WHEN" should mean for a
      * scheduled rule — and because the deferred fire then flows through the
      * same minutes-late computation as a late boot, the rule's missed-run
-     * policy governs both: [AutomationRule.MISSED_RUN_SKIP] fires only in
+     * policy governs both: [MissedRunPolicy.SKIP] fires only in
      * the scheduled minute itself ("at the scheduled time or not at all"),
-     * [AutomationRule.MISSED_RUN_WINDOW] fires only within
+     * [MissedRunPolicy.WINDOW] fires only within
      * [AutomationRule.missedWindowMinutes] of it.
      *
-     * Catch-up: in the default [AutomationRule.MISSED_RUN_CATCH_UP] mode,
+     * Catch-up: in the default [MissedRunPolicy.CATCH_UP] mode,
      * STATEFUL actions (setting convergence) are always included when the
      * rule fires, no matter how late the tick is, and ONESHOT actions
      * (moment effects like a photo) only when the rule is within [graceMs]
@@ -140,7 +140,7 @@ object AutomationSchedulePolicy {
         val fired = ArrayList<FiredRule>()
         for (rule in rules) {
             if (!rule.enabled) continue
-            if (rule.triggerType != AutomationRule.TRIGGER_TIME_OF_DAY) continue
+            if (rule.triggerType != AutomationTriggerKind.TIME_OF_DAY) continue
             if (!MotionArmingPolicy.isArmedDay(rule.daysMask, snapshot.isoDayIndex)) continue
             if (!AutomationConditionPolicy.conditionsMet(rule, snapshot)) continue
             val key = occurrenceKey(rule, snapshot.epochDay)
@@ -156,15 +156,14 @@ object AutomationSchedulePolicy {
             // lateness, covering both late boots and deferred fires
             // (conditions met past the scheduled minute). SKIP fires only
             // inside the scheduled minute itself; WINDOW inside its span;
-            // CATCH_UP (the default, and the folded shape of anything
-            // unknown) carries no rule-level bound. An unknown policy
-            // reaching this far cannot be distinguished from CATCH_UP —
-            // sanitize already folds it — so only the two explicit
-            // late-hating modes gate here.
+            // CATCH_UP (the default, and the decode's fold target for
+            // anything unknown) carries no rule-level bound — so only the
+            // two explicit late-hating modes gate here.
             when (rule.missedRunPolicy) {
-                AutomationRule.MISSED_RUN_SKIP -> if (minutesLate > 0) continue
-                AutomationRule.MISSED_RUN_WINDOW ->
+                MissedRunPolicy.SKIP -> if (minutesLate > 0) continue
+                MissedRunPolicy.WINDOW ->
                     if (minutesLate > rule.missedWindowMinutes) continue
+                MissedRunPolicy.CATCH_UP -> Unit
             }
             val actions = rule.actions.filter { action ->
                 when (AutomationActionCatalog.typeFor(action.type)?.catchUp) {
@@ -178,7 +177,7 @@ object AutomationSchedulePolicy {
                     // bound above already caps it). Only the default
                     // CATCH_UP mode consults the global grace.
                     CatchUpClass.ONESHOT ->
-                        rule.missedRunPolicy == AutomationRule.MISSED_RUN_WINDOW ||
+                        rule.missedRunPolicy == MissedRunPolicy.WINDOW ||
                             minutesLate * 60_000L <= graceMs
                     null -> false
                 }
@@ -240,45 +239,45 @@ object AutomationSchedulePolicy {
      * holding steady at 21% with threshold 20 stays quiet and 21→20 fires
      * exactly once), with `when_below = false` the mirror-image climb. A
      * null previous level (first read of the process) cannot establish a
-     * crossing and never fires; [AutomationRule.TRIGGER_TIME_OF_DAY] matches
+     * crossing and never fires; [AutomationTriggerKind.TIME_OF_DAY] matches
      * no event — its fires come only from [dueRules].
      */
     fun triggerMatches(
-        triggerType: String,
+        triggerType: AutomationTriggerKind,
         triggerParams: Map<String, String>,
         event: AutomationEvent,
     ): Boolean {
         val bool = { name: String ->
             AutomationParamValues.boolValue(
-                AutomationTriggerCatalog.typeFor(triggerType)?.params ?: emptyList(),
+                AutomationTriggerCatalog.typeFor(triggerType.id)?.params ?: emptyList(),
                 triggerParams,
                 name,
             )
         }
         return when (event) {
-            is AutomationEvent.AppStarted -> triggerType == AutomationTriggerCatalog.APP_STARTED
-            is AutomationEvent.MotionDetected -> triggerType == AutomationTriggerCatalog.MOTION_DETECTED
-            is AutomationEvent.SoundDetected -> triggerType == AutomationTriggerCatalog.SOUND_DETECTED
-            is AutomationEvent.TamperDetected -> triggerType == AutomationTriggerCatalog.TAMPER_DETECTED
+            is AutomationEvent.AppStarted -> triggerType == AutomationTriggerKind.APP_STARTED
+            is AutomationEvent.MotionDetected -> triggerType == AutomationTriggerKind.MOTION_DETECTED
+            is AutomationEvent.SoundDetected -> triggerType == AutomationTriggerKind.SOUND_DETECTED
+            is AutomationEvent.TamperDetected -> triggerType == AutomationTriggerKind.TAMPER_DETECTED
             is AutomationEvent.ChargingChanged ->
-                triggerType == AutomationTriggerCatalog.CHARGING_CHANGED && bool("charging") == event.charging
+                triggerType == AutomationTriggerKind.CHARGING_CHANGED && bool("charging") == event.charging
             is AutomationEvent.BatteryLevelChanged ->
-                triggerType == AutomationTriggerCatalog.BATTERY_LEVEL && batteryCrossed(triggerType, triggerParams, event)
+                triggerType == AutomationTriggerKind.BATTERY_LEVEL && batteryCrossed(triggerType, triggerParams, event)
             is AutomationEvent.StreamingChanged ->
-                triggerType == AutomationTriggerCatalog.STREAMING_CHANGED && bool("streaming") == event.streaming
+                triggerType == AutomationTriggerKind.STREAMING_CHANGED && bool("streaming") == event.streaming
             is AutomationEvent.ViewersChanged ->
-                triggerType == AutomationTriggerCatalog.VIEWERS_CHANGED && bool("connected") == event.connected
+                triggerType == AutomationTriggerKind.VIEWERS_CHANGED && bool("connected") == event.connected
         }
     }
 
     /** The battery threshold-crossing verdict described in [triggerMatches]. */
     private fun batteryCrossed(
-        triggerType: String,
+        triggerType: AutomationTriggerKind,
         triggerParams: Map<String, String>,
         event: AutomationEvent.BatteryLevelChanged,
     ): Boolean {
         val previous = event.previous ?: return false
-        val specs = AutomationTriggerCatalog.typeFor(triggerType)?.params ?: emptyList()
+        val specs = AutomationTriggerCatalog.typeFor(triggerType.id)?.params ?: emptyList()
         val threshold = AutomationParamValues.intValue(specs, triggerParams, "level") ?: return false
         val whenBelow = AutomationParamValues.boolValue(specs, triggerParams, "when_below")
         return if (whenBelow) {
@@ -290,12 +289,14 @@ object AutomationSchedulePolicy {
 
     /**
      * Clamp one rule into its persisted/usable shape: name trimmed;
-     * [AutomationRule.triggerType] kept only when it is a catalog kind and
-     * reset to time-of-day otherwise (an unknown future trigger written by a
-     * newer app version degrades to a time trigger instead of firing on the
-     * wrong cue); [AutomationRule.triggerParams] sanitized against the
-     * trigger catalog, an unknown-key payload degrading to the schema's
-     * documented defaults; minute into 0..[StreamDefaults.MINUTES_PER_DAY]-1;
+     * [AutomationRule.triggerType] kept only when its id is a catalog kind
+     * and reset to time-of-day otherwise (the enum decode already folds an
+     * unknown wire id; this stays the final guard against enum/catalog
+     * drift — an unknown future trigger degrades to a time trigger instead
+     * of firing on the wrong cue); [AutomationRule.triggerParams] sanitized
+     * against the trigger catalog, an unknown-key payload degrading to the
+     * schema's documented defaults; minute into
+     * 0..[StreamDefaults.MINUTES_PER_DAY]-1;
      * day mask into
      * [StreamDefaults.MOTION_ARM_DAYS_MASK_MIN]..[StreamDefaults.MOTION_ARM_DAYS_MASK_MAX]
      * (a zero mask would disarm the rule silently — the enabled toggle
@@ -303,10 +304,12 @@ object AutomationSchedulePolicy {
      * conditions sanitized through the condition catalog (unknown conditions
      * dropped) then capped at
      * [StreamDefaults.AUTOMATION_MAX_CONDITIONS_PER_RULE]; mode folded to
-     * ALL unless it is exactly ANY; cooldown clamped into the
+     * ALL unless it is exactly ANY (the enum decode has already done this
+     * fold for wire values — the guard stays so the sanitizer alone remains
+     * a complete tolerance contract); cooldown clamped into the
      * [StreamDefaults.AUTOMATION_COOLDOWN_MIN_SECONDS]..[StreamDefaults.AUTOMATION_COOLDOWN_MAX_SECONDS]
      * span; the missed-run policy folded to
-     * [AutomationRule.MISSED_RUN_CATCH_UP] unless it is exactly SKIP or
+     * [MissedRunPolicy.CATCH_UP] unless it is exactly SKIP or
      * WINDOW (an unknown future policy degrades to the historical catch-up
      * behavior instead of silently skipping or widening fires) with the
      * window clamped into the
@@ -324,13 +327,13 @@ object AutomationSchedulePolicy {
      * smuggle a claimed last-fired instant into persistence.
      */
     fun sanitizeRule(rule: AutomationRule): AutomationRule {
-        val triggerType = if (AutomationTriggerCatalog.typeFor(rule.triggerType) != null) {
+        val triggerType = if (AutomationTriggerCatalog.typeFor(rule.triggerType.id) != null) {
             rule.triggerType
         } else {
-            AutomationRule.TRIGGER_TIME_OF_DAY
+            AutomationTriggerKind.TIME_OF_DAY
         }
-        val triggerParams = AutomationTriggerCatalog.sanitizeParams(triggerType, rule.triggerParams)
-            ?: AutomationTriggerCatalog.sanitizeParams(triggerType, emptyMap())
+        val triggerParams = AutomationTriggerCatalog.sanitizeParams(triggerType.id, rule.triggerParams)
+            ?: AutomationTriggerCatalog.sanitizeParams(triggerType.id, emptyMap())
             ?: emptyMap()
         return rule.copy(
             name = rule.name.trim(),
@@ -344,18 +347,18 @@ object AutomationSchedulePolicy {
             conditions = rule.conditions
                 .mapNotNull(AutomationConditionCatalog::sanitizeCondition)
                 .take(StreamDefaults.AUTOMATION_MAX_CONDITIONS_PER_RULE),
-            conditionMode = if (rule.conditionMode == AutomationRule.CONDITION_MODE_ANY) {
-                AutomationRule.CONDITION_MODE_ANY
+            conditionMode = if (rule.conditionMode == ConditionMode.ANY) {
+                ConditionMode.ANY
             } else {
-                AutomationRule.CONDITION_MODE_ALL
+                ConditionMode.ALL
             },
             cooldownSeconds = rule.cooldownSeconds.coerceIn(
                 StreamDefaults.AUTOMATION_COOLDOWN_MIN_SECONDS,
                 StreamDefaults.AUTOMATION_COOLDOWN_MAX_SECONDS,
             ),
             missedRunPolicy = when (rule.missedRunPolicy) {
-                AutomationRule.MISSED_RUN_SKIP, AutomationRule.MISSED_RUN_WINDOW -> rule.missedRunPolicy
-                else -> AutomationRule.MISSED_RUN_CATCH_UP
+                MissedRunPolicy.SKIP, MissedRunPolicy.WINDOW -> rule.missedRunPolicy
+                else -> MissedRunPolicy.CATCH_UP
             },
             missedWindowMinutes = rule.missedWindowMinutes.coerceIn(
                 StreamDefaults.AUTOMATION_MISSED_WINDOW_MIN_MINUTES,

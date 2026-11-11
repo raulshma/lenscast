@@ -63,6 +63,18 @@ class AutomationTriggerCatalogTest {
     }
 
     @Test
+    fun `the trigger vocabulary enum ids agree with the catalog ids`() {
+        // AutomationRule.triggerType is the typed form of these ids (the
+        // enum's wire adapter writes `kind.id`): the two vocabularies must
+        // agree one for one, or the persisted JSON would carry a string no
+        // catalog lookup — and no picker — recognizes.
+        assertEquals(
+            AutomationTriggerCatalog.ACTION_TYPES.map { it.id },
+            AutomationTriggerKind.entries.map { it.id },
+        )
+    }
+
+    @Test
     fun `sanitizeParams canonicalizes values and folds absent required params to defaults`() {
         val sanitized = AutomationTriggerCatalog.sanitizeParams(
             AutomationTriggerCatalog.BATTERY_LEVEL,

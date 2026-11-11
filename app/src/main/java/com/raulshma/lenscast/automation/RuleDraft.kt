@@ -4,6 +4,9 @@ import com.raulshma.lenscast.automation.schedule.AutomationActionSpec
 import com.raulshma.lenscast.automation.schedule.AutomationConditionSpec
 import com.raulshma.lenscast.automation.schedule.AutomationRule
 import com.raulshma.lenscast.automation.schedule.AutomationTriggerCatalog
+import com.raulshma.lenscast.automation.schedule.AutomationTriggerKind
+import com.raulshma.lenscast.automation.schedule.ConditionMode
+import com.raulshma.lenscast.automation.schedule.MissedRunPolicy
 import com.raulshma.lenscast.capture.MotionArmingPolicy
 import com.raulshma.lenscast.core.StreamDefaults
 
@@ -12,6 +15,18 @@ import com.raulshma.lenscast.core.StreamDefaults
  * freely (name typing, param toggles) and only the committed save becomes an
  * [AutomationRule] — the ViewModel's sanitize pass then clamps it into the
  * persisted shape. [id] is null for a rule the store has never seen.
+ *
+ * The three vocabulary fields ([triggerType], [conditionMode],
+ * [missedRunPolicy]) deliberately stay the STRING wire ids, mirroring the
+ * persisted format: the editor's pickers, chips and label resolvers all deal
+ * in catalog id strings ([AutomationTriggerCatalog.typeFor],
+ * [AutomationViewModel.triggerTypeLabelRes], the picker option lists), so a
+ * string draft keeps every one of those sites unchanged. [toRule] converts
+ * them to the rule's typed enums through the tolerant [AutomationTriggerKind.parse]/
+ * [ConditionMode.parse]/[MissedRunPolicy.parse] (a draft id the catalogs
+ * moved away from folds exactly like a decoded wire value would), and
+ * [from] converts back with `enum.id` — so the draft↔rule boundary is the
+ * only place the string↔enum conversion lives.
  *
  * Extracted from AutomationScreen so the draft↔rule conversion (the third
  * field-by-field copy of the rule shape) is testable and reusable: the field
@@ -40,14 +55,14 @@ data class RuleDraft(
         id = id,
         name = name,
         enabled = enabled,
-        triggerType = triggerType,
+        triggerType = AutomationTriggerKind.parse(triggerType),
         minuteOfDay = minuteOfDay,
         daysMask = daysMask,
         triggerParams = triggerParams,
         conditions = conditions,
-        conditionMode = conditionMode,
+        conditionMode = ConditionMode.parse(conditionMode),
         cooldownSeconds = cooldownSeconds,
-        missedRunPolicy = missedRunPolicy,
+        missedRunPolicy = MissedRunPolicy.parse(missedRunPolicy),
         missedWindowMinutes = missedWindowMinutes,
         actions = actions,
     )
@@ -58,14 +73,14 @@ data class RuleDraft(
             id = null,
             name = "",
             enabled = true,
-            triggerType = AutomationTriggerCatalog.TIME_OF_DAY,
+            triggerType = AutomationTriggerKind.TIME_OF_DAY.id,
             minuteOfDay = DEFAULT_MINUTE_OF_DAY,
             daysMask = MotionArmingPolicy.ALL_DAYS_MASK,
             triggerParams = emptyMap(),
             conditions = emptyList(),
-            conditionMode = AutomationRule.CONDITION_MODE_ALL,
+            conditionMode = ConditionMode.ALL.id,
             cooldownSeconds = StreamDefaults.AUTOMATION_COOLDOWN_DEFAULT_SECONDS,
-            missedRunPolicy = AutomationRule.MISSED_RUN_CATCH_UP,
+            missedRunPolicy = MissedRunPolicy.CATCH_UP.id,
             missedWindowMinutes = StreamDefaults.AUTOMATION_MISSED_WINDOW_DEFAULT_MINUTES,
             actions = emptyList(),
         )
@@ -74,14 +89,14 @@ data class RuleDraft(
             id = rule.id,
             name = rule.name,
             enabled = rule.enabled,
-            triggerType = rule.triggerType,
+            triggerType = rule.triggerType.id,
             minuteOfDay = rule.minuteOfDay,
             daysMask = rule.daysMask,
             triggerParams = rule.triggerParams,
             conditions = rule.conditions,
-            conditionMode = rule.conditionMode,
+            conditionMode = rule.conditionMode.id,
             cooldownSeconds = rule.cooldownSeconds,
-            missedRunPolicy = rule.missedRunPolicy,
+            missedRunPolicy = rule.missedRunPolicy.id,
             missedWindowMinutes = rule.missedWindowMinutes,
             actions = rule.actions,
         )

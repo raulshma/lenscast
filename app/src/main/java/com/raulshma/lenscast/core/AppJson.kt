@@ -15,6 +15,13 @@ import com.squareup.moshi.Moshi
  * The one registered custom adapter is the [Secret] wire type's
  * [SecretWireAdapter]: every `Secret` field in the codegen'd DTO graph
  * serializes blank through it.
+ *
+ * One carve-out: the automation rule vocabulary (`AutomationTriggerKind`,
+ * `ConditionMode`, `MissedRunPolicy`) is NOT registered here — those enums
+ * encode as their canonical string ids only through the derived
+ * `AutomationRuleJson.moshi` (see its KDoc; plain `AppJson.moshi` would
+ * emit enum names). Any surface that JSON-encodes `AutomationRule`, directly
+ * or nested in a DTO, builds its adapters from that instance.
  */
 object AppJson {
     val moshi: Moshi = Moshi.Builder()

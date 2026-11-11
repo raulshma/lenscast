@@ -79,7 +79,7 @@ object AutomationConditionPolicy {
     fun conditionsMet(rule: AutomationRule, snapshot: AutomationSensorSnapshot): Boolean {
         if (rule.conditions.isEmpty()) return true
         return when (rule.conditionMode) {
-            AutomationRule.CONDITION_MODE_ANY -> rule.conditions.any { isMet(it, snapshot) }
+            ConditionMode.ANY -> rule.conditions.any { isMet(it, snapshot) }
             else -> rule.conditions.all { isMet(it, snapshot) }
         }
     }
