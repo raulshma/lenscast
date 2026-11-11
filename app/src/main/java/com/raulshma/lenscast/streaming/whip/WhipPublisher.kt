@@ -7,14 +7,13 @@ import com.raulshma.lenscast.core.StreamDefaults
 import com.raulshma.lenscast.core.YuvConverter
 import com.raulshma.lenscast.streaming.FrameThrottle
 import com.raulshma.lenscast.streaming.FrameTiming
+import com.raulshma.lenscast.streaming.PublisherSession
 import com.raulshma.lenscast.streaming.webrtc.GatherObserver
 import com.raulshma.lenscast.streaming.webrtc.WebRtcPlumbing
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
 import org.webrtc.DefaultVideoDecoderFactory
 import org.webrtc.DefaultVideoEncoderFactory
 import org.webrtc.EglBase
@@ -27,7 +26,6 @@ import org.webrtc.VideoFrame
 import org.webrtc.VideoSource
 import org.webrtc.audio.AudioDeviceModule
 import org.webrtc.audio.JavaAudioDeviceModule
-import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * The lifecycle surface [WhipOutput] drives; [WhipPublisher] implements it in
@@ -114,8 +112,6 @@ internal class WhipPublisher(
 ) : WhipPublisherHandle {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    private val wanted = AtomicBoolean(false)
-    private val started = AtomicBoolean(false)
 
     @Volatile private var targetFps = StreamDefaults.STREAM_FPS
     private val frameThrottle = FrameThrottle(
@@ -128,55 +124,36 @@ internal class WhipPublisher(
     // only read elsewhere through volatile references (the frame feed).
     @Volatile private var videoSource: VideoSource? = null
 
-    @Volatile private var statusValue: WhipStatus = WhipStatus.Idle
+    // ── lifecycle: the shared wanted/started + reconnect/backoff machine ──
 
-    override fun status(): WhipStatus = statusValue
+    private val session = PublisherSession(
+        onStatus = onStatus,
+        idleStatus = WhipStatus.Idle,
+        connectingStatus = WhipStatus.Connecting,
+        errorStatus = { message -> WhipStatus.Error(message) },
+        defaultErrorMessage = "WHIP session failed",
+        connect = { runAttempt() },
+        logAttemptFailed = { e -> Log.w(TAG, "WHIP attempt to ${url.hostAndPort} failed: ${e.message}") },
+        onStop = {
+            videoSource = null
+            // The attempt loop's watch beat notices wanted=false within
+            // SESSION_WATCH_INTERVAL_MS and runs the teardown (DELETE + dispose)
+            // on its own coroutine — no force-close needed, unlike the RTMP
+            // socket, because every WHIP step is deadline-bounded.
+        },
+        scope = scope,
+    )
 
-    private fun publishStatus(status: WhipStatus) {
-        statusValue = status
-        onStatus(status)
-    }
+    override fun status(): WhipStatus = session.status()
 
-    // ── lifecycle ──
+    override fun start() = session.start()
 
-    override fun start() {
-        if (!started.compareAndSet(false, true)) return
-        wanted.set(true)
-        val session = scope.launch {
-            var attempt = 0
-            while (wanted.get()) {
-                publishStatus(WhipStatus.Connecting)
-                try {
-                    runAttempt()
-                    attempt = 0 // a session that ended cleanly starts over without penalty
-                } catch (e: Exception) {
-                    if (!wanted.get()) break
-                    publishStatus(WhipStatus.Error(e.message ?: "WHIP session failed"))
-                    Log.w(TAG, "WHIP attempt to ${url.hostAndPort} failed: ${e.message}")
-                }
-                if (!wanted.get()) break
-                delay(backoffMs(attempt))
-                attempt += 1
-            }
-            publishStatus(WhipStatus.Idle)
-        }
-        session.invokeOnCompletion { scope.cancel() }
-    }
-
-    override fun stop() {
-        if (!started.compareAndSet(true, false)) return
-        wanted.set(false)
-        videoSource = null
-        // The attempt loop's watch beat notices wanted=false within
-        // SESSION_WATCH_INTERVAL_MS and runs the teardown (DELETE + dispose)
-        // on its own coroutine — no force-close needed, unlike the RTMP
-        // socket, because every WHIP step is deadline-bounded.
-    }
+    override fun stop() = session.stop()
 
     // ── the analysis tap's frame feed (camera thread) ──
 
     override fun feedVideoFrame(nv21: ByteArray, width: Int, height: Int, rotation: Int) {
-        if (!wanted.get()) return
+        if (!session.isWanted()) return
         val source = videoSource ?: return
         if (!frameThrottle.accept(System.currentTimeMillis())) return
 
@@ -281,7 +258,7 @@ internal class WhipPublisher(
             resourceUrl = answer.resourceUrl
             awaitSetRemoteAnswer(pc, answer.answerSdp)
 
-            publishStatus(WhipStatus.Connected)
+            session.publish(WhipStatus.Connected)
             Log.i(
                 TAG,
                 "WHIP session accepted by ${url.hostAndPort}${url.resourcePath} " +
@@ -289,7 +266,7 @@ internal class WhipPublisher(
             )
 
             // Hold the session: a dead ICE answers within one watch beat.
-            while (wanted.get()) {
+            while (session.isWanted()) {
                 when (pc.iceConnectionState()) {
                     PeerConnection.IceConnectionState.FAILED,
                     PeerConnection.IceConnectionState.CLOSED,
@@ -308,7 +285,7 @@ internal class WhipPublisher(
         } finally {
             videoSource = null
             resourceUrl?.let { resource ->
-                if (wanted.get()) { // a failure path — the session is being abandoned
+                if (session.isWanted()) { // a failure path — the session is being abandoned
                     runCatching { deleteSession(resource) }
                 }
             }
@@ -340,14 +317,6 @@ internal class WhipPublisher(
         )
     }
 
-    private fun backoffMs(attempt: Int): Long {
-        var ms = INITIAL_BACKOFF_MS
-        repeat(attempt.coerceAtLeast(0)) {
-            ms = (ms * 2).coerceAtMost(MAX_BACKOFF_MS)
-        }
-        return ms
-    }
-
     private companion object {
         private const val TAG = "WhipPublisher"
 
@@ -355,8 +324,6 @@ internal class WhipPublisher(
         private const val AUDIO_TRACK_ID = "lenscast-audio"
 
         private const val SESSION_WATCH_INTERVAL_MS = 1_000L
-        private const val INITIAL_BACKOFF_MS = 1_000L
-        private const val MAX_BACKOFF_MS = 30_000L
     }
 }
 

@@ -304,7 +304,7 @@ class RtspServer(
      */
     override fun feedSubVideo(nalUnits: List<EncodedNalUnit>) {
         if (!running.get() || nalUnits.isEmpty()) return
-        val hasSubListeners = clients.values.any { it.isSubWanted }
+        val hasSubListeners = clients.values.any { it.sub.isWanted }
         if (!hasSubListeners) return
 
         subRtpTimestamp += timestampIncrement
@@ -316,7 +316,7 @@ class RtspServer(
         // sub packetizer's sequence state is shared across sub clients.
         val packets = subVideoPacketizer.packetizeAccessUnit(nalUnits.map { it.data }, subRtpTimestamp)
         for (client in clients.values) {
-            if (!client.acceptSubAu(isKeyframeAu)) continue
+            if (!client.sub.acceptAu(isKeyframeAu)) continue
             for (packet in packets) {
                 client.sendSubRtpPacket(packet)
             }
@@ -469,11 +469,13 @@ class RtspServer(
         private val audioRtcpChannel: Int get() = tracks[RtspUriPolicy.AUDIO_TRACK_ID]?.rtcpChannel ?: 3
 
         // Sub-stream state: its own SETUP gate, channels, PLAY gate, and the
-        // same keyframe-wait discipline as the main video track.
-        private var subSetup = false
-        private var subRtpChannel = 0
-        private var subRtcpChannel = 1
-        private var awaitingSubKeyframe = true
+        // same keyframe-wait discipline as the main video track — the twin
+        // machine lives in [RtspSubStreamState], named and JVM-tested beside
+        // the protocol module. Public within this private inner class — the
+        // server-level sub fan-out ([feedSubVideo]) reads it, and Kotlin (unlike
+        // Java) does not let the outer class touch a private member of its
+        // inner class.
+        val sub = RtspSubStreamState()
 
         /**
          * The aggregate stream's playing verdict, derived from [state] — the
@@ -487,9 +489,6 @@ class RtspServer(
          */
         val isPlaying: Boolean
             get() = state == SessionState.PLAYING
-
-        var isSubWanted = false
-            private set
 
         /** Set at PLAY; cleared on the first keyframe AU that follows (see [acceptVideoAu]). */
         private var awaitingKeyframe = true
@@ -509,16 +508,6 @@ class RtspServer(
             return true
         }
 
-        /** The sub-stream's twin of [acceptVideoAu]: sub PLAY + own keyframe wait. */
-        fun acceptSubAu(isKeyframeAu: Boolean): Boolean {
-            if (!isSubWanted || !subSetup) return false
-            if (awaitingSubKeyframe) {
-                if (!isKeyframeAu) return false
-                awaitingSubKeyframe = false
-            }
-            return true
-        }
-
         fun onVideoAuDelivered() {
             framesSent.incrementAndGet()
         }
@@ -528,7 +517,7 @@ class RtspServer(
             val media = buildList {
                 if (tracks[RtspUriPolicy.VIDEO_TRACK_ID]?.isSetup == true) add("video")
                 if (isAudioSetup) add("audio")
-                if (subSetup) add(RtspUriPolicy.SUB_STREAM_PATH)
+                if (sub.advertised) add(RtspUriPolicy.SUB_STREAM_PATH)
             }
             val transport = if (media.isEmpty()) "TCP" else "RTP/AVP/TCP;interleaved"
             return com.raulshma.lenscast.streaming.RtspClientDescriptor(
@@ -541,7 +530,7 @@ class RtspServer(
                 connectedAtMs = connectedAtMs,
                 transport = transport,
                 media = media,
-                playing = isPlaying || isSubWanted,
+                playing = isPlaying || sub.isWanted,
                 framesSent = framesSent.get(),
             )
         }
@@ -821,12 +810,11 @@ class RtspServer(
 
             if (transportVerdict is RtspSessionProtocol.TransportVerdict.Interleaved) {
                 transportVerdict.channels?.let { channels ->
-                    subRtpChannel = channels.rtp
-                    subRtcpChannel = channels.rtcp
+                    sub.onChannelsNegotiated(rtp = channels.rtp, rtcp = channels.rtcp)
                 }
             }
 
-            subSetup = true
+            sub.onSetupAccepted()
 
             if (rtspSessionId.isEmpty()) {
                 rtspSessionId = sessionId + "_" + System.currentTimeMillis().toString(16)
@@ -841,7 +829,7 @@ class RtspServer(
 
             sendResponse(
                 output, "200 OK", mapOf(
-                    "Transport" to "RTP/AVP/TCP;unicast;interleaved=$subRtpChannel-$subRtcpChannel",
+                    "Transport" to "RTP/AVP/TCP;unicast;interleaved=${sub.rtpChannel}-${sub.rtcpChannel}",
                     "Session" to "$rtspSessionId;timeout=$SESSION_TIMEOUT_HEADER_SECONDS"
                 )
             )
@@ -857,15 +845,14 @@ class RtspServer(
                 RtspUriPolicy.isSubControlUri(requestUri)
 
             if (isSubPlay) {
-                if (!subStreamActive() || !subSetup) {
+                if (!subStreamActive() || !sub.isSetup) {
                     sendResponse(output, "455 Method Not Valid In This State")
                     return
                 }
                 // Every PLAY (re)arms the sub keyframe wait, then forces a
                 // sync frame from the sub encoder — the main stream's gate
                 // discipline, per stream.
-                isSubWanted = true
-                awaitingSubKeyframe = true
+                sub.onPlayArmed()
                 encodedSource.requestSubKeyFrame()
 
                 val streamBase = buildAbsoluteRtspUrl("/${RtspUriPolicy.SUB_STREAM_PATH}")
@@ -926,15 +913,13 @@ class RtspServer(
                 return
             }
 
-            // TEARDOWN is aggregate: both streams end, the session drops to INIT.
-            isSubWanted = false
-            // The sub SETUP gate drops with the rest — describe() kept
+            // TEARDOWN is aggregate: both streams end, the session drops to
+            // INIT. The sub SETUP gate drops with the rest — describe() kept
             // advertising "/sub" for a torn-down stream otherwise. The
             // keyframe wait re-arms for the same reason the gates do (the
             // next sub PLAY re-arms it anyway). Bug fix only: the TEARDOWN
             // response bytes are untouched.
-            subSetup = false
-            awaitingSubKeyframe = true
+            sub.onTeardown()
             state = SessionState.INIT
             sendResponse(
                 output, "200 OK", mapOf(
@@ -996,7 +981,7 @@ class RtspServer(
 
         fun sendVideoRtcpPacket(packet: ByteArray) = sendInterleaved(videoRtcpChannel, packet)
 
-        fun sendSubRtpPacket(packet: ByteArray) = sendInterleaved(subRtpChannel, packet)
+        fun sendSubRtpPacket(packet: ByteArray) = sendInterleaved(sub.rtpChannel, packet)
 
         fun close() {
             // The kicked/closed connection stops playing — the drop to INIT

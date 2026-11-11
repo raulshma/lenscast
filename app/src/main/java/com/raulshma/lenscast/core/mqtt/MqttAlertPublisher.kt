@@ -101,15 +101,25 @@ class MqttAlertPublisher(
         Thread(runnable, "MqttTelemetry").apply { isDaemon = true }
     }
 
-    @Volatile private var lastConfig: Config? = null
-    /** Whether discovery + availability went out on the current connection. */
-    private var announced = false
+    /**
+     * One connection's announce truth: the config the connection was built
+     * under and which entity sets the last announce actually published under
+     * it — the close path clears exactly those, so a disable never spams the
+     * broker with retained empties for entities it never created. Swapped
+     * whole on the publisher thread; never mutated field-wise. The write
+     * order is load-bearing: [announced] flips only after a full announce (a
+     * mid-announce throw retries the whole announce); the optional-entity
+     * flags flip before their publishes (set-before-publish — a throw records
+     * "these went out", so cleanup stays conservative).
+     */
+    private data class Connection(
+        val config: Config? = null,
+        val announced: Boolean = false,
+        val announcedTelemetry: Boolean = false,
+        val publishedStreamStates: Boolean = false,
+    )
 
-    // What the last announce actually published under this connection — the
-    // close path clears exactly that, so a disable never spams the broker
-    // with retained empties for entities it never created.
-    private var announcedTelemetry = false
-    private var publishedStreamStates = false
+    @Volatile private var connection = Connection()
 
     /** The client-event throttle state (kind → last-sent ms), pure-policed. */
     private val clientEventSentMs = HashMap<String, Long>()
@@ -173,9 +183,10 @@ class MqttAlertPublisher(
      */
     fun close() {
         executor.execute {
-            lastConfig?.let {
+            val c = connection
+            c.config?.let {
                 publishRetainedOffline(it)
-                clearDiscoveryConfigs(it)
+                clearDiscoveryConfigs(it, c.announcedTelemetry, c.publishedStreamStates)
             }
             client.close()
         }
@@ -304,22 +315,20 @@ class MqttAlertPublisher(
      * a changed discovery prefix never orphans the old prefix's entities.
      */
     private fun ensureConnection(config: Config) {
-        val changed = lastConfig != config
+        val changed = connection.config != config
         if (changed) {
-            lastConfig?.let {
+            val old = connection
+            old.config?.let {
                 publishRetainedOffline(it)
-                clearDiscoveryConfigs(it)
+                clearDiscoveryConfigs(it, old.announcedTelemetry, old.publishedStreamStates)
             }
             client.close()
-            announced = false
-            announcedTelemetry = false
-            publishedStreamStates = false
-            lastConfig = config
+            connection = Connection(config = config)
         }
         if (!client.isConnected) {
             val topics = topicsFor(config)
             client.connect(endpointOf(config, topics, deviceId))
-            announced = false
+            connection = connection.copy(announced = false)
         }
     }
 
@@ -342,7 +351,7 @@ class MqttAlertPublisher(
      * telemetry sensor configs and the retained stream/sensor states go the
      * same way, so nothing outlives the setting.
      */
-    private fun clearDiscoveryConfigs(config: Config) {
+    private fun clearDiscoveryConfigs(config: Config, announcedTelemetry: Boolean, publishedStreamStates: Boolean) {
         if (!client.isConnected) return
         try {
             val topics = topicsFor(config)
@@ -367,9 +376,9 @@ class MqttAlertPublisher(
 
     /** Discovery + availability + the retained stream-state replay, once per connection. */
     private fun announceOnce(config: Config) {
-        if (announced) return
+        if (connection.announced) return
         announce(topicsFor(config), config)
-        announced = true
+        connection = connection.copy(announced = true)
     }
 
     private fun announce(topics: MqttTopics.EntityTopics, config: Config) {
@@ -384,8 +393,9 @@ class MqttAlertPublisher(
         // The telemetry sensor entities exist only while the telemetry
         // toggle is on: a flip re-runs the connection lifecycle (the config
         // value changed), so the configs are announced or cleared in step.
-        announcedTelemetry = config.telemetryEnabled
-        if (announcedTelemetry) {
+        val telemetryAnnounced = config.telemetryEnabled
+        connection = connection.copy(announcedTelemetry = telemetryAnnounced)
+        if (telemetryAnnounced) {
             for (sensor in MqttTopics.TelemetrySensor.entries) {
                 client.publish(
                     topics.telemetryDiscoveryTopicFor(sensor),
@@ -399,7 +409,7 @@ class MqttAlertPublisher(
         // The retained truth replay: whatever is live right now, as the
         // broker (and a HA restart) will remember it.
         val streamStates = streamStatesProvider()
-        publishedStreamStates = streamStates.isNotEmpty()
+        connection = connection.copy(publishedStreamStates = streamStates.isNotEmpty())
         for ((output, on) in streamStates) {
             client.publish(topics.streamStateTopicFor(output), if (on) STATE_ON else STATE_OFF, qos = 1, retain = true)
         }

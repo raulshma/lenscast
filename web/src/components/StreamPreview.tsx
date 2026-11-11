@@ -1,7 +1,9 @@
 import { Show, createSignal, createMemo, createEffect, onCleanup } from 'solid-js'
 import type { DeviceStatus, StreamingSettings } from '../types'
 import type { LiveAudioStatus } from '../audio/LiveAudioPlayer'
+import { MAX_PREVIEW_ERRORS, NO_HLS_RETRY_MS, previewRetryDelayMs, shouldDemoteToHls } from '../hooks/previewRetryPolicy'
 import { useZoomable } from '../hooks/useZoomable'
+import { pttBusy, pttTransition, type PttPhase } from '../lib/pttPhase'
 import ConnectionQualityIndicator from './ConnectionQualityIndicator'
 import { tapToFocus as apiTapToFocus, setZoom as apiSetZoom, setTorch as apiSetTorch, pushTalkback } from '../api/client'
 import { API_DEFAULTS } from '../api/defaults'
@@ -148,12 +150,12 @@ export default function StreamPreview(props: Props) {
   })
 
   const [previewErrorCount, setPreviewErrorCount] = createSignal(0)
-  const MAX_PREVIEW_ERRORS = 5
   // The MJPEG retry ladder owns exactly one pending auto-retry timer: a
   // newer error supersedes an older wait (clear-then-arm in onError), and
   // unmount cancels it — stale timers must not fire setPreviewVisible after
-  // the component is gone, and the no-HLS branch must not stack one 15 s
-  // timer per error.
+  // the component is gone, and the no-HLS branch must not stack one
+  // NO_HLS_RETRY_MS timer per error. The budget, the backoff, and the
+  // demotion verdict live in hooks/previewRetryPolicy.
   let previewRetryTimer: ReturnType<typeof setTimeout> | null = null
   onCleanup(() => { if (previewRetryTimer) clearTimeout(previewRetryTimer) })
   // The player rung is owned by useAppState (so the P shortcut and this
@@ -264,7 +266,17 @@ export default function StreamPreview(props: Props) {
 
   const [zoomRatio, setZoomRatio] = createSignal(1)
   const [torchOn, setTorchOn] = createSignal(false)
-  const [talking, setTalking] = createSignal(false)
+  // The push-to-talk hold lifecycle (lib/pttPhase: idle → arming → holding
+  // → draining; pttHold below stays the async-liveness guard for in-flight
+  // continuations — the phase is the UI/latch verdict). The derived memo
+  // keeps every reader site untouched: busy = {arming, holding, draining},
+  // exactly the old boolean latch's true-set. Known wart, deliberately
+  // kept: the phantom "Talking…" label while the mic-permission dialog is
+  // up (Arming is busy) — the label doubles as press feedback, and the
+  // honest fix is a third locale key across the i18n files, deferred to a
+  // UX wave.
+  const [pttPhase, setPttPhase] = createSignal<PttPhase>('idle')
+  const talking = createMemo(() => pttBusy(pttPhase()))
 
   // Transient talkback status line — every silent failure mode this feature
   // used to have (no mic API, denied permission, dead WS link) surfaces here.
@@ -455,6 +467,10 @@ export default function StreamPreview(props: Props) {
       if (hold !== pttHold) return
       throw err
     }
+    // Audio graph is up: arming → holding. The hold guard is mandatory — a
+    // hold bumped during the awaits reaches here too, and an unguarded
+    // write would stomp a newer hold's (or a drain's) phase.
+    if (hold === pttHold) setPttPhase(pttTransition(pttPhase(), 'audioUp'))
   }
 
   function sendPcm(chunk: Float32Array) {
@@ -479,8 +495,13 @@ export default function StreamPreview(props: Props) {
     try {
       pttSocket?.send('stop')
     } catch { }
+    setPttPhase(pttTransition(pttPhase(), 'release'))
     await stopPttCleanup()
-    setTalking(false)
+    // The idle write stays AFTER the drain, same statement position as the
+    // old latch-clear: the busy phase must hold through the whole cleanup
+    // so a second press cannot re-enter mid-drain (the drain serialization
+    // in stopPttCleanup is load-bearing).
+    setPttPhase(pttTransition(pttPhase(), 'drained'))
   }
 
   async function stopPttCleanup() {
@@ -504,11 +525,11 @@ export default function StreamPreview(props: Props) {
   // Unmount mid-hold (session demoted or logged out while the button is
   // held): the audio graph must not outlive the UI — bump the hold
   // generation so a stale startPtt bails at its next await, tear the
-  // graph down, and clear the talking latch (the button is going away
-  // with us).
+  // graph down, and land the phase on idle (teardown reaches it from
+  // anywhere; the button is going away with us).
   onCleanup(() => {
     pttHold++
-    setTalking(false)
+    setPttPhase('idle')
     void stopPttCleanup()
   })
 
@@ -582,19 +603,20 @@ export default function StreamPreview(props: Props) {
                 // MJPEG used up its retries: drop down the ladder to HLS
                 // (muxed A/V). With no HLS rung available, keep the slow
                 // MJPEG auto-retry so the stream isn't permanently stuck.
-                const next = nextPlayerMode('mjpeg', true, true, true, hlsSupported())
                 setPreviewErrorCount(0)
-                if (next === 'mjpeg') {
+                if (shouldDemoteToHls(count, hlsSupported())) {
+                  if (playerMode() === 'mjpeg') {
+                    setPlayerMode('hls')
+                    if (isActive()) {
+                      props.setPreviewVisible(true)
+                    }
+                  }
+                } else {
                   previewRetryTimer = setTimeout(() => {
                     if (isActive()) {
                       props.setPreviewVisible(true)
                     }
-                  }, 15_000)
-                } else if (playerMode() === 'mjpeg') {
-                  setPlayerMode(next)
-                  if (isActive()) {
-                    props.setPreviewVisible(true)
-                  }
+                  }, NO_HLS_RETRY_MS)
                 }
                 return
               }
@@ -603,7 +625,7 @@ export default function StreamPreview(props: Props) {
                 if (isActive()) {
                   props.setPreviewVisible(true)
                 }
-              }, 2000 * Math.min(count, 4))
+              }, previewRetryDelayMs(count))
             }}
             style={{
               transform: `scale(${zoom.scale()}) translate(${zoom.translateX()}px, ${zoom.translateY()}px)`,
@@ -876,7 +898,7 @@ export default function StreamPreview(props: Props) {
               // Capture the pointer so a slight finger drift mid-hold can't
               // cancel the talk (release anywhere still fires pointerup).
               try { e.currentTarget.setPointerCapture(e.pointerId) } catch { }
-              setTalking(true)
+              setPttPhase(pttTransition(pttPhase(), 'press'))
               startPtt().catch((err) => {
                 console.error('Talkback failed:', err)
                 void stopPtt()
@@ -897,7 +919,7 @@ export default function StreamPreview(props: Props) {
               if (e.key !== ' ' && e.key !== 'Enter') return
               e.preventDefault()
               if (e.repeat || talking()) return
-              setTalking(true)
+              setPttPhase(pttTransition(pttPhase(), 'press'))
               startPtt().catch((err) => {
                 console.error('Talkback failed:', err)
                 void stopPtt()

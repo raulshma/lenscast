@@ -6,6 +6,8 @@ import { createPollLadder } from './pollLadder'
 import { sseLaneHealthy } from './sseHealth'
 import { hashRouter, type RouteName } from '../lib/router'
 import { createSectionedDebouncer } from '../lib/sectionedDebounce'
+import { recordingPhaseKind } from '../lib/recordingPhase'
+import { sessionPhase } from '../lib/sessionPhase'
 import { transportSwitchUrl } from '../lib/transportSwitch'
 import { closeMedia, openMedia, viewerTarget } from '../lib/viewerStore'
 import { hlsSupported, nextPlayerMode, whepSupported, type PlayerMode } from '../video/playerLadder'
@@ -37,6 +39,10 @@ export function useAppState() {
   // httpOnly cookie is the store), so the role follows the same pattern.
   const [sessionRole, setSessionRole] = createSignal<SessionRole>('admin')
   const isViewer = createMemo(() => authenticated() && sessionRole() === 'viewer')
+  // The auth lifecycle as one derived verdict (lib/sessionPhase): booting →
+  // open/locked → signedIn. Demotion is a transition (signOut below), not a
+  // resting variant — see the lib module's doc.
+  const sessionPhaseMemo = createMemo(() => sessionPhase(authChecked(), authRequired(), authenticated()))
   const [loginUser, setLoginUser] = createSignal('')
   const [loginPass, setLoginPass] = createSignal('')
   const [loginError, setLoginError] = createSignal('')
@@ -88,6 +94,9 @@ export function useAppState() {
   const [isScheduled, setIsScheduled] = createSignal(false)
   const [scheduledStartTimeMs, setScheduledStartTimeMs] = createSignal<number | null>(null)
   const recordingTimer = createRecordingTimer(isRecording, recordingElapsed)
+  // The lane's phase as one derived verdict (lib/recordingPhase): recording
+  // wins over scheduled, payloads stay in their own signals below.
+  const recordingPhase = createMemo(() => recordingPhaseKind(isRecording(), isScheduled()))
 
   // ── Live Audio ──
   const [liveAudioStatus, setLiveAudioStatus] = createSignal<LiveAudioStatus>('idle')
@@ -114,7 +123,16 @@ export function useAppState() {
   // false at load (auth was off then), and the login screen renders only
   // when authRequired && !authenticated.
   function demoteToLogin() {
-    setAuthRequired(true)
+    signOut({ demoted: true })
+  }
+
+  // The one session wipe, shared by the deliberate logout and the 401
+  // demotion: same six resets either way, and `demoted` additionally arms
+  // authRequired (the demotion's whole point). The recording/interval lanes
+  // and their generation counters are deliberately NOT reset — an in-flight
+  // poll's guarded write landing after a sign-out is today's behavior.
+  function signOut(opts: { demoted: boolean }) {
+    if (opts.demoted) setAuthRequired(true)
     setAuthenticated(false)
     setSessionRole('admin')
     setSettings(null)
@@ -188,6 +206,12 @@ export function useAppState() {
         }
       }
     } catch {
+      // Fail-open, deliberate: a probe failure renders the admin-implied
+      // dashboard instead of bricking it. If auth is actually armed, the
+      // next authenticated fetch 401s and demoteToLogin() lands the login
+      // screen — the wrong window is one round trip and self-heals. The
+      // alternative (failing closed) would lock the owner out of the no-auth
+      // LAN dashboard on any transient probe error.
       setAuthRequired(false)
       setAuthenticated(true)
       setSessionRole('admin')
@@ -214,12 +238,7 @@ export function useAppState() {
 
   async function handleLogout() {
     try { await api.logout() } catch { }
-    setAuthenticated(false)
-    setSessionRole('admin')
-    setSettings(null)
-    setStatus(null)
-    setStatusFailures(0)
-    setSseConnected(false)
+    signOut({ demoted: false })
   }
 
   // ── Data fetching ──
@@ -629,9 +648,14 @@ export function useAppState() {
 
     // Track SSE liveness with a small grace: a closed stream re-arms the
     // lane, and so does an open-but-silent one. Evaluated whenever the
-    // status lane's gate runs — every 3rd ladder tick (~3 s), the lane's
-    // everyTicks boundary — and publishes the verdict into sseConnected so
-    // the poll-lane gate and the connection-lost banner can never disagree.
+    // status lane's gate is consulted — every 3rd tick (~3 s) while the
+    // verdict is dead (the lane fires and resets its counter), every tick
+    // (~1 s) while healthy (the closed gate leaves the counter saturated,
+    // so it is consulted each tick). The onopen/onerror writes make visible
+    // transitions instant; this checker is the backstop for the half-open
+    // socket no event ever reports (corrected within SSE_STALE_MS). It
+    // publishes the verdict into sseConnected so the poll-lane gate and the
+    // connection-lost banner can never disagree.
     let sseAliveAt = 0
     let lastSseEventAt = 0
     function sseHealthChecker(): boolean {
@@ -674,6 +698,7 @@ export function useAppState() {
   return {
     // Auth
     authChecked, authRequired, authenticated, sessionRole, isViewer,
+    sessionPhase: sessionPhaseMemo,
     loginUser, setLoginUser, loginPass, setLoginPass,
     loginError, loginLoading, handleLogin, handleLogout,
     // Core
@@ -690,7 +715,7 @@ export function useAppState() {
     intervalConfig, setIntervalConfig, intervalRunning, intervalCompleted,
     // Recording
     recordingConfig, setRecordingConfig, isRecording, recordingElapsed, recordingTimer,
-    isScheduled, scheduledStartTimeMs,
+    isScheduled, scheduledStartTimeMs, recordingPhase,
     // Audio
     liveAudioStatus,
     // Actions

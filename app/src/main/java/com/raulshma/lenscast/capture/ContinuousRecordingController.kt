@@ -47,14 +47,30 @@ class ContinuousRecordingController(
 
     private val lock = Any()
 
-    /** True while this controller considers the loop maintained (a segment is live or starting). */
-    private var armed = false
+    /**
+     * The loop's maintenance machine; lock-confined, this class is the only
+     * writer.
+     *
+     * Entering [LoopState.Maintaining] drops a lapsed-or-live suppression
+     * stamp; every stamp read that can observe the difference is proven
+     * ≤0-remaining — see [tryArm]'s rider.
+     */
+    private sealed interface LoopState {
+        /** Nothing maintained, no suppression pending. */
+        data object Dormant : LoopState
 
-    /** True when the live segment was started by this controller (its stop is ours to send). */
-    private var armedByUs = false
+        /**
+         * A segment is live/starting and this controller maintains it.
+         * [ours] = it armed the chain; [graceIdleSinceMs] = the chain-break
+         * grace stamp while Idle waits out the window.
+         */
+        data class Maintaining(val ours: Boolean, val graceIdleSinceMs: Long?) : LoopState
 
-    /** Arming is suppressed until this stamp lapses (a stop broke the chain). */
-    private var suppressedUntilMs = 0L
+        /** A chain break set the cooldown; arming waits out [untilMs]. */
+        data class Suppressing(val untilMs: Long) : LoopState
+    }
+
+    private var loopState: LoopState = LoopState.Dormant
 
     /** The scheduled re-evaluation after a chain break or while suppressed. */
     private var rearmJob: Job? = null
@@ -62,8 +78,8 @@ class ContinuousRecordingController(
     /** The scheduled re-check when the chain-break grace window expires. */
     private var graceJob: Job? = null
 
-    /** Idle-seen stamp for the chain-break grace window; null while not counting. */
-    private var idleSinceMs: Long? = null
+    /** The pending suppression stamp, or 0L when none (a lapsed stamp and 0L are observationally identical). */
+    private fun suppressionUntilMs(): Long = (loopState as? LoopState.Suppressing)?.untilMs ?: 0L
 
     /**
      * Starts observing. Idempotent enough for single-call use; the observation
@@ -104,9 +120,7 @@ class ContinuousRecordingController(
                 if (recordingController.state.value is RecordingState.Idle) {
                     Log.d(TAG, "Arming continuous segment: ${config.durationSeconds}s, " +
                         "repeat=${config.repeatIntervalSeconds}s")
-                    armed = true
-                    armedByUs = true
-                    idleSinceMs = null
+                    loopState = LoopState.Maintaining(ours = true, graceIdleSinceMs = null)
                     cancelGraceLocked()
                     recordingController.start(config)
                 }
@@ -115,12 +129,19 @@ class ContinuousRecordingController(
                 // Same commit discipline as Start: re-verify under the lock
                 // so a user stop/start landing after the decision is never
                 // overridden by the disable-time teardown.
-                if (armedByUs && recordingController.state.value is RecordingState.Recording) {
+                val ours = (loopState as? LoopState.Maintaining)?.ours == true
+                if (ours && recordingController.state.value is RecordingState.Recording) {
                     Log.d(TAG, "Continuous recording disabled; stopping the loop segment")
-                    armed = false
-                    armedByUs = false
-                    idleSinceMs = null
-                    suppressedUntilMs = 0L
+                    // Entering Dormant also erases the suppression stamp.
+                    // decide() deliberately leaves it in place until here (a
+                    // commit-time erase instead of the old decide-time one):
+                    // the StopOurs commit guard must still read `ours` from
+                    // the Maintaining state. The only observable delta is
+                    // that in the decide→commit window an interleaved
+                    // tryArm's rider may read a future stamp and schedule one
+                    // rearm that self-terminates on enabled=false — a no-op
+                    // wake-up, no decision change.
+                    loopState = LoopState.Dormant
                     cancelGraceLocked()
                     recordingController.stop()
                 }
@@ -136,20 +157,21 @@ class ContinuousRecordingController(
         if (!inputs.enabled) {
             rearmJob?.cancel()
             rearmJob = null
-            suppressedUntilMs = 0L
             val recordingActive = inputs.state is RecordingState.Recording
             return when {
                 ContinuousRecordingPolicy.shouldStopOnDisable(
                     enabled = false,
                     recordingActive = recordingActive,
-                    armedByController = armedByUs,
+                    // Deliberately no state write on this path: the StopOurs
+                    // commit guard still reads `ours` from the Maintaining
+                    // state, and the commit's Dormant write erases the
+                    // suppression stamp from there (see the commit).
+                    armedByController = (loopState as? LoopState.Maintaining)?.ours == true,
                 ) -> Decision.StopOurs
                 else -> {
                     // A foreign recording outlives the toggle untouched; our
                     // own idle loop simply ends here.
-                    armed = false
-                    armedByUs = false
-                    idleSinceMs = null
+                    loopState = LoopState.Dormant
                     cancelGraceLocked()
                     Decision.Noop
                 }
@@ -157,18 +179,23 @@ class ContinuousRecordingController(
         }
         return when (val state = inputs.state) {
             is RecordingState.Recording -> {
-                idleSinceMs = null
                 cancelGraceLocked()
                 // Any live recording IS the loop — ours mid-chain or a user's
-                // own start. Maintain it, never double-start over it.
-                armed = true
-                armedByUs = armedByUs || state.config == config
+                // own start. Maintain it, never double-start over it. The `||`
+                // is deliberate: it preserves a foreign takeover over an
+                // ours-chain (the disable-time teardown then stops the foreign
+                // recording) and adopts the loop's own late repeat re-start.
+                loopState = LoopState.Maintaining(
+                    ours = (loopState as? LoopState.Maintaining)?.ours == true || state.config == config,
+                    graceIdleSinceMs = null,
+                )
                 Decision.Live
             }
             is RecordingState.Scheduled -> {
                 // A future start is pending (capture-screen schedule): leave
                 // it alone; its fire re-enters through the state flow.
-                idleSinceMs = null
+                val current = loopState
+                if (current is LoopState.Maintaining) loopState = current.copy(graceIdleSinceMs = null)
                 cancelGraceLocked()
                 Decision.Noop
             }
@@ -178,18 +205,18 @@ class ContinuousRecordingController(
 
     /** Caller holds [lock]; the feature is enabled and the state is Idle. */
     private fun decideIdle(config: RecordingConfig): Decision {
-        if (!armed) {
+        if (loopState !is LoopState.Maintaining) {
             // Nothing is being maintained: either the initial arm (arm
             // immediately — the RecordingController gates camera access) or a
             // suppression window from an earlier break (wait it out).
-            if (!ContinuousRecordingPolicy.canArm(nowMs(), suppressedUntilMs)) {
+            if (!ContinuousRecordingPolicy.canArm(nowMs(), suppressionUntilMs())) {
                 // Unconditional: [scheduleRearm] cancels and replaces, so a
                 // re-evaluation during a pending job's tail re-targets the
                 // CURRENT deadline instead of leaving a job aimed at one a
                 // later break may already have extended. Skipping the
                 // reschedule here can strand the loop on a stale deadline —
                 // its fire fails [canArm] and nothing is scheduled behind it.
-                return Decision.ScheduleRearm(max(0L, suppressedUntilMs - nowMs()))
+                return Decision.ScheduleRearm(max(0L, suppressionUntilMs() - nowMs()))
             }
             return if (ContinuousRecordingPolicy.shouldArm(
                     enabled = true,
@@ -205,8 +232,10 @@ class ContinuousRecordingController(
         // Armed and Idle: the chain broke. Give the repeat machinery the grace
         // window before declaring the break — a healthy chained auto-stop
         // spends about REPEAT_GAP_SECONDS in Idle.
-        val since = idleSinceMs ?: run {
-            idleSinceMs = nowMs()
+        val since = (loopState as? LoopState.Maintaining)?.graceIdleSinceMs ?: run {
+            // decideIdle's armed path guarantees Maintaining; the safe form
+            // documents that.
+            loopState = (loopState as? LoopState.Maintaining)?.copy(graceIdleSinceMs = nowMs()) ?: loopState
             // The state flow stays Idle — it will not re-emit on its own — so
             // schedule the re-check that declares the break when the grace
             // window lapses (or is cancelled by the next Recording emission).
@@ -214,19 +243,19 @@ class ContinuousRecordingController(
         }
         val idleForMs = nowMs() - since
         if (!ContinuousRecordingPolicy.chainBreakConfirmed(idleForMs)) return Decision.Noop
-        idleSinceMs = null
-        armed = false
-        armedByUs = false
-        suppressedUntilMs = ContinuousRecordingPolicy.suppressedUntilMs(nowMs())
+        // One atomic write replacing the four adjacent flag writes of the old
+        // shape (same lock hold, no reader between them).
+        loopState = LoopState.Suppressing(ContinuousRecordingPolicy.suppressedUntilMs(nowMs()))
         Log.d(TAG, "Continuous chain broken after ${idleForMs}ms Idle; arming suppressed for " +
             "${ContinuousRecordingPolicy.USER_STOP_SUPPRESSION_MS}ms")
         // Always reschedule, with the CURRENT remaining window: a break
-        // inside an earlier suppression extends [suppressedUntilMs], and the
-        // still-pending job from the first break targets the OLD deadline —
-        // its fire would fail [canArm] and strand the loop (an Idle with no
-        // scheduled wake-up and no flow emission to recover from).
+        // inside an earlier suppression extends the suppression stamp
+        // ([LoopState.Suppressing.untilMs]), and the still-pending job from
+        // the first break targets the OLD deadline — its fire would fail
+        // [canArm] and strand the loop (an Idle with no scheduled wake-up and
+        // no flow emission to recover from).
         // [scheduleRearm] cancels and replaces, so this can never stack jobs.
-        return Decision.ScheduleRearm(max(0L, suppressedUntilMs - nowMs()))
+        return Decision.ScheduleRearm(max(0L, suppressionUntilMs() - nowMs()))
     }
 
     /** Re-evaluate after [delayMs]: the suppression cooldown tail. */
@@ -291,14 +320,14 @@ class ContinuousRecordingController(
             val fire = ContinuousRecordingPolicy.shouldArm(
                 enabled = settingsDataStore.continuousRecording.value,
                 recordingStateIsIdle = idle,
-                alreadyArmed = armed,
-            ) && ContinuousRecordingPolicy.canArm(nowMs(), suppressedUntilMs)
+                alreadyArmed = loopState is LoopState.Maintaining,
+            ) && ContinuousRecordingPolicy.canArm(nowMs(), suppressionUntilMs())
             if (!fire) {
                 // A still-live suppression always keeps exactly one wake-up
                 // scheduled — a stale-deadline fire must not strand the loop
                 // (a re-arm Job that fails [canArm] is done; nothing else
                 // re-emits or re-schedules while the state sits on Idle).
-                val remaining = suppressedUntilMs - nowMs()
+                val remaining = suppressionUntilMs() - nowMs()
                 if (idle && remaining > 0) scheduleRearm(remaining)
                 return
             }
@@ -306,9 +335,7 @@ class ContinuousRecordingController(
                 segmentMinutes = settingsDataStore.continuousSegmentMinutes.value,
                 audioEnabled = settingsDataStore.recordingAudioEnabled.value,
             )
-            armed = true
-            armedByUs = true
-            idleSinceMs = null
+            loopState = LoopState.Maintaining(ours = true, graceIdleSinceMs = null)
             recordingController.start(config)
         }
         Log.d(TAG, "Re-arming continuous segment after cooldown")

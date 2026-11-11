@@ -77,8 +77,9 @@ import org.robolectric.shadows.ShadowApplication
  * RecordingDurationPolicy verdicts, already event-sequence-tested). The
  * 60 s user-stop suppression tail IS covered — through the loop's injected
  * `nowMs` seam (fake-time verdicts, real-time coroutine delays) in the
- * second-break pin, the one test here that pays a minute-scale real-time
- * budget because the rearm job's delay is the policy constant.
+ * second-break pin and the rearm-fires-over-a-user-recording pin, the tests
+ * here that pay a minute-scale real-time budget because the rearm job's
+ * delay is the policy constant.
  *
  * Timing is real wall-clock with the controller's own default scope: short
  * durations (1 s) drive the auto-stop/repeat/schedule paths and every await
@@ -643,6 +644,168 @@ class RecordingControllerTest {
         settle("the re-armed loop must not churn behind the restart")
         assertEquals(3, serviceIntents(RecordingService.ACTION_START).size)
         assertEquals(2, serviceIntents(RecordingService.ACTION_STOP).size)
+    }
+
+    @Test
+    fun `a foreign takeover keeps the loop's stop-ours verdict - the disable-time teardown stops the foreign recording too`() {
+        val loop = armContinuousLoop()
+        controller.onServiceStarted(System.currentTimeMillis(), loop.segment)
+
+        // A foreign recording takes over the live segment: the loop adopts it
+        // while KEEPING its own ours verdict (the Recording branch's `||`
+        // deliberately preserves ours over a config mismatch) — the takeover
+        // must not launder the loop's stop into a foreign one.
+        val foreign = RecordingConfig(durationSeconds = 0, repeatIntervalSeconds = 0)
+        controller.start(foreign)
+        awaitServiceIntents(RecordingService.ACTION_START, 2, "the foreign start was never queued")
+        controller.onServiceStarted(System.currentTimeMillis(), foreign)
+        settle("the loop must adopt the foreign recording before the flip")
+        assertEquals(2, serviceIntents(RecordingService.ACTION_START).size) // arm + foreign, nothing new
+
+        // Flip the toggle off: the teardown must still stop the segment —
+        // now the foreign recording — because ours survived the takeover.
+        loop.inputs.enabled.value = false
+        awaitServiceIntents(
+            RecordingService.ACTION_STOP,
+            1,
+            "the disable-time teardown never stopped the foreign recording",
+        )
+        controller.onServiceStopped()
+        assertEquals(RecordingState.Idle, controller.state.value)
+
+        // Feature off and loop down: no re-arm behind the teardown.
+        settle("a disabled loop must stay down")
+        assertEquals(2, serviceIntents(RecordingService.ACTION_START).size)
+        assertEquals(1, serviceIntents(RecordingService.ACTION_STOP).size)
+    }
+
+    @Test
+    fun `a user start inside the suppression window leaves the pending rearm a quiet no-op - the chain still re-arms past the extended deadline`() {
+        // The rearmJob-outlives-Suppression shape, on the manual clock: the
+        // break #1 rearm job (the policy constant as its real delay) fires
+        // while a USER recording is live inside the window. The loop adopted
+        // that recording (Maintaining, not ours) and the job stays pending
+        // beside the state — its fire must be the deliberate quiet no-op: no
+        // start over the live segment, no reschedule behind it, the user
+        // recording untouched. The user recording then stops, break #2
+        // extends the window, and exactly one re-arm fires past the extended
+        // deadline (the same accounting as the wedge pin above).
+        val clock = ManualClock()
+        val loop = armContinuousLoop(nowMs = clock::now)
+        // The segment's start report carries a REAL stamp: the controller's
+        // duration math is real-clock, and a manual stamp here would make the
+        // 300 s auto-stop fire immediately (a negative remainMs skips the
+        // delay), racing this test's own stop intent. The manual clock below
+        // drives the LOOP's verdicts only (grace, suppression, rearm delays).
+        controller.onServiceStarted(System.currentTimeMillis(), loop.segment)
+
+        // Break #1: a foreign stop — the grace check declares it past the 5 s
+        // mark (same pre/post-advance windows as the wedge pin). The stop
+        // also cancels the just-armed 300 s duration job.
+        controller.stop()
+        awaitServiceIntents(RecordingService.ACTION_STOP, 1, "the first chain break was never queued")
+        controller.onServiceStopped()
+        assertEquals(RecordingState.Idle, controller.state.value)
+        Thread.sleep(4_000)
+        clock.advance(6_000)
+        Thread.sleep(6_000)
+        // Break #1 declared (suppression until fake now + 60 s); the rearm
+        // job is armed with the full 60 s as its real delay.
+
+        // A user recording starts inside the window: the loop adopts it
+        // (Maintaining, not ours) and the pending rearm stays targeting
+        // break #1's deadline.
+        clock.advance(1_000)
+        val user = RecordingConfig(durationSeconds = 0, repeatIntervalSeconds = 0)
+        controller.start(user)
+        awaitServiceIntents(RecordingService.ACTION_START, 2, "the user start was never queued")
+        controller.onServiceStarted(clock.now(), user)
+        assertTrue(controller.state.value is RecordingState.Recording)
+
+        // The pending rearm fires while the user recording is live: quiet
+        // no-op — nothing starts over the live segment, nothing is disturbed.
+        settle(STALE_REARM_FIRE_SETTLE_MS, "the pending rearm's fire window has passed")
+        assertTrue(
+            "the rearm's fire must not disturb the live user recording",
+            controller.state.value is RecordingState.Recording,
+        )
+        assertEquals(2, serviceIntents(RecordingService.ACTION_START).size) // arm + user start only
+
+        // The user recording stops: the grace dance declares break #2, which
+        // extends the suppression past break #1's (already-consumed) deadline.
+        controller.stop()
+        awaitServiceIntents(RecordingService.ACTION_STOP, 2, "the user stop was never queued")
+        controller.onServiceStopped()
+        Thread.sleep(4_000)
+        clock.advance(6_000)
+        Thread.sleep(6_000)
+
+        // Past the EXTENDED deadline: exactly one re-arm fires.
+        clock.advance(54_000)
+        settle(STALE_REARM_FIRE_SETTLE_MS, "the extended window's real-time tail has passed")
+        clock.advance(7_000)
+        val restarts = awaitServiceIntents(
+            RecordingService.ACTION_START,
+            3,
+            "the loop never re-armed past the extended suppression deadline",
+        )
+        assertEquals(loop.segment, decodeConfig(restarts.last()))
+
+        // The re-arm is the only new activity: no further starts, no stops.
+        settle("the re-armed loop must not churn behind the restart")
+        assertEquals(3, serviceIntents(RecordingService.ACTION_START).size)
+        assertEquals(2, serviceIntents(RecordingService.ACTION_STOP).size)
+    }
+
+    @Test
+    fun `a disable-and-reenable inside the suppression window erases the cooldown - the loop re-arms immediately`() {
+        // The disable-time Dormant write erases a still-live suppression
+        // stamp: round-tripping the toggle inside the cooldown must re-arm
+        // immediately, not wait the window out. On the manual clock the
+        // re-arm fires with the stamp's deadline still ~59 s in the future —
+        // an immediate start can only be the erase.
+        val clock = ManualClock()
+        val loop = armContinuousLoop(nowMs = clock::now)
+        // The segment's start report carries a REAL stamp: the controller's
+        // duration math is real-clock, and a manual stamp here would make the
+        // 300 s auto-stop fire immediately (a negative remainMs skips the
+        // delay), racing this test's own stop intent. The manual clock below
+        // drives the LOOP's verdicts only (grace, suppression, rearm delays).
+        controller.onServiceStarted(System.currentTimeMillis(), loop.segment)
+
+        // Declare break #1 (same grace dance as the wedge pin): Suppressing
+        // until fake now + 60 s, with a rearm job pending. The stop also
+        // cancels the just-armed 300 s duration job.
+        controller.stop()
+        awaitServiceIntents(RecordingService.ACTION_STOP, 1, "the chain break was never queued")
+        controller.onServiceStopped()
+        assertEquals(RecordingState.Idle, controller.state.value)
+        Thread.sleep(4_000)
+        clock.advance(6_000)
+        Thread.sleep(6_000)
+
+        // Toggle off: the disable-time Noop path ends the idle loop — Dormant
+        // erases the stamp, and the pending rearm job is cancelled at decide
+        // time. The settle lets that decision land before the re-enable (the
+        // two flips must not conflate into a single enabled emission).
+        loop.inputs.enabled.value = false
+        settle("the disable must land before the re-enable")
+        loop.inputs.enabled.value = true
+
+        // Re-enabled with the clock ~1 s past the break — deep inside the
+        // would-be cooldown: the immediate re-arm can only be the erase.
+        val restarts = awaitServiceIntents(
+            RecordingService.ACTION_START,
+            2,
+            "the loop never re-armed after the disable/enable round-trip",
+        )
+        assertEquals(loop.segment, decodeConfig(restarts.last()))
+
+        // The re-arm is the only new activity: no stop (nothing was live), no
+        // further starts.
+        settle("the re-armed loop must not churn behind the restart")
+        assertEquals(2, serviceIntents(RecordingService.ACTION_START).size)
+        assertEquals(1, serviceIntents(RecordingService.ACTION_STOP).size)
     }
 
     // ── harness ──

@@ -3,6 +3,7 @@ package com.raulshma.lenscast.streaming.srt
 import android.util.Log
 import com.raulshma.lenscast.core.StreamDefaults
 import com.raulshma.lenscast.streaming.EncodedSource
+import com.raulshma.lenscast.streaming.PublisherSession
 import com.raulshma.lenscast.streaming.rtsp.EncodedNalUnit
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -10,7 +11,6 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.channels.Channel
-import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.net.DatagramPacket
@@ -18,7 +18,6 @@ import java.net.DatagramSocket
 import java.net.InetSocketAddress
 import java.net.SocketTimeoutException
 import java.util.Random
-import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * The lifecycle surface [SrtOutput] drives; [SrtPublisher] implements it in
@@ -98,8 +97,6 @@ internal class SrtPublisher(
     }
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    private val wanted = AtomicBoolean(false)
-    private val started = AtomicBoolean(false)
 
     private val mediaChannel = Channel<Media>(
         capacity = MEDIA_CHANNEL_CAPACITY,
@@ -110,7 +107,6 @@ internal class SrtPublisher(
 
     // Cross-thread session state: the encoder threads feed, the writer and
     // session coroutines own the socket.
-    @Volatile private var statusValue: SrtStatus = SrtStatus.Idle
     @Volatile private var statsValue = SrtStats()
     @Volatile private var lastReceiveMs = 0L
     @Volatile private var lastSendMs = 0L
@@ -124,61 +120,44 @@ internal class SrtPublisher(
     private var socketId = 0
     private var peerSocketId = 0
 
-    override fun status(): SrtStatus = statusValue
+    // ── lifecycle: the shared wanted/started + reconnect/backoff machine ──
+
+    private val session = PublisherSession(
+        onStatus = onStatus,
+        idleStatus = SrtStatus.Idle,
+        connectingStatus = SrtStatus.Connecting,
+        errorStatus = { message -> SrtStatus.Error(message) },
+        defaultErrorMessage = "connection failed",
+        connect = { runAttempt() },
+        logAttemptFailed = { e -> Log.w(TAG, "SRT attempt toward ${url.redacted()} failed: ${e.message}") },
+        onStop = {
+            mediaChannel.close()
+            // The shutdown notice is best-effort: a listener that is gone
+            // already cannot read it, and the socket never outlives the grace.
+            val sock = socket
+            scope.launch {
+                runCatching {
+                    sock?.send(
+                        DatagramPacket(
+                            SrtPacket.shutdown(timestampUs(), peerSocketId),
+                            SrtPacket.HEADER_BYTES,
+                            InetSocketAddress(url.host, url.port),
+                        ),
+                    )
+                }
+                delay(STOP_FORCE_CLOSE_MS)
+                runCatching { sock?.close() }
+            }
+        },
+        scope = scope,
+    )
+
+    override fun status(): SrtStatus = session.status()
     override fun stats(): SrtStats = statsValue
 
-    private fun publishStatus(status: SrtStatus) {
-        statusValue = status
-        onStatus(status)
-    }
+    override fun start() = session.start()
 
-    // ── lifecycle ──
-
-    override fun start() {
-        if (!started.compareAndSet(false, true)) return
-        wanted.set(true)
-        val session = scope.launch {
-            var attempt = 0
-            while (wanted.get()) {
-                publishStatus(SrtStatus.Connecting)
-                try {
-                    runAttempt()
-                    attempt = 0 // a session that ended cleanly starts over without penalty
-                } catch (e: Exception) {
-                    if (!wanted.get()) break
-                    publishStatus(SrtStatus.Error(e.message ?: "connection failed"))
-                    Log.w(TAG, "SRT attempt toward ${url.redacted()} failed: ${e.message}")
-                }
-                if (!wanted.get()) break
-                delay(backoffMs(attempt))
-                attempt += 1
-            }
-            publishStatus(SrtStatus.Idle)
-        }
-        session.invokeOnCompletion { scope.cancel() }
-    }
-
-    override fun stop() {
-        if (!started.compareAndSet(true, false)) return
-        wanted.set(false)
-        mediaChannel.close()
-        // The shutdown notice is best-effort: a listener that is gone
-        // already cannot read it, and the socket never outlives the grace.
-        val sock = socket
-        scope.launch {
-            runCatching {
-                sock?.send(
-                    DatagramPacket(
-                        SrtPacket.shutdown(timestampUs(), peerSocketId),
-                        SrtPacket.HEADER_BYTES,
-                        InetSocketAddress(url.host, url.port),
-                    ),
-                )
-            }
-            delay(STOP_FORCE_CLOSE_MS)
-            runCatching { sock?.close() }
-        }
-    }
+    override fun stop() = session.stop()
 
     // ── the media taps (encoder drain threads) ──
 
@@ -247,19 +226,19 @@ internal class SrtPublisher(
             sessionBaseMs = nowMs()
             lastSendMs = nowMs()
             source.requestKeyFrame()
-            publishStatus(SrtStatus.Connected)
+            session.publish(SrtStatus.Connected)
             Log.i(TAG, "SRT publishing to ${url.redacted()} (peer socket $peerSocketId)")
 
             val writer = scope.launch {
                 runCatching { drainMedia() }
-                    .onFailure { if (wanted.get()) Log.w(TAG, "SRT media writer ended: ${it.message}") }
+                    .onFailure { if (session.isWanted()) Log.w(TAG, "SRT media writer ended: ${it.message}") }
             }
             try {
                 readLoop(sock)
             } finally {
                 writer.cancel()
             }
-            if (!wanted.get()) return
+            if (!session.isWanted()) return
             throw java.io.IOException("SRT connection closed by peer")
         } finally {
             runCatching { sock.close() }
@@ -306,7 +285,7 @@ internal class SrtPublisher(
      */
     private fun readLoop(sock: DatagramSocket) {
         val buffer = ByteArray(MAX_INCOMING_BYTES)
-        while (wanted.get()) {
+        while (session.isWanted()) {
             val packet = DatagramPacket(buffer, buffer.size)
             try {
                 sock.receive(packet)
@@ -366,7 +345,7 @@ internal class SrtPublisher(
                     is Media.Audio -> writeAudio(media)
                 }
             } catch (e: Exception) {
-                if (wanted.get()) Log.w(TAG, "SRT media write failed: ${e.message}")
+                if (session.isWanted()) Log.w(TAG, "SRT media write failed: ${e.message}")
                 // Unblocks the read half (which owns this attempt's teardown)
                 // instead of leaving both sides stalled on a dead socket.
                 runCatching { socket?.close() }
@@ -413,14 +392,6 @@ internal class SrtPublisher(
     /** Microseconds since an arbitrary epoch, the SRT timestamp convention. */
     private fun timestampUs(): Long = System.nanoTime() / 1_000 and 0xFFFFFFFFL
 
-    private fun backoffMs(attempt: Int): Long {
-        var ms = INITIAL_BACKOFF_MS
-        repeat(attempt.coerceAtLeast(0)) {
-            ms = (ms * 2).coerceAtMost(MAX_BACKOFF_MS)
-        }
-        return ms
-    }
-
     private companion object {
         private const val TAG = "SrtPublisher"
 
@@ -428,8 +399,6 @@ internal class SrtPublisher(
         private const val MAX_INCOMING_BYTES = 1500
         private const val MEDIA_CHANNEL_CAPACITY = 128
         private const val STOP_FORCE_CLOSE_MS = 2_000L
-        private const val INITIAL_BACKOFF_MS = 1_000L
-        private const val MAX_BACKOFF_MS = 30_000L
     }
 }
 

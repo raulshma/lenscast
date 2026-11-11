@@ -1,4 +1,4 @@
-import { createEffect, createSignal, For, onCleanup, onMount, Show } from 'solid-js'
+import { createEffect, createMemo, createSignal, For, onCleanup, onMount, Show } from 'solid-js'
 import SettingsCard from './SettingsCard'
 import {
   type CameraCredentials,
@@ -13,6 +13,7 @@ import {
   tileRefreshMs,
   withMode,
 } from '../lib/multicamStorage'
+import { SNAPSHOT_PATH, tileBadgeKind, tileRung } from '../lib/tileRung'
 import { t, tCount } from '../lib/i18n'
 
 /**
@@ -21,11 +22,10 @@ import { t, tCount } from '../lib/i18n'
  * shown on each phone's Connect sheet).
  */
 
-// Remote LensCast routes (server-side: StreamingServer.kt). Plain <img> needs
-// no CORS, but both routes sit behind the camera's auth when enabled —
-// credential-carrying tiles fetch their frames instead (see CameraTile).
-const SNAPSHOT_PATH = '/snapshot' // image/jpeg, latest MJPEG frame
-const MJPEG_PATH = '/stream' // multipart/x-mixed-replace, rendered natively by <img>
+// Remote LensCast media routes (server-side: StreamingServer.kt) live in
+// lib/tileRung. Plain <img> needs no CORS, but both routes sit behind the
+// camera's auth when enabled — credential-carrying tiles fetch their frames
+// instead (see CameraTile).
 
 const STORAGE_KEY = 'lenscast.multicam.cameras'
 
@@ -191,9 +191,14 @@ function CameraTile(props: {
     })
   })
 
-  const imageUrl = () => frameUrl() ?? (mode() === 'live'
-    ? mediaUrl(props.camera.baseUrl, MJPEG_PATH, props.camera)
-    : mediaUrl(props.camera.baseUrl, `${SNAPSHOT_PATH}?t=${tick()}`, props.camera))
+  // The tile's media source, derived and never stored (lib/tileRung): the
+  // held auth frame, else the live MJPEG rung, else the cache-busted
+  // snapshot. It only READS the primitives the writers set — the wave-6
+  // revoke discipline is untouched (revocation invalidates the browser
+  // resource, not the string read here), and onError/onLoad below keep
+  // reading frameUrl()/mode() directly.
+  const rung = createMemo(() => tileRung(frameUrl(), mode(), tick(), props.camera))
+  const badgeKind = createMemo(() => tileBadgeKind(status(), mode()))
 
   function startEdit() {
     setEditName(props.camera.name)
@@ -259,7 +264,7 @@ function CameraTile(props: {
         <img
           class="multicam-tile-img"
           alt={t('multicam.previewAlt', { name: props.camera.name })}
-          src={imageUrl()}
+          src={rung().url}
           loading="lazy"
           onError={() => {
             // A failed object URL just re-runs the next fetch tick.
@@ -279,12 +284,16 @@ function CameraTile(props: {
           }}
           onLoad={() => setStatus('online')}
         />
+        {/* The stylesheet has no .multicam-badge-loading rule: a loading
+            tile has always carried the offline badge styling while its text
+            shows the '…' placeholder — the class map below keeps that. */}
         <span
-          class={`multicam-badge multicam-badge-${status() === 'online' ? (mode() === 'live' ? 'live' : 'online') : 'offline'}`}
+          class={`multicam-badge multicam-badge-${badgeKind() === 'loading' ? 'offline' : badgeKind()}`}
         >
-          {status() === 'online'
-            ? (mode() === 'live' ? t('multicam.tile.live') : t('multicam.tile.online'))
-            : status() === 'offline' ? t('multicam.tile.offline') : '…'}
+          {badgeKind() === 'live'
+            ? t('multicam.tile.live')
+            : badgeKind() === 'online' ? t('multicam.tile.online')
+            : badgeKind() === 'offline' ? t('multicam.tile.offline') : '…'}
         </span>
         <Show when={captureLabel()}>
           <span class={`multicam-badge multicam-capture-badge multicam-capture-${props.captureStatus()}`}>

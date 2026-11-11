@@ -51,10 +51,17 @@ import java.util.Date
  */
 class RecordingService : Service() {
 
-    private var isRecording = false
+    /**
+     * The service's shadow of RecordingController.state (Idle/Recording/
+     * Finalizing — the service never holds Scheduled; scheduling lives in the
+     * controller). Main-thread-written only; the controller's state remains
+     * the only public truth — reports (:234/:344/:328/:378) unchanged.
+     */
+    private enum class Phase { Idle, Recording, Finalizing }
+
+    private var phase = Phase.Idle
     private var startTimeMs: Long = 0
     private var recordingConfig: RecordingConfig? = null
-    private var isFinalizingRecording = false
     private var capturedRecordingAudioExclusively = false
     private var activeRecording: Recording? = null
 
@@ -83,25 +90,29 @@ class RecordingService : Service() {
         // saved-clip promotion no-ops against the cancelled scope (clip lost —
         // the same bargain the Finalizing rescue already makes) and the error
         // branch's teardownSession re-runs an idempotent ladder.
-        if (isRecording) {
-            isRecording = false
-            runCatching { activeRecording?.stop() }
-            pendingTempFile?.delete()
-            pendingTempFile = null
-            releaseExclusiveRecordingAudio()
-            app.cameraService.endExclusiveSession()
-            app.cameraService.releaseKeepAlive()
-            app.cameraService.unbindRecording()
-            recordingController.onServiceStopped()
-        }
-        // Destroy mid-drain (system teardown while the encrypted promotion is
-        // in flight): the clip is lost with the cancelled scope, but the
-        // controller must never stay wedged in Finalizing and the temp
-        // plaintext must not outlive the service.
-        if (isFinalizingRecording) {
-            pendingTempFile?.delete()
-            pendingTempFile = null
-            recordingController.onServiceStopped()
+        when (phase) {
+            Phase.Recording -> {
+                phase = Phase.Idle
+                runCatching { activeRecording?.stop() }
+                pendingTempFile?.delete()
+                pendingTempFile = null
+                releaseExclusiveRecordingAudio()
+                app.cameraService.endExclusiveSession()
+                app.cameraService.releaseKeepAlive()
+                app.cameraService.unbindRecording()
+                recordingController.onServiceStopped()
+            }
+            // Destroy mid-drain (system teardown while the encrypted promotion is
+            // in flight): the clip is lost with the cancelled scope, but the
+            // controller must never stay wedged in Finalizing and the temp
+            // plaintext must not outlive the service.
+            Phase.Finalizing -> {
+                pendingTempFile?.delete()
+                pendingTempFile = null
+                recordingController.onServiceStopped()
+                phase = Phase.Idle
+            }
+            Phase.Idle -> {}
         }
         serviceScope.cancel()
         super.onDestroy()
@@ -124,9 +135,10 @@ class RecordingService : Service() {
         // A start while the previous recording is still draining would
         // overwrite activeRecording and lose the session when the pending
         // Finalize fires — drop it instead (the repeat policy re-issues).
-        if (isRecording || isFinalizingRecording) return
+        if (phase != Phase.Idle) return
         recordingConfig = config
-        isFinalizingRecording = false
+        // The old `isFinalizingRecording = false` here is subsumed: the Idle
+        // guard above already guarantees the phase is not Finalizing.
         startTimeMs = System.currentTimeMillis()
 
         val shouldIncludeAudio = config?.includeAudio ?: true
@@ -312,7 +324,7 @@ class RecordingService : Service() {
                 }
 
             activeRecording = currentRecording
-            isRecording = true
+            phase = Phase.Recording
         } catch (e: Exception) {
             Log.e(TAG, "Failed to start recording", e)
             cleanupFailedStart()
@@ -320,17 +332,20 @@ class RecordingService : Service() {
     }
 
     private fun stopRecording() {
-        if (!isRecording || isFinalizingRecording) {
-            if (!isRecording) {
+        when (phase) {
+            Phase.Recording -> {
+                // Fall through to the drain below.
+            }
+            Phase.Idle, Phase.Finalizing -> {
                 // Nothing live to drain. Report anyway so a stop aimed at a
                 // stale service instance can never wedge the controller in a
-                // non-Idle state.
+                // non-Idle state. (Finalizing: the drain is already running;
+                // the re-report is the same idempotent no-op.)
                 recordingController.onServiceStopped()
+                return
             }
-            return
         }
-        isRecording = false
-        isFinalizingRecording = true
+        phase = Phase.Finalizing
 
         val currentRecording = activeRecording
         if (currentRecording == null) {
@@ -345,16 +360,15 @@ class RecordingService : Service() {
         currentRecording.stop()
     }
 
-    /** A completed recording: clear the finalizing flag, then the shared teardown. */
+    /** A completed recording: leave Finalizing, then the shared teardown. */
     private fun finishRecordingSession() {
-        isFinalizingRecording = false
+        phase = Phase.Idle
         teardownSession()
     }
 
-    /** A start that never came live: clear both live flags, then the shared teardown. */
+    /** A start that never came live: back to Idle, then the shared teardown. */
     private fun cleanupFailedStart() {
-        isRecording = false
-        isFinalizingRecording = false
+        phase = Phase.Idle
         // A failed start never promotes the encrypted temp output.
         pendingTempFile?.delete()
         pendingTempFile = null

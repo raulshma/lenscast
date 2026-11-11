@@ -165,4 +165,268 @@ class MqttAlertPublisherLifecycleTest {
             }
         }
     }
+
+    @Test
+    fun `close clears the retained stream states the announce published`() {
+        ServerSocket(0, 1, InetAddress.getLoopbackAddress()).use { server ->
+            val publisher = MqttAlertPublisher(
+                configProvider = {
+                    MqttAlertPublisher.Config(
+                        enabled = true,
+                        broker = MqttAlertPublisher.Broker("127.0.0.1", server.localPort, "", "", false),
+                        discoveryPrefix = "ha",
+                    )
+                },
+                deviceId = "dev1",
+                deviceName = "Test Phone",
+                streamStatesProvider = { mapOf(MqttTopics.StreamOutput.WEB to true) },
+            )
+            publisher.start()
+
+            val broker = Broker(server.accept())
+            try {
+                assertEquals(1, broker.readFrame().type) // CONNECT
+                broker.connack()
+
+                // Announce: one retained discovery config per sensor kind,
+                // then the retained availability online, then the retained
+                // stream-state truth for the one live output.
+                repeat(MqttTopics.SensorKind.entries.size + 1) { index ->
+                    val frame = broker.readFrame()
+                    assertEquals(3, frame.type)
+                    assertEquals(1, frame.qos)
+                    assertTrue("announce publish $index must be retained", frame.retained)
+                    if (index < MqttTopics.SensorKind.entries.size) {
+                        assertTrue(publishTopic(frame.body).startsWith("ha/binary_sensor/lenscast_dev1_"))
+                    } else {
+                        assertEquals("ha/lenscast/dev1/status", publishTopic(frame.body))
+                        assertEquals("online", publishPayload(frame.body))
+                    }
+                    broker.puback(publishPacketId(frame.body))
+                }
+                val streamState = broker.readFrame()
+                assertEquals(3, streamState.type)
+                assertTrue("the stream state must be retained", streamState.retained)
+                assertEquals("ha/lenscast/dev1/stream/web/state", publishTopic(streamState.body))
+                assertEquals("ON", publishPayload(streamState.body))
+                broker.puback(publishPacketId(streamState.body))
+
+                // Close: retained offline, then the discovery configs, then —
+                // the pin — one retained empty per stream output (every
+                // output's state topic, not just the live one: the close path
+                // clears exactly what went out), then the DISCONNECT.
+                publisher.close()
+                val offline = broker.readFrame()
+                assertEquals(3, offline.type)
+                assertTrue("close offline must be retained", offline.retained)
+                assertEquals("ha/lenscast/dev1/status", publishTopic(offline.body))
+                assertEquals("offline", publishPayload(offline.body))
+                broker.puback(publishPacketId(offline.body))
+
+                repeat(MqttTopics.SensorKind.entries.size) { index ->
+                    val clear = broker.readFrame()
+                    assertEquals(3, clear.type)
+                    assertTrue("discovery clear $index must be retained", clear.retained)
+                    assertEquals("", publishPayload(clear.body))
+                    broker.puback(publishPacketId(clear.body))
+                }
+                val clearedStreams = mutableListOf<String>()
+                repeat(MqttTopics.StreamOutput.entries.size) { index ->
+                    val clear = broker.readFrame()
+                    assertEquals(3, clear.type)
+                    assertTrue("stream-state clear $index must be retained", clear.retained)
+                    assertEquals("", publishPayload(clear.body))
+                    clearedStreams.add(publishTopic(clear.body))
+                    broker.puback(publishPacketId(clear.body))
+                }
+                assertEquals(
+                    MqttTopics.StreamOutput.entries
+                        .map { "ha/lenscast/dev1/stream/${it.wireName}/state" }
+                        .sorted(),
+                    clearedStreams.sorted(),
+                )
+
+                assertEquals(14, broker.readFrame().type) // DISCONNECT
+            } finally {
+                publisher.close()
+            }
+        }
+    }
+
+    @Test
+    fun `a telemetry flip re-runs the connection lifecycle and the changed path clears the telemetry entities`() {
+        ServerSocket(0, 1, InetAddress.getLoopbackAddress()).use { server ->
+            var config = MqttAlertPublisher.Config(
+                enabled = true,
+                broker = MqttAlertPublisher.Broker("127.0.0.1", server.localPort, "", "", false),
+                discoveryPrefix = "ha",
+                telemetryEnabled = true,
+            )
+            val publisher = MqttAlertPublisher(
+                configProvider = { config },
+                deviceId = "dev1",
+                deviceName = "Test Phone",
+            )
+            publisher.start()
+
+            val broker1 = Broker(server.accept())
+            try {
+                assertEquals(1, broker1.readFrame().type) // CONNECT
+                broker1.connack()
+
+                // Announce under telemetry-on: the binary_sensor configs, one
+                // sensor discovery config per telemetry entity, then online.
+                val telemetryCount = MqttTopics.TelemetrySensor.entries.size
+                repeat(MqttTopics.SensorKind.entries.size + telemetryCount + 1) { index ->
+                    val frame = broker1.readFrame()
+                    assertEquals(3, frame.type)
+                    assertTrue(frame.retained)
+                    broker1.puback(publishPacketId(frame.body))
+                    when {
+                        index < MqttTopics.SensorKind.entries.size ->
+                            assertTrue(publishTopic(frame.body).startsWith("ha/binary_sensor/"))
+                        index < MqttTopics.SensorKind.entries.size + telemetryCount ->
+                            assertTrue(publishTopic(frame.body).startsWith("ha/sensor/"))
+                        else -> assertEquals("ha/lenscast/dev1/status", publishTopic(frame.body))
+                    }
+                }
+
+                // Flip the telemetry toggle off (same broker — the config
+                // VALUE change alone re-runs the lifecycle): the changed path
+                // publishes the retained offline under the OLD truth, clears
+                // the binary_sensor configs and every telemetry discovery AND
+                // state topic, disconnects, reconnects, and re-announces the
+                // base discovery with NO telemetry entities.
+                config = config.copy(telemetryEnabled = false)
+                publisher.start()
+
+                val offline = broker1.readFrame()
+                assertTrue(offline.retained)
+                assertEquals("ha/lenscast/dev1/status", publishTopic(offline.body))
+                assertEquals("offline", publishPayload(offline.body))
+                broker1.puback(publishPacketId(offline.body))
+
+                repeat(MqttTopics.SensorKind.entries.size) { index ->
+                    val clear = broker1.readFrame()
+                    assertEquals("", publishPayload(clear.body))
+                    assertTrue(publishTopic(clear.body).startsWith("ha/binary_sensor/"))
+                    broker1.puback(publishPacketId(clear.body))
+                }
+                repeat(telemetryCount) { index ->
+                    val sensor = MqttTopics.TelemetrySensor.entries[index]
+                    val discoveryClear = broker1.readFrame()
+                    assertEquals("", publishPayload(discoveryClear.body))
+                    assertEquals(
+                        "ha/sensor/lenscast_dev1_${sensor.wireName}/config",
+                        publishTopic(discoveryClear.body),
+                    )
+                    broker1.puback(publishPacketId(discoveryClear.body))
+                    val stateClear = broker1.readFrame()
+                    assertEquals("", publishPayload(stateClear.body))
+                    assertEquals(
+                        "ha/lenscast/dev1/${sensor.wireName}/state",
+                        publishTopic(stateClear.body),
+                    )
+                    broker1.puback(publishPacketId(stateClear.body))
+                }
+                assertEquals(14, broker1.readFrame().type) // DISCONNECT
+
+                // The reconnect announces the base truth only: no telemetry
+                // entity may exist behind the flip.
+                val broker2 = Broker(server.accept())
+                assertEquals(1, broker2.readFrame().type) // CONNECT
+                broker2.connack()
+                repeat(MqttTopics.SensorKind.entries.size + 1) { index ->
+                    val frame = broker2.readFrame()
+                    assertEquals(3, frame.type)
+                    assertTrue(frame.retained)
+                    broker2.puback(publishPacketId(frame.body))
+                    if (index < MqttTopics.SensorKind.entries.size) {
+                        assertTrue(publishTopic(frame.body).startsWith("ha/binary_sensor/"))
+                    } else {
+                        assertEquals("ha/lenscast/dev1/status", publishTopic(frame.body))
+                        assertEquals("online", publishPayload(frame.body))
+                    }
+                }
+            } finally {
+                publisher.close()
+            }
+        }
+    }
+
+    @Test
+    fun `a changed discovery prefix clears the old prefix's entities before the new prefix's announce`() {
+        ServerSocket(0, 1, InetAddress.getLoopbackAddress()).use { server ->
+            var config = MqttAlertPublisher.Config(
+                enabled = true,
+                broker = MqttAlertPublisher.Broker("127.0.0.1", server.localPort, "", "", false),
+                discoveryPrefix = "ha",
+            )
+            val publisher = MqttAlertPublisher(
+                configProvider = { config },
+                deviceId = "dev1",
+                deviceName = "Test Phone",
+            )
+            publisher.start()
+
+            val broker1 = Broker(server.accept())
+            try {
+                assertEquals(1, broker1.readFrame().type) // CONNECT
+                broker1.connack()
+
+                // First announce under prefix "ha".
+                repeat(MqttTopics.SensorKind.entries.size + 1) { index ->
+                    val frame = broker1.readFrame()
+                    assertEquals(3, frame.type)
+                    assertTrue(frame.retained)
+                    if (index < MqttTopics.SensorKind.entries.size) {
+                        assertTrue(publishTopic(frame.body).startsWith("ha/binary_sensor/"))
+                    } else {
+                        assertEquals("ha/lenscast/dev1/status", publishTopic(frame.body))
+                    }
+                    broker1.puback(publishPacketId(frame.body))
+                }
+
+                // Move to prefix "hb": the old prefix's retained availability
+                // and discovery configs are cleared (and the connection
+                // dropped) BEFORE anything under the new prefix goes out — a
+                // changed prefix must never orphan the old prefix's entities.
+                config = config.copy(discoveryPrefix = "hb")
+                publisher.start()
+
+                val offline = broker1.readFrame()
+                assertTrue(offline.retained)
+                assertEquals("ha/lenscast/dev1/status", publishTopic(offline.body))
+                assertEquals("offline", publishPayload(offline.body))
+                broker1.puback(publishPacketId(offline.body))
+                repeat(MqttTopics.SensorKind.entries.size) { index ->
+                    val clear = broker1.readFrame()
+                    assertTrue(clear.retained)
+                    assertEquals("", publishPayload(clear.body))
+                    assertTrue(publishTopic(clear.body).startsWith("ha/binary_sensor/"))
+                    broker1.puback(publishPacketId(clear.body))
+                }
+                assertEquals(14, broker1.readFrame().type) // DISCONNECT
+
+                // The new connection announces under the NEW prefix only.
+                val broker2 = Broker(server.accept())
+                assertEquals(1, broker2.readFrame().type) // CONNECT
+                broker2.connack()
+                repeat(MqttTopics.SensorKind.entries.size + 1) { index ->
+                    val frame = broker2.readFrame()
+                    assertEquals(3, frame.type)
+                    assertTrue(frame.retained)
+                    if (index < MqttTopics.SensorKind.entries.size) {
+                        assertTrue(publishTopic(frame.body).startsWith("hb/binary_sensor/"))
+                    } else {
+                        assertEquals("hb/lenscast/dev1/status", publishTopic(frame.body))
+                        assertEquals("online", publishPayload(frame.body))
+                    }
+                    broker2.puback(publishPacketId(frame.body))
+                }
+            } finally {
+                publisher.close()
+            }
+        }
+    }
 }

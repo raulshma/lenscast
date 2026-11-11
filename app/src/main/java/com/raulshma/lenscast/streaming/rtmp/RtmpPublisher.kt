@@ -2,6 +2,7 @@ package com.raulshma.lenscast.streaming.rtmp
 
 import android.util.Log
 import com.raulshma.lenscast.streaming.EncodedSource
+import com.raulshma.lenscast.streaming.PublisherSession
 import com.raulshma.lenscast.streaming.rtsp.EncodedNalUnit
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -9,7 +10,6 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.channels.Channel
-import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.io.IOException
@@ -20,7 +20,6 @@ import java.net.Socket
 import java.net.SocketTimeoutException
 import java.util.Random
 import java.util.concurrent.ConcurrentLinkedQueue
-import java.util.concurrent.atomic.AtomicBoolean
 
 /** A connect/publish rejection with a message worth surfacing on the status line. */
 internal class RtmpPublishException(message: String) : Exception(message)
@@ -81,8 +80,6 @@ internal class RtmpPublisher(
     }
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    private val wanted = AtomicBoolean(false)
-    private val started = AtomicBoolean(false)
 
     private val mediaChannel = Channel<Media>(
         capacity = MEDIA_CHANNEL_CAPACITY,
@@ -113,57 +110,38 @@ internal class RtmpPublisher(
     private var publishStreamId = 0
     private var sessionBaseMs = 0L
 
-    @Volatile private var statusValue: RtmpStatus = RtmpStatus.Idle
     private val random = Random()
 
-    override fun status(): RtmpStatus = statusValue
+    // ── lifecycle: the shared wanted/started + reconnect/backoff machine ──
 
-    private fun publishStatus(status: RtmpStatus) {
-        statusValue = status
-        onStatus(status)
-    }
-
-    // ── lifecycle ──
-
-    override fun start() {
-        if (!started.compareAndSet(false, true)) return
-        wanted.set(true)
-        val session = scope.launch {
-            var attempt = 0
-            while (wanted.get()) {
-                publishStatus(RtmpStatus.Connecting)
-                try {
-                    runAttempt()
-                    attempt = 0 // a session that ended cleanly starts over without penalty
-                } catch (e: Exception) {
-                    if (!wanted.get()) break
-                    publishStatus(RtmpStatus.Error(e.message ?: "connection failed"))
-                    Log.w(TAG, "RTMP attempt to ${url.hostAndPort} failed: ${e.message}")
-                }
-                if (!wanted.get()) break
-                val backoffMs = backoffMs(attempt)
-                attempt += 1
-                delay(backoffMs)
+    private val session = PublisherSession(
+        onStatus = onStatus,
+        idleStatus = RtmpStatus.Idle,
+        connectingStatus = RtmpStatus.Connecting,
+        errorStatus = { message -> RtmpStatus.Error(message) },
+        defaultErrorMessage = "connection failed",
+        connect = { runAttempt() },
+        logAttemptFailed = { e -> Log.w(TAG, "RTMP attempt to ${url.hostAndPort} failed: ${e.message}") },
+        onStop = {
+            // Closing the channel ends the writer's drain loop, whose tail is the
+            // clean close (FCUnpublish/DeleteStream + socket close). A dead
+            // network can block that write, so a delayed force-close guarantees
+            // the socket never outlives the stop.
+            mediaChannel.close()
+            val sock = socket
+            scope.launch {
+                delay(STOP_FORCE_CLOSE_MS)
+                runCatching { sock?.close() }
             }
-            publishStatus(RtmpStatus.Idle)
-        }
-        session.invokeOnCompletion { scope.cancel() }
-    }
+        },
+        scope = scope,
+    )
 
-    override fun stop() {
-        if (!started.compareAndSet(true, false)) return
-        wanted.set(false)
-        // Closing the channel ends the writer's drain loop, whose tail is the
-        // clean close (FCUnpublish/DeleteStream + socket close). A dead
-        // network can block that write, so a delayed force-close guarantees
-        // the socket never outlives the stop.
-        mediaChannel.close()
-        val sock = socket
-        scope.launch {
-            delay(STOP_FORCE_CLOSE_MS)
-            runCatching { sock?.close() }
-        }
-    }
+    override fun status(): RtmpStatus = session.status()
+
+    override fun start() = session.start()
+
+    override fun stop() = session.stop()
 
     // ── the media taps (encoder drain threads) ──
 
@@ -286,17 +264,17 @@ internal class RtmpPublisher(
             sentAudioSeq = null
             sessionBaseMs = nowMs()
             source.requestKeyFrame()
-            publishStatus(RtmpStatus.Connected)
+            session.publish(RtmpStatus.Connected)
             Log.i(TAG, "RTMP publishing ${url.streamKey} to ${url.hostAndPort}/${url.app}")
 
             writerJob = scope.launch {
                 runCatching { drainMedia(writer) }
-                    .onFailure { if (wanted.get()) Log.w(TAG, "RTMP media writer ended: ${it.message}") }
+                    .onFailure { if (session.isWanted()) Log.w(TAG, "RTMP media writer ended: ${it.message}") }
             }
 
             // The read half runs here until the socket dies or stop() closes it.
             readLoop(reader, input)
-            if (!wanted.get()) return
+            if (!session.isWanted()) return
             throw IOException("RTMP connection closed by server")
         } finally {
             writerJob?.cancel()
@@ -364,7 +342,7 @@ internal class RtmpPublisher(
     }
 
     private fun readLoop(reader: RtmpChunkReader, input: InputStream) {
-        while (wanted.get()) {
+        while (session.isWanted()) {
             pumpReader(reader, input)
         }
     }
@@ -423,7 +401,7 @@ internal class RtmpPublisher(
                     is Media.Audio -> writeAudioMessage(writer, message)
                 }
             } catch (e: Exception) {
-                if (wanted.get()) Log.w(TAG, "RTMP media write failed: ${e.message}")
+                if (session.isWanted()) Log.w(TAG, "RTMP media write failed: ${e.message}")
                 alive = false
                 // Unblocks the read half (which owns this attempt's teardown)
                 // instead of leaving both sides stalled on a dead socket.
@@ -558,14 +536,6 @@ internal class RtmpPublisher(
 
     private fun nowMs(): Long = System.nanoTime() / 1_000_000L
 
-    private fun backoffMs(attempt: Int): Long {
-        var ms = INITIAL_BACKOFF_MS
-        repeat(attempt.coerceAtLeast(0)) {
-            ms = (ms * 2).coerceAtMost(MAX_BACKOFF_MS)
-        }
-        return ms
-    }
-
     private fun int32(value: Int): ByteArray = byteArrayOf(
         ((value shr 24) and 0xFF).toByte(),
         ((value shr 16) and 0xFF).toByte(),
@@ -593,8 +563,6 @@ internal class RtmpPublisher(
         private const val READ_BUFFER_BYTES = 16 * 1024
         private const val MEDIA_CHANNEL_CAPACITY = 128
         private const val STOP_FORCE_CLOSE_MS = 2_000L
-        private const val INITIAL_BACKOFF_MS = 1_000L
-        private const val MAX_BACKOFF_MS = 30_000L
     }
 }
 
