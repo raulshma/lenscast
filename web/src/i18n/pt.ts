@@ -73,6 +73,12 @@ export const pt: Partial<Record<MessageKey, string>> = {
   'preview.audioConnecting': 'Conectando…',
   'preview.audioError': 'Erro de áudio',
   'preview.audioIdle': 'Áudio inativo',
+  'preview.fullscreen': 'Tela cheia',
+  'preview.fullscreenTitle': 'Alternar pré-visualização em tela cheia (mantém a tela ativa ao vivo)',
+  'preview.exitFullscreen': 'Sair',
+  'preview.exitFullscreenTitle': 'Sair da tela cheia',
+  'preview.fullscreenNeedsHttps': 'O bloqueio de tela precisa de HTTPS — ative o HTTPS nas configurações do dispositivo para manter a tela ativa',
+  'preview.fullscreenUnavailable': 'A tela cheia não está disponível neste navegador',
 
   // ── Lens selector (zoom renders generically from zoomRatio with no catalog entry) ──
   'lens.front': 'Frontal',

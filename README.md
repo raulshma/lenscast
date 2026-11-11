@@ -87,7 +87,7 @@ LensCast is an Android camera application with live video/audio streaming to web
 
 ### Web UI (Remote Control Dashboard)
 - Full remote camera control dashboard built with SolidJS, Tailwind CSS v4, and DaisyUI
-- Live stream preview with start/stop/resume controls for both web (M-JPEG) and RTSP streams
+- Live stream preview with start/stop/resume controls for both web (M-JPEG) and RTSP streams, plus a full-screen mode (native Fullscreen API with a CSS-overlay fallback for iOS) that keeps the screen awake while live over HTTPS
 - Remote camera settings: exposure, focus, white balance, zoom, resolution, frame rate, HDR, stabilization, night vision, and scene mode
 - Streaming settings: port, JPEG quality, adaptive bitrate toggle, web/RTSP enable/disable, audio configuration
 - Stream overlay configuration: timestamp, branding, custom text, position, font size, colors

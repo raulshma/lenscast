@@ -73,6 +73,12 @@ export const zh: Partial<Record<MessageKey, string>> = {
   'preview.audioConnecting': '连接中…',
   'preview.audioError': '音频出错',
   'preview.audioIdle': '音频空闲',
+  'preview.fullscreen': '全屏',
+  'preview.fullscreenTitle': '切换全屏预览（直播时保持屏幕常亮）',
+  'preview.exitFullscreen': '退出',
+  'preview.exitFullscreenTitle': '退出全屏',
+  'preview.fullscreenNeedsHttps': '屏幕常亮需要 HTTPS——请在设备设置中启用 HTTPS 以保持屏幕常亮',
+  'preview.fullscreenUnavailable': '此浏览器不支持全屏',
 
   // ── Lens selector (zoom renders generically from zoomRatio with no catalog entry) ──
   'lens.front': '前置',

@@ -73,6 +73,12 @@ export const fr: Partial<Record<MessageKey, string>> = {
   'preview.audioConnecting': 'Connexion...',
   'preview.audioError': 'Erreur audio',
   'preview.audioIdle': 'Audio inactif',
+  'preview.fullscreen': 'Plein écran',
+  'preview.fullscreenTitle': 'Basculer l’aperçu en plein écran (garde l’écran allumé en direct)',
+  'preview.exitFullscreen': 'Quitter',
+  'preview.exitFullscreenTitle': 'Quitter le plein écran',
+  'preview.fullscreenNeedsHttps': 'Le verrouillage d’écran exige HTTPS — activez HTTPS dans les réglages de l’appareil pour garder l’écran allumé',
+  'preview.fullscreenUnavailable': 'Le plein écran n’est pas disponible dans ce navigateur',
 
   // ── Lens selector (zoom renders generically from zoomRatio with no catalog entry) ──
   'lens.front': 'Front',

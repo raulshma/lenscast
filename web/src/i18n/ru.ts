@@ -74,6 +74,12 @@ export const ru: Partial<Record<MessageKey, string>> = {
   'preview.audioConnecting': 'Подключение...',
   'preview.audioError': 'Ошибка звука',
   'preview.audioIdle': 'Звук ожидает',
+  'preview.fullscreen': 'Полный экран',
+  'preview.fullscreenTitle': 'Полноэкранный просмотр (не даёт экрану гаснуть во время эфира)',
+  'preview.exitFullscreen': 'Выйти',
+  'preview.exitFullscreenTitle': 'Выйти из полноэкранного режима',
+  'preview.fullscreenNeedsHttps': 'Для удержания экрана нужен HTTPS — включите HTTPS в настройках устройства, чтобы экран не гас',
+  'preview.fullscreenUnavailable': 'Полноэкранный режим недоступен в этом браузере',
 
   // ── Lens selector (zoom renders generically from zoomRatio with no catalog entry) ──
   'lens.front': 'Фронтальная',

@@ -762,6 +762,29 @@ audit trail), SystemPanel (the /api/system triage view), and ConfigBackupCard
 (the settings export/import pair) — are one-card clients of the same client
 API surface.
 
+### Fullscreen Policy
+**`web/src/lib/fullscreenPolicy.ts`** — the full-screen preview's decisions,
+pure and vitest-pinned (the previewRetryPolicy / transportSwitch shape): the
+browser primitives stay in `web/src/hooks/useFullscreen.ts`, the verdicts live
+here. `chooseMode` takes native `requestFullscreen` on the shared
+`.preview-container` (every player rung — MJPEG img, HLS/WHEP video, H264
+canvas — rides inside it) and falls back to a CSS fixed-overlay when the API
+is absent or its request was rejected (iOS Safari rejects every time, so the
+rejection is sticky and later toggles go straight to the overlay).
+`wakeLockVerdict` acquires a screen wake lock only while fullscreen AND the
+stream is live AND the API + secure context allow it — the fullscreen-scoped
+rule is the load-bearing pin (an active stream alone never holds the screen),
+and `shouldReacquire` re-requests it on visibility regain (the browser drops
+the lock when the tab hides). `escapeVerdict` splits ownership: native
+fullscreen leaves Escape to the browser, the CSS overlay exits unless a higher
+overlay (the media viewer, the shortcuts help) owns Escape first. `hintKey`
+flashes the one subtle degradation hint (insecure context with the wake-lock
+API present → needs-HTTPS; no fullscreen at all → unavailable) and stays silent
+for a simply-missing wake-lock API. The hook lifts the active bit to App
+(`onFullscreenChange`) so `overlayActive()` includes it and the gallery defers
+Escape while fullscreen; the in-container exit button and hint ride inside the
+container because the action bar is invisible in native fullscreen.
+
 ### Gallery Page
 **`streaming/web/GalleryPage.kt`** — the pure `/api/gallery` pagination:
 `of(items, type, page, pageSize)` returns items, filtered total, and the
@@ -2274,6 +2297,8 @@ contracts.
 | `RecordingPhaseKind` | `useAppState` (derived memo over `isRecording`/`isScheduled`) | `web/src/lib/recordingPhase.ts` | idle / scheduled / recording | recording wins (the same priority the stop-button label encodes); payloads stay in their own signals (`recordingElapsed`, `scheduledStartTimeMs`) and the three generation-guarded write sites are untouched — a signal-of-object refactor was evaluated and rejected: it would rewrite the wave-6 guards for zero render win and silently "fix" the stop branch's deliberate stale-elapsed quirk |
 | `PreviewRetryPolicy` | `StreamPreview`'s MJPEG `onError` (pure module; the `<img>` and the timer stay at the call site) | `web/src/hooks/previewRetryPolicy.ts` | budget `MAX_PREVIEW_ERRORS = 5`; backoff `previewRetryDelayMs` = 2 s·count capped at 8 s; demote `shouldDemoteToHls(count, hls)` | the ladder's constants byte-identical (`NO_HLS_RETRY_MS = 15_000` fixed arm vs the ~10 s HLS latency); the verdict replaces the old `nextPlayerMode('mjpeg', …) !== 'mjpeg'` probe — verdict-identical given playerLadder's ladder; the reset-at-exhaustion and the `playerMode() === 'mjpeg'` guard stay at the call site |
 | `TileRung` / `tileBadgeKind` | `CameraTile` (derived memos; the five primitives stay the written truth) | `web/src/lib/tileRung.ts` | auth-frame / live / snapshot; badge live / online / offline / loading | derived, never stored — the fetch/toggle/demotion writers keep writing the primitives under the wave-6 revoke/stale discipline, and the rung only reads them (revocation invalidates the browser resource, not the string); the persisted-vs-local `mode` divergence is deliberate (a silent MJPEG demotion lasts the session only and must not destroy the persisted preference; credential tiles are snapshot-locked); a loading tile still carries the offline badge styling — the stylesheet has no `-loading` rule, and the class map keeps that byte-identical |
+| Fullscreen mode | `useFullscreen` (`active`/`mode` signals; `cssOverlay` derived) | `web/src/hooks/useFullscreen.ts` | inactive / native / css-overlay | native `requestFullscreen` on the shared container; a rejected request sticks `nativeRejected` and falls back to the CSS fixed-overlay (iOS Safari); the active bit lifts to App's `overlayActive()` so higher overlays defer Escape; unmount releases the wake lock and exits native fullscreen |
+| Screen wake-lock verdict | `useFullscreen` effect over `wakeLockVerdict` (pure) | `web/src/lib/fullscreenPolicy.ts` | acquire / release / noop | fullscreen-scoped only — acquire while fullscreen AND live AND API+secure-context, release when either ends, noop when wanted-but-unsupported; re-acquires on visibility regain; a release landing mid-request is honored so no lock is stranded |
 
 ### Deliberately implicit
 
@@ -2299,6 +2324,7 @@ Machines that stay implicit on purpose — do not re-flag them:
 - AutomationReceiver's goAsync completion ladder (`automation/AutomationReceiver.kt`): finish-once via `finished` + `completionOwnedByCallbacks`; every non-capture path finishes in finally and the capture path's feeder (PhotoCaptureManager) now guarantees the completion signal unconditionally — the ladder is correct as written.
 - The SSE health backstop's redundant writers (`web/src/hooks/useAppState.ts`): `onopen`/`onerror` write `sseConnected` AND the checker republishes the same verdict — deliberate layering, not drift. The event writes make visible transitions instant; removing them to make the checker the only writer was evaluated and rejected (1–2 extra post-reconnect status fetches and up to ~3 s of connection-lost-banner linger — slower truth in exactly the windows the banner exists for). The checker earns its keep for the half-open socket no event ever reports.
 - The PTT phantom label (`web/src/components/StreamPreview.tsx`): during `arming` (the mic-permission dialog window) the button reads "Talking…" with no audio captured — deliberately kept: the busy label doubles as press feedback (a reverting button invites re-presses the latch silently drops), and the honest fix is a third locale key across the seven i18n files — UX work for a future wave, now a one-line change now that `PttPhase` exists.
+- Native fullscreen's Escape (`web/src/hooks/useFullscreen.ts`): in native mode the browser exits fullscreen on Escape itself, so `escapeVerdict` returns noop and the hook neither preventDefaults nor exits — only the CSS overlay owns Escape (and defers to a higher overlay that owns it first). Handling Escape in native mode too would double-exit and fight the browser.
 - RtspServer's write-failure INIT without a socket close (`streaming/rtsp/RtspServer.kt` `writeLoop`): a failed AU write drops the session to INIT (the old inline `isPlaying = false` verdict) and exits the writer, but leaves the socket to the session read loop's timeout/EOF — exactly the old failure shape; `ensureWriter`'s `isAlive` check replaces the dead writer on the next PLAY.
 - The RTSP send queue's lock-free `size` read at the offer (`RtspServer.ClientSession.enqueueAu`): the 8-AU bound is soft by one AU under a drain/writer race — the policy's room-making (`size + 1 - capacity`) absorbs it; a lock to make the bound hard would re-couple the drain thread to the writer, the exact stall the decoupling removes. The cooldown stamps (`lastKeyframeRequestMs`/`lastSubKeyframeRequestMs`) are drain-thread-only writes, so they stay plain fields.
 

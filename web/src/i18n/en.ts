@@ -73,6 +73,12 @@ export const en: Record<string, string> = {
   'preview.audioConnecting': 'Connecting...',
   'preview.audioError': 'Audio Error',
   'preview.audioIdle': 'Audio Idle',
+  'preview.fullscreen': 'Full Screen',
+  'preview.fullscreenTitle': 'Toggle full-screen preview (keeps the screen awake while live)',
+  'preview.exitFullscreen': 'Exit',
+  'preview.exitFullscreenTitle': 'Exit full screen',
+  'preview.fullscreenNeedsHttps': 'Screen wake lock needs HTTPS — enable HTTPS in the device settings to keep the screen awake',
+  'preview.fullscreenUnavailable': 'Full screen is not available in this browser',
 
   // ── Lens selector (zoom renders generically from zoomRatio with no catalog entry) ──
   'lens.front': 'Front',

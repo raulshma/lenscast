@@ -309,6 +309,65 @@ html, body {
   box-shadow: 0 0 30px rgba(0, 212, 255, 0.05);
 }
 
+/* Full-screen preview (issue #17). Native fullscreen makes the container the
+   fullscreen element; this CSS fixed-overlay is the iOS-Safari fallback (and
+   the graceful path when a native request is rejected). z-ladder: navbar 20 <
+   gallery 50 < this 60 < automation 220. object-fit: contain on .preview-img
+   letterboxes a 4:3 stream correctly. */
+.preview-container-fullscreen {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  background: #000;
+  border: none;
+  border-radius: 0;
+}
+
+/* In-container exit — the action bar is outside the container and invisible
+   in native fullscreen. Top-left keeps it clear of the LIVE badge (top-right). */
+.preview-fullscreen-exit {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  z-index: 20;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  font-size: 13px;
+  color: #fff;
+  background: rgba(0, 0, 0, 0.6);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: var(--lc-radius);
+  backdrop-filter: blur(8px);
+  cursor: pointer;
+}
+
+.preview-fullscreen-exit svg {
+  width: 16px;
+  height: 16px;
+}
+
+.preview-fullscreen-exit:hover {
+  background: rgba(0, 0, 0, 0.8);
+}
+
+.preview-fullscreen-hint {
+  position: absolute;
+  bottom: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 20;
+  max-width: 90%;
+  padding: 8px 14px;
+  font-size: 13px;
+  text-align: center;
+  color: #fff;
+  background: rgba(0, 0, 0, 0.7);
+  border-radius: var(--lc-radius);
+  backdrop-filter: blur(8px);
+}
+
 .preview-img {
   width: 100%;
   height: 100%;

@@ -3,6 +3,7 @@ import type { DeviceStatus, StreamingSettings } from '../types'
 import type { LiveAudioStatus } from '../audio/LiveAudioPlayer'
 import { MAX_PREVIEW_ERRORS, NO_HLS_RETRY_MS, previewRetryDelayMs, shouldDemoteToHls } from '../hooks/previewRetryPolicy'
 import { useZoomable } from '../hooks/useZoomable'
+import { useFullscreen } from '../hooks/useFullscreen'
 import { pttBusy, pttTransition, type PttPhase } from '../lib/pttPhase'
 import ConnectionQualityIndicator from './ConnectionQualityIndicator'
 import { tapToFocus as apiTapToFocus, setZoom as apiSetZoom, setTorch as apiSetTorch, pushTalkback } from '../api/client'
@@ -36,6 +37,8 @@ interface Props {
   overlaySettings: () => StreamingSettings | null
   /** True once both telemetry lanes are dead — the LIVE badge must not lie. */
   connectionLost: () => boolean
+  /** Lifts the fullscreen active bit to App so higher-overlay Escape coordination includes it. */
+  onFullscreenChange?: (active: boolean) => void
 }
 
 // The talkback mic tap. AudioWorklet (the modern replacement for the
@@ -348,6 +351,21 @@ export default function StreamPreview(props: Props) {
     wheelZoomFactor: 0.15,
   })
 
+  // ── Fullscreen preview + screen wake lock (issue #17) ──
+  // The container is shared with useZoomable (same geometry-aware clamps); a
+  // second ref captures the element for the fullscreen hook. The wake lock is
+  // fullscreen-scoped: it holds the screen only while the preview is
+  // fullscreen AND showing a live stream, and releases on exit/stop/unmount.
+  const [previewContainer, setPreviewContainer] = createSignal<HTMLElement | null>(null)
+  const [fullscreenMsg, setFullscreenMsg] = createSignal('')
+  const flashFullscreenMsg = flashLater(setFullscreenMsg, 4000)
+  const fullscreen = useFullscreen({
+    container: previewContainer,
+    streamActive: () => webActive() && props.previewVisible(),
+    onActiveChange: (active) => props.onFullscreenChange?.(active),
+    onHint: (key) => flashFullscreenMsg(t(key)),
+  })
+
   const overlay = () => props.overlaySettings()
   const overlayEnabled = () => overlay()?.overlayEnabled ?? API_DEFAULTS.overlayEnabled
   const overlayPosition = () => overlay()?.overlayPosition ?? API_DEFAULTS.overlayPosition
@@ -575,8 +593,11 @@ export default function StreamPreview(props: Props) {
     <section class="preview-section" id="preview-section">
       <div
         class="preview-container zoomable-container"
-        classList={{ 'preview-active': webActive() && props.previewVisible() }}
-        ref={zoom.containerRef}
+        classList={{
+          'preview-active': webActive() && props.previewVisible(),
+          'preview-container-fullscreen': fullscreen.cssOverlay(),
+        }}
+        ref={(el) => { zoom.containerRef(el); setPreviewContainer(el) }}
       >
         {props.previewVisible() && webActive() ? (
           <Show when={playerMode() !== 'mjpeg'} fallback={
@@ -736,6 +757,33 @@ export default function StreamPreview(props: Props) {
             }}
           />
         </Show>
+
+        {/* In-container exit — the action bar lives outside the container and
+            is invisible in native fullscreen, so the exit affordance must ride
+            inside it (top-right, clear of the LIVE badge's corner). */}
+        <Show when={fullscreen.active()}>
+          <button
+            type="button"
+            class="preview-fullscreen-exit"
+            onClick={fullscreen.exit}
+            title={t('preview.exitFullscreenTitle')}
+            aria-label={t('preview.exitFullscreen')}
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M8 3v3a2 2 0 0 1-2 2H3" />
+              <path d="M21 8h-3a2 2 0 0 1-2-2V3" />
+              <path d="M3 16h3a2 2 0 0 1 2 2v3" />
+              <path d="M16 21v-3a2 2 0 0 1 2-2h3" />
+            </svg>
+            <span>{t('preview.exitFullscreen')}</span>
+          </button>
+        </Show>
+
+        {/* Degradation hint — in-container so it is visible in native
+            fullscreen too (the action bar's message slots are not). */}
+        <Show when={fullscreenMsg()}>
+          <div class="preview-fullscreen-hint" role="status">{fullscreenMsg()}</div>
+        </Show>
       </div>
 
       {/* Action Bar */}
@@ -752,6 +800,20 @@ export default function StreamPreview(props: Props) {
               <polyline points="2 12 12 17 22 12" />
             </svg>
             <span>{t('preview.playerLabel', { mode: playerMode().toUpperCase() })}</span>
+          </button>
+          <button
+            type="button"
+            class="action-btn action-btn-ghost"
+            onClick={fullscreen.toggle}
+            title={t('preview.fullscreenTitle')}
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M8 3H5a2 2 0 0 0-2 2v3" />
+              <path d="M21 8V5a2 2 0 0 0-2-2h-3" />
+              <path d="M3 16v3a2 2 0 0 0 2 2h3" />
+              <path d="M16 21h3a2 2 0 0 0 2-2v-3" />
+            </svg>
+            <span>{t('preview.fullscreen')}</span>
           </button>
           <button
             id="capture-btn"

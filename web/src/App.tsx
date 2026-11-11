@@ -1,4 +1,4 @@
-import { ErrorBoundary, Show } from 'solid-js'
+import { ErrorBoundary, Show, createSignal } from 'solid-js'
 import { useAppState } from './hooks/useAppState'
 import { useTheme } from './hooks/useTheme'
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts'
@@ -85,8 +85,10 @@ function App() {
   })
 
   // True while a higher overlay owns Escape (shortcuts help, the shared media
-  // viewer) — the gallery defers its own Escape handling then.
-  const overlayActive = () => state.showShortcuts() || viewerTarget() != null
+  // viewer, the full-screen preview) — the gallery defers its own Escape
+  // handling then.
+  const [previewFullscreen, setPreviewFullscreen] = createSignal(false)
+  const overlayActive = () => state.showShortcuts() || viewerTarget() != null || previewFullscreen()
 
   return (
     <div class="app">
@@ -157,6 +159,7 @@ function App() {
                   setPreviewVisible={state.setPreviewVisible}
                   overlaySettings={() => state.settings()?.streaming ?? null}
                   connectionLost={state.connectionLost}
+                  onFullscreenChange={setPreviewFullscreen}
                 />
 
                 <SettingsPanel
