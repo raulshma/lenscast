@@ -2,7 +2,9 @@ package com.raulshma.lenscast.streaming
 
 import com.raulshma.lenscast.streaming.rtmp.RtmpOutput
 import com.raulshma.lenscast.streaming.rtmp.RtmpPublisherHandle
+import com.raulshma.lenscast.streaming.rtmp.RtmpPushConfig
 import com.raulshma.lenscast.streaming.rtmp.RtmpStatus
+import com.raulshma.lenscast.streaming.rtmp.RtmpUrl
 import com.raulshma.lenscast.streaming.rtsp.EncodedNalUnit
 import com.raulshma.lenscast.streaming.rtsp.RtspVideoCodec
 import com.raulshma.lenscast.streaming.srt.SrtOutput
@@ -12,8 +14,11 @@ import com.raulshma.lenscast.streaming.srt.SrtStatus
 import com.raulshma.lenscast.streaming.whip.WhipOutput
 import com.raulshma.lenscast.streaming.whip.WhipPublisherHandle
 import com.raulshma.lenscast.streaming.whip.WhipStatus
+import java.util.concurrent.CountDownLatch
+import kotlin.concurrent.thread
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -111,7 +116,9 @@ class PushOutputTest {
     /**
      * One transport under the harness: the thin output built as the manager
      * builds it, plus the transport-agnostic seams the shared assertions
-     * read (recorders, statuses as [PushStatus], the settle counter).
+     * read (recorders, statuses as [PushStatus], the settle counter). The
+     * settles list is thread-safe because the transition-race tests run
+     * concurrent starts/stops whose epilogues append from worker threads.
      */
     private class Fixture(
         val label: String,
@@ -141,7 +148,7 @@ class PushOutputTest {
     private fun rtmpFixture(codec: RtspVideoCodec = RtspVideoCodec.H264): Fixture {
         val publishers = mutableListOf<Recorder>()
         val statuses = mutableListOf<PushStatus>()
-        val settles = mutableListOf<Unit>()
+        val settles = java.util.Collections.synchronizedList(mutableListOf<Unit>())
         val activeEvents = mutableListOf<Boolean>()
         val output = RtmpOutput(
             source = FakeSource(codec),
@@ -181,7 +188,7 @@ class PushOutputTest {
     private fun srtFixture(codec: RtspVideoCodec = RtspVideoCodec.H264): Fixture {
         val publishers = mutableListOf<Recorder>()
         val statuses = mutableListOf<PushStatus>()
-        val settles = mutableListOf<Unit>()
+        val settles = java.util.Collections.synchronizedList(mutableListOf<Unit>())
         val activeEvents = mutableListOf<Boolean>()
         val output = SrtOutput(
             source = FakeSource(codec),
@@ -221,7 +228,7 @@ class PushOutputTest {
     private fun whipFixture(audioAllowed: Boolean = true): Fixture {
         val publishers = mutableListOf<Recorder>()
         val statuses = mutableListOf<PushStatus>()
-        val settles = mutableListOf<Unit>()
+        val settles = java.util.Collections.synchronizedList(mutableListOf<Unit>())
         val activeEvents = mutableListOf<Boolean>()
         val output = WhipOutput(
             audioAllowed = { audioAllowed },
@@ -600,5 +607,115 @@ class PushOutputTest {
             assertEquals(fixture.label, 3, fixture.settles.size)
             assertFalse(fixture.label, fixture.isActive())
         }
+    }
+
+    // ── the transition races ──
+
+    @Test
+    fun `concurrent starts construct exactly one publisher and retain it`() {
+        for (fixture in allFixtures()) {
+            fixture.setEnabled(true)
+            fixture.setUrl(fixture.validUrl)
+
+            val gate = CountDownLatch(1)
+            val starters = List(2) {
+                thread {
+                    gate.await()
+                    fixture.start()
+                }
+            }
+            gate.countDown()
+            starters.forEach { it.join() }
+
+            // One start wins the transition lock; the loser returns Started
+            // without building. The old check-then-act leaked a live
+            // publisher nobody could stop here.
+            assertEquals(fixture.label, 1, fixture.publishers.size)
+            assertTrue(fixture.label, fixture.isActive())
+            assertEquals(fixture.label, 1, fixture.publishers.single().startCalls)
+        }
+    }
+
+    @Test
+    fun `a stale handle cannot flip the status line after stop`() {
+        for (fixture in allFixtures()) {
+            fixture.startPassing()
+            fixture.stop()
+            assertEquals(fixture.label, fixture.idle, fixture.status())
+
+            // The torn-down handle still holds its bound status sink — a
+            // late report from it (the stale reconnect loop) must drop, not
+            // resurrect the wire status.
+            fixture.fireConnected()
+            assertEquals(fixture.label, fixture.idle, fixture.status())
+            assertEquals(fixture.label, fixture.idle, fixture.statuses.last())
+        }
+    }
+
+    /**
+     * The deep module wired exactly as [rtmpFixture] wires it, but built
+     * directly so the race assertions can read seams the thin wrapper does
+     * not re-expose — [PushOutput.currentPublisher] among them.
+     */
+    private fun directRtmpOutput(
+        publishers: MutableList<FakeRtmpPublisher>,
+        statuses: MutableList<PushStatus>,
+    ): PushOutput<RtmpPushConfig, RtmpUrl, FakeRtmpPublisher, RtmpStatus> = PushOutput(
+        label = "RTMP",
+        tag = "RtmpOutputTest",
+        onStatusChanged = { statuses += it },
+        settle = {},
+        initialConfig = RtmpPushConfig(url = "rtmp://example.com/live/key"),
+        parse = RtmpUrl::parse,
+        invalidUrlMessage = "Invalid RTMP URL — expected rtmp://host/app/stream-key (or rtmps://…)",
+        videoCodec = { RtspVideoCodec.H264 },
+        describeTarget = { "${it.hostAndPort}/${it.app}" },
+        idleStatus = RtmpStatus.Idle,
+        errorStatus = { reason -> RtmpStatus.Error(reason) },
+        publisherFactory = { _, _, onStatus ->
+            FakeRtmpPublisher(onStatus).also { publishers += it }
+        },
+        startPublisher = { it.start() },
+        stopPublisher = { it.stop() },
+    )
+
+    @Test
+    fun `a restart racing a stop never resurrects the stopped output`() {
+        repeat(RACE_ROUNDS) { round ->
+            val publishers = mutableListOf<FakeRtmpPublisher>()
+            val statuses = mutableListOf<PushStatus>()
+            val output = directRtmpOutput(publishers, statuses)
+            output.setEnabled(true)
+            assertEquals(PushOutput.StartResult.Started, output.start())
+
+            val gate = CountDownLatch(1)
+            val stopper = thread {
+                gate.await()
+                output.stop()
+            }
+            val restarter = thread {
+                gate.await()
+                output.update { it.copy(url = "rtmp://elsewhere:1936/live/key") }
+            }
+            gate.countDown()
+            stopper.join()
+            restarter.join()
+
+            // Either ordering lands stopped: the stop ran before the restart
+            // (the restart saw !active and did nothing) or after it (it
+            // stopped the NEW publisher). A resurrected live output — the
+            // old stop-between-check-and-start window — is the bug.
+            assertFalse("round $round", output.isActive())
+            assertNull("round $round", output.currentPublisher())
+            assertEquals("round $round", RtmpStatus.Idle, output.status())
+            assertEquals("round $round", RtmpStatus.Idle, statuses.last())
+            // Every publisher that got constructed also got its clean close.
+            publishers.forEach { assertTrue("round $round", it.stopCalls >= 1) }
+        }
+    }
+
+    private companion object {
+        /** Repetitions for the restart-vs-stop stress round. */
+        const val RACE_ROUNDS = 100
     }
 }

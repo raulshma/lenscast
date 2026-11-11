@@ -149,6 +149,13 @@ export default function StreamPreview(props: Props) {
 
   const [previewErrorCount, setPreviewErrorCount] = createSignal(0)
   const MAX_PREVIEW_ERRORS = 5
+  // The MJPEG retry ladder owns exactly one pending auto-retry timer: a
+  // newer error supersedes an older wait (clear-then-arm in onError), and
+  // unmount cancels it — stale timers must not fire setPreviewVisible after
+  // the component is gone, and the no-HLS branch must not stack one 15 s
+  // timer per error.
+  let previewRetryTimer: ReturnType<typeof setTimeout> | null = null
+  onCleanup(() => { if (previewRetryTimer) clearTimeout(previewRetryTimer) })
   // The player rung is owned by useAppState (so the P shortcut and this
   // component's ladder fall-down drive the same signal); these two one-line
   // adapters keep the whole ladder logic below untouched.
@@ -494,6 +501,17 @@ export default function StreamPreview(props: Props) {
     await pttFallback.drain()
   }
 
+  // Unmount mid-hold (session demoted or logged out while the button is
+  // held): the audio graph must not outlive the UI — bump the hold
+  // generation so a stale startPtt bails at its next await, tear the
+  // graph down, and clear the talking latch (the button is going away
+  // with us).
+  onCleanup(() => {
+    pttHold++
+    setTalking(false)
+    void stopPttCleanup()
+  })
+
   // ── Snapshot share: Web Share with a File payload when the browser can,
   // otherwise the same programmatic download the Snap button does. ──
   const [sharingSnapshot, setSharingSnapshot] = createSignal(false)
@@ -549,7 +567,15 @@ export default function StreamPreview(props: Props) {
             loading="eager"
             decoding="async"
             onClick={handleStreamClick}
+            onLoad={() => {
+              // A successful load clears the error budget; the count must
+              // never accumulate across recovery windows.
+              setPreviewErrorCount(0)
+            }}
             onError={() => {
+              // A newer error supersedes an older wait: at most one retry
+              // timer may be pending, so the previous one dies here.
+              if (previewRetryTimer) clearTimeout(previewRetryTimer)
               const count = previewErrorCount() + 1
               setPreviewErrorCount(count)
               if (count >= MAX_PREVIEW_ERRORS) {
@@ -559,7 +585,7 @@ export default function StreamPreview(props: Props) {
                 const next = nextPlayerMode('mjpeg', true, true, true, hlsSupported())
                 setPreviewErrorCount(0)
                 if (next === 'mjpeg') {
-                  setTimeout(() => {
+                  previewRetryTimer = setTimeout(() => {
                     if (isActive()) {
                       props.setPreviewVisible(true)
                     }
@@ -573,7 +599,7 @@ export default function StreamPreview(props: Props) {
                 return
               }
               props.setPreviewVisible(false)
-              setTimeout(() => {
+              previewRetryTimer = setTimeout(() => {
                 if (isActive()) {
                   props.setPreviewVisible(true)
                 }

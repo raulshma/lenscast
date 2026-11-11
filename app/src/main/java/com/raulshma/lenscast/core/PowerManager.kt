@@ -39,10 +39,31 @@ class PowerManager(private val context: Context) {
     @Volatile private var wakeLockAcquired = false
     @Volatile private var wakeLockAcquiredAtMs = 0L
 
+    // The streaming slot has two concurrent hands — the session's renew poll
+    // and the session's end (a release from another coroutine can interleave
+    // with a renew's release/acquire re-arm, and a plain acquire behind a
+    // torn release resurrects the lock). Every mutation of the slot is
+    // serialized on this monitor.
+    private val wakeLockLock = Any()
+
+    /**
+     * Whether the renewal ladder may act. Armed by the session's acquire and
+     * disarmed by any release, so a renew tick can never outlive the session
+     * that armed it: a tick landing after the release returns instead of
+     * re-acquiring (the bare lock alone would still resurrect —
+     * `resolve(!held)` reads a released slot as "lost lock, plain acquire").
+     */
+    @Volatile private var wakeRenewalArmed = false
+
     // The always-on slot behind the keep-awake setting: held for the process
     // lifetime, never touched by the streaming session's own lock management.
     private var keepAwakeLock: AndroidPowerManager.WakeLock? = null
     @Volatile private var keepAwakeAcquired = false
+
+    // The keep-awake slot's monitor: independent from [wakeLockLock] on
+    // purpose — the two slots never interact, and a session-side wake-lock
+    // operation must not queue behind a keep-awake toggle (or vice versa).
+    private val keepAwakeLockLock = Any()
 
     // Null until the first battery read — the event payload omits the field
     // for an unknown level rather than reporting a fabricated percent.
@@ -130,7 +151,13 @@ class PowerManager(private val context: Context) {
     }
 
     @SuppressLint("WakelockTimeout")
-    fun acquireWakeLock(tag: String = "LensCast") {
+    fun acquireWakeLock(tag: String = WAKE_LOCK_TAG) = synchronized(wakeLockLock) {
+        acquireWakeLockLocked(tag)
+    }
+
+    /** Caller holds [wakeLockLock]. */
+    @SuppressLint("WakelockTimeout")
+    private fun acquireWakeLockLocked(tag: String) {
         if (wakeLockAcquired) return
         try {
             wakeLock = powerManager.newWakeLock(
@@ -140,6 +167,7 @@ class PowerManager(private val context: Context) {
             }
             wakeLockAcquired = true
             wakeLockAcquiredAtMs = SystemClock.elapsedRealtime()
+            wakeRenewalArmed = true
             Log.d(TAG, "Wake lock acquired with timeout ${WakeLockRenewPolicy.TIMEOUT_MS}ms")
         } catch (e: Exception) {
             Log.e(TAG, "Failed to acquire wake lock", e)
@@ -153,23 +181,34 @@ class PowerManager(private val context: Context) {
      * The ladder — young lock left alone, past the halfway mark released
      * and re-acquired, a lost lock re-acquired — lives in
      * [WakeLockRenewPolicy]; this is the Android arm that applies its
-     * verdict to the real lock.
+     * verdict to the real lock. The ladder is armed by the session's
+     * acquire and disarmed by any release ([wakeRenewalArmed]): a renew
+     * tick can never outlive the session that armed it.
      */
-    fun renewWakeLock() {
+    fun renewWakeLock() = synchronized(wakeLockLock) { renewWakeLockLocked() }
+
+    /** Caller holds [wakeLockLock]. */
+    private fun renewWakeLockLocked() {
+        // A post-teardown tick is a no-op, not a resurrection.
+        if (!wakeRenewalArmed) return
         val elapsedMs = SystemClock.elapsedRealtime() - wakeLockAcquiredAtMs
         when (WakeLockRenewPolicy.resolve(wakeLockAcquired, elapsedMs)) {
-            WakeLockRenewPolicy.Action.ACQUIRE -> acquireWakeLock()
+            WakeLockRenewPolicy.Action.ACQUIRE -> acquireWakeLockLocked(WAKE_LOCK_TAG)
             WakeLockRenewPolicy.Action.KEEP -> Unit
             WakeLockRenewPolicy.Action.REARM -> {
                 Log.d(TAG, "Renewing wake lock after ${elapsedMs}ms")
-                releaseWakeLock()
-                acquireWakeLock()
+                releaseWakeLockLocked()
+                acquireWakeLockLocked(WAKE_LOCK_TAG)
             }
         }
     }
 
-    fun releaseWakeLock() {
+    fun releaseWakeLock() = synchronized(wakeLockLock) { releaseWakeLockLocked() }
+
+    /** Caller holds [wakeLockLock]. */
+    private fun releaseWakeLockLocked() {
         if (!wakeLockAcquired) return
+        wakeRenewalArmed = false
         wakeLock?.let {
             try {
                 if (it.isHeld) {
@@ -193,7 +232,11 @@ class PowerManager(private val context: Context) {
      * its own hold, never this one.
      */
     @SuppressLint("WakelockTimeout")
-    fun acquireKeepAwake() {
+    fun acquireKeepAwake() = synchronized(keepAwakeLockLock) { acquireKeepAwakeLocked() }
+
+    /** Caller holds [keepAwakeLockLock]. */
+    @SuppressLint("WakelockTimeout")
+    private fun acquireKeepAwakeLocked() {
         if (keepAwakeAcquired) return
         try {
             keepAwakeLock = powerManager.newWakeLock(
@@ -208,7 +251,10 @@ class PowerManager(private val context: Context) {
         }
     }
 
-    fun releaseKeepAwake() {
+    fun releaseKeepAwake() = synchronized(keepAwakeLockLock) { releaseKeepAwakeLocked() }
+
+    /** Caller holds [keepAwakeLockLock]. */
+    private fun releaseKeepAwakeLocked() {
         if (!keepAwakeAcquired) return
         keepAwakeLock?.let {
             try {
@@ -312,6 +358,9 @@ class PowerManager(private val context: Context) {
 
     companion object {
         private const val TAG = "PowerManager"
+
+        /** The streaming slot's default wake-lock tag ("$tag::Partial"). */
+        private const val WAKE_LOCK_TAG = "LensCast"
         private const val KEEP_AWAKE_TAG = "LensCast::KeepAwake"
 
         /**

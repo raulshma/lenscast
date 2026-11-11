@@ -12,3 +12,6 @@ local.properties
 /web/node_modules/
 *.jks
 *.keystore
+
+# Kotlin daemon/session artifacts
+.kotlin/

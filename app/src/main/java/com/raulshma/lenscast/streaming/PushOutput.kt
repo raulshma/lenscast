@@ -189,6 +189,20 @@ internal class PushOutput<C : PushConnectConfig, P, H, S : PushStatus>(
     /** The output is live: started and not yet stopped, even while connecting/reconnecting. */
     private val active = AtomicBoolean(false)
 
+    /**
+     * Serializes the lifecycle transitions ([startQuietly], [stopQuietly],
+     * [teardownPublisher], [restartQuietly], [stop]'s flip) so they stop
+     * being check-then-act on [active]: two concurrent starts used to leak a
+     * live publisher nobody could stop, and a stop landing between a
+     * restart's check and its start resurrected a just-stopped output. The
+     * epilogues that reach back into the manager run OUTSIDE the lock —
+     * [settle] (the encoded-hub refresh) never runs under it, the
+     * onActiveChanged/onStatusChanged hooks are pure state writes, and the
+     * hub's state lock is never held across a push-output transition — so
+     * the lock order stays one-way and cannot deadlock.
+     */
+    private val transitionLock = Any()
+
     @Volatile
     private var publisher: H? = null
 
@@ -261,9 +275,11 @@ internal class PushOutput<C : PushConnectConfig, P, H, S : PushStatus>(
 
     /** Stops the publisher (the transport's clean close) and settles — no-op when already stopped. */
     fun stop() {
-        if (!active.getAndSet(false)) return
-        onActiveChanged(false)
-        teardownPublisher()
+        synchronized(transitionLock) {
+            if (!active.getAndSet(false)) return
+            onActiveChanged(false)
+            teardownPublisher()
+        }
         settle()
     }
 
@@ -274,17 +290,21 @@ internal class PushOutput<C : PushConnectConfig, P, H, S : PushStatus>(
      * as [stop] — only the epilogue differs.
      */
     fun stopQuietly() {
-        if (!active.getAndSet(false)) return
-        onActiveChanged(false)
-        teardownPublisher()
+        synchronized(transitionLock) {
+            if (!active.getAndSet(false)) return
+            onActiveChanged(false)
+            teardownPublisher()
+        }
     }
 
     /** The transport's clean close: stop the handle, drop it, publish idle. */
     private fun teardownPublisher() {
-        publisher?.let(stopPublisher)
-        publisher = null
-        publishStatus(idleStatus)
-        Log.i(tag, "$label output stopped")
+        synchronized(transitionLock) {
+            publisher?.let(stopPublisher)
+            publisher = null
+            publishStatus(idleStatus)
+            Log.i(tag, "$label output stopped")
+        }
     }
 
     // ── settings: the restart routing ──
@@ -320,38 +340,54 @@ internal class PushOutput<C : PushConnectConfig, P, H, S : PushStatus>(
      * The restart ladder a live output takes on any config change: stop →
      * start, with the enabled check kept from the twins (active implies
      * enabled, but the guard documents the intent). The start re-runs the
-     * full validation ladder — a restart is a start, not a hot-swap.
+     * full validation ladder — a restart is a start, not a hot-swap. The
+     * stop→start pair is atomic under [transitionLock], so a concurrent
+     * stop can no longer land between the two and resurrect a just-stopped
+     * output: it either runs entirely before (the restart no-ops on
+     * `active`) or entirely after (it stops the NEW publisher).
      */
     private fun restartQuietly() {
-        if (enabled.get() && active.get()) {
-            stopQuietly()
-            startQuietly()
+        synchronized(transitionLock) {
+            if (enabled.get() && active.get()) {
+                stopQuietly()
+                startQuietly()
+            }
         }
     }
 
     /** The validation ladder + publisher construction, without the settle. */
     private fun startQuietly(): StartResult {
-        if (active.get()) return StartResult.Started
-        if (!enabled.get()) {
-            return reject("$label push is disabled")
+        synchronized(transitionLock) {
+            if (active.get()) return StartResult.Started
+            if (!enabled.get()) {
+                return reject("$label push is disabled")
+            }
+            val parsed = parse(config.url)
+                ?: return reject(invalidUrlMessage)
+            val codec = videoCodec?.invoke()
+            if (codec != null && codec != RtspVideoCodec.H264) {
+                return reject(
+                    "$label push requires the H.264 video codec — the encoded path is currently H.265; " +
+                        "switch the RTSP video codec to H.264 in streaming settings",
+                )
+            }
+            active.set(true)
+            onActiveChanged(true)
+            // The status sink binds to THIS handle, not the field: a
+            // superseded publisher (a restart, or a stop) must not keep
+            // writing the status line — a stale reconnect loop would
+            // otherwise flip the wire status after the output went idle.
+            var handle: H? = null
+            handle = publisherFactory(config, parsed) { s ->
+                if (publisher != null && publisher === handle) publishStatus(s)
+            }
+            val built = handle!!
+            publisher = built
+            beforeStart(built)
+            startPublisher(built)
+            Log.i(tag, "$label output started toward ${describeTarget(parsed)}")
+            return StartResult.Started
         }
-        val parsed = parse(config.url)
-            ?: return reject(invalidUrlMessage)
-        val codec = videoCodec?.invoke()
-        if (codec != null && codec != RtspVideoCodec.H264) {
-            return reject(
-                "$label push requires the H.264 video codec — the encoded path is currently H.265; " +
-                    "switch the RTSP video codec to H.264 in streaming settings",
-            )
-        }
-        active.set(true)
-        onActiveChanged(true)
-        val handle = publisherFactory(config, parsed, ::publishStatus)
-        publisher = handle
-        beforeStart(handle)
-        startPublisher(handle)
-        Log.i(tag, "$label output started toward ${describeTarget(parsed)}")
-        return StartResult.Started
     }
 
     private fun reject(reason: String): StartResult.Rejected {

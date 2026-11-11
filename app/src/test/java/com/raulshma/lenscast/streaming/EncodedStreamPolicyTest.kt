@@ -143,4 +143,26 @@ class EncodedStreamPolicyTest {
             )
         )
     }
+
+    // ── needsEncoderBuild: the reconfigure-wedge verdict ──
+
+    @Test
+    fun `a healthy running pipeline needs no rebuild`() {
+        assertFalse(EncodedStreamPolicy.needsEncoderBuild(running = true, encoderLive = true))
+    }
+
+    @Test
+    fun `a stopped pipeline always builds`() {
+        assertTrue(EncodedStreamPolicy.needsEncoderBuild(running = false, encoderLive = true))
+        assertTrue(EncodedStreamPolicy.needsEncoderBuild(running = false, encoderLive = false))
+    }
+
+    @Test
+    fun `a running pipeline without a live encoder rebuilds - the reconfigure wedge`() {
+        // The wedge this pins: a permanent reconfigure failure used to leave
+        // running=true with the STOPPED encoder in the slot, so a bare
+        // `!running` guard never rebuilt and every encoded sink stayed black
+        // while the hub answered live.
+        assertTrue(EncodedStreamPolicy.needsEncoderBuild(running = true, encoderLive = false))
+    }
 }

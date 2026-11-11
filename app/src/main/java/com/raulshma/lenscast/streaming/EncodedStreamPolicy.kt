@@ -38,4 +38,17 @@ object EncodedStreamPolicy {
         captureRunning: Boolean,
         formatMatches: Boolean,
     ): Boolean = captureRunning && !(aacRunning && formatMatches)
+
+    /**
+     * The hub's (re)build verdict: the start path must build (or rebuild) the
+     * video encoder whenever the pipeline is not running, AND whenever it
+     * runs without a live encoder. The second half is the reconfigure wedge:
+     * a permanent reconfigure failure used to return with `running` still
+     * true and [activeEncoder] pointing at the STOPPED encoder, so the
+     * frame-path refresh (≤500ms) saw "running" and never rebuilt — every
+     * encoded sink stayed black while the hub answered live. A nulled
+     * encoder (permanent failure, or stop) with sinks still active must
+     * rebuild on the next refresh.
+     */
+    fun needsEncoderBuild(running: Boolean, encoderLive: Boolean): Boolean = !running || !encoderLive
 }

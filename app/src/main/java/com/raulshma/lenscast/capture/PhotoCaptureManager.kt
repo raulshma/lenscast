@@ -81,7 +81,16 @@ class PhotoCaptureManager(
             takePictureCallback(
                 destination,
                 onSaved = { filePath, fileSizeBytes ->
-                    recordInHistory(fileName, filePath, fileSizeBytes)
+                    try {
+                        recordInHistory(fileName, filePath, fileSizeBytes)
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Failed to record capture in history", e)
+                    }
+                    // History is best-effort; the use-case release and the
+                    // caller's completion signal are unconditional — a throw
+                    // above must not leak the photo slot or strand the
+                    // caller's callback (AutomationReceiver's goAsync window
+                    // would hold until the OS timeout).
                     cameraService.releasePhotoCapture()
                     onSaved(filePath, fileSizeBytes)
                 },

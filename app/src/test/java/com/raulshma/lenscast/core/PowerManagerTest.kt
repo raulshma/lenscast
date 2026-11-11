@@ -1,6 +1,8 @@
 package com.raulshma.lenscast.core
 
 import android.os.PowerManager as AndroidPowerManager
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNotSame
 import org.junit.Assert.assertNull
@@ -16,10 +18,11 @@ import org.robolectric.annotation.Config
 /**
  * The wake-lock slots behind the app's awake posture, on Robolectric's
  * shadowed [android.os.PowerManager]: the streaming slot's timeout +
- * renew delegation (young locks untouched, an unheld slot re-acquired —
- * the ladder's thresholds and boundary live in [WakeLockRenewPolicyTest])
- * and the keep-awake slot's independence — a session end releases only
- * its own hold, never the always-on one.
+ * renew delegation (young locks untouched; a renew tick with no armed
+ * session — never acquired, or released — is a no-op, never a
+ * resurrection; the ladder's thresholds and boundary live in
+ * [WakeLockRenewPolicyTest]) and the keep-awake slot's independence — a
+ * session end releases only its own hold, never the always-on one.
  *
  * Assertions ride the wrapper's own slot fields (read reflectively), not
  * `ShadowPowerManager.getLatestWakeLock()`: the shadow's static tracks the
@@ -75,11 +78,24 @@ class PowerManagerTest {
     }
 
     @Test
-    fun `renew re-acquires a lock that was never taken`() {
+    fun `a renew tick with no armed session is a no-op, never a resurrection`() {
+        // The ladder is armed by an acquire and disarmed by any release —
+        // so a tick with nothing ever acquired must not re-acquire (the old
+        // delegation read an unheld slot as "lost lock" and minted one).
         powerManager.renewWakeLock()
-        val first = streamingSlot()
-        assertNotNull(first)
-        assertTrue(first!!.isHeld)
+        assertNull(streamingSlot())
+        assertFalse(armedFlag())
+
+        // The pin of the streaming session's end racing a poll tick: acquire,
+        // release (the session ended), then a tick that was already in
+        // flight — it must find the ladder disarmed and leave the slot
+        // cleared, not re-acquire behind a dead session.
+        powerManager.acquireWakeLock()
+        powerManager.releaseWakeLock()
+        powerManager.renewWakeLock()
+        assertNull("the renew resurrected a released lock", streamingSlot())
+        assertFalse("the renew left the slot flag set", armedFlag())
+        assertEquals(0L, acquiredAtStamp())
     }
 
     // ── the keep-awake slot ──
@@ -138,6 +154,20 @@ class PowerManagerTest {
     private fun streamingSlot(): AndroidPowerManager.WakeLock? = slotField("wakeLock")
 
     private fun keepAwakeSlot(): AndroidPowerManager.WakeLock? = slotField("keepAwakeLock")
+
+    /** The streaming slot's acquired flag, read through the same reflective seam. */
+    private fun armedFlag(): Boolean {
+        val field = PowerManager::class.java.getDeclaredField("wakeLockAcquired")
+        field.isAccessible = true
+        return field.getBoolean(powerManager)
+    }
+
+    /** The streaming slot's acquired-at stamp, read through the same reflective seam. */
+    private fun acquiredAtStamp(): Long {
+        val field = PowerManager::class.java.getDeclaredField("wakeLockAcquiredAtMs")
+        field.isAccessible = true
+        return field.getLong(powerManager)
+    }
 
     private fun slotField(name: String): AndroidPowerManager.WakeLock? {
         val field = PowerManager::class.java.getDeclaredField(name)

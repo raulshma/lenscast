@@ -14,9 +14,11 @@ import com.raulshma.lenscast.streaming.webrtc.WebRtcPlumbing
 import com.raulshma.lenscast.streaming.webrtc.WebrtcSdpException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import org.webrtc.AudioSource
 import org.webrtc.DefaultVideoDecoderFactory
@@ -33,7 +35,6 @@ import org.webrtc.audio.AudioDeviceModule
 import org.webrtc.audio.JavaAudioDeviceModule
 import java.security.SecureRandom
 import java.util.concurrent.ConcurrentHashMap
-import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * The WHEP viewer endpoint (RFC 9725's egress twin): browsers POST an SDP
@@ -96,7 +97,9 @@ class WhepServer(
     private val registry = WhepSessionRegistry()
     private val sessions = ConcurrentHashMap<String, WhepSession>()
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    private val reapLoopStarted = AtomicBoolean(false)
+
+    /** The reap loop's handle — the idempotence and teardown seam for [start]/[stop]. */
+    @Volatile private var reapJob: Job? = null
     private val random = SecureRandom()
 
     @Volatile private var targetFps = StreamDefaults.STREAM_FPS
@@ -111,19 +114,30 @@ class WhepServer(
 
     // ── lifecycle (rides the web transport via the Streaming Manager) ──
 
-    /** Arms the reap loop; idempotent. Also called lazily by [handleOffer]. */
+    /**
+     * Arms the reap loop; idempotent while the loop lives. The loop is held
+     * as a [Job], not a fire-once flag: a start after a stop relaunches a
+     * fresh loop (the flag this replaces never reset, so a start-after-stop
+     * skipped the relaunch and dead sessions could hold encoder slots).
+     * Also called lazily by [handleOffer].
+     */
     fun start() {
-        if (!reapLoopStarted.compareAndSet(false, true)) return
-        scope.launch {
-            while (true) {
+        if (reapJob?.isActive == true) return
+        reapJob = scope.launch {
+            while (isActive) {
                 delay(REAP_INTERVAL_MS)
                 runCatching { reapDeadSessions() }
             }
         }
     }
 
-    /** Tears every session down and releases the shared environment (the web transport is going away). */
+    /**
+     * Tears every session down, cancels the reap loop, and releases the
+     * shared environment (the web transport is going away).
+     */
     fun stop() {
+        reapJob?.cancel()
+        reapJob = null
         sessions.keys.toList().forEach { teardown(it) }
         synchronized(this) {
             environment?.dispose()

@@ -832,7 +832,12 @@ class RtspServer(
                 rtspSessionId = sessionId + "_" + System.currentTimeMillis().toString(16)
             }
 
-            state = SessionState.READY
+            // Demote-safe: a /sub-only client still walks INIT → READY (its
+            // aggregate PLAY passes the handlePlay state guard, byte-identical
+            // response), but a sub SETUP during PLAYING can no longer demote
+            // PLAYING → READY — that demotion flipped isPlaying false and
+            // froze the MAIN stream until the client re-PLAYed.
+            if (state == SessionState.INIT) state = SessionState.READY
 
             sendResponse(
                 output, "200 OK", mapOf(
@@ -923,6 +928,13 @@ class RtspServer(
 
             // TEARDOWN is aggregate: both streams end, the session drops to INIT.
             isSubWanted = false
+            // The sub SETUP gate drops with the rest — describe() kept
+            // advertising "/sub" for a torn-down stream otherwise. The
+            // keyframe wait re-arms for the same reason the gates do (the
+            // next sub PLAY re-arms it anyway). Bug fix only: the TEARDOWN
+            // response bytes are untouched.
+            subSetup = false
+            awaitingSubKeyframe = true
             state = SessionState.INIT
             sendResponse(
                 output, "200 OK", mapOf(

@@ -75,6 +75,25 @@ class RecordingService : Service() {
     }
 
     override fun onDestroy() {
+        // Destroy mid-recording (external stopService / system teardown): no
+        // stop intent will ever drain this session — stop the recorder
+        // best-effort and run the same rescue as the Finalizing path plus the
+        // session ladder, so the camera session and the controller cannot
+        // outlive the service. Any late Finalize lands after onDestroy: the
+        // saved-clip promotion no-ops against the cancelled scope (clip lost —
+        // the same bargain the Finalizing rescue already makes) and the error
+        // branch's teardownSession re-runs an idempotent ladder.
+        if (isRecording) {
+            isRecording = false
+            runCatching { activeRecording?.stop() }
+            pendingTempFile?.delete()
+            pendingTempFile = null
+            releaseExclusiveRecordingAudio()
+            app.cameraService.endExclusiveSession()
+            app.cameraService.releaseKeepAlive()
+            app.cameraService.unbindRecording()
+            recordingController.onServiceStopped()
+        }
         // Destroy mid-drain (system teardown while the encrypted promotion is
         // in flight): the clip is lost with the cancelled scope, but the
         // controller must never stay wedged in Finalizing and the temp

@@ -13,11 +13,16 @@ class ServiceDiscoveryManager(private val context: Context) {
         context.getSystemService(Context.NSD_SERVICE) as NsdManager
     }
 
-    private var registrationListener: NsdManager.RegistrationListener? = null
-    private var rtspRegistrationListener: NsdManager.RegistrationListener? = null
+    // @Volatile: written on the caller's thread, nulled from any stop path —
+    // the unregister decision reads them without a flag gate now.
+    @Volatile private var registrationListener: NsdManager.RegistrationListener? = null
+    @Volatile private var rtspRegistrationListener: NsdManager.RegistrationListener? = null
     private val isRegistered = AtomicBoolean(false)
     private val isRtspRegistered = AtomicBoolean(false)
     @Volatile private var registerAttempts = 0
+
+    /** The RTSP advert's last registration attempt; the change-detection input for a refresh. */
+    @Volatile private var rtspAdvert: RtspAdvert? = null
 
     data class RtspAdvert(
         val port: Int = com.raulshma.lenscast.core.StreamDefaults.RTSP_PORT,
@@ -36,7 +41,9 @@ class ServiceDiscoveryManager(private val context: Context) {
         } else {
             registerHttp(port, serviceName)
         }
-        // Always (re-)evaluate the RTSP advert so a late auth toggle still lands.
+        // Always (re-)evaluate the RTSP advert: it is re-registered when
+        // re-invoked with changed params (the late auth toggle), and a
+        // no-op when nothing moved.
         if (rtsp != null) registerRtsp(port = rtsp.port, path = rtsp.path, authRequired = rtsp.authRequired, serviceName = serviceName)
     }
 
@@ -94,8 +101,13 @@ class ServiceDiscoveryManager(private val context: Context) {
     }
 
     fun unregisterService() {
+        // Unregister for ANY non-null listener: a stop landing before the
+        // async registration confirms used to skip the unregister (the flag
+        // gates) AND null the listener — the advert ghosted until process
+        // death and the next start advertised a duplicate. Pre-confirmation
+        // unregister is legal; failures stay caught and logged.
         registrationListener?.let {
-            if (isRegistered.get()) {
+            if (DiscoveryRegistrationPolicy.shouldUnregister(listenerPresent = it != null)) {
                 try {
                     nsdManager.unregisterService(it)
                 } catch (e: Exception) {
@@ -104,7 +116,7 @@ class ServiceDiscoveryManager(private val context: Context) {
             }
         }
         rtspRegistrationListener?.let {
-            if (isRtspRegistered.get()) {
+            if (DiscoveryRegistrationPolicy.shouldUnregister(listenerPresent = it != null)) {
                 try {
                     nsdManager.unregisterService(it)
                 } catch (e: Exception) {
@@ -114,11 +126,29 @@ class ServiceDiscoveryManager(private val context: Context) {
         }
         registrationListener = null
         rtspRegistrationListener = null
+        isRegistered.set(false)
+        isRtspRegistered.set(false)
+        rtspAdvert = null
         registerAttempts = 0
     }
 
     private fun registerRtsp(port: Int, path: String, authRequired: Boolean, serviceName: String) {
-        if (isRtspRegistered.get()) return
+        val requested = RtspAdvert(port = port, path = path, authRequired = authRequired)
+        // Change detection, not a flag gate: a re-invocation with params
+        // equal to the last attempt returns; any drift (the late auth
+        // toggle) drops the stale advert and re-registers, so the TXT
+        // record follows the truth.
+        if (DiscoveryRegistrationPolicy.shouldSkipRtspRegister(rtspAdvert, requested)) return
+        rtspRegistrationListener?.let {
+            if (DiscoveryRegistrationPolicy.shouldUnregister(listenerPresent = it != null)) {
+                try {
+                    nsdManager.unregisterService(it)
+                } catch (e: Exception) {
+                    Log.e(TAG, "Failed to unregister stale RTSP mDNS advert", e)
+                }
+            }
+            rtspRegistrationListener = null
+        }
         val serviceInfo = NsdServiceInfo()
         serviceInfo.setServiceName(makeUniqueServiceName("$serviceName-RTSP"))
         serviceInfo.setServiceType(SERVICE_TYPE_RTSP)
@@ -143,6 +173,7 @@ class ServiceDiscoveryManager(private val context: Context) {
         }
         try {
             nsdManager.registerService(serviceInfo, NsdManager.PROTOCOL_DNS_SD, rtspRegistrationListener)
+            rtspAdvert = requested
         } catch (e: Exception) {
             Log.e(TAG, "Failed to register RTSP mDNS service", e)
             isRtspRegistered.set(false)

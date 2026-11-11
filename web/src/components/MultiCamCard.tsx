@@ -141,10 +141,17 @@ function CameraTile(props: {
   // The credential-carrying rung: fetch the snapshot with auth headers and
   // render the blob. On failure the frame is dropped and the plain <img>
   // rung gets a try (the remote may have auth off after all).
+  // Race discipline: each request carries the tick that spawned it, and a
+  // response landing after a newer tick (or after the tile is gone) revokes
+  // its own object URL and walks away — an older tick's slower response
+  // must never revoke the newer frame's URL, and a response landing after
+  // the tile's cleanup must never store a URL nothing will ever revoke.
+  let tileDisposed = false
   createEffect(() => {
     const auth = props.camera.auth
     if (!auth || mode() !== 'snapshot') return
-    const path = `${SNAPSHOT_PATH}?t=${tick()}`
+    const requestTick = tick()
+    const path = `${SNAPSHOT_PATH}?t=${requestTick}`
     setStatus('loading')
     void (async () => {
       try {
@@ -155,12 +162,20 @@ function CameraTile(props: {
         if (!res.ok) throw new Error(`HTTP ${res.status}`)
         const blob = await res.blob()
         const next = URL.createObjectURL(blob)
+        if (tileDisposed || tick() !== requestTick) {
+          // Superseded (or unmounted): this URL was never stored, so
+          // revoking it here is the URL's only lease end.
+          URL.revokeObjectURL(next)
+          return
+        }
         setFrameUrl((prev) => {
           if (prev) URL.revokeObjectURL(prev)
           return next
         })
         setStatus('online')
       } catch {
+        // A stale failure must not blank a newer tick's frame either.
+        if (tileDisposed || tick() !== requestTick) return
         setFrameUrl((prev) => {
           if (prev) URL.revokeObjectURL(prev)
           return null
@@ -169,6 +184,7 @@ function CameraTile(props: {
     })()
   })
   onCleanup(() => {
+    tileDisposed = true
     setFrameUrl((prev) => {
       if (prev) URL.revokeObjectURL(prev)
       return null
@@ -456,6 +472,14 @@ export default function MultiCamCard() {
     setUrl('')
   }
 
+  // The volley's 'sending'/'sent'/'failed' badges clear themselves 4 s after
+  // the volley lands — but exactly one reset may be pending: a volley
+  // started while a previous reset is pending cancels it first, or the old
+  // timer would wipe the new volley's 'sending' badges mid-flight. Unmount
+  // cancels the timer with the rest of the card.
+  let captureResetTimer: ReturnType<typeof setTimeout> | null = null
+  onCleanup(() => { if (captureResetTimer) clearTimeout(captureResetTimer) })
+
   /**
    * POST /api/capture on every camera with its credentials. The
    * readable rung (cors mode) only succeeds against servers that send CORS
@@ -467,6 +491,10 @@ export default function MultiCamCard() {
     if (capturing()) return
     const targets = [...cameras()]
     if (targets.length === 0) return
+    // A newer volley supersedes the previous one's pending reset — but a
+    // volley that never starts (guard clauses above) must leave it alone,
+    // or the previous volley's badges would never clear.
+    if (captureResetTimer) clearTimeout(captureResetTimer)
     setCapturing(true)
     setCaptureResults(Object.fromEntries(targets.map((c) => [c.id, 'sending' as CaptureStatus])))
     await Promise.all(targets.map(async (cam) => {
@@ -486,7 +514,7 @@ export default function MultiCamCard() {
       setCaptureResults((current) => ({ ...current, [cam.id]: outcome }))
     }))
     setCapturing(false)
-    setTimeout(() => setCaptureResults({}), 4000)
+    captureResetTimer = setTimeout(() => setCaptureResults({}), 4000)
   }
 
   onMount(() => {

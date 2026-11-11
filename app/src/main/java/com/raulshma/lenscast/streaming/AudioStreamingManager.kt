@@ -33,8 +33,16 @@ class AudioStreamingManager(private val context: Context) : RtspAudioSource {
     )
 
     private val isStreaming = AtomicBoolean(false)
-    private val isTalking = AtomicBoolean(false)
-    @Volatile private var talkUntilMs = 0L
+
+    // The half-duplex talkback gate, ONE value instead of the old
+    // isTalking/talkUntilMs/uplinkStreaming trio: the reader thread's
+    // check-then-act over three fields raced both ways (a chunk leaked
+    // after PTT opened; a lost update un-muted the mic for a whole clip
+    // and echoed the talker's own voice to every audio subscriber).
+    // Volatile like the fields it replaces — the reader thread reads, the
+    // WS threads write; expiry is pure time ([TalkbackPolicy]), so the
+    // reader never writes back.
+    @Volatile private var talkbackPhase: TalkbackPhase = TalkbackPhase.Idle
     @Volatile private var talkbackTrack: android.media.AudioTrack? = null
     private val subscribers = ConcurrentHashMap<Long, AudioSubscriberPipe>()
     private val nextSubscriberId = AtomicLong(1L)
@@ -268,10 +276,10 @@ class AudioStreamingManager(private val context: Context) : RtspAudioSource {
         chunkListener?.invoke(chunk)
         // Half-duplex talkback: while the phone speaker plays browser audio
         // (one-shot clip or a held PTT stream), drop mic chunks so the uplink
-        // doesn't echo back to the talker.
-        if (uplinkStreaming.get()) return
-        if (isTalking.get() && System.currentTimeMillis() < talkUntilMs) return
-        isTalking.set(false)
+        // doesn't echo back to the talker. The phase is read ONCE and never
+        // written back — a clip's expiry is pure time, so there is no
+        // check-then-act window for a concurrent PTT open to lose.
+        if (TalkbackPolicy.shouldDropMic(talkbackPhase, System.currentTimeMillis())) return
         val snapshot = subscribers.values.toList()
         snapshot.forEach { it.enqueue(chunk) }
     }
@@ -283,8 +291,13 @@ class AudioStreamingManager(private val context: Context) : RtspAudioSource {
     fun playUplink(pcm16: ByteArray, sampleRateHz: Int = 16_000, holdMs: Long = 800): Boolean {
         if (pcm16.isEmpty()) return false
         return try {
-            isTalking.set(true)
-            talkUntilMs = System.currentTimeMillis() + holdMs
+            // Held dominates: a clip attempted during a PTT hold must not
+            // replace the Held phase — the clip's expiry would otherwise
+            // un-mute the mic mid-hold and echo the uplink back to the
+            // talker.
+            if (talkbackPhase !is TalkbackPhase.Held) {
+                talkbackPhase = TalkbackPhase.Clip(System.currentTimeMillis() + holdMs)
+            }
             var track = talkbackTrack
             val chMask = AudioFormat.CHANNEL_OUT_MONO
             val minBuf = android.media.AudioTrack.getMinBufferSize(
@@ -322,19 +335,22 @@ class AudioStreamingManager(private val context: Context) : RtspAudioSource {
             true
         } catch (e: Exception) {
             Log.w(TAG, "Talkback playback failed", e)
-            isTalking.set(false)
+            // Only the clip gate clears — never clobber a Held PTT stream's
+            // phase from a failed one-shot play.
+            if (talkbackPhase is TalkbackPhase.Clip) talkbackPhase = TalkbackPhase.Idle
             false
         }
     }
 
     /** True while a continuous PTT stream holds the speaker. */
-    fun uplinkStreamingActive(): Boolean = uplinkStreaming.get()
+    fun uplinkStreamingActive(): Boolean = talkbackPhase is TalkbackPhase.Held
 
     fun stopTalkback() {
-        isTalking.set(false)
+        // One write ends both halves of the old trio: the clip gate and the
+        // PTT hold.
+        talkbackPhase = TalkbackPhase.Idle
         runCatching { talkbackTrack?.pause() }
         runCatching { talkbackTrack?.flush() }
-        uplinkStreaming.set(false)
         runCatching { uplinkTrack?.pause() }
         runCatching { uplinkTrack?.flush() }
         runCatching { uplinkTrack?.release() }
@@ -343,11 +359,10 @@ class AudioStreamingManager(private val context: Context) : RtspAudioSource {
 
     // ── Continuous talkback stream (WebSocket PTT): PCM16 mono chunks in, ──
     // ── speaker out, for as long as the button is held.                   ──
-    private val uplinkStreaming = AtomicBoolean(false)
     @Volatile private var uplinkTrack: android.media.AudioTrack? = null
 
     fun startUplinkStream(sampleRateHz: Int = 16_000): Boolean {
-        if (uplinkStreaming.get()) return true
+        if (talkbackPhase is TalkbackPhase.Held) return true
         return try {
         val chMask = AudioFormat.CHANNEL_OUT_MONO
         val minBuf = android.media.AudioTrack.getMinBufferSize(sampleRateHz, chMask, AudioFormat.ENCODING_PCM_16BIT)
@@ -370,7 +385,7 @@ class AudioStreamingManager(private val context: Context) : RtspAudioSource {
             .build()
         track.play()
         uplinkTrack = track
-        uplinkStreaming.set(true)
+        talkbackPhase = TalkbackPhase.Held
         true
     } catch (e: Exception) {
         Log.w(TAG, "Uplink stream start failed", e)
@@ -403,7 +418,9 @@ class AudioStreamingManager(private val context: Context) : RtspAudioSource {
         runCatching { talkbackTrack?.flush() }
         runCatching { talkbackTrack?.release() }
         talkbackTrack = null
-        isTalking.set(false)
+        // The mic-side teardown clears only the clip gate — a Held PTT
+        // stream is the WS path's state, released by [stopTalkback].
+        if (talkbackPhase is TalkbackPhase.Clip) talkbackPhase = TalkbackPhase.Idle
         runCatching { echoCanceler?.release() }
         echoCanceler = null
         runCatching { noiseSuppressor?.release() }

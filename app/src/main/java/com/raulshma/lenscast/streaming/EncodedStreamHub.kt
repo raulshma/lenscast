@@ -227,7 +227,15 @@ internal class EncodedStreamHub(
     }
 
     private fun startLocked() {
-        if (!running.get()) {
+        // The verdict is wider than a bare `running` check on purpose: a
+        // pipeline running WITHOUT a live encoder (a permanent reconfigure
+        // failure nulled [activeEncoder]) must rebuild here too, so the
+        // ≤500ms frame-path refresh self-heals instead of wedging black
+        // forever while isRunning() answers live. A failed rebuild leaves
+        // running=true with activeEncoder=null deliberately — sinks are
+        // still active (else stopLocked would have landed), so the next
+        // refresh simply retries the build.
+        if (EncodedStreamPolicy.needsEncoderBuild(running.get(), activeEncoder != null)) {
             val encoder = encoderForLocked(activeVideoCodec)
             encoder.configure(videoWidth, videoHeight, videoBitrate, frameRate)
             encoder.setInputFormat(inputFormat)
@@ -252,6 +260,11 @@ internal class EncodedStreamHub(
     private fun stopLocked() {
         if (running.getAndSet(false)) {
             activeEncoder?.stop()
+            // The stopped encoder must not keep serving sps/pps/vps (an SDP
+            // for a dead stream) or gate the next build: null it, so before
+            // the first start AND after a stop the EncodedSource answers
+            // null exactly as its doc promises.
+            activeEncoder = null
             Log.d(TAG, "Encoded stream stopped")
         }
         stopSubEncoderLocked()
@@ -537,8 +550,10 @@ internal class EncodedStreamHub(
      * The dimension/input-format/codec reconfigure, ported from the RTSP
      * server's frame path: stop → configure → start, one retry, black frame
      * for CSD. Selects the encoder for the CURRENT codec, so a codec change
-     * lands here too. A permanent failure leaves the encoder stopped;
-     * encodeFrame no-ops safely until a later reconfigure succeeds.
+     * lands here too. A permanent failure stops the encoder AND nulls
+     * [activeEncoder] — the stopped instance must not serve sps/pps/vps or
+     * gate the retry — so a later refresh rebuilds through
+     * [EncodedStreamPolicy.needsEncoderBuild] and the pipeline self-heals.
      */
     private fun reconfigureEncoderLocked(width: Int, height: Int) {
         videoWidth = width
@@ -554,6 +569,9 @@ internal class EncodedStreamHub(
             } catch (_: InterruptedException) {
             }
             if (!encoder.start()) {
+                // running stays true (the sinks are still active), but the
+                // dead encoder leaves the slot: the next refresh rebuilds.
+                activeEncoder = null
                 Log.e(TAG, "Encoder restart at ${width}x${height} failed permanently; frames skipped until next reconfigure")
                 return
             }
@@ -630,9 +648,9 @@ internal class EncodedStreamHub(
     //
     // sps/pps are the ACTIVE codec's SPS/PPS; vps is non-null only under
     // H.265, so the H.264 SDP path can never observe a stale VPS. Before the
-    // first start (no encoder instantiated) everything answers null and
-    // requestKeyFrame no-ops — the same shape as a started-but-CSD-less
-    // encoder.
+    // first start and after a stop (no active encoder — [activeEncoder] is
+    // null) everything answers null and requestKeyFrame no-ops — the same
+    // shape as a started-but-CSD-less encoder.
 
     override val sps: ByteArray?
         get() = activeEncoder?.sps

@@ -79,7 +79,12 @@ class AutomationEventWiring(
     private val scope: CoroutineScope,
 ) {
 
+    /** One launch per process: a second [start] must not double-launch the collectors — event triggers would re-run. */
+    @Volatile private var started = false
+
     fun start() {
+        if (started) return
+        started = true
         watchDetectionEvents()
         watchCharging()
         watchBatteryLevel()

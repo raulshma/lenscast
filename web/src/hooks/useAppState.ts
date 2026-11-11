@@ -3,6 +3,7 @@ import * as api from '../api/client'
 import { createRecordingTimer } from '../RecordingTimer'
 import { createLiveAudioPlayer, type LiveAudioStatus } from '../audio/LiveAudioPlayer'
 import { createPollLadder } from './pollLadder'
+import { sseLaneHealthy } from './sseHealth'
 import { hashRouter, type RouteName } from '../lib/router'
 import { createSectionedDebouncer } from '../lib/sectionedDebounce'
 import { transportSwitchUrl } from '../lib/transportSwitch'
@@ -19,10 +20,6 @@ import type {
 
 /** Consecutive status-lane failures before the dashboard shows the connection-lost banner. */
 const CONNECTION_LOST_FAILURES = 3
-// The push lane's freshness bar: the server streams a status event every
-// second, so five seconds of silence (open socket or not) counts as a dead
-// lane and hands telemetry back to the poll ladder.
-const SSE_STALE_MS = 5_000
 // The server announces an HTTP/HTTPS switch just before it restarts the
 // listener, then rebinds within a couple hundred milliseconds. Waiting a
 // little longer before navigating keeps the reload from landing on the closed
@@ -267,9 +264,21 @@ export function useAppState() {
     }
   }
 
+  // One poll owner at a time (the Gallery.tsx fetch-generation shape): each
+  // status poll takes a generation number, and a superseded poll drops its
+  // result instead of writing it. Without the guard, a poll response that
+  // was already in flight when an optimistic action landed (start/stop
+  // recording, start/stop interval capture) would overwrite that verdict —
+  // a stopped recording's REC overlay could resurrect for up to one poll
+  // interval.
+  let recordingStatusGeneration = 0
+  let intervalStatusGeneration = 0
+
   async function fetchIntervalStatus() {
+    const generation = ++intervalStatusGeneration
     try {
       const s = await api.getIntervalCaptureStatus()
+      if (generation !== intervalStatusGeneration) return
       setIntervalRunning(s.isRunning)
       setIntervalCompleted(s.completedCaptures)
     } catch (e) {
@@ -278,8 +287,10 @@ export function useAppState() {
   }
 
   async function fetchRecordingStatus() {
+    const generation = ++recordingStatusGeneration
     try {
       const s = await api.getRecordingStatus()
+      if (generation !== recordingStatusGeneration) return
       setIsRecording(s.isRecording)
       setRecordingElapsed(s.elapsedSeconds)
       setIsScheduled(s.isScheduled ?? false)
@@ -414,6 +425,9 @@ export function useAppState() {
       () => api.startIntervalCapture(intervalConfig()),
       t('error.startInterval'),
       () => {
+        // Invalidate any in-flight status poll — a stale response must not
+        // overwrite this optimistic verdict.
+        intervalStatusGeneration++
         setIntervalRunning(true)
         setIntervalCompleted(0)
       },
@@ -422,6 +436,9 @@ export function useAppState() {
 
   function handleStopIntervalCapture() {
     return runResultAction(api.stopIntervalCapture, t('error.stopInterval'), () => {
+      // Invalidate any in-flight status poll — a stale response must not
+      // overwrite this optimistic verdict.
+      intervalStatusGeneration++
       setIntervalRunning(false)
     })
   }
@@ -431,6 +448,9 @@ export function useAppState() {
       () => api.startRecording(recordingConfig()),
       t('error.startRecording'),
       () => {
+        // Invalidate any in-flight status poll — a stale response must not
+        // overwrite this optimistic verdict.
+        recordingStatusGeneration++
         if (recordingConfig().startTimeMs) {
           setIsScheduled(true)
           setScheduledStartTimeMs(recordingConfig().startTimeMs ?? null)
@@ -444,6 +464,9 @@ export function useAppState() {
 
   function handleStopRecording() {
     return runResultAction(api.stopRecording, t('error.stopRecording'), () => {
+      // Invalidate any in-flight status poll — a stale response must not
+      // overwrite this optimistic verdict.
+      recordingStatusGeneration++
       setIsRecording(false)
       setIsScheduled(false)
       setScheduledStartTimeMs(null)
@@ -605,14 +628,15 @@ export function useAppState() {
     })
 
     // Track SSE liveness with a small grace: a closed stream re-arms the
-    // lane, and so does an open-but-silent one. Runs once per ladder tick
-    // (1 s) and publishes the verdict into sseConnected so the poll-lane
-    // gate and the connection-lost banner can never disagree.
+    // lane, and so does an open-but-silent one. Evaluated whenever the
+    // status lane's gate runs — every 3rd ladder tick (~3 s), the lane's
+    // everyTicks boundary — and publishes the verdict into sseConnected so
+    // the poll-lane gate and the connection-lost banner can never disagree.
     let sseAliveAt = 0
     let lastSseEventAt = 0
     function sseHealthChecker(): boolean {
       if (eventSource && eventSource.readyState === EventSource.OPEN) sseAliveAt = Date.now()
-      const healthy = Date.now() - sseAliveAt < 5_000 && Date.now() - lastSseEventAt < SSE_STALE_MS
+      const healthy = sseLaneHealthy(Date.now(), eventSource?.readyState === EventSource.OPEN, sseAliveAt, lastSseEventAt)
       setSseConnected(healthy)
       return healthy
     }

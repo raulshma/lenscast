@@ -2122,6 +2122,9 @@ contracts.
 | `IntervalCaptureState` | `CaptureViewModel` (only writer) | `capture/model/IntervalCaptureState.kt` | Unknown / Running(snapshot) / Stopped | Unknown = the WorkManager snapshot not yet observed; the Start button renders disabled-with-progress until observed |
 | `DetectionModelStore.State` | `DetectionModelStore` (`requestDownload`, idempotent) | `capture/ml/DetectionModelStore.kt` | NotDownloaded / Downloading(progress) / Ready(file) / Failed(reason) | a Ready that fails its size-then-digest re-check is demoted, never wedged |
 | `AudioModelStore.State` | `AudioModelStore` (`requestDownload`, idempotent) | `capture/ml/AudioModelStore.kt` | NotDownloaded / Downloading(progress) / Ready(file) / Failed(reason) | same shape as `DetectionModelStore.State` |
+| Continuous-loop rearm discipline | `ContinuousRecordingController.decideIdle`/`tryArm` | `capture/ContinuousRecordingController.kt` | a live suppression always keeps exactly one wake-up scheduled | a second chain break inside a suppression window retargets the pending job (`scheduleRearm` cancels+replaces) — the old `rearmJob == null ? ScheduleRearm : Noop` left the stale job aimed at the old deadline; its fire failed `canArm` and the loop sat Idle with no flow emission ever coming, silently dead |
+| Photo capture completion invariant | `PhotoCaptureManager.takePictureCallback` wrappers | `capture/PhotoCaptureManager.kt` | — | history is best-effort; the use-case release and the caller's completion signal are unconditional — a history throw used to leak the photo use-case slot and hold AutomationReceiver's goAsync window until the OS timeout |
+| RecordingService destroy rescue | `onDestroy` | `capture/RecordingService.kt` | — | a destroy during Recording runs the same rescue as the Finalizing path (session ladder + `onServiceStopped` + temp delete) — the controller and the camera session cannot outlive the service |
 
 ### Gallery
 
@@ -2143,11 +2146,15 @@ contracts.
 | `ForegroundMode` | `StreamingService.foregroundMode` (@Volatile) | `streaming/StreamingService.kt` | None / ServerOnly / Streaming | bookkeeping of the last successful typed foreground start; the failed-reassert stopSelf sharp edge is documented and unchanged |
 | `Credentials` | `WebAuthGate` (private) | `streaming/WebAuthGate.kt` | nullable admin / viewer pairs | a blank half clears the whole pair (the blanking convention, now structural) |
 | `SessionPhase` | `WhepSessionRegistry` (per entry) | `streaming/whep/WhepSessionRegistry.kt` | Awaiting / Connected / Disconnected | the per-phase reap deadlines are byte-identical to the old thresholds |
-| `PushPhase` | `PushOutput.phase()` (derived) | `streaming/PushOutput.kt` | Idle / Connecting / Reconnecting / Connected / Refused | derived from wireName × active — distinguishes refused vs reconnecting; the /api/status wire strings are unchanged (OpenApiSpec-pinned) |
+| `PushPhase` | `PushOutput.phase()` (derived) | `streaming/PushOutput.kt` | Idle / Connecting / Reconnecting / Connected / Refused | derived from wireName × active — distinguishes refused vs reconnecting; the /api/status wire strings are unchanged (OpenApiSpec-pinned); the lifecycle transitions serialize on one `transitionLock` (concurrent starts used to leak a live publisher nobody could stop; a stop between a restart's legs resurrected the output) and a superseded handle's statuses are dropped at the sink |
+| `TalkbackPhase` | `AudioStreamingManager.talkbackPhase` (one @Volatile write per entry point) | `streaming/TalkbackPolicy.kt` | Idle / Clip(untilMs) / Held | the half-duplex mic-drop verdict, read once per chunk — the retired isTalking/talkUntilMs/uplinkStreaming trio raced both ways: one chunk leaked past a PTT open, and a lost update un-muted the mic for a whole clip and echoed the talker's voice to every audio subscriber |
+| `DiscoveryRegistrationPolicy` verdicts | `ServiceDiscoveryManager` (@Volatile listeners, `rtspAdvert` change detection) | `streaming/DiscoveryRegistrationPolicy.kt` | no-advert / advert(port, path, auth) | unregister keys on the listener, not a flag — a stop landing before the async registration confirmed used to ghost the advert until process death and mint a duplicate on the next start; a re-invocation with changed params re-registers, so the TXT auth attribute follows the truth |
+| WhepServer reap loop | `reapJob: Job?` (start/stop own it) | `streaming/whep/WhepServer.kt` | armed / cancelled | a start after a stop relaunches — the old once-only flag over an immortal loop was correct only by accident |
+| `EncodedStreamPolicy.needsEncoderBuild` | `EncodedStreamHub.startLocked` guard | `streaming/EncodedStreamPolicy.kt` | Stopped / Running / Running·encoderless (retryable) | a permanent reconfigure failure nulls `activeEncoder` (and so does `stopLocked`), so the ≤500ms frame-path refresh rebuilds — the old wedge left a black pipeline that `isRunning()` reported live, unrecoverable until every sink deactivated |
 | `LatestFrame` | `MjpegStreamPump` (private) | `streaming/MjpegStreamPump.kt` | (jpeg, version) | swapped atomically on every `updateFrame`; readers compare versions |
 | `isStreaming` | `StreamingManager` — derived combine of five active mirrors | `streaming/StreamingManager.kt` | Boolean | mirrors written by their owners at the transition itself (`onActiveChanged` seams); `updateStreamingState` deleted; `isLiveStreaming()` is the same predicate |
 | `applyEcoIdleState` | `StreamingManager` (single writer) | `streaming/StreamingManager.kt` | `EcoIdlePolicy.State` + lock-free `ecoIdleActive` volatile | the only writer of the pairing; the volatile write is the publish step (see Eco Idle Policy) |
-| ClientSession `isPlaying` | `RtspServer.ClientSession` (private `SessionState`) | `streaming/rtsp/RtspServer.kt` | INIT / READY / PLAYING | `isPlaying` is derived (`state == PLAYING`); teardown drops to INIT so send taps stop |
+| ClientSession `isPlaying` | `RtspServer.ClientSession` (private `SessionState`) | `streaming/rtsp/RtspServer.kt` | INIT / READY / PLAYING | `isPlaying` is derived (`state == PLAYING`); teardown drops to INIT so send taps stop; the sub SETUP write is demote-safe (INIT→READY only — a SETUP during PLAYING used to demote it and freeze the main stream until a re-PLAY) and TEARDOWN clears `subSetup`, so describe() stops advertising a torn-down /sub |
 | `BootResumePolicy.Verdict` | `BootResumePolicy.decide` | `streaming/StreamStateJournal.kt` | NONE / WEB / RTSP / BOTH | boot resume over the persisted journal's web/rtsp flags |
 
 ### Automation
@@ -2158,6 +2165,7 @@ contracts.
 | Rule vocabulary | `AutomationTriggerKind` / `ConditionMode` / `MissedRunPolicy` | `automation/schedule/AutomationRuleEnums.kt` | TIME_OF_DAY + 8 triggers; ALL/ANY; CATCH_UP/SKIP/WINDOW | exact wire ids; `AutomationRuleJson` = AppJson + the three wire adapters is the one Moshi for the rule graph (plain AppJson.moshi would emit enum names); RuleDraft keeps wire strings, converts at the boundary |
 | `Picker` | AutomationScreen (private, `activePicker`) | `automation/AutomationScreen.kt` | Action / Trigger / Condition | editor pickers mutually exclusive structurally |
 | Rule-editor dirty pair | AutomationScreen `modified`/`showDiscardConfirm` (rememberSaveable — the draft's shadow) | `automation/AutomationScreen.kt` | Closed / Open·clean / Open·dirty / ConfirmingDiscard | saveable together with the saveable draft, so a configuration change can never split truth from dirtiness (the old plain-remember dirty flag let rotation dismiss edits silently) |
+| Wiring start guard | `AutomationEventWiring` (`@Volatile started`) | `automation/AutomationEventWiring.kt` | set-once | matches `AutomationScheduler.start`'s idempotence contract — a second start would double-launch the collectors and re-run every event trigger |
 
 ### Core
 
@@ -2166,6 +2174,7 @@ contracts.
 | `UpdateState` | `UpdateViewModel` | `update/model/UpdateInfo.kt` | Idle / Checking / UpdateAvailable / UpToDate / Downloading / ReadyToInstall / Error | the update screen's full lifecycle as one explicit machine |
 | `MicStartDecision` | `MicAccess.startDecision` (consulted through MicGate) | `core/MicAccess.kt` | Proceed / Degrade(warning) | warn-and-degrade: the caller starts either way (see Mic Access) |
 | Keep-awake startup reconcile | `KeepAwakeController` collector (single writer) | `core/KeepAwakeController.kt` | DiskSeeded → FlowFollowing | the first emission is disk-confirmed at collect time — a stale default never holds and a gap write is never lost (see Keep Awake) |
+| Wake-slot renewal gate | `PowerManager` (`wakeLockLock` monitor + `wakeRenewalArmed`) | `core/PowerManager.kt` | armed (session live) / disarmed (released) | the renew ladder can never outlive the session that armed it — a post-release tick is a no-op, not a resurrection (`resolve(!held)` reads a released slot as "lost lock, re-acquire"); the streaming and keep-awake slots synchronize on independent monitors |
 | `TrackingSnapshot` | `StreamWatchdog` (swapped via copy) | `core/WatchdogPolicy.kt` | five last* tracking facts (frame baselines, last check, last recovery, last failure reason) | one immutable snapshot per update; the runtime's Atomic counters stay separate on purpose |
 | `isQuitting` latch | `MainApplication` (@Volatile flag) | `MainApplication.kt` | set-once flag | guards the quitApplication teardown ladder — the first invocation runs it, later ones no-op |
 | GeoTag ask-once + degraded caption | SettingsScreen + its permission launcher | `settings/SettingsScreen.kt` | off / on-with-permission / on-but-denied (degraded) | persist-on-grant — a denial leaves the setting off; enabled-but-denied shows the credit-only EXIF caption |
@@ -2187,6 +2196,11 @@ contracts.
 | AuthCard config mirror | `AuthCard` (`adminDirty`/`viewerDirty`) | `web/src/components/AuthCard.tsx` | Synced-with-server / Locally-dirty, per group | the 10 s poll overwrites a group only while synced — Save clears the bit and re-bases from server truth; the password fields are write-only drafts the poll never touches |
 | Gallery fetch generation | `Gallery.tsx` `fetchGallery` (generation counter) | `web/src/Gallery.tsx` | one fetch owner at a time | a superseded fetch drops its result — the filter/query/page trigger effects cannot race the grid into showing the abandoned request's items (RecordingTimeline's day-guard, generalized) |
 | Rule-editor dirty | `AutomationRuleEditor` derived memo | `web/src/components/AutomationRuleEditor.tsx` | clean / dirty = structural compare against the rule the editor opened with | dirty is derived, never tracked — a new mutator needs no bookkeeping; the memo reads `specsVersion` because the param records mutate in place |
+| Recording/interval status generations | `useAppState` per-lane counters (the Gallery fetch-generation shape) | `web/src/hooks/useAppState.ts` | one poll owner at a time, per lane | the four optimistic action handlers invalidate in-flight polls — a stale response used to resurrect a stopped recording's REC overlay (or kill a just-started one) for up to one poll interval |
+| `sseLaneHealthy` | `web/src/hooks/sseHealth.ts` (pure); `sseHealthChecker` publishes it | `web/src/hooks/sseHealth.ts` | Fresh / alive-grace / Dead | open AND alive < 5 s AND events < SSE_STALE_MS — a closed socket is dead immediately (the old inline checker could overwrite onerror's false with its grace-window true for up to 5 s); evaluated at the status lane's everyTicks boundary (~3 s), not the 1 s its old comment claimed |
+| MJPEG retry ladder | `StreamPreview.previewRetryTimer` + `previewErrorCount` | `web/src/components/StreamPreview.tsx` | at most one pending retry timer; error budget resets on load | unmount cancels the timer and a successful load clears the budget — five lifetime transient errors used to permanently demote MJPEG to the ~10 s-latency HLS rung (or pin the 8 s backoff forever without HLS) |
+| PTT unmount teardown | `StreamPreview` onCleanup (hold generation + `stopPttCleanup`) | `web/src/components/StreamPreview.tsx` | — | an unmount mid-hold (session demoted or logged out) tears the mic/context/WS down — the hold used to leave a hot mic and an open socket behind the login screen |
+| Multicam tile fetch generation | `CameraTile` `requestTick` guard + `captureResetTimer` | `web/src/components/MultiCamCard.tsx` | one fetch owner per tick; one pending volley reset | a superseded or disposed response revokes its own blob URL and walks away (it used to revoke the newer tick's URL, or store one nothing would ever revoke); a newer volley cancels the previous one's pending badge wipe |
 
 ### Deliberately implicit
 
@@ -2208,82 +2222,78 @@ Machines that stay implicit on purpose — do not re-flag them:
 - `StreamWatchdog.updateState()`'s re-derive-IDLE-over-FAILED quirk (`core/StreamWatchdog.kt`): a null-status refresh can re-derive IDLE over FAILED — flagged in a comment, behavior preserved.
 - PushOutput's benign cross-thread status reads (`streaming/PushOutput.kt`): `statusValue` is @Volatile, written from connect/disconnect threads and read from /api/status threads — a torn read is impossible, a stale one is benign.
 - DetectionNotifier posting silently no-ops when POST_NOTIFICATIONS is denied (`capture/DetectionNotifier.kt`): the persisted toggle and the runtime permission are two truths; the degrade happens at post time (`notify` returns false and the coordinator records no notify action).
+- The wear first-run door (`wear/MainActivity.kt` `firstRunDoorOpened` × `WearRemoteController` `UiState.configured`): a once-per-activity-instance bounce memory held in two classes on purpose — the door belongs to the instance (a resume without a save stays on the remote screen); the wave-6 hunt refuted the suspected bug.
+- AutomationReceiver's goAsync completion ladder (`automation/AutomationReceiver.kt`): finish-once via `finished` + `completionOwnedByCallbacks`; every non-capture path finishes in finally and the capture path's feeder (PhotoCaptureManager) now guarantees the completion signal unconditionally — the ladder is correct as written.
 
-### Flagged, not named (wave-5 hunt — do not re-hunt; name when next touched)
+### Flagged, not named (wave-5/6 hunts — do not re-hunt; name when next touched)
 
-The sweep confirmed these implicit machines but left them implicit: each
-naming change is too large, or sits too close to a byte-pinned wire, to
-land as drive-by hygiene. Roughly in priority order — the first entries
-carry user-visible symptoms:
+The sweeps confirmed these implicit machines; the wave-6 pass fixed their
+user-visible bugs (each entry says what landed) and left the naming work
+itself — each remainder too large, or too close to a pinned wire, to land
+as drive-by hygiene. Roughly in priority order:
 
-- PTT talkback session (`web/src/components/StreamPreview.tsx`, the `ptt*`
-  closure lets + `talking` + hold counter): Idle/Arming/Ws/Fallback/Draining
-  across ~8 writers; the known wart is the phantom "Talking" state while the
-  mic-permission dialog is up.
-- Telemetry lane health (`web/src/hooks/useAppState.ts` — `statusFailures` +
-  `sseConnected` + two wall-clock lets): `onopen`'s optimistic true and the
-  1 Hz checker are competing verdict writers for up to one tick; the
-  Fresh/Stale/PollOnly/Lost verdict wants one pure function.
-- MJPEG preview restart ladder (`web/src/components/StreamPreview.tsx`
-  onError handler): counter + visibility + nonce + timers that are never
-  cancelled — a stale timer can re-show after the stream stopped.
+- Push publisher session unification (`rtmp/RtmpPublisher.kt`,
+  `srt/SrtPublisher.kt`, `whip/WhipPublisher.kt`, `PushOutput.kt`): the
+  wanted/started CAS pair + backoff counter hand-rolled three times with
+  three divergent stop choreographies (~150 dedupable lines) — a
+  `PublisherSession` type can own the identical loop/CAS/backoff skeleton
+  (provably timing-equivalent) with the stop choreographies as
+  per-transport hooks; `PushOutput`'s fresh-publisher-every-start
+  invariant stays unenforced by the type. Wave 6 fixed the riders first:
+  the transitions serialize on one `transitionLock` (concurrent starts
+  leaked a live publisher; a stop between a restart's legs resurrected a
+  stopped output) and a superseded handle can no longer write the status
+  line.
+- PTT talkback phase naming (`web/src/components/StreamPreview.tsx`, the
+  `ptt*` closure lets + `talking` + hold counter):
+  Idle/Arming/Ws/Fallback/Draining across ~8 writers; the known wart is
+  the phantom "Talking" label while the mic-permission dialog is up.
+  Wave 6 fixed the unmount leak (an `onCleanup` tears the audio graph
+  down — a demote/logout mid-hold used to leave a hot mic).
 - Auth/session lifecycle (`web/src/hooks/useAppState.ts` signals 34-46):
-  Booting/Open/Locked/SignedIn/Demoted with hand-maintained reset ladders;
-  `checkAuth`'s catch fails open to admin-implied.
+  Booting/Open/Locked/SignedIn/Demoted with hand-maintained reset ladders
+  (`demoteToLogin` resets six fields, `handleLogout` four). The naming: a
+  derived `SessionPhase` memo + one `signOut(opts)` reset, keeping the
+  four exported signals. `checkAuth`'s catch fails open to admin-implied
+  — deliberate, self-heals within one round trip; document, don't change.
 - Recording phase trio (`useAppState` 89-92 + `RecordingTimer.tsx`):
-  idle/scheduled/recording as four signals with an optimistic branch; the
-  wall timer can disagree with the server elapsed after a device-side
-  restart.
+  idle/scheduled/recording as four signals with an optimistic branch; a
+  `RecordingPhase` signal with derived accessors is the shape. Wave 6
+  fixed the stale-response race (per-lane generation guards).
 - Multicam tile rung (`web/src/components/MultiCamCard.tsx` per tile):
-  snapshot/live/live-broken/offline as five primitives; local mode and the
-  persisted mode diverge by design when a tile silently demotes.
-- Push publisher session (`rtmp/RtmpPublisher.kt`, `srt/SrtPublisher.kt`,
-  `whip/WhipPublisher.kt`): the wanted/started CAS pair + backoff counter
-  hand-rolled three times with three divergent stop choreographies (~150
-  dedupable lines); `PushOutput`'s fresh-publisher-every-start invariant is
-  unenforced.
-- EncodedStreamHub reconfigure ladder (`streaming/EncodedStreamHub.kt`
-  543-583): `running` × `activeEncoder` × harness-running encodes
-  Reconfiguring/FailedPermanently, which nothing can name today — the
-  "RTSP went black but settings say live" diagnosis. The audio-attach
-  format trio (174-177) is load-bearing only through the harness phase
-  above.
-- RtspServer sub-stream twin (`streaming/rtsp/RtspServer.kt` 473-527):
-  `subSetup` × `isSubWanted` × `awaitingSubKeyframe` mirror the named
-  `SessionState` enum and cross-write it (sub SETUP sets `state`; TEARDOWN
-  leaves a hybrid `describe()` still advertises).
-- Talkback half-duplex phase (`streaming/AudioStreamingManager.kt` 35-38):
-  `isTalking` + `talkUntilMs` + `uplinkStreaming` — the reader-thread
-  check-then-act can leak one mic chunk; `stopTalkback` clears four fields
-  without atomicity.
-- ContinuousRecordingController loop state (`capture/
-  ContinuousRecordingController.kt` 50-65): `armed`/`armedByUs`/
-  `suppressedUntilMs`/`idleSinceMs` + two Job sentinels — the wedged-Job
-  history is documented in place; a sealed loop state would make the rearm
-  ladder structural.
-- RecordingService shadow phase (`capture/RecordingService.kt` 54-65): the
-  boolean cluster mirrors the named `RecordingController.state`, with three
-  wedge-rescue guards as scar tissue.
-- PowerManager wake slots (`core/PowerManager.kt` 38-45): held-flag +
-  nullable-lock + timestamp per slot; the OS can expire the 60-minute lock
-  under a true flag until the next renew poll.
-- MQTT announce trio (`core/mqtt/MqttAlertPublisher.kt` 104-115): three
-  asymmetrically-reset booleans + the config snapshot; a mid-announce throw
-  leaves retained-entity cleanup decisions wrong. Same module's
-  `MqttClient` (72-91) spells Connected/Dead as field pairs that must agree
-  four ways.
-- mDNS advert pairs (`streaming/ServiceDiscoveryManager.kt` 16-20): the
-  registration flags vs the platform registry — a stale flag mints a second
-  registration or skips the unregister (ghost adverts after server stop).
-- WhepServer endpoint phase (`streaming/whep/WhepServer.kt` 99): the
-  once-only, never-stopped reap loop — `start()` after `stop()` silently
-  skips relaunching the reaper for the new session generation.
-- Wear first-run door (`wear/.../MainActivity.kt` `firstRunDoorOpened` ×
-  `WearRemoteController` `UiState.configured`): the once-per-instance
-  bounce memory lives in two classes.
-- AutomationReceiver completion pair (`automation/AutomationReceiver.kt`
-  48-59): the `goAsync()` window's Open/Callback-owned/Closed ladder — a
-  queued-but-never-fired capture holds the receiver until the OS timeout.
-- Edge-detector mirrors (`automation/AutomationEventWiring.kt` 112-161):
-  four hand-rolled seed-then-diff primitives; `start()` is not idempotent
-  (the scheduler's is).
+  snapshot/live/live-broken/offline as five primitives; local mode and
+  the persisted mode diverge by design when a tile silently demotes.
+  Wave 6 fixed the fetch races (requestTick guard) and the volley-wipe
+  timer; a `TileRungState` remains.
+- MJPEG preview restart policy (`web/src/components/StreamPreview.tsx`):
+  the harms are fixed (one pending retry timer, the error budget resets
+  on load, unmount cancels); the ladder itself — `retryDelay(count)`,
+  `shouldDemote(count, hlsAvailable)` — still wants a pure
+  `PreviewRetryPolicy`.
+- Telemetry lane cadence (`web/src/hooks/useAppState.ts`): `sseLaneHealthy`
+  is the named verdict now (wave 6); the open questions are deliberate
+  behavior decisions, not bugs — evaluating it every ladder tick (the old
+  comment claimed 1 s; the status lane's gate runs it every 3rd tick) and
+  making the checker the only `sseConnected` writer.
+- RtspServer sub-stream twin (`streaming/rtsp/RtspServer.kt` ~473-527):
+  `subSetup` × `isSubWanted` × `awaitingSubKeyframe` still mirror the
+  named `SessionState` enum. Wave 6 fixed the cross-writes (demote-safe
+  sub SETUP, honest TEARDOWN); the twin wants extraction into a pure
+  phase/verdict holder beside `RtspSessionProtocol`.
+- ContinuousRecordingController sealed loop state
+  (`capture/ContinuousRecordingController.kt`): `armed`/`armedByUs`/
+  `suppressedUntilMs`/`idleSinceMs` + two Job sentinels want
+  `LoopState { Dormant, Maintaining(ours), Suppressing(untilMs) }`. Wave 6
+  fixed the rearm-loss wedge (a second chain break inside a suppression
+  window used to strand the loop on a stale deadline, silently dead).
+- RecordingService shadow phase (`capture/RecordingService.kt`): the
+  boolean cluster mirrors the named `RecordingController.state`, with
+  wedge-rescue guards as scar tissue (the onDestroy rescue now covers the
+  Recording phase too). A private `Phase` enum would make the guards
+  `when` checks.
+- MQTT announce trio (`core/mqtt/MqttAlertPublisher.kt` ~104-115): three
+  asymmetrically-reset booleans + the config snapshot want one immutable
+  record swapped at the two transition points (the set-before-publish
+  ordering is what makes a mid-announce throw safe — refuted as a bug,
+  naming only). `MqttClient`'s Connected/Dead field pairs are
+  lock-confined and documented — leave alone.

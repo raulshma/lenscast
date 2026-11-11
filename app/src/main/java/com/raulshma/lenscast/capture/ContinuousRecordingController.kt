@@ -11,6 +11,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
+import kotlin.math.max
 
 /**
  * Keeps the NVR-style continuous loop alive over the RecordingController's
@@ -182,9 +183,13 @@ class ContinuousRecordingController(
             // immediately — the RecordingController gates camera access) or a
             // suppression window from an earlier break (wait it out).
             if (!ContinuousRecordingPolicy.canArm(nowMs(), suppressedUntilMs)) {
-                val remaining = suppressedUntilMs - nowMs()
-                if (rearmJob == null) return Decision.ScheduleRearm(remaining)
-                return Decision.Noop
+                // Unconditional: [scheduleRearm] cancels and replaces, so a
+                // re-evaluation during a pending job's tail re-targets the
+                // CURRENT deadline instead of leaving a job aimed at one a
+                // later break may already have extended. Skipping the
+                // reschedule here can strand the loop on a stale deadline —
+                // its fire fails [canArm] and nothing is scheduled behind it.
+                return Decision.ScheduleRearm(max(0L, suppressedUntilMs - nowMs()))
             }
             return if (ContinuousRecordingPolicy.shouldArm(
                     enabled = true,
@@ -215,11 +220,13 @@ class ContinuousRecordingController(
         suppressedUntilMs = ContinuousRecordingPolicy.suppressedUntilMs(nowMs())
         Log.d(TAG, "Continuous chain broken after ${idleForMs}ms Idle; arming suppressed for " +
             "${ContinuousRecordingPolicy.USER_STOP_SUPPRESSION_MS}ms")
-        return if (rearmJob == null) {
-            Decision.ScheduleRearm(ContinuousRecordingPolicy.USER_STOP_SUPPRESSION_MS)
-        } else {
-            Decision.Noop
-        }
+        // Always reschedule, with the CURRENT remaining window: a break
+        // inside an earlier suppression extends [suppressedUntilMs], and the
+        // still-pending job from the first break targets the OLD deadline —
+        // its fire would fail [canArm] and strand the loop (an Idle with no
+        // scheduled wake-up and no flow emission to recover from).
+        // [scheduleRearm] cancels and replaces, so this can never stack jobs.
+        return Decision.ScheduleRearm(max(0L, suppressedUntilMs - nowMs()))
     }
 
     /** Re-evaluate after [delayMs]: the suppression cooldown tail. */
@@ -286,7 +293,15 @@ class ContinuousRecordingController(
                 recordingStateIsIdle = idle,
                 alreadyArmed = armed,
             ) && ContinuousRecordingPolicy.canArm(nowMs(), suppressedUntilMs)
-            if (!fire) return
+            if (!fire) {
+                // A still-live suppression always keeps exactly one wake-up
+                // scheduled — a stale-deadline fire must not strand the loop
+                // (a re-arm Job that fails [canArm] is done; nothing else
+                // re-emits or re-schedules while the state sits on Idle).
+                val remaining = suppressedUntilMs - nowMs()
+                if (idle && remaining > 0) scheduleRearm(remaining)
+                return
+            }
             val config = ContinuousRecordingPolicy.segmentConfig(
                 segmentMinutes = settingsDataStore.continuousSegmentMinutes.value,
                 audioEnabled = settingsDataStore.recordingAudioEnabled.value,

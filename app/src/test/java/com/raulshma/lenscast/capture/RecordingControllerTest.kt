@@ -72,11 +72,13 @@ import org.robolectric.shadows.ShadowApplication
  * Deliberately NOT covered here (needs a real foreground service or
  * virtual time): the service's own lifecycle, foreground vs non-foreground
  * start dispatch (the Robolectric shadow folds `startForegroundService`
- * into `startService`, so the `foreground` flag is not observable), the
- * 60 s user-stop suppression tail of the continuous loop (real-time only —
- * the pin below covers the 5 s grace window and the break declaration), and
+ * into `startService`, so the `foreground` flag is not observable), and
  * any sub-second race interleaving (those live in the pure
- * RecordingDurationPolicy verdicts, already event-sequence-tested).
+ * RecordingDurationPolicy verdicts, already event-sequence-tested). The
+ * 60 s user-stop suppression tail IS covered — through the loop's injected
+ * `nowMs` seam (fake-time verdicts, real-time coroutine delays) in the
+ * second-break pin, the one test here that pays a minute-scale real-time
+ * budget because the rearm job's delay is the policy constant.
  *
  * Timing is real wall-clock with the controller's own default scope: short
  * durations (1 s) drive the auto-stop/repeat/schedule paths and every await
@@ -571,13 +573,87 @@ class RecordingControllerTest {
         assertEquals(1, serviceIntents(RecordingService.ACTION_START).size) // only the original arm
     }
 
+    @Test
+    fun `a second chain break inside the suppression window retargets the rearm - the loop re-arms past the extended deadline`() {
+        // The stranding wedge, on the manual clock: break #1 arms a rearm job
+        // at the full suppression length (the policy constant — the one wait
+        // here that cannot shrink, because the rearm job's delay is real-time
+        // even though the verdicts are fake-time). A foreign recording starts
+        // inside the window and its stop declares break #2, which EXTENDS the
+        // suppression past break #1's deadline. The stale job then fires past
+        // its own deadline but inside the extended window: without the
+        // retarget, its fire fails canArm and returns without rescheduling —
+        // the loop sits Idle with no pending job and no flow emission ever
+        // coming, silently dead until a setting changes. The pin: past the
+        // EXTENDED deadline, exactly one re-arm START fires.
+        val clock = ManualClock()
+        val loop = armContinuousLoop(nowMs = clock::now)
+        controller.onServiceStarted(clock.now(), loop.segment)
+
+        // Break #1: a foreign stop — the grace check declares it past the 5 s
+        // mark. The pre-advance window lets the collector's first Idle pass
+        // stamp its idle-since against the un-advanced clock; the post-advance
+        // window covers the check's real-time fire reading the advanced clock.
+        controller.stop()
+        awaitServiceIntents(RecordingService.ACTION_STOP, 1, "the first chain break was never queued")
+        controller.onServiceStopped()
+        assertEquals(RecordingState.Idle, controller.state.value)
+        Thread.sleep(4_000)
+        clock.advance(6_000)
+        Thread.sleep(6_000)
+        // Break #1 declared (suppression until fake now + 60 s); the rearm
+        // job is armed with the full 60 s as its real delay.
+
+        // A foreign recording starts inside the suppression window: the loop
+        // adopts it (armed, not armed-by-us) and leaves the pending rearm
+        // targeting break #1's OLD deadline.
+        clock.advance(1_000)
+        val foreign = RecordingConfig(durationSeconds = 0, repeatIntervalSeconds = 0)
+        controller.start(foreign)
+        awaitServiceIntents(RecordingService.ACTION_START, 2, "the foreign start was never queued")
+        controller.onServiceStarted(clock.now(), foreign)
+
+        // ...and stops inside the window: the second chain break extends the
+        // suppression past break #1's deadline (the same grace dance).
+        controller.stop()
+        awaitServiceIntents(RecordingService.ACTION_STOP, 2, "the foreign stop was never queued")
+        controller.onServiceStopped()
+        Thread.sleep(4_000)
+        clock.advance(6_000)
+        Thread.sleep(6_000)
+
+        // Past the ORIGINAL (now stale) deadline, still inside the EXTENDED
+        // window, and through the stale job's real-time fire moment: on the
+        // stranding shape its fire fails canArm and schedules nothing; on the
+        // fixed machine the job was retargeted at break #2 and its fire sits
+        // past the extended deadline.
+        clock.advance(54_000)
+        settle(STALE_REARM_FIRE_SETTLE_MS, "the stale rearm's fire window has passed")
+
+        // Past the EXTENDED deadline: exactly one re-arm fires.
+        clock.advance(7_000)
+        val restarts = awaitServiceIntents(
+            RecordingService.ACTION_START,
+            3,
+            "the loop never re-armed past the extended suppression deadline",
+        )
+        assertEquals(loop.segment, decodeConfig(restarts.last()))
+
+        // The re-arm is the only new activity: no further starts, no stops.
+        settle("the re-armed loop must not churn behind the restart")
+        assertEquals(3, serviceIntents(RecordingService.ACTION_START).size)
+        assertEquals(2, serviceIntents(RecordingService.ACTION_STOP).size)
+    }
+
     // ── harness ──
 
     /**
      * Arms the real [ContinuousRecordingController] against this test's
      * [controller]: fakes the loop's store inputs, starts the loop, flips the
      * enable input on, and returns the decoded segment config it queued.
-     * Shared by both interplay tests.
+     * Shared by the interplay tests; [nowMs] injects the loop's clock seam
+     * (the suppression-tail pin drives a manual clock — the verdicts are
+     * fake-time, the coroutine delays stay real-time).
      *
      * The store input is faked at the loop's own constructor seam, and that
      * is deliberate isolation, not a shortcut. In production exactly one loop
@@ -599,7 +675,7 @@ class RecordingControllerTest {
      * (see the companion note); the faked input feeds exactly the value a
      * real save of that setting would decode back.
      */
-    private fun armContinuousLoop(): ArmedLoop {
+    private fun armContinuousLoop(nowMs: () -> Long = System::currentTimeMillis): ArmedLoop {
         val inputs = LoopInputs(
             enabled = MutableStateFlow(false),
             segmentMinutes = MutableStateFlow(SEGMENT_MINUTES),
@@ -617,6 +693,7 @@ class RecordingControllerTest {
             },
             controller,
             scope = CoroutineScope(SupervisorJob() + Dispatchers.Default).also { loopScopes += it },
+            nowMs = nowMs,
         )
         loop.start()
 
@@ -641,6 +718,23 @@ class RecordingControllerTest {
                 "intent ${intent.action} carried no config extra"
             },
         )
+
+    /**
+     * A test-driven clock for the loop's `nowMs` seam: every verdict the loop
+     * computes (grace confirmation, suppression windows, rearm deadlines) is
+     * fake-time under the test's control, while the loop's coroutine delays
+     * stay real-time. Advancing is explicit — a verdict never moves the clock.
+     */
+    private class ManualClock(startMs: Long = MANUAL_CLOCK_START_MS) {
+        var currentMs = startMs
+            private set
+
+        fun now(): Long = currentMs
+
+        fun advance(ms: Long) {
+            currentMs += ms
+        }
+    }
 
     /** Pops everything queued so far into [drained]. Single-remover, race-free against concurrent appends. */
     private fun pumpStartedServices() {
@@ -723,6 +817,20 @@ class RecordingControllerTest {
 
         /** Past the 5 s chain-break grace + its scheduled re-check: the break is declared, nothing re-arms. */
         const val FOREIGN_STOP_GRACE_SETTLE_MS = 5_400L
+
+        /**
+         * The stale rearm job's real-time fire window in the second-break
+         * pin: the job was armed at break #1's declaration with the full
+         * USER_STOP_SUPPRESSION_MS as its (real-time) delay, so letting its
+         * fire moment pass — with the clock parked past the stale deadline
+         * but inside the extended window — costs one suppression length
+         * minus the grace waits already spent. The suite's one minute-scale
+         * wait; un-shrinkable without opening a seam in the loop.
+         */
+        const val STALE_REARM_FIRE_SETTLE_MS = 58_000L
+
+        /** The manual clock's start value for the suppression-tail pin (an arbitrary non-zero base). */
+        const val MANUAL_CLOCK_START_MS = 1_000_000L
 
         /** The await budget every positive-timing poll gets, sized for parallel-build load. */
         const val AWAIT_BUDGET_MS = 30_000L
