@@ -760,7 +760,7 @@ export default function StreamPreview(props: Props) {
 
         {/* In-container exit — the action bar lives outside the container and
             is invisible in native fullscreen, so the exit affordance must ride
-            inside it (top-right, clear of the LIVE badge's corner). */}
+            inside it (top-left, clear of the LIVE badge's top-right corner). */}
         <Show when={fullscreen.active()}>
           <button
             type="button"
