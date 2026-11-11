@@ -1986,3 +1986,208 @@ port is quoted only from a scheme-less `host:port(/path)` string. The TLS
 fingerprint itself flows through CameraViewModel (`tlsCertificateFingerprint`
 — read once per sheet open); the screen no longer reaches around the
 ViewModel into the app-scoped manager.
+
+### Gallery Session
+**`gallery/GallerySession.kt`** — the app-scoped owner of the gallery's
+soft-delete staging and warm decryption: the DeleteStagingPolicy instance,
+the pending `stagedIds` flow, the undo, the one commit poller, and the
+`decryptedPhotos`/`encryptedVideoIds` warm-decryption maps — the state the
+gallery and viewer routes used to keep in two separate
+NavBackStackEntry-scoped GalleryViewModels, where a stage done in the
+viewer stayed invisible to the grid until commit and the sniff/decrypt pass
+ran once per gallery route. One session shared by both routes' ViewModels
+is the single staging truth; the ViewModels delegate to it and keep only
+their own per-route UI state (selection, filter, search).
+Commit-on-exit contract: leaving the GALLERY AREA is not an undo — the
+gallery ViewModel's `onCleared` calls `flush`, committing whatever is still
+staged immediately — while leaving the VIEWER deliberately does not flush,
+so its staged ids stay pending with a live undo affordance in the grid. The
+expiry poller (a 250 ms tick, one at a time, restarted per stage) is the
+safety net for every staged id either way, and the pending set is
+republished only after the store delete lands, so a committed item stays
+hidden until its media is really gone. Threading: the mutators run on the
+UI thread (via the ViewModels) while the poller and warm loop run on the app
+scope — every policy access is serialized under one lock, replacing the old
+Main-thread confinement.
+
+### Session Demand
+**`camera/model/SessionDemand.kt`** — one immutable record of what the camera
+session is being asked to do: `previewRequested`, `exclusiveSessionRefCount`,
+`keepAliveRefCount`, `isActivityForeground`, `currentPreviewView`. Before it
+the five facts lived in five loose CameraService fields written one
+statement at a time — a multi-fact writer (startPreview, stopPreview,
+release) could be observed half-applied by the auto-recovery thread's
+cross-thread arbiter consults. Every writer goes through the service's
+`updateDemand` seam on Main, swapping the whole record copy-on-write;
+`demandState()` maps a snapshot onto the arbiter's `CameraDemandState`. The
+five named demand states are overlaps of the facts, not an enum — Unbound,
+Preview-bound foreground, Preview-bound surface-detached, Headless
+keep-alive, Exclusive-held — and a session sits in several at once (a
+recording is Exclusive-held AND Headless keep-alive AND backgrounded).
+Ownership is strict: RecordingService alone writes
+`exclusiveSessionRefCount`; StreamingSession, PhotoCaptureManager, and
+RecordingService share `keepAliveRefCount`; MainActivity's lifecycle
+observer writes `isActivityForeground` (default `true` before the first
+lifecycle event); the UI writes `previewRequested` and
+`currentPreviewView` together. The preserved, documented decision:
+`CameraService.release()` does NOT reset `keepAliveRefCount` — the stale
+keep-alive after release is today's behavior on purpose.
+
+### Selected Lens
+**`camera/model/SelectedLens.kt`** — the one selected-lens fact: the
+`CameraSelector` the next bind uses, whether it faces front, and its index
+into the published lens inventory, published as one immutable value. The
+three must move together because they describe one lens from three angles —
+the former three-store version (a plain selector var plus two flows) could
+half-update: the enumeration-failure fallback reset only the index, leaving
+the selector and the facing stale. CameraService is the only writer (lens
+selection, the switch fallback, both enumeration outcomes — each a single
+atomic update); the lens row, the Web API's lens status, and the facing
+mirror read the published flow. `isFrontCamera` and `selectedLensIndex`
+are derived projections off the one fact — they can never disagree with
+the selector.
+
+### Torch State
+**`camera/model/TorchState.kt`** — the LIVE torch fact as a sealed machine:
+`Off` (also the state while no camera is bound — the live fact dies with
+the camera session), `On(null)` lit at the device default brightness, and
+`On(level)` lit at a strength the service actually drove through the API
+33+ ladder. Distinct from the persisted
+`CameraSettings.torchEnabled`/`torchStrength` pair, which is INTENT: remote
+writers (the Web API's torch toggle, the deterrence coordinator) flip the
+live torch through `CameraService.setTorchEnabled` without ever persisting,
+so a settings read must not be mistaken for the torch's state.
+CameraService is the only writer, fed from the bound camera's cameraInfo
+torchState observation plus the strength it last drove; the pure
+`TorchState.from` mapping keeps the machine JVM-testable, and
+`isTorchOn()` derives from the same flow. The automation side's
+LIVE/PERSISTED split (see Torch (LIVE vs PERSISTED)) rides this line.
+
+### Rule Vocabulary
+**`automation/schedule/AutomationRuleEnums.kt`** — the typed forms of the
+rule graph's stringly fields: `AutomationTriggerKind` (one constant per
+Automation Trigger Catalog id; unknown wire ids fold to `TIME_OF_DAY`),
+`ConditionMode` (`ALL`/`ANY` — anything not exactly `"any"` folds to `ALL`,
+the stricter semantics), and `MissedRunPolicy` (`CATCH_UP`/`SKIP`/`WINDOW`;
+unknown folds to `CATCH_UP`, the historical behavior). Each enum carries
+its exact canonical wire id (`id`), a tolerant parse, and a `WIRE_ADAPTER`
+that writes `enum.id` — the same string the String fields held, so the
+persisted-rule JSON and the web API stay byte-compatible across the
+stringly→typed conversion. `AutomationRuleJson` (same file) is the one
+Moshi instance for the rule graph: AppJson plus the three wire adapters;
+adapters built from plain `AppJson.moshi` would fall through to Moshi's
+name-based enum encoding and emit `"TIME_OF_DAY"` — a wire break — so no
+rule-graph surface (the store codec, the draft saver, the
+`/api/automation` handler) may serialize through the bare instance. Name
+note: the former `AutomationRuleJson` DTO clones are gone (see Automation
+Rule); the object is the Moshi instance, not a data clone. RuleDraft keeps
+wire strings and converts at the boundary; the catalogs stay the
+parameter-schema authority — the enums are the decode/compare form.
+
+## State Machines
+
+Every state machine below has a named owner type — the type that alone
+writes it; pure verdicts over raw facts live in `*Policy`/`*State` files
+with JVM tests. Flows publish single truths — mirrors are derived, never a
+second hand-written copy — and wire/persistence formats are byte-compatible
+contracts.
+
+### Camera
+
+| Machine | Owner (type) | File | States | Invariant / notes |
+| --- | --- | --- | --- | --- |
+| `CameraState` | `CameraViewModel._cameraState` — sticky overlay over `CameraService`'s flow | `camera/model/CameraState.kt` | Idle / Initializing / RequestPermission / Ready / Error | sticky filter drops an incoming Idle (see Deliberately implicit) |
+| `StreamStatus` | `CameraViewModel._streamStatus`, built by the Status Snapshot Builder | `camera/model/CameraState.kt` | 7 booleans (isActive, isWebActive, isServerRunning, isAudioActive, isRtspActive, isWebEnabled, isRtspEnabled) + urls, clientCount | the boolean cluster as one typed snapshot; folded by the dashboard verdicts |
+| `ServerStatusTier` / `StreamShutterContainer` / `WifiBannerVariant` | `CameraDashboardPolicy` verdicts | `camera/model/CameraDashboardPolicy.kt` | LIVE/READY/OFFLINE; RECORDING/ENABLED/DISABLED; STREAM_ACTIVE/STREAM_IDLE | pure folds over the StreamStatus cluster; the screen maps tiers onto colors and strings |
+| `RecordButtonTier` | `CameraDashboardPolicy.recordButtonTier(RecordingState)` | `camera/model/CameraDashboardPolicy.kt` | IDLE / SCHEDULED / RECORDING | visuals only — the tap verdict stays `RecordingToggle.decide`'s |
+| `CountdownState` | the CameraViewModel countdown job (only writer) | `camera/model/CountdownState.kt` | Idle / Counting(secondsRemaining) / Firing | self-timer; the initial Counting is written synchronously before the job launches (immediate-cancel race fixed); the settings mode flipping OFF cancels |
+| `SelectedLens` | `CameraService` (only writer) | `camera/model/SelectedLens.kt` | selector / isFront / index as one fact | the enumerate-failure fallback resets all three; `isFrontCamera`/`selectedLensIndex` are derived projections |
+| `TorchState` | `CameraService` (only writer) | `camera/model/TorchState.kt` | Off / On(strengthLevel?) | LIVE truth — persisted settings are intent, remote writers drive live only; unbound ⇒ Off |
+| `QuickSettingsUiState` | CameraScreen (`remember`, the three transitions) | `camera/model/QuickSettingsUiState.kt` | Collapsed / Expanded / Sheet(setting) | sheet-open ⇒ bar-expanded structurally; intentionally does not survive rotation |
+| `SessionDemand` | `CameraService` via `updateDemand` (Main only) | `camera/model/SessionDemand.kt` | previewRequested / exclusiveSessionRefCount / keepAliveRefCount / isActivityForeground / currentPreviewView | ONE immutable record swapped copy-on-write; `demandState()` maps it to the arbiter's `CameraDemandState`; `release()` intentionally does NOT reset keepAliveRefCount (documented decision) |
+| `SpiritLevelMonitor.Registration` | `SpiritLevelMonitor` (private) | `camera/SpiritLevelMonitor.kt` | Attached(sensor) / NoSensor / Detached | "registered" is derived from the two gates, not stored; the no-accelerometer verdict is memoized |
+| `StreamStartOutcome` | `StreamToggle` | `camera/model/StreamToggle.kt` | Started / Stopped / Disabled / StartFailed / BeginFailedRolledBack | the gate→start→begin→rollback ladder, exactly once; a failed session begin rolls back the just-started output |
+
+### Capture
+
+| Machine | Owner (type) | File | States | Invariant / notes |
+| --- | --- | --- | --- | --- |
+| `RecordingState` | `RecordingController.state`; RecordingService reports via `onService*` | `capture/RecordingController.kt` | Idle / Scheduled(startAtMs, config) / Recording(startedAtMs, config, finalizing) | the only public truth about recording (see Recording Controller); no optimistic copies anywhere |
+| `TimelapseState` | `CaptureViewModel` (only writer) | `capture/model/TimelapseState.kt` | Idle / Running / Done(TimelapseComposer.Result) | Running is re-asserted per run, so a previous run's Done never leaks |
+| `IntervalCaptureState` | `CaptureViewModel` (only writer) | `capture/model/IntervalCaptureState.kt` | Unknown / Running(snapshot) / Stopped | Unknown = the WorkManager snapshot not yet observed; the Start button renders disabled-with-progress until observed |
+| `DetectionModelStore.State` | `DetectionModelStore` (`requestDownload`, idempotent) | `capture/ml/DetectionModelStore.kt` | NotDownloaded / Downloading(progress) / Ready(file) / Failed(reason) | a Ready that fails its size-then-digest re-check is demoted, never wedged |
+| `AudioModelStore.State` | `AudioModelStore` (`requestDownload`, idempotent) | `capture/ml/AudioModelStore.kt` | NotDownloaded / Downloading(progress) / Ready(file) / Failed(reason) | same shape as `DetectionModelStore.State` |
+
+### Gallery
+
+| Machine | Owner (type) | File | States | Invariant / notes |
+| --- | --- | --- | --- | --- |
+| `GallerySession` | app-scoped `GallerySession` | `gallery/GallerySession.kt` | DeleteStagingPolicy + stagedIds + commit poller; decryptedPhotos / encryptedVideoIds warm maps | one truth shared by the gallery and viewer routes; commit-on-exit lives in the gallery VM's onCleared, the viewer never flushes |
+| `SelectionState` | `GalleryViewModel.selection` (private) | `gallery/GalleryViewModel.kt` | active / ids | `selectMode`/`selectedIds` are derived maps; zero-selected-with-mode-on is kept behavior |
+| `UndoSnackbarState` | `GalleryViewModel.undoSnackbar` (derived from stagedIds) | `gallery/GalleryViewModel.kt` | stagedIds snapshot at snackbar show | Undo unstages exactly the snapshot, never the live set |
+| `ResolvedMedia` | `resolveViewerMedia(filePath, encryptedAtRest)` | `gallery/GalleryMedia.kt` | PlainFile / SchemeUri / EncryptedVideo / Missing | encrypted wins by TYPE — ciphertext never surfaces as a plain model |
+| `ViewerSyncEffect` | `ViewerSync.reduce` / `onDelete` | `gallery/ViewerSync.kt` | JumpTo(index) / AnimateTo(index) / Pop | the first resync of a fresh viewer jumps, later ones animate; NavigationGraph executes it |
+
+### Streaming
+
+| Machine | Owner (type) | File | States | Invariant / notes |
+| --- | --- | --- | --- | --- |
+| `RunState` | `StreamingServer` (private) | `streaming/StreamingServer.kt` | NeverTried / FailedStart / Running | dirty-stopped retryability: a throwing stop leaves FailedStart so the next stop runs and the release is retried |
+| `ForegroundMode` | `StreamingService.foregroundMode` (@Volatile) | `streaming/StreamingService.kt` | None / ServerOnly / Streaming | bookkeeping of the last successful typed foreground start; the failed-reassert stopSelf sharp edge is documented and unchanged |
+| `Credentials` | `WebAuthGate` (private) | `streaming/WebAuthGate.kt` | nullable admin / viewer pairs | a blank half clears the whole pair (the blanking convention, now structural) |
+| `SessionPhase` | `WhepSessionRegistry` (per entry) | `streaming/whep/WhepSessionRegistry.kt` | Awaiting / Connected / Disconnected | the per-phase reap deadlines are byte-identical to the old thresholds |
+| `PushPhase` | `PushOutput.phase()` (derived) | `streaming/PushOutput.kt` | Idle / Connecting / Reconnecting / Connected / Refused | derived from wireName × active — distinguishes refused vs reconnecting; the /api/status wire strings are unchanged (OpenApiSpec-pinned) |
+| `LatestFrame` | `MjpegStreamPump` (private) | `streaming/MjpegStreamPump.kt` | (jpeg, version) | swapped atomically on every `updateFrame`; readers compare versions |
+| `isStreaming` | `StreamingManager` — derived combine of five active mirrors | `streaming/StreamingManager.kt` | Boolean | mirrors written by their owners at the transition itself (`onActiveChanged` seams); `updateStreamingState` deleted; `isLiveStreaming()` is the same predicate |
+| `applyEcoIdleState` | `StreamingManager` (single writer) | `streaming/StreamingManager.kt` | `EcoIdlePolicy.State` + lock-free `ecoIdleActive` volatile | the only writer of the pairing; the volatile write is the publish step (see Eco Idle Policy) |
+| ClientSession `isPlaying` | `RtspServer.ClientSession` (private `SessionState`) | `streaming/rtsp/RtspServer.kt` | INIT / READY / PLAYING | `isPlaying` is derived (`state == PLAYING`); teardown drops to INIT so send taps stop |
+| `BootResumePolicy.Verdict` | `BootResumePolicy.decide` | `streaming/StreamStateJournal.kt` | NONE / WEB / RTSP / BOTH | boot resume over the persisted journal's web/rtsp flags |
+
+### Automation
+
+| Machine | Owner (type) | File | States | Invariant / notes |
+| --- | --- | --- | --- | --- |
+| `JournalEntry` | `AutomationFireJournal` | `automation/schedule/AutomationFireJournal.kt` | Occurrence(epochDay, minute) / EventFired(atMs) | total decode split by EVENT_JOURNAL_THRESHOLD; refutable garbage is sanitized on load |
+| Rule vocabulary | `AutomationTriggerKind` / `ConditionMode` / `MissedRunPolicy` | `automation/schedule/AutomationRuleEnums.kt` | TIME_OF_DAY + 8 triggers; ALL/ANY; CATCH_UP/SKIP/WINDOW | exact wire ids; `AutomationRuleJson` = AppJson + the three wire adapters is the one Moshi for the rule graph (plain AppJson.moshi would emit enum names); RuleDraft keeps wire strings, converts at the boundary |
+| `Picker` | AutomationScreen (private, `activePicker`) | `automation/AutomationScreen.kt` | Action / Trigger / Condition | editor pickers mutually exclusive structurally |
+
+### Core
+
+| Machine | Owner (type) | File | States | Invariant / notes |
+| --- | --- | --- | --- | --- |
+| `UpdateState` | `UpdateViewModel` | `update/model/UpdateInfo.kt` | Idle / Checking / UpdateAvailable / UpToDate / Downloading / ReadyToInstall / Error | the update screen's full lifecycle as one explicit machine |
+| `MicStartDecision` | `MicAccess.startDecision` (consulted through MicGate) | `core/MicAccess.kt` | Proceed / Degrade(warning) | warn-and-degrade: the caller starts either way (see Mic Access) |
+| `TrackingSnapshot` | `StreamWatchdog` (swapped via copy) | `core/WatchdogPolicy.kt` | five last* tracking facts (frame baselines, last check, last recovery, last failure reason) | one immutable snapshot per update; the runtime's Atomic counters stay separate on purpose |
+| `isQuitting` latch | `MainApplication` (@Volatile flag) | `MainApplication.kt` | set-once flag | guards the quitApplication teardown ladder — the first invocation runs it, later ones no-op |
+| GeoTag ask-once + degraded caption | SettingsScreen + its permission launcher | `settings/SettingsScreen.kt` | off / on-with-permission / on-but-denied (degraded) | persist-on-grant — a denial leaves the setting off; enabled-but-denied shows the credit-only EXIF caption |
+| Nav Routes | `Routes` (object) | `navigation/Routes.kt` | the one route vocabulary | MainActivity navigation events use extraBufferCapacity=8 + DROP_OLDEST (freshest intent wins) |
+
+### Wear
+
+| Machine | Owner (type) | File | States | Invariant / notes |
+| --- | --- | --- | --- | --- |
+| `RequestState<T>` | the wear module's async surfaces | `wear/WearModels.kt` | Idle / Loading / Success / Error | the wear module's request lifecycle; Loading replaces content only on user-initiated actions |
+| `WearTileModels.StateLine` | `WearTileModels.stateLine(status)` | `wear/WearTileModels.kt` | UNKNOWN / IDLE / WEB / RTSP / WEB_AND_RTSP | derived from the cached status's live flags |
+| `PermissionState` | `SettingsActivity` (activity-local) | `wear/SettingsActivity.kt` | Unknown / Granted / Denied | replaces the nullable `notificationGranted` tri-state; pre-33 devices write Granted unconditionally |
+| `WearTileStatusCache` holder | `WearTileStatusCache` (@Volatile holder swap) | `wear/WearTileService.kt` | (latest, publishedLine) in one immutable holder | the publisher skips a re-render when the line did not change; process death → "Phone status unknown" |
+
+### Deliberately implicit
+
+Machines that stay implicit on purpose — do not re-flag them:
+
+- The `CameraState` stickiness overlay: two holders (`CameraService._cameraState` → `CameraViewModel._cameraState`) whose collector applies `stickyCameraState` (`camera/model/RecordingToggle.kt`) to drop an incoming Idle — the screen never regresses to Idle from a state it already reached; pinned by RecordingToggleTest. Stays implicit because the verdict is one pure function over plain flows.
+- Capability sentinels ship plausible defaults until the first bind: the zoom/ISO/exposure ranges start at the `CameraSettings` persistence bounds, RAW support and `torchStrengthMaxLevel` start null — "null/default until proven" is documented at each field in `camera/CameraService.kt`; the device's live ranges replace them at bind time.
+- Night-vision per-branch precedence in `CameraControlPlan.from` (`camera/model/CameraControlPlan.kt`): the ON branch clamps fps to 10..≤15 and forces the NIGHT scene mode ahead of the frameRate/sceneMode settings — per-branch by design, not a global precedence table.
+- The eco-idle monitor's `Job?` null-sentinel (`StreamingManager.ecoIdleMonitorJob`): null = the loop is not running; each toggle flip restarts or cancels it, so a poll loop exists only while its mode is on.
+- SirenAutoStop's armed-timer overlap: an already-armed stop stays armed across a null-delay start ("run until stopped" must not touch the timer) — documented in `automation/AutomationActionExecutor.kt`'s siren path.
+- `AutomationScheduler`'s `rulesCache`/`enabledCache` and the startup event-loss window: an event arriving before the first rules emission evaluates against empty caches — documented in its KDoc (`automation/schedule/AutomationScheduler.kt`).
+- `StreamStateJournalWriter`'s `drop(1)` first-emission gap (`streaming/StreamStateJournalWriter.kt`): the combine's initial value is skipped, so a state equal to the journal's pre-existing contents is never re-saved — the journal already holds it.
+- ForegroundNotifications' runtime mic re-checks (`core/ForegroundNotifications.kt`): the typed startForeground re-checks RECORD_AUDIO at promote time, alongside MicGate's consult-time check — two checks on purpose (notification type vs feature start).
+- The wear PhotoButton's confirming timer (`wear/WearRemoteScreen.kt`): a `LaunchedEffect` retires the green "Captured" phase after an auto-clear delay — display-only, no persistence.
+- `UpdateViewModel`'s `downloadJob: Job?` sentinel (`update/UpdateViewModel.kt`): null vs an in-flight job gates download re-entry; the machine states themselves live in UpdateState.
+- `StreamingManager`'s `isRtspRunning` (mirrors `server != null`) vs `RtspOutput.isActive()` after a failed bind: both are published, intentionally different facts — a failed bind leaves the server "running" while the output is inactive; the derived `isStreaming` reads `isActive`, the exact bit `isLiveStreaming()` probes.
+- `CameraViewModel`'s dead `isFrontCamera` mirror flow (`camera/CameraViewModel.kt`): no consumer since SelectedLens; kept as public API.
+- `bindRecording` discards the recording session's `Camera` object (`camera/CameraService.kt`, `writeBack = false`): the torch/zoom/focus seams keep tracking the pre-recording session during recording — pre-existing behavior, preserved.
+- `StreamWatchdog.updateState()`'s re-derive-IDLE-over-FAILED quirk (`core/StreamWatchdog.kt`): a null-status refresh can re-derive IDLE over FAILED — flagged in a comment, behavior preserved.
+- PushOutput's benign cross-thread status reads (`streaming/PushOutput.kt`): `statusValue` is @Volatile, written from connect/disconnect threads and read from /api/status threads — a torn read is impossible, a stale one is benign.
+- DetectionNotifier posting silently no-ops when POST_NOTIFICATIONS is denied (`capture/DetectionNotifier.kt`): the persisted toggle and the runtime permission are two truths; the degrade happens at post time (`notify` returns false and the coordinator records no notify action).
