@@ -55,3 +55,16 @@ export function hlsSupported(): boolean {
   if ('MediaSource' in window) return true
   return !!document.createElement('video').canPlayType('application/vnd.apple.mpegurl')
 }
+
+/**
+ * Which HLS playback path to take. hls.js (MSE) wins whenever it can run:
+ * some Chromium builds answer canPlayType('application/vnd.apple.mpegurl')
+ * with "maybe" yet cannot demux the MPEG-TS segments, so a native-first check
+ * strands the preview on a dead 0:00 element. Native is the fallback for
+ * MSE-less Safari/iOS only.
+ */
+export function hlsPlaybackKind(mseSupported: boolean, nativeHls: boolean): 'hlsjs' | 'native' | 'none' {
+  if (mseSupported) return 'hlsjs'
+  if (nativeHls) return 'native'
+  return 'none'
+}

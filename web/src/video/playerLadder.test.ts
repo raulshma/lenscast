@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { PLAYER_LADDER, cyclePlayerMode, nextPlayerMode, whepSupported } from './playerLadder'
+import { PLAYER_LADDER, cyclePlayerMode, hlsPlaybackKind, nextPlayerMode, whepSupported } from './playerLadder'
 
 describe('nextPlayerMode automatic fallback ladder', () => {
   it('starts at whep when nothing has failed', () => {
@@ -57,5 +57,22 @@ describe('whepSupported', () => {
     // The node test env has no window: the rung is statically unsupported
     // there, which is exactly how callers fold it into the ladder flags.
     expect(whepSupported()).toBe(false)
+  })
+})
+
+describe('hlsPlaybackKind', () => {
+  it('prefers hls.js on Chromium even though canPlayType says "maybe"', () => {
+    // The 0:00 regression: Chromium reports native HLS support but cannot
+    // demux MPEG-TS, so native-first stranded the preview. MSE wins.
+    expect(hlsPlaybackKind(true, true)).toBe('hlsjs')
+    expect(hlsPlaybackKind(true, false)).toBe('hlsjs')
+  })
+
+  it('uses native only where MSE is absent (Safari/iOS)', () => {
+    expect(hlsPlaybackKind(false, true)).toBe('native')
+  })
+
+  it('reports none when neither path can play', () => {
+    expect(hlsPlaybackKind(false, false)).toBe('none')
   })
 })

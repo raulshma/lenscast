@@ -9,7 +9,7 @@ import ConnectionQualityIndicator from './ConnectionQualityIndicator'
 import { tapToFocus as apiTapToFocus, setZoom as apiSetZoom, setTorch as apiSetTorch, pushTalkback } from '../api/client'
 import { API_DEFAULTS } from '../api/defaults'
 import { createH264Player, h264Supported, wsUrl } from '../video/h264Player'
-import { cyclePlayerMode, hlsSupported, nextPlayerMode, type PlayerMode } from '../video/playerLadder'
+import { cyclePlayerMode, hlsPlaybackKind, hlsSupported, nextPlayerMode, type PlayerMode } from '../video/playerLadder'
 import { createWhepPlayer } from '../lib/whepClient'
 import { canShareFiles, shareSnapshotImage, snapshotFileName } from '../lib/share'
 import { PttFallbackUplink, floatChunkToPcm16 } from '../lib/pttFallback'
@@ -237,11 +237,19 @@ export default function StreamPreview(props: Props) {
       teardownHls()
       return
     }
-    if (el.canPlayType('application/vnd.apple.mpegurl')) {
+    // Chromium answers canPlayType() with "maybe" but cannot demux MPEG-TS,
+    // so native-first strands the preview at 0:00. hls.js wins whenever MSE
+    // exists; native only for MSE-less Safari/iOS where it actually decodes.
+    const kind = hlsPlaybackKind(
+      'MediaSource' in window,
+      !!el.canPlayType('application/vnd.apple.mpegurl'),
+    )
+    if (kind === 'native') {
       el.src = '/hls/playlist.m3u8'
       void el.play().catch(() => { })
       return
     }
+    if (kind === 'none') return
     void import('hls.js').then(({ default: Hls }) => {
       if (hlsVideo() !== el || playerMode() !== 'hls') return
       hlsPlayer = new Hls({
