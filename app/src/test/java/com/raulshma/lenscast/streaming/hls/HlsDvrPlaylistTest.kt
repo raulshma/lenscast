@@ -65,11 +65,11 @@ class HlsDvrPlaylistTest {
         HlsManager.setEnabled(true)
     }
 
-    /** Feeds [count] whole segments of keyframe AUs at a 24 fps tick. */
+    /** Feeds [count] closed segments: keyframes every 500ms close 1s segments. */
     private fun feedSegmentsViaVideo(count: Int) {
-        repeat(count * StreamDefaults.HLS_SEGMENT_AUS) {
+        repeat(count * 2 + 1) {
             HlsManager.feedVideo(listOf(EncodedNalUnit(ByteArray(16), isKeyFrame = true)))
-            nowMs += 1000L / 24
+            nowMs += 500L
         }
     }
 

@@ -13,6 +13,13 @@ interface HlsVideoSink {
     fun feedVideo(nalus: List<EncodedNalUnit>)
 
     fun feedAudio(aacData: ByteArray)
+
+    /**
+     * The AAC encoder's format, so the TS muxer can build ADTS headers (raw
+     * AAC is not valid in TS). Called when the shared encode (re)attaches
+     * audio; sinks that do not mux TS ignore it.
+     */
+    fun setAudioFormat(sampleRateHz: Int, channelCount: Int) {}
 }
 
 interface HlsSegmentSource {

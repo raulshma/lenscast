@@ -350,6 +350,9 @@ internal class EncodedStreamHub(
         configuredChannelCount = audio.getChannelCount()
         configuredAudioBitrateKbps = audioBitrateKbps()
         aacEncoder.configure(configuredSampleRateHz, configuredChannelCount, configuredAudioBitrateKbps)
+        // The TS muxer needs the format to build ADTS headers around the raw
+        // AAC frames this encode produces.
+        hlsSink.setAudioFormat(configuredSampleRateHz, configuredChannelCount)
         if (!aacEncoder.start()) {
             Log.w(TAG, "AAC encoder failed to start; encoded audio stays idle")
             stopAudioLocked()

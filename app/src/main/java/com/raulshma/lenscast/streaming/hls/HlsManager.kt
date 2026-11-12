@@ -22,9 +22,12 @@ import java.util.concurrent.atomic.AtomicLong
 object HlsManager : HlsVideoSink, HlsSegmentSource {
     private const val TAG = "HlsManager"
     private const val MAX_SEGMENTS = 8
-    // ~48 AUs at 24fps ≈ 2s per segment; EXTINF carries the real duration.
-    private const val AUS_PER_SEGMENT = 48
+    // A segment closes on the NEXT keyframe once it has spanned at least this
+    // long, so every segment opens on an IDR (with SPS/PPS) — a player joining
+    // at any segment can initialize. The encoder's 2s GOP sets the real pace.
+    private const val MIN_SEGMENT_MS = 1_000L
     private const val PTS_HZ = 90_000L
+    private const val MIN_SEGMENT_PTS = PTS_HZ * MIN_SEGMENT_MS / 1000
 
     // How long a served playlist/segment keeps the shared encoders up after
     // the last request: comfortably beyond the served 5x2s playlist window,
@@ -63,6 +66,16 @@ object HlsManager : HlsVideoSink, HlsSegmentSource {
 
     @Volatile private var videoAnchorMs = -1L
     @Volatile private var audioAnchorMs = -1L
+
+    // The AAC encoder's format for the TS muxer's ADTS headers; the hub
+    // reports it whenever the shared encode (re)attaches audio.
+    @Volatile private var audioSampleRateHz = 48_000
+    @Volatile private var audioChannelCount = 1
+
+    override fun setAudioFormat(sampleRateHz: Int, channelCount: Int) {
+        audioSampleRateHz = sampleRateHz
+        audioChannelCount = channelCount
+    }
 
     /** Whether web streaming currently wants the ring (route gating + tests). */
     fun isEnabled(): Boolean = enabled
@@ -121,12 +134,16 @@ object HlsManager : HlsVideoSink, HlsSegmentSource {
         if (!enabled || aacData.isEmpty()) return
         try {
             val now = clockMs()
-            if (audioAnchorMs < 0) audioAnchorMs = now
-            val audioPts = (now - audioAnchorMs) * PTS_HZ / 1000
-            val ts = TsPacketizer.audioFrameToTs(aacData, audioPts)
             synchronized(lock) {
-                // Audio rides the current open segment so A/V stay muxed.
-                pending.add(ts)
+                // Audio rides the open segment so A/V stay muxed; before the
+                // first keyframe there is no segment to ride, and dropping the
+                // pre-roll keeps the audio clock anchored to the video's.
+                if (pendingStartPts < 0) return
+                if (audioAnchorMs < 0) audioAnchorMs = now
+                val audioPts = (now - audioAnchorMs) * PTS_HZ / 1000
+                pending.add(
+                    TsPacketizer.audioFrameToTs(aacData, audioPts, audioSampleRateHz, audioChannelCount),
+                )
             }
         } catch (e: Exception) {
             Log.w(TAG, "HLS audio feed failed", e)
@@ -137,7 +154,13 @@ object HlsManager : HlsVideoSink, HlsSegmentSource {
         if (!enabled || nalus.isEmpty()) return
         try {
             val now = clockMs()
-            if (videoAnchorMs < 0) videoAnchorMs = now
+            val isKeyFrame = nalus.any { it.isKeyFrame }
+            // Never open the ring mid-GOP: the first retained AU must be an
+            // IDR carrying SPS/PPS, or a joining player can never initialize.
+            if (videoAnchorMs < 0) {
+                if (!isKeyFrame) return
+                videoAnchorMs = now
+            }
             // Strictly monotonic even if the clock steps back or two frames
             // land inside the same millisecond.
             val computed = (now - videoAnchorMs) * PTS_HZ / 1000
@@ -145,34 +168,42 @@ object HlsManager : HlsVideoSink, HlsSegmentSource {
             lastVideoPts = pts
             val ts = TsPacketizer.videoAuToTs(nalus.map { it.data }, pts)
             synchronized(lock) {
-                if (pendingStartPts < 0) pendingStartPts = pts
-                pending.add(ts)
-                if (pending.size >= AUS_PER_SEGMENT) {
-                    val seq = sequence.incrementAndGet()
-                    val combined = pending.fold(ByteArray(0)) { acc, b -> acc + b }
-                    val durationSec = (pts - pendingStartPts).toDouble() / PTS_HZ
-                    segments.addLast(HlsSegment(seq, combined, durationSec))
-                    // The ring bound: the DVR setting while raised, else the
-                    // compact sliding-live cap.
-                    val cap = if (dvrSegments > 0) dvrSegments else MAX_SEGMENTS
-                    while (segments.size > cap) segments.removeFirst()
-                    pending.clear()
-                    pendingStartPts = -1
-                    // Demand-gated sample: a hot ring is being pulled, so the
-                    // segment's bytes over its duration are honest send-side
-                    // throughput for the adaptive encoded-bitrate lane.
-                    if (isHot()) {
-                        encodedSendTap?.invoke(
-                            combined.size,
-                            (durationSec * 1000).toLong().coerceAtLeast(1),
-                        )
-                    }
-                    Log.d(TAG, "HLS segment $seq ready (${combined.size}B, ${String.format(java.util.Locale.US, "%.2f", durationSec)}s, window=${segments.size})")
+                if (pendingStartPts < 0) {
+                    pendingStartPts = pts
+                } else if (isKeyFrame && pts - pendingStartPts >= MIN_SEGMENT_PTS) {
+                    // Close on the keyframe that OPENS the next segment, so the
+                    // duration spans exactly the AUs this segment holds.
+                    closeSegmentLocked(pts)
+                    pendingStartPts = pts
                 }
+                pending.add(ts)
             }
         } catch (e: Exception) {
             Log.w(TAG, "HLS feed failed", e)
         }
+    }
+
+    /** Emits the open segment; [nextStartPts] is the PTS of the AU opening the next one. */
+    private fun closeSegmentLocked(nextStartPts: Long) {
+        val seq = sequence.incrementAndGet()
+        val combined = pending.fold(ByteArray(0)) { acc, b -> acc + b }
+        val durationSec = (nextStartPts - pendingStartPts).toDouble() / PTS_HZ
+        segments.addLast(HlsSegment(seq, combined, durationSec))
+        // The ring bound: the DVR setting while raised, else the
+        // compact sliding-live cap.
+        val cap = if (dvrSegments > 0) dvrSegments else MAX_SEGMENTS
+        while (segments.size > cap) segments.removeFirst()
+        pending.clear()
+        // Demand-gated sample: a hot ring is being pulled, so the
+        // segment's bytes over its duration are honest send-side
+        // throughput for the adaptive encoded-bitrate lane.
+        if (isHot()) {
+            encodedSendTap?.invoke(
+                combined.size,
+                (durationSec * 1000).toLong().coerceAtLeast(1),
+            )
+        }
+        Log.d(TAG, "HLS segment $seq ready (${combined.size}B, ${String.format(java.util.Locale.US, "%.2f", durationSec)}s, window=${segments.size})")
     }
 
     override fun playlist(): String {

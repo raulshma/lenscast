@@ -20,28 +20,34 @@ class TsPacketizerHevcTest {
 
     /**
      * The stream_type byte in the muxer's minimal PMT section: the section
-     * carries a 10-byte fixed header (table id, length, program number,
+     * carries a 12-byte fixed header (table id, length, program number,
      * version, section numbers, PCR PID, program_info_length), so the video
-     * stream_type lands at section offset 10, packet index 4 + 10.
+     * stream_type lands at section offset 12. The payload opens with the
+     * mandatory pointer_field (0); the partial packet carries an adaptation
+     * field first, so the section start is parsed, not assumed.
      */
+    private fun pmtSectionStart(pmt: ByteArray): Int {
+        val afc = (pmt[3].toInt() shr 4) and 3
+        var pos = 4
+        if (afc and 2 != 0) pos += 1 + (pmt[pos].toInt() and 0xFF)
+        assertEquals(0, pmt[pos].toInt()) // pointer_field
+        return pos + 1
+    }
+
     private fun pmtStreamType(): Int {
         val pmt = TsPacketizer.pmt()
-        // The single-packet fast path writes the section straight after the
-        // 4-byte TS header (no pointer field at payload_start with zero
-        // offset — tsPacket copies chunk to pkt[4]).
-        val sectionStart = 4
-        val streamTypeOffset = 10
+        val sectionStart = pmtSectionStart(pmt)
         assertEquals(0x02, pmt[sectionStart].toInt() and 0xFF) // table_id
-        return pmt[sectionStart + streamTypeOffset].toInt() and 0xFF
+        return pmt[sectionStart + 12].toInt() and 0xFF
     }
 
     private fun assertAudioStreamTypeIsAac() {
         // The AAC stream_type follows the 5-byte video ES entry in the section.
         val pmt = TsPacketizer.pmt()
-        val sectionStart = 4
+        val sectionStart = pmtSectionStart(pmt)
         assertEquals(
             TsPacketizer.STREAM_TYPE_AAC,
-            pmt[sectionStart + 10 + 5].toInt() and 0xFF,
+            pmt[sectionStart + 12 + 5].toInt() and 0xFF,
         )
     }
 

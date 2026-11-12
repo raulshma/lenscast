@@ -37,10 +37,43 @@ class HlsManagerTest {
     fun `playlist reports real segment durations at 30fps`() {
         feedSecondsOfVideo(framesPerSecond = 30, seconds = 5)
         val playlist = HlsManager.playlist()
-        // 48 AUs at 33ms ticks span 47 intervals = 1.551s — real durations,
-        // not the old hardcoded 2.0s.
-        assertTrue(playlist.contains("#EXTINF:1.551,"))
+        // All-keyframe feed: a segment closes on the first keyframe at least
+        // 1s in — 31 ticks of 33ms = 1.023s of real wall-clock span, not the
+        // old hardcoded 2.0s.
+        assertTrue(playlist.contains("#EXTINF:1.023,"))
         assertTrue(playlist.contains("#EXT-X-TARGETDURATION:2"))
+    }
+
+    @Test
+    fun `segments close on keyframes so every segment opens on an IDR`() {
+        // The decodability regression: mid-GOP segment starts left joining
+        // players without SPS/PPS/IDR. 30fps with a 2s GOP — only every 60th
+        // AU is a keyframe, and segments must span the GOP, not a fixed AU
+        // count.
+        repeat(150) { i ->
+            HlsManager.feedVideo(listOf(EncodedNalUnit(ByteArray(16), isKeyFrame = i % 60 == 0)))
+            nowMs += 33L
+        }
+        val playlist = HlsManager.playlist()
+        // 60 ticks of 33ms = 1.98s per GOP.
+        assertTrue(playlist.contains("#EXTINF:1.980,"))
+        assertTrue(playlist.contains("#EXT-X-TARGETDURATION:2"))
+        assertEquals(2, countSegments())
+    }
+
+    @Test
+    fun `delta frames before the first keyframe never open the ring`() {
+        repeat(30) {
+            HlsManager.feedVideo(listOf(EncodedNalUnit(ByteArray(16), isKeyFrame = false)))
+            nowMs += 33L
+        }
+        assertFalse(HlsManager.hasSegments())
+        // The ring opens on the IDR, and the next keyframe ≥1s later closes
+        // the first segment.
+        HlsManager.feedVideo(listOf(videoFrame()))
+        nowMs += 2_000L
+        HlsManager.feedVideo(listOf(videoFrame()))
+        assertTrue(HlsManager.hasSegments())
     }
 
     @Test
@@ -85,8 +118,9 @@ class HlsManagerTest {
     }
 
     private fun countSegments(): Int {
+        // Sequences start at 1 — seg0 never exists.
         var count = 0
-        while (HlsManager.segment(HlsPlaylist.segmentName(count.toLong())) != null) count++
+        while (HlsManager.segment(HlsPlaylist.segmentName((count + 1).toLong())) != null) count++
         return count
     }
 

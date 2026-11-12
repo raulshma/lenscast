@@ -185,8 +185,6 @@ object StreamDefaults {
     // default when blank or malformed.
     const val PUSH_VAPID_SUBJECT_DEFAULT = "mailto:lenscast@localhost"
 
-    // HLS segment pacing.
-    const val HLS_SEGMENT_AUS = 48
     // DVR window: how many segments the ring may retain when the DVR setting
     // is raised above the sliding 5-segment live window (0 keeps LIVE mode).
     const val HLS_DVR_SEGMENTS_MAX = 120
