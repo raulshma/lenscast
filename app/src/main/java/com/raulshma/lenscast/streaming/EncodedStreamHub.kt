@@ -480,7 +480,7 @@ internal class EncodedStreamHub(
     /**
      * The overlay settings land on the compositor — the next pushed frame
      * re-renders its cached strip (only when the rendered content actually
-     * changed). Volatile retained-setter, like [setVideoResolution].
+     * changed). Volatile retained-setter, like [setFrameRate].
      */
     fun setOverlaySettings(settings: OverlaySettings) {
         overlayCompositor.setOverlaySettings(settings)
@@ -500,15 +500,27 @@ internal class EncodedStreamHub(
     /**
      * The persisted RTSP resolution lands on the hub's retained dimensions —
      * the size every incoming frame is aspect-filled onto ([YuvConverter.scaleNv21])
-     * and the encoder is configured at, independent of the camera's analysis
-     * resolution. While stopped this is simply the next `configure`; while
-     * running the very next pushed frame already carries the new size.
-     * MediaCodec has no live `setParameters` for dimensions, which is why the
-     * RTSP output still classifies a resolution change as NEEDS_RESTART.
+     * AND the encoder is configured at, independent of the camera's analysis
+     * resolution. While stopped this is simply the next `configure`. While
+     * running, a size change reconfigures the live encoder (stop → configure →
+     * start, the hot-swap [setInputFormat] and [setVideoCodec] ride): MediaCodec
+     * has no live `setParameters` for dimensions, and the frame path scales to
+     * the new size on the very next frame, so an encoder left at the old
+     * dimensions would fail every NV21→NV12 conversion. This is independent of
+     * the RTSP output's NEEDS_RESTART, which rebuilds only the network/SDP side
+     * and never touches this encoder. A same-size call is a no-op, so a settings
+     * re-emission never churns a live pipeline; the fixed-VGA sub-encoder is
+     * unaffected.
      */
     fun setVideoResolution(width: Int, height: Int) {
-        videoWidth = width
-        videoHeight = height
+        if (width == videoWidth && height == videoHeight) return
+        synchronized(stateLock) {
+            videoWidth = width
+            videoHeight = height
+            if (running.get()) {
+                reconfigureEncoderLocked(width, height)
+            }
+        }
     }
 
     /** A new input format reconfigures the running encoder — hot-swap with reconfigure. */

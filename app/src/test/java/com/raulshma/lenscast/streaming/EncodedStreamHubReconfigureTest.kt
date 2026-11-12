@@ -13,12 +13,17 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * The hub's reconfigure-wedge recovery: a permanent encoder (re)start failure
- * must leave the hub able to heal, not wedged black while [isRunning] answers
- * live. The suite pins the three invariants of that fix — a permanent
- * reconfigure failure nulls the stopped encoder (so the [EncodedSource]
- * answers null for a dead stream), a later refresh rebuilds and frames flow
- * again, and a stop nulls the encoder too.
+ * The hub's live reconfigure behaviour. Two concerns:
+ *
+ * The reconfigure-wedge recovery — a permanent encoder (re)start failure must
+ * leave the hub able to heal, not wedged black while [isRunning] answers live.
+ * A permanent reconfigure failure nulls the stopped encoder (so the
+ * [EncodedSource] answers null for a dead stream), a later refresh rebuilds and
+ * frames flow again, and a stop nulls the encoder too.
+ *
+ * The live resolution change — [EncodedStreamHub.setVideoResolution] must
+ * reconfigure the running encoder to the new size (the frame path aspect-fills
+ * onto it immediately), and a same-size apply must not churn the pipeline.
  */
 class EncodedStreamHubReconfigureTest {
 
@@ -34,12 +39,14 @@ class EncodedStreamHubReconfigureTest {
         val encodedFrames = mutableListOf<ByteArray>()
         var configuredWidth = 0
         var configuredHeight = 0
+        var configureCount = 0
         var started = false
         var failStarts = 0
 
         override fun configure(width: Int, height: Int, bitrate: Int, frameRate: Int) {
             configuredWidth = width
             configuredHeight = height
+            configureCount++
         }
 
         override fun setInputFormat(format: RtspInputFormat) {}
@@ -184,5 +191,40 @@ class EncodedStreamHubReconfigureTest {
         assertNull(hub.sps)
         assertNull(hub.pps)
         assertNull(hub.vps)
+    }
+
+    @Test
+    fun `a live resolution change reconfigures the running encoder to the new size`() {
+        val encoder = FakeVideoEncoder()
+        val hub = hubWith(encoder)
+        hub.refresh()
+        assertTrue(hub.isRunning())
+        assertEquals(1280, encoder.configuredWidth)
+        assertEquals(720, encoder.configuredHeight)
+
+        // The live 16:9 → 4:3 switch that used to leave the encoder at the old
+        // dimensions while the frame path scaled to the new ones: every
+        // NV21→NV12 conversion then ran off the end of the smaller buffer.
+        hub.setVideoResolution(960, 720)
+
+        assertEquals(960, encoder.configuredWidth)
+        assertEquals(720, encoder.configuredHeight)
+        assertTrue(encoder.started)
+        // The next frame is aspect-filled onto the NEW size and encodes clean.
+        hub.pushFrame(ByteArray(1280 * 720 * 3 / 2), 1280, 720, rotation = 0)
+        assertEquals(960 * 720 * 3 / 2, encoder.encodedFrames.last().size)
+    }
+
+    @Test
+    fun `a same-size resolution apply does not churn the live encoder`() {
+        val encoder = FakeVideoEncoder()
+        val hub = hubWith(encoder)
+        hub.refresh()
+        val configuresAfterStart = encoder.configureCount
+
+        hub.setVideoResolution(1280, 720)
+
+        assertEquals(configuresAfterStart, encoder.configureCount)
+        assertTrue(encoder.started)
     }
 }
