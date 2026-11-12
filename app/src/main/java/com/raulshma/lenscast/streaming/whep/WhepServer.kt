@@ -6,6 +6,8 @@ import android.util.Log
 import com.raulshma.lenscast.core.StreamDefaults
 import com.raulshma.lenscast.core.YuvConverter
 import com.raulshma.lenscast.core.toHexString
+import com.raulshma.lenscast.camera.model.OverlaySettings
+import com.raulshma.lenscast.streaming.EncodedOverlayCompositor
 import com.raulshma.lenscast.streaming.FrameThrottle
 import com.raulshma.lenscast.streaming.FrameTiming
 import com.raulshma.lenscast.streaming.whip.WhipOfferBuilder
@@ -46,8 +48,10 @@ import java.util.concurrent.ConcurrentHashMap
  * [DefaultVideoEncoderFactory] WHIP uses), fed from ONE shared
  * [VideoSource] that taps the same NV21 analysis frames the WHIP publisher
  * consumes — the manager fans every camera frame in through
- * [feedVideoFrame], throttled to the stream's target fps and rotated
- * upright exactly like WHIP. The tap is the supported libwebrtc
+ * [feedVideoFrame], throttled to the stream's target fps, rotated upright
+ * exactly like WHIP, and stamped with the configured burned-in overlay
+ * ([EncodedOverlayCompositor]) so viewers see the same timestamp/branding as
+ * every other output. The tap is the supported libwebrtc
  * integration; the encoded-hub access units are deliberately not fed here
  * (see the WHIP publisher's KDoc for that decision). WHEP v1 is H.264-only
  * by construction — libwebrtc encodes its own video, independent of the
@@ -76,15 +80,24 @@ import java.util.concurrent.ConcurrentHashMap
  * device-verified; the decisions around it (offer gating, registry cap and
  * reap, auth) are the pure modules next to it, JVM-tested.
  */
-class WhepServer(
+class WhepServer internal constructor(
     private val context: Context,
     /** The STUN setting provider — the manager hands over the WHIP STUN value. */
     private val stunServer: () -> String?,
     /** The per-session mic-arbitration verdict (WHIP's rule, evaluated at offer time). */
     private val audioAllowed: () -> Boolean,
     /** The concurrent-viewer cap (the RTSP server's max-4 convention). */
-    private val maxSessions: Int = StreamDefaults.WHEP_MAX_VIEWERS,
+    private val maxSessions: Int,
+    /** The burned-in overlay, stamped into the NV21 tap like every other output. */
+    private val overlayCompositor: EncodedOverlayCompositor,
 ) {
+
+    constructor(
+        context: Context,
+        stunServer: () -> String?,
+        audioAllowed: () -> Boolean,
+        maxSessions: Int = StreamDefaults.WHEP_MAX_VIEWERS,
+    ) : this(context, stunServer, audioAllowed, maxSessions, EncodedOverlayCompositor())
 
     sealed class Handshake {
         /** The offer was answered: the session resource id and the answer SDP. */
@@ -154,33 +167,19 @@ class WhepServer(
         val env = environment ?: return
         if (sessions.isEmpty()) return
         if (!frameThrottle.accept(System.currentTimeMillis())) return
-        val upright: ByteArray
-        val upWidth: Int
-        val upHeight: Int
-        when (rotation) {
-            90, 270 -> {
-                upright = YuvConverter.rotateNv21(nv21, width, height, rotation)
-                upWidth = height
-                upHeight = width
-            }
-            180 -> {
-                upright = YuvConverter.rotateNv21(nv21, width, height, rotation)
-                upWidth = width
-                upHeight = height
-            }
-            else -> {
-                upright = nv21.copyOf()
-                upWidth = width
-                upHeight = height
-            }
-        }
-        val frame = VideoFrame(NV21Buffer(upright, upWidth, upHeight, null), 0, System.nanoTime())
+        val tap = prepareTapFrame(nv21, width, height, rotation, overlayCompositor, System.currentTimeMillis())
+        val frame = VideoFrame(NV21Buffer(tap.nv21, tap.width, tap.height, null), 0, System.nanoTime())
         env.videoSource.capturerObserver.onFrameCaptured(frame)
     }
 
     /** Live target-fps change: the frame throttle's interval moves immediately. */
     fun setFrameRate(fps: Int) {
         targetFps = FrameTiming.effectiveFps(fps)
+    }
+
+    /** The Settings Applier's overlay route in — the next tapped frame re-renders. */
+    fun setOverlaySettings(settings: OverlaySettings) {
+        overlayCompositor.setOverlaySettings(settings)
     }
 
     /** The live viewer count — the status snapshot's `whepClients` value. */
@@ -425,5 +424,48 @@ class WhepServer(
 
         /** The reap loop's cadence — comfortably under the connect-reap window. */
         private const val REAP_INTERVAL_MS = 2_000L
+
+        /**
+         * The tap's frame prep: rotate upright and stamp the burned-in
+         * overlay. Pure NV21 (no libwebrtc), so the stamp contract is
+         * JVM-tested while the transport around it stays device-only.
+         */
+        internal fun prepareTapFrame(
+            nv21: ByteArray,
+            width: Int,
+            height: Int,
+            rotation: Int,
+            compositor: EncodedOverlayCompositor,
+            nowMs: Long,
+        ): TapFrame {
+            val upright: ByteArray
+            val upWidth: Int
+            val upHeight: Int
+            when (rotation) {
+                90, 270 -> {
+                    upright = YuvConverter.rotateNv21(nv21, width, height, rotation)
+                    upWidth = height
+                    upHeight = width
+                }
+                180 -> {
+                    upright = YuvConverter.rotateNv21(nv21, width, height, rotation)
+                    upWidth = width
+                    upHeight = height
+                }
+                else -> {
+                    upright = nv21.copyOf()
+                    upWidth = width
+                    upHeight = height
+                }
+            }
+            // [upright] is privately owned (a rotation result or an explicit
+            // copy), so the overlay blends in place without touching the
+            // camera's shared analysis array that the other taps still read.
+            val stamped = compositor.applyTo(upright, upWidth, upHeight, nowMs, frameShared = false)
+            return TapFrame(stamped, upWidth, upHeight)
+        }
     }
 }
+
+/** The upright, overlay-stamped NV21 the shared video source consumes. */
+internal class TapFrame(val nv21: ByteArray, val width: Int, val height: Int)

@@ -157,7 +157,6 @@ function App() {
                   handleStartRtspStream={state.handleStartRtspStream}
                   handleStopRtspStream={state.handleStopRtspStream}
                   setPreviewVisible={state.setPreviewVisible}
-                  overlaySettings={() => state.settings()?.streaming ?? null}
                   connectionLost={state.connectionLost}
                   onFullscreenChange={setPreviewFullscreen}
                 />

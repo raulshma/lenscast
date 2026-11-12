@@ -30,7 +30,6 @@ function renderPreview() {
     handleStartRtspStream: () => {},
     handleStopRtspStream: () => {},
     setPreviewVisible: () => {},
-    overlaySettings: () => null,
     connectionLost: () => false,
   }
   return render(() => <StreamPreview {...props} />)

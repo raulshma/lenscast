@@ -38,7 +38,6 @@ function renderPreview(opts: { live?: boolean } = {}) {
     handleStartRtspStream: () => {},
     handleStopRtspStream: () => {},
     setPreviewVisible: () => {},
-    overlaySettings: () => null,
     connectionLost: () => false,
   }
   const utils = render(() => <StreamPreview {...props} />)

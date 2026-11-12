@@ -1697,8 +1697,9 @@ class StreamingManager(
         currentOverlaySettings = settings
         // The encoded path burns the same overlay into its shared encode
         // (RTSP/HLS/WS/RTMP/SRT); the MJPEG path keeps reading the volatile
-        // per frame.
+        // per frame, and the WHEP tap stamps its own libwebrtc encode.
         encodedHub.setOverlaySettings(settings)
+        whepServer.setOverlaySettings(settings)
         Log.d(TAG, "Overlay settings updated: enabled=${settings.enabled}, position=${settings.position}")
     }
 

@@ -1,5 +1,5 @@
 import { Show, createSignal, createMemo, createEffect, onCleanup } from 'solid-js'
-import type { DeviceStatus, StreamingSettings } from '../types'
+import type { DeviceStatus } from '../types'
 import type { LiveAudioStatus } from '../audio/LiveAudioPlayer'
 import { MAX_PREVIEW_ERRORS, NO_HLS_RETRY_MS, previewRetryDelayMs, shouldDemoteToHls } from '../hooks/previewRetryPolicy'
 import { useZoomable } from '../hooks/useZoomable'
@@ -13,7 +13,7 @@ import { cyclePlayerMode, hlsPlaybackKind, hlsSupported, nextPlayerMode, type Pl
 import { createWhepPlayer } from '../lib/whepClient'
 import { canShareFiles, shareSnapshotImage, snapshotFileName } from '../lib/share'
 import { PttFallbackUplink, floatChunkToPcm16 } from '../lib/pttFallback'
-import { t, tCount } from '../lib/i18n'
+import { t } from '../lib/i18n'
 import type Hls from 'hls.js'
 
 interface Props {
@@ -34,7 +34,6 @@ interface Props {
   handleStartRtspStream: () => void
   handleStopRtspStream: () => void
   setPreviewVisible: (v: boolean) => void
-  overlaySettings: () => StreamingSettings | null
   /** True once both telemetry lanes are dead — the LIVE badge must not lie. */
   connectionLost: () => boolean
   /** Lifts the fullscreen active bit to App so higher-overlay Escape coordination includes it. */
@@ -372,59 +371,6 @@ export default function StreamPreview(props: Props) {
     streamActive: () => webActive() && props.previewVisible(),
     onActiveChange: (active) => props.onFullscreenChange?.(active),
     onHint: (key) => flashFullscreenMsg(t(key)),
-  })
-
-  const overlay = () => props.overlaySettings()
-  const overlayEnabled = () => overlay()?.overlayEnabled ?? API_DEFAULTS.overlayEnabled
-  const overlayPosition = () => overlay()?.overlayPosition ?? API_DEFAULTS.overlayPosition
-  const overlayTextColor = () => overlay()?.overlayTextColor ?? API_DEFAULTS.overlayTextColor
-  const overlayBgColor = () => overlay()?.overlayBackgroundColor ?? API_DEFAULTS.overlayBackgroundColor
-  const overlayFontSize = () => overlay()?.overlayFontSize ?? API_DEFAULTS.overlayFontSize
-  const overlayPadding = () => overlay()?.overlayPadding ?? API_DEFAULTS.overlayPadding
-  const overlayLineHeight = () => overlay()?.overlayLineHeight ?? API_DEFAULTS.overlayLineHeight
-
-  const positionStyles: Record<string, { top?: string; right?: string; bottom?: string; left?: string }> = {
-    TOP_LEFT: { top: '12px', left: '12px' },
-    TOP_RIGHT: { top: '12px', right: '12px' },
-    BOTTOM_LEFT: { bottom: '12px', left: '12px' },
-    BOTTOM_RIGHT: { bottom: '12px', right: '12px' },
-  }
-
-  const overlayLines = createMemo(() => {
-    const lines: string[] = []
-    const o = overlay()
-    if (!o) return lines
-
-    if (o.showTimestamp) {
-      const now = new Date()
-      const fmt = o.timestampFormat || 'yyyy-MM-dd HH:mm:ss'
-      const formatted = fmt
-        .replace('yyyy', String(now.getFullYear()))
-        .replace('MM', String(now.getMonth() + 1).padStart(2, '0'))
-        .replace('dd', String(now.getDate()).padStart(2, '0'))
-        .replace('HH', String(now.getHours()).padStart(2, '0'))
-        .replace('mm', String(now.getMinutes()).padStart(2, '0'))
-        .replace('ss', String(now.getSeconds()).padStart(2, '0'))
-      lines.push(formatted)
-    }
-
-    if (o.showBranding && o.brandingText) {
-      lines.push(o.brandingText)
-    }
-
-    if (o.showStatus) {
-      const statusParts: string[] = []
-      if (props.isRecording()) statusParts.push('REC')
-      const clientCount = st()?.streaming?.clientCount ?? API_DEFAULTS.clientCount
-      if (clientCount > 0) statusParts.push(tCount('preview.viewers', clientCount))
-      if (statusParts.length > 0) lines.push(statusParts.join('  '))
-    }
-
-    if (o.showCustomText && o.customText) {
-      lines.push(o.customText)
-    }
-
-    return lines
   })
 
   // ── Continuous push-to-talk: mic → PCM16 chunks → WS /ws/talkback. ──

@@ -10,7 +10,8 @@ import com.raulshma.lenscast.core.YuvConverter
  * lines into the NV21 frames the [EncodedStreamHub] feeds its MediaCodec
  * encoders, so RTSP (and every output riding the same shared encode — HLS,
  * WS video, RTMP, SRT) shows the same timestamp/branding/custom text the
- * web stream does. WHIP/WHEP encode separately and are not stamped here.
+ * web stream does. WHIP encodes separately and is not stamped here; WHEP
+ * stamps its own tap with a compositor of its own.
  *
  * The design keeps the per-frame cost at a small-region blend: the overlay
  * text is rasterized (Android graphics) and converted to Y,U,V,A (BT.601
@@ -94,7 +95,7 @@ internal class EncodedOverlayCompositor(
      * [frame] mutated in place — or, when [frameShared] marks the array as
      * still aliased by other consumers (the camera's own analysis array),
      * a per-size reusable copy blended instead, so the MJPEG pipeline and
-     * the WHIP/WHEP taps keep reading clean pixels.
+     * the WHIP tap keep reading clean pixels.
      */
     fun applyTo(
         frame: ByteArray,
