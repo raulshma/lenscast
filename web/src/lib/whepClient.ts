@@ -58,6 +58,20 @@ export function isFatalIceState(state: string): boolean {
 /** The gather-complete cap: host candidates are immediate, so waiting past this never buys connectivity on the LAN. */
 const GATHER_TIMEOUT_MS = 1_500
 
+/**
+ * The media-arrival cap: the SDP answer can settle while no frame ever renders
+ * (ICE never connects behind AP isolation / a firewall / NAT, or the track is
+ * undecodable here). A starved MediaStream fires no element 'error' and ICE
+ * 'disconnected' is non-fatal, so past this window the rung reports an error and
+ * the ladder demotes — "answer ≠ media", the h264 rung's config-watchdog twin.
+ * Longer than that config window: WebRTC still owes ICE + DTLS + a first keyframe
+ * after the answer lands.
+ */
+const MEDIA_TIMEOUT_MS = 6_000
+
+/** The element events that mean a frame actually decoded; any one cancels the watchdog. */
+const MEDIA_READY_EVENTS = ['loadeddata', 'playing', 'resize'] as const
+
 export interface WhepPlayerDeps {
   /** Default: a plain `RTCPeerConnection` with no ICE servers (LAN host candidates; the server side carries the shared STUN setting). */
   newPeerConnection?: () => RTCPeerConnection
@@ -67,6 +81,8 @@ export interface WhepPlayerDeps {
   deleteSession?: (sessionId: string) => Promise<unknown>
   /** The one-shot gather cap in ms. */
   gatherTimeoutMs?: number
+  /** The media-arrival cap in ms: answer settled but no frame rendered. */
+  mediaTimeoutMs?: number
 }
 
 export function createWhepPlayer(
@@ -78,6 +94,8 @@ export function createWhepPlayer(
   let sessionId: string | null = null
   let target: HTMLVideoElement | null = null
   let onElementError: (() => void) | null = null
+  let mediaTimer: ReturnType<typeof setTimeout> | null = null
+  let onMediaReady: (() => void) | null = null
 
   const defaultNewPeerConnection = (): RTCPeerConnection => new RTCPeerConnection()
 
@@ -108,6 +126,40 @@ export function createWhepPlayer(
 
   function setStatus(status: WhepStatus) {
     options.onStatus?.(status)
+  }
+
+  /** Cancels the media-arrival watchdog and detaches its element listeners. */
+  function clearMediaWatchdog() {
+    if (mediaTimer !== null) {
+      clearTimeout(mediaTimer)
+      mediaTimer = null
+    }
+    if (target && onMediaReady) {
+      for (const ev of MEDIA_READY_EVENTS) {
+        try { target.removeEventListener(ev, onMediaReady) } catch { /* detached element */ }
+      }
+    }
+    onMediaReady = null
+  }
+
+  /**
+   * Arms the "answer ≠ media" watchdog once the SDP settles: if no frame renders
+   * within the window, tear down and report the error the ladder demotes on. A
+   * frame arriving (loadeddata / playing / resize) cancels it.
+   */
+  function armMediaWatchdog(video: HTMLVideoElement, myRun: number) {
+    if (video.readyState >= 2 && video.videoWidth > 0) return
+    onMediaReady = () => {
+      if (run !== myRun) return
+      clearMediaWatchdog()
+    }
+    for (const ev of MEDIA_READY_EVENTS) video.addEventListener(ev, onMediaReady)
+    mediaTimer = setTimeout(() => {
+      mediaTimer = null
+      if (run !== myRun) return
+      stop()
+      setStatus('error')
+    }, deps.mediaTimeoutMs ?? MEDIA_TIMEOUT_MS)
   }
 
   /** Resolves on gather-complete or the cap — whichever first. */
@@ -164,7 +216,10 @@ export function createWhepPlayer(
       }
       peer.oniceconnectionstatechange = () => {
         if (run !== myRun) return
-        if (isFatalIceState(peer.iceConnectionState)) setStatus('error')
+        if (isFatalIceState(peer.iceConnectionState)) {
+          clearMediaWatchdog()
+          setStatus('error')
+        }
       }
 
       // The element's media verdict is the one failure the handshake cannot
@@ -207,6 +262,7 @@ export function createWhepPlayer(
       await peer.setRemoteDescription({ type: 'answer', sdp: response.body })
       if (run !== myRun) return
       setStatus('playing')
+      armMediaWatchdog(video, myRun)
     } catch (error) {
       if (run !== myRun) return
       // A failed handshake owns its cleanup: the peer closes and a captured
@@ -233,6 +289,7 @@ export function createWhepPlayer(
 
   /** Closes the live pieces (if any) and invalidates the in-flight run. */
   function releasePeer(): void {
+    clearMediaWatchdog()
     const peer = pc
     pc = null
     const id = sessionId

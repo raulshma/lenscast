@@ -67,6 +67,8 @@ function makeVideo() {
   const video = {
     srcObject: null as MediaStream | null,
     error: null as MediaError | null,
+    readyState: 0,
+    videoWidth: 0,
     play: vi.fn(async () => {}),
     addEventListener(type: string, cb: () => void) {
       ;(listeners[type] ??= []).push(cb)
@@ -79,8 +81,14 @@ function makeVideo() {
       video.error = { code: 3 } as MediaError
       for (const cb of listeners['error'] ?? []) cb()
     },
+    /** The first frame actually decoded: the media-arrival watchdog's cancel beat. */
+    emitMediaReady() {
+      video.readyState = 2
+      video.videoWidth = 640
+      for (const cb of listeners['loadeddata'] ?? []) cb()
+    },
   }
-  return video as unknown as HTMLVideoElement & { emitMediaError(): void }
+  return video as unknown as HTMLVideoElement & { emitMediaError(): void; emitMediaReady(): void }
 }
 
 const ANSWER_SDP = 'v=0\r\nm=video 9 UDP/TLS/RTP/SAVPF 96\r\na=recvonly\r\n'
@@ -138,7 +146,7 @@ describe('isFatalIceState', () => {
 
 // ── the offer/answer state machine ──
 
-function setupPlayer(postOffer: (offer: string) => Promise<WhepAnswerResponse>) {
+function setupPlayer(postOffer: (offer: string) => Promise<WhepAnswerResponse>, mediaTimeoutMs?: number) {
   const pc = makeFakePc()
   const statuses: WhepStatus[] = []
   const deleteSession = vi.fn(async () => {})
@@ -149,6 +157,7 @@ function setupPlayer(postOffer: (offer: string) => Promise<WhepAnswerResponse>) 
       postOffer,
       deleteSession,
       gatherTimeoutMs: 50,
+      mediaTimeoutMs,
     },
   )
   return { pc, statuses, deleteSession, player }
@@ -342,6 +351,63 @@ describe('createWhepPlayer element media errors', () => {
     expect(deleteSession).toHaveBeenCalledTimes(1)
 
     video.emitMediaError()
+    expect(statuses).toEqual(['negotiating', 'playing', 'idle'])
+    expect(deleteSession).toHaveBeenCalledTimes(1)
+  })
+})
+
+// ── the media-arrival watchdog: "answer ≠ media" ──
+// The SDP answer can settle (status 'playing') while no frame ever renders —
+// ICE never connects (AP isolation, firewall, NAT) or the track is undecodable
+// here. A starved MediaStream fires no element 'error', and ICE 'disconnected'
+// is non-fatal, so without a watchdog the rung sat on a black video forever
+// while the h264/mjpeg rungs below it would have worked over the same HTTP path.
+
+describe('createWhepPlayer media-arrival watchdog', () => {
+  it('a starved track after playing demotes to error once the media window elapses', async () => {
+    const { pc, statuses, deleteSession, player } = setupPlayer(() => Promise.resolve(answerResponse()), 40)
+    const video = makeVideo()
+    pc.gatherComplete()
+    await player.start(video)
+    expect(statuses).toEqual(['negotiating', 'playing'])
+
+    // No frame ever arrives (the black-preview condition).
+    await new Promise((r) => setTimeout(r, 80)) // > mediaTimeoutMs(40)
+    expect(statuses).toEqual(['negotiating', 'playing', 'idle', 'error'])
+    expect(deleteSession).toHaveBeenCalledWith('abc123')
+    expect(pc.closed).toBe(true)
+    expect(video.srcObject).toBeNull()
+  })
+
+  it('ICE disconnected forever still demotes via the media window', async () => {
+    const { pc, statuses, player } = setupPlayer(() => Promise.resolve(answerResponse()), 40)
+    pc.gatherComplete()
+    await player.start(makeVideo())
+    pc.emitIceState('disconnected') // non-fatal: the ICE handler alone never demotes
+    expect(statuses).toEqual(['negotiating', 'playing'])
+    await new Promise((r) => setTimeout(r, 80))
+    expect(statuses).toEqual(['negotiating', 'playing', 'idle', 'error'])
+  })
+
+  it('a frame arriving before the window cancels the watchdog', async () => {
+    const { pc, statuses, deleteSession, player } = setupPlayer(() => Promise.resolve(answerResponse()), 40)
+    const video = makeVideo()
+    pc.gatherComplete()
+    await player.start(video)
+    video.emitMediaReady()
+    await new Promise((r) => setTimeout(r, 80))
+    expect(statuses).toEqual(['negotiating', 'playing'])
+    expect(deleteSession).not.toHaveBeenCalled()
+  })
+
+  it('stop cancels the watchdog so a later window is inert', async () => {
+    const { pc, statuses, deleteSession, player } = setupPlayer(() => Promise.resolve(answerResponse()), 40)
+    const video = makeVideo()
+    pc.gatherComplete()
+    await player.start(video)
+    player.stop()
+    expect(statuses).toEqual(['negotiating', 'playing', 'idle'])
+    await new Promise((r) => setTimeout(r, 80))
     expect(statuses).toEqual(['negotiating', 'playing', 'idle'])
     expect(deleteSession).toHaveBeenCalledTimes(1)
   })
