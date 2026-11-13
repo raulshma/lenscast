@@ -25,6 +25,9 @@
   <a href="https://f-droid.org/packages/com.raulshma.lenscast/">
     <img alt="Latest release on F-Droid" src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Ff-droid.org%2Fapi%2Fv1%2Fpackages%2Fcom.raulshma.lenscast&query=%24.packages%5B0%5D.versionName&prefix=v&label=F-Droid&style=for-the-badge&color=1976D2&logo=fdroid&logoColor=white"/>
   </a>
+  <a href="https://github.com/raulshma/lenscast/releases">
+    <img alt="Total downloads" src="https://img.shields.io/github/downloads/raulshma/lenscast/total?style=for-the-badge&color=181717&logo=github&logoColor=white&label=Downloads"/>
+  </a>
 </p>
 
 </br>
