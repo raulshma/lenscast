@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { createRoot } from 'solid-js'
-import { createHashRouter, formatHash, parseHash, sameRoute, type HashRouterDeps } from './router'
+import { createHashRouter, formatHash, isNextRoute, isSystemTab, parseHash, sameRoute, toNextRoute, type HashRouterDeps } from './router'
 
 describe('parseHash', () => {
   it('parses every route shape', () => {
@@ -25,6 +25,58 @@ describe('parseHash', () => {
   it('a bare #/gallery/ (trailing slash, no id) is the id-less gallery route', () => {
     expect(parseHash('#/gallery/')).toEqual({ name: 'gallery' })
   })
+
+  it('parses the next-UI view routes', () => {
+    expect(parseHash('#/live')).toEqual({ name: 'live' })
+    expect(parseHash('#/media')).toEqual({ name: 'media' })
+    expect(parseHash('#/detection')).toEqual({ name: 'detection' })
+    expect(parseHash('#/system')).toEqual({ name: 'system' })
+    expect(parseHash('#/media/clip%207')).toEqual({ name: 'media', mediaId: 'clip 7' })
+    expect(parseHash('#/media/')).toEqual({ name: 'media' })
+  })
+
+  it('parses system sub-tabs; a bare #/system/ (trailing slash) is the id-less route', () => {
+    expect(parseHash('#/system/camera')).toEqual({ name: 'system', tab: 'camera' })
+    expect(parseHash('#/system/links')).toEqual({ name: 'system', tab: 'links' })
+    expect(parseHash('#/system/')).toEqual({ name: 'system' })
+  })
+})
+
+describe('isSystemTab', () => {
+  it('accepts exactly the declared tabs', () => {
+    expect(isSystemTab('camera')).toBe(true)
+    expect(isSystemTab('capture')).toBe(true)
+    expect(isSystemTab('streaming')).toBe(true)
+    expect(isSystemTab('storage')).toBe(true)
+    expect(isSystemTab('links')).toBe(true)
+    expect(isSystemTab('admin')).toBe(true)
+    expect(isSystemTab('nonsense')).toBe(false)
+    expect(isSystemTab(undefined)).toBe(false)
+  })
+})
+
+describe('isNextRoute / toNextRoute', () => {
+  it('classifies the next-UI names', () => {
+    expect(isNextRoute('live')).toBe(true)
+    expect(isNextRoute('media')).toBe(true)
+    expect(isNextRoute('detection')).toBe(true)
+    expect(isNextRoute('system')).toBe(true)
+    expect(isNextRoute('dashboard')).toBe(false)
+    expect(isNextRoute('gallery')).toBe(false)
+  })
+
+  it('maps every legacy route onto its next-UI equivalent', () => {
+    expect(toNextRoute({ name: 'dashboard' })).toEqual({ name: 'live' })
+    expect(toNextRoute({ name: 'settings' })).toEqual({ name: 'system' })
+    expect(toNextRoute({ name: 'events' })).toEqual({ name: 'detection' })
+    expect(toNextRoute({ name: 'gallery' })).toEqual({ name: 'media' })
+    expect(toNextRoute({ name: 'gallery', mediaId: 'x1' })).toEqual({ name: 'media', mediaId: 'x1' })
+  })
+
+  it('passes next-UI routes through unchanged', () => {
+    expect(toNextRoute({ name: 'live' })).toEqual({ name: 'live' })
+    expect(toNextRoute({ name: 'media', mediaId: 'x1' })).toEqual({ name: 'media', mediaId: 'x1' })
+  })
 })
 
 describe('formatHash', () => {
@@ -35,6 +87,25 @@ describe('formatHash', () => {
     expect(formatHash({ name: 'gallery' })).toBe('#/gallery')
     expect(formatHash({ name: 'gallery', mediaId: 'clip 7' })).toBe('#/gallery/clip%207')
     expect(parseHash(formatHash({ name: 'gallery', mediaId: 'x/y' }))).toEqual({ name: 'gallery', mediaId: 'x/y' })
+  })
+
+  it('round-trips the next-UI view routes', () => {
+    expect(formatHash({ name: 'live' })).toBe('#/live')
+    expect(formatHash({ name: 'media' })).toBe('#/media')
+    expect(formatHash({ name: 'media', mediaId: 'clip 7' })).toBe('#/media/clip%207')
+    expect(parseHash(formatHash({ name: 'media', mediaId: 'x/y' }))).toEqual({ name: 'media', mediaId: 'x/y' })
+    expect(formatHash({ name: 'detection' })).toBe('#/detection')
+    expect(formatHash({ name: 'system' })).toBe('#/system')
+  })
+
+  it('round-trips system tabs; an invalid tab falls back to the bare system route', () => {
+    for (const tab of ['camera', 'capture', 'streaming', 'storage', 'links', 'admin'] as const) {
+      const route = { name: 'system' as const, tab }
+      expect(formatHash(route)).toBe(`#/system/${tab}`)
+      expect(parseHash(formatHash(route))).toEqual(route)
+    }
+    expect(formatHash({ name: 'system', tab: 'nonsense' })).toBe('#/system')
+    expect(formatHash({ name: 'system', tab: undefined })).toBe('#/system')
   })
 })
 

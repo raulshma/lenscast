@@ -95,35 +95,64 @@ class StreamingService : Service() {
     }
 
     private fun startStreamingForeground(url: String?, includeAudio: Boolean) {
-        showForeground(
+        val promoted = promote(
             channelId = STREAMING_CHANNEL_ID,
             title = "LensCast Streaming",
             message = ForegroundNotifications.streamingMessage(url, includeAudio),
             includeAudio = includeAudio,
             serverMode = false,
         )
+        if (!promoted) {
+            // The CAMERA/MICROPHONE promotion is denied while the app is not
+            // visible — MIUI's while-in-use camera policy throws
+            // SecurityException for it (stock API 30+ restricts it too), and
+            // this is exactly the locked-mount start: tile, boot resume,
+            // automation. The old behavior — stopSelf — tore the service
+            // down entirely, taking the working server-only notification
+            // with it and leaving the live stream with no foreground
+            // service at all. Fall back to the server-only promotion: the
+            // process keeps its foreground standing and the server stays
+            // reachable; the session's stall watch and the resume seam own
+            // re-asserting the streaming promotion once the policy allows.
+            Log.w(TAG, "Streaming foreground promotion denied; holding the server-only promotion")
+            promoteServerOnly(url, includeAudio)
+        }
         Log.d(TAG, "Streaming foreground service started")
     }
 
     private fun startServerForeground(url: String?, includeAudio: Boolean) {
-        showForeground(
+        promoteServerOnly(url, includeAudio)
+        Log.d(TAG, "Server foreground service started")
+    }
+
+    /**
+     * The server-only promotion — both the direct server start and the
+     * denied-streaming-promotion fallback land here, so the two paths cannot
+     * drift apart in channel, title, or typing.
+     */
+    private fun promoteServerOnly(url: String?, includeAudio: Boolean): Boolean =
+        promote(
             channelId = SERVER_CHANNEL_ID,
             title = "LensCast Camera Server",
             message = ForegroundNotifications.serverMessage(url),
             includeAudio = includeAudio,
             serverMode = true,
         )
-        Log.d(TAG, "Server foreground service started")
-    }
 
-    private fun showForeground(
+    /**
+     * One typed foreground promotion attempt. Returns whether the typed
+     * startForeground landed; [foregroundMode] records only landings. On
+     * failure the caller decides the fallback — this method never stops the
+     * service itself.
+     */
+    private fun promote(
         channelId: String,
         title: String,
         message: String,
         includeAudio: Boolean,
         serverMode: Boolean,
-    ) {
-        runCatching {
+    ): Boolean {
+        val result = runCatching {
             val notification = ForegroundNotifications.build(
                 this, channelId, title, message, ongoing = true,
             )
@@ -145,17 +174,11 @@ class StreamingService : Service() {
             // Record only a start that actually succeeded — the typed
             // startForeground calls above either threw or landed.
             foregroundMode = if (serverMode) ForegroundMode.ServerOnly else ForegroundMode.Streaming
-        }.onFailure {
-            // A denied background start or a missing type prerequisite must
-            // not take the app down. The next foreground resume re-promotes.
-            // KNOWN SHARP EDGE (follow-up): a failed streaming re-assert
-            // stopSelf()s from here, tearing down a live server-only
-            // notification with it — the teardown below is today's behavior
-            // and stays; the recorded mode clearing through onDestroy is what
-            // makes it visible.
-            Log.e(TAG, "Foreground promotion failed: ${it.javaClass.simpleName}")
-            stopSelf()
         }
+        result.exceptionOrNull()?.let {
+            Log.e(TAG, "Foreground promotion failed: ${it.javaClass.simpleName}")
+        }
+        return result.isSuccess
     }
 
     private fun removeForegroundNotification() {

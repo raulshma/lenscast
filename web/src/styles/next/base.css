@@ -1,0 +1,95 @@
+/* ══════════════════════════════════════════════════════════════════
+   NEXT UI — BASE
+   Scoped resets and document-level styling for the next shell. The
+   classic App.css rules on html/body stay authoritative for the classic
+   UI; these only apply while [data-ui='next'] is set.
+   ══════════════════════════════════════════════════════════════════ */
+
+:root[data-ui='next'] {
+  background: var(--nx-bg);
+}
+
+:root[data-ui='next'] body {
+  background: var(--nx-bg);
+  color: var(--nx-text);
+  font-family: var(--nx-font);
+  font-size: var(--nx-text-base);
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-wrap: pretty;
+}
+
+/* Typographic defaults: headings get optical tightening + balance. */
+[data-ui='next'] h1,
+[data-ui='next'] h2,
+[data-ui='next'] h3 {
+  margin: 0;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  text-wrap: balance;
+}
+
+[data-ui='next'] p {
+  margin: 0;
+}
+
+/* Buttons and controls inherit the product face, not UA defaults. */
+[data-ui='next'] button,
+[data-ui='next'] input,
+[data-ui='next'] select,
+[data-ui='next'] textarea {
+  font-family: inherit;
+  color: inherit;
+}
+
+/* Visible keyboard focus everywhere, styled once. */
+[data-ui='next'] :focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--nx-focus-ring);
+  border-radius: var(--nx-radius-sm);
+}
+
+/* Inline data (timers, bitrates, counts) never shifts the layout. */
+[data-ui='next'] .nx-num,
+[data-ui='next'] .nx-mono {
+  font-family: var(--nx-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Scrollbars: quiet, matching the canvas. */
+[data-ui='next'] * {
+  scrollbar-width: thin;
+  scrollbar-color: var(--nx-border-strong) transparent;
+}
+
+[data-ui='next'] ::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+[data-ui='next'] ::-webkit-scrollbar-thumb {
+  background: var(--nx-border-strong);
+  border-radius: var(--nx-radius-full);
+  border: 3px solid transparent;
+  background-clip: content-box;
+}
+
+[data-ui='next'] ::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+[data-ui='next'] ::selection {
+  background: var(--nx-accent-subtle);
+}
+
+/* Reduced motion: keep state/color changes, drop movement. */
+@media (prefers-reduced-motion: reduce) {
+  [data-ui='next'] *,
+  [data-ui='next'] *::before,
+  [data-ui='next'] *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

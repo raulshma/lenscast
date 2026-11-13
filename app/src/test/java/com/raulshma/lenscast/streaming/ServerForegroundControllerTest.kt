@@ -45,6 +45,21 @@ class ServerForegroundControllerTest {
     }
 
     @Test
+    fun `sync re-asserts the streaming promotion while a session is active`() {
+        // The resume heal: a session whose CAMERA/MICROPHONE promotion was
+        // denied on a backgrounded start gets it re-asserted the moment the
+        // app is visible again — the server-only promotion is the fallback
+        // the service already fell back to, not the re-assert target.
+        io.mockk.every { session.isActive } returns true
+        isServerRunning.value = true
+
+        controller.sync()
+
+        verify(exactly = 1) { session.reassertStreamingForegroundIfActive() }
+        verify(exactly = 0) { session.ensureServerForeground() }
+    }
+
+    @Test
     fun `a transient server restart inside the stop grace never bounces the service`() {
         // Issue #14's fatal pattern: a port change bounces isServerRunning
         // false → true inside one restart. Stopping on the down leg races the

@@ -371,6 +371,11 @@ export function useAppState() {
 
   async function handleSelectLens(index: number) {
     await api.selectLens(index)
+    // The switch rebinds the camera: re-read the lens inventory (the `selected`
+    // flags the picker chips render from) and the status push (lensId/lensLabel,
+    // live zoom of the new lens) — without this the strip's chips go stale.
+    void fetchLenses()
+    void fetchStatus()
   }
 
   async function handleResetDefaults() {
@@ -506,15 +511,20 @@ export function useAppState() {
   const router = hashRouter()
   createEffect((prev?: { name: RouteName; mediaId?: string }) => {
     const route = router.route()
-    if (prev && prev.name === 'gallery' && prev.mediaId &&
-        (route.name !== 'gallery' || route.mediaId !== prev.mediaId)) {
+    // Media-viewer deep links: #/gallery/<id> (classic) and #/media/<id>
+    // (next UI) both open the shared viewer, and leaving either closes it.
+    const prevOnMedia = prev?.mediaId != null && (prev.name === 'gallery' || prev.name === 'media')
+    const stillSameMedia = route.mediaId != null && route.mediaId === prev?.mediaId &&
+      (route.name === 'gallery' || route.name === 'media')
+    if (prevOnMedia && !stillSameMedia) {
       closeMedia()
+    }
+    if ((route.name === 'gallery' || route.name === 'media') && route.mediaId &&
+        viewerTarget()?.id !== route.mediaId) {
+      openMedia(route.mediaId)
     }
     if (route.name === 'gallery') {
       if (!showGallery()) setShowGallery(true)
-      if (route.mediaId && viewerTarget()?.id !== route.mediaId) {
-        openMedia(route.mediaId)
-      }
     } else {
       if (showGallery()) setShowGallery(false)
       if (route.name === 'settings' || route.name === 'events') {

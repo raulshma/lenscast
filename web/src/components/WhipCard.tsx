@@ -2,8 +2,10 @@ import { Show, createSignal } from 'solid-js'
 import type { AllSettings, DeviceStatus } from '../types'
 import { API_DEFAULTS } from '../api/defaults'
 import SettingsCard from './SettingsCard'
+import StatusChip, { type StatusTone } from './StatusChip'
 import ToggleRow from './ToggleRow'
 import { whipStatusView, whipStunField, WHIP_STATUS_LABELS_EN, WHIP_STUN_HINTS_EN } from '../lib/whip'
+import { statusTone } from '../lib/statusVariant'
 import { t } from '../lib/i18n'
 
 interface Props {
@@ -55,6 +57,9 @@ export default function WhipCard(props: Props) {
     present: t('whip.stunSet'),
     empty: t('whip.stunEmpty'),
   })
+  // Header chip: quiet while idle; anything else (connecting, live, error)
+  // is a state worth seeing from across the page.
+  const chipTone = (): StatusTone | null => statusTone(statusView().variant)
 
   return (
     <SettingsCard
@@ -66,6 +71,17 @@ export default function WhipCard(props: Props) {
         </svg>
       }
       title={t('whip.title')}
+      badge={
+        <Show when={chipTone()}>
+          {(tone) => (
+            <StatusChip
+              tone={tone()}
+              label={statusView().label}
+              pulse={statusView().variant === 'success'}
+            />
+          )}
+        </Show>
+      }
     >
       <div class="field-group">
         <ToggleRow

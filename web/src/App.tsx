@@ -1,20 +1,15 @@
-import { ErrorBoundary, Show, createSignal } from 'solid-js'
+import { ErrorBoundary, Show, createEffect } from 'solid-js'
 import { useAppState } from './hooks/useAppState'
 import { useTheme } from './hooks/useTheme'
+import { useNextTheme } from './hooks/useNextTheme'
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts'
 import LoginScreen from './components/LoginScreen'
-import Navbar from './components/Navbar'
-import StreamPreview from './components/StreamPreview'
-import SettingsPanel from './components/SettingsPanel'
-import AppSettingsPanel from './components/AppSettingsPanel'
-import ClientsCard from './components/ClientsCard'
-import MultiCamCard from './components/MultiCamCard'
-import ShareCard from './components/ShareCard'
-import ShortcutsOverlay from './components/ShortcutsOverlay'
-import { MediaViewerOverlay } from './components/MediaViewer'
-import Gallery from './Gallery'
+import LegacyShell from './components/legacy/LegacyShell'
+import NextShell from './components/next/NextShell'
+import NxLogin from './components/next/NxLogin'
 import { cyclePlayerMode } from './video/playerLadder'
-import { viewerTarget } from './lib/viewerStore'
+import { uiModeStore } from './lib/uiMode'
+import { hashRouter } from './lib/router'
 import { t } from './lib/i18n'
 import './App.css'
 
@@ -28,9 +23,40 @@ function triggerDownload(url: string) {
   document.body.removeChild(a)
 }
 
+/**
+ * App is the shell dispatcher: it owns the single useAppState instance, the
+ * global keyboard shortcuts, the auth gate, and the persisted classic/next
+ * UI-mode switch (the opt-in redesign). Everything below the auth gate is
+ * one of the two shells — LegacyShell (the shipped default, unchanged) or
+ * NextShell (the opt-in redesign). Only one mounts at a time; the shared
+ * state instance means the switch is instant and nothing re-polls.
+ */
 function App() {
   const state = useAppState()
-  const { theme, toggleTheme } = useTheme()
+  const ui = uiModeStore()
+  // Each shell's theme semantics apply only while that UI mode is active:
+  // both shells use dark = attribute absent, light adds data-theme="light"
+  // (they differ only in storage keys: lenscast.theme vs
+  // lenscast.nextTheme). Both guards are read reactively, so switching
+  // modes re-applies the right attribute — including on the login screen,
+  // which the dispatcher renders itself.
+  const { theme, toggleTheme } = useTheme(() => ui.mode() === 'classic')
+  const { theme: nextTheme, toggleTheme: toggleNextTheme } = useNextTheme()
+
+  // Mirror the mode + next theme onto <html> for CSS scoping and so a shell
+  // switch after mount stays consistent with the pre-paint boot snippet in
+  // index.html. The browser chrome follows the active surface (next's
+  // charcoal canvas).
+  createEffect(() => {
+    const root = document.documentElement
+    root.setAttribute('data-ui', ui.mode())
+    if (ui.mode() === 'next') {
+      if (nextTheme() === 'light') root.setAttribute('data-theme', 'light')
+      else root.removeAttribute('data-theme')
+      const meta = document.querySelector('meta[name="theme-color"]')
+      if (meta) meta.setAttribute('content', nextTheme() === 'dark' ? '#0a0c10' : '#eff1f4')
+    }
+  })
 
   // One global keydown listener; every guard (editable focus, modifier keys,
   // the key map) is the pure lib/shortcuts module. Write shortcuts skip
@@ -63,11 +89,27 @@ function App() {
       state.setPlayerMode(cyclePlayerMode(state.playerMode()))
     },
     gallery: () => {
+      // In the next UI the gallery is the Media view, not an overlay.
+      if (ui.mode() === 'next') {
+        const current = hashRouter().route()
+        hashRouter().navigate(current.name === 'media' ? { name: 'live' } : { name: 'media' })
+        return
+      }
       state.setShowGallery(!state.showGallery())
     },
     search: () => {
       const focus = () => {
         (document.getElementById('gallery-search-input') as HTMLInputElement | null)?.focus()
+      }
+      if (ui.mode() === 'next') {
+        if (hashRouter().route().name === 'media') focus()
+        else {
+          hashRouter().navigate({ name: 'media' })
+          // Solid renders the view synchronously with the hash flip; one
+          // macrotask later the input exists.
+          setTimeout(focus, 50)
+        }
+        return
       }
       if (state.showGallery()) focus()
       else {
@@ -83,12 +125,6 @@ function App() {
   }, {
     enabled: () => state.authChecked() && (!state.authRequired() || state.authenticated()),
   })
-
-  // True while a higher overlay owns Escape (shortcuts help, the shared media
-  // viewer, the full-screen preview) — the gallery defers its own Escape
-  // handling then.
-  const [previewFullscreen, setPreviewFullscreen] = createSignal(false)
-  const overlayActive = () => state.showShortcuts() || viewerTarget() != null || previewFullscreen()
 
   return (
     <div class="app">
@@ -106,134 +142,32 @@ function App() {
               </div>
             </div>
           )}>
-            <>
-              <Navbar
-                status={state.status}
-                saving={state.saving}
-                authRequired={state.authRequired}
-                handleLogout={state.handleLogout}
-                setShowGallery={state.setShowGallery}
-                onShowShortcuts={() => state.setShowShortcuts(true)}
-                theme={theme}
-                toggleTheme={toggleTheme}
-              />
-
-              <Show when={state.connectionLost()}>
-                <div class="connection-lost-banner" role="alert">
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z" />
-                    <line x1="12" y1="9" x2="12" y2="13" />
-                    <line x1="12" y1="17" x2="12.01" y2="17" />
-                  </svg>
-                  <span>{t('app.connectionLost')}</span>
-                </div>
-              </Show>
-
-              <Show when={state.isViewer()}>
-                <div class="connection-lost-banner" role="note">
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <rect x="3" y="11" width="18" height="11" rx="2" />
-                    <path d="M7 11V7a5 5 0 0110 0v4" />
-                  </svg>
-                  <span>{t('app.viewerBanner')}</span>
-                </div>
-              </Show>
-
-              <main class="main-layout">
-                <StreamPreview
-                  status={state.status}
-                  previewVisible={state.previewVisible}
-                  streamNonce={state.streamNonce}
-                  streamActionLoading={state.streamActionLoading}
-                  isRecording={state.isRecording}
-                  captureMsg={state.captureMsg}
-                  liveAudioStatus={state.liveAudioStatus}
-                  recordingTimer={state.recordingTimer}
-                  playerMode={state.playerMode}
-                  setPlayerMode={state.setPlayerMode}
-                  handleCapture={state.handleCapture}
-                  handleStartWebStream={state.handleStartWebStream}
-                  handleStopWebStream={state.handleStopWebStream}
-                  handleStartRtspStream={state.handleStartRtspStream}
-                  handleStopRtspStream={state.handleStopRtspStream}
-                  setPreviewVisible={state.setPreviewVisible}
-                  connectionLost={state.connectionLost}
-                  onFullscreenChange={setPreviewFullscreen}
-                />
-
-                <SettingsPanel
-                  settings={state.settings}
-                  status={state.status}
-                  lenses={state.lenses}
-                  error={state.error}
-                  updateCamera={state.updateCamera}
-                  updateStreamingAndSave={state.updateStreamingAndSave}
-                  updateStreamingDebounced={state.updateStreamingDebounced}
-                  handleSelectLens={state.handleSelectLens}
-                  handleResetDefaults={state.handleResetDefaults}
-                  intervalConfig={state.intervalConfig}
-                  setIntervalConfig={state.setIntervalConfig}
-                  intervalRunning={state.intervalRunning}
-                  intervalCompleted={state.intervalCompleted}
-                  handleStartIntervalCapture={state.handleStartIntervalCapture}
-                  handleStopIntervalCapture={state.handleStopIntervalCapture}
-                  recordingConfig={state.recordingConfig}
-                  setRecordingConfig={state.setRecordingConfig}
-                  isRecording={state.isRecording}
-                  isScheduled={state.isScheduled}
-                  scheduledStartTimeMs={state.scheduledStartTimeMs}
-                  recordingTimer={state.recordingTimer}
-                  handleStartRecording={state.handleStartRecording}
-                  handleStopRecording={state.handleStopRecording}
-                  activeTab={state.activeTab}
-                  setActiveTab={state.setActiveTab}
-                >
-                  <AppSettingsPanel
-                    settings={state.settings}
-                    status={state.status}
-                    streamActionLoading={state.streamActionLoading}
-                    updateStreamingAndSave={state.updateStreamingAndSave}
-                    updateStreamingDebounced={state.updateStreamingDebounced}
-                    setRecordingConfigAudio={(v) => state.setRecordingConfig({ ...state.recordingConfig(), includeAudio: v })}
-                    handleStartWhip={state.handleStartWhip}
-                    handleStopWhip={state.handleStopWhip}
-                    handleStartRtmp={state.handleStartRtmp}
-                    handleStopRtmp={state.handleStopRtmp}
-                    readOnly={state.isViewer}
-                  />
-                  <ClientsCard readOnly={state.isViewer} />
-                  <MultiCamCard />
-                  <ShareCard />
-                </SettingsPanel>
-              </main>
-
-              <Show when={state.showGallery()}>
-                <Gallery
-                  onClose={() => state.setShowGallery(false)}
-                  readOnly={state.isViewer}
-                  overlayActive={overlayActive}
-                />
-              </Show>
-
-              {/* The shared clip viewer: event-feed "View clip", timeline
-                  segments, and #/gallery/<id> deep links all open here. */}
-              <MediaViewerOverlay canDelete={!state.isViewer()} />
-
-              <Show when={state.showShortcuts()}>
-                <ShortcutsOverlay onClose={() => state.setShowShortcuts(false)} />
-              </Show>
-            </>
+            <Show when={ui.mode() === 'classic'} fallback={<NextShell state={state} theme={nextTheme} toggleTheme={toggleNextTheme} />}>
+              <LegacyShell state={state} theme={theme} toggleTheme={toggleTheme} />
+            </Show>
           </ErrorBoundary>
         }>
-          <LoginScreen
-            loginUser={state.loginUser}
-            setLoginUser={state.setLoginUser}
-            loginPass={state.loginPass}
-            setLoginPass={state.setLoginPass}
-            loginError={state.loginError}
-            loginLoading={state.loginLoading}
-            handleLogin={state.handleLogin}
-          />
+          <Show when={ui.mode() === 'classic'} fallback={
+            <NxLogin
+              loginUser={state.loginUser}
+              setLoginUser={state.setLoginUser}
+              loginPass={state.loginPass}
+              setLoginPass={state.setLoginPass}
+              loginError={state.loginError}
+              loginLoading={state.loginLoading}
+              handleLogin={state.handleLogin}
+            />
+          }>
+            <LoginScreen
+              loginUser={state.loginUser}
+              setLoginUser={state.setLoginUser}
+              loginPass={state.loginPass}
+              setLoginPass={state.setLoginPass}
+              loginError={state.loginError}
+              loginLoading={state.loginLoading}
+              handleLogin={state.handleLogin}
+            />
+          </Show>
         </Show>
       }>
         <div class="app-loading">

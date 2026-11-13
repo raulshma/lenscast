@@ -5,41 +5,20 @@ import { groupGalleryByDay, listCaptureDays } from './gallery/groupByDay'
 import { filterByQuery } from './lib/mediaSearch'
 import { toViewerMedia } from './lib/viewerStore'
 import { MediaViewer } from './components/MediaViewer'
-import { dayGroupLabel, formatDate, formatTime, t, tCount } from './lib/i18n'
+import { dayGroupLabel, t, tCount } from './lib/i18n'
+import { formatDateLabel, formatFileSize, formatDuration } from './lib/format'
 
 /** How long typing waits before the search refetches the gallery. */
 const SEARCH_DEBOUNCE_MS = 300
-
-function formatFileSize(bytes: number): string {
-  if (bytes <= 0) return ''
-  const units = ['B', 'KB', 'MB', 'GB']
-  let i = 0
-  let size = bytes
-  while (size >= 1024 && i < units.length - 1) {
-    size /= 1024
-    i++
-  }
-  return `${size.toFixed(i > 0 ? 1 : 0)} ${units[i]}`
-}
-
-function formatDateLabel(ts: number): string {
-  const d = new Date(ts)
-  return formatDate(d, { month: 'short', day: 'numeric' }) +
-    ' ' + formatTime(d, { hour: '2-digit', minute: '2-digit' })
-}
-
-function formatDuration(ms: number): string {
-  const totalSec = Math.floor(ms / 1000)
-  const min = Math.floor(totalSec / 60)
-  const sec = totalSec % 60
-  return `${min}:${sec.toString().padStart(2, '0')}`
-}
 
 export default function Gallery(props: {
   onClose: () => void
   readOnly?: () => boolean
   /** True while a higher overlay (shortcuts help, the shared media viewer) owns Escape. */
   overlayActive?: () => boolean
+  /** When the gallery is mounted as a view (next UI Media view), not an overlay:
+      no header × — the icon rail is the way out. */
+  hideClose?: boolean
 }) {
   // A viewer-role session hides the delete controls; downloads (reads) stay.
   const canDelete = () => props.readOnly?.() !== true
@@ -302,7 +281,7 @@ export default function Gallery(props: {
               <path d="M6 6.5h1M17 6.5h1M6 17.5h1M17 17.5h1" stroke-width="2" stroke-linecap="round" />
             </svg>
           </button>
-          <Show when={!selectMode()}>
+          <Show when={!selectMode() && !props.hideClose}>
             <button class="navbar-icon-btn" onClick={props.onClose} title={t('common.close')}>
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <path d="M18 6L6 18M6 6l12 12" />

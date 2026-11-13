@@ -3,6 +3,7 @@ import type { DeviceStatus } from '../types'
 import { API_DEFAULTS } from '../api/defaults'
 import type { ThemeMode } from '../hooks/useTheme'
 import { LOCALES, LOCALE_DISPLAY_NAMES, locale, setLocale, t, type Locale } from '../lib/i18n'
+import { uiModeStore } from '../lib/uiMode'
 
 interface Props {
   status: () => DeviceStatus | null
@@ -50,9 +51,10 @@ export default function Navbar(props: Props) {
           <span>{st()?.battery?.level ?? '--'}%</span>
         </div>
 
-        {/* Thermal */}
+        {/* Thermal — status-pill-thermal lets the ≤480px media query drop it
+            (with the clients pill) to keep the navbar on one phone row. */}
         <div
-          class="status-pill"
+          class="status-pill status-pill-thermal"
           classList={{
             'status-pill-success': !st()?.thermal || st()!.thermal === 'NORMAL',
             'status-pill-warning': st()?.thermal === 'MODERATE' || st()?.thermal === 'LIGHT',
@@ -75,6 +77,20 @@ export default function Navbar(props: Props) {
           </svg>
           <span>{st()?.streaming?.clientCount ?? API_DEFAULTS.clientCount}</span>
         </div>
+
+        {/* Opt-in: the redesigned console shell. Classic stays the default
+            until the redesign graduates — the switch persists per user. */}
+        <button
+          id="next-ui-btn"
+          class="navbar-next-pill"
+          onClick={() => uiModeStore().set('next')}
+          title={t('nav.newUi')}
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round">
+            <path d="M12 3l2.1 5.9L20 11l-5.9 2.1L12 19l-2.1-5.9L4 11l5.9-2.1z" />
+          </svg>
+          <span>{t('nav.newUi')}</span>
+        </button>
 
         {/* Theme */}
         <button

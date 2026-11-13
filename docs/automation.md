@@ -194,6 +194,17 @@ Two holds answer that, both in `core/PowerManager.kt`:
   lost (expired timeout racing the poll, an external release) is
   re-acquired on the next tick.
 
+One more locked-screen variable the wake locks don't cover: **the camera
+itself**. Android's while-in-use camera policy (stricter under MIUI/HyperOS)
+denies camera access — and the camera-typed foreground promotion — to an app
+that is not visible, so a stream started from the tile, boot resume or
+automation while the screen is locked comes up camera-dark: the service
+holds the process up with its server-only promotion, the stream watchdog
+keeps retrying the camera, and the moment the app is opened the promotion
+lands and the stream heals itself within seconds. A stream started once from
+the app and then locked streams indefinitely. See the README's
+start-from-background note.
+
 ## Trigger catalog
 
 Nine trigger ids (AutomationTriggerCatalog; published read-only by GET

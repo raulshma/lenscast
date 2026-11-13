@@ -1,5 +1,6 @@
 import { Show } from 'solid-js'
 import SettingsCard from './SettingsCard'
+import StatusChip, { type StatusTone } from './StatusChip'
 import type { AllSettings, DeviceStatus } from '../types'
 import { API_DEFAULTS } from '../api/defaults'
 import { formatTime, t } from '../lib/i18n'
@@ -27,6 +28,14 @@ const STATE_COLORS: Record<string, string> = {
   COOLDOWN: 'var(--lc-warning)',
 }
 
+const STATE_TONES: Record<string, StatusTone> = {
+  IDLE: 'neutral',
+  MONITORING: 'success',
+  RECOVERING: 'warning',
+  FAILED: 'danger',
+  COOLDOWN: 'warning',
+}
+
 export default function WatchdogCard(props: Props) {
   const s = () => props.settings()
   const wd = () => props.status()?.watchdog
@@ -51,6 +60,15 @@ export default function WatchdogCard(props: Props) {
         </svg>
       }
       title={t('watchdog.title')}
+      badge={
+        <Show when={enabled()}>
+          <StatusChip
+            tone={STATE_TONES[wd()?.status ?? 'IDLE'] ?? 'neutral'}
+            label={statusInfo().label}
+            pulse={(wd()?.status ?? 'IDLE') === 'MONITORING'}
+          />
+        </Show>
+      }
     >
       {/* Enable Toggle */}
       <div class="field-group">

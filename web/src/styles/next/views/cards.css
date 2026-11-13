@@ -1,0 +1,183 @@
+/* ══════════════════════════════════════════════════════════════════
+   NEXT UI — LEGACY BRIDGE
+   Every classic card has been ported onto the nx kit (system/cards,
+   views/detection, views/media), so the old reskin layer is gone. What
+   remains is the bridge for the three classic-DOM surfaces that still
+   render under [data-ui='next']:
+     · StreamPreview internals — the stage keeps its URL bar, copy
+       button and audio state chip (player internals are not ported).
+     · A port's kept internals — MultiCam's edit rows and the recording
+       timeline reuse the field-input/field-select/field-row vocabulary.
+     · Shared overlays — ShortcutsOverlay reuses the gallery overlay
+       shell, and the media viewer (MediaViewerOverlay) is the gallery
+       viewer. Both are mounted by both shells.
+   Classic UI is untouched — every rule here is scoped.
+   ══════════════════════════════════════════════════════════════════ */
+
+/* ── Field vocabulary (kept port internals) ───────────────────────── */
+
+[data-ui='next'] .field-group {
+  gap: var(--nx-space-1);
+}
+
+[data-ui='next'] .field-row {
+  gap: var(--nx-space-3);
+}
+
+[data-ui='next'] .field-select,
+[data-ui='next'] .field-input {
+  appearance: none;
+  height: 32px;
+  padding: 0 12px;
+  border-radius: var(--nx-radius);
+  border: 1px solid var(--nx-control-border);
+  background: var(--nx-control-bg);
+  color: var(--nx-text);
+  font-size: var(--nx-text-base);
+  font-family: var(--nx-font);
+  transition: border-color var(--nx-duration-fast) var(--nx-ease), box-shadow var(--nx-duration-fast) var(--nx-ease);
+}
+
+[data-ui='next'] .field-select {
+  padding-right: 30px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23808695' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  cursor: pointer;
+}
+
+[data-ui='next'] .field-select:focus,
+[data-ui='next'] .field-input:focus {
+  outline: none;
+  border-color: var(--nx-accent);
+  box-shadow: 0 0 0 3px var(--nx-focus-ring);
+  background-color: var(--nx-surface);
+}
+
+[data-ui='next'] .field-select:disabled,
+[data-ui='next'] .field-input:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ── Stream URL & audio rows (StreamPreview internals) ────────────── */
+
+[data-ui='next'] .stream-url-bar {
+  background: var(--nx-surface-2);
+  border: 1px solid var(--nx-border);
+  border-radius: var(--nx-radius);
+  padding: 8px 12px;
+  gap: var(--nx-space-2);
+}
+
+[data-ui='next'] .stream-url-bar code {
+  font-family: var(--nx-mono);
+  font-size: var(--nx-text-sm);
+  color: var(--nx-text-secondary);
+}
+
+[data-ui='next'] .url-copy-btn {
+  color: var(--nx-text-tertiary);
+  border-radius: var(--nx-radius-sm);
+}
+
+[data-ui='next'] .url-copy-btn:hover {
+  color: var(--nx-text);
+  background: var(--nx-surface-3);
+}
+
+[data-ui='next'] .url-copy-btn-copied,
+[data-ui='next'] .url-copy-btn-copied:hover {
+  color: var(--nx-success);
+}
+
+[data-ui='next'] .audio-status-indicator {
+  background: var(--nx-surface-2);
+  border: 1px solid var(--nx-border);
+  border-radius: var(--nx-radius);
+  font-size: var(--nx-text-sm);
+  color: var(--nx-text-secondary);
+  padding: 8px 12px;
+  gap: var(--nx-space-2);
+}
+
+[data-ui='next'] .audio-live {
+  background: var(--nx-success-bg);
+  border-color: transparent;
+  color: var(--nx-success);
+}
+
+[data-ui='next'] .audio-connecting {
+  background: var(--nx-warning-bg);
+  border-color: transparent;
+  color: var(--nx-warning);
+}
+
+[data-ui='next'] .audio-blocked {
+  background: var(--nx-warning-bg);
+  border-color: transparent;
+  color: var(--nx-warning);
+}
+
+[data-ui='next'] .audio-error {
+  background: var(--nx-danger-bg);
+  border-color: transparent;
+  color: var(--nx-danger);
+}
+
+/* ── Automation rule grammar (AutomationPanel kept internals) ─────── */
+
+/* The WHEN / ONLY WHEN / THEN structural labels are grammar, not signal:
+   recoloring each word cyan/green made every rule look alarmed. Neutral
+   labels, one voice; the missing-action state keeps its danger color.
+   Selectors stay nested (0-3-0) to out-rank App.css's own rules, which
+   load after these imports. */
+[data-ui='next'] .automation-when .automation-when-label,
+[data-ui='next'] .automation-onlywhen .automation-when-label,
+[data-ui='next'] .automation-then .automation-when-label {
+  color: var(--nx-text-tertiary);
+}
+
+[data-ui='next'] .automation-when .automation-when-text,
+[data-ui='next'] .automation-onlywhen .automation-when-text {
+  color: var(--nx-text-secondary);
+}
+
+/* ── Shared overlays ──────────────────────────────────────────────── */
+
+/* The classic overlays take over the whole viewport with an opaque page
+   background; the next UI dims the app behind them instead. This catches
+   the shortcuts help too (it reuses the gallery overlay shell). */
+[data-ui='next'] .gallery-overlay {
+  background: var(--nx-scrim);
+  backdrop-filter: blur(4px);
+}
+
+/* Gradient wordmarks read as decoration; headers carry plain titles. */
+[data-ui='next'] .gallery-header {
+  background: var(--nx-surface);
+  border-bottom: 1px solid var(--nx-border);
+}
+
+[data-ui='next'] .gallery-header h2 {
+  background: none;
+  -webkit-background-clip: initial;
+  -webkit-text-fill-color: currentColor;
+  background-clip: initial;
+  color: var(--nx-text);
+  font-size: var(--nx-text-lg);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+/* The shared media viewer overlay (still fullscreen above every view). */
+[data-ui='next'] .gallery-viewer {
+  background: var(--nx-scrim);
+  backdrop-filter: blur(6px);
+}
+
+[data-ui='next'] .gallery-viewer-bar {
+  background: color-mix(in srgb, var(--nx-surface) 88%, transparent);
+  border-bottom: 1px solid var(--nx-border);
+  backdrop-filter: blur(8px);
+}

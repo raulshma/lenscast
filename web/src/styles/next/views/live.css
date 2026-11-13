@@ -1,0 +1,580 @@
+/* ══════════════════════════════════════════════════════════════════
+   NEXT UI — LIVE VIEW
+   The stage: a near-black viewport (video reads best on dark in both
+   themes) with viewfinder corner ticks — the product's signature. The
+   command bar floats on a surface pill; stream actions keep their
+   semantic colors as soft chips. The inspector column carries the
+   console's channel rack (ChannelMatrix) and telemetry panels.
+   ══════════════════════════════════════════════════════════════════ */
+
+[data-ui='next'] .preview-section {
+  flex: 1;
+  min-height: 0;
+  padding: 0;
+  gap: var(--nx-space-3);
+  overflow: visible;
+}
+
+/* The stage */
+[data-ui='next'] .preview-container {
+  background: #0a0c10;
+  border-radius: var(--nx-radius-lg);
+  border: 1px solid var(--nx-border);
+  transition: border-color var(--nx-duration) var(--nx-ease);
+}
+
+/* Viewfinder corner ticks (top-left + bottom-right) — quiet until live. */
+[data-ui='next'] .preview-container::before,
+[data-ui='next'] .preview-container::after {
+  content: '';
+  position: absolute;
+  width: 22px;
+  height: 22px;
+  z-index: 4;
+  pointer-events: none;
+  border: 0 solid var(--nx-border-strong);
+  opacity: 0.9;
+  transition: border-color var(--nx-duration) var(--nx-ease);
+}
+
+[data-ui='next'] .preview-container::before {
+  top: 12px;
+  left: 12px;
+  border-top-width: 2px;
+  border-left-width: 2px;
+  border-top-left-radius: 6px;
+}
+
+[data-ui='next'] .preview-container::after {
+  bottom: 12px;
+  right: 12px;
+  border-bottom-width: 2px;
+  border-right-width: 2px;
+  border-bottom-right-radius: 6px;
+}
+
+/* Live: the ticks pick up the REC hue, the border warms slightly. */
+[data-ui='next'] .preview-active {
+  border-color: color-mix(in srgb, var(--nx-danger) 30%, transparent);
+}
+
+[data-ui='next'] .preview-active::before,
+[data-ui='next'] .preview-active::after {
+  border-color: color-mix(in srgb, var(--nx-danger) 60%, transparent);
+}
+
+[data-ui='next'] .preview-container-fullscreen {
+  border-radius: 0;
+  border: none;
+  box-shadow: none;
+  z-index: 60;
+}
+
+[data-ui='next'] .preview-container-fullscreen::before,
+[data-ui='next'] .preview-container-fullscreen::after {
+  display: none;
+}
+
+/* Overlays on the stage */
+[data-ui='next'] .live-badge {
+  background: color-mix(in srgb, var(--nx-danger) 85%, transparent);
+  backdrop-filter: blur(8px);
+  font-family: var(--nx-mono);
+  font-size: var(--nx-text-xs);
+  font-weight: 700;
+  letter-spacing: 1px;
+  padding: 4px 12px;
+  border-radius: var(--nx-radius-sm);
+}
+
+[data-ui='next'] .recording-timer-overlay {
+  background: rgba(10, 12, 16, 0.72);
+  backdrop-filter: blur(8px);
+  border: 1px solid color-mix(in srgb, var(--nx-danger) 40%, transparent);
+  border-radius: var(--nx-radius-sm);
+  padding: 6px 14px;
+}
+
+[data-ui='next'] .recording-time {
+  font-family: var(--nx-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--nx-text-md);
+}
+
+[data-ui='next'] .recording-dot {
+  background: var(--nx-danger);
+}
+
+[data-ui='next'] .preview-fullscreen-exit {
+  background: rgba(10, 12, 16, 0.72);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: var(--nx-radius);
+  font-size: var(--nx-text-base);
+  color: #fff;
+  backdrop-filter: blur(8px);
+}
+
+[data-ui='next'] .preview-fullscreen-exit:hover {
+  background: rgba(10, 12, 16, 0.9);
+}
+
+[data-ui='next'] .preview-fullscreen-hint {
+  background: rgba(10, 12, 16, 0.72);
+  border-radius: var(--nx-radius);
+  font-size: var(--nx-text-base);
+  color: #fff;
+  backdrop-filter: blur(8px);
+}
+
+/* The empty stage: one quiet instrument glyph in a ring, then the two
+   lines of copy with a real measure — an invitation, not a void. */
+[data-ui='next'] .preview-placeholder {
+  gap: var(--nx-space-3);
+}
+
+[data-ui='next'] .preview-placeholder-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 72px;
+  height: 72px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.03);
+  color: rgba(232, 236, 243, 0.55);
+}
+
+[data-ui='next'] .preview-placeholder-text {
+  font-size: var(--nx-text-lg);
+  font-weight: 600;
+  color: rgba(232, 236, 243, 0.85);
+}
+
+[data-ui='next'] .preview-placeholder-sub {
+  font-size: var(--nx-text-sm);
+  max-width: 360px;
+  text-align: center;
+  line-height: 1.5;
+  color: rgba(232, 236, 243, 0.45);
+}
+
+/* The command bar */
+[data-ui='next'] .preview-actions {
+  gap: var(--nx-space-2);
+  padding: 6px;
+  background: var(--nx-surface);
+  border: 1px solid var(--nx-border);
+  border-radius: var(--nx-radius-lg);
+  box-shadow: var(--nx-shadow-sm);
+}
+
+[data-ui='next'] .preview-actions-left {
+  gap: 2px;
+}
+
+[data-ui='next'] .action-btn {
+  height: 34px;
+  padding: 0 12px;
+  border-radius: var(--nx-radius);
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--nx-text-secondary);
+  font-size: var(--nx-text-base);
+  font-weight: 500;
+  transition: background var(--nx-duration-fast) var(--nx-ease), color var(--nx-duration-fast) var(--nx-ease), border-color var(--nx-duration-fast) var(--nx-ease), transform 80ms var(--nx-ease);
+}
+
+[data-ui='next'] .action-btn:hover {
+  background: var(--nx-surface-2);
+  color: var(--nx-text);
+}
+
+[data-ui='next'] .action-btn:active:not(:disabled) {
+  transform: scale(0.98);
+}
+
+[data-ui='next'] .action-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* Same mute for the accent-filled capture: disabled must not read as a
+   live primary action (see the matching rule in App.css). */
+[data-ui='next'] .action-btn-primary:disabled {
+  background: var(--nx-surface-3);
+  border-color: var(--nx-border);
+  color: var(--nx-text-tertiary);
+  opacity: 1;
+}
+
+[data-ui='next'] .action-btn svg {
+  width: 16px;
+  height: 16px;
+}
+
+/* Capture — the one accent-filled action on the bar. */
+[data-ui='next'] .action-btn-primary {
+  background: var(--nx-accent);
+  border-color: var(--nx-accent);
+  color: var(--nx-on-accent);
+}
+
+[data-ui='next'] .action-btn-primary:hover:not(:disabled) {
+  background: var(--nx-accent-hover);
+  box-shadow: none;
+  transform: none;
+}
+
+[data-ui='next'] .action-btn-success {
+  background: var(--nx-success-bg);
+  border-color: transparent;
+  color: var(--nx-success);
+}
+
+[data-ui='next'] .action-btn-success:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--nx-success) 16%, transparent);
+}
+
+[data-ui='next'] .action-btn-warning {
+  background: var(--nx-warning-bg);
+  border-color: transparent;
+  color: var(--nx-warning);
+}
+
+[data-ui='next'] .action-btn-warning:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--nx-warning) 16%, transparent);
+}
+
+[data-ui='next'] .action-btn-ghost {
+  background: transparent;
+  border-color: transparent;
+  color: var(--nx-text-secondary);
+}
+
+[data-ui='next'] .action-btn-ghost:hover:not(:disabled) {
+  background: var(--nx-surface-2);
+  color: var(--nx-text);
+}
+
+[data-ui='next'] .action-btn-toggled {
+  background: var(--nx-accent-subtle);
+  border-color: transparent;
+  color: var(--nx-accent-text);
+}
+
+[data-ui='next'] .action-btn-talking {
+  background: var(--nx-danger-bg);
+  border-color: transparent;
+  color: var(--nx-danger);
+  animation: nx-rec-pulse 1.5s var(--nx-ease) infinite;
+}
+
+/* ── Camera controls strip — the stage's floating instrument row. The
+   host geometry is shared with the classic skin (App.css .cam-strip-host);
+   here the pill and its handle dress in the console surface. Kit buttons,
+   slider, selects, and chips carry their own styling. ── */
+[data-ui='next'] .cam-strip-host {
+  gap: var(--nx-space-2);
+}
+
+[data-ui='next'] .nx-cam-strip {
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: var(--nx-space-2);
+  max-width: 100%;
+  padding: var(--nx-space-2);
+  background: color-mix(in srgb, var(--nx-surface) 88%, transparent);
+  backdrop-filter: blur(10px);
+  border: 1px solid var(--nx-border);
+  border-radius: var(--nx-radius-lg);
+  box-shadow: var(--nx-shadow-sm);
+}
+
+[data-ui='next'] .nx-cam-strip .nx-slider {
+  width: 140px;
+}
+
+[data-ui='next'] .nx-cam-strip .nx-chip:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+[data-ui='next'] .nx-cam-strip-readout {
+  min-width: 44px;
+  text-align: center;
+  font-family: var(--nx-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--nx-text-sm);
+  font-weight: 600;
+  color: var(--nx-text-secondary);
+}
+
+[data-ui='next'] .nx-cam-strip-handle {
+  pointer-events: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--nx-space-2);
+  height: 30px;
+  padding: 0 12px;
+  background: color-mix(in srgb, var(--nx-surface) 88%, transparent);
+  backdrop-filter: blur(10px);
+  border: 1px solid var(--nx-border);
+  border-radius: var(--nx-radius-lg);
+  color: var(--nx-text-secondary);
+  font-size: var(--nx-text-sm);
+  cursor: pointer;
+  transition: color var(--nx-duration-fast) var(--nx-ease), border-color var(--nx-duration-fast) var(--nx-ease);
+}
+
+[data-ui='next'] .nx-cam-strip-handle:hover {
+  color: var(--nx-text);
+  border-color: var(--nx-control-border-hover);
+}
+
+[data-ui='next'] .nx-cam-strip-msg {
+  pointer-events: none;
+  padding: 4px 12px;
+  font-size: var(--nx-text-xs);
+  color: var(--nx-danger);
+  background: color-mix(in srgb, var(--nx-surface) 88%, transparent);
+  border: 1px solid var(--nx-border);
+  border-radius: var(--nx-radius);
+  backdrop-filter: blur(10px);
+}
+
+.nx-cam-strip-chevron-flipped {
+  transform: rotate(180deg);
+}
+
+[data-ui='next'] .nx-cam-strip-handle:focus-visible,
+[data-ui='next'] .nx-cam-strip .nx-chip:focus-visible {
+  outline: 2px solid var(--nx-accent);
+  outline-offset: 2px;
+}
+
+@media (max-width: 480px) {
+  [data-ui='next'] .nx-cam-strip .nx-slider {
+    width: 90px;
+  }
+}
+
+[data-ui='next'] .capture-msg {
+  font-size: var(--nx-text-sm);
+  color: var(--nx-success);
+  animation: nx-fade-in 0.3s var(--nx-ease);
+}
+
+/* REC dot pulse — local to the stage overlays. */
+@keyframes nx-rec-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
+}
+
+@keyframes nx-fade-in {
+  from { opacity: 0; }
+}
+
+/* ── Channel rack (ChannelMatrix) ─────────────────────────────────── */
+
+.nx-channel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--nx-space-1);
+}
+
+.nx-channel + .nx-channel {
+  margin-top: var(--nx-space-1);
+  padding-top: var(--nx-space-2);
+  border-top: 1px solid var(--nx-border);
+}
+
+.nx-channel-head {
+  display: flex;
+  align-items: center;
+  gap: var(--nx-space-2);
+  min-height: 28px;
+}
+
+.nx-channel-code {
+  font-family: var(--nx-mono);
+  font-size: var(--nx-text-sm);
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  color: var(--nx-text);
+  flex-shrink: 0;
+}
+
+.nx-channel-status {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--nx-mono);
+  font-size: var(--nx-text-2xs);
+  font-weight: 500;
+  letter-spacing: 0.1em;
+  color: var(--nx-text-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.nx-channel-status-ok {
+  color: var(--nx-success);
+}
+
+.nx-channel-status-warn {
+  color: var(--nx-warning);
+}
+
+.nx-channel-status-fault {
+  color: var(--nx-danger);
+}
+
+.nx-channel-btn {
+  height: 24px;
+  padding: 0 10px;
+  border: 1px solid var(--nx-control-border);
+  border-radius: var(--nx-radius-sm);
+  background: var(--nx-control-bg);
+  color: var(--nx-text-secondary);
+  font-family: var(--nx-mono);
+  font-size: var(--nx-text-2xs);
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  cursor: pointer;
+  transition: border-color var(--nx-duration-fast) var(--nx-ease), color var(--nx-duration-fast) var(--nx-ease), background var(--nx-duration-fast) var(--nx-ease);
+}
+
+.nx-channel-btn:hover:not(:disabled) {
+  border-color: var(--nx-control-border-hover);
+  color: var(--nx-text);
+}
+
+.nx-channel-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.nx-channel-error {
+  font-size: var(--nx-text-xs);
+}
+
+/* ── Clients list (ClientsPanel) ──────────────────────────────────── */
+
+.nx-clients {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.nx-clients-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--nx-space-2);
+  padding: 2px 0;
+}
+
+.nx-clients-id {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--nx-text-sm);
+  color: var(--nx-text-secondary);
+}
+
+.nx-clients-kicked {
+  font-size: var(--nx-text-xs);
+  color: var(--nx-success);
+}
+
+.nx-clients-empty {
+  font-size: var(--nx-text-sm);
+  color: var(--nx-text-tertiary);
+  padding: var(--nx-space-1) 0;
+}
+
+/* ── Stage loading skeleton ───────────────────────────────────────── */
+
+.nx-stage-skeleton {
+  flex: 1;
+  min-height: 320px;
+  display: flex;
+  border-radius: var(--nx-radius-lg);
+  border: 1px solid var(--nx-border);
+  overflow: hidden;
+}
+
+/* ── Tablet inspector FAB (768–1199px only) ───────────────────────── */
+
+.nx-inspector-fab {
+  display: none;
+  position: fixed;
+  right: var(--nx-space-4);
+  bottom: calc(var(--nx-space-4) + 58px);
+  z-index: 40;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border: 1px solid var(--nx-border-strong);
+  border-radius: var(--nx-radius-lg);
+  background: var(--nx-surface);
+  color: var(--nx-text-secondary);
+  cursor: pointer;
+  box-shadow: var(--nx-shadow-md);
+  transition: color var(--nx-duration-fast) var(--nx-ease), border-color var(--nx-duration-fast) var(--nx-ease);
+}
+
+.nx-inspector-fab:hover {
+  color: var(--nx-text);
+  border-color: var(--nx-control-border-hover);
+}
+
+@media (min-width: 768px) and (max-width: 1199px) {
+  .nx-inspector-fab {
+    display: flex;
+  }
+}
+
+/* ── Mobile: the bar wraps; chips stay tappable ───────────────────── */
+@media (max-width: 767px) {
+  [data-ui='next'] .preview-section {
+    padding: var(--nx-space-2);
+  }
+
+  [data-ui='next'] .preview-actions-left {
+    gap: var(--nx-space-1);
+  }
+
+  [data-ui='next'] .action-btn {
+    height: 38px;
+    padding: 0 12px;
+  }
+
+  .nx-inspector-fab {
+    bottom: calc(var(--nx-space-3) + 58px);
+  }
+}
+
+/* Below 480px App.css strips every action label, which turns the two stream
+   lanes into identical unlabelled squares (the start pair is a matching pair
+   of bare play triangles). The lane state — Start/Stop Web vs RTSP — is the
+   one thing on this bar that cannot be guessed from an icon, so their labels
+   stay; the bar wraps and the ghost buttons still collapse to icons. */
+@media (max-width: 480px) {
+  [data-ui='next'] .action-btn-success span,
+  [data-ui='next'] .action-btn-warning span {
+    display: inline;
+  }
+
+  [data-ui='next'] .action-btn-success,
+  [data-ui='next'] .action-btn-warning {
+    padding: 0 10px;
+  }
+}

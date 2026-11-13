@@ -2,17 +2,8 @@ import SettingsCard from './SettingsCard'
 import type { AllSettings, CameraSettings, WhiteBalance } from '../types'
 import { WB_LABELS } from '../types'
 import { API_DEFAULTS } from '../api/defaults'
+import { WB_MODE_I18N_KEYS } from '../lib/cameraLabels'
 import { t } from '../lib/i18n'
-
-/** Wire value → i18n key for the white-balance options (labels live in the catalog). */
-const WB_KEYS: Record<WhiteBalance, string> = {
-  AUTO: 'common.auto',
-  DAYLIGHT: 'option.wb.daylight',
-  CLOUDY: 'option.wb.cloudy',
-  INDOOR: 'option.wb.indoor',
-  FLUORESCENT: 'option.wb.fluorescent',
-  MANUAL: 'common.manual',
-}
 
 interface Props {
   settings: () => AllSettings | null
@@ -43,7 +34,7 @@ export default function WhiteBalanceCard(props: Props) {
           onChange={(e) => props.updateCamera({ whiteBalance: e.currentTarget.value as WhiteBalance })}
         >
           {Object.keys(WB_LABELS).map((k) => (
-            <option value={k}>{t(WB_KEYS[k as WhiteBalance])}</option>
+            <option value={k}>{t(WB_MODE_I18N_KEYS[k as WhiteBalance])}</option>
           ))}
         </select>
       </div>

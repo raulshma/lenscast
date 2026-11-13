@@ -1,0 +1,241 @@
+/* ══════════════════════════════════════════════════════════════════
+   NEXT UI — DESIGN TOKENS (operator control room)
+   Namespaced under [data-ui='next'] so the classic shell's --lc-*
+   tokens stay untouched. DARK is the default: a deep charcoal operator
+   console — dense, mono-labeled, data-forward. Color is a signal,
+   never decoration: red = live/REC/error (with glow), amber =
+   degraded/connecting, green = healthy/on, cyan (the logo's lens
+   cathode) = interactive only. Depth is hairline borders and inset
+   bevels, not shadows. Sharpened light parity in [data-theme='light'].
+   ══════════════════════════════════════════════════════════════════ */
+
+:root[data-ui='next'] {
+  color-scheme: dark;
+
+  /* Surfaces — canvas < panel < raised < inset well, one charcoal family */
+  --nx-bg: #0a0c10;
+  --nx-surface: #12151b;
+  --nx-surface-2: #171b22;
+  --nx-surface-3: #1d222b;
+  --nx-scrim: rgba(4, 6, 10, 0.68);
+
+  /* Borders — hairlines carry all the depth */
+  --nx-border: rgba(255, 255, 255, 0.08);
+  --nx-border-strong: rgba(255, 255, 255, 0.16);
+  --nx-focus-ring: rgba(79, 172, 254, 0.35);
+
+  /* Signal — lens cyan (logo lensGrad #4FACFE). Interactive only. */
+  --nx-accent: #4facfe;
+  --nx-accent-hover: #77c4ff;
+  --nx-accent-active: #a5d8ff;
+  --nx-accent-text: #77c4ff;
+  --nx-accent-subtle: rgba(79, 172, 254, 0.12);
+  --nx-on-accent: #0a0c10;
+
+  /* Semantic — state colors. Danger doubles as the REC/LIVE red. */
+  --nx-danger: #ff3b5c;
+  --nx-danger-bg: rgba(255, 59, 92, 0.1);
+  --nx-warning: #ffb020;
+  --nx-warning-bg: rgba(255, 176, 32, 0.1);
+  --nx-success: #2bd97c;
+  --nx-success-bg: rgba(43, 217, 124, 0.1);
+  --nx-info: #4facfe;
+  --nx-info-bg: rgba(79, 172, 254, 0.1);
+
+  /* LED glow — the broadcast "on air" halo for live states */
+  --nx-glow-rec: 0 0 10px rgba(255, 59, 92, 0.5);
+  --nx-glow-ok: 0 0 8px rgba(43, 217, 124, 0.4);
+  --nx-glow-warn: 0 0 8px rgba(255, 176, 32, 0.4);
+
+  /* Text — four levels, crisp on charcoal */
+  --nx-text: #e8ecf3;
+  --nx-text-secondary: rgba(232, 236, 243, 0.64);
+  --nx-text-tertiary: rgba(232, 236, 243, 0.44);
+  --nx-text-faint: rgba(232, 236, 243, 0.28);
+
+  /* Typography — Inter for prose, JetBrains Mono for every numeral,
+     status, timestamp and channel code */
+  --nx-font: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --nx-mono: 'JetBrains Mono', ui-monospace, 'Cascadia Code', 'Source Code Pro', monospace;
+  --nx-text-2xs: 10px;
+  --nx-text-xs: 11px;
+  --nx-text-sm: 12px;
+  --nx-text-base: 13px;
+  --nx-text-md: 14px;
+  --nx-text-lg: 16px;
+  --nx-text-xl: 18px;
+  --nx-text-2xl: 22px;
+
+  /* Spacing — 4px grid, multiples only */
+  --nx-space-1: 4px;
+  --nx-space-2: 8px;
+  --nx-space-3: 12px;
+  --nx-space-4: 16px;
+  --nx-space-5: 20px;
+  --nx-space-6: 24px;
+  --nx-space-8: 32px;
+  --nx-space-10: 40px;
+
+  /* Radii — machined instrument corners */
+  --nx-radius-sm: 2px;
+  --nx-radius: 4px;
+  --nx-radius-lg: 6px;
+  --nx-radius-xl: 10px;
+  --nx-radius-full: 999px;
+
+  /* Elevation — hairline rings; only overlays get real shadow */
+  --nx-shadow-sm: 0 0 0 1px rgba(255, 255, 255, 0.03);
+  --nx-shadow-md: 0 0 0 1px rgba(255, 255, 255, 0.04);
+  --nx-shadow-lg: 0 0 0 1px rgba(255, 255, 255, 0.06), 0 24px 56px rgba(0, 0, 0, 0.6);
+
+  /* Machined top edge: a 1px inner highlight along raised surfaces'
+     first row — the bevel of an instrument faceplate, not a glow. */
+  --nx-bevel: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+
+  /* Motion — faster than app-default: consoles respond, not float */
+  --nx-ease: cubic-bezier(0.23, 1, 0.32, 1);
+  --nx-ease-inout: cubic-bezier(0.77, 0, 0.175, 1);
+  --nx-duration-fast: 120ms;
+  --nx-duration: 160ms;
+
+  /* Control tokens — tuned independently of surfaces */
+  --nx-control-bg: #171b22;
+  --nx-control-border: rgba(255, 255, 255, 0.12);
+  --nx-control-border-hover: rgba(255, 255, 255, 0.28);
+
+  /* daisyUI remap: the components still riding daisyUI classes (night
+     vision, gallery viewer) inherit the nx palette until they migrate.
+     :root[data-ui] out-specifies the plugin's :root theme block. */
+  --color-base-100: #12151b;
+  --color-base-200: #171b22;
+  --color-base-300: #1d222b;
+  --color-base-content: #e8ecf3;
+  --color-primary: #4facfe;
+  --color-primary-content: #0a0c10;
+  --color-secondary: #1d222b;
+  --color-secondary-content: #e8ecf3;
+  --color-neutral: #1d222b;
+  --color-neutral-content: #e8ecf3;
+  --radius-box: 6px;
+  --radius-field: 4px;
+  --radius-selector: 4px;
+
+  /* Classic-token remap: rules I haven't rebuilt as nx components yet
+     read --lc-* values. Under the next UI those names resolve to
+     nx-appropriate colors, so no leftover rule can paint foreign
+     values onto console surfaces. */
+  --lc-bg: var(--nx-bg);
+  --lc-surface: var(--nx-surface);
+  --lc-surface-2: var(--nx-surface-2);
+  --lc-surface-3: var(--nx-surface-3);
+  --lc-border: var(--nx-border);
+  --lc-border-hover: var(--nx-border-strong);
+  --lc-accent: #4facfe;
+  --lc-accent-dim: #77c4ff;
+  --lc-accent-glow: rgba(79, 172, 254, 0.18);
+  --lc-accent-bg: rgba(79, 172, 254, 0.12);
+  --lc-success: #2bd97c;
+  --lc-success-bg: rgba(43, 217, 124, 0.1);
+  --lc-warning: #ffb020;
+  --lc-warning-bg: rgba(255, 176, 32, 0.1);
+  --lc-danger: #ff3b5c;
+  --lc-danger-bg: rgba(255, 59, 92, 0.1);
+  --lc-info: #4facfe;
+  --lc-info-bg: rgba(79, 172, 254, 0.1);
+  --lc-text: #e8ecf3;
+  --lc-text-dim: rgba(232, 236, 243, 0.64);
+  --lc-text-muted: rgba(232, 236, 243, 0.44);
+  --lc-radius: 4px;
+  --lc-radius-sm: 2px;
+  --lc-radius-lg: 6px;
+  --lc-radius-full: 999px;
+  --lc-shadow: var(--nx-shadow-sm);
+  --lc-shadow-lg: var(--nx-shadow-lg);
+  --lc-glow-accent: none;
+}
+
+/* ── Sharpened light — same console structure, print-safe signals ── */
+:root[data-ui='next'][data-theme='light'] {
+  color-scheme: light;
+
+  --nx-bg: #eff1f4;
+  --nx-surface: #ffffff;
+  --nx-surface-2: #f5f6f8;
+  --nx-surface-3: #e9ecef;
+  --nx-scrim: rgba(10, 14, 20, 0.45);
+
+  --nx-border: rgba(15, 23, 34, 0.1);
+  --nx-border-strong: rgba(15, 23, 34, 0.2);
+  --nx-focus-ring: rgba(11, 118, 179, 0.32);
+
+  --nx-accent: #0b76b3;
+  --nx-accent-hover: #0a6aa0;
+  --nx-accent-active: #085c8a;
+  --nx-accent-text: #0b6aa3;
+  --nx-accent-subtle: rgba(11, 118, 179, 0.09);
+  --nx-on-accent: #ffffff;
+
+  --nx-danger: #d3274b;
+  --nx-danger-bg: rgba(211, 39, 75, 0.08);
+  --nx-warning: #b45309;
+  --nx-warning-bg: rgba(180, 83, 9, 0.09);
+  --nx-success: #128a55;
+  --nx-success-bg: rgba(18, 138, 85, 0.09);
+  --nx-info: #0b76b3;
+  --nx-info-bg: rgba(11, 118, 179, 0.08);
+
+  --nx-glow-rec: 0 0 8px rgba(211, 39, 75, 0.35);
+  --nx-glow-ok: 0 0 6px rgba(18, 138, 85, 0.3);
+  --nx-glow-warn: 0 0 6px rgba(180, 83, 9, 0.3);
+
+  --nx-text: #12161d;
+  --nx-text-secondary: rgba(18, 22, 29, 0.66);
+  --nx-text-tertiary: rgba(18, 22, 29, 0.46);
+  --nx-text-faint: rgba(18, 22, 29, 0.3);
+
+  --nx-shadow-sm: 0 0 0 1px rgba(15, 23, 34, 0.04);
+  --nx-shadow-md: 0 0 0 1px rgba(15, 23, 34, 0.05);
+  --nx-shadow-lg: 0 0 0 1px rgba(15, 23, 34, 0.06), 0 24px 56px rgba(10, 16, 26, 0.18);
+
+  --nx-bevel: inset 0 1px 0 rgba(255, 255, 255, 0.7);
+
+  --nx-control-bg: #f5f6f8;
+  --nx-control-border: rgba(15, 23, 34, 0.14);
+  --nx-control-border-hover: rgba(15, 23, 34, 0.3);
+
+  --color-base-100: #ffffff;
+  --color-base-200: #f5f6f8;
+  --color-base-300: #e9ecef;
+  --color-base-content: #12161d;
+  --color-primary: #0b76b3;
+  --color-primary-content: #ffffff;
+  --color-secondary: #e9ecef;
+  --color-secondary-content: #12161d;
+  --color-neutral: #e9ecef;
+  --color-neutral-content: #12161d;
+
+  --lc-bg: var(--nx-bg);
+  --lc-surface: var(--nx-surface);
+  --lc-surface-2: var(--nx-surface-2);
+  --lc-surface-3: var(--nx-surface-3);
+  --lc-border: var(--nx-border);
+  --lc-border-hover: var(--nx-border-strong);
+  --lc-accent: #0b76b3;
+  --lc-accent-dim: #0a6aa0;
+  --lc-accent-glow: rgba(11, 118, 179, 0.14);
+  --lc-accent-bg: rgba(11, 118, 179, 0.09);
+  --lc-success: #128a55;
+  --lc-success-bg: rgba(18, 138, 85, 0.09);
+  --lc-warning: #b45309;
+  --lc-warning-bg: rgba(180, 83, 9, 0.09);
+  --lc-danger: #d3274b;
+  --lc-danger-bg: rgba(211, 39, 75, 0.08);
+  --lc-info: #0b76b3;
+  --lc-info-bg: rgba(11, 118, 179, 0.08);
+  --lc-text: #12161d;
+  --lc-text-dim: rgba(18, 22, 29, 0.66);
+  --lc-text-muted: rgba(18, 22, 29, 0.46);
+  --lc-shadow: var(--nx-shadow-sm);
+  --lc-shadow-lg: var(--nx-shadow-lg);
+  --lc-glow-accent: none;
+}

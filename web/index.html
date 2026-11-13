@@ -22,6 +22,30 @@
   <link rel="manifest" href="/manifest.webmanifest" />
   <meta name="theme-color" content="#0a0a0f" />
   <link rel="apple-touch-icon" href="/logo.svg" />
+  <!-- Pre-paint UI mode + theme: applies the persisted classic/next UI mode
+       and theme before first paint so an opted-in user never sees a flash of
+       the wrong look. Classic semantics: light adds data-theme="light", dark
+       is the attribute's absence. Next (console) semantics, own storage key:
+       light adds data-theme="light", dark is the absence. Only one shell is
+       mounted at a time, so the disjoint attribute values stay consistent. -->
+  <script>
+    (function () {
+      try {
+        var root = document.documentElement
+        var ui = localStorage.getItem('lenscast.ui') === 'next' ? 'next' : 'classic'
+        root.setAttribute('data-ui', ui)
+        if (ui === 'next') {
+          if (localStorage.getItem('lenscast.nextTheme') === 'light') {
+            root.setAttribute('data-theme', 'light')
+          }
+        } else if (localStorage.getItem('lenscast.theme') === 'light') {
+          root.setAttribute('data-theme', 'light')
+        }
+      } catch (e) {
+        /* Storage unavailable — the runtime defaults apply. */
+      }
+    })()
+  </script>
   <!-- Fonts are self-hosted via @fontsource imports in src/index.tsx: the
        dashboard is used on isolated LANs and offline, and must not contact
        any third party. -->

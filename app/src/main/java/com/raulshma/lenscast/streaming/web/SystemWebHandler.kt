@@ -26,7 +26,6 @@ class SystemWebHandler(
     private val context: Context,
     private val powerManager: PowerManager,
     private val captureHistoryStore: CaptureHistoryStore,
-    private val nowMs: () -> Long = System::currentTimeMillis,
 ) {
 
     private val responseAdapter by lazy { AppJson.moshi.adapter(SystemInfoResponseDto::class.java) }
@@ -54,7 +53,10 @@ class SystemWebHandler(
     /** Ms since this process started; 0 below API 24 (no start stamp exists). */
     private fun processUptimeMs(): Long = runCatching {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-            (nowMs() - Process.getStartUptimeMillis()).coerceAtLeast(0L)
+            // The start stamp lives in the uptime timebase, so the other side
+            // of the subtraction must be elapsedRealtime — wall-clock now
+            // would read as ~56 years of process uptime.
+            (SystemClock.elapsedRealtime() - Process.getStartUptimeMillis()).coerceAtLeast(0L)
         } else {
             0L
         }

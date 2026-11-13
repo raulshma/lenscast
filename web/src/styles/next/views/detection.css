@@ -1,0 +1,332 @@
+/* ══════════════════════════════════════════════════════════════════
+   NEXT UI — DETECTION VIEW (ops dashboard)
+   Statistics header, event journal, arming panel. Loads after
+   cards.css so its rules win where the classic reskin overlaps.
+   ══════════════════════════════════════════════════════════════════ */
+
+/* Stats header spans both grid columns. */
+.nx-detect-head {
+  min-width: 0;
+}
+
+/* ── Event type tags — the journal's severity vocabulary ──────────── */
+
+.nx-tag {
+  display: inline-flex;
+  align-items: center;
+  height: 18px;
+  padding: 0 7px;
+  border-radius: var(--nx-radius-sm);
+  font-family: var(--nx-mono);
+  font-size: var(--nx-text-2xs);
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  line-height: 1;
+  background: var(--nx-surface-3);
+  color: var(--nx-text-secondary);
+  flex-shrink: 0;
+}
+
+.nx-tag-motion {
+  background: var(--nx-warning-bg);
+  color: var(--nx-warning);
+}
+
+.nx-tag-sound {
+  background: var(--nx-info-bg);
+  color: var(--nx-info);
+}
+
+.nx-tag-tamper {
+  background: var(--nx-danger-bg);
+  color: var(--nx-danger);
+}
+
+/* ── Stats rows (per-type counts) ─────────────────────────────────── */
+
+.nx-stats-rows {
+  display: flex;
+  flex-direction: column;
+  gap: var(--nx-space-1);
+}
+
+.nx-stats-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--nx-space-3);
+  min-height: 26px;
+}
+
+.nx-stats-count {
+  font-size: var(--nx-text-base);
+  font-weight: 600;
+  color: var(--nx-text);
+}
+
+/* ── Seven-day bars — flat accent columns over a hairline floor ───── */
+
+.nx-bars-block {
+  display: flex;
+  flex-direction: column;
+  gap: var(--nx-space-2);
+}
+
+.nx-bars {
+  display: flex;
+  align-items: stretch;
+  gap: var(--nx-space-2);
+}
+
+.nx-bar-col {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+
+.nx-bars-plot {
+  height: 64px;
+  width: 100%;
+  display: flex;
+  align-items: flex-end;
+  border-bottom: 1px solid var(--nx-border-strong);
+}
+
+.nx-bar {
+  width: 100%;
+  min-height: 2px;
+  border-radius: 2px 2px 0 0;
+  background: var(--nx-accent);
+  transition: height var(--nx-duration) var(--nx-ease);
+}
+
+.nx-bar-zero {
+  background: var(--nx-border-strong);
+  min-height: 2px;
+}
+
+.nx-bar-count {
+  font-family: var(--nx-mono);
+  font-size: var(--nx-text-2xs);
+  font-weight: 600;
+  color: var(--nx-text-secondary);
+  font-variant-numeric: tabular-nums;
+  min-height: 14px;
+  line-height: 14px;
+}
+
+.nx-bar-label {
+  font-family: var(--nx-mono);
+  font-size: var(--nx-text-2xs);
+  color: var(--nx-text-tertiary);
+  text-transform: uppercase;
+}
+
+/* Top zones / labels pair side by side when there's room. */
+.nx-stats-top {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--nx-space-3);
+}
+
+@media (min-width: 640px) {
+  .nx-stats-top {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.nx-stats-top-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--nx-space-1);
+}
+
+/* ── Event journal rows ───────────────────────────────────────────── */
+
+.nx-log-filters {
+  display: flex;
+  flex-direction: column;
+  gap: var(--nx-space-2);
+}
+
+.nx-log-labels {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--nx-space-1);
+}
+
+.nx-log {
+  display: flex;
+  flex-direction: column;
+  gap: var(--nx-space-2);
+}
+
+.nx-log-row {
+  display: flex;
+  gap: var(--nx-space-3);
+  padding: var(--nx-space-2);
+  border: 1px solid var(--nx-border);
+  border-radius: var(--nx-radius);
+  background: var(--nx-surface-2);
+}
+
+.nx-log-thumb {
+  width: 64px;
+  height: 48px;
+  object-fit: cover;
+  border-radius: var(--nx-radius-sm);
+  flex-shrink: 0;
+  border: 1px solid var(--nx-border);
+}
+
+.nx-log-thumb-empty {
+  background: var(--nx-surface-3);
+}
+
+.nx-log-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.nx-log-line {
+  display: flex;
+  align-items: center;
+  gap: var(--nx-space-2);
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.nx-log-time {
+  font-size: var(--nx-text-xs);
+  color: var(--nx-text-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+
+.nx-log-actions {
+  font-size: var(--nx-text-xs);
+  color: var(--nx-text-tertiary);
+}
+
+.nx-log-chips {
+  gap: var(--nx-space-1);
+}
+
+.nx-log-chips .nx-chip {
+  height: 18px;
+  font-size: 9px;
+}
+
+.nx-log-clip {
+  margin-left: auto;
+  border: none;
+  background: transparent;
+  color: var(--nx-accent-text);
+  font-family: var(--nx-mono);
+  font-size: var(--nx-text-2xs);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  cursor: pointer;
+  white-space: nowrap;
+  padding: 2px 4px;
+  border-radius: var(--nx-radius-sm);
+}
+
+.nx-log-clip:hover {
+  background: var(--nx-accent-subtle);
+}
+
+/* ── Arming panel pieces ──────────────────────────────────────────── */
+
+.nx-arm-days {
+  display: flex;
+  gap: var(--nx-space-1);
+  flex-wrap: wrap;
+  padding: var(--nx-space-1) 0;
+}
+
+.nx-daychip {
+  min-width: 34px;
+  height: 26px;
+  padding: 0 6px;
+  border: 1px solid var(--nx-control-border);
+  border-radius: var(--nx-radius-sm);
+  background: var(--nx-control-bg);
+  color: var(--nx-text-tertiary);
+  font-family: var(--nx-mono);
+  font-size: var(--nx-text-2xs);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: all var(--nx-duration-fast) var(--nx-ease);
+}
+
+.nx-daychip:hover {
+  border-color: var(--nx-control-border-hover);
+  color: var(--nx-text);
+}
+
+.nx-daychip-active {
+  background: var(--nx-accent-subtle);
+  border-color: color-mix(in srgb, var(--nx-accent) 36%, transparent);
+  color: var(--nx-accent-text);
+}
+
+.nx-zone-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--nx-space-2);
+  padding: 2px 0;
+}
+
+.nx-zone-rect {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--nx-text-sm);
+  color: var(--nx-text-secondary);
+}
+
+.nx-zone-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--nx-space-2);
+}
+
+.nx-deterrence {
+  display: flex;
+  gap: var(--nx-space-2);
+  padding: var(--nx-space-1) 0;
+}
+
+/* ── Automation panel additions ───────────────────────────────────── */
+
+.nx-automation-add {
+  display: flex;
+  align-items: center;
+  gap: var(--nx-space-3);
+  padding-top: var(--nx-space-1);
+}
+
+/* The rule rows keep their classic DOM under the panel; tighten their
+   rhythm to the console's and quiet the chrome. */
+[data-ui='next'] .nx-panel .automation-rule-row {
+  border: 1px solid var(--nx-border);
+  border-radius: var(--nx-radius);
+  background: var(--nx-surface-2);
+}
+
+[data-ui='next'] .nx-panel .automation-rule-main:hover {
+  background: transparent;
+}

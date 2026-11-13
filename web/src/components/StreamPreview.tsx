@@ -1,12 +1,14 @@
 import { Show, createSignal, createMemo, createEffect, onCleanup } from 'solid-js'
+import type { JSX } from 'solid-js'
 import type { DeviceStatus } from '../types'
 import type { LiveAudioStatus } from '../audio/LiveAudioPlayer'
 import { MAX_PREVIEW_ERRORS, NO_HLS_RETRY_MS, previewRetryDelayMs, shouldDemoteToHls } from '../hooks/previewRetryPolicy'
 import { useZoomable } from '../hooks/useZoomable'
 import { useFullscreen } from '../hooks/useFullscreen'
 import { pttBusy, pttTransition, type PttPhase } from '../lib/pttPhase'
+import { flashLater } from '../lib/flashLater'
 import ConnectionQualityIndicator from './ConnectionQualityIndicator'
-import { tapToFocus as apiTapToFocus, setZoom as apiSetZoom, setTorch as apiSetTorch, pushTalkback } from '../api/client'
+import { tapToFocus as apiTapToFocus, pushTalkback } from '../api/client'
 import { API_DEFAULTS } from '../api/defaults'
 import { createH264Player, h264Supported, wsUrl } from '../video/h264Player'
 import { cyclePlayerMode, hlsPlaybackKind, hlsSupported, nextPlayerMode, type PlayerMode } from '../video/playerLadder'
@@ -36,6 +38,13 @@ interface Props {
   setPreviewVisible: (v: boolean) => void
   /** True once both telemetry lanes are dead — the LIVE badge must not lie. */
   connectionLost: () => boolean
+  /**
+   * The camera controls strip as a slot: each shell passes its own skin
+   * (classic markup or the nx kit renderer); this component owns only the
+   * host geometry — pinned to the container's bottom edge, over live video
+   * only, reachable in fullscreen, with taps kept off the focus surface.
+   */
+  stripOverlay?: () => JSX.Element
   /** Lifts the fullscreen active bit to App so higher-overlay Escape coordination includes it. */
   onFullscreenChange?: (active: boolean) => void
 }
@@ -110,22 +119,6 @@ function UrlCopyButton(props: { copied: () => boolean; onCopy: () => void }) {
       </Show>
     </button>
   )
-}
-
-/**
- * One self-clearing message slot: replaces the value now, cancels any still-
- * pending reset, and the reset only clears when the slot still shows this
- * value — so a newer flash is never wiped by an older timer. Must be called
- * under a component owner so the timer dies with the component.
- */
-function flashLater(set: (v: string | ((prev: string) => string)) => void, ms: number): (msg: string) => void {
-  let timer: ReturnType<typeof setTimeout> | null = null
-  onCleanup(() => { if (timer) clearTimeout(timer) })
-  return (msg: string) => {
-    set(msg)
-    if (timer) clearTimeout(timer)
-    timer = setTimeout(() => set((current) => (current === msg ? '' : current)), ms)
-  }
 }
 
 /**
@@ -274,8 +267,6 @@ export default function StreamPreview(props: Props) {
   })
   onCleanup(() => teardownHls())
 
-  const [zoomRatio, setZoomRatio] = createSignal(1)
-  const [torchOn, setTorchOn] = createSignal(false)
   // The push-to-talk hold lifecycle (lib/pttPhase: idle → arming → holding
   // → draining; pttHold below stays the async-liveness guard for in-flight
   // continuations — the phase is the UI/latch verdict). The derived memo
@@ -315,26 +306,6 @@ export default function StreamPreview(props: Props) {
     }
     flashCopied(which)
   }
-
-  // Torch truth lives on the device: the status push is authoritative, and
-  // the local optimistic flip below only bridges the round-trip. Every
-  // snapshot re-syncs the mirror, so a snapshot that raced the flip can
-  // momentarily revert it; the next snapshot settles it on the device's
-  // answer (which is also how a failed action self-corrects).
-  createEffect(() => {
-    const deviceTorch = st()?.torchOn
-    if (deviceTorch != null) setTorchOn(deviceTorch)
-  })
-
-  // Zoom mirrors the device the same way, but a focused slider belongs to an
-  // in-flight manual drag — never yank it from under the user's pointer.
-  const zoomMax = () => st()?.zoomRange?.max ?? API_DEFAULTS.cameraZoomMaxRatio
-  createEffect(() => {
-    const deviceZoom = st()?.zoomRatio
-    if (deviceZoom != null && document.activeElement?.id !== 'remote-zoom-slider') {
-      setZoomRatio(Math.min(deviceZoom, zoomMax()))
-    }
-  })
 
   const handleStreamClick = async (e: MouseEvent) => {
     const container = e.currentTarget as HTMLElement
@@ -543,6 +514,11 @@ export default function StreamPreview(props: Props) {
     }
   }
 
+  // The strip floats over live video only — never over the boot placeholder —
+  // and the container class lifts the bottom-corner overlays (digital-zoom
+  // pill, fullscreen hint) clear of it.
+  const stripVisible = () => !!props.stripOverlay && props.previewVisible() && webActive() && !!st()
+
   return (
     <section class="preview-section" id="preview-section">
       <div
@@ -550,6 +526,7 @@ export default function StreamPreview(props: Props) {
         classList={{
           'preview-active': webActive() && props.previewVisible(),
           'preview-container-fullscreen': fullscreen.cssOverlay(),
+          'has-cam-strip': stripVisible(),
         }}
         ref={(el) => { zoom.containerRef(el); setPreviewContainer(el) }}
       >
@@ -738,6 +715,16 @@ export default function StreamPreview(props: Props) {
         <Show when={fullscreenMsg()}>
           <div class="preview-fullscreen-hint" role="status">{fullscreenMsg()}</div>
         </Show>
+
+        {/* Camera controls strip — the per-skin renderer (classic markup or
+            the nx kit) arrives through the slot; the host owns only the
+            geometry (container bottom edge, inside native fullscreen too) and
+            stops clicks from reaching the tap-to-focus surface underneath. */}
+        <Show when={stripVisible()}>
+          <div class="cam-strip-host" onClick={(e) => e.stopPropagation()}>
+            {props.stripOverlay?.()}
+          </div>
+        </Show>
       </div>
 
       {/* Action Bar */}
@@ -855,50 +842,6 @@ export default function StreamPreview(props: Props) {
               <line x1="15.41" y1="6.51" x2="8.59" y2="10.49" />
             </svg>
             <span>{sharingSnapshot() ? t('preview.sharing') : t('preview.share')}</span>
-          </button>
-
-          <label class="action-btn action-btn-ghost" title={t('preview.remoteZoom')}>
-            <span>{zoomRatio().toFixed(1)}x</span>
-            <input
-              id="remote-zoom-slider"
-              type="range"
-              aria-label={t('preview.remoteZoom')}
-              min="1"
-              max={String(zoomMax())}
-              step="0.5"
-              value={zoomRatio()}
-              onInput={async (e) => {
-                const v = parseFloat(e.currentTarget.value)
-                setZoomRatio(v)
-                try {
-                  await apiSetZoom(v)
-                } catch (err) {
-                  console.error('Remote zoom failed:', err)
-                }
-              }}
-            />
-          </label>
-
-          <button
-            class="action-btn action-btn-ghost"
-            classList={{ 'action-btn-toggled': torchOn() }}
-            aria-pressed={torchOn()}
-            onClick={async () => {
-              const next = !torchOn()
-              setTorchOn(next)
-              try {
-                await apiSetTorch(next)
-              } catch (err) {
-                console.error('Torch failed:', err)
-                setTorchOn(!next)
-              }
-            }}
-            title={t('preview.torchTitle')}
-          >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M8 2h8l-1 7h3L10 22l2-9H7l1-11z" />
-            </svg>
-            <span>{torchOn() ? t('preview.torchOn') : t('preview.torch')}</span>
           </button>
 
           <button

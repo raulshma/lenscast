@@ -2,8 +2,10 @@ import { Show, createSignal } from 'solid-js'
 import type { AllSettings, DeviceStatus } from '../types'
 import { API_DEFAULTS } from '../api/defaults'
 import SettingsCard from './SettingsCard'
+import StatusChip, { type StatusTone } from './StatusChip'
 import ToggleRow from './ToggleRow'
 import { rtmpStatusView, rtmpUrlField, RTMP_STATUS_LABELS_EN, RTMP_HINTS_EN } from '../lib/rtmp'
+import { statusTone } from '../lib/statusVariant'
 import { t } from '../lib/i18n'
 
 interface Props {
@@ -58,6 +60,9 @@ export default function RtmpCard(props: Props) {
     host: t('rtmp.hintHost'),
     ok: t('rtmp.hintOk'),
   })
+  // Header chip: quiet while idle; anything else (connecting, live, error)
+  // is a state worth seeing from across the page.
+  const chipTone = (): StatusTone | null => statusTone(statusView().variant)
 
   return (
     <SettingsCard
@@ -71,6 +76,17 @@ export default function RtmpCard(props: Props) {
         </svg>
       }
       title={t('rtmp.title')}
+      badge={
+        <Show when={chipTone()}>
+          {(tone) => (
+            <StatusChip
+              tone={tone()}
+              label={statusView().label}
+              pulse={statusView().variant === 'success'}
+            />
+          )}
+        </Show>
+      }
     >
       <div class="field-group">
         <ToggleRow

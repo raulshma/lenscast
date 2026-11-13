@@ -1,5 +1,6 @@
 import { Show, createSignal } from 'solid-js'
 import SettingsCard from './SettingsCard'
+import StatusChip from './StatusChip'
 import type { RecordingConfig, RecordingQuality } from '../types'
 import { RECORDING_QUALITY_LABELS } from '../types'
 import { formatTime, t } from '../lib/i18n'
@@ -52,6 +53,18 @@ export default function RecordingCard(props: Props) {
         </svg>
       }
       title={t('recording.title')}
+      badge={
+        <Show
+          when={props.isRecording()}
+          fallback={
+            <Show when={props.isScheduled()}>
+              <StatusChip tone="warning" label={t('recording.badge.scheduled')} />
+            </Show>
+          }
+        >
+          <StatusChip tone="danger" label={t('recording.badge.rec')} pulse />
+        </Show>
+      }
     >
       <Show when={props.isRecording()}>
         <div class="status-banner status-banner-danger">

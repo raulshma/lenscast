@@ -1,0 +1,1022 @@
+/* ══════════════════════════════════════════════════════════════════
+   NEXT UI — COMPONENT PRIMITIVES
+   One family per control kind. Every interactive element ships its
+   full state set (default / hover / active / focus-visible / disabled).
+   ══════════════════════════════════════════════════════════════════ */
+
+/* ── Buttons ──────────────────────────────────────────────────────── */
+
+.nx-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--nx-space-2);
+  height: 32px;
+  padding: 0 14px;
+  border: 1px solid transparent;
+  border-radius: var(--nx-radius);
+  background: transparent;
+  font-size: var(--nx-text-base);
+  font-weight: 500;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+  user-select: none;
+  transition:
+    background var(--nx-duration-fast) var(--nx-ease),
+    color var(--nx-duration-fast) var(--nx-ease),
+    border-color var(--nx-duration-fast) var(--nx-ease),
+    box-shadow var(--nx-duration-fast) var(--nx-ease),
+    transform 80ms var(--nx-ease);
+}
+
+.nx-btn:active:not(:disabled) {
+  transform: scale(0.98);
+}
+
+.nx-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.nx-btn svg {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+}
+
+/* Primary — the accent, used sparingly (one primary action per zone). */
+.nx-btn-primary {
+  background: var(--nx-accent);
+  color: var(--nx-on-accent);
+}
+
+.nx-btn-primary:hover:not(:disabled) {
+  background: var(--nx-accent-hover);
+}
+
+.nx-btn-primary:active:not(:disabled) {
+  background: var(--nx-accent-active);
+}
+
+/* Secondary — quiet, bordered. */
+.nx-btn-secondary {
+  background: var(--nx-surface);
+  border-color: var(--nx-border-strong);
+  color: var(--nx-text);
+}
+
+.nx-btn-secondary:hover:not(:disabled) {
+  background: var(--nx-surface-2);
+}
+
+/* Ghost — for toolbars and dense rows. */
+.nx-btn-ghost {
+  color: var(--nx-text-secondary);
+}
+
+.nx-btn-ghost:hover:not(:disabled) {
+  background: var(--nx-surface-2);
+  color: var(--nx-text);
+}
+
+/* Danger — destructive confirmation, not decoration. */
+.nx-btn-danger {
+  background: var(--nx-danger);
+  color: #fff;
+}
+
+.nx-btn-danger:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+
+.nx-btn-danger-soft {
+  background: var(--nx-danger-bg);
+  color: var(--nx-danger);
+}
+
+.nx-btn-danger-soft:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--nx-danger) 16%, transparent);
+}
+
+/* Warning — a latched hot state (torch on), amber like the LED. */
+.nx-btn-warning {
+  background: var(--nx-warning-bg);
+  color: var(--nx-warning);
+}
+
+.nx-btn-warning:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--nx-warning) 16%, transparent);
+}
+
+/* Toggled — a latched state (stream on, filter active). */
+.nx-btn-toggled {
+  background: var(--nx-accent-subtle);
+  color: var(--nx-accent-text);
+  border-color: color-mix(in srgb, var(--nx-accent) 30%, transparent);
+}
+
+.nx-btn-toggled:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--nx-accent) 14%, transparent);
+}
+
+/* Sizes */
+.nx-btn-sm {
+  height: 28px;
+  padding: 0 10px;
+  font-size: var(--nx-text-sm);
+  border-radius: var(--nx-radius-sm);
+}
+
+.nx-btn-sm svg {
+  width: 14px;
+  height: 14px;
+}
+
+.nx-btn-lg {
+  height: 40px;
+  padding: 0 18px;
+  font-size: var(--nx-text-md);
+}
+
+.nx-btn-icon {
+  width: 34px;
+  padding: 0;
+}
+
+.nx-btn-icon.nx-btn-sm {
+  width: 28px;
+}
+
+/* ── Inputs & selects ─────────────────────────────────────────────── */
+
+/* Inputs are inset: slightly darker than their card, faint border. */
+.nx-input,
+.nx-select {
+  height: 32px;
+  padding: 0 12px;
+  border: 1px solid var(--nx-control-border);
+  border-radius: var(--nx-radius);
+  background: var(--nx-control-bg);
+  color: var(--nx-text);
+  font-size: var(--nx-text-base);
+  transition: border-color var(--nx-duration-fast) var(--nx-ease), background var(--nx-duration-fast) var(--nx-ease);
+}
+
+.nx-input::placeholder {
+  color: var(--nx-text-faint);
+}
+
+.nx-input:hover:not(:disabled),
+.nx-select:hover:not(:disabled) {
+  border-color: var(--nx-control-border-hover);
+}
+
+.nx-input:focus,
+.nx-select:focus {
+  outline: none;
+  border-color: var(--nx-accent);
+  box-shadow: 0 0 0 3px var(--nx-focus-ring);
+}
+
+.nx-input:disabled,
+.nx-select:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.nx-select {
+  appearance: none;
+  padding-right: 30px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23808695' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  cursor: pointer;
+}
+
+.nx-select option {
+  background: var(--nx-surface);
+  color: var(--nx-text);
+}
+
+.nx-input-sm,
+.nx-select.nx-input-sm {
+  height: 28px;
+  font-size: var(--nx-text-sm);
+}
+
+/* Multiline */
+.nx-textarea {
+  padding: 8px 12px;
+  border: 1px solid var(--nx-control-border);
+  border-radius: var(--nx-radius);
+  background: var(--nx-control-bg);
+  color: var(--nx-text);
+  font-size: var(--nx-text-base);
+  line-height: 1.5;
+  resize: vertical;
+  min-height: 64px;
+}
+
+.nx-textarea:focus {
+  outline: none;
+  border-color: var(--nx-accent);
+  box-shadow: 0 0 0 3px var(--nx-focus-ring);
+}
+
+/* Range sliders — native accent color keeps them themeable. */
+.nx-slider {
+  width: 100%;
+  accent-color: var(--nx-accent);
+  cursor: pointer;
+}
+
+.nx-slider:focus-visible {
+  box-shadow: none;
+}
+
+.nx-slider:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* Color picker */
+.nx-color {
+  width: 32px;
+  height: 32px;
+  padding: 2px;
+  border: 1px solid var(--nx-control-border);
+  border-radius: var(--nx-radius);
+  background: var(--nx-control-bg);
+  cursor: pointer;
+}
+
+/* Checkbox / radio inherit the accent. */
+[data-ui='next'] input[type='checkbox'],
+[data-ui='next'] input[type='radio'] {
+  accent-color: var(--nx-accent);
+}
+
+/* Field group: label + control + hint, the form vocabulary. */
+.nx-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--nx-space-1);
+}
+
+.nx-field-label {
+  font-size: var(--nx-text-sm);
+  font-weight: 500;
+  color: var(--nx-text-secondary);
+}
+
+.nx-field-hint {
+  font-size: var(--nx-text-xs);
+  color: var(--nx-text-tertiary);
+}
+
+.nx-field-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--nx-space-3);
+  min-height: 34px;
+}
+
+/* Label + hint stack inside a row; the control sits on the right. */
+.nx-field-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+/* Slider field: label + live mono value above, the range below. */
+.nx-slider-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--nx-space-1);
+  padding: var(--nx-space-1) 0;
+}
+
+.nx-slider-field-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--nx-space-3);
+}
+
+.nx-slider-field-value {
+  font-size: var(--nx-text-sm);
+  font-weight: 600;
+  color: var(--nx-text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Anchors dressed as buttons (export links, downloads). */
+a.nx-btn {
+  text-decoration: none;
+}
+
+/* Read-only diagnostics rows: values right-aligned in mono. */
+.nx-info-value {
+  font-size: var(--nx-text-sm);
+  color: var(--nx-text-secondary);
+  text-align: right;
+  max-width: 60%;
+}
+
+/* Number inputs inside field rows stay compact. */
+.nx-input-num {
+  width: 84px;
+  text-align: right;
+}
+
+/* ── Switch ───────────────────────────────────────────────────────── */
+
+.nx-switch {
+  position: relative;
+  display: inline-block;
+  flex-shrink: 0;
+  /* 44x24: a thumb-sized target — the old 32x18 fell under the 24px
+     minimum touch size on the detection toggles. */
+  width: 44px;
+  height: 24px;
+  cursor: pointer;
+}
+
+.nx-switch input {
+  position: absolute;
+  opacity: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  cursor: pointer;
+}
+
+.nx-switch-track {
+  position: absolute;
+  inset: 0;
+  border-radius: var(--nx-radius-full);
+  background: var(--nx-surface-3);
+  border: 1px solid var(--nx-border-strong);
+  transition: background var(--nx-duration) var(--nx-ease), border-color var(--nx-duration) var(--nx-ease);
+}
+
+.nx-switch-thumb {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: var(--nx-shadow-sm);
+  transition: transform var(--nx-duration) var(--nx-ease);
+}
+
+.nx-switch input:checked ~ .nx-switch-track {
+  background: var(--nx-accent);
+  border-color: var(--nx-accent);
+}
+
+.nx-switch input:checked ~ .nx-switch-thumb {
+  transform: translateX(20px);
+  background: var(--nx-on-accent);
+}
+
+.nx-switch input:focus-visible ~ .nx-switch-track {
+  box-shadow: 0 0 0 3px var(--nx-focus-ring);
+}
+
+.nx-switch input:disabled {
+  cursor: not-allowed;
+}
+
+.nx-switch input:disabled ~ .nx-switch-track {
+  opacity: 0.45;
+}
+
+/* ── Cards ────────────────────────────────────────────────────────── */
+
+.nx-card {
+  background: var(--nx-surface);
+  border: 1px solid var(--nx-border);
+  border-radius: var(--nx-radius-lg);
+}
+
+.nx-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--nx-space-3);
+  padding: var(--nx-space-4) var(--nx-space-4) 0;
+}
+
+.nx-card-title {
+  display: flex;
+  align-items: center;
+  gap: var(--nx-space-2);
+  font-size: var(--nx-text-md);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--nx-text);
+}
+
+.nx-card-title svg {
+  width: 16px;
+  height: 16px;
+  color: var(--nx-text-tertiary);
+}
+
+.nx-card-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--nx-space-2);
+}
+
+.nx-card-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--nx-space-3);
+  padding: var(--nx-space-3) var(--nx-space-4) var(--nx-space-4);
+}
+
+/* A labeled section inside a card body. */
+.nx-card-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--nx-space-2);
+}
+
+.nx-card-section-title {
+  font-size: var(--nx-text-xs);
+  font-weight: 600;
+  color: var(--nx-text-tertiary);
+}
+
+/* ── Badges & status ──────────────────────────────────────────────── */
+
+.nx-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 20px;
+  padding: 0 8px;
+  border-radius: var(--nx-radius-full);
+  font-size: var(--nx-text-xs);
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.nx-badge-neutral {
+  background: var(--nx-surface-3);
+  color: var(--nx-text-secondary);
+}
+
+.nx-badge-accent {
+  background: var(--nx-accent-subtle);
+  color: var(--nx-accent-text);
+}
+
+.nx-badge-success {
+  background: var(--nx-success-bg);
+  color: var(--nx-success);
+}
+
+.nx-badge-warning {
+  background: var(--nx-warning-bg);
+  color: var(--nx-warning);
+}
+
+.nx-badge-danger {
+  background: var(--nx-danger-bg);
+  color: var(--nx-danger);
+}
+
+.nx-badge-info {
+  background: var(--nx-info-bg);
+  color: var(--nx-info);
+}
+
+/* Live/status dot — the recording & streaming tell. */
+.nx-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--nx-text-faint);
+  flex-shrink: 0;
+}
+
+.nx-dot-live {
+  background: var(--nx-danger);
+  animation: nx-pulse 2s var(--nx-ease) infinite;
+}
+
+.nx-dot-success {
+  background: var(--nx-success);
+}
+
+.nx-dot-warning {
+  background: var(--nx-warning);
+}
+
+.nx-dot-danger {
+  background: var(--nx-danger);
+}
+
+@keyframes nx-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
+}
+
+/* ── Banners ──────────────────────────────────────────────────────── */
+
+.nx-banner {
+  display: flex;
+  align-items: center;
+  gap: var(--nx-space-2);
+  padding: 8px 12px;
+  border-radius: var(--nx-radius);
+  font-size: var(--nx-text-sm);
+  line-height: 1.45;
+}
+
+.nx-banner svg {
+  width: 15px;
+  height: 15px;
+  flex-shrink: 0;
+}
+
+.nx-banner-info {
+  background: var(--nx-info-bg);
+  color: var(--nx-info);
+}
+
+.nx-banner-warning {
+  background: var(--nx-warning-bg);
+  color: var(--nx-warning);
+}
+
+.nx-banner-danger {
+  background: var(--nx-danger-bg);
+  color: var(--nx-danger);
+}
+
+.nx-banner-success {
+  background: var(--nx-success-bg);
+  color: var(--nx-success);
+}
+
+.nx-banner-neutral {
+  background: var(--nx-surface-2);
+  color: var(--nx-text-secondary);
+}
+
+/* ── Segmented control ────────────────────────────────────────────── */
+
+.nx-segment {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  background: var(--nx-surface-2);
+  border: 1px solid var(--nx-border);
+  border-radius: var(--nx-radius);
+}
+
+.nx-segment-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 12px;
+  border: none;
+  border-radius: var(--nx-radius-sm);
+  background: transparent;
+  color: var(--nx-text-tertiary);
+  font-size: var(--nx-text-sm);
+  font-weight: 500;
+  cursor: pointer;
+  transition: background var(--nx-duration-fast) var(--nx-ease), color var(--nx-duration-fast) var(--nx-ease), box-shadow var(--nx-duration-fast) var(--nx-ease);
+}
+
+.nx-segment-btn:hover {
+  color: var(--nx-text);
+}
+
+.nx-segment-btn-active {
+  background: var(--nx-surface);
+  color: var(--nx-text);
+  box-shadow: var(--nx-shadow-sm);
+}
+
+/* ── Modal ────────────────────────────────────────────────────────── */
+
+.nx-modal-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--nx-space-6);
+  background: var(--nx-scrim);
+}
+
+.nx-modal {
+  width: min(480px, 100%);
+  max-height: 90vh;
+  overflow-y: auto;
+  background: var(--nx-surface);
+  border: 1px solid var(--nx-border);
+  border-radius: var(--nx-radius-xl);
+  box-shadow: var(--nx-shadow-lg);
+}
+
+/* Entrance: fade + slight rise, ease-out, never from scale(0). */
+@keyframes nx-modal-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+[data-ui='next'] .automation-editor-modal,
+[data-ui='next'] .automation-picker-modal,
+[data-ui='next'] .nx-modal {
+  animation: nx-modal-in var(--nx-duration) var(--nx-ease);
+}
+
+/* ── Menu / list rows ─────────────────────────────────────────────── */
+
+.nx-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.nx-list-row {
+  display: flex;
+  align-items: center;
+  gap: var(--nx-space-3);
+  padding: var(--nx-space-2) var(--nx-space-3);
+  border-radius: var(--nx-radius);
+  font-size: var(--nx-text-base);
+  transition: background var(--nx-duration-fast) var(--nx-ease);
+}
+
+.nx-list-row:hover {
+  background: var(--nx-surface-2);
+}
+
+/* ── Empty state ──────────────────────────────────────────────────── */
+
+.nx-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--nx-space-2);
+  padding: var(--nx-space-8) var(--nx-space-4);
+  text-align: center;
+  color: var(--nx-text-tertiary);
+}
+
+.nx-empty svg {
+  width: 28px;
+  height: 28px;
+  color: var(--nx-text-faint);
+}
+
+.nx-empty-title {
+  font-size: var(--nx-text-base);
+  font-weight: 600;
+  color: var(--nx-text-secondary);
+}
+
+.nx-empty-hint {
+  font-size: var(--nx-text-sm);
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   OPERATOR CONSOLE KIT
+   The control-room layer: mono micro-labels, telemetry chips, LED
+   state dots, instrument panels, meters, toasts, drawer, skeletons.
+   ══════════════════════════════════════════════════════════════════ */
+
+/* ── Micro-label — the console's uppercase mono voice ─────────────── */
+
+.nx-label {
+  font-family: var(--nx-mono);
+  font-size: var(--nx-text-2xs);
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--nx-text-tertiary);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* ── Telemetry chip — the strip's data unit ───────────────────────── */
+
+.nx-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 24px;
+  padding: 0 8px;
+  background: var(--nx-surface-2);
+  border: 1px solid var(--nx-border);
+  border-radius: var(--nx-radius-sm);
+  font-family: var(--nx-mono);
+  font-size: var(--nx-text-2xs);
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  color: var(--nx-text-secondary);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  text-transform: uppercase;
+}
+
+button.nx-chip {
+  cursor: pointer;
+  transition: border-color var(--nx-duration-fast) var(--nx-ease), color var(--nx-duration-fast) var(--nx-ease);
+}
+
+button.nx-chip:hover {
+  border-color: var(--nx-control-border-hover);
+  color: var(--nx-text);
+}
+
+.nx-chip-ok {
+  color: var(--nx-success);
+  border-color: color-mix(in srgb, var(--nx-success) 24%, transparent);
+}
+
+.nx-chip-warn {
+  color: var(--nx-warning);
+  border-color: color-mix(in srgb, var(--nx-warning) 24%, transparent);
+}
+
+.nx-chip-rec {
+  color: var(--nx-danger);
+  border-color: color-mix(in srgb, var(--nx-danger) 32%, transparent);
+  background: var(--nx-danger-bg);
+}
+
+/* Selected filter chip. */
+.nx-chip-active {
+  color: var(--nx-accent-text);
+  border-color: color-mix(in srgb, var(--nx-accent) 36%, transparent);
+  background: var(--nx-accent-subtle);
+}
+
+/* ── LED — state at a glance; color carries the meaning ───────────── */
+
+.nx-led {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--nx-text-faint);
+  flex-shrink: 0;
+}
+
+.nx-led-ok {
+  background: var(--nx-success);
+  box-shadow: var(--nx-glow-ok);
+}
+
+.nx-led-warn {
+  background: var(--nx-warning);
+  box-shadow: var(--nx-glow-warn);
+  animation: nx-pulse 1.6s var(--nx-ease) infinite;
+}
+
+.nx-led-rec {
+  background: var(--nx-danger);
+  box-shadow: var(--nx-glow-rec);
+  animation: nx-pulse 1.2s var(--nx-ease) infinite;
+}
+
+.nx-led-accent {
+  background: var(--nx-accent);
+}
+
+/* Static red — a fault, not the live pulse. */
+.nx-led-danger {
+  background: var(--nx-danger);
+}
+
+/* ── Panel — the instrument faceplate card ────────────────────────── */
+
+.nx-panel {
+  background: var(--nx-surface);
+  border: 1px solid var(--nx-border);
+  border-radius: var(--nx-radius-lg);
+  box-shadow: var(--nx-shadow-sm);
+}
+
+.nx-panel-header {
+  display: flex;
+  align-items: center;
+  /* Wrap when narrow — the action row drops under the title instead of
+     squeezing the flexible title down to a couple of ellipsized letters. */
+  flex-wrap: wrap;
+  gap: var(--nx-space-2);
+  row-gap: 2px;
+  min-height: 36px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--nx-border);
+  border-radius: var(--nx-radius-lg) var(--nx-radius-lg) 0 0;
+  background: var(--nx-surface-2);
+}
+
+.nx-panel-title {
+  /* basis auto (not the 0 of `flex: 1`): the header's wrap decision must
+     see the title's real width, or the line never breaks and the title
+     crushes to a couple of ellipsized letters on a 360px phone. */
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: var(--nx-mono);
+  font-size: var(--nx-text-2xs);
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--nx-text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.nx-panel-code {
+  font-family: var(--nx-mono);
+  font-size: var(--nx-text-2xs);
+  font-weight: 600;
+  color: var(--nx-accent-text);
+  font-variant-numeric: tabular-nums;
+}
+
+.nx-panel-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--nx-space-1);
+}
+
+.nx-panel-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--nx-space-3);
+  padding: var(--nx-space-3);
+}
+
+.nx-panel-body-flush {
+  padding: 0;
+}
+
+/* ── Skeleton & spinner — loading vocabulary ──────────────────────── */
+
+.nx-skeleton {
+  background: var(--nx-surface-3);
+  border-radius: var(--nx-radius-sm);
+  animation: nx-shimmer 1.4s ease-in-out infinite;
+}
+
+@keyframes nx-shimmer {
+  0%, 100% { opacity: 0.55; }
+  50% { opacity: 1; }
+}
+
+.nx-spinner {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  border: 2px solid var(--nx-border-strong);
+  border-top-color: var(--nx-accent);
+  border-radius: 50%;
+  animation: nx-spin 0.7s linear infinite;
+}
+
+.nx-spinner-sm {
+  width: 11px;
+  height: 11px;
+  border-width: 2px;
+}
+
+@keyframes nx-spin {
+  to { transform: rotate(360deg); }
+}
+
+/* ── Drawer — the slide-over inspector for narrow viewports ───────── */
+
+.nx-drawer-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 150;
+  background: var(--nx-scrim);
+}
+
+.nx-drawer {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 151;
+  width: min(360px, 92vw);
+  display: flex;
+  flex-direction: column;
+  background: var(--nx-surface);
+  border-left: 1px solid var(--nx-border-strong);
+  box-shadow: var(--nx-shadow-lg);
+  animation: nx-drawer-in var(--nx-duration) var(--nx-ease);
+}
+
+@keyframes nx-drawer-in {
+  from {
+    opacity: 0;
+    transform: translateX(24px);
+  }
+}
+
+.nx-drawer-header {
+  display: flex;
+  align-items: center;
+  gap: var(--nx-space-2);
+  min-height: 44px;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--nx-border);
+}
+
+.nx-drawer-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--nx-space-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--nx-space-3);
+}
+
+/* ── Toasts — action feedback, bottom-right stack ─────────────────── */
+
+.nx-toasts {
+  position: fixed;
+  right: var(--nx-space-4);
+  bottom: var(--nx-space-4);
+  z-index: 300;
+  display: flex;
+  flex-direction: column;
+  gap: var(--nx-space-2);
+  pointer-events: none;
+}
+
+.nx-toast {
+  pointer-events: auto;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: var(--nx-space-2);
+  min-width: 240px;
+  max-width: 360px;
+  padding: 10px 12px;
+  background: var(--nx-surface-2);
+  border: 1px solid var(--nx-border-strong);
+  border-left: 2px solid var(--nx-text-tertiary);
+  border-radius: var(--nx-radius);
+  box-shadow: var(--nx-shadow-lg);
+  font-size: var(--nx-text-sm);
+  line-height: 1.45;
+  animation: nx-toast-in var(--nx-duration) var(--nx-ease);
+}
+
+.nx-toast-success { border-left-color: var(--nx-success); }
+.nx-toast-danger { border-left-color: var(--nx-danger); }
+.nx-toast-warning { border-left-color: var(--nx-warning); }
+.nx-toast-info { border-left-color: var(--nx-info); }
+
+@keyframes nx-toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+
+/* On phones the fixed bottom-right stack lands on the labelled tab bar
+   (58px, plus its safe-area padding) — lift the stack above it and let
+   the cards span the content width. */
+@media (max-width: 767px) {
+  .nx-toasts {
+    left: var(--nx-space-3);
+    right: var(--nx-space-3);
+    bottom: calc(58px + env(safe-area-inset-bottom, 0px) + var(--nx-space-2));
+  }
+
+  .nx-toast {
+    max-width: none;
+    width: 100%;
+  }
+}

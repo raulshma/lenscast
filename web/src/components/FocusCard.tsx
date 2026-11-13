@@ -2,16 +2,8 @@ import SettingsCard from './SettingsCard'
 import type { AllSettings, CameraSettings, FocusMode } from '../types'
 import { FOCUS_MODE_LABELS } from '../types'
 import { API_DEFAULTS } from '../api/defaults'
+import { FOCUS_MODE_I18N_KEYS } from '../lib/cameraLabels'
 import { t } from '../lib/i18n'
-
-/** Wire value → i18n key for the focus-mode options (labels live in the catalog). */
-const FOCUS_KEYS: Record<FocusMode, string> = {
-  AUTO: 'common.auto',
-  MANUAL: 'common.manual',
-  MACRO: 'option.macro',
-  CONTINUOUS_PICTURE: 'option.focus.contPhoto',
-  CONTINUOUS_VIDEO: 'option.focus.contVideo',
-}
 
 interface Props {
   settings: () => AllSettings | null
@@ -46,7 +38,7 @@ export default function FocusCard(props: Props) {
           onChange={(e) => props.updateCamera({ focusMode: e.currentTarget.value as FocusMode })}
         >
           {Object.keys(FOCUS_MODE_LABELS).map((k) => (
-            <option value={k}>{t(FOCUS_KEYS[k as FocusMode])}</option>
+            <option value={k}>{t(FOCUS_MODE_I18N_KEYS[k as FocusMode])}</option>
           ))}
         </select>
       </div>

@@ -86,7 +86,11 @@ export default function DetectionStatsCard() {
             <For each={bars()}>
               {(day) => (
                 <div class="stats-bar-col" title={`${day.day}: ${tCount('stats.eventCount', day.count)}`}>
-                  <div class="stats-bar" style={{ height: `${Math.round((day.count / maxCount()) * 100)}%` }} />
+                  <div
+                    class="stats-bar"
+                    classList={{ 'stats-bar-zero': day.count === 0 }}
+                    style={{ height: `${Math.round((day.count / maxCount()) * 100)}%` }}
+                  />
                   <span class="stats-bar-count">
                     <Show when={day.count > 0}>{day.count}</Show>
                   </span>

@@ -1,0 +1,888 @@
+/* ══════════════════════════════════════════════════════════════════
+   NEXT UI — SHELL & LAYOUT (operator console)
+   A labelled sidebar (the console's channel strip) + a telemetry
+   strip above the view outlet. The sidebar shares the canvas
+   background — one surface world, a border divides, not a color
+   change. It collapses to an icon rail on demand (persisted) and
+   automatically below 1024px; below 768px it docks as a labelled
+   bottom tab bar. The strip carries the live data: channel LEDs,
+   throughput, clients, REC, thermal, battery.
+   ══════════════════════════════════════════════════════════════════ */
+
+.nx-shell {
+  display: flex;
+  height: 100%;
+  min-height: 0;
+  background: var(--nx-bg);
+  color: var(--nx-text);
+}
+
+/* ── Sidebar ──────────────────────────────────────────────────────── */
+
+.nx-sidebar {
+  display: flex;
+  flex-direction: column;
+  width: 220px;
+  flex-shrink: 0;
+  padding: var(--nx-space-3) var(--nx-space-2);
+  border-right: 1px solid var(--nx-border);
+  background: var(--nx-bg);
+  z-index: 30;
+  transition: width var(--nx-duration) var(--nx-ease);
+}
+
+.nx-side-head {
+  display: flex;
+  align-items: center;
+  gap: var(--nx-space-2);
+  padding: var(--nx-space-1) var(--nx-space-2) var(--nx-space-3);
+  min-height: 44px;
+}
+
+.nx-side-head img {
+  width: 26px;
+  height: 26px;
+  flex-shrink: 0;
+}
+
+.nx-side-brand {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--nx-mono);
+  font-size: var(--nx-text-sm);
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--nx-text);
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.nx-side-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.nx-side-item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--nx-space-3);
+  height: 38px;
+  padding: 0 var(--nx-space-3);
+  border: none;
+  border-radius: var(--nx-radius);
+  background: transparent;
+  color: var(--nx-text-secondary);
+  font-size: var(--nx-text-base);
+  font-weight: 500;
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--nx-duration-fast) var(--nx-ease), color var(--nx-duration-fast) var(--nx-ease);
+}
+
+.nx-side-item:hover {
+  background: var(--nx-surface-2);
+  color: var(--nx-text);
+}
+
+.nx-side-item svg {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+}
+
+.nx-side-item-label {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Trailing status glyph (the live tell on the Live tab). */
+.nx-side-item-glyph {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.nx-side-item-active {
+  background: var(--nx-accent-subtle);
+  color: var(--nx-accent-text);
+}
+
+.nx-side-item-active:hover {
+  background: var(--nx-accent-subtle);
+  color: var(--nx-accent-text);
+}
+
+/* The active marker: a 3px accent bar hugging the sidebar edge. */
+.nx-side-item-active::before {
+  content: '';
+  position: absolute;
+  left: -10px;
+  top: 8px;
+  bottom: 8px;
+  width: 3px;
+  border-radius: var(--nx-radius-full);
+  background: var(--nx-accent);
+}
+
+/* REC row under the nav: a labelled timer, not just a dot. */
+.nx-side-rec {
+  display: flex;
+  align-items: center;
+  gap: var(--nx-space-3);
+  height: 30px;
+  margin: var(--nx-space-2) var(--nx-space-1) 0;
+  padding: 0 var(--nx-space-2);
+  border: 1px solid color-mix(in srgb, var(--nx-danger) 28%, transparent);
+  border-radius: var(--nx-radius-sm);
+  background: var(--nx-danger-bg);
+  color: var(--nx-danger);
+  font-family: var(--nx-mono);
+  font-size: var(--nx-text-2xs);
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.nx-side-spacer {
+  flex: 1;
+}
+
+/* ── Vitals — always-on telemetry docked at the sidebar's foot ────── */
+
+.nx-side-vitals {
+  display: flex;
+  flex-direction: column;
+  gap: var(--nx-space-2);
+  margin: 0 var(--nx-space-1) var(--nx-space-2);
+  padding: var(--nx-space-2);
+  border: 1px solid var(--nx-border);
+  border-radius: var(--nx-radius);
+  background: var(--nx-surface);
+}
+
+.nx-vital {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.nx-vital-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--nx-mono);
+  font-size: var(--nx-text-2xs);
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  color: var(--nx-text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.nx-vital-head svg {
+  width: 12px;
+  height: 12px;
+  flex-shrink: 0;
+  opacity: 0.7;
+}
+
+.nx-vital-ok { color: var(--nx-success); }
+.nx-vital-warn { color: var(--nx-warning); }
+.nx-vital-danger { color: var(--nx-danger); }
+
+/* ── Utility rows (theme, locale, shortcuts, exit, logout) ────────── */
+
+.nx-side-util {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding-top: var(--nx-space-2);
+  border-top: 1px solid var(--nx-border);
+}
+
+.nx-util-btn {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border: none;
+  border-radius: var(--nx-radius);
+  background: transparent;
+  color: var(--nx-text-tertiary);
+  cursor: pointer;
+  transition: background var(--nx-duration-fast) var(--nx-ease), color var(--nx-duration-fast) var(--nx-ease);
+}
+
+.nx-util-btn:hover {
+  background: var(--nx-surface-2);
+  color: var(--nx-text);
+}
+
+.nx-util-btn svg {
+  width: 17px;
+  height: 17px;
+}
+
+/* Language: a transparent select laid over the globe glyph. */
+.nx-side-locale {
+  position: relative;
+  overflow: hidden;
+}
+
+.nx-side-locale svg {
+  pointer-events: none;
+  opacity: 0.55;
+}
+
+.nx-side-locale-select {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  opacity: 0;
+  cursor: pointer;
+  border: none;
+}
+
+/* ── Compact mode: user-toggled (persisted) at ≥1024px ───────────── */
+
+.nx-shell-compact .nx-sidebar {
+  width: 56px;
+  padding: var(--nx-space-3) var(--nx-space-1);
+}
+
+.nx-shell-compact .nx-side-head {
+  justify-content: center;
+  padding-left: 0;
+  padding-right: 0;
+}
+
+/* Only the toggle fits the 56px rail. */
+.nx-shell-compact .nx-side-head img {
+  display: none;
+}
+
+.nx-shell-compact .nx-side-brand,
+.nx-shell-compact .nx-side-item-label,
+.nx-shell-compact .nx-side-vitals,
+.nx-shell-compact .nx-side-rec .nx-side-rec-label {
+  display: none;
+}
+
+.nx-shell-compact .nx-side-item {
+  justify-content: center;
+  padding: 0;
+  width: 40px;
+  align-self: center;
+}
+
+.nx-shell-compact .nx-side-rec {
+  justify-content: center;
+  padding: 0;
+  border: none;
+  background: transparent;
+}
+
+.nx-shell-compact .nx-side-util {
+  flex-direction: column;
+}
+
+/* ── Telemetry strip — the console's status line ──────────────────── */
+
+.nx-strip {
+  display: flex;
+  align-items: center;
+  gap: var(--nx-space-3);
+  height: 40px;
+  flex-shrink: 0;
+  padding: 0 var(--nx-space-4);
+  border-bottom: 1px solid var(--nx-border);
+  background: var(--nx-bg);
+}
+
+.nx-strip-title {
+  font-size: var(--nx-text-base);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.nx-strip-chips {
+  display: flex;
+  align-items: center;
+  gap: var(--nx-space-2);
+  flex: 1;
+  min-width: 0;
+  justify-content: flex-end;
+  overflow: hidden;
+}
+
+/* Content column ──────────────────────────────────────────────────── */
+
+.nx-content {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+
+/* ── System sub-tabs ─────────────────────────────────────────────────
+   Flat instrument nav: text tabs on a hairline, the active one marked
+   by a 2px cyan underline — no pills, no fills. Deep-links as
+   #/system/<tab>; one short topic per tab kills the settings scroll.
+   The bar is sticky: a settings page scrolls, and the whole point of
+   sub-topics is switching without scrolling back up. The wrap pins to
+   the top of the view's scrollport and bleeds over the view's side
+   padding so cards slide underneath an opaque edge-to-edge strip; the
+   scroller inside is constrained to the same centered column as
+   .nx-view-inner, so tab labels line up with the card column.
+   Sticky insets resolve against the scrollport's padding edge, so
+   `top` cancels .nx-view's top padding — a plain 0 would dock the bar
+   that padding short of the strip, leaving a see-through strip with
+   cards sliding through the gap. */
+.nx-systabs-wrap {
+  position: sticky;
+  top: calc(-1 * var(--nx-space-5));
+  z-index: 20;
+  flex-shrink: 0;
+  margin: 0 calc(-1 * var(--nx-space-6));
+  background: var(--nx-bg);
+  border-bottom: 1px solid var(--nx-border);
+}
+
+.nx-systabs {
+  display: flex;
+  align-items: stretch;
+  gap: var(--nx-space-4);
+  flex-shrink: 0;
+  max-width: calc(1200px + 2 * var(--nx-space-6));
+  margin: 0 auto;
+  padding: 0 var(--nx-space-6);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.nx-systabs-fade {
+  display: none;
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 1px; /* the hairline stays crisp under the fade */
+  width: 28px;
+  background: linear-gradient(to left, var(--nx-bg), transparent);
+  pointer-events: none;
+}
+
+.nx-systabs::-webkit-scrollbar {
+  display: none;
+}
+
+.nx-systab {
+  position: relative;
+  flex-shrink: 0;
+  padding: 10px 0;
+  border: none;
+  background: transparent;
+  color: var(--nx-text-tertiary);
+  font-size: var(--nx-text-base);
+  font-weight: 500;
+  cursor: pointer;
+  transition: color var(--nx-duration-fast) var(--nx-ease);
+}
+
+.nx-systab:hover {
+  color: var(--nx-text);
+}
+
+.nx-systab-active {
+  color: var(--nx-text);
+}
+
+.nx-systab-active::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 2px;
+  background: var(--nx-accent);
+}
+
+/* ── View outlet ──────────────────────────────────────────────────── */
+
+.nx-view {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--nx-space-5) var(--nx-space-6) var(--nx-space-8);
+}
+
+/* Full-bleed variant: the live stage fills the viewport height — the
+   view scrolls internally instead, so the stage never collapses. */
+.nx-view-flush {
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.nx-view-inner {
+  max-width: 1200px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--nx-space-4);
+}
+
+/* The System pane stacks rack-bay sections: generous between bays, tight
+   inside one (head → cards is .nx-section's own 12px). From 1100px the
+   pane itself becomes a two-column grid so consecutive single-card bays
+   pair up side by side — stacked half-width bays would leave a dead
+   column beside each. Multi-card bays (their own 2-col masonry inside)
+   and wide singles read across both columns. */
+.nx-system-pane {
+  gap: var(--nx-space-6);
+}
+
+/* Loading state while settings/lenses fetch: loading bars in the grid's
+   first column so the pane never pops layout when the real bays arrive. */
+.nx-system-loading {
+  display: flex;
+  flex-direction: column;
+  gap: var(--nx-space-3);
+}
+
+@media (min-width: 1100px) {
+  .nx-system-pane {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: var(--nx-space-6) var(--nx-space-4);
+    align-items: start;
+  }
+
+  .nx-system-pane .nx-section:not(.nx-section-single),
+  .nx-system-pane .nx-section-wide {
+    grid-column: 1 / -1;
+  }
+
+  .nx-section-single .nx-columns {
+    column-count: 1;
+  }
+}
+
+/* Bays are numbered in DOM order — 01, 02, … restarting per tab, since
+   only one tab's sections exist at a time. The index is the accent's
+   only appearance in the section header: quiet label, live counter. */
+.nx-view-system {
+  counter-reset: nx-section;
+}
+
+.nx-system-pane .nx-section-title::before {
+  counter-increment: nx-section;
+  content: counter(nx-section, decimal-leading-zero);
+  margin-right: var(--nx-space-2);
+  color: var(--nx-accent-text);
+}
+
+/* ── Inspector (Live view, ≥1200px; drawer at 768–1199) ───────────── */
+
+.nx-stage-row {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+.nx-stage {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.nx-inspector {
+  display: none;
+  width: 300px;
+  flex-shrink: 0;
+  flex-direction: column;
+  gap: var(--nx-space-3);
+  padding: var(--nx-space-3);
+  border-left: 1px solid var(--nx-border);
+  overflow-y: auto;
+}
+
+/* Cards must never compress to fit: a flex child defaults to
+   flex-shrink: 1, which quietly squashes the tall cards instead of
+   scrolling. */
+.nx-inspector > * {
+  flex-shrink: 0;
+}
+
+@media (min-width: 1200px) {
+  .nx-inspector {
+    display: flex;
+  }
+}
+
+/* ── Grouped sections (System/Detection/Media views) ─────────────── */
+
+.nx-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--nx-space-3);
+}
+
+.nx-section-head {
+  display: flex;
+  align-items: center;
+  gap: var(--nx-space-2);
+  padding: var(--nx-space-2) 0 0;
+}
+
+.nx-section-title {
+  font-family: var(--nx-mono);
+  font-size: var(--nx-text-xs);
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--nx-text-tertiary);
+}
+
+.nx-section-rule {
+  flex: 1;
+  height: 1px;
+  background: var(--nx-border);
+}
+
+/* Responsive card columns: one column on narrow, two ≥1100px. True
+   masonry via CSS columns — a grid pairs cards into equal-height rows,
+   which leaves a dead gap under every short card; columns pack each one
+   right after the previous. Cards stay whole (break-inside). */
+.nx-columns {
+  column-count: 1;
+  column-gap: var(--nx-space-4);
+}
+
+@media (min-width: 1100px) {
+  .nx-columns {
+    column-count: 2;
+  }
+}
+
+.nx-columns > * {
+  min-width: 0;
+  width: 100%;
+  break-inside: avoid;
+  margin: 0 0 var(--nx-space-4);
+}
+
+/* Detection view: the arming card is a tall single column; stats, feed
+   and automation pack into a side column ≥1100px instead of stretching
+   every toggle row across the full content width. */
+.nx-detection-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--nx-space-4);
+  align-items: start;
+}
+
+.nx-detection-side {
+  display: grid;
+  /* Shrinkable single track: the panels' unbreakable header rows would
+     otherwise size the implicit auto track to their min-content — wider
+     than a 360px phone's content box — and clip the right edge. */
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--nx-space-4);
+  min-width: 0;
+}
+
+.nx-detection-side > * {
+  min-width: 0;
+}
+
+@media (min-width: 1100px) {
+  .nx-detection-grid {
+    grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+  }
+}
+
+/* ── Full-width banners above the view ────────────────────────────── */
+
+.nx-banner-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--nx-space-2);
+  padding: 8px var(--nx-space-4);
+  font-size: var(--nx-text-sm);
+  flex-shrink: 0;
+}
+
+.nx-banner-bar svg {
+  width: 15px;
+  height: 15px;
+  flex-shrink: 0;
+}
+
+.nx-banner-bar-danger {
+  background: var(--nx-danger-bg);
+  color: var(--nx-danger);
+}
+
+.nx-banner-bar-neutral {
+  background: var(--nx-info-bg);
+  color: var(--nx-info);
+}
+
+/* ── Auto-compact below 1024px: the sidebar narrows itself ────────── */
+
+@media (max-width: 1023px) and (min-width: 768px) {
+  .nx-sidebar {
+    width: 56px;
+    padding: var(--nx-space-3) var(--nx-space-1);
+  }
+
+  .nx-side-head {
+    justify-content: center;
+    padding-left: 0;
+    padding-right: 0;
+  }
+
+  .nx-side-head img {
+    display: none;
+  }
+
+  .nx-side-brand,
+  .nx-side-item-label,
+  .nx-side-vitals,
+  .nx-side-rec .nx-side-rec-label {
+    display: none;
+  }
+
+  .nx-side-item {
+    justify-content: center;
+    padding: 0;
+    width: 40px;
+    align-self: center;
+  }
+
+  .nx-side-rec {
+    justify-content: center;
+    padding: 0;
+    border: none;
+    background: transparent;
+  }
+
+  .nx-side-util {
+    flex-direction: column;
+  }
+}
+
+/* ── Mobile: the sidebar becomes a labelled bottom tab bar ────────── */
+
+@media (max-width: 767px) {
+  .nx-shell {
+    flex-direction: column;
+  }
+
+  .nx-sidebar {
+    order: 2;
+    flex-direction: row;
+    align-items: center;
+    width: 100%;
+    height: 58px;
+    padding: var(--nx-space-1) var(--nx-space-2);
+    padding-bottom: max(var(--nx-space-1), env(safe-area-inset-bottom));
+    border-right: none;
+    border-top: 1px solid var(--nx-border);
+  }
+
+  .nx-side-head,
+  .nx-side-spacer,
+  .nx-side-vitals,
+  .nx-side-locale,
+  .nx-util-btn-shortcuts {
+    display: none;
+  }
+
+  .nx-side-nav {
+    flex: 1;
+    flex-direction: row;
+    min-width: 0;
+  }
+
+  .nx-side-item {
+    flex: 1;
+    flex-direction: column;
+    justify-content: center;
+    gap: 3px;
+    height: 48px;
+    padding: 0 2px;
+    min-width: 0;
+  }
+
+  .nx-side-item svg {
+    width: 17px;
+    height: 17px;
+  }
+
+  .nx-side-item-label {
+    flex: none;
+    max-width: 100%;
+    font-size: 9px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+  }
+
+  .nx-side-item-glyph {
+    position: absolute;
+    top: 5px;
+    right: 50%;
+    transform: translateX(14px);
+  }
+
+  /* The active marker flips to a top edge bar. */
+  .nx-side-item-active::before {
+    left: 10px;
+    right: 10px;
+    top: -5px;
+    bottom: auto;
+    width: auto;
+    height: 3px;
+  }
+
+  .nx-side-rec {
+    display: none;
+  }
+
+  .nx-side-util {
+    padding-top: 0;
+    border-top: none;
+    padding-left: var(--nx-space-1);
+  }
+
+  .nx-util-btn {
+    width: 32px;
+    height: 44px;
+  }
+
+  /* Views own the tab bar; utilities stay reachable but visibly secondary. */
+  .nx-view {
+    padding: var(--nx-space-3) var(--nx-space-3) var(--nx-space-6);
+  }
+
+  .nx-inspector {
+    display: flex;
+    border-left: none;
+    border-top: 1px solid var(--nx-border);
+    width: 100%;
+    flex-shrink: 0;
+    padding: var(--nx-space-3);
+  }
+
+  .nx-stage-row {
+    flex-direction: column;
+    overflow-y: auto;
+  }
+
+  .nx-strip {
+    height: auto;
+    min-height: 40px;
+    flex-wrap: wrap;
+    padding: 4px var(--nx-space-3);
+  }
+
+  /* Lower-priority telemetry drops out; title, LIVE, REC, battery stay. */
+  .nx-strip-hide-sm {
+    display: none;
+  }
+
+  .nx-systabs-wrap {
+    top: calc(-1 * var(--nx-space-3));
+    margin: 0 calc(-1 * var(--nx-space-3));
+  }
+
+  .nx-systabs {
+    /* Tight enough that all six tabs fit a 360px phone instead of
+       clipping the last one at the edge; the strip still scrolls (with
+       the fade below) on narrower screens. */
+    padding: 0 10px;
+    gap: 6px;
+    scroll-behavior: smooth;
+  }
+
+  .nx-systabs-fade {
+    display: block;
+    width: 40px;
+  }
+}
+
+/* Between 768 and 1279: strip trims its widest chips. */
+@media (max-width: 1279px) {
+  .nx-strip-hide-lg {
+    display: none;
+  }
+}
+
+/* ── Sign-in (next mode) — the console's boot panel ───────────────── */
+
+.nx-login {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--nx-space-6);
+  background: var(--nx-bg);
+  color: var(--nx-text);
+}
+
+.nx-login-card {
+  width: min(360px, 100%);
+  background: var(--nx-surface);
+  border: 1px solid var(--nx-border-strong);
+  border-radius: var(--nx-radius-xl);
+  box-shadow: var(--nx-shadow-lg);
+  overflow: hidden;
+}
+
+.nx-login-brand {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--nx-space-2);
+  padding: var(--nx-space-6) var(--nx-space-5) var(--nx-space-4);
+  border-bottom: 1px solid var(--nx-border);
+  background: var(--nx-surface-2);
+}
+
+.nx-login-wordmark {
+  font-family: var(--nx-mono);
+  font-size: var(--nx-text-lg);
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--nx-text);
+}
+
+.nx-login-subtitle {
+  font-size: var(--nx-text-sm);
+  color: var(--nx-text-tertiary);
+  text-align: center;
+}
+
+.nx-login-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--nx-space-3);
+  padding: var(--nx-space-5);
+}

@@ -160,6 +160,11 @@ class StreamingSessionTest {
 
     @Test
     fun `begin attaches the full environment and a second late begin only re-asserts the foreground service`() {
+        // After begin() starts the watchdog the poll's isMonitoring read
+        // answers "monitoring" and never re-arms — model that here so the
+        // exact-once pin below is the production-true count, not an artifact
+        // of the relaxed mock answering "not monitoring" forever.
+        every { streamWatchdog.isMonitoring } returns true
         runWithMainPumped { session.begin() }
         runWithMainPumped { session.begin() }
 

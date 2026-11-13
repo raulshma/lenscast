@@ -34,7 +34,9 @@ import com.raulshma.lenscast.core.WatchdogPolicy.WatchdogStatus
  * tick's escalation verdict, the tier ladder, backoff, verification
  * windows — delegates to [WatchdogPolicy].
  *
- * The watchdog is disabled by default and must be explicitly enabled via settings.
+ * The watchdog is enabled by default (settings-togglable). With it off, a
+ * camera death mid-stream leaves a zombie: the dashboard reports active while
+ * no frame reaches any client, and nothing ever recovers it.
  */
 class StreamWatchdog(
     private val cameraService: CameraService,
@@ -68,7 +70,19 @@ class StreamWatchdog(
     val state: StateFlow<WatchdogState> = _state.asStateFlow()
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    // @Volatile: the session poll reads [isMonitoring] off the lifecycle
+    // lock, so a loop launch/cancel inside it must be visible to that read.
+    @Volatile
     private var monitorJob: Job? = null
+
+    /**
+     * Serializes the monitor loop's lifecycle: begin(), the session poll's
+     * re-arm and the resume seam can race a check-then-launch on
+     * [monitorJob], and two concurrent loops double every health check and
+     * double every recovery — observed on-device as two interleaved
+     * "Attempting MEDIUM recovery" ladders healing one stream.
+     */
+    private val lifecycleLock = Any()
 
     private val consecutiveFailures = AtomicInteger(0)
     private val totalRecoveries = AtomicInteger(0)
@@ -115,7 +129,7 @@ class StreamWatchdog(
      * Start the watchdog monitoring loop. Called when streaming begins.
      * No-op if watchdog is disabled or already monitoring.
      */
-    fun startMonitoring() {
+    fun startMonitoring() = synchronized(lifecycleLock) {
         if (!enabled) {
             Log.d(TAG, "startMonitoring: watchdog is disabled, skipping")
             return
@@ -129,6 +143,7 @@ class StreamWatchdog(
         consecutiveFailures.set(0)
         tracking = WatchdogPolicy.TrackingSnapshot(
             processedFrameCount = streamingManager.processedFrames.value,
+            cameraFrameCount = streamingManager.cameraFrameCount(),
             rtspAcceptedFrames = streamingManager.getRtspHealth().acceptedFrames,
             frameCheckTimeMs = System.currentTimeMillis(),
             recoveryTimestamp = tracking.recoveryTimestamp,
@@ -188,6 +203,7 @@ class StreamWatchdog(
                             }
                             tracking = tracking.copy(
                                 processedFrameCount = streamingManager.processedFrames.value,
+                                cameraFrameCount = streamingManager.cameraFrameCount(),
                                 rtspAcceptedFrames = acceptedFrames,
                                 frameCheckTimeMs = System.currentTimeMillis(),
                                 recoveryTimestamp = System.currentTimeMillis(),
@@ -226,7 +242,7 @@ class StreamWatchdog(
     /**
      * Stop the watchdog monitoring loop. Called when streaming ends.
      */
-    fun stopMonitoring() {
+    fun stopMonitoring() = synchronized(lifecycleLock) {
         monitorJob?.cancel()
         monitorJob = null
         wasStreamingActive = false
@@ -235,6 +251,15 @@ class StreamWatchdog(
         updateState(WatchdogStatus.IDLE)
         Log.d(TAG, "Watchdog monitoring stopped")
     }
+
+    /**
+     * Whether the monitor loop is currently running. A watchdog that
+     * exhausted its retries is in FAILED with a dead loop — the session's
+     * poll reads this to keep re-arming it for as long as the stream lives
+     * (an unattended mount has no one to restart the stream by hand).
+     */
+    val isMonitoring: Boolean
+        get() = monitorJob?.isActive == true
 
     // ── Health Checks ──
 
@@ -259,6 +284,8 @@ class StreamWatchdog(
             clientCount = streamingManager.clientCount.value,
             processedFrames = streamingManager.processedFrames.value,
             lastProcessedFrameCount = tracking.processedFrameCount,
+            cameraFrames = streamingManager.cameraFrameCount(),
+            lastCameraFrames = tracking.cameraFrameCount,
             lastFrameCheckTimeMs = tracking.frameCheckTimeMs,
             nowMs = System.currentTimeMillis(),
             rtspActive = streamingManager.isRtspRunning.value,
@@ -276,6 +303,7 @@ class StreamWatchdog(
         WatchdogPolicy.updatedTracking(snapshot)?.let { update ->
             tracking = tracking.copy(
                 processedFrameCount = update.processedFrameCount,
+                cameraFrameCount = update.cameraFrameCount,
                 rtspAcceptedFrames = snapshot.rtspAcceptedFrames,
                 frameCheckTimeMs = update.frameCheckTimeMs,
             )
@@ -313,11 +341,15 @@ class StreamWatchdog(
         val spec = WatchdogPolicy.verificationSpecFor(tier)
 
         delay(spec.delayMs)
-        val framesBeforeWait = if (spec.measureFrames) streamingManager.processedFrames.value else 0
+        // The camera-frame counter, not processedFrames: the M-JPEG pipeline
+        // only processes for real viewers, so a headless stream's rebind
+        // would never verify against processed frames. Camera frames flow
+        // (or don't) regardless of who is watching.
+        val framesBeforeWait = if (spec.measureFrames) streamingManager.cameraFrameCount() else 0L
         if (spec.measureFrames) {
             delay(WatchdogPolicy.RECOVERY_VERIFICATION_WINDOW_MS)
         }
-        val framesAfterWait = if (spec.measureFrames) streamingManager.processedFrames.value else 0
+        val framesAfterWait = if (spec.measureFrames) streamingManager.cameraFrameCount() else 0L
 
         val success = WatchdogPolicy.verificationSuccess(
             tier = tier,

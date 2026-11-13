@@ -1,4 +1,12 @@
 @import "tailwindcss";
+@import "./styles/next/tokens.css";
+@import "./styles/next/base.css";
+@import "./styles/next/components.css";
+@import "./styles/next/layout.css";
+@import "./styles/next/views/cards.css";
+@import "./styles/next/views/live.css";
+@import "./styles/next/views/detection.css";
+@import "./styles/next/views/media.css";
 @plugin "daisyui";
 
 /* ═══════════════════════════════════════════════
@@ -368,6 +376,219 @@ html, body {
   backdrop-filter: blur(8px);
 }
 
+/* ── Camera controls strip (floating over the preview's bottom edge) ──
+   Glass-pill recipe shared with .zoom-indicator / .preview-fullscreen-exit.
+   z-ladder inside the container: media < zoom-indicator 10 < strip 12 <
+   focus ring 15 < fullscreen overlays 20. The host spans the width but is
+   not interactive — only the pill itself catches pointers, so the strip
+   never blocks a corner tap-to-focus. */
+.cam-strip-host {
+  position: absolute;
+  bottom: 12px;
+  left: 12px;
+  right: 12px;
+  z-index: 12;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  pointer-events: none;
+}
+
+.cam-strip {
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  max-width: 100%;
+  padding: 6px 8px;
+  background: rgba(0, 0, 0, 0.7);
+  backdrop-filter: blur(8px);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: var(--lc-radius-full);
+  color: #fff;
+}
+
+.cam-strip-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  background: rgba(0, 0, 0, 0.5);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: var(--lc-radius-full);
+  color: #fff;
+  cursor: pointer;
+  transition: background 0.2s ease;
+}
+
+.cam-strip-btn svg {
+  width: 18px;
+  height: 18px;
+}
+
+.cam-strip-btn:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.15);
+}
+
+.cam-strip-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.cam-strip-btn-toggled {
+  background: rgba(0, 212, 255, 0.25);
+  border-color: rgba(0, 212, 255, 0.5);
+}
+
+.cam-strip-slider {
+  width: 140px;
+  height: 36px;
+  margin: 0;
+  accent-color: var(--lc-accent);
+}
+
+.cam-strip-slider:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.cam-strip-readout {
+  min-width: 44px;
+  text-align: center;
+  font-family: var(--lc-mono);
+  font-size: 13px;
+  font-weight: 600;
+  color: #fff;
+}
+
+.cam-strip-chip {
+  display: inline-flex;
+  align-items: center;
+  height: 36px;
+  padding: 0 12px;
+  background: rgba(0, 0, 0, 0.5);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: var(--lc-radius-full);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background 0.2s ease;
+}
+
+.cam-strip-chip:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.15);
+}
+
+.cam-strip-chip:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.cam-strip-chip-active {
+  background: rgba(0, 212, 255, 0.25);
+  border-color: rgba(0, 212, 255, 0.5);
+}
+
+.cam-strip-select {
+  height: 36px;
+  padding: 0 8px;
+  background: rgba(0, 0, 0, 0.5);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: var(--lc-radius-sm);
+  color: #fff;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.cam-strip-select:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.cam-strip-select option {
+  background: var(--lc-surface);
+  color: var(--lc-text);
+}
+
+/* Collapsed: one slim pill with the zoom readout and the expand chevron. */
+.cam-strip-handle {
+  pointer-events: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 36px;
+  padding: 0 12px;
+  background: rgba(0, 0, 0, 0.7);
+  backdrop-filter: blur(8px);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: var(--lc-radius-full);
+  color: #fff;
+  font-size: 13px;
+  cursor: pointer;
+  transition: background 0.2s ease;
+}
+
+.cam-strip-handle svg {
+  width: 16px;
+  height: 16px;
+}
+
+.cam-strip-handle:hover {
+  background: rgba(0, 0, 0, 0.85);
+}
+
+.cam-strip-msg {
+  pointer-events: none;
+  padding: 6px 12px;
+  font-size: 12px;
+  color: #fff;
+  background: rgba(0, 0, 0, 0.7);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: var(--lc-radius-full);
+  backdrop-filter: blur(8px);
+}
+
+/* The strip owns the bottom edge: lift the digital-zoom pill and the
+   fullscreen hint above it so the three never stack. */
+.preview-container.has-cam-strip .zoom-indicator {
+  bottom: 68px;
+}
+
+.preview-container.has-cam-strip .preview-fullscreen-hint {
+  bottom: 68px;
+}
+
+.cam-strip-btn:focus-visible,
+.cam-strip-chip:focus-visible,
+.cam-strip-select:focus-visible,
+.cam-strip-handle:focus-visible,
+.cam-strip-slider:focus-visible {
+  outline: 2px solid var(--lc-accent);
+  outline-offset: 2px;
+}
+
+@media (max-width: 480px) {
+  .cam-strip {
+    gap: 4px;
+    padding: 4px 6px;
+  }
+
+  .cam-strip-slider {
+    width: 90px;
+  }
+
+  .cam-strip-chip {
+    padding: 0 8px;
+  }
+}
+
 .preview-img {
   width: 100%;
   height: 100%;
@@ -672,6 +893,15 @@ html, body {
   cursor: not-allowed;
 }
 
+/* A disabled capture still painted the accent gradient — it read as an
+   active, tappable primary. Mute it to a plain surface instead. */
+.action-btn-primary:disabled {
+  background: var(--lc-surface-3);
+  border-color: var(--lc-border);
+  color: var(--lc-text-dim);
+  opacity: 1;
+}
+
 .action-btn-primary {
   background: linear-gradient(135deg, var(--lc-accent-dim), var(--lc-accent));
   border-color: var(--lc-accent);
@@ -967,6 +1197,13 @@ html, body {
   display: flex;
   flex-direction: column;
   gap: 10px;
+}
+
+/* Header status chips (StatusChip) are next-UI only: the shared cards
+   render them in both shells, so the classic shell hides them inert.
+   The next UI re-enables and styles them in styles/next/views/cards.css. */
+.settings-card-badge {
+  display: none;
 }
 
 /* Error Banner */
@@ -1336,6 +1573,85 @@ html, body {
 .toggle-switch input:disabled + .toggle-slider {
   opacity: 0.4;
   cursor: not-allowed;
+}
+
+/* ═══════════════════════════════════════════════
+   SHARED SETTINGS KIT — CLASSIC SKIN
+   The five streaming cards (next/views/system/StreamingCards.tsx) render
+   the next UI's nx-* kit in BOTH shells, but styles/next/* only define
+   the --nx-* tokens under [data-ui='next'] — in the classic shell every
+   var() in those rules was invalid at computed-value time, leaving bare
+   geometry: transparent cards, 0px borders, invisible switches. Map the
+   tokens the kit reads onto the classic palette so the same markup wears
+   the classic look. The next UI is unaffected — it defines these itself
+   in styles/next/tokens.css.
+   ═══════════════════════════════════════════════ */
+:root:not([data-ui='next']) {
+  /* Faces */
+  --nx-font: var(--lc-font);
+  --nx-mono: var(--lc-mono);
+  /* Surfaces & lines */
+  --nx-surface: var(--lc-surface);
+  --nx-surface-2: var(--lc-surface-2);
+  --nx-surface-3: var(--lc-surface-3);
+  --nx-control-bg: var(--lc-surface-2);
+  --nx-control-border: var(--lc-border);
+  --nx-control-border-hover: var(--lc-border-hover);
+  --nx-border: var(--lc-border);
+  --nx-border-strong: var(--lc-border-hover);
+  /* Ink */
+  --nx-text: var(--lc-text);
+  --nx-text-secondary: var(--lc-text-dim);
+  --nx-text-tertiary: var(--lc-text-muted);
+  --nx-text-faint: var(--lc-text-muted);
+  /* Accent & semantic states */
+  --nx-accent: var(--lc-accent);
+  --nx-accent-hover: var(--lc-accent-dim);
+  --nx-accent-active: var(--lc-accent-dim);
+  --nx-accent-text: var(--lc-accent);
+  --nx-accent-subtle: var(--lc-accent-bg);
+  --nx-on-accent: var(--lc-bg);
+  --nx-danger: var(--lc-danger);
+  --nx-danger-bg: var(--lc-danger-bg);
+  --nx-success: var(--lc-success);
+  --nx-success-bg: var(--lc-success-bg);
+  --nx-warning: var(--lc-warning);
+  --nx-warning-bg: var(--lc-warning-bg);
+  --nx-info: var(--lc-info);
+  --nx-info-bg: var(--lc-info-bg);
+  /* Geometry: classic radii; a plain card, not the next UI's hairline
+     bevel — .settings-card carries no shadow either. */
+  --nx-radius-sm: var(--lc-radius-sm);
+  --nx-radius: var(--lc-radius-sm);
+  --nx-radius-lg: var(--lc-radius);
+  --nx-radius-xl: var(--lc-radius-lg);
+  --nx-radius-full: var(--lc-radius-full);
+  --nx-shadow-sm: none;
+  --nx-focus-ring: 0 0 0 1px var(--lc-accent-bg);
+  /* Shared scale — the same px values styles/next/tokens.css uses. */
+  --nx-space-1: 4px;
+  --nx-space-2: 8px;
+  --nx-space-3: 12px;
+  --nx-text-2xs: 10px;
+  --nx-text-xs: 11px;
+  --nx-text-sm: 12px;
+  --nx-text-base: 13px;
+  --nx-text-md: 14px;
+  --nx-duration-fast: 120ms;
+  --nx-duration: 160ms;
+  --nx-ease: ease;
+}
+
+/* base.css scopes the kit's mono helper to the next shell; the shared
+   cards use it for live values, so give it the classic mono face here. */
+:root:not([data-ui='next']) .nx-mono {
+  font-family: var(--lc-mono);
+}
+
+/* Classic hints are mono (see .field-hint above) — keep the kit's hints
+   in the same voice instead of a second, plainer explanation style. */
+:root:not([data-ui='next']) .nx-field-hint {
+  font-family: var(--lc-mono);
 }
 
 /* ═══════════════════════════════════════════════
@@ -1919,12 +2235,21 @@ html, body {
   display: flex;
   flex-direction: column;
   gap: 2px;
+  min-width: 0;
 }
 
 .gallery-viewer-bar .viewer-name {
   font-size: 13px;
   font-weight: 600;
   color: var(--lc-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The action cluster keeps its size; the filename absorbs the squeeze. */
+.gallery-viewer-bar .viewer-actions {
+  flex-shrink: 0;
 }
 
 .gallery-viewer-bar .viewer-date {
@@ -1969,59 +2294,10 @@ html, body {
 }
 
 /* ═══════════════════════════════════════════════
-   RESPONSIVE
+   RESPONSIVE — moved to the end of the file so the
+   phone/tablet overrides win against any component
+   rule above, regardless of definition order.
    ═══════════════════════════════════════════════ */
-@media (max-width: 768px) {
-  .main-layout {
-    grid-template-columns: 1fr;
-    grid-template-rows: 45% 1fr;
-  }
-
-  .settings-panel {
-    border-left: none;
-    border-top: 1px solid var(--lc-border);
-  }
-
-  .preview-section {
-    padding: 10px;
-  }
-
-  .settings-panel {
-    padding: 10px;
-  }
-
-  .status-pill span {
-    display: none;
-  }
-
-  .status-pill {
-    padding: 3px 6px;
-  }
-
-  .navbar-camera-badge {
-    display: none;
-  }
-}
-
-@media (max-width: 480px) {
-  .main-layout {
-    grid-template-rows: 40% 1fr;
-  }
-
-  .preview-actions {
-    flex-wrap: wrap;
-  }
-
-  .action-btn span {
-    display: none;
-  }
-
-  .gallery-grid {
-    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
-    gap: 8px;
-    padding: 8px;
-  }
-}
 /* Connected Clients Card */
 .clients-count-row {
   display: flex;
@@ -3841,4 +4117,147 @@ button.timeline-segment {
   padding: 8px;
   font-size: 12px;
   border-style: dashed;
+}
+
+/* ═══════════════════════════════════════════════
+   NEXT-UI OPT-IN (classic side)
+   ═══════════════════════════════════════════════ */
+
+/* Navbar pill that opts the user into the redesigned (next) shell. */
+.navbar-next-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 10px;
+  border-radius: var(--lc-radius-full);
+  border: 1px solid rgba(0, 212, 255, 0.35);
+  background: var(--lc-accent-bg);
+  color: var(--lc-accent);
+  font-family: var(--lc-font);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  transition: background 0.2s ease, border-color 0.2s ease;
+}
+
+.navbar-next-pill:hover {
+  background: var(--lc-accent-glow);
+  border-color: rgba(0, 212, 255, 0.55);
+}
+
+.navbar-next-pill svg {
+  width: 13px;
+  height: 13px;
+}
+
+/* ═══════════════════════════════════════════════
+   RESPONSIVE — kept last on purpose: these overrides
+   must beat component rules defined anywhere above,
+   regardless of definition order (e.g. .navbar-next-pill).
+   ═══════════════════════════════════════════════ */
+@media (max-width: 768px) {
+  .main-layout {
+    grid-template-columns: 1fr;
+    grid-template-rows: 45% 1fr;
+  }
+
+  .settings-panel {
+    border-left: none;
+    border-top: 1px solid var(--lc-border);
+    padding: 10px;
+  }
+
+  .preview-section {
+    padding: 10px;
+  }
+
+  .status-pill span {
+    display: none;
+  }
+
+  .status-pill {
+    padding: 3px 6px;
+  }
+
+  .navbar-camera-badge {
+    display: none;
+  }
+
+  /* Navbar: tighten spacing so the right-side controls stay on-screen at
+     tablet widths, and collapse the opt-in pill to its sparkle icon. */
+  .app-navbar {
+    height: 44px;
+    padding: 0 10px;
+  }
+
+  .navbar-left {
+    gap: 8px;
+    min-width: 0;
+  }
+
+  .navbar-right {
+    gap: 5px;
+  }
+
+  .navbar-next-pill span {
+    display: none;
+  }
+
+  .navbar-next-pill {
+    height: 26px;
+    padding: 0 8px;
+  }
+}
+
+@media (max-width: 480px) {
+  .main-layout {
+    grid-template-rows: 40% 1fr;
+  }
+
+  .preview-actions {
+    flex-wrap: wrap;
+  }
+
+  .action-btn span {
+    display: none;
+  }
+
+  .gallery-grid {
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    gap: 8px;
+    padding: 8px;
+  }
+
+  /* Phone navbar. At 320px every remaining item must fit one row, so the
+     secondary status pills (thermal, clients — battery stays) and the
+     keyboard-shortcuts help (a desktop affordance) are dropped, the brand
+     shrinks a step, and the locale select is allowed to squeeze. */
+  .app-navbar {
+    flex-wrap: wrap;
+    height: auto;
+    min-height: 44px;
+    row-gap: 4px;
+    padding: 6px 10px;
+  }
+
+  .status-pill-thermal,
+  .status-pill-info {
+    display: none;
+  }
+
+  #shortcuts-btn {
+    display: none;
+  }
+
+  .brand-name {
+    font-size: 14px;
+  }
+
+  .navbar-locale-select {
+    flex-shrink: 1;
+    min-width: 56px;
+    padding: 0 16px 0 6px;
+  }
 }

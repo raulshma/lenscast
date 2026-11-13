@@ -762,6 +762,24 @@ audit trail), SystemPanel (the /api/system triage view), and ConfigBackupCard
 (the settings export/import pair) — are one-card clients of the same client
 API surface.
 
+### Camera Controls Strip
+**`web/src/hooks/useCameraControls.ts`** — the floating camera strip's
+behavior, one factory consumed by two thin skins: the classic
+`web/src/components/CameraControlsStrip.tsx` (inline SVGs, glass-pill CSS)
+and the next kit renderer `web/src/components/next/views/live/CameraStrip.tsx`
+(nx buttons/slider/selects). The skins arrive inside `StreamPreview` through
+its `stripOverlay` slot — the component owns only the host geometry
+(`.cam-strip-host`, bottom edge of the preview container, live-video-only,
+taps stopped from reaching the focus surface), so fullscreen and the two
+skins need no per-skin positioning logic. Zoom/torch/EV mirror rules and the
+send throttle are covered in the state-machine table below; the numeric
+verdicts are pure in `web/src/lib/cameraControlsPolicy.ts` (the
+previewRetryPolicy shape). The lens chips, focus/WB quick-selects reuse the
+shared label maps in `web/src/lib/cameraLabels.ts` (formerly duplicated in
+LensSelector, LensPanel, FocusCard, WhiteBalanceCard). Every write is
+admin-only on the device (RoleGatePolicy), so the viewer pair gets a disabled
+strip with a hint instead of silent 403s.
+
 ### Fullscreen Policy
 **`web/src/lib/fullscreenPolicy.ts`** — the full-screen preview's decisions,
 pure and vitest-pinned (the previewRetryPolicy / transportSwitch shape): the
@@ -1299,10 +1317,13 @@ and `/api/status` display. Bandwidth numbers are measured client throughput —
 (hard restart choreography) when it stalls. Recovery re-attaches the environment
 through the Streaming Session's `refreshAfterRecovery()`. The decisions are
 the pure `WatchdogPolicy`: the SOFT/MEDIUM/HARD escalation ladder
-(`tierFor`), the stall verdict over a `HealthSnapshot` (`evaluate`), the
-per-tier recovery-verification verdict (`verificationSuccess` — SOFT's
-frames-advanced-or-zero-clients, MEDIUM's isLive, HARD's isLive+cameraReady),
-and the named verification windows. The loop itself executes a tested plan:
+(`tierFor`), the stall verdict over a `HealthSnapshot` (`evaluate` — the
+viewer-independent camera-tap stall check runs before the client-gated
+one, so a locked headless mount still trips it), the per-tier
+recovery-verification verdict (`verificationSuccess` — SOFT's
+frames-advanced, measured on the viewer-independent camera counter so a
+headless stream verifies honestly with no zero-clients escape; MEDIUM's
+isLive, HARD's isLive+cameraReady), and the named verification windows. The loop itself executes a tested plan:
 `verificationSpecFor(tier)` (delay + whether frames are measured) collapses
 `verifyRecovery` into one parameterized pass, and `nextTick` is the one
 verdict (action, status, backoff) per health tick — backoff before the
@@ -2299,6 +2320,9 @@ contracts.
 | `TileRung` / `tileBadgeKind` | `CameraTile` (derived memos; the five primitives stay the written truth) | `web/src/lib/tileRung.ts` | auth-frame / live / snapshot; badge live / online / offline / loading | derived, never stored — the fetch/toggle/demotion writers keep writing the primitives under the wave-6 revoke/stale discipline, and the rung only reads them (revocation invalidates the browser resource, not the string); the persisted-vs-local `mode` divergence is deliberate (a silent MJPEG demotion lasts the session only and must not destroy the persisted preference; credential tiles are snapshot-locked); a loading tile still carries the offline badge styling — the stylesheet has no `-loading` rule, and the class map keeps that byte-identical |
 | Fullscreen mode | `useFullscreen` (`active`/`mode` signals; `cssOverlay` derived) | `web/src/hooks/useFullscreen.ts` | inactive / native / css-overlay | native `requestFullscreen` on the shared container; a rejected request sticks `nativeRejected` and falls back to the CSS fixed-overlay (iOS Safari); the active bit lifts to App's `overlayActive()` so higher overlays defer Escape; unmount releases the wake lock and exits native fullscreen |
 | Screen wake-lock verdict | `useFullscreen` effect over `wakeLockVerdict` (pure) | `web/src/lib/fullscreenPolicy.ts` | acquire / release / noop | fullscreen-scoped only — acquire while fullscreen AND live AND API+secure-context, release when either ends, noop when wanted-but-unsupported; re-acquires on visibility regain; a release landing mid-request is honored so no lock is stranded |
+| Camera-strip mirrors (zoom/torch/EV) | `createCameraControls` (one instance per skin renderer; only one shell is mounted) | `web/src/hooks/useCameraControls.ts` | device truth authoritative; optimistic flips bridge the round-trip | torch/zoom resync from every status push — the focused slider holds the zoom mirror via the `remote-zoom-slider` activeElement guard (the old preview-bar contract carried over) and a recent stepper press holds it for `ZOOM_MIRROR_HOLD_MS = 600` (its echo can land before the device applied), EV resyncs from the settings mirror once `evPressGuard`'s 800 ms post-press window closes; a failed POST reverts the optimistic flip and flashes the strip's message slot, and the next snapshot settles the truth anyway — the failure self-corrects through the same channel |
+| Zoom send throttle | `useCameraControls.setZoom` over the pure verdicts | `web/src/lib/cameraControlsPolicy.ts` | leading send + one trailing flush per `ZOOM_SEND_THROTTLE_MS = 150` | a slider drag lands as a handful of POSTs instead of one per input event (the old bar fired one per input); the flush carries the newest optimistic ratio and re-arms `lastZoomSentAt`; cleanup cancels a pending flush so an unmounted strip never POSTs |
+| Strip collapse | `useCameraControls` `collapsed` signal over `parseStripCollapsed` (pure) | `web/src/lib/cameraControlsPolicy.ts` | open / collapsed | persisted under `lenscast.camStrip`; anything but `'collapsed'` is open — an unknown value can never wedge the strip shut (uiMode's parse rule); the collapsed handle is also the HLS rung's escape hatch, since the expanded strip overlaps that rung's native seek bar |
 
 ### Deliberately implicit
 

@@ -58,7 +58,16 @@ class ServerForegroundController(
         pendingStop?.cancel()
         pendingStop = null
         if (running) {
-            session.ensureServerForeground()
+            if (session.isActive) {
+                // A live session owns the stronger CAMERA/MICROPHONE
+                // promotion — re-assert it rather than the server-only one
+                // (which would no-op). This is also the resume heal for a
+                // start whose typed promotion was denied while the app was
+                // backgrounded or locked.
+                session.reassertStreamingForegroundIfActive()
+            } else {
+                session.ensureServerForeground()
+            }
         } else {
             val target = scope
             if (target == null) {

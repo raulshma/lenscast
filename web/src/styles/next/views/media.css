@@ -1,0 +1,226 @@
+/* ══════════════════════════════════════════════════════════════════
+   NEXT UI — MEDIA VIEW
+   Day-grouped thumbnail grid with a console toolbar. Loads after
+   cards.css so its rules win where the classic reskin overlaps.
+   ══════════════════════════════════════════════════════════════════ */
+
+.nx-media {
+  gap: var(--nx-space-4);
+}
+
+/* ── Toolbar ──────────────────────────────────────────────────────── */
+
+.nx-media-toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--nx-space-3);
+  flex-wrap: wrap;
+}
+
+.nx-media-search {
+  display: flex;
+  align-items: center;
+  gap: var(--nx-space-2);
+  flex: 1;
+  min-width: 180px;
+  max-width: 340px;
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid var(--nx-control-border);
+  border-radius: var(--nx-radius);
+  background: var(--nx-control-bg);
+  color: var(--nx-text-tertiary);
+}
+
+.nx-media-search:focus-within {
+  border-color: var(--nx-accent);
+  box-shadow: 0 0 0 3px var(--nx-focus-ring);
+}
+
+.nx-media-search-input {
+  flex: 1;
+  min-width: 0;
+  height: auto;
+  border: none;
+  background: transparent;
+  padding: 0;
+}
+
+.nx-media-search-input:focus {
+  border: none;
+  box-shadow: none;
+}
+
+.nx-media-toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--nx-space-2);
+  margin-left: auto;
+  flex-wrap: wrap;
+}
+
+/* ── Day groups ───────────────────────────────────────────────────── */
+
+.nx-media-day {
+  display: flex;
+  flex-direction: column;
+  gap: var(--nx-space-2);
+}
+
+.nx-media-day-head {
+  display: flex;
+  align-items: center;
+  gap: var(--nx-space-3);
+  padding-top: var(--nx-space-2);
+}
+
+.nx-media-day-label {
+  font-size: var(--nx-text-xs);
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--nx-text-secondary);
+}
+
+.nx-media-day-count {
+  font-size: var(--nx-text-xs);
+  color: var(--nx-text-faint);
+}
+
+/* ── Grid ─────────────────────────────────────────────────────────── */
+
+.nx-media-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: var(--nx-space-2);
+}
+
+.nx-media-grid-skeleton .nx-skeleton {
+  height: 140px;
+  border-radius: var(--nx-radius);
+}
+
+.nx-tile {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--nx-border);
+  border-radius: var(--nx-radius);
+  background: var(--nx-surface);
+  overflow: hidden;
+  cursor: pointer;
+  transition: border-color var(--nx-duration-fast) var(--nx-ease), box-shadow var(--nx-duration-fast) var(--nx-ease);
+}
+
+.nx-tile:hover {
+  border-color: var(--nx-border-strong);
+}
+
+.nx-tile:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--nx-focus-ring);
+}
+
+.nx-tile-selectable:hover {
+  border-color: color-mix(in srgb, var(--nx-accent) 40%, transparent);
+}
+
+.nx-tile-selected {
+  border-color: var(--nx-accent);
+  box-shadow: 0 0 0 1px var(--nx-accent);
+}
+
+.nx-tile-thumb {
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  object-fit: cover;
+  display: block;
+  background: #0a0c10;
+}
+
+.nx-tile-badge {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: var(--nx-radius-sm);
+  background: rgba(4, 6, 10, 0.72);
+  color: #fff;
+  font-size: var(--nx-text-2xs);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  font-variant-numeric: tabular-nums;
+  backdrop-filter: blur(4px);
+}
+
+.nx-tile-check {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: var(--nx-radius-sm);
+  background: var(--nx-accent);
+  color: var(--nx-on-accent);
+}
+
+.nx-tile-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 6px 8px;
+  min-width: 0;
+}
+
+.nx-tile-name {
+  font-size: var(--nx-text-xs);
+  color: var(--nx-text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.nx-tile-sub {
+  font-size: var(--nx-text-2xs);
+  color: var(--nx-text-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.nx-tile-delete {
+  position: absolute;
+  bottom: 34px;
+  right: 6px;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border: none;
+  border-radius: var(--nx-radius-sm);
+  background: rgba(4, 6, 10, 0.72);
+  color: var(--nx-danger);
+  cursor: pointer;
+  backdrop-filter: blur(4px);
+}
+
+.nx-tile:hover .nx-tile-delete,
+.nx-tile:focus-within .nx-tile-delete {
+  display: flex;
+}
+
+.nx-tile-delete:hover {
+  background: var(--nx-danger-bg);
+}
+
+.nx-media-more {
+  display: flex;
+  justify-content: center;
+  padding: var(--nx-space-2) 0 var(--nx-space-4);
+}

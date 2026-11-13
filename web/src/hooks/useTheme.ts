@@ -24,11 +24,18 @@ function initialTheme(): ThemeMode {
  * CSS as before. Light mode only ever adds data-theme="light" on <html>,
  * which App.css overrides with a dedicated token block. The choice persists
  * to localStorage and falls back to prefers-color-scheme on first visit.
+ *
+ * `enabled` lets the dispatcher scope the classic attribute semantics to the
+ * classic shell: while the next shell is mounted it writes its own disjoint
+ * data-theme value (useNextTheme), and the guard keeps this effect from
+ * fighting it. The guard is read reactively, so switching shells re-applies
+ * the classic attribute.
  */
-export function useTheme() {
+export function useTheme(enabled?: () => boolean) {
   const [theme, setTheme] = createSignal<ThemeMode>(initialTheme())
 
   createEffect(() => {
+    if (enabled && !enabled()) return
     const root = document.documentElement
     if (theme() === 'light') root.setAttribute('data-theme', 'light')
     else root.removeAttribute('data-theme')

@@ -116,6 +116,34 @@ class StreamingSession(
     }
 
     /**
+     * The resume seam: while a session is live, re-assert its streaming
+     * foreground promotion and re-arm the watchdog. A start that happened
+     * while the app was not visible (tile, boot resume, automation on a
+     * locked mount) could not take the CAMERA/MICROPHONE typed promotion —
+     * the while-in-use camera policy denies it — and the stall watch may
+     * have exhausted its retries into FAILED while the camera stayed denied.
+     * The moment the app is visible again both heal: the typed promotion
+     * lands, and a fresh watchdog pass rebinds the camera the policy just
+     * allowed back.
+     */
+    fun reassertStreamingForegroundIfActive() {
+        // Read-then-send under the same lock the end path flips the bit
+        // under: a re-assert racing a session end must never promote a
+        // streaming notification over a torn-down session.
+        val sent = synchronized(foregroundModeLock) {
+            if (active.get()) {
+                sendForegroundIntent(StreamingService.ACTION_START)
+                true
+            } else {
+                false
+            }
+        }
+        if (!sent) return
+        Log.d(TAG, "Streaming session foreground re-asserted on resume")
+        runCatching { streamWatchdog.startMonitoring() }
+    }
+
+    /**
      * Re-asserts the foreground service's type after a mic-capture verdict
      * flip the stream lifecycle did not cause - arming sound detection starts
      * a headless capture, disarming stops it, and the service must carry (or
@@ -343,6 +371,15 @@ class StreamingSession(
                 // frame pump and every detection path with it.
                 powerManager.renewWakeLock()
                 streamingManager.applyBatteryOptimization(powerManager.optimizationResult.value)
+                // A live session never gives up on its camera. A watchdog
+                // that exhausted its retries sits in FAILED with a dead
+                // loop; on ROMs whose while-in-use camera policy denies
+                // recovery while the app is backgrounded, every pass fails
+                // until the policy relents (screen unlocked, app visible).
+                // Re-arm on each poll so the ladder keeps running at this
+                // cadence for as long as the session lives — the unattended
+                // mount has no one to restart the stream by hand.
+                if (!streamWatchdog.isMonitoring) streamWatchdog.startMonitoring()
                 delay(OPTIMIZATION_POLL_MS)
             }
         }

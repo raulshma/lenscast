@@ -589,7 +589,13 @@ class RecordingControllerTest {
         // EXTENDED deadline, exactly one re-arm START fires.
         val clock = ManualClock()
         val loop = armContinuousLoop(nowMs = clock::now)
-        controller.onServiceStarted(clock.now(), loop.segment)
+        // The segment's start report carries a REAL stamp (the sibling pin
+        // below documents why): the controller's duration math is real-clock,
+        // and a manual stamp here would make the 300 s auto-stop fire
+        // immediately (a negative remainMs skips the delay), racing this
+        // test's own stop intent. The manual clock below drives the LOOP's
+        // verdicts only (grace, suppression, rearm delays).
+        controller.onServiceStarted(System.currentTimeMillis(), loop.segment)
 
         // Break #1: a foreign stop — the grace check declares it past the 5 s
         // mark. The pre-advance window lets the collector's first Idle pass

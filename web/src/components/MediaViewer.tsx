@@ -135,7 +135,7 @@ export function MediaViewer(props: {
         <div class="viewer-info">
           <span class="viewer-name">{props.item.fileName}</span>
         </div>
-        <div class="flex items-center gap-2">
+        <div class="viewer-actions flex items-center gap-2">
           <CopyLinkButton url={shareUrl} />
           <a class="action-btn action-btn-ghost" href={props.item.downloadUrl} download="">
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">

@@ -30,8 +30,12 @@ object WatchdogPolicy {
     /**
      * The post-recovery verdict, per tier — what the watchdog's verification
      * window is for:
-     * - SOFT: frames advanced across the observation window, or no clients
-     *   are connected to verify against (assume OK).
+     * - SOFT: frames advanced across the observation window. The measurement
+     *   is the camera-frame counter (viewer-independent), so a headless
+     *   stream verifies honestly — a rebind that brought no frames back
+     *   fails here instead of being waved through by the old
+     *   no-clients-assume-OK escape, which let a denied camera ride SOFT
+     *   forever on a locked mount.
      * - MEDIUM: the stream is live again.
      * - HARD: the stream is live and the camera is Ready.
      * Every call site passes every argument explicitly; a tier that doesn't
@@ -44,7 +48,7 @@ object WatchdogPolicy {
         isLive: Boolean,
         cameraReady: Boolean,
     ): Boolean = when (tier) {
-        RecoveryTier.SOFT -> framesAdvanced || clientCount == 0
+        RecoveryTier.SOFT -> framesAdvanced
         RecoveryTier.MEDIUM -> isLive
         RecoveryTier.HARD -> isLive && cameraReady
     }
@@ -90,6 +94,8 @@ object WatchdogPolicy {
         val clientCount: Int,
         val processedFrames: Int,
         val lastProcessedFrameCount: Int,
+        val cameraFrames: Long = 0L,
+        val lastCameraFrames: Long = 0L,
         val lastFrameCheckTimeMs: Long,
         val nowMs: Long,
         val rtspActive: Boolean = false,
@@ -110,8 +116,7 @@ object WatchdogPolicy {
 
     /**
      * The health verdict in branch order — camera error, server stopped,
-     * stream stopped, frame stall — or null when healthy. Frame-stall
-     * detection applies only while clients are connected.
+     * stream stopped, frame stall — or null when healthy.
      */
     fun evaluate(snapshot: HealthSnapshot): StallReason? {
         // 1. Camera state check
@@ -129,7 +134,21 @@ object WatchdogPolicy {
             return StallReason.STREAM_STOPPED
         }
 
-        // 4. Frame stall detection — only when clients are connected
+        // 4. Camera-tap stall — viewer-independent. The camera-frame counter
+        // advances for every sensor frame (motion detection and the snapshot
+        // store consume all of them), so this catches the headless stall a
+        // locked mount hits when the while-in-use camera policy denies the
+        // reopen: zero clients, the old client-gated check below blind, and
+        // the dashboard reporting active while nothing flows.
+        if (snapshot.nowMs - snapshot.lastFrameCheckTimeMs >= FRAME_STALL_THRESHOLD_MS &&
+            snapshot.cameraFrames == snapshot.lastCameraFrames
+        ) {
+            return StallReason.FRAME_STALL
+        }
+
+        // 5. Viewer-side stall — the camera delivers but the M-JPEG pipeline
+        // does not (queue wedged, encoder dead); only observable with
+        // clients actually pulling.
         if (snapshot.clientCount > 0 &&
             snapshot.nowMs - snapshot.lastFrameCheckTimeMs >= FRAME_STALL_THRESHOLD_MS &&
             snapshot.processedFrames == snapshot.lastProcessedFrameCount
@@ -165,6 +184,7 @@ object WatchdogPolicy {
 
     data class FrameTracking(
         val processedFrameCount: Int,
+        val cameraFrameCount: Long,
         val frameCheckTimeMs: Long,
     )
 
@@ -184,6 +204,8 @@ object WatchdogPolicy {
     data class TrackingSnapshot(
         /** The processed-frames count the last check left as the stall baseline. */
         val processedFrameCount: Int = 0,
+        /** The camera-frame count the last check left as the headless stall baseline. */
+        val cameraFrameCount: Long = 0L,
         /** The RTSP accepted-frames count the last check left as the stall baseline. */
         val rtspAcceptedFrames: Long = 0L,
         /** Wall clock of the last check that touched the frame baselines (the stall window's origin). */
@@ -195,21 +217,23 @@ object WatchdogPolicy {
     )
 
     /**
-     * The frame-tracking update a healthy check leaves behind. With no
-     * clients the tracking resets to now (avoiding false stalls once clients
-     * reconnect); with clients it advances only when frames are flowing.
-     * Null = keep the current tracking (a stall was detected).
+     * The frame-tracking update a healthy check leaves behind: the stall
+     * baselines re-origin whenever ANY flow signal progressed — the
+     * viewer-independent camera counter or the viewers' processed counter.
+     * The old no-client reset branch is gone: the camera counter made
+     * headless flow observable, and resetting on `clientCount <= 0` is
+     * exactly what hid a dead camera from an unattended mount. Null = keep
+     * the current tracking (a stall was detected).
      */
     fun updatedTracking(snapshot: HealthSnapshot): FrameTracking? {
-        if (snapshot.clientCount <= 0) {
-            // No clients — reset frame tracking to avoid false positives once clients reconnect
-            return FrameTracking(snapshot.processedFrames, snapshot.nowMs)
-        }
-        // Update tracking if frames are flowing
-        if (snapshot.processedFrames != snapshot.lastProcessedFrameCount) {
-            return FrameTracking(snapshot.processedFrames, snapshot.nowMs)
-        }
-        return null
+        val flowing = snapshot.cameraFrames != snapshot.lastCameraFrames ||
+            snapshot.processedFrames != snapshot.lastProcessedFrameCount
+        if (!flowing) return null
+        return FrameTracking(
+            processedFrameCount = snapshot.processedFrames,
+            cameraFrameCount = snapshot.cameraFrames,
+            frameCheckTimeMs = snapshot.nowMs,
+        )
     }
 
     /** The watchdog's published lifecycle statuses — the verdicts name them, the loop publishes them. */

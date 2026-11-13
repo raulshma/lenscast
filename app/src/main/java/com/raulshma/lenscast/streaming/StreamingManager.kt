@@ -50,6 +50,7 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicLong
 
 class StreamingManager(
     private val context: Context,
@@ -271,6 +272,18 @@ class StreamingManager(
     @Volatile
     private var currentOverlaySettings = OverlaySettings()
     private val networkQualityMonitor = NetworkQualityMonitor()
+
+    /**
+     * Every camera frame that reached the fan-out, counted regardless of
+     * viewers — motion detection and the snapshot store run on all of them.
+     * The watchdog's headless stall signal: [processedFrames] only moves for
+     * real M-JPEG viewers, so a locked mount streaming to zero clients was
+     * invisible to the old client-gated stall check.
+     */
+    private val cameraFrameCount = AtomicLong(0L)
+
+    /** The monotonic camera-frame count the watchdog's stall watch compares across ticks. */
+    fun cameraFrameCount(): Long = cameraFrameCount.get()
     private val adaptiveBitrateController = AdaptiveBitrateController(networkQualityMonitor)
     private val qualityPolicy = StreamQualityPolicy(thermalMonitor, adaptiveBitrateController)
     private val framePipeline = FramePipeline(qualityPolicy)
@@ -1413,6 +1426,11 @@ class StreamingManager(
      * and rotating them upstream would shift their semantics.
      */
     fun pushFrame(yuvData: ByteArray, width: Int, height: Int, rotation: Int = 0) {
+        // The viewer-independent camera-frame counter — the watchdog's
+        // headless stall signal. Counted at entry, before the thermal
+        // early-return: a thermally-paused stream is a controlled state, not
+        // a camera failure, and the counter must not read one as the other.
+        cameraFrameCount.incrementAndGet()
         // Thermal CRITICAL pauses encoding on both outputs — the pipeline's
         // Long.MAX_VALUE delay alone would stall MJPEG while the encoded
         // sinks kept burning CPU.

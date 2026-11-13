@@ -17,6 +17,8 @@ class WatchdogPolicyTest {
         clientCount: Int = 1,
         processedFrames: Int = 100,
         lastProcessedFrameCount: Int = 90, // frames advancing by default → healthy
+        cameraFrames: Long = 1_000L,
+        lastCameraFrames: Long = 900L, // camera tap advancing by default → healthy
         lastFrameCheckTimeMs: Long = 0L,
         nowMs: Long = WatchdogPolicy.FRAME_STALL_THRESHOLD_MS,
     ) = WatchdogPolicy.HealthSnapshot(
@@ -28,6 +30,8 @@ class WatchdogPolicyTest {
         clientCount = clientCount,
         processedFrames = processedFrames,
         lastProcessedFrameCount = lastProcessedFrameCount,
+        cameraFrames = cameraFrames,
+        lastCameraFrames = lastCameraFrames,
         lastFrameCheckTimeMs = lastFrameCheckTimeMs,
         nowMs = nowMs,
     )
@@ -145,14 +149,51 @@ class WatchdogPolicyTest {
     }
 
     @Test
-    fun `no clients means no frame stall even with frozen frames`() {
+    fun `a headless mount with frozen camera frames is stalled even with no clients`() {
+        // The locked-mount zombie: zero viewers, the camera tap dead (the
+        // while-in-use policy denied the reopen). The camera counter is the
+        // only signal that can see it.
+        assertEquals(
+            WatchdogPolicy.StallReason.FRAME_STALL,
+            WatchdogPolicy.evaluate(
+                snapshot(
+                    clientCount = 0,
+                    cameraFrames = 1_000L,
+                    lastCameraFrames = 1_000L,
+                    nowMs = 10 * WatchdogPolicy.FRAME_STALL_THRESHOLD_MS,
+                )
+            )
+        )
+    }
+
+    @Test
+    fun `no clients with a flowing camera tap is healthy even with frozen pipeline frames`() {
+        // The M-JPEG pipeline only processes for real viewers; a healthy
+        // headless camera shows frozen processedFrames. The camera counter
+        // proves the tap is alive — no stall.
         assertNull(
             WatchdogPolicy.evaluate(
                 snapshot(
                     clientCount = 0,
                     processedFrames = 100,
                     lastProcessedFrameCount = 100,
+                    cameraFrames = 1_000L,
+                    lastCameraFrames = 900L,
                     nowMs = 10 * WatchdogPolicy.FRAME_STALL_THRESHOLD_MS,
+                )
+            )
+        )
+    }
+
+    @Test
+    fun `headless stall boundary is exclusive below the threshold`() {
+        assertNull(
+            WatchdogPolicy.evaluate(
+                snapshot(
+                    clientCount = 0,
+                    cameraFrames = 1_000L,
+                    lastCameraFrames = 1_000L,
+                    nowMs = WatchdogPolicy.FRAME_STALL_THRESHOLD_MS - 1,
                 )
             )
         )
@@ -197,11 +238,19 @@ class WatchdogPolicyTest {
     // ── updatedTracking ──
 
     @Test
-    fun `tracking resets to now when no clients are connected`() {
+    fun `tracking advances both baselines when the camera tap flows headless`() {
         val tracking = WatchdogPolicy.updatedTracking(
-            snapshot(clientCount = 0, processedFrames = 55, nowMs = 9_000)
+            snapshot(
+                clientCount = 0,
+                processedFrames = 55,
+                lastProcessedFrameCount = 55, // pipeline idle without viewers
+                cameraFrames = 1_500L,
+                lastCameraFrames = 1_400L,
+                nowMs = 9_000,
+            )
         )!!
         assertEquals(55, tracking.processedFrameCount)
+        assertEquals(1_500L, tracking.cameraFrameCount)
         assertEquals(9_000, tracking.frameCheckTimeMs)
     }
 
@@ -215,10 +264,15 @@ class WatchdogPolicyTest {
     }
 
     @Test
-    fun `tracking is kept when clients are connected but frames are frozen`() {
+    fun `tracking is kept when every flow signal is frozen`() {
         assertNull(
             WatchdogPolicy.updatedTracking(
-                snapshot(clientCount = 1, processedFrames = 100, lastProcessedFrameCount = 100)
+                snapshot(
+                    processedFrames = 100,
+                    lastProcessedFrameCount = 100,
+                    cameraFrames = 1_000L,
+                    lastCameraFrames = 1_000L,
+                )
             )
         )
     }
@@ -231,8 +285,14 @@ class WatchdogPolicyTest {
         val tracking = WatchdogPolicy.updatedTracking(healthy)!!
         assertTrue(tracking.processedFrameCount == 130 && tracking.frameCheckTimeMs == WatchdogPolicy.FRAME_STALL_THRESHOLD_MS)
 
-        // A stalled stream evaluates to FRAME_STALL and keeps the old tracking.
-        val stalled = snapshot(processedFrames = 130, lastProcessedFrameCount = 130)
+        // A stalled stream (every counter frozen) evaluates to FRAME_STALL
+        // and keeps the old tracking.
+        val stalled = snapshot(
+            processedFrames = 130,
+            lastProcessedFrameCount = 130,
+            cameraFrames = 1_000L,
+            lastCameraFrames = 1_000L,
+        )
         assertEquals(WatchdogPolicy.StallReason.FRAME_STALL, WatchdogPolicy.evaluate(stalled))
         assertNull(WatchdogPolicy.updatedTracking(stalled))
     }
@@ -253,8 +313,12 @@ class WatchdogPolicyTest {
     }
 
     @Test
-    fun `soft recovery assumes success when no clients are connected to verify against`() {
-        assertTrue(
+    fun `soft recovery verifies honestly even with no clients connected`() {
+        // The camera-frame counter made headless verification possible: a
+        // rebind that brought no frames back must fail — the old
+        // no-clients-assume-OK escape waved a denied camera through SOFT
+        // forever on a locked mount.
+        assertFalse(
             WatchdogPolicy.verificationSuccess(
                 WatchdogPolicy.RecoveryTier.SOFT,
                 framesAdvanced = false,

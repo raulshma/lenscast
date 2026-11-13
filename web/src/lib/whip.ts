@@ -3,6 +3,8 @@
 // field map to display text over plain values, so vitest can pin every
 // mapping without a browser.
 
+import type { StatusVariant } from './statusVariant'
+
 /** The whipStatus wire names on the status snapshot (absent on pre-WHIP firmware). */
 export type WhipStatusWire = 'idle' | 'connecting' | 'connected' | 'error'
 
@@ -21,7 +23,7 @@ export interface WhipStatusView {
   /** The failure reason; empty outside the error state. */
   detail: string
   /** The status-banner variant the card renders. */
-  variant: 'info' | 'success' | 'warning' | 'error'
+  variant: StatusVariant
 }
 
 /** The display strings whipStatusView emits — overridden by the i18n caller. */

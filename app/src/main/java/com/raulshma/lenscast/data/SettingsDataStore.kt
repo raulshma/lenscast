@@ -875,7 +875,12 @@ internal val storageQuotaMbPref = intPref(
 internal val mediaEncryptionEnabledPref = boolPref(Keys.MEDIA_ENCRYPTION_ENABLED, defaultTrue = false)
 
 
-internal val watchdogEnabledPref = boolPref(Keys.WATCHDOG_ENABLED, defaultTrue = false)
+// On by default: without it a mid-stream camera death (an OEM background
+// sweep, the while-in-use camera policy denying a reopen) leaves a zombie —
+// the dashboard reports active while no frame reaches any client, forever.
+// The watchdog's escalating tiers are the only in-process cure, and its HARD
+// tier's re-initialization is what un-poisons CameraX's "Cams:0" empty list.
+internal val watchdogEnabledPref = boolPref(Keys.WATCHDOG_ENABLED, defaultTrue = true)
 
 internal val watchdogMaxRetriesPref = intPref(
     Keys.WATCHDOG_MAX_RETRIES,
