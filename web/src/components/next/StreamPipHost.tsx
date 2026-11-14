@@ -1,5 +1,5 @@
-import { createEffect, createSignal, onCleanup } from 'solid-js'
-import type { NextState } from './NextState'
+import { createEffect, createMemo, createSignal, onCleanup } from 'solid-js'
+import { streamPreviewProps, type NextState } from './NextState'
 import { hashRouter, isNextRoute, type RouteName } from '../../lib/router'
 import { API_DEFAULTS } from '../../api/defaults'
 import { t } from '../../lib/i18n'
@@ -45,6 +45,12 @@ export default function StreamPipHost(props: { state: NextState }) {
   }
   const webActive = () => state.status()?.streaming?.webStreamingActive ?? API_DEFAULTS.webStreamingActive
   const pipMode = () => pipWanted(view(), webActive(), state.previewVisible(), pipDismissed())
+  // The re-parenting verdict spelled as a boolean: false exactly when the
+  // effect below parks the host in the hidden holding pen (away from live
+  // with the dock dismissed or the stream down). StreamPreview's push-to-talk
+  // cleanup observes it — previewVisible rides along true through that
+  // re-parent, so this is the only signal that says the stage is gone.
+  const interactionVisible = createMemo(() => view() === 'live' || pipMode())
   const bottomInset = () =>
     typeof window !== 'undefined' && window.innerWidth < PIP_MOBILE_BREAKPOINT ? PIP_MOBILE_BOTTOM_INSET : 0
 
@@ -230,23 +236,8 @@ export default function StreamPipHost(props: { state: NextState }) {
           never unmount it. */}
       <div class="nx-stream-host" ref={setHostEl}>
         <StreamPreview
-          status={state.status}
-          previewVisible={state.previewVisible}
-          streamNonce={state.streamNonce}
-          streamActionLoading={state.streamActionLoading}
-          isRecording={state.isRecording}
-          captureMsg={state.captureMsg}
-          liveAudioStatus={state.liveAudioStatus}
-          recordingTimer={state.recordingTimer}
-          playerMode={state.playerMode}
-          setPlayerMode={state.setPlayerMode}
-          handleCapture={state.handleCapture}
-          handleStartWebStream={state.handleStartWebStream}
-          handleStopWebStream={state.handleStopWebStream}
-          handleStartRtspStream={state.handleStartRtspStream}
-          handleStopRtspStream={state.handleStopRtspStream}
-          setPreviewVisible={state.setPreviewVisible}
-          connectionLost={state.connectionLost}
+          {...streamPreviewProps(state)}
+          interactionVisible={interactionVisible}
           stripOverlay={() => <CameraStrip state={state} />}
         />
       </div>

@@ -89,14 +89,26 @@ describe('StreamPipHost', () => {
     expect(dock().getAttribute('aria-hidden')).toBe('false')
   })
 
-  it('hands the player to the stage slot on the live view', async () => {
+  it('hands the player to the stage slot on live and back without remounting it', async () => {
     const { state } = fixtureState()
     render(() => <StreamPipHost state={state} />)
     await waitFor(() => expect(host().parentElement).toBeTruthy())
+    // Capture identity BEFORE navigating: the re-queried host/player of a
+    // remount would satisfy these assertions, the captured ones cannot.
+    const hostBefore = host()
+    const playerBefore = hostBefore.querySelector('.preview-img')
+    expect(playerBefore).toBeTruthy()
+
     hashRouter().navigate({ name: 'live' })
-    await waitFor(() => expect(host().parentElement).toBe(stage))
+    await waitFor(() => expect(hostBefore.parentElement).toBe(stage))
     // No dock element is rendered while the stage hosts the player.
     expect(dock().classList.contains('nx-pip-hidden')).toBe(true)
+
+    hashRouter().navigate({ name: 'media' })
+    await waitFor(() => expect(hostBefore.parentElement).toBe(document.querySelector('.nx-pip-slot')))
+    // The round trip moved the same elements — no host or player replacement.
+    expect(host()).toBe(hostBefore)
+    expect(hostBefore.querySelector('.preview-img')).toBe(playerBefore)
   })
 
   it('parks the player in the holding pen when the stream stops', async () => {

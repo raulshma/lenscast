@@ -125,7 +125,7 @@ class StreamingService : Service() {
             runCatching {
                 (application as? com.raulshma.lenscast.AppGraph)
                     ?.lockBypassController
-                    ?.onStreamingPromotionDenied()
+                    ?.requestWake()
             }.onFailure {
                 Log.w(TAG, "Lock bypass dispatch failed: ${it.javaClass.simpleName}")
             }

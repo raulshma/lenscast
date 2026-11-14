@@ -28,50 +28,63 @@ import com.raulshma.lenscast.streaming.StreamingService
  * activity dismisses itself and the camera stays with the running
  * CAMERA-typed foreground service.
  *
- * This controller owns the posting policy: only when the keyguard is
- * actually locked, only when the full-screen-intent permission is usable
- * (Android 14+ can revoke it — Play installs of non-calling apps), and
- * throttled so a denied-promotion retry loop cannot spam the screen. The
- * denied-promotion fallback in [StreamingService] is the trigger — that is
- * the exact code path a locked-mount start lands on.
+ * This controller owns the Android reads (keyguard truth, POST_NOTIFICATIONS,
+ * the full-screen-intent permission), the attempt bookkeeping, and the
+ * posting; the decision ladder itself lives in [LockBypassPolicy] and is
+ * JVM-tested there. Two triggers call [requestWake]: the denied-promotion
+ * fallback in [StreamingService] and the session's denied bind under lock
+ * ([com.raulshma.lenscast.streaming.StreamingSession]) — both are exact
+ * locked-mount paths where the app needs to become visible.
  */
 class LockBypassController(
     private val context: Context,
     private val keyguardMonitor: KeyguardMonitor,
 ) {
 
-    private var lastAttemptAtMs = 0L
+    /** The last wake's [SystemClock.elapsedRealtime]; negative = no attempt yet. */
+    private var lastAttemptAtMs = -1L
 
     /**
-     * Called when the streaming foreground promotion was denied. Posts the
-     * wake notification when the state warrants it; a silent no-op otherwise
-     * (unlocked — the resume seam owns that case; no FSI permission — the
-     * blocked-by-lock status flag owns the truth instead; throttled).
+     * Called when a locked-mount camera need was denied — the streaming
+     * foreground promotion or the camera bind itself. Posts the wake
+     * notification when [LockBypassPolicy] warrants it; a silent no-op
+     * otherwise (unlocked — the resume seam owns that case; no FSI
+     * permission — the blocked-by-lock status flag owns the truth instead;
+     * throttled). The keyguard truth is re-read first: a process alive since
+     * before the screen went off may hold a stale flag if a broadcast was
+     * missed, and the wake's whole premise is the lock.
      */
-    fun onStreamingPromotionDenied() {
-        if (!keyguardMonitor.isKeyguardLocked.value) {
-            // Not a locked-mount denial (a background start on an unlocked
-            // device) — the resume seam heals it on the next visit.
-            return
-        }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) !=
-            PackageManager.PERMISSION_GRANTED
-        ) {
-            Log.w(TAG, "Lock bypass unavailable: POST_NOTIFICATIONS not granted")
-            return
-        }
-        if (!NotificationManagerCompat.from(context).canUseFullScreenIntent()) {
-            // Android 14+ Play-installed apps can lose the full-screen intent
-            // permission; without it the notification would only show as a
-            // heads-up banner, so don't wake-pretend — the dashboard's
-            // blocked-by-lock state is the honest surface.
-            Log.w(TAG, "Lock bypass unavailable: full-screen intents not permitted")
+    fun requestWake() {
+        keyguardMonitor.refresh()
+        val verdict = LockBypassPolicy.resolve(
+            isKeyguardLocked = keyguardMonitor.isKeyguardLocked.value,
+            postNotificationsGranted = postNotificationsGranted(),
+            canUseFullScreenIntent = NotificationManagerCompat.from(context).canUseFullScreenIntent(),
+            nowMs = SystemClock.elapsedRealtime(),
+            lastAttemptAtMs = lastAttemptAtMs,
+        )
+        if (verdict != LockBypassPolicy.Verdict.POST) {
+            Log.d(TAG, "Lock bypass skipped: $verdict")
+            when (verdict) {
+                LockBypassPolicy.Verdict.SKIP_NO_POST_NOTIFICATIONS ->
+                    Log.w(TAG, "Lock bypass unavailable: POST_NOTIFICATIONS not granted")
+                LockBypassPolicy.Verdict.SKIP_NO_FULL_SCREEN_INTENT ->
+                    // Android 14+ Play-installed apps can lose the full-screen
+                    // intent permission; without it the notification would only
+                    // show as a heads-up banner, so don't wake-pretend — the
+                    // dashboard's blocked-by-lock state is the honest surface.
+                    Log.w(TAG, "Lock bypass unavailable: full-screen intents not permitted")
+                else -> Unit
+            }
             return
         }
         val now = SystemClock.elapsedRealtime()
+        // Re-check under the lock: the verdict read the throttle outside any
+        // synchronization, and a denied promotion and a denied bind can race
+        // here from different dispatchers. Same floor, atomic advance; the
+        // unset sentinel (-1) always passes — the first wake is never held.
         synchronized(this) {
-            if (now - lastAttemptAtMs < MIN_ATTEMPT_INTERVAL_MS) {
+            if (lastAttemptAtMs >= 0 && now - lastAttemptAtMs < LockBypassPolicy.MIN_ATTEMPT_INTERVAL_MS) {
                 Log.d(TAG, "Lock bypass throttled (attempted ${now - lastAttemptAtMs}ms ago)")
                 return
             }
@@ -83,6 +96,13 @@ class LockBypassController(
     /** Removes the wake notification — the activity's dismissal epilogue. */
     fun cancel() {
         runCatching { NotificationManagerCompat.from(context).cancel(ForegroundNotifications.LOCK_BYPASS_NOTIFICATION_ID) }
+    }
+
+    /** POST_NOTIFICATIONS is a runtime permission only from API 33; before it, posting needs no grant. */
+    private fun postNotificationsGranted(): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return true
+        return ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) ==
+            PackageManager.PERMISSION_GRANTED
     }
 
     private fun post() {
@@ -129,13 +149,5 @@ class LockBypassController(
 
     companion object {
         private const val TAG = "LockBypassController"
-
-        /**
-         * The retry floor between wake attempts: a watchdog pass that keeps
-         * failing under lock re-lands on the denied promotion repeatedly, and
-         * each pass must not re-launch the shim. One wake per episode plus a
-         * re-arm window is enough — the shim itself heals within seconds.
-         */
-        const val MIN_ATTEMPT_INTERVAL_MS = 30_000L
     }
 }

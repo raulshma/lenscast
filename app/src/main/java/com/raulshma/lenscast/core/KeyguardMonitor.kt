@@ -26,6 +26,13 @@ import kotlinx.coroutines.flow.asStateFlow
  * blocked-by-lock. The unlock cue is the earliest possible moment any heal
  * can be attempted — before the app-visible resume seam — so the stream
  * comes back the instant the user unlocks, not on the next poll cadence.
+ *
+ * Both directions are tracked: ACTION_USER_PRESENT clears the flag and
+ * ACTION_SCREEN_OFF re-reads it (a screen going off is where the keyguard
+ * engages, so a process alive since before the lock learns the new truth
+ * without waiting for a later SCREEN_ON). Decision sites still refresh()
+ * before reading — broadcast delivery to a backgrounded process is not a
+ * contract the wake depends on.
  */
 class KeyguardMonitor(private val context: Context) {
 
@@ -54,7 +61,7 @@ class KeyguardMonitor(private val context: Context) {
                     _unlockEvents.tryEmit(Unit)
                     Log.d(TAG, "Keyguard dismissed (user present)")
                 }
-                Intent.ACTION_SCREEN_ON -> refresh()
+                Intent.ACTION_SCREEN_ON, Intent.ACTION_SCREEN_OFF -> refresh()
             }
         }
     }
@@ -67,6 +74,7 @@ class KeyguardMonitor(private val context: Context) {
             val filter = IntentFilter().apply {
                 addAction(Intent.ACTION_USER_PRESENT)
                 addAction(Intent.ACTION_SCREEN_ON)
+                addAction(Intent.ACTION_SCREEN_OFF)
             }
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                 context.registerReceiver(receiver, filter, Context.RECEIVER_EXPORTED)

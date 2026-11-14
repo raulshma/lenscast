@@ -150,13 +150,16 @@ class MainApplication : Application(), SingletonImageLoader.Factory, AppGraph {
     override val streamingSession: StreamingSession by lazy {
         StreamingSession(
             this, cameraService, { streamingManager }, powerManager, thermalMonitor,
-            keyguardMonitor,
+            keyguardMonitor, lockBypassController,
         ) { streamWatchdog }
     }
     // The locked-mount story's state source: is the keyguard up, and when did
-    // the user unlock. Plain Android over the application context — no cycle
-    // with the streaming graph (the session reads it during begin; the
-    // controller reads it before posting the wake notification).
+    // the user unlock — plus the wake that makes a locked-mount bind
+    // legitimate. Plain Android over the application context — no cycle with
+    // the streaming graph (the session reads the monitor during begin; the
+    // controller reads it before posting the wake, and the session asks it to
+    // post on a denied bind). Both lazies depend only on the context and each
+    // other's already-declared pieces, so the reference order is free.
     override val keyguardMonitor: KeyguardMonitor by lazy { KeyguardMonitor(this) }
     override val lockBypassController: LockBypassController by lazy {
         LockBypassController(this, keyguardMonitor)

@@ -18,6 +18,7 @@ import androidx.camera.core.SurfaceOrientedMeteringPointFactory
 // Aliased: the model's own TorchState state machine is the published torch
 // fact; this import stays for CameraX's torch-state constant.
 import androidx.camera.core.TorchState as CameraXTorchState
+import androidx.camera.core.CameraState as CameraXCameraState
 import androidx.camera.core.resolutionselector.ResolutionSelector
 import androidx.camera.core.resolutionselector.ResolutionStrategy
 import androidx.camera.lifecycle.ProcessCameraProvider
@@ -202,6 +203,18 @@ class CameraService(private val context: Context) {
     private val _cameraState = MutableStateFlow<CameraState>(CameraState.Idle)
     val cameraState: StateFlow<CameraState> = _cameraState.asStateFlow()
 
+    /**
+     * The observed-open fact, separate from [cameraState]: a successful bind
+     * CLAIMS Ready before the camera opens (and the open can still be denied
+     * later by the while-in-use policy), so consumers that need actual camera
+     * *access* — not bind bookkeeping — read this. True only while the
+     * camera-open observer has seen OPEN on the currently bound camera; false
+     * from bind acceptance until that open lands, on any observed error, and
+     * whenever the observation dies with an unbind or a fresh bind.
+     */
+    private val _cameraOpenObserved = MutableStateFlow(false)
+    val cameraOpenObserved: StateFlow<Boolean> = _cameraOpenObserved.asStateFlow()
+
     // The facing flag is no longer its own store: a projection of the one
     // selected-lens fact above, so it can never disagree with the selector.
     val isFrontCamera: StateFlow<Boolean> = _selectedLens
@@ -262,6 +275,7 @@ class CameraService(private val context: Context) {
      * (the frame-error recovery does).
      */
     private var torchStateObserver: Observer<Int>? = null
+    private var cameraOpenStateObserver: Observer<CameraXCameraState>? = null
 
     private var sensorExposureTimeRange: LongRange = 1L..1_000_000_000L
 
@@ -420,6 +434,64 @@ class CameraService(private val context: Context) {
         val observer = torchStateObserver ?: return
         val liveData = camera?.cameraInfo?.torchState
         torchStateObserver = null
+        liveData?.let { controlsHandler.post { it.removeObserver(observer) } }
+    }
+
+    /**
+     * Attach the camera-open observation to the just-bound camera. A bind
+     * succeeding is bookkeeping — CameraX's bindToLifecycle returns before
+     * the camera *opens*, and a while-in-use policy denial (the locked-mount
+     * headline) surfaces later as a non-null StateError in cameraInfo's
+     * camera state, not as a bind exception. The observed transitions are
+     * the truth: a StateError republishes [CameraState.Error]
+     * (ERROR_CAMERA_DISABLED gets the dedicated [CAMERA_DISABLED_MESSAGE]),
+     * OPEN republishes Ready. LiveData's initial dispatch re-states the
+     * current state, so a rebind into an already-open camera re-asserts
+     * Ready; the identity guard drops a stale attach when a fast rebind
+     * replaced the camera before this ran.
+     */
+    private fun observeCameraOpenState(cam: Camera) {
+        val observer = Observer<CameraXCameraState> { state ->
+            // CameraX carries errors as a non-null StateError on the emitted
+            // state (the Type enum has no ERROR member — it stays one of the
+            // five lifecycle states), so the error's presence, not the type,
+            // is the check.
+            val error = state.error
+            if (error != null) {
+                val disabled = error.code == CameraXCameraState.ERROR_CAMERA_DISABLED
+                Log.w(TAG, "Observed camera-state error (disabled=$disabled, code=${error.code})")
+                _cameraOpenObserved.value = false
+                _cameraState.value = CameraState.Error(
+                    if (disabled) CAMERA_DISABLED_MESSAGE
+                    else "Camera error, code ${error.code}",
+                )
+                return@Observer
+            }
+            // The open fact rides every observed transition: OPEN confirms,
+            // anything else withdraws the confirmation.
+            _cameraOpenObserved.value = state.type == CameraXCameraState.Type.OPEN
+            if (state.type == CameraXCameraState.Type.OPEN && _cameraState.value !is CameraState.Ready) {
+                _cameraState.value = CameraState.Ready
+            }
+        }
+        cameraOpenStateObserver = observer
+        controlsHandler.post {
+            if (cameraOpenStateObserver === observer && camera === cam) {
+                cam.cameraInfo.cameraState.observeForever(observer)
+            }
+        }
+    }
+
+    /**
+     * Detach the camera-open observation — the same lifecycle the torch one
+     * rides. The observed-open confirmation dies with it: the next bind must
+     * see OPEN again before [cameraOpenObserved] stands up.
+     */
+    private fun stopCameraOpenObservation() {
+        val observer = cameraOpenStateObserver ?: return
+        val liveData = camera?.cameraInfo?.cameraState
+        cameraOpenStateObserver = null
+        _cameraOpenObserved.value = false
         liveData?.let { controlsHandler.post { it.removeObserver(observer) } }
     }
 
@@ -1056,6 +1128,7 @@ class CameraService(private val context: Context) {
             // camera's live data dies with the unbind below, and the attach
             // must follow the new bind (main-thread posts stay in order).
             stopTorchObservation()
+            stopCameraOpenObservation()
             provider.unbindAll()
             try {
                 camera = bindLargestCompatible(
@@ -1076,6 +1149,9 @@ class CameraService(private val context: Context) {
                 // flip (local enableTorch, a remote writer, the re-asserted
                 // strength) republishes [torchState].
                 observeTorchState(cam)
+                // The live open fact: bind is bookkeeping, the observed
+                // camera-state transitions are the readiness truth.
+                observeCameraOpenState(cam)
 
                 // Refresh the live RAW capability from the camera just
                 // bound; if the plan's capability fold changed what should
@@ -1152,18 +1228,28 @@ class CameraService(private val context: Context) {
             }, CONTROLS_APPLY_DELAY_MS)
 
             // Deferred from the capability check above: rebuild once so the
-            // ImageCapture matches the effective photo config.
+            // ImageCapture matches the effective photo config. Its verdict
+            // propagates: a failed corrective rebind has already published
+            // Error, and the claimed Ready below would stomp that honest
+            // state and report a working camera that is not bound.
             if (correctivePhotoConfigRebind) {
                 correctivePhotoConfigRebind = false
-                rebindUseCases()
+                if (!rebindUseCases()) return false
             }
 
-            // A successful bind IS camera readiness. The service only used to
-            // post Ready from initialize(), so a bind that recovered after a
-            // failure left the state stuck on Error — the sticky UI rule then
-            // hid a working camera behind the error screen, and the
-            // watchdog's recovery verification (which reads Ready) failed
-            // even when frames flowed.
+            // A successful bind CLAIMS camera readiness — CameraX 1.5's
+            // bindToLifecycle returns before the camera opens, and a
+            // while-in-use denial can still surface as an ERROR in the
+            // camera state later. The service only used to post Ready from
+            // initialize(), so a bind that recovered after a failure left
+            // the state stuck on Error — the sticky UI rule then hid a
+            // working camera behind the error screen, and the watchdog's
+            // recovery verification (which reads Ready) failed even when
+            // frames flowed. The claimed state stands until the observed
+            // transitions correct it: [observeCameraOpenState] republishes
+            // Ready on the actual open and Error on a policy denial.
+            // [cameraOpenObserved] carries the difference between this
+            // claim and a confirmed open.
             _cameraState.value = CameraState.Ready
             return true
         } catch (e: Exception) {
@@ -1227,6 +1313,7 @@ class CameraService(private val context: Context) {
 
     private fun clearBoundUseCases() {
         stopTorchObservation()
+        stopCameraOpenObservation()
         preview?.surfaceProvider = null
         preview = null
         imageCapture = null
@@ -1774,6 +1861,15 @@ class CameraService(private val context: Context) {
         /** Fail-fast line for bind attempts before the CAMERA permission exists. */
         private const val CAMERA_PERMISSION_REQUIRED_MESSAGE =
             "Camera permission is not granted. Grant it, then retry."
+
+        /**
+         * The observed-camera-state line for ERROR_CAMERA_DISABLED — the
+         * while-in-use policy's denial (exactly the locked-mount case). A
+         * message constant, not a flag: the streaming session matches it to
+         * drive the blocked-by-lock truth without a second state channel
+         * (the CAMERA_PERMISSION_REQUIRED_MESSAGE precedent).
+         */
+        const val CAMERA_DISABLED_MESSAGE = "Camera disabled by policy (while-in-use denial)"
     }
 }
 

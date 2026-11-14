@@ -80,10 +80,11 @@ export default function AuditPanel() {
                 <div class="nx-audit-main">
                   <div class="nx-audit-line">
                     <span class="nx-audit-time nx-mono">{formatTime(entry.timestampMs)}</span>
-                    <span class="nx-audit-action">{entry.action}</span>
+                    {/* Both lines ellipsize; the title keeps the full text reachable. */}
+                    <span class="nx-audit-action" title={entry.action}>{entry.action}</span>
                   </div>
                   <Show when={entry.detail}>
-                    <span class="nx-audit-detail">{entry.detail}</span>
+                    <span class="nx-audit-detail" title={entry.detail}>{entry.detail}</span>
                   </Show>
                 </div>
                 <Badge tone={outcomeTone(entry)} mono>{entry.outcome}</Badge>

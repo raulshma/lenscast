@@ -1,6 +1,7 @@
 import { createSignal, onCleanup, Show } from 'solid-js'
 import type { NextState } from '../NextState'
-import { isDayArmed } from '../../../armDays'
+import { isArmed } from '../../../armDays'
+import { t } from '../../../lib/i18n'
 import StatsPanel from './detection/StatsPanel'
 import EventLog from './detection/EventLog'
 import SecurityPanel from './detection/SecurityPanel'
@@ -27,32 +28,45 @@ function minuteOfDay(now: Date): number {
 export default function DetectionView(props: { state: NextState }) {
   const state = props.state
 
-  // The armed verdict rides the settings poll plus a minute ticker, so
-  // the strip opens and closes with the clock, not just the poll.
-  const [nowMinute, setNowMinute] = createSignal(minuteOfDay(new Date()))
-  const armTick = setInterval(() => setNowMinute(minuteOfDay(new Date())), ARM_TICK_MS)
+  // The armed verdict rides the settings poll plus a 30s clock ticker, so
+  // the strip opens and closes with the clock, not just the poll. The
+  // ticker holds one Date sample: weekday and minute must agree — two
+  // samples can straddle midnight and arm Sunday with Saturday's minute.
+  const [clock, setClock] = createSignal(new Date())
+  const armTick = setInterval(() => setClock(new Date()), ARM_TICK_MS)
   onCleanup(() => clearInterval(armTick))
 
   const armedNow = () => {
     const stream = state.settings()?.streaming
-    if (!stream?.motionDetectionEnabled) return false
-    if (!stream.motionArmScheduleEnabled) return true
-    const now = new Date()
-    // Bit 0 = Monday … bit 6 = Sunday (the arm mask's ISO day order).
-    if (!isDayArmed(stream.motionArmDaysMask, (now.getDay() + 6) % 7)) return false
-    const minute = nowMinute()
-    const start = stream.motionArmStartMinute
-    const end = stream.motionArmEndMinute
-    if (start === end) return true
-    // A window may wrap midnight.
-    return start < end ? minute >= start && minute < end : minute >= start || minute < end
+    // The clock signal is read unconditionally, before any verdict: an
+    // excluded day must still track the ticker so the strip wakes the
+    // moment an included day (or window boundary) begins.
+    const now = clock()
+    if (!stream) return false
+    // The server's own verdict, mirrored (MotionArmingPolicy.isArmed) so the
+    // strip reads armed exactly when detection actually runs — inclusive
+    // window bounds, ISO day order (bit 0 = Monday … bit 6 = Sunday).
+    return isArmed(
+      stream.motionDetectionEnabled,
+      stream.motionArmScheduleEnabled,
+      stream.motionArmStartMinute,
+      stream.motionArmEndMinute,
+      minuteOfDay(now),
+      stream.motionArmDaysMask,
+      (now.getDay() + 6) % 7,
+    )
   }
 
   return (
     <div class="nx-view">
       <div class="nx-view-inner">
         <div class="nx-detect-head" classList={{ 'nx-detect-armed': armedNow() }}>
+          {/* The strip is pure decoration; the spoken state rides the status
+              line below it so assistive tech reads what the strip shows. */}
           <div class="nx-arm-strip" aria-hidden="true" />
+          <span class="nx-detect-status" role="status">
+            {armedNow() ? t('security.armedNow') : t('security.armedIdle')}
+          </span>
           <StatsPanel />
         </div>
         <div class="nx-detection-grid">

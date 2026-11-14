@@ -90,6 +90,8 @@ export default function SecurityPanel(props: Props) {
   const quietHoursOn = () => stream()?.alertQuietHoursEnabled ?? API_DEFAULTS.alertQuietHoursEnabled
   // Day-of-week arm mask helpers: bit 0 = Monday … bit 6 = Sunday.
   const armDaysMask = () => stream()?.motionArmDaysMask ?? API_DEFAULTS.motionArmDaysMask
+  const armStartMinute = () => stream()?.motionArmStartMinute ?? API_DEFAULTS.motionArmStartMinute
+  const armEndMinute = () => stream()?.motionArmEndMinute ?? API_DEFAULTS.motionArmEndMinute
   const armedDayCount = () => [0, 1, 2, 3, 4, 5, 6].filter((day) => isDayArmed(armDaysMask(), day)).length
 
   function toggleArmDay(isoDayIndex: number) {
@@ -281,7 +283,10 @@ export default function SecurityPanel(props: Props) {
             </For>
           </div>
           {/* The schedule restated as a plain sentence — the toggles stay
-              compact, this line carries the reading: days, then the window. */}
+              compact, this line carries the reading: days, then the window.
+              Equal bounds arm the whole day (isArmed's never-restricts
+              verdict), so the interval reads as the all-day label instead
+              of a nonsensical "14:00–14:00". */}
           <div class="nx-arm-summary">
             <span>
               {isEveryDayMask(armDaysMask())
@@ -289,9 +294,9 @@ export default function SecurityPanel(props: Props) {
                 : dayListLabel(armDaysMask(), t)}
             </span>
             <span class="nx-arm-summary-time nx-mono">
-              {minutesToLabel(stream()?.motionArmStartMinute ?? API_DEFAULTS.motionArmStartMinute)}
-              –
-              {minutesToLabel(stream()?.motionArmEndMinute ?? API_DEFAULTS.motionArmEndMinute)}
+              {armStartMinute() === armEndMinute()
+                ? t('security.allDay')
+                : `${minutesToLabel(armStartMinute())}–${minutesToLabel(armEndMinute())}`}
             </span>
           </div>
         </Show>

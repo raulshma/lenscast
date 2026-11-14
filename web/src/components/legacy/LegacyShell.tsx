@@ -1,5 +1,6 @@
 import { Show, createSignal } from 'solid-js'
 import type { useAppState } from '../../hooks/useAppState'
+import { streamPreviewProps } from '../next/NextState'
 import type { ThemeMode } from '../../hooks/useTheme'
 import { viewerTarget } from '../../lib/viewerStore'
 import Navbar from '../Navbar'
@@ -72,23 +73,7 @@ export default function LegacyShell(props: Props) {
 
       <main class="main-layout">
         <StreamPreview
-          status={state.status}
-          previewVisible={state.previewVisible}
-          streamNonce={state.streamNonce}
-          streamActionLoading={state.streamActionLoading}
-          isRecording={state.isRecording}
-          captureMsg={state.captureMsg}
-          liveAudioStatus={state.liveAudioStatus}
-          recordingTimer={state.recordingTimer}
-          playerMode={state.playerMode}
-          setPlayerMode={state.setPlayerMode}
-          handleCapture={state.handleCapture}
-          handleStartWebStream={state.handleStartWebStream}
-          handleStopWebStream={state.handleStopWebStream}
-          handleStartRtspStream={state.handleStartRtspStream}
-          handleStopRtspStream={state.handleStopRtspStream}
-          setPreviewVisible={state.setPreviewVisible}
-          connectionLost={state.connectionLost}
+          {...streamPreviewProps(state)}
           stripOverlay={() => (
             <CameraControlsStrip
               status={state.status}

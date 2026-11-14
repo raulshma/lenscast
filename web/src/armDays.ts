@@ -20,3 +20,34 @@ export function toggleArmDayMask(daysMask: number, isoDayIndex: number): number 
   const toggled = daysMask ^ dayBit(isoDayIndex)
   return toggled === 0 ? daysMask : toggled
 }
+
+/** The TS mirror of the server's MinuteWindow: minutes 0..1439, both bounds
+ * inclusive, start > end wraps across midnight. Equal bounds cover nothing —
+ * the schedule's degenerate "never restricts" verdict is [isArmed]'s to make. */
+function minuteWindowCovers(startMinute: number, endMinute: number, minuteOfDay: number): boolean {
+  if (startMinute === endMinute) return false
+  return startMinute < endMinute
+    ? minuteOfDay >= startMinute && minuteOfDay <= endMinute
+    : minuteOfDay >= startMinute || minuteOfDay <= endMinute
+}
+
+/** The TS mirror of the server's MotionArmingPolicy.isArmed — the console's
+ * armed strip must answer the same question the capture coordinator answers
+ * for actual detection, with the same inclusive bounds. Minute-of-day is
+ * 0..1439; a window that wraps midnight (start > end) arms across the
+ * boundary; start == end means the schedule never restricts anything. */
+export function isArmed(
+  detectionEnabled: boolean,
+  scheduleEnabled: boolean,
+  startMinute: number,
+  endMinute: number,
+  minuteOfDay: number,
+  daysMask: number,
+  isoDayIndex: number,
+): boolean {
+  if (!detectionEnabled) return false
+  if (!scheduleEnabled) return true
+  if (!isDayArmed(daysMask, isoDayIndex)) return false
+  if (startMinute === endMinute) return true
+  return minuteWindowCovers(startMinute, endMinute, minuteOfDay)
+}

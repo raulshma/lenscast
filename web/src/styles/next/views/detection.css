@@ -37,6 +37,18 @@
   margin-bottom: var(--nx-space-2);
 }
 
+/* The strip's spoken twin: off-canvas but not display:none, so assistive
+   tech reads the armed verdict the strip only shows. */
+.nx-detect-status {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
 /* ── Stats — one big tabular numeral leads each metric ────────────── */
 /* Asymmetric composition, not a stat-card grid: the lead metric spans
    the field with a 28px numeral, the remaining types sit as compact

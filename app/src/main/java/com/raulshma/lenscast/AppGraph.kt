@@ -73,7 +73,7 @@ interface AppGraph {
     val streamingSession: StreamingSession
     /** The live keyguard truth + unlock cue ([KeyguardMonitor]); the locked-mount story's state source. */
     val keyguardMonitor: com.raulshma.lenscast.core.KeyguardMonitor
-    /** The locked-mount camera wake ([com.raulshma.lenscast.core.LockBypassController]); the streaming service's denied-promotion trigger. */
+    /** The locked-mount camera wake ([com.raulshma.lenscast.core.LockBypassController]); the service's denied-promotion and the session's denied-bind trigger. */
     val lockBypassController: com.raulshma.lenscast.core.LockBypassController
     val tlsCertManager: TlsCertManager
     val pushSubscriptionStore: PushSubscriptionStore

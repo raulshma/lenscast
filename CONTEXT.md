@@ -1380,6 +1380,31 @@ default-aware view — the split is documented and locked by test.
 One network callback, exposed as `isWifiConnected: StateFlow`. Callers observe
 the flow; nobody takes one-shot connectivity snapshots.
 
+### Keyguard Monitor
+**`core/KeyguardMonitor.kt`** — app-scoped observer of the device's keyguard
+state, the locked-mount story's state source. Exposes `isKeyguardLocked: StateFlow`
+and an `unlockEvents` cue (ACTION_USER_PRESENT — the earliest heal moment, before
+the app-visible resume seam). Both directions are tracked: USER_PRESENT clears the
+flag, SCREEN_ON/SCREEN_OFF re-read the manager. Decision sites call `refresh()`
+before reading — broadcast delivery to a backgrounded process is not a contract
+the wake depends on. Callers observe the flow; nobody else touches KeyguardManager.
+
+### Lock Bypass
+**`core/LockBypassController.kt`** (+ the pure `core/LockBypassPolicy.kt` and the
+over-keyguard shim `streaming/LockBypassActivity.kt`) — the locked-mount camera
+wake. The vocabulary: *locked-mount* (a stream started while the device is locked,
+so the while-in-use policy denies the camera open and the CAMERA-typed foreground
+promotion), the *wake notification* (a high-importance full-screen intent that
+launches LockBypassActivity over the keyguard for the few seconds promotion and
+bind need — visible is the one legitimate state), and *blocked-by-lock* (the
+status-wire flag the session sets when a bind is denied under lock, so preview,
+telemetry, and the channel matrix report the truth instead of claiming to be on
+air). Two triggers call `requestWake()` — the service's denied-promotion fallback
+and the session's denied bind under lock; the pure policy owns the verdict ladder
+(keyguard up, POST_NOTIFICATIONS, full-screen-intent permission, the 30 s re-arm
+floor) and is JVM-tested; the controller keeps the Android reads, the attempt
+bookkeeping, and the posting.
+
 ### Stream Defaults
 **`core/StreamDefaults.kt`** — the single home for stream configuration
 defaults *and* validation bounds (ports, JPEG quality, fps, audio config,

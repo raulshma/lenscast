@@ -5,7 +5,9 @@ import android.content.Intent
 import android.os.Build
 import android.util.Log
 import com.raulshma.lenscast.camera.CameraService
+import com.raulshma.lenscast.camera.model.CameraState
 import com.raulshma.lenscast.core.KeyguardMonitor
+import com.raulshma.lenscast.core.LockBypassController
 import com.raulshma.lenscast.core.PowerManager
 import com.raulshma.lenscast.core.StreamWatchdog
 import com.raulshma.lenscast.core.ThermalMonitor
@@ -15,6 +17,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -49,6 +52,7 @@ class StreamingSession(
     private val powerManager: PowerManager,
     private val thermalMonitor: ThermalMonitor,
     private val keyguardMonitor: KeyguardMonitor,
+    private val lockBypassController: LockBypassController,
     watchdogProvider: () -> StreamWatchdog,
 ) {
 
@@ -68,6 +72,7 @@ class StreamingSession(
     private val lifecycleMutex = Mutex()
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private var optimizationJob: Job? = null
+    private var cameraStateJob: Job? = null
 
     val isActive: Boolean get() = active.get()
 
@@ -104,6 +109,7 @@ class StreamingSession(
                 }
                 keepAliveAcquired = true
                 startOptimizationPolling()
+                startCameraStateWatch()
                 sendForegroundIntent(StreamingService.ACTION_START)
                 foregroundStarted = true
                 streamWatchdog.startMonitoring()
@@ -223,6 +229,7 @@ class StreamingSession(
             // Keep the session active through teardown so a concurrent server
             // sync cannot promote server mode over a still-live stream.
             stopOptimizationPolling()
+            stopCameraStateWatch()
             streamWatchdog.stopMonitoring()
             powerManager.releaseWakeLock()
             thermalMonitor.stopMonitoring()
@@ -340,6 +347,11 @@ class StreamingSession(
     private suspend fun unwind(keepAliveAcquired: Boolean, foregroundStarted: Boolean) {
         stopOptimizationPolling()
         runCatching { streamWatchdog.stopMonitoring() }
+        // The watch must be down before the rollback clears the flag: an
+        // in-flight verdict could otherwise re-flag (or re-request a wake)
+        // after startup already failed, resurrecting state the rollback
+        // just buried.
+        stopCameraStateWatch()
         // The begin failed — nothing stayed live, so a blocked-by-lock flag
         // recorded mid-attach is stale the moment the rollback lands.
         streamingManager.setCameraBlockedByLock(false)
@@ -395,6 +407,56 @@ class StreamingSession(
         optimizationJob = null
     }
 
+    /**
+     * The blocked verdict rides the camera's observed state, not the bind
+     * result: a bind can return true while the open is still denied (CameraX
+     * reports the while-in-use refusal asynchronously). Watch the camera
+     * state for the session's lifetime — a Ready paired with an observed
+     * OPEN clears the blocked-by-lock flag no matter which path landed the
+     * open (the shim, the unlock heal, the resume seam, a recovery pass),
+     * and an observed policy denial under lock re-flags it. The keyguard
+     * truth is re-read at the denial so a broadcast the monitor missed
+     * cannot flip the verdict.
+     */
+    private fun startCameraStateWatch() {
+        cameraStateJob?.cancel()
+        cameraStateJob = scope.launch {
+            // The pair, not the state alone: a bind's claimed Ready arrives
+            // before the open, and the verdict completes when the open lands
+            // — the collect must wake on that flip even though the state
+            // value itself never changed.
+            combine(cameraService.cameraState, cameraService.cameraOpenObserved) { state, openObserved ->
+                state to openObserved
+            }.collect { (state, openObserved) ->
+                when {
+                    state is CameraState.Ready && openObserved ->
+                        streamingManager.setCameraBlockedByLock(false)
+                    state is CameraState.Error &&
+                        state.message == CameraService.CAMERA_DISABLED_MESSAGE -> {
+                        keyguardMonitor.refresh()
+                        if (keyguardMonitor.isKeyguardLocked.value) {
+                            streamingManager.setCameraBlockedByLock(true)
+                            // The bind accepted and the open was denied later —
+                            // the same locked-mount hole the denied-promotion
+                            // path covers; the policy ladder and throttle make
+                            // the re-request safe.
+                            lockBypassController.requestWake()
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private suspend fun stopCameraStateWatch() {
+        // Cancel AND join: an in-flight verdict (a flag write, a wake
+        // request) must finish before the caller touches the blocked truth,
+        // so the watch can neither re-flag nor re-wake after teardown.
+        cameraStateJob?.cancel()
+        cameraStateJob?.join()
+        cameraStateJob = null
+    }
+
     private suspend fun onMain(timeoutMs: Long, block: () -> Unit): Boolean {
         return withTimeoutOrNull(timeoutMs) {
             withContext(Dispatchers.Main) { block() }
@@ -419,11 +481,29 @@ class StreamingSession(
         }
         if (!dispatched) return false
         if (bound) {
-            streamingManager.setCameraBlockedByLock(false)
+            // A returned-true bind is bind-accepted, not open-verified: under
+            // lock the blocked verdict waits for the camera-state watch (OPEN
+            // clears it, an observed ERROR_CAMERA_DISABLED sets it). Unlocked,
+            // the app is visible enough that a landed bind is the readiness
+            // contract — clear any stale flag.
+            if (!keyguardMonitor.isKeyguardLocked.value) {
+                streamingManager.setCameraBlockedByLock(false)
+            }
         } else {
-            Log.w(TAG, "Keep-alive attach rebind failed (keyguardLocked=${keyguardMonitor.isKeyguardLocked.value})")
-            if (keyguardMonitor.isKeyguardLocked.value) {
+            // The flag can have flipped since the monitor registered — a
+            // process alive since before the screen went off re-reads here
+            // rather than trusting a broadcast it may never have seen.
+            keyguardMonitor.refresh()
+            val locked = keyguardMonitor.isKeyguardLocked.value
+            Log.w(TAG, "Keep-alive attach rebind failed (keyguardLocked=$locked)")
+            if (locked) {
                 streamingManager.setCameraBlockedByLock(true)
+                // The promotion can have landed while the open still got
+                // denied — some OEM while-in-use policies split the two. The
+                // wake is what makes the bind legitimate, so a denied bind
+                // under lock asks for it exactly like a denied promotion;
+                // its policy ladder decides whether a post is warranted.
+                lockBypassController.requestWake()
             }
         }
         return true
@@ -447,11 +527,22 @@ class StreamingSession(
         val dispatched = onMain(MAIN_DISPATCH_TIMEOUT_MS) {
             bound = cameraService.rebindUseCases()
         }
-        if (dispatched && bound) {
-            // Any bind that lands ends the blocked state — the recovery
-            // ladder's success is exactly this fact (and the watchdog's
-            // framesAdvanced verification reads the frames that follow it).
-            streamingManager.setCameraBlockedByLock(false)
+        // Bind acceptance is bookkeeping, not an open: a landed bind
+        // publishes a claimed Ready, and clearing the blocked verdict here
+        // would overwrite a denial the camera-state watch observed (or one
+        // still pending). The watch owns the flag for a live session — its
+        // observed OPEN clears it, its denial branch re-flags under lock —
+        // so only a denied dispatch touches the flag here.
+        if (dispatched && !bound) {
+            // A recovery bind that came back denied under lock re-flags the
+            // blocked truth, matching the startup attach's handling: the
+            // wire must say LOCKED while the camera stays denied, not flip
+            // clear between recovery attempts. The unlock cue re-reads the
+            // keyguard first for the same reason the attach path does.
+            keyguardMonitor.refresh()
+            if (keyguardMonitor.isKeyguardLocked.value) {
+                streamingManager.setCameraBlockedByLock(true)
+            }
         }
         return dispatched && bound
     }

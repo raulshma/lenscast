@@ -16,27 +16,32 @@ export interface ChannelState {
   error?: string | null
 }
 
+/**
+ * The locked-mount status for a channel row: 'blocked' only while the row is
+ * genuinely active *and* the device says the camera bind is denied under
+ * lock. The flag is absent on older firmware, so absence reads unblocked.
+ */
+function lockBlockStatus(blockedByLock: boolean, active: boolean): ChannelState['status'] {
+  return blockedByLock && active ? 'blocked' : undefined
+}
+
 /** The four output channels, in strip order. */
 export function channelStates(status: DeviceStatus | null | undefined): ChannelState[] {
   const s = status?.streaming
   if (!s) return []
-  // The locked-mount truth: the outputs report active but the camera bind is
-  // denied under lock, so no frames flow. The flag is absent on older
-  // firmware — a WEB/RTSP row only carries 'blocked' while it is genuinely
-  // active and the device says so.
   const blockedByLock = status?.cameraBlockedByLock === true
   return [
     {
       code: 'WEB',
       enabled: s.webStreamingEnabled,
       active: s.webStreamingActive,
-      status: blockedByLock && s.webStreamingActive ? 'blocked' : undefined,
+      status: lockBlockStatus(blockedByLock, s.webStreamingActive),
     },
     {
       code: 'RTSP',
       enabled: s.rtspEnabled,
       active: s.rtspStreamingActive,
-      status: blockedByLock && s.rtspStreamingActive ? 'blocked' : undefined,
+      status: lockBlockStatus(blockedByLock, s.rtspStreamingActive),
     },
     { code: 'RTMP', enabled: s.rtmpEnabled === true, active: s.rtmpActive === true, status: s.rtmpStatus, error: s.rtmpError },
     { code: 'WHIP', enabled: s.whipEnabled === true, active: s.whipActive === true, status: s.whipStatus, error: s.whipError },

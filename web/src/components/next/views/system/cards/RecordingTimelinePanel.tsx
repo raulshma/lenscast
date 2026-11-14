@@ -1,4 +1,4 @@
-import { createEffect, createMemo, createSignal, For, onMount, Show } from 'solid-js'
+import { createEffect, createMemo, createSignal, For, onCleanup, onMount, Show } from 'solid-js'
 import type { JSX } from 'solid-js'
 import type { DetectionEvent, RecordingSession, RecordingTrigger } from '../../../../../types'
 import { getDetectionEvents, getRecordingSessions } from '../../../../../api/client'
@@ -18,6 +18,9 @@ import { dayGroupLabel, formatTime, t, tCount } from '../../../../../lib/i18n'
 import { Panel } from '../../../ui'
 
 const HOUR_TICKS = [0, 3, 6, 9, 12, 15, 18, 21, 24]
+
+/** How often the now-line re-reads the clock (it only moves by minutes). */
+const NOW_TICK_MS = 30_000
 
 /** The day-scoped marker fetch budget — a full day of events, not one page. */
 const EVENT_MARKERS_LIMIT = 200
@@ -137,10 +140,18 @@ export default function RecordingTimelinePanel() {
   const segments = createMemo(() => (sessions() ? layoutTimeline(sessions()!, trackStart()) : []))
   const markers = createMemo(() => eventMarkers(events(), day()))
   const lanes = createMemo(() => laneCount(segments()))
+  // The wall clock, timer-backed: a bare Date.now() in the markup would
+  // paint once and never move — a signal makes the now-line (and the
+  // today check, which can flip at midnight) re-evaluate as time passes.
+  const [nowMs, setNowMs] = createSignal(Date.now())
+  onMount(() => {
+    const nowTick = setInterval(() => setNowMs(Date.now()), NOW_TICK_MS)
+    onCleanup(() => clearInterval(nowTick))
+  })
   // The now-line's position as a percent of the 24h track, clamped to it.
   // Only meaningful for today — past days have no "now".
   const nowPct = () => {
-    const pct = ((Date.now() - trackStart()) / 86_400_000) * 100
+    const pct = ((nowMs() - trackStart()) / 86_400_000) * 100
     return Math.min(100, Math.max(0, pct))
   }
 
@@ -157,7 +168,7 @@ export default function RecordingTimelinePanel() {
           >
             ‹
           </button>
-          <span class="timeline-day-label">{dayGroupLabel(dayLabel(day(), Date.now()))}</span>
+          <span class="timeline-day-label">{dayGroupLabel(dayLabel(day(), nowMs()))}</span>
           <button
             type="button"
             class="timeline-day-btn"
@@ -189,7 +200,7 @@ export default function RecordingTimelinePanel() {
 
       <div class="timeline-wrap">
         <div class="timeline-track" style={{ height: `${lanes() * 14 + 8}px` }}>
-          <Show when={day() === todayKey()}>
+          <Show when={day() === todayKey(nowMs())}>
             <div class="timeline-now" style={{ left: `${nowPct()}%` }} aria-hidden="true" />
           </Show>
           <For each={segments()}>

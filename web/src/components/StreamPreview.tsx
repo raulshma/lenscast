@@ -47,6 +47,14 @@ interface Props {
   stripOverlay?: () => JSX.Element
   /** Lifts the fullscreen active bit to App so higher-overlay Escape coordination includes it. */
   onFullscreenChange?: (active: boolean) => void
+  /**
+   * False while the host has parked the preview where the user cannot see
+   * or interact with it (the persistent shell's hidden holding pen):
+   * distinct from [previewVisible], which stays true across that re-parent —
+   * an active push-to-talk hold must stop without waiting for a pointer
+   * release the hidden element may never see. Absent or true = interactive.
+   */
+  interactionVisible?: () => boolean
 }
 
 // The talkback mic tap. AudioWorklet (the modern replacement for the
@@ -184,8 +192,11 @@ export default function StreamPreview(props: Props) {
   // ungated effect would re-run start() on each tick, and start()'s
   // leading stop() would tear down the handshake before it can ever play.
   // The memo absorbs the per-tick re-evaluation and only propagates flips.
+  // blockedByLock gates too: a camera denied under lock produces no frames,
+  // so the WHEP/H264 transports must not negotiate (and churn reconnects)
+  // behind the padlock placeholder.
   const modeWanted = (mode: PlayerMode) =>
-    createMemo(() => playerMode() === mode && props.previewVisible() && webActive())
+    createMemo(() => playerMode() === mode && props.previewVisible() && webActive() && !blockedByLock())
   const whepWanted = modeWanted('whep')
   createEffect(() => {
     const el = whepVideo()
@@ -229,9 +240,16 @@ export default function StreamPreview(props: Props) {
       hlsPlayer = null
     }
   }
+  // The same memo gate as the WHEP/H264 rungs above: an inline read of
+  // blockedByLock() tracks the whole status signal the SSE push replaces
+  // every second, so the ungated effect re-ran per tick — each pass rode
+  // the import to a fresh Hls instance that orphaned the one before it.
+  // blockedByLock in the gate (not just the render): a lock-blocked camera
+  // has no frames for HLS to pull, so the rung tears down with the rest.
+  const hlsWanted = modeWanted('hls')
   createEffect(() => {
     const el = hlsVideo()
-    if (playerMode() !== 'hls' || !el) {
+    if (!hlsWanted() || !el) {
       teardownHls()
       return
     }
@@ -249,7 +267,12 @@ export default function StreamPreview(props: Props) {
     }
     if (kind === 'none') return
     void import('hls.js').then(({ default: Hls }) => {
-      if (hlsVideo() !== el || playerMode() !== 'hls') return
+      // The import raced the gate: re-check before starting transport — the
+      // lock can flip while the module was in flight.
+      if (hlsVideo() !== el || !hlsWanted()) return
+      // A second import resolving over a live player must not orphan the
+      // first Hls instance: destroy before the replacement takes the field.
+      teardownHls()
       hlsPlayer = new Hls({
         lowLatencyMode: true,
         enableWorker: true,
@@ -480,6 +503,24 @@ export default function StreamPreview(props: Props) {
     pttHold++
     setPttPhase('idle')
     void stopPttCleanup()
+  })
+
+  // Stage loss mid-hold while this component stays mounted (the persistent
+  // next-shell host re-parents the player and an error retry hid the stage,
+  // the camera went blocked-by-lock, or the host parked the preview in its
+  // hidden holding pen on dismissal): the uplink must not outlive the stage
+  // it started on. The persistent host keeps the button element alive
+  // across re-parents — pointer capture already lands the release on it —
+  // so this covers the states the element's own handlers cannot see, the
+  // parked-in-holding one included: previewVisible stays true across that
+  // re-parent, which is exactly why the interaction signal is separate.
+  createEffect(() => {
+    if (
+      (!props.previewVisible() || blockedByLock() || props.interactionVisible?.() === false) &&
+      talking()
+    ) {
+      void stopPtt()
+    }
   })
 
   // ── Snapshot share: Web Share with a File payload when the browser can,
@@ -917,6 +958,12 @@ export default function StreamPreview(props: Props) {
             onKeyUp={(e) => {
               if (e.key !== ' ' && e.key !== 'Enter') return
               e.preventDefault()
+              void stopPtt()
+            }}
+            onBlur={() => {
+              // A keyboard hold whose focus was taken mid-hold (a click
+              // elsewhere) never sees its keyup — the orphaned uplink would
+              // hold the mic open until teardown.
               void stopPtt()
             }}
             onContextMenu={(e) => e.preventDefault()}

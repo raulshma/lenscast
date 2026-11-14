@@ -61,10 +61,11 @@
   --nx-glow-ok: 0 0 8px rgba(55, 217, 138, 0.4);
   --nx-glow-warn: 0 0 8px rgba(255, 176, 32, 0.4);
 
-  /* Text — bone white, four levels */
+  /* Text — bone white, four levels. Tertiary clears WCAG AA 4.5:1 on the
+     lightest plate (#1c212b ≈ 4.8) — labels and segment buttons read it. */
   --nx-text: #edf0f4;
   --nx-text-secondary: rgba(237, 240, 244, 0.64);
-  --nx-text-tertiary: rgba(237, 240, 244, 0.44);
+  --nx-text-tertiary: rgba(237, 240, 244, 0.52);
   --nx-text-faint: rgba(237, 240, 244, 0.26);
 
   /* Typography — Golos Text speaks (labels, nav, headings, body);
@@ -165,7 +166,7 @@
   --lc-signal-bg: rgba(255, 46, 135, 0.11);
   --lc-text: #edf0f4;
   --lc-text-dim: rgba(237, 240, 244, 0.64);
-  --lc-text-muted: rgba(237, 240, 244, 0.44);
+  --lc-text-muted: rgba(237, 240, 244, 0.52);
   --lc-radius: 4px;
   --lc-radius-sm: 2px;
   --lc-radius-lg: 6px;
@@ -214,9 +215,10 @@
   --nx-glow-ok: 0 0 6px rgba(14, 138, 80, 0.3);
   --nx-glow-warn: 0 0 6px rgba(154, 91, 0, 0.3);
 
+  /* Tertiary clears AA 4.5:1 on the lightest surface (#fbfcfe ≈ 5.1). */
   --nx-text: #10151d;
   --nx-text-secondary: rgba(16, 21, 29, 0.66);
-  --nx-text-tertiary: rgba(16, 21, 29, 0.46);
+  --nx-text-tertiary: rgba(16, 21, 29, 0.62);
   --nx-text-faint: rgba(16, 21, 29, 0.3);
 
   --nx-shadow-sm: 0 0 0 1px rgba(16, 21, 29, 0.04);
@@ -265,7 +267,7 @@
   --lc-signal-bg: rgba(214, 14, 108, 0.09);
   --lc-text: #10151d;
   --lc-text-dim: rgba(16, 21, 29, 0.66);
-  --lc-text-muted: rgba(16, 21, 29, 0.46);
+  --lc-text-muted: rgba(16, 21, 29, 0.62);
   --lc-shadow: var(--nx-shadow-sm);
   --lc-shadow-lg: var(--nx-shadow-lg);
   --lc-glow-accent: none;

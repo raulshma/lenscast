@@ -5,14 +5,17 @@ import android.content.Context
 import android.content.Intent
 import android.os.Looper
 import com.raulshma.lenscast.camera.CameraService
+import com.raulshma.lenscast.camera.model.CameraState
 import com.raulshma.lenscast.core.BatteryOptimizationResult
 import com.raulshma.lenscast.core.KeyguardMonitor
+import com.raulshma.lenscast.core.LockBypassController
 import com.raulshma.lenscast.core.PowerManager
 import com.raulshma.lenscast.core.StreamWatchdog
 import com.raulshma.lenscast.core.ThermalMonitor
 import com.raulshma.lenscast.core.WatchdogPolicy
 import io.mockk.coEvery
 import io.mockk.coVerify
+import io.mockk.clearMocks
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
@@ -68,6 +71,7 @@ class StreamingSessionTest {
     private val streamWatchdog: StreamWatchdog = mockk(relaxed = true)
     private val keyguardLocked = MutableStateFlow(false)
     private val keyguardMonitor: KeyguardMonitor = mockk(relaxed = true)
+    private val lockBypassController: LockBypassController = mockk(relaxed = true)
 
     /**
      * The streaming-restart answer, read at call time. (Suspend answers
@@ -105,6 +109,7 @@ class StreamingSessionTest {
             powerManager = powerManager,
             thermalMonitor = thermalMonitor,
             keyguardMonitor = keyguardMonitor,
+            lockBypassController = lockBypassController,
             watchdogProvider = { streamWatchdog },
         )
     }
@@ -257,6 +262,20 @@ class StreamingSessionTest {
     }
 
     @Test
+    fun `a denied bind under lock also asks the lock bypass for the wake`() {
+        // The promotion can land while the open still gets denied — the wake
+        // is what makes the bind legitimate, so the denied bind re-arms the
+        // same request the denied promotion would; the controller's policy
+        // ladder decides whether a post is warranted.
+        every { cameraService.rebindUseCases() } returns false
+        keyguardLocked.value = true
+
+        runWithMainPumped { session.begin() }
+
+        verify(exactly = 1) { lockBypassController.requestWake() }
+    }
+
+    @Test
     fun `a denied bind on an unlocked device does not claim lock blocking`() {
         every { cameraService.rebindUseCases() } returns false
         keyguardLocked.value = false
@@ -265,6 +284,7 @@ class StreamingSessionTest {
 
         assertTrue(session.isActive)
         verify(exactly = 0) { streamingManager.setCameraBlockedByLock(true) }
+        verify(exactly = 0) { lockBypassController.requestWake() }
     }
 
     @Test
@@ -277,14 +297,50 @@ class StreamingSessionTest {
     }
 
     @Test
-    fun `unlock heal rebinds and clears the flag when the bind lands`() {
+    fun `unlock heal rebind is bind-acceptance only — the flag waits for the observed open`() {
+        // Start blocked: the denied bind under lock flags the session, the
+        // exact state the unlock heal exists to recover from.
+        every { cameraService.rebindUseCases() } returns false
+        keyguardLocked.value = true
         runWithMainPumped { session.begin() }
+        verify(atLeast = 1) { streamingManager.setCameraBlockedByLock(true) }
 
+        // The user unlocks; the heal rebinds. Acceptance alone is not an
+        // open: a landed bind's claimed Ready must not clear a verdict the
+        // camera-state watch observed — only the watch's observed OPEN may.
         every { cameraService.rebindUseCases() } returns true
+        // Drop the blocked-phase call recordings, keep the stubs.
+        clearMocks(cameraService, streamingManager, answers = false)
         runWithMainPumped { session.rebindOnUnlock() }
 
-        verify(atLeast = 1) { streamingManager.setCameraBlockedByLock(false) }
+        verify(exactly = 1) { cameraService.rebindUseCases() }
+        verify(exactly = 0) { streamingManager.setCameraBlockedByLock(false) }
         coVerify(exactly = 0) { cameraService.releaseKeepAlive() }
+    }
+
+    @Test
+    fun `the camera-state watch clears the blocked flag only on an observed open`() {
+        val cameraState = MutableStateFlow<CameraState>(CameraState.Idle)
+        val openObserved = MutableStateFlow(false)
+        every { cameraService.cameraState } returns cameraState
+        every { cameraService.cameraOpenObserved } returns openObserved
+        every { cameraService.rebindUseCases() } returns false
+        keyguardLocked.value = true
+
+        runWithMainPumped { session.begin() }
+        verify(atLeast = 1) { streamingManager.setCameraBlockedByLock(true) }
+        // Drop the blocked-phase recordings, keep the stubs and the flows.
+        clearMocks(streamingManager, answers = false)
+
+        // A bind's claimed Ready with no observed open must not clear…
+        cameraState.value = CameraState.Ready
+        Thread.sleep(200)
+        verify(exactly = 0) { streamingManager.setCameraBlockedByLock(false) }
+
+        // …the open landing is what completes the verdict.
+        openObserved.value = true
+
+        verifyUntil { verify(exactly = 1) { streamingManager.setCameraBlockedByLock(false) } }
     }
 
     @Test
