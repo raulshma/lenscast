@@ -5,6 +5,7 @@ import com.raulshma.lenscast.core.StreamAuthCrypto
 import java.security.SecureRandom
 import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicLong
 
 /**
  * Owns RTSP request authorization: the Digest/Basic decision ladder, the
@@ -25,9 +26,11 @@ class RtspSessionAuthorizer(
 
     private val secureRandom = SecureRandom()
     private val digestNonces = ConcurrentHashMap<String, DigestNonceState>()
+    private val mintSeq = AtomicLong()
 
     private data class DigestNonceState(
         val expiresAtMs: Long,
+        val mintSeq: Long,
         val ncTrack: ConcurrentHashMap<String, Long> = ConcurrentHashMap(),
     )
 
@@ -203,7 +206,7 @@ class RtspSessionAuthorizer(
         val bytes = ByteArray(DIGEST_NONCE_BYTES)
         secureRandom.nextBytes(bytes)
         val nonce = Base64Codec.encodeUrlSafe(bytes)
-        digestNonces[nonce] = DigestNonceState(clock() + DIGEST_NONCE_TTL_MS)
+        digestNonces[nonce] = DigestNonceState(clock() + DIGEST_NONCE_TTL_MS, mintSeq.getAndIncrement())
         return nonce
     }
 
@@ -217,8 +220,12 @@ class RtspSessionAuthorizer(
         }
         if (digestNonces.size > MAX_DIGEST_NONCES) {
             val overflow = digestNonces.size - MAX_DIGEST_NONCES
+            // Evict by earliest expiry, ties by mint order. The tie-break is
+            // load-bearing: sortedBy is stable and ConcurrentHashMap order is
+            // hash-based, so equal expiries (frozen clock, same-ms bursts)
+            // would otherwise evict an arbitrary nonce.
             val keysToRemove = digestNonces.entries
-                .sortedBy { it.value.expiresAtMs }
+                .sortedWith(compareBy({ it.value.expiresAtMs }, { it.value.mintSeq }))
                 .take(overflow)
                 .map { it.key }
             keysToRemove.forEach { digestNonces.remove(it) }
