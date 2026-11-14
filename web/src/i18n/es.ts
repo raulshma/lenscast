@@ -67,6 +67,10 @@ export const es: Partial<Record<MessageKey, string>> = {
   'next.thermal.moderate': 'Moderado',
   'next.thermal.severe': 'Severo',
   'next.thermal.critical': 'Crítico',
+  'next.pip.title': 'En directo',
+  'next.pip.stop': 'Detener transmisión web',
+  'next.pip.expand': 'Volver a la vista en vivo',
+  'next.pip.close': 'Ocultar minirreproductor',
 
   // ── App shell ──
   'app.renderError': 'Error al renderizar el panel: {error}',

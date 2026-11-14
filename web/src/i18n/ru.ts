@@ -68,6 +68,10 @@ export const ru: Partial<Record<MessageKey, string>> = {
   'next.thermal.moderate': 'Умеренный',
   'next.thermal.severe': 'Сильный',
   'next.thermal.critical': 'Критический',
+  'next.pip.title': 'В эфире',
+  'next.pip.stop': 'Остановить веб-поток',
+  'next.pip.expand': 'Вернуться к трансляции',
+  'next.pip.close': 'Скрыть мини-плеер',
 
   // ── App shell ──
   'app.renderError': 'Ошибка отрисовки панели управления: {error}',

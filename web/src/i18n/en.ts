@@ -67,6 +67,10 @@ export const en: Record<string, string> = {
   'next.thermal.moderate': 'Moderate',
   'next.thermal.severe': 'Severe',
   'next.thermal.critical': 'Critical',
+  'next.pip.title': 'On air',
+  'next.pip.stop': 'Stop web stream',
+  'next.pip.expand': 'Back to live view',
+  'next.pip.close': 'Hide mini player',
 
   // ── App shell ──
   'app.renderError': 'Dashboard rendering error: {error}',

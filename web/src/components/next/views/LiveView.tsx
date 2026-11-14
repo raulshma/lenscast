@@ -1,7 +1,6 @@
-import { Show, createSignal } from 'solid-js'
+import { Show, createSignal, onCleanup } from 'solid-js'
 import type { NextState } from '../NextState'
-import StreamPreview from '../../StreamPreview'
-import CameraStrip from './live/CameraStrip'
+import { registerStageSlot } from '../../../lib/pipStore'
 import { t } from '../../../lib/i18n'
 import { IconSliders } from '../../icons'
 import { Drawer, Skeleton } from '../ui'
@@ -13,14 +12,25 @@ import SystemInfoPanel from './live/SystemInfoPanel'
 /**
  * Live view: the full-width preview stage with its command bar, and the
  * inspector column — channel rack, storage, viewers, diagnostics. The
- * stage engine stays StreamPreview (player ladder, talkback, tap-to-focus
- * are its own world); the reskin lives in styles/next/views/live.css.
- * At 768–1199px the inspector is unreachable inline, so a slide-over
- * Drawer carries it — the tablet no longer loses the channel rack.
+ * stage engine (StreamPreview) is not mounted here: it lives once in
+ * StreamPipHost above the view outlet, and this view renders only the
+ * mount-point slot it re-parents into — so navigating away parks the
+ * player in the mini-player dock instead of tearing the stream down.
+ * The reskin lives in styles/next/views/live.css. At 768–1199px the
+ * inspector is unreachable inline, so a slide-over Drawer carries it —
+ * the tablet no longer loses the channel rack.
  */
 export default function LiveView(props: { state: NextState }) {
   const state = props.state
   const [drawerOpen, setDrawerOpen] = createSignal(false)
+
+  // The slot the persistent StreamPreview host re-parents into while this
+  // view is active; cleared on unmount so the host parks (or docks) instead
+  // of appending into a detached subtree.
+  const stageSlotRef = (el: HTMLDivElement) => {
+    registerStageSlot(el)
+    onCleanup(() => registerStageSlot(null))
+  }
 
   const inspector = () => (
     <>
@@ -49,26 +59,7 @@ export default function LiveView(props: { state: NextState }) {
               </div>
             }
           >
-            <StreamPreview
-              status={state.status}
-              previewVisible={state.previewVisible}
-              streamNonce={state.streamNonce}
-              streamActionLoading={state.streamActionLoading}
-              isRecording={state.isRecording}
-              captureMsg={state.captureMsg}
-              liveAudioStatus={state.liveAudioStatus}
-              recordingTimer={state.recordingTimer}
-              playerMode={state.playerMode}
-              setPlayerMode={state.setPlayerMode}
-              handleCapture={state.handleCapture}
-              handleStartWebStream={state.handleStartWebStream}
-              handleStopWebStream={state.handleStopWebStream}
-              handleStartRtspStream={state.handleStartRtspStream}
-              handleStopRtspStream={state.handleStopRtspStream}
-              setPreviewVisible={state.setPreviewVisible}
-              connectionLost={state.connectionLost}
-              stripOverlay={() => <CameraStrip state={state} />}
-            />
+            <div class="nx-stage-slot" ref={stageSlotRef} />
           </Show>
         </div>
 

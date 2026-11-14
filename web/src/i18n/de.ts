@@ -67,6 +67,10 @@ export const de: Partial<Record<MessageKey, string>> = {
   'next.thermal.moderate': 'Mäßig',
   'next.thermal.severe': 'Stark',
   'next.thermal.critical': 'Kritisch',
+  'next.pip.title': 'Auf Sendung',
+  'next.pip.stop': 'Webstream stoppen',
+  'next.pip.expand': 'Zurück zur Live-Ansicht',
+  'next.pip.close': 'Mini-Player ausblenden',
 
   // ── App shell ──
   'app.renderError': 'Fehler beim Rendern des Dashboards: {error}',

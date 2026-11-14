@@ -67,6 +67,10 @@ export const zh: Partial<Record<MessageKey, string>> = {
   'next.thermal.moderate': '中等',
   'next.thermal.severe': '严重',
   'next.thermal.critical': '临界',
+  'next.pip.title': '正在直播',
+  'next.pip.stop': '停止网页串流',
+  'next.pip.expand': '返回实时画面',
+  'next.pip.close': '隐藏迷你播放器',
 
   // ── App shell ──
   'app.renderError': '面板渲染出错：{error}',

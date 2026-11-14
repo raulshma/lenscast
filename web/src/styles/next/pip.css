@@ -1,0 +1,214 @@
+/* ══════════════════════════════════════════════════════════════════
+   NEXT UI — MINI PLAYER (the live stream's PiP dock)
+   One persistent StreamPreview instance rides above the view outlet:
+   on the live stage it fills the stage slot; away from Live it plays
+   inside this floating dock. The chrome row carries on-air magenta
+   (DESIGN.md color law) plus stop / expand / dismiss, and doubles as
+   the drag handle. The full-stage chrome (command bar, camera strip,
+   URL bars) does not fit a mini window and is hidden — the tap layer
+   turns the picture itself into the expand affordance.
+   ══════════════════════════════════════════════════════════════════ */
+
+/* ── The movable host ─────────────────────────────────────────────── */
+/* A transparent flex passthrough: it exists so the player can survive
+   view switches by re-parenting (stage slot ↔ dock slot ↔ parked pen)
+   without unmounting a single player element. */
+
+/* LiveView's mount point must behave exactly like the preview-section it
+   wraps — a bounded flex child of the stage column. Without the flex/min-
+   height chain the player's content height (a tall or portrait source at
+   natural size) escapes the stage and scrolls the whole view. */
+[data-ui='next'] .nx-stage-slot {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+[data-ui='next'] .nx-stream-host {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* The holding pen stays out of layout entirely — a parked host is
+   alive (stream keeps playing, session warm) but invisible. */
+[data-ui='next'] .nx-pip-holding {
+  display: none;
+}
+
+/* ── The dock ─────────────────────────────────────────────────────── */
+[data-ui='next'] .nx-pip {
+  position: fixed;
+  /* Above views and the inspector FAB (40); below the gallery viewer
+     (60), drawer (150), modal (200) and toasts (300). */
+  z-index: 45;
+  width: min(320px, 44vw);
+  display: flex;
+  flex-direction: column;
+  background: var(--nx-surface);
+  border: 1px solid var(--nx-border-strong);
+  border-radius: var(--nx-radius-lg);
+  overflow: hidden;
+  user-select: none;
+  /* Overlays are the one place real shadows are allowed (DESIGN.md). */
+  box-shadow: var(--nx-shadow-lg);
+}
+
+[data-ui='next'] .nx-pip-hidden {
+  display: none;
+}
+
+/* ── Chrome row: on-air label + stop / expand / dismiss ───────────── */
+[data-ui='next'] .nx-pip-chrome {
+  display: flex;
+  align-items: center;
+  gap: var(--nx-space-1);
+  height: 34px;
+  padding: 0 6px 0 var(--nx-space-2);
+  background: var(--nx-surface);
+  border-bottom: 1px solid var(--nx-border);
+  cursor: grab;
+  touch-action: none;
+}
+
+[data-ui='next'] .nx-pip-chrome:active {
+  cursor: grabbing;
+}
+
+[data-ui='next'] .nx-pip-live {
+  flex: 1;
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--nx-mono);
+  font-size: var(--nx-text-xs);
+  font-weight: 600;
+  letter-spacing: normal;
+  color: var(--nx-signal);
+}
+
+[data-ui='next'] .nx-pip-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 26px;
+  height: 26px;
+  border: none;
+  border-radius: var(--nx-radius);
+  background: transparent;
+  color: var(--nx-text-secondary);
+  cursor: pointer;
+  transition: background var(--nx-duration-fast) var(--nx-ease), color var(--nx-duration-fast) var(--nx-ease);
+}
+
+[data-ui='next'] .nx-pip-btn:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--nx-text) 8%, transparent);
+  color: var(--nx-text);
+}
+
+[data-ui='next'] .nx-pip-btn:focus-visible {
+  outline: 2px solid var(--nx-accent);
+  outline-offset: 2px;
+}
+
+[data-ui='next'] .nx-pip-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* Stop wears the signal, like the stage's stop lane (live.css). */
+[data-ui='next'] .nx-pip-btn-stop {
+  color: var(--nx-signal);
+}
+
+[data-ui='next'] .nx-pip-btn-stop:hover:not(:disabled) {
+  background: var(--nx-signal-bg);
+  color: var(--nx-signal);
+}
+
+/* ── The picture slot + tap-to-expand layer ───────────────────────── */
+[data-ui='next'] .nx-pip-slot {
+  position: relative;
+  aspect-ratio: 16 / 9;
+  display: flex;
+  flex-direction: column;
+  background: #000;
+}
+
+/* The picture is one big expand button in the mini window — this layer
+   also stands in front of tap-to-focus, zoom and the stage overlays
+   (ticks z4, tally z5, chips z10), none of which fit a mini window. */
+[data-ui='next'] .nx-pip-tap {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  border: none;
+  padding: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+[data-ui='next'] .nx-pip-tap:focus-visible {
+  outline: 2px solid var(--nx-accent);
+  outline-offset: -2px;
+}
+
+/* ── The stage engine, docked ─────────────────────────────────────── */
+/* StreamPreview's full-stage chrome collapses to just the picture. The
+   container is pinned absolutely inside the slot: the dock's 16:9 box is
+   fixed geometry, and player content (a square-scaled MJPEG, a rotated
+   source) must letterbox inside it — never stretch the window. */
+
+[data-ui='next'] .nx-pip .preview-section {
+  flex: 1;
+  min-height: 0;
+  padding: 0;
+  gap: 0;
+  background: #000;
+  overflow: hidden;
+  position: relative;
+}
+
+[data-ui='next'] .nx-pip .preview-container {
+  position: absolute;
+  inset: 0;
+  border-radius: 0;
+  border: none;
+}
+
+[data-ui='next'] .nx-pip .preview-img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+[data-ui='next'] .nx-pip .preview-actions,
+[data-ui='next'] .nx-pip .audio-status-bar,
+[data-ui='next'] .nx-pip .stream-url-bar,
+[data-ui='next'] .nx-pip .cam-strip-host,
+[data-ui='next'] .nx-pip .live-badge,
+[data-ui='next'] .nx-pip .connection-quality-wrapper {
+  display: none;
+}
+
+/* REC stays — it repositions below the ticks, clear of the corner. */
+[data-ui='next'] .nx-pip .recording-timer-overlay {
+  top: auto;
+  left: auto;
+  right: 8px;
+  bottom: 8px;
+  padding: 3px 10px;
+}
+
+/* ── Mobile: smaller window, above the bottom tab bar (58px) ─────── */
+@media (max-width: 767px) {
+  [data-ui='next'] .nx-pip {
+    width: min(232px, 52vw);
+  }
+}

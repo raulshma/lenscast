@@ -42,6 +42,7 @@ import DetectionView from './views/DetectionView'
 import SystemView from './views/SystemView'
 import ShortcutsOverlay from '../ShortcutsOverlay'
 import { MediaViewerOverlay } from '../MediaViewer'
+import StreamPipHost from './StreamPipHost'
 
 interface Props {
   state: NextState
@@ -426,6 +427,12 @@ export default function NextShell(props: Props) {
       {/* The shared clip viewer: deep links and (later) feeds open it above
           any view. */}
       <MediaViewerOverlay canDelete={!state.isViewer()} />
+
+      {/* The persistent live-stream host: owns the one StreamPreview
+          instance and re-parents it between the live stage and the mini
+          player, so navigating away never tears the stream down. Mounted
+          outside every <Show> — it must survive all view switches. */}
+      <StreamPipHost state={state} />
 
       <Toaster />
     </div>

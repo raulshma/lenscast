@@ -67,6 +67,10 @@ export const fr: Partial<Record<MessageKey, string>> = {
   'next.thermal.moderate': 'Modérée',
   'next.thermal.severe': 'Sévère',
   'next.thermal.critical': 'Critique',
+  'next.pip.title': 'À l’antenne',
+  'next.pip.stop': 'Arrêter le flux web',
+  'next.pip.expand': 'Revenir à la vue en direct',
+  'next.pip.close': 'Masquer le mini-lecteur',
 
   // ── App shell ──
   'app.renderError': 'Erreur de rendu du tableau de bord : {error}',

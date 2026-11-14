@@ -155,6 +155,16 @@ export const IconClose = icon(
 export const IconChevronLeft = icon(<polyline points="15 18 9 12 15 6" />)
 export const IconChevronRight = icon(<polyline points="9 18 15 12 9 6" />)
 
+/** Expand — maximize the mini player back onto the live stage. */
+export const IconExpand = icon(
+  <>
+    <polyline points="15 3 21 3 21 9" />
+    <polyline points="9 21 3 21 3 15" />
+    <line x1="21" y1="3" x2="14" y2="10" />
+    <line x1="3" y1="21" x2="10" y2="14" />
+  </>,
+)
+
 /** Battery — body + charge level tick. */
 export const IconBattery = icon(
   <>
