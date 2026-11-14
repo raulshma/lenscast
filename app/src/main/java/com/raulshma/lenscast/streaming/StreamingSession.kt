@@ -5,6 +5,7 @@ import android.content.Intent
 import android.os.Build
 import android.util.Log
 import com.raulshma.lenscast.camera.CameraService
+import com.raulshma.lenscast.core.KeyguardMonitor
 import com.raulshma.lenscast.core.PowerManager
 import com.raulshma.lenscast.core.StreamWatchdog
 import com.raulshma.lenscast.core.ThermalMonitor
@@ -47,6 +48,7 @@ class StreamingSession(
     streamingManagerProvider: () -> StreamingManager,
     private val powerManager: PowerManager,
     private val thermalMonitor: ThermalMonitor,
+    private val keyguardMonitor: KeyguardMonitor,
     watchdogProvider: () -> StreamWatchdog,
 ) {
 
@@ -261,7 +263,7 @@ class StreamingSession(
             WatchdogPolicy.RecoveryTier.SOFT -> {
                 Log.d(TAG, "Soft recovery: rebinding CameraX use cases")
                 rebindCamera().also { bound ->
-                    if (!bound) Log.w(TAG, "Soft recovery: camera rebind timed out")
+                    if (!bound) Log.w(TAG, "Soft recovery: camera rebind failed (timed out or denied)")
                 }
             }
 
@@ -317,7 +319,7 @@ class StreamingSession(
         thermalMonitor.startMonitoring()
         streamingManager.applyBatteryOptimization(powerManager.optimizationResult.value)
         if (!rebindCamera()) {
-            Log.w(TAG, "Post-recovery camera rebind timed out")
+            Log.w(TAG, "Post-recovery camera rebind failed (timed out or denied)")
         }
     }
 
@@ -338,6 +340,9 @@ class StreamingSession(
     private suspend fun unwind(keepAliveAcquired: Boolean, foregroundStarted: Boolean) {
         stopOptimizationPolling()
         runCatching { streamWatchdog.stopMonitoring() }
+        // The begin failed — nothing stayed live, so a blocked-by-lock flag
+        // recorded mid-attach is stale the moment the rollback lands.
+        streamingManager.setCameraBlockedByLock(false)
         runCatching { powerManager.releaseWakeLock() }
         runCatching { thermalMonitor.stopMonitoring() }
         if (keepAliveAcquired) {
@@ -396,12 +401,32 @@ class StreamingSession(
         } != null
     }
 
-    /** @return false when the Main thread didn't service the attach in time. */
+    /**
+     * @return false only when the Main thread didn't service the attach in
+     * time. A *denied bind* (the locked device's while-in-use policy — the
+     * attach hop completes but the camera never opens) no longer passes
+     * silently: the blocked-by-lock truth is recorded for the status wire.
+     * The session still begins — the locked-mount start's contract is
+     * "streaming on, server-only foreground, heal on visibility", and every
+     * headless start path (tile, boot resume, automation, the dashboard)
+     * depends on it.
+     */
     private suspend fun acquireKeepAliveAndRebind(): Boolean {
-        return onMain(MAIN_DISPATCH_TIMEOUT_MS) {
+        var bound = false
+        val dispatched = onMain(MAIN_DISPATCH_TIMEOUT_MS) {
             cameraService.acquireKeepAlive()
-            cameraService.rebindUseCases()
+            bound = cameraService.rebindUseCases()
         }
+        if (!dispatched) return false
+        if (bound) {
+            streamingManager.setCameraBlockedByLock(false)
+        } else {
+            Log.w(TAG, "Keep-alive attach rebind failed (keyguardLocked=${keyguardMonitor.isKeyguardLocked.value})")
+            if (keyguardMonitor.isKeyguardLocked.value) {
+                streamingManager.setCameraBlockedByLock(true)
+            }
+        }
+        return true
     }
 
     private suspend fun releaseKeepAliveAndRebind() {
@@ -412,11 +437,38 @@ class StreamingSession(
         if (!completed) {
             Log.w(TAG, "Keep-alive release did not complete within ${MAIN_DISPATCH_TIMEOUT_MS}ms")
         }
+        // A torn-down session can never be blocked — stale truth off the wire
+        // even when the unbind verdict skips an actual bind.
+        streamingManager.setCameraBlockedByLock(false)
     }
 
     private suspend fun rebindCamera(): Boolean {
-        return onMain(MAIN_DISPATCH_TIMEOUT_MS) {
-            cameraService.rebindUseCases()
+        var bound = false
+        val dispatched = onMain(MAIN_DISPATCH_TIMEOUT_MS) {
+            bound = cameraService.rebindUseCases()
+        }
+        if (dispatched && bound) {
+            // Any bind that lands ends the blocked state — the recovery
+            // ladder's success is exactly this fact (and the watchdog's
+            // framesAdvanced verification reads the frames that follow it).
+            streamingManager.setCameraBlockedByLock(false)
+        }
+        return dispatched && bound
+    }
+
+    /**
+     * The unlock heal: the earliest a blocked bind can be retried. Called
+     * from the app runtime on the keyguard's user-present cue — before the
+     * app-visible resume seam — so a stream that started blocked comes back
+     * at the moment the user unlocks, not on the next watchdog cadence. A
+     * no-op without a live session; a still-denied bind (the unlocked
+     * device's policy can keep refusing when no activity is visible) just
+     * leaves the flag standing for the resume seam or the shim to clear.
+     */
+    suspend fun rebindOnUnlock() {
+        if (!active.get()) return
+        if (!rebindCamera()) {
+            Log.d(TAG, "Unlock rebind did not land; leaving the heal to the resume seam")
         }
     }
 

@@ -28,7 +28,9 @@ import com.raulshma.lenscast.capture.ml.AudioModelStore
 import com.raulshma.lenscast.capture.ml.DetectionModelStore
 import com.raulshma.lenscast.core.ConnectivityMonitor
 import com.raulshma.lenscast.core.KeepAwakeController
+import com.raulshma.lenscast.core.KeyguardMonitor
 import com.raulshma.lenscast.core.KeystoreMediaKeyProvider
+import com.raulshma.lenscast.core.LockBypassController
 import com.raulshma.lenscast.core.MediaCrypto
 import com.raulshma.lenscast.core.PowerManager
 import com.raulshma.lenscast.core.SirenAutoStop
@@ -148,7 +150,16 @@ class MainApplication : Application(), SingletonImageLoader.Factory, AppGraph {
     override val streamingSession: StreamingSession by lazy {
         StreamingSession(
             this, cameraService, { streamingManager }, powerManager, thermalMonitor,
+            keyguardMonitor,
         ) { streamWatchdog }
+    }
+    // The locked-mount story's state source: is the keyguard up, and when did
+    // the user unlock. Plain Android over the application context — no cycle
+    // with the streaming graph (the session reads it during begin; the
+    // controller reads it before posting the wake notification).
+    override val keyguardMonitor: KeyguardMonitor by lazy { KeyguardMonitor(this) }
+    override val lockBypassController: LockBypassController by lazy {
+        LockBypassController(this, keyguardMonitor)
     }
     // Server state -> runtime service server mode. The session still owns the
     // FGS intents; this is the app-lifetime bridge that keeps the server-only
@@ -393,6 +404,7 @@ class MainApplication : Application(), SingletonImageLoader.Factory, AppGraph {
     override fun onCreate() {
         super.onCreate()
         connectivityMonitor.start()
+        keyguardMonitor.start()
         settingsApplier.start(appScope)
         serverForegroundController.start(appScope)
         wireFramePump()
@@ -403,6 +415,7 @@ class MainApplication : Application(), SingletonImageLoader.Factory, AppGraph {
         initializeDetectionMicWatch()
         initializeWidgetRefresh()
         initializeAutoUpdateCheck()
+        initializeUnlockHeal()
     }
 
     /**
@@ -571,6 +584,25 @@ class MainApplication : Application(), SingletonImageLoader.Factory, AppGraph {
             streamingManager.isDetectionMicActive.collect {
                 runCatching { streamingSession.refreshForegroundMicVerdict() }
                     .onFailure { android.util.Log.w("MainApplication", "Mic verdict re-assert failed: ${it.message}") }
+            }
+        }
+    }
+
+    /**
+     * The unlock heal is app-runtime composition, not screen state: a stream
+     * started while the device was locked (dashboard, tile, boot resume) may
+     * have had its camera bind denied, and the earliest retry cue is the
+     * keyguard dismissal — not the next app-visible resume, which may never
+     * come on a headless mount. Best-effort and idempotent: a still-denied
+     * bind leaves the blocked-by-lock flag standing for the resume seam or
+     * the lock-bypass shim, and the streaming promotion re-assert rides
+     * along.
+     */
+    private fun initializeUnlockHeal() {
+        appScope.launch {
+            keyguardMonitor.unlockEvents.collect {
+                runCatching { streamingSession.reassertStreamingForegroundIfActive() }
+                runCatching { streamingSession.rebindOnUnlock() }
             }
         }
     }

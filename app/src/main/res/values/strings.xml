@@ -799,4 +799,6 @@
     <string name="automation_condition_desc_recording">Only while a recording is (or is not) active</string>
     <string name="automation_condition_desc_thermal">Only while the device is (or is not) throttling</string>
     <string name="automation_condition_desc_motion_detection">Only while motion detection is on (or off)</string>
+    <string name="lock_bypass_title">Starting the camera</string>
+    <string name="lock_bypass_message">LensCast is waking the camera for a remotely started stream</string>
 </resources>

@@ -369,6 +369,13 @@ export interface DeviceStatus {
   torchOn: boolean
   /** Live siren state, so dashboard toggles mirror the device. */
   sirenActive: boolean
+  /**
+   * A live stream's camera bind is being denied because the device is locked —
+   * the outputs run but no camera frames flow (the locked-mount start's
+   * "on but black" state). Absent on older devices (pre-flag firmware); false
+   * when the camera is delivering or nothing is streaming.
+   */
+  cameraBlockedByLock?: boolean
   /** The zoom ratio the camera is currently applying. */
   zoomRatio: number
   /** The selected lens; absent before the lens enumeration lands. */

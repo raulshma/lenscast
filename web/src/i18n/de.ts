@@ -88,6 +88,8 @@ export const de: Partial<Record<MessageKey, string>> = {
 
   'preview.streamError': 'Streamfehler',
   'preview.noStream': 'Kein aktiver Stream',
+  'preview.blockedByLock': 'Kamera blockiert — Gerät ist gesperrt',
+  'preview.hint.blockedByLock': 'Die Übertragung startet, sobald das Gerät entsperrt wird',
   'preview.hint.disabled': 'Web-Stream oder RTSP in den Einstellungen aktivieren, um zu starten',
   'preview.hint.web': 'Auf „Web-Stream“ klicken, um den Live-Feed zu starten',
   'preview.hint.webOff': 'Web-Streaming ist in den Einstellungen deaktiviert',

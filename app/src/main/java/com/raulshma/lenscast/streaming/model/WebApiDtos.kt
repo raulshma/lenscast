@@ -442,6 +442,13 @@ data class StatusResponseDto(
     val torchOn: Boolean = false,
     /** Live siren state, the siren toggle's device truth (auto-deterrence can start it). */
     val sirenActive: Boolean = false,
+    /**
+     * A live stream's camera bind is being denied because the device is
+     * locked — the outputs run but no camera frames flow (the locked-mount
+     * start's "on but black" state). Absent on older firmware; false when
+     * the camera is delivering or nothing is streaming.
+     */
+    val cameraBlockedByLock: Boolean = false,
     /** The persisted zoom ratio the camera is currently applying. */
     val zoomRatio: Double = 1.0,
     /** The selected lens's camera id and label; null before the lens enumeration lands. */

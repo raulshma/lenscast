@@ -137,6 +137,12 @@ export default function StreamPreview(props: Props) {
   const webActive = () => st()?.streaming?.webStreamingActive ?? API_DEFAULTS.webStreamingActive
   const rtspEnabled = () => st()?.streaming?.rtspEnabled ?? API_DEFAULTS.rtspEnabled
   const rtspActive = () => st()?.streaming?.rtspStreamingActive ?? API_DEFAULTS.rtspStreamingActive
+  // The locked-mount truth: the device says a live stream's camera bind is
+  // denied under lock. The stage swaps to the placeholder (players unmount —
+  // the futile ladder churn stops with them) and says so, instead of staging
+  // a black screen no error can explain. Absent on older firmware → never
+  // blocked, the old behavior exactly.
+  const blockedByLock = () => st()?.cameraBlockedByLock === true
 
   const [focusIndicator, setFocusIndicator] = createSignal<{ x: number; y: number; visible: boolean }>({
     x: 0,
@@ -517,20 +523,20 @@ export default function StreamPreview(props: Props) {
   // The strip floats over live video only — never over the boot placeholder —
   // and the container class lifts the bottom-corner overlays (digital-zoom
   // pill, fullscreen hint) clear of it.
-  const stripVisible = () => !!props.stripOverlay && props.previewVisible() && webActive() && !!st()
+  const stripVisible = () => !!props.stripOverlay && props.previewVisible() && webActive() && !!st() && !blockedByLock()
 
   return (
     <section class="preview-section" id="preview-section">
       <div
         class="preview-container zoomable-container"
         classList={{
-          'preview-active': webActive() && props.previewVisible(),
+          'preview-active': webActive() && props.previewVisible() && !blockedByLock(),
           'preview-container-fullscreen': fullscreen.cssOverlay(),
           'has-cam-strip': stripVisible(),
         }}
         ref={(el) => { zoom.containerRef(el); setPreviewContainer(el) }}
       >
-        {props.previewVisible() && webActive() ? (
+        {props.previewVisible() && webActive() && !blockedByLock() ? (
           <Show when={playerMode() !== 'mjpeg'} fallback={
           <img
             class="preview-img zoomable-content"
@@ -626,15 +632,32 @@ export default function StreamPreview(props: Props) {
           <div class="preview-placeholder">
             <div class="preview-placeholder-icon">
               <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1">
-                <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
-                <circle cx="12" cy="13" r="4" />
+                <Show
+                  when={blockedByLock()}
+                  fallback={
+                    <>
+                      <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
+                      <circle cx="12" cy="13" r="4" />
+                    </>
+                  }
+                >
+                  {/* Locked padlock — the blocked-by-lock stage's glyph */}
+                  <rect x="5" y="11" width="14" height="10" rx="2" />
+                  <path d="M8 11V7a4 4 0 0 1 8 0v4" />
+                </Show>
               </svg>
             </div>
-            <span class="preview-placeholder-text">{webActive() ? t('preview.connecting') : isActive() ? t('preview.streamError') : t('preview.noStream')}</span>
+            <span class="preview-placeholder-text">
+              {blockedByLock()
+                ? t('preview.blockedByLock')
+                : webActive() ? t('preview.connecting') : isActive() ? t('preview.streamError') : t('preview.noStream')}
+            </span>
             <span class="preview-placeholder-sub">
-              {!webStreamingEnabled() && !rtspEnabled()
-                ? t('preview.hint.disabled')
-                : webStreamingEnabled() ? t('preview.hint.web') : t('preview.hint.webOff')}
+              {blockedByLock()
+                ? t('preview.hint.blockedByLock')
+                : !webStreamingEnabled() && !rtspEnabled()
+                  ? t('preview.hint.disabled')
+                  : webStreamingEnabled() ? t('preview.hint.web') : t('preview.hint.webOff')}
             </span>
           </div>
         )}
@@ -649,8 +672,10 @@ export default function StreamPreview(props: Props) {
 
         {/* Live badge — hidden once telemetry is confirmed dead: a stale
             status snapshot would otherwise keep it lit while the device is
-            unreachable (the App-level connection-lost banner explains why). */}
-        <Show when={webActive() && props.previewVisible() && !props.connectionLost()}>
+            unreachable (the App-level connection-lost banner explains why).
+            Also hidden while blocked-by-lock: the stage below says the
+            truth, the badge must not contradict it. */}
+        <Show when={webActive() && props.previewVisible() && !props.connectionLost() && !blockedByLock()}>
           <div class="live-badge">
             <span class="live-badge-dot" />
             LIVE

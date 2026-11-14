@@ -107,15 +107,28 @@ class StreamingService : Service() {
             // visible — MIUI's while-in-use camera policy throws
             // SecurityException for it (stock API 30+ restricts it too), and
             // this is exactly the locked-mount start: tile, boot resume,
-            // automation. The old behavior — stopSelf — tore the service
-            // down entirely, taking the working server-only notification
-            // with it and leaving the live stream with no foreground
-            // service at all. Fall back to the server-only promotion: the
-            // process keeps its foreground standing and the server stays
-            // reachable; the session's stall watch and the resume seam own
-            // re-asserting the streaming promotion once the policy allows.
+            // automation, the dashboard's remote start. The old behavior —
+            // stopSelf — tore the service down entirely, taking the working
+            // server-only notification with it and leaving the live stream
+            // with no foreground service at all. Fall back to the server-only
+            // promotion: the process keeps its foreground standing and the
+            // server stays reachable; the session's stall watch and the
+            // resume seam own re-asserting the streaming promotion once the
+            // policy allows.
             Log.w(TAG, "Streaming foreground promotion denied; holding the server-only promotion")
             promoteServerOnly(url, includeAudio)
+            // Under lock this denial is the whole black-screen story: the
+            // outputs run but no camera can open. Hand the wake to the
+            // lock-bypass shim — a full-screen intent over the keyguard
+            // makes the app visible for the seconds the promotion and the
+            // camera bind need. Unlocked denials stay with the resume seam.
+            runCatching {
+                (application as? com.raulshma.lenscast.AppGraph)
+                    ?.lockBypassController
+                    ?.onStreamingPromotionDenied()
+            }.onFailure {
+                Log.w(TAG, "Lock bypass dispatch failed: ${it.javaClass.simpleName}")
+            }
         }
         Log.d(TAG, "Streaming foreground service started")
     }

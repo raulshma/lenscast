@@ -88,6 +88,8 @@ export const fr: Partial<Record<MessageKey, string>> = {
 
   'preview.streamError': 'Erreur de flux',
   'preview.noStream': 'Aucun flux actif',
+  'preview.blockedByLock': 'Caméra bloquée — l’appareil est verrouillé',
+  'preview.hint.blockedByLock': 'Le flux démarrera au déverrouillage de l’appareil',
   'preview.hint.disabled': 'Activez le flux web ou RTSP dans les réglages pour démarrer',
   'preview.hint.web': 'Cliquez sur « Flux web » pour lancer la vue en direct',
   'preview.hint.webOff': 'La diffusion web est désactivée dans les réglages',

@@ -12,7 +12,7 @@ export interface ChannelState {
   code: 'WEB' | 'RTSP' | 'RTMP' | 'WHIP'
   enabled: boolean
   active: boolean
-  status?: 'idle' | 'connecting' | 'connected' | 'error'
+  status?: 'idle' | 'connecting' | 'connected' | 'error' | 'blocked'
   error?: string | null
 }
 
@@ -20,16 +20,34 @@ export interface ChannelState {
 export function channelStates(status: DeviceStatus | null | undefined): ChannelState[] {
   const s = status?.streaming
   if (!s) return []
+  // The locked-mount truth: the outputs report active but the camera bind is
+  // denied under lock, so no frames flow. The flag is absent on older
+  // firmware — a WEB/RTSP row only carries 'blocked' while it is genuinely
+  // active and the device says so.
+  const blockedByLock = status?.cameraBlockedByLock === true
   return [
-    { code: 'WEB', enabled: s.webStreamingEnabled, active: s.webStreamingActive },
-    { code: 'RTSP', enabled: s.rtspEnabled, active: s.rtspStreamingActive },
+    {
+      code: 'WEB',
+      enabled: s.webStreamingEnabled,
+      active: s.webStreamingActive,
+      status: blockedByLock && s.webStreamingActive ? 'blocked' : undefined,
+    },
+    {
+      code: 'RTSP',
+      enabled: s.rtspEnabled,
+      active: s.rtspStreamingActive,
+      status: blockedByLock && s.rtspStreamingActive ? 'blocked' : undefined,
+    },
     { code: 'RTMP', enabled: s.rtmpEnabled === true, active: s.rtmpActive === true, status: s.rtmpStatus, error: s.rtmpError },
     { code: 'WHIP', enabled: s.whipEnabled === true, active: s.whipActive === true, status: s.whipStatus, error: s.whipError },
   ]
 }
 
-/** LED tone for a channel: on-air green, handshake amber, fault red. */
+/** LED tone for a channel: on-air green, handshake/blocked amber, fault red. */
 export function channelLed(c: ChannelState): LedTone {
+  // Blocked outranks active: the row is nominally on air but the camera is
+  // denied — amber, not green.
+  if (c.status === 'blocked') return 'warn'
   if (c.active) return 'ok'
   if (c.status === 'connecting') return 'warn'
   if (c.status === 'error') return 'danger'

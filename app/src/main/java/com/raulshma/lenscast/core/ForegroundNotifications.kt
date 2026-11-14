@@ -37,6 +37,15 @@ object ForegroundNotifications {
     const val INTERVAL_CAPTURE_NOTIFICATION_ID = 1004
 
     /**
+     * The locked-mount camera wake ([com.raulshma.lenscast.core.LockBypassController]):
+     * a transient full-screen-intent notification, not a foreground slot —
+     * the ID is registered here so a producer can never collide with the
+     * foreground producers above.
+     */
+    const val LOCK_BYPASS_NOTIFICATION_ID = 1005
+    const val LOCK_BYPASS_CHANNEL_ID = "lock_bypass_channel"
+
+    /**
      * Detection-alert notifications live above every foreground slot and are
      * sub-numbered per event type (motion/sound/tamper), so a burst of one
      * kind replaces itself and never collides with a producer slot.

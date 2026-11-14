@@ -4,4 +4,17 @@
         <item name="android:statusBarColor">@android:color/transparent</item>
         <item name="android:navigationBarColor">@android:color/transparent</item>
     </style>
+
+    <!--
+      The locked-mount camera shim (LockBypassActivity): translucent over the
+      keyguard — the Compose surface draws the dim panel, the keyguard shows
+      through the edges for the brief episode.
+    -->
+    <style name="Theme.LensCast.LockBypass" parent="@android:style/Theme.DeviceDefault.NoActionBar">
+        <item name="android:windowIsTranslucent">true</item>
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:backgroundDimEnabled">false</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+    </style>
 </resources>

@@ -6,6 +6,7 @@ import android.content.Intent
 import android.os.Looper
 import com.raulshma.lenscast.camera.CameraService
 import com.raulshma.lenscast.core.BatteryOptimizationResult
+import com.raulshma.lenscast.core.KeyguardMonitor
 import com.raulshma.lenscast.core.PowerManager
 import com.raulshma.lenscast.core.StreamWatchdog
 import com.raulshma.lenscast.core.ThermalMonitor
@@ -65,6 +66,8 @@ class StreamingSessionTest {
     private val powerManager: PowerManager = mockk(relaxed = true)
     private val thermalMonitor: ThermalMonitor = mockk(relaxed = true)
     private val streamWatchdog: StreamWatchdog = mockk(relaxed = true)
+    private val keyguardLocked = MutableStateFlow(false)
+    private val keyguardMonitor: KeyguardMonitor = mockk(relaxed = true)
 
     /**
      * The streaming-restart answer, read at call time. (Suspend answers
@@ -80,6 +83,7 @@ class StreamingSessionTest {
     @Before
     fun setUp() {
         coEvery { cameraService.initialize() } returns Result.success(Unit)
+        every { cameraService.rebindUseCases() } returns true
         every { streamingManager.streamUrl } returns streamUrl
         every { streamingManager.isAudioStreaming } returns isAudioStreaming
         every { streamingManager.isRtspRunning } returns isRtspRunning
@@ -93,12 +97,14 @@ class StreamingSessionTest {
         every { streamingManager.ensureServerRunning() } returns true
         every { streamingManager.startStreaming() } answers { startStreamingResult }
         every { powerManager.optimizationResult } returns optimizationResult
+        every { keyguardMonitor.isKeyguardLocked } returns keyguardLocked
         session = StreamingSession(
             context = appContext,
             cameraService = cameraService,
             streamingManagerProvider = { streamingManager },
             powerManager = powerManager,
             thermalMonitor = thermalMonitor,
+            keyguardMonitor = keyguardMonitor,
             watchdogProvider = { streamWatchdog },
         )
     }
@@ -230,6 +236,63 @@ class StreamingSessionTest {
         // tick must re-arm the streaming lock before its 60-minute budget
         // can lapse (renew no-ops or release+re-acquires inside PowerManager).
         verifyUntil { verify(exactly = 1) { powerManager.renewWakeLock() } }
+    }
+
+    // ── blocked-by-lock (the locked-mount start) ──
+
+    @Test
+    fun `begin under lock with a denied bind flags blocked-by-lock and keeps the session`() {
+        // The while-in-use camera policy's shape: the Main hop completes but
+        // the rebind is denied — exactly the locked-mount dashboard start.
+        every { cameraService.rebindUseCases() } returns false
+        keyguardLocked.value = true
+
+        runWithMainPumped { session.begin() }
+
+        // The locked-mount contract: the session stands (streaming on,
+        // server-only foreground, heal on visibility), but the status wire
+        // carries the blocked truth instead of a silent black screen.
+        assertTrue(session.isActive)
+        verify(exactly = 1) { streamingManager.setCameraBlockedByLock(true) }
+    }
+
+    @Test
+    fun `a denied bind on an unlocked device does not claim lock blocking`() {
+        every { cameraService.rebindUseCases() } returns false
+        keyguardLocked.value = false
+
+        runWithMainPumped { session.begin() }
+
+        assertTrue(session.isActive)
+        verify(exactly = 0) { streamingManager.setCameraBlockedByLock(true) }
+    }
+
+    @Test
+    fun `begin with a successful bind clears any stale blocked-by-lock flag`() {
+        keyguardLocked.value = false
+
+        runWithMainPumped { session.begin() }
+
+        verify(exactly = 1) { streamingManager.setCameraBlockedByLock(false) }
+    }
+
+    @Test
+    fun `unlock heal rebinds and clears the flag when the bind lands`() {
+        runWithMainPumped { session.begin() }
+
+        every { cameraService.rebindUseCases() } returns true
+        runWithMainPumped { session.rebindOnUnlock() }
+
+        verify(atLeast = 1) { streamingManager.setCameraBlockedByLock(false) }
+        coVerify(exactly = 0) { cameraService.releaseKeepAlive() }
+    }
+
+    @Test
+    fun `unlock heal is a no-op without a live session`() {
+        runWithMainPumped { session.rebindOnUnlock() }
+
+        verify(exactly = 0) { cameraService.rebindUseCases() }
+        verify(exactly = 0) { streamingManager.setCameraBlockedByLock(any()) }
     }
 
     // ── end ──

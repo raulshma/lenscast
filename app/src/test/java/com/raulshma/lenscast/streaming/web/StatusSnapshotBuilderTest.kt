@@ -279,6 +279,30 @@ class StatusSnapshotBuilderTest {
     }
 
     @Test
+    fun `blocked-by-lock defaults false and passes through when supplied`() {
+        val default = StatusSnapshotBuilder.build(
+            streaming = streaming(active = true),
+            thermal = thermal(),
+            battery = battery(),
+            watchdog = watchdog(),
+            adaptive = adaptive(enabled = true),
+            network = network(),
+        )
+        assertEquals(false, default.cameraBlockedByLock)
+
+        val blocked = StatusSnapshotBuilder.build(
+            streaming = streaming(active = true),
+            thermal = thermal(),
+            battery = battery(),
+            watchdog = watchdog(),
+            adaptive = adaptive(enabled = true),
+            network = network(),
+            cameraBlockedByLock = true,
+        )
+        assertEquals(true, blocked.cameraBlockedByLock)
+    }
+
+    @Test
     fun `a supplied phase folds the live bit and the wire strings stay untouched`() {
         // Reconnecting (Error + live) and Refused (Error + stopped) both ride
         // the wire's plain "error" string; the phase only re-derives the live

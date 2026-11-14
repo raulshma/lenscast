@@ -160,6 +160,7 @@ object StatusSnapshotBuilder {
         network: NetworkInputs,
         encodedVideo: EncodedVideoInputs = EncodedVideoInputs(bitrateBps = 0),
         sirenActive: Boolean = false,
+        cameraBlockedByLock: Boolean = false,
     ): StatusResponseDto {
         val adaptiveBitrateDto = if (adaptive.enabled) {
             AdaptiveBitrateStatusDto(
@@ -243,6 +244,7 @@ object StatusSnapshotBuilder {
             ),
             torchOn = camera?.torchOn ?: false,
             sirenActive = sirenActive,
+            cameraBlockedByLock = cameraBlockedByLock,
             zoomRatio = camera?.zoomRatio ?: 1.0,
             lensId = camera?.lensId,
             lensLabel = camera?.lensLabel,

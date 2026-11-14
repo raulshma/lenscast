@@ -909,6 +909,9 @@ object OpenApiSpec {
             "battery" to ref("BatteryStatusDto"),
             "torchOn" to boolSchema(),
             "sirenActive" to boolSchema(),
+            "cameraBlockedByLock" to boolSchema(
+                "A live stream's camera bind is being denied because the device is locked — outputs run, no frames flow"
+            ),
             "zoomRatio" to mapOf("type" to "number"),
             "lensId" to stringSchema(),
             "lensLabel" to stringSchema(),

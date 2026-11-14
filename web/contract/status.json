@@ -30,6 +30,7 @@
   },
   "torchOn": false,
   "sirenActive": false,
+  "cameraBlockedByLock": false,
   "zoomRatio": 1.75,
   "lensId": "0",
   "lensLabel": "Wide",

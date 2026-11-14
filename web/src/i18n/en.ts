@@ -88,7 +88,9 @@ export const en: Record<string, string> = {
 
   'preview.streamError': 'Stream error',
   'preview.noStream': 'No active stream',
+  'preview.blockedByLock': 'Camera blocked — device is locked',
   'preview.hint.disabled': 'Enable Web Stream or RTSP in settings to start',
+  'preview.hint.blockedByLock': 'The stream will start when the device unlocks',
   'preview.hint.web': 'Click Web Stream to start the live feed',
   'preview.hint.webOff': 'Web streaming is disabled in settings',
   'preview.viewers_one': '{count} viewer',

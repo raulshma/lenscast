@@ -562,6 +562,32 @@ class StreamingManager(
     private val _isDetectionMicActive = MutableStateFlow(false)
     val isDetectionMicActive: StateFlow<Boolean> = _isDetectionMicActive
 
+    /**
+     * True while a live stream's camera bind is being denied because the
+     * device is locked — Android's while-in-use policy only grants a fresh
+     * camera open to a visible app, so a locked-mount start runs its outputs
+     * (encoder, HLS, the WHEP handshake) with no camera behind them: the
+     * black-screen-behind-an-"ON AIR"-badge state. The streaming session is
+     * the writer: it sets the flag when the keep-alive attach's rebind fails
+     * under lock and clears it on the first bind that lands (or on teardown).
+     * The status wire publishes it, so the dashboard can say "blocked —
+     * device locked" instead of staging a black screen that no error can
+     * explain.
+     */
+    private val _cameraBlockedByLock = MutableStateFlow(false)
+    val cameraBlockedByLock: StateFlow<Boolean> = _cameraBlockedByLock
+
+    /** The synchronous read seam for the status handler / MQTT telemetry. */
+    fun isCameraBlockedByLock(): Boolean = _cameraBlockedByLock.value
+
+    /** The session's single write seam for the blocked truth. */
+    fun setCameraBlockedByLock(blocked: Boolean) {
+        if (_cameraBlockedByLock.value != blocked) {
+            _cameraBlockedByLock.value = blocked
+            Log.d(TAG, "Camera blocked-by-lock flag → $blocked")
+        }
+    }
+
     /** True while the shared mic capture runs for any reason. */
     fun isSharedMicCapturing(): Boolean = audioStreamingManager.isRunning()
 

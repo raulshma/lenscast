@@ -121,6 +121,7 @@ class StatusWebHandler(
                 bitrateBps = streamingManager.currentVideoBitrate(),
             ),
             sirenActive = streamingManager.sirenController().isRunning(),
+            cameraBlockedByLock = streamingManager.isCameraBlockedByLock(),
         )
         return responseAdapter.toJson(response)
     }

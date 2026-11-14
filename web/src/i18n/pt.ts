@@ -88,6 +88,8 @@ export const pt: Partial<Record<MessageKey, string>> = {
 
   'preview.streamError': 'Erro na transmissão',
   'preview.noStream': 'Nenhuma transmissão ativa',
+  'preview.blockedByLock': 'Câmera bloqueada — o dispositivo está bloqueado',
+  'preview.hint.blockedByLock': 'A transmissão começará quando o dispositivo for desbloqueado',
   'preview.hint.disabled': 'Ative a transmissão web ou RTSP nas configurações para começar',
   'preview.hint.web': 'Clique em «Transmissão web» para iniciar o ao vivo',
   'preview.hint.webOff': 'A transmissão web está desativada nas configurações',

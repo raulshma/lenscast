@@ -49,6 +49,16 @@
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.BIND_QUICK_SETTINGS_TILE" />
     <uses-permission android:name="com.raulshma.lenscast.permission.AUTOMATION" />
+    <!--
+      The locked-mount camera wake (LockBypassController → LockBypassActivity):
+      a full-screen intent is the sanctioned way to become visible over the
+      keyguard, which is what the while-in-use camera policy requires before it
+      grants the CAMERA-typed foreground promotion to a remotely started
+      stream. Sideloaded/F-Droid installs hold it by default; Android 14+ Play
+      installs can have it revoked (the controller checks
+      canUseFullScreenIntent and falls back to the blocked-by-lock status).
+    -->
+    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
 
     <!--
       Guards the exported AutomationReceiver, so arbitrary apps cannot drive
@@ -87,6 +97,22 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!--
+          The locked-mount camera shim: launched only by the lock-bypass
+          full-screen intent (and the notification's content tap path goes to
+          MainActivity instead), so never exported and never in Recents.
+          showWhenLocked/turnScreenOn are also set in code for the pre-27
+          window-flag path (minSdk 23).
+        -->
+        <activity
+            android:name=".streaming.LockBypassActivity"
+            android:exported="false"
+            android:noHistory="true"
+            android:excludeFromRecents="true"
+            android:showWhenLocked="true"
+            android:turnScreenOn="true"
+            android:theme="@style/Theme.LensCast.LockBypass" />
 
         <provider
             android:name="androidx.core.content.FileProvider"

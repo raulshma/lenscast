@@ -16,6 +16,9 @@ export default function ChannelMatrix(props: { state: NextState }) {
   const state = props.state
 
   const statusText = (c: ChannelState): string => {
+    // Blocked outranks on air: the row is nominally live but the camera is
+    // denied under lock — the console says so instead of a green lie.
+    if (c.status === 'blocked') return 'LOCKED'
     if (c.active) return 'ON AIR'
     if (c.status === 'connecting') return 'SYNC'
     if (c.status === 'error') return 'FAULT'
@@ -24,7 +27,9 @@ export default function ChannelMatrix(props: { state: NextState }) {
 
   const statusTone = (c: ChannelState): string => {
     // On air is the signal state — magenta per the color law (DESIGN.md).
-    // Green stays for healthy-idle (RDY); red is faults only.
+    // Green stays for healthy-idle (RDY); red is faults only; blocked is
+    // amber (a condition, not a fault — it heals on unlock).
+    if (c.status === 'blocked') return 'nx-channel-status-warn'
     if (c.active) return 'nx-channel-status-air'
     if (c.status === 'connecting') return 'nx-channel-status-warn'
     if (c.status === 'error') return 'nx-channel-status-fault'

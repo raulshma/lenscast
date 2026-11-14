@@ -786,17 +786,26 @@ class CameraService(private val context: Context) {
      * camera, unbind when no demand remains, bind into the effective owner
      * otherwise. Callers that arrive through a freedom gate consult
      * [CameraSessionArbiter] themselves and land in [executeBinding] directly.
+     *
+     * @return whether the consult ended without a failed bind — a bound
+     * camera, an unbind (no demand), or a skip (an exclusive session owns the
+     * camera). False only when a *bind* was attempted and failed (the locked
+     * device's while-in-use denial is the headline case); the streaming
+     * session reads this to flag the stream blocked-by-lock instead of
+     * believing the camera came up.
      */
-    fun rebindUseCases() {
-        when (
+    fun rebindUseCases(): Boolean {
+        return when (
             val action = CameraSessionArbiter.decide(
                 demandState(CameraSessionArbiter.Trigger.RebindCheck)
             )
         ) {
-            CameraSessionArbiter.CameraSessionAction.Noop ->
+            CameraSessionArbiter.CameraSessionAction.Noop -> {
                 Log.d(TAG, "rebindUseCases: skipped while an exclusive session is active")
+                true
+            }
             is CameraSessionArbiter.BindingAction -> executeBinding(action)
-            else -> {}
+            else -> true
         }
     }
 
@@ -804,28 +813,30 @@ class CameraService(private val context: Context) {
      * The one action → CameraX execution for the binding verdicts, shared by
      * every gated entry point: ensure the provider — only actions that use it
      * reach here, the same passes the old inline gates allowed through — then
-     * unbind or bind into the effective lifecycle owner.
+     * unbind or bind into the effective lifecycle owner. @return as in
+     * [rebindUseCases].
      */
-    private fun executeBinding(action: CameraSessionArbiter.BindingAction) {
+    private fun executeBinding(action: CameraSessionArbiter.BindingAction): Boolean {
         val provider = ensureCameraProviderAvailable()
         Log.d(TAG, "rebindUseCases: provider=${provider != null}, refCount=${sessionDemand.keepAliveRefCount}, previewRequested=${sessionDemand.previewRequested}, lifecycleOwner=${lifecycleOwner != null}")
 
         if (provider == null) {
             Log.w(TAG, "rebindUseCases: cameraProvider is null, cannot rebind")
-            return
+            return false
         }
 
-        when (action) {
+        return when (action) {
             CameraSessionArbiter.BindingAction.Unbind -> {
                 provider.unbindAll()
                 clearBoundUseCases()
                 Log.d(TAG, "rebindUseCases: unbound camera because there is no active demand")
+                true
             }
             CameraSessionArbiter.BindingAction.Rebind -> {
                 val owner = getEffectiveLifecycleOwner()
                 if (owner == null) {
                     Log.w(TAG, "rebindUseCases: no lifecycle owner available and no keep-alive, cannot rebind")
-                    return
+                    return false
                 }
                 bindUseCases(provider, owner)
             }
@@ -941,11 +952,19 @@ class CameraService(private val context: Context) {
         rebindUseCases()
     }
 
+    /**
+     * The CameraX bind itself. @return true when the bind landed
+     * ([CameraState.Ready] — the same fact the camera UI reads), false on
+     * either failure path (a use-case combination no combination ladder can
+     * satisfy, or the OS denying the open — the locked device's while-in-use
+     * policy). The state write stays the single truth; the return only
+     * propagates it to programmatic callers.
+     */
     @androidx.camera.camera2.interop.ExperimentalCamera2Interop
     private fun bindUseCases(
         provider: ProcessCameraProvider,
         owner: LifecycleOwner,
-    ) {
+    ): Boolean {
         Log.d(TAG, "bindUseCases: selector=${_selectedLens.value.selector}, resolution=$currentResolution, attachPreview=${shouldAttachPreview()}")
 
         // The photo-use-case decisions (quality clamp, capture mode, RAW
@@ -1049,7 +1068,7 @@ class CameraService(private val context: Context) {
             } catch (e: Exception) {
                 Log.e(TAG, "bindUseCases: failed to bind camera", e)
                 _cameraState.value = CameraState.Error("Failed to start camera: ${e.message}")
-                return
+                return false
             }
 
             camera?.let { cam ->
@@ -1146,9 +1165,11 @@ class CameraService(private val context: Context) {
             // watchdog's recovery verification (which reads Ready) failed
             // even when frames flowed.
             _cameraState.value = CameraState.Ready
+            return true
         } catch (e: Exception) {
             Log.e(TAG, "bindUseCases: failed to bind camera", e)
             _cameraState.value = CameraState.Error("Failed to start camera: ${e.message}")
+            return false
         }
     }
 

@@ -254,6 +254,7 @@ describe('DTO contract fixtures', () => {
       'camera',
       'battery',
       'torchOn',
+      'cameraBlockedByLock',
       'zoomRatio',
       'lensId',
       'lensLabel',

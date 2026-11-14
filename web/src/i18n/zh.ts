@@ -88,6 +88,8 @@ export const zh: Partial<Record<MessageKey, string>> = {
 
   'preview.streamError': '直播出错',
   'preview.noStream': '没有正在进行的直播',
+  'preview.blockedByLock': '摄像头被阻止 — 设备已锁定',
+  'preview.hint.blockedByLock': '设备解锁后直播将自动开始',
   'preview.hint.disabled': '请在设置中启用网页直播或 RTSP 以开始',
   'preview.hint.web': '点击「网页直播」开始实时画面',
   'preview.hint.webOff': '网页直播已在设置中停用',

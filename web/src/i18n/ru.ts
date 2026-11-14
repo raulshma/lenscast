@@ -89,6 +89,8 @@ export const ru: Partial<Record<MessageKey, string>> = {
 
   'preview.streamError': 'Ошибка трансляции',
   'preview.noStream': 'Нет активной трансляции',
+  'preview.blockedByLock': 'Камера заблокирована — устройство заблокировано',
+  'preview.hint.blockedByLock': 'Трансляция начнётся после разблокировки устройства',
   'preview.hint.disabled': 'Включите веб-трансляцию или RTSP в настройках, чтобы начать',
   'preview.hint.web': 'Нажмите «Веб-трансляция», чтобы включить прямой эфир',
   'preview.hint.webOff': 'Веб-трансляция отключена в настройках',
