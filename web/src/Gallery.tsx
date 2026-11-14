@@ -147,6 +147,7 @@ export default function Gallery(props: {
   async function handleDelete(item: GalleryItem, e: Event) {
     e.stopPropagation()
     if (deleting()) return
+    if (!confirm(t('gallery.deleteOneConfirm', { name: item.fileName }))) return
     setDeleting(item.id)
     try {
       await api.deleteMedia(item.id)

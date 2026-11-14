@@ -25,6 +25,7 @@ import Button from '../../ui/Button'
 import Empty from '../../ui/Empty'
 import Led from '../../ui/Led'
 import Panel from '../../ui/Panel'
+import ConfirmDialog from '../../ui/ConfirmDialog'
 import AutomationRuleEditor from '../../../AutomationRuleEditor'
 
 interface Props {
@@ -48,6 +49,7 @@ export default function AutomationPanel(props: Props) {
   // The rule draft the editor dialog is open on; null = closed.
   const [editing, setEditing] = createSignal<AutomationRuleDto | null>(null)
   const [isNewRule, setIsNewRule] = createSignal(false)
+  const [pendingRemove, setPendingRemove] = createSignal<AutomationRuleDto | null>(null)
 
   const readOnly = () => props.readOnly?.() ?? false
   // The editor contract's caps/presets: device truth once fetched
@@ -142,8 +144,16 @@ export default function AutomationPanel(props: Props) {
   function removeRule(rule: AutomationRuleDto) {
     const current = state()
     if (!current || readOnly() || saving()) return
-    // The Gallery/AuditCard precedent: destructive, so a confirm guards it.
-    if (!window.confirm(t('automation.deleteConfirm', { name: rule.name || t('automation.ruleUnnamed') }))) return
+    setPendingRemove(rule)
+  }
+
+  // The dialog confirms against the rule it was opened for; the id filter
+  // makes a stale confirm a harmless no-op if the list moved under it.
+  function confirmRemoveRule() {
+    const rule = pendingRemove()
+    const current = state()
+    if (!rule || !current || saving()) return
+    setPendingRemove(null)
     void persist(current.enabled, current.rules.filter((entry) => entry.id !== rule.id))
   }
 
@@ -395,6 +405,16 @@ export default function AutomationPanel(props: Props) {
           />
         )}
       </Show>
+
+      <ConfirmDialog
+        open={pendingRemove() !== null}
+        title={t('common.delete')}
+        message={t('automation.deleteConfirm', { name: pendingRemove()?.name || t('automation.ruleUnnamed') })}
+        danger
+        busy={saving()}
+        onConfirm={confirmRemoveRule}
+        onClose={() => setPendingRemove(null)}
+      />
     </Panel>
   )
 }

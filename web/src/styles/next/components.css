@@ -775,6 +775,40 @@ a.nx-btn {
   to { opacity: 1; transform: none; }
 }
 
+/* Confirm dialog — the kit's ask-before-destructive-action modal. */
+.nx-confirm {
+  width: min(400px, 100%);
+}
+
+.nx-confirm-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--nx-space-2);
+  padding: var(--nx-space-5) var(--nx-space-5) 0;
+}
+
+.nx-confirm-title {
+  font-family: var(--nx-font);
+  font-size: var(--nx-text-md);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--nx-text);
+}
+
+.nx-confirm-message {
+  font-family: var(--nx-font);
+  font-size: var(--nx-text-base);
+  line-height: 1.5;
+  color: var(--nx-text-secondary);
+}
+
+.nx-confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--nx-space-2);
+  padding: var(--nx-space-4) var(--nx-space-5) var(--nx-space-5);
+}
+
 [data-ui='next'] .automation-editor-modal,
 [data-ui='next'] .automation-picker-modal,
 [data-ui='next'] .nx-modal {

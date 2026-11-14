@@ -8,7 +8,7 @@ import { openMedia } from '../../../lib/viewerStore'
 import { dayGroupLabel, formatTime, t, tCount } from '../../../lib/i18n'
 import { formatFileSize, formatDuration } from '../../../lib/format'
 import { IconPhoto, IconFilm, IconSearch, IconTrash, IconCheck } from '../../icons'
-import { Panel, Segmented, TextInput, Button, Badge, Empty, Skeleton, Spinner } from '../ui'
+import { Panel, Segmented, TextInput, Button, Badge, Empty, Skeleton, Spinner, ConfirmDialog } from '../ui'
 
 /** How long typing waits before the search refetches the gallery. */
 const SEARCH_DEBOUNCE_MS = 300
@@ -37,6 +37,12 @@ export default function MediaView(props: { state: NextState }) {
   const [selectMode, setSelectMode] = createSignal(false)
   const [selectedIds, setSelectedIds] = createSignal<Set<string>>(new Set())
   const [batchDeleting, setBatchDeleting] = createSignal(false)
+  // The confirm dialogs' snapshots, taken at open time (the Android viewer's
+  // DeleteTarget pattern): the dialog deletes against what it showed, never
+  // against whatever the list has become while it sat open.
+  const [pendingDelete, setPendingDelete] = createSignal<GalleryItem | null>(null)
+  const [deleteOneBusy, setDeleteOneBusy] = createSignal(false)
+  const [confirmBatch, setConfirmBatch] = createSignal(false)
   const [searchInput, setSearchInput] = createSignal('')
   const [query, setQuery] = createSignal('')
   let searchTimer: ReturnType<typeof setTimeout> | null = null
@@ -104,20 +110,34 @@ export default function MediaView(props: { state: NextState }) {
     openMedia(item.id, { type: item.type, fileName: item.fileName })
   }
 
-  async function deleteOne(item: GalleryItem) {
+  function deleteOne(item: GalleryItem) {
+    setPendingDelete(item)
+  }
+
+  async function confirmDeleteOne() {
+    const item = pendingDelete()
+    if (!item || deleteOneBusy()) return
+    setDeleteOneBusy(true)
     try {
       await api.deleteMedia(item.id)
       setItems((prev) => prev.filter((i) => i.id !== item.id))
       setTotal((n) => Math.max(0, n - 1))
     } catch (e: any) {
       setError(e?.message || t('gallery.deleteFailed'))
+    } finally {
+      setDeleteOneBusy(false)
+      setPendingDelete(null)
     }
   }
 
-  async function deleteBatch() {
+  function deleteBatch() {
+    if (selectedIds().size === 0 || batchDeleting()) return
+    setConfirmBatch(true)
+  }
+
+  async function confirmBatchDelete() {
     const ids = [...selectedIds()]
-    if (ids.length === 0 || batchDeleting()) return
-    if (!window.confirm(t('gallery.deleteConfirm_other', { count: ids.length }))) return
+    if (ids.length === 0) return
     setBatchDeleting(true)
     try {
       await api.deleteMediaBatch(ids)
@@ -129,6 +149,7 @@ export default function MediaView(props: { state: NextState }) {
       setError(e?.message || t('gallery.batchFailed'))
     } finally {
       setBatchDeleting(false)
+      setConfirmBatch(false)
     }
   }
 
@@ -259,7 +280,7 @@ export default function MediaView(props: { state: NextState }) {
                               class="nx-tile-delete"
                               title={t('common.delete')}
                               aria-label={t('common.delete')}
-                              onClick={(e) => { e.stopPropagation(); void deleteOne(item) }}
+                              onClick={(e) => { e.stopPropagation(); deleteOne(item) }}
                             >
                               <IconTrash size={13} />
                             </button>
@@ -285,6 +306,25 @@ export default function MediaView(props: { state: NextState }) {
           </Show>
         </Show>
       </div>
+
+      <ConfirmDialog
+        open={pendingDelete() !== null}
+        title={t('common.delete')}
+        message={t('gallery.deleteOneConfirm', { name: pendingDelete()?.fileName ?? '' })}
+        danger
+        busy={deleteOneBusy()}
+        onConfirm={confirmDeleteOne}
+        onClose={() => setPendingDelete(null)}
+      />
+      <ConfirmDialog
+        open={confirmBatch()}
+        title={t('common.delete')}
+        message={tCount('gallery.deleteConfirm', selectedIds().size)}
+        danger
+        busy={batchDeleting()}
+        onConfirm={confirmBatchDelete}
+        onClose={() => setConfirmBatch(false)}
+      />
     </div>
   )
 }

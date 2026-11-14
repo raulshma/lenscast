@@ -2,7 +2,7 @@ import { createSignal, For, onMount, Show } from 'solid-js'
 import type { AuditEntry, AuditLogResponse } from '../../../../../types'
 import { clearAuditLog, getAuditLog } from '../../../../../api/client'
 import { formatDateTime, t } from '../../../../../lib/i18n'
-import { Panel, FieldRow, Button, Badge, Empty } from '../../../ui'
+import { Panel, FieldRow, Button, Badge, Empty, ConfirmDialog } from '../../../ui'
 
 const DEFAULT_LIMIT = 50
 
@@ -15,12 +15,13 @@ function formatTime(timestampMs: number): string {
  * onto the kit: who did what to the camera's config — every mutating Web
  * API dispatch and every login outcome, newest first. The trail lives
  * server-side (filesDir/audit_log.json); this panel reads it, refreshes on
- * demand, and can clear it (with the classic window.confirm guard).
+ * demand, and can clear it (a ConfirmDialog guard).
  */
 export default function AuditPanel() {
   const [audit, setAudit] = createSignal<AuditLogResponse | null>(null)
   const [busy, setBusy] = createSignal(false)
   const [error, setError] = createSignal('')
+  const [confirmClear, setConfirmClear] = createSignal(false)
 
   async function refresh() {
     if (busy()) return
@@ -35,14 +36,24 @@ export default function AuditPanel() {
     }
   }
 
-  async function clear() {
-    if (busy() || !window.confirm(t('audit.clearConfirm'))) return
+  function clear() {
+    if (busy()) return
+    setConfirmClear(true)
+  }
+
+  async function confirmClearLog() {
+    if (busy()) return
     setBusy(true)
     try {
       await clearAuditLog()
-      await refresh()
+      // Inline fetch, not refresh(): the clear's busy flag is still up here,
+      // and refresh() early-returns on busy.
+      setAudit(await getAuditLog(DEFAULT_LIMIT))
+      setError('')
+      setConfirmClear(false)
     } catch (e) {
       setError(e instanceof Error ? e.message : t('audit.clearFailed'))
+      setConfirmClear(false)
     } finally {
       setBusy(false)
     }
@@ -98,6 +109,15 @@ export default function AuditPanel() {
           </span>
         </Show>
       </Show>
+      <ConfirmDialog
+        open={confirmClear()}
+        title={t('audit.clear')}
+        message={t('audit.clearConfirm')}
+        danger
+        busy={busy()}
+        onConfirm={confirmClearLog}
+        onClose={() => setConfirmClear(false)}
+      />
     </Panel>
   )
 }
