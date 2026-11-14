@@ -1,0 +1,11 @@
+Since 0.2.0:
+• Streaming: self-healing unattended streams — the watchdog no longer accepts a dead camera as healthy, so a mount nobody watches restarts itself instead of failing silently with no one around to restart it by hand
+• Streaming: remote starts now wake the camera over the lock screen — a translucent shim shows for the few seconds the camera bind needs, then dismisses itself; the session also stops trusting a bind the system later denies, which used to report a frameless stream as live
+• Streaming fix: the RTSP preview no longer freezes and fast-forwards — RTP timestamps follow the wall clock instead of delivered-frame counts, with each viewer's send loop decoupled
+• Streaming fix: a live RTSP resolution change now reconfigures the hub encoder, so switching resolutions mid-stream no longer leaves a persistently broken feed
+• Streaming fix: HLS segments are spec-valid down to the byte and the player prefers hls.js whenever Media Source is available — previews no longer strand at 0:00 in Chromium browsers
+• Web preview fix: WHEP demotes to a working player rung when no media arrives (AP isolation, firewalls, NAT) instead of sitting on a black video, and the overlay is burned into the WHEP preview like every other output
+• Camera: new 4:3 encode tiers (960×720 and 1440×1080) whose aspect steers the motion-analysis window, so 4:3 streams analyze the full frame instead of a double crop; torch strength levels now gate on Android 13 instead of 15, where the raw CameraManager API actually landed
+• Web console: the beta console UI adopts the Viewfinder design language — cyan is touchable, magenta means on air, red is reserved for faults (REC/LIVE no longer read as errors); full-screen preview with a screen wake lock; the live stream survives navigation in a mini player; deletes run through a themed, localized confirm dialog
+• Widget: home-screen refresh now covers all five live outputs — a push-only stream no longer leaves the widget Idle; the geotag toggle only persists on a granted permission and says so when it's degraded
+• Under the hood: 44 implicit state machines across nine modules named and made single-truth, scheduled-recording and geotag strings translated in all six locales, all libraries and packages bumped
