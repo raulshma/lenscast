@@ -1,5 +1,16 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<issues format="6" by="lint 9.4.0" type="baseline" client="gradle" dependencies="false" name="AGP (9.4.0)" variant="all" version="9.4.0">
+<issues format="6" by="lint 9.5.1" type="baseline" client="gradle" dependencies="false" name="AGP (9.5.1)" variant="all" version="9.5.1">
+
+    <issue
+        id="EmptySuperCall"
+        message="No need to call `super.onCleared`; the super method is defined to be empty"
+        errorLine1="        super.onCleared()"
+        errorLine2="              ~~~~~~~~~">
+        <location
+            file="src/main/java/com/raulshma/lenscast/camera/CameraViewModel.kt"
+            line="774"
+            column="15"/>
+    </issue>
 
     <issue
         id="MissingPermission"
@@ -8,8 +19,19 @@
         errorLine2="                                                    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/java/com/raulshma/lenscast/camera/CameraViewModel.kt"
-            line="643"
+            line="709"
             column="53"/>
+    </issue>
+
+    <issue
+        id="MissingPermission"
+        message="Call requires permission which may be rejected by user: code should explicitly check to see if permission is available (with `checkPermission`) or explicitly handle a potential `SecurityException`"
+        errorLine1="            NotificationManagerCompat.from(context)"
+        errorLine2="            ^">
+        <location
+            file="src/main/java/com/raulshma/lenscast/core/LockBypassController.kt"
+            line="142"
+            column="13"/>
     </issue>
 
     <issue
@@ -140,19 +162,30 @@
         errorLine2="                          ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/java/com/raulshma/lenscast/core/ForegroundNotifications.kt"
-            line="48"
+            line="63"
             column="27"/>
     </issue>
 
     <issue
         id="InlinedApi"
-        message="Field requires API level 30 (current min is 29): `android.content.pm.ServiceInfo#FOREGROUND_SERVICE_TYPE_CAMERA`"
-        errorLine1="            var serviceTypes = ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA"
-        errorLine2="                               ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        message="Field requires API level 30 (current min is 23): `android.content.pm.ServiceInfo#FOREGROUND_SERVICE_TYPE_CAMERA`"
+        errorLine1="        baseType = ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA,"
+        errorLine2="                   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/java/com/raulshma/lenscast/core/ForegroundNotifications.kt"
-            line="117"
-            column="32"/>
+            line="143"
+            column="20"/>
+    </issue>
+
+    <issue
+        id="InlinedApi"
+        message="Field requires API level 29 (current min is 23): `android.content.pm.ServiceInfo#FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE`"
+        errorLine1="        baseType = ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE,"
+        errorLine2="                   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/raulshma/lenscast/core/ForegroundNotifications.kt"
+            line="167"
+            column="20"/>
     </issue>
 
     <issue
@@ -162,8 +195,19 @@
         errorLine2="                ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/java/com/raulshma/lenscast/core/ForegroundNotifications.kt"
-            line="140"
+            line="211"
             column="17"/>
+    </issue>
+
+    <issue
+        id="InlinedApi"
+        message="Field requires API level 24 (current min is 23): `android.app.NotificationManager#IMPORTANCE_HIGH`"
+        errorLine1="                importance = android.app.NotificationManager.IMPORTANCE_HIGH,"
+        errorLine2="                             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/raulshma/lenscast/core/LockBypassController.kt"
+            line="114"
+            column="30"/>
     </issue>
 
     <issue
@@ -186,6 +230,17 @@
             file="src/main/java/com/raulshma/lenscast/streaming/rtsp/MediaCodecVideoEncoder.kt"
             line="297"
             column="32"/>
+    </issue>
+
+    <issue
+        id="InlinedApi"
+        message="Field requires API level 33 (current min is 23): `android.Manifest.permission#POST_NOTIFICATIONS`"
+        errorLine1="    const val PERMISSION = Manifest.permission.POST_NOTIFICATIONS"
+        errorLine2="                           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/raulshma/lenscast/camera/model/NotificationPermissionPolicy.kt"
+            line="26"
+            column="28"/>
     </issue>
 
     <issue
@@ -217,7 +272,7 @@
         errorLine2="                                ~~~~~~~~~~">
         <location
             file="src/main/java/com/raulshma/lenscast/capture/DetectionCoordinator.kt"
-            line="766"
+            line="791"
             column="33"/>
     </issue>
 
@@ -228,7 +283,7 @@
         errorLine2="                                             ~~~~~~~~~~~~~~">
         <location
             file="src/main/java/com/raulshma/lenscast/capture/DetectionCoordinator.kt"
-            line="766"
+            line="791"
             column="46"/>
     </issue>
 
@@ -261,7 +316,7 @@
         errorLine2="                                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/java/com/raulshma/lenscast/core/PowerManager.kt"
-            line="170"
+            line="286"
             column="34"/>
     </issue>
 
@@ -272,8 +327,52 @@
         errorLine2="                                             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/java/com/raulshma/lenscast/core/PowerManager.kt"
-            line="196"
+            line="312"
             column="46"/>
+    </issue>
+
+    <issue
+        id="NonObservableLocale"
+        message="Reading locale in a non-observable way in a composable function"
+        errorLine1="                LensInventory.formatZoom(lens.zoomRatio, Locale.getDefault())"
+        errorLine2="                                                         ~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/raulshma/lenscast/camera/CameraScreen.kt"
+            line="2508"
+            column="58"/>
+    </issue>
+
+    <issue
+        id="NonObservableLocale"
+        message="Reading locale in a non-observable way in a composable function"
+        errorLine1="                LensInventory.formatFocal(lens.focalLength, Locale.getDefault())"
+        errorLine2="                                                            ~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/raulshma/lenscast/camera/CameraScreen.kt"
+            line="2510"
+            column="61"/>
+    </issue>
+
+    <issue
+        id="NonObservableLocale"
+        message="Reading locale in a non-observable way in a composable function"
+        errorLine1="            lensVariant(front, LensInventory.formatFocal(lens.focalLength, Locale.getDefault()))"
+        errorLine2="                                                                           ~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/raulshma/lenscast/camera/CameraScreen.kt"
+            line="2515"
+            column="76"/>
+    </issue>
+
+    <issue
+        id="NonObservableLocale"
+        message="Reading locale in a non-observable way in a composable function"
+        errorLine1="                    text = event.type.replaceFirstChar { it.uppercase(Locale.getDefault()) },"
+        errorLine2="                                                                      ~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/raulshma/lenscast/capture/DetectionEventsScreen.kt"
+            line="206"
+            column="71"/>
     </issue>
 
     <issue
@@ -283,7 +382,7 @@
         errorLine2="                     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/AndroidManifest.xml"
-            line="43"
+            line="50"
             column="22"/>
     </issue>
 
@@ -311,387 +410,79 @@
 
     <issue
         id="GradleDependency"
-        message="A newer version of `compileSdk` than 36 is available: 37"
-        errorLine1="    compileSdk = 36"
-        errorLine2="    ~~~~~~~~~~~~~~~">
-        <location
-            file="build.gradle.kts"
-            line="127"
-            column="5"/>
-    </issue>
-
-    <issue
-        id="GradleDependency"
-        message="A newer version of com.google.devtools.ksp than 2.2.10-2.0.2 is available: 2.3.10"
-        errorLine1="ksp = &quot;2.2.10-2.0.2&quot;"
-        errorLine2="      ~~~~~~~~~~~~~~">
-        <location
-            file="../gradle/libs.versions.toml"
-            line="4"
-            column="7"/>
-    </issue>
-
-    <issue
-        id="GradleDependency"
-        message="A newer version of androidx.core:core-ktx than 1.16.0 is available: 1.19.0"
-        errorLine1="coreKtx = &quot;1.16.0&quot;"
-        errorLine2="          ~~~~~~~~">
-        <location
-            file="../gradle/libs.versions.toml"
-            line="5"
-            column="11"/>
-    </issue>
-
-    <issue
-        id="GradleDependency"
-        message="A newer version of androidx.lifecycle:lifecycle-runtime-ktx than 2.9.0 is available: 2.11.0"
-        errorLine1="lifecycle = &quot;2.9.0&quot;"
-        errorLine2="            ~~~~~~~">
-        <location
-            file="../gradle/libs.versions.toml"
-            line="6"
-            column="13"/>
-    </issue>
-
-    <issue
-        id="GradleDependency"
-        message="A newer version of androidx.lifecycle:lifecycle-viewmodel-compose than 2.9.0 is available: 2.11.0"
-        errorLine1="lifecycle = &quot;2.9.0&quot;"
-        errorLine2="            ~~~~~~~">
-        <location
-            file="../gradle/libs.versions.toml"
-            line="6"
-            column="13"/>
-    </issue>
-
-    <issue
-        id="GradleDependency"
-        message="A newer version of androidx.activity:activity-compose than 1.10.1 is available: 1.13.0"
-        errorLine1="activityCompose = &quot;1.10.1&quot;"
-        errorLine2="                  ~~~~~~~~">
-        <location
-            file="../gradle/libs.versions.toml"
-            line="7"
-            column="19"/>
-    </issue>
-
-    <issue
-        id="GradleDependency"
-        message="A newer version of androidx.compose:compose-bom than 2026.03.00 is available: 2026.09.00"
-        errorLine1="composeBom = &quot;2026.03.00&quot;"
-        errorLine2="             ~~~~~~~~~~~~">
-        <location
-            file="../gradle/libs.versions.toml"
-            line="8"
-            column="14"/>
-    </issue>
-
-    <issue
-        id="GradleDependency"
-        message="A newer version of androidx.navigation:navigation-compose than 2.9.0 is available: 2.10.1"
-        errorLine1="navigation = &quot;2.9.0&quot;"
+        message="A newer version of androidx.navigation:navigation-compose than 2.9.8 is available: 2.10.2"
+        errorLine1="navigation = &quot;2.9.8&quot;"
         errorLine2="             ~~~~~~~">
         <location
-            file="../gradle/libs.versions.toml"
-            line="9"
+            file="$HOME/agent-repos/lenscast/gradle/libs.versions.toml"
+            line="18"
             column="14"/>
     </issue>
 
     <issue
         id="GradleDependency"
-        message="A newer version of androidx.camera:camera-camera2 than 1.5.0 is available: 1.6.2"
-        errorLine1="camerax = &quot;1.5.0&quot;"
-        errorLine2="          ~~~~~~~">
-        <location
-            file="../gradle/libs.versions.toml"
-            line="10"
-            column="11"/>
-    </issue>
-
-    <issue
-        id="GradleDependency"
-        message="A newer version of androidx.camera:camera-core than 1.5.0 is available: 1.6.2"
-        errorLine1="camerax = &quot;1.5.0&quot;"
-        errorLine2="          ~~~~~~~">
-        <location
-            file="../gradle/libs.versions.toml"
-            line="10"
-            column="11"/>
-    </issue>
-
-    <issue
-        id="GradleDependency"
-        message="A newer version of androidx.camera:camera-extensions than 1.5.0 is available: 1.6.2"
-        errorLine1="camerax = &quot;1.5.0&quot;"
-        errorLine2="          ~~~~~~~">
-        <location
-            file="../gradle/libs.versions.toml"
-            line="10"
-            column="11"/>
-    </issue>
-
-    <issue
-        id="GradleDependency"
-        message="A newer version of androidx.camera:camera-lifecycle than 1.5.0 is available: 1.6.2"
-        errorLine1="camerax = &quot;1.5.0&quot;"
-        errorLine2="          ~~~~~~~">
-        <location
-            file="../gradle/libs.versions.toml"
-            line="10"
-            column="11"/>
-    </issue>
-
-    <issue
-        id="GradleDependency"
-        message="A newer version of androidx.camera:camera-video than 1.5.0 is available: 1.6.2"
-        errorLine1="camerax = &quot;1.5.0&quot;"
-        errorLine2="          ~~~~~~~">
-        <location
-            file="../gradle/libs.versions.toml"
-            line="10"
-            column="11"/>
-    </issue>
-
-    <issue
-        id="GradleDependency"
-        message="A newer version of androidx.camera:camera-view than 1.5.0 is available: 1.6.2"
-        errorLine1="camerax = &quot;1.5.0&quot;"
-        errorLine2="          ~~~~~~~">
-        <location
-            file="../gradle/libs.versions.toml"
-            line="10"
-            column="11"/>
-    </issue>
-
-    <issue
-        id="GradleDependency"
-        message="A newer version of androidx.work:work-runtime-ktx than 2.11.0 is available: 2.11.2"
-        errorLine1="workManager = &quot;2.11.0&quot;"
+        message="A newer version of androidx.work:work-runtime-ktx than 2.11.2 is available: 2.12.0"
+        errorLine1="workManager = &quot;2.11.2&quot;"
         errorLine2="              ~~~~~~~~">
         <location
-            file="../gradle/libs.versions.toml"
-            line="11"
+            file="$HOME/agent-repos/lenscast/gradle/libs.versions.toml"
+            line="23"
             column="15"/>
     </issue>
 
     <issue
         id="GradleDependency"
-        message="A newer version of androidx.datastore:datastore-preferences than 1.1.4 is available: 1.2.1"
-        errorLine1="datastore = &quot;1.1.4&quot;"
+        message="A newer version of androidx.datastore:datastore-preferences than 1.2.0 is available: 1.3.0"
+        errorLine1="datastore = &quot;1.2.0&quot;"
         errorLine2="            ~~~~~~~">
         <location
-            file="../gradle/libs.versions.toml"
-            line="14"
-            column="13"/>
-    </issue>
-
-    <issue
-        id="GradleDependency"
-        message="A newer version of androidx.media3:media3-exoplayer than 1.7.1 is available: 1.11.1"
-        errorLine1="media3 = &quot;1.7.1&quot;"
-        errorLine2="         ~~~~~~~">
-        <location
-            file="../gradle/libs.versions.toml"
-            line="21"
-            column="10"/>
-    </issue>
-
-    <issue
-        id="GradleDependency"
-        message="A newer version of androidx.media3:media3-ui than 1.7.1 is available: 1.11.1"
-        errorLine1="media3 = &quot;1.7.1&quot;"
-        errorLine2="         ~~~~~~~">
-        <location
-            file="../gradle/libs.versions.toml"
-            line="21"
-            column="10"/>
-    </issue>
-
-    <issue
-        id="GradleDependency"
-        message="A newer version of androidx.wear:wear than 1.3.0 is available: 1.4.0"
-        errorLine1="wear = &quot;1.3.0&quot;"
-        errorLine2="       ~~~~~~~">
-        <location
-            file="../gradle/libs.versions.toml"
-            line="31"
-            column="8"/>
-    </issue>
-
-    <issue
-        id="GradleDependency"
-        message="A newer version of androidx.wear.compose:compose-foundation than 1.4.0 is available: 1.6.2"
-        errorLine1="wearCompose = &quot;1.4.0&quot;"
-        errorLine2="              ~~~~~~~">
-        <location
-            file="../gradle/libs.versions.toml"
-            line="32"
-            column="15"/>
-    </issue>
-
-    <issue
-        id="GradleDependency"
-        message="A newer version of androidx.wear.compose:compose-material than 1.4.0 is available: 1.6.2"
-        errorLine1="wearCompose = &quot;1.4.0&quot;"
-        errorLine2="              ~~~~~~~">
-        <location
-            file="../gradle/libs.versions.toml"
-            line="32"
-            column="15"/>
-    </issue>
-
-    <issue
-        id="GradleDependency"
-        message="A newer version of androidx.wear.tiles:tiles than 1.5.0 is available: 1.6.2"
-        errorLine1="wearTiles = &quot;1.5.0&quot;"
-        errorLine2="            ~~~~~~~">
-        <location
-            file="../gradle/libs.versions.toml"
-            line="33"
-            column="13"/>
-    </issue>
-
-    <issue
-        id="GradleDependency"
-        message="A newer version of androidx.wear.tiles:tiles-material than 1.5.0 is available: 1.6.2"
-        errorLine1="wearTiles = &quot;1.5.0&quot;"
-        errorLine2="            ~~~~~~~">
-        <location
-            file="../gradle/libs.versions.toml"
-            line="33"
+            file="$HOME/agent-repos/lenscast/gradle/libs.versions.toml"
+            line="28"
             column="13"/>
     </issue>
 
     <issue
         id="NewerVersionAvailable"
-        message="A newer version of org.jetbrains.kotlin.plugin.compose than 2.2.10 is available: 2.4.20"
+        message="A newer version of org.jetbrains.kotlin.plugin.compose than 2.2.10 is available: 2.4.21"
         errorLine1="kotlin = &quot;2.2.10&quot;"
         errorLine2="         ~~~~~~~~">
         <location
-            file="../gradle/libs.versions.toml"
-            line="3"
+            file="$HOME/agent-repos/lenscast/gradle/libs.versions.toml"
+            line="5"
             column="10"/>
     </issue>
 
     <issue
         id="NewerVersionAvailable"
-        message="A newer version of org.jetbrains.kotlinx:kotlinx-coroutines-android than 1.10.2 is available: 1.11.0"
-        errorLine1="coroutines = &quot;1.10.2&quot;"
-        errorLine2="             ~~~~~~~~">
-        <location
-            file="../gradle/libs.versions.toml"
-            line="18"
-            column="14"/>
-    </issue>
-
-    <issue
-        id="NewerVersionAvailable"
-        message="A newer version of org.jetbrains.kotlinx:kotlinx-coroutines-guava than 1.10.2 is available: 1.11.0"
-        errorLine1="coroutines = &quot;1.10.2&quot;"
-        errorLine2="             ~~~~~~~~">
-        <location
-            file="../gradle/libs.versions.toml"
-            line="18"
-            column="14"/>
-    </issue>
-
-    <issue
-        id="NewerVersionAvailable"
-        message="A newer version of io.coil-kt.coil3:coil than 3.4.0 is available: 3.6.2"
+        message="A newer version of io.coil-kt.coil3:coil than 3.4.0 is available: 3.6.3"
         errorLine1="coil = &quot;3.4.0&quot;"
         errorLine2="       ~~~~~~~">
         <location
-            file="../gradle/libs.versions.toml"
-            line="20"
+            file="$HOME/agent-repos/lenscast/gradle/libs.versions.toml"
+            line="34"
             column="8"/>
     </issue>
 
     <issue
         id="NewerVersionAvailable"
-        message="A newer version of io.coil-kt.coil3:coil-compose than 3.4.0 is available: 3.6.2"
+        message="A newer version of io.coil-kt.coil3:coil-compose than 3.4.0 is available: 3.6.3"
         errorLine1="coil = &quot;3.4.0&quot;"
         errorLine2="       ~~~~~~~">
         <location
-            file="../gradle/libs.versions.toml"
-            line="20"
+            file="$HOME/agent-repos/lenscast/gradle/libs.versions.toml"
+            line="34"
             column="8"/>
     </issue>
 
     <issue
         id="NewerVersionAvailable"
-        message="A newer version of io.coil-kt.coil3:coil-video than 3.4.0 is available: 3.6.2"
+        message="A newer version of io.coil-kt.coil3:coil-video than 3.4.0 is available: 3.6.3"
         errorLine1="coil = &quot;3.4.0&quot;"
         errorLine2="       ~~~~~~~">
         <location
-            file="../gradle/libs.versions.toml"
-            line="20"
+            file="$HOME/agent-repos/lenscast/gradle/libs.versions.toml"
+            line="34"
             column="8"/>
-    </issue>
-
-    <issue
-        id="NewerVersionAvailable"
-        message="A newer version of com.google.zxing:core than 3.5.3 is available: 3.5.4"
-        errorLine1="zxing = &quot;3.5.3&quot;"
-        errorLine2="        ~~~~~~~">
-        <location
-            file="../gradle/libs.versions.toml"
-            line="22"
-            column="9"/>
-    </issue>
-
-    <issue
-        id="NewerVersionAvailable"
-        message="A newer version of io.getstream:stream-webrtc-android than 1.3.8 is available: 1.3.10"
-        errorLine1="streamWebrtc = &quot;1.3.8&quot;"
-        errorLine2="               ~~~~~~~">
-        <location
-            file="../gradle/libs.versions.toml"
-            line="23"
-            column="16"/>
-    </issue>
-
-    <issue
-        id="NewerVersionAvailable"
-        message="A newer version of org.robolectric:robolectric than 4.14.1 is available: 4.17"
-        errorLine1="robolectric = &quot;4.14.1&quot;"
-        errorLine2="              ~~~~~~~~">
-        <location
-            file="../gradle/libs.versions.toml"
-            line="24"
-            column="15"/>
-    </issue>
-
-    <issue
-        id="NewerVersionAvailable"
-        message="A newer version of io.mockk:mockk than 1.13.16 is available: 1.14.11"
-        errorLine1="mockk = &quot;1.13.16&quot;"
-        errorLine2="        ~~~~~~~~~">
-        <location
-            file="../gradle/libs.versions.toml"
-            line="25"
-            column="9"/>
-    </issue>
-
-    <issue
-        id="NewerVersionAvailable"
-        message="A newer version of app.cash.turbine:turbine than 1.2.0 is available: 1.2.1"
-        errorLine1="turbine = &quot;1.2.0&quot;"
-        errorLine2="          ~~~~~~~">
-        <location
-            file="../gradle/libs.versions.toml"
-            line="26"
-            column="11"/>
-    </issue>
-
-    <issue
-        id="NewerVersionAvailable"
-        message="A newer version of com.squareup.okhttp3:okhttp than 4.12.0 is available: 5.5.0"
-        errorLine1="okhttp = &quot;4.12.0&quot;"
-        errorLine2="         ~~~~~~~~">
-        <location
-            file="../gradle/libs.versions.toml"
-            line="30"
-            column="10"/>
     </issue>
 
     <issue
@@ -866,7 +657,7 @@
         errorLine2="                                                                   ~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/java/com/raulshma/lenscast/gallery/MediaViewerScreen.kt"
-            line="352"
+            line="363"
             column="68"/>
     </issue>
 
@@ -877,7 +668,7 @@
         errorLine2="                  ~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/java/com/raulshma/lenscast/gallery/MediaViewerScreen.kt"
-            line="354"
+            line="365"
             column="19"/>
     </issue>
 
@@ -888,8 +679,19 @@
         errorLine2="                          ~~~~~~~~~~~~~~">
         <location
             file="src/main/java/com/raulshma/lenscast/gallery/MediaViewerScreen.kt"
-            line="359"
+            line="370"
             column="27"/>
+    </issue>
+
+    <issue
+        id="VisibleForTests"
+        message="This method should only be accessed from tests or within private scope"
+        errorLine1="            cameraProvider?.shutdownAsync()?.await()"
+        errorLine2="                            ~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/raulshma/lenscast/camera/CameraService.kt"
+            line="612"
+            column="29"/>
     </issue>
 
     <issue
@@ -937,13 +739,35 @@
     </issue>
 
     <issue
+        id="MissingTranslation"
+        message="&quot;lock_bypass_title&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;lock_bypass_title&quot;>Starting the camera&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="802"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;lock_bypass_message&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;lock_bypass_message&quot;>LensCast is waking the camera for a remotely started stream&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="803"
+            column="13"/>
+    </issue>
+
+    <issue
         id="Untranslatable"
         message="The resource string &quot;settings_srt_url_hint&quot; is marked as translatable=&quot;false&quot;, but is translated to &quot;zh&quot; (Chinese) here"
         errorLine1="    &lt;string name=&quot;settings_srt_url_hint&quot; translatable=&quot;false&quot;>srt://主机:端口?streamid=密钥&lt;/string>"
         errorLine2="                                         ~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/values-zh/strings.xml"
-            line="328"
+            line="369"
             column="42"/>
     </issue>
 
@@ -954,7 +778,7 @@
         errorLine2="                                         ~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/values-de/strings.xml"
-            line="330"
+            line="373"
             column="42"/>
     </issue>
 
@@ -965,7 +789,7 @@
         errorLine2="                                         ~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/values-es/strings.xml"
-            line="330"
+            line="373"
             column="42"/>
     </issue>
 
@@ -976,7 +800,7 @@
         errorLine2="                                         ~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/values-fr/strings.xml"
-            line="331"
+            line="376"
             column="42"/>
     </issue>
 
@@ -987,7 +811,7 @@
         errorLine2="                                         ~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/values-pt-rBR/strings.xml"
-            line="331"
+            line="376"
             column="42"/>
     </issue>
 
@@ -998,7 +822,7 @@
         errorLine2="                                         ~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/values-ru/strings.xml"
-            line="345"
+            line="392"
             column="42"/>
     </issue>
 
@@ -1009,7 +833,7 @@
         errorLine2="    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/values/strings.xml"
-            line="79"
+            line="117"
             column="5"/>
     </issue>
 
@@ -1020,7 +844,7 @@
         errorLine2="    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/values/strings.xml"
-            line="80"
+            line="118"
             column="5"/>
     </issue>
 
@@ -1031,7 +855,62 @@
         errorLine2="    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/values/strings.xml"
-            line="122"
+            line="161"
+            column="5"/>
+    </issue>
+
+    <issue
+        id="PluralsCandidate"
+        message="Formatting %d followed by words (&quot;rules&quot;): This should probably be a plural rather than a string"
+        errorLine1="    &lt;string name=&quot;automation_rules_count&quot;>%1$d of %2$d rules&lt;/string>"
+        errorLine2="    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="714"
+            column="5"/>
+    </issue>
+
+    <issue
+        id="UnusedQuantity"
+        message="For language &quot;fr&quot; (French) the following quantities are not relevant: `many`"
+        errorLine1="    &lt;plurals name=&quot;camera_server_status_viewers&quot;>"
+        errorLine2="    ^">
+        <location
+            file="src/main/res/values-fr/strings.xml"
+            line="75"
+            column="5"/>
+    </issue>
+
+    <issue
+        id="UnusedQuantity"
+        message="For language &quot;pt&quot; (Portuguese) the following quantities are not relevant: `many`"
+        errorLine1="    &lt;plurals name=&quot;camera_server_status_viewers&quot;>"
+        errorLine2="    ^">
+        <location
+            file="src/main/res/values-pt-rBR/strings.xml"
+            line="75"
+            column="5"/>
+    </issue>
+
+    <issue
+        id="UnusedQuantity"
+        message="For language &quot;fr&quot; (French) the following quantities are not relevant: `many`"
+        errorLine1="    &lt;plurals name=&quot;camera_client_summary&quot;>"
+        errorLine2="    ^">
+        <location
+            file="src/main/res/values-fr/strings.xml"
+            line="80"
+            column="5"/>
+    </issue>
+
+    <issue
+        id="UnusedQuantity"
+        message="For language &quot;pt&quot; (Portuguese) the following quantities are not relevant: `many`"
+        errorLine1="    &lt;plurals name=&quot;camera_client_summary&quot;>"
+        errorLine2="    ^">
+        <location
+            file="src/main/res/values-pt-rBR/strings.xml"
+            line="80"
             column="5"/>
     </issue>
 
@@ -1042,7 +921,7 @@
         errorLine2="    ^">
         <location
             file="src/main/res/values-zh/strings.xml"
-            line="55"
+            line="91"
             column="5"/>
     </issue>
 
@@ -1053,7 +932,7 @@
         errorLine2="    ^">
         <location
             file="src/main/res/values-zh/strings.xml"
-            line="112"
+            line="149"
             column="5"/>
     </issue>
 
@@ -1064,7 +943,7 @@
         errorLine2="    ^">
         <location
             file="src/main/res/values-zh/strings.xml"
-            line="122"
+            line="159"
             column="5"/>
     </issue>
 
@@ -1075,7 +954,7 @@
         errorLine2="    ^">
         <location
             file="src/main/res/values-zh/strings.xml"
-            line="132"
+            line="169"
             column="5"/>
     </issue>
 
@@ -1086,7 +965,7 @@
         errorLine2="    ^">
         <location
             file="src/main/res/values-zh/strings.xml"
-            line="158"
+            line="195"
             column="5"/>
     </issue>
 
@@ -1097,7 +976,7 @@
         errorLine2="    ^">
         <location
             file="src/main/res/values-zh/strings.xml"
-            line="163"
+            line="200"
             column="5"/>
     </issue>
 
@@ -1108,7 +987,7 @@
         errorLine2="    ^">
         <location
             file="src/main/res/values-zh/strings.xml"
-            line="188"
+            line="225"
             column="5"/>
     </issue>
 
@@ -1119,7 +998,7 @@
         errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/java/com/raulshma/lenscast/MainApplication.kt"
-            line="313"
+            line="470"
             column="13"/>
     </issue>
 
@@ -1152,7 +1031,7 @@
         errorLine2="                                                     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/java/com/raulshma/lenscast/core/ForegroundNotifications.kt"
-            line="69"
+            line="84"
             column="54"/>
     </issue>
 
@@ -1163,7 +1042,7 @@
         errorLine2="                   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/java/com/raulshma/lenscast/core/PowerManager.kt"
-            line="158"
+            line="274"
             column="20"/>
     </issue>
 
@@ -1174,7 +1053,7 @@
         errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/java/com/raulshma/lenscast/core/PowerManager.kt"
-            line="166"
+            line="282"
             column="13"/>
     </issue>
 
@@ -1185,7 +1064,7 @@
         errorLine2="                   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/java/com/raulshma/lenscast/core/PowerManager.kt"
-            line="186"
+            line="302"
             column="20"/>
     </issue>
 
@@ -1196,7 +1075,7 @@
         errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/java/com/raulshma/lenscast/core/PowerManager.kt"
-            line="194"
+            line="310"
             column="13"/>
     </issue>
 
@@ -1207,7 +1086,7 @@
         errorLine2="                     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/java/com/raulshma/lenscast/update/UpdateNotifier.kt"
-            line="31"
+            line="38"
             column="22"/>
     </issue>
 
@@ -1218,7 +1097,7 @@
         errorLine2="        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/java/com/raulshma/lenscast/camera/CameraViewModel.kt"
-            line="75"
+            line="79"
             column="9"/>
     </issue>
 
@@ -1229,7 +1108,7 @@
         errorLine2="    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/java/com/raulshma/lenscast/capture/CaptureViewModel.kt"
-            line="37"
+            line="38"
             column="5"/>
     </issue>
 
@@ -1323,12 +1202,45 @@
 
     <issue
         id="UnusedResources"
+        message="The resource `R.string.gallery_deleting` appears to be unused"
+        errorLine1="    &lt;string name=&quot;gallery_deleting&quot;>Deleting&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="172"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
         message="The resource `R.string.settings_whip_token_hint` appears to be unused"
         errorLine1="    &lt;string name=&quot;settings_whip_token_hint&quot;>Paste to replace — empty keeps the stored token&lt;/string>"
         errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/values/strings.xml"
-            line="347"
+            line="390"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.automation_edit_rule_cd` appears to be unused"
+        errorLine1="    &lt;string name=&quot;automation_edit_rule_cd&quot;>Edit rule&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="544"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.automation_rule_conditions_title` appears to be unused"
+        errorLine1="    &lt;string name=&quot;automation_rule_conditions_title&quot;>Only when:&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="695"
             column="13"/>
     </issue>
 
@@ -1339,7 +1251,7 @@
         errorLine2="                                     ~~~~~~~~~">
         <location
             file="src/main/res/values-zh/strings.xml"
-            line="274"
+            line="312"
             column="38"/>
     </issue>
 
@@ -1350,7 +1262,7 @@
         errorLine2="                                     ~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/values-de/strings.xml"
-            line="276"
+            line="316"
             column="38"/>
     </issue>
 
@@ -1361,40 +1273,7 @@
         errorLine2="                                     ~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/values-es/strings.xml"
-            line="276"
-            column="38"/>
-    </issue>
-
-    <issue
-        id="TypographyEllipsis"
-        message="Replace &quot;...&quot; with ellipsis character (…, &amp;#8230;) ?"
-        errorLine1="    &lt;string name=&quot;settings_checking&quot;>Checking for updates...&lt;/string>"
-        errorLine2="                                     ~~~~~~~~~~~~~~~~~~~~~~~">
-        <location
-            file="src/main/res/values/strings.xml"
-            line="276"
-            column="38"/>
-    </issue>
-
-    <issue
-        id="TypographyEllipsis"
-        message="Replace &quot;...&quot; with ellipsis character (…, &amp;#8230;) ?"
-        errorLine1="    &lt;string name=&quot;settings_checking&quot;>Recherche de mises à jour...&lt;/string>"
-        errorLine2="                                     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
-        <location
-            file="src/main/res/values-fr/strings.xml"
-            line="277"
-            column="38"/>
-    </issue>
-
-    <issue
-        id="TypographyEllipsis"
-        message="Replace &quot;...&quot; with ellipsis character (…, &amp;#8230;) ?"
-        errorLine1="    &lt;string name=&quot;settings_checking&quot;>Verificando atualizações...&lt;/string>"
-        errorLine2="                                     ~~~~~~~~~~~~~~~~~~~~~~~~~~~">
-        <location
-            file="src/main/res/values-pt-rBR/strings.xml"
-            line="277"
+            line="316"
             column="38"/>
     </issue>
 
@@ -1405,8 +1284,41 @@
         errorLine2="                                        ~~~~~~~~~~~~~~">
         <location
             file="src/main/res/values-zh/strings.xml"
-            line="278"
+            line="316"
             column="41"/>
+    </issue>
+
+    <issue
+        id="TypographyEllipsis"
+        message="Replace &quot;...&quot; with ellipsis character (…, &amp;#8230;) ?"
+        errorLine1="    &lt;string name=&quot;settings_checking&quot;>Checking for updates...&lt;/string>"
+        errorLine2="                                     ~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="316"
+            column="38"/>
+    </issue>
+
+    <issue
+        id="TypographyEllipsis"
+        message="Replace &quot;...&quot; with ellipsis character (…, &amp;#8230;) ?"
+        errorLine1="    &lt;string name=&quot;settings_checking&quot;>Recherche de mises à jour...&lt;/string>"
+        errorLine2="                                     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values-fr/strings.xml"
+            line="319"
+            column="38"/>
+    </issue>
+
+    <issue
+        id="TypographyEllipsis"
+        message="Replace &quot;...&quot; with ellipsis character (…, &amp;#8230;) ?"
+        errorLine1="    &lt;string name=&quot;settings_checking&quot;>Verificando atualizações...&lt;/string>"
+        errorLine2="                                     ~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values-pt-rBR/strings.xml"
+            line="319"
+            column="38"/>
     </issue>
 
     <issue
@@ -1416,7 +1328,7 @@
         errorLine2="                                        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/values-de/strings.xml"
-            line="280"
+            line="320"
             column="41"/>
     </issue>
 
@@ -1427,7 +1339,7 @@
         errorLine2="                                        ~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/values-es/strings.xml"
-            line="280"
+            line="320"
             column="41"/>
     </issue>
 
@@ -1438,7 +1350,7 @@
         errorLine2="                                        ~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/values/strings.xml"
-            line="280"
+            line="320"
             column="41"/>
     </issue>
 
@@ -1449,7 +1361,7 @@
         errorLine2="                                        ~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/values-fr/strings.xml"
-            line="281"
+            line="323"
             column="41"/>
     </issue>
 
@@ -1460,7 +1372,7 @@
         errorLine2="                                        ~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/values-pt-rBR/strings.xml"
-            line="281"
+            line="323"
             column="41"/>
     </issue>
 
@@ -1471,7 +1383,7 @@
         errorLine2="                                     ~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/values-ru/strings.xml"
-            line="291"
+            line="335"
             column="38"/>
     </issue>
 
@@ -1482,7 +1394,7 @@
         errorLine2="                                        ~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/values-ru/strings.xml"
-            line="295"
+            line="339"
             column="41"/>
     </issue>
 
@@ -1592,7 +1504,7 @@
         errorLine2="                ~~~~~~~~~~~~">
         <location
             file="src/main/java/com/raulshma/lenscast/MainApplication.kt"
-            line="319"
+            line="476"
             column="17"/>
     </issue>
 
@@ -1603,7 +1515,7 @@
         errorLine2="                        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/java/com/raulshma/lenscast/gallery/MediaViewerScreen.kt"
-            line="356"
+            line="367"
             column="25"/>
     </issue>
 
@@ -1614,7 +1526,7 @@
         errorLine2="                        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/java/com/raulshma/lenscast/core/PowerManager.kt"
-            line="171"
+            line="287"
             column="25"/>
     </issue>
 
@@ -1625,7 +1537,7 @@
         errorLine2="                              ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/java/com/raulshma/lenscast/core/PowerManager.kt"
-            line="197"
+            line="313"
             column="31"/>
     </issue>
 
@@ -1636,7 +1548,7 @@
         errorLine2="                              ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/java/com/raulshma/lenscast/core/PowerManager.kt"
-            line="197"
+            line="313"
             column="31"/>
     </issue>
 
@@ -1669,7 +1581,7 @@
         errorLine2="                             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/java/com/raulshma/lenscast/streaming/StreamOverlayRenderer.kt"
-            line="117"
+            line="111"
             column="30"/>
     </issue>
 
@@ -1680,7 +1592,7 @@
         errorLine2="                           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/java/com/raulshma/lenscast/streaming/StreamOverlayRenderer.kt"
-            line="118"
+            line="112"
             column="28"/>
     </issue>
 
@@ -1691,7 +1603,7 @@
         errorLine2="                             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/java/com/raulshma/lenscast/streaming/StreamOverlayRenderer.kt"
-            line="150"
+            line="144"
             column="30"/>
     </issue>
 
@@ -1702,7 +1614,7 @@
         errorLine2="                           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/java/com/raulshma/lenscast/streaming/StreamOverlayRenderer.kt"
-            line="151"
+            line="145"
             column="28"/>
     </issue>
 
@@ -1713,7 +1625,7 @@
         errorLine2="                                                             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/java/com/raulshma/lenscast/streaming/StreamOverlayRenderer.kt"
-            line="180"
+            line="187"
             column="62"/>
     </issue>
 
@@ -1724,8 +1636,19 @@
         errorLine2="                                                             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/java/com/raulshma/lenscast/streaming/StreamOverlayRenderer.kt"
-            line="180"
+            line="187"
             column="62"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX function `createBitmap` instead?"
+        errorLine1="            val box = Bitmap.createBitmap(bgWidth, totalHeight, Bitmap.Config.ARGB_8888)"
+        errorLine2="                      ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/raulshma/lenscast/streaming/StreamOverlayRenderer.kt"
+            line="201"
+            column="23"/>
     </issue>
 
     <issue

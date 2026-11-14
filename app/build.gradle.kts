@@ -124,7 +124,7 @@ val buildWebUi = npmScriptTask(
 
 android {
     namespace = "com.raulshma.lenscast"
-    compileSdk = 36
+    compileSdk = 37
 
     signingConfigs {
         create("release") {

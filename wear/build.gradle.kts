@@ -17,7 +17,7 @@ plugins {
 
 android {
     namespace = "com.raulshma.lenscast.wear"
-    compileSdk = 36
+    compileSdk = 37
 
     defaultConfig {
         applicationId = "com.raulshma.lenscast.wear"
@@ -62,14 +62,13 @@ android {
 }
 
 dependencies {
-    // Compose BOM pinned to the same 2026.03.00 the root catalog pins; the
+    // Compose BOM pinned to the same version the root catalog pins; the
     // unversioned androidx.compose artifacts below inherit from it.
     implementation(platform(libs.compose.bom))
 
-    // Wear core + Wear Compose (stable 1.4.0 — NOT the Material 3 alpha
-    // line). compose-material is the M2-flavored Wear MaterialTheme
-    // (Scaffold/TimeText/ScalingLazyColumn); compose-foundation adds the
-    // rotary/lazy building blocks beneath it.
+    // Wear core + Wear Compose (stable 1.7.x line — compose-material is the
+    // M2-flavored Wear MaterialTheme (Scaffold/TimeText/ScalingLazyColumn);
+    // compose-foundation adds the rotary/lazy building blocks beneath it).
     implementation(libs.wear)
     implementation(libs.wear.compose.foundation)
     implementation(libs.wear.compose.material)
