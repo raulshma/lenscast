@@ -1,8 +1,9 @@
 /* ══════════════════════════════════════════════════════════════════
-   NEXT UI — BASE
+   NEXT UI — BASE ("Viewfinder" redesign)
    Scoped resets and document-level styling for the next shell. The
    classic App.css rules on html/body stay authoritative for the classic
-   UI; these only apply while [data-ui='next'] is set.
+   UI; these only apply while [data-ui='next'] is set. Type law lives
+   here: Golos Text speaks, JetBrains Mono measures (DESIGN.md).
    ══════════════════════════════════════════════════════════════════ */
 
 :root[data-ui='next'] {
@@ -20,7 +21,9 @@
   text-wrap: pretty;
 }
 
-/* Typographic defaults: headings get optical tightening + balance. */
+/* Typographic defaults: headings get optical tightening + balance.
+   Golos Text carries UI at 600 for headings — never uppercase, never
+   letter-spaced caps (the DESIGN.md type law). */
 [data-ui='next'] h1,
 [data-ui='next'] h2,
 [data-ui='next'] h3 {

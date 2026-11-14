@@ -13,7 +13,8 @@ interface Props {
 
 /**
  * Right-edge slide-over for narrow viewports (the Live inspector on
- * tablets, detail panels on phones). Closes on scrim tap or the ✕.
+ * tablets, detail panels on phones). Closes on scrim tap or the close
+ * button.
  */
 export default function Drawer(props: Props) {
   return (

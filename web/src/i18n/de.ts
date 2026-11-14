@@ -148,6 +148,9 @@ export const de: Partial<Record<MessageKey, string>> = {
   'cam.collapse': 'Kamerasteuerung einklappen',
   'cam.expand': 'Kamerasteuerung ausklappen',
   'cam.adminHint': 'Administratorzugang erforderlich',
+  'cam.resetZoom': 'Zurücksetzen',
+  'cam.picture': 'Bild',
+  'cam.wbShort': 'WB',
 
   // ── Lens selector (zoom renders generically from zoomRatio with no catalog entry) ──
   'lens.front': 'Front',

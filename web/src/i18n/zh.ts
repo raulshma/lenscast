@@ -148,6 +148,9 @@ export const zh: Partial<Record<MessageKey, string>> = {
   'cam.collapse': '收起相机控制',
   'cam.expand': '展开相机控制',
   'cam.adminHint': '需要管理员权限',
+  'cam.resetZoom': '重置',
+  'cam.picture': '画面',
+  'cam.wbShort': '白平衡',
 
   // ── Lens selector (zoom renders generically from zoomRatio with no catalog entry) ──
   'lens.front': '前置',

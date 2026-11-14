@@ -77,10 +77,15 @@ export default function AuditPanel() {
           <For each={audit()!.entries}>
             {(entry) => (
               <li class="nx-clients-row">
-                <span class="nx-clients-id nx-mono" title={entry.detail || entry.action}>
-                  {formatTime(entry.timestampMs)} · {entry.action}
-                  {entry.detail ? ` · ${entry.detail}` : ''}
-                </span>
+                <div class="nx-audit-main">
+                  <div class="nx-audit-line">
+                    <span class="nx-audit-time nx-mono">{formatTime(entry.timestampMs)}</span>
+                    <span class="nx-audit-action">{entry.action}</span>
+                  </div>
+                  <Show when={entry.detail}>
+                    <span class="nx-audit-detail">{entry.detail}</span>
+                  </Show>
+                </div>
                 <Badge tone={outcomeTone(entry)} mono>{entry.outcome}</Badge>
               </li>
             )}

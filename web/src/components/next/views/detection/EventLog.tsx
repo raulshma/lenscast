@@ -150,7 +150,7 @@ export default function EventLog(props: { readOnly?: () => boolean } = {}) {
         <div class="nx-log">
           <For each={filteredEvents()}>
             {(event) => (
-              <div class="nx-log-row">
+              <div class="nx-log-row" classList={{ 'nx-log-row-fault': event.type === 'tamper' }}>
                 <Show when={event.snapshotJpegBase64} fallback={<div class="nx-log-thumb nx-log-thumb-empty" aria-hidden="true" />}>
                   <img
                     class="nx-log-thumb"
@@ -169,13 +169,15 @@ export default function EventLog(props: { readOnly?: () => boolean } = {}) {
                         onClick={() => openClip(event)}
                         title={clipFileName(event) ?? t('events.playClipTitle')}
                       >
-                        ▶ {t('events.viewClip')}
+                        {t('events.viewClip')}
                       </button>
                     </Show>
                   </div>
                   <div class="nx-log-line nx-log-actions">
                     <Show when={event.dispatchedActions.length > 0} fallback={<span>{t('events.noActions')}</span>}>
-                      <span>{event.dispatchedActions.map(actionLabel).join(' · ')}</span>
+                      <For each={event.dispatchedActions}>
+                        {(action) => <span class="nx-log-action">{actionLabel(action)}</span>}
+                      </For>
                     </Show>
                   </div>
                   <Show when={event.zones.length > 0 || eventLabels(event).length > 0}>

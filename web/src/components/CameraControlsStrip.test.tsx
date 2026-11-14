@@ -72,24 +72,28 @@ function mount(overrides: Partial<CameraControlsDeps> = {}) {
 }
 
 describe('zoom group', () => {
-  it('renders the slider with its device-mirror id, the readout, and the wide reset', () => {
+  it('renders the slider with its device-mirror id and the readout, no reset chip at 1.0x', () => {
     mount()
     const slider = document.getElementById('remote-zoom-slider') as HTMLInputElement
     expect(slider).toBeTruthy()
     expect(slider.getAttribute('aria-label')).toBe('Remote zoom')
     expect(slider.min).toBe('1')
     expect(document.querySelector('.cam-strip-readout')!.textContent).toBe('1.0x')
-    const wide = [...document.querySelectorAll('.cam-strip-chip')].find((c) => c.textContent === 'Wide')!
-    expect(wide).toBeTruthy()
+    // The reset chip only joins once the device is actually zoomed in — at
+    // 1.0x it would just duplicate the active "Wide" lens chip.
+    const reset = [...document.querySelectorAll('.cam-strip-chip')].find((c) => c.textContent === 'Reset')
+    expect(reset).toBeUndefined()
   })
 
-  it('mirrors the device zoom and re-scales the readout', async () => {
+  it('mirrors the device zoom, re-scales the readout, and offers the reset chip', async () => {
     const { status } = mount()
     status[1]({ ...BASE_STATUS, zoomRatio: 2.5, zoomRange: { min: 1, max: 8 } })
     await Promise.resolve()
     const slider = document.getElementById('remote-zoom-slider') as HTMLInputElement
     expect(slider.max).toBe('8')
     expect(document.querySelector('.cam-strip-readout')!.textContent).toBe('2.5x')
+    const reset = [...document.querySelectorAll('.cam-strip-chip')].find((c) => c.textContent === 'Reset')!
+    expect(reset).toBeTruthy()
   })
 })
 
@@ -112,7 +116,8 @@ describe('viewer lockout', () => {
     expect(slider.disabled).toBe(true)
     const disabledWithTitle = [...document.querySelectorAll('button')]
       .filter((b) => (b as HTMLButtonElement).disabled && b.getAttribute('title') === 'Admin access required')
-    // Zoom steppers, wide reset, lens chips, EV steppers, torch — all locked.
+    // Zoom steppers, lens chips, EV steppers, torch — all locked (the reset
+    // chip is zoom-gated and absent at 1.0x).
     expect(disabledWithTitle.length).toBeGreaterThanOrEqual(6)
   })
 })

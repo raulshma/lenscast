@@ -14,15 +14,19 @@ interface Props {
 
 /**
  * The console's sign-in: the same props and keys as the classic
- * LoginScreen, dressed as a boot panel — mono wordmark, inset fields,
- * one primary action. Rendered by the dispatcher while data-ui='next'.
+ * LoginScreen, as one centered plate on the body-black canvas. The
+ * single brand moment is the logo's lens ring — oversized, dim, drawn
+ * behind the plate in CSS (layout.css). Golos labels, hairline inputs,
+ * one cyan submit, the error in red text below. Rendered by the
+ * dispatcher while data-ui='next'.
  */
 export default function NxLogin(props: Props) {
   return (
     <div class="nx-login">
+      <div class="nx-login-ring" aria-hidden="true" />
       <div class="nx-login-card">
         <div class="nx-login-brand">
-          <img src="/logo.svg" alt="LensCast" width="34" height="34" />
+          <img src="/logo.svg" alt="LensCast" width="40" height="40" />
           <span class="nx-login-wordmark">LensCast</span>
           <span class="nx-login-subtitle">{t('login.subtitle')}</span>
         </div>

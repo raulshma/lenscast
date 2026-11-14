@@ -49,10 +49,10 @@ import AuditPanel from './system/cards/AuditPanel'
  * classic counterpart — same signals, same bindings, same API_DEFAULTS.
  *
  * Inside a tab, panels are grouped into labelled sections (`.nx-section`,
- * the rack-bay vocabulary from layout.css): a mono uppercase title with a
- * hairline rule, then that section's own masonry. Reading order is therefore
- * deliberate — related modules sit together instead of masonry scattering
- * them.
+ * the rack-bay vocabulary from layout.css): a Golos 600 sentence-case title
+ * with a 2px cyan tick on the header's left edge and a hairline rule, then
+ * that section's own masonry. Reading order is therefore deliberate —
+ * related modules sit together instead of masonry scattering them.
  */
 
 /**

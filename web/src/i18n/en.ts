@@ -148,6 +148,9 @@ export const en: Record<string, string> = {
   'cam.collapse': 'Collapse camera controls',
   'cam.expand': 'Expand camera controls',
   'cam.adminHint': 'Admin access required',
+  'cam.resetZoom': 'Reset',
+  'cam.picture': 'Picture',
+  'cam.wbShort': 'WB',
 
   // ── Lens selector (zoom renders generically from zoomRatio with no catalog entry) ──
   'lens.front': 'Front',

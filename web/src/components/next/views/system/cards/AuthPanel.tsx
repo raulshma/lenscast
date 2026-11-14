@@ -241,7 +241,7 @@ export default function AuthPanel() {
   createVisiblePoll(refresh, 10_000)
 
   return (
-    <Panel title={t('auth.title')}>
+    <Panel title={t('auth.title')} class="nx-panel-danger">
       <ToggleField
         label={t('auth.require')}
         checked={enabled()}
@@ -357,7 +357,7 @@ export default function AuthPanel() {
           </div>
         </Show>
         <Show when={pairingJson()}>
-          <span class="nx-label">{t('auth.pairing')}</span>
+          <span class="nx-subhead">{t('auth.pairing')}</span>
           <textarea
             class="nx-textarea"
             readonly
@@ -387,7 +387,9 @@ export default function AuthPanel() {
             {(session) => (
               <li class="nx-clients-row">
                 <span class="nx-clients-id nx-mono" title={session.tokenPrefix}>
-                  {t('auth.sessionPrefix', { prefix: session.tokenPrefix })}{session.role === 'viewer' ? t('auth.viewerRole') : ''} · {t('auth.expires', { time: formatTime(session.expiresAtMs, { hour: '2-digit', minute: '2-digit', second: '2-digit' }) })}
+                  {t('auth.sessionPrefix', { prefix: session.tokenPrefix })}
+                  {session.role === 'viewer' ? ` — ${t('auth.viewerRole')}` : ''}
+                  {` — ${t('auth.expires', { time: formatTime(session.expiresAtMs, { hour: '2-digit', minute: '2-digit', second: '2-digit' }) })}`}
                 </span>
                 <Button
                   size="sm"

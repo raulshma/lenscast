@@ -106,7 +106,7 @@ export default function UnifiedPushPanel(props: Props) {
               <li class="nx-clients-row">
                 <span class="nx-clients-id nx-mono" title={target.endpoint}>
                   {target.label || target.instance}
-                  {target.distributor ? ` · ${target.distributor}` : ''}
+                  {target.distributor ? ` — ${target.distributor}` : ''}
                 </span>
                 <Button
                   size="sm"

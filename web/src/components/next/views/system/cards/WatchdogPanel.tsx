@@ -110,7 +110,7 @@ export default function WatchdogPanel(props: Props) {
           <Show when={wd()!.totalRecoveries > 0 || wd()!.consecutiveFailures > 0}>
             <Show when={wd()!.consecutiveFailures > 0}>
               <FieldRow label={t('watchdog.consecutiveFailures')}>
-                <span class="nx-mono nx-info-value" style={{ color: 'var(--lc-warning)' }}>
+                <span class="nx-mono nx-info-value" style={{ color: 'var(--nx-warning)' }}>
                   {wd()!.consecutiveFailures}
                 </span>
               </FieldRow>

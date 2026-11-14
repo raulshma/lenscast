@@ -23,7 +23,9 @@ export default function ChannelMatrix(props: { state: NextState }) {
   }
 
   const statusTone = (c: ChannelState): string => {
-    if (c.active) return 'nx-channel-status-ok'
+    // On air is the signal state — magenta per the color law (DESIGN.md).
+    // Green stays for healthy-idle (RDY); red is faults only.
+    if (c.active) return 'nx-channel-status-air'
     if (c.status === 'connecting') return 'nx-channel-status-warn'
     if (c.status === 'error') return 'nx-channel-status-fault'
     return ''

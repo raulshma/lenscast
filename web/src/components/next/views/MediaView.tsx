@@ -247,8 +247,10 @@ export default function MediaView(props: { state: NextState }) {
                           <div class="nx-tile-meta">
                             <span class="nx-tile-name" title={item.fileName}>{item.fileName}</span>
                             <span class="nx-tile-sub nx-mono">
-                              {formatTime(new Date(item.timestamp), { hour: '2-digit', minute: '2-digit' })}
-                              <Show when={item.fileSizeBytes > 0}> · {formatFileSize(item.fileSizeBytes)}</Show>
+                              <span>{formatTime(new Date(item.timestamp), { hour: '2-digit', minute: '2-digit' })}</span>
+                              <Show when={item.fileSizeBytes > 0}>
+                                <span>{formatFileSize(item.fileSizeBytes)}</span>
+                              </Show>
                             </span>
                           </div>
                           <Show when={canDelete()}>

@@ -381,7 +381,10 @@ html, body {
    z-ladder inside the container: media < zoom-indicator 10 < strip 12 <
    focus ring 15 < fullscreen overlays 20. The host spans the width but is
    not interactive — only the pill itself catches pointers, so the strip
-   never blocks a corner tap-to-focus. */
+   never blocks a corner tap-to-focus.
+   Layout: the pill is five .cam-strip-group sections (zoom, lenses,
+   exposure, picture, utility) split by hairline dividers, so narrow
+   previews wrap whole groups instead of orphaning single controls. */
 .cam-strip-host {
   position: absolute;
   bottom: 12px;
@@ -401,14 +404,54 @@ html, body {
   align-items: center;
   justify-content: center;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: 4px;
+  row-gap: 6px;
   max-width: 100%;
-  padding: 6px 8px;
+  padding: 6px 9px;
   background: rgba(0, 0, 0, 0.7);
   backdrop-filter: blur(8px);
-  border: 1px solid rgba(255, 255, 255, 0.2);
+  border: 1px solid rgba(255, 255, 255, 0.14);
   border-radius: var(--lc-radius-full);
   color: #fff;
+}
+
+.cam-strip-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* Hairline between sections; sibling combinator keeps it correct when the
+   conditional lens/picture groups drop out of the DOM. */
+.cam-strip-group + .cam-strip-group {
+  padding-left: 6px;
+  border-left: 1px solid rgba(255, 255, 255, 0.14);
+}
+
+/* The pill is dark glass in both themes, so its quiet inks are hardcoded
+   (theme tokens like --lc-text-dim flip dark in classic's light theme and
+   would vanish here). */
+.cam-strip-glyph {
+  display: inline-flex;
+  color: rgba(228, 228, 239, 0.6);
+}
+
+.cam-strip-glyph svg {
+  width: 14px;
+  height: 14px;
+  display: block;
+}
+
+.cam-strip-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.cam-strip-fieldlabel {
+  font-size: 11px;
+  color: rgba(228, 228, 239, 0.6);
+  white-space: nowrap;
 }
 
 .cam-strip-btn {
@@ -443,13 +486,60 @@ html, body {
 .cam-strip-btn-toggled {
   background: rgba(0, 212, 255, 0.25);
   border-color: rgba(0, 212, 255, 0.5);
+  color: var(--lc-accent);
 }
 
+/* The collapse affordance is housekeeping, not a camera control — keep it
+   visually quieter than the rest of the utility group. */
+.cam-strip-collapse {
+  opacity: 0.55;
+  transition: background 0.2s ease, opacity 0.2s ease;
+}
+
+.cam-strip-collapse:hover:not(:disabled) {
+  opacity: 1;
+}
+
+/* Slim custom range: quiet track, small accent thumb, 36px hit area. */
 .cam-strip-slider {
-  width: 140px;
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100px;
   height: 36px;
   margin: 0;
-  accent-color: var(--lc-accent);
+  background: transparent;
+  cursor: pointer;
+}
+
+.cam-strip-slider::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: var(--lc-radius-full);
+  background: rgba(255, 255, 255, 0.22);
+}
+
+.cam-strip-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  margin-top: -5px;
+  border-radius: var(--lc-radius-full);
+  background: var(--lc-accent);
+  border: 2px solid rgba(0, 0, 0, 0.6);
+}
+
+.cam-strip-slider::-moz-range-track {
+  height: 4px;
+  border-radius: var(--lc-radius-full);
+  background: rgba(255, 255, 255, 0.22);
+}
+
+.cam-strip-slider::-moz-range-thumb {
+  width: 10px;
+  height: 10px;
+  border-radius: var(--lc-radius-full);
+  background: var(--lc-accent);
+  border: 2px solid rgba(0, 0, 0, 0.6);
 }
 
 .cam-strip-slider:disabled {
@@ -458,11 +548,12 @@ html, body {
 }
 
 .cam-strip-readout {
-  min-width: 44px;
+  min-width: 36px;
   text-align: center;
   font-family: var(--lc-mono);
   font-size: 13px;
   font-weight: 600;
+  font-variant-numeric: tabular-nums;
   color: #fff;
 }
 
@@ -470,7 +561,7 @@ html, body {
   display: inline-flex;
   align-items: center;
   height: 36px;
-  padding: 0 12px;
+  padding: 0 8px;
   background: rgba(0, 0, 0, 0.5);
   border: 1px solid rgba(255, 255, 255, 0.2);
   border-radius: var(--lc-radius-full);
@@ -496,15 +587,26 @@ html, body {
   border-color: rgba(0, 212, 255, 0.5);
 }
 
+/* Native chrome off: the select renders as a quiet pill with a drawn
+   chevron, matching the full-radius language of the rest of the strip.
+   Fixed width — a select auto-sizes to its widest *option* ("Continuous
+   (Photo)"), which alone is ~40px wider than the strip can spare. */
 .cam-strip-select {
+  width: 108px;
   height: 36px;
-  padding: 0 8px;
-  background: rgba(0, 0, 0, 0.5);
+  padding: 0 24px 0 8px;
+  background-color: rgba(0, 0, 0, 0.5);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23ffffff' stroke-opacity='0.7' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 8px center;
+  background-size: 12px;
   border: 1px solid rgba(255, 255, 255, 0.2);
-  border-radius: var(--lc-radius-sm);
+  border-radius: var(--lc-radius-full);
   color: #fff;
   font-size: 12px;
   cursor: pointer;
+  appearance: none;
+  -webkit-appearance: none;
 }
 
 .cam-strip-select:disabled {
@@ -580,8 +682,16 @@ html, body {
     padding: 4px 6px;
   }
 
+  .cam-strip-group {
+    gap: 4px;
+  }
+
+  .cam-strip-group + .cam-strip-group {
+    padding-left: 6px;
+  }
+
   .cam-strip-slider {
-    width: 90px;
+    width: 80px;
   }
 
   .cam-strip-chip {

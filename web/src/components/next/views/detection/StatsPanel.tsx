@@ -12,11 +12,26 @@ function weekdayLabel(day: string): string {
   return formatDate(new Date(y, m - 1, d), { weekday: 'narrow' })
 }
 
+/** Golos label for a metric row, reusing the event-filter strings. */
+function typeLabel(type: string): string {
+  switch (type) {
+    case 'motion': return t('events.filter.motion')
+    case 'sound': return t('events.filter.sound')
+    case 'tamper': return t('events.filter.tamper')
+    default: return type
+  }
+}
+
 /**
  * Aggregate detection statistics, ported from the classic DetectionStatsCard:
  * a 24h/7d/all-time window over the per-type counts, the zero-filled
  * seven-day bar chart, and the top zones / ML labels. The payload carries
  * all three windows at once, so the toggle never refetches.
+ *
+ * The composition varies by content rather than repeating a stat-card
+ * grid: the lead metric speaks in one big tabular numeral, the remaining
+ * types share a compact column row, the total runs quiet under a
+ * hairline, and the seven-day sparkline sits beside them ≥900px.
  */
 export default function StatsPanel() {
   const [stats] = createResource(() => getDetectionStats())
@@ -60,39 +75,39 @@ export default function StatsPanel() {
         }
       >
         <div class="nx-stats-rows">
-          <For each={counts()}>
-            {(row) => (
-              <div class="nx-stats-row">
-                <span class={`nx-tag nx-tag-${row.type}`}>{row.type}</span>
-                <span class="nx-stats-count nx-mono">{tCount('stats.eventCount', row.count)}</span>
-              </div>
-            )}
-          </For>
-          <div class="nx-stats-row">
-            <span class="nx-label">{t('stats.total', { count: windowTotal(stats()!, window()) })}</span>
-          </div>
-        </div>
-
-        <div class="nx-bars-block">
-          <span class="nx-label">{t('stats.last7')}</span>
-          <div class="nx-bars" role="img" aria-label={t('stats.perDayAria')}>
-            <For each={bars()}>
-              {(day) => (
-                <div class="nx-bar-col" title={`${day.day}: ${tCount('stats.eventCount', day.count)}`}>
-                  <div class="nx-bars-plot">
-                    <div
-                      class="nx-bar"
-                      classList={{ 'nx-bar-zero': day.count === 0 }}
-                      style={{ height: `${Math.round((day.count / maxCount()) * 100)}%` }}
-                    />
-                  </div>
-                  <span class="nx-bar-count">
-                    <Show when={day.count > 0}>{day.count}</Show>
-                  </span>
-                  <span class="nx-bar-label">{weekdayLabel(day.day)}</span>
+          <div class="nx-stats-metrics">
+            <For each={counts()}>
+              {(row, index) => (
+                <div class="nx-stats-row" classList={{ 'nx-stats-row-lead': index() === 0 }}>
+                  <span class="nx-stats-count nx-mono">{row.count}</span>
+                  <span class="nx-stat-label">{typeLabel(row.type)}</span>
                 </div>
               )}
             </For>
+            <div class="nx-stats-total nx-mono">{t('stats.total', { count: windowTotal(stats()!, window()) })}</div>
+          </div>
+
+          <div class="nx-bars-block">
+            <span class="nx-label">{t('stats.last7')}</span>
+            <div class="nx-bars" role="img" aria-label={t('stats.perDayAria')}>
+              <For each={bars()}>
+                {(day) => (
+                  <div class="nx-bar-col" title={`${day.day}: ${tCount('stats.eventCount', day.count)}`}>
+                    <div class="nx-bars-plot">
+                      <div
+                        class="nx-bar"
+                        classList={{ 'nx-bar-zero': day.count === 0 }}
+                        style={{ height: `${Math.round((day.count / maxCount()) * 100)}%` }}
+                      />
+                    </div>
+                    <span class="nx-bar-count">
+                      <Show when={day.count > 0}>{day.count}</Show>
+                    </span>
+                    <span class="nx-bar-label">{weekdayLabel(day.day)}</span>
+                  </div>
+                )}
+              </For>
+            </div>
           </div>
         </div>
 

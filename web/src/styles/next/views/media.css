@@ -1,11 +1,21 @@
 /* ══════════════════════════════════════════════════════════════════
-   NEXT UI — MEDIA VIEW
-   Day-grouped thumbnail grid with a console toolbar. Loads after
-   cards.css so its rules win where the classic reskin overlaps.
+   NEXT UI — MEDIA VIEW ("Viewfinder")
+   The light table: the gallery sits in a recessed --nx-well plate,
+   tiles are hairline plates in a tight uniform rhythm — the filmstrip
+   feel comes from that rhythm and the mono duration/size labels, not
+   from skeuomorphic chrome. Hover answers the hand (plate raise +
+   cyan hairline); selection is a cyan edge and a subtle cyan fill.
+   Red appears only on destructive controls. Golos speaks, JetBrains
+   Mono measures. Loads after cards.css.
    ══════════════════════════════════════════════════════════════════ */
 
 .nx-media {
   gap: var(--nx-space-4);
+  /* The recessed light table the whole browser sits on. */
+  background: var(--nx-well);
+  border: 1px solid var(--nx-border);
+  border-radius: var(--nx-radius-lg);
+  padding: var(--nx-space-4);
 }
 
 /* ── Toolbar ──────────────────────────────────────────────────────── */
@@ -25,11 +35,12 @@
   min-width: 180px;
   max-width: 340px;
   height: 28px;
-  padding: 0 8px;
+  padding: 0 var(--nx-space-2);
   border: 1px solid var(--nx-control-border);
   border-radius: var(--nx-radius);
   background: var(--nx-control-bg);
   color: var(--nx-text-tertiary);
+  transition: border-color var(--nx-duration-fast) var(--nx-ease), box-shadow var(--nx-duration-fast) var(--nx-ease);
 }
 
 .nx-media-search:focus-within {
@@ -59,7 +70,7 @@
   flex-wrap: wrap;
 }
 
-/* ── Day groups ───────────────────────────────────────────────────── */
+/* ── Day groups — quiet mono date + hairline rule + count ─────────── */
 
 .nx-media-day {
   display: flex;
@@ -74,20 +85,23 @@
   padding-top: var(--nx-space-2);
 }
 
+/* A date is data — mono, sentence case, never tracked caps. */
 .nx-media-day-label {
+  font-family: var(--nx-mono);
   font-size: var(--nx-text-xs);
-  font-weight: 600;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+  font-weight: 500;
   color: var(--nx-text-secondary);
+  font-variant-numeric: tabular-nums;
 }
 
 .nx-media-day-count {
+  font-family: var(--nx-mono);
   font-size: var(--nx-text-xs);
   color: var(--nx-text-faint);
+  font-variant-numeric: tabular-nums;
 }
 
-/* ── Grid ─────────────────────────────────────────────────────────── */
+/* ── Grid — tight uniform tile rhythm on the well ─────────────────── */
 
 .nx-media-grid {
   display: grid;
@@ -97,23 +111,27 @@
 
 .nx-media-grid-skeleton .nx-skeleton {
   height: 140px;
-  border-radius: var(--nx-radius);
+  border-radius: var(--nx-radius-lg);
 }
 
+/* Tiles are hairline plates, radius 6 — not rounded-photo cards. */
 .nx-tile {
   position: relative;
   display: flex;
   flex-direction: column;
   border: 1px solid var(--nx-border);
-  border-radius: var(--nx-radius);
+  border-radius: var(--nx-radius-lg);
   background: var(--nx-surface);
   overflow: hidden;
   cursor: pointer;
-  transition: border-color var(--nx-duration-fast) var(--nx-ease), box-shadow var(--nx-duration-fast) var(--nx-ease);
+  transition: border-color var(--nx-duration-fast) var(--nx-ease), background var(--nx-duration-fast) var(--nx-ease), transform var(--nx-duration-fast) var(--nx-ease);
 }
 
+/* The hand's answer: the plate raises, the hairline turns cyan. */
 .nx-tile:hover {
-  border-color: var(--nx-border-strong);
+  border-color: color-mix(in srgb, var(--nx-accent) 45%, transparent);
+  background: var(--nx-surface-2);
+  transform: translateY(-1px);
 }
 
 .nx-tile:focus-visible {
@@ -122,12 +140,16 @@
 }
 
 .nx-tile-selectable:hover {
-  border-color: color-mix(in srgb, var(--nx-accent) 40%, transparent);
+  border-color: color-mix(in srgb, var(--nx-accent) 45%, transparent);
 }
 
-.nx-tile-selected {
+/* Selection: cyan edge + subtle cyan fill on the plate. */
+.nx-tile-selected,
+.nx-tile-selected:hover {
   border-color: var(--nx-accent);
+  background: var(--nx-accent-subtle);
   box-shadow: 0 0 0 1px var(--nx-accent);
+  transform: none;
 }
 
 .nx-tile-thumb {
@@ -135,9 +157,11 @@
   aspect-ratio: 4 / 3;
   object-fit: cover;
   display: block;
-  background: #0a0c10;
+  background: var(--nx-well);
 }
 
+/* Duration badge rides the thumbnail like a camera OSD: dark scrim,
+   mono tabular — same in both themes (it sits over photo content). */
 .nx-tile-badge {
   position: absolute;
   top: 6px;
@@ -148,13 +172,11 @@
   height: 18px;
   padding: 0 6px;
   border-radius: var(--nx-radius-sm);
-  background: rgba(4, 6, 10, 0.72);
+  background: rgba(2, 3, 6, 0.72);
   color: #fff;
   font-size: var(--nx-text-2xs);
-  font-weight: 600;
-  letter-spacing: 0.04em;
+  font-weight: 500;
   font-variant-numeric: tabular-nums;
-  backdrop-filter: blur(4px);
 }
 
 .nx-tile-check {
@@ -175,11 +197,13 @@
   display: flex;
   flex-direction: column;
   gap: 1px;
-  padding: 6px 8px;
+  padding: 6px var(--nx-space-2);
   min-width: 0;
+  border-top: 1px solid var(--nx-border);
 }
 
 .nx-tile-name {
+  font-family: var(--nx-font);
   font-size: var(--nx-text-xs);
   color: var(--nx-text-secondary);
   white-space: nowrap;
@@ -187,27 +211,33 @@
   text-overflow: ellipsis;
 }
 
+/* Time and size: separate mono spans in a rhythm — no dot joiners. */
 .nx-tile-sub {
+  display: flex;
+  align-items: baseline;
+  gap: var(--nx-space-2);
   font-size: var(--nx-text-2xs);
   color: var(--nx-text-faint);
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
 }
 
+/* Destructive = red, only here. */
 .nx-tile-delete {
   position: absolute;
-  bottom: 34px;
+  bottom: 40px;
   right: 6px;
   display: none;
   align-items: center;
   justify-content: center;
-  width: 26px;
-  height: 26px;
+  width: 28px;
+  height: 28px;
   border: none;
   border-radius: var(--nx-radius-sm);
-  background: rgba(4, 6, 10, 0.72);
+  background: rgba(2, 3, 6, 0.72);
   color: var(--nx-danger);
   cursor: pointer;
-  backdrop-filter: blur(4px);
 }
 
 .nx-tile:hover .nx-tile-delete,
@@ -215,12 +245,14 @@
   display: flex;
 }
 
-.nx-tile-delete:hover {
-  background: var(--nx-danger-bg);
+.nx-tile-delete:hover,
+.nx-tile-delete:focus-visible {
+  background: var(--nx-danger);
+  color: #fff;
 }
 
 .nx-media-more {
   display: flex;
   justify-content: center;
-  padding: var(--nx-space-2) 0 var(--nx-space-4);
+  padding: var(--nx-space-2) 0 0;
 }

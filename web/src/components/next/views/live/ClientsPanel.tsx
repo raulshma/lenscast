@@ -76,9 +76,9 @@ export default function ClientsPanel(props: { readOnly?: () => boolean } = {}) {
         <ul class="nx-clients">
           <For each={clients()!.httpClients} fallback={
             <li class="nx-clients-empty">
-              {t('clients.noHttp')}
+              {t('clients.noHttp')}.
               <Show when={clients()!.rtspCount > 0}>
-                {' '}· {tCount('clients.rtspCount', clients()!.rtspCount)}
+                {' '}{tCount('clients.rtspCount', clients()!.rtspCount)}.
               </Show>
             </li>
           }>
@@ -97,7 +97,7 @@ export default function ClientsPanel(props: { readOnly?: () => boolean } = {}) {
                     {kicking() === id ? t('clients.kicking') : t('clients.kick')}
                   </Button>
                 }>
-                  <span class="nx-clients-kicked nx-mono">{t('clients.kicked')}</span>
+                  <span class="nx-clients-kicked">{t('clients.kicked')}</span>
                 </Show>
               </li>
             )}

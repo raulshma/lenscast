@@ -3,7 +3,7 @@ import type { AllSettings, RtspInputFormat, RtspResolution, RtspVideoCodec } fro
 import { API_DEFAULTS } from '../../../../api/defaults'
 import { t } from '../../../../lib/i18n'
 import { streamToggle } from '../../../../lib/streamToggle'
-import { Panel, ToggleField, SliderField, FieldRow, Select } from '../../ui'
+import { Panel, ToggleField, SliderField, FieldRow, Select, Led } from '../../ui'
 
 // The five inline streaming/audio/https/rtsp/keep-awake cards, ported onto
 // the next UI's component kit. Same exports, same props, same bindings —
@@ -40,7 +40,7 @@ export function WebStreamCard(props: StreamingCardProps) {
   const webStreamingEnabled = () => s()?.streaming?.webStreamingEnabled ?? API_DEFAULTS.webStreamingEnabled
 
   return (
-    <Panel title={t('webstream.title')}>
+    <Panel title={t('webstream.title')} badge={<Led tone={webStreamingEnabled() ? 'ok' : 'off'} />}>
       <ToggleField
         label={t('webstream.enable')}
         hint={t('webstream.independent')}
@@ -164,7 +164,7 @@ export function HttpsCard(props: StreamingCardProps) {
   const { httpsToggle } = useToggles(props)
 
   return (
-    <Panel title={t('https.title')}>
+    <Panel title={t('https.title')} badge={<Led tone={httpsToggle.checked() ? 'ok' : 'off'} />}>
       <ToggleField
         label={t('https.serve')}
         hint={t('https.desc')}
@@ -180,7 +180,7 @@ export function RtspCard(props: StreamingCardProps) {
   const rtspVideoCodec = () => s()?.streaming?.rtspVideoCodec ?? API_DEFAULTS.rtspVideoCodec
 
   return (
-    <Panel title={t('rtsp.title')}>
+    <Panel title={t('rtsp.title')} badge={<Led tone={s()?.streaming?.rtspEnabled ?? API_DEFAULTS.rtspEnabled ? 'ok' : 'off'} />}>
       <ToggleField
         label={t('rtsp.enable')}
         checked={s()?.streaming?.rtspEnabled ?? API_DEFAULTS.rtspEnabled}
@@ -256,7 +256,7 @@ export function KeepAwakeCard(props: StreamingCardProps) {
   const { keepAwake } = useToggles(props)
 
   return (
-    <Panel title={t('keepawake.title')}>
+    <Panel title={t('keepawake.title')} badge={<Led tone={keepAwake.checked() ? 'ok' : 'off'} />}>
       <ToggleField
         label={t('keepawake.enable')}
         hint={t('keepawake.desc')}

@@ -1,96 +1,147 @@
 /* ══════════════════════════════════════════════════════════════════
-   NEXT UI — LIVE VIEW
-   The stage: a near-black viewport (video reads best on dark in both
-   themes) with viewfinder corner ticks — the product's signature. The
-   command bar floats on a surface pill; stream actions keep their
-   semantic colors as soft chips. The inspector column carries the
-   console's channel rack (ChannelMatrix) and telemetry panels.
+   NEXT UI — LIVE VIEW ("Viewfinder")
+   The picture is the hero: the video runs near edge-to-edge on a
+   --nx-well surround, framed by 1px viewfinder corner ticks. The
+   console's one autonomous moment lives here — on air, the tally edge,
+   the ticks and the stage chrome turn signal magenta together. The
+   command bar floats on --nx-glass (the only glass in the app); every
+   other surface is quiet plates and hairlines. The inspector column
+   stacks the channel rack and telemetry faceplates.
    ══════════════════════════════════════════════════════════════════ */
+
+/* ── Stage: the picture on a well surround ────────────────────────── */
 
 [data-ui='next'] .preview-section {
   flex: 1;
   min-height: 0;
-  padding: 0;
+  padding: var(--nx-space-3);
   gap: var(--nx-space-3);
   overflow: visible;
+  background: var(--nx-well);
 }
 
-/* The stage */
 [data-ui='next'] .preview-container {
-  background: #0a0c10;
+  background: #000;
   border-radius: var(--nx-radius-lg);
   border: 1px solid var(--nx-border);
-  transition: border-color var(--nx-duration) var(--nx-ease);
+  box-shadow: none;
 }
 
-/* Viewfinder corner ticks (top-left + bottom-right) — quiet until live. */
-[data-ui='next'] .preview-container::before,
+/* Viewfinder corner ticks — four 1px arms, ~24px long, painted by one
+   transparent overlay pseudo (eight hard-stop gradient layers). They
+   sit inside the frame like a real monitor's reticle and never catch
+   pointers. The ink is a light constant, not a border token: the ticks
+   draw on the stage viewport, which is #000 in both themes (like the
+   placeholder and the REC chip, this is over-video chrome, not a
+   themed surface). On air they warm to the signal with the tally edge. */
+[data-ui='next'] .preview-container::before {
+  --tick: rgba(237, 240, 244, 0.32);
+  content: '';
+  position: absolute;
+  inset: 10px;
+  z-index: 4;
+  pointer-events: none;
+  background-image:
+    linear-gradient(var(--tick), var(--tick)),
+    linear-gradient(var(--tick), var(--tick)),
+    linear-gradient(var(--tick), var(--tick)),
+    linear-gradient(var(--tick), var(--tick)),
+    linear-gradient(var(--tick), var(--tick)),
+    linear-gradient(var(--tick), var(--tick)),
+    linear-gradient(var(--tick), var(--tick)),
+    linear-gradient(var(--tick), var(--tick));
+  background-position:
+    0 0,
+    0 0,
+    100% 0,
+    100% 0,
+    0 100%,
+    0 100%,
+    100% 100%,
+    100% 100%;
+  background-size:
+    24px 1px,
+    1px 24px,
+    24px 1px,
+    1px 24px,
+    24px 1px,
+    1px 24px,
+    24px 1px,
+    1px 24px;
+  background-repeat: no-repeat;
+  transition: opacity var(--nx-duration) var(--nx-ease);
+}
+
+/* The on-air tally edge: a 2px signal-magenta hairline along the stage's
+   top border, and nothing else on the edge — the --nx-glow-rec halo is
+   reserved for the REC chip. Appears only while the picture is live. */
 [data-ui='next'] .preview-container::after {
   content: '';
   position: absolute;
-  width: 22px;
-  height: 22px;
-  z-index: 4;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  z-index: 5;
   pointer-events: none;
-  border: 0 solid var(--nx-border-strong);
-  opacity: 0.9;
-  transition: border-color var(--nx-duration) var(--nx-ease);
+  background: var(--nx-signal);
+  opacity: 0;
+  transition: opacity var(--nx-duration) var(--nx-ease);
 }
 
-[data-ui='next'] .preview-container::before {
-  top: 12px;
-  left: 12px;
-  border-top-width: 2px;
-  border-left-width: 2px;
-  border-top-left-radius: 6px;
-}
-
-[data-ui='next'] .preview-container::after {
-  bottom: 12px;
-  right: 12px;
-  border-bottom-width: 2px;
-  border-right-width: 2px;
-  border-bottom-right-radius: 6px;
-}
-
-/* Live: the ticks pick up the REC hue, the border warms slightly. */
+/* On air: the orchestrated moment — ticks, tally edge and chrome turn
+   signal magenta together (the App.css cyan border glow stays dead). */
 [data-ui='next'] .preview-active {
-  border-color: color-mix(in srgb, var(--nx-danger) 30%, transparent);
+  border-color: var(--nx-border);
+  box-shadow: none;
 }
 
-[data-ui='next'] .preview-active::before,
+[data-ui='next'] .preview-active::before {
+  --tick: color-mix(in srgb, var(--nx-signal) 75%, transparent);
+}
+
 [data-ui='next'] .preview-active::after {
-  border-color: color-mix(in srgb, var(--nx-danger) 60%, transparent);
+  opacity: 1;
 }
 
+/* Fullscreen: the picture fills the viewport. Ticks stand down; the
+   tally edge stays — it is the on-air tell when no other chrome is. */
 [data-ui='next'] .preview-container-fullscreen {
+  background: #000;
   border-radius: 0;
   border: none;
   box-shadow: none;
   z-index: 60;
 }
 
-[data-ui='next'] .preview-container-fullscreen::before,
-[data-ui='next'] .preview-container-fullscreen::after {
+[data-ui='next'] .preview-container-fullscreen::before {
   display: none;
 }
 
-/* Overlays on the stage */
+/* ── Stage chrome: dark instrument chips over the picture ─────────── */
+/* Chips that float over video stay dark in both themes — the viewport
+   itself is always black, so themed surfaces would read wrong here. */
+
 [data-ui='next'] .live-badge {
-  background: color-mix(in srgb, var(--nx-danger) 85%, transparent);
-  backdrop-filter: blur(8px);
+  background: var(--nx-signal);
+  color: var(--nx-on-accent);
   font-family: var(--nx-mono);
   font-size: var(--nx-text-xs);
-  font-weight: 700;
-  letter-spacing: 1px;
+  font-weight: 600;
+  letter-spacing: normal;
   padding: 4px 12px;
   border-radius: var(--nx-radius-sm);
 }
 
+[data-ui='next'] .live-badge-dot {
+  background: var(--nx-on-accent);
+}
+
+/* The REC chip: dot + tabular timer. This chip alone carries the
+   on-air halo. */
 [data-ui='next'] .recording-timer-overlay {
   background: rgba(10, 12, 16, 0.72);
-  backdrop-filter: blur(8px);
-  border: 1px solid color-mix(in srgb, var(--nx-danger) 40%, transparent);
+  border: 1px solid color-mix(in srgb, var(--nx-signal) 40%, transparent);
   border-radius: var(--nx-radius-sm);
   padding: 6px 14px;
 }
@@ -99,35 +150,36 @@
   font-family: var(--nx-mono);
   font-variant-numeric: tabular-nums;
   font-size: var(--nx-text-md);
+  letter-spacing: normal;
+  color: #fff;
 }
 
 [data-ui='next'] .recording-dot {
-  background: var(--nx-danger);
+  background: var(--nx-signal);
+  box-shadow: var(--nx-glow-rec);
 }
 
 [data-ui='next'] .preview-fullscreen-exit {
-  background: rgba(10, 12, 16, 0.72);
+  background: rgba(10, 12, 16, 0.85);
   border: 1px solid rgba(255, 255, 255, 0.18);
   border-radius: var(--nx-radius);
   font-size: var(--nx-text-base);
   color: #fff;
-  backdrop-filter: blur(8px);
 }
 
 [data-ui='next'] .preview-fullscreen-exit:hover {
-  background: rgba(10, 12, 16, 0.9);
+  background: rgba(10, 12, 16, 0.95);
 }
 
 [data-ui='next'] .preview-fullscreen-hint {
-  background: rgba(10, 12, 16, 0.72);
+  background: rgba(10, 12, 16, 0.85);
   border-radius: var(--nx-radius);
   font-size: var(--nx-text-base);
   color: #fff;
-  backdrop-filter: blur(8px);
 }
 
-/* The empty stage: one quiet instrument glyph in a ring, then the two
-   lines of copy with a real measure — an invitation, not a void. */
+/* The empty stage: one quiet instrument glyph in a hairline ring, then
+   two lines of copy with a real measure — an invitation, not a void. */
 [data-ui='next'] .preview-placeholder {
   gap: var(--nx-space-3);
 }
@@ -138,16 +190,17 @@
   justify-content: center;
   width: 72px;
   height: 72px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(237, 240, 244, 0.14);
   border-radius: 50%;
-  background: rgba(255, 255, 255, 0.03);
-  color: rgba(232, 236, 243, 0.55);
+  background: rgba(237, 240, 244, 0.03);
+  color: rgba(237, 240, 244, 0.5);
 }
 
 [data-ui='next'] .preview-placeholder-text {
   font-size: var(--nx-text-lg);
   font-weight: 600;
-  color: rgba(232, 236, 243, 0.85);
+  letter-spacing: -0.01em;
+  color: rgba(237, 240, 244, 0.85);
 }
 
 [data-ui='next'] .preview-placeholder-sub {
@@ -155,23 +208,29 @@
   max-width: 360px;
   text-align: center;
   line-height: 1.5;
-  color: rgba(232, 236, 243, 0.45);
+  color: rgba(237, 240, 244, 0.45);
 }
 
-/* The command bar */
+/* ── The command bar: floating glass under the picture ────────────── */
+/* --nx-glass + blur — the only glass in the app. Buttons stay ghost on
+   glass; the capture is the one filled (cyan) action. */
+
 [data-ui='next'] .preview-actions {
   gap: var(--nx-space-2);
   padding: 6px;
-  background: var(--nx-surface);
+  background: var(--nx-glass);
+  -webkit-backdrop-filter: blur(var(--nx-glass-blur));
+  backdrop-filter: blur(var(--nx-glass-blur));
   border: 1px solid var(--nx-border);
   border-radius: var(--nx-radius-lg);
-  box-shadow: var(--nx-shadow-sm);
 }
 
 [data-ui='next'] .preview-actions-left {
   gap: 2px;
 }
 
+/* Ghost on glass: a faint text-toned wash instead of a surface fill —
+   the bar is translucent, a themed plate behind it would look smudged. */
 [data-ui='next'] .action-btn {
   height: 34px;
   padding: 0 12px;
@@ -185,7 +244,7 @@
 }
 
 [data-ui='next'] .action-btn:hover {
-  background: var(--nx-surface-2);
+  background: color-mix(in srgb, var(--nx-text) 7%, transparent);
   color: var(--nx-text);
 }
 
@@ -201,8 +260,8 @@
 /* Same mute for the accent-filled capture: disabled must not read as a
    live primary action (see the matching rule in App.css). */
 [data-ui='next'] .action-btn-primary:disabled {
-  background: var(--nx-surface-3);
-  border-color: var(--nx-border);
+  background: color-mix(in srgb, var(--nx-text) 8%, transparent);
+  border-color: transparent;
   color: var(--nx-text-tertiary);
   opacity: 1;
 }
@@ -225,24 +284,30 @@
   transform: none;
 }
 
+/* Start lanes: quiet cyan — the touchable color says these bring the
+   picture up, without a second filled button. */
 [data-ui='next'] .action-btn-success {
-  background: var(--nx-success-bg);
+  background: transparent;
   border-color: transparent;
-  color: var(--nx-success);
+  color: var(--nx-accent-text);
 }
 
 [data-ui='next'] .action-btn-success:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--nx-success) 16%, transparent);
+  background: var(--nx-accent-subtle);
+  color: var(--nx-accent-text);
 }
 
+/* Stop lanes: they appear only while on air, so they wear the signal —
+   magenta is the live chrome, red stays reserved for faults. */
 [data-ui='next'] .action-btn-warning {
-  background: var(--nx-warning-bg);
+  background: transparent;
   border-color: transparent;
-  color: var(--nx-warning);
+  color: var(--nx-signal);
 }
 
 [data-ui='next'] .action-btn-warning:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--nx-warning) 16%, transparent);
+  background: var(--nx-signal-bg);
+  color: var(--nx-signal);
 }
 
 [data-ui='next'] .action-btn-ghost {
@@ -252,7 +317,7 @@
 }
 
 [data-ui='next'] .action-btn-ghost:hover:not(:disabled) {
-  background: var(--nx-surface-2);
+  background: color-mix(in srgb, var(--nx-text) 7%, transparent);
   color: var(--nx-text);
 }
 
@@ -262,17 +327,35 @@
   color: var(--nx-accent-text);
 }
 
+/* Talkback live: your voice is going out — on air, signal magenta. */
 [data-ui='next'] .action-btn-talking {
-  background: var(--nx-danger-bg);
+  background: var(--nx-signal-bg);
   border-color: transparent;
-  color: var(--nx-danger);
+  color: var(--nx-signal);
   animation: nx-rec-pulse 1.5s var(--nx-ease) infinite;
 }
 
-/* ── Camera controls strip — the stage's floating instrument row. The
-   host geometry is shared with the classic skin (App.css .cam-strip-host);
-   here the pill and its handle dress in the console surface. Kit buttons,
-   slider, selects, and chips carry their own styling. ── */
+[data-ui='next'] .capture-msg {
+  font-size: var(--nx-text-sm);
+  color: var(--nx-success);
+  animation: nx-fade-in 0.3s var(--nx-ease);
+}
+
+/* REC-state pulse — local to the stage chrome. */
+@keyframes nx-rec-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
+}
+
+@keyframes nx-fade-in {
+  from { opacity: 0; }
+}
+
+/* ── Camera controls strip — the stage's floating instrument row ──── */
+/* The host geometry is shared with the classic skin (App.css
+   .cam-strip-host); here the pill dresses as an opaque instrument
+   plate — no blur, the glass budget is spent on the command bar. */
+
 [data-ui='next'] .cam-strip-host {
   gap: var(--nx-space-2);
 }
@@ -286,15 +369,54 @@
   gap: var(--nx-space-2);
   max-width: 100%;
   padding: var(--nx-space-2);
-  background: color-mix(in srgb, var(--nx-surface) 88%, transparent);
-  backdrop-filter: blur(10px);
+  background: color-mix(in srgb, var(--nx-surface) 94%, transparent);
   border: 1px solid var(--nx-border);
   border-radius: var(--nx-radius-lg);
-  box-shadow: var(--nx-shadow-sm);
+}
+
+/* Operator groups separated by hairlines, not gaps of air. */
+[data-ui='next'] .nx-cam-strip-group {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--nx-space-2);
+}
+
+[data-ui='next'] .nx-cam-strip-group + .nx-cam-strip-group {
+  padding-left: var(--nx-space-2);
+  border-left: 1px solid var(--nx-border);
 }
 
 [data-ui='next'] .nx-cam-strip .nx-slider {
   width: 140px;
+}
+
+/* Strip chips: quiet hairline keys in the UI face — names and modes are
+   labels, so Golos sentence case (the kit chip's mono face is for data
+   chips elsewhere). The active lens gets the cyan tick and fill. */
+[data-ui='next'] .nx-cam-strip .nx-chip {
+  height: 28px;
+  padding: 0 10px;
+  background: transparent;
+  border: 1px solid var(--nx-control-border);
+  border-radius: var(--nx-radius);
+  font-family: var(--nx-font);
+  font-size: var(--nx-text-sm);
+  font-weight: 500;
+  letter-spacing: normal;
+  text-transform: none;
+  color: var(--nx-text-secondary);
+}
+
+[data-ui='next'] .nx-cam-strip .nx-chip:hover:not(:disabled) {
+  border-color: var(--nx-control-border-hover);
+  color: var(--nx-text);
+}
+
+[data-ui='next'] .nx-cam-strip .nx-chip-active {
+  background: var(--nx-accent-subtle);
+  border-color: color-mix(in srgb, var(--nx-accent) 45%, transparent);
+  color: var(--nx-accent-text);
+  box-shadow: inset 2px 0 0 var(--nx-accent);
 }
 
 [data-ui='next'] .nx-cam-strip .nx-chip:disabled {
@@ -319,8 +441,7 @@
   gap: var(--nx-space-2);
   height: 30px;
   padding: 0 12px;
-  background: color-mix(in srgb, var(--nx-surface) 88%, transparent);
-  backdrop-filter: blur(10px);
+  background: color-mix(in srgb, var(--nx-surface) 94%, transparent);
   border: 1px solid var(--nx-border);
   border-radius: var(--nx-radius-lg);
   color: var(--nx-text-secondary);
@@ -339,13 +460,12 @@
   padding: 4px 12px;
   font-size: var(--nx-text-xs);
   color: var(--nx-danger);
-  background: color-mix(in srgb, var(--nx-surface) 88%, transparent);
+  background: color-mix(in srgb, var(--nx-surface) 94%, transparent);
   border: 1px solid var(--nx-border);
   border-radius: var(--nx-radius);
-  backdrop-filter: blur(10px);
 }
 
-.nx-cam-strip-chevron-flipped {
+[data-ui='next'] .nx-cam-strip-chevron-flipped {
   transform: rotate(180deg);
 }
 
@@ -355,130 +475,129 @@
   outline-offset: 2px;
 }
 
-@media (max-width: 480px) {
-  [data-ui='next'] .nx-cam-strip .nx-slider {
-    width: 90px;
-  }
-}
+/* ── Channel rack (ChannelMatrix) — dense operator rows ───────────── */
+/* One row per output: LED, mono channel code, mono state code, start/
+   stop verb. Hairline dividers carry the structure; no card-in-card. */
 
-[data-ui='next'] .capture-msg {
-  font-size: var(--nx-text-sm);
-  color: var(--nx-success);
-  animation: nx-fade-in 0.3s var(--nx-ease);
-}
-
-/* REC dot pulse — local to the stage overlays. */
-@keyframes nx-rec-pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.55; }
-}
-
-@keyframes nx-fade-in {
-  from { opacity: 0; }
-}
-
-/* ── Channel rack (ChannelMatrix) ─────────────────────────────────── */
-
-.nx-channel {
+[data-ui='next'] .nx-channel {
   display: flex;
   flex-direction: column;
   gap: var(--nx-space-1);
 }
 
-.nx-channel + .nx-channel {
+[data-ui='next'] .nx-channel + .nx-channel {
   margin-top: var(--nx-space-1);
   padding-top: var(--nx-space-2);
   border-top: 1px solid var(--nx-border);
 }
 
-.nx-channel-head {
+[data-ui='next'] .nx-channel-head {
   display: flex;
   align-items: center;
   gap: var(--nx-space-2);
   min-height: 28px;
 }
 
-.nx-channel-code {
+/* Channel codes are data: mono, tabular, untracked. */
+[data-ui='next'] .nx-channel-code {
   font-family: var(--nx-mono);
   font-size: var(--nx-text-sm);
   font-weight: 600;
-  letter-spacing: 0.08em;
   color: var(--nx-text);
   flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
 }
 
-.nx-channel-status {
+/* State codes (ON AIR / SYNC / FAULT / RDY): console vocabulary, mono,
+   no tracking — the tone colors do the talking. */
+[data-ui='next'] .nx-channel-status {
   flex: 1;
   min-width: 0;
   font-family: var(--nx-mono);
-  font-size: var(--nx-text-2xs);
+  font-size: var(--nx-text-xs);
   font-weight: 500;
-  letter-spacing: 0.1em;
   color: var(--nx-text-faint);
   font-variant-numeric: tabular-nums;
 }
 
-.nx-channel-status-ok {
+/* ON AIR wears the signal magenta — the channel is on air, not merely
+   healthy. RDY stays green (healthy-idle); FAULT stays red. */
+[data-ui='next'] .nx-channel-status-air {
+  color: var(--nx-signal);
+}
+
+[data-ui='next'] .nx-channel-status-ok {
   color: var(--nx-success);
 }
 
-.nx-channel-status-warn {
+[data-ui='next'] .nx-channel-status-warn {
   color: var(--nx-warning);
 }
 
-.nx-channel-status-fault {
+[data-ui='next'] .nx-channel-status-fault {
   color: var(--nx-danger);
 }
 
-.nx-channel-btn {
-  height: 24px;
-  padding: 0 10px;
+/* The verb: a quiet hairline key in the UI face. */
+[data-ui='next'] .nx-channel-btn {
+  height: 28px;
+  padding: 0 12px;
   border: 1px solid var(--nx-control-border);
-  border-radius: var(--nx-radius-sm);
-  background: var(--nx-control-bg);
+  border-radius: var(--nx-radius);
+  background: transparent;
   color: var(--nx-text-secondary);
-  font-family: var(--nx-mono);
-  font-size: var(--nx-text-2xs);
-  font-weight: 600;
-  letter-spacing: 0.1em;
+  font-family: var(--nx-font);
+  font-size: var(--nx-text-sm);
+  font-weight: 500;
   cursor: pointer;
   transition: border-color var(--nx-duration-fast) var(--nx-ease), color var(--nx-duration-fast) var(--nx-ease), background var(--nx-duration-fast) var(--nx-ease);
 }
 
-.nx-channel-btn:hover:not(:disabled) {
+[data-ui='next'] .nx-channel-btn:hover:not(:disabled) {
   border-color: var(--nx-control-border-hover);
   color: var(--nx-text);
 }
 
-.nx-channel-btn:disabled {
+[data-ui='next'] .nx-channel-btn:focus-visible {
+  outline: 2px solid var(--nx-accent);
+  outline-offset: 2px;
+}
+
+[data-ui='next'] .nx-channel-btn:disabled {
   opacity: 0.4;
   cursor: not-allowed;
 }
 
-.nx-channel-error {
+[data-ui='next'] .nx-channel-error {
   font-size: var(--nx-text-xs);
 }
 
-/* ── Clients list (ClientsPanel) ──────────────────────────────────── */
+/* ── Clients list (ClientsPanel) — shared kit rows ────────────────── */
+/* Plain hairline rows; the id is data and stays mono, the kick verb is
+   a quiet danger key. Audit/Auth/Push panels reuse this vocabulary. */
 
-.nx-clients {
+[data-ui='next'] .nx-clients {
   list-style: none;
   margin: 0;
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 2px;
 }
 
-.nx-clients-row {
+[data-ui='next'] .nx-clients-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: var(--nx-space-2);
+  min-height: 32px;
   padding: 2px 0;
 }
 
-.nx-clients-id {
+[data-ui='next'] .nx-clients-row + .nx-clients-row {
+  border-top: 1px solid var(--nx-border);
+}
+
+[data-ui='next'] .nx-clients-id {
   flex: 1;
   min-width: 0;
   overflow: hidden;
@@ -488,31 +607,52 @@
   color: var(--nx-text-secondary);
 }
 
-.nx-clients-kicked {
+/* Action feedback: a quiet sentence, not a celebration. */
+[data-ui='next'] .nx-clients-kicked {
   font-size: var(--nx-text-xs);
-  color: var(--nx-success);
+  color: var(--nx-text-tertiary);
 }
 
-.nx-clients-empty {
+[data-ui='next'] .nx-clients-empty {
   font-size: var(--nx-text-sm);
   color: var(--nx-text-tertiary);
   padding: var(--nx-space-1) 0;
+  line-height: 1.5;
+}
+
+/* ── System info value cell — battery sentence spans ──────────────── */
+/* The battery row states one fact from mono measurements plus, when
+   plugged in, a Golos word. Kept local so the shared .nx-info-value
+   kit rule (detection, system views) is untouched. */
+
+[data-ui='next'] .nx-info-battery {
+  display: inline-flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--nx-space-2);
+}
+
+[data-ui='next'] .nx-info-note {
+  font-size: var(--nx-text-xs);
+  color: var(--nx-text-tertiary);
 }
 
 /* ── Stage loading skeleton ───────────────────────────────────────── */
 
-.nx-stage-skeleton {
+[data-ui='next'] .nx-stage-skeleton {
   flex: 1;
   min-height: 320px;
   display: flex;
   border-radius: var(--nx-radius-lg);
   border: 1px solid var(--nx-border);
+  background: var(--nx-well);
   overflow: hidden;
 }
 
 /* ── Tablet inspector FAB (768–1199px only) ───────────────────────── */
 
-.nx-inspector-fab {
+[data-ui='next'] .nx-inspector-fab {
   display: none;
   position: fixed;
   right: var(--nx-space-4);
@@ -527,17 +667,21 @@
   background: var(--nx-surface);
   color: var(--nx-text-secondary);
   cursor: pointer;
-  box-shadow: var(--nx-shadow-md);
   transition: color var(--nx-duration-fast) var(--nx-ease), border-color var(--nx-duration-fast) var(--nx-ease);
 }
 
-.nx-inspector-fab:hover {
+[data-ui='next'] .nx-inspector-fab:hover {
   color: var(--nx-text);
   border-color: var(--nx-control-border-hover);
 }
 
+[data-ui='next'] .nx-inspector-fab:focus-visible {
+  outline: 2px solid var(--nx-accent);
+  outline-offset: 2px;
+}
+
 @media (min-width: 768px) and (max-width: 1199px) {
-  .nx-inspector-fab {
+  [data-ui='next'] .nx-inspector-fab {
     display: flex;
   }
 }
@@ -557,7 +701,12 @@
     padding: 0 12px;
   }
 
-  .nx-inspector-fab {
+  [data-ui='next'] .nx-cam-strip-group + .nx-cam-strip-group {
+    border-left: none;
+    padding-left: 0;
+  }
+
+  [data-ui='next'] .nx-inspector-fab {
     bottom: calc(var(--nx-space-3) + 58px);
   }
 }
@@ -576,5 +725,9 @@
   [data-ui='next'] .action-btn-success,
   [data-ui='next'] .action-btn-warning {
     padding: 0 10px;
+  }
+
+  [data-ui='next'] .nx-cam-strip .nx-slider {
+    width: 90px;
   }
 }

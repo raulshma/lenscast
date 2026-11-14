@@ -65,12 +65,12 @@ export default function RecordingPanel(props: Props) {
             </Show>
           }
         >
-          <Badge tone="danger" mono><Led tone="rec" />{t('recording.badge.rec')}</Badge>
+          <Badge tone="danger" class="nx-badge-rec" mono><Led tone="rec" />{t('recording.badge.rec')}</Badge>
         </Show>
       }
     >
       <Show when={props.isRecording()}>
-        <div class="nx-banner nx-banner-danger" role="status" aria-live="polite">
+        <div class="nx-banner nx-banner-rec" role="status" aria-live="polite">
           <Led tone="rec" />
           {t('recording.active', { time: props.recordingTimer.formatElapsed() })}
         </div>

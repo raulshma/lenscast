@@ -149,6 +149,9 @@ export const ru: Partial<Record<MessageKey, string>> = {
   'cam.collapse': 'Свернуть панель управления камерой',
   'cam.expand': 'Развернуть панель управления камерой',
   'cam.adminHint': 'Требуется доступ администратора',
+  'cam.resetZoom': 'Сброс',
+  'cam.picture': 'Изображение',
+  'cam.wbShort': 'ББ',
 
   // ── Lens selector (zoom renders generically from zoomRatio with no catalog entry) ──
   'lens.front': 'Фронтальная',

@@ -1,7 +1,15 @@
 /* ══════════════════════════════════════════════════════════════════
-   NEXT UI — COMPONENT PRIMITIVES
+   NEXT UI — COMPONENT PRIMITIVES ("Viewfinder" redesign)
    One family per control kind. Every interactive element ships its
    full state set (default / hover / active / focus-visible / disabled).
+
+   Color law (DESIGN.md): cyan = touchable, magenta = on air, red =
+   wrong, amber = degraded, green = healthy. Depth is plates and
+   hairlines; the only soft shadows here belong to overlays (drawer,
+   modal, toasts). Type: Golos Text speaks — labels and titles are
+   sentence case, never mono, never tracked caps. JetBrains Mono
+   strictly measures — timers, counts, codes. Presses answer the hand:
+   1px down, never a scale.
    ══════════════════════════════════════════════════════════════════ */
 
 /* ── Buttons ──────────────────────────────────────────────────────── */
@@ -16,8 +24,10 @@
   border: 1px solid transparent;
   border-radius: var(--nx-radius);
   background: transparent;
+  font-family: var(--nx-font);
   font-size: var(--nx-text-base);
   font-weight: 500;
+  letter-spacing: -0.01em;
   line-height: 1;
   white-space: nowrap;
   cursor: pointer;
@@ -25,13 +35,12 @@
   transition:
     background var(--nx-duration-fast) var(--nx-ease),
     color var(--nx-duration-fast) var(--nx-ease),
-    border-color var(--nx-duration-fast) var(--nx-ease),
-    box-shadow var(--nx-duration-fast) var(--nx-ease),
-    transform 80ms var(--nx-ease);
+    border-color var(--nx-duration-fast) var(--nx-ease);
 }
 
+/* The press: one pixel toward the glass. No scale, no bounce. */
 .nx-btn:active:not(:disabled) {
-  transform: scale(0.98);
+  transform: translateY(1px);
 }
 
 .nx-btn:disabled {
@@ -45,7 +54,13 @@
   flex-shrink: 0;
 }
 
-/* Primary — the accent, used sparingly (one primary action per zone). */
+/* base.css' generic :focus-visible ring would snap the corner radius to
+   2px; keep each control's own shape under the ring. */
+.nx-btn:focus-visible {
+  border-radius: var(--nx-radius);
+}
+
+/* Primary — the cyan action. One per zone; everything else is quiet. */
 .nx-btn-primary {
   background: var(--nx-accent);
   color: var(--nx-on-accent);
@@ -59,18 +74,23 @@
   background: var(--nx-accent-active);
 }
 
-/* Secondary — quiet, bordered. */
+/* Secondary — a quiet control face: control bg, hairline edge. */
 .nx-btn-secondary {
-  background: var(--nx-surface);
-  border-color: var(--nx-border-strong);
+  background: var(--nx-control-bg);
+  border-color: var(--nx-control-border);
   color: var(--nx-text);
 }
 
 .nx-btn-secondary:hover:not(:disabled) {
+  background: var(--nx-surface-3);
+  border-color: var(--nx-control-border-hover);
+}
+
+.nx-btn-secondary:active:not(:disabled) {
   background: var(--nx-surface-2);
 }
 
-/* Ghost — for toolbars and dense rows. */
+/* Ghost — toolbars and dense rows; the hairline appears on hover only. */
 .nx-btn-ghost {
   color: var(--nx-text-secondary);
 }
@@ -80,14 +100,16 @@
   color: var(--nx-text);
 }
 
-/* Danger — destructive confirmation, not decoration. */
+/* Danger — destructive confirmation and faults only, never REC. The
+   on-fill ink follows the accent fill's rule: near-black on the bright
+   dark-theme red, white on the deep light-theme red — AA either way. */
 .nx-btn-danger {
   background: var(--nx-danger);
-  color: #fff;
+  color: var(--nx-on-accent);
 }
 
 .nx-btn-danger:hover:not(:disabled) {
-  filter: brightness(1.08);
+  background: color-mix(in srgb, var(--nx-danger) 88%, black);
 }
 
 .nx-btn-danger-soft {
@@ -99,7 +121,7 @@
   background: color-mix(in srgb, var(--nx-danger) 16%, transparent);
 }
 
-/* Warning — a latched hot state (torch on), amber like the LED. */
+/* Warning — a latched hot state (torch on), amber like its LED. */
 .nx-btn-warning {
   background: var(--nx-warning-bg);
   color: var(--nx-warning);
@@ -109,18 +131,19 @@
   background: color-mix(in srgb, var(--nx-warning) 16%, transparent);
 }
 
-/* Toggled — a latched state (stream on, filter active). */
+/* Toggled — a latched on state: cyan edge, subtle cyan fill. Pairs
+   with `aria-pressed` (Button's `ariaPressed` prop). */
 .nx-btn-toggled {
   background: var(--nx-accent-subtle);
+  border-color: color-mix(in srgb, var(--nx-accent) 45%, transparent);
   color: var(--nx-accent-text);
-  border-color: color-mix(in srgb, var(--nx-accent) 30%, transparent);
 }
 
 .nx-btn-toggled:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--nx-accent) 14%, transparent);
+  background: color-mix(in srgb, var(--nx-accent) 16%, transparent);
 }
 
-/* Sizes */
+/* Sizes — 28 / 32 / 38, all at or above the 28px hit floor. */
 .nx-btn-sm {
   height: 28px;
   padding: 0 10px;
@@ -133,14 +156,18 @@
   height: 14px;
 }
 
+.nx-btn-sm:focus-visible {
+  border-radius: var(--nx-radius-sm);
+}
+
 .nx-btn-lg {
-  height: 40px;
+  height: 38px;
   padding: 0 18px;
   font-size: var(--nx-text-md);
 }
 
 .nx-btn-icon {
-  width: 34px;
+  width: 32px;
   padding: 0;
 }
 
@@ -148,9 +175,14 @@
   width: 28px;
 }
 
+.nx-btn-icon.nx-btn-lg {
+  width: 38px;
+}
+
 /* ── Inputs & selects ─────────────────────────────────────────────── */
 
-/* Inputs are inset: slightly darker than their card, faint border. */
+/* One control system: control face, hairline, cyan when focused.
+   Hover lifts the hairline; focus turns it cyan and rings. */
 .nx-input,
 .nx-select {
   height: 32px;
@@ -159,8 +191,9 @@
   border-radius: var(--nx-radius);
   background: var(--nx-control-bg);
   color: var(--nx-text);
+  font-family: var(--nx-font);
   font-size: var(--nx-text-base);
-  transition: border-color var(--nx-duration-fast) var(--nx-ease), background var(--nx-duration-fast) var(--nx-ease);
+  transition: border-color var(--nx-duration-fast) var(--nx-ease);
 }
 
 .nx-input::placeholder {
@@ -179,6 +212,11 @@
   box-shadow: 0 0 0 3px var(--nx-focus-ring);
 }
 
+.nx-input:focus-visible,
+.nx-select:focus-visible {
+  border-radius: var(--nx-radius);
+}
+
 .nx-input:disabled,
 .nx-select:disabled {
   opacity: 0.5;
@@ -188,6 +226,8 @@
 .nx-select {
   appearance: none;
   padding-right: 30px;
+  /* Neutral mid-gray chevron: legible on the control face in both
+     themes; an SVG data URI can't read a CSS variable. */
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23808695' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
   background-repeat: no-repeat;
   background-position: right 10px center;
@@ -212,32 +252,22 @@
   border-radius: var(--nx-radius);
   background: var(--nx-control-bg);
   color: var(--nx-text);
+  font-family: var(--nx-font);
   font-size: var(--nx-text-base);
   line-height: 1.5;
   resize: vertical;
   min-height: 64px;
+  transition: border-color var(--nx-duration-fast) var(--nx-ease);
+}
+
+.nx-textarea:hover:not(:disabled) {
+  border-color: var(--nx-control-border-hover);
 }
 
 .nx-textarea:focus {
   outline: none;
   border-color: var(--nx-accent);
   box-shadow: 0 0 0 3px var(--nx-focus-ring);
-}
-
-/* Range sliders — native accent color keeps them themeable. */
-.nx-slider {
-  width: 100%;
-  accent-color: var(--nx-accent);
-  cursor: pointer;
-}
-
-.nx-slider:focus-visible {
-  box-shadow: none;
-}
-
-.nx-slider:disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
 }
 
 /* Color picker */
@@ -251,13 +281,18 @@
   cursor: pointer;
 }
 
+.nx-color:hover:not(:disabled) {
+  border-color: var(--nx-control-border-hover);
+}
+
 /* Checkbox / radio inherit the accent. */
 [data-ui='next'] input[type='checkbox'],
 [data-ui='next'] input[type='radio'] {
   accent-color: var(--nx-accent);
 }
 
-/* Field group: label + control + hint, the form vocabulary. */
+/* ── Field system — label speaks Golos, hint stays tertiary ───────── */
+
 .nx-field {
   display: flex;
   flex-direction: column;
@@ -265,6 +300,7 @@
 }
 
 .nx-field-label {
+  font-family: var(--nx-font);
   font-size: var(--nx-text-sm);
   font-weight: 500;
   color: var(--nx-text-secondary);
@@ -307,9 +343,10 @@
   gap: var(--nx-space-3);
 }
 
+/* The measurement — mono face comes from .nx-mono. */
 .nx-slider-field-value {
   font-size: var(--nx-text-sm);
-  font-weight: 600;
+  font-weight: 500;
   color: var(--nx-text-secondary);
   font-variant-numeric: tabular-nums;
 }
@@ -327,10 +364,12 @@ a.nx-btn {
   max-width: 60%;
 }
 
-/* Number inputs inside field rows stay compact. */
+/* Number inputs are measurements — the data face. */
 .nx-input-num {
   width: 84px;
   text-align: right;
+  font-family: var(--nx-mono);
+  font-variant-numeric: tabular-nums;
 }
 
 /* ── Switch ───────────────────────────────────────────────────────── */
@@ -339,15 +378,16 @@ a.nx-btn {
   position: relative;
   display: inline-block;
   flex-shrink: 0;
-  /* 44x24: a thumb-sized target — the old 32x18 fell under the 24px
-     minimum touch size on the detection toggles. */
+  /* 44x28: the label is the hit target (≥28px floor); the track sits
+     24px tall inside it. */
   width: 44px;
-  height: 24px;
+  height: 28px;
   cursor: pointer;
 }
 
 .nx-switch input {
   position: absolute;
+  inset: 0;
   opacity: 0;
   width: 100%;
   height: 100%;
@@ -357,25 +397,25 @@ a.nx-btn {
 
 .nx-switch-track {
   position: absolute;
-  inset: 0;
+  inset: 2px 0;
   border-radius: var(--nx-radius-full);
-  background: var(--nx-surface-3);
-  border: 1px solid var(--nx-border-strong);
+  background: var(--nx-control-bg);
+  border: 1px solid var(--nx-control-border);
   transition: background var(--nx-duration) var(--nx-ease), border-color var(--nx-duration) var(--nx-ease);
 }
 
 .nx-switch-thumb {
   position: absolute;
-  top: 3px;
+  top: 5px;
   left: 3px;
   width: 18px;
   height: 18px;
   border-radius: 50%;
-  background: #fff;
-  box-shadow: var(--nx-shadow-sm);
-  transition: transform var(--nx-duration) var(--nx-ease);
+  background: var(--nx-text);
+  transition: transform var(--nx-duration) var(--nx-ease), background var(--nx-duration) var(--nx-ease);
 }
 
+/* Checked = cyan; the thumb crosses to the dark side of the accent. */
 .nx-switch input:checked ~ .nx-switch-track {
   background: var(--nx-accent);
   border-color: var(--nx-accent);
@@ -384,6 +424,12 @@ a.nx-btn {
 .nx-switch input:checked ~ .nx-switch-thumb {
   transform: translateX(20px);
   background: var(--nx-on-accent);
+}
+
+/* One ring, on the track — suppress the generic ring on the invisible
+   input so focus doesn't draw twice. */
+.nx-switch input:focus-visible {
+  box-shadow: none;
 }
 
 .nx-switch input:focus-visible ~ .nx-switch-track {
@@ -398,12 +444,121 @@ a.nx-btn {
   opacity: 0.45;
 }
 
+.nx-switch input:disabled ~ .nx-switch-thumb {
+  opacity: 0.45;
+}
+
+/* ── Slider — the machined fader ──────────────────────────────────── */
+
+/* Cyan fill left of the value, quiet track right of it, bone thumb.
+   <Slider> sets --nx-slider-pct to the value's percentage, so the fill
+   reads as a level with no measured geometry. */
+.nx-slider {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 100%;
+  height: 28px;
+  margin: 0;
+  border-radius: var(--nx-radius-full);
+  background:
+    linear-gradient(
+      to right,
+      var(--nx-accent) var(--nx-slider-pct, 50%),
+      var(--nx-surface-3) var(--nx-slider-pct, 50%)
+    )
+    no-repeat center / 100% 4px;
+  cursor: pointer;
+}
+
+.nx-slider::-webkit-slider-thumb {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--nx-text);
+  border: none;
+  box-shadow: 0 0 0 1px var(--nx-border-strong);
+}
+
+.nx-slider::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--nx-text);
+  border: none;
+  box-shadow: 0 0 0 1px var(--nx-border-strong);
+}
+
+.nx-slider:focus-visible {
+  border-radius: var(--nx-radius-full);
+}
+
+.nx-slider:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* ── Segmented control ────────────────────────────────────────────── */
+
+.nx-segment {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  background: var(--nx-control-bg);
+  border: 1px solid var(--nx-control-border);
+  border-radius: var(--nx-radius);
+}
+
+.nx-segment-btn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 12px;
+  border: none;
+  border-radius: var(--nx-radius-sm);
+  background: transparent;
+  color: var(--nx-text-tertiary);
+  font-family: var(--nx-font);
+  font-size: var(--nx-text-sm);
+  font-weight: 500;
+  cursor: pointer;
+  transition: background var(--nx-duration-fast) var(--nx-ease), color var(--nx-duration-fast) var(--nx-ease);
+}
+
+.nx-segment-btn:hover {
+  color: var(--nx-text);
+}
+
+/* Active: the raised plate plus a 2px cyan tick under the chosen word. */
+.nx-segment-btn-active {
+  background: color-mix(in srgb, #fff 7%, var(--nx-control-bg));
+  color: var(--nx-text);
+}
+
+.nx-segment-btn-active::after {
+  content: '';
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  bottom: 0;
+  height: 2px;
+  border-radius: 1px 1px 0 0;
+  background: var(--nx-accent);
+}
+
 /* ── Cards ────────────────────────────────────────────────────────── */
 
+/* A faceplate: plate surface, machined top bevel, hairline. No soft
+   shadow — the hairline carries the depth. */
 .nx-card {
   background: var(--nx-surface);
   border: 1px solid var(--nx-border);
   border-radius: var(--nx-radius-lg);
+  box-shadow: var(--nx-bevel);
 }
 
 .nx-card-header {
@@ -418,6 +573,7 @@ a.nx-btn {
   display: flex;
   align-items: center;
   gap: var(--nx-space-2);
+  font-family: var(--nx-font);
   font-size: var(--nx-text-md);
   font-weight: 600;
   letter-spacing: -0.01em;
@@ -451,22 +607,24 @@ a.nx-btn {
 }
 
 .nx-card-section-title {
+  font-family: var(--nx-font);
   font-size: var(--nx-text-xs);
   font-weight: 600;
   color: var(--nx-text-tertiary);
 }
 
-/* ── Badges & status ──────────────────────────────────────────────── */
+/* ── Badges — quiet tinted chips ──────────────────────────────────── */
 
 .nx-badge {
   display: inline-flex;
   align-items: center;
   gap: 5px;
   height: 20px;
-  padding: 0 8px;
-  border-radius: var(--nx-radius-full);
+  padding: 0 7px;
+  border-radius: var(--nx-radius-sm);
   font-size: var(--nx-text-xs);
   font-weight: 600;
+  letter-spacing: -0.01em;
   line-height: 1;
   white-space: nowrap;
 }
@@ -491,6 +649,8 @@ a.nx-btn {
   color: var(--nx-warning);
 }
 
+/* `danger` is a fault: red. On-air states keep tone="danger" markup and
+   add class="nx-badge-signal" by hand (see below). */
 .nx-badge-danger {
   background: var(--nx-danger-bg);
   color: var(--nx-danger);
@@ -499,6 +659,15 @@ a.nx-btn {
 .nx-badge-info {
   background: var(--nx-info-bg);
   color: var(--nx-info);
+}
+
+/* On-air badge — REC / LIVE. Declared after the tone classes so it
+   wins at equal specificity: it re-points the red fault tint at signal
+   magenta (magenta = your picture is going out; red = something is
+   wrong). Additive class only — Badge props are unchanged. */
+.nx-badge-signal {
+  background: var(--nx-signal-bg);
+  color: var(--nx-signal);
 }
 
 /* Live/status dot — the recording & streaming tell. */
@@ -510,8 +679,9 @@ a.nx-btn {
   flex-shrink: 0;
 }
 
+/* On air — signal magenta, not red. */
 .nx-dot-live {
-  background: var(--nx-danger);
+  background: var(--nx-signal);
   animation: nx-pulse 2s var(--nx-ease) infinite;
 }
 
@@ -532,7 +702,7 @@ a.nx-btn {
   50% { opacity: 0.45; }
 }
 
-/* ── Banners ──────────────────────────────────────────────────────── */
+/* ── Banners — tinted, quiet, one per meaning ─────────────────────── */
 
 .nx-banner {
   display: flex;
@@ -575,45 +745,7 @@ a.nx-btn {
   color: var(--nx-text-secondary);
 }
 
-/* ── Segmented control ────────────────────────────────────────────── */
-
-.nx-segment {
-  display: inline-flex;
-  align-items: center;
-  gap: 2px;
-  padding: 2px;
-  background: var(--nx-surface-2);
-  border: 1px solid var(--nx-border);
-  border-radius: var(--nx-radius);
-}
-
-.nx-segment-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  height: 28px;
-  padding: 0 12px;
-  border: none;
-  border-radius: var(--nx-radius-sm);
-  background: transparent;
-  color: var(--nx-text-tertiary);
-  font-size: var(--nx-text-sm);
-  font-weight: 500;
-  cursor: pointer;
-  transition: background var(--nx-duration-fast) var(--nx-ease), color var(--nx-duration-fast) var(--nx-ease), box-shadow var(--nx-duration-fast) var(--nx-ease);
-}
-
-.nx-segment-btn:hover {
-  color: var(--nx-text);
-}
-
-.nx-segment-btn-active {
-  background: var(--nx-surface);
-  color: var(--nx-text);
-  box-shadow: var(--nx-shadow-sm);
-}
-
-/* ── Modal ────────────────────────────────────────────────────────── */
+/* ── Modal — an overlay: the only real shadow plus the drawer's ───── */
 
 .nx-modal-scrim {
   position: fixed;
@@ -624,6 +756,7 @@ a.nx-btn {
   justify-content: center;
   padding: var(--nx-space-6);
   background: var(--nx-scrim);
+  animation: nx-fade-in var(--nx-duration-fast) var(--nx-ease);
 }
 
 .nx-modal {
@@ -631,27 +764,25 @@ a.nx-btn {
   max-height: 90vh;
   overflow-y: auto;
   background: var(--nx-surface);
-  border: 1px solid var(--nx-border);
-  border-radius: var(--nx-radius-xl);
+  border: 1px solid var(--nx-border-strong);
+  border-radius: var(--nx-radius-lg);
   box-shadow: var(--nx-shadow-lg);
 }
 
-/* Entrance: fade + slight rise, ease-out, never from scale(0). */
+/* Entrance: a short fade answering the click — no slide-up choreography. */
 @keyframes nx-modal-in {
-  from {
-    opacity: 0;
-    transform: translateY(6px) scale(0.97);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-  }
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: none; }
 }
 
 [data-ui='next'] .automation-editor-modal,
 [data-ui='next'] .automation-picker-modal,
 [data-ui='next'] .nx-modal {
   animation: nx-modal-in var(--nx-duration) var(--nx-ease);
+}
+
+@keyframes nx-fade-in {
+  from { opacity: 0; }
 }
 
 /* ── Menu / list rows ─────────────────────────────────────────────── */
@@ -675,7 +806,7 @@ a.nx-btn {
   background: var(--nx-surface-2);
 }
 
-/* ── Empty state ──────────────────────────────────────────────────── */
+/* ── Empty state — quiet text, then the first action ──────────────── */
 
 .nx-empty {
   display: flex;
@@ -695,6 +826,7 @@ a.nx-btn {
 }
 
 .nx-empty-title {
+  font-family: var(--nx-font);
   font-size: var(--nx-text-base);
   font-weight: 600;
   color: var(--nx-text-secondary);
@@ -702,28 +834,37 @@ a.nx-btn {
 
 .nx-empty-hint {
   font-size: var(--nx-text-sm);
+  max-width: 44ch;
+}
+
+/* The first action (Empty's `action` slot) lands under the hint. */
+.nx-empty-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--nx-space-2);
+  margin-top: var(--nx-space-1);
 }
 
 /* ══════════════════════════════════════════════════════════════════
    OPERATOR CONSOLE KIT
-   The control-room layer: mono micro-labels, telemetry chips, LED
-   state dots, instrument panels, meters, toasts, drawer, skeletons.
+   Quiet labels, telemetry chips, LED state dots, instrument panels,
+   toasts, drawer, loading vocabulary.
    ══════════════════════════════════════════════════════════════════ */
 
-/* ── Micro-label — the console's uppercase mono voice ─────────────── */
+/* ── Quiet section label — Golos, sentence case. The old mono-caps
+   tracked eyebrow is banned chrome (type law); this class now reads as
+   a small spoken label, nothing more. ───────────────────────────── */
 
 .nx-label {
-  font-family: var(--nx-mono);
-  font-size: var(--nx-text-2xs);
+  font-family: var(--nx-font);
+  font-size: var(--nx-text-xs);
   font-weight: 600;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+  letter-spacing: -0.01em;
   color: var(--nx-text-tertiary);
-  font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
 
-/* ── Telemetry chip — the strip's data unit ───────────────────────── */
+/* ── Telemetry chip — the data face: mono, tabular, no caps ───────── */
 
 .nx-chip {
   display: inline-flex;
@@ -735,16 +876,16 @@ a.nx-btn {
   border: 1px solid var(--nx-border);
   border-radius: var(--nx-radius-sm);
   font-family: var(--nx-mono);
-  font-size: var(--nx-text-2xs);
+  font-size: var(--nx-text-xs);
   font-weight: 500;
-  letter-spacing: 0.06em;
   color: var(--nx-text-secondary);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
-  text-transform: uppercase;
 }
 
+/* Interactive chips (filters) meet the 28px hit floor. */
 button.nx-chip {
+  height: 28px;
   cursor: pointer;
   transition: border-color var(--nx-duration-fast) var(--nx-ease), color var(--nx-duration-fast) var(--nx-ease);
 }
@@ -764,20 +905,22 @@ button.nx-chip:hover {
   border-color: color-mix(in srgb, var(--nx-warning) 24%, transparent);
 }
 
+/* On air — signal magenta. Red stays with faults. */
 .nx-chip-rec {
-  color: var(--nx-danger);
-  border-color: color-mix(in srgb, var(--nx-danger) 32%, transparent);
-  background: var(--nx-danger-bg);
+  color: var(--nx-signal);
+  border-color: color-mix(in srgb, var(--nx-signal) 32%, transparent);
+  background: var(--nx-signal-bg);
 }
 
-/* Selected filter chip. */
+/* Selected filter chip — cyan edge, subtle cyan fill. */
 .nx-chip-active {
   color: var(--nx-accent-text);
   border-color: color-mix(in srgb, var(--nx-accent) 36%, transparent);
   background: var(--nx-accent-subtle);
 }
 
-/* ── LED — state at a glance; color carries the meaning ───────────── */
+/* ── LED — state at a glance; color carries the meaning. Glow lives
+   here and on the on-air edge only, never as decoration. ─────────── */
 
 .nx-led {
   width: 7px;
@@ -798,8 +941,9 @@ button.nx-chip:hover {
   animation: nx-pulse 1.6s var(--nx-ease) infinite;
 }
 
+/* On air — the signal-magenta pulse (was red; red is faults only). */
 .nx-led-rec {
-  background: var(--nx-danger);
+  background: var(--nx-signal);
   box-shadow: var(--nx-glow-rec);
   animation: nx-pulse 1.2s var(--nx-ease) infinite;
 }
@@ -813,16 +957,20 @@ button.nx-chip:hover {
   background: var(--nx-danger);
 }
 
-/* ── Panel — the instrument faceplate card ────────────────────────── */
+/* ── Panel — the instrument faceplate: plate surface, machined top
+   bevel (--nx-bevel), hairline, radius 6. The title speaks Golos 600
+   sentence case; a 2px cyan tick marks the header's left edge. The
+   numbered section code is banned chrome — `Panel.code` is gone. ── */
 
 .nx-panel {
   background: var(--nx-surface);
   border: 1px solid var(--nx-border);
   border-radius: var(--nx-radius-lg);
-  box-shadow: var(--nx-shadow-sm);
+  box-shadow: var(--nx-bevel);
 }
 
 .nx-panel-header {
+  position: relative;
   display: flex;
   align-items: center;
   /* Wrap when narrow — the action row drops under the title instead of
@@ -830,11 +978,23 @@ button.nx-chip:hover {
   flex-wrap: wrap;
   gap: var(--nx-space-2);
   row-gap: 2px;
-  min-height: 36px;
-  padding: 6px 12px;
+  min-height: 38px;
+  padding: 8px 12px 8px 14px;
   border-bottom: 1px solid var(--nx-border);
   border-radius: var(--nx-radius-lg) var(--nx-radius-lg) 0 0;
-  background: var(--nx-surface-2);
+}
+
+/* The tick: 2px of cyan on the header's left edge — not a full border. */
+.nx-panel-header::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 50%;
+  width: 2px;
+  height: 16px;
+  transform: translateY(-50%);
+  border-radius: 0 1px 1px 0;
+  background: var(--nx-accent);
 }
 
 .nx-panel-title {
@@ -845,20 +1005,20 @@ button.nx-chip:hover {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
-  font-family: var(--nx-mono);
-  font-size: var(--nx-text-2xs);
+  font-family: var(--nx-font);
+  font-size: var(--nx-text-base);
   font-weight: 600;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--nx-text-secondary);
-  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+  color: var(--nx-text);
 }
 
+/* Legacy hook: numbered section codes are banned, the class stays so
+   stale markup can't paint accent chrome. It measures; it doesn't shout. */
 .nx-panel-code {
   font-family: var(--nx-mono);
   font-size: var(--nx-text-2xs);
-  font-weight: 600;
-  color: var(--nx-accent-text);
+  font-weight: 500;
+  color: var(--nx-text-tertiary);
   font-variant-numeric: tabular-nums;
 }
 
@@ -881,22 +1041,23 @@ button.nx-chip:hover {
 
 /* ── Skeleton & spinner — loading vocabulary ──────────────────────── */
 
+/* Shimmer walks surface-2 → surface-3; both via tokens, light parity. */
 .nx-skeleton {
-  background: var(--nx-surface-3);
+  background: var(--nx-surface-2);
   border-radius: var(--nx-radius-sm);
   animation: nx-shimmer 1.4s ease-in-out infinite;
 }
 
 @keyframes nx-shimmer {
-  0%, 100% { opacity: 0.55; }
-  50% { opacity: 1; }
+  0%, 100% { background-color: var(--nx-surface-2); }
+  50% { background-color: var(--nx-surface-3); }
 }
 
 .nx-spinner {
   width: 14px;
   height: 14px;
   flex-shrink: 0;
-  border: 2px solid var(--nx-border-strong);
+  border: 1.5px solid var(--nx-border-strong);
   border-top-color: var(--nx-accent);
   border-radius: 50%;
   animation: nx-spin 0.7s linear infinite;
@@ -905,20 +1066,22 @@ button.nx-chip:hover {
 .nx-spinner-sm {
   width: 11px;
   height: 11px;
-  border-width: 2px;
+  border-width: 1.5px;
 }
 
 @keyframes nx-spin {
   to { transform: rotate(360deg); }
 }
 
-/* ── Drawer — the slide-over inspector for narrow viewports ───────── */
+/* ── Drawer — the slide-over inspector. An overlay: the real shadow,
+   and a slide that answers the hand. ──────────────────────────────── */
 
 .nx-drawer-scrim {
   position: fixed;
   inset: 0;
   z-index: 150;
   background: var(--nx-scrim);
+  animation: nx-fade-in var(--nx-duration-fast) var(--nx-ease);
 }
 
 .nx-drawer {
@@ -936,10 +1099,10 @@ button.nx-chip:hover {
   animation: nx-drawer-in var(--nx-duration) var(--nx-ease);
 }
 
+/* The slide: from off-screen, no fade — it arrives like a drawer. */
 @keyframes nx-drawer-in {
   from {
-    opacity: 0;
-    transform: translateX(24px);
+    transform: translateX(100%);
   }
 }
 
@@ -961,7 +1124,7 @@ button.nx-chip:hover {
   gap: var(--nx-space-3);
 }
 
-/* ── Toasts — action feedback, bottom-right stack ─────────────────── */
+/* ── Toasts — quiet plates with a 2px tone tick, bottom-right stack ── */
 
 .nx-toasts {
   position: fixed;
@@ -983,7 +1146,7 @@ button.nx-chip:hover {
   min-width: 240px;
   max-width: 360px;
   padding: 10px 12px;
-  background: var(--nx-surface-2);
+  background: var(--nx-surface);
   border: 1px solid var(--nx-border-strong);
   border-left: 2px solid var(--nx-text-tertiary);
   border-radius: var(--nx-radius);
@@ -993,16 +1156,17 @@ button.nx-chip:hover {
   animation: nx-toast-in var(--nx-duration) var(--nx-ease);
 }
 
+/* The tick is the tone: info cyan, success green, danger red, warning
+   amber — one meaning each, no tinted washes. */
 .nx-toast-success { border-left-color: var(--nx-success); }
 .nx-toast-danger { border-left-color: var(--nx-danger); }
 .nx-toast-warning { border-left-color: var(--nx-warning); }
 .nx-toast-info { border-left-color: var(--nx-info); }
 
+/* Arrival is a fade — the one autonomous moment in this app is the
+   on-air transition, so a toast doesn't get choreography. */
 @keyframes nx-toast-in {
-  from {
-    opacity: 0;
-    transform: translateY(8px);
-  }
+  from { opacity: 0; }
 }
 
 /* On phones the fixed bottom-right stack lands on the labelled tab bar

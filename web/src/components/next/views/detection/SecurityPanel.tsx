@@ -3,7 +3,7 @@ import type { AllSettings, DeviceStatus, MotionZone } from '../../../../types'
 import { API_DEFAULTS } from '../../../../api/defaults'
 import { isDayArmed, toggleArmDayMask } from '../../../../armDays'
 import { downloadDetectionModel, sendTestAlert, setSiren, setTorch } from '../../../../api/client'
-import { automationDayLabelKey } from '../../../../lib/automation'
+import { automationDayLabelKey, dayListLabel, isEveryDayMask } from '../../../../lib/automation'
 import { t } from '../../../../lib/i18n'
 import { Panel, ToggleField, SliderField, FieldRow, TextInput, Button, Empty } from '../../ui'
 
@@ -279,6 +279,20 @@ export default function SecurityPanel(props: Props) {
                 </button>
               )}
             </For>
+          </div>
+          {/* The schedule restated as a plain sentence — the toggles stay
+              compact, this line carries the reading: days, then the window. */}
+          <div class="nx-arm-summary">
+            <span>
+              {isEveryDayMask(armDaysMask())
+                ? t('automation.daysEveryDay')
+                : dayListLabel(armDaysMask(), t)}
+            </span>
+            <span class="nx-arm-summary-time nx-mono">
+              {minutesToLabel(stream()?.motionArmStartMinute ?? API_DEFAULTS.motionArmStartMinute)}
+              –
+              {minutesToLabel(stream()?.motionArmEndMinute ?? API_DEFAULTS.motionArmEndMinute)}
+            </span>
           </div>
         </Show>
 

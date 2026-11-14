@@ -22,7 +22,7 @@ export default function LensPanel(props: Props) {
           {(lens) => (
             <button
               type="button"
-              class="nx-chip"
+              class="nx-chip nx-lens-chip"
               classList={{ 'nx-chip-active': lens.selected }}
               onClick={() => props.handleSelectLens(lens.index)}
             >

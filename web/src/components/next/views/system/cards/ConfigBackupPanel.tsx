@@ -66,12 +66,12 @@ export default function ConfigBackupPanel() {
   }
 
   return (
-    <Panel title={t('config.title')}>
+    <Panel title={t('config.title')} class="nx-panel-danger">
       <div class="nx-deterrence">
         <Button size="sm" variant="ghost" disabled={busy()} onClick={download}>
           {t('config.export')}
         </Button>
-        <label class="nx-btn nx-btn-ghost nx-btn-sm" for="settings-import-input">
+        <label class="nx-btn nx-btn-danger-soft nx-btn-sm" for="settings-import-input">
           {busy() ? t('config.working') : t('config.import')}
         </label>
         <input

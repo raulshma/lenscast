@@ -39,6 +39,11 @@ import '@fontsource/inter/cyrillic-400.css'
 import '@fontsource/inter/cyrillic-600.css'
 import '@fontsource/jetbrains-mono/latin-400.css'
 import '@fontsource/jetbrains-mono/latin-600.css'
+import '@fontsource/golos-text/latin-400.css'
+import '@fontsource/golos-text/latin-500.css'
+import '@fontsource/golos-text/latin-600.css'
+import '@fontsource/golos-text/cyrillic-400.css'
+import '@fontsource/golos-text/cyrillic-600.css'
 
 // ── Query-param presets (before any store reads localStorage) ──
 const params = new URLSearchParams(window.location.search)

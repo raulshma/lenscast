@@ -148,6 +148,9 @@ export const fr: Partial<Record<MessageKey, string>> = {
   'cam.collapse': 'Replier les commandes caméra',
   'cam.expand': 'Déplier les commandes caméra',
   'cam.adminHint': 'Accès administrateur requis',
+  'cam.resetZoom': 'Réinitialiser',
+  'cam.picture': 'Image',
+  'cam.wbShort': 'WB',
 
   // ── Lens selector (zoom renders generically from zoomRatio with no catalog entry) ──
   'lens.front': 'Front',

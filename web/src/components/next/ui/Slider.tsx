@@ -8,8 +8,14 @@ interface Props {
   ariaLabel?: string
 }
 
-/** Range slider; accent color comes from the native control token. */
+/** Range slider: cyan fill up to the value, bone thumb — the fill length
+ *  rides a `--nx-slider-pct` custom property the kit CSS reads. */
 export default function Slider(props: Props) {
+  const fill = () => {
+    const span = props.max - props.min || 1
+    const pct = ((props.value - props.min) / span) * 100
+    return `${Math.min(100, Math.max(0, pct))}%`
+  }
   return (
     <input
       type="range"
@@ -20,6 +26,7 @@ export default function Slider(props: Props) {
       value={props.value}
       disabled={props.disabled}
       aria-label={props.ariaLabel}
+      style={{ '--nx-slider-pct': fill() }}
       onInput={(e) => props.onChange(Number(e.currentTarget.value))}
     />
   )

@@ -57,30 +57,17 @@ export default function AutomationPanel(props: Props) {
   /** The published icon kind of a rule's trigger, resolved from the fetched catalog. */
   const triggerIcon = (typeId: string): string => state()?.triggers.find((entry) => entry.id === typeId)?.icon ?? ''
 
-  /** The WHEN row text: "HH:mm · days" for time rules, the "when …" line for events. */
-  const whenText = (rule: AutomationRuleDto): string => {
-    if (rule.triggerType === 'time_of_day') {
-      const dayText = isEveryDayMask(rule.daysMask)
-        ? t('automation.daysEveryDay')
-        : dayListLabel(rule.daysMask, t)
-      return `${formatMinuteOfDay(rule.minuteOfDay)} · ${dayText}`
-    }
-    return joinSummaryLines(automationTriggerSummaryLines(rule), t)
-  }
+  /** Days label over a mask: "Every day" or the localized day list. */
+  const daysText = (mask: number): string =>
+    isEveryDayMask(mask) ? t('automation.daysEveryDay') : dayListLabel(mask, t)
 
-  /** The ONLY WHEN row: all conditions joined by the mode's localized joiner. */
-  const onlyWhenText = (rule: AutomationRuleDto): string => {
-    const joiner = rule.conditionMode === 'any' ? t('automation.joinOr') : t('automation.joinAnd')
-    return rule.conditions
-      .map((condition) => {
-        const summary = automationConditionText(condition)
-        if (condition.type === 'time_window' && !isEveryDayMask(conditionDaysMask(condition))) {
-          return `${summary} · ${dayListLabel(conditionDaysMask(condition), t)}`
-        }
-        return summary
-      })
-      .join(` ${joiner} `)
-  }
+  /** The localized and/or joiner between a rule's conditions. */
+  const conditionJoiner = (rule: AutomationRuleDto): string =>
+    rule.conditionMode === 'any' ? t('automation.joinOr') : t('automation.joinAnd')
+
+  /** The WHEN row text for event rules: the localized trigger summary. */
+  const whenText = (rule: AutomationRuleDto): string =>
+    joinSummaryLines(automationTriggerSummaryLines(rule), t)
 
   /** One condition's summary (label-less, self-descriptive — the app's conditionText). */
   const automationConditionText = (condition: { type: string; params: Record<string, string> }): string =>
@@ -277,12 +264,17 @@ export default function AutomationPanel(props: Props) {
                   </span>
                   <span class="automation-rule-heading">
                     <span class="automation-rule-name">{rule.name || t('automation.ruleUnnamed')}</span>
-                    {/* Time rules show the classic HH:mm · days; event rules
-                        show their localized trigger label. */}
+                    {/* Time rules show the time (mono) and the days as two
+                        separate facts; event rules show their localized
+                        trigger label. */}
                     <span class="automation-rule-sub">
-                      {rule.triggerType === 'time_of_day'
-                        ? whenText(rule)
-                        : t(automationTriggerLabelKey(rule.triggerType))}
+                      <Show
+                        when={rule.triggerType === 'time_of_day'}
+                        fallback={t(automationTriggerLabelKey(rule.triggerType))}
+                      >
+                        <span class="nx-rule-time nx-mono">{formatMinuteOfDay(rule.minuteOfDay)}</span>
+                        <span>{daysText(rule.daysMask)}</span>
+                      </Show>
                     </span>
                   </span>
                 </button>
@@ -309,7 +301,23 @@ export default function AutomationPanel(props: Props) {
                 <Show when={rule.conditions.length > 0}>
                   <div class="automation-when-row automation-onlywhen">
                     <span class="automation-when-label">{t('automation.onlyWhen')}</span>
-                    <span class="automation-when-text">{onlyWhenText(rule)}</span>
+                    <span class="automation-when-text">
+                      <For each={rule.conditions}>
+                        {(condition, index) => (
+                          <>
+                            <Show when={index() > 0}>
+                              <span class="nx-rule-joiner">{conditionJoiner(rule)} </span>
+                            </Show>
+                            <span class="nx-rule-condition">
+                              {automationConditionText(condition)}
+                              <Show when={condition.type === 'time_window' && !isEveryDayMask(conditionDaysMask(condition))}>
+                                <span class="nx-rule-days"> — {daysText(conditionDaysMask(condition))}</span>
+                              </Show>
+                            </span>
+                          </>
+                        )}
+                      </For>
+                    </span>
                   </div>
                 </Show>
                 <div class="automation-when-row automation-then">

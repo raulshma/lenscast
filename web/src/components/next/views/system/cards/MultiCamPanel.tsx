@@ -263,7 +263,14 @@ function CameraTile(props: {
   }
 
   return (
-    <div class="multicam-tile" classList={{ 'multicam-tile-offline': status() === 'offline' }}>
+    <div
+      class="multicam-tile"
+      classList={{
+        'multicam-tile-offline': status() === 'offline',
+        // The active camera: cyan edge on the faceplate (views/cards.css).
+        'multicam-tile-live': mode() === 'live' && status() !== 'offline',
+      }}
+    >
       <div class="multicam-tile-media">
         <img
           class="multicam-tile-img"

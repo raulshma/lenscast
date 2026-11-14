@@ -1,61 +1,75 @@
 /* ══════════════════════════════════════════════════════════════════
-   NEXT UI — DESIGN TOKENS (operator control room)
+   NEXT UI — DESIGN TOKENS ("Viewfinder" redesign)
    Namespaced under [data-ui='next'] so the classic shell's --lc-*
-   tokens stay untouched. DARK is the default: a deep charcoal operator
-   console — dense, mono-labeled, data-forward. Color is a signal,
-   never decoration: red = live/REC/error (with glow), amber =
-   degraded/connecting, green = healthy/on, cyan (the logo's lens
-   cathode) = interactive only. Depth is hairline borders and inset
-   bevels, not shadows. Sharpened light parity in [data-theme='light'].
+   tokens stay untouched. The palette is the logo's own: camera-body
+   black surfaces, the cyan lens for anything touchable, the magenta
+   ring for anything on air. See DESIGN.md for the color law:
+
+     cyan  --nx-accent  = interactive only
+     magenta --nx-signal = live / REC / detection hits (the on-air state)
+     red   --nx-danger  = errors and faults only
+     amber --nx-warning = degraded / connecting
+     green --nx-success = healthy status only
+
+   Depth is machined plates and hairlines; --nx-glass is reserved for
+   the floating stage command bar; LED glow only on actual LEDs and the
+   on-air edge. Sharpened light parity in [data-theme='light'].
    ══════════════════════════════════════════════════════════════════ */
 
 :root[data-ui='next'] {
   color-scheme: dark;
 
-  /* Surfaces — canvas < panel < raised < inset well, one charcoal family */
-  --nx-bg: #0a0c10;
-  --nx-surface: #12151b;
-  --nx-surface-2: #171b22;
-  --nx-surface-3: #1d222b;
-  --nx-scrim: rgba(4, 6, 10, 0.68);
+  /* Surfaces — body < plate < raised < inset well, one black family */
+  --nx-bg: #07080c;
+  --nx-surface: #10131a;
+  --nx-surface-2: #161a22;
+  --nx-surface-3: #1c212b;
+  --nx-well: #0a0c11;
+  --nx-scrim: rgba(2, 3, 6, 0.7);
 
   /* Borders — hairlines carry all the depth */
-  --nx-border: rgba(255, 255, 255, 0.08);
-  --nx-border-strong: rgba(255, 255, 255, 0.16);
-  --nx-focus-ring: rgba(79, 172, 254, 0.35);
+  --nx-border: rgba(237, 240, 244, 0.07);
+  --nx-border-strong: rgba(237, 240, 244, 0.16);
+  --nx-focus-ring: rgba(62, 200, 255, 0.4);
 
-  /* Signal — lens cyan (logo lensGrad #4FACFE). Interactive only. */
-  --nx-accent: #4facfe;
-  --nx-accent-hover: #77c4ff;
-  --nx-accent-active: #a5d8ff;
-  --nx-accent-text: #77c4ff;
-  --nx-accent-subtle: rgba(79, 172, 254, 0.12);
-  --nx-on-accent: #0a0c10;
+  /* Accent — the logo's lens cyan. Touchable things only. */
+  --nx-accent: #3ec8ff;
+  --nx-accent-hover: #6fd6ff;
+  --nx-accent-active: #a5e4ff;
+  --nx-accent-text: #6fd6ff;
+  --nx-accent-subtle: rgba(62, 200, 255, 0.1);
+  --nx-on-accent: #04121b;
 
-  /* Semantic — state colors. Danger doubles as the REC/LIVE red. */
-  --nx-danger: #ff3b5c;
-  --nx-danger-bg: rgba(255, 59, 92, 0.1);
+  /* Signal — the logo's ring magenta. On air / REC / detection hits. */
+  --nx-signal: #ff2e87;
+  --nx-signal-hover: #ff5da1;
+  --nx-signal-bg: rgba(255, 46, 135, 0.11);
+
+  /* Semantic — state colors. Danger is faults only, never REC. */
+  --nx-danger: #ff4757;
+  --nx-danger-bg: rgba(255, 71, 87, 0.1);
   --nx-warning: #ffb020;
   --nx-warning-bg: rgba(255, 176, 32, 0.1);
-  --nx-success: #2bd97c;
-  --nx-success-bg: rgba(43, 217, 124, 0.1);
-  --nx-info: #4facfe;
-  --nx-info-bg: rgba(79, 172, 254, 0.1);
+  --nx-success: #37d98a;
+  --nx-success-bg: rgba(55, 217, 138, 0.1);
+  --nx-info: #3ec8ff;
+  --nx-info-bg: rgba(62, 200, 255, 0.1);
 
-  /* LED glow — the broadcast "on air" halo for live states */
-  --nx-glow-rec: 0 0 10px rgba(255, 59, 92, 0.5);
-  --nx-glow-ok: 0 0 8px rgba(43, 217, 124, 0.4);
+  /* LED glow — the broadcast "on air" halo. LEDs and the on-air edge
+     only; never decoration. */
+  --nx-glow-rec: 0 0 10px rgba(255, 46, 135, 0.55);
+  --nx-glow-ok: 0 0 8px rgba(55, 217, 138, 0.4);
   --nx-glow-warn: 0 0 8px rgba(255, 176, 32, 0.4);
 
-  /* Text — four levels, crisp on charcoal */
-  --nx-text: #e8ecf3;
-  --nx-text-secondary: rgba(232, 236, 243, 0.64);
-  --nx-text-tertiary: rgba(232, 236, 243, 0.44);
-  --nx-text-faint: rgba(232, 236, 243, 0.28);
+  /* Text — bone white, four levels */
+  --nx-text: #edf0f4;
+  --nx-text-secondary: rgba(237, 240, 244, 0.64);
+  --nx-text-tertiary: rgba(237, 240, 244, 0.44);
+  --nx-text-faint: rgba(237, 240, 244, 0.26);
 
-  /* Typography — Inter for prose, JetBrains Mono for every numeral,
-     status, timestamp and channel code */
-  --nx-font: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  /* Typography — Golos Text speaks (labels, nav, headings, body);
+     JetBrains Mono measures (timers, bitrates, counts, codes). */
+  --nx-font: 'Golos Text', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   --nx-mono: 'JetBrains Mono', ui-monospace, 'Cascadia Code', 'Source Code Pro', monospace;
   --nx-text-2xs: 10px;
   --nx-text-xs: 11px;
@@ -65,6 +79,7 @@
   --nx-text-lg: 16px;
   --nx-text-xl: 18px;
   --nx-text-2xl: 22px;
+  --nx-text-3xl: 28px;
 
   /* Spacing — 4px grid, multiples only */
   --nx-space-1: 4px;
@@ -84,13 +99,17 @@
   --nx-radius-full: 999px;
 
   /* Elevation — hairline rings; only overlays get real shadow */
-  --nx-shadow-sm: 0 0 0 1px rgba(255, 255, 255, 0.03);
-  --nx-shadow-md: 0 0 0 1px rgba(255, 255, 255, 0.04);
-  --nx-shadow-lg: 0 0 0 1px rgba(255, 255, 255, 0.06), 0 24px 56px rgba(0, 0, 0, 0.6);
+  --nx-shadow-sm: 0 0 0 1px rgba(237, 240, 244, 0.03);
+  --nx-shadow-md: 0 0 0 1px rgba(237, 240, 244, 0.04);
+  --nx-shadow-lg: 0 0 0 1px rgba(237, 240, 244, 0.06), 0 24px 56px rgba(0, 0, 0, 0.65);
 
   /* Machined top edge: a 1px inner highlight along raised surfaces'
      first row — the bevel of an instrument faceplate, not a glow. */
-  --nx-bevel: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  --nx-bevel: inset 0 1px 0 rgba(237, 240, 244, 0.05);
+
+  /* Glass — the floating stage command bar. The only glass in the app. */
+  --nx-glass: rgba(9, 11, 16, 0.72);
+  --nx-glass-blur: 14px;
 
   /* Motion — faster than app-default: consoles respond, not float */
   --nx-ease: cubic-bezier(0.23, 1, 0.32, 1);
@@ -99,23 +118,23 @@
   --nx-duration: 160ms;
 
   /* Control tokens — tuned independently of surfaces */
-  --nx-control-bg: #171b22;
-  --nx-control-border: rgba(255, 255, 255, 0.12);
-  --nx-control-border-hover: rgba(255, 255, 255, 0.28);
+  --nx-control-bg: #161a22;
+  --nx-control-border: rgba(237, 240, 244, 0.13);
+  --nx-control-border-hover: rgba(237, 240, 244, 0.3);
 
   /* daisyUI remap: the components still riding daisyUI classes (night
      vision, gallery viewer) inherit the nx palette until they migrate.
      :root[data-ui] out-specifies the plugin's :root theme block. */
-  --color-base-100: #12151b;
-  --color-base-200: #171b22;
-  --color-base-300: #1d222b;
-  --color-base-content: #e8ecf3;
-  --color-primary: #4facfe;
-  --color-primary-content: #0a0c10;
-  --color-secondary: #1d222b;
-  --color-secondary-content: #e8ecf3;
-  --color-neutral: #1d222b;
-  --color-neutral-content: #e8ecf3;
+  --color-base-100: #10131a;
+  --color-base-200: #161a22;
+  --color-base-300: #1c212b;
+  --color-base-content: #edf0f4;
+  --color-primary: #3ec8ff;
+  --color-primary-content: #04121b;
+  --color-secondary: #1c212b;
+  --color-secondary-content: #edf0f4;
+  --color-neutral: #1c212b;
+  --color-neutral-content: #edf0f4;
   --radius-box: 6px;
   --radius-field: 4px;
   --radius-selector: 4px;
@@ -130,21 +149,23 @@
   --lc-surface-3: var(--nx-surface-3);
   --lc-border: var(--nx-border);
   --lc-border-hover: var(--nx-border-strong);
-  --lc-accent: #4facfe;
-  --lc-accent-dim: #77c4ff;
-  --lc-accent-glow: rgba(79, 172, 254, 0.18);
-  --lc-accent-bg: rgba(79, 172, 254, 0.12);
-  --lc-success: #2bd97c;
-  --lc-success-bg: rgba(43, 217, 124, 0.1);
+  --lc-accent: #3ec8ff;
+  --lc-accent-dim: #6fd6ff;
+  --lc-accent-glow: rgba(62, 200, 255, 0.18);
+  --lc-accent-bg: rgba(62, 200, 255, 0.1);
+  --lc-success: #37d98a;
+  --lc-success-bg: rgba(55, 217, 138, 0.1);
   --lc-warning: #ffb020;
   --lc-warning-bg: rgba(255, 176, 32, 0.1);
-  --lc-danger: #ff3b5c;
-  --lc-danger-bg: rgba(255, 59, 92, 0.1);
-  --lc-info: #4facfe;
-  --lc-info-bg: rgba(79, 172, 254, 0.1);
-  --lc-text: #e8ecf3;
-  --lc-text-dim: rgba(232, 236, 243, 0.64);
-  --lc-text-muted: rgba(232, 236, 243, 0.44);
+  --lc-danger: #ff4757;
+  --lc-danger-bg: rgba(255, 71, 87, 0.1);
+  --lc-info: #3ec8ff;
+  --lc-info-bg: rgba(62, 200, 255, 0.1);
+  --lc-signal: #ff2e87;
+  --lc-signal-bg: rgba(255, 46, 135, 0.11);
+  --lc-text: #edf0f4;
+  --lc-text-dim: rgba(237, 240, 244, 0.64);
+  --lc-text-muted: rgba(237, 240, 244, 0.44);
   --lc-radius: 4px;
   --lc-radius-sm: 2px;
   --lc-radius-lg: 6px;
@@ -154,65 +175,73 @@
   --lc-glow-accent: none;
 }
 
-/* ── Sharpened light — same console structure, print-safe signals ── */
+/* ── Sharpened light — same instrument in daylight ── */
 :root[data-ui='next'][data-theme='light'] {
   color-scheme: light;
 
-  --nx-bg: #eff1f4;
-  --nx-surface: #ffffff;
-  --nx-surface-2: #f5f6f8;
-  --nx-surface-3: #e9ecef;
-  --nx-scrim: rgba(10, 14, 20, 0.45);
+  --nx-bg: #eef1f5;
+  --nx-surface: #fbfcfe;
+  --nx-surface-2: #f2f4f8;
+  --nx-surface-3: #e7eaf0;
+  --nx-well: #e2e6ec;
+  --nx-scrim: rgba(12, 16, 24, 0.45);
 
-  --nx-border: rgba(15, 23, 34, 0.1);
-  --nx-border-strong: rgba(15, 23, 34, 0.2);
-  --nx-focus-ring: rgba(11, 118, 179, 0.32);
+  --nx-border: rgba(16, 21, 29, 0.1);
+  --nx-border-strong: rgba(16, 21, 29, 0.2);
+  --nx-focus-ring: rgba(10, 126, 181, 0.35);
 
-  --nx-accent: #0b76b3;
-  --nx-accent-hover: #0a6aa0;
-  --nx-accent-active: #085c8a;
-  --nx-accent-text: #0b6aa3;
-  --nx-accent-subtle: rgba(11, 118, 179, 0.09);
+  --nx-accent: #0a7eb5;
+  --nx-accent-hover: #0a72a3;
+  --nx-accent-active: #086592;
+  --nx-accent-text: #0a72a3;
+  --nx-accent-subtle: rgba(10, 126, 181, 0.09);
   --nx-on-accent: #ffffff;
 
-  --nx-danger: #d3274b;
-  --nx-danger-bg: rgba(211, 39, 75, 0.08);
-  --nx-warning: #b45309;
-  --nx-warning-bg: rgba(180, 83, 9, 0.09);
-  --nx-success: #128a55;
-  --nx-success-bg: rgba(18, 138, 85, 0.09);
-  --nx-info: #0b76b3;
-  --nx-info-bg: rgba(11, 118, 179, 0.08);
+  --nx-signal: #d60e6c;
+  --nx-signal-hover: #bd0c5f;
+  --nx-signal-bg: rgba(214, 14, 108, 0.09);
 
-  --nx-glow-rec: 0 0 8px rgba(211, 39, 75, 0.35);
-  --nx-glow-ok: 0 0 6px rgba(18, 138, 85, 0.3);
-  --nx-glow-warn: 0 0 6px rgba(180, 83, 9, 0.3);
+  --nx-danger: #c4273c;
+  --nx-danger-bg: rgba(196, 39, 60, 0.08);
+  --nx-warning: #9a5b00;
+  --nx-warning-bg: rgba(154, 91, 0, 0.09);
+  --nx-success: #0e8a50;
+  --nx-success-bg: rgba(14, 138, 80, 0.09);
+  --nx-info: #0a7eb5;
+  --nx-info-bg: rgba(10, 126, 181, 0.08);
 
-  --nx-text: #12161d;
-  --nx-text-secondary: rgba(18, 22, 29, 0.66);
-  --nx-text-tertiary: rgba(18, 22, 29, 0.46);
-  --nx-text-faint: rgba(18, 22, 29, 0.3);
+  --nx-glow-rec: 0 0 8px rgba(214, 14, 108, 0.4);
+  --nx-glow-ok: 0 0 6px rgba(14, 138, 80, 0.3);
+  --nx-glow-warn: 0 0 6px rgba(154, 91, 0, 0.3);
 
-  --nx-shadow-sm: 0 0 0 1px rgba(15, 23, 34, 0.04);
-  --nx-shadow-md: 0 0 0 1px rgba(15, 23, 34, 0.05);
-  --nx-shadow-lg: 0 0 0 1px rgba(15, 23, 34, 0.06), 0 24px 56px rgba(10, 16, 26, 0.18);
+  --nx-text: #10151d;
+  --nx-text-secondary: rgba(16, 21, 29, 0.66);
+  --nx-text-tertiary: rgba(16, 21, 29, 0.46);
+  --nx-text-faint: rgba(16, 21, 29, 0.3);
 
-  --nx-bevel: inset 0 1px 0 rgba(255, 255, 255, 0.7);
+  --nx-shadow-sm: 0 0 0 1px rgba(16, 21, 29, 0.04);
+  --nx-shadow-md: 0 0 0 1px rgba(16, 21, 29, 0.05);
+  --nx-shadow-lg: 0 0 0 1px rgba(16, 21, 29, 0.06), 0 24px 56px rgba(12, 16, 24, 0.18);
 
-  --nx-control-bg: #f5f6f8;
-  --nx-control-border: rgba(15, 23, 34, 0.14);
-  --nx-control-border-hover: rgba(15, 23, 34, 0.3);
+  --nx-bevel: inset 0 1px 0 rgba(255, 255, 255, 0.8);
 
-  --color-base-100: #ffffff;
-  --color-base-200: #f5f6f8;
-  --color-base-300: #e9ecef;
-  --color-base-content: #12161d;
-  --color-primary: #0b76b3;
+  --nx-glass: rgba(251, 252, 254, 0.82);
+  --nx-glass-blur: 14px;
+
+  --nx-control-bg: #f2f4f8;
+  --nx-control-border: rgba(16, 21, 29, 0.14);
+  --nx-control-border-hover: rgba(16, 21, 29, 0.3);
+
+  --color-base-100: #fbfcfe;
+  --color-base-200: #f2f4f8;
+  --color-base-300: #e7eaf0;
+  --color-base-content: #10151d;
+  --color-primary: #0a7eb5;
   --color-primary-content: #ffffff;
-  --color-secondary: #e9ecef;
-  --color-secondary-content: #12161d;
-  --color-neutral: #e9ecef;
-  --color-neutral-content: #12161d;
+  --color-secondary: #e7eaf0;
+  --color-secondary-content: #10151d;
+  --color-neutral: #e7eaf0;
+  --color-neutral-content: #10151d;
 
   --lc-bg: var(--nx-bg);
   --lc-surface: var(--nx-surface);
@@ -220,21 +249,23 @@
   --lc-surface-3: var(--nx-surface-3);
   --lc-border: var(--nx-border);
   --lc-border-hover: var(--nx-border-strong);
-  --lc-accent: #0b76b3;
-  --lc-accent-dim: #0a6aa0;
-  --lc-accent-glow: rgba(11, 118, 179, 0.14);
-  --lc-accent-bg: rgba(11, 118, 179, 0.09);
-  --lc-success: #128a55;
-  --lc-success-bg: rgba(18, 138, 85, 0.09);
-  --lc-warning: #b45309;
-  --lc-warning-bg: rgba(180, 83, 9, 0.09);
-  --lc-danger: #d3274b;
-  --lc-danger-bg: rgba(211, 39, 75, 0.08);
-  --lc-info: #0b76b3;
-  --lc-info-bg: rgba(11, 118, 179, 0.08);
-  --lc-text: #12161d;
-  --lc-text-dim: rgba(18, 22, 29, 0.66);
-  --lc-text-muted: rgba(18, 22, 29, 0.46);
+  --lc-accent: #0a7eb5;
+  --lc-accent-dim: #0a72a3;
+  --lc-accent-glow: rgba(10, 126, 181, 0.14);
+  --lc-accent-bg: rgba(10, 126, 181, 0.09);
+  --lc-success: #0e8a50;
+  --lc-success-bg: rgba(14, 138, 80, 0.09);
+  --lc-warning: #9a5b00;
+  --lc-warning-bg: rgba(154, 91, 0, 0.09);
+  --lc-danger: #c4273c;
+  --lc-danger-bg: rgba(196, 39, 60, 0.08);
+  --lc-info: #0a7eb5;
+  --lc-info-bg: rgba(10, 126, 181, 0.08);
+  --lc-signal: #d60e6c;
+  --lc-signal-bg: rgba(214, 14, 108, 0.09);
+  --lc-text: #10151d;
+  --lc-text-dim: rgba(16, 21, 29, 0.66);
+  --lc-text-muted: rgba(16, 21, 29, 0.46);
   --lc-shadow: var(--nx-shadow-sm);
   --lc-shadow-lg: var(--nx-shadow-lg);
   --lc-glow-accent: none;

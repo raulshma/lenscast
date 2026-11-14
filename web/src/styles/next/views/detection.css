@@ -1,76 +1,121 @@
 /* ══════════════════════════════════════════════════════════════════
-   NEXT UI — DETECTION VIEW (ops dashboard)
-   Statistics header, event journal, arming panel. Loads after
-   cards.css so its rules win where the classic reskin overlaps.
+   NEXT UI — DETECTION VIEW ("Viewfinder")
+   The detection surface leads with state: a signal-magenta tick strip
+   across the head while armed motion detection is live, quiet when
+   idle. Stats lead with one big tabular numeral per metric; the event
+   journal is a flat list — hairlines and 2px left ticks, no shadowed
+   cards; every hit carries the signal, red stays on genuine faults.
+   Golos speaks, JetBrains Mono measures. Loads after cards.css so the
+   automation bridge overrides below win at equal scope.
    ══════════════════════════════════════════════════════════════════ */
 
-/* Stats header spans both grid columns. */
+/* Stats header spans both grid columns and carries the armed strip. */
 .nx-detect-head {
   min-width: 0;
 }
 
-/* ── Event type tags — the journal's severity vocabulary ──────────── */
+/* ── Armed tick strip — the surface's one-glance state ────────────── */
+/* Quiet when idle (invisible); while armed motion detection is inside
+   its live window the strip reads as signal-magenta ticks. Static —
+   the on-air transition is the session's only autonomous moment. */
 
-.nx-tag {
-  display: inline-flex;
-  align-items: center;
-  height: 18px;
-  padding: 0 7px;
-  border-radius: var(--nx-radius-sm);
-  font-family: var(--nx-mono);
-  font-size: var(--nx-text-2xs);
-  font-weight: 600;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  line-height: 1;
-  background: var(--nx-surface-3);
-  color: var(--nx-text-secondary);
-  flex-shrink: 0;
+.nx-arm-strip {
+  height: 2px;
+  margin-bottom: 0;
+  border-radius: var(--nx-radius-full);
+  background: repeating-linear-gradient(
+    90deg,
+    var(--nx-signal) 0 12px,
+    transparent 12px 18px
+  );
+  opacity: 0;
+  transition: opacity var(--nx-duration) var(--nx-ease), margin-bottom var(--nx-duration) var(--nx-ease);
 }
 
-.nx-tag-motion {
-  background: var(--nx-warning-bg);
-  color: var(--nx-warning);
+.nx-detect-armed .nx-arm-strip {
+  opacity: 1;
+  margin-bottom: var(--nx-space-2);
 }
 
-.nx-tag-sound {
-  background: var(--nx-info-bg);
-  color: var(--nx-info);
-}
-
-.nx-tag-tamper {
-  background: var(--nx-danger-bg);
-  color: var(--nx-danger);
-}
-
-/* ── Stats rows (per-type counts) ─────────────────────────────────── */
+/* ── Stats — one big tabular numeral leads each metric ────────────── */
+/* Asymmetric composition, not a stat-card grid: the lead metric spans
+   the field with a 28px numeral, the remaining types sit as compact
+   columns, the total runs quiet under a hairline, the seven-day
+   sparkline rides to the right ≥900px. */
 
 .nx-stats-rows {
-  display: flex;
-  flex-direction: column;
-  gap: var(--nx-space-1);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--nx-space-4);
+  align-items: end;
+}
+
+@media (min-width: 900px) {
+  .nx-stats-rows {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+}
+
+.nx-stats-metrics {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--nx-space-3) var(--nx-space-5);
+  align-content: start;
+  min-width: 0;
 }
 
 .nx-stats-row {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--nx-space-3);
-  min-height: 26px;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
 }
 
+/* The headline metric takes the whole field; the rest share the row. */
+.nx-stats-row-lead {
+  grid-column: 1 / -1;
+}
+
+/* The measurement speaks first: tabular mono, one size per role. */
 .nx-stats-count {
-  font-size: var(--nx-text-base);
-  font-weight: 600;
+  font-family: var(--nx-mono);
+  font-size: var(--nx-text-xl);
+  font-weight: 500;
+  line-height: 1.1;
   color: var(--nx-text);
+  font-variant-numeric: tabular-nums;
 }
 
-/* ── Seven-day bars — flat accent columns over a hairline floor ───── */
+.nx-stats-row-lead .nx-stats-count {
+  font-size: var(--nx-text-3xl);
+}
+
+.nx-stat-label {
+  font-family: var(--nx-font);
+  font-size: var(--nx-text-xs);
+  font-weight: 500;
+  color: var(--nx-text-secondary);
+}
+
+/* The quiet roll-up under a hairline. */
+.nx-stats-total {
+  grid-column: 1 / -1;
+  margin-top: var(--nx-space-1);
+  padding-top: var(--nx-space-2);
+  border-top: 1px solid var(--nx-border);
+  font-family: var(--nx-mono);
+  font-size: var(--nx-text-xs);
+  color: var(--nx-text-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Seven-day sparkline — quiet ink columns over a hairline floor ── */
 
 .nx-bars-block {
   display: flex;
   flex-direction: column;
   gap: var(--nx-space-2);
+  min-width: 0;
 }
 
 .nx-bars {
@@ -89,7 +134,7 @@
 }
 
 .nx-bars-plot {
-  height: 64px;
+  height: 56px;
   width: 100%;
   display: flex;
   align-items: flex-end;
@@ -99,8 +144,9 @@
 .nx-bar {
   width: 100%;
   min-height: 2px;
-  border-radius: 2px 2px 0 0;
-  background: var(--nx-accent);
+  border-radius: 1px 1px 0 0;
+  /* Quiet ink, not accent — the sparkline is not interactive. */
+  background: color-mix(in srgb, var(--nx-text) 38%, transparent);
   transition: height var(--nx-duration) var(--nx-ease);
 }
 
@@ -112,7 +158,7 @@
 .nx-bar-count {
   font-family: var(--nx-mono);
   font-size: var(--nx-text-2xs);
-  font-weight: 600;
+  font-weight: 500;
   color: var(--nx-text-secondary);
   font-variant-numeric: tabular-nums;
   min-height: 14px;
@@ -120,10 +166,9 @@
 }
 
 .nx-bar-label {
-  font-family: var(--nx-mono);
+  font-family: var(--nx-font);
   font-size: var(--nx-text-2xs);
   color: var(--nx-text-tertiary);
-  text-transform: uppercase;
 }
 
 /* Top zones / labels pair side by side when there's room. */
@@ -145,7 +190,10 @@
   gap: var(--nx-space-1);
 }
 
-/* ── Event journal rows ───────────────────────────────────────────── */
+/* ── Event journal — flat rows, hairlines and signal ticks ────────── */
+/* No shadowed cards: rows sit on the panel, newest first, a 2px left
+   tick carries the hit (signal magenta); red stays on genuine faults
+   (tamper). Hover raises the row to surface-2 — the hand's answer. */
 
 .nx-log-filters {
   display: flex;
@@ -162,16 +210,44 @@
 .nx-log {
   display: flex;
   flex-direction: column;
-  gap: var(--nx-space-2);
 }
 
 .nx-log-row {
+  position: relative;
   display: flex;
   gap: var(--nx-space-3);
-  padding: var(--nx-space-2);
-  border: 1px solid var(--nx-border);
+  padding: var(--nx-space-2) var(--nx-space-2) var(--nx-space-2) var(--nx-space-4);
   border-radius: var(--nx-radius);
+  transition: background var(--nx-duration-fast) var(--nx-ease);
+}
+
+.nx-log-row + .nx-log-row {
+  border-top: 1px solid var(--nx-border);
+}
+
+.nx-log-row:hover {
   background: var(--nx-surface-2);
+}
+
+.nx-log-row:focus-within {
+  background: var(--nx-surface-2);
+}
+
+/* The hit tick — signal magenta, the on-air meaning of a detection. */
+.nx-log-row::before {
+  content: '';
+  position: absolute;
+  left: 4px;
+  top: var(--nx-space-2);
+  bottom: var(--nx-space-2);
+  width: 2px;
+  border-radius: 1px;
+  background: var(--nx-signal);
+}
+
+/* A genuine fault — tamper — ticks red instead. */
+.nx-log-row-fault::before {
+  background: var(--nx-danger);
 }
 
 .nx-log-thumb {
@@ -203,15 +279,55 @@
   flex-wrap: wrap;
 }
 
+/* Timestamps are measurements — mono, tabular. */
 .nx-log-time {
-  font-size: var(--nx-text-xs);
+  font-family: var(--nx-mono);
+  font-size: var(--nx-text-2xs);
   color: var(--nx-text-tertiary);
   font-variant-numeric: tabular-nums;
 }
 
+/* Dispatched actions: separate spans (never dot-joined strings). */
 .nx-log-actions {
   font-size: var(--nx-text-xs);
   color: var(--nx-text-tertiary);
+}
+
+.nx-log-action {
+  white-space: nowrap;
+}
+
+/* ── Event type tags — quiet mono codes; red on faults only ───────── */
+
+.nx-tag {
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: var(--nx-radius-sm);
+  font-family: var(--nx-mono);
+  font-size: var(--nx-text-2xs);
+  font-weight: 500;
+  line-height: 1;
+  background: var(--nx-surface-3);
+  color: var(--nx-text-secondary);
+  flex-shrink: 0;
+}
+
+.nx-tag-motion {
+  background: var(--nx-surface-3);
+  color: var(--nx-text-secondary);
+}
+
+.nx-tag-sound {
+  background: var(--nx-surface-3);
+  color: var(--nx-text-secondary);
+}
+
+/* Tamper is the one fault in the journal — it keeps red. */
+.nx-tag-tamper {
+  background: var(--nx-danger-bg);
+  color: var(--nx-danger);
 }
 
 .nx-log-chips {
@@ -219,31 +335,40 @@
 }
 
 .nx-log-chips .nx-chip {
-  height: 18px;
-  font-size: 9px;
+  height: 20px;
+  font-size: var(--nx-text-2xs);
 }
 
+/* Label filter chips: the shared chip is 24px; this surface's controls
+   hold the 28px hit-target floor (scoped here — components.css owns the
+   base). */
+.nx-log-labels .nx-chip {
+  height: 28px;
+}
+
+/* Clip action: touchable, so cyan. Golos, sentence case. */
 .nx-log-clip {
   margin-left: auto;
   border: none;
   background: transparent;
   color: var(--nx-accent-text);
-  font-family: var(--nx-mono);
-  font-size: var(--nx-text-2xs);
-  font-weight: 600;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
+  font-family: var(--nx-font);
+  font-size: var(--nx-text-xs);
+  font-weight: 500;
+  min-height: 28px;
+  padding: 0 var(--nx-space-2);
+  border-radius: var(--nx-radius-sm);
   cursor: pointer;
   white-space: nowrap;
-  padding: 2px 4px;
-  border-radius: var(--nx-radius-sm);
+  transition: background var(--nx-duration-fast) var(--nx-ease), color var(--nx-duration-fast) var(--nx-ease);
 }
 
 .nx-log-clip:hover {
   background: var(--nx-accent-subtle);
+  color: var(--nx-accent-hover);
 }
 
-/* ── Arming panel pieces ──────────────────────────────────────────── */
+/* ── Arm schedule — compact toggles under a plain sentence ────────── */
 
 .nx-arm-days {
   display: flex;
@@ -252,21 +377,20 @@
   padding: var(--nx-space-1) 0;
 }
 
+/* Day toggles: words, not codes — Golos, sentence case, 28px targets. */
 .nx-daychip {
-  min-width: 34px;
-  height: 26px;
-  padding: 0 6px;
+  min-width: 38px;
+  min-height: 28px;
+  padding: 0 var(--nx-space-2);
   border: 1px solid var(--nx-control-border);
   border-radius: var(--nx-radius-sm);
   background: var(--nx-control-bg);
   color: var(--nx-text-tertiary);
-  font-family: var(--nx-mono);
-  font-size: var(--nx-text-2xs);
-  font-weight: 600;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
+  font-family: var(--nx-font);
+  font-size: var(--nx-text-xs);
+  font-weight: 500;
   cursor: pointer;
-  transition: all var(--nx-duration-fast) var(--nx-ease);
+  transition: border-color var(--nx-duration-fast) var(--nx-ease), color var(--nx-duration-fast) var(--nx-ease), background var(--nx-duration-fast) var(--nx-ease);
 }
 
 .nx-daychip:hover {
@@ -274,11 +398,31 @@
   color: var(--nx-text);
 }
 
+/* On = touchable state, so cyan. */
 .nx-daychip-active {
   background: var(--nx-accent-subtle);
   border-color: color-mix(in srgb, var(--nx-accent) 36%, transparent);
   color: var(--nx-accent-text);
 }
+
+/* The schedule restated as a plain sentence: days, then the window. */
+.nx-arm-summary {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: var(--nx-space-2);
+  padding: var(--nx-space-1) 0 0;
+  font-size: var(--nx-text-sm);
+  color: var(--nx-text-secondary);
+}
+
+.nx-arm-summary-time {
+  font-size: var(--nx-text-xs);
+  color: var(--nx-text-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Zones and deterrence rows ────────────────────────────────────── */
 
 .nx-zone-row {
   display: flex;
@@ -310,7 +454,140 @@
   padding: var(--nx-space-1) 0;
 }
 
-/* ── Automation panel additions ───────────────────────────────────── */
+/* ── Automation — rules read as trigger-into-action grammar ───────── */
+/* Bridge overrides for the kept classic DOM (App.css + cards.css also
+   style it; this file loads last, and [data-ui='next'] out-scopes).
+   Enable state is cyan (touchable/active); the WHEN / ONLY WHEN / THEN
+   rows indent along a hairline spine — structure through layout, not
+   arrows, caps or per-word colors. */
+
+[data-ui='next'] .automation-rule-row {
+  position: relative;
+  gap: var(--nx-space-2);
+  padding: var(--nx-space-2) var(--nx-space-3);
+  margin-top: var(--nx-space-2);
+  border: 1px solid var(--nx-border);
+  border-left: 2px solid var(--nx-border-strong);
+  border-radius: var(--nx-radius-lg);
+  background: var(--nx-surface);
+}
+
+[data-ui='next'] .automation-rule-row:first-of-type {
+  margin-top: 0;
+}
+
+/* Enabled rule: cyan tick — active machinery. */
+[data-ui='next'] .automation-rule-row:not(.automation-rule-disabled) {
+  border-left-color: var(--nx-accent);
+}
+
+[data-ui='next'] .automation-rule-main:hover {
+  background: transparent;
+}
+
+[data-ui='next'] .automation-rule-main:not(:disabled):hover .automation-rule-name {
+  color: var(--nx-accent-text);
+}
+
+[data-ui='next'] .automation-rule-name {
+  font-family: var(--nx-font);
+  font-size: var(--nx-text-md);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  transition: color var(--nx-duration-fast) var(--nx-ease);
+}
+
+[data-ui='next'] .automation-rule-sub {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: var(--nx-space-2);
+  font-family: var(--nx-font);
+  font-size: var(--nx-text-xs);
+  color: var(--nx-text-tertiary);
+}
+
+[data-ui='next'] .nx-rule-time {
+  font-family: var(--nx-mono);
+  color: var(--nx-text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+/* The trigger badge quiets to a plain icon well — color is a signal,
+   and a rule's trigger type is not one. */
+[data-ui='next'] .automation-rule-row .automation-rule-badge {
+  width: 30px;
+  height: 30px;
+  border-radius: var(--nx-radius-sm);
+  background: var(--nx-surface-3);
+  color: var(--nx-text-secondary);
+}
+
+/* The WHEN / ONLY WHEN / THEN block: indented along a hairline spine. */
+[data-ui='next'] .automation-when-rows {
+  margin-left: 40px;
+  padding-left: var(--nx-space-3);
+  border-left: 1px solid var(--nx-border);
+  gap: var(--nx-space-1);
+}
+
+[data-ui='next'] .automation-when-row {
+  font-family: var(--nx-font);
+  font-size: var(--nx-text-xs);
+  line-height: 1.45;
+}
+
+/* Grammar labels: Golos, sentence case — never caps, never tracked. */
+[data-ui='next'] .automation-when-label {
+  width: 72px;
+  font-family: var(--nx-font);
+  font-size: var(--nx-text-2xs);
+  font-weight: 600;
+  letter-spacing: normal;
+  text-transform: none;
+  color: var(--nx-text-tertiary);
+}
+
+[data-ui='next'] .automation-when-text {
+  font-family: var(--nx-font);
+}
+
+[data-ui='next'] .nx-rule-joiner {
+  color: var(--nx-text-tertiary);
+  padding: 0 2px;
+}
+
+/* A rule without actions is a fault the operator can fix — red text,
+   no wash, no italics. */
+[data-ui='next'] .automation-then-missing {
+  font-style: normal;
+  color: var(--nx-danger);
+}
+
+/* Disabled rules dim through color, not blunt opacity. */
+[data-ui='next'] .automation-rule-disabled .automation-rule-name,
+[data-ui='next'] .automation-rule-disabled .automation-rule-sub,
+[data-ui='next'] .automation-rule-disabled .automation-when-text,
+[data-ui='next'] .automation-rule-disabled .automation-lastfired {
+  opacity: 1;
+  color: var(--nx-text-tertiary);
+}
+
+[data-ui='next'] .automation-lastfired {
+  font-family: var(--nx-font);
+  font-size: var(--nx-text-2xs);
+  color: var(--nx-text-tertiary);
+}
+
+[data-ui='next'] .automation-lastfired svg {
+  width: 12px;
+  height: 12px;
+  color: var(--nx-text-faint);
+}
+
+[data-ui='next'] .automation-rule-buttons {
+  gap: var(--nx-space-1);
+}
 
 .nx-automation-add {
   display: flex;
@@ -319,14 +596,17 @@
   padding-top: var(--nx-space-1);
 }
 
-/* The rule rows keep their classic DOM under the panel; tighten their
-   rhythm to the console's and quiet the chrome. */
-[data-ui='next'] .nx-panel .automation-rule-row {
-  border: 1px solid var(--nx-border);
-  border-radius: var(--nx-radius);
-  background: var(--nx-surface-2);
-}
+/* ── Type law guardrails for this view ────────────────────────────── */
+/* Section labels here are Golos 600 sentence case (the shared .nx-label
+   voice is owned by components.css; these keep the view compliant
+   regardless of load order). */
 
-[data-ui='next'] .nx-panel .automation-rule-main:hover {
-  background: transparent;
+[data-ui='next'] .nx-detect-head .nx-label,
+[data-ui='next'] .nx-detection-grid .nx-label {
+  font-family: var(--nx-font);
+  font-size: var(--nx-text-xs);
+  font-weight: 600;
+  letter-spacing: normal;
+  text-transform: none;
+  color: var(--nx-text-tertiary);
 }

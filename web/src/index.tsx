@@ -19,6 +19,14 @@ import '@fontsource/jetbrains-mono/latin-600.css'
 import '@fontsource/jetbrains-mono/cyrillic-400.css'
 import '@fontsource/jetbrains-mono/cyrillic-500.css'
 import '@fontsource/jetbrains-mono/cyrillic-600.css'
+// Golos Text: the next UI's speaking face (DESIGN.md). Inter stays for the
+// classic shell; Golos only ships the weights and subsets the console uses.
+import '@fontsource/golos-text/latin-400.css'
+import '@fontsource/golos-text/latin-500.css'
+import '@fontsource/golos-text/latin-600.css'
+import '@fontsource/golos-text/cyrillic-400.css'
+import '@fontsource/golos-text/cyrillic-500.css'
+import '@fontsource/golos-text/cyrillic-600.css'
 
 import { render } from 'solid-js/web'
 import App from './App'

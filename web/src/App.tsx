@@ -54,7 +54,7 @@ function App() {
       if (nextTheme() === 'light') root.setAttribute('data-theme', 'light')
       else root.removeAttribute('data-theme')
       const meta = document.querySelector('meta[name="theme-color"]')
-      if (meta) meta.setAttribute('content', nextTheme() === 'dark' ? '#0a0c10' : '#eff1f4')
+      if (meta) meta.setAttribute('content', nextTheme() === 'dark' ? '#07080c' : '#eef1f5')
     }
   })
 

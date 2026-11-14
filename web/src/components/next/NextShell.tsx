@@ -60,12 +60,14 @@ function readStoredCompact(): boolean {
 }
 
 /**
- * The operator console shell: a labelled sidebar (nav + vitals dock),
- * a telemetry strip (channel LEDs, throughput, clients, REC, thermal,
- * battery), and the view outlet. All state is the dispatcher's shared
- * useAppState instance; the theme signal comes from the dispatcher too
- * (it owns the DOM attribute). Below 1024px the sidebar auto-compacts;
- * below 768px it docks as a labelled bottom tab bar (layout.css).
+ * The operator console shell: a rail-first sidebar (brand mark, view
+ * items, REC row, vitals dock, utility row), a 36px telemetry
+ * statusline (LIVE, channel LEDs, throughput, clients, REC, thermal,
+ * battery, saving), and the view outlet. All state is the dispatcher's
+ * shared useAppState instance; the theme signal comes from the
+ * dispatcher too (it owns the DOM attribute). Below 1024px the sidebar
+ * auto-compacts; below 768px it docks as a labelled bottom tab bar
+ * (layout.css).
  */
 export default function NextShell(props: Props) {
   const state = props.state
@@ -217,31 +219,36 @@ export default function NextShell(props: Props) {
 
         <div class="nx-side-spacer" />
 
-        {/* Vitals dock: battery, thermal, link — always-on telemetry. */}
+        {/* Vitals dock: battery, thermal, link — three quiet rows.
+            Golos labels speak; only the measurements go mono, and the
+            tone classes color icon + value (layout.css). */}
         <Show when={state.status()}>
           <div class="nx-side-vitals">
             <Show when={battery()}>
               <div class="nx-vital">
                 <span class={`nx-vital-head ${batteryToneClass()}`}>
-                  <IconBattery size={12} />
-                  {battery()!.level}%
+                  <IconBattery size={13} />
+                  <span class="nx-vital-label">{t('next.vitals.battery')}</span>
+                  <span class="nx-vital-value nx-num">{battery()!.level}%</span>
                   <Show when={battery()!.isCharging}>
-                    <span>· {t('next.vitals.charging')}</span>
+                    <span class="nx-vital-charging">{t('next.vitals.charging')}</span>
                   </Show>
                 </span>
               </div>
             </Show>
             <div class="nx-vital">
               <span class={`nx-vital-head ${thermalToneClass()}`}>
-                <IconTherm size={12} />
-                {thermalLabel(state.status()?.thermal)}
+                <IconTherm size={13} />
+                <span class="nx-vital-label">{t('next.vitals.thermal')}</span>
+                <span class="nx-vital-value">{thermalLabel(state.status()?.thermal)}</span>
               </span>
             </div>
             <Show when={quality()}>
               <div class="nx-vital">
                 <span class={`nx-vital-head ${linkToneClass()}`}>
-                  <IconSignal size={12} />
-                  {linkLabel(quality())}
+                  <IconSignal size={13} />
+                  <span class="nx-vital-label">{t('next.vitals.link')}</span>
+                  <span class="nx-vital-value nx-num">{linkLabel(quality())}</span>
                 </span>
               </div>
             </Show>
@@ -320,7 +327,8 @@ export default function NextShell(props: Props) {
           <span class="nx-strip-title">{viewLabel(view())}</span>
           <div class="nx-strip-chips">
             <Show when={isLive()}>
-              <Badge tone="danger" mono>
+              {/* On air — signal magenta (layout.css), not the danger red. */}
+              <Badge tone="neutral" class="nx-strip-live">
                 <Led tone="rec" />
                 {t('next.live')}
               </Badge>
@@ -372,7 +380,9 @@ export default function NextShell(props: Props) {
               </span>
             </Show>
             <Show when={battery()}>
-              <span class="nx-chip nx-strip-hide-sm" classList={{ 'nx-chip-warn': batteryTone(battery()?.level) === 'warn', 'nx-chip-rec': batteryTone(battery()?.level) === 'danger' }}>
+              {/* Critical battery is a fault — red (nx-chip-crit), never
+                  the on-air magenta that nx-chip-rec now carries. */}
+              <span class="nx-chip nx-strip-hide-sm" classList={{ 'nx-chip-warn': batteryTone(battery()?.level) === 'warn', 'nx-chip-crit': batteryTone(battery()?.level) === 'danger' }}>
                 {battery()!.level}%
               </span>
             </Show>

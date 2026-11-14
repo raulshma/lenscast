@@ -10,7 +10,10 @@ interface Props {
   children: JSX.Element
 }
 
-/** Rounded status pill. Compose a `<Led>`/dot inside for live states. */
+/** Quiet tinted status chip. Compose a `<Led>`/dot inside for live states.
+ *  On-air states keep tone="danger" markup and add class="nx-badge-signal" —
+ *  the CSS re-points that red at signal magenta (magenta = your picture is
+ *  going out; red = something is wrong). */
 export default function Badge(props: Props) {
   const tone = () => props.tone ?? 'neutral'
   return (

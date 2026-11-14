@@ -38,7 +38,7 @@ function timeLabelMs(ms: number): string {
 function segmentTitle(seg: TimelineSegment): string {
   const span = `${timeLabelMs(seg.startMs)}–${timeLabelMs(seg.endMs)}`
   const clip = seg.mediaId != null ? t('timeline.segment.openClip') : t('timeline.segment.noClip')
-  return `${seg.trigger} · ${span}${clip}`
+  return `${seg.trigger} — ${span} — ${clip}`
 }
 
 function segmentStyle(seg: TimelineSegment): JSX.CSSProperties {
@@ -67,8 +67,10 @@ function openSegment(seg: TimelineSegment) {
  * day bucketing — lives in the pure lib/timeline module; segments with a
  * linked mediaId open the shared in-dashboard media viewer, like the event
  * feed's clip buttons. The timeline bar DOM (day picker, legend, track,
- * markers, ticks) keeps its classic classes, which the shared stylesheet
- * still ships; only the card wrapper and the note banners moved to the kit.
+ * markers, ticks) keeps its classic classes, restyled as a data
+ * visualization in views/cards.css (hairline track, REC segments in the
+ * signal magenta, cyan now-line, mono ticks); only the card wrapper and
+ * the note banners moved to the kit.
  */
 export default function RecordingTimelinePanel() {
   const [day, setDay] = createSignal(todayKey())
@@ -135,6 +137,12 @@ export default function RecordingTimelinePanel() {
   const segments = createMemo(() => (sessions() ? layoutTimeline(sessions()!, trackStart()) : []))
   const markers = createMemo(() => eventMarkers(events(), day()))
   const lanes = createMemo(() => laneCount(segments()))
+  // The now-line's position as a percent of the 24h track, clamped to it.
+  // Only meaningful for today — past days have no "now".
+  const nowPct = () => {
+    const pct = ((Date.now() - trackStart()) / 86_400_000) * 100
+    return Math.min(100, Math.max(0, pct))
+  }
 
   return (
     <Panel title={t('timeline.title')}>
@@ -181,6 +189,9 @@ export default function RecordingTimelinePanel() {
 
       <div class="timeline-wrap">
         <div class="timeline-track" style={{ height: `${lanes() * 14 + 8}px` }}>
+          <Show when={day() === todayKey()}>
+            <div class="timeline-now" style={{ left: `${nowPct()}%` }} aria-hidden="true" />
+          </Show>
           <For each={segments()}>
             {(seg) => (
               <Show
@@ -211,7 +222,7 @@ export default function RecordingTimelinePanel() {
               <span
                 class={`timeline-marker timeline-marker-${marker.type}`}
                 style={{ left: `${marker.pct}%` }}
-                title={`${marker.type} · ${timeLabelMs(marker.timestampMs)}`}
+                title={`${marker.type} — ${timeLabelMs(marker.timestampMs)}`}
               />
             )}
           </For>

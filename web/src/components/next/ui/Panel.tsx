@@ -2,10 +2,8 @@ import { Show } from 'solid-js'
 import type { JSX } from 'solid-js'
 
 interface Props {
-  /** Mono uppercase header title. */
+  /** Header title — Golos 600, sentence case. No section codes. */
   title?: string
-  /** Running section code rendered before the title (01, 02…). */
-  code?: string
   /** Right-side action slot (icon buttons, chips). */
   actions?: JSX.Element
   /** Status slot between title and actions (LED, badge). */
@@ -17,17 +15,15 @@ interface Props {
 }
 
 /**
- * The instrument faceplate: a two-tone header (mono title + optional
- * section code) over a bordered body. The console's section card.
+ * The instrument faceplate: plate surface, machined top bevel, hairline,
+ * and a header whose Golos title carries the 2px cyan tick. The
+ * console's section card.
  */
 export default function Panel(props: Props) {
   return (
     <section class={`nx-panel${props.class ? ` ${props.class}` : ''}`}>
-      <Show when={props.title || props.code || props.actions || props.badge}>
+      <Show when={props.title || props.actions || props.badge}>
         <header class="nx-panel-header">
-          <Show when={props.code}>
-            <span class="nx-panel-code">{props.code}</span>
-          </Show>
           <Show when={props.title}>
             <span class="nx-panel-title">{props.title}</span>
           </Show>
