@@ -598,50 +598,50 @@ class RecordingControllerTest {
         controller.onServiceStarted(System.currentTimeMillis(), loop.segment)
 
         // Break #1: a foreign stop — the grace check declares it past the 5 s
-        // mark. The pre-advance window lets the collector's first Idle pass
-        // stamp its idle-since against the un-advanced clock; the post-advance
-        // window covers the check's real-time fire reading the advanced clock.
+        // mark. The paced window absorbs the collector's unobservable stamp
+        // lag: wherever the idle-since lands inside it, the check's first
+        // real-time fire reads a fake now that has kept 2× pace past the
+        // mark and declares.
         controller.stop()
         awaitServiceIntents(RecordingService.ACTION_STOP, 1, "the first chain break was never queued")
         controller.onServiceStopped()
         assertEquals(RecordingState.Idle, controller.state.value)
-        Thread.sleep(4_000)
-        clock.advance(6_000)
-        Thread.sleep(6_000)
+        pace(clock, GRACE_DANCE_MS)
         // Break #1 declared (suppression until fake now + 60 s); the rearm
         // job is armed with the full 60 s as its real delay.
 
-        // A foreign recording starts inside the suppression window: the loop
-        // adopts it (armed, not armed-by-us) and leaves the pending rearm
-        // targeting break #1's OLD deadline.
-        clock.advance(1_000)
+        // A foreign recording starts deep inside the suppression window: the
+        // loop adopts it (armed, not armed-by-us) and leaves the pending
+        // rearm targeting break #1's OLD deadline.
         val foreign = RecordingConfig(durationSeconds = 0, repeatIntervalSeconds = 0)
         controller.start(foreign)
         awaitServiceIntents(RecordingService.ACTION_START, 2, "the foreign start was never queued")
         controller.onServiceStarted(clock.now(), foreign)
 
         // ...and stops inside the window: the second chain break extends the
-        // suppression past break #1's deadline (the same grace dance).
+        // suppression past break #1's deadline (the same paced grace dance,
+        // and scheduleRearm retargets the pending job onto the extended
+        // deadline as it declares).
         controller.stop()
         awaitServiceIntents(RecordingService.ACTION_STOP, 2, "the foreign stop was never queued")
         controller.onServiceStopped()
-        Thread.sleep(4_000)
-        clock.advance(6_000)
-        Thread.sleep(6_000)
+        pace(clock, GRACE_DANCE_MS)
 
-        // Past the ORIGINAL (now stale) deadline, still inside the EXTENDED
-        // window, and through the stale job's real-time fire moment: on the
-        // stranding shape its fire fails canArm and schedules nothing; on the
-        // fixed machine the job was retargeted at break #2 and its fire sits
-        // past the extended deadline.
-        clock.advance(54_000)
-        settle(STALE_REARM_FIRE_SETTLE_MS, "the stale rearm's fire window has passed")
+        // Through the retargeted job's real-time fire moment (armed at
+        // break #2's declaration with the extended window as its real
+        // delay): the pacing guarantees the fire finds the fake clock past
+        // that deadline — on the stranding shape its fire would fail canArm
+        // and schedule nothing, stranding the loop Idle.
+        pace(clock, STALE_REARM_FIRE_SETTLE_MS)
 
-        // Past the EXTENDED deadline: exactly one re-arm fires.
-        clock.advance(7_000)
-        val restarts = awaitServiceIntents(
+        // Exactly one re-arm fires, paced: the wait keeps the clock moving
+        // so even a late-declared break #2's job fires into a lapsed window
+        // within the budget.
+        val restarts = awaitPacedServiceIntents(
+            clock,
             RecordingService.ACTION_START,
             3,
+            PACED_REARM_BUDGET_MS,
             "the loop never re-armed past the extended suppression deadline",
         )
         assertEquals(loop.segment, decodeConfig(restarts.last()))
@@ -706,22 +706,19 @@ class RecordingControllerTest {
         controller.onServiceStarted(System.currentTimeMillis(), loop.segment)
 
         // Break #1: a foreign stop — the grace check declares it past the 5 s
-        // mark (same pre/post-advance windows as the wedge pin). The stop
-        // also cancels the just-armed 300 s duration job.
+        // mark (same paced grace dance as the wedge pin). The stop also
+        // cancels the just-armed 300 s duration job.
         controller.stop()
         awaitServiceIntents(RecordingService.ACTION_STOP, 1, "the first chain break was never queued")
         controller.onServiceStopped()
         assertEquals(RecordingState.Idle, controller.state.value)
-        Thread.sleep(4_000)
-        clock.advance(6_000)
-        Thread.sleep(6_000)
+        pace(clock, GRACE_DANCE_MS)
         // Break #1 declared (suppression until fake now + 60 s); the rearm
         // job is armed with the full 60 s as its real delay.
 
         // A user recording starts inside the window: the loop adopts it
         // (Maintaining, not ours) and the pending rearm stays targeting
         // break #1's deadline.
-        clock.advance(1_000)
         val user = RecordingConfig(durationSeconds = 0, repeatIntervalSeconds = 0)
         controller.start(user)
         awaitServiceIntents(RecordingService.ACTION_START, 2, "the user start was never queued")
@@ -730,29 +727,30 @@ class RecordingControllerTest {
 
         // The pending rearm fires while the user recording is live: quiet
         // no-op — nothing starts over the live segment, nothing is disturbed.
-        settle(STALE_REARM_FIRE_SETTLE_MS, "the pending rearm's fire window has passed")
+        pace(clock, STALE_REARM_FIRE_SETTLE_MS)
         assertTrue(
             "the rearm's fire must not disturb the live user recording",
             controller.state.value is RecordingState.Recording,
         )
         assertEquals(2, serviceIntents(RecordingService.ACTION_START).size) // arm + user start only
 
-        // The user recording stops: the grace dance declares break #2, which
-        // extends the suppression past break #1's (already-consumed) deadline.
+        // The user recording stops: the paced grace dance declares break #2,
+        // which extends the suppression past break #1's (already-consumed)
+        // deadline.
         controller.stop()
         awaitServiceIntents(RecordingService.ACTION_STOP, 2, "the user stop was never queued")
         controller.onServiceStopped()
-        Thread.sleep(4_000)
-        clock.advance(6_000)
-        Thread.sleep(6_000)
+        pace(clock, GRACE_DANCE_MS)
 
-        // Past the EXTENDED deadline: exactly one re-arm fires.
-        clock.advance(54_000)
-        settle(STALE_REARM_FIRE_SETTLE_MS, "the extended window's real-time tail has passed")
-        clock.advance(7_000)
-        val restarts = awaitServiceIntents(
+        // Past the EXTENDED deadline: exactly one re-arm fires, paced — the
+        // wait keeps the clock moving so the job's real-time fire finds the
+        // window lapsed wherever the declaration landed.
+        pace(clock, STALE_REARM_FIRE_SETTLE_MS)
+        val restarts = awaitPacedServiceIntents(
+            clock,
             RecordingService.ACTION_START,
             3,
+            PACED_REARM_BUDGET_MS,
             "the loop never re-armed past the extended suppression deadline",
         )
         assertEquals(loop.segment, decodeConfig(restarts.last()))
@@ -779,16 +777,14 @@ class RecordingControllerTest {
         // drives the LOOP's verdicts only (grace, suppression, rearm delays).
         controller.onServiceStarted(System.currentTimeMillis(), loop.segment)
 
-        // Declare break #1 (same grace dance as the wedge pin): Suppressing
-        // until fake now + 60 s, with a rearm job pending. The stop also
-        // cancels the just-armed 300 s duration job.
+        // Declare break #1 (same paced grace dance as the wedge pin):
+        // Suppressing until fake now + 60 s, with a rearm job pending. The
+        // stop also cancels the just-armed 300 s duration job.
         controller.stop()
         awaitServiceIntents(RecordingService.ACTION_STOP, 1, "the chain break was never queued")
         controller.onServiceStopped()
         assertEquals(RecordingState.Idle, controller.state.value)
-        Thread.sleep(4_000)
-        clock.advance(6_000)
-        Thread.sleep(6_000)
+        pace(clock, GRACE_DANCE_MS)
 
         // Toggle off: the disable-time Noop path ends the idle loop — Dormant
         // erases the stamp, and the pending rearm job is cancelled at decide
@@ -798,8 +794,9 @@ class RecordingControllerTest {
         settle("the disable must land before the re-enable")
         loop.inputs.enabled.value = true
 
-        // Re-enabled with the clock ~1 s past the break — deep inside the
-        // would-be cooldown: the immediate re-arm can only be the erase.
+        // Re-enabled with the clock still deep inside the would-be cooldown
+        // (paced — at most ~26 s of fake time past the break, against a
+        // 60 s window): the immediate re-arm can only be the erase.
         val restarts = awaitServiceIntents(
             RecordingService.ACTION_START,
             2,
@@ -939,6 +936,53 @@ class RecordingControllerTest {
         // [reason] documents the guarantee at the call site; the asserts follow it.
     }
 
+    /**
+     * Real-time wait with the fake clock paced at [PACED_CLOCK_RATE]× real
+     * time. The loop's verdicts are fake-time while its delays are
+     * real-time, and the collector stamps land at unobservable real moments
+     * — under CI load a stamp can lag past any fixed advance, shifting
+     * every deadline computed from it beyond what the choreography's
+     * remaining steps can reach (the suite's observed flake). Pacing keeps
+     * the fake now ahead of the real schedule: a grace check confirms on
+     * its first fire wherever the stamp landed inside the window, and a
+     * rearm job armed at real delay D always finds the clock past its
+     * deadline D later — the two clocks can no longer disagree about
+     * whether a window has lapsed.
+     */
+    private fun pace(clock: ManualClock, realMs: Long) {
+        var remaining = realMs
+        while (remaining > 0) {
+            val tick = minOf(PACE_TICK_MS, remaining)
+            Thread.sleep(tick)
+            clock.advance(tick * PACED_CLOCK_RATE)
+            remaining -= tick
+        }
+    }
+
+    /**
+     * [pace]d wait for [action] to reach [count], then every queued one,
+     * oldest first. The pacing stays on while waiting: a late rearm job's
+     * fire must find the fake clock past the deadline its real delay was
+     * armed against, not the parked now of the moment the wait began.
+     */
+    private fun awaitPacedServiceIntents(
+        clock: ManualClock,
+        action: String,
+        count: Int,
+        budgetMs: Long,
+        message: String,
+    ): List<Intent> {
+        val deadline = System.currentTimeMillis() + budgetMs
+        while (serviceIntents(action).size < count) {
+            check(System.currentTimeMillis() < deadline) {
+                "$message (queued so far: ${drained.map { it.action }})"
+            }
+            Thread.sleep(PACE_TICK_MS)
+            clock.advance(PACE_TICK_MS * PACED_CLOCK_RATE)
+        }
+        return serviceIntents(action)
+    }
+
     private fun awaitUntil(message: String, condition: () -> Boolean) {
         // Generous budget: the box runs several Gradle builds in parallel and
         // a resumed coroutine or a DataStore write can lag for seconds under load.
@@ -988,15 +1032,48 @@ class RecordingControllerTest {
         const val FOREIGN_STOP_GRACE_SETTLE_MS = 5_400L
 
         /**
-         * The stale rearm job's real-time fire window in the second-break
-         * pin: the job was armed at break #1's declaration with the full
+         * The stale rearm job's real-time fire window in the manual-clock
+         * pins: the job is armed at the break's declaration with the full
          * USER_STOP_SUPPRESSION_MS as its (real-time) delay, so letting its
-         * fire moment pass — with the clock parked past the stale deadline
-         * but inside the extended window — costs one suppression length
-         * minus the grace waits already spent. The suite's one minute-scale
-         * wait; un-shrinkable without opening a seam in the loop.
+         * fire moment pass costs one suppression length minus the grace
+         * waits already spent. The suite's one minute-scale wait;
+         * un-shrinkable without opening a seam in the loop. Spent via
+         * [pace], so the verdicts' fake clock tracks the fire schedule
+         * while the wall waits run.
          */
         const val STALE_REARM_FIRE_SETTLE_MS = 58_000L
+
+        /**
+         * The manual-clock pins' grace dance: one paced window covering the
+         * collector's (lag-prone) idle stamp, the 5 s grace mark, and the
+         * grace check's real-time fire — comfortably past the old
+         * sleep-4s/advance-6s/sleep-6s choreography, whose fixed advances
+         * assumed a collector that stamps within seconds.
+         */
+        const val GRACE_DANCE_MS = 16_000L
+
+        /**
+         * The paced final await's budget in the manual-clock pins: covers a
+         * rearm fire landing anywhere from the settle's tail to a worst-case
+         * late break declaration plus the full real-time suppression delay.
+         * Only a skewed run ever spends it — a healthy fire exits the loop
+         * immediately.
+         */
+        const val PACED_REARM_BUDGET_MS = 60_000L
+
+        /** The pacing tick: fake advances in small steps alongside the real sleeps. */
+        const val PACE_TICK_MS = 200L
+
+        /**
+         * The fake clock's pace over real time, ≥ 1× so every verdict reads
+         * a now that stays ahead of the real schedule its delay was armed
+         * against. 2× doubles the observed grace/suppression verdicts
+         * relative to real waits without approaching the loop's real-time
+         * staleness (the 300 s segment auto-stop is never armed in these
+         * pins — durationSeconds = 0 foreign/user configs and real-stamped
+         * loop arms that stop by hand).
+         */
+        const val PACED_CLOCK_RATE = 2L
 
         /** The manual clock's start value for the suppression-tail pin (an arbitrary non-zero base). */
         const val MANUAL_CLOCK_START_MS = 1_000_000L

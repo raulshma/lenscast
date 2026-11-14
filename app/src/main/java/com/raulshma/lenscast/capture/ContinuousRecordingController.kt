@@ -242,7 +242,12 @@ class ContinuousRecordingController(
             return Decision.ScheduleGraceCheck
         }
         val idleForMs = nowMs() - since
-        if (!ContinuousRecordingPolicy.chainBreakConfirmed(idleForMs)) return Decision.Noop
+        // Unconfirmed (the check fired before the idle window lapsed — a
+        // late stamp read against a faster-moving schedule): re-schedule the
+        // check. Returning Noop here would consume the job with nothing
+        // behind it — Idle + armed, no wake-up, and no flow emission ever
+        // coming (the state stays Idle) strands the loop.
+        if (!ContinuousRecordingPolicy.chainBreakConfirmed(idleForMs)) return Decision.ScheduleGraceCheck
         // One atomic write replacing the four adjacent flag writes of the old
         // shape (same lock hold, no reader between them).
         loopState = LoopState.Suppressing(ContinuousRecordingPolicy.suppressedUntilMs(nowMs()))
@@ -348,7 +353,7 @@ class ContinuousRecordingController(
         data object Noop : Decision
         data class ScheduleRearm(val delayMs: Long) : Decision
 
-        /** Entering the armed-Idle grace count: the break declaration needs a scheduled re-check. */
+        /** The armed-Idle grace count: the break declaration needs a scheduled re-check (or a consumed one re-scheduled). */
         data object ScheduleGraceCheck : Decision
     }
 
