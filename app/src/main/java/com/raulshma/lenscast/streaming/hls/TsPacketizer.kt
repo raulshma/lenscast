@@ -197,19 +197,31 @@ object TsPacketizer {
     }
 
     internal fun sectionWithCrc(section: ByteArray): ByteArray {
-        // Real CRC32 (ISO 13818-1 / IEEE) so strict players accept PAT/PMT.
+        // The PSI CRC is part of the section's validity: strict demuxers
+        // (media3's SectionReader) drop a section whose CRC doesn't verify.
         return section + crc32(section)
     }
 
+    /**
+     * The MPEG-2 PSI CRC (ISO 13818-1 annex A): poly 0x04C11DB7, MSB-first,
+     * init 0xFFFFFFFF, NO final inversion, transmitted big-endian. A
+     * zip-flavored implementation (LSB-first 0xEDB88320 + final xor — the
+     * java.util.zip.CRC32 algorithm, and the reflected-register bit-reverse
+     * shortcut produces it too) computes a DIFFERENT checksum. The old
+     * zip-flavored bytes sailed through the zip-based decodability test and
+     * hls.js (which never verifies PSI CRCs) while media3's SectionReader
+     * silently dropped every PAT/PMT: no tracks, no samples, and the
+     * companion's HLS rung stalled in BUFFERING forever (found on the
+     * on-device E2E). Check value: crc32("123456789") = 03 76 E6 E7.
+     */
     internal fun crc32(data: ByteArray): ByteArray {
         var crc = 0xFFFFFFFF.toInt()
         for (b in data) {
-            crc = crc xor (b.toInt() and 0xFF)
+            crc = crc xor ((b.toInt() and 0xFF) shl 24)
             repeat(8) {
-                crc = if (crc and 1 != 0) (crc ushr 1) xor 0xEDB88320.toInt() else crc ushr 1
+                crc = if (crc < 0) (crc shl 1) xor 0x04C11DB7 else crc shl 1
             }
         }
-        crc = crc xor 0xFFFFFFFF.toInt()
         return byteArrayOf(
             ((crc ushr 24) and 0xFF).toByte(),
             ((crc ushr 16) and 0xFF).toByte(),

@@ -87,6 +87,13 @@ mediapipe-tasks-audio = { group = "com.google.mediapipe", name = "tasks-audio", 
 
 okhttp = { group = "com.squareup.okhttp3", name = "okhttp", version.ref = "okhttp" }
 
+# Companion-mode client stack (:app's first OkHttp consumer — the served side
+# stays NanoHTTPD): the SSE lanes for the remote event/status streams, the
+# client-side tests, and the auth'd OkHttp datasource for the remote HLS rung.
+okhttp-sse = { group = "com.squareup.okhttp3", name = "okhttp-sse", version.ref = "okhttp" }
+mockwebserver = { group = "com.squareup.okhttp3", name = "mockwebserver", version.ref = "okhttp" }
+media3-datasource-okhttp = { group = "androidx.media3", name = "media3-datasource-okhttp", version.ref = "media3" }
+
 # Wear OS companion (:wear) — the stable wear-compose line and the Tiles
 # stack for the watch-side remote and its tile.
 wear = { group = "androidx.wear", name = "wear", version.ref = "wear" }
@@ -103,6 +110,10 @@ coil-video = { group = "io.coil-kt.coil3", name = "coil-video", version.ref = "c
 coil-base = { group = "io.coil-kt.coil3", name = "coil", version.ref = "coil" }
 
 media3-exoplayer = { group = "androidx.media3", name = "media3-exoplayer", version.ref = "media3" }
+# The HLS rung: DefaultMediaSourceFactory resolves HlsMediaSource.Factory
+# reflectively — without this module on the classpath the rung dies with a
+# ClassNotFoundException the moment it prepares an m3u8.
+media3-exoplayer-hls = { group = "androidx.media3", name = "media3-exoplayer-hls", version.ref = "media3" }
 media3-ui = { group = "androidx.media3", name = "media3-ui", version.ref = "media3" }
 
 zxing-core = { group = "com.google.zxing", name = "core", version.ref = "zxing" }

@@ -159,6 +159,34 @@ class HttpAuthFilter(
             }
             return null
         }
+        // The RFC 7617 lane: the companion's username/password pairing sends
+        // `Authorization: Basic` on every request and mints no session cookie
+        // (LiveViewModel's basic dial) — the lane simply never authenticated
+        // before this branch, so the pairing UI's own "Test connection" failed
+        // against the very device it was pointed at. Header-authenticated like
+        // the token lane: no ambient cookie credentials, so the CSRF check is
+        // skipped; a viewer-role presentation passes the same RoleGatePolicy
+        // ladder (and audit) as a viewer session cookie.
+        val basic = basicCredentialsFrom(headers["authorization"])
+        if (basic != null) {
+            val role = webAuthGate.basicRole(basic.first, basic.second)
+                ?: return HttpResult.jsonError(401, "Authentication required")
+            if (
+                role == SessionRole.VIEWER &&
+                method != "GET" && method != "HEAD" &&
+                RoleGatePolicy.decide(SessionRole.VIEWER, method, uri) == RoleGatePolicy.Verdict.DENY
+            ) {
+                runCatching {
+                    auditLog?.record(
+                        action = "access.denied",
+                        detail = "$method $uri",
+                        outcome = AuditEntry.OUTCOME_ERROR,
+                    )
+                }
+                return HttpResult.jsonError(403, "Admin access required")
+            }
+            return null
+        }
         if (!webAuthGate.authenticate(headers["cookie"])) {
             return HttpResult.jsonError(401, "Authentication required")
         }
@@ -198,6 +226,25 @@ class HttpAuthFilter(
             return authorization.substring(space + 1).trim().takeIf { it.isNotEmpty() }
         }
         return headers["x-api-token"]?.trim()?.takeIf { it.isNotEmpty() }
+    }
+
+    /**
+     * The RFC 7617 `Authorization: Basic` pair, or null when the header is
+     * absent, not Basic (the Bearer form is the API-token lane's input), or
+     * malformed — a malformed presentation continues down the ladder exactly
+     * like an absent one rather than inventing credentials out of garbage.
+     */
+    internal fun basicCredentialsFrom(authorization: String?): Pair<String, String>? {
+        if (authorization.isNullOrEmpty()) return null
+        val space = authorization.indexOf(' ')
+        if (space <= 0) return null
+        if (!authorization.substring(0, space).equals("Basic", ignoreCase = true)) return null
+        val decoded = runCatching {
+            String(java.util.Base64.getDecoder().decode(authorization.substring(space + 1).trim()))
+        }.getOrNull() ?: return null
+        val colon = decoded.indexOf(':')
+        if (colon < 0) return null
+        return decoded.substring(0, colon) to decoded.substring(colon + 1)
     }
 
     /**

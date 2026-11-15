@@ -322,6 +322,10 @@ dependencies {
     implementation(libs.coil.video)
 
     implementation(libs.media3.exoplayer)
+    // The companion HLS rung's media source: resolved reflectively by
+    // DefaultMediaSourceFactory — absent from the classpath the rung
+    // ClassNotFoundErrors into an instant demote (found on-device).
+    implementation(libs.media3.exoplayer.hls)
     implementation(libs.media3.ui)
 
     implementation(libs.zxing.core)
@@ -329,6 +333,15 @@ dependencies {
     // WebRTC stack for the WHIP egress (streaming/whip/): Stream's
     // maintained Apache-2.0 build of libwebrtc (BSD upstream).
     implementation(libs.stream.webrtc.android)
+
+    // Companion mode's client stack — :app's first OkHttp use (the served
+    // side stays NanoHTTPD): the remote device's HTTP/SSE lanes and the
+    // auth'd OkHttp datasource for the HLS rung of the video ladder.
+    // MockWebServer backs the client tests.
+    implementation(libs.okhttp)
+    implementation(libs.okhttp.sse)
+    implementation(libs.media3.datasource.okhttp)
+    testImplementation(libs.mockwebserver)
 
     testImplementation(libs.junit)
     testImplementation(libs.mockk)

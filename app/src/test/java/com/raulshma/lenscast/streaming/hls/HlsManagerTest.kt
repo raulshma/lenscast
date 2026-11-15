@@ -45,6 +45,55 @@ class HlsManagerTest {
     }
 
     @Test
+    fun `a stall gap clamps the pdt to wall and trims the live ring instead of teleporting the window`() {
+        // The second on-device strand: an ~6min encoder idle (rung switches,
+        // the MJPEG era) left the closing segment's PDT pinned to the pre-gap
+        // wall instant. The playlist then mixed eras; when the stale front
+        // aged out of the 5-segment window, the window's start time jumped
+        // +370s under a playing player — whose position suddenly sat 370s
+        // before the window with nothing to load and no error, forever.
+        feedSecondsOfVideo(framesPerSecond = 30, seconds = 3)
+        nowMs += 370_000L
+        HlsManager.feedVideo(listOf(videoFrame()))
+        val playlist = HlsManager.playlist()
+        // The pre-gap era is gone (live ring trimmed): one post-gap segment,
+        // its PDT clamped to the wall it closed at — not pinned 370s back.
+        assertEquals(1, playlist.lineSequence().count { it.endsWith(".ts") })
+        val windowStartMs = java.time.Instant.parse(
+            playlist.lineSequence().first { it.startsWith("#EXT-X-PROGRAM-DATE-TIME") }.substringAfter(":"),
+        ).toEpochMilli()
+        val wallNow = System.currentTimeMillis()
+        assertTrue("window start $windowStartMs vs wall $wallNow", wallNow - windowStartMs in 0..15_000)
+        // ...and the ring resumes growing normally, the discontinuity marking
+        // the timestamp jump for players that were mid-GOP.
+        feedSecondsOfVideo(framesPerSecond = 30, seconds = 3)
+        val resumed = HlsManager.playlist()
+        assertTrue(resumed.lineSequence().count { it.endsWith(".ts") } >= 2)
+        assertTrue(resumed.contains("#EXT-X-DISCONTINUITY"))
+        assertFalse(resumed.contains("#EXTINF:370"))
+    }
+
+    @Test
+    fun `an encoder stall is absorbed at the boundary instead of lying in EXTINF`() {
+        // The on-device E2E killer: the encoder stalls (rung switch, screen
+        // sleep) mid-segment, the closing keyframe lands after the gap, and
+        // the old duration math (next keyframe minus segment start) declared
+        // the GAP as media. A joining player consumes the real AUs in less
+        // than the declared EXTINF, freezes short of the next segment's
+        // boundary with nothing left to load, and buffers forever. 90 ticks
+        // close two segments; the open third holds ticks 63..90 (27 ticks of
+        // media + one frame = 0.924s) when the clock jumps 10s and the
+        // closing keyframe arrives.
+        feedSecondsOfVideo(framesPerSecond = 30, seconds = 3)
+        nowMs += 10_000L
+        HlsManager.feedVideo(listOf(videoFrame()))
+        val playlist = HlsManager.playlist()
+        assertTrue(playlist.contains("#EXTINF:0.924,"))
+        assertFalse(playlist.contains("#EXTINF:10.924,"))
+        assertTrue(playlist.contains("#EXT-X-TARGETDURATION:"))
+    }
+
+    @Test
     fun `segments close on keyframes so every segment opens on an IDR`() {
         // The decodability regression: mid-GOP segment starts left joining
         // players without SPS/PPS/IDR. 30fps with a 2s GOP — only every 60th

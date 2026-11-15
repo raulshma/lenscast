@@ -1,5 +1,6 @@
 package com.raulshma.lenscast.streaming
 
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -70,5 +71,25 @@ class DiscoveryRegistrationPolicyTest {
     @Test
     fun `a missing listener has nothing to unregister`() {
         assertFalse(DiscoveryRegistrationPolicy.shouldUnregister(listenerPresent = false))
+    }
+
+    // ── httpTxtRecords: the companion-mode discovery contract ──
+
+    @Test
+    fun `the http advert publishes the lenscast marker the companion filter keys on`() {
+        // The companion app's discovery filter (companion/discovery/
+        // NsdDiscoveryFilter) tells a LensCast device apart from every other
+        // _http._tcp service on the LAN by this exact TXT record — a rename
+        // or drop here silently empties its pairing sheet.
+        val records = DiscoveryRegistrationPolicy.httpTxtRecords()
+        assertTrue(records.containsKey(DiscoveryRegistrationPolicy.LENSCAST_TXT_KEY))
+        assertEquals("1", records[DiscoveryRegistrationPolicy.LENSCAST_TXT_KEY])
+    }
+
+    @Test
+    fun `the marker key is the lowercase literal the resolver side delivers`() {
+        // NsdManager lowercases TXT keys when a client resolves the record;
+        // the advertised key is already lowercase so both spellings agree.
+        assertEquals("lenscast", DiscoveryRegistrationPolicy.LENSCAST_TXT_KEY)
     }
 }

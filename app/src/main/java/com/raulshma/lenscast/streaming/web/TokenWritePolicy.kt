@@ -36,6 +36,18 @@ object TokenWritePolicy {
         // Deterrence: the siren route plus the torch route the router registers
         "/api/deterrence/siren",
         "/api/camera/torch",
+        // Live lens controls: the zoom/focus/lens triple the companion's Live
+        // tab drives — same class as torch (ephemeral camera state, nothing
+        // persisted, nothing disabled). Zoom's absence was found on the
+        // loopback E2E: the slider moved, the request 401'd, and the snackbar
+        // read "Sign-in required" while torch and siren on the same tab passed.
+        "/api/camera/zoom",
+        "/api/camera/focus",
+        "/api/camera/lens",
+        // The interval-capture loop's start/stop: recording-class control
+        // (it creates media on a schedule; it persists no setting).
+        "/api/capture/interval/start",
+        "/api/capture/interval/stop",
         // Detection model fetch: a device-maintenance action in the siren/torch
         // class — it changes no persisted setting and cannot disable anything.
         "/api/settings/ml-model/download",

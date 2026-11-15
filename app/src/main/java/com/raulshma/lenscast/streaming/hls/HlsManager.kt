@@ -45,14 +45,32 @@ object HlsManager : HlsVideoSink, HlsSegmentSource {
      */
     internal var encodedSendTap: ((bytes: Int, durationMs: Long) -> Unit)? = null
 
-    class HlsSegment(val sequence: Long, val bytes: ByteArray, val durationSec: Double)
+    class HlsSegment(
+        val sequence: Long,
+        val bytes: ByteArray,
+        val durationSec: Double,
+        /** Wall-clock instant this segment's first AU belongs to — the playlist's PROGRAM-DATE-TIME anchor. */
+        val startWallMs: Long = 0L,
+        /**
+         * True when this segment's first PTS jumps past the previous segment's
+         * last (an encoder idle/rejoin gap). The playlist renders
+         * `#EXT-X-DISCONTINUITY` before it so a player re-anchors its timestamp
+         * mapping instead of carrying the pre-gap offset across the jump.
+         */
+        val discontinuity: Boolean = false,
+    )
 
     private val lock = Any()
     private val segments = ArrayDeque<HlsSegment>()
     private val sequence = AtomicLong(0)
     private val pending = mutableListOf<ByteArray>()
     private var pendingStartPts = -1L
+    private var pendingLastPts = -1L
+    private var pendingPrevLastPts = -1L
     private var lastVideoPts = -1L
+    // Set when a segment boundary absorbs an encoder-idle PTS gap; consumed by
+    // the NEXT segment closed, which is the one that opens after the jump.
+    private var nextDiscontinuity = false
     @Volatile private var enabled = false
 
     // DVR window: 0 keeps the sliding live ring (MAX_SEGMENTS + a 5-segment
@@ -64,8 +82,9 @@ object HlsManager : HlsVideoSink, HlsSegmentSource {
     // injectable clock) — the demand signal behind [isHot].
     @Volatile private var lastRequestMs = -1L
 
+    // Both tracks share ONE anchor so audio and video PTS land on the same
+    // timeline (a per-track anchor skews A/V by the audio-start offset).
     @Volatile private var videoAnchorMs = -1L
-    @Volatile private var audioAnchorMs = -1L
 
     // The AAC encoder's format for the TS muxer's ADTS headers; the hub
     // reports it whenever the shared encode (re)attaches audio.
@@ -122,11 +141,13 @@ object HlsManager : HlsVideoSink, HlsSegmentSource {
             segments.clear()
             pending.clear()
             pendingStartPts = -1
+            pendingLastPts = -1
+            pendingPrevLastPts = -1
             lastVideoPts = -1
+            nextDiscontinuity = false
             sequence.set(0)
         }
         videoAnchorMs = -1
-        audioAnchorMs = -1
         TsPacketizer.reset()
     }
 
@@ -138,9 +159,10 @@ object HlsManager : HlsVideoSink, HlsSegmentSource {
                 // Audio rides the open segment so A/V stay muxed; before the
                 // first keyframe there is no segment to ride, and dropping the
                 // pre-roll keeps the audio clock anchored to the video's.
-                if (pendingStartPts < 0) return
-                if (audioAnchorMs < 0) audioAnchorMs = now
-                val audioPts = (now - audioAnchorMs) * PTS_HZ / 1000
+                if (pendingStartPts < 0 || videoAnchorMs < 0) return
+                // Same anchor as video, so the two tracks share one timeline
+                // instead of skewing by the audio-start offset.
+                val audioPts = (now - videoAnchorMs) * PTS_HZ / 1000
                 pending.add(
                     TsPacketizer.audioFrameToTs(aacData, audioPts, audioSampleRateHz, audioChannelCount),
                 )
@@ -177,6 +199,8 @@ object HlsManager : HlsVideoSink, HlsSegmentSource {
                     pendingStartPts = pts
                 }
                 pending.add(ts)
+                pendingPrevLastPts = pendingLastPts
+                pendingLastPts = pts
             }
         } catch (e: Exception) {
             Log.w(TAG, "HLS feed failed", e)
@@ -187,8 +211,57 @@ object HlsManager : HlsVideoSink, HlsSegmentSource {
     private fun closeSegmentLocked(nextStartPts: Long) {
         val seq = sequence.incrementAndGet()
         val combined = pending.fold(ByteArray(0)) { acc, b -> acc + b }
-        val durationSec = (nextStartPts - pendingStartPts).toDouble() / PTS_HZ
-        segments.addLast(HlsSegment(seq, combined, durationSec))
+        // Declare the media the segment actually holds (last AU's display span
+        // minus the first AU), never the span up to the next segment's opening
+        // keyframe: an encoder stall (rung switch, screen sleep, camera
+        // reconfig) opens a PTS gap, and declaring the gap as EXTINF leaves a
+        // joining player stranded — it consumes the real media in less than
+        // the declared duration, freezes short of the next segment's boundary
+        // with nothing left to load, and buffers forever while the window
+        // slides past it. The gap rides the boundary instead. Found on the
+        // loopback E2E: a rung switch mid-join produced a 10.5s EXTINF holding
+        // 0.6s of media and the companion's HLS rung died in exactly that pose.
+        val lastFrameDelta =
+            if (pendingPrevLastPts >= 0) pendingLastPts - pendingPrevLastPts else 0L
+        val durationSec = (pendingLastPts + lastFrameDelta - pendingStartPts)
+            .coerceAtLeast(1L)
+            .toDouble() / PTS_HZ
+        // [clockMs] is a monotonic source (uptime-shaped), not wall time: map
+        // the segment start through the elapsed span since the video anchor,
+        // measured on the same clock, onto the wall clock read now. This tracks
+        // real wall time even across an idle gap (an incremental PDT would fall
+        // behind wall time by the accumulated gaps, and media3 — which estimates
+        // the live edge from the device clock — would join ahead of the media).
+        // A stall-absorbing segment is the exception: its first AU predates the
+        // gap, so the mapping pins its PDT to the pre-gap wall instant — and a
+        // playlist that mixes pre-gap PDTs with post-gap ones teleports its
+        // window start forward by the gap when the stale front ages out,
+        // leaving any player joined before the jump stranded behind the window
+        // with nothing to load (found on the loopback E2E: an ~6min encoder
+        // idle moved winStart +370s under a playing companion). Clamp such a
+        // segment's PDT to the wall it closed at (start = now − its honest
+        // duration, end = now) and, in live mode, drop the pre-gap segments —
+        // the served window then never spans the discontinuity, so the
+        // timeline can never teleport. (#EXT-X-DISCONTINUITY on the next
+        // segment still marks the TS timestamp jump for mid-GOP players.)
+        val gapMs = (nextStartPts - pendingLastPts) / (PTS_HZ / 1000)
+        val startWallMs = if (gapMs > 500) {
+            System.currentTimeMillis() - (durationSec * 1000).toLong()
+        } else if (videoAnchorMs >= 0) {
+            val msSinceAnchor = clockMs() - (videoAnchorMs + pendingStartPts / (PTS_HZ / 1000))
+            System.currentTimeMillis() - msSinceAnchor
+        } else 0L
+        if (gapMs > 500) {
+            Log.w(TAG, "HLS encoder stall ${gapMs}ms absorbed at segment boundary")
+            if (dvrSegments == 0) {
+                segments.clear()
+                Log.i(TAG, "HLS stall gap: live ring trimmed to the post-gap era (PDT clamped to wall)")
+            }
+        }
+        segments.addLast(HlsSegment(seq, combined, durationSec, startWallMs, discontinuity = nextDiscontinuity))
+        // The gap opens the NEXT segment: flag it so the playlist marks the
+        // discontinuity there and a joining player re-anchors its timestamps.
+        nextDiscontinuity = gapMs > 500
         // The ring bound: the DVR setting while raised, else the
         // compact sliding-live cap.
         val cap = if (dvrSegments > 0) dvrSegments else MAX_SEGMENTS
@@ -216,6 +289,8 @@ object HlsManager : HlsVideoSink, HlsSegmentSource {
                 sequence = sequence.get(),
                 segmentDurationsSec = window.map { it.durationSec },
                 dvr = dvr,
+                windowStartEpochMs = window.firstOrNull()?.startWallMs?.takeIf { it > 0 },
+                discontinuities = window.map { it.discontinuity },
             )
         }
     }

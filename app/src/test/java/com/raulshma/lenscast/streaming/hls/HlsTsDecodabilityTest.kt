@@ -4,7 +4,6 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
-import java.util.zip.CRC32
 
 /**
  * The decodability contract players enforce on every TS segment, pinned at
@@ -153,21 +152,47 @@ class HlsTsDecodabilityTest {
     }
 
     @Test
-    fun `pat and pmt carry a valid crc32`() {
+    fun `pat and pmt carry a valid mpeg2 crc32`() {
+        // ISO 13818-1 annex A: poly 0x04C11DB7, MSB-first, init 0xFFFFFFFF,
+        // no final inversion. The zip algorithm (java.util.zip.CRC32) is a
+        // DIFFERENT checksum — the earlier muxer shipped it, the zip-based
+        // check here passed it, and media3's SectionReader silently dropped
+        // every PAT/PMT (the HLS stall on the loopback E2E). hls.js never
+        // verifies PSI CRCs, which is why only ExoPlayer stalled.
         val packets = parse(TsPacketizer.videoAuToTs(listOf(ByteArray(4)), pts90k = 0L))
         for (pid in listOf(TsPacketizer.PID_PAT, TsPacketizer.PID_PMT)) {
             val payload = packets.first { it.pid == pid }.payload
             // PUSI PSI packets open with the mandatory pointer_field.
             assertEquals(0, payload[0].toInt())
             val section = payload.copyOfRange(1, payload.size)
-            val crc = CRC32()
-            crc.update(section, 0, section.size - 4)
-            val tail = section.copyOfRange(section.size - 4, section.size)
-            val actual = ((tail[0].toLong() and 0xFF) shl 24) or
-                ((tail[1].toLong() and 0xFF) shl 16) or
-                ((tail[2].toLong() and 0xFF) shl 8) or
-                (tail[3].toLong() and 0xFF)
-            assertEquals("CRC on PID $pid", crc.value, actual)
+            val actual = readCrc32(section.copyOfRange(section.size - 4, section.size))
+            assertEquals("CRC on PID $pid", mpeg2Crc32(section.copyOfRange(0, section.size - 4)), actual)
         }
     }
+
+    @Test
+    fun `crc32 is the mpeg2 psi variant`() {
+        // The standard check value pins the exact algorithm: the zip CRC of
+        // the same bytes is CBF43926, and the reflected-register bit-reverse
+        // shortcut is also wrong (refin=false PSI needs bit-reversed input
+        // bytes — not worth the confusion).
+        assertEquals(0x0376E6E7, mpeg2Crc32("123456789".toByteArray(Charsets.US_ASCII)))
+    }
+
+    private fun readCrc32(bytes: ByteArray): Int = ((bytes[0].toInt() and 0xFF) shl 24) or
+        ((bytes[1].toInt() and 0xFF) shl 16) or
+        ((bytes[2].toInt() and 0xFF) shl 8) or
+        (bytes[3].toInt() and 0xFF)
+}
+
+/** MSB-first CRC-32/MPEG-2 (ISO 13818-1 annex A) over [data]. */
+internal fun mpeg2Crc32(data: ByteArray): Int {
+    var crc = 0xFFFFFFFF.toInt()
+    for (b in data) {
+        crc = crc xor ((b.toInt() and 0xFF) shl 24)
+        repeat(8) {
+            crc = if (crc < 0) (crc shl 1) xor 0x04C11DB7 else crc shl 1
+        }
+    }
+    return crc
 }

@@ -26,6 +26,8 @@ import com.raulshma.lenscast.capture.TamperResponsePolicy
 import com.raulshma.lenscast.capture.TimelapseComposer
 import com.raulshma.lenscast.capture.ml.AudioModelStore
 import com.raulshma.lenscast.capture.ml.DetectionModelStore
+import com.raulshma.lenscast.companion.di.CompanionGraph
+import com.raulshma.lenscast.core.AppJson
 import com.raulshma.lenscast.core.ConnectivityMonitor
 import com.raulshma.lenscast.core.KeepAwakeController
 import com.raulshma.lenscast.core.KeyguardMonitor
@@ -320,6 +322,12 @@ class MainApplication : Application(), SingletonImageLoader.Factory, AppGraph {
     override val tlsCertManager: TlsCertManager by lazy { TlsCertManager(this) }
     override val updateChecker: UpdateChecker by lazy { UpdateChecker(this) }
     override val updateNotifier: UpdateNotifier by lazy { UpdateNotifier(this) }
+    // The companion mode's sub-graph (roster, credentials, discovery,
+    // sessions) — lazy like every collaborator, so the pairing and device
+    // screens pay for it only when first entered.
+    override val companion: CompanionGraph by lazy {
+        CompanionGraph(this, appScope, AppJson)
+    }
     val updateCheckPipeline: UpdateCheckPipeline by lazy {
         UpdateCheckPipeline.production(updateChecker, updateNotifier, settingsDataStore)
     }
@@ -657,7 +665,16 @@ class MainApplication : Application(), SingletonImageLoader.Factory, AppGraph {
                 streamingManager.srtStatus,
             ) { _, _, _, _, _ -> }
                 .collect {
-                    StreamWidgetProvider.refresh(this@MainApplication)
+                    // A widget re-render must never take the process down
+                    // (an appWidgetHost in a dead state must not crash a live
+                    // stream); the next transition re-renders anyway.
+                    runCatching { StreamWidgetProvider.refresh(this@MainApplication) }
+                        .onFailure {
+                            android.util.Log.w(
+                                "MainApplication",
+                                "Widget refresh failed: ${it.message}",
+                            )
+                        }
                 }
         }
     }

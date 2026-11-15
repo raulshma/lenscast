@@ -1655,6 +1655,25 @@ its manifest INTERNET-only), `WearRemoteController` drives the
 stream/recording lifecycle actions, and `WearSettingsStore` holds the phone
 base URL and credentials locally on the watch.
 
+### Companion Mode
+**`companion/`** — the phone-app remote that VIEWs and CONTROLs other
+LensCast devices (web-console parity, inside `:app`). One
+`CompanionGraph` under AppGraph owns the collaborators: `DeviceRosterStore`
+(paired devices; `CompanionDevice` snapshots), `CompanionCredentialStore`
+(credentials AES-GCM-encrypted via the Android Keystore — no plaintext
+fallback, never logged or exported), `DeviceSessionManager` (one cached
+`DeviceSession` per device id — the connection state machine + the conflated
+status SSE/poll ladder + the detection-event feed; `manualDetectionPoll` /
+`clearDetectionFeed` are the on-demand seams the events tab drives), and
+`LenscastApiClient` (JSON + SSE over a shared engine; `CertificateFingerprintProbe`
+is the ONLY trust-all TLS path — user-confirmed TOFU at pairing; pinned
+fingerprints ride `DevicePinning` thereafter). The UI is strict MVI per
+screen: `DevicesScreen` (roster, probes, capture-all volley, removal) →
+`DeviceScreen` shell → Live/Events/Media/System tabs, each a stateless
+render half (data-class-of-lambdas actions) beside a ViewModel. Playback is
+the ladder `PlayerLadder` (WHEP → HLS → MJPEG) in `playback/`; pairing
+is `ui/pairing/` over the probe chain (TLS → auth → sign-in).
+
 ### Automation Rule
 **`automation/schedule/AutomationRule.kt`** — one if/then rule as the user
 configured it (WHEN a trigger, ONLY WHEN optional conditions, THEN

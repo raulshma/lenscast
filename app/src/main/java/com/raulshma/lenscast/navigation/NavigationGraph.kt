@@ -25,6 +25,8 @@ import com.raulshma.lenscast.AppGraph
 import com.raulshma.lenscast.MainActivity
 import com.raulshma.lenscast.automation.AutomationScreen
 import com.raulshma.lenscast.camera.CameraScreen
+import com.raulshma.lenscast.companion.ui.DeviceScreen
+import com.raulshma.lenscast.companion.ui.DevicesScreen
 import com.raulshma.lenscast.capture.CaptureScreen
 import com.raulshma.lenscast.capture.DetectionEventsScreen
 import com.raulshma.lenscast.gallery.GalleryScreen
@@ -88,6 +90,28 @@ fun NavigationGraph() {
                             onNavigateToSettings = { navController.navigate(Routes.SETTINGS) },
                             onNavigateToCapture = { navController.navigate(Routes.CAPTURE) },
                             onNavigateToGallery = { navController.navigate(Routes.GALLERY) },
+                            onNavigateToDevices = { navController.navigate(Routes.DEVICES) },
+                        )
+                    }
+                }
+
+                composable(Routes.DEVICES) {
+                    CompositionLocalProvider(LocalAnimatedVisibilityScope provides this@composable) {
+                        DevicesScreen(
+                            onBack = { navController.popBackStack() },
+                            onOpenDevice = { deviceId ->
+                                navController.navigate(Routes.device(deviceId, Routes.TAB_LIVE))
+                            },
+                        )
+                    }
+                }
+
+                composable(Routes.DEVICE) { backStackEntry ->
+                    CompositionLocalProvider(LocalAnimatedVisibilityScope provides this@composable) {
+                        DeviceScreen(
+                            deviceId = backStackEntry.arguments?.getString("deviceId").orEmpty(),
+                            initialTab = backStackEntry.arguments?.getString("tab") ?: Routes.TAB_LIVE,
+                            onBack = { navController.popBackStack() },
                         )
                     }
                 }

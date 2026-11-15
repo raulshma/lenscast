@@ -77,8 +77,8 @@ class WebAuthGateApiTokenTest {
     fun `a POST outside the write allow-list is still denied`() {
         val g = gate()
         assertFalse(g.authorizeApiToken(token, "POST", "/api/settings"))
-        assertFalse(g.authorizeApiToken(token, "POST", "/api/camera/lens"))
         assertFalse(g.authorizeApiToken(token, "POST", "/api/media/batch-delete"))
+        assertFalse(g.authorizeApiToken(token, "POST", "/api/audio/uplink"))
     }
 
     @Test

@@ -263,6 +263,43 @@ class WebAuthGate(
         return LoginResult(success = true, token = createSession(matchedRole), role = matchedRole)
     }
 
+    /**
+     * The RFC 7617 verdict for an `Authorization: Basic` presentation — the
+     * companion pairing lane that mints no session cookie (LiveViewModel's
+     * basic dial): the role whose credential pair matched, or null on
+     * failure. Shares the login rate-limit budget, keyed per username, so
+     * header credential-guessing is bounded exactly like form login. Both
+     * failure shapes fold to null — a wrong password never reveals which
+     * usernames exist. With auth disabled the lane passes as ADMIN, matching
+     * [authenticate]'s auth-off behavior.
+     */
+    fun basicRole(username: String, password: String): SessionRole? {
+        val storedAdmin = admin
+        if (storedAdmin == null) return SessionRole.ADMIN
+        val storedViewer = viewer
+        val now = clock()
+        return synchronized(authAttemptsLock) {
+            cleanupExpiredAuthAttempts(now)
+            val attempt = authAttempts.getOrPut("basic:" + username) { AuthAttempt(0, 0L) }
+            if (attempt.blockedUntil > now) return@synchronized null
+            if (attempt.count >= MAX_AUTH_ATTEMPTS) {
+                attempt.blockedUntil = now + AUTH_LOCKOUT_MS
+                attempt.count = 0
+                return@synchronized null
+            }
+            val matched = when {
+                StreamAuthCrypto.constantTimeEquals(username, storedAdmin.username) &&
+                    StreamAuthCrypto.verifyPassword(password, storedAdmin.passwordHash) -> SessionRole.ADMIN
+                storedViewer != null &&
+                    StreamAuthCrypto.constantTimeEquals(username, storedViewer.username) &&
+                    StreamAuthCrypto.verifyPassword(password, storedViewer.passwordHash) -> SessionRole.VIEWER
+                else -> null
+            }
+            if (matched == null) attempt.count++ else attempt.count = 0
+            matched
+        }
+    }
+
     /** The failed-login results: the message is derived from the typed reason. */
     private fun notConfigured(): LoginResult = failure(LoginFailure.NotConfigured)
 

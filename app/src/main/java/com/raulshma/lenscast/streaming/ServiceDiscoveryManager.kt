@@ -49,10 +49,10 @@ class ServiceDiscoveryManager(private val context: Context) {
 
     private fun registerHttp(port: Int, serviceName: String) {
 
-        val serviceInfo = NsdServiceInfo()
-        serviceInfo.setServiceName(makeUniqueServiceName(serviceName))
-        serviceInfo.setServiceType(SERVICE_TYPE_HTTP)
-        serviceInfo.setPort(port)
+        val serviceInfo = buildHttpServiceInfo(
+            name = makeUniqueServiceName(serviceName),
+            port = port,
+        )
 
         registrationListener = object : NsdManager.RegistrationListener {
             override fun onServiceRegistered(info: NsdServiceInfo) {
@@ -67,10 +67,10 @@ class ServiceDiscoveryManager(private val context: Context) {
                 if (registerAttempts < MAX_REGISTER_ATTEMPTS) {
                     registerAttempts++
                     try {
-                        val retry = NsdServiceInfo()
-                        retry.setServiceName(makeUniqueServiceName("$DEFAULT_SERVICE_NAME-$registerAttempts"))
-                        retry.setServiceType(SERVICE_TYPE_HTTP)
-                        retry.setPort(info.port)
+                        val retry = buildHttpServiceInfo(
+                            name = makeUniqueServiceName("$DEFAULT_SERVICE_NAME-$registerAttempts"),
+                            port = info.port,
+                        )
                         nsdManager.registerService(retry, NsdManager.PROTOCOL_DNS_SD, this)
                     } catch (e: Exception) {
                         Log.e(TAG, "mDNS retry failed", e)
@@ -178,6 +178,27 @@ class ServiceDiscoveryManager(private val context: Context) {
             Log.e(TAG, "Failed to register RTSP mDNS service", e)
             isRtspRegistered.set(false)
         }
+    }
+
+    /**
+     * Every HTTP advert the manager builds — the initial registration and
+     * the collision retry alike — comes from here, so the published TXT
+     * records ([DiscoveryRegistrationPolicy.httpTxtRecords]) can never go
+     * missing on one path only.
+     */
+    private fun buildHttpServiceInfo(name: String, port: Int): NsdServiceInfo {
+        val serviceInfo = NsdServiceInfo()
+        serviceInfo.setServiceName(name)
+        serviceInfo.setServiceType(SERVICE_TYPE_HTTP)
+        serviceInfo.setPort(port)
+        // The lenscast=1 marker is why this helper exists as a single seam:
+        // the companion app's discovery filter keys on this TXT record to
+        // tell a LensCast device apart from every other _http._tcp service
+        // shouting on the same LAN (printers, AirPlay, other phones).
+        DiscoveryRegistrationPolicy.httpTxtRecords().forEach { (key, value) ->
+            serviceInfo.setAttribute(key, value)
+        }
+        return serviceInfo
     }
 
     private fun makeUniqueServiceName(baseName: String): String {

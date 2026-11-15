@@ -211,7 +211,12 @@ class StreamingSession(
     }
 
     private fun stopForegroundServiceLocked() {
-        context.stopService(Intent(context, StreamingService::class.java))
+        // The start side already tolerates a denied/odd harness; the stop is
+        // just as non-fatal (the service simply stays until the next sync).
+        runCatching { context.stopService(Intent(context, StreamingService::class.java)) }
+            .onFailure {
+                Log.w(TAG, "Server foreground stop failed: ${it.javaClass.simpleName}")
+            }
     }
 
     /**

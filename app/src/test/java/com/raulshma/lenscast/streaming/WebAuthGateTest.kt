@@ -310,6 +310,42 @@ class WebAuthGateTest {
         assertTrue(gate.loginAs().success)
     }
 
+    // ── basic (RFC 7617) ──
+
+    @Test
+    fun `basic presentation of the admin pair answers admin`() {
+        assertEquals(SessionRole.ADMIN, gate().basicRole(USER, PASSWORD))
+    }
+
+    @Test
+    fun `basic presentation of the viewer pair answers viewer`() {
+        assertEquals(SessionRole.VIEWER, gateWithViewer().basicRole(VIEWER_USER, VIEWER_PASSWORD))
+    }
+
+    @Test
+    fun `basic wrong password answers null without revealing the username`() {
+        val gate = gateWithViewer()
+        assertNull(gate.basicRole(USER, "wrong"))
+        assertNull(gate.basicRole(VIEWER_USER, "wrong"))
+        assertNull(gate.basicRole("nobody", PASSWORD))
+    }
+
+    @Test
+    fun `basic with auth disabled passes as admin like authenticate does`() {
+        assertEquals(SessionRole.ADMIN, gate(username = null).basicRole("anyone", "anything"))
+    }
+
+    @Test
+    fun `basic credential guessing is rate limited per username`() {
+        val gate = gate()
+        repeat(10) { attempt -> assertNull(gate.basicRole(USER, "wrong-$attempt")) }
+        // Locked: even the CORRECT password is refused inside the window —
+        // then time travel past the lockout re-arms the pair.
+        assertNull(gate.basicRole(USER, PASSWORD))
+        nowMs += 2 * 60_000L
+        assertEquals(SessionRole.ADMIN, gate.basicRole(USER, PASSWORD))
+    }
+
     companion object {
         private const val USER = "admin"
         private const val PASSWORD = "correct horse battery staple"

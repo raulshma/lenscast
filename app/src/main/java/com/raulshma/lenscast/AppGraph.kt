@@ -88,6 +88,14 @@ interface AppGraph {
     val updateInstaller: UpdateInstaller
     val updateNotifier: UpdateNotifier
 
+    /**
+     * The companion mode's sub-graph: the paired-device roster, credential
+     * store, mDNS discovery and live sessions the viewing/controlling half
+     * of the app resolves — one lazy object instead of a dozen individual
+     * graph members.
+     */
+    val companion: com.raulshma.lenscast.companion.di.CompanionGraph
+
     /** App-lifetime scope for work that must outlive a ViewModel or screen. */
     val appScope: CoroutineScope
 

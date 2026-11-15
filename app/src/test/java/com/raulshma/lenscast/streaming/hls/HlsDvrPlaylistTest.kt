@@ -29,6 +29,50 @@ class HlsDvrPlaylistTest {
     }
 
     @Test
+    fun `window start epoch renders the program date time anchor`() {
+        // 2025-11-15T13:50:00.123Z — the anchor line rides the first segment.
+        val anchor = 1_763_214_600_123L
+        val m3u8 = HlsPlaylist.build(
+            names(9),
+            sequence = 9,
+            segmentDurationsSec = names(9).map { 2.0 },
+            windowStartEpochMs = anchor,
+        )
+        val line = m3u8.lineSequence().first { it.startsWith("#EXT-X-PROGRAM-DATE-TIME:") }
+        assertEquals(
+            "the anchor is the window's first segment, ISO-8601 UTC",
+            "#EXT-X-PROGRAM-DATE-TIME:2025-11-15T13:50:00.123Z",
+            line,
+        )
+        // It sits with the headers, before any segment.
+        val anchorIndex = m3u8.lineSequence().toList().indexOfFirst { it.startsWith("#EXT-X-PROGRAM-DATE-TIME") }
+        val firstSegmentIndex = m3u8.lineSequence().toList().indexOfFirst { it.endsWith(".ts") }
+        assertTrue("PDT is a header line", anchorIndex < firstSegmentIndex)
+    }
+
+    @Test
+    fun `absent window start renders no program date time`() {
+        val m3u8 = HlsPlaylist.build(names(9), sequence = 9)
+        assertFalse(m3u8.contains("#EXT-X-PROGRAM-DATE-TIME"))
+        // A null-epoch window (encoder never anchored) stays quiet too.
+        val m3u8Null = HlsPlaylist.build(
+            names(9),
+            sequence = 9,
+            segmentDurationsSec = names(9).map { 2.0 },
+            windowStartEpochMs = null,
+        )
+        assertFalse(m3u8Null.contains("#EXT-X-PROGRAM-DATE-TIME"))
+    }
+
+    @Test
+    fun `program date time formatting is utc iso 8601`() {
+        assertEquals(
+            "2026-01-01T00:00:00.000Z",
+            HlsPlaylist.formatProgramDateTime(1_767_225_600_000L),
+        )
+    }
+
+    @Test
     fun `event playlist renders the full retained window`() {
         val m3u8 = HlsPlaylist.build(names(9), sequence = 9, segmentDurationsSec = names(9).map { 2.0 }, dvr = true)
         assertTrue(m3u8.contains("#EXT-X-PLAYLIST-TYPE:EVENT"))

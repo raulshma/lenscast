@@ -603,4 +603,66 @@ class HttpAuthFilterTest {
             auditLog.record(any(), any(), any())
         }
     }
+
+    // ── the RFC 7617 Basic lane (the companion's username/password pairing) ──
+
+    private fun basicHeader(user: String, pass: String) =
+        "authorization" to "Basic " + java.util.Base64.getEncoder().encodeToString("$user:$pass".toByteArray())
+
+    @Test
+    fun `basic admin presentation passes reads and writes without a session`() {
+        val filter = HttpAuthFilter(viewerGate(), port = 8080)
+        val admin = mapOf(basicHeader("admin", "admin-pw"))
+        assertNull(filter.authorize("GET", "/api/settings", admin))
+        // Credential-admin writes like a session admin — settings are the
+        // whole point of the pairing (the token lane restricts POSTs; the
+        // credential lane does not).
+        assertNull(filter.authorize("POST", "/api/settings", admin))
+        assertNull(filter.authorize("POST", "/api/capture", admin))
+    }
+
+    @Test
+    fun `basic viewer presentation reads everywhere and is gated on writes`() {
+        val filter = HttpAuthFilter(viewerGate(), port = 8080)
+        val viewer = mapOf(basicHeader("door", "viewer-pw"))
+        assertNull(filter.authorize("GET", "/api/settings", viewer))
+        // Media egress: the WHEP SDP offer is a viewer-allowed write.
+        assertNull(filter.authorize("POST", "/whep", viewer))
+        // Admin-only writes deny 403 exactly like a viewer session cookie.
+        val result = filter.authorize("POST", "/api/settings", viewer)!!
+        assertEquals(403, result.statusCode)
+        assertNull(filter.authorize("GET", "/api/settings", viewer))
+    }
+
+    @Test
+    fun `basic wrong credentials fail closed`() {
+        val filter = HttpAuthFilter(viewerGate(), port = 8080)
+        assertEquals(
+            401,
+            filter.authorize("GET", "/api/settings", mapOf(basicHeader("door", "wrong")))!!.statusCode,
+        )
+        assertEquals(
+            401,
+            filter.authorize("GET", "/api/settings", mapOf(basicHeader("nobody", "admin-pw")))!!.statusCode,
+        )
+    }
+
+    @Test
+    fun `a malformed basic header falls through the ladder untouched`() {
+        val filter = HttpAuthFilter(viewerGate(), port = 8080)
+        // Bad base64: not credentials, continue to the cookie path (which
+        // fails without one) rather than inventing a verdict from garbage.
+        assertEquals(
+            401,
+            filter.authorize("GET", "/api/settings", mapOf("authorization" to "Basic !!!not-base64!!!"))!!.statusCode,
+        )
+        // Payload without the user:pass colon splits nothing — same verdict.
+        val noColon = "authorization" to "Basic " + java.util.Base64.getEncoder().encodeToString("justauser".toByteArray())
+        assertEquals(401, filter.authorize("GET", "/api/settings", mapOf(noColon))!!.statusCode)
+        // A bearer header is the token lane's input; basic parsing ignores it.
+        assertEquals(
+            401,
+            filter.authorize("GET", "/api/settings", mapOf("authorization" to "Bearer whatever"))!!.statusCode,
+        )
+    }
 }

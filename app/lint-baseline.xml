@@ -338,7 +338,7 @@
         errorLine2="                                                         ~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/java/com/raulshma/lenscast/camera/CameraScreen.kt"
-            line="2508"
+            line="2519"
             column="58"/>
     </issue>
 
@@ -349,7 +349,7 @@
         errorLine2="                                                            ~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/java/com/raulshma/lenscast/camera/CameraScreen.kt"
-            line="2510"
+            line="2521"
             column="61"/>
     </issue>
 
@@ -360,7 +360,7 @@
         errorLine2="                                                                           ~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/java/com/raulshma/lenscast/camera/CameraScreen.kt"
-            line="2515"
+            line="2526"
             column="76"/>
     </issue>
 
@@ -373,6 +373,17 @@
             file="src/main/java/com/raulshma/lenscast/capture/DetectionEventsScreen.kt"
             line="206"
             column="71"/>
+    </issue>
+
+    <issue
+        id="PictureInPictureIssue"
+        message="An activity in this app supports picture-in-picture and the targetSdkVersion is 31 or above; it is therefore strongly recommended to call both `setAutoEnterEnabled(true)` and `setSourceRectHint(...)`"
+        errorLine1="    &lt;application"
+        errorLine2="     ~~~~~~~~~~~">
+        <location
+            file="src/main/AndroidManifest.xml"
+            line="77"
+            column="6"/>
     </issue>
 
     <issue
@@ -695,6 +706,17 @@
     </issue>
 
     <issue
+        id="ComposableNaming"
+        message="Composable functions that return Unit should start with an uppercase letter"
+        errorLine1="    private fun stubSurface(state: LiveUiState.Ready, runtime: LiveRuntime, modifier: Modifier) {"
+        errorLine2="                ~~~~~~~~~~~">
+        <location
+            file="src/test/java/com/raulshma/lenscast/companion/ui/tabs/live/LiveContentTest.kt"
+            line="86"
+            column="17"/>
+    </issue>
+
+    <issue
         id="ModifierParameter"
         message="Modifier parameter should be the first optional parameter"
         errorLine1="    modifier: Modifier = Modifier,"
@@ -702,6 +724,17 @@
         <location
             file="src/main/java/com/raulshma/lenscast/camera/ConnectSheet.kt"
             line="34"
+            column="5"/>
+    </issue>
+
+    <issue
+        id="ModifierParameter"
+        message="Modifier parameter should be the first optional parameter"
+        errorLine1="    modifier: Modifier = Modifier,"
+        errorLine2="    ~~~~~~~~">
+        <location
+            file="src/main/java/com/raulshma/lenscast/companion/ui/tabs/system/SystemTabCards.kt"
+            line="795"
             column="5"/>
     </issue>
 
@@ -757,6 +790,2866 @@
         <location
             file="src/main/res/values/strings.xml"
             line="803"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_nav_devices_cd&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_nav_devices_cd&quot;>Devices — view and control paired LensCast cameras&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="806"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_title&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_title&quot;>Devices&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="809"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_empty&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_empty&quot;>No paired devices yet.\nScan a camera QR code or add one manually to start.&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="810"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_add&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_add&quot;>Add device&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="811"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_add_cd&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_add_cd&quot;>Add device&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="812"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_remove&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_remove&quot;>Remove&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="813"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_remove_confirm&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_remove_confirm&quot;>Remove %1$s from your devices? Stored credentials for it are deleted too.&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="814"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_last_seen&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_last_seen&quot;>Last seen %1$s&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="815"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_tab_live&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_tab_live&quot;>Live&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="818"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_tab_events&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_tab_events&quot;>Events&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="819"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_tab_media&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_tab_media&quot;>Media&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="820"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_tab_system&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_tab_system&quot;>System&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="821"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_connecting&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_connecting&quot;>Connecting…&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="824"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_connected&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_connected&quot;>Connected&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="825"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_reconnecting&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_reconnecting&quot;>Reconnecting…&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="826"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_offline&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_offline&quot;>Offline&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="827"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_auth_failed&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_auth_failed&quot;>Sign-in failed&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="828"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_scan_qr&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_scan_qr&quot;>Scan QR code&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="831"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_scan_qr_hint&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_scan_qr_hint&quot;>Point the camera at the Connect QR code shown on the LensCast device&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="832"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_discover_mdns&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_discover_mdns&quot;>Discover on network&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="833"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_discover_scanning&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_discover_scanning&quot;>Scanning…&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="834"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_discover_empty&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_discover_empty&quot;>No LensCast devices found on this network&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="835"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_manual&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_manual&quot;>Add manually&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="836"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_name&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_name&quot;>Name&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="837"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_host&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_host&quot;>Host&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="838"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_port&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_port&quot;>Port&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="839"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_use_tls&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_use_tls&quot;>Use HTTPS&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="840"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_tls_fingerprint&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_tls_fingerprint&quot;>Certificate fingerprint (SHA-256)&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="841"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_tofu_warning&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_tofu_warning&quot;>This certificate is self-signed. Compare the fingerprint with the one on the camera Connect screen before trusting this device.&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="842"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_token&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_token&quot;>API token&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="843"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_username&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_username&quot;>Username&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="844"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_password&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_password&quot;>Password&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="845"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_auth_kind_token&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_auth_kind_token&quot;>API token&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="846"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_auth_kind_basic&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_auth_kind_basic&quot;>Username and password&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="847"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_role_admin&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_role_admin&quot;>Admin&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="848"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_role_viewer&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_role_viewer&quot;>Viewer&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="849"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_test&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_test&quot;>Test connection&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="850"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_testing&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_testing&quot;>Testing…&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="851"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_test_ok&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_test_ok&quot;>Connected as %1$s&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="852"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_test_failed&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_test_failed&quot;>Connection failed: %1$s&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="853"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_save&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_save&quot;>Save&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="854"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_rung_whep&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_rung_whep&quot;>WebRTC&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="857"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_rung_hls&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_rung_hls&quot;>HLS&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="858"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_rung_mjpeg&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_rung_mjpeg&quot;>MJPEG&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="859"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_rung_connecting&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_rung_connecting&quot;>Connecting…&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="860"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_rung_failed&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_rung_failed&quot;>Stream unavailable&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="861"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_cycle_rung_cd&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_cycle_rung_cd&quot;>Switch stream transport&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="862"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_listen_audio&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_listen_audio&quot;>Listen&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="863"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_stop_audio&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_stop_audio&quot;>Stop listening&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="864"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_talkback_start&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_talkback_start&quot;>Talk&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="865"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_talkback_stop&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_talkback_stop&quot;>Stop talking&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="866"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_talkback_active&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_talkback_active&quot;>Talking to the camera&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="867"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_capture_cd&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_capture_cd&quot;>Capture a photo&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="868"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_torch_on_cd&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_torch_on_cd&quot;>Turn torch on&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="869"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_torch_off_cd&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_torch_off_cd&quot;>Turn torch off&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="870"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_zoom_cd&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_zoom_cd&quot;>Zoom&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="871"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_focus_cd&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_focus_cd&quot;>Tap to focus&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="873"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_siren_on&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_siren_on&quot;>Sound siren&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="874"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_siren_off&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_siren_off&quot;>Stop siren&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="875"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_stream_start&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_stream_start&quot;>Start stream&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="876"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_stream_stop&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_stream_stop&quot;>Stop stream&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="877"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_clients_title&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_clients_title&quot;>Connected clients&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="878"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_clients_empty&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_clients_empty&quot;>No clients connected&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="879"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_kick_cd&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_kick_cd&quot;>Disconnect client %1$s&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="880"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_fullscreen_cd&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_fullscreen_cd&quot;>Fullscreen&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="882"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_pip_cd&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_pip_cd&quot;>Picture-in-picture&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="883"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_events_empty&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_events_empty&quot;>No detection events yet&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="886"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_filter_all&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_filter_all&quot;>All&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="888"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_filter_motion&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_filter_motion&quot;>Motion&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="890"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_filter_sound&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_filter_sound&quot;>Sound&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="892"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_filter_tamper&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_filter_tamper&quot;>Tamper&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="894"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_stats_title&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_stats_title&quot;>Statistics&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="896"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_stats_24h&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_stats_24h&quot;>24 hours&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="897"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_stats_7d&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_stats_7d&quot;>7 days&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="898"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_stats_all&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_stats_all&quot;>All time&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="900"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_stats_total&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_stats_total&quot;>Total events&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="901"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_snapshot_cd&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_snapshot_cd&quot;>View snapshot&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="903"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_clip_cd&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_clip_cd&quot;>View clip&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="905"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_media_empty&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_media_empty&quot;>No captures on this device&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="908"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_delete_cd&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_delete_cd&quot;>Delete %1$s&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="909"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_download_cd&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_download_cd&quot;>Download&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="911"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_share_cd&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_share_cd&quot;>Share&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="912"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_recordings_title&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_recordings_title&quot;>Recording sessions&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="913"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_record_start&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_record_start&quot;>Record&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="914"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_record_stop&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_record_stop&quot;>Stop recording&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="915"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_record_active&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_record_active&quot;>Recording&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="916"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_timeline_today&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_timeline_today&quot;>Today&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="918"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_search_hint&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_search_hint&quot;>Search captures&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="920"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_load_more&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_load_more&quot;>Load more&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="922"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_role_readonly_banner&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_role_readonly_banner&quot;>Signed in as viewer — controls are read-only&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="925"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_conn_idle&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_conn_idle&quot;>Idle&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="928"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_device_missing_title&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_device_missing_title&quot;>Device not found&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="929"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_device_missing_body&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_device_missing_body&quot;>This device is no longer in your devices list. It may have been removed.&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="930"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_refresh_cd&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_refresh_cd&quot;>Refresh device status&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="933"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_capture_all_cd&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_capture_all_cd&quot;>Capture a photo on every online device&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="934"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_capture_all_ok&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_capture_all_ok&quot;>Photo captured on %1$s&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="935"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_capture_all_failed&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_capture_all_failed&quot;>Capture failed on %1$s&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="936"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_device_options_cd&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_device_options_cd&quot;>More options for %1$s&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="937"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_cancel&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_cancel&quot;>Cancel&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="938"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_device_removed&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_device_removed&quot;>%1$s removed&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="939"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_tls_pinned&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_tls_pinned&quot;>Certificate pinned&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="940"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_tls_tofu&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_tls_tofu&quot;>Trust on first use&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="941"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_role_unknown&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_role_unknown&quot;>Unknown role&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="942"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_pair_camera_rationale&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_pair_camera_rationale&quot;>LensCast needs camera access to scan a pairing QR code.&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="945"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_qr_invalid&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_qr_invalid&quot;>Not a LensCast pairing code&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="946"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_discover_pick_cd&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_discover_pick_cd&quot;>Use this device&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="947"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_tls_fingerprint_hint&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_tls_fingerprint_hint&quot;>Leave empty to confirm the certificate when pairing (trust on first use)&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="948"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_tofu_title&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_tofu_title&quot;>Trust this device?&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="949"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_tofu_confirm&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_tofu_confirm&quot;>Trust device&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="950"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_pair_step_tls&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_pair_step_tls&quot;>Checking certificate…&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="951"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_pair_step_auth&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_pair_step_auth&quot;>Checking sign-in…&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="952"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_pair_step_signin&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_pair_step_signin&quot;>Signing in…&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="953"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_pair_invalid_input&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_pair_invalid_input&quot;>Enter a host and a port between 1 and 65535&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="954"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_pair_no_credentials&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_pair_no_credentials&quot;>Enter the sign-in credentials for this device&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="955"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_pair_error_network&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_pair_error_network&quot;>Device unreachable&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="956"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_pair_error_login&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_pair_error_login&quot;>Sign-in failed — check the username and password&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="957"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_pair_error_auth&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_pair_error_auth&quot;>This device requires a sign-in&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="958"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_pair_error_pin&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_pair_error_pin&quot;>Certificate fingerprint mismatch — the device identity changed&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="959"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_pair_error_tls&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_pair_error_tls&quot;>Could not read the device certificate&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="960"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_pair_error_tofu_declined&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_pair_error_tofu_declined&quot;>Pairing cancelled — the certificate was not trusted&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="961"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_pair_error_request&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_pair_error_request&quot;>The device answered with an error&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="962"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_system_info_title&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_system_info_title&quot;>Device&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="965"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_system_info_app_version&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_system_info_app_version&quot;>App version&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="966"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_system_info_model&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_system_info_model&quot;>Model&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="967"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_system_info_android&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_system_info_android&quot;>Android&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="968"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_system_info_uptime&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_system_info_uptime&quot;>Uptime&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="969"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_system_info_battery&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_system_info_battery&quot;>Battery&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="970"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_system_info_battery_percent&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_system_info_battery_percent&quot;>%1$d%%&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="971"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_system_info_battery_charging&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_system_info_battery_charging&quot;>charging&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="972"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_system_info_storage&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_system_info_storage&quot;>Storage&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="973"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_system_info_storage_used_of&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_system_info_storage_used_of&quot;>%1$s used of %2$s&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="974"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_system_info_lenses&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_system_info_lenses&quot;>Lenses&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="975"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_system_info_lens_active&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_system_info_lens_active&quot;>Active&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="976"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_system_info_unavailable&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_system_info_unavailable&quot;>Device information unavailable&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="977"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_system_settings_title&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_system_settings_title&quot;>Detection &amp;amp; capture settings&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="980"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_system_settings_read_only&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_system_settings_read_only&quot;>Viewer session — settings are read-only&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="981"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_system_settings_unavailable&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_system_settings_unavailable&quot;>Settings unavailable&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="982"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_system_settings_dirty_save&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_system_settings_dirty_save&quot;>Save&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="983"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_system_settings_revert&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_system_settings_revert&quot;>Revert&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="984"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_system_settings_saving&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_system_settings_saving&quot;>Saving…&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="985"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_system_group_motion&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_system_group_motion&quot;>Motion detection&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="986"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_system_motion_enabled&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_system_motion_enabled&quot;>Motion detection&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="987"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_system_motion_sensitivity&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_system_motion_sensitivity&quot;>Sensitivity&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="988"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_system_motion_recording&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_system_motion_recording&quot;>Record on motion&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="989"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_system_motion_post_roll&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_system_motion_post_roll&quot;>Post-roll (seconds)&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="990"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_system_motion_cooldown&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_system_motion_cooldown&quot;>Motion cooldown (seconds)&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="991"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_system_motion_arm&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_system_motion_arm&quot;>Arm schedule&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="992"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_system_motion_arm_start&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_system_motion_arm_start&quot;>Start (minute of day)&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="993"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_system_motion_arm_end&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_system_motion_arm_end&quot;>End (minute of day)&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="994"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_system_motion_arm_days&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_system_motion_arm_days&quot;>Days&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="995"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_system_group_sound&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_system_group_sound&quot;>Sound detection&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="1005"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_system_sound_enabled&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_system_sound_enabled&quot;>Sound detection&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="1006"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_system_sound_threshold&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_system_sound_threshold&quot;>Threshold&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="1007"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_system_sound_adaptive&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_system_sound_adaptive&quot;>Adaptive noise floor&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="1008"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_system_sound_recording&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_system_sound_recording&quot;>Record on sound&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="1009"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_system_sound_cooldown&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_system_sound_cooldown&quot;>Sound cooldown (seconds)&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="1010"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_system_group_ml&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_system_group_ml&quot;>Object detection (ML gate)&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="1011"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_system_ml_enabled&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_system_ml_enabled&quot;>Object detection&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="1012"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_system_ml_min_score&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_system_ml_min_score&quot;>Minimum confidence&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="1013"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_system_ml_person&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_system_ml_person&quot;>People&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="1014"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_system_ml_pets&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_system_ml_pets&quot;>Pets&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="1015"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_system_ml_vehicles&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_system_ml_vehicles&quot;>Vehicles&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="1016"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_system_group_tamper&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_system_group_tamper&quot;>Tamper detection&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="1017"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_system_tamper_enabled&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_system_tamper_enabled&quot;>Tamper detection&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="1018"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_system_group_storage&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_system_group_storage&quot;>Capture &amp;amp; storage&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="1019"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_system_capture_retention&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_system_capture_retention&quot;>Capture retention (days, 0 = forever)&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="1020"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_system_event_retention&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_system_event_retention&quot;>Event retention (days, 0 = forever)&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="1021"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_system_storage_quota&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_system_storage_quota&quot;>Storage quota (MB)&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="1022"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_system_auth_title&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_system_auth_title&quot;>Web sessions&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="1025"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_system_auth_not_required&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_system_auth_not_required&quot;>This device does not require a sign-in&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="1026"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_system_auth_signed_in&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_system_auth_signed_in&quot;>Signed in&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="1027"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_system_auth_expired&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_system_auth_expired&quot;>Session expired — re-pair the device&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="1028"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_system_auth_unavailable&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_system_auth_unavailable&quot;>Session information unavailable&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="1029"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_system_sessions_empty&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_system_sessions_empty&quot;>No active sessions&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="1030"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_system_session_revoke&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_system_session_revoke&quot;>Revoke&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="1031"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_system_logout&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_system_logout&quot;>Sign out&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="1032"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_system_logout_confirm&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_system_logout_confirm&quot;>Sign out of this device\&apos;s dashboard session?&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="1033"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_system_audit_title&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_system_audit_title&quot;>Audit log&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="1036"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_system_audit_empty&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_system_audit_empty&quot;>No audited actions yet&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="1037"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_system_audit_load_more&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_system_audit_load_more&quot;>Load more&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="1038"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_system_audit_loading&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_system_audit_loading&quot;>Loading…&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="1039"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_system_audit_unavailable&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_system_audit_unavailable&quot;>Audit log unavailable&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="1040"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_system_no_device&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_system_no_device&quot;>This device is no longer in your roster&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="1043"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_system_retry&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_system_retry&quot;>Retry&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="1044"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_system_error_load&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_system_error_load&quot;>Could not reach the device&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="1045"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_system_error_forbidden&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_system_error_forbidden&quot;>The device denied this action — viewer permissions&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="1046"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_system_error_auth&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_system_error_auth&quot;>Session expired — re-pair the device&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="1047"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_system_error_network&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_system_error_network&quot;>Device unreachable&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="1048"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_system_error_http&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_system_error_http&quot;>The device answered with an error&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="1049"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_system_settings_saved&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_system_settings_saved&quot;>Settings saved&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="1050"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_system_settings_save_failed&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_system_settings_save_failed&quot;>Save failed — changes reverted&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="1051"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_system_session_revoked&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_system_session_revoked&quot;>Session revoked&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="1052"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_system_logged_out&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_system_logged_out&quot;>Signed out&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="1053"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_events_live&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_events_live&quot;>Live&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="1056"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_events_refresh_cd&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_events_refresh_cd&quot;>Refresh events&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="1057"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_events_clear&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_events_clear&quot;>Clear log&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="1058"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_events_clear_confirm_title&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_events_clear_confirm_title&quot;>Clear the event log?&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="1059"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_events_clear_confirm_body&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_events_clear_confirm_body&quot;>Every detection event stored on the device is deleted permanently.&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="1060"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_events_clear_confirm_action&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_events_clear_confirm_action&quot;>Clear&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="1061"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_events_cleared&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_events_cleared&quot;>Event log cleared&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="1062"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_events_clear_failed&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_events_clear_failed&quot;>Could not clear the event log&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="1063"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_events_test_fire&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_events_test_fire&quot;>Test alert&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="1064"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_events_test_fired&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_events_test_fired&quot;>Test alert dispatched to: %1$s&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="1065"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_events_test_no_sinks&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_events_test_no_sinks&quot;>Test alert dispatched — no sinks are configured&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="1066"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_events_test_failed&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_events_test_failed&quot;>The test alert did not dispatch&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="1067"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_events_forbidden&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_events_forbidden&quot;>This action needs an admin sign-in&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="1068"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_events_signin_required&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_events_signin_required&quot;>Sign-in required — pair the device again&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="1069"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_events_action_failed&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_events_action_failed&quot;>The device did not answer — try again&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="1070"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_events_time_now&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_events_time_now&quot;>Just now&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="1071"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_events_time_minutes&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_events_time_minutes&quot;>%1$d min ago&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="1072"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_events_time_hours&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_events_time_hours&quot;>%1$d h ago&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="1073"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_events_time_days&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_events_time_days&quot;>%1$d d ago&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="1074"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_media_filter_all&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_media_filter_all&quot;>All&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="1077"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_media_filter_photos&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_media_filter_photos&quot;>Photos&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="1078"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_media_filter_videos&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_media_filter_videos&quot;>Videos&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="1079"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_media_empty_filtered&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_media_empty_filtered&quot;>Nothing matches this filter&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="1080"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_media_delete&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_media_delete&quot;>Delete&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="1081"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_media_delete_confirm_single&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_media_delete_confirm_single&quot;>Delete %1$s from the device? This cannot be undone.&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="1082"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_media_delete_confirm_batch&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_media_delete_confirm_batch&quot;>Delete %1$d captures from the device? This cannot be undone.&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="1083"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_media_deleted&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_media_deleted&quot;>Deleted %1$d item(s)&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="1084"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_media_select_count&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_media_select_count&quot;>%1$d selected&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="1085"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_media_clear_selection_cd&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_media_clear_selection_cd&quot;>Clear selection&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="1086"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_media_share_chooser&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_media_share_chooser&quot;>Share media link&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="1087"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_media_viewer_close_cd&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_media_viewer_close_cd&quot;>Close viewer&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="1088"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_media_not_recording&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_media_not_recording&quot;>Not recording&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="1089"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_media_elapsed&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_media_elapsed&quot;>Elapsed %1$s&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="1090"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_media_sessions_empty&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_media_sessions_empty&quot;>No recording sessions yet&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="1091"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_media_trigger_manual&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_media_trigger_manual&quot;>Manual&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="1092"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_media_trigger_motion&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_media_trigger_motion&quot;>Motion&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="1093"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_media_trigger_sound&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_media_trigger_sound&quot;>Sound&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="1094"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_media_trigger_continuous&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_media_trigger_continuous&quot;>Continuous&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="1095"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_media_trigger_scheduled&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_media_trigger_scheduled&quot;>Scheduled&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="1096"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_media_trigger_interval&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_media_trigger_interval&quot;>Interval&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="1097"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_media_interval_title&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_media_interval_title&quot;>Interval capture&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="1098"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_media_interval_idle&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_media_interval_idle&quot;>Interval capture is off&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="1099"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_media_interval_running&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_media_interval_running&quot;>Running — %1$d captures so far&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="1100"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_media_interval_seconds&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_media_interval_seconds&quot;>Seconds between captures&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="1101"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_media_interval_seconds_range&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_media_interval_seconds_range&quot;>Enter a number between 1 and 3600&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="1102"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_media_interval_start&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_media_interval_start&quot;>Start&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="1103"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_media_interval_stop&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_media_interval_stop&quot;>Stop&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="1104"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_media_error_gallery&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_media_error_gallery&quot;>Could not load the capture library&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="1105"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_media_error_recordings&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_media_error_recordings&quot;>Could not load the recording sessions&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="1106"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_media_error_interval&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_media_error_interval&quot;>Could not load the interval-capture status&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="1107"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_media_retry&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_media_retry&quot;>Retry&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="1108"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_media_action_failed&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_media_action_failed&quot;>The device did not answer — try again&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="1109"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_live_forbidden&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_live_forbidden&quot;>Viewer permissions — this camera refused the control&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="1112"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_live_control_auth&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_live_control_auth&quot;>Sign-in required — check this device\&apos;s credentials&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="1113"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_live_control_failed&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_live_control_failed&quot;>The camera refused that control&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="1114"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_live_capture_ok&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_live_capture_ok&quot;>Photo saved on the camera&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="1115"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_live_kick_confirm_body&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_live_kick_confirm_body&quot;>Disconnect %1$s from the camera\&apos;s stream?&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="1116"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_live_kick_yes&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_live_kick_yes&quot;>Disconnect&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="1117"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_live_kick_ok&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_live_kick_ok&quot;>Client disconnected&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="1118"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_live_kick_failed&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_live_kick_failed&quot;>Could not disconnect the client&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="1119"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_live_client_web&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_live_client_web&quot;>Web viewer&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="1120"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_live_client_rtsp&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_live_client_rtsp&quot;>RTSP&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="1121"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_live_client_since&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_live_client_since&quot;>since %1$s&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="1122"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_live_audio_failed&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_live_audio_failed&quot;>Live audio failed&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="1123"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_live_talkback_failed&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_live_talkback_failed&quot;>Talkback connection failed&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="1124"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_live_talkback_needs_login&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_live_talkback_needs_login&quot;>Talkback needs a signed-in session — pair this device with a username and password to talk&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="1125"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;companion_live_recording_elapsed&quot; is not translated in &quot;de&quot; (German), &quot;ru&quot; (Russian), &quot;pt&quot; (Portuguese), &quot;fr&quot; (French), &quot;es&quot; (Spanish), &quot;zh&quot; (Chinese)"
+        errorLine1="    &lt;string name=&quot;companion_live_recording_elapsed&quot;>Recording · %1$s&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="1126"
             column="13"/>
     </issue>
 
@@ -867,6 +3760,50 @@
         <location
             file="src/main/res/values/strings.xml"
             line="714"
+            column="5"/>
+    </issue>
+
+    <issue
+        id="PluralsCandidate"
+        message="Formatting %d followed by words (&quot;captures&quot;): This should probably be a plural rather than a string"
+        errorLine1="    &lt;string name=&quot;companion_media_delete_confirm_batch&quot;>Delete %1$d captures from the device? This cannot be undone.&lt;/string>"
+        errorLine2="    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="1083"
+            column="5"/>
+    </issue>
+
+    <issue
+        id="PluralsCandidate"
+        message="Formatting %d followed by words (&quot;item&quot;): This should probably be a plural rather than a string"
+        errorLine1="    &lt;string name=&quot;companion_media_deleted&quot;>Deleted %1$d item(s)&lt;/string>"
+        errorLine2="    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="1084"
+            column="5"/>
+    </issue>
+
+    <issue
+        id="PluralsCandidate"
+        message="Formatting %d followed by words (&quot;selected&quot;): This should probably be a plural rather than a string"
+        errorLine1="    &lt;string name=&quot;companion_media_select_count&quot;>%1$d selected&lt;/string>"
+        errorLine2="    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="1085"
+            column="5"/>
+    </issue>
+
+    <issue
+        id="PluralsCandidate"
+        message="Formatting %d followed by words (&quot;captures&quot;): This should probably be a plural rather than a string"
+        errorLine1="    &lt;string name=&quot;companion_media_interval_running&quot;>Running — %1$d captures so far&lt;/string>"
+        errorLine2="    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="1100"
             column="5"/>
     </issue>
 
@@ -992,14 +3929,47 @@
     </issue>
 
     <issue
+        id="BadHostnameVerifier"
+        message="`verify` always returns `true`, which could cause insecure network traffic due to trusting TLS/SSL server certificates for wrong hostnames"
+        errorLine1="    override fun verify(hostname: String, session: javax.net.ssl.SSLSession): Boolean = true"
+        errorLine2="                 ~~~~~~">
+        <location
+            file="src/main/java/com/raulshma/lenscast/companion/client/CertificateFingerprintProbe.kt"
+            line="157"
+            column="18"/>
+    </issue>
+
+    <issue
         id="HardwareIds"
         message="Using `getString` to get device identifiers is not recommended"
         errorLine1="            android.provider.Settings.Secure.getString(contentResolver, android.provider.Settings.Secure.ANDROID_ID)"
         errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/java/com/raulshma/lenscast/MainApplication.kt"
-            line="470"
+            line="478"
             column="13"/>
+    </issue>
+
+    <issue
+        id="CustomX509TrustManager"
+        message="Implementing a custom `X509TrustManager` is error-prone and likely to be insecure. It is likely to disable certificate validation altogether, and is non-trivial to implement correctly without calling Android&apos;s default implementation."
+        errorLine1="internal class RecordingTrustManager : X509TrustManager {"
+        errorLine2="               ~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/raulshma/lenscast/companion/client/CertificateFingerprintProbe.kt"
+            line="135"
+            column="16"/>
+    </issue>
+
+    <issue
+        id="CustomX509TrustManager"
+        message="Implementing a custom `X509TrustManager` is error-prone and likely to be insecure. It is likely to disable certificate validation altogether, and is non-trivial to implement correctly without calling Android&apos;s default implementation."
+        errorLine1="internal class PinnedTrustManager(private val expectedSha256Hex: String) : X509TrustManager {"
+        errorLine2="               ~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/raulshma/lenscast/companion/client/DevicePinning.kt"
+            line="82"
+            column="16"/>
     </issue>
 
     <issue
@@ -1109,6 +4079,17 @@
         <location
             file="src/main/java/com/raulshma/lenscast/capture/CaptureViewModel.kt"
             line="38"
+            column="5"/>
+    </issue>
+
+    <issue
+        id="StaticFieldLeak"
+        message="This field leaks a context object"
+        errorLine1="    @Volatile private var whepSurface: SurfaceViewRenderer? = null"
+        errorLine2="    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/raulshma/lenscast/companion/ui/tabs/live/LiveViewModel.kt"
+            line="155"
             column="5"/>
     </issue>
 
@@ -1241,6 +4222,160 @@
         <location
             file="src/main/res/values/strings.xml"
             line="695"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.companion_focus_cd` appears to be unused"
+        errorLine1="    &lt;string name=&quot;companion_focus_cd&quot;>Tap to focus&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="873"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.companion_fullscreen_cd` appears to be unused"
+        errorLine1="    &lt;string name=&quot;companion_fullscreen_cd&quot;>Fullscreen&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="882"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.companion_filter_all` appears to be unused"
+        errorLine1="    &lt;string name=&quot;companion_filter_all&quot;>All&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="888"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.companion_filter_motion` appears to be unused"
+        errorLine1="    &lt;string name=&quot;companion_filter_motion&quot;>Motion&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="890"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.companion_filter_sound` appears to be unused"
+        errorLine1="    &lt;string name=&quot;companion_filter_sound&quot;>Sound&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="892"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.companion_filter_tamper` appears to be unused"
+        errorLine1="    &lt;string name=&quot;companion_filter_tamper&quot;>Tamper&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="894"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.companion_stats_title` appears to be unused"
+        errorLine1="    &lt;string name=&quot;companion_stats_title&quot;>Statistics&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="896"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.companion_stats_all` appears to be unused"
+        errorLine1="    &lt;string name=&quot;companion_stats_all&quot;>All time&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="900"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.companion_snapshot_cd` appears to be unused"
+        errorLine1="    &lt;string name=&quot;companion_snapshot_cd&quot;>View snapshot&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="903"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.companion_clip_cd` appears to be unused"
+        errorLine1="    &lt;string name=&quot;companion_clip_cd&quot;>View clip&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="905"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.companion_download_cd` appears to be unused"
+        errorLine1="    &lt;string name=&quot;companion_download_cd&quot;>Download&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="911"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.companion_timeline_today` appears to be unused"
+        errorLine1="    &lt;string name=&quot;companion_timeline_today&quot;>Today&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="918"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.companion_search_hint` appears to be unused"
+        errorLine1="    &lt;string name=&quot;companion_search_hint&quot;>Search captures&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="920"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.companion_load_more` appears to be unused"
+        errorLine1="    &lt;string name=&quot;companion_load_more&quot;>Load more&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="922"
             column="13"/>
     </issue>
 
@@ -1504,7 +4639,7 @@
         errorLine2="                ~~~~~~~~~~~~">
         <location
             file="src/main/java/com/raulshma/lenscast/MainApplication.kt"
-            line="476"
+            line="484"
             column="17"/>
     </issue>
 

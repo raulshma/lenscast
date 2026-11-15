@@ -47,6 +47,20 @@ class TokenWritePolicyTest {
     }
 
     @Test
+    fun `the live lens controls and interval-capture loop are writable`() {
+        // The companion's Live tab drives these on a token pairing — a route
+        // the UI exposes must be token-writable or the control 401s (found on
+        // the loopback E2E: the zoom slider moved, the request was denied,
+        // "Sign-in required" snackbar, while torch and siren on the same tab
+        // passed). All ephemeral camera state — nothing persisted.
+        assertTrue(TokenWritePolicy.allowsPost("/api/camera/zoom"))
+        assertTrue(TokenWritePolicy.allowsPost("/api/camera/focus"))
+        assertTrue(TokenWritePolicy.allowsPost("/api/camera/lens"))
+        assertTrue(TokenWritePolicy.allowsPost("/api/capture/interval/start"))
+        assertTrue(TokenWritePolicy.allowsPost("/api/capture/interval/stop"))
+    }
+
+    @Test
     fun `the detection model download and test-alert routes are writable`() {
         assertTrue(TokenWritePolicy.allowsPost("/api/settings/ml-model/download"))
         // The YAMNet twin: same device-maintenance class, nothing persisted.
@@ -78,11 +92,7 @@ class TokenWritePolicyTest {
 
     @Test
     fun `routes outside the allow-list stay read-only for tokens`() {
-        assertFalse(TokenWritePolicy.allowsPost("/api/camera/lens"))
-        assertFalse(TokenWritePolicy.allowsPost("/api/camera/focus"))
-        assertFalse(TokenWritePolicy.allowsPost("/api/camera/zoom"))
-        assertFalse(TokenWritePolicy.allowsPost("/api/capture/interval/start"))
-        assertFalse(TokenWritePolicy.allowsPost("/api/capture/interval/stop"))
+        // Destructive and session-class routes stay off the token ladder.
         assertFalse(TokenWritePolicy.allowsPost("/api/media/batch-delete"))
         assertFalse(TokenWritePolicy.allowsPost("/api/audio/uplink"))
         assertFalse(TokenWritePolicy.allowsPost("/api/detection/events"))
@@ -118,6 +128,11 @@ class TokenWritePolicyTest {
                 "/api/recording/stop",
                 "/api/deterrence/siren",
                 "/api/camera/torch",
+                "/api/camera/zoom",
+                "/api/camera/focus",
+                "/api/camera/lens",
+                "/api/capture/interval/start",
+                "/api/capture/interval/stop",
                 "/api/settings/ml-model/download",
                 "/api/settings/audio-model/download",
                 "/api/detection/test",

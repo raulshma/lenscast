@@ -1,0 +1,18 @@
+<!--
+    Test-scope manifest: Robolectric's merged test manifest must declare the
+    activity the compose-ui-test harness launches (`createComposeRule()` runs
+    in a bare androidx.activity.ComponentActivity), or every compose test
+    fails with "Unable to resolve activity" (robolectric#4736). The bare
+    activity is enough — the UI tests wrap their content in MaterialTheme
+    themselves, so the theme here is only the default the harness needs to
+    inflate anything at all.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <application>
+        <activity
+            android:name="androidx.activity.ComponentActivity"
+            android:theme="@style/Theme.LensCast" />
+    </application>
+
+</manifest>

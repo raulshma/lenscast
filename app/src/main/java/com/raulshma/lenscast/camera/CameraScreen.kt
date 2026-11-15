@@ -59,6 +59,7 @@ import androidx.compose.material.icons.filled.Cameraswitch
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Collections
 import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.Devices
 import androidx.compose.material.icons.filled.Exposure
 import androidx.compose.material.icons.filled.FiberManualRecord
 import androidx.compose.material.icons.filled.FlashAuto
@@ -215,6 +216,7 @@ fun CameraScreen(
     onNavigateToSettings: () -> Unit,
     onNavigateToCapture: () -> Unit,
     onNavigateToGallery: () -> Unit,
+    onNavigateToDevices: () -> Unit,
 ) {
     val context = LocalContext.current
     val app = context.applicationContext as AppGraph
@@ -383,6 +385,7 @@ fun CameraScreen(
                 onNavigateToGallery = onNavigateToGallery,
                 onNavigateToCapture = onNavigateToCapture,
                 onNavigateToSettings = onNavigateToSettings,
+                onNavigateToDevices = onNavigateToDevices,
                 onQuitApplication = {
                     // finishAffinity empties the task first, so the process
                     // kill cannot leave the system to relaunch the activity;
@@ -478,6 +481,7 @@ private fun ImmersiveCameraView(
     onNavigateToGallery: () -> Unit,
     onNavigateToCapture: () -> Unit,
     onNavigateToSettings: () -> Unit,
+    onNavigateToDevices: () -> Unit,
     onQuitApplication: () -> Unit,
     onCopyStreamUrl: () -> Unit,
     onCopyRtspUrl: () -> Unit,
@@ -567,6 +571,7 @@ private fun ImmersiveCameraView(
             onNavigateToGallery = onNavigateToGallery,
             onNavigateToCapture = onNavigateToCapture,
             onNavigateToSettings = onNavigateToSettings,
+            onNavigateToDevices = onNavigateToDevices,
             onQuitApplication = onQuitApplication,
             onToggleQuickSettings = onToggleQuickSettings,
             onCopyStreamUrl = onCopyStreamUrl,
@@ -705,6 +710,7 @@ private fun CameraTopOverlay(
     onNavigateToGallery: () -> Unit,
     onNavigateToCapture: () -> Unit,
     onNavigateToSettings: () -> Unit,
+    onNavigateToDevices: () -> Unit,
     onQuitApplication: () -> Unit,
     onToggleQuickSettings: () -> Unit,
     onCopyStreamUrl: () -> Unit,
@@ -748,7 +754,12 @@ private fun CameraTopOverlay(
             }
         }
 
+        // The right cluster overflows the screen with the stream chips up
+        // (six buttons never fit beside LIVE/WEB) — scrollable so the tail
+        // entries (Devices, More options) stay reachable, and width-hugging
+        // when idle so SpaceBetween still pins the cluster to the edge.
         Row(
+            modifier = Modifier.horizontalScroll(rememberScrollState()),
             horizontalArrangement = Arrangement.spacedBy(2.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -774,6 +785,11 @@ private fun CameraTopOverlay(
                 icon = Icons.Default.Collections,
                 contentDescription = stringResource(R.string.camera_gallery_cd),
                 onClick = onNavigateToGallery
+            )
+            CameraControlButton(
+                icon = Icons.Default.Devices,
+                contentDescription = stringResource(R.string.companion_nav_devices_cd),
+                onClick = onNavigateToDevices
             )
             Box {
                 CameraControlButton(
