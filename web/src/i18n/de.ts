@@ -376,6 +376,8 @@ export const de: Partial<Record<MessageKey, string>> = {
   // ── RTSP card ──
   'rtsp.title': 'RTSP-Stream',
   'rtsp.enable': 'RTSP-Streaming aktivieren',
+  'rtsp.tls': 'TLS (RTSPS)',
+  'rtsp.tlsDesc': 'RTSP über TLS ausliefern (rtsps://), mit derselben selbstsignierten Identität — unabhängig vom HTTPS-Schalter. Ein laufender RTSP-Output wird dafür neu gestartet.',
   'rtsp.subStream': 'Sub-Stream in niedriger Auflösung (/sub)',
   'rtsp.subStreamDesc': 'Stellt einen zweiten H.264-Stream in niedriger Auflösung für NVR-Detect-Rollen bereit.',
   'rtsp.port': 'RTSP-Port',

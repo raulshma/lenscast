@@ -375,6 +375,8 @@ export const ru: Partial<Record<MessageKey, string>> = {
   // ── RTSP card ──
   'rtsp.title': 'RTSP-поток',
   'rtsp.enable': 'Включить RTSP-трансляцию',
+  'rtsp.tls': 'TLS (RTSPS)',
+  'rtsp.tlsDesc': 'Раздача RTSP через TLS (rtsps://) с тем же самоподписанным сертификатом — независимо от переключателя HTTPS. Изменение перезапускает активный вывод RTSP.',
   'rtsp.subStream': 'Субпоток низкого разрешения (/sub)',
   'rtsp.subStreamDesc': 'Отдаёт второй низкоразрешённый поток H.264 для ролей детекции NVR.',
   'rtsp.port': 'Порт RTSP',

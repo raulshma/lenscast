@@ -97,6 +97,8 @@ export interface StreamingSettings {
   streamAudioEchoCancellation: boolean
   recordingAudioEnabled: boolean
   rtspEnabled: boolean
+  /** The RTSP listener's own TLS setting (rtsps://), independent of httpsEnabled. */
+  rtspTlsEnabled: boolean
   rtspPort: number
   rtspInputFormat: RtspInputFormat
   rtspResolution: RtspResolution

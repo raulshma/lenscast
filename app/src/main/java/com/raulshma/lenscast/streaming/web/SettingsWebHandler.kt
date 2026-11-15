@@ -121,6 +121,7 @@ class SettingsWebHandler(
                 streamAudioEchoCancellation = store.streamAudioEchoCancellation.value,
                 recordingAudioEnabled = store.recordingAudioEnabled.value,
                 rtspEnabled = store.rtspEnabled.value,
+                rtspTlsEnabled = store.rtspTlsEnabled.value,
                 rtspPort = store.rtspPort.value,
                 rtspInputFormat = store.rtspInputFormat.value.name,
                 rtspResolution = store.rtspResolution.value.wireName,
@@ -296,6 +297,7 @@ class SettingsWebHandler(
             settingsDataStore.saveStreamAudioEchoCancellation(stream.streamAudioEchoCancellation)
             settingsDataStore.saveRecordingAudioEnabled(stream.recordingAudioEnabled)
             settingsDataStore.saveRtspEnabled(stream.rtspEnabled)
+            settingsDataStore.saveRtspTlsEnabled(stream.rtspTlsEnabled)
             settingsDataStore.saveRtspPort(stream.rtspPort)
             parseEnumOrNull<RtspInputFormat>(stream.rtspInputFormat.takeIf { it.isNotBlank() })
                 ?.let { settingsDataStore.saveRtspInputFormat(it) }

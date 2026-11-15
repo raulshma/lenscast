@@ -49,6 +49,7 @@ import com.squareup.moshi.Types
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
@@ -216,6 +217,7 @@ private object Keys {
     val API_TOKEN_ENABLED = stringPreferencesKey("api_token_enabled")
     val API_TOKEN_HASH = stringPreferencesKey("api_token_hash")
     val HTTPS_ENABLED = stringPreferencesKey("https_enabled")
+    val RTSP_TLS = stringPreferencesKey("rtsp_tls")
     val AUDIO_DEVICE_ID = stringPreferencesKey("audio_device_id")
     val RESUME_STREAMS_ON_BOOT = stringPreferencesKey("resume_streams_on_boot")
     val DETECTION_NOTIFICATIONS_ENABLED = stringPreferencesKey("detection_notifications_enabled")
@@ -766,6 +768,26 @@ internal val apiTokenHashPref = stringPref(Keys.API_TOKEN_HASH, "")
 
 internal val httpsEnabledPref = boolPref(Keys.HTTPS_ENABLED, defaultTrue = false)
 
+// RTSP TLS is its own setting (issue #18: HTTPS and RTSP/RTSPS are chosen
+// independently — an HTTPS dashboard must not force rtsps:// on an RTSP
+// client that only speaks plain RTSP). Before the key existed the scheme was
+// implied by the HTTPS flag; the store's init seeds it once from the stored
+// HTTPS value so existing rtsps users keep their scheme across the update.
+internal val rtspTlsEnabledPref = boolPref(Keys.RTSP_TLS, defaultTrue = false)
+
+/**
+ * The one-time RTSP-TLS seeding, as a pure map edit: while the `rtsp_tls`
+ * key is absent, write the value the HTTPS flag implied before the split
+ * (`"true"` when HTTPS was stored on, `"false"` otherwise); a present key is
+ * never touched, so every later run is a no-op and the two toggles stay
+ * independent. JVM-tested against `preferencesOf` maps (RtspTlsMigrationTest).
+ */
+internal fun migrateRtspTlsPrefs(prefs: MutablePreferences) {
+    if (prefs[Keys.RTSP_TLS] == null) {
+        writeBool(prefs, Keys.RTSP_TLS, readBool(prefs, Keys.HTTPS_ENABLED, defaultTrue = false))
+    }
+}
+
 internal val audioDeviceIdPref = stringPref(Keys.AUDIO_DEVICE_ID, "")
 
 internal val resumeStreamsOnBootPref = boolPref(Keys.RESUME_STREAMS_ON_BOOT, defaultTrue = false)
@@ -1268,6 +1290,14 @@ class SettingsDataStore(
     private val shareInScope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
 ) {
 
+    init {
+        // One-time RTSP-TLS migration (see migrateRtspTlsPrefs) — idempotent,
+        // only writes while the key is absent.
+        shareInScope.launch {
+            context.dataStore.edit(::migrateRtspTlsPrefs)
+        }
+    }
+
     // Every setting is shared exactly once, derived from its descriptor.
     // Consumers (SettingsViewModel, Web API handlers, SettingsApplier) read
     // these StateFlows directly instead of re-wrapping the flows with
@@ -1477,6 +1507,8 @@ class SettingsDataStore(
     val apiTokenHash: StateFlow<String> = apiTokenHashPref.shared()
 
     val httpsEnabled: StateFlow<Boolean> = httpsEnabledPref.shared()
+
+    val rtspTlsEnabled: StateFlow<Boolean> = rtspTlsEnabledPref.shared()
 
     val audioDeviceId: StateFlow<String> = audioDeviceIdPref.shared()
 
@@ -1753,6 +1785,8 @@ class SettingsDataStore(
     suspend fun saveApiTokenHash(hash: String) = apiTokenHashPref.save(hash)
 
     suspend fun saveHttpsEnabled(enabled: Boolean) = httpsEnabledPref.save(enabled)
+
+    suspend fun saveRtspTlsEnabled(enabled: Boolean) = rtspTlsEnabledPref.save(enabled)
 
     suspend fun saveAudioDeviceId(id: String) = audioDeviceIdPref.save(id)
 

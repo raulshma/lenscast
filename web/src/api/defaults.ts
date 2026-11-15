@@ -23,6 +23,10 @@ export const API_DEFAULTS = {
   streamAudioEchoCancellation: true,
   recordingAudioEnabled: true,
   rtspEnabled: false,
+  // RTSP TLS is its own toggle (issue #18) — HTTPS on the web port no longer
+  // implies rtsps://. Before the setting existed the scheme followed
+  // httpsEnabled; the device seeds the toggle once from that stored value.
+  rtspTlsEnabled: false,
   rtspSubStreamEnabled: false,
   rtspPort: 8554,
   rtspStreamingActive: false,

@@ -37,6 +37,8 @@ class OnvifServer(
     /** The device service's on/off toggle; while off, discovery is stopped and [handle] faults. */
     private val enabled: () -> Boolean = { true },
     private val httpsEnabled: () -> Boolean = { false },
+    /** The RTSP listener's own TLS setting (issue #18: independent of [httpsEnabled]). */
+    private val rtspTlsEnabled: () -> Boolean = { false },
     private val videoWidth: () -> Int = { StreamDefaults.RTSP_VIDEO_WIDTH },
     private val videoHeight: () -> Int = { StreamDefaults.RTSP_VIDEO_HEIGHT },
     private val videoBitrate: () -> Int = { StreamDefaults.RTSP_VIDEO_BITRATE },
@@ -138,8 +140,8 @@ class OnvifServer(
     /** HTTPS mode serves the web port as TLS-only, so every advertised web URL must match. */
     private fun webScheme(): String = if (httpsEnabled()) "https" else "http"
 
-    /** HTTPS mode also flips the RTSP listener to TLS on the same port — advertise rtsps:// then. */
-    private fun rtspScheme(): String = if (httpsEnabled()) "rtsps" else "rtsp"
+    /** The RTSP listener's own TLS setting drives the advertised stream URI (issue #18). */
+    private fun rtspScheme(): String = if (rtspTlsEnabled()) "rtsps" else "rtsp"
 
     /** Bracketed IPv6, plain IPv4 — the same URL-host rule NetworkUtils owns. */
     private fun host(): String =

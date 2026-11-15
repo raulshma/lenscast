@@ -374,6 +374,8 @@ export const zh: Partial<Record<MessageKey, string>> = {
   // ── RTSP card ──
   'rtsp.title': 'RTSP 视频流',
   'rtsp.enable': '启用 RTSP 直播',
+  'rtsp.tls': 'TLS（RTSPS）',
+  'rtsp.tlsDesc': '通过 TLS 提供 RTSP（rtsps://），使用同一自签名证书——独立于 HTTPS 开关。修改会重启正在运行的 RTSP 输出。',
   'rtsp.subStream': '低分辨率子码流（/sub）',
   'rtsp.subStreamDesc': '为 NVR 检测角色提供第二条低分辨率 H.264 流。',
   'rtsp.port': 'RTSP 端口',

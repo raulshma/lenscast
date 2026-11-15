@@ -30,6 +30,7 @@ function useToggles(props: StreamingCardProps) {
     onvif: streamToggle(streaming, 'onvifEnabled', save),
     mediaEncryption: streamToggle(streaming, 'mediaEncryptionEnabled', save),
     httpsToggle: streamToggle(streaming, 'httpsEnabled', save),
+    rtspTls: streamToggle(streaming, 'rtspTlsEnabled', save),
     rtspSubStream: streamToggle(streaming, 'rtspSubStreamEnabled', save),
     keepAwake: streamToggle(streaming, 'keepAwakeEnabled', save),
   }
@@ -176,7 +177,7 @@ export function HttpsCard(props: StreamingCardProps) {
 }
 
 export function RtspCard(props: StreamingCardProps) {
-  const { s, rtspSubStream } = useToggles(props)
+  const { s, rtspTls, rtspSubStream } = useToggles(props)
   const rtspVideoCodec = () => s()?.streaming?.rtspVideoCodec ?? API_DEFAULTS.rtspVideoCodec
 
   return (
@@ -188,6 +189,16 @@ export function RtspCard(props: StreamingCardProps) {
       />
 
       <Show when={s()?.streaming?.rtspEnabled}>
+        {/* TLS is the RTSP listener's own setting (issue #18): toggling the
+            web HTTPS card no longer flips the RTSP scheme. A change restarts
+            a live RTSP output — the same restart-time property as the port. */}
+        <ToggleField
+          label={t('rtsp.tls')}
+          hint={t('rtsp.tlsDesc')}
+          checked={rtspTls.checked()}
+          onChange={rtspTls.onToggle}
+        />
+
         <ToggleField
           label={t('rtsp.subStream')}
           hint={t('rtsp.subStreamDesc')}

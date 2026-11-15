@@ -77,6 +77,12 @@ data class StreamingSettingsDto(
     val streamAudioEchoCancellation: Boolean = true,
     val recordingAudioEnabled: Boolean = true,
     val rtspEnabled: Boolean = false,
+    /**
+     * The RTSP listener's own TLS setting (issue #18): rtsps:// when true,
+     * independent of `httpsEnabled` — an HTTPS dashboard no longer forces
+     * the RTSP listener to TLS.
+     */
+    val rtspTlsEnabled: Boolean = false,
     val rtspPort: Int = StreamDefaults.RTSP_PORT,
     val rtspInputFormat: String = "",
     /** The RTSP output resolution wire name: "480p" | "720p" | "720p43" | "1080p" | "1080p43". */

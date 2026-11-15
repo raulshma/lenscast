@@ -61,12 +61,13 @@ class SettingsApplierTest {
     private val streamAudioEchoCancellation = MutableStateFlow(true)
     private val jpegQuality = MutableStateFlow(70)
     private val overlaySettings = MutableStateFlow(OverlaySettings())
-    private val rtspEnabled = MutableStateFlow(false)
-    private val rtspPort = MutableStateFlow(8554)
-    private val rtspInputFormat = MutableStateFlow(RtspInputFormat.AUTO)
-    private val rtspResolution = MutableStateFlow(RtspResolution.P720)
-    private val rtspVideoCodec = MutableStateFlow(RtspVideoCodec.H264)
-    private val rtspSubStreamEnabled = MutableStateFlow(false)
+private val rtspEnabled = MutableStateFlow(false)
+private val rtspPort = MutableStateFlow(8554)
+private val rtspInputFormat = MutableStateFlow(RtspInputFormat.AUTO)
+private val rtspResolution = MutableStateFlow(RtspResolution.P720)
+private val rtspVideoCodec = MutableStateFlow(RtspVideoCodec.H264)
+private val rtspSubStreamEnabled = MutableStateFlow(false)
+private val rtspTlsEnabled = MutableStateFlow(false)
     private val rtmpEnabled = MutableStateFlow(false)
     private val rtmpUrl = MutableStateFlow("")
     private val whipEnabled = MutableStateFlow(false)
@@ -152,6 +153,7 @@ class SettingsApplierTest {
         every { settingsDataStore.rtspResolution } returns rtspResolution
         every { settingsDataStore.rtspVideoCodec } returns rtspVideoCodec
         every { settingsDataStore.rtspSubStreamEnabled } returns rtspSubStreamEnabled
+        every { settingsDataStore.rtspTlsEnabled } returns rtspTlsEnabled
         every { settingsDataStore.rtmpEnabled } returns rtmpEnabled
         every { settingsDataStore.rtmpUrl } returns rtmpUrl
         every { settingsDataStore.whipEnabled } returns whipEnabled
@@ -416,6 +418,25 @@ class SettingsApplierTest {
             verify(exactly = 1) { streamingManager.setRtspSubStreamEnabled(true) }
             verify(exactly = 2) { streamingManager.setRtspSubStreamEnabled(any()) }
         }
+    }
+
+    @Test
+    fun `rtsp tls toggle lands on the manager independently of the rtsp group`() {
+        eventually {
+            verify(exactly = 1) { streamingManager.setRtspTlsEnabled(false) }
+        }
+        rtspTlsEnabled.value = true
+        eventually {
+            verify(exactly = 1) { streamingManager.setRtspTlsEnabled(true) }
+            verify(exactly = 2) { streamingManager.setRtspTlsEnabled(any()) }
+        }
+        // The dedicated single-flow rule means an unrelated RTSP group change
+        // (the five-flow combine) does not re-fire the TLS setter.
+        rtspPort.value = 9555
+        eventually {
+            verify(exactly = 1) { streamingManager.setRtspPort(9555) }
+        }
+        verify(exactly = 2) { streamingManager.setRtspTlsEnabled(any()) }
     }
 
     // ── encode resolution aspect → camera analysis seam ──

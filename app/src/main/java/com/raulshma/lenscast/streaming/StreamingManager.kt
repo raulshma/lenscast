@@ -159,6 +159,12 @@ class StreamingManager(
     // server lifecycle, the restart-vs-apply choice, the audio-stream handle,
     // the URL, and the audio-wanted/mic-arbitration decision all live in the
     // deep module; this class keeps the fan-out and the web/mDNS concerns.
+    // The RTSP listener's TLS intent — its own setting, not the web transport's
+    // (issue #18). The Settings Applier lands it through [setRtspTlsEnabled];
+    // the `secure`/factory/advertised-scheme reads below follow it live.
+    @Volatile
+    private var rtspTlsActive = false
+
     private val rtspOutput: RtspOutput = RtspOutput(
         audio = audioStreamingManager,
         audioConfig = ::audioConfig,
@@ -173,14 +179,17 @@ class StreamingManager(
         // is what isLiveStreaming() probes, and a failed bind keeps the two
         // answers different (live, but no serving socket).
         onActiveChanged = { active -> _isRtspActive.value = active },
-        // rtsps when HTTPS mode is on — the listener and every advertised URL follow.
-        secure = { webTransport.tlsEnabled() },
+        // rtsps when the independent RTSP-TLS setting is on (issue #18: no
+        // longer coupled to the web HTTPS toggle) — the listener and every
+        // advertised URL follow.
+        secure = { rtspTlsActive },
         serverFactory = { port ->
             RtspServer(
                 port = port,
                 encodedSource = encodedHub,
-                // TLS on/off follows the HTTPS setting: the same self-signed
-                // identity, the same 8554 port, clients use rtsps://.
+                // TLS on/off follows the independent RTSP-TLS setting: the
+                // same self-signed identity, the same 8554 port, clients use
+                // rtsps://.
                 sslServerSocketFactory = rtspTlsFactory(),
                 subStreamActive = { encodedHub.isSubStreamEnabled() },
                 encodedSendTap = ::onEncodedSinkSend,
@@ -709,7 +718,7 @@ class StreamingManager(
                 // The web identity and the RTSP identity share TlsCertManager,
                 // but a factory failure at RTSP start keeps the listener plain:
                 // advertise rtsps only when that factory can actually be built.
-                val scheme = if (webTransport.tlsEnabled() && rtspTlsFactory() != null) "rtsps" else "rtsp"
+                val scheme = if (rtspTlsActive && rtspTlsFactory() != null) "rtsps" else "rtsp"
                 "$scheme://$host:${rtspOutput.port()}/${RtspUriPolicy.DEFAULT_STREAM_PATH}"
             },
             httpClients = try {
@@ -1900,16 +1909,15 @@ class StreamingManager(
      * Switch the server between plain HTTP and HTTPS (self-signed). Like a
      * port change, this is a stop → recreate → start cycle through the
      * [WebTransport] replace entry; the shared auth gate survives, so
-     * dashboards stay logged in. The RTSP listener follows the same toggle —
-     * a live output restarts so the next accept is TLS (clients use rtsps://
-     * on the same port) or plain rtsp again.
+     * dashboards stay logged in. This is the WEB transport's toggle only —
+     * the RTSP scheme follows its own independent setting
+     * ([setRtspTlsEnabled], issue #18), so an HTTPS dashboard no longer
+     * forces rtsps:// on the RTSP listener.
      *
      * The web half of the toggle (identity resolve → replacement build →
      * announce-on-scheme-change → stop → swap → start) runs under the
      * module's lifecycle lock, so it can never interleave with a concurrent
-     * port apply (the two share the same replace cycle). The RTSP bounce
-     * follows outside that lock, guarded by [rtspOutput]'s own lifecycle
-     * atomics, so an audio bind cannot stall the web transport. Advertised
+     * port apply (the two share the same replace cycle). Advertised
      * URLs are rebuilt from the new scheme, so clients are never handed an
      * https URL for a plain server (or the reverse). A TLS identity that
      * cannot be built falls back to plain inside the module — the scheme is
@@ -1933,10 +1941,25 @@ class StreamingManager(
             }
             Log.d(TAG, "TLS ${if (webTransport.tlsEnabled()) "enabled" else "disabled"}; restart=${outcome.restartLabel()}")
         }
+    }
+
+    /**
+     * Switch the RTSP listener between plain RTSP and RTSPS (self-signed) —
+     * the RTSP scheme's own setting, independent of the web HTTPS toggle
+     * (issue #18). Like the web toggle this is a restart-time property: a
+     * live output bounces (stop → start) so the next accept is TLS (clients
+     * use rtsps:// on the same port) or plain rtsp again. The bounce is
+     * guarded by [rtspOutput]'s own lifecycle atomics, so an audio bind
+     * cannot stall it.
+     */
+    fun setRtspTlsEnabled(enabled: Boolean) {
+        if (rtspTlsActive == enabled) return
+        rtspTlsActive = enabled
         if (rtspOutput.isActive()) {
             rtspOutput.stop()
             rtspOutput.start()
         }
+        Log.d(TAG, "RTSP TLS ${if (enabled) "enabled" else "disabled"}")
     }
 
     /**
@@ -1950,9 +1973,9 @@ class StreamingManager(
         ReplaceOutcome.UNCHANGED -> "false"
     }
 
-    /** The RTSP listener's TLS factory while HTTPS mode is on; null keeps it plain. */
+    /** The RTSP listener's TLS factory while the RTSP-TLS setting is on; null keeps it plain. */
     private fun rtspTlsFactory(): javax.net.ssl.SSLServerSocketFactory? {
-        if (!webTransport.tlsEnabled()) return null
+        if (!rtspTlsActive) return null
         return runCatching {
             val app = context.applicationContext as AppGraph
             app.tlsCertManager.identity(localIpsSafe()).serverSocketFactory

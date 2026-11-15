@@ -189,6 +189,7 @@ class MainApplication : Application(), SingletonImageLoader.Factory, AppGraph {
             audioEnabled = { settingsDataStore.streamAudioEnabled.value },
             enabled = { settingsDataStore.onvifEnabled.value },
             httpsEnabled = { settingsDataStore.httpsEnabled.value },
+            rtspTlsEnabled = { settingsDataStore.rtspTlsEnabled.value },
             videoWidth = { settingsDataStore.rtspResolution.value.width },
             videoHeight = { settingsDataStore.rtspResolution.value.height },
             videoBitrate = { streamingManager.currentVideoBitrate() },

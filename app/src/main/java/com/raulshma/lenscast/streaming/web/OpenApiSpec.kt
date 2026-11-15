@@ -858,6 +858,7 @@ object OpenApiSpec {
             "streamAudioEchoCancellation" to boolSchema(),
             "recordingAudioEnabled" to boolSchema(),
             "rtspEnabled" to boolSchema(),
+            "rtspTlsEnabled" to boolSchema("The RTSP listener's own TLS setting (rtsps://), independent of httpsEnabled"),
             "rtspPort" to intSchema(),
             "rtspInputFormat" to stringSchema(),
             "rtspResolution" to stringSchema("`480p` | `720p` | `720p43` | `1080p` | `1080p43`"),

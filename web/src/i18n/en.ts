@@ -380,6 +380,8 @@ export const en: Record<string, string> = {
   'rtsp.restartHint': 'Applies with an RTSP restart',
   'rtsp.codec': 'Video Codec',
   'rtsp.codecH264': 'H.264 (recommended)',
+  'rtsp.tls': 'TLS (RTSPS)',
+  'rtsp.tlsDesc': 'Serve RTSP over TLS (rtsps://) with the same self-signed identity — independent of the HTTPS toggle. Restarting a live RTSP output applies it.',
   'rtsp.subStream': 'Low-Res Sub-Stream (/sub)',
   'rtsp.subStreamDesc': 'Serves a second low-resolution H.264 stream for NVR detect roles.',
 

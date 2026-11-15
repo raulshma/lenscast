@@ -28,6 +28,7 @@
     "streamAudioEchoCancellation": true,
     "recordingAudioEnabled": true,
     "rtspEnabled": false,
+    "rtspTlsEnabled": false,
     "rtspPort": 8554,
     "rtspInputFormat": "AUTO",
     "rtspResolution": "720p",

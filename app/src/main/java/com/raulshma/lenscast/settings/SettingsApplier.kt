@@ -156,6 +156,17 @@ class SettingsApplier(
             }
         }
 
+        // RTSP TLS (issue #18: the RTSP scheme's own setting, no longer
+        // riding the HTTPS toggle): a dedicated single-flow rule like the
+        // sub-stream's — the RTSP group above is already at the five-flow
+        // combine limit, and the manager's setter no-ops on an unchanged
+        // value, so re-fires are harmless.
+        scope.launch {
+            settingsDataStore.rtspTlsEnabled.collectLatest { tls ->
+                streamingManager.setRtspTlsEnabled(tls)
+            }
+        }
+
         // The encode resolution's aspect steers the camera's streaming
         // analysis window (issue #17): a 4:3 tier analyzes 4:3 frames so the
         // encode aspect-fills without cropping. A dedicated single-flow rule
