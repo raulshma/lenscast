@@ -755,42 +755,49 @@ private fun CameraTopOverlay(
         }
 
         // The right cluster overflows the screen with the stream chips up
-        // (six buttons never fit beside LIVE/WEB) — scrollable so the tail
-        // entries (Devices, More options) stay reachable, and width-hugging
-        // when idle so SpaceBetween still pins the cluster to the edge.
+        // (six buttons never fit beside LIVE/WEB): the five secondary buttons
+        // scroll, while the More-options button is PINNED outside the scroll
+        // so the menu (camera controls, capture tools, settings, quit) stays
+        // reachable without swiping the tail into view — the overflow fix for
+        // the pushed-off-screen Gallery/Menu report. Width-hugging when idle
+        // so SpaceBetween still pins the cluster to the edge.
         Row(
-            modifier = Modifier.horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(2.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            ServerStatusButton(
-                streamStatus = streamStatus,
-                lastServerError = lastServerError,
-                onCopyUrl = onCopyStreamUrl,
-                onCopyRtspUrl = onCopyRtspUrl,
-                onToggleServer = onToggleServer,
-            )
-            CameraControlButton(
-                icon = Icons.Default.ContentCopy,
-                contentDescription = stringResource(R.string.camera_connect_cd),
-                onClick = onShowConnect
-            )
-            CameraControlButton(
-                icon = if (showPreview) Icons.Default.Visibility else Icons.Default.VisibilityOff,
-                contentDescription = if (showPreview) stringResource(R.string.camera_hide_preview_cd)
-                else stringResource(R.string.camera_show_preview_cd),
-                onClick = onTogglePreview
-            )
-            CameraControlButton(
-                icon = Icons.Default.Collections,
-                contentDescription = stringResource(R.string.camera_gallery_cd),
-                onClick = onNavigateToGallery
-            )
-            CameraControlButton(
-                icon = Icons.Default.Devices,
-                contentDescription = stringResource(R.string.companion_nav_devices_cd),
-                onClick = onNavigateToDevices
-            )
+            Row(
+                modifier = Modifier.horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(2.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                ServerStatusButton(
+                    streamStatus = streamStatus,
+                    lastServerError = lastServerError,
+                    onCopyUrl = onCopyStreamUrl,
+                    onCopyRtspUrl = onCopyRtspUrl,
+                    onToggleServer = onToggleServer,
+                )
+                CameraControlButton(
+                    icon = Icons.Default.ContentCopy,
+                    contentDescription = stringResource(R.string.camera_connect_cd),
+                    onClick = onShowConnect
+                )
+                CameraControlButton(
+                    icon = if (showPreview) Icons.Default.Visibility else Icons.Default.VisibilityOff,
+                    contentDescription = if (showPreview) stringResource(R.string.camera_hide_preview_cd)
+                    else stringResource(R.string.camera_show_preview_cd),
+                    onClick = onTogglePreview
+                )
+                CameraControlButton(
+                    icon = Icons.Default.Collections,
+                    contentDescription = stringResource(R.string.camera_gallery_cd),
+                    onClick = onNavigateToGallery
+                )
+                CameraControlButton(
+                    icon = Icons.Default.Devices,
+                    contentDescription = stringResource(R.string.companion_nav_devices_cd),
+                    onClick = onNavigateToDevices
+                )
+            }
             Box {
                 CameraControlButton(
                     icon = Icons.Default.MoreVert,
