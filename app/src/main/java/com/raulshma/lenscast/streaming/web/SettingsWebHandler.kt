@@ -267,8 +267,18 @@ class SettingsWebHandler(
                 hdrMode = parseEnum(cam.hdrMode, current.hdrMode),
                 sceneMode = cam.sceneMode,
                 nightVisionMode = parseEnum(cam.nightVisionMode, current.nightVisionMode),
+                // Torch is NOT a web-camera-section setting: the camera DTO
+                // carries no torch fields (GET can't present them, PUT can't
+                // change them), so the rebuild must carry the stored values —
+                // defaulting them here turned a dashboard camera-section save
+                // into a persisted torch=false, and the Settings Applier
+                // killed the LED (the scheduled-automation torch, too) on
+                // every save. Live torch flips stay on POST /api/camera/torch
+                // (deterrence/automation write the live state, never this).
+                torchEnabled = current.torchEnabled,
                 outputRotation = OutputRotationPolicy.coerce(cam.outputRotation),
                 orientationLocked = cam.orientationLocked,
+                torchStrength = current.torchStrength,
             )
             settingsDataStore.saveSettings(newSettings)
         }
