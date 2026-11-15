@@ -13,6 +13,7 @@ import com.raulshma.lenscast.core.PowerManager
 import com.raulshma.lenscast.data.CaptureHistoryStore
 import com.raulshma.lenscast.streaming.model.BatteryDetailDto
 import com.raulshma.lenscast.streaming.model.StorageInfoDto
+import com.raulshma.lenscast.streaming.model.SuccessResponse
 import com.raulshma.lenscast.streaming.model.SystemInfoResponseDto
 
 /**
@@ -20,15 +21,21 @@ import com.raulshma.lenscast.streaming.model.SystemInfoResponseDto
  * build/device identity, uptimes, and the battery/storage facts the status
  * endpoint deliberately leaves coarse. Every read degrades to a safe value —
  * a missing sticky battery intent or an unavailable volume stat must never
- * 500 the triage page.
+ * 500 the triage page. The one write is POST /api/system/restart (issue #18's
+ * dashboard App-Restart button): the restart callback schedules the
+ * AlarmManager relaunch and quits past a settle, so the OK below still
+ * flushes to the dashboard before the teardown begins.
  */
 class SystemWebHandler(
     private val context: Context,
     private val powerManager: PowerManager,
     private val captureHistoryStore: CaptureHistoryStore,
+    /** The app's restart seam (AppGraph.restartApplication); invoked after the response is built. */
+    private val restart: () -> Unit = {},
 ) {
 
     private val responseAdapter by lazy { AppJson.moshi.adapter(SystemInfoResponseDto::class.java) }
+    private val successAdapter by lazy { AppJson.moshi.adapter(SuccessResponse::class.java) }
 
     fun get(): String {
         val response = SystemInfoResponseDto(
@@ -43,6 +50,12 @@ class SystemWebHandler(
             storage = storageInfo(),
         )
         return responseAdapter.toJson(response)
+    }
+
+    /** POST /api/system/restart — schedule the relaunch, run the quit teardown, answer OK. */
+    fun restart(): String {
+        restart()
+        return successAdapter.toJson(SuccessResponse())
     }
 
     private fun appVersion(): String = runCatching {

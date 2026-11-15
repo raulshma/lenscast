@@ -67,6 +67,7 @@ internal fun buildWebApiStack(
         context = context,
         powerManager = app.powerManager,
         captureHistoryStore = app.captureHistoryStore,
+        restart = { app.restartApplication() },
     )
     val pushHandler = PushWebHandler(
         subscriptions = app.pushSubscriptionStore,

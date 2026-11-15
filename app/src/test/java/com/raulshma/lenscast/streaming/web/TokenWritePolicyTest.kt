@@ -136,6 +136,7 @@ class TokenWritePolicyTest {
                 "/api/settings/ml-model/download",
                 "/api/settings/audio-model/download",
                 "/api/detection/test",
+                "/api/system/restart",
                 "/api/push/unifiedpush",
                 "/api/push/unifiedpush/remove",
             ),

@@ -1,10 +1,10 @@
-import { createResource, For, Show } from 'solid-js'
+import { createResource, createSignal, For, Show } from 'solid-js'
 import type { JSX } from 'solid-js'
 import type { SystemInfo } from '../../../../types'
-import { getSystemInfo } from '../../../../api/client'
+import { getSystemInfo, restartApp } from '../../../../api/client'
 import { formatBytes } from '../../../../format'
 import { t } from '../../../../lib/i18n'
-import { Panel, FieldRow, Skeleton } from '../../ui'
+import { Button, ConfirmDialog, FieldRow, Panel, Skeleton } from '../../ui'
 
 function formatUptime(ms: number): string {
   if (!Number.isFinite(ms) || ms <= 0) return '—'
@@ -29,6 +29,22 @@ function batteryTempLabel(tenthsC: number | null | undefined): string {
  */
 export default function SystemInfoPanel() {
   const [info] = createResource<SystemInfo>(() => getSystemInfo())
+  const [confirmOpen, setConfirmOpen] = createSignal(false)
+  const [restarting, setRestarting] = createSignal(false)
+
+  // Issue #18's App-Restart button: the device schedules its own relaunch and
+  // quits, so a dead connection here is the happy path — the note is shown
+  // either way and the dashboard's status polling reconnects to the fresh
+  // session.
+  const onRestart = async () => {
+    setConfirmOpen(false)
+    setRestarting(true)
+    try {
+      await restartApp()
+    } catch {
+      // Expected: the teardown can kill the connection before the OK lands.
+    }
+  }
 
   const rows = () => {
     const d = info()
@@ -83,7 +99,26 @@ export default function SystemInfoPanel() {
             </FieldRow>
           )}
         </For>
+        <FieldRow label={t('system.restart')}>
+          <Show
+            when={!restarting()}
+            fallback={<span class="nx-info-value nx-info-note">{t('system.restarting')}</span>}
+          >
+            <Button variant="danger-soft" size="sm" onClick={() => setConfirmOpen(true)}>
+              {t('system.restartButton')}
+            </Button>
+          </Show>
+        </FieldRow>
       </Show>
+      <ConfirmDialog
+        open={confirmOpen()}
+        title={t('system.restart')}
+        message={t('system.restartConfirm')}
+        danger
+        busy={restarting()}
+        onConfirm={onRestart}
+        onClose={() => setConfirmOpen(false)}
+      />
     </Panel>
   )
 }

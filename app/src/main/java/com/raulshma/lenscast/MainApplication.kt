@@ -28,6 +28,7 @@ import com.raulshma.lenscast.capture.ml.AudioModelStore
 import com.raulshma.lenscast.capture.ml.DetectionModelStore
 import com.raulshma.lenscast.companion.di.CompanionGraph
 import com.raulshma.lenscast.core.AppJson
+import com.raulshma.lenscast.core.AppRelaunch
 import com.raulshma.lenscast.core.ConnectivityMonitor
 import com.raulshma.lenscast.core.KeepAwakeController
 import com.raulshma.lenscast.core.KeyguardMonitor
@@ -469,6 +470,24 @@ class MainApplication : Application(), SingletonImageLoader.Factory, AppGraph {
     }
 
     /**
+     * The restart (the dashboard's App-Restart button — POST /api/system/restart,
+     * issue #18): register the relaunch on AlarmManager first — the process
+     * death the quit ladder causes clears every in-memory way back, so the
+     * OS alarm is the only survivor — then run the quit ladder past a short
+     * settle so the triggering request's OK response flushes to the client
+     * before the teardown begins. The [quitApplication] single-owner guard
+     * makes a racing second restart (a double button tap, the alarm firing
+     * into a still-alive process) a no-op.
+     */
+    override fun restartApplication() {
+        AppRelaunch.schedule(this)
+        appScope.launch {
+            delay(RESTART_RESPONSE_FLUSH_MS)
+            quitApplication()
+        }
+    }
+
+    /**
      * The installation-scoped MQTT client id / HA unique-id stem. ANDROID_ID
      * is stable per app install; a read failure falls back to a persisted
      * random id — a constant would give every such install the same MQTT
@@ -713,5 +732,8 @@ class MainApplication : Application(), SingletonImageLoader.Factory, AppGraph {
 
         /** The teardown window between the stop ladder and the process kill. */
         private const val QUIT_TEARDOWN_GRACE_MS = 500L
+
+        /** The settle before a restart's quit ladder — past the triggering response's flush. */
+        private const val RESTART_RESPONSE_FLUSH_MS = 300L
     }
 }

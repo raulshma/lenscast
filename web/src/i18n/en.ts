@@ -604,6 +604,10 @@ export const en: Record<string, string> = {
   'system.processUptime': 'Process uptime',
   'system.battery': 'Battery',
   'system.capturesOnDisk': 'Captures on disk',
+  'system.restart': 'App restart',
+  'system.restartButton': 'Restart',
+  'system.restartConfirm': 'Restart the LensCast app? Streams re-arm from their persisted settings when it comes back.',
+  'system.restarting': 'Restarting — the dashboard reconnects to the fresh session automatically.',
   'system.volumeFree': 'Volume free',
 
   // ── MQTT card ──

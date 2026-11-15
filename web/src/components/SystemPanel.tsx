@@ -1,6 +1,6 @@
-import { createResource, For, Show } from 'solid-js'
+import { createResource, createSignal, For, Show } from 'solid-js'
 import type { SystemInfo } from '../types'
-import { getSystemInfo } from '../api/client'
+import { getSystemInfo, restartApp } from '../api/client'
 import { formatBytes } from '../format'
 import SettingsCard from './SettingsCard'
 import { t } from '../lib/i18n'
@@ -28,6 +28,21 @@ function batteryTempLabel(tenthsC: number | null | undefined): string {
  */
 export default function SystemPanel() {
   const [info] = createResource<SystemInfo>(() => getSystemInfo())
+  const [restarting, setRestarting] = createSignal(false)
+
+  // Issue #18's App-Restart button: the device schedules its own relaunch and
+  // quits, so the request failing with a dead connection is the happy path —
+  // the note is shown either way and the dashboard's status polling
+  // reconnects to the fresh session.
+  const onRestart = async () => {
+    if (restarting() || !window.confirm(t('system.restartConfirm'))) return
+    setRestarting(true)
+    try {
+      await restartApp()
+    } catch {
+      // Expected: the teardown can kill the connection before the OK lands.
+    }
+  }
 
   const rows = () => {
     const d = info()
@@ -88,6 +103,19 @@ export default function SystemPanel() {
               <span class="field-value">
                 {formatBytes(d().storage.freeBytes)} / {formatBytes(d().storage.totalBytes)}
               </span>
+            </div>
+            <div class="field-row">
+              <span class="field-label">{t('system.restart')}</span>
+              <div class="motion-zone-actions">
+                <Show
+                  when={!restarting()}
+                  fallback={<span class="field-value">{t('system.restarting')}</span>}
+                >
+                  <button type="button" class="client-kick-btn" onClick={onRestart}>
+                    {t('system.restartButton')}
+                  </button>
+                </Show>
+              </div>
             </div>
           </>
         )}

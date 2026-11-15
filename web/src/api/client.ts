@@ -387,6 +387,18 @@ export async function sendTestAlert(): Promise<import('../types').DetectionTestR
   return requestJson('/api/detection/test', { method: 'POST' })
 }
 
+/**
+ * Restart the app (POST /api/system/restart): the device schedules its own
+ * relaunch and quits. The OK usually arrives before the process dies, but a
+ * connection error here is EXPECTED (the teardown races the response) and is
+ * not a failure — the caller shows its restarting note either way and the
+ * dashboard's status polling reconnects to the fresh session.
+ */
+export async function restartApp(): Promise<{ success: boolean }> {
+  return requestJson('/api/system/restart', { method: 'POST' })
+}
+
+
 /** Downloads the versioned settings export envelope (secrets already blanked server-side). */
 export async function exportSettings(): Promise<import('../types').SettingsExport> {
   return requestJson('/api/settings/export')

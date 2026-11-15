@@ -603,6 +603,10 @@ export const es: Partial<Record<MessageKey, string>> = {
   'system.processUptime': 'Tiempo activo del proceso',
   'system.battery': 'Batería',
   'system.capturesOnDisk': 'Capturas en disco',
+  'system.restart': 'Reinicio de la app',
+  'system.restartButton': 'Reiniciar',
+  'system.restartConfirm': '¿Reiniciar la app LensCast? Las emisiones se reactivan desde sus ajustes guardados al volver.',
+  'system.restarting': 'Reiniciando: el panel se reconecta automáticamente a la nueva sesión.',
   'system.volumeFree': 'Libre en el volumen',
 
   // ── MQTT card ──

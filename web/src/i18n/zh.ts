@@ -603,6 +603,10 @@ export const zh: Partial<Record<MessageKey, string>> = {
   'system.processUptime': '进程运行时长',
   'system.battery': '电池',
   'system.capturesOnDisk': '磁盘上的拍摄内容',
+  'system.restart': '应用重启',
+  'system.restartButton': '重启',
+  'system.restartConfirm': '重启 LensCast 应用？重启后各路推流会按已保存的设置自动恢复。',
+  'system.restarting': '正在重启——面板将自动重新连接到新会话。',
   'system.volumeFree': '卷剩余空间',
 
   // ── MQTT card ──

@@ -604,6 +604,10 @@ export const ru: Partial<Record<MessageKey, string>> = {
   'system.processUptime': 'Время работы процесса',
   'system.battery': 'Батарея',
   'system.capturesOnDisk': 'Снимки на диске',
+  'system.restart': 'Перезапуск приложения',
+  'system.restartButton': 'Перезапустить',
+  'system.restartConfirm': 'Перезапустить приложение LensCast? Потоки снова заработают из сохранённых настроек после перезапуска.',
+  'system.restarting': 'Перезапуск — панель автоматически подключится к новой сессии.',
   'system.volumeFree': 'Свободно на томе',
 
   // ── MQTT card ──

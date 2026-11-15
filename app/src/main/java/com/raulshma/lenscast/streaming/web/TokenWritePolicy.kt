@@ -57,6 +57,12 @@ object TokenWritePolicy {
         // Test alert: fires the alert sinks once (webhook/MQTT/notification);
         // it persists nothing, records no event, and cannot arm deterrence.
         "/api/detection/test",
+        // App restart: a device-maintenance action in the same class — the
+        // token holder is the automation system itself, and restarting the app
+        // is what its own keeper does on wedged state. It persists nothing
+        // (the quit ladder is the one the overflow menu runs) and the relaunch
+        // re-arms every persisted stream by policy.
+        "/api/system/restart",
         // UnifiedPush receiver pairing: a headless distributor has no browser
         // session. This is the one persisted-state exception: enrolling a
         // receiver routes future detection alerts to it, while the routes stay

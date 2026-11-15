@@ -122,6 +122,7 @@ class ApiRouter(
         "/api/recording/stop" -> ApiResponse.ok(recording.stop())
         "/api/deterrence/siren" -> ApiResponse.ok(deterrence.setSiren(r.body))
         "/api/detection/test" -> ApiResponse.ok(detectionTest.test())
+        "/api/system/restart" -> ApiResponse.ok(system.restart())
         "/api/auth/config" -> ApiResponse.ok(auth.put(r.body))
         "/api/media/batch-delete" -> ApiResponse.ok(gallery.batchDelete(r.body))
         "/api/push/subscriptions" -> ApiResponse.ok(push.subscribe(r.body))
@@ -240,6 +241,7 @@ class ApiRouter(
             Route(ApiMethod.POST, "/api/recording/stop"),
             Route(ApiMethod.POST, "/api/deterrence/siren"),
             Route(ApiMethod.POST, "/api/detection/test"),
+            Route(ApiMethod.POST, "/api/system/restart"),
             Route(ApiMethod.PUT, "/api/auth/config"),
             Route(ApiMethod.POST, "/api/auth/config"),
             Route(ApiMethod.POST, "/api/media/batch-delete"),

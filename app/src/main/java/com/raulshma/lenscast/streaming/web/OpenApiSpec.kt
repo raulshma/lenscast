@@ -223,6 +223,14 @@ object OpenApiSpec {
                 mapOf("200" to ok("SystemInfoResponseDto")),
             ),
         )
+        path(
+            "/api/system/restart",
+            "post" to operation(
+                listOf("system"),
+                "Restart the app: schedule the relaunch, run the quit teardown, answer OK",
+                mapOf("200" to ok("SuccessResponse")),
+            ),
+        )
 
         // ── camera ──
         path(

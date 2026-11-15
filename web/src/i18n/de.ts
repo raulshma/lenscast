@@ -605,6 +605,10 @@ export const de: Partial<Record<MessageKey, string>> = {
   'system.processUptime': 'Prozesslaufzeit',
   'system.battery': 'Akku',
   'system.capturesOnDisk': 'Aufnahmen auf dem Speicher',
+  'system.restart': 'App-Neustart',
+  'system.restartButton': 'Neustart',
+  'system.restartConfirm': 'LensCast-App neu starten? Streams werden beim Wiederstart aus den gespeicherten Einstellungen erneut aktiviert.',
+  'system.restarting': 'Neustart läuft — das Dashboard verbindet sich automatisch mit der neuen Sitzung.',
   'system.volumeFree': 'Volume frei',
 
   // ── MQTT card ──

@@ -113,4 +113,14 @@ interface AppGraph {
      * first, then the one server stop ladder, then the deliberate exit.
      */
     fun quitApplication()
+
+    /**
+     * Restart the app: schedule the launcher-intent relaunch on AlarmManager
+     * (the one mechanism that survives the process death) and then run the
+     * same [quitApplication] teardown. The relaunch is registered before the
+     * quit guard flips, and the quit follows past a short settle so a
+     * web-triggered restart's OK response flushes to the dashboard first
+     * (issue #18's dashboard App-Restart button).
+     */
+    fun restartApplication()
 }
