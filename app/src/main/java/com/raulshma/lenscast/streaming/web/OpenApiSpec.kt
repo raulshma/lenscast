@@ -479,6 +479,23 @@ object OpenApiSpec {
                 mapOf("200" to ok("DetectionTestResponseDto")),
             ),
         )
+        path(
+            "/api/automation/test",
+            "post" to operation(
+                listOf("automation"),
+                "Arm the Automation Test: fire one rule's actions immediately (restore pending, never journaled)",
+                mapOf("200" to ok("AutomationTestResponseDto")),
+                requestBody = jsonBody("AutomationTestArmRequestDto"),
+            ),
+        )
+        path(
+            "/api/automation/test/restore",
+            "post" to operation(
+                listOf("automation"),
+                "Restore the armed Automation Test's pre-test state",
+                mapOf("200" to ok("AutomationTestResponseDto")),
+            ),
+        )
 
         // ── deterrence ──
         path(
@@ -691,6 +708,16 @@ object OpenApiSpec {
             required = listOf("success", "dispatchedActions"),
             fixture = "detection-test.json",
         ),
+        "AutomationTestResponseDto" to schema(
+            "success" to boolSchema(),
+            "armedRuleId" to stringSchema("The rule now armed (null after a restore or a failed arm)"),
+            "error" to stringSchema("The failure reason; omitted on success"),
+            required = listOf("success"),
+            fixture = "automation-test.json",
+        ),
+        "AutomationTestArmRequestDto" to schema(
+            "ruleId" to stringSchema("The rule to fire once"),
+        ),
         "SettingsResponseDto" to schema(
             "camera" to ref("CameraSettingsDto"),
             "streaming" to ref("StreamingSettingsDto"),
@@ -717,6 +744,7 @@ object OpenApiSpec {
             "triggers" to arrayOf(ref("AutomationCatalogTriggerDto")),
             "conditions" to arrayOf(ref("AutomationCatalogConditionDto")),
             "limits" to ref("AutomationLimitsDto"),
+            "testArmedRuleId" to stringSchema("The armed Automation Test's rule id (omitted when nothing is armed)"),
             required = listOf("enabled", "rules", "catalog", "triggers", "conditions", "limits"),
             fixture = "automation.json",
         ),

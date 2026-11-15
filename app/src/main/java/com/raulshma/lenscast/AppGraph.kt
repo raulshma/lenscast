@@ -1,5 +1,6 @@
 package com.raulshma.lenscast
 
+import com.raulshma.lenscast.automation.AutomationTestController
 import com.raulshma.lenscast.automation.schedule.AutomationFireJournal
 import com.raulshma.lenscast.camera.CameraService
 import com.raulshma.lenscast.capture.DecryptedPhotoCache
@@ -123,4 +124,12 @@ interface AppGraph {
      * (issue #18's dashboard App-Restart button).
      */
     fun restartApplication()
+
+    /**
+     * The Automation Test's arm/restore owner (issue #18 item 3): fires a
+     * rule's actions once through the automation executor and winds the
+     * touched axes back on restore. Pulled by the automation screen and the
+     * web stack's test routes.
+     */
+    val automationTestController: AutomationTestController
 }

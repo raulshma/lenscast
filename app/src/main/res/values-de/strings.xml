@@ -713,6 +713,8 @@
     <string name="automation_last_fired_yesterday">Zuletzt gestern um %1$s ausgeführt</string>
     <string name="automation_last_fired_on">Zuletzt ausgeführt am %1$s um %2$s</string>
     <string name="automation_rule_menu_cd">Weitere Optionen</string>
+    <string name="automation_rule_run_test">Jetzt ausführen</string>
+    <string name="automation_rule_restore_test">Zustand wiederherstellen</string>
     <string name="automation_rule_duplicate_cd">Regel duplizieren</string>
     <string name="automation_delete_confirm_title">Regel löschen?</string>
     <string name="automation_delete_confirm_body">„%1$s“ wird nicht mehr ausgeführt. Das kann nicht rückgängig gemacht werden.</string>

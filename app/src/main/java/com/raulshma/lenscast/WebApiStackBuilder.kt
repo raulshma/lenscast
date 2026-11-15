@@ -6,6 +6,7 @@ import com.raulshma.lenscast.streaming.web.ApiRouter
 import com.raulshma.lenscast.streaming.web.AuditLog
 import com.raulshma.lenscast.streaming.web.AuditWebHandler
 import com.raulshma.lenscast.streaming.web.AuthWebHandler
+import com.raulshma.lenscast.streaming.web.AutomationTestWebHandler
 import com.raulshma.lenscast.streaming.web.AutomationWebHandler
 import com.raulshma.lenscast.streaming.web.CaptureWebHandler
 import com.raulshma.lenscast.streaming.web.DetectionEventsWebHandler
@@ -77,7 +78,12 @@ internal fun buildWebApiStack(
         subscriptions = app.pushSubscriptionStore,
         vapidKeys = app.vapidKeys,
     )
-    val automationHandler = AutomationWebHandler(app.settingsDataStore, app.automationFireJournal)
+    val automationHandler = AutomationWebHandler(
+        app.settingsDataStore,
+        app.automationFireJournal,
+        testController = app.automationTestController,
+    )
+    val automationTest = AutomationTestWebHandler(controller = { app.automationTestController })
     return WebApiStack(
         router = ApiRouter(
             settings = SettingsWebHandler(
@@ -86,6 +92,7 @@ internal fun buildWebApiStack(
                 audioModelStore = app.audioModelStore,
             ),
             automation = automationHandler,
+            automationTest = automationTest,
             status = statusHandler,
             stream = StreamWebHandler(manager, app.streamingSession),
             capture = CaptureWebHandler(app.photoCaptureManager),
@@ -120,6 +127,7 @@ internal fun buildWebApiStack(
         push = pushHandler,
         unifiedPush = unifiedPushHandler,
         automation = automationHandler,
+        automationTest = automationTest,
     )
 }
 

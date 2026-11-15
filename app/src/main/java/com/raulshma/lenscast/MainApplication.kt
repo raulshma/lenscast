@@ -9,6 +9,7 @@ import coil3.video.VideoFrameDecoder
 import com.raulshma.lenscast.automation.AutomationActionExecutor
 import com.raulshma.lenscast.automation.AutomationEventWiring
 import com.raulshma.lenscast.automation.AutomationSnapshotProvider
+import com.raulshma.lenscast.automation.AutomationTestController
 import com.raulshma.lenscast.automation.schedule.AutomationFireJournal
 import com.raulshma.lenscast.automation.schedule.AutomationScheduler
 import com.raulshma.lenscast.camera.CameraService
@@ -402,6 +403,11 @@ class MainApplication : Application(), SingletonImageLoader.Factory, AppGraph {
     }
     /** App-lifetime scope for work that must outlive a ViewModel or screen. */
     override val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+
+    /** The Automation Test's arm/restore owner (the automation screen + the web test routes). */
+    override val automationTestController: AutomationTestController by lazy {
+        AutomationTestController(this)
+    }
 
     /**
      * The single-owner guard for the quit ladder ([quitApplication]): the

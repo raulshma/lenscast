@@ -63,6 +63,11 @@ object TokenWritePolicy {
         // (the quit ladder is the one the overflow menu runs) and the relaunch
         // re-arms every persisted stream by policy.
         "/api/system/restart",
+        // Automation test arm/restore: the token holder IS the automation
+        // system — firing a rule once (and restoring its effects) is exactly
+        // what the scheduler does without any credential, minus the journal.
+        "/api/automation/test",
+        "/api/automation/test/restore",
         // UnifiedPush receiver pairing: a headless distributor has no browser
         // session. This is the one persisted-state exception: enrolling a
         // receiver routes future detection alerts to it, while the routes stay

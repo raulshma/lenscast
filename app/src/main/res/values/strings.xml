@@ -725,6 +725,8 @@
     <string name="automation_last_fired_yesterday">Last ran yesterday at %1$s</string>
     <string name="automation_last_fired_on">Last ran %1$s at %2$s</string>
     <string name="automation_rule_menu_cd">More options</string>
+    <string name="automation_rule_run_test">Run now</string>
+    <string name="automation_rule_restore_test">Restore state</string>
     <string name="automation_rule_duplicate_cd">Duplicate rule</string>
     <string name="automation_delete_confirm_title">Delete rule?</string>
     <string name="automation_delete_confirm_body">“%1$s” will stop running. This cannot be undone.</string>

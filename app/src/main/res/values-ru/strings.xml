@@ -732,6 +732,8 @@
     <string name="automation_last_fired_yesterday">Последний запуск вчера в %1$s</string>
     <string name="automation_last_fired_on">Последний запуск %1$s в %2$s</string>
     <string name="automation_rule_menu_cd">Дополнительные действия</string>
+    <string name="automation_rule_run_test">Запустить сейчас</string>
+    <string name="automation_rule_restore_test">Восстановить состояние</string>
     <string name="automation_rule_duplicate_cd">Дублировать правило</string>
     <string name="automation_delete_confirm_title">Удалить правило?</string>
     <string name="automation_delete_confirm_body">«%1$s» больше не будет запускаться. Это действие нельзя отменить.</string>

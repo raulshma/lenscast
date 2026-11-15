@@ -166,6 +166,7 @@ class OpenApiSpecParityTest {
         system = mockk(relaxed = true),
         push = mockk(relaxed = true),
         unifiedPush = mockk(relaxed = true),
+        automationTest = mockk(relaxed = true),
         auditLog = mockk(relaxed = true),
     )
 

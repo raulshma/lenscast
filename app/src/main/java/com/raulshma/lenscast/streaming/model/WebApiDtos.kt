@@ -732,6 +732,25 @@ data class DetectionTestResponseDto(
     val dispatchedActions: List<String> = emptyList(),
 )
 
+/**
+ * The POST /api/automation/test answer: whether the rule armed (its actions
+ * fired once, restore pending) and which id is now armed, or the arm/restore
+ * failure reason. `armedRuleId` null means nothing is armed after this call
+ * (a failed arm, or a successful restore).
+ */
+@JsonClass(generateAdapter = true)
+data class AutomationTestResponseDto(
+    val success: Boolean = true,
+    val armedRuleId: String? = null,
+    val error: String? = null,
+)
+
+/** The POST /api/automation/test body: the rule to fire once. */
+@JsonClass(generateAdapter = true)
+data class AutomationTestArmRequestDto(
+    val ruleId: String? = null,
+)
+
 // ── Audit Log DTOs ──
 
 /** One audited action: a write-route dispatch or a login outcome. */
@@ -1125,6 +1144,12 @@ data class AutomationStateDto(
     val triggers: List<AutomationCatalogTriggerDto> = emptyList(),
     val conditions: List<AutomationCatalogConditionDto> = emptyList(),
     val limits: AutomationLimitsDto = AutomationLimitsDto(),
+    /**
+     * The armed Automation Test's rule id (issue #18 item 3): a dashboard or
+     * the app re-learns "this rule's test is live — restore pending" after a
+     * reload. Response-only; null (omitted) when nothing is armed.
+     */
+    val testArmedRuleId: String? = null,
 )
 
 /**

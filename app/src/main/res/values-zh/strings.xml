@@ -708,6 +708,8 @@
     <string name="automation_last_fired_yesterday">昨天 %1$s 最后运行</string>
     <string name="automation_last_fired_on">%1$s %2$s 最后运行</string>
     <string name="automation_rule_menu_cd">更多操作</string>
+    <string name="automation_rule_run_test">立即运行</string>
+    <string name="automation_rule_restore_test">恢复状态</string>
     <string name="automation_rule_duplicate_cd">复制规则</string>
     <string name="automation_delete_confirm_title">删除规则?</string>
     <string name="automation_delete_confirm_body">“%1$s”将停止运行。此操作无法撤消。</string>

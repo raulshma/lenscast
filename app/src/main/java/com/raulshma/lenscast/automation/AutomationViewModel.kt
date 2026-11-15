@@ -87,12 +87,17 @@ class AutomationViewModel(
     private val cameraService: CameraService,
     private val settingsDataStore: SettingsDataStore,
     private val fireJournal: AutomationFireJournal,
+    /** The Automation Test's arm/restore owner (issue #18 item 3). */
+    private val testController: AutomationTestController,
 ) : ViewModel() {
 
     // Read-side state straight from the Settings Store — no per-ViewModel
     // stateIn, no retyped defaults.
     val automationEnabled: StateFlow<Boolean> = settingsDataStore.automationEnabled
     val automationRules: StateFlow<List<AutomationRule>> = settingsDataStore.automationRules
+
+    /** The armed Automation Test's rule id; null = nothing armed. */
+    val armedTestRuleId: StateFlow<String?> = testController.armedRuleId
 
     /** The bound camera's multi-level flash ceiling (null = no levels / unsupported). */
     val torchStrengthMaxLevel: StateFlow<Int?> = cameraService.torchStrengthMaxLevel
@@ -133,6 +138,20 @@ class AutomationViewModel(
     fun duplicateRule(rule: AutomationRule, copyName: String) =
         persistRules(withRuleDuplicated(settingsDataStore.automationRules.value, rule, copyName))
 
+    /**
+     * The Automation Test: fire [ruleId]'s actions once (snapshot held), or
+     * wind the armed test back. The arm verifies the id against the persisted
+     * rules, so an unknown id is a logged no-op — the card action only
+     * appears for rules that exist.
+     */
+    fun runRuleTest(ruleId: String) {
+        save { testController.arm(ruleId) }
+    }
+
+    fun restoreRuleTest() {
+        save { testController.restore() }
+    }
+
     /** The single persist seam: every rules write sanitizes, then saves. */
     private fun persistRules(rules: List<AutomationRule>) = save {
         settingsDataStore.saveAutomationRules(AutomationSchedulePolicy.sanitizeRules(rules))
@@ -146,10 +165,11 @@ class AutomationViewModel(
         private val cameraService: CameraService,
         private val settingsDataStore: SettingsDataStore,
         private val fireJournal: AutomationFireJournal,
+        private val testController: AutomationTestController,
     ) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
         override fun <T : ViewModel> create(modelClass: Class<T>): T {
-            return AutomationViewModel(cameraService, settingsDataStore, fireJournal) as T
+            return AutomationViewModel(cameraService, settingsDataStore, fireJournal, testController) as T
         }
     }
 

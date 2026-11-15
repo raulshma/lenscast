@@ -716,6 +716,8 @@
     <string name="automation_last_fired_yesterday">Dernière exécution hier à %1$s</string>
     <string name="automation_last_fired_on">Dernière exécution le %1$s à %2$s</string>
     <string name="automation_rule_menu_cd">Plus d\'options</string>
+    <string name="automation_rule_run_test">Exécuter maintenant</string>
+    <string name="automation_rule_restore_test">Restaurer l’état</string>
     <string name="automation_rule_duplicate_cd">Dupliquer la règle</string>
     <string name="automation_delete_confirm_title">Supprimer la règle ?</string>
     <string name="automation_delete_confirm_body">« %1$s » ne sera plus exécutée. Cette action est irréversible.</string>

@@ -31,6 +31,8 @@ class ApiRouter(
     private val push: PushWebHandler,
     /** The /api/push/unifiedpush receiver routes (POSTs token-writable). */
     private val unifiedPush: UnifiedPushWebHandler,
+    /** The Automation Test's arm/restore pair (POST /api/automation/test, /restore). */
+    private val automationTest: AutomationTestWebHandler,
     /** The audit trail for mutating dispatches. */
     private val auditLog: AuditLog,
 ) {
@@ -97,6 +99,8 @@ class ApiRouter(
         "/api/settings" -> ApiResponse.ok(settings.put(r.body))
         "/api/settings/import" -> ApiResponse.ok(settings.import(r.body))
         "/api/automation" -> ApiResponse.ok(automation.put(r.body))
+        "/api/automation/test" -> ApiResponse.ok(automationTest.arm(r.body))
+        "/api/automation/test/restore" -> ApiResponse.ok(automationTest.restore())
         "/api/settings/ml-model/download" -> ApiResponse.ok(settings.downloadModel())
         "/api/settings/audio-model/download" -> ApiResponse.ok(settings.downloadAudioModel())
         "/api/stream/start", "/api/stream/resume" -> ApiResponse.ok(stream.startAll())
@@ -214,6 +218,8 @@ class ApiRouter(
             Route(ApiMethod.POST, "/api/settings"),
             Route(ApiMethod.PUT, "/api/automation"),
             Route(ApiMethod.POST, "/api/automation"),
+            Route(ApiMethod.POST, "/api/automation/test"),
+            Route(ApiMethod.POST, "/api/automation/test/restore"),
             Route(ApiMethod.POST, "/api/settings/import"),
             Route(ApiMethod.POST, "/api/settings/ml-model/download"),
             Route(ApiMethod.POST, "/api/settings/audio-model/download"),

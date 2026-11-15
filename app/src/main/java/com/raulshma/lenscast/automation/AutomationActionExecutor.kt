@@ -59,6 +59,19 @@ class AutomationActionExecutor(private val app: MainApplication) : AutomationAct
     }
 
     /**
+     * Runs one action list directly — the Automation Test's arm and restore
+     * both drive this (issue #18 item 3), so a test fire takes exactly the
+     * execution path a scheduled fire takes, with no second implementation to
+     * drift. Never journaled: the fire journal and cooldowns stay the
+     * scheduler's, a test leaves no `lastFiredAt` trace.
+     */
+    suspend fun runActions(actions: List<AutomationActionSpec>) {
+        for (action in actions) {
+            execute(action)
+        }
+    }
+
+    /**
      * One catalog action to its seam. Camera-valued actions
      * (camera_exposure/ev/zoom/fps and torch) merge into the PERSISTED
      * [com.raulshma.lenscast.camera.model.CameraSettings] — the Settings

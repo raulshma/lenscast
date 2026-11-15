@@ -32,6 +32,7 @@ import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.RestoreFromTrash
 import androidx.compose.material.icons.outlined.Bolt
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -119,13 +120,19 @@ fun AutomationScreen(onNavigateBack: () -> Unit) {
     val context = LocalContext.current
     val app = context.applicationContext as AppGraph
     val viewModel: AutomationViewModel = viewModel(
-        factory = AutomationViewModel.Factory(app.cameraService, app.settingsDataStore, app.automationFireJournal)
+        factory = AutomationViewModel.Factory(
+            app.cameraService,
+            app.settingsDataStore,
+            app.automationFireJournal,
+            app.automationTestController,
+        )
     )
     val automationEnabled by viewModel.automationEnabled.collectAsState()
     val rules by viewModel.automationRules.collectAsState()
     val canAddRule by viewModel.canAddRule.collectAsState()
     val torchStrengthMaxLevel by viewModel.torchStrengthMaxLevel.collectAsState()
     val lastFiredKeys by viewModel.lastFiredKeys.collectAsState()
+    val armedTestRuleId by viewModel.armedTestRuleId.collectAsState()
     // The "now" anchor for the last-fired buckets: retaken on every journal
     // poll (the screen's own beat), so the Today/Yesterday boundary and the
     // rendered HH:mm stay current instead of frozen into the composition.
@@ -222,12 +229,15 @@ fun AutomationScreen(onNavigateBack: () -> Unit) {
                     rule = rule,
                     lastFiredKey = rule.id?.let(lastFiredKeys::get),
                     lastFiredNowMs = lastFiredNowMs,
+                    testArmed = rule.id != null && rule.id == armedTestRuleId,
                     onToggleEnabled = { enabled ->
                         rule.id?.let { id -> viewModel.setRuleEnabled(id, enabled) }
                     },
                     onEdit = { editorDraft = RuleDraft.from(rule) },
                     onDuplicate = { viewModel.duplicateRule(rule, copyName) },
                     onDelete = { deleteCandidateId = rule.id },
+                    onRunTest = { rule.id?.let(viewModel::runRuleTest) },
+                    onRestoreTest = { viewModel.restoreRuleTest() },
                 )
             }
         }
@@ -284,10 +294,14 @@ private fun AutomationRuleCard(
     rule: AutomationRule,
     lastFiredKey: Long?,
     lastFiredNowMs: Long,
+    /** True while this rule's Automation Test is armed (restore pending). */
+    testArmed: Boolean,
     onToggleEnabled: (Boolean) -> Unit,
     onEdit: () -> Unit,
     onDuplicate: () -> Unit,
     onDelete: () -> Unit,
+    onRunTest: () -> Unit,
+    onRestoreTest: () -> Unit,
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
     Card(
@@ -402,6 +416,30 @@ private fun AutomationRuleCard(
                         )
                     }
                     DropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }) {
+                        // The Automation Test (issue #18 item 3): fire once
+                        // now, or — while this rule's test is armed — restore
+                        // the pre-test state. The restore affordance replaces
+                        // the run item so the undo is never two taps away.
+                        DropdownMenuItem(
+                            text = {
+                                Text(
+                                    stringResource(
+                                        if (testArmed) R.string.automation_rule_restore_test
+                                        else R.string.automation_rule_run_test
+                                    )
+                                )
+                            },
+                            leadingIcon = {
+                                Icon(
+                                    if (testArmed) Icons.Default.RestoreFromTrash else Icons.Default.PlayArrow,
+                                    contentDescription = null,
+                                )
+                            },
+                            onClick = {
+                                menuExpanded = false
+                                if (testArmed) onRestoreTest() else onRunTest()
+                            },
+                        )
                         DropdownMenuItem(
                             text = { Text(stringResource(R.string.automation_rule_duplicate_cd)) },
                             leadingIcon = { Icon(Icons.Default.ContentCopy, contentDescription = null) },

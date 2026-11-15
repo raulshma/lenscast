@@ -44,6 +44,8 @@ import com.raulshma.lenscast.streaming.model.AutomationUpdateRequestDto
 class AutomationWebHandler(
     private val settingsDataStore: SettingsDataStore,
     private val fireJournal: AutomationFireJournal,
+    /** The Automation Test's owner; its armed-rule id rides the state document. */
+    private val testController: com.raulshma.lenscast.automation.AutomationTestController? = null,
 ) {
 
     // The rule graph's adapters ride [AutomationRuleJson] — AppJson plus the
@@ -94,6 +96,7 @@ class AutomationWebHandler(
                 enabled = settingsDataStore.automationEnabledFromDisk(),
                 rules = settingsDataStore.automationRulesFromDisk(),
                 journal = fireJournal.load(),
+                testArmedRuleId = testController?.armedRuleId?.value,
             ),
         )
     }
@@ -105,6 +108,7 @@ class AutomationWebHandler(
                 enabled = settingsDataStore.automationEnabledFromDisk(),
                 rules = settingsDataStore.automationRulesFromDisk(),
                 journal = fireJournal.load(),
+                testArmedRuleId = testController?.armedRuleId?.value,
             ),
         )
         return state
@@ -130,6 +134,7 @@ class AutomationWebHandler(
             rules: List<AutomationRule>,
             journal: Map<String, Long>,
             zone: TimeZone = TimeZone.getDefault(),
+            testArmedRuleId: String? = null,
         ): AutomationStateDto {
             return AutomationStateDto(
                 enabled = enabled,
@@ -139,6 +144,7 @@ class AutomationWebHandler(
                             ?.let { AutomationSchedulePolicy.decodeOccurrenceKey(it, zone) },
                     )
                 },
+                testArmedRuleId = testArmedRuleId,
                 // The editor contract's published bounds: StreamDefaults is
                 // the ONE source, the clients consume the document.
                 limits = AutomationLimitsDto(

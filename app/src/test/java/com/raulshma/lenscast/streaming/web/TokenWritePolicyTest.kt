@@ -137,6 +137,8 @@ class TokenWritePolicyTest {
                 "/api/settings/audio-model/download",
                 "/api/detection/test",
                 "/api/system/restart",
+                "/api/automation/test",
+                "/api/automation/test/restore",
                 "/api/push/unifiedpush",
                 "/api/push/unifiedpush/remove",
             ),

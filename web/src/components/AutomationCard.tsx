@@ -1,6 +1,6 @@
 import { createSignal, For, Show } from 'solid-js'
 import type { AutomationRuleDto, AutomationStateDto } from '../types'
-import { getAutomation, putAutomation } from '../api/client'
+import { getAutomation, putAutomation, restoreAutomationTest, testAutomation } from '../api/client'
 import { formatDate, t } from '../lib/i18n'
 import { createVisiblePoll } from '../hooks/visiblePoll'
 import {
@@ -165,6 +165,40 @@ export default function AutomationCard(props: Props) {
     if (!current || readOnly() || saving() || atRuleCap()) return
     const copyName = rule.name ? t('automation.ruleCopyOf', { name: rule.name }) : t('automation.ruleCopy')
     void persist(current.enabled, withRuleDuplicated(current.rules, rule.id, copyName, limits().maxRules))
+  }
+
+  // ── the Automation Test (issue #18 item 3): fire once, restore after ──
+
+  const armedRuleId = () => state()?.testArmedRuleId ?? null
+  const [testing, setTesting] = createSignal(false)
+
+  /** Fire the rule's actions once (restore pending). A confirm guards the siren/recording side effects. */
+  async function runTest(rule: AutomationRuleDto) {
+    if (readOnly() || testing()) return
+    if (!window.confirm(t('automation.testConfirm', { name: rule.name || t('automation.ruleUnnamed') }))) return
+    setTesting(true)
+    try {
+      await testAutomation(rule.id)
+      await reload(true)
+    } catch {
+      // The device answers errors in-band; a transport failure resurfaces on the next poll.
+    } finally {
+      setTesting(false)
+    }
+  }
+
+  /** Wind the armed test's touched axes back to their pre-test values. */
+  async function restoreTest() {
+    if (testing()) return
+    setTesting(true)
+    try {
+      await restoreAutomationTest()
+      await reload(true)
+    } catch {
+      // Same in-band contract as the arm.
+    } finally {
+      setTesting(false)
+    }
   }
 
   function editRule(rule: AutomationRuleDto) {
@@ -363,6 +397,27 @@ export default function AutomationCard(props: Props) {
                   </svg>
                   {t('automation.edit')}
                 </button>
+                {/* The Automation Test: fire once (restore pending), or wind
+                    this rule's test back when it is the armed one. */}
+                <Show
+                  when={armedRuleId() === rule.id}
+                  fallback={
+                    <button class="card-btn card-btn-ghost" onClick={() => runTest(rule)} disabled={readOnly() || testing()} title={t('automation.testAria')} aria-label={t('automation.testAria')}>
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M13 2L4.5 13.5h5L9 22l8.5-11.5h-5L13 2z" />
+                      </svg>
+                      {t('automation.test')}
+                    </button>
+                  }
+                >
+                  <button class="card-btn card-btn-primary" onClick={() => restoreTest()} disabled={testing()} title={t('automation.restoreAria')} aria-label={t('automation.restoreAria')}>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <path d="M3 12a9 9 0 109-9" />
+                      <path d="M3 4v8h8" />
+                    </svg>
+                    {t('automation.restore')}
+                  </button>
+                </Show>
                 <button class="card-btn card-btn-ghost" onClick={() => duplicateRule(rule)} disabled={readOnly() || saving() || atRuleCap()} title={t('automation.duplicateRuleAria')} aria-label={t('automation.duplicateRuleAria')}>
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     <rect x="9" y="9" width="12" height="12" rx="2" />

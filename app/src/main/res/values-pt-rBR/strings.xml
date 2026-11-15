@@ -716,6 +716,8 @@
     <string name="automation_last_fired_yesterday">Executada pela última vez ontem às %1$s</string>
     <string name="automation_last_fired_on">Executada pela última vez em %1$s às %2$s</string>
     <string name="automation_rule_menu_cd">Mais opções</string>
+    <string name="automation_rule_run_test">Executar agora</string>
+    <string name="automation_rule_restore_test">Restaurar estado</string>
     <string name="automation_rule_duplicate_cd">Duplicar regra</string>
     <string name="automation_delete_confirm_title">Excluir regra?</string>
     <string name="automation_delete_confirm_body">“%1$s” vai parar de ser executada. Isso não pode ser desfeito.</string>

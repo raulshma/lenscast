@@ -455,6 +455,24 @@ export async function putAutomation(update: import('../types').AutomationUpdateR
   })
 }
 
+/**
+ * POST /api/automation/test — arm the Automation Test: fire the rule's
+ * actions once immediately (through the same executor a scheduled fire uses)
+ * with the pre-test state held for the restore; never journaled.
+ */
+export async function testAutomation(ruleId: string): Promise<import('../types').AutomationTestResponseDto> {
+  return requestJson('/api/automation/test', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ruleId } satisfies import('../types').AutomationTestArmRequestDto),
+  })
+}
+
+/** POST /api/automation/test/restore — wind the armed test's touched axes back. */
+export async function restoreAutomationTest(): Promise<import('../types').AutomationTestResponseDto> {
+  return requestJson('/api/automation/test/restore', { method: 'POST' })
+}
+
 // ── Web Push (browser subscriptions; the phone publishes to them) ──
 
 /** The VAPID server key: base64url, 65-byte uncompressed P-256 point — the subscription's applicationServerKey. */

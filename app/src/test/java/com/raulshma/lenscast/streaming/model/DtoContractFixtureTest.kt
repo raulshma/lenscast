@@ -360,6 +360,17 @@ class DtoContractFixtureTest {
     }
 
     @Test
+    fun `automation test response matches the automation test fixture`() {
+        val test = AutomationTestResponseDto(
+            armedRuleId = "0b1e2d3c-4a5b-6c7d-8e9f-0a1b2c3d4e5f",
+        )
+        assertMatchesFixture(
+            "automation-test.json",
+            moshi.adapter(AutomationTestResponseDto::class.java).toJson(test),
+        )
+    }
+
+    @Test
     fun `system info response matches the system fixture`() {
         val system = SystemInfoResponseDto(
             appVersion = "1.9.0",

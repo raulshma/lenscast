@@ -1044,6 +1044,20 @@ export interface AutomationStateDto {
   triggers: AutomationCatalogTriggerDto[]
   conditions: AutomationCatalogConditionDto[]
   limits: AutomationLimitsDto
+  /** The armed Automation Test's rule id (omitted when nothing is armed). */
+  testArmedRuleId?: string
+}
+
+/** POST /api/automation/test body: the rule to fire once (restore pending). */
+export interface AutomationTestArmRequestDto {
+  ruleId: string
+}
+
+/** POST /api/automation/test and /restore's answer. */
+export interface AutomationTestResponseDto {
+  success: boolean
+  armedRuleId?: string
+  error?: string
 }
 
 /**
