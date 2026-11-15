@@ -718,6 +718,7 @@ describe('API_DEFAULTS lockstep with the fixtures', () => {
       'processUptimeMs',
       'battery',
       'storage',
+      'torchStrengthMaxLevel',
     ])
     expectKeys(system.battery as unknown as Record<string, unknown>, [
       'level',

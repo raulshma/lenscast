@@ -791,6 +791,16 @@ data class SystemInfoResponseDto(
     val processUptimeMs: Long,
     val battery: BatteryDetailDto,
     val storage: StorageInfoDto,
+    /**
+     * The torch strength ceiling the bound camera's HAL reports
+     * (FLASH_INFO_STRENGTH_MAXIMUM_LEVEL); null when unknown — pre-33, no
+     * flash unit, or the key is missing. A reported max of 1 is the
+     * binary-torch fallback: the per-level API exists but the HAL drives no
+     * brightness ladder, so a persisted strength level is silently a plain
+     * on/off (the issue #16b "brightness does nothing" class — the
+     * diagnostics here make that verdict visible without logcat).
+     */
+    val torchStrengthMaxLevel: Int? = null,
 )
 
 /** Battery facts beyond the status DTO's level/charging trio. */

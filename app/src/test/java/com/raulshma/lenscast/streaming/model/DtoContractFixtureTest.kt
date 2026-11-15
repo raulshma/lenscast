@@ -396,6 +396,7 @@ class DtoContractFixtureTest {
                 freeBytes = 53_687_091_200,
                 totalBytes = 107_374_182_400,
             ),
+            torchStrengthMaxLevel = 3,
         )
         assertMatchesFixture(
             "system.json",

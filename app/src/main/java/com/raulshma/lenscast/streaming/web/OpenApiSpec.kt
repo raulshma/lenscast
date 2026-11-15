@@ -1155,6 +1155,7 @@ object OpenApiSpec {
             "processUptimeMs" to intSchema(),
             "battery" to ref("BatteryDetailDto"),
             "storage" to ref("StorageInfoDto"),
+            "torchStrengthMaxLevel" to intSchema(),
             required = listOf("appVersion", "deviceModel", "deviceManufacturer", "androidVersion", "sdkInt", "osUptimeMs", "processUptimeMs", "battery", "storage"),
             fixture = "system.json",
         ),

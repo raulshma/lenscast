@@ -32,6 +32,8 @@ class SystemWebHandler(
     private val captureHistoryStore: CaptureHistoryStore,
     /** The app's restart seam (AppGraph.restartApplication); invoked after the response is built. */
     private val restart: () -> Unit = {},
+    /** The bound camera's torch strength ceiling (CameraService.torchStrengthMaxLevel); null when unknown. */
+    private val torchStrengthMaxLevel: () -> Int? = { null },
 ) {
 
     private val responseAdapter by lazy { AppJson.moshi.adapter(SystemInfoResponseDto::class.java) }
@@ -48,6 +50,7 @@ class SystemWebHandler(
             processUptimeMs = processUptimeMs(),
             battery = batteryDetail(),
             storage = storageInfo(),
+            torchStrengthMaxLevel = torchStrengthMaxLevel(),
         )
         return responseAdapter.toJson(response)
     }

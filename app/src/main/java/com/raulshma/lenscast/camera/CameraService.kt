@@ -1247,6 +1247,15 @@ class CameraService(private val context: Context) {
                 } else {
                     _torchStrengthMaxLevel.value = null
                 }
+                // The #16b triage line: a reported max of 1 means the HAL
+                // drives no brightness ladder — any requested strength is a
+                // plain on/off regardless of what the settings hold. One
+                // INFO per bind pairs the ceiling with the persisted ask.
+                Log.i(
+                    TAG,
+                    "Torch strength: device max=${_torchStrengthMaxLevel.value ?: "unsupported"}, " +
+                        "requested=${activeSettings.torchStrength ?: "default"}",
+                )
             }
 
             // CameraX drops control calls issued synchronously inside the

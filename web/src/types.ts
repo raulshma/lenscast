@@ -670,6 +670,8 @@ export interface SystemInfo {
     freeBytes: number
     totalBytes: number
   }
+  /** The bound camera's torch strength ceiling (FLASH_INFO_STRENGTH_MAXIMUM_LEVEL); absent when unknown. */
+  torchStrengthMaxLevel?: number
 }
 
 /** One per-UTC-day total in the detection stats series. */

@@ -21,5 +21,6 @@
     "quotaBytes": 2147483648,
     "freeBytes": 53687091200,
     "totalBytes": 107374182400
-  }
+  },
+  "torchStrengthMaxLevel": 3
 }

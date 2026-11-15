@@ -69,6 +69,7 @@ internal fun buildWebApiStack(
         powerManager = app.powerManager,
         captureHistoryStore = app.captureHistoryStore,
         restart = { app.restartApplication() },
+        torchStrengthMaxLevel = { app.cameraService.torchStrengthMaxLevel.value },
     )
     val pushHandler = PushWebHandler(
         subscriptions = app.pushSubscriptionStore,
