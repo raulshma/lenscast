@@ -47,7 +47,11 @@ arbitration in RecordingService, camera rebinding) are allowed to bypass it.
 One documented second application path exists for camera controls: gesture /
 quick-setting updates apply to the CameraService *before* persisting (for
 responsiveness) and the Applier re-applies after persistence — camera-control
-application is idempotent, so the overlap is harmless and intended.
+application is idempotent, so the overlap is harmless and intended. The RTSP
+group's combine sits at the typed five-flow limit — the independent
+`rtspTlsEnabled` flag (issue #18's decoupled RTSPS) applies through its own
+single-flow collector onto `StreamingManager.setRtspTlsEnabled` (an
+early-return no-op when unchanged), not a sixth combine argument.
 
 ### Settings Store
 **`data/SettingsDataStore.kt`** — persistence for camera, streaming, watchdog,
@@ -73,7 +77,10 @@ once, inside the store, and exposed as a `StateFlow` — ViewModels and Web
 API handlers read those flows directly, no re-wrapping and no re-typed
 defaults. Settings screens consume them via SettingsViewModel — no mirror
 state. Auth settings are a plain value type; hashing/verification lives in
-Stream Auth Crypto.
+Stream Auth Crypto. RTSP TLS is its own `rtsp_tls` flag, not a derived read:
+at first store construction a pure one-time migration seeds it from the HTTPS
+flag's stored value (existing installs keep their scheme; new installs start
+plaintext), and from then on the two toggles are independent (issue #18).
 
 ### Recording Controller
 **`capture/RecordingController.kt`** — the single owner of recording state and
@@ -660,7 +667,11 @@ download route, and the settings export/import pair — GET
 envelope through the pure `SettingsImportParser` and applies it through the
 same `put` path a dashboard save uses; the parser also accepts a bare
 settings update document with full PUT semantics — a present section
-persists wholesale, so the envelope remains the lossless path), `StatusWebHandler` (status
+persists wholesale, so the envelope remains the lossless path; the
+camera-section rebuild carries the persisted torch pair
+(`torchEnabled`/`torchStrength`) verbatim — the web camera section never
+edits torch, and defaulting them here turned a dashboard save into a
+persisted torch=false that killed a scheduled LED, issue #16a), `StatusWebHandler` (status
 aggregation, plus the live camera-control truth — torch, zoom, selected
 lens, and the device's real control ranges — so the dashboard mirrors the
 device instead of hardcoding bounds), `StreamWebHandler`
@@ -672,7 +683,11 @@ and sanitizes before saving, and both routes answer from a fresh disk
 read so the client sees the persisted truth, not what it sent; the
 read-only catalogs publish their picker `group`/`icon` kinds and the
 `limits` block publishes StreamDefaults' editor bounds — see
-Automation Limits), `LensWebHandler`,
+Automation Limits), `AutomationTestWebHandler` (POST
+`/api/automation/test`(+`/restore`) — the Automation Test's arm/restore
+pair backed by the app's `AutomationTestController`; the automation state
+document publishes `testArmedRuleId` so a reload re-learns the armed rule),
+`LensWebHandler`,
 `IntervalCaptureWebHandler`, `RecordingWebHandler` (observes the Recording
 Controller), `GalleryWebHandler` (media resolution/thumbnails),
 `DeterrenceWebHandler` (the siren route), `DetectionEventsWebHandler` (the
@@ -848,9 +863,11 @@ has no viewer form.
 
 ### Token Write Policy
 **`streaming/web/TokenWritePolicy.kt`** — the exact POST routes a valid API
-token may write (stream/web/RTSP start and stop, `/api/capture`, recording
-start and stop, siren, torch, the model downloads, the detection-test alert,
-and the UnifiedPush receiver pairing routes). Every path outside the list
+token may write (stream/web/RTSP/RTMP/WHIP/SRT start and stop, `/api/capture`,
+recording start and stop, siren, torch, the live lens controls, the
+interval-capture loop, the model downloads, the detection-test alert,
+`/api/system/restart`, the automation test's arm/restore pair, and the
+UnifiedPush receiver pairing routes). Every path outside the list
 stays read-only for tokens. The list deliberately contains no `/api/auth/`
 route; under `/api/push/` it contains only the two receiver-facing
 UnifiedPush routes, so a bearer token never mints sessions, rotates
@@ -967,7 +984,11 @@ delegates over `update`, plus the coalesced `setAudioConfig(wanted, bitrate)`
 single-restart entry the manager's audio snapshot routes through;
 `StreamingManager` keeps its public surface (the
 Settings Applier's audio write is one coalesced call) and delegates — the manager retains fan-out and
-web/mDNS concerns the way `FramePipeline` absorbed the web frame path.
+web/mDNS concerns the way `FramePipeline` absorbed the web frame path. TLS
+is an `rtspTlsActive` verdict the manager owns (`secure = { rtspTlsActive }`):
+`setRtspTlsEnabled` bounces the output only while it is active, the HTTPS
+toggle no longer bounces RTSP, and the connect-info scheme reads the same
+verdict (`rtsps` only when TLS is active AND the TLS factory is present).
 
 ### RTSP Resolution
 **`streaming/rtsp/RtspResolution.kt`** — the RTSP output's resolution choices
@@ -1170,6 +1191,23 @@ the last focus-applied settings, consults the policy (forcing on a fresh
 bind), and skips the metering otherwise — so the settings-apply path that
 runs on every slider tick (twice, editor + Applier) can no longer cancel a
 deliberate tap-to-focus.
+
+### Controls Apply Policy
+**`camera/model/ControlsApplyPolicy.kt` + `CameraService.liveCamera`** —
+the post-bind controls choreography and the mid-recording apply target
+(issue #18 item 1's two mechanisms). The policy is the pure retry ladder: a
+deferred controls apply is scheduled at 400 ms (the empirically-settled
+first rung — CameraX drops control calls issued synchronously inside the
+bind window) and again at 1500 ms, bounded by the settle budget; applies
+are idempotent, so rungs are cheap. `bindRecording` rebinds with
+`writeBack=false` — the fresh session starts at platform defaults — so the
+same ladder runs for the recording session, and the returned Camera is
+tracked in `liveCamera` (the camera of the LIVE session): every remote,
+gesture, and settings-apply seam (controls, torch, zoom, focus, the
+observer identity guards) targets `liveCamera` first, so mid-recording
+dashboard changes land on the live session instead of silently targeting
+the closed one. `clearBoundUseCases` clears the seam and cancels pending
+applies.
 
 ### Quick Setting Catalog
 **`camera/model/QuickSettingCatalog.kt`** — one pure descriptor per
@@ -1633,8 +1671,13 @@ version/SDK, OS and process uptimes, extended battery facts (temperature,
 voltage, health off the sticky BATTERY_CHANGED intent; level/charging from
 the same PowerManager the status endpoint uses, so the two never disagree),
 and storage (capture bytes vs the configured quota plus StatFs volume
-free/total). Every read degrades to a safe value — a headless triage page
-must never 500.
+free/total), plus `torchStrengthMaxLevel` — the bound camera's
+`FLASH_INFO_STRENGTH_MAXIMUM_LEVEL` (null when unknown), the issue #16b
+triage fact whose in-process twin is CameraService's INFO bind log pairing
+device max with the requested level. Every read degrades to a safe value —
+a headless triage page must never 500. The one write is POST
+`/api/system/restart` (issue #18's dashboard App-Restart button — see App
+Relaunch).
 
 ### Storage Quota
 **`data/CaptureHistoryStore.kt` (`quotaMb` provider)** — the once-hard-coded
@@ -1876,6 +1919,17 @@ only its own hold, and the streaming lock is re-armed by the session's
 30-second poll (`renewWakeLock`) before its 60-minute budget lapses,
 independent of this hold.
 
+### App Relaunch
+**`core/AppRelaunch.kt` + `AppGraph.restartApplication`** — the dashboard
+App-Restart's relaunch half (issue #18 item 4b): one AlarmManager
+`setAndAllowWhileIdle` on `ELAPSED_REALTIME_WAKEUP` two seconds out, firing
+the package's launch intent through an immutable `PendingIntent` — the only
+mechanism that survives `quitApplication`'s process exit.
+`MainApplication.restartApplication` schedules, waits a fixed 300 ms
+response-flush settle, then reuses the existing quit ladder; the handler
+answers OK first, and the dashboard swaps its button for a "restarting"
+note while the server comes back with reset uptime.
+
 ### Automation Condition Policy
 **`automation/schedule/AutomationConditionPolicy.kt`** — the pure verdict
 over a snapshot: `isMet(condition, snapshot)` per condition (the catalog
@@ -2034,10 +2088,32 @@ actions (`camera_*`, `torch`) merge into the persisted CameraSettings via
 no stream interruption; `camera_lens` switches on Main, clamped into the
 live lens inventory (empty inventory and a missing index skip silently);
 `detection` writes the motion/sound toggles to the Settings Store; unknown
-ids skip silently as the last gate. Deliberately stateless and cheap to
+ids skip silently as the last gate. A public `runActions` runs this same
+seam for the Automation Test — never journaled (no `lastFiredAt`, no
+cooldown write), so a test fire leaves no schedule trace. Deliberately stateless and cheap to
 construct — a front-end builds an instance per command against
 MainApplication's lazy seam graph, so the composition root gains no new
 member. The torch mode split is deliberate: see Torch (LIVE vs PERSISTED).
+
+### Automation Test Controller
+**`automation/AutomationTestController.kt` +
+`automation/schedule/AutomationRestorePolicy.kt`** — the apply/restore
+toggle behind the automation screens' "Run now" (issue #18 item 3). Arming
+a rule is Mutex-serialized: restore whatever was armed before, snapshot the
+restorable axes (persisted camera settings, live torch toggle/strength,
+stream and detection toggles, stream state, recording-idle), run the rule's
+actions through the Automation Action Executor's `runActions` — the shared
+seam, so a test fire exercises exactly what a scheduled fire runs — and
+publish the armed rule id (a StateFlow the app screen and the dashboard
+mirror as `testArmedRuleId`). Restore is the pure policy's verdict: only
+the axes the rule touched wind back, `siren` restores as a stop,
+`recording` stops only if the controller was idle at arm time (a recording
+the user started mid-test is the user's), `capture_photo` and unknown ids
+restore nothing, and torch strength restores only when the rule drove it.
+Arming rule B restores rule A first — one armed test at a time — and the
+armed state is deliberately in-memory only: the restore list exists to wind
+back state this process changed, so a process restart simply leaves the
+state where the test put it.
 
 ### Automation Rule Editor State
 **`automation/RuleDraft.kt`, `automation/RuleDraftSaver.kt`,
@@ -2094,7 +2170,14 @@ should be ON (the strength API switches the torch on as a side effect when
 it was off), and re-asserts it on the same `applyCameraControls` seam that
 keeps the binary torch alive across rebinds; `CameraSettings.torchStrength`
 (null = device default) carries the persisted request, and the automation
-editor caps its strength slider at the live device verdict.
+editor caps its strength slider at the live device verdict. The verdict is
+externally visible: `torchStrengthMaxLevel` rides `GET /api/system` (a
+reported max of 1 is the binary-torch fallback — issue #16b's triage fact).
+The camera-open strength call is the pinned residual
+(`docs/research/torch-quick-settings.md` §6): the API is CTS-exercised
+camera-closed and documented `CAMERA_IN_USE` when the camera is in use, so
+a reporter device with max > 1 whose logcat shows the "Torch strength
+failed" line is a distinct in-session strength bug, not a max=1 HAL.
 
 ### Torch (LIVE vs PERSISTED)
 **`automation/AutomationActionExecutor.kt` (`setTorchLive` vs the
