@@ -50,6 +50,7 @@ import com.raulshma.lenscast.camera.model.SessionDemand
 import com.raulshma.lenscast.camera.model.StreamAspect
 import com.raulshma.lenscast.camera.model.TorchState
 import com.raulshma.lenscast.camera.model.TorchStrengthPolicy
+import com.raulshma.lenscast.camera.model.ControlsApplyPolicy
 import com.raulshma.lenscast.core.YuvConverter
 import com.raulshma.lenscast.camera.model.WhiteBalance
 import com.raulshma.lenscast.camera.model.HdrMode
@@ -105,6 +106,22 @@ class CameraService(private val context: Context) {
     private var imageCapture: ImageCapture? = null
     private var imageAnalysis: ImageAnalysis? = null
     private var camera: Camera? = null
+
+    /**
+     * The camera of the LIVE session — the instance every control apply, remote
+     * PTZ/torch flip, live-zoom read, and observation attach must reach.
+     * Normally the same instance as [camera]; a recording bind ([bindRecording])
+     * replaces the session WITHOUT write-back (the preview-side fields must
+     * survive for [unbindRecording] to restore), so while a recording holds the
+     * camera this field carries the recording session's instance while
+     * [camera] still points at the dead pre-recording one. Set on every
+     * successful bind (inside [bindLargestCompatible], both write-back
+     * variants), cleared by [clearBoundUseCases]. Without this seam, every
+     * settings apply landing mid-recording silently targeted the closed
+     * session — manual ISO/exposure reset at recording start and dashboard
+     * changes went dead until the next full rebind.
+     */
+    private var liveCamera: Camera? = null
     private var lifecycleOwner: LifecycleOwner? = null
     private var frameListener: ((ByteArray, Int, Int, Int) -> Unit)? = null
 
@@ -329,7 +346,7 @@ class CameraService(private val context: Context) {
     }
 
     fun tapToFocus(x: Float, y: Float) {
-        val cam = camera ?: run {
+        val cam = liveCamera ?: run {
             Log.w(TAG, "tapToFocus: camera not available")
             return
         }
@@ -343,7 +360,7 @@ class CameraService(private val context: Context) {
 
     /** Remote PTZ/torch seam for the Web API: zoom clamps to the live device range. */
     fun setZoomRatio(ratio: Float): Boolean {
-        val cam = camera ?: return false
+        val cam = liveCamera ?: return false
         return try {
             cam.cameraControl.setZoomRatio(clampZoom(ratio, cam))
             true
@@ -374,10 +391,10 @@ class CameraService(private val context: Context) {
      * lens is physically at 3x. Null before the first camera bind; the caller
      * falls back to the persisted setting.
      */
-    fun liveZoomRatio(): Float? = camera?.cameraInfo?.zoomState?.value?.zoomRatio
+    fun liveZoomRatio(): Float? = liveCamera?.cameraInfo?.zoomState?.value?.zoomRatio
 
     fun setTorchEnabled(on: Boolean): Boolean {
-        val cam = camera ?: return false
+        val cam = liveCamera ?: return false
         return try {
             if (!cam.cameraInfo.hasFlashUnit()) {
                 Log.w(TAG, "setTorchEnabled: no flash unit")
@@ -419,7 +436,7 @@ class CameraService(private val context: Context) {
         }
         torchStateObserver = observer
         controlsHandler.post {
-            if (torchStateObserver === observer && camera === cam) {
+            if (torchStateObserver === observer && liveCamera === cam) {
                 cam.cameraInfo.torchState.observeForever(observer)
             }
         }
@@ -427,12 +444,12 @@ class CameraService(private val context: Context) {
 
     /**
      * Detach the torch observation from the bound camera's live data. The
-     * live data reference is captured before posting: the camera field may
+     * live data reference is captured before posting: the live camera may
      * already be gone (unbind) by the time this lands on the main thread.
      */
     private fun stopTorchObservation() {
         val observer = torchStateObserver ?: return
-        val liveData = camera?.cameraInfo?.torchState
+        val liveData = liveCamera?.cameraInfo?.torchState
         torchStateObserver = null
         liveData?.let { controlsHandler.post { it.removeObserver(observer) } }
     }
@@ -476,7 +493,7 @@ class CameraService(private val context: Context) {
         }
         cameraOpenStateObserver = observer
         controlsHandler.post {
-            if (cameraOpenStateObserver === observer && camera === cam) {
+            if (cameraOpenStateObserver === observer && liveCamera === cam) {
                 cam.cameraInfo.cameraState.observeForever(observer)
             }
         }
@@ -489,7 +506,7 @@ class CameraService(private val context: Context) {
      */
     private fun stopCameraOpenObservation() {
         val observer = cameraOpenStateObserver ?: return
-        val liveData = camera?.cameraInfo?.cameraState
+        val liveData = liveCamera?.cameraInfo?.cameraState
         cameraOpenStateObserver = null
         _cameraOpenObserved.value = false
         liveData?.let { controlsHandler.post { it.removeObserver(observer) } }
@@ -940,7 +957,22 @@ class CameraService(private val context: Context) {
         return try {
             // No write-back: the preview-side fields must keep their values so
             // [unbindRecording] can restore the standard binding.
-            bindLargestCompatible(provider, owner, base, extra = videoCapture, writeBack = false)
+            //
+            // The recording bind REPLACES the live session, so it runs the same
+            // settle choreography bindUseCases runs: detach the observations
+            // riding the outgoing camera, rebind, reattach to the session that
+            // just bound, and schedule the deferred controls apply. Without it
+            // the fresh session came up at platform defaults — auto AE, manual
+            // ISO/exposure silently gone for the whole recording — and the
+            // preview-side `camera` field (deliberately not written back)
+            // routed every later settings apply to the closed session, so
+            // dashboard changes went dead until the next full rebind.
+            stopTorchObservation()
+            stopCameraOpenObservation()
+            val bound = bindLargestCompatible(provider, owner, base, extra = videoCapture, writeBack = false)
+            observeTorchState(bound)
+            observeCameraOpenState(bound)
+            schedulePostBindControlsApply()
             true
         } catch (e: Exception) {
             Log.e(TAG, "bindRecording: no compatible combination found", e)
@@ -1222,10 +1254,9 @@ class CameraService(private val context: Context) {
             // camera would come up at the platform default 1.0 zoom while
             // activeSettings says otherwise — the restart-restores-zoom
             // contract silently broke on rebinds. Defer the apply past the
-            // settle instead.
-            controlsHandler.postDelayed({
-                applyCameraControls(activeSettings, forceFocusReapply = true)
-            }, CONTROLS_APPLY_DELAY_MS)
+            // settle instead (the bounded ladder from ControlsApplyPolicy —
+            // the same choreography bindRecording runs for its own session).
+            schedulePostBindControlsApply()
 
             // Deferred from the capability check above: rebuild once so the
             // ImageCapture matches the effective photo config. Its verdict
@@ -1287,6 +1318,11 @@ class CameraService(private val context: Context) {
                     *useCases.toTypedArray()
                 )
 
+                // Both variants bind a live session — the write-back=false
+                // caller (bindRecording) must route its control applies and
+                // observations at this instance too, not the dead predecessor.
+                liveCamera = boundCamera
+
                 if (writeBack) {
                     preview = useCases.filterIsInstance<Preview>().firstOrNull()
                     imageCapture = useCases.filterIsInstance<ImageCapture>().firstOrNull()
@@ -1319,6 +1355,7 @@ class CameraService(private val context: Context) {
         imageCapture = null
         imageAnalysis = null
         camera = null
+        liveCamera = null
         boundPhotoConfig = null
         // Unbound camera = torch dark: the live fact dies with the session,
         // and the driven strength goes with it (TorchState's KDoc).
@@ -1597,9 +1634,31 @@ class CameraService(private val context: Context) {
         }
     }
 
+    /**
+     * The one post-bind controls-apply scheduler, shared by every session
+     * producer ([bindUseCases] and [bindRecording]): one apply per
+     * [ControlsApplyPolicy] rung, each re-asserting [activeSettings] with
+     * [forceFocusReapply] so a fresh bind's metering state matches too. Each
+     * apply resolves its target at fire time through [liveCamera] — a rung
+     * landing after a newer bind re-asserts onto the newer session, which is
+     * the desired idempotent behavior, and a rung landing after an unbind is
+     * a caught-exception no-op.
+     */
+    private fun schedulePostBindControlsApply() {
+        ControlsApplyPolicy.applyDelaysMs().forEach { delayMs ->
+            controlsHandler.postDelayed({
+                applyCameraControls(activeSettings, forceFocusReapply = true)
+            }, delayMs)
+        }
+    }
+
     @androidx.annotation.OptIn(androidx.camera.camera2.interop.ExperimentalCamera2Interop::class)
     private fun applyCameraControls(settings: CameraSettings, forceFocusReapply: Boolean) {
-        val cam = camera ?: return
+        // The live session is the target — during a recording bind the
+        // preview-side `camera` field points at the closed pre-recording
+        // camera, and every settings emission (dashboard PUT via the Settings
+        // Applier, on-device editor) must reach the session actually running.
+        val cam = liveCamera ?: return
 
         try {
             cam.cameraControl.setZoomRatio(clampZoom(settings.zoomRatio, cam))
@@ -1845,14 +1904,6 @@ class CameraService(private val context: Context) {
     companion object {
         private const val TAG = "CameraService"
 
-        /**
-         * Post-bind settle window for deferred camera-control applies: CameraX
-         * drops zoom/torch calls issued synchronously inside the bind window
-         * on some devices (fresh camera then runs at platform defaults even
-         * though activeSettings says otherwise), while the same apply a beat
-         * later lands. Empirically verified on the DRG (Nokia 6.1 Plus).
-         */
-        private const val CONTROLS_APPLY_DELAY_MS = 400L
         internal const val MAX_ANALYSIS_WIDTH = 1280
         internal const val MAX_ANALYSIS_HEIGHT = 720
         internal const val FOUR_THREE_ANALYSIS_WIDTH = 960
