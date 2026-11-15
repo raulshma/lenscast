@@ -9,6 +9,7 @@ class OnvifServerTest {
     private fun server(
         enabled: () -> Boolean = { true },
         httpsEnabled: () -> Boolean = { false },
+        rtspTlsEnabled: () -> Boolean = { false },
         videoCodec: () -> RtspVideoCodec = { RtspVideoCodec.H264 },
     ) = OnvifServer(
         ipAddress = { "192.168.1.5" },
@@ -17,6 +18,7 @@ class OnvifServerTest {
         audioEnabled = { true },
         enabled = enabled,
         httpsEnabled = httpsEnabled,
+        rtspTlsEnabled = rtspTlsEnabled,
         videoWidth = { 1280 },
         videoHeight = { 720 },
         videoBitrate = { 2_000_000 },
@@ -96,8 +98,8 @@ class OnvifServerTest {
     }
 
     @Test
-    fun `https mode switches the advertised rtsp uri to rtsps`() {
-        val stream = server(httpsEnabled = { true }).handle(
+    fun `tls mode switches the advertised rtsp uri to rtsps and https alone no longer does`() {
+        val stream = server(rtspTlsEnabled = { true }).handle(
             "<s:Envelope><s:Body><trt:GetStreamUri/></s:Body></s:Envelope>",
         )
         assertTrue(stream.contains("<tt:Uri>rtsps://192.168.1.5:8554/stream</tt:Uri>"))
@@ -106,6 +108,12 @@ class OnvifServerTest {
             "<s:Envelope><s:Body><trt:GetStreamUri/></s:Body></s:Envelope>",
         )
         assertTrue(plain.contains("<tt:Uri>rtsp://192.168.1.5:8554/stream</tt:Uri>"))
+        // The decoupling (issue #18): HTTPS flips only the web/snapshot URLs;
+        // the stream URI follows its own TLS flag.
+        val httpsOnly = server(httpsEnabled = { true }).handle(
+            "<s:Envelope><s:Body><trt:GetStreamUri/></s:Body></s:Envelope>",
+        )
+        assertTrue(httpsOnly.contains("<tt:Uri>rtsp://192.168.1.5:8554/stream</tt:Uri>"))
     }
 
     @Test
