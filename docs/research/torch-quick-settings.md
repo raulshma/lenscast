@@ -9,7 +9,8 @@ case. Companion research: `torch-strength.md` (the brightness half of #16b).
 
 **Resolution (2026-11-16):** the lock is not a LensCast bug and not fixable from
 LensCast — it is the framework's flash-unit exclusivity, layered with a
-ROM-dependent SystemUI availability policy. Verified by experiment on the dev
+ROM-dependent torch-availability policy below SystemUI (the tile code itself is
+stock AOSP on both ROMs; source-validated 2026-11-16). Verified by experiment on the dev
 POCO F1 (see §4) and against the public API docs + CTS (§2–3). **No behavior
 change:** the experiment closed off the one alternative we could have tried —
 `CameraManager.setTorchMode` is not usable while streaming at all. The one
@@ -33,14 +34,20 @@ one-sided:
    while streaming, because torch mode requires the camera closed. Therefore a
    locked QS tile while the Main lens streams is structural: *no* app
    implementation can light that LED and keep the tile free.
-3. **SystemUI (ROM-dependent):** when the tile disables, and for which camera.
-   The reporter's One UI keys it off flash-unit ownership (Ultra-Wide has no
-   flash unit → tile stays live). AOSP-family SystemUI is stricter: on the dev
-   POCO F1 the tile locks whenever ANY camera is open — even the flash-less
-   front camera — with the OS's own "Camera in use" subtitle.
+3. **Torch-availability reporting (ROM-dependent):** when the tile disables,
+   and for which camera. The tile code itself is identical across ROMs — stock
+   AOSP SystemUI picks the back-flash camera and mirrors that camera's
+   `TorchCallback` stream, nothing more (LineageOS 22.1's
+   `FlashlightControllerImpl` is byte-identical to AOSP main). What differs is
+   what the camera stack reports into that stream. The reporter's One UI
+   reports unavailability only while the flash-owning camera is open
+   (Ultra-Wide has no flash unit → tile stays live). On the dev POCO F1 the
+   vendor HAL reports the flash camera's torch unavailable whenever ANY camera
+   is open — even the flash-less front camera — so the tile locks with the
+   OS's own "Camera in use" subtitle.
 
-The Ultra-Wide behavior the reporter wants to preserve is the SystemUI layer
-doing its per-flash-unit thing on their ROM. LensCast neither causes nor can
+The Ultra-Wide behavior the reporter wants to preserve is the camera stack's
+per-flash-unit torch reporting on their ROM. LensCast neither causes nor can
 remove it. The best we can do — and what this research pins as a constraint —
 is keep LensCast's camera usage exactly as it is and never adopt
 `setTorchMode` as the streaming path (§5).
@@ -87,6 +94,21 @@ facts fall out of the same file:
   invoked during plain torch toggling. Unavailable is specifically the
   camera-opened (or resource-lost) signal, not part of normal torch use.
 
+Three more tests in the same file (source-validated against AOSP main,
+2026-11-16) sharpen §1 and §5 further:
+
+- `testTorchModeExceptions`: with camera N open, `setTorchMode` on N expects
+  `CAMERA_IN_USE` — even from the same process that owns the camera, which is
+  direct CTS proof that torch mode is not a streaming path. On a *different*
+  flash camera M the call may either succeed or fail with
+  `MAX_CAMERAS_IN_USE`; CTS tolerates both. That discretion is the
+  framework-level license for the Ultra-Wide case working on some ROMs.
+- `testCameraDeviceOpenAfterTorchOn`: opening the flash-owning camera fires
+  `onTorchModeUnavailable` for that camera only, and (vendor API > 33) leaves
+  other cameras' torch state untouched — but its comment concedes legacy HALs
+  "may trigger UNAVAILABLE for any other id", the HAL discretion §4 shows in
+  the wild on the POCO F1.
+
 ## 3. The QS tile is a setTorchMode client
 
 SystemUI's flashlight tile has no privileged path; it toggles
@@ -95,9 +117,9 @@ SystemUI's flashlight tile has no privileged path; it toggles
 Routines" is likewise an external torch client — the reporter observed it
 losing control exactly when the tile locks, which is consistent with both
 being served by the same exclusive rule. "Locked and disabled" in the QS panel
-is therefore not a separate system setting: it is the tile reacting to
-`onTorchModeUnavailable` (One UI) or to camera-use state (AOSP-family, §4),
-both caused by LensCast holding the flash-owning camera open.
+is therefore not a separate system setting: on both ROMs the tile is reacting
+to `onTorchModeUnavailable` on the flash-owning camera's stream — what differs
+is what the ROM's camera stack reports into that stream (§4).
 
 ## 4. Experiment (dev POCO F1, 2026-11-16)
 
@@ -130,23 +152,35 @@ single strength level, so the POCO F1 is a binary-torch device throughout.
    **"Camera in use"**, green camera-use chip in the shade, "1 app is active"
    privacy chip. The OS itself states the reason on the tile.
 3. *LensCast bound to camera 1 (Front — NO flash unit)*: tile **still** dimmed
-   with "Camera in use". AOSP-family SystemUI here keys the lock off ANY open
-   camera, not off flash ownership.
+   with "Camera in use". Stock SystemUI has no any-camera policy (it only
+   follows the back-flash camera's torch stream), so this is the ROM's camera
+   stack reporting the flash camera's torch unavailable while a flash-less
+   camera streams — HAL-level policy, not tile policy.
 4. *Camera released (HOME)*: tile returns to enabled/"Off".
 
-This refines the model: the framework layer (§1) is per-flash-unit, but the
-SystemUI layer that greys the tile is ROM policy, and ROMs differ:
+This refines the model: the framework layer (§1) is per-flash-unit, and the
+SystemUI tile code is *not* where the ROMs differ — LineageOS 22.1's
+`FlashlightControllerImpl`/`FlashlightTile` are byte-identical (modulo icon
+calls) to AOSP main, both keying the tile off the torch-availability stream of
+the one back-flash camera. What is ROM policy is the torch-availability
+*reporting* below SystemUI (vendor camera HAL / service): when the stack fires
+`onTorchModeUnavailable` for the flash camera:
 
-- **One UI (reporter's Samsung, Android 13):** locks only while the
-  flash-owning camera is open → Ultra-Wide streams keep the tile usable. This
-  is what the reporter observed and wants preserved.
-- **AOSP-family (POCO F1, LineageOS 22):** locks whenever any camera is open →
-  even the Ultra-Wide case would lock on this ROM.
+- **One UI (reporter's Samsung, Android 13):** reports unavailability only
+  while the flash-owning camera is open → Ultra-Wide streams keep the tile
+  usable. This is what the reporter observed and wants preserved.
+- **Xiaomi/QTI HAL (POCO F1, LineageOS 22):** reports the flash camera's torch
+  unavailable whenever any camera is open → even the Ultra-Wide case would
+  lock on this ROM. CTS explicitly tolerates this ("this may trigger
+  UNAVAILABLE for any other id", `testCameraDeviceOpenAfterTorchOn`), so it is
+  HAL-discretionary, not a framework invariant.
 
 Side note from the same session: relaunching the app via adb right after HOME
 hit the while-in-use policy ("Camera disabled by policy (while-in-use
 denial)") — the same REJECT line visible in this device's camera events log
-from earlier testing. A cold start clears it. Unrelated to the torch, recorded
+from earlier testing. ("Camera … disabled by policy" is the AOSP
+`ERROR_DISABLED` service string; the parenthetical is this ROM's event-log
+wording.) A cold start clears it. Unrelated to the torch, recorded
 here so the failure signature is findable.
 
 ## 5. setTorchMode as the streaming torch path: closed off
@@ -157,9 +191,11 @@ available?* — has a documented answer that makes the experiment moot:
 
 - `setTorchMode` exists precisely to control the flash **without opening the
   camera device** (its one-line summary), and throws `CAMERA_IN_USE` when the
-  camera is in use (§1). Streaming requires the camera open. Therefore
-  `setTorchMode` is not an alternative in-session torch path at all — there is
-  no public API that lights the Main-lens LED from outside its own session.
+  camera is in use (§1) — CTS expects that throw even from the camera-owning
+  process itself (`testTorchModeExceptions`, §2). Streaming requires the
+  camera open. Therefore `setTorchMode` is not an alternative in-session torch
+  path at all — there is no public API that lights the Main-lens LED from
+  outside its own session.
 - In-session, `FLASH_MODE_TORCH` (what CameraX `enableTorch` drives, what
   LensCast uses) is the only mechanism.
 - Conclusion: the Main-lens QS lock is a framework rule about exclusive flash
