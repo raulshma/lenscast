@@ -68,8 +68,31 @@ internal fun buildWebApiStack(
         context = context,
         powerManager = app.powerManager,
         captureHistoryStore = app.captureHistoryStore,
-        restart = { app.restartApplication() },
+        restartApplication = { app.restartApplication() },
         torchStrengthMaxLevel = { app.cameraService.torchStrengthMaxLevel.value },
+        // Wave 4 (blueprint P1 items 9/10 + the deferred item-7 telemetry):
+        // the soft ladder is the graph's ONE instance (the heartbeat's
+        // SOFT_RESTART tier runs the same object), the reset lever is the
+        // camera service's bounded budget, and the telemetry reads live.
+        softRestart = { app.softRestart.run() },
+        resetCameraLever = { app.cameraService.resetCamera() },
+        crashRelaunchTelemetry = {
+            val state = app.crashMarkerJournal.load()
+            com.raulshma.lenscast.streaming.model.CrashRelaunchTelemetryDto(
+                crashCount = state.consecutiveCrashes,
+                state = com.raulshma.lenscast.streaming.web.SystemWebHandler.crashRelaunchStateName(
+                    state.consecutiveCrashes,
+                ),
+            )
+        },
+        heartbeatTelemetry = {
+            val state = app.heartbeatController.state.value
+            com.raulshma.lenscast.streaming.model.HeartbeatTelemetryDto(
+                armed = state.armed,
+                misses = state.consecutiveMisses,
+                tier = state.lastTier?.name,
+            )
+        },
     )
     val pushHandler = PushWebHandler(
         subscriptions = app.pushSubscriptionStore,

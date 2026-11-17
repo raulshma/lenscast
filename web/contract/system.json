@@ -22,5 +22,18 @@
     "freeBytes": 53687091200,
     "totalBytes": 107374182400
   },
-  "torchStrengthMaxLevel": 3
+  "torchStrengthMaxLevel": 3,
+  "canScheduleExactAlarms": true,
+  "isIgnoringBatteryOptimizations": true,
+  "isDeviceInDozeMode": false,
+  "batteryOptimizationState": "UNRESTRICTED",
+  "crashRelaunch": {
+    "crashCount": 1,
+    "state": "ARM"
+  },
+  "heartbeat": {
+    "armed": true,
+    "misses": 0,
+    "tier": "SOFT"
+  }
 }

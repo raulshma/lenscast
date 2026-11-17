@@ -61,8 +61,16 @@ object TokenWritePolicy {
         // token holder is the automation system itself, and restarting the app
         // is what its own keeper does on wedged state. It persists nothing
         // (the quit ladder is the one the overflow menu runs) and the relaunch
-        // re-arms every persisted stream by policy.
+        // re-arms every persisted stream by policy. `?mode=soft` (wave 4)
+        // rides the same route — the soft ladder is the same recovery class,
+        // gentler still (no process death at all).
         "/api/system/restart",
+        // Reset camera (wave 4, blueprint P1 item 10): the same
+        // device-maintenance class — a bounded camera rebind the keeper
+        // itself runs on camera errors, persisting nothing, stopping no
+        // server. The bounded budget (CameraErrorPolicy) is what makes it
+        // safe to leave token-writable: a stuck automation cannot loop it.
+        "/api/system/reset-camera",
         // Automation test arm/restore: the token holder IS the automation
         // system — firing a rule once (and restoring its effects) is exactly
         // what the scheduler does without any credential, minus the journal.

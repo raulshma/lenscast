@@ -227,8 +227,33 @@ object OpenApiSpec {
             "/api/system/restart",
             "post" to operation(
                 listOf("system"),
-                "Restart the app: schedule the relaunch, run the quit teardown, answer OK",
-                mapOf("200" to ok("SuccessResponse")),
+                "Restart the app: pre-check the exact-alarm grant (typed refusal without quitting when " +
+                    "ungranted), schedule the relaunch, run the quit teardown, answer OK. `?mode=soft` " +
+                    "runs the in-process soft-restart ladder instead (server stop → camera rebind → " +
+                    "re-arm, no process death — the camera-preserving tier); absent or `process` keeps " +
+                    "the deep restart. The soft answer is built after the re-arm and carries " +
+                    "`mode:\"soft\"` (or the failed step in the typed-refusal shape)",
+                mapOf("200" to ok("SystemRestartResponse")),
+                parameters = listOf(
+                    queryParam(
+                        "mode",
+                        "`soft` = the in-process soft-restart ladder (no process death); absent or " +
+                            "`process` = the deep quit-and-relaunch restart",
+                        mapOf("type" to "string"),
+                    ),
+                ),
+            ),
+        )
+        path(
+            "/api/system/reset-camera",
+            "post" to operation(
+                listOf("system"),
+                "Reset the camera subsystem: one bounded rebind through the CameraErrorPolicy budget " +
+                    "(the same lever the error observer spends) — the server NEVER stops. The verdict " +
+                    "field tells the dashboard whether the lever fired (REBIND), the taxonomy says " +
+                    "reboot the phone (REBOOT_REQUIRED), the camera is gone (WAIT_CAMERA_ADDED), or " +
+                    "the budget is spent (CAMERAX_HANDLES)",
+                mapOf("200" to ok("CameraResetResponse")),
             ),
         )
 
@@ -684,6 +709,21 @@ object OpenApiSpec {
             required = listOf("success"),
             fixture = null,
         ),
+        "SystemRestartResponse" to schema(
+            "success" to boolSchema("False = the typed refusal; the device did NOT quit (deep) or the ladder failed (soft)"),
+            "mode" to stringSchema("The mode actually run: `soft` on the soft ladder's answers; absent for the deep restart"),
+            "reason" to stringSchema("Machine-readable refusal reason (`exact_alarm_not_granted`, `soft_restart_failed`); absent on success"),
+            "step" to stringSchema("The soft ladder step that failed (`rebindCamera`, `startServer`); absent otherwise"),
+            "hint" to stringSchema("Device-side fallback text for the refusal; the dashboard maps reason to its localized message"),
+            required = listOf("success"),
+        ),
+        "CameraResetResponse" to schema(
+            "success" to boolSchema("True only when the rebind lever fired and bound"),
+            "verdict" to stringSchema("The CameraErrorPolicy verdict that drove the answer: `REBIND` | `CAMERAX_HANDLES` | `REBOOT_REQUIRED` | `WAIT_CAMERA_ADDED`"),
+            "reason" to stringSchema("Machine-readable failure reason (`rebind_denied`, `rebind_budget_spent`, `reboot_required`, `camera_removed`); absent on success"),
+            "hint" to stringSchema("Device-side fallback text for the failure; the dashboard maps reason to its localized message"),
+            required = listOf("success"),
+        ),
         "ErrorResponse" to schema(
             "success" to boolSchema("Always false"),
             "error" to stringSchema("The readable failure reason"),
@@ -925,6 +965,7 @@ object OpenApiSpec {
             "webhookEnabled" to boolSchema(),
             "webhookUrl" to stringSchema(),
             "watchdogEnabled" to boolSchema(),
+            "fsiCameraResumeEnabled" to boolSchema("Opt-in, default off: after a process death or reboot lands the app back in the server-only state, post a full-screen-intent prompt (content-tap heads-up when the FSI permission is revoked) that restarts the journal-recorded outputs while visible — the only unattended camera restore; lights the screen by design"),
             "onvifEnabled" to boolSchema(),
             "httpsEnabled" to boolSchema(),
             "hlsDvrSegments" to intSchema(),
@@ -1156,7 +1197,13 @@ object OpenApiSpec {
             "battery" to ref("BatteryDetailDto"),
             "storage" to ref("StorageInfoDto"),
             "torchStrengthMaxLevel" to intSchema(),
-            required = listOf("appVersion", "deviceModel", "deviceManufacturer", "androidVersion", "sdkInt", "osUptimeMs", "processUptimeMs", "battery", "storage"),
+            "canScheduleExactAlarms" to boolSchema("AlarmManager.canScheduleExactAlarms(); absent below API 31"),
+            "isIgnoringBatteryOptimizations" to boolSchema("The app is on the battery-optimization allowlist (the Unrestricted state)"),
+            "isDeviceInDozeMode" to boolSchema("The device is in doze (device-idle) mode at snapshot time"),
+            "batteryOptimizationState" to stringSchema("`UNRESTRICTED` | `OPTIMIZED` | `RESTRICTED` — the Settings > Battery per-app state"),
+            "crashRelaunch" to mapOf("type" to "object", "description" to "The crash-relaunch loop guard: crashCount + state (`ARM` | `BACKOFF` | `GIVE_UP`)"),
+            "heartbeat" to mapOf("type" to "object", "description" to "The alarm heartbeat: armed, misses, and the last escalation tier"),
+            required = listOf("appVersion", "deviceModel", "deviceManufacturer", "androidVersion", "sdkInt", "osUptimeMs", "processUptimeMs", "battery", "storage", "isIgnoringBatteryOptimizations", "isDeviceInDozeMode", "batteryOptimizationState"),
             fixture = "system.json",
         ),
         "BatteryDetailDto" to schema(

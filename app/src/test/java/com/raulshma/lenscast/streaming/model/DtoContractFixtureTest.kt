@@ -397,6 +397,20 @@ class DtoContractFixtureTest {
                 totalBytes = 107_374_182_400,
             ),
             torchStrengthMaxLevel = 3,
+            // API 35 in the fixture ⇒ the exact-alarm grant model exists; the
+            // allowlisted app reads canScheduleExactAlarms=true and
+            // UNRESTRICTED (the allowlist folds into both answers).
+            canScheduleExactAlarms = true,
+            isIgnoringBatteryOptimizations = true,
+            isDeviceInDozeMode = false,
+            batteryOptimizationState = "UNRESTRICTED",
+            // The deferred item-7 telemetry (wave 4): one crash recorded and
+            // cleared into ARM, the heartbeat armed with a live verdict.
+            crashRelaunch = CrashRelaunchTelemetryDto(
+                crashCount = 1,
+                state = com.raulshma.lenscast.streaming.web.SystemWebHandler.crashRelaunchStateName(1),
+            ),
+            heartbeat = HeartbeatTelemetryDto(armed = true, misses = 0, tier = "SOFT"),
         )
         assertMatchesFixture(
             "system.json",

@@ -126,7 +126,11 @@ class ApiRouter(
         "/api/recording/stop" -> ApiResponse.ok(recording.stop())
         "/api/deterrence/siren" -> ApiResponse.ok(deterrence.setSiren(r.body))
         "/api/detection/test" -> ApiResponse.ok(detectionTest.test())
-        "/api/system/restart" -> ApiResponse.ok(system.restart())
+        // The restart route's `mode` query (blueprint P1 item 9): "soft" runs
+        // the in-process soft-restart ladder; absent or "process" keeps the
+        // deep (quit + relaunch) restart. Same route, documented param.
+        "/api/system/restart" -> ApiResponse.ok(system.restart(r.query["mode"]))
+        "/api/system/reset-camera" -> ApiResponse.ok(system.resetCamera())
         "/api/auth/config" -> ApiResponse.ok(auth.put(r.body))
         "/api/media/batch-delete" -> ApiResponse.ok(gallery.batchDelete(r.body))
         "/api/push/subscriptions" -> ApiResponse.ok(push.subscribe(r.body))
@@ -248,6 +252,7 @@ class ApiRouter(
             Route(ApiMethod.POST, "/api/deterrence/siren"),
             Route(ApiMethod.POST, "/api/detection/test"),
             Route(ApiMethod.POST, "/api/system/restart"),
+            Route(ApiMethod.POST, "/api/system/reset-camera"),
             Route(ApiMethod.PUT, "/api/auth/config"),
             Route(ApiMethod.POST, "/api/auth/config"),
             Route(ApiMethod.POST, "/api/media/batch-delete"),

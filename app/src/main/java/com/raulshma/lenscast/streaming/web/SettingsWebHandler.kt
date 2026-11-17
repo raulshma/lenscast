@@ -160,6 +160,7 @@ class SettingsWebHandler(
                 watchdogEnabled = store.watchdogEnabled.value,
                 watchdogMaxRetries = store.watchdogMaxRetries.value,
                 watchdogCheckIntervalSeconds = store.watchdogCheckIntervalSeconds.value,
+                fsiCameraResumeEnabled = store.fsiCameraResume.value,
                 mdnsEnabled = store.mdnsEnabled.value,
                 motionDetectionEnabled = store.motionDetectionEnabled.value,
                 motionSensitivityPercent = store.motionSensitivity.value,
@@ -333,6 +334,10 @@ class SettingsWebHandler(
             settingsDataStore.saveWatchdogEnabled(stream.watchdogEnabled)
             settingsDataStore.saveWatchdogMaxRetries(stream.watchdogMaxRetries)
             settingsDataStore.saveWatchdogCheckIntervalSeconds(stream.watchdogCheckIntervalSeconds)
+            // Opt-in, default off: the post-death camera bring-up prompt
+            // (blueprint P1 item 11) — lights the screen by design, so the
+            // flag rides the standard round-trip like every other gate.
+            settingsDataStore.saveFsiCameraResume(stream.fsiCameraResumeEnabled)
             settingsDataStore.saveMdnsEnabled(stream.mdnsEnabled)
             settingsDataStore.saveMotionDetectionEnabled(stream.motionDetectionEnabled)
             settingsDataStore.saveMotionSensitivity(stream.motionSensitivityPercent)

@@ -64,6 +64,7 @@
     "watchdogEnabled": false,
     "watchdogMaxRetries": 5,
     "watchdogCheckIntervalSeconds": 5,
+    "fsiCameraResumeEnabled": false,
     "mdnsEnabled": true,
     "motionDetectionEnabled": false,
     "motionSensitivityPercent": 50,

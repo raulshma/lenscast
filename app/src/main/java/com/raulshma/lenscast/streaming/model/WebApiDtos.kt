@@ -177,6 +177,16 @@ data class StreamingSettingsDto(
     val watchdogEnabled: Boolean = false,
     val watchdogMaxRetries: Int = StreamDefaults.WATCHDOG_MAX_RETRIES,
     val watchdogCheckIntervalSeconds: Int = StreamDefaults.WATCHDOG_CHECK_INTERVAL_SECONDS,
+    /**
+     * The FSI camera-resume prompt (blueprint P1 item 11): opt-in, default
+     * OFF. When a process death or reboot lands the app back in the
+     * SERVER-ONLY state with the journal still recording live outputs, the
+     * prompt posts a full-screen-intent notification (high-priority content
+     * tap when the FSI permission is revoked) that restarts the
+     * journal-recorded outputs while visible — the only unattended path
+     * that restores CAMERA. Off by default because it lights the screen.
+     */
+    val fsiCameraResumeEnabled: Boolean = false,
     val mdnsEnabled: Boolean = true,
     val motionDetectionEnabled: Boolean = false,
     val motionSensitivityPercent: Int = StreamDefaults.MOTION_SENSITIVITY_PERCENT_DEFAULT,
@@ -534,6 +544,58 @@ data class ClientConnectionDetailDto(
 @JsonClass(generateAdapter = true)
 data class SuccessResponse(val success: Boolean = true)
 
+/**
+ * POST /api/system/restart — the additive extension of [SuccessResponse]: a
+ * success serializes as exactly the old `{"success":true}` (nulls omitted on
+ * the wire), while the typed refusal (unattended-reliability-blueprint.md
+ * P0-B item 8, restart-reliability.md §5 option D) adds `success:false` plus
+ * a machine-readable [reason] the dashboard maps to a localized message and
+ * a device-side [hint] fallback. The refusal answers BEFORE the quit seam
+ * runs — the button can never read a silent no-op as a restart.
+ *
+ * Wave 4's soft mode (P1 item 9) extends the shape additively: the soft
+ * ladder's answers carry [mode]`:"soft"` — `{"success":true,"mode":"soft"}`
+ * on a re-armed server, `success:false` + [reason]`:"soft_restart_failed"`
+ * + [step] (the failed ladder step, machine-readable) + [hint] when a
+ * decisive step failed. The deep restart's answers never carry [mode], so
+ * the legacy wire contract (`{"success":true}`) stays byte-identical.
+ */
+@JsonClass(generateAdapter = true)
+data class SystemRestartResponse(
+    val success: Boolean = true,
+    /** The restart mode actually run; `"soft"` on the soft ladder, absent for the deep (process) restart. */
+    val mode: String? = null,
+    /** Machine-readable refusal reason ("exact_alarm_not_granted", "soft_restart_failed"); null on success. */
+    val reason: String? = null,
+    /** The soft-restart ladder step that failed ("rebindCamera", "startServer"); null otherwise. */
+    val step: String? = null,
+    /** Device-side fallback text for the refusal; the dashboard's own localized message wins. */
+    val hint: String? = null,
+)
+
+/**
+ * POST /api/system/reset-camera (unattended-reliability-blueprint.md P1
+ * item 10) — the targeted camera-subsystem recovery the market was missing:
+ * one bounded `rebindUseCases` lever without touching the server (the
+ * server NEVER stops — that is what separates this from the soft restart).
+ * [verdict] carries the [com.raulshma.lenscast.camera.model.CameraErrorPolicy]
+ * wire name that drove the answer (`REBIND`, `CAMERAX_HANDLES`,
+ * `REBOOT_REQUIRED`, `WAIT_CAMERA_ADDED`), so the dashboard can tell "the
+ * lever fired" from "the taxonomy says reboot the phone" from "the bounded
+ * budget is spent". Success is `{"success":true,"verdict":"REBIND"}`;
+ * every failure is typed ([reason]) instead of a bare 200.
+ */
+@JsonClass(generateAdapter = true)
+data class CameraResetResponse(
+    val success: Boolean = true,
+    /** The CameraErrorPolicy verdict that drove the answer; null only on a handler-level error. */
+    val verdict: String? = null,
+    /** Machine-readable failure reason ("rebind_denied", "rebind_budget_spent", "camera_removed"); null on success. */
+    val reason: String? = null,
+    /** Device-side fallback text for the failure; the dashboard's own localized message wins. */
+    val hint: String? = null,
+)
+
 @JsonClass(generateAdapter = true)
 data class ErrorResponse(val success: Boolean = false, val error: String)
 
@@ -801,6 +863,72 @@ data class SystemInfoResponseDto(
      * diagnostics here make that verdict visible without logcat).
      */
     val torchStrengthMaxLevel: Int? = null,
+    /**
+     * AlarmManager.canScheduleExactAlarms(): true with SCHEDULE_EXACT_ALARM
+     * granted or the app on the power-save exemption list — the allowlist
+     * already folds into the platform answer (restart-reliability.md §1.3).
+     * Null below API 31, where exact alarms need no permission and there is
+     * no grant to report. False is the dashboard-restart blocker: the
+     * AppRelaunch relaunch alarm cannot arm (blueprint P0-B item 7).
+     */
+    val canScheduleExactAlarms: Boolean? = null,
+    /** The app is on the battery-optimization allowlist — the "Unrestricted" state. */
+    val isIgnoringBatteryOptimizations: Boolean,
+    /** The device is in doze (device-idle) mode at snapshot time. */
+    val isDeviceInDozeMode: Boolean,
+    /**
+     * The Settings > Battery per-app state as UNRESTRICTED / OPTIMIZED /
+     * RESTRICTED (android-14-15-background-limits.md §4.2: Restricted
+     * "fully prevents an app from running in the background" — no FGS
+     * launches, existing FGS demoted, alarms untriggered; Unrestricted means
+     * "alarms: no execution limits; network: unrestricted"). Derived
+     * allowlist-first — see SystemWebHandler.batteryOptimizationState.
+     */
+    val batteryOptimizationState: String,
+    /**
+     * The crash-relaunch loop guard's state (blueprint P0 item 1's telemetry,
+     * the deferred half of item 7): the persisted consecutive-crash count and
+     * the derived verdict wire name. Absent only when the graph seam is not
+     * wired (unit-test construction) — in production the journal always
+     * answers, `crashCount 0` + `ARM` being the healthy shape.
+     */
+    val crashRelaunch: CrashRelaunchTelemetryDto? = null,
+    /**
+     * The alarm heartbeat's live state (blueprint P0 item 3's telemetry, the
+     * deferred half of item 7): armed flag, consecutive-miss bookkeeping and
+     * the last escalation tier the policy handed out (omitted until a verdict
+     * exists). Absent only when the graph seam is not wired (unit-test
+     * construction).
+     */
+    val heartbeat: HeartbeatTelemetryDto? = null,
+)
+
+/**
+ * The crash-relaunch loop guard's telemetry block: [crashCount] is the
+ * persisted consecutive-crash counter ([com.raulshma.lenscast.core.CrashMarkerJournal]),
+ * [state] its derived verdict wire name — `ARM` (fresh or one-off; the next
+ * crash relaunches at base delay), `BACKOFF` (a loop is forming; the relaunch
+ * pace doubles) or `GIVE_UP` (the handler stopped arming; the OS sticky
+ * restart is the only tier left).
+ */
+@JsonClass(generateAdapter = true)
+data class CrashRelaunchTelemetryDto(
+    val crashCount: Int,
+    val state: String,
+)
+
+/**
+ * The alarm heartbeat's telemetry block: [armed] mirrors the controller's
+ * arming seam, [misses] the consecutive-miss bookkeeping, [tier] the last
+ * escalation tier the policy emitted (`SOFT`, `MEDIUM`, `SOFT_RESTART`,
+ * `RELAUNCH`) — omitted until a verdict exists (a healthy heartbeat carries
+ * no tier).
+ */
+@JsonClass(generateAdapter = true)
+data class HeartbeatTelemetryDto(
+    val armed: Boolean,
+    val misses: Int,
+    val tier: String? = null,
 )
 
 /** Battery facts beyond the status DTO's level/charging trio. */
