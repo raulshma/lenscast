@@ -312,6 +312,7 @@ A GitHub Actions workflow (`.github/workflows/release.yml`) automates release bu
 | `BIND_QUICK_SETTINGS_TILE` | The stream Quick Settings tile |
 | `WAKE_LOCK` | Keeping the device awake during long sessions |
 | `REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` | Requesting Doze mode exemption |
+| `SCHEDULE_EXACT_ALARM` | The dashboard App-Restart's relaunch — the exact alarm is the only foreground-service start that survives the restart's process death; Android 13+ requires the one-time "Alarms & reminders" Settings grant |
 | `READ_MEDIA_IMAGES` / `READ_MEDIA_VIDEO` | Accessing captured media in gallery |
 | `POST_NOTIFICATIONS` | Foreground service notifications and local detection alerts |
 | `ACCESS_COARSE_LOCATION` | Optional EXIF GPS geotagging of photos (runtime-requested only when the setting is first enabled) |

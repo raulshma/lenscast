@@ -292,8 +292,7 @@ Execution semantics worth knowing:
 Multi-level torch brightness rides Android 13's (API 33+)
 `CameraManager.turnOnTorchWithStrengthLevel` and the
 `FLASH_INFO_STRENGTH_MAXIMUM_LEVEL` characteristic
-(`camera/model/TorchStrengthPolicy.kt` is the pure no-op ladder; API sourcing
-in `docs/research/torch-strength.md`):
+(`camera/model/TorchStrengthPolicy.kt` is the pure no-op ladder):
 
 - **API 33+ required.** Below that — or on a single-level flash (max level
   ≤ 1 — several phones report 1 even on newer Android), or when the device's

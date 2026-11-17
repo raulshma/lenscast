@@ -1366,7 +1366,154 @@ isLive, HARD's isLive+cameraReady), and the named verification windows. The loop
 `verifyRecovery` into one parameterized pass, and `nextTick` is the one
 verdict (action, status, backoff) per health tick — backoff before the
 attempt, verification after, by construction — so the coroutine keeps only
-timing, the reads, and the recovery calls.
+timing, the reads, and the recovery calls. Two arming seams feed one loop
+(blueprint P0 item 2, resolved tension 3): the session seam
+(`startMonitoring`/`stopMonitoring`, called by StreamingSession) runs the
+full analysis and is gated by the user-facing `enabled` setting; the
+server-liveness seam (`startServerLivenessWatch`/`stopServerLivenessWatch`,
+driven by Server Watchdog Arming) watches the post-relaunch server-only
+state and is deliberately NOT gated by `enabled` — the old KDoc's
+"enabled by default" was false (the field defaults off, wired from
+SettingsApplier), so the split is the honest resolution: the setting gates
+the session/stall analysis only, server liveness never depends on a
+settings screen nobody opened. `HealthSnapshot.serverOnlyMode` skips the
+session-scoped branches while camera-error and the loopback probe stay
+active; a session end hands the loop to the server baseline when the
+server survives, so the post-stream state stays watched by construction.
+
+### Server Watchdog Arming
+**`core/ServerWatchdogArming.kt`** — the server-lifecycle bridge onto the
+watchdog's process-wide baseline: collects
+`StreamingManager.isServerRunning` (the same flow Server Foreground
+Controller bridges, so every server start/stop path — StreamToggle, boot
+resume, watchdog recovery, port/TLS restarts — arms and disarms through one
+observation) and drives `startServerLivenessWatch`/`stopServerLivenessWatch`.
+The stop leg carries the same grace window as Server Foreground
+Controller's (issue #14's race class): a server *restart* bounces the flow
+false→true with the watchdog's own MEDIUM recovery as the bouncer, and
+stopping the loop mid-recovery would kill the thing performing the
+recovery — a promote inside the window cancels the pending stop.
+
+### Loopback Server Probe
+**`core/LoopbackServerProbe.kt`** — the watchdog's one bounded
+`HttpURLConnection` GET to the server's own `/api/system` (blueprint P0
+item 5, self-healing §6): its own connection, ~2 s connect + ~2 s read
+timeouts, any status below 500 counts as answered (a 401 with auth on is a
+living server), timeout/refused/5xx/throw counts as not. It exists for the
+failure class the `isServerRunning` flag cannot see — a wedged accept loop
+or API executor keeps the flag true while nothing answers. The watchdog
+takes it as a plain lambda seam (`loopbackProbe`), so JVM tests inject a
+fake and no real HTTP rides the policy tests; the production instance gets
+its URL per probe from `StreamingManager.loopbackSystemUrl()`, so a port
+or TLS change moves the probe with the listener it probes. A `false`
+verdict becomes `WatchdogPolicy.StallReason.SERVER_UNANSWERING` and rides
+the existing recovery ladder — in server-only mode that escalates through
+the session-less MEDIUM (server restart) since the camera rebind has no
+session to serve (the out-of-process tier is wave 2's heartbeat).
+
+### Camera Error Policy
+**`camera/model/CameraErrorPolicy.kt`** — the pure CameraX
+`CameraState.StateError` recovery verdict (blueprint P0 item 4, self-healing
+§5's taxonomy): `decide(errorCode, rebindAttempts)` returns
+`CAMERAX_HANDLES` (recoverable codes, DISABLED, DND — CameraX/device
+policy/user own the fix), `REBIND` (STREAM_CONFIG and unknown codes, while
+the bounded lever has attempts left — `MAX_REBIND_ATTEMPTS`, then
+report-only), `WAIT_CAMERA_ADDED` (REMOVED — CameraX has torn the dead
+session down; wait for the platform's `onCameraAvailable`), or
+`REBOOT_REQUIRED` (FATAL — camera2's `ERROR_CAMERA_SERVICE`; no sanctioned
+in-process recovery, the dashboard must say "reboot the phone"). The
+CameraService's open-state observer consults it on every observed error,
+spends the rebind lever through the existing `rebindUseCases` (posted to
+main — a bind inside the LiveData dispatch would re-enter the observer
+mid-transition), registers the availability-callback wait for REMOVED
+(API 28+ Executor variant, Handler variant below), and resets the attempt
+counter on an observed OPEN. The verdict rides the published error as
+`CameraState.Error(message, recovery)` — the status wire's
+`cameraStateName` (the data-class toString) gains exactly the
+`recovery=…` suffix, so "will self-heal" is distinguishable from "reboot
+required" without string-matching (wave 3 consumes it); errors raised
+outside the taxonomy path carry a null verdict and render unchanged.
+
+### Stream State Journal
+**`streaming/StreamStateJournal.kt`** — the persisted record of which
+outputs the user last left intentionally running (atomic-write JSON in
+`filesDir/streaming/stream_state.json`), and the single source of *intent*
+for the recovery tiers: `State.userStopped` records the user's swipe-kill
+(`StreamingService.onTaskRemoved` — record only; stock Android keeps the
+service through a swipe, but an OEM kill follows and nothing may resurrect
+a stream the user explicitly killed). The flag's lifetime rule: it blocks
+exactly one boot (`BootResumePolicy.decide` returns NONE for it and the
+boot receiver spends it with `clearUserStopped` after reading) and is
+cleared the moment any output goes live again (`recordLiveOutputs` — the
+next explicit start supersedes the kill intent, which is why a stop
+transition preserves rather than erases it). It can never block resume
+forever and never gates a manual request (the tile's `tileStart` ignores
+it). Wave 2's WatchdogAlarmPolicy reads the same flag for its
+stand-down decision. `State.fsiResumePrompted` is the same flag family for
+the FSI Resume Prompt: set when that prompt posts, cleared by
+`recordLiveOutputs` when an output goes live again — the same
+"cleared-by-the-next-live-output, preserved-through-stop-transitions"
+lifetime rule. The writer (`StreamStateJournalWriter`) observes the
+web/RTSP active flows and persists through `recordLiveOutputs` so the
+flags' clearing lives in exactly one method.
+
+### Crash Relaunch Handler
+**`MainApplication.kt` + `core/CrashRelaunchPolicy.kt` +
+`core/CrashMarkerJournal.kt`** — the crash-triggered deterministic relaunch
+(blueprint P0 item 1, ACRA `ReportExecutor`'s shape): the default
+uncaught-exception handler installed first thing in `onCreate` persists the
+crash marker, arms `AppRelaunch` (the existing restart alarm, now with a
+`delayMs` parameter — the schedule-before-the-process-dies ordering the
+dashboard restart already uses), then CHAINS to the previous handler so the
+platform still records the crash — the handler's own work can never
+suppress the chain. The loop guard is the pure `CrashRelaunchPolicy`: a
+crash after 5 minutes (`CLEAN_UPTIME_WINDOW_MS`) of process uptime starts a
+fresh series; a crash inside the window increments the persisted counter;
+one fresh crash arms at the 2-second restart delay, loop crashes 2..3 arm
+at the doubled `relaunchDelayMs` (the watchdog's own backoff rhythm), and
+past `MAX_CONSECUTIVE_CRASHES` (3) the verdict is GIVE_UP — sticky-only
+(blueprint resolved tension 1 keeps `START_STICKY` as the zero-grant
+fallback), until clean uptime or the app-start reset (a process start that
+survives the window zeroes the counter — `initializeCrashLoopReset`, whose
+coroutine's own survival IS the proof) or a manual `CrashMarkerJournal.reset`
+for the telemetry surface. The counter lives in `filesDir/crash/crash_marker.json`
+(the Stream State Journal shape: atomic write, corrupt-falls-back-to-zero);
+`State.gaveUp` is derived from the counter, so the give-up fact for
+`GET /api/system` (wave 3) has one source of truth.
+
+### Alarm Heartbeat
+**`core/HeartbeatController.kt` + `core/WatchdogAlarmPolicy.kt` +
+`streaming/HeartbeatReceiver.kt`** — the out-of-process liveness tier
+(blueprint P0 item 3, self-healing §3): a 15-minute (`INTERVAL_MS` — the
+doze floor, the largest interval that still promises doze delivery, 4/hour
+inside the ~7/hour while-idle budget) allow-while-idle alarm, one-shot and
+re-armed at each fire by the receiver. Exactness re-evaluates per arm:
+`setExactAndAllowWhileIdle` only when the exact grant is held
+(`canScheduleExactAlarms()` on API 31+, unconditional below — the
+AppRelaunch precedent), plain `setAndAllowWhileIdle` otherwise (no
+permission, still doze-delivered; honestly documented: without the grant or
+the battery allowlist an inexact fire into a dead process may fail the FGS
+start — caught in the receiver, sticky restart remains the fallback). The
+alarm targets the manifest-registered HeartbeatReceiver (never a listener
+alarm), which re-arms FIRST and then `startForegroundService`s the runtime
+service with `ACTION_HEARTBEAT` — the start recreates a dead process, and
+the service lands the server-only promotion before delegating to the
+controller. Arming rides wave 1's server seam: the same
+`isServerRunning` flow Server Watchdog Arming bridges, grace-windowed on
+the stop leg (a pending disarm re-reads the flow at fire time, so a
+restart bounce can never drop the cadence), and there is deliberately no
+session-scope arming. The verdict is the pure `WatchdogAlarmPolicy`, one
+escalation per consecutive miss over an ordered tier enum — SOFT
+(`StreamingSession.recover(SOFT)`) → MEDIUM (`recover(MEDIUM)`) → RELAUNCH
+(the quit ladder + `AppRelaunch`, the top tier that holds until the miss
+budget, then STAND_DOWN); wave 4's soft-restart tier inserts between MEDIUM
+and RELAUNCH with no decision-logic change (RELAUNCH stays the last entry,
+pinned by test), and the journal's user-stopped flag stands down at every
+miss count. The health verdict is wave 1's seam reused:
+`StreamWatchdog.evaluateOnce` (the monitor loop's snapshot, loopback probe
+included, deliberately side-effect-free so a heartbeat read cannot mask the
+loop's stall baselines). `HeartbeatState` (armed, misses, last verdict) is
+the wave 3 telemetry surface.
 
 ### Battery Quality Policy
 **`core/BatteryQualityPolicy.kt`** — the pure battery→quality ladder:
@@ -1442,6 +1589,35 @@ and the session's denied bind under lock; the pure policy owns the verdict ladde
 (keyguard up, POST_NOTIFICATIONS, full-screen-intent permission, the 30 s re-arm
 floor) and is JVM-tested; the controller keeps the Android reads, the attempt
 bookkeeping, and the posting.
+
+### FSI Resume Prompt
+**`core/FsiResumeController.kt`** (+ the pure `core/FsiResumePolicy.kt`) — the
+post-death camera bring-up prompt (blueprint P1 item 11, the tier ladder's T6
+row): the ONLY unattended path that restores CAMERA after a process death or
+reboot, opt-in (`fsi_camera_resume`, default OFF) because it buys visibility by
+lighting the screen — a full-screen intent auto-launches over locked/off
+screens, directly against AppRelaunch's service-first headless promise, so a
+fresh install must never wake its owner's phone unasked. The trigger is the
+runtime service's server-only promotion funnel (`startServerForeground` — the
+relaunch alarm, the sticky restart, and the heartbeat all land there), and the
+decision is pure: `FsiResumePolicy.decide(opt-in flag, journal-says-was-live,
+user-stopped, camera-held, already-prompted, FSI-granted)` returns
+POST_FULL_SCREEN (FSI granted — the off-Play default on 14+),
+POST_TAP_FALLBACK (Play-revoked: the same notification as a high-priority
+heads-up whose content tap still lands the visible start — a notification
+interaction is a documented while-in-use exemption), or a SUPPRESS reason.
+The debounce is the Stream State Journal's `fsiResumePrompted` marker: set
+when the prompt posts, cleared only when an output actually goes live again
+(`recordLiveOutputs`), so the heartbeat's 15-minute landings can never
+re-prompt the same death event and a failed recovery stays honestly silent.
+The notification targets LockBypassActivity with `EXTRA_FSI_RESUME`: the shim
+starts the journal-recorded outputs through the Stream Toggle ladder
+(`BootResumePolicy.execute` over `tileStart` — a prompt tap is a manual
+request exactly like the tile's) *while visible*, then its existing readiness
+watch dismisses it; teardown rides the shim's dismissal epilogue and
+MainActivity's resume. Settings flow through the applier's dedicated
+single-flow rule (`onSettingApplied`) so the fresh-process landings never
+race DataStore's first read.
 
 ### Stream Defaults
 **`core/StreamDefaults.kt`** — the single home for stream configuration
@@ -2154,8 +2330,7 @@ the editor's ↑/↓ buttons use.
 33+ per-level torch: `CameraManager.turnOnTorchWithStrengthLevel` plus the
 `FLASH_INFO_STRENGTH_MAXIMUM_LEVEL` characteristic (both Android 13 — not
 CameraX's API-35-only `setTorchStrengthLevel` wrapper, which rides the
-different `CaptureRequest.FLASH_STRENGTH_LEVEL` key; sourcing in
-`docs/research/torch-strength.md`) let a multi-level flash
+different `CaptureRequest.FLASH_STRENGTH_LEVEL` key) let a multi-level flash
 run below full power, where `CameraControl.enableTorch` is binary.
 `effectiveLevel` is the no-op ladder — every rung returns null, "don't call
 the strength API; plain enableTorch already gives the user everything the
@@ -2173,8 +2348,7 @@ keeps the binary torch alive across rebinds; `CameraSettings.torchStrength`
 editor caps its strength slider at the live device verdict. The verdict is
 externally visible: `torchStrengthMaxLevel` rides `GET /api/system` (a
 reported max of 1 is the binary-torch fallback — issue #16b's triage fact).
-The camera-open strength call is the pinned residual
-(`docs/research/torch-quick-settings.md` §6): the API is CTS-exercised
+The camera-open strength call is the pinned residual: the API is CTS-exercised
 camera-closed and documented `CAMERA_IN_USE` when the camera is in use, so
 a reporter device with max > 1 whose logcat shows the "Torch strength
 failed" line is a distinct in-session strength bug, not a max=1 HAL.
@@ -2391,7 +2565,10 @@ contracts.
 | ClientSession `isPlaying` | `RtspServer.ClientSession` (private `SessionState`) | `streaming/rtsp/RtspServer.kt` | INIT / READY / PLAYING | `isPlaying` is derived (`state == PLAYING`); teardown and write failure drop to INIT so the send gates stop; the sub SETUP write is demote-safe (INIT→READY only — a SETUP during PLAYING used to demote it and freeze the main stream until a re-PLAY) and TEARDOWN clears the sub SETUP gate, so describe() stops advertising a torn-down /sub |
 | `RtspSendPolicy.OfferVerdict` | `RtspServer.ClientSession.enqueueAu` (drain thread, per offer) | `streaming/rtsp/RtspSendPolicy.kt` | (dropCount, rearmKeyframe, requestKeyframe) | drop-oldest whole AUs at the 8-AU bound, never the incoming AU; re-arm on drop except when the incoming AU is the keyframe itself; keyframe requests under the 1000 ms cooldown (sustained congestion must not drive the encoder all-intra) |
 | ClientSession writer lifecycle | `RtspServer.ClientSession.writerThread` (@Volatile `Thread?`) | `streaming/rtsp/RtspServer.kt` | absent / alive / dead-until-re-PLAY | `ensureWriter` (both PLAY paths) replaces a dead writer via `isAlive`; `stopWriter` (TEARDOWN/close) nulls + clears + interrupts; a write failure drops the session to INIT and exits the loop — the socket stays for the read loop's timeout/EOF to close (see Deliberately implicit) |
-| `BootResumePolicy.Verdict` | `BootResumePolicy.decide` | `streaming/StreamStateJournal.kt` | NONE / WEB / RTSP / BOTH | boot resume over the persisted journal's web/rtsp flags |
+| `BootResumePolicy.Verdict` | `BootResumePolicy.decide` | `streaming/StreamStateJournal.kt` | NONE / WEB / RTSP / BOTH | boot resume over the persisted journal's web/rtsp flags; `userStopped` forces NONE for exactly one boot (the flag is consumed by the receiver after the read) and is cleared by the next live-output record — tileStart ignores it |
+| `State.userStopped` | `StreamStateJournal` (persisted flag) | `streaming/StreamStateJournal.kt` | false / true (written by `markUserStopped`, spent by `clearUserStopped`, superseded by any live-output record) | the swipe-kill intent (`onTaskRemoved`, record only): gates boot resume one boot and wave 2's heartbeat stand-down; never blocks forever, never gates a manual start |
+| `StreamWatchdog.LoopOwner` | `StreamWatchdog.loopOwner` (@Volatile, lifecycle-lock guarded) | `core/StreamWatchdog.kt` | NONE / SESSION / SERVER | one loop, two arming seams; the owner decides what a stop may tear down (session end hands off to SERVER when the server survives) and sets `HealthSnapshot.serverOnlyMode` |
+| `CameraErrorPolicy.Verdict` | `CameraService.observeCameraOpenState`'s error branch (attempts on `errorRebindAttempts`, reset on observed OPEN) | `camera/model/CameraErrorPolicy.kt` | CAMERAX_HANDLES / REBIND / WAIT_CAMERA_ADDED / REBOOT_REQUIRED | bounded lever (≤3) spent through `rebindUseCases`, posted off the LiveData dispatch; REMOVED waits on `CameraManager.onCameraAvailable`; FATAL never rebinds and publishes `CameraState.Error(message, recovery)` so the wire can tell reboot-required from self-healing |
 | `PublisherSession<S>` | `RtmpPublisher`/`SrtPublisher`/`WhipPublisher` delegate start/stop/status to one instance | `streaming/PublisherSession.kt` | started/wanted CAS pair + one supervised reconnect loop + 1 s→30 s capped backoff (reset to 1 s on a clean attempt end) | the skeleton was character-identical in all three publishers (only the status type, the null-message fallback, the log line, and RTMP's compute/increment/delay textual order differed — canonicalized on delay-then-increment, documented identical); the three stop choreographies are opaque per-transport `onStop` hooks (RTMP channel-close-drives-clean-close + 2 s force-close; SRT shutdown-packet + 2 s grace; WHIP `videoSource = null` watch-beat self-teardown) and must not be decomposed further; the scope stays publisher-owned (the hooks launch cleanup on it) and a loop's completion cancels it — a stopped instance stays inert, which is why `PushOutput.startQuietly`'s fresh-publisher-every-start invariant stays unenforced by the type |
 | `RtspSubStreamState` | `RtspServer.ClientSession.sub` (one per connection) | `streaming/rtsp/RtspSubStreamState.kt` | SETUP gate (isSetup) / PLAY gate (isWanted) / keyframe wait / negotiated channel pair | the /sub twin of the aggregate SessionState machine, named and JVM-tested beside `RtspSessionProtocol` — the first JVM pin on the sub session decisions; plain mutable fields on purpose (the session thread and the encoder drain thread race them benignly, exactly as the fields this replaced — volatile/immutable would change which access unit is first delivered after a mid-GOP PLAY); `onPlayArmed` stays adjacent to the caller's `requestSubKeyFrame`, `onDropRearm` re-arms the wait when the send queue drops queued AUs, and the demote-safe INIT→READY write stays server-side (the holder has no aggregate knowledge) |
 

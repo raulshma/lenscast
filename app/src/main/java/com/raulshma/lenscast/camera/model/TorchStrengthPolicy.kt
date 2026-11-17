@@ -17,8 +17,7 @@ package com.raulshma.lenscast.camera.model
  * wraps only the API 35 `CaptureRequest.FLASH_STRENGTH_LEVEL` request key and is
  * API-35-only, but the CameraManager pair this policy drives exists since
  * Android 13 — that mismatch is exactly how a "35" gate once locked out
- * capable Android 13 devices (issue #16; full sourcing in
- * docs/research/torch-strength.md).
+ * capable Android 13 devices (issue #16).
  *
  * The no-op ladder (every rung returns null = "don't call the strength API;
  * plain enableTorch already gives the user everything the device can do"):

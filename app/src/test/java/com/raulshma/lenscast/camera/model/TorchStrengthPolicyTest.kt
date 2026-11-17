@@ -12,7 +12,7 @@ import org.junit.Test
  * `CameraManager.turnOnTorchWithStrengthLevel` and the
  * `FLASH_INFO_STRENGTH_MAXIMUM_LEVEL` characteristic actually landed; 34 is
  * pinned explicitly because a wrong "API 35" gate once locked those devices
- * out (issue #16, docs/research/torch-strength.md).
+ * out (issue #16).
  */
 class TorchStrengthPolicyTest {
 
