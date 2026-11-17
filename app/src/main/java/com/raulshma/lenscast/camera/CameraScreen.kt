@@ -759,13 +759,19 @@ private fun CameraTopOverlay(
         // scroll, while the More-options button is PINNED outside the scroll
         // so the menu (camera controls, capture tools, settings, quit) stays
         // reachable without swiping the tail into view — the overflow fix for
-        // the pushed-off-screen Gallery/Menu report. Width-hugging when idle
-        // so SpaceBetween still pins the cluster to the edge.
+        // the pushed-off-screen Gallery/Menu report. The scroll row takes a
+        // fill=false weight: an overflowing scroll row without one claims the
+        // parent's whole width and clips the pinned button off-screen —
+        // weight carves the pinned button its slot first, fill=false keeps
+        // width-hugging when idle so SpaceBetween still pins the cluster to
+        // the edge.
         Row(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Row(
-                modifier = Modifier.horizontalScroll(rememberScrollState()),
+                modifier = Modifier
+                    .weight(1f, fill = false)
+                    .horizontalScroll(rememberScrollState()),
                 horizontalArrangement = Arrangement.spacedBy(2.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
