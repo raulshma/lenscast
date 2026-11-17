@@ -182,3 +182,13 @@ jobs:
           body_path: fastlane/metadata/android/en-US/changelogs/${{ steps.version.outputs.changelog_vercode }}.txt
           draft: true
           generate_release_notes: true
+          # Draft releases create their tag only at publish time, and
+          # target_commitish defaults to the default branch — publish the
+          # draft before the version bump lands on main and the tag is born
+          # at a commit whose literals still say the PREVIOUS version.
+          # That exact miss shipped v0.2.1: the fdroiddata UpdateCheckMode:
+          # Tags bot parsed 0.2.0 at the tagged commit, read the release as
+          # "up to date", and silently skipped it. Pinning the commitish to
+          # this run's checkout SHA (the tree the literal gate above just
+          # verified) makes the tag's birth independent of publish timing.
+          target_commitish: ${{ github.sha }}
