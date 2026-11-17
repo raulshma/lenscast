@@ -194,6 +194,27 @@ LensCast is an Android camera application with live video/audio streaming to web
 
 ---
 
+## Beta builds
+
+Between stable releases, signed **beta APKs** are published on the
+[GitHub Releases](https://github.com/raulshma/lenscast/releases) page as
+*pre-releases* (tags like `v0.2.2-beta.1`, one APK per ABI — most phones
+want `arm64-v8a`). They are cut from `main` whenever something is worth
+early testing, and install on your existing LensCast:
+
+- **Same app, same signature** — a beta installs straight over stable and
+  keeps your settings.
+- **Beta-to-beta updates are manual**: grab the newest pre-release asset.
+  The in-app updater never offers betas — it only ever sees stable
+  releases.
+- **You cannot return to the current stable** after installing a beta
+  (Android blocks version downgrades); the next stable release upgrades
+  over it cleanly and the in-app updater will offer it as usual.
+- **Feedback**: open a [GitHub issue](https://github.com/raulshma/lenscast/issues)
+  and mention the beta version you were on.
+
+---
+
 ## Documentation
 
 - [Remote access](docs/remote-access.md) — viewing the stream outside your LAN (Tailscale, WireGuard, and why port forwarding is discouraged)
@@ -294,6 +315,8 @@ A GitHub Actions workflow (`.github/workflows/release.yml`) automates release bu
 - Builds the **store flavor** (with the in-app updater) as one signed APK per ABI (`armeabi-v7a`, `arm64-v8a`, `x86_64`) with distinct `versionCode`s (`major*10000 + minor*1000 + patch*10 + abiIndex`); the `fdroid` flavor is built by F-Droid's own recipe and distributed on F-Droid ([get it here](https://f-droid.org/packages/com.raulshma.lenscast/)), not shipped here (see [F-Droid distribution](docs/fdroid.md) for the per-release flow)
 - Publishes them to a **draft** GitHub Release with automatic semantic version tagging — verify the assets, then publish
 - The `versionCode`/`versionName` literals in `app/build.gradle.kts` (which F-Droid's update checker reads) must be bumped in the same release — the workflow overrides them per build via `-PversionCode`/`-PversionName` but does not rewrite the tag's literals
+
+A separate beta workflow (`.github/workflows/beta.yml`) publishes the **pre-release** APKs described in [Beta builds](#beta-builds): same per-ABI store builds from `main`, tagged `v<version>-beta.<n>`. They ship as GitHub pre-releases, so the stable in-app updater never offers them, and F-Droid's tag checker no-ops on them (a beta tag parses to the shipped stable's versionCode). Trigger it by pushing a `beta/**` branch or via manual dispatch — see [Contributing](CONTRIBUTING.md) for the versionCode slot budget.
 
 ---
 

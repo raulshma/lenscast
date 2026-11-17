@@ -1,0 +1,201 @@
+name: Beta
+
+# Beta channel: signed store-flavor APKs cut from main and published as
+# GitHub PRE-releases (tag v<version>-beta.<n>). Three properties make this
+# safe without touching app code:
+#
+# 1. GitHub's /releases/latest endpoint excludes pre-releases, so the
+#    stable in-app updater (update/UpdateChecker.kt) never sees a beta.
+# 2. Same applicationId + keystore as stable: a beta installs straight over
+#    stable, and when the next stable ships, its higher versionCode beats
+#    every beta slot — the updater converges testers automatically
+#    (UpdatePolicy.isNewer("0.2.2", "0.2.2-beta.1") parses the "-beta" part
+#    to 0, so the shipped stable reads as newer).
+# 3. Beta versionCodes occupy the free slots between the last stable
+#    literal and the next patch release's codes — at most three betas fit
+#    per patch cycle; the compute step below fails loudly past that.
+# 4. F-Droid never builds a beta: its Tags-mode checker parses the Gradle
+#    literals at the tagged commit, and beta commits carry the last
+#    shipped stable's literals, so every beta tag reads back as "up to
+#    date". (Precondition: each release's literal bump lands on main —
+#    release.yml's literal gate plus the main-branch release ritual
+#    already enforce that. Cut betas from an up-to-date main.)
+#
+# Branches here are deliberately `beta/**`: they must not match
+# release.yml's `v[0-9]+*` / `release/**` triggers.
+
+on:
+  push:
+    branches:
+      - 'beta/**'
+  workflow_dispatch:
+    inputs:
+      version_name:
+        description: 'Full beta versionName, e.g. 0.2.2-beta.1 (empty: derive from the Gradle literals + existing beta tags)'
+        required: false
+        type: string
+
+concurrency:
+  group: beta-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release-beta:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          # All tags: the beta counter is "highest existing
+          # v<target>-beta.* tag + 1".
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          # jsdom 30 (via undici 8) requires Node >= 22.19; Node 20 crashes
+          # vitest workers at CacheStorage init even though tests pass.
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: web/package-lock.json
+
+      # JDK 21 matches the Gradle daemon toolchain
+      # (gradle/gradle-daemon-jvm.properties); setup-java only bootstraps
+      # it, the daemon JVM criteria pick the exact version.
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v3
+
+      - name: Decode Keystore
+        run: |
+          echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > lenscast-release.jks
+
+      - name: Calculate Beta Version
+        id: version
+        env:
+          INPUT_VERSION: ${{ inputs.version_name }}
+        run: |
+          # The beta rides stable's versionCode scheme
+          # (major*10_000 + minor*1_000 + patch*10 + abiIndex, abi 1..3) in
+          # the free codes between the last stable and the next one: a beta
+          # always installs over stable, and the next stable always
+          # installs over the beta (Android blocks downgrades).
+          #
+          # Budget: the next patch release occupies base+1..base+3 (its
+          # base is base+10; base = x86_64 literal - 3). Beta cut n takes
+          # the three codes ending at base+3n+3 — slots 2016/2019/2022
+          # after a 2013 stable. A fourth cut would reach the next
+          # stable's codes and strand that ABI until the release after,
+          # so fail loudly instead of silently stranding testers.
+          GRADLE_FILE="app/build.gradle.kts"
+          STABLE_VN=$(grep -E '^[[:space:]]*versionName = "' "$GRADLE_FILE" | head -n1 | cut -d'"' -f2)
+          STABLE_VC=$(grep -E '^[[:space:]]*versionCode = [0-9]+' "$GRADLE_FILE" | head -n1 | grep -oE '[0-9]+$')
+          if [ -z "$STABLE_VN" ] || [ -z "$STABLE_VC" ]; then
+            echo "::error::Could not read the versionName/versionCode literals from $GRADLE_FILE"
+            exit 1
+          fi
+          BASE=$((STABLE_VC - 3))
+          echo "Stable literals: $STABLE_VN / $STABLE_VC (versionCode base $BASE)"
+
+          TAG_RE='^v[0-9]+\.[0-9]+\.[0-9]+-beta\.[0-9]+$'
+
+          if [ -n "$INPUT_VERSION" ]; then
+            # Dispatch input is the full beta versionName; a leading v is
+            # tolerated. The counter must advance past the latest existing
+            # beta tag so the published pre-release is strictly newer.
+            BETA_VN=$(echo "$INPUT_VERSION" | sed -E 's/^v//')
+            if ! echo "$BETA_VN" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+-beta\.[0-9]+$'; then
+              echo "::error::version_name input must look like 0.2.2-beta.1 (got \"$INPUT_VERSION\")"
+              exit 1
+            fi
+            BASE_PREFIX=$(echo "$BETA_VN" | grep -oE '^[0-9]+\.[0-9]+\.[0-9]+')
+            LAST_BETA=$(git tag -l "v${BASE_PREFIX}-beta.*" | grep -E "$TAG_RE" | sort -V | tail -n 1)
+            LAST_N=0
+            if [ -n "$LAST_BETA" ]; then LAST_N=$(echo "$LAST_BETA" | grep -oE '[0-9]+$'); fi
+            INPUT_N=$(echo "$BETA_VN" | grep -oE '[0-9]+$')
+            if [ "$INPUT_N" -le "$LAST_N" ]; then
+              echo "::error::v$BETA_VN does not advance the beta counter (latest existing: $LAST_BETA)"
+              exit 1
+            fi
+          else
+            # Derive: next patch over the stable literal, beta counter =
+            # highest existing v<target>-beta.* tag + 1.
+            IFS='.' read -r MAJOR MINOR PATCH <<< "$STABLE_VN"
+            BASE_PREFIX="${MAJOR}.${MINOR}.$((PATCH + 1))"
+            LAST_BETA=$(git tag -l "v${BASE_PREFIX}-beta.*" | grep -E "$TAG_RE" | sort -V | tail -n 1)
+            LAST_N=0
+            if [ -n "$LAST_BETA" ]; then LAST_N=$(echo "$LAST_BETA" | grep -oE '[0-9]+$'); fi
+            BETA_VN="${BASE_PREFIX}-beta.$((LAST_N + 1))"
+          fi
+
+          N=$(echo "$BETA_VN" | grep -oE '[0-9]+$')
+          SLOT=$((BASE + 3 + 3 * N))
+          if [ "$N" -gt 3 ] || [ "$SLOT" -ge "$((BASE + 13))" ]; then
+            echo "::error::v$BETA_VN needs versionCode $SLOT, which reaches the next stable release's codes (>= $((BASE + 11)))."
+            echo "::error::Ship the stable release first (or bump the literals); at most three betas fit per patch cycle."
+            exit 1
+          fi
+          if git rev-parse -q --verify "refs/tags/v$BETA_VN" >/dev/null; then
+            echo "::error::Tag v$BETA_VN already exists."
+            exit 1
+          fi
+
+          echo "Beta versionName: $BETA_VN (x86_64 versionCode slot $SLOT)"
+          echo "version_name=$BETA_VN" >> $GITHUB_OUTPUT
+          echo "tag=v$BETA_VN" >> $GITHUB_OUTPUT
+          echo "slot=$SLOT" >> $GITHUB_OUTPUT
+
+      - name: Run Test Suite (web + app + wear)
+        run: |
+          ./gradlew :app:testStoreDebugUnitTest :app:testFdroidDebugUnitTest \
+            :wear:testDebugUnitTest :wear:assembleDebug
+          (cd web && npm ci && npm run typecheck && npm run test)
+
+      - name: Build Android App (Beta, one APK per ABI)
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          abi_index() { case "$1" in armeabi-v7a) echo 1;; arm64-v8a) echo 2;; x86_64) echo 3;; esac; }
+          mkdir -p out
+          for abi in armeabi-v7a arm64-v8a x86_64; do
+            VC=$((${{ steps.version.outputs.slot }} - 3 + $(abi_index "$abi")))
+            echo "::group::Building store/$abi (versionCode $VC)"
+            ./gradlew assembleStoreRelease -PversionName="${{ steps.version.outputs.version_name }}" -PversionCode="$VC" -PabiFilter="$abi"
+            mv app/build/outputs/apk/store/release/app-store-release.apk \
+              "out/lenscast-${{ steps.version.outputs.version_name }}-${abi}-vc${VC}.apk"
+            echo "::endgroup::"
+          done
+          mv out/*.apk .
+          rmdir out
+
+      - name: Publish Beta Pre-Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: "${{ steps.version.outputs.tag }}"
+          name: "Beta ${{ steps.version.outputs.version_name }}"
+          files: lenscast-*.apk
+          # prerelease is what keeps the stable in-app updater blind: the
+          # /releases/latest endpoint it polls skips pre-releases.
+          prerelease: true
+          draft: false
+          generate_release_notes: true
+          # Prepend the tester-facing notes; generate_release_notes appends
+          # the commit list after this body.
+          body: |
+            Unstable beta build from commit ${{ github.sha }}, cut ahead of the next stable release.
+
+            - Installs straight over LensCast stable — same app, same settings. Most phones want the `arm64-v8a` APK.
+            - Beta-to-beta updates are manual: grab the newest pre-release asset here. The in-app updater only ever sees stable releases.
+            - Going back to the *current* stable is not possible after installing a beta (Android blocks downgrades) — the next stable release replaces it and the in-app updater will offer it as usual.
+            - Feedback welcome: [open an issue](https://github.com/raulshma/lenscast/issues) and mention the beta version you were on.

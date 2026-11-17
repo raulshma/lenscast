@@ -66,7 +66,11 @@ jobs:
 
           BASE_PREFIX="v${major}.${minor}"
 
-          latest_tag=$(git tag -l "${BASE_PREFIX}.*" | sort -V | tail -n 1)
+          # Stable-shaped tags only: the beta channel (beta.yml) publishes
+          # v<base>-beta.<n> tags that match this glob, and sort -V ranks
+          # v0.2.2-beta.2 above v0.2.1 — without the filter the "next
+          # patch" would read the beta's counter and compute v0.2.3.
+          latest_tag=$(git tag -l "${BASE_PREFIX}.*" | grep -E '^v[0-9]+(\.[0-9]+)+$' | sort -V | tail -n 1)
 
           if [ -n "$latest_tag" ]; then
               latest_patch=${latest_tag##*.}

@@ -127,6 +127,40 @@ Before pushing the branch:
 5. For F-Droid: update `fdroid/com.raulshma.lenscast.yml` (see
    [docs/fdroid.md](docs/fdroid.md) for the full procedure).
 
+## Cutting a beta
+
+Between stable releases, the beta channel (`.github/workflows/beta.yml`)
+publishes signed store-flavor APKs from `main` as GitHub **pre-releases**
+(tag `v<version>-beta.<n>`). To cut one:
+
+1. Make sure `main` is green and contains what you want tested.
+2. Push a `beta/<version>` branch (e.g. `beta/0.2.2`) or dispatch the
+   workflow with an explicit `version_name` (e.g. `0.3.0-beta.1`). With no
+   input the target is the Gradle literal's patch + 1, and the counter is
+   one past the highest existing `v<target>-beta.*` tag.
+3. Skim the published pre-release — its body carries the tester-facing
+   install notes.
+
+Betas need no literal bump and no fastlane changelog: they ride the
+workflow's `-PversionName`/`-PversionCode` overrides. Their versionCodes
+occupy the free slots between the last stable (x86_64 literal `L`) and the
+next patch release's codes (`L+1`..`L+3`): beta cut *n* takes
+`L+3n-2`..`L+3n`, one code per ABI — exactly **three** betas fit per
+patch cycle. A fourth would collide with the next stable's codes (Android
+blocks downgrades, so that ABI's testers would be stranded until the
+release after), and the workflow refuses to cut it — ship the stable or
+bump the literals first.
+
+Beta tags stay invisible outside GitHub pre-releases with no fdroid-side
+change: F-Droid's Tags-mode checker parses the Gradle literals at the
+tagged commit, and beta commits carry the last shipped stable's literals —
+so every beta tag reads back as "up to date" and generates no F-Droid
+build. That relies on each release's literal bump landing on `main`
+(see `release.yml`'s literal gate); cut betas from an up-to-date `main`.
+One guard is still needed in-repo: `release.yml` filters its "next patch"
+tag glob to stable-shaped tags, so `sort -V` cannot rank a beta tag above
+the last stable and skew the next release's version.
+
 ## Licensing
 
 By contributing, you agree your contributions are licensed under the
