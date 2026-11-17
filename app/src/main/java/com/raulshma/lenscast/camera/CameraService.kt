@@ -3,6 +3,7 @@ package com.raulshma.lenscast.camera
 
 import android.content.Context
 import android.hardware.camera2.CameraCharacteristics
+import android.hardware.camera2.CameraManager
 import android.util.Log
 import android.util.Size
 import androidx.camera.camera2.interop.Camera2CameraInfo
@@ -34,10 +35,12 @@ import androidx.camera.camera2.interop.CaptureRequestOptions
 import androidx.camera.core.UseCase
 import androidx.camera.video.Recorder
 import androidx.camera.video.VideoCapture
+import com.raulshma.lenscast.camera.model.CameraErrorPolicy
 import com.raulshma.lenscast.camera.model.CameraLensInfo
 import com.raulshma.lenscast.camera.model.CameraSettings
 import com.raulshma.lenscast.camera.model.CameraControlPlan
 import com.raulshma.lenscast.camera.model.KelvinGainsPolicy
+import com.raulshma.lenscast.camera.model.CameraResetResult
 import com.raulshma.lenscast.camera.model.CameraState
 import com.raulshma.lenscast.camera.model.CameraSessionArbiter
 import com.raulshma.lenscast.camera.model.FocusApplyPolicy
@@ -460,9 +463,16 @@ class CameraService(private val context: Context) {
      * the camera *opens*, and a while-in-use policy denial (the locked-mount
      * headline) surfaces later as a non-null StateError in cameraInfo's
      * camera state, not as a bind exception. The observed transitions are
-     * the truth: a StateError republishes [CameraState.Error]
-     * (ERROR_CAMERA_DISABLED gets the dedicated [CAMERA_DISABLED_MESSAGE]),
-     * OPEN republishes Ready. LiveData's initial dispatch re-states the
+     * the truth: a StateError republishes [CameraState.Error] carrying the
+     * [CameraErrorPolicy] verdict (ERROR_CAMERA_DISABLED keeps the dedicated
+     * [CAMERA_DISABLED_MESSAGE]; ERROR_CAMERA_FATAL_ERROR gets
+     * [CAMERA_FATAL_MESSAGE] so the dashboard can tell "reboot the phone"
+     * from "will self-heal" — blueprint P0 item 4), OPEN republishes Ready.
+     * The policy verdict also DRIVES the shell: REBIND spends the bounded
+     * `rebindUseCases` lever, WAIT_CAMERA_ADDED registers the
+     * [CameraManager.AvailabilityCallback] wait, and an observed OPEN resets
+     * the attempt counter — until the camera actually opens, every error
+     * consumed a lever attempt. LiveData's initial dispatch re-states the
      * current state, so a rebind into an already-open camera re-asserts
      * Ready; the identity guard drops a stale attach when a fast rebind
      * replaced the camera before this ran.
@@ -475,20 +485,51 @@ class CameraService(private val context: Context) {
             // is the check.
             val error = state.error
             if (error != null) {
+                val verdict = CameraErrorPolicy.decide(error.code, errorRebindAttempts.get())
                 val disabled = error.code == CameraXCameraState.ERROR_CAMERA_DISABLED
-                Log.w(TAG, "Observed camera-state error (disabled=$disabled, code=${error.code})")
+                Log.w(TAG, "Observed camera-state error (disabled=$disabled, code=${error.code}, verdict=$verdict)")
                 _cameraOpenObserved.value = false
                 _cameraState.value = CameraState.Error(
-                    if (disabled) CAMERA_DISABLED_MESSAGE
-                    else "Camera error, code ${error.code}",
+                    when {
+                        disabled -> CAMERA_DISABLED_MESSAGE
+                        verdict == CameraErrorPolicy.Verdict.REBOOT_REQUIRED -> CAMERA_FATAL_MESSAGE
+                        else -> "Camera error, code ${error.code}"
+                    },
+                    verdict,
                 )
+                when (verdict) {
+                    CameraErrorPolicy.Verdict.REBIND -> {
+                        errorRebindAttempts.incrementAndGet()
+                        // Posted, not inline: a bind inside the LiveData
+                        // dispatch would re-enter this observer mid-transition
+                        // (the bind's own ERROR → OPEN choreography) — the
+                        // same reason the observation attach itself is posted.
+                        controlsHandler.post {
+                            Log.d(TAG, "CameraErrorPolicy: bounded error rebind (attempt $errorRebindAttempts)")
+                            rebindUseCases()
+                        }
+                    }
+                    CameraErrorPolicy.Verdict.WAIT_CAMERA_ADDED -> registerCameraAddedWait()
+                    // CAMERAX_HANDLES — CameraX's own retry (or the device
+                    // policy / user toggle) owns the fix; REBOOT_REQUIRED —
+                    // no sanctioned in-process lever exists. Both report only.
+                    else -> {}
+                }
                 return@Observer
             }
             // The open fact rides every observed transition: OPEN confirms,
             // anything else withdraws the confirmation.
             _cameraOpenObserved.value = state.type == CameraXCameraState.Type.OPEN
-            if (state.type == CameraXCameraState.Type.OPEN && _cameraState.value !is CameraState.Ready) {
-                _cameraState.value = CameraState.Ready
+            if (state.type == CameraXCameraState.Type.OPEN) {
+                // An open camera is the only receipt that the bounded rebind
+                // lever's budget restarts: until OPEN, each observed error
+                // spent one (CameraErrorPolicy's caller-owned bookkeeping).
+                if (errorRebindAttempts.getAndSet(0) > 0) {
+                    Log.d(TAG, "CameraErrorPolicy: camera opened — rebind attempts reset")
+                }
+                if (_cameraState.value !is CameraState.Ready) {
+                    _cameraState.value = CameraState.Ready
+                }
             }
         }
         cameraOpenStateObserver = observer
@@ -496,6 +537,76 @@ class CameraService(private val context: Context) {
             if (cameraOpenStateObserver === observer && liveCamera === cam) {
                 cam.cameraInfo.cameraState.observeForever(observer)
             }
+        }
+    }
+
+    /**
+     * Error-driven rebind attempts since the last observed OPEN — the
+     * caller-side bookkeeping [CameraErrorPolicy.decide] takes (the counter
+     * itself stays out of the pure policy). Atomic because error observations
+     * arrive on the main-thread LiveData dispatch while the OPEN reset and
+     * the posted rebind hop through [controlsHandler].
+     */
+    private val errorRebindAttempts = java.util.concurrent.atomic.AtomicInteger(0)
+
+    /**
+     * The pending ERROR_CAMERA_REMOVED wait, when one is registered — the
+     * [CameraManager.AvailabilityCallback] that reopens the camera when the
+     * hardware returns. At most one lives at a time.
+     */
+    @Volatile
+    private var cameraAddedCallback: CameraManager.AvailabilityCallback? = null
+
+    /**
+     * The WAIT_CAMERA_ADDED half of [CameraErrorPolicy]: a removed (unplugged
+     * USB) camera is a terminal state CameraX has already torn down — the
+     * unbind half of the verdict is CameraX's own — so the app-side half is
+     * waiting for the platform's availability callback and spending one
+     * rebind on the camera's return (blueprint P0 item 4, self-healing §5).
+     * The platform primitive is [CameraManager.AvailabilityCallback.onCameraAvailable]
+     * — there is no dedicated "added" callback: a removed camera reports
+     * unavailable, and its re-addition reports available (as does the
+     * registration itself for cameras already present, which conveniently
+     * covers the return racing this registration). Registration replaces any
+     * pending wait (a flapping USB camera must not accumulate callbacks); the
+     * wait is not a lever attempt — only actual rebinds count.
+     */
+    private fun registerCameraAddedWait() {
+        unregisterCameraAddedWait()
+        val manager = context.getSystemService(Context.CAMERA_SERVICE) as? CameraManager
+        if (manager == null) {
+            Log.w(TAG, "CameraErrorPolicy: no CameraManager — cannot wait for the camera's return")
+            return
+        }
+        val callback = object : CameraManager.AvailabilityCallback() {
+            override fun onCameraAvailable(cameraId: String) {
+                Log.d(TAG, "CameraErrorPolicy: camera $cameraId available again — re-binding")
+                unregisterCameraAddedWait()
+                controlsHandler.post { rebindUseCases() }
+            }
+        }
+        cameraAddedCallback = callback
+        // The callback body posts to the main handler itself, so the executor
+        // variant (28+) can stay on the caller's thread; below P the Handler
+        // variant delivers on main — both land in the same posted rebind.
+        // (minSdk 23: the Executor overload is API 28+.)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            manager.registerAvailabilityCallback({ r -> r.run() }, callback)
+        } else {
+            @Suppress("DEPRECATION")
+            manager.registerAvailabilityCallback(callback, android.os.Handler(android.os.Looper.getMainLooper()))
+        }
+        Log.d(TAG, "CameraErrorPolicy: waiting for onCameraAdded before reopening")
+    }
+
+    private fun unregisterCameraAddedWait() {
+        val pending = cameraAddedCallback ?: return
+        cameraAddedCallback = null
+        try {
+            (context.getSystemService(Context.CAMERA_SERVICE) as? CameraManager)
+                ?.unregisterAvailabilityCallback(pending)
+        } catch (e: Exception) {
+            Log.w(TAG, "CameraErrorPolicy: camera-added wait unregister failed", e)
         }
     }
 
@@ -896,6 +1007,38 @@ class CameraService(private val context: Context) {
             is CameraSessionArbiter.BindingAction -> executeBinding(action)
             else -> true
         }
+    }
+
+    /**
+     * The remote reset-camera lever (blueprint P1 item 10, prior-art §7.2 —
+     * the market's missing primitive): the dashboard's targeted
+     * camera-subsystem recovery. It runs the SAME bounded rebind lever the
+     * error observer runs — [CameraErrorPolicy.decideResetCamera] consults
+     * the wave-1 attempt counter, so the HTTP path spends the identical
+     * budget instead of bypassing it (a spam-clicked reset button dies at
+     * [CameraErrorPolicy.MAX_REBIND_ATTEMPTS] exactly like a flapping
+     * camera does), and a standing taxonomy verdict that is not REBIND
+     * (REBOOT_REQUIRED / WAIT_CAMERA_ADDED / CAMERAX_HANDLES) surfaces
+     * verbatim without spending anything. A spent attempt increments the
+     * same counter, an observed OPEN still resets it — one budget, one
+     * bookkeeping, two entry points (the observer and this lever).
+     *
+     * The bind hops through the main handler: CameraX binds are main-thread
+     * work, and a wedged main thread must bound the wait (the same dispatch
+     * discipline the session's recovery rebind uses), so this is suspend.
+     * Distinct from the soft-restart tier: this NEVER stops the server.
+     */
+    suspend fun resetCamera(): CameraResetResult {
+        val published = (_cameraState.value as? CameraState.Error)?.recovery
+        val verdict = CameraErrorPolicy.decideResetCamera(published, errorRebindAttempts.get())
+        if (verdict != CameraErrorPolicy.Verdict.REBIND) {
+            Log.d(TAG, "resetCamera: verdict $verdict (published=$published) — no rebind spent")
+            return CameraResetResult(verdict)
+        }
+        errorRebindAttempts.incrementAndGet()
+        val bound = withContext(Dispatchers.Main) { rebindUseCases() }
+        Log.d(TAG, "resetCamera: bounded manual rebind (attempt $errorRebindAttempts, bound=$bound)")
+        return CameraResetResult(CameraErrorPolicy.Verdict.REBIND, bound)
     }
 
     /**
@@ -1887,6 +2030,7 @@ class CameraService(private val context: Context) {
     fun release() {
         // Final teardown — device-bound bookkeeping, no gate to consult: no
         // state exempts releasing the camera.
+        unregisterCameraAddedWait()
         cameraProvider?.unbindAll()
         cameraProvider = null
         clearBoundUseCases()
@@ -1930,6 +2074,16 @@ class CameraService(private val context: Context) {
          * (the CAMERA_PERMISSION_REQUIRED_MESSAGE precedent).
          */
         const val CAMERA_DISABLED_MESSAGE = "Camera disabled by policy (while-in-use denial)"
+
+        /**
+         * The observed-camera-state line for ERROR_CAMERA_FATAL_ERROR —
+         * camera2's ERROR_CAMERA_SERVICE, whose documented answer is a device
+         * reboot (CameraX taxonomy, self-healing §5; blueprint P0 item 4).
+         * The [CameraState.Error.recovery] verdict carries the structured
+         * REBOOT_REQUIRED alongside, so consumers need not string-match; the
+         * message is the human-readable form the dashboard renders today.
+         */
+        const val CAMERA_FATAL_MESSAGE = "Camera fatal error — reboot the device"
     }
 }
 
