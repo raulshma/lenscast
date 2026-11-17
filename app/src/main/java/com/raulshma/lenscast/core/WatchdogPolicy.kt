@@ -78,13 +78,30 @@ object WatchdogPolicy {
 
     enum class StallReason {
         CAMERA_ERROR,
+        SERVER_UNANSWERING,
         SERVER_STOPPED,
         STREAM_STOPPED,
         FRAME_STALL,
         RTSP_UNHEALTHY,
     }
 
-    /** Everything [evaluate] needs — a snapshot of the watchdog's live inputs. */
+    /**
+     * Everything [evaluate] needs — a snapshot of the watchdog's live inputs.
+     *
+     * [serverOnlyMode] marks the state the server-seam arming watches: the
+     * process runs the server with NO live stream session (the post-relaunch
+     * state every death-and-relaunch tier lands in). The session-scoped
+     * checks (stream-active flags, frame stalls, RTSP health) are skipped
+     * there — there is no session to stall — while [cameraError] and the
+     * loopback probe stay active.
+     *
+     * [serverAnswered] is the loopback `/api/system` probe's verdict: true =
+     * the HTTP stack answered (any status below 500 — a 401 with auth on is a
+     * living server), false = connect/read timeout or a 5xx (the wedged
+     * accept loop / executor class the `isServerRunning` flag cannot see),
+     * null = the probe did not run (the flag is already down, or the seam is
+     * absent) and must not count as a stall.
+     */
     data class HealthSnapshot(
         val cameraError: Boolean,
         val cameraErrorMessage: String? = null,
@@ -103,6 +120,8 @@ object WatchdogPolicy {
         val rtspHealthy: Boolean = true,
         val rtspAcceptedFrames: Long = 0L,
         val lastRtspAcceptedFrames: Long = 0L,
+        val serverOnlyMode: Boolean = false,
+        val serverAnswered: Boolean? = null,
     )
 
     /** Escalation ladder: first two failures soft, next two medium, then hard. */
@@ -115,8 +134,11 @@ object WatchdogPolicy {
     }
 
     /**
-     * The health verdict in branch order — camera error, server stopped,
-     * stream stopped, frame stall — or null when healthy.
+     * The health verdict in branch order — camera error, unanswering server,
+     * then (session mode only) server stopped, stream stopped, frame stall —
+     * or null when healthy. The first two branches run in BOTH modes: a HAL
+     * error and a wedged HTTP stack are session-independent facts, the exact
+     * failures the post-relaunch server-only state must not sit Idle through.
      */
     fun evaluate(snapshot: HealthSnapshot): StallReason? {
         // 1. Camera state check
@@ -124,17 +146,30 @@ object WatchdogPolicy {
             return StallReason.CAMERA_ERROR
         }
 
-        // 2. Streaming should be active but server isn't running
+        // 2. Loopback probe — the server's flags can stay true while the
+        // accept loop or API executor is wedged; only the probe sees that.
+        // null (probe not run) is not a stall.
+        if (snapshot.serverAnswered == false) {
+            return StallReason.SERVER_UNANSWERING
+        }
+
+        // Everything below is session bookkeeping: with no session live
+        // (server-only mode) there is nothing to stall.
+        if (snapshot.serverOnlyMode) {
+            return null
+        }
+
+        // 3. Streaming should be active but server isn't running
         if (snapshot.wasStreamingActive && !snapshot.serverRunning) {
             return StallReason.SERVER_STOPPED
         }
 
-        // 3. Stream was active but is no longer live
+        // 4. Stream was active but is no longer live
         if (snapshot.wasStreamingActive && !snapshot.liveStreaming) {
             return StallReason.STREAM_STOPPED
         }
 
-        // 4. Camera-tap stall — viewer-independent. The camera-frame counter
+        // 5. Camera-tap stall — viewer-independent. The camera-frame counter
         // advances for every sensor frame (motion detection and the snapshot
         // store consume all of them), so this catches the headless stall a
         // locked mount hits when the while-in-use camera policy denies the
@@ -146,7 +181,7 @@ object WatchdogPolicy {
             return StallReason.FRAME_STALL
         }
 
-        // 5. Viewer-side stall — the camera delivers but the M-JPEG pipeline
+        // 6. Viewer-side stall — the camera delivers but the M-JPEG pipeline
         // does not (queue wedged, encoder dead); only observable with
         // clients actually pulling.
         if (snapshot.clientCount > 0 &&
@@ -156,7 +191,7 @@ object WatchdogPolicy {
             return StallReason.FRAME_STALL
         }
 
-        // 5. RTSP-only health — catches an RTSP hang while MJPEG looks idle-healthy.
+        // 7. RTSP-only health — catches an RTSP hang while MJPEG looks idle-healthy.
         if (snapshot.rtspActive && !snapshot.rtspHealthy) {
             return StallReason.RTSP_UNHEALTHY
         }
@@ -174,6 +209,7 @@ object WatchdogPolicy {
     fun failureMessage(reason: StallReason, snapshot: HealthSnapshot): String {
         return when (reason) {
             StallReason.CAMERA_ERROR -> "Camera error: ${snapshot.cameraErrorMessage}"
+            StallReason.SERVER_UNANSWERING -> "Streaming server not answering (loopback probe failed)"
             StallReason.SERVER_STOPPED -> "Streaming server stopped unexpectedly"
             StallReason.STREAM_STOPPED -> "Stream stopped unexpectedly"
             StallReason.RTSP_UNHEALTHY -> "RTSP output unhealthy (no frames to ${snapshot.rtspPlayingClients} players)"

@@ -2054,6 +2054,15 @@ class StreamingManager(
     }
 
     /**
+     * The loopback `/api/system` URL the watchdog's liveness probe GETs
+     * (blueprint P0 item 5): loopback, never the advertised LAN host, and
+     * derived from the transport's retained scheme/port so a port or TLS
+     * change moves the probe with the listener it is probing.
+     */
+    fun loopbackSystemUrl(): String =
+        "${webTransport.scheme()}://127.0.0.1:${webTransport.port()}/api/system"
+
+    /**
      * Invoked by [RtspOutput] when a stop releases the audio stream it
      * opened: if the web output is not streaming, nobody needs the capture —
      * stop it and clear the web audio state.

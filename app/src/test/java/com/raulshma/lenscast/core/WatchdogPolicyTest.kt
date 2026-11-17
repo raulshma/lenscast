@@ -21,6 +21,8 @@ class WatchdogPolicyTest {
         lastCameraFrames: Long = 900L, // camera tap advancing by default → healthy
         lastFrameCheckTimeMs: Long = 0L,
         nowMs: Long = WatchdogPolicy.FRAME_STALL_THRESHOLD_MS,
+        serverOnlyMode: Boolean = false,
+        serverAnswered: Boolean? = null,
     ) = WatchdogPolicy.HealthSnapshot(
         cameraError = cameraError,
         cameraErrorMessage = cameraErrorMessage,
@@ -34,6 +36,8 @@ class WatchdogPolicyTest {
         lastCameraFrames = lastCameraFrames,
         lastFrameCheckTimeMs = lastFrameCheckTimeMs,
         nowMs = nowMs,
+        serverOnlyMode = serverOnlyMode,
+        serverAnswered = serverAnswered,
     )
 
     // ── tierFor escalation ladder ──
@@ -199,6 +203,104 @@ class WatchdogPolicyTest {
         )
     }
 
+    // ── server-only mode (the post-relaunch state the server-seam arming watches) ──
+
+    @Test
+    fun `server-only mode skips every session-scoped check`() {
+        // Everything frozen/down: no session exists to stall — the server-flag
+        // and frame branches are session bookkeeping and must not fire.
+        assertNull(
+            WatchdogPolicy.evaluate(
+                snapshot(
+                    serverOnlyMode = true,
+                    wasStreamingActive = false,
+                    serverRunning = false,
+                    liveStreaming = false,
+                    clientCount = 0,
+                    processedFrames = 100,
+                    lastProcessedFrameCount = 100,
+                    cameraFrames = 1_000L,
+                    lastCameraFrames = 1_000L,
+                    nowMs = 600_000,
+                )
+            )
+        )
+    }
+
+    @Test
+    fun `camera error still fires in server-only mode`() {
+        // The one session-independent failure signal that predates the probe:
+        // a HAL error in the post-relaunch server-only state must not sit Idle.
+        assertEquals(
+            WatchdogPolicy.StallReason.CAMERA_ERROR,
+            WatchdogPolicy.evaluate(snapshot(cameraError = true, serverOnlyMode = true)),
+        )
+    }
+
+    // ── the loopback probe input (serverAnswered) ──
+
+    @Test
+    fun `an unanswering server is detected in session mode`() {
+        assertEquals(
+            WatchdogPolicy.StallReason.SERVER_UNANSWERING,
+            WatchdogPolicy.evaluate(snapshot(serverAnswered = false)),
+        )
+    }
+
+    @Test
+    fun `an unanswering server is detected in server-only mode`() {
+        assertEquals(
+            WatchdogPolicy.StallReason.SERVER_UNANSWERING,
+            WatchdogPolicy.evaluate(
+                snapshot(serverOnlyMode = true, wasStreamingActive = false, serverAnswered = false),
+            ),
+        )
+    }
+
+    @Test
+    fun `a skipped probe never stalls the stream`() {
+        // null = probe not applicable (the server flag is already down, or the
+        // probe seam is absent) — absence of evidence is not a stall.
+        assertNull(WatchdogPolicy.evaluate(snapshot(serverAnswered = null)))
+        assertNull(
+            WatchdogPolicy.evaluate(
+                snapshot(serverOnlyMode = true, wasStreamingActive = false, serverAnswered = null),
+            )
+        )
+    }
+
+    @Test
+    fun `an answering server keeps a healthy stream healthy`() {
+        assertNull(WatchdogPolicy.evaluate(snapshot(serverAnswered = true)))
+    }
+
+    @Test
+    fun `camera error outranks an unanswering server`() {
+        assertEquals(
+            WatchdogPolicy.StallReason.CAMERA_ERROR,
+            WatchdogPolicy.evaluate(snapshot(cameraError = true, serverAnswered = false)),
+        )
+    }
+
+    @Test
+    fun `an unanswering server outranks the session-scoped stall branches`() {
+        // The wedged-server class the flags cannot see: flags say running,
+        // frames may even flow, but the HTTP stack does not answer.
+        assertEquals(
+            WatchdogPolicy.StallReason.SERVER_UNANSWERING,
+            WatchdogPolicy.evaluate(
+                snapshot(
+                    serverAnswered = false,
+                    serverRunning = false,
+                    liveStreaming = false,
+                    processedFrames = 100,
+                    lastProcessedFrameCount = 100,
+                    nowMs = 600_000,
+                )
+            ),
+        )
+    }
+
     // ── failureMessage ──
 
     @Test
@@ -214,6 +316,10 @@ class WatchdogPolicyTest {
         assertEquals(
             "Streaming server stopped unexpectedly",
             WatchdogPolicy.failureMessage(WatchdogPolicy.StallReason.SERVER_STOPPED, snapshot())
+        )
+        assertEquals(
+            "Streaming server not answering (loopback probe failed)",
+            WatchdogPolicy.failureMessage(WatchdogPolicy.StallReason.SERVER_UNANSWERING, snapshot())
         )
         assertEquals(
             "Stream stopped unexpectedly",
