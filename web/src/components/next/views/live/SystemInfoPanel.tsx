@@ -1,8 +1,9 @@
 import { createResource, createSignal, For, Show } from 'solid-js'
 import type { JSX } from 'solid-js'
 import type { SystemInfo } from '../../../../types'
-import { getSystemInfo, restartApp } from '../../../../api/client'
+import { getSystemInfo, getStatus, resetCamera, restartApp } from '../../../../api/client'
 import { formatBytes } from '../../../../format'
+import { reliabilityAdvisories, restartRefusalDisplay, resetCameraFailureDisplay } from '../../../../lib/reliabilityHints'
 import { t } from '../../../../lib/i18n'
 import { Button, ConfirmDialog, FieldRow, Panel, Skeleton } from '../../ui'
 
@@ -25,25 +26,79 @@ function batteryTempLabel(tenthsC: number | null | undefined): string {
  * Read-only diagnostics, ported from the classic SystemPanel: what build
  * is running, on what device, for how long, and how battery and storage
  * are holding up — the triage view for a headless phone (GET /api/system).
- * A failure renders an unavailable note instead of an error.
+ * A failure renders an unavailable note instead of an error. The
+ * reliability callouts (blueprint P0-B item 7) surface the grant/battery
+ * states the 24/7 run depends on before they cost a night.
+ *
+ * Wave 4 (blueprint P1 items 9/10): the restart dialog gains the soft
+ * restart — the in-process ladder that preserves the FGS's camera standing
+ * (resolved tension 2) — beside the deep restart, and the camera-state row
+ * carries the reset-camera button (the bounded, server-never-stops
+ * recovery).
  */
 export default function SystemInfoPanel() {
   const [info] = createResource<SystemInfo>(() => getSystemInfo())
+  // The camera state rides the live status snapshot (GET /api/status's
+  // `camera` line): the reset button sits beside it, so the row is both the
+  // diagnosis and the lever.
+  const [status, statusActions] = createResource(() => getStatus())
   const [confirmOpen, setConfirmOpen] = createSignal(false)
   const [restarting, setRestarting] = createSignal(false)
+  const [restartFailure, setRestartFailure] = createSignal('')
+  const [resetting, setResetting] = createSignal(false)
+  const [resetDone, setResetDone] = createSignal(false)
+  const [resetFailure, setResetFailure] = createSignal('')
 
   // Issue #18's App-Restart button: the device schedules its own relaunch and
   // quits, so a dead connection here is the happy path — the note is shown
   // either way and the dashboard's status polling reconnects to the fresh
-  // session.
-  const onRestart = async () => {
+  // session. The typed refusal (blueprint item 8) is different: the
+  // pre-check refused BEFORE the device quit — nothing restarted, so the
+  // localized failure replaces the restarting note and the dialog closes.
+  const onRestart = async (mode: 'soft' | 'process') => {
     setConfirmOpen(false)
     setRestarting(true)
+    setRestartFailure('')
     try {
-      await restartApp()
+      const result = await restartApp(mode)
+      if (result.success === false) {
+        const display = restartRefusalDisplay(result)
+        setRestartFailure('messageKey' in display ? t(display.messageKey) : display.deviceHint)
+        setRestarting(false)
+      }
     } catch {
       // Expected: the teardown can kill the connection before the OK lands.
     }
+  }
+
+  // The reset-camera lever (blueprint item 10): one bounded rebind, the
+  // server never stops — the answer is typed, so a policy refusal surfaces
+  // its reason instead of a silent shrug.
+  const onResetCamera = async () => {
+    setResetting(true)
+    setResetDone(false)
+    setResetFailure('')
+    try {
+      const result = await resetCamera()
+      if (result.success) {
+        setResetDone(true)
+        // Re-fetch the camera line so the row's state reflects the rebind.
+        statusActions.refetch()
+      } else {
+        const display = resetCameraFailureDisplay(result)
+        setResetFailure('messageKey' in display ? t(display.messageKey) : display.deviceHint)
+      }
+    } catch {
+      setResetFailure(t('system.resetCameraDenied.generic'))
+    }
+    setResetting(false)
+  }
+
+  // The reliability callouts (blueprint item 7): the Show above is not
+  // keyed, so the accessor guards the undefined case rows() also guards.
+  const advisories = () => {
+    const d = info()
+    return d ? reliabilityAdvisories(d) : []
   }
 
   const rows = () => {
@@ -90,6 +145,16 @@ export default function SystemInfoPanel() {
           </Show>
         }
       >
+        <For each={advisories()}>
+          {(advisory) => (
+            <div
+              class={`nx-banner ${advisory.level === 'warning' ? 'nx-banner-warning' : 'nx-banner-info'}`}
+              role={advisory.level === 'warning' ? 'alert' : 'note'}
+            >
+              <span>{t(advisory.messageKey)}</span>
+            </div>
+          )}
+        </For>
         <For each={rows()}>
           {([label, value, mono]) => (
             <FieldRow label={label}>
@@ -99,6 +164,30 @@ export default function SystemInfoPanel() {
             </FieldRow>
           )}
         </For>
+        <FieldRow label={t('system.camera')}>
+          <span class="nx-info-value">
+            {status()?.camera || '—'}
+          </span>
+          <Button
+            variant="secondary"
+            size="sm"
+            disabled={resetting()}
+            loading={resetting()}
+            onClick={onResetCamera}
+          >
+            {t('system.resetCamera')}
+          </Button>
+        </FieldRow>
+        <Show when={resetDone()}>
+          <div class="nx-banner nx-banner-info" role="note">
+            <span>{t('system.resetCameraDone')}</span>
+          </div>
+        </Show>
+        <Show when={resetFailure()}>
+          <div class="nx-banner nx-banner-warning" role="alert">
+            <span>{resetFailure()}</span>
+          </div>
+        </Show>
         <FieldRow label={t('system.restart')}>
           <Show
             when={!restarting()}
@@ -109,14 +198,22 @@ export default function SystemInfoPanel() {
             </Button>
           </Show>
         </FieldRow>
+        <Show when={restartFailure()}>
+          <div class="nx-banner nx-banner-warning" role="alert">
+            <span>{restartFailure()}</span>
+          </div>
+        </Show>
       </Show>
       <ConfirmDialog
         open={confirmOpen()}
         title={t('system.restart')}
-        message={t('system.restartConfirm')}
+        message={t('system.restartConfirmOptions')}
         danger
         busy={restarting()}
-        onConfirm={onRestart}
+        confirmLabel={t('system.restartButton')}
+        alternativeLabel={t('system.softRestartButton')}
+        onAlternative={() => onRestart('soft')}
+        onConfirm={() => onRestart('process')}
         onClose={() => setConfirmOpen(false)}
       />
     </Panel>

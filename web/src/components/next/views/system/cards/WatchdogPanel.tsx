@@ -1,5 +1,6 @@
-import { Show } from 'solid-js'
-import type { AllSettings, DeviceStatus } from '../../../../../types'
+import { createResource, Show } from 'solid-js'
+import type { AllSettings, DeviceStatus, SystemInfo } from '../../../../../types'
+import { getSystemInfo } from '../../../../../api/client'
 import { API_DEFAULTS } from '../../../../../api/defaults'
 import { formatTime, t } from '../../../../../lib/i18n'
 import { Panel, ToggleField, SliderField, FieldRow, Badge, Led, type BadgeTone, type LedTone } from '../../../ui'
@@ -40,12 +41,25 @@ const STATE_LEDS: Record<string, LedTone> = {
  * every binding unchanged: the enable toggle, max-retries and check-interval
  * sliders, and the live status readout (state, consecutive failures, total
  * recoveries, last recovery time, last failure reason, exhausted alert)
- * straight off the status snapshot's watchdog slice.
+ * straight off the status snapshot's watchdog slice. Plus the out-of-process
+ * reliability telemetry (spec item 7, fix D): the crash-relaunch guard's
+ * count/state and the alarm heartbeat's armed/misses/tier ride GET
+ * /api/system as one compact status line each — shown whenever wired,
+ * independent of the watchdog toggle.
  */
 export default function WatchdogPanel(props: Props) {
   const s = () => props.settings()
   const wd = () => props.status()?.watchdog
   const enabled = () => s()?.streaming?.watchdogEnabled ?? API_DEFAULTS.watchdogEnabled
+  const fsiResume = () => s()?.streaming?.fsiCameraResumeEnabled ?? API_DEFAULTS.fsiCameraResumeEnabled
+  // The out-of-process reliability telemetry (GET /api/system, spec item 7's
+  // "the dashboard can see every state"): the crash-relaunch loop guard's and
+  // the alarm heartbeat's live states, one compact line each. Self-fetched —
+  // the SystemInfoPanel precedent; absent fields stay hidden (an unwired
+  // graph keeps them off the wire).
+  const [sys] = createResource<SystemInfo>(() => getSystemInfo())
+  const crashGuard = () => sys()?.crashRelaunch
+  const heartbeat = () => sys()?.heartbeat
 
   const statusLabel = () => t(STATE_KEYS[wd()?.status ?? 'IDLE'] ?? STATE_KEYS.IDLE)
 
@@ -75,6 +89,42 @@ export default function WatchdogPanel(props: Props) {
       <div class="nx-banner nx-banner-info" role="note" aria-live="polite">
         {t('watchdog.desc')}
       </div>
+
+      {/* Camera Resume Prompt (opt-in, default off) */}
+      <ToggleField
+        label={t('watchdog.fsiResume')}
+        checked={fsiResume()}
+        onChange={() => props.updateStreamingAndSave({ fsiCameraResumeEnabled: !fsiResume() })}
+      />
+      <div class="nx-banner nx-banner-info" role="note" aria-live="polite">
+        {t('watchdog.fsiResume.desc')}
+      </div>
+
+      {/* Crash guard + heartbeat telemetry (spec item 7): every state the
+          overnight run relies on, dashboard-visible. Both run regardless of
+          the watchdog toggle (the heartbeat keys on the server lifecycle,
+          not the session), so these lines are not gated on `enabled()`.
+          GIVE_UP warns — the handler has stopped arming and only the OS
+          sticky restart is left. */}
+      <Show when={crashGuard()}>
+        <FieldRow label={t('watchdog.crashGuard')}>
+          <span
+            class="nx-mono nx-info-value"
+            style={{ color: crashGuard()!.state === 'GIVE_UP' ? 'var(--nx-warning)' : undefined }}
+          >
+            {crashGuard()!.crashCount} · {crashGuard()!.state}
+          </span>
+        </FieldRow>
+      </Show>
+      <Show when={heartbeat()}>
+        <FieldRow label={t('watchdog.heartbeat')}>
+          <span class="nx-mono nx-info-value">
+            {heartbeat()!.armed ? t('watchdog.heartbeat.armed') : t('watchdog.heartbeat.disarmed')}
+            {' · '}{heartbeat()!.misses} {t('watchdog.heartbeat.misses')}
+            <Show when={heartbeat()!.tier}>{' · '}{heartbeat()!.tier}</Show>
+          </span>
+        </FieldRow>
+      </Show>
 
       <Show when={enabled()}>
         {/* Max Retries */}

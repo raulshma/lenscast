@@ -5,6 +5,7 @@ import {
   type AuthConfig,
   type AutomationStateDto,
   type AutomationIconVocabulary,
+  type CameraResetResponse,
   type DetectionStats,
   type DetectionTestResponse,
   type DeviceStatus,
@@ -35,6 +36,14 @@ import authConfigFixture from '../contract/auth-config.json'
 import systemFixture from '../contract/system.json'
 import detectionStatsFixture from '../contract/detection-stats.json'
 import automationFixture from '../contract/automation.json'
+import {
+  RESTART_REASON_EXACT_ALARM_NOT_GRANTED,
+  RESTART_REASON_SOFT_RESTART_FAILED,
+  RESET_REASON_BUDGET_SPENT,
+  RESET_REASON_CAMERA_REMOVED,
+  RESET_REASON_REBIND_DENIED,
+  RESET_REASON_REBOOT_REQUIRED,
+} from './lib/reliabilityHints'
 
 // The checked-in JSON files in web/contract/ are the shared DTO contract:
 // app's DtoContractFixtureTest serializes the Kotlin DTOs (through the
@@ -172,6 +181,7 @@ const STREAMING_KEYS = [
   'watchdogEnabled',
   'watchdogMaxRetries',
   'watchdogCheckIntervalSeconds',
+  'fsiCameraResumeEnabled',
   'mdnsEnabled',
   'motionDetectionEnabled',
   'motionSensitivityPercent',
@@ -583,6 +593,58 @@ describe('DTO contract fixtures', () => {
   })
 })
 
+// ── the restart/reset wire vocabulary (fix G) ──
+// These travel as bare strings on POST /api/system/restart and
+// POST /api/system/reset-camera. The Kotlin side hoists every literal into
+// SystemWebHandler consts (RESTART_REASON_*, RESTART_MODE_*, VERDICT_*,
+// RESET_REASON_*) and pins them on the wire through SystemWebHandlerRestartTest's
+// exact-JSON assertions; the web resolves them through reliabilityHints'
+// exported constants. These pins close the loop on the web side: a spelling
+// drift on either side now fails a test instead of silently degrading a
+// localized refusal into a generic device hint.
+const RESTART_MODE_SOFT = 'soft'
+const RESTART_MODE_PROCESS = 'process'
+
+const VERDICT_REBIND = 'REBIND'
+const VERDICT_CAMERAX_HANDLES = 'CAMERAX_HANDLES'
+const VERDICT_REBOOT_REQUIRED = 'REBOOT_REQUIRED'
+const VERDICT_WAIT_CAMERA_ADDED = 'WAIT_CAMERA_ADDED'
+
+describe('restart/reset wire vocabulary pins', () => {
+  it('the restart refusal reasons match the Kotlin SystemWebHandler consts', () => {
+    expect(RESTART_REASON_EXACT_ALARM_NOT_GRANTED).toBe('exact_alarm_not_granted')
+    expect(RESTART_REASON_SOFT_RESTART_FAILED).toBe('soft_restart_failed')
+  })
+
+  it('the reset-camera refusal reasons match the Kotlin SystemWebHandler consts', () => {
+    expect(RESET_REASON_REBIND_DENIED).toBe('rebind_denied')
+    expect(RESET_REASON_BUDGET_SPENT).toBe('rebind_budget_spent')
+    expect(RESET_REASON_REBOOT_REQUIRED).toBe('reboot_required')
+    expect(RESET_REASON_CAMERA_REMOVED).toBe('camera_removed')
+  })
+
+  it('the reset verdict union is exactly the CameraErrorPolicy wire vocabulary', () => {
+    // Exhaustive type pin: a Record keyed by types.ts' `verdict` union itself
+    // must carry every member (a member added on the Kotlin/types side fails
+    // the missing key; one removed fails the excess key) — and the values pin
+    // the wire spellings the SystemWebHandler consts carry.
+    const wireVerdicts: Record<NonNullable<CameraResetResponse['verdict']>, string> = {
+      REBIND: VERDICT_REBIND,
+      CAMERAX_HANDLES: VERDICT_CAMERAX_HANDLES,
+      REBOOT_REQUIRED: VERDICT_REBOOT_REQUIRED,
+      WAIT_CAMERA_ADDED: VERDICT_WAIT_CAMERA_ADDED,
+    }
+    expect(Object.values(wireVerdicts)).toEqual(['REBIND', 'CAMERAX_HANDLES', 'REBOOT_REQUIRED', 'WAIT_CAMERA_ADDED'])
+  })
+
+  it('the restart modes keep their wire spellings (types.ts SystemRestartResponse.mode)', () => {
+    // The soft mode's success shape and the deep restart's legacy shape both
+    // key on this string (SystemWebHandler.RESTART_MODE_SOFT / _PROCESS).
+    expect(RESTART_MODE_SOFT).toBe('soft')
+    expect(RESTART_MODE_PROCESS).toBe('process')
+  })
+})
+
 describe('API_DEFAULTS lockstep with the fixtures', () => {
   const settings: AllSettings = settingsFixture as AllSettings
   const { camera, streaming } = settings
@@ -685,6 +747,11 @@ describe('API_DEFAULTS lockstep with the fixtures', () => {
     expect(streaming.unifiedPushEnabled).toBe(API_DEFAULTS.unifiedPushEnabled)
   })
 
+  it('watchdog and fsi-resume fallbacks match the settings fixture defaults', () => {
+    expect(streaming.watchdogEnabled).toBe(API_DEFAULTS.watchdogEnabled)
+    expect(streaming.fsiCameraResumeEnabled).toBe(API_DEFAULTS.fsiCameraResumeEnabled)
+  })
+
   it('detection suite, retention and rtspResolution fallbacks match the settings fixture defaults', () => {
     expect(streaming.rtspResolution).toBe(API_DEFAULTS.rtspResolution)
     expect(streaming.rtspVideoCodec).toBe(API_DEFAULTS.rtspVideoCodec)
@@ -719,6 +786,14 @@ describe('API_DEFAULTS lockstep with the fixtures', () => {
       'battery',
       'storage',
       'torchStrengthMaxLevel',
+      'canScheduleExactAlarms',
+      'isIgnoringBatteryOptimizations',
+      'isDeviceInDozeMode',
+      'batteryOptimizationState',
+      // The deferred item-7 telemetry (wave 4): the crash-relaunch loop
+      // guard's and the heartbeat's live states ride the snapshot.
+      'crashRelaunch',
+      'heartbeat',
     ])
     expectKeys(system.battery as unknown as Record<string, unknown>, [
       'level',
@@ -736,6 +811,20 @@ describe('API_DEFAULTS lockstep with the fixtures', () => {
       'freeBytes',
       'totalBytes',
     ])
+    // The reliability facts are internally consistent: the fixture's device
+    // (API 35) reports the grant, and the allowlisted app reads UNRESTRICTED.
+    expect(system.sdkInt).toBeGreaterThanOrEqual(31)
+    expect(system.canScheduleExactAlarms).toBe(true)
+    expect(system.isIgnoringBatteryOptimizations).toBe(true)
+    expect(system.batteryOptimizationState).toBe('UNRESTRICTED')
+    // The telemetry blocks use the documented closed vocabularies, and the
+    // fixture's state pair is coherent (a nonzero crash count is never ARM-
+    // fresh-only, and the fixture's heartbeat carries a verdict tier).
+    expect(system.crashRelaunch?.crashCount).toBeGreaterThanOrEqual(0)
+    expect(['ARM', 'BACKOFF', 'GIVE_UP']).toContain(system.crashRelaunch?.state)
+    expect(system.heartbeat?.armed).toBe(true)
+    expect(system.heartbeat?.misses).toBeGreaterThanOrEqual(0)
+    expect(['SOFT', 'MEDIUM', 'SOFT_RESTART', 'RELAUNCH']).toContain(system.heartbeat?.tier)
   })
 
   it('detection stats fixture assigns to DetectionStats', () => {

@@ -15,6 +15,13 @@ interface Props {
   danger?: boolean
   /** True while the confirmed action runs: the confirm spins and Escape/scrim closes are blocked. */
   busy?: boolean
+  /**
+   * An optional gentler alternative action (the restart dialog's "soft
+   * restart" beside the deep restart): rendered as a secondary button beside
+   * the confirm so one dialog offers both intensities.
+   */
+  alternativeLabel?: string
+  onAlternative?: () => void
   onConfirm: () => void
   onClose: () => void
 }
@@ -53,6 +60,11 @@ export default function ConfirmDialog(props: Props) {
             <Button variant="secondary" disabled={props.busy} onClick={props.onClose}>
               {props.cancelLabel ?? t('common.cancel')}
             </Button>
+            <Show when={props.alternativeLabel && props.onAlternative}>
+              <Button variant="secondary" disabled={props.busy} onClick={props.onAlternative}>
+                {props.alternativeLabel}
+              </Button>
+            </Show>
             <Button variant={props.danger ? 'danger' : 'primary'} loading={props.busy} onClick={props.onConfirm}>
               {props.confirmLabel ?? t('common.confirm')}
             </Button>

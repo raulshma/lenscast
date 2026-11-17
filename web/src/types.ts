@@ -173,6 +173,15 @@ export interface StreamingSettings {
   watchdogEnabled: boolean
   watchdogMaxRetries: number
   watchdogCheckIntervalSeconds: number
+  /**
+   * Opt-in, default off: after a process death or reboot lands the app back
+   * in the server-only state, the phone posts a full-screen-intent prompt
+   * (a content-tap heads-up when the FSI permission is revoked) that
+   * restarts the journal-recorded outputs while visible — the only
+   * unattended path that restores the camera. Off by default because it
+   * lights the screen.
+   */
+  fsiCameraResumeEnabled: boolean
   mdnsEnabled: boolean
   motionDetectionEnabled: boolean
   motionSensitivityPercent: number
@@ -672,6 +681,69 @@ export interface SystemInfo {
   }
   /** The bound camera's torch strength ceiling (FLASH_INFO_STRENGTH_MAXIMUM_LEVEL); absent when unknown. */
   torchStrengthMaxLevel?: number
+  /**
+   * AlarmManager.canScheduleExactAlarms(): true with the exact-alarm grant or the
+   * battery-allowlist equivalent; absent below API 31 (no grant model there).
+   * False = the dashboard's App-Restart button cannot relaunch the app.
+   */
+  canScheduleExactAlarms?: boolean
+  /** The app is on the battery-optimization allowlist — the "Unrestricted" state. */
+  isIgnoringBatteryOptimizations: boolean
+  /** The device is in doze (device-idle) mode at snapshot time. */
+  isDeviceInDozeMode: boolean
+  /** The Settings > Battery per-app state (UNRESTRICTED | OPTIMIZED | RESTRICTED). */
+  batteryOptimizationState: 'UNRESTRICTED' | 'OPTIMIZED' | 'RESTRICTED'
+  /**
+   * The crash-relaunch loop guard's live state (blueprint P0 item 1 telemetry,
+   * the deferred item-7 half): the persisted consecutive-crash count plus the
+   * derived verdict — ARM (fresh guard or a one-off crash; the next crash
+   * relaunches at base delay), BACKOFF (a loop is forming; the pace doubles),
+   * GIVE_UP (the handler stopped arming; the OS sticky restart is the only
+   * tier left). Absent on responses whose graph seam is unwired.
+   */
+  crashRelaunch?: { crashCount: number; state: 'ARM' | 'BACKOFF' | 'GIVE_UP' }
+  /**
+   * The alarm heartbeat's live state (blueprint P0 item 3 telemetry): armed
+   * flag, consecutive-miss bookkeeping, and the last escalation tier the
+   * policy emitted (SOFT | MEDIUM | SOFT_RESTART | RELAUNCH — absent until a
+   * verdict exists). Absent on responses whose graph seam is unwired.
+   */
+  heartbeat?: { armed: boolean; misses: number; tier?: string }
+}
+
+/**
+ * POST /api/system/restart — the deep restart's success shape is the bare
+ * `{"success":true}` (byte-identical with the pre-soft contract); the typed
+ * refusal (blueprint item 8) adds `success:false` plus a machine-readable
+ * reason the dashboard maps to a localized message. The soft mode (blueprint
+ * item 9) carries `mode:"soft"` — success adds it to the bare shape, failure
+ * additionally names the failed ladder `step`.
+ */
+export interface SystemRestartResponse {
+  success: boolean
+  /** The mode actually run: `"soft"` on the soft ladder's answers; absent for the deep restart. */
+  mode?: string
+  /** Machine-readable refusal reason ("exact_alarm_not_granted", "soft_restart_failed"); absent on success. */
+  reason?: string
+  /** The soft-restart ladder step that failed ("rebindCamera", "startServer"); absent otherwise. */
+  step?: string
+  /** Device-side fallback text for the refusal; the dashboard's localized message wins. */
+  hint?: string
+}
+
+/**
+ * POST /api/system/reset-camera (blueprint item 10) — the targeted camera
+ * recovery that never stops the server. `verdict` carries the device's
+ * CameraErrorPolicy verdict that drove the answer; every non-REBIND answer is
+ * a typed failure with a machine-readable reason.
+ */
+export interface CameraResetResponse {
+  success: boolean
+  verdict?: 'REBIND' | 'CAMERAX_HANDLES' | 'REBOOT_REQUIRED' | 'WAIT_CAMERA_ADDED'
+  /** Machine-readable failure reason ("rebind_denied", "rebind_budget_spent", "reboot_required", "camera_removed"); absent on success. */
+  reason?: string
+  /** Device-side fallback text for the failure; the dashboard's localized message wins. */
+  hint?: string
 }
 
 /** One per-UTC-day total in the detection stats series. */

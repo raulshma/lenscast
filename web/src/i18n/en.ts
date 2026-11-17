@@ -334,6 +334,17 @@ export const en: Record<string, string> = {
   'watchdog.state.recovering': 'Recovering…',
   'watchdog.state.failed': 'Failed',
   'watchdog.state.cooldown': 'Cooldown',
+  'watchdog.fsiResume': 'Camera Resume Prompt',
+  'watchdog.fsiResume.desc': 'After a crash or reboot leaves the server running without the camera, briefly lights the screen once to bring the camera back and resume the stream you left running. Opt-in: it turns the display on.',
+  // Spec item 7's deferred half (fix D): the crash-relaunch guard's and the
+  // heartbeat's live states ride GET /api/system — one compact status line
+  // each on the reliability card. The state/tier values (ARM/BACKOFF/GIVE_UP,
+  // SOFT/MEDIUM/SOFT_RESTART/RELAUNCH) stay wire vocabulary, untranslated.
+  'watchdog.crashGuard': 'Crash Relaunch Guard',
+  'watchdog.heartbeat': 'Alarm Heartbeat',
+  'watchdog.heartbeat.armed': 'Armed',
+  'watchdog.heartbeat.disarmed': 'Disarmed',
+  'watchdog.heartbeat.misses': 'misses',
 
   // ── Web streaming card ──
   'webstream.title': 'Web Streaming',
@@ -608,6 +619,27 @@ export const en: Record<string, string> = {
   'system.restartButton': 'Restart',
   'system.restartConfirm': 'Restart the LensCast app? Streams re-arm from their persisted settings when it comes back.',
   'system.restarting': 'Restarting — the dashboard reconnects to the fresh session automatically.',
+  'system.restartDenied.exactAlarm': 'Restart refused: the device has not granted “Alarms & reminders”, so the app cannot relaunch itself. Grant it in Settings → Apps → LensCast and try again.',
+  'system.restartDenied.generic': 'Restart was refused by the device; nothing was restarted.',
+  // Wave 4 (blueprint item 9): the soft restart — the in-process ladder that
+  // keeps the app alive, preserving the camera's foreground-service standing.
+  'system.softRestartButton': 'Soft restart',
+  'system.softRestartConfirm': 'Run a soft restart? The streaming pipeline re-arms in place without killing the app — the camera-preserving option.',
+  'system.restartConfirmOptions': 'Soft restart re-arms the streams in place and keeps the app alive. Full restart quits the app and relaunches it — streams re-arm from their persisted settings.',
+  'system.restartDenied.softFailed': 'The soft restart failed on the device',
+  // Wave 4 (blueprint item 10): the reset-camera lever — the bounded camera
+  // recovery that never stops the server.
+  'system.camera': 'Camera',
+  'system.resetCamera': 'Reset camera',
+  'system.resetCameraDone': 'Camera rebind sent — the camera re-armed in place.',
+  'system.resetCameraDenied.rebind': 'The camera rebind did not land (for example the device is locked). Unlock the device or retry.',
+  'system.resetCameraDenied.budget': 'The camera rebind budget is spent without a recovery. Reboot the device if the camera stays down.',
+  'system.resetCameraDenied.reboot': 'Camera fatal error — reboot the device.',
+  'system.resetCameraDenied.removed': 'The camera hardware was removed (unplugged). Reconnect it; LensCast rebinds when it returns.',
+  'system.resetCameraDenied.generic': 'Reset camera was refused by the device; nothing was reset.',
+  'system.reliability.exactAlarms': 'Grant “Alarms & reminders” for LensCast in the device settings — without it the app cannot relaunch itself after a dashboard restart.',
+  'system.reliability.restricted': 'The device restricts LensCast in the background — background work is blocked and the app may be stopped. Set it to “Unrestricted” under Settings → Battery.',
+  'system.reliability.optimized': 'Battery optimization is on. For 24/7 unattended use, set LensCast to “Unrestricted” under Settings → Battery.',
   'system.volumeFree': 'Volume free',
 
   // ── MQTT card ──

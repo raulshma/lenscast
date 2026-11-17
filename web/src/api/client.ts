@@ -393,9 +393,74 @@ export async function sendTestAlert(): Promise<import('../types').DetectionTestR
  * connection error here is EXPECTED (the teardown races the response) and is
  * not a failure — the caller shows its restarting note either way and the
  * dashboard's status polling reconnects to the fresh session.
+ *
+ * The typed refusal (blueprint item 8): `success:false` + a machine-readable
+ * `reason` ("exact_alarm_not_granted") means the pre-check refused BEFORE the
+ * device quit — nothing restarted, no connection drop will follow, and the
+ * caller must show the failure (mapped to a localized message via
+ * restartRefusalDisplay) instead of the restarting note.
+ *
+ * `mode: 'soft'` (blueprint item 9) runs the in-process soft-restart ladder
+ * instead — no process death, the camera-preserving tier. Its response is
+ * built AFTER the re-arm, but the ladder tears down and recreates the
+ * listener socket mid-flight, so the response itself can be dropped even on
+ * success; on a dropped connection this polls GET /api/system (the same
+ * recover-by-polling pattern the deep restart's status polling uses) until
+ * the re-armed server answers, and answers with the real outcome — a
+ * `mode:"soft"` success, or a typed soft failure when the device never came
+ * back inside the poll window. The deep modes keep today's semantics
+ * byte-for-byte (a dropped connection propagates to the caller).
  */
-export async function restartApp(): Promise<{ success: boolean }> {
-  return requestJson('/api/system/restart', { method: 'POST' })
+export async function restartApp(mode?: 'soft' | 'process'): Promise<import('../types').SystemRestartResponse> {
+  const url = mode ? `/api/system/restart?mode=${encodeURIComponent(mode)}` : '/api/system/restart'
+  try {
+    return await requestJson(url, { method: 'POST' })
+  } catch (error) {
+    if (mode !== 'soft') throw error
+    const answered = await pollUntilSystemAnswers()
+    if (answered) return { success: true, mode: 'soft' }
+    return {
+      success: false,
+      mode: 'soft',
+      reason: 'soft_restart_failed',
+      step: 'startServer',
+      hint: 'The device did not answer within the poll window after the soft restart.',
+    }
+  }
+}
+
+/** How long a dropped soft-restart response may chase the re-armed server. */
+const SOFT_RESTART_POLL_TIMEOUT_MS = 30_000
+const SOFT_RESTART_POLL_INTERVAL_MS = 1_000
+
+/**
+ * Poll the read-only diagnostics snapshot until the device answers (or the
+ * window closes). The deep restart's dashboard recovers by its own status
+ * polling; the soft restart borrows the same pattern explicitly because its
+ * request/response can die with the old listener while the ladder succeeds.
+ */
+async function pollUntilSystemAnswers(): Promise<boolean> {
+  const deadline = Date.now() + SOFT_RESTART_POLL_TIMEOUT_MS
+  while (Date.now() < deadline) {
+    try {
+      await getSystemInfo()
+      return true
+    } catch {
+      await new Promise((resolve) => setTimeout(resolve, SOFT_RESTART_POLL_INTERVAL_MS))
+    }
+  }
+  return false
+}
+
+/**
+ * Reset the camera subsystem (POST /api/system/reset-camera, blueprint item
+ * 10): one bounded rebind through the device's CameraErrorPolicy budget —
+ * the server NEVER stops. The typed answer distinguishes "the lever fired"
+ * (REBIND) from "reboot the phone" (REBOOT_REQUIRED), "the camera is gone"
+ * (WAIT_CAMERA_ADDED) and "the budget is spent" (CAMERAX_HANDLES).
+ */
+export async function resetCamera(): Promise<import('../types').CameraResetResponse> {
+  return requestJson('/api/system/reset-camera', { method: 'POST' })
 }
 
 

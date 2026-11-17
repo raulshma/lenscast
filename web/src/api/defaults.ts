@@ -70,6 +70,8 @@ export const API_DEFAULTS = {
   watchdogEnabled: false,
   watchdogMaxRetries: 5,
   watchdogCheckIntervalSeconds: 5,
+  // The post-death camera bring-up prompt (opt-in, default off).
+  fsiCameraResumeEnabled: false,
 
   // Detection (motion/sound), discovery, webhook and backup settings
   mdnsEnabled: true,
