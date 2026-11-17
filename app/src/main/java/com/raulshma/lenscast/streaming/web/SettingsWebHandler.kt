@@ -46,6 +46,13 @@ class SettingsWebHandler(
     private val audioModelStore: AudioModelStore,
     /** The export envelope's timestamp source. */
     private val nowMs: () -> Long = System::currentTimeMillis,
+    /**
+     * The live torch fact ([com.raulshma.lenscast.camera.CameraService.isTorchOn])
+     * the camera-section PUT rebuild converges the stored torch pair to.
+     * Required with no default: a defaulted `false` would silently re-create
+     * the original bug on a forgotten construction site.
+     */
+    private val liveTorchOn: () -> Boolean,
 ) {
 
     private val responseAdapter by lazy { AppJson.moshi.adapter(SettingsResponseDto::class.java) }
@@ -271,13 +278,17 @@ class SettingsWebHandler(
                 nightVisionMode = parseEnum(cam.nightVisionMode, current.nightVisionMode),
                 // Torch is NOT a web-camera-section setting: the camera DTO
                 // carries no torch fields (GET can't present them, PUT can't
-                // change them), so the rebuild must carry the stored values —
-                // defaulting them here turned a dashboard camera-section save
-                // into a persisted torch=false, and the Settings Applier
-                // killed the LED (the scheduled-automation torch, too) on
-                // every save. Live torch flips stay on POST /api/camera/torch
-                // (deterrence/automation write the live state, never this).
-                torchEnabled = current.torchEnabled,
+                // change them). The rebuild snapshots the LIVE torch fact
+                // rather than carrying the stored intent: live-only writers
+                // (POST /api/camera/torch, the deterrence coordinator) diverge
+                // from the stored pair by design, and this save re-asserts
+                // torch through the Settings Applier — carrying the stale
+                // stored value here killed a lit LED (the scheduled-automation
+                // torch, too) on every dashboard camera-section save (issue
+                // #16). torchStrength stays the stored intent: a live flip
+                // drives the device-default brightness and carries no strength
+                // intent of its own.
+                torchEnabled = liveTorchOn(),
                 outputRotation = OutputRotationPolicy.coerce(cam.outputRotation),
                 orientationLocked = cam.orientationLocked,
                 torchStrength = current.torchStrength,

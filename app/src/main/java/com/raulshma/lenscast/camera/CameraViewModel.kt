@@ -130,6 +130,7 @@ class CameraViewModel(
         current = { settings.value },
         persist = { settingsDataStore.saveSettings(it) },
         apply = { cameraService.applySettings(it) },
+        liveTorchOn = { cameraService.isTorchOn() },
     )
 
     // One shared clock over the controller's state (1s ticks, whole seconds).

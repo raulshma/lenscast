@@ -17,15 +17,35 @@ class CameraSettingsEditor(
     private val current: () -> CameraSettings,
     private val persist: suspend (CameraSettings) -> Unit,
     private val apply: (suspend (CameraSettings) -> Unit)? = null,
+    /**
+     * The live torch fact the edit's convergence answers to — a transform
+     * that left the torch pair untouched must not re-assert stale stored
+     * intent over a live-only lit LED. Required with no default: a defaulted
+     * `false` would silently re-create the darkened-LED bug on a forgotten
+     * construction site (see [CameraSettings.convergeTorch]).
+     */
+    private val liveTorchOn: () -> Boolean,
 ) {
 
     /**
      * Apply-then-persist, in that order, of the transform's output run
-     * through [normalizeManualDefaults] first — every write lands applied
-     * and persisted in the same normalized shape.
+     * through [normalizeManualDefaults] and the torch convergence first —
+     * every write lands applied and persisted in the same normalized shape,
+     * and the [apply] call itself (which drives the torch from the value)
+     * sees the converged one, not only the persisted copy. The transform is
+     * opaque, so the torch-touch verdict is the transform-diff proxy: a
+     * toggle write always flips [CameraSettings.torchEnabled] and lands
+     * explicit; no shipped editor control writes the same torch value it
+     * read.
      */
     suspend fun edit(transform: (CameraSettings) -> CameraSettings) {
-        val next = normalizeManualDefaults(transform(current()))
+        val base = current()
+        val normalized = normalizeManualDefaults(transform(base))
+        val next = CameraSettings.convergeTorch(
+            normalized,
+            touchedTorch = normalized.torchEnabled != base.torchEnabled,
+            liveTorchOn = liveTorchOn(),
+        )
         apply?.invoke(next)
         persist(next)
     }

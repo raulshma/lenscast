@@ -117,6 +117,7 @@ internal fun buildWebApiStack(
                 settingsDataStore = app.settingsDataStore,
                 detectionModelStore = app.detectionModelStore,
                 audioModelStore = app.audioModelStore,
+                liveTorchOn = { app.cameraService.isTorchOn() },
             ),
             automation = automationHandler,
             automationTest = automationTest,

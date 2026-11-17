@@ -6,6 +6,7 @@ import com.raulshma.lenscast.automation.schedule.AutomationActionRunner
 import com.raulshma.lenscast.automation.schedule.AutomationActionSpec
 import com.raulshma.lenscast.automation.schedule.AutomationActionCatalog
 import com.raulshma.lenscast.automation.schedule.AutomationSchedulePolicy
+import com.raulshma.lenscast.camera.model.CameraSettings
 import com.raulshma.lenscast.capture.model.RecordingConfig
 import com.raulshma.lenscast.capture.model.RecordingQuality
 import com.raulshma.lenscast.streaming.BootResumePolicy
@@ -130,13 +131,25 @@ class AutomationActionExecutor(private val app: MainApplication) : AutomationAct
         }
     }
 
-    /** Merges one camera action into the persisted settings; the applier does the rest. */
+    /**
+     * Merges one camera action into the persisted settings; the applier does
+     * the rest. The action type is the torch-touch verdict: a `torch` action
+     * is an explicit torch write and passes through verbatim, every other
+     * camera action leaves the pair untouched — and this save's applier
+     * re-assert must carry the live fact, not the stale stored intent
+     * ([CameraSettings.convergeTorch]), or a camera-only rule fire darkened
+     * the deterrence coordinator's live-only lit LED.
+     */
     private suspend fun applyCameraSetting(action: AutomationActionSpec) {
-        val merged = AutomationSchedulePolicy.mergeCameraSettings(
-            app.settingsDataStore.settings.value,
-            action,
+        val current = app.settingsDataStore.settings.value
+        val merged = AutomationSchedulePolicy.mergeCameraSettings(current, action)
+        app.settingsDataStore.saveSettings(
+            CameraSettings.convergeTorch(
+                merged,
+                touchedTorch = AutomationActionCatalog.typeFor(action.type)?.id == "torch",
+                liveTorchOn = app.cameraService.isTorchOn(),
+            ),
         )
-        app.settingsDataStore.saveSettings(merged)
     }
 
     /**
