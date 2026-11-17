@@ -6,22 +6,40 @@ import android.content.Context
 import android.content.Intent
 import android.os.SystemClock
 import android.util.Log
+import com.raulshma.lenscast.streaming.StreamingService
 
 /**
- * The app-restart relaunch: registers the launcher intent on AlarmManager so
+ * The app-restart relaunch: registers the streaming service on AlarmManager so
  * it survives the process death that [com.raulshma.lenscast.MainApplication.quitApplication]
  * deliberately causes. Every in-memory way back (handlers, coroutines, the
  * composition root) dies with the process, so the OS alarm is the only
  * mechanism that can bring the app back; the caller schedules this BEFORE
- * entering the quit ladder. The launcher intent comes from PackageManager —
- * the same ACTION_MAIN entry the home screen uses, so the restart lands on
- * the real front door, not a synthetic launch.
+ * entering the quit ladder.
  *
- * The alarm rides `ELAPSED_REALTIME_WAKEUP` + `setAndAllowWhileIdle`: it
- * wakes the CPU (not the screen — a headless phone restarted from its
- * dashboard must come back serving without lighting up) and needs no exact-
- * alarm permission; while the device idles the platform's per-app throttle
- * may defer the fire by a few minutes, which a restart tolerates.
+ * The relaunch targets [StreamingService] (ACTION_RELAUNCH → the server-only
+ * recovery the sticky-restart path already takes), NOT the launcher activity:
+ * Android 15 hard-blocks background ACTIVITY launches whose sender is a dead
+ * process — verified on-device that neither the PendingIntent creator opt-in
+ * (ActivityOptions.MODE_BACKGROUND_ACTIVITY_START_ALLOWED) nor the
+ * SYSTEM_ALERT_WINDOW exemption rescues the launch (BAL result 102,
+ * callingUidProcState NONEXISTENT). Foreground-SERVICE starts are a different
+ * gate with different exemptions, and the restart acceptance needs the
+ * dashboard back, not a visible activity — a headless phone restarted from
+ * its dashboard must come back serving without lighting up. Once the service
+ * starts, the application's resume seam re-issues the current mode exactly as
+ * after a sticky restart or boot.
+ *
+ * The alarm rides `setExactAndAllowWhileIdle` under SCHEDULE_EXACT_ALARM:
+ * the exact-alarm grant is the one foreground-service start exemption that
+ * survives the quit ladder's process death (it keys off the alarm type and
+ * the uid-level permission, not the dead creator's process state — overlay
+ * and the inexact alarm were both verified blocked on-device). Below API 31
+ * exact alarms need no permission; on 31–32 the declared permission is
+ * granted at install; on 33+ it is a one-time "Alarms & reminders" Settings
+ * toggle. Ungranted, the schedule throws before anything quits — the restart
+ * endpoint reports the missing grant and the camera keeps running, so a
+ * dashboard tap can never darken a phone it cannot bring back. The alarm is
+ * a one-shot — a restart that fails still leaves nothing armed.
  */
 object AppRelaunch {
 
@@ -35,18 +53,20 @@ object AppRelaunch {
      */
     internal const val RELAUNCH_DELAY_MS = 2_000L
 
-    /** Register the relaunch. Idempotent per scheduling — a re-schedule replaces the prior intent. */
-    fun schedule(context: Context) {
-        val launchIntent = context.packageManager.getLaunchIntentForPackage(context.packageName)
-        if (launchIntent == null) {
-            Log.e(TAG, "No launch intent for ${context.packageName}; restart will not relaunch")
-            return
-        }
-        launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        val pending = PendingIntent.getActivity(
+    /**
+     * Register the relaunch. Idempotent per scheduling — a re-schedule
+     * replaces the prior intent. [delayMs] defaults to [RELAUNCH_DELAY_MS]
+     * (the dashboard-restart pacing); the crash handler passes the crash
+     * loop's backoff ([CrashRelaunchPolicy.relaunchDelayMs]) so a forming
+     * loop does not spin at the 2-second cadence.
+     */
+    fun schedule(context: Context, delayMs: Long = RELAUNCH_DELAY_MS) {
+        val serviceIntent = Intent(context, StreamingService::class.java)
+            .setAction(StreamingService.ACTION_RELAUNCH)
+        val pending = PendingIntent.getForegroundService(
             context,
             0,
-            launchIntent,
+            serviceIntent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
         val manager = context.getSystemService(Context.ALARM_SERVICE) as? AlarmManager
@@ -54,11 +74,11 @@ object AppRelaunch {
             Log.e(TAG, "AlarmManager unavailable; restart will not relaunch")
             return
         }
-        manager.setAndAllowWhileIdle(
+        manager.setExactAndAllowWhileIdle(
             AlarmManager.ELAPSED_REALTIME_WAKEUP,
-            SystemClock.elapsedRealtime() + RELAUNCH_DELAY_MS,
+            SystemClock.elapsedRealtime() + delayMs,
             pending,
         )
-        Log.d(TAG, "Relaunch scheduled in ${RELAUNCH_DELAY_MS}ms")
+        Log.d(TAG, "Relaunch scheduled in ${delayMs}ms (service-first)")
     }
 }
