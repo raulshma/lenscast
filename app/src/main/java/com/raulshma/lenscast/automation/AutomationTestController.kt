@@ -127,6 +127,17 @@ class AutomationTestController(private val app: MainApplication) {
      * the "pre-test" snapshot and make the next restore faithfully restore
      * exactly what it was meant to rewind (the store-left-unreset cycle).
      * A fresh DataStore read is the read-your-write seam.
+     *
+     * The one deliberate exception is the torch TOGGLE, which comes from the
+     * live CameraService fact (`isTorchOn`), not the store: live-only writers
+     * (the web torch route, the deterrence coordinator) flip the LED without
+     * ever persisting, so the stored intent can disagree with reality — and
+     * a restore that answers from the stale stored pair re-lights a dark LED
+     * (or darkens a lit one) instead of winding the test back (the on-device
+     * 0.2.2 repro). Every wholesale camera write converged to this same fact
+     * in e84b36d; the snapshot reads it too. STRENGTH stays the stored
+     * intent: a live flip drives the device-default brightness and carries
+     * no strength intent of its own (SettingsWebHandler's rebuild precedent).
      */
     private suspend fun captureSnapshot(): AutomationStateSnapshot {
         val saved = app.settingsDataStore.settingsFromDisk()
@@ -137,7 +148,7 @@ class AutomationTestController(private val app: MainApplication) {
             zoomRatio = saved.zoomRatio,
             frameRate = saved.frameRate,
             lensIndex = app.cameraService.selectedLens.value.index,
-            torchEnabled = saved.torchEnabled,
+            torchEnabled = app.cameraService.isTorchOn(),
             torchStrength = saved.torchStrength,
             motionEnabled = app.settingsDataStore.motionDetectionEnabledFromDisk(),
             soundEnabled = app.settingsDataStore.soundDetectionEnabledFromDisk(),

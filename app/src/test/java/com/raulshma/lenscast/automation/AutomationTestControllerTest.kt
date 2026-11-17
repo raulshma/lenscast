@@ -205,4 +205,46 @@ class AutomationTestControllerTest {
         coVerify { applier.applyCameraSettingsNow(capture(applied)) }
         assertTrue(applied.captured.torchEnabled)
     }
+
+    // ── torch snapshot divergence: the arm-time snapshot must answer the ──
+    // ── LIVE LED fact, not the stored intent live-only writers leave stale ──
+
+    @Test
+    fun `a torch rule restore answers from the live dark fact, not stale stored lit intent`() = runBlocking {
+        // The camera-section save converged the store to a lit LED, then a
+        // live-only writer (web torch route / deterrence) darkened it: stored
+        // intent says on, the LED is off. The 0.2.2 on-device repro — a
+        // snapshot answering from the store re-lit the LED on restore.
+        coEvery { settingsDataStore.settingsFromDisk() } returns CameraSettings(torchEnabled = true)
+        every { cameraService.isTorchOn() } returns false
+
+        val controller = controller()
+        assertTrue(controller.arm("r1"))
+        controller.restore()
+
+        // The rewind must land the pre-test DARK live fact on both surfaces —
+        // the persisted store and the live session — not the stale stored lit.
+        coVerify { settingsDataStore.saveSettings(match { !it.torchEnabled }) }
+        val applied = slot<CameraSettings>()
+        coVerify { applier.applyCameraSettingsNow(capture(applied)) }
+        assertFalse(applied.captured.torchEnabled)
+    }
+
+    @Test
+    fun `a torch rule restore keeps a live-only lit LED lit across the rewind`() = runBlocking {
+        // The inverse divergence: stored intent says off, but the deterrence
+        // coordinator lit the LED live-only. A store-answering snapshot would
+        // darken it on the way back.
+        every { cameraService.isTorchOn() } returns true
+
+        val controller = controller()
+        assertTrue(controller.arm("r1"))
+        controller.restore()
+
+        // The pre-test LIT live fact survives the restore on both surfaces.
+        coVerify { settingsDataStore.saveSettings(match { it.torchEnabled }) }
+        val applied = slot<CameraSettings>()
+        coVerify { applier.applyCameraSettingsNow(capture(applied)) }
+        assertTrue(applied.captured.torchEnabled)
+    }
 }

@@ -55,7 +55,13 @@ persists leaves the live camera at the fired state until an async emission
 happens to reach it, so restore drives the live session in the same call,
 through the applier's own mutex. Its arm-time snapshot reads the store from
 disk (`settingsFromDisk`), not the shared flows' lagging `.value`, so a test
-armed right after another restore snapshots the restored world. The RTSP
+armed right after another restore snapshots the restored world — with one
+deliberate exception: the torch toggle comes from the live CameraService
+fact (`isTorchOn`), because live-only writers (web torch route, deterrence
+coordinator) diverge from the stored intent by design, and a
+store-answering snapshot rewound the LED to the wrong state (the 0.2.2
+on-device repro); torch strength stays the stored intent, which no live
+flip ever carries. The RTSP
 group's combine sits at the typed five-flow limit — the independent
 `rtspTlsEnabled` flag (issue #18's decoupled RTSPS) applies through its own
 single-flow collector onto `StreamingManager.setRtspTlsEnabled` (an
@@ -2284,8 +2290,10 @@ member. The torch mode split is deliberate: see Torch (LIVE vs PERSISTED).
 `automation/schedule/AutomationRestorePolicy.kt`** — the apply/restore
 toggle behind the automation screens' "Run now" (issue #18 item 3). Arming
 a rule is Mutex-serialized: restore whatever was armed before, snapshot the
-restorable axes (persisted camera settings, live torch toggle/strength,
-stream and detection toggles, stream state, recording-idle), run the rule's
+restorable axes (persisted camera settings, the LIVE torch toggle from
+`CameraService.isTorchOn` — the stored intent is stale whenever a live-only
+writer moved the LED — with torch strength as the stored intent, stream and
+detection toggles, stream state, recording-idle), run the rule's
 actions through the Automation Action Executor's `runActions` — the shared
 seam, so a test fire exercises exactly what a scheduled fire runs — and
 publish the armed rule id (a StateFlow the app screen and the dashboard
