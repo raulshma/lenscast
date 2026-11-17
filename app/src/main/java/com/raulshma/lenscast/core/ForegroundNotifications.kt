@@ -46,6 +46,16 @@ object ForegroundNotifications {
     const val LOCK_BYPASS_CHANNEL_ID = "lock_bypass_channel"
 
     /**
+     * The post-death camera bring-up prompt
+     * ([com.raulshma.lenscast.core.FsiResumeController]): another transient
+     * high-priority notification (full-screen when the FSI permission is
+     * held, heads-up + content tap otherwise), registered here like the lock
+     * bypass slot so it can never claim a foreground producer's ID.
+     */
+    const val FSI_RESUME_NOTIFICATION_ID = 1006
+    const val FSI_RESUME_CHANNEL_ID = "fsi_resume_channel"
+
+    /**
      * Detection-alert notifications live above every foreground slot and are
      * sub-numbered per event type (motion/sound/tamper), so a burst of one
      * kind replaces itself and never collides with a producer slot.

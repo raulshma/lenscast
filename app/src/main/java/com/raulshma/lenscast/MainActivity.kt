@@ -46,6 +46,12 @@ class MainActivity : ComponentActivity() {
                     // Retry a foreground promotion Android may have denied
                     // while the app was backgrounded.
                     app.ensureServerForeground()
+                    // The app is visible — the state every post-death camera
+                    // recovery needs. Dismiss the FSI camera-resume prompt
+                    // (blueprint P1 item 11): a manual visit is the recovery
+                    // the prompt exists to reach, so its notification has no
+                    // reason to outlive it.
+                    runCatching { app.fsiResumeController.cancel() }
                 }
                 Lifecycle.Event.ON_STOP -> app.cameraService.onActivityStop()
                 else -> {}

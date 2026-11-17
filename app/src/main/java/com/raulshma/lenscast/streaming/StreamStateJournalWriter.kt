@@ -29,10 +29,10 @@ class StreamStateJournalWriter(
     fun start() {
         scope.launch {
             combine(webActive, rtspActive) { web: Boolean, rtsp: Boolean ->
-                StreamStateJournal.State(web = web, rtsp = rtsp)
+                web to rtsp
             }
                 .drop(1)
-                .collect { state: StreamStateJournal.State -> journal.save(state) }
+                .collect { (web, rtsp) -> journal.recordLiveOutputs(web, rtsp) }
         }
     }
 }

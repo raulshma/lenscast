@@ -348,6 +348,8 @@
     <string name="settings_disable_battery_opt">Disable Battery Optimization</string>
     <string name="settings_disable_battery_opt_description">Prevents the system from stopping the app in the background</string>
     <string name="settings_resume_on_boot">Resume Streams on Boot</string>
+    <string name="settings_fsi_camera_resume">Camera Resume Prompt</string>
+    <string name="settings_fsi_camera_resume_description">After a crash or reboot leaves the server running without the camera, briefly lights the screen once to bring the camera back and resume the stream you left running. Opt-in: it turns the display on.</string>
 
     <string name="settings_keep_awake">Keep Device Awake</string>
     <string name="settings_keep_awake_description">Holds the CPU awake while the app runs, so automation rules fire on schedule even with the screen locked. Uses more battery; released when you quit the app. Deep doze (unplugged and stationary) can still suspend it — pair it with the battery-optimization exemption above.</string>
@@ -804,6 +806,12 @@
     <string name="lock_bypass_title">Starting the camera</string>
     <string name="lock_bypass_message">LensCast is waking the camera for a remotely started stream</string>
 
+    <!-- ── FSI camera resume (blueprint P1 item 11): the post-death prompt ── -->
+    <string name="fsi_resume_channel_name">Camera resume</string>
+    <string name="fsi_resume_channel_description">Prompts to bring the camera back after the app restarted on its own</string>
+    <string name="fsi_resume_title">Resume camera streaming?</string>
+    <string name="fsi_resume_message">Tap to bring the camera back after the restart — the stream you left running is waiting</string>
+
     <!-- ── Companion mode ── -->
     <string name="companion_nav_devices_cd">Devices — view and control paired LensCast cameras</string>
 
@@ -838,7 +846,10 @@
     <string name="companion_manual">Add manually</string>
     <string name="companion_name">Name</string>
     <string name="companion_host">Host</string>
+    <string name="companion_host_paste_hint">Or paste the camera\'s pairing link (http://host:port)</string>
+    <string name="companion_host_invalid">Not a valid camera address</string>
     <string name="companion_port">Port</string>
+    <string name="companion_port_invalid">Port must be 1-65535</string>
     <string name="companion_use_tls">Use HTTPS</string>
     <string name="companion_tls_fingerprint">Certificate fingerprint (SHA-256)</string>
     <string name="companion_tofu_warning">This certificate is self-signed. Compare the fingerprint with the one on the camera Connect screen before trusting this device.</string>

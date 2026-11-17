@@ -155,6 +155,7 @@ fun AppSettingsScreen(
     val isIgnoringBatteryOptimizations by viewModel.isIgnoringBatteryOptimizations
     val resumeStreamsOnBoot by viewModel.resumeStreamsOnBoot.collectAsState()
     val keepAwakeEnabled by viewModel.keepAwakeEnabled.collectAsState()
+    val fsiCameraResume by viewModel.fsiCameraResume.collectAsState()
     val continuousRecording by viewModel.continuousRecording.collectAsState()
     val continuousSegmentMinutes by viewModel.continuousSegmentMinutes.collectAsState()
     val ecoIdleFpsEnabled by viewModel.ecoIdleFpsEnabled.collectAsState()
@@ -495,6 +496,12 @@ fun AppSettingsScreen(
                         title = stringResource(R.string.settings_resume_on_boot),
                         checked = resumeStreamsOnBoot,
                         onCheckedChange = { viewModel.updateResumeStreamsOnBoot(it) }
+                    )
+                    SwitchSetting(
+                        title = stringResource(R.string.settings_fsi_camera_resume),
+                        description = stringResource(R.string.settings_fsi_camera_resume_description),
+                        checked = fsiCameraResume,
+                        onCheckedChange = { viewModel.updateFsiCameraResume(it) }
                     )
                 }
             }

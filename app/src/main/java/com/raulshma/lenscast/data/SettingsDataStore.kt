@@ -220,6 +220,7 @@ private object Keys {
     val RTSP_TLS = stringPreferencesKey("rtsp_tls")
     val AUDIO_DEVICE_ID = stringPreferencesKey("audio_device_id")
     val RESUME_STREAMS_ON_BOOT = stringPreferencesKey("resume_streams_on_boot")
+    val FSI_CAMERA_RESUME = stringPreferencesKey("fsi_camera_resume")
     val DETECTION_NOTIFICATIONS_ENABLED = stringPreferencesKey("detection_notifications_enabled")
     val TAMPER_DETECTION_ENABLED = stringPreferencesKey("tamper_detection_enabled")
     val MQTT_ENABLED = stringPreferencesKey("mqtt_enabled")
@@ -791,6 +792,16 @@ internal fun migrateRtspTlsPrefs(prefs: MutablePreferences) {
 internal val audioDeviceIdPref = stringPref(Keys.AUDIO_DEVICE_ID, "")
 
 internal val resumeStreamsOnBootPref = boolPref(Keys.RESUME_STREAMS_ON_BOOT, defaultTrue = false)
+
+/**
+ * The FSI camera-resume prompt (blueprint P1 item 11 — the tier ladder's T6):
+ * opt-in, default OFF. It is the only unattended path that restores CAMERA
+ * after a process death or reboot, and it buys that by lighting the screen
+ * (a full-screen intent auto-launches over locked/off screens) — directly
+ * against the service-first relaunch's headless promise, so a fresh install
+ * must never wake its owner's phone at 3 a.m. without having asked.
+ */
+internal val fsiCameraResumePref = boolPref(Keys.FSI_CAMERA_RESUME, defaultTrue = false)
 
 /**
  * The keep-awake master toggle, on by default: the app's posture is
@@ -1514,6 +1525,8 @@ class SettingsDataStore(
 
     val resumeStreamsOnBoot: StateFlow<Boolean> = resumeStreamsOnBootPref.shared()
 
+    val fsiCameraResume: StateFlow<Boolean> = fsiCameraResumePref.shared()
+
     /** Startup-critical: suspends on the disk value, immune to the flow's default-first race. */
     suspend fun resumeStreamsOnBootNow(): Boolean = resumeStreamsOnBootPref.diskValue()
 
@@ -1791,6 +1804,8 @@ class SettingsDataStore(
     suspend fun saveAudioDeviceId(id: String) = audioDeviceIdPref.save(id)
 
     suspend fun saveResumeStreamsOnBoot(enabled: Boolean) = resumeStreamsOnBootPref.save(enabled)
+
+    suspend fun saveFsiCameraResume(enabled: Boolean) = fsiCameraResumePref.save(enabled)
 
     suspend fun saveDetectionNotificationsEnabled(enabled: Boolean) =
         detectionNotificationsEnabledPref.save(enabled)

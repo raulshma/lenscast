@@ -39,6 +39,7 @@ class SettingsApplier(
     private val streamWatchdog: StreamWatchdog,
     private val mqttAlertPublisher: MqttAlertPublisher,
     private val onvifServer: OnvifServer,
+    private val fsiResumeController: com.raulshma.lenscast.core.FsiResumeController,
     // Trailing-edge settle window for the port/TLS restart cycle (issue #14):
     // a slider emits one value per frame, and every emission restarts the
     // transport — dozens of stop/start cycles per drag whose service teardown
@@ -482,6 +483,18 @@ class SettingsApplier(
         scope.launch {
             settingsDataStore.ecoIdleFpsEnabled.collectLatest { enabled ->
                 streamingManager.setEcoIdleFpsEnabled(enabled)
+            }
+        }
+
+        // FSI camera resume (blueprint P1 item 11): a dedicated single-flow
+        // rule like the RTSP-TLS one. The prompt controller reads the applied
+        // value at each evaluation instead of the store's flow, so the
+        // service's fresh-process landings (the relaunch is the main trigger)
+        // never race DataStore's first read — the same applied-value
+        // discipline as every runtime flag above.
+        scope.launch {
+            settingsDataStore.fsiCameraResume.collectLatest { enabled ->
+                fsiResumeController.onSettingApplied(enabled)
             }
         }
 

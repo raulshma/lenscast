@@ -158,6 +158,7 @@ class SettingsViewModel(
     val audioDeviceId: StateFlow<String> = settingsDataStore.audioDeviceId
     val resumeStreamsOnBoot: StateFlow<Boolean> = settingsDataStore.resumeStreamsOnBoot
     val keepAwakeEnabled: StateFlow<Boolean> = settingsDataStore.keepAwakeEnabled
+    val fsiCameraResume: StateFlow<Boolean> = settingsDataStore.fsiCameraResume
 
     // Auth state comes straight from the Settings Store — no writable mirror.
     // Typing responsiveness comes from the store flow re-emit on save.
@@ -427,6 +428,8 @@ class SettingsViewModel(
     fun updateResumeStreamsOnBoot(enabled: Boolean) = save { settingsDataStore.saveResumeStreamsOnBoot(enabled) }
 
     fun updateKeepAwakeEnabled(enabled: Boolean) = save { settingsDataStore.saveKeepAwakeEnabled(enabled) }
+
+    fun updateFsiCameraResume(enabled: Boolean) = save { settingsDataStore.saveFsiCameraResume(enabled) }
 
     fun updateCaptureRetentionDays(days: Int) = save { settingsDataStore.saveCaptureRetentionDays(days) }
 

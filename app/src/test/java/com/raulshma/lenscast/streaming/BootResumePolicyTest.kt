@@ -51,4 +51,29 @@ class BootResumePolicyTest {
             BootResumePolicy.tileStart(StreamStateJournal.State(web = true, rtsp = true)),
         )
     }
+
+    // ── the user-stopped intent flag (onTaskRemoved's record) ──
+
+    @Test
+    fun `a user-stopped flag blocks boot resume even with the setting on and outputs recorded`() {
+        // The swipe-kill + OEM-kill shape: the journal still records what was
+        // live, but the user killed it — boot must not resurrect the stream.
+        assertEquals(
+            BootResumePolicy.Verdict.NONE,
+            BootResumePolicy.decide(
+                settingEnabled = true,
+                journal = StreamStateJournal.State(web = true, rtsp = true, userStopped = true),
+            ),
+        )
+    }
+
+    @Test
+    fun `tile start ignores the user-stopped flag`() {
+        // A tile tap is an explicit manual request in the present — it is not
+        // the automation the flag exists to gate.
+        assertEquals(
+            BootResumePolicy.Verdict.BOTH,
+            BootResumePolicy.tileStart(StreamStateJournal.State(web = true, rtsp = true, userStopped = true)),
+        )
+    }
 }

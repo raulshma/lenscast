@@ -41,9 +41,18 @@ class BootCompletedReceiver : BroadcastReceiver() {
     }
 
     private suspend fun resumeIfWanted(app: MainApplication) {
+        val journal = app.streamStateJournal.load()
+        if (journal.userStopped) {
+            // The user swiped the app away before shutdown and an OEM kill
+            // followed: boot must not resurrect a stream the user explicitly
+            // killed. Consume-on-read — the flag gates exactly one boot, so
+            // it can never block resume forever (blueprint P0 item 6).
+            Log.d(TAG, "User stopped the stream before shutdown; skipping boot resume (flag consumed)")
+            app.streamStateJournal.clearUserStopped()
+        }
         val verdict = BootResumePolicy.decide(
             settingEnabled = app.settingsDataStore.resumeStreamsOnBootNow(),
-            journal = app.streamStateJournal.load(),
+            journal = journal,
         )
         Log.d(TAG, "Boot stream resume verdict: $verdict")
         BootResumePolicy.execute(toggle = app.streamToggle, verdict = verdict)

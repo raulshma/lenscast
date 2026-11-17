@@ -7,6 +7,7 @@ import com.raulshma.lenscast.camera.model.OverlaySettings
 import com.raulshma.lenscast.camera.model.PhotoAspectRatio
 import com.raulshma.lenscast.camera.model.PhotoCapturePlan
 import com.raulshma.lenscast.camera.model.StreamAspect
+import com.raulshma.lenscast.core.FsiResumeController
 import com.raulshma.lenscast.core.StreamWatchdog
 import com.raulshma.lenscast.core.mqtt.MqttAlertPublisher
 import com.raulshma.lenscast.core.mqtt.MqttTopics
@@ -108,6 +109,7 @@ private val rtspTlsEnabled = MutableStateFlow(false)
     private val mqttTelemetryEnabled = MutableStateFlow(false)
     private val onvifEnabled = MutableStateFlow(false)
     private val ecoIdleFpsEnabled = MutableStateFlow(false)
+    private val fsiCameraResume = MutableStateFlow(false)
 
     // Manager-side flows the MQTT stream-state publisher reads.
     private val isWebStreamingActive = MutableStateFlow(false)
@@ -123,6 +125,7 @@ private val rtspTlsEnabled = MutableStateFlow(false)
     private val streamWatchdog: StreamWatchdog = mockk(relaxed = true)
     private val mqttAlertPublisher: MqttAlertPublisher = mockk(relaxed = true)
     private val onvifServer: OnvifServer = mockk(relaxed = true)
+    private val fsiResumeController: FsiResumeController = mockk(relaxed = true)
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
@@ -194,6 +197,7 @@ private val rtspTlsEnabled = MutableStateFlow(false)
         every { settingsDataStore.mqttTelemetryEnabled } returns mqttTelemetryEnabled
         every { settingsDataStore.onvifEnabled } returns onvifEnabled
         every { settingsDataStore.ecoIdleFpsEnabled } returns ecoIdleFpsEnabled
+        every { settingsDataStore.fsiCameraResume } returns fsiCameraResume
 
         SettingsApplier(
             settingsDataStore = settingsDataStore,
@@ -202,6 +206,7 @@ private val rtspTlsEnabled = MutableStateFlow(false)
             streamWatchdog = streamWatchdog,
             mqttAlertPublisher = mqttAlertPublisher,
             onvifServer = onvifServer,
+            fsiResumeController = fsiResumeController,
             serverApplyDebounceMs = 0,
         ).start(scope)
     }
@@ -342,6 +347,7 @@ private val rtspTlsEnabled = MutableStateFlow(false)
                 streamWatchdog = streamWatchdog,
                 mqttAlertPublisher = mqttAlertPublisher,
                 onvifServer = onvifServer,
+                fsiResumeController = fsiResumeController,
                 serverApplyDebounceMs = 400,
             ).start(burstScope)
             eventually {
@@ -751,6 +757,24 @@ private val rtspTlsEnabled = MutableStateFlow(false)
         eventually {
             verify(exactly = 1) { streamingManager.setEcoIdleFpsEnabled(true) }
             verify(exactly = 2) { streamingManager.setEcoIdleFpsEnabled(any()) }
+        }
+    }
+
+    // ── FSI camera resume (blueprint P1 item 11) ──
+
+    @Test
+    fun `fsi camera resume toggle lands on the prompt controller`() {
+        // The dedicated single-flow rule: the initial emission applies the
+        // descriptor default (off), a flip applies the new value — the
+        // prompt controller reads the applied flag at each evaluation, so
+        // the applier is its only push source.
+        eventually {
+            verify(exactly = 1) { fsiResumeController.onSettingApplied(false) }
+        }
+        fsiCameraResume.value = true
+        eventually {
+            verify(exactly = 1) { fsiResumeController.onSettingApplied(true) }
+            verify(exactly = 2) { fsiResumeController.onSettingApplied(any()) }
         }
     }
 
