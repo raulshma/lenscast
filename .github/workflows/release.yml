@@ -113,6 +113,33 @@ jobs:
           echo "Changelog found: $CHANGELOG_FILE"
           cat "$CHANGELOG_FILE"
 
+      - name: Verify Gradle Version Literals Match The Release
+        env:
+          APK_VERSION: ${{ steps.version.outputs.apk_version }}
+          VERSION_BASE: ${{ steps.version.outputs.version_base }}
+        run: |
+          # F-Droid (UpdateCheckMode: Tags) parses the versionCode/versionName
+          # literals out of app/build.gradle.kts at the tagged commit; the
+          # -P overrides below only affect the APKs we upload, not what
+          # fdroidbot reads. v0.2.1 was tagged before its bump landed, so the
+          # bot parsed 0.2.0 there and silently skipped the release. Fail
+          # fast when the checked-out tree's literals lag the release.
+          GRADLE_FILE="app/build.gradle.kts"
+          EXPECTED_VC=$((VERSION_BASE + 3))
+          GRADLE_VN=$(grep -E '^[[:space:]]*versionName = "' "$GRADLE_FILE" | head -n1 | cut -d'"' -f2)
+          GRADLE_VC=$(grep -E '^[[:space:]]*versionCode = [0-9]+' "$GRADLE_FILE" | head -n1 | grep -oE '[0-9]+$')
+          STATUS=0
+          if [ "$GRADLE_VN" != "$APK_VERSION" ]; then
+            echo "::error::$GRADLE_FILE says versionName \"$GRADLE_VN\"; release computes \"$APK_VERSION\"."
+            echo "::error::Commit the version bump to the release branch before pushing it, or fdroidbot will not see this release."
+            STATUS=1
+          fi
+          if [ "$GRADLE_VC" != "$EXPECTED_VC" ]; then
+            echo "::error::$GRADLE_FILE says versionCode $GRADLE_VC; release computes $EXPECTED_VC (base + x86_64 abiIndex 3)."
+            STATUS=1
+          fi
+          exit $STATUS
+
       - name: Run Test Suite (web + app + wear)
         run: |
           ./gradlew :app:testStoreDebugUnitTest :app:testFdroidDebugUnitTest \
