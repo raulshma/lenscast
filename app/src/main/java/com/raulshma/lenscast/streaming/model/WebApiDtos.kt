@@ -554,11 +554,15 @@ data class SuccessResponse(val success: Boolean = true)
  * runs — the button can never read a silent no-op as a restart.
  *
  * Wave 4's soft mode (P1 item 9) extends the shape additively: the soft
- * ladder's answers carry [mode]`:"soft"` — `{"success":true,"mode":"soft"}`
- * on a re-armed server, `success:false` + [reason]`:"soft_restart_failed"`
- * + [step] (the failed ladder step, machine-readable) + [hint] when a
- * decisive step failed. The deep restart's answers never carry [mode], so
- * the legacy wire contract (`{"success":true}`) stays byte-identical.
+ * answers carry [mode]`:"soft"` — `{"success":true,"mode":"soft"}` is the
+ * ACKNOWLEDGMENT (accepted, the ladder launching off the request thread,
+ * whose verdict lands in the device log — the ladder's stop step tears down
+ * the listener socket the request rode on, so a verdict awaited inline was
+ * never deliverable), and `success:false` + [reason]`:"soft_restart_failed"`
+ * + [step] + [hint] is the typed refusal — today only the unwired-ladder
+ * shape, the one soft failure known synchronously. The deep restart's
+ * answers never carry [mode], so the legacy wire contract
+ * (`{"success":true}`) stays byte-identical.
  */
 @JsonClass(generateAdapter = true)
 data class SystemRestartResponse(
@@ -567,7 +571,7 @@ data class SystemRestartResponse(
     val mode: String? = null,
     /** Machine-readable refusal reason ("exact_alarm_not_granted", "soft_restart_failed"); null on success. */
     val reason: String? = null,
-    /** The soft-restart ladder step that failed ("rebindCamera", "startServer"); null otherwise. */
+    /** The soft-restart failure step ("rebindCamera", "startServer", or "not_wired" for an unwired ladder); null otherwise. */
     val step: String? = null,
     /** Device-side fallback text for the refusal; the dashboard's own localized message wins. */
     val hint: String? = null,

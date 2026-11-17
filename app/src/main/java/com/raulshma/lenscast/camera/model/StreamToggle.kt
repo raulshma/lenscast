@@ -107,6 +107,28 @@ class StreamToggle(
     }
 
     /**
+     * The whole-server start WITH the persisted-enabled outputs re-armed —
+     * the soft-restart ladder's re-arm step ([StreamToggle.startServer] alone
+     * restarts only the server shell + session, leaving every output down
+     * even though its enable setting says it should be serving). When both
+     * output gates are off this is exactly [startServer] (the server-only
+     * shape); otherwise the outputs go up through [startBoth]'s full
+     * per-output gate → start → begin → rollback discipline — the web and
+     * RTSP TLS modes ride the live transport/config getters, so a re-arm
+     * lands exactly the shapes a fresh start would. Any start failure folds
+     * into the whole-server failure outcome ([kind] null — the re-arm is one
+     * step, the ladder reports it as `startServer`).
+     */
+    suspend fun startServerWithOutputs(): StreamStartOutcome {
+        if (!transports.webEnabled && !transports.rtspEnabled) return startServer()
+        val (web, rtsp) = startBoth()
+        return when {
+            web.isStartFailure || rtsp?.isStartFailure == true -> StreamStartOutcome.StartFailed(kind = null)
+            else -> StreamStartOutcome.Started
+        }
+    }
+
+    /**
      * The whole-server start ladder: web then RTSP, each through the full
      * [start] gate → begin → rollback discipline. A failed RTSP start after
      * the web started rolls the web output back through the same per-output

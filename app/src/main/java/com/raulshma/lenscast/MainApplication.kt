@@ -248,12 +248,16 @@ class MainApplication : Application(), SingletonImageLoader.Factory, AppGraph {
     // dispatched, bounded, carrying the blocked-by-lock bookkeeping). ONE
     // instance serves both entry points: the dashboard's `?mode=soft` route
     // (via the Web API stack) and the heartbeat's SOFT_RESTART tier (above).
+    // The re-arm step is startServerWithOutputs, not the bare startServer:
+    // restarting only the server shell + session left the persisted-enabled
+    // outputs (web + RTSP) down after the ladder — the re-arm must restore
+    // them, exactly as a fresh start's enabled outputs would serve.
     override val softRestart: SoftRestartLadder by lazy {
         SoftRestartLadder(
             stopRecording = { recordingController.stop() },
             stopServer = { streamToggle.stopServer() },
             rebindCamera = { streamingSession.recover(WatchdogPolicy.RecoveryTier.SOFT) },
-            startServer = { streamToggle.startServer() },
+            startServer = { streamToggle.startServerWithOutputs() },
         )
     }
     // The crash handler's loop-guard counter (blueprint item 1): persisted
@@ -589,6 +593,31 @@ class MainApplication : Application(), SingletonImageLoader.Factory, AppGraph {
         appScope.launch {
             delay(RESTART_RESPONSE_FLUSH_MS)
             quitApplication()
+        }
+    }
+
+    /**
+     * The dashboard's soft restart (POST /api/system/restart?mode=soft):
+     * launch the ladder OFF the request thread, past the response flush, and
+     * log the verdict when it lands. The response-drop race is structural —
+     * the HTTP request rides a connection accepted by the web listener, and
+     * the ladder's `stopServer` step tears that listener (and every open
+     * connection on it) down; a ladder run inline inside the handler would
+     * close the socket before NanoHTTPD could write the answer, and the
+     * dashboard would read an empty reply on every soft restart. The deep
+     * restart already answers before its teardown for exactly this reason
+     * ([restartApplication]'s flush settle) — the soft path matches it: the
+     * handler acknowledges the request (the dashboard's poll loop re-syncs on
+     * the re-armed server either way), and the verdict — success or the
+     * failed step — lands in the log where the heartbeat tier's verdicts land
+     * too. The settle mirrors [RESTART_RESPONSE_FLUSH_MS]: enough for the
+     * response bytes to reach the socket before the teardown begins.
+     */
+    override fun launchSoftRestart() {
+        appScope.launch {
+            delay(RESTART_RESPONSE_FLUSH_MS)
+            val result = softRestart.run()
+            Log.d(TAG, "Soft restart verdict: $result")
         }
     }
 

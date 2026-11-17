@@ -65,6 +65,11 @@ class LiveLadderTest {
     private lateinit var credentials: CompanionCredentialStore
     private lateinit var sessions: DeviceSessionManager
 
+    // The session manager's own scope — held separately so tearDown can
+    // cancel every lane the manager (and its viewers' hold loops) parked on
+    // Default, instead of leaking them into the rest of the suite's JVM.
+    private val sessionsScope = CoroutineScope(SupervisorJob())
+
     /** The fake clock the ladder, the viewers and the MJPEG budget share. */
     private val clock = AtomicLong(0L)
 
@@ -102,12 +107,16 @@ class LiveLadderTest {
             ),
         )
         credentials.put("dev-1", StoredCredentials(CompanionAuthKind.TOKEN, token = "t"))
-        sessions = DeviceSessionManager(roster, credentials, CoroutineScope(SupervisorJob()))
+        sessions = DeviceSessionManager(roster, credentials, sessionsScope)
     }
 
     @After
     fun tearDown() {
         sessions.release("dev-1") // stops the session and its parked lanes
+        // Cancel the manager scope too: a viewer that reached Live parks in
+        // the hold loop forever by design — release() ends the session's
+        // lanes, but anything the ladder still spun up dies here.
+        sessionsScope.cancel()
         runCatching { server.shutdown() }
         filesDir.deleteRecursively()
     }
@@ -199,12 +208,19 @@ class LiveLadderTest {
             .setResponseCode(200)
             .setHeader("Content-Type", "text/event-stream")
             .setBody("retry: 1000\n\n")
-            .setBodyDelay(60_000, TimeUnit.MILLISECONDS)
+            // 10s, not 60: every parked read holds an OkHttp dispatcher
+            // permit (5 per host by default), and a 60 s body delay pinned
+            // them for the whole budget — a post-cycle WHEP could queue
+            // behind the parked lanes and burn awaitReady's tail (the
+            // observed 90 s stall). The retry header re-dials a lapsed hang
+            // within a second, so the silent-lane shape survives the
+            // shorter hold; the permits just circulate.
+            .setBodyDelay(10_000, TimeUnit.MILLISECONDS)
     }
 
     private suspend fun awaitReady(
         vm: LiveViewModel,
-        timeoutMs: Long = 15_000,
+        timeoutMs: Long = 30_000, // seconds-scale when healthy: the ladder's budgets are sub-second seams; slack only for suite-load scheduling
         condition: (LiveUiState.Ready) -> Boolean,
     ): LiveUiState.Ready {
         var hit: LiveUiState.Ready? = null
@@ -232,7 +248,7 @@ class LiveLadderTest {
         dispatcher.enqueueStatus(statusJson)
         val session = sessions.session("dev-1")
         session.start()
-        withTimeout(15_000) { session.connectionState.first { it == ConnectionState.CONNECTED } }
+        withTimeout(30_000) { session.connectionState.first { it == ConnectionState.CONNECTED } } // 30s: the SSE session connect stretches past 15s under a loaded suite JVM
 
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
         try {
@@ -252,7 +268,7 @@ class LiveLadderTest {
         dispatcher.enqueueStatus(statusJson)
         val session = sessions.session("dev-1")
         session.start()
-        withTimeout(15_000) { session.connectionState.first { it == ConnectionState.CONNECTED } }
+        withTimeout(30_000) { session.connectionState.first { it == ConnectionState.CONNECTED } } // 30s: the SSE session connect stretches past 15s under a loaded suite JVM
 
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
         try {
@@ -279,7 +295,7 @@ class LiveLadderTest {
         dispatcher.enqueueStatus(statusJson)
         val session = sessions.session("dev-1")
         session.start()
-        withTimeout(15_000) { session.connectionState.first { it == ConnectionState.CONNECTED } }
+        withTimeout(30_000) { session.connectionState.first { it == ConnectionState.CONNECTED } } // 30s: the SSE session connect stretches past 15s under a loaded suite JVM
 
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
         try {
@@ -299,7 +315,7 @@ class LiveLadderTest {
             session.stop()
             dispatcher.enqueueStatus(statusJson)
             session.start()
-            withTimeout(15_000) { session.connectionState.first { it == ConnectionState.CONNECTED } }
+            withTimeout(30_000) { session.connectionState.first { it == ConnectionState.CONNECTED } } // 30s: the SSE session connect stretches past 15s under a loaded suite JVM
             awaitReady(vm) {
                 it.connection == ConnectionState.CONNECTED &&
                     it.rung == PlaybackRung.MJPEG &&
@@ -313,7 +329,7 @@ class LiveLadderTest {
             session.stop()
             dispatcher.enqueueStatus(statusJson)
             session.start()
-            withTimeout(15_000) { session.connectionState.first { it == ConnectionState.CONNECTED } }
+            withTimeout(30_000) { session.connectionState.first { it == ConnectionState.CONNECTED } } // 30s: the SSE session connect stretches past 15s under a loaded suite JVM
             val ready = awaitReady(vm) { it.rung == PlaybackRung.WHEP && it.rungPhase == RungPhase.LIVE }
             assertEquals(PlaybackRung.WHEP, ready.rung)
         } finally {

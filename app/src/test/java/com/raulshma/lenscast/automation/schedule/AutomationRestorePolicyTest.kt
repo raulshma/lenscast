@@ -1,6 +1,9 @@
 package com.raulshma.lenscast.automation.schedule
 
+import com.raulshma.lenscast.camera.model.CameraSettings
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -144,5 +147,58 @@ class AutomationRestorePolicyTest {
     fun `capture_photo and unknown ids restore nothing`() {
         assertTrue(restore(AutomationActionSpec("capture_photo", emptyMap())).isEmpty())
         assertTrue(restore(AutomationActionSpec("not_a_real_action", mapOf("x" to "1"))).isEmpty())
+    }
+
+    // ── restoredCameraSettings: the live-apply payload of the restore ──
+
+    @Test
+    fun `restored camera settings fold the restore actions onto the persisted base`() {
+        val base = CameraSettings(iso = 800, exposureTime = 50_000_000L, torchEnabled = true, zoomRatio = 2.0f)
+        val restored = AutomationRestorePolicy.restoredCameraSettings(
+            listOf(
+                AutomationActionSpec("camera_exposure", mapOf("iso" to "3200", "exposure_time_ms" to "100.0")),
+                AutomationActionSpec("torch", mapOf("enabled" to "false")),
+            ),
+            base,
+        )
+        // Touched axes carry the snapshot's values (exposure_time_ms in
+        // nanoseconds, like the persisted field); untouched axes stay.
+        assertEquals(3200, restored.iso)
+        assertEquals(100_000_000L, restored.exposureTime)
+        assertFalse(restored.torchEnabled)
+        assertEquals(2.0f, restored.zoomRatio)
+    }
+
+    @Test
+    fun `restored camera settings fold the auto sentinel to null`() {
+        // The device bug's core: a snapshot with auto ISO/exposure and torch
+        // off must land live as driver-auto and torch dark, not as a stale
+        // manual carry-over from the fired state.
+        val fired = CameraSettings(iso = 1600, exposureTime = 10_000_000L, torchEnabled = true, frameRate = 30)
+        val restored = AutomationRestorePolicy.restoredCameraSettings(
+            listOf(
+                AutomationActionSpec("camera_exposure", mapOf("iso" to "0", "exposure_time_ms" to "0")),
+                AutomationActionSpec("torch", mapOf("enabled" to "false")),
+            ),
+            fired,
+        )
+        assertNull(restored.iso)
+        assertNull(restored.exposureTime)
+        assertFalse(restored.torchEnabled)
+        assertEquals(30, restored.frameRate)
+    }
+
+    @Test
+    fun `restored camera settings ignore non-camera actions`() {
+        val base = CameraSettings(iso = 100)
+        val restored = AutomationRestorePolicy.restoredCameraSettings(
+            listOf(
+                AutomationActionSpec("siren", mapOf("enabled" to "false")),
+                AutomationActionSpec("stream", mapOf("enabled" to "false")),
+                AutomationActionSpec("recording", mapOf("enabled" to "false")),
+            ),
+            base,
+        )
+        assertEquals(base, restored)
     }
 }

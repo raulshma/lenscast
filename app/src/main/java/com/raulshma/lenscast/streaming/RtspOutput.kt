@@ -144,8 +144,9 @@ internal class RtspOutput(
      * The active mirror after every [isActive] flip, so the owner's derived
      * streaming-state flow follows the output. Separate from [onStateChanged]
      * on purpose: that mirror reports a *serving* server (`server != null`),
-     * while `isLiveStreaming` probes [isActive] — live even when the bind
-     * failed. The two answers differ exactly in that failure case.
+     * while [isActive] is the start/stop lifecycle bit. A bind failure clears
+     * both in the same failed start, so the two answers only ever differ in
+     * the instant before the failure lands.
      */
     private val onActiveChanged: (Boolean) -> Unit = {},
     /** The encoded-stream hub's live bitrate seam: the H.264 encoder is the hub's, so a bitrate change lands there, not in any server instance. */
@@ -158,7 +159,13 @@ internal class RtspOutput(
     /** The output is switched on — start() while disabled refuses. */
     private val enabled = AtomicBoolean(false)
 
-    /** The output is live: started and not yet stopped, even if the server failed to bind. */
+    /**
+     * The output is live: started and not yet stopped. A bind failure clears
+     * it inside the same start call — the flag must reflect reality (nothing
+     * is serving), or the owner's toggle gates, the derived streaming state,
+     * and the retry-on-next-start recovery would all read a dead output as
+     * live.
+     */
     private val active = AtomicBoolean(false)
 
     // Cross-thread: the frame pump reads server/port while settings and
@@ -196,7 +203,11 @@ internal class RtspOutput(
 
     fun isEnabled(): Boolean = enabled.get()
 
-    /** True from [start] until [stop] — the owner's "RTSP output live" answer. */
+    /**
+     * True from [start] until [stop] — the owner's "RTSP output live" answer.
+     * A bind failure ends the start with the flag already cleared, so a
+     * later [start] retries the bind from scratch (the port-freed recovery).
+     */
     fun isActive(): Boolean = active.get()
 
     /** True while a server instance is actually serving. */
@@ -213,12 +224,18 @@ internal class RtspOutput(
 
     // ── lifecycle ──
 
-    /** Starts the output (no-op when already live, matching the previous activity guard). */
-    fun start() {
-        if (active.getAndSet(true)) return
+    /**
+     * Starts the output (no-op when already live, matching the previous
+     * activity guard). True when a server instance is actually serving after
+     * the call — a failed bind is a false start the caller can report, not a
+     * wedge the state then advertises forever.
+     */
+    fun start(): Boolean {
+        if (active.getAndSet(true)) return server != null
         onActiveChanged(true)
         startServer()
         notifyState()
+        return server != null
     }
 
     /** Stops the server, releases the audio handle, and hands the capture release decision to the owner. */
@@ -466,6 +483,12 @@ internal class RtspOutput(
         } else {
             audioStream?.close()
             audioStream = null
+            // The failed bind IS the start's failure: clear the active flag
+            // exactly like stop() would, so the owner's flows follow reality
+            // and a later start (after the port frees) re-attempts the bind
+            // instead of bouncing off the stale active guard.
+            active.set(false)
+            onActiveChanged(false)
             Log.e(TAG, "Failed to start RTSP server on port $port")
         }
     }

@@ -441,11 +441,16 @@ class PairingFlowTest {
     fun `a pasted link runs the chain through the boundary split, never INVALID_INPUT`() = runBlocking {
         val vm = viewModel(CoroutineScope(coroutineContext))
         vm.onModeChanged(AddDeviceMode.MANUAL)
-        vm.onHostChange("http://192.168.1.5:8443")
+        // Port 1 on loopback: nothing listens there, the connect is refused
+        // in milliseconds. A LAN-shaped unroutable address (192.168.x.y)
+        // would hang the dial for the client's full connect budget — and on
+        // a box that actually HAS a device at that address the probe would
+        // connect, making the outcome environment-dependent.
+        vm.onHostChange("http://127.0.0.1:1")
         vm.onTestClicked()
 
-        // The address is unroutable in tests, but the link split must let
-        // the chain RUN (NETWORK_UNREACHABLE) instead of failing the gate.
+        // The refused connect must let the chain RUN (NETWORK_UNREACHABLE)
+        // instead of failing the gate.
         assertEquals(PairingFailure.NETWORK_UNREACHABLE, awaitFailure(vm).failure)
     }
 

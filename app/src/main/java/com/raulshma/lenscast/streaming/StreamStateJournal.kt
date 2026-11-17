@@ -176,6 +176,31 @@ object BootResumePolicy {
         else -> Verdict.WEB
     }
 
+    /**
+     * The post-death relaunch verdict (the dashboard's App-Restart promise:
+     * "streams re-arm from their persisted settings"): the persisted output
+     * enables decide which outputs come back — NOT the journal, whose
+     * recorded liveness the quit ladder deliberately wipes when the restart
+     * tears the server down (a journal read here would restore nothing).
+     * The journal still contributes its one guard: a standing [StreamStateJournal.State.userStopped]
+     * flag (the swipe-kill an OEM kill followed) means nothing re-arms — a
+     * stream the user explicitly killed is not resurrected by the sticky
+     * restart that can land in the same handler. Deliberately NOT gated on
+     * `resumeStreamsOnBoot`: that setting scopes BOOT resume; a restart is
+     * a user-initiated recovery whose promise is the persisted enables.
+     */
+    fun decideRearm(
+        journal: StreamStateJournal.State,
+        webEnabled: Boolean,
+        rtspEnabled: Boolean,
+    ): Verdict = when {
+        journal.userStopped -> Verdict.NONE
+        webEnabled && rtspEnabled -> Verdict.BOTH
+        webEnabled -> Verdict.WEB
+        rtspEnabled -> Verdict.RTSP
+        else -> Verdict.NONE
+    }
+
     /** Runs a verdict through the one Stream Toggle ladder — no caller re-rolls a start path. */
     suspend fun execute(toggle: StreamToggle, verdict: Verdict) {
         when (verdict) {

@@ -6,6 +6,7 @@ import android.os.Build
 import android.os.IBinder
 import android.util.Log
 import com.raulshma.lenscast.core.ForegroundNotifications
+import kotlinx.coroutines.launch
 
 /**
  * Which typed foreground start ran last on the runtime service. Bookkeeping
@@ -85,6 +86,7 @@ class StreamingService : Service() {
             null, ACTION_RELAUNCH -> {
                 if (intent != null) Log.d(TAG, "Relaunched by the restart alarm")
                 startServerForeground(url = null, includeAudio = false)
+                rearmPersistedOutputs()
             }
             // The alarm heartbeat's delivery (HeartbeatReceiver): the FGS
             // start recreated the process if it was dead, and this start
@@ -277,6 +279,45 @@ class StreamingService : Service() {
         } else {
             @Suppress("DEPRECATION")
             stopForeground(true)
+        }
+    }
+
+    /**
+     * The post-death output re-arm (the dashboard's App-Restart promise:
+     * "streams re-arm from their persisted settings"). The foreground
+     * promotion above brings the PROCESS back; the persisted-enabled outputs
+     * (web + RTSP) come back through the one Stream Toggle ladder the boot
+     * receiver and the tile use — [BootResumePolicy.execute] over
+     * [BootResumePolicy.decideRearm], whose verdict reads the persisted
+     * enables and the journal's user-stopped guard.
+     *
+     * The persisted flags are read FROM DISK, not from the shared flows: a
+     * fresh process's flows still hold the descriptor defaults (the boot
+     * receiver's documented race), and the Settings Applier's collectors may
+     * not have landed yet. The read values are landed on the manager's gates
+     * before the toggle runs (idempotent — the applier's own application of
+     * the same values no-ops), so the toggle's gates judge the persisted
+     * truth. Off the main thread; best-effort (a failed re-arm leaves the
+     * server-only recovery the promotion already landed).
+     */
+    private fun rearmPersistedOutputs() {
+        val app = application as? com.raulshma.lenscast.AppGraph ?: return
+        app.appScope.launch {
+            runCatching {
+                val webEnabled = app.settingsDataStore.webStreamingEnabledFromDisk()
+                val rtspEnabled = app.settingsDataStore.rtspEnabledFromDisk()
+                val verdict = BootResumePolicy.decideRearm(
+                    journal = app.streamStateJournal.load(),
+                    webEnabled = webEnabled,
+                    rtspEnabled = rtspEnabled,
+                )
+                app.streamingManager.setWebStreamingEnabled(webEnabled)
+                app.streamingManager.setRtspEnabled(rtspEnabled)
+                Log.d(TAG, "Relaunch re-arm verdict: $verdict")
+                BootResumePolicy.execute(toggle = app.streamToggle, verdict = verdict)
+            }.onFailure {
+                Log.w(TAG, "Relaunch re-arm failed: ${it.javaClass.simpleName}")
+            }
         }
     }
 

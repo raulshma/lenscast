@@ -28,6 +28,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.job
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import okhttp3.mockwebserver.Dispatcher
@@ -143,7 +144,10 @@ class LiveViewModelControlsTest {
         canControl = canControl,
         hasStoredCredential = hasStoredCredential,
         scope = scope,
-        playerScope = CoroutineScope(SupervisorJob() + Dispatchers.IO),
+        // IO lanes but parented to the caller's job: an independent
+        // SupervisorJob here outlives the test's finally-cancel and leaks
+        // every player lane into the rest of the suite's JVM.
+        playerScope = CoroutineScope(SupervisorJob(scope.coroutineContext.job) + Dispatchers.IO),
         ladder = PlayerLadder(start = PlaybackRung.WHEP),
         timings = timings,
         whepFactory = { api -> WhepViewer(api, peerFactory = { FailingPeer() }, scope = scope) },
@@ -153,7 +157,7 @@ class LiveViewModelControlsTest {
                 openStream = { throw IOException("noop mjpeg") },
                 // Park in the first backoff: one failed attempt, no network, no churn.
                 pauseMs = { awaitCancellation() },
-                scope = CoroutineScope(SupervisorJob() + Dispatchers.IO),
+                scope = CoroutineScope(SupervisorJob(scope.coroutineContext.job) + Dispatchers.IO),
             )
         },
         audioFactory = { api -> AudioListener(api) },

@@ -79,6 +79,7 @@ datastore-preferences = { group = "androidx.datastore", name = "datastore-prefer
 
 coroutines-guava = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-guava", version.ref = "coroutines" }
 coroutines-android = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-android", version.ref = "coroutines" }
+coroutines-test = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-test", version.ref = "coroutines" }
 
 # MediaPipe Tasks for the app's ML detection gates (plain libraries, no
 # Play-services dependency — see the pinned comments in app/build.gradle.kts).

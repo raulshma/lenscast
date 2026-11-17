@@ -47,7 +47,15 @@ arbitration in RecordingService, camera rebinding) are allowed to bypass it.
 One documented second application path exists for camera controls: gesture /
 quick-setting updates apply to the CameraService *before* persisting (for
 responsiveness) and the Applier re-applies after persistence — camera-control
-application is idempotent, so the overlap is harmless and intended. The RTSP
+application is idempotent, so the overlap is harmless and intended. The
+Automation Test's restore is the third: after persisting the rewind it JOINS
+the applier's in-flight camera apply (`flushCameraApply`) and then applies the
+restored settings itself (`applyCameraSettingsNow`) — a restore that only
+persists leaves the live camera at the fired state until an async emission
+happens to reach it, so restore drives the live session in the same call,
+through the applier's own mutex. Its arm-time snapshot reads the store from
+disk (`settingsFromDisk`), not the shared flows' lagging `.value`, so a test
+armed right after another restore snapshots the restored world. The RTSP
 group's combine sits at the typed five-flow limit — the independent
 `rtspTlsEnabled` flag (issue #18's decoupled RTSPS) applies through its own
 single-flow collector onto `StreamingManager.setRtspTlsEnabled` (an

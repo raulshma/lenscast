@@ -1331,6 +1331,17 @@ class SettingsDataStore(
 
     val settings: StateFlow<CameraSettings> = cameraSettingsPref.shared()
 
+    /**
+     * The current disk value of the camera settings, suspending until
+     * DataStore's read lands (the [diskValue] discipline). The
+     * read-your-write seam for the Automation Test's snapshot: an arm right
+     * after the implicit restore's saves must not answer from the shared
+     * flow's lagging `.value` (the async share-in hop) — the pre-restore
+     * values would become the "pre-test" snapshot and the next restore would
+     * faithfully restore the state it was supposed to have rewound.
+     */
+    suspend fun settingsFromDisk(): CameraSettings = cameraSettingsPref.diskValue()
+
     val streamingPort: StateFlow<Int> = streamingPortPref.shared()
 
     val jpegQuality: StateFlow<Int> = jpegQualityPref.shared()
@@ -1417,6 +1428,9 @@ class SettingsDataStore(
 
     val motionDetectionEnabled: StateFlow<Boolean> = motionDetectionEnabledPref.shared()
 
+    /** The disk-read twin of [motionDetectionEnabled] — see [settingsFromDisk]. */
+    suspend fun motionDetectionEnabledFromDisk(): Boolean = motionDetectionEnabledPref.diskValue()
+
     val motionSensitivity: StateFlow<Int> = motionSensitivityPref.shared()
 
     val motionZones: StateFlow<List<MotionZone>> = motionZonesPref.shared()
@@ -1446,6 +1460,9 @@ class SettingsDataStore(
     val motionArmDaysMask: StateFlow<Int> = motionArmDaysMaskPref.shared()
 
     val soundDetectionEnabled: StateFlow<Boolean> = soundDetectionEnabledPref.shared()
+
+    /** The disk-read twin of [soundDetectionEnabled] — see [settingsFromDisk]. */
+    suspend fun soundDetectionEnabledFromDisk(): Boolean = soundDetectionEnabledPref.diskValue()
 
     val soundThresholdPercent: StateFlow<Int> = soundThresholdPercentPref.shared()
 
@@ -1529,6 +1546,17 @@ class SettingsDataStore(
 
     /** Startup-critical: suspends on the disk value, immune to the flow's default-first race. */
     suspend fun resumeStreamsOnBootNow(): Boolean = resumeStreamsOnBootPref.diskValue()
+
+    /**
+     * The web-streaming enable's disk value, for the startup-critical read:
+     * the post-death relaunch re-arm must see the persisted flags, not the
+     * shared flows' descriptor defaults (the same race the boot receiver
+     * dodges with [resumeStreamsOnBootNow]).
+     */
+    suspend fun webStreamingEnabledFromDisk(): Boolean = webStreamingEnabledPref.diskValue()
+
+    /** The RTSP enable's disk value — the relaunch re-arm's other persisted gate. */
+    suspend fun rtspEnabledFromDisk(): Boolean = rtspEnabledPref.diskValue()
 
     val keepAwakeEnabled: StateFlow<Boolean> = keepAwakeEnabledPref.shared()
 

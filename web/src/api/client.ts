@@ -400,16 +400,17 @@ export async function sendTestAlert(): Promise<import('../types').DetectionTestR
  * caller must show the failure (mapped to a localized message via
  * restartRefusalDisplay) instead of the restarting note.
  *
- * `mode: 'soft'` (blueprint item 9) runs the in-process soft-restart ladder
- * instead — no process death, the camera-preserving tier. Its response is
- * built AFTER the re-arm, but the ladder tears down and recreates the
- * listener socket mid-flight, so the response itself can be dropped even on
- * success; on a dropped connection this polls GET /api/system (the same
- * recover-by-polling pattern the deep restart's status polling uses) until
- * the re-armed server answers, and answers with the real outcome — a
- * `mode:"soft"` success, or a typed soft failure when the device never came
- * back inside the poll window. The deep modes keep today's semantics
- * byte-for-byte (a dropped connection propagates to the caller).
+ * `mode: 'soft'` (blueprint item 9) launches the in-process soft-restart
+ * ladder instead — no process death, the camera-preserving tier. The device
+ * acknowledges the request before the ladder runs (the ladder tears down the
+ * listener socket the request rode on, so an awaited verdict was never
+ * deliverable); the acknowledgment usually arrives, but on a dropped
+ * connection this polls GET /api/system (the same recover-by-polling
+ * pattern the deep restart's status polling uses) until the re-armed server
+ * answers, and answers with a `mode:"soft"` success — or a typed soft
+ * failure when the device never came back inside the poll window. The deep
+ * modes keep today's semantics byte-for-byte (a dropped connection
+ * propagates to the caller).
  */
 export async function restartApp(mode?: 'soft' | 'process'): Promise<import('../types').SystemRestartResponse> {
   const url = mode ? `/api/system/restart?mode=${encodeURIComponent(mode)}` : '/api/system/restart'

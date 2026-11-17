@@ -10,11 +10,12 @@ import com.raulshma.lenscast.core.StreamDefaults
 import com.raulshma.lenscast.data.SettingsDataStore
 import io.mockk.every
 import io.mockk.mockk
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.test.TestCoroutineScheduler
+import kotlinx.coroutines.test.TestScope
+import kotlinx.coroutines.test.advanceTimeBy
+import kotlinx.coroutines.test.runCurrent
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -35,7 +36,7 @@ import org.robolectric.shadows.ShadowApplication
  * (start / stop / cancelSchedule / the `RecordingState` flow / the
  * `onService*` report callbacks). No production seam was opened for this
  * suite: the controller is constructed exactly as production constructs it
- * (real context, its own default scope), the service is never started —
+ * (real context, an injected scope), the service is never started —
  * Robolectric's shadow application records every intent the controller
  * queues for [RecordingService], and the test plays the service by calling
  * the `onService*` report callbacks in the order the real service would.
@@ -69,25 +70,28 @@ import org.robolectric.shadows.ShadowApplication
  *   loop's store inputs are faked at its constructor seam (see
  *   [armContinuousLoop] for why the real store cannot be touched here).
  *
- * Deliberately NOT covered here (needs a real foreground service or
- * virtual time): the service's own lifecycle, foreground vs non-foreground
- * start dispatch (the Robolectric shadow folds `startForegroundService`
- * into `startService`, so the `foreground` flag is not observable), and
- * any sub-second race interleaving (those live in the pure
- * RecordingDurationPolicy verdicts, already event-sequence-tested). The
- * 60 s user-stop suppression tail IS covered — through the loop's injected
- * `nowMs` seam (fake-time verdicts, real-time coroutine delays) in the
- * second-break pin and the rearm-fires-over-a-user-recording pin, the tests
- * here that pay a minute-scale real-time budget because the rearm job's
- * delay is the policy constant.
+ * Deliberately NOT covered here (needs a real foreground service): the
+ * service's own lifecycle and foreground vs non-foreground start dispatch
+ * (the Robolectric shadow folds `startForegroundService` into
+ * `startService`, so the `foreground` flag is not observable). Sub-second
+ * race interleaving lives in the pure RecordingDurationPolicy verdicts,
+ * already event-sequence-tested — except the user-stop suppression tail,
+ * which IS covered here through the loop's injected `suppressionMs`/`graceMs`
+ * windows (the rearm job's coroutine delay is the injected suppression
+ * length, so the production minute-scale tail is tested at a 4 s scale).
  *
- * Timing is real wall-clock with the controller's own default scope: short
- * durations (1 s) drive the auto-stop/repeat/schedule paths and every await
- * uses a generous budget, because the box runs several Gradle builds in
- * parallel and a resumed coroutine can lag for seconds under load. Negative
- * waits (asserting an intent never appears) only ever cover jobs that were
- * cancelled or never armed, so they cannot flake — the settle is
- * documentary.
+ * Timing is VIRTUAL end to end. The controller and the loop share one
+ * [TestScope]: the auto-stop/repeat/schedule delays and the loop's grace
+ * checks and suppression rearm jobs all wait on the same virtual clock,
+ * moved only by the test's explicit [advance] calls. A wait is an advance;
+ * a "never fires" pin is proven by advancing past every armed would-be
+ * timing ([settle]) — exhaustive, instant, and load-immune (a resumed
+ * coroutine cannot lag: the clock only moves when the test moves it). The
+ * one real-clock input left is the service report stamps — they ride
+ * through the controller's duration math untouched (a real stamp against a
+ * virtual delay computes a positive remain; the stamps themselves are never
+ * compared to the loop's virtual verdicts, which read
+ * `scheduler.currentTime` through the loop's `nowMs` seam).
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34])
@@ -98,6 +102,15 @@ class RecordingControllerTest {
     private lateinit var controller: RecordingController
 
     /**
+     * The one virtual clock for this test: the controller's delayed jobs
+     * (schedule, auto-stop, repeat) and the loop's (grace check, rearm)
+     * all queue on this scope's scheduler. The test drives them with
+     * [advance] / [tick]; nothing runs between calls.
+     */
+    private lateinit var testScope: TestScope
+    private lateinit var scheduler: TestCoroutineScheduler
+
+    /**
      * Every intent the controller has queued for the service so far in this
      * test, in queue order. Drained from the shadow's queue (popped one
      * synchronized element at a time — this test thread is the only
@@ -106,33 +119,24 @@ class RecordingControllerTest {
      */
     private val drained = mutableListOf<Intent>()
 
-    /**
-     * The scopes this test handed to its [ContinuousRecordingController]s.
-     * The loop observes for its scope's lifetime — production hosts exactly
-     * one, for the whole process — so the test cancels the scope in [tearDown]
-     * to model the process ending with the test method. Without that, a
-     * finished test's loop could still hold a pending re-arm (the 60 s
-     * chain-break cooldown tail) that fires through its stale controller
-     * after the test has moved on — and Robolectric records a started
-     * service against whatever test is current (the shadow resolves through
-     * the global activity thread, not through the stale Application), i.e.
-     * straight into the next test's intent counts.
-     */
-    private val loopScopes = mutableListOf<CoroutineScope>()
-
     @Before
     fun setUp() {
         context = RuntimeEnvironment.getApplication()
         appShadow = Shadows.shadowOf(context as Application)
-        controller = RecordingController(context)
+        testScope = TestScope()
+        scheduler = testScope.testScheduler
+        controller = RecordingController(context, testScope)
         drained.clear()
     }
 
     @After
     fun tearDown() {
-        // Dead loops cannot re-arm into a later test's queue (see [loopScopes]).
-        loopScopes.forEach { it.cancel() }
-        loopScopes.clear()
+        // Dead loops/jobs cannot fire into a later test's queue: the shared
+        // scope's cancellation kills the controller's armed cycles and every
+        // loop this test armed (Robolectric records a started service
+        // against whatever test is current, so a survivor would pollute the
+        // next test's intent counts).
+        testScope.cancel()
     }
 
     // ── start: intent construction + service-confirmed state ──
@@ -162,9 +166,10 @@ class RecordingControllerTest {
             RecordingState.Recording(startedAtMs = reportedAt, config = config, finalizing = false),
             controller.state.value,
         )
-        // The derived isRecording flow follows the state (Eagerly-shared, so
-        // give the sharing coroutine a moment under load).
-        awaitUntil("isRecording never flipped true") { controller.isRecording.value }
+        // The derived isRecording flow follows the state (Eagerly-shared on
+        // the virtual scheduler — one tick materializes the share).
+        tick()
+        assertTrue("isRecording never flipped true", controller.isRecording.value)
     }
 
     // ── delay-until scheduling ──
@@ -189,6 +194,10 @@ class RecordingControllerTest {
         pumpStartedServices()
         assertTrue("a scheduled start must not queue anything early", drained.isEmpty())
 
+        // The schedule job's real-clock gap (startAt minus System.currentTime-
+        // Milliseconds, a few microseconds when scheduled) is a ~SCHEDULE_DELAY_MS
+        // virtual delay: advancing past it fires.
+        advance(SCHEDULE_DELAY_MS + SCHEDULE_ADVANCE_MARGIN_MS)
         val start = awaitServiceIntents(RecordingService.ACTION_START, 1, "the scheduled start never fired").single()
         assertEquals(RecordingService::class.java.name, start.component?.className)
         // The fired intent carries the folded config too.
@@ -210,8 +219,8 @@ class RecordingControllerTest {
         controller.cancelSchedule()
 
         // Straight back to Idle, and — the load-bearing half — the delayed
-        // job was cancelled, not merely masked: after the fire time has long
-        // passed, no start intent may appear.
+        // job was cancelled, not merely masked: advancing past the fire time
+        // (and the settle's generous tail) queues no start intent.
         assertEquals(RecordingState.Idle, controller.state.value)
         settle("no start intent may fire after cancelSchedule — the job was cancelled, not masked")
         assertEquals(0, serviceIntents(RecordingService.ACTION_START).size)
@@ -233,7 +242,9 @@ class RecordingControllerTest {
         )
 
         // The first schedule's fire time passes with the state already
-        // superseded: its job must never launch the old start.
+        // superseded: its job must never launch the old start. The settle
+        // also stays far short of the SECOND schedule's 60 s offset — a
+        // fired start here could only be the old one.
         settle("the superseded schedule must never fire")
         assertEquals(0, serviceIntents(RecordingService.ACTION_START).size)
 
@@ -291,7 +302,8 @@ class RecordingControllerTest {
         // Only the stopped report lands Idle.
         controller.onServiceStopped()
         assertEquals(RecordingState.Idle, controller.state.value)
-        awaitUntil("isRecording never fell back to false") { !controller.isRecording.value }
+        tick()
+        assertFalse("isRecording never fell back to false", controller.isRecording.value)
     }
 
     @Test
@@ -318,9 +330,10 @@ class RecordingControllerTest {
         controller.start(config)
         controller.onServiceStarted(System.currentTimeMillis(), config) // arms the duration job
 
-        // The auto-stop fires through a STOP service intent ~1s later — the
-        // controller's own duration policy, no client involvement.
-        awaitServiceIntents(RecordingService.ACTION_STOP, 1, "the duration auto-stop never fired")
+        // The auto-stop fires through a STOP service intent one (virtual)
+        // second later — the controller's own duration policy, no client
+        // involvement.
+        advance(DURATION_CYCLE_MS)
 
         // No optimistic write: the state is still live Recording while the
         // service drains — only its report lands Idle.
@@ -342,7 +355,11 @@ class RecordingControllerTest {
 
         // Cycle 1: the duration elapses, the policy's own stop intent goes
         // out, the drain is reported, and the armed repeat survives the
-        // AUTO stop report (only its own stop survives it).
+        // AUTO stop report (only its own stop survives it). One advance per
+        // phase: the auto-stop fires, THE REPORT LANDS, then the gap
+        // elapses — the same order the real service's serialized queue
+        // produces, and the order the repeat's stateIsIdle re-check needs.
+        advance(DURATION_CYCLE_MS)
         awaitServiceIntents(RecordingService.ACTION_STOP, 1, "auto-stop #1 never fired")
         controller.onServiceFinalizing()
         controller.onServiceStopped()
@@ -350,6 +367,7 @@ class RecordingControllerTest {
 
         // The repeat waits out its gap and re-starts — through the same
         // start path, with the same config it armed on.
+        advance(DURATION_CYCLE_MS)
         val restarts = awaitServiceIntents(RecordingService.ACTION_START, 2, "the repeat re-start never fired")
         assertEquals(config, decodeConfig(restarts.last()))
         controller.onServiceStarted(System.currentTimeMillis(), decodeConfig(restarts.last()))
@@ -358,6 +376,7 @@ class RecordingControllerTest {
         // way, and this time the user stop lands inside the freshly armed
         // repeat gap — the one USER cause no armed step survives — so the
         // chain ends here for good.
+        advance(DURATION_CYCLE_MS)
         awaitServiceIntents(RecordingService.ACTION_STOP, 2, "auto-stop #2 never fired")
         controller.stop()
         awaitServiceIntents(RecordingService.ACTION_STOP, 3, "the user stop intent was never queued")
@@ -374,7 +393,10 @@ class RecordingControllerTest {
         controller.onServiceStarted(System.currentTimeMillis(), config)
 
         // The cycle's own auto-stop and its report: the repeat survives this
-        // one and waits out the gap.
+        // one and waits out the gap. One advance per phase — the auto-stop
+        // fires, the report lands (Idle), and the repeat stays armed behind
+        // the AUTO cause.
+        advance(DURATION_CYCLE_MS)
         awaitServiceIntents(RecordingService.ACTION_STOP, 1, "auto-stop never fired")
         controller.onServiceStopped()
         assertEquals(RecordingState.Idle, controller.state.value)
@@ -384,6 +406,8 @@ class RecordingControllerTest {
         // leave a restart armed behind it.
         controller.onServiceStopped()
 
+        // The settle advances past the armed restart's whole would-be fire:
+        // nothing appears.
         settle("a service-reported stop must cancel the armed restart")
         assertEquals(RecordingState.Idle, controller.state.value)
         assertEquals(1, serviceIntents(RecordingService.ACTION_START).size) // only the original start
@@ -537,12 +561,14 @@ class RecordingControllerTest {
 
         // Any live recording IS the loop: the re-evaluation over the
         // Recording state must maintain it, never double-start.
+        tick()
         settle("the loop must never double-start over a live recording")
         assertEquals(1, serviceIntents(RecordingService.ACTION_START).size)
 
         // Disable the feature: the loop's own teardown goes through the same
         // stop() surface a screen would — only a loop this client armed.
         loop.inputs.enabled.value = false
+        tick()
         awaitServiceIntents(RecordingService.ACTION_STOP, 1, "the disable-time teardown never stopped the loop")
         controller.onServiceStopped()
         assertEquals(RecordingState.Idle, controller.state.value)
@@ -564,84 +590,78 @@ class RecordingControllerTest {
         controller.onServiceStopped()
         assertEquals(RecordingState.Idle, controller.state.value)
 
-        // The controller counts the Idle through the chain-break grace
-        // window (5 s), declares the break, and suppresses re-arming for the
-        // 60 s cooldown. The suppression tail is beyond real-time reach
-        // here; the pin is that nothing re-starts across the whole grace
-        // window plus the break declaration itself.
-        settle(FOREIGN_STOP_GRACE_SETTLE_MS, "the loop must not re-start over a foreign stop")
+        // The controller counts the Idle through the injected grace window,
+        // declares the break, and suppresses re-arming for the injected
+        // cooldown: the rearm job sits TEST_SUPPRESSION_MS out. The settle
+        // advances past the grace declaration and sits strictly inside that
+        // window — a re-armed START here could only be a suppression miss.
+        tick()
+        advance(GRACE_DECLARE_ADVANCE_MS)
+        settle("the loop must not re-start over a foreign stop")
         assertEquals(RecordingState.Idle, controller.state.value)
         assertEquals(1, serviceIntents(RecordingService.ACTION_START).size) // only the original arm
     }
 
     @Test
     fun `a second chain break inside the suppression window retargets the rearm - the loop re-arms past the extended deadline`() {
-        // The stranding wedge, on the manual clock: break #1 arms a rearm job
-        // at the full suppression length (the policy constant — the one wait
-        // here that cannot shrink, because the rearm job's delay is real-time
-        // even though the verdicts are fake-time). A foreign recording starts
-        // inside the window and its stop declares break #2, which EXTENDS the
-        // suppression past break #1's deadline. The stale job then fires past
-        // its own deadline but inside the extended window: without the
-        // retarget, its fire fails canArm and returns without rescheduling —
-        // the loop sits Idle with no pending job and no flow emission ever
-        // coming, silently dead until a setting changes. The pin: past the
-        // EXTENDED deadline, exactly one re-arm START fires.
-        val clock = ManualClock()
-        val loop = armContinuousLoop(nowMs = clock::now)
-        // The segment's start report carries a REAL stamp (the sibling pin
-        // below documents why): the controller's duration math is real-clock,
-        // and a manual stamp here would make the 300 s auto-stop fire
-        // immediately (a negative remainMs skips the delay), racing this
-        // test's own stop intent. The manual clock below drives the LOOP's
-        // verdicts only (grace, suppression, rearm delays).
+        // The stranding wedge: break #1 arms a rearm job at the injected
+        // suppression length. A foreign recording starts inside the window
+        // and its stop declares break #2, which EXTENDS the suppression past
+        // break #1's deadline. The retargeted job then fires exactly at the
+        // extended deadline: without the retarget, the stale job's fire
+        // would fail canArm and return without rescheduling — the loop sits
+        // Idle with no pending job and no flow emission ever coming,
+        // silently dead until a setting changes. The pin: past the EXTENDED
+        // deadline, exactly one re-arm START fires.
+        val loop = armContinuousLoop()
+        // The segment's start report carries a REAL stamp: the controller's
+        // duration math is real-clock, and the report stamp flows into the
+        // armed 300 s duration job (a positive virtual delay — it never
+        // fires in this test, and the user stop below cancels it). The
+        // loop's verdicts read the virtual clock through its `nowMs` seam.
         controller.onServiceStarted(System.currentTimeMillis(), loop.segment)
 
-        // Break #1: a foreign stop — the grace check declares it past the 5 s
-        // mark. The paced window absorbs the collector's unobservable stamp
-        // lag: wherever the idle-since lands inside it, the check's first
-        // real-time fire reads a fake now that has kept 2× pace past the
-        // mark and declares.
+        // Break #1: a foreign stop — the grace check declares it past the
+        // injected grace mark.
         controller.stop()
         awaitServiceIntents(RecordingService.ACTION_STOP, 1, "the first chain break was never queued")
         controller.onServiceStopped()
         assertEquals(RecordingState.Idle, controller.state.value)
-        pace(clock, GRACE_DANCE_MS)
-        // Break #1 declared (suppression until fake now + 60 s); the rearm
-        // job is armed with the full 60 s as its real delay.
+        tick() // the collector stamps the Idle; the grace check is scheduled
+        advance(GRACE_DECLARE_ADVANCE_MS)
+        // Break #1 declared (suppression until virtual now + TEST_SUPPRESSION_MS);
+        // the rearm job is armed with that window as its (virtual) delay.
 
-        // A foreign recording starts deep inside the suppression window: the
-        // loop adopts it (armed, not armed-by-us) and leaves the pending
-        // rearm targeting break #1's OLD deadline.
+        // A foreign recording starts inside the suppression window: the loop
+        // adopts it (armed, not armed-by-us) and leaves the pending rearm
+        // targeting break #1's OLD deadline.
         val foreign = RecordingConfig(durationSeconds = 0, repeatIntervalSeconds = 0)
         controller.start(foreign)
         awaitServiceIntents(RecordingService.ACTION_START, 2, "the foreign start was never queued")
-        controller.onServiceStarted(clock.now(), foreign)
+        controller.onServiceStarted(System.currentTimeMillis(), foreign)
+        tick() // the loop adopts the foreign recording
 
         // ...and stops inside the window: the second chain break extends the
-        // suppression past break #1's deadline (the same paced grace dance,
-        // and scheduleRearm retargets the pending job onto the extended
-        // deadline as it declares).
+        // suppression past break #1's deadline (the same grace dance, and
+        // scheduleRearm retargets the pending job onto the extended deadline
+        // as it declares).
         controller.stop()
         awaitServiceIntents(RecordingService.ACTION_STOP, 2, "the foreign stop was never queued")
         controller.onServiceStopped()
-        pace(clock, GRACE_DANCE_MS)
+        tick()
+        advance(GRACE_DECLARE_ADVANCE_MS)
 
-        // Through the retargeted job's real-time fire moment (armed at
-        // break #2's declaration with the extended window as its real
-        // delay): the pacing guarantees the fire finds the fake clock past
-        // that deadline — on the stranding shape its fire would fail canArm
-        // and schedule nothing, stranding the loop Idle.
-        pace(clock, STALE_REARM_FIRE_SETTLE_MS)
+        // Through the retargeted job's fire moment (armed at break #2's
+        // declaration with the extended window as its delay): on the
+        // stranding shape its fire would fail canArm and schedule nothing,
+        // stranding the loop Idle.
+        advance(TEST_SUPPRESSION_MS)
 
-        // Exactly one re-arm fires, paced: the wait keeps the clock moving
-        // so even a late-declared break #2's job fires into a lapsed window
-        // within the budget.
-        val restarts = awaitPacedServiceIntents(
-            clock,
+        // Exactly one re-arm fired — the deterministic clock makes the count
+        // a direct read, no pacing or budget needed.
+        val restarts = awaitServiceIntents(
             RecordingService.ACTION_START,
             3,
-            PACED_REARM_BUDGET_MS,
             "the loop never re-armed past the extended suppression deadline",
         )
         assertEquals(loop.segment, decodeConfig(restarts.last()))
@@ -665,12 +685,14 @@ class RecordingControllerTest {
         controller.start(foreign)
         awaitServiceIntents(RecordingService.ACTION_START, 2, "the foreign start was never queued")
         controller.onServiceStarted(System.currentTimeMillis(), foreign)
+        tick() // the loop adopts the foreign recording
         settle("the loop must adopt the foreign recording before the flip")
         assertEquals(2, serviceIntents(RecordingService.ACTION_START).size) // arm + foreign, nothing new
 
         // Flip the toggle off: the teardown must still stop the segment —
         // now the foreign recording — because ours survived the takeover.
         loop.inputs.enabled.value = false
+        tick()
         awaitServiceIntents(
             RecordingService.ACTION_STOP,
             1,
@@ -687,34 +709,30 @@ class RecordingControllerTest {
 
     @Test
     fun `a user start inside the suppression window leaves the pending rearm a quiet no-op - the chain still re-arms past the extended deadline`() {
-        // The rearmJob-outlives-Suppression shape, on the manual clock: the
-        // break #1 rearm job (the policy constant as its real delay) fires
-        // while a USER recording is live inside the window. The loop adopted
-        // that recording (Maintaining, not ours) and the job stays pending
-        // beside the state — its fire must be the deliberate quiet no-op: no
-        // start over the live segment, no reschedule behind it, the user
-        // recording untouched. The user recording then stops, break #2
-        // extends the window, and exactly one re-arm fires past the extended
-        // deadline (the same accounting as the wedge pin above).
-        val clock = ManualClock()
-        val loop = armContinuousLoop(nowMs = clock::now)
-        // The segment's start report carries a REAL stamp: the controller's
-        // duration math is real-clock, and a manual stamp here would make the
-        // 300 s auto-stop fire immediately (a negative remainMs skips the
-        // delay), racing this test's own stop intent. The manual clock below
-        // drives the LOOP's verdicts only (grace, suppression, rearm delays).
+        // The rearmJob-outlives-Suppression shape: the break #1 rearm job
+        // fires while a USER recording is live inside the window. The loop
+        // adopted that recording (Maintaining, not ours) and the job stays
+        // pending beside the state — its fire must be the deliberate quiet
+        // no-op: no start over the live segment, no reschedule behind it,
+        // the user recording untouched. The user recording then stops, break
+        // #2 extends the window, and exactly one re-arm fires past the
+        // extended deadline (the same accounting as the wedge pin above).
+        val loop = armContinuousLoop()
+        // Real report stamp (see the wedge pin): the loop's verdicts read
+        // the virtual clock through the `nowMs` seam.
         controller.onServiceStarted(System.currentTimeMillis(), loop.segment)
 
-        // Break #1: a foreign stop — the grace check declares it past the 5 s
-        // mark (same paced grace dance as the wedge pin). The stop also
-        // cancels the just-armed 300 s duration job.
+        // Break #1: a foreign stop — the grace check declares it past the
+        // injected grace mark. The stop also cancels the just-armed 300 s
+        // duration job.
         controller.stop()
         awaitServiceIntents(RecordingService.ACTION_STOP, 1, "the first chain break was never queued")
         controller.onServiceStopped()
         assertEquals(RecordingState.Idle, controller.state.value)
-        pace(clock, GRACE_DANCE_MS)
-        // Break #1 declared (suppression until fake now + 60 s); the rearm
-        // job is armed with the full 60 s as its real delay.
+        tick()
+        advance(GRACE_DECLARE_ADVANCE_MS)
+        // Break #1 declared (suppression until virtual now + TEST_SUPPRESSION_MS);
+        // the rearm job is armed with that window as its (virtual) delay.
 
         // A user recording starts inside the window: the loop adopts it
         // (Maintaining, not ours) and the pending rearm stays targeting
@@ -722,12 +740,15 @@ class RecordingControllerTest {
         val user = RecordingConfig(durationSeconds = 0, repeatIntervalSeconds = 0)
         controller.start(user)
         awaitServiceIntents(RecordingService.ACTION_START, 2, "the user start was never queued")
-        controller.onServiceStarted(clock.now(), user)
+        controller.onServiceStarted(System.currentTimeMillis(), user)
+        tick()
         assertTrue(controller.state.value is RecordingState.Recording)
 
-        // The pending rearm fires while the user recording is live: quiet
-        // no-op — nothing starts over the live segment, nothing is disturbed.
-        pace(clock, STALE_REARM_FIRE_SETTLE_MS)
+        // Advance exactly through the pending rearm's fire moment while the
+        // user recording is live: quiet no-op — nothing starts over the live
+        // segment, nothing is disturbed. The deterministic clock fires the
+        // job exactly here; there is no race to pace away.
+        advance(TEST_SUPPRESSION_MS)
         assertTrue(
             "the rearm's fire must not disturb the live user recording",
             controller.state.value is RecordingState.Recording,
@@ -740,17 +761,14 @@ class RecordingControllerTest {
         controller.stop()
         awaitServiceIntents(RecordingService.ACTION_STOP, 2, "the user stop was never queued")
         controller.onServiceStopped()
-        pace(clock, GRACE_DANCE_MS)
+        tick()
+        advance(GRACE_DECLARE_ADVANCE_MS)
 
-        // Past the EXTENDED deadline: exactly one re-arm fires, paced — the
-        // wait keeps the clock moving so the job's real-time fire finds the
-        // window lapsed wherever the declaration landed.
-        pace(clock, STALE_REARM_FIRE_SETTLE_MS)
-        val restarts = awaitPacedServiceIntents(
-            clock,
+        // Advance through the EXTENDED deadline: exactly one re-arm fires.
+        advance(TEST_SUPPRESSION_MS)
+        val restarts = awaitServiceIntents(
             RecordingService.ACTION_START,
             3,
-            PACED_REARM_BUDGET_MS,
             "the loop never re-armed past the extended suppression deadline",
         )
         assertEquals(loop.segment, decodeConfig(restarts.last()))
@@ -765,38 +783,37 @@ class RecordingControllerTest {
     fun `a disable-and-reenable inside the suppression window erases the cooldown - the loop re-arms immediately`() {
         // The disable-time Dormant write erases a still-live suppression
         // stamp: round-tripping the toggle inside the cooldown must re-arm
-        // immediately, not wait the window out. On the manual clock the
-        // re-arm fires with the stamp's deadline still ~59 s in the future —
-        // an immediate start can only be the erase.
-        val clock = ManualClock()
-        val loop = armContinuousLoop(nowMs = clock::now)
-        // The segment's start report carries a REAL stamp: the controller's
-        // duration math is real-clock, and a manual stamp here would make the
-        // 300 s auto-stop fire immediately (a negative remainMs skips the
-        // delay), racing this test's own stop intent. The manual clock below
-        // drives the LOOP's verdicts only (grace, suppression, rearm delays).
+        // immediately, not wait the window out. On the virtual clock the
+        // re-enable lands with the stamp's deadline still far in the future
+        // (only the grace declaration's advance has elapsed against the
+        // TEST_SUPPRESSION_MS window), so an immediate start can only be
+        // the erase — waiting the window out would have taken a further
+        // advance the test never makes.
+        val loop = armContinuousLoop()
+        // Real report stamp (see the wedge pin).
         controller.onServiceStarted(System.currentTimeMillis(), loop.segment)
 
-        // Declare break #1 (same paced grace dance as the wedge pin):
-        // Suppressing until fake now + 60 s, with a rearm job pending. The
-        // stop also cancels the just-armed 300 s duration job.
+        // Declare break #1 (the grace dance): Suppressing until virtual now
+        // + TEST_SUPPRESSION_MS, with a rearm job pending. The stop also
+        // cancels the just-armed 300 s duration job.
         controller.stop()
         awaitServiceIntents(RecordingService.ACTION_STOP, 1, "the chain break was never queued")
         controller.onServiceStopped()
         assertEquals(RecordingState.Idle, controller.state.value)
-        pace(clock, GRACE_DANCE_MS)
+        tick()
+        advance(GRACE_DECLARE_ADVANCE_MS)
 
         // Toggle off: the disable-time Noop path ends the idle loop — Dormant
         // erases the stamp, and the pending rearm job is cancelled at decide
-        // time. The settle lets that decision land before the re-enable (the
+        // time. The tick lets that decision land before the re-enable (the
         // two flips must not conflate into a single enabled emission).
         loop.inputs.enabled.value = false
-        settle("the disable must land before the re-enable")
+        tick()
         loop.inputs.enabled.value = true
+        tick()
 
-        // Re-enabled with the clock still deep inside the would-be cooldown
-        // (paced — at most ~26 s of fake time past the break, against a
-        // 60 s window): the immediate re-arm can only be the erase.
+        // Re-enabled with the clock still deep inside the would-be cooldown:
+        // the immediate re-arm can only be the erase.
         val restarts = awaitServiceIntents(
             RecordingService.ACTION_START,
             2,
@@ -817,9 +834,10 @@ class RecordingControllerTest {
      * Arms the real [ContinuousRecordingController] against this test's
      * [controller]: fakes the loop's store inputs, starts the loop, flips the
      * enable input on, and returns the decoded segment config it queued.
-     * Shared by the interplay tests; [nowMs] injects the loop's clock seam
-     * (the suppression-tail pin drives a manual clock — the verdicts are
-     * fake-time, the coroutine delays stay real-time).
+     * Shared by the interplay tests; the loop shares this test's [TestScope]
+     * and reads the virtual clock through its `nowMs` seam
+     * (`scheduler.currentTime`) — its grace checks and rearm delays advance
+     * exactly when the test advances, never before.
      *
      * The store input is faked at the loop's own constructor seam, and that
      * is deliberate isolation, not a shortcut. In production exactly one loop
@@ -841,16 +859,12 @@ class RecordingControllerTest {
      * (see the companion note); the faked input feeds exactly the value a
      * real save of that setting would decode back.
      */
-    private fun armContinuousLoop(nowMs: () -> Long = System::currentTimeMillis): ArmedLoop {
+    private fun armContinuousLoop(): ArmedLoop {
         val inputs = LoopInputs(
             enabled = MutableStateFlow(false),
             segmentMinutes = MutableStateFlow(SEGMENT_MINUTES),
             audioEnabled = MutableStateFlow(AUDIO_ENABLED),
         )
-        // The loop's observation scope is injected (the DetectionCoordinatorTest
-        // seam pattern) and tracked for tearDown's cancellation: the default
-        // scope would observe forever, and a loop surviving its own test could
-        // still hold a pending re-arm that fires into a later test's queue.
         val loop = ContinuousRecordingController(
             mockk {
                 every { continuousRecording } returns inputs.enabled
@@ -858,8 +872,10 @@ class RecordingControllerTest {
                 every { recordingAudioEnabled } returns inputs.audioEnabled
             },
             controller,
-            scope = CoroutineScope(SupervisorJob() + Dispatchers.Default).also { loopScopes += it },
-            nowMs = nowMs,
+            scope = testScope,
+            nowMs = { scheduler.currentTime },
+            suppressionMs = TEST_SUPPRESSION_MS,
+            graceMs = TEST_GRACE_MS,
         )
         loop.start()
 
@@ -885,23 +901,6 @@ class RecordingControllerTest {
             },
         )
 
-    /**
-     * A test-driven clock for the loop's `nowMs` seam: every verdict the loop
-     * computes (grace confirmation, suppression windows, rearm deadlines) is
-     * fake-time under the test's control, while the loop's coroutine delays
-     * stay real-time. Advancing is explicit — a verdict never moves the clock.
-     */
-    private class ManualClock(startMs: Long = MANUAL_CLOCK_START_MS) {
-        var currentMs = startMs
-            private set
-
-        fun now(): Long = currentMs
-
-        fun advance(ms: Long) {
-            currentMs += ms
-        }
-    }
-
     /** Pops everything queued so far into [drained]. Single-remover, race-free against concurrent appends. */
     private fun pumpStartedServices() {
         while (true) {
@@ -916,81 +915,44 @@ class RecordingControllerTest {
         return drained.filter { it.action == action }
     }
 
-    /** Waits until [action] has been queued [count] times, then returns every queued one, oldest first. */
+    /**
+     * The intents queued with [action] must have reached [count] already —
+     * after the caller's synchronous calls and/or [advance]s. The virtual
+     * clock is deterministic: a count that is not there now will never
+     * arrive, so this fails immediately instead of polling (an await budget
+     * would only hide a mis-sequenced advance).
+     */
     private fun awaitServiceIntents(action: String, count: Int, message: String): List<Intent> {
-        awaitUntil("$message (queued so far: ${drained.map { it.action }})") {
-            serviceIntents(action).size >= count
+        tick()
+        return serviceIntents(action).also { queued ->
+            check(queued.size >= count) { "$message (queued so far: ${drained.map { it.action }})" }
         }
-        return serviceIntents(action)
     }
 
     /**
-     * Real-time settle for a negative (never-fires) assertion. Every such
-     * assertion covers a job that was cancelled or never armed, so the
-     * outcome cannot depend on load — the wait only makes the proof visible.
+     * Runs everything the virtual clock has due right now: the loop's
+     * collector reacting to a state/setting change, a just-scheduled job's
+     * first suspension point, the Eagerly-shared isRecording share.
      */
-    private fun settle(reason: String) = settle(CYCLE_SETTLE_MS, reason)
+    private fun tick() {
+        scheduler.runCurrent()
+    }
 
-    private fun settle(ms: Long, reason: String) {
-        Thread.sleep(ms)
+    /** Moves the shared virtual clock forward by [ms] and runs whatever comes due. */
+    private fun advance(ms: Long) {
+        scheduler.advanceTimeBy(ms)
+        scheduler.runCurrent()
+    }
+
+    /**
+     * Advance past every armed would-be timing of the cycle the test just
+     * cancelled or never armed. A "never fires" pin: the virtual clock
+     * covers every future delay the remaining armed jobs could have, and no
+     * new intent may appear.
+     */
+    private fun settle(reason: String) {
+        advance(CYCLE_SETTLE_MS)
         // [reason] documents the guarantee at the call site; the asserts follow it.
-    }
-
-    /**
-     * Real-time wait with the fake clock paced at [PACED_CLOCK_RATE]× real
-     * time. The loop's verdicts are fake-time while its delays are
-     * real-time, and the collector stamps land at unobservable real moments
-     * — under CI load a stamp can lag past any fixed advance, shifting
-     * every deadline computed from it beyond what the choreography's
-     * remaining steps can reach (the suite's observed flake). Pacing keeps
-     * the fake now ahead of the real schedule: a grace check confirms on
-     * its first fire wherever the stamp landed inside the window, and a
-     * rearm job armed at real delay D always finds the clock past its
-     * deadline D later — the two clocks can no longer disagree about
-     * whether a window has lapsed.
-     */
-    private fun pace(clock: ManualClock, realMs: Long) {
-        var remaining = realMs
-        while (remaining > 0) {
-            val tick = minOf(PACE_TICK_MS, remaining)
-            Thread.sleep(tick)
-            clock.advance(tick * PACED_CLOCK_RATE)
-            remaining -= tick
-        }
-    }
-
-    /**
-     * [pace]d wait for [action] to reach [count], then every queued one,
-     * oldest first. The pacing stays on while waiting: a late rearm job's
-     * fire must find the fake clock past the deadline its real delay was
-     * armed against, not the parked now of the moment the wait began.
-     */
-    private fun awaitPacedServiceIntents(
-        clock: ManualClock,
-        action: String,
-        count: Int,
-        budgetMs: Long,
-        message: String,
-    ): List<Intent> {
-        val deadline = System.currentTimeMillis() + budgetMs
-        while (serviceIntents(action).size < count) {
-            check(System.currentTimeMillis() < deadline) {
-                "$message (queued so far: ${drained.map { it.action }})"
-            }
-            Thread.sleep(PACE_TICK_MS)
-            clock.advance(PACE_TICK_MS * PACED_CLOCK_RATE)
-        }
-        return serviceIntents(action)
-    }
-
-    private fun awaitUntil(message: String, condition: () -> Boolean) {
-        // Generous budget: the box runs several Gradle builds in parallel and
-        // a resumed coroutine or a DataStore write can lag for seconds under load.
-        val deadline = System.currentTimeMillis() + AWAIT_BUDGET_MS
-        while (!condition()) {
-            check(System.currentTimeMillis() < deadline) { message }
-            Thread.sleep(10)
-        }
     }
 
     /** The loop's three store inputs, faked per interplay test (see [armContinuousLoop]). */
@@ -1005,7 +967,14 @@ class RecordingControllerTest {
 
     private companion object {
         /** The future-start offset every scheduling test uses. */
-        const val SCHEDULE_DELAY_MS = 1_200L
+        const val SCHEDULE_DELAY_MS = 250L
+
+        /**
+         * The scheduled-start advance covers the delay plus the few
+         * microseconds of real time between the test computing `startAt`
+         * and `schedule()` subtracting `System.currentTimeMillis()`.
+         */
+        const val SCHEDULE_ADVANCE_MARGIN_MS = 50L
 
         /**
          * The continuous loop's segment length, in minutes: the smallest
@@ -1025,60 +994,46 @@ class RecordingControllerTest {
         /** The recording-audio preference value the faked loop input carries. */
         const val AUDIO_ENABLED = true
 
-        /** Documentary settle past a cancelled/never-armed cycle's would-be timing. */
+        /**
+         * The suppression window injected into the loop under test (the
+         * production constant is a real 60 s): the rearm job delays on this
+         * value — virtually. The manual pins advance exactly through it.
+         */
+        const val TEST_SUPPRESSION_MS = 4_000L
+
+        /** The chain-break grace window injected into the loop under test. */
+        const val TEST_GRACE_MS = 200L
+
+        /**
+         * The advance that declares a chain break: the collector's Idle
+         * stamp plus the grace check's delay ([TEST_GRACE_MS] plus the
+         * controller's check slack) plus a settling margin. Advancing this
+         * far fires exactly one grace check — confirmed, since the idle
+         * stamp was taken at the preceding [tick].
+         */
+        const val GRACE_DECLARE_ADVANCE_MS = TEST_GRACE_MS + 100L
+
+        /**
+         * Exactly ONE duration-policy step: the 1 s auto-stop of a bounded
+         * recording, or the 1 s repeat gap behind it. The delay is anchored
+         * at a real-clock stamp (a few microseconds under one virtual
+         * second — [RecordingDurationPolicy.autoStopDelayMs]), so the
+         * boundary-inclusive advance fires exactly the phase's job and
+         * nothing armed behind it. Never advance two steps in a row over a
+         * live cycle: the repeat anchored at the auto-stop's fire moment
+         * would fire inside the same advance — before the test has played
+         * the stop report — and its stateIsIdle re-check would kill it over
+         * a stale Recording state. One advance, one report, one advance.
+         */
+        const val DURATION_CYCLE_MS = 1_000L
+
+        /**
+         * The "never fires" advance: past a 1 s duration cycle, past the
+         * [SCHEDULE_DELAY_MS] schedule fire, past every cancelled would-be
+         * timing the pins leave behind — and strictly short of the
+         * TEST_SUPPRESSION_MS rearm mark (a settle after a break declaration
+         * must stay inside the live cooldown).
+         */
         const val CYCLE_SETTLE_MS = 2_000L
-
-        /** Past the 5 s chain-break grace + its scheduled re-check: the break is declared, nothing re-arms. */
-        const val FOREIGN_STOP_GRACE_SETTLE_MS = 5_400L
-
-        /**
-         * The stale rearm job's real-time fire window in the manual-clock
-         * pins: the job is armed at the break's declaration with the full
-         * USER_STOP_SUPPRESSION_MS as its (real-time) delay, so letting its
-         * fire moment pass costs one suppression length minus the grace
-         * waits already spent. The suite's one minute-scale wait;
-         * un-shrinkable without opening a seam in the loop. Spent via
-         * [pace], so the verdicts' fake clock tracks the fire schedule
-         * while the wall waits run.
-         */
-        const val STALE_REARM_FIRE_SETTLE_MS = 58_000L
-
-        /**
-         * The manual-clock pins' grace dance: one paced window covering the
-         * collector's (lag-prone) idle stamp, the 5 s grace mark, and the
-         * grace check's real-time fire — comfortably past the old
-         * sleep-4s/advance-6s/sleep-6s choreography, whose fixed advances
-         * assumed a collector that stamps within seconds.
-         */
-        const val GRACE_DANCE_MS = 16_000L
-
-        /**
-         * The paced final await's budget in the manual-clock pins: covers a
-         * rearm fire landing anywhere from the settle's tail to a worst-case
-         * late break declaration plus the full real-time suppression delay.
-         * Only a skewed run ever spends it — a healthy fire exits the loop
-         * immediately.
-         */
-        const val PACED_REARM_BUDGET_MS = 60_000L
-
-        /** The pacing tick: fake advances in small steps alongside the real sleeps. */
-        const val PACE_TICK_MS = 200L
-
-        /**
-         * The fake clock's pace over real time, ≥ 1× so every verdict reads
-         * a now that stays ahead of the real schedule its delay was armed
-         * against. 2× doubles the observed grace/suppression verdicts
-         * relative to real waits without approaching the loop's real-time
-         * staleness (the 300 s segment auto-stop is never armed in these
-         * pins — durationSeconds = 0 foreign/user configs and real-stamped
-         * loop arms that stop by hand).
-         */
-        const val PACED_CLOCK_RATE = 2L
-
-        /** The manual clock's start value for the suppression-tail pin (an arbitrary non-zero base). */
-        const val MANUAL_CLOCK_START_MS = 1_000_000L
-
-        /** The await budget every positive-timing poll gets, sized for parallel-build load. */
-        const val AWAIT_BUDGET_MS = 30_000L
     }
 }

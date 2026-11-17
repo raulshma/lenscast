@@ -32,6 +32,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.newSingleThreadContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import org.junit.After
 import org.junit.Before
@@ -127,7 +128,13 @@ private val rtspTlsEnabled = MutableStateFlow(false)
     private val onvifServer: OnvifServer = mockk(relaxed = true)
     private val fsiResumeController: FsiResumeController = mockk(relaxed = true)
 
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    // One dedicated thread: the applier's collectors serialize on it
+    // deterministically, so the flush/apply tests answer on the applier's
+    // own lane instead of racing the shared Default pool.
+    private val applierThread = newSingleThreadContext("SettingsApplierTest-applier")
+    private val scope = CoroutineScope(SupervisorJob() + applierThread)
+
+    private lateinit var applier: SettingsApplier
 
     @Before
     fun setUp() {
@@ -199,7 +206,7 @@ private val rtspTlsEnabled = MutableStateFlow(false)
         every { settingsDataStore.ecoIdleFpsEnabled } returns ecoIdleFpsEnabled
         every { settingsDataStore.fsiCameraResume } returns fsiCameraResume
 
-        SettingsApplier(
+        applier = SettingsApplier(
             settingsDataStore = settingsDataStore,
             cameraService = cameraService,
             streamingManager = streamingManager,
@@ -208,12 +215,14 @@ private val rtspTlsEnabled = MutableStateFlow(false)
             onvifServer = onvifServer,
             fsiResumeController = fsiResumeController,
             serverApplyDebounceMs = 0,
-        ).start(scope)
+        )
+        applier.start(scope)
     }
 
     @After
     fun tearDown() {
         scope.cancel()
+        applierThread.close()
     }
 
     // ── helpers ──
@@ -275,6 +284,65 @@ private val rtspTlsEnabled = MutableStateFlow(false)
         }
         settle()
         verify(exactly = 1) { streamingManager.setFrameRate(30) }
+    }
+
+    // ── flush + direct apply: the restore's serialized camera-apply seam ──
+
+    @Test
+    fun `flush camera apply returns only after the latest emission reached the camera`() {
+        kotlinx.coroutines.runBlocking {
+            eventually { coVerify(exactly = 1) { cameraService.applySettings(CameraSettings()) } }
+            val manual = CameraSettings(iso = 800, torchEnabled = true)
+            cameraSettings.value = manual
+            applier.flushCameraApply()
+            // flushCameraApply returned: the manual emission's apply has
+            // COMPLETED — not merely started.
+            coVerify(atLeast = 1) { cameraService.applySettings(manual) }
+        }
+    }
+
+    @Test
+    fun `flush after a quick burst leaves the latest value applied and none pending`() {
+        kotlinx.coroutines.runBlocking {
+            eventually { coVerify(exactly = 1) { cameraService.applySettings(CameraSettings()) } }
+            cameraSettings.value = CameraSettings(iso = 400)
+            cameraSettings.value = CameraSettings(iso = 800)
+            applier.flushCameraApply()
+            // StateFlow conflation may skip the middle emission entirely;
+            // the join guarantee is the LATEST delivered value's apply.
+            coVerify(atLeast = 1) { cameraService.applySettings(CameraSettings(iso = 800)) }
+        }
+    }
+
+    @Test
+    fun `apply camera settings now drives the camera directly and later emissions still land`() {
+        kotlinx.coroutines.runBlocking {
+            val live = CameraSettings(iso = null, torchEnabled = false, zoomRatio = 2.5f)
+            applier.applyCameraSettingsNow(live)
+            coVerify(exactly = 1) { cameraService.applySettings(live) }
+            // A store emission after the direct apply lands through the
+            // collector on top — the documented idempotent overlap.
+            val next = live.copy(frameRate = 30)
+            cameraSettings.value = next
+            applier.flushCameraApply()
+            coVerify(exactly = 1) { cameraService.applySettings(next) }
+        }
+    }
+
+    @Test
+    fun `flush on an applier that was never started returns immediately`() {
+        kotlinx.coroutines.runBlocking {
+            SettingsApplier(
+                settingsDataStore = settingsDataStore,
+                cameraService = cameraService,
+                streamingManager = streamingManager,
+                streamWatchdog = streamWatchdog,
+                mqttAlertPublisher = mqttAlertPublisher,
+                onvifServer = onvifServer,
+                fsiResumeController = fsiResumeController,
+                serverApplyDebounceMs = 0,
+            ).flushCameraApply()
+        }
     }
 
     // ── web server port + TLS ──

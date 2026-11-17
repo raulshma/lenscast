@@ -43,6 +43,15 @@ class ContinuousRecordingController(
     private val recordingController: RecordingController,
     private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
     private val nowMs: () -> Long = System::currentTimeMillis,
+    /**
+     * The suppression cooldown, injectable so tests drive the loop at
+     * test-scale windows (the rearm job delays on this value — at the
+     * production constant that wait is a real 60 s). Defaults are the policy
+     * constants; production constructs without them.
+     */
+    private val suppressionMs: Long = ContinuousRecordingPolicy.USER_STOP_SUPPRESSION_MS,
+    /** The chain-break grace window, injectable for the same reason. */
+    private val graceMs: Long = ContinuousRecordingPolicy.CHAIN_BREAK_GRACE_MS,
 ) {
 
     private val lock = Any()
@@ -247,12 +256,12 @@ class ContinuousRecordingController(
         // check. Returning Noop here would consume the job with nothing
         // behind it — Idle + armed, no wake-up, and no flow emission ever
         // coming (the state stays Idle) strands the loop.
-        if (!ContinuousRecordingPolicy.chainBreakConfirmed(idleForMs)) return Decision.ScheduleGraceCheck
+        if (!ContinuousRecordingPolicy.chainBreakConfirmed(idleForMs, graceMs)) return Decision.ScheduleGraceCheck
         // One atomic write replacing the four adjacent flag writes of the old
         // shape (same lock hold, no reader between them).
-        loopState = LoopState.Suppressing(ContinuousRecordingPolicy.suppressedUntilMs(nowMs()))
+        loopState = LoopState.Suppressing(ContinuousRecordingPolicy.suppressedUntilMs(nowMs(), suppressionMs))
         Log.d(TAG, "Continuous chain broken after ${idleForMs}ms Idle; arming suppressed for " +
-            "${ContinuousRecordingPolicy.USER_STOP_SUPPRESSION_MS}ms")
+            "${suppressionMs}ms")
         // Always reschedule, with the CURRENT remaining window: a break
         // inside an earlier suppression extends the suppression stamp
         // ([LoopState.Suppressing.untilMs]), and the still-pending job from
@@ -289,7 +298,7 @@ class ContinuousRecordingController(
             // Same assignment discipline as [scheduleRearm]: assigned under
             // the lock the body nulls it from.
             graceJob = scope.launch {
-                delay(ContinuousRecordingPolicy.CHAIN_BREAK_GRACE_MS + GRACE_CHECK_SLACK_MS)
+                delay(graceMs + GRACE_CHECK_SLACK_MS)
                 synchronized(lock) { graceJob = null }
                 evaluate(currentInputs())
             }

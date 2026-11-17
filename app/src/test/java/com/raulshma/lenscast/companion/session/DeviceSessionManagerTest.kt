@@ -205,6 +205,10 @@ class DeviceSessionManagerTest {
         detectionSseRetryMs = 120L,
         ladderBackoffMs = listOf(20L, 30L, 40L),
         ladderGiveUpAtCapTier = 3,
+        // A wrong-scheme dial (TLS against the plaintext mock) must fail in
+        // milliseconds, not the production 3 s connect budget the ladder
+        // would otherwise pay per rung.
+        dialConnectTimeoutMs = 250L,
     )
 
     private fun DeviceSession.fast(statusSseRetryMs: Long = 40L): DeviceSession = apply {
@@ -265,13 +269,13 @@ class DeviceSessionManagerTest {
             session.laneOpenListener = { kind, url -> openedUrls.add(kind to url) }
 
             session.start()
-            // 60s, not 15: the https intent lands in milliseconds on a healthy
-            // JVM, but this whole file shares one worker with the Robolectric
-            // UI classes in the full suite — sandbox teardown pauses and
-            // OkHttp reader-thread pressure have (rarely) stretched that to
-            // >15s. A real regression still fails, just bounded at a minute.
+            // 15s: the https intents land in milliseconds on a healthy JVM;
+            // the budget is slack for suite-load scheduling, not a fix for a
+            // saturated JVM (the old 60 s edition absorbed the per-method
+            // MainApplication leaks — see test-resources/robolectric.properties).
+            // A real regression still fails, just bounded.
             try {
-                withTimeout(60.seconds) {
+                withTimeout(15.seconds) {
                     // BOTH rebuilds must land here — the detection lane's
                     // re-dial trails the status lane's, and under suite-load
                     // the gap has stretched past an immediate assert.
@@ -330,23 +334,9 @@ class DeviceSessionManagerTest {
         // cannot complete a TLS handshake, the ladder exhausts to OFFLINE.
         probeBases.clear()
         session.start()
-        // Same 60s rationale as the transport test's wait above.
-        try {
-            withTimeout(60.seconds) {
-                while (probeBases.none { it.startsWith("https://") }) delay(10)
-            }
-        } catch (e: TimeoutCancellationException) {
-            // TEMP DIAGNOSTIC: dump every thread that is doing anything but idling.
-            Thread.getAllStackTraces().forEach { (thread, stack) ->
-                val interesting = stack.any {
-                    it.className.contains("okhttp") || it.className.contains("kotlinx") ||
-                        it.className.contains("raulshma")
-                }
-                if (interesting && stack.size > 3) {
-                    println("DIAG-T=${thread.name}: " + stack.take(12).joinToString(" | ") { it.className })
-                }
-            }
-            throw e
+        // Same budget rationale as the transport test's wait above.
+        withTimeout(15.seconds) {
+            while (probeBases.none { it.startsWith("https://") }) delay(10)
         }
         assertEquals(ConnectionState.OFFLINE, session.connectionState.first { it == ConnectionState.OFFLINE })
         // Every restarted dial rode the override — not one fell back to the

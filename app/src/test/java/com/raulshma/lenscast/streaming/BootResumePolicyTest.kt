@@ -76,4 +76,43 @@ class BootResumePolicyTest {
             BootResumePolicy.tileStart(StreamStateJournal.State(web = true, rtsp = true, userStopped = true)),
         )
     }
+
+    // ── the post-death relaunch re-arm (decideRearm) ──
+
+    @Test
+    fun `the relaunch re-arm maps the persisted enables onto the verdicts`() {
+        // The journal is NOT the input here — the quit ladder wipes the
+        // recorded liveness when the restart tears the server down, so the
+        // dashboard's restart promise keys on the persisted enable flags.
+        assertEquals(
+            BootResumePolicy.Verdict.NONE,
+            BootResumePolicy.decideRearm(StreamStateJournal.State(), webEnabled = false, rtspEnabled = false),
+        )
+        assertEquals(
+            BootResumePolicy.Verdict.WEB,
+            BootResumePolicy.decideRearm(StreamStateJournal.State(), webEnabled = true, rtspEnabled = false),
+        )
+        assertEquals(
+            BootResumePolicy.Verdict.RTSP,
+            BootResumePolicy.decideRearm(StreamStateJournal.State(), webEnabled = false, rtspEnabled = true),
+        )
+        assertEquals(
+            BootResumePolicy.Verdict.BOTH,
+            BootResumePolicy.decideRearm(StreamStateJournal.State(), webEnabled = true, rtspEnabled = true),
+        )
+    }
+
+    @Test
+    fun `a user-stopped flag blocks the relaunch re-arm even with enables on`() {
+        // The swipe-kill + OEM-kill + sticky-restart shape: nothing may
+        // resurrect the stream the user explicitly killed.
+        assertEquals(
+            BootResumePolicy.Verdict.NONE,
+            BootResumePolicy.decideRearm(
+                StreamStateJournal.State(userStopped = true),
+                webEnabled = true,
+                rtspEnabled = true,
+            ),
+        )
+    }
 }

@@ -2,8 +2,10 @@ package com.raulshma.lenscast.companion.ui.tabs
 
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -11,12 +13,15 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.raulshma.lenscast.AppGraph
 import com.raulshma.lenscast.R
 import com.raulshma.lenscast.companion.session.DeviceSession
+import com.raulshma.lenscast.companion.ui.DeviceScreenTags
 import com.raulshma.lenscast.companion.ui.tabs.events.EventsActions
 import com.raulshma.lenscast.companion.ui.tabs.events.EventsContent
 import com.raulshma.lenscast.companion.ui.tabs.events.EventsEffect
@@ -41,7 +46,15 @@ import com.raulshma.lenscast.companion.ui.tabs.events.EventsViewModel
  */
 @Composable
 fun EventsTab(session: DeviceSession, modifier: Modifier = Modifier) {
-    val companion = (LocalContext.current.applicationContext as AppGraph).companion
+    // The same soft-cast shape MediaTab/SystemTab use: the graph is always
+    // present in production (MainApplication implements AppGraph), but a
+    // host without it (tests, a non-graph process) degrades to the title
+    // hook instead of a ClassCastException.
+    val companion = (LocalContext.current.applicationContext as? AppGraph)?.companion
+    if (companion == null) {
+        EventsTabUnavailable(modifier = modifier)
+        return
+    }
     val viewModel: EventsViewModel = viewModel(
         key = session.deviceId,
         factory = EventsViewModel.Factory(companion, session),
@@ -104,5 +117,18 @@ fun EventsTab(session: DeviceSession, modifier: Modifier = Modifier) {
     Box(modifier = modifier.fillMaxSize()) {
         EventsContent(state = state, actions = actions, modifier = Modifier.fillMaxSize())
         SnackbarHost(hostState = snackbarHostState, modifier = Modifier.align(Alignment.BottomCenter))
+    }
+}
+
+/** The degraded no-graph state: the title hook — the one contract every tab state keeps. */
+@Composable
+private fun EventsTabUnavailable(modifier: Modifier = Modifier) {
+    Box(modifier = modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        Text(
+            text = stringResource(R.string.companion_tab_events),
+            style = MaterialTheme.typography.headlineSmall,
+            fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.testTag(DeviceScreenTags.TAB_TITLE),
+        )
     }
 }

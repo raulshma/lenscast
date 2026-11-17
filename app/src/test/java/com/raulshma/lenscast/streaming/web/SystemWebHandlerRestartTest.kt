@@ -1,6 +1,5 @@
 package com.raulshma.lenscast.streaming.web
 
-import com.raulshma.lenscast.core.SoftRestartLadder
 import io.mockk.mockk
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
@@ -22,10 +21,13 @@ import org.junit.Test
  * extended additively, never rewritten.
  *
  * Wave 4 (blueprint P1 item 9) adds `?mode=soft`: the in-process soft-restart
- * ladder answers AFTER the re-arm with `mode:"soft"` on success and the
- * failed ladder step in the typed-refusal shape on failure. Plain and
- * `?mode=process` stay byte-identical with the deep restart's legacy wire
- * contract.
+ * ladder LAUNCHES off the request thread and the handler answers the
+ * acknowledgment `{"success":true,"mode":"soft"}` immediately — the ladder's
+ * stopServer step tears down the listener socket the request rode on, so a
+ * verdict awaited inline was never deliverable (the deep restart answers
+ * before its teardown the same way). Only the unwired launcher answers the
+ * typed refusal synchronously. Plain and `?mode=process` stay byte-identical
+ * with the deep restart's legacy wire contract.
  */
 class SystemWebHandlerRestartTest {
 
@@ -100,8 +102,8 @@ class SystemWebHandlerRestartTest {
     // ── wave 4: ?mode=soft, the in-process soft-restart ladder ──
 
     @Test
-    fun `soft mode answers mode soft after the ladder re-arms`() = runBlocking {
-        var ladderRuns = 0
+    fun `soft mode launches the ladder once and answers the acknowledgment`() = runBlocking {
+        var launches = 0
         var deepSeamCalls = 0
         val handler = SystemWebHandler(
             context = mockk(),
@@ -109,41 +111,41 @@ class SystemWebHandlerRestartTest {
             captureHistoryStore = mockk(),
             restartApplication = { deepSeamCalls++ },
             canScheduleExactAlarms = { false }, // the soft path needs no grant
-            softRestart = {
-                ladderRuns++
-                SoftRestartLadder.Result.Restarted
-            },
+            launchSoftRestart = { launches++; true },
         )
 
         val body = handler.restart(mode = SystemWebHandler.RESTART_MODE_SOFT)
 
-        assertEquals(1, ladderRuns)
+        // The response is the acknowledgment, not the verdict: the ladder's
+        // stopServer step closes the request's own socket, so the verdict is
+        // awaited off the request thread (the deep restart answers before its
+        // teardown the same way).
+        assertEquals(1, launches)
         // The soft path must not touch the deep seam, whatever the grant says.
         assertEquals(0, deepSeamCalls)
         assertEquals("""{"success":true,"mode":"soft"}""", body)
     }
 
     @Test
-    fun `soft mode reports the failed step in the typed refusal shape`() = runBlocking {
+    fun `a launcher that refuses to accept answers nothing-launching`() = runBlocking {
+        // The wired-but-refusing shape is indistinguishable from unwired on
+        // purpose: the only honest synchronous failure is "the ladder will
+        // not run".
+        var deepSeamCalls = 0
         val handler = SystemWebHandler(
             context = mockk(),
             powerManager = mockk(),
             captureHistoryStore = mockk(),
-            softRestart = {
-                SoftRestartLadder.Result.StepFailed(
-                    SoftRestartLadder.Step.START_SERVER,
-                    "Failed to start server",
-                )
-            },
+            restartApplication = { deepSeamCalls++ },
+            launchSoftRestart = { false },
         )
 
         val body = handler.restart(mode = SystemWebHandler.RESTART_MODE_SOFT)
 
-        // Not a silent 200: the failed ladder step is machine-readable, the
-        // wave-3 refusal shape (success:false + reason + hint) carries it.
+        assertEquals(0, deepSeamCalls)
         assertEquals(
             """{"success":false,"mode":"soft","reason":"soft_restart_failed",""" +
-                """"step":"startServer","hint":"Soft restart failed at Failed to start server"}""",
+                """"step":"not_wired","hint":"Soft restart failed at soft restart seam not wired"}""",
             body,
         )
     }
@@ -165,30 +167,8 @@ class SystemWebHandlerRestartTest {
     }
 
     @Test
-    fun `an unknown soft restart result shape still answers the refusal contract`() = runBlocking {
-        // The production graph always wires the real ladder; this pins that
-        // the sealed result's other branch is the only failure shape on the
-        // wire (the honest not-wired default uses the same shape).
-        val handler = SystemWebHandler(
-            context = mockk(),
-            powerManager = mockk(),
-            captureHistoryStore = mockk(),
-            softRestart = {
-                SoftRestartLadder.Result.StepFailed(
-                    SoftRestartLadder.Step.REBIND_CAMERA,
-                    "camera rebind did not bind (denied or timed out)",
-                )
-            },
-        )
-
-        val body = handler.restart(mode = SystemWebHandler.RESTART_MODE_SOFT)
-        assertEquals(true, body.contains(""""step":"rebindCamera""""))
-        assertEquals(true, body.contains(""""reason":"soft_restart_failed""""))
-    }
-
-    @Test
     fun `the unwired soft-restart default answers the honest failure, never a success`() = runBlocking {
-        // Fix F: the default seam is the honest absence (the { null }
+        // Fix F: the default launcher is the honest absence (the { null }
         // telemetry precedent in the ladder's failure shape) — a mis-wired
         // graph must report a typed failure naming the not-wired step, not
         // a Restarted nothing performed.

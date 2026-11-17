@@ -53,9 +53,9 @@ internal const val CALL_TIMEOUT_S = 12L
  * One engine per device client: the shared connection pool and TLS session
  * cache are what keep the poll/SSE/media lanes on warm connections.
  */
-fun CompanionDevice.buildEngine(): OkHttpClient {
+fun CompanionDevice.buildEngine(connectTimeoutMs: Long = CONNECT_TIMEOUT_S * 1000L): OkHttpClient {
     val builder = OkHttpClient.Builder()
-        .connectTimeout(CONNECT_TIMEOUT_S, TimeUnit.SECONDS)
+        .connectTimeout(connectTimeoutMs, TimeUnit.MILLISECONDS)
         .readTimeout(IO_TIMEOUT_S, TimeUnit.SECONDS)
         .writeTimeout(IO_TIMEOUT_S, TimeUnit.SECONDS)
         .callTimeout(CALL_TIMEOUT_S, TimeUnit.SECONDS)

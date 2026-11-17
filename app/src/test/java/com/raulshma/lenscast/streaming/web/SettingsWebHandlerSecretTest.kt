@@ -51,13 +51,34 @@ class SettingsWebHandlerSecretTest {
 
     private val responseAdapter = AppJson.moshi.adapter(SettingsResponseDto::class.java)
 
-    /** DataStore's shared flows re-emit off the store's scope — wait until the value lands. */
+    /**
+     * DataStore's shared flows re-emit off the store's scope — wait until the
+     * value lands. Healthy propagation is milliseconds (one collector per
+     * pref on this instance's share-in scope); the budget is only slack for
+     * suite-load scheduling, not a fix for a saturated JVM — the 90 s
+     * edition of this budget existed to absorb the per-method
+     * MainApplication leaks (see test-resources/robolectric.properties) and
+     * still burned its full tail on the one write a leaked applier
+     * clobbered. 20 s: generous for a real hiccup, quick to fail on a
+     * genuine regression.
+     */
     private fun awaitUntil(message: String = "condition never became true", condition: () -> Boolean) {
-        val deadline = System.currentTimeMillis() + 30_000
+        val deadline = System.currentTimeMillis() + 20_000
         while (!condition()) {
             check(System.currentTimeMillis() < deadline) { message }
             Thread.sleep(10)
         }
+    }
+
+    /**
+     * Plants only the stored api token hash — the one precondition the
+     * empty-token gate pins read. The full-[plantAllSecrets] sweep costs
+     * seven serialized DataStore writes plus their propagation waits, which
+     * is needless exposure for a pin that never reads the other six secrets.
+     */
+    private suspend fun plantApiTokenHash() {
+        store.saveApiTokenHash("stored-token-hash")
+        awaitUntil("apiTokenHash never propagated") { store.apiTokenHash.value == "stored-token-hash" }
     }
 
     /** Plants every stored credential; returns once the store flows carry them. */
@@ -255,6 +276,13 @@ class SettingsWebHandlerSecretTest {
 
     @Test
     fun `enabling with no token and no stored hash fails closed`() = runBlocking {
+        // The gate's precondition must be observable before the PUT — the
+        // @Before reset rides the same DataStore share-in as every write, and
+        // a blind sleep can assert against a not-yet-reset store.
+        awaitUntil("the gate reset never propagated") {
+            !store.apiTokenEnabled.value && store.apiTokenHash.value == ""
+        }
+
         handler.put("""{"streaming":{"apiTokenEnabled":true,"apiToken":""}}""")
 
         // Give the PUT's writes a chance to land (nothing of the gate's is
@@ -266,7 +294,7 @@ class SettingsWebHandlerSecretTest {
 
     @Test
     fun `enabling with an empty token keeps the armed state on a stored hash`() = runBlocking {
-        plantAllSecrets() // plants "stored-token-hash"
+        plantApiTokenHash()
 
         handler.put("""{"streaming":{"apiTokenEnabled":true,"apiToken":""}}""")
 
@@ -283,9 +311,8 @@ class SettingsWebHandlerSecretTest {
         awaitUntil("apiTokenHash never propagated") {
             store.apiTokenHash.value == StreamAuthCrypto.sha256Hex("rotated-token")
         }
-        // Give the enable-flag write its chance to land, then pin: the gate
-        // never arms a disabled flag.
-        Thread.sleep(200)
-        assertFalse(store.apiTokenEnabled.value)
+        // Await, don't sleep-and-hope: the gate never arms a disabled flag,
+        // and the disarm write rides the same share-in as the hash rotation.
+        awaitUntil("the disarm never propagated") { !store.apiTokenEnabled.value }
     }
 }

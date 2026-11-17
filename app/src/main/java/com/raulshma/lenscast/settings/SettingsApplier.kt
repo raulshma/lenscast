@@ -6,6 +6,7 @@ import com.raulshma.lenscast.camera.model.PhotoCapturePlan
 import com.raulshma.lenscast.core.StreamWatchdog
 import com.raulshma.lenscast.core.mqtt.MqttAlertPublisher
 import com.raulshma.lenscast.core.mqtt.MqttTopics
+import com.raulshma.lenscast.camera.model.CameraSettings
 import com.raulshma.lenscast.data.SettingsDataStore
 import com.raulshma.lenscast.streaming.StreamingManager
 import com.raulshma.lenscast.streaming.onvif.OnvifServer
@@ -17,11 +18,16 @@ import com.raulshma.lenscast.streaming.srt.SrtStatus
 import com.raulshma.lenscast.streaming.whip.WhipStatus
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import java.util.concurrent.atomic.AtomicLong
 
 /**
  * Single owner of "persisted settings -> runtime" application.
@@ -49,11 +55,34 @@ class SettingsApplier(
     private val serverApplyDebounceMs: Long = SERVER_APPLY_DEBOUNCE_MS,
 ) {
 
+    /** Serializes the camera-settings apply against [applyCameraSettingsNow]. */
+    private val cameraApplyMutex = Mutex()
+
+    // Flush seam. The collector records the snapshot its apply COMPLETED
+    // under (inside the mutex, so the record always implies a finished
+    // apply), and [flushCameraApply] joins on VALUE equality with the
+    // store's current snapshot — "the latest value on the store reached the
+    // camera". Deliberately not a Job: since kotlinx-coroutines 1.11 a
+    // collect block runs inline on the collector coroutine — no per-emission
+    // child exists, so a coroutineContext[Job] captured inside the block IS
+    // the collector, and joining it waits forever. [cameraApplyDelivered]
+    // only guards the never-started case: with no collector subscribed,
+    // nothing can be in flight.
+    private val cameraApplyDelivered = AtomicLong(0)
+    private val lastAppliedCameraSettings = MutableStateFlow<CameraSettings?>(null)
+
     fun start(scope: CoroutineScope) {
-        // Camera settings
+        // Camera settings. Plain collect (not collectLatest): applies run
+        // serialized under the mutex in delivery order — idempotent by
+        // contract — while StateFlow conflation already collapses a rapid
+        // drag into the latest value.
         scope.launch {
-            settingsDataStore.settings.collectLatest { saved ->
-                cameraService.applySettings(saved)
+            settingsDataStore.settings.collect { saved ->
+                cameraApplyDelivered.incrementAndGet()
+                cameraApplyMutex.withLock {
+                    cameraService.applySettings(saved)
+                    lastAppliedCameraSettings.value = saved
+                }
             }
         }
 
@@ -499,6 +528,43 @@ class SettingsApplier(
         }
 
         Log.d(TAG, "Settings applier started")
+    }
+
+    /**
+     * Waits until the camera snapshot the store holds RIGHT NOW has been
+     * fully applied to the [CameraService] — the happens-after edge for a
+     * caller that must drive the live camera itself deterministically after
+     * a persist (the Automation Test's restore): without it, the arm-side
+     * emission's apply could still be in the collector when the caller's
+     * apply lands, and either could win. The join is on value equality, so
+     * a value persisted just before the flush (not yet delivered to the
+     * collector) is still waited for, and an apply of a newer emission that
+     * lands while waiting satisfies it too. Returns immediately when this
+     * applier was never started (nothing can be in flight). If the
+     * collector is torn down mid-apply (scope cancellation, service
+     * shutdown) the record never converges; the caller's cancellation is
+     * the way out, same as joining the collector would have been.
+     */
+    suspend fun flushCameraApply() {
+        if (cameraApplyDelivered.get() == 0L) return
+        lastAppliedCameraSettings.first { it == settingsDataStore.settings.value }
+    }
+
+    /**
+     * Applies one camera-settings value to the [CameraService] directly,
+     * serialized with the collector through [cameraApplyMutex] so a direct
+     * apply and a store-driven apply can never interleave mid-applies. This
+     * is the documented idempotent-overlap seam (the same contract as the
+     * camera screens' apply-then-persist): callers persist first, then drive
+     * the live session themselves, and the collector's eventual re-apply of
+     * the persisted value is a no-op restatement. The Automation Test's
+     * restore uses it so the live camera rewinds in the restore call, not
+     * whenever the store's next async emission reaches the collector.
+     */
+    suspend fun applyCameraSettingsNow(settings: CameraSettings) {
+        cameraApplyMutex.withLock {
+            cameraService.applySettings(settings)
+        }
     }
 
     private data class AudioSettings(

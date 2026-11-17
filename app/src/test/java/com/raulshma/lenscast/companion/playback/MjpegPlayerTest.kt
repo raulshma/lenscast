@@ -259,8 +259,18 @@ class MjpegPlayerTest {
     @Test
     fun `multipart frames publish live through the real decoder`() = runBlocking {
         val gated = GatedDecoder()
+        // The pump is an independent coroutine: entry a's EOF sends it
+        // straight into open #2, and on the conflated source frame b can
+        // overwrite frame a before the collector's first dispatch even runs
+        // (the load flake: this test's first receive then answers 1). Gate
+        // entry b's open on the first decode request — the sibling pin's
+        // armBeforeFailing barrier, applied to a success.
+        val openB = CompletableDeferred<Unit>()
         val h = Harness(
-            entries = listOf(Entry(multipartBody(realJpeg(8, 6, 0x111111))), Entry(multipartBody(realJpeg(8, 6, 0x222222)))),
+            entries = listOf(
+                Entry(multipartBody(realJpeg(8, 6, 0x111111))),
+                Entry(multipartBody(realJpeg(8, 6, 0x222222)), armBeforeFailing = openB),
+            ),
             decoder = gated,
             unconfined = false, // real threads: the decode gates order every beat
         )
@@ -271,7 +281,9 @@ class MjpegPlayerTest {
         assertEquals(MjpegState.Live, h.player.state.value)
         gated.releases.trySend(Bitmap.createBitmap(8, 6, Bitmap.Config.RGB_565))
 
-        // Frame b follows once the first decode released the collector.
+        // Frame b follows once the first decode released the collector — and
+        // the gate: frame a has been observed, so the pump may fetch it.
+        openB.complete(Unit)
         withTimeout(10_000) { assertEquals(1L, gated.requested.receive()) }
         gated.releases.trySend(Bitmap.createBitmap(8, 6, Bitmap.Config.RGB_565))
         val newest = withTimeout(10_000) { h.player.frame.first { it != null && it.sequence == 1L } }

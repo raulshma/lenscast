@@ -75,7 +75,14 @@ class TalkbackClientTest {
         // queue-shutdown latch after a fully completed WebSocket close
         // handshake (the assertions above have already proven the session
         // ended); a lingering mock socket is a mock artifact, not a signal.
-        runCatching { server.shutdown() }
+        // The latch can hold shutdown() for ~7 s per test (measured), so the
+        // wait runs on a daemon thread with a short patience: a clean close
+        // lands well within it, a stuck latch is abandoned to the daemon —
+        // never parked on the test thread, never blocking JVM exit.
+        val shutdown = Thread { runCatching { server.shutdown() } }
+        shutdown.isDaemon = true
+        shutdown.start()
+        shutdown.join(SHUTDOWN_PATIENCE_MS)
     }
 
     private fun connect(listener: ServerSocketListener): TalkbackSession {
@@ -206,5 +213,10 @@ class TalkbackClientTest {
         withTimeout(10_000) { session.state.first { it == TalkbackState.FAILED } }
         assertNotNull(session.failureCause.value)
         assertEquals(TalkbackState.FAILED, session.state.value)
+    }
+
+    private companion object {
+        /** The shutdown latch's bounded patience (a healthy close lands in single-digit ms). */
+        const val SHUTDOWN_PATIENCE_MS = 250L
     }
 }

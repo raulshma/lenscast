@@ -30,6 +30,18 @@ import kotlinx.coroutines.sync.withLock
  * Stateless like the executor otherwise: the snapshot lives only while a
  * test is armed (process-lifetime — a restart with a test armed restores
  * nothing, which the dashboard re-learns as "nothing armed").
+ *
+ * The restore drives the live camera itself. Persisting the snapshot values
+ * alone leaves the live session at the fired state until the Settings
+ * Applier's async emission happens to reach it — and if that emission's
+ * apply was still mid-flight from the ARM side, the fired state could land
+ * after the restore's and stand indefinitely (the POCO F1 on-device failure:
+ * store rewound, camera still manual with the torch burning). So
+ * [restoreLocked] first joins the applier's in-flight camera apply, then
+ * drives the restored value straight onto the session through the applier's
+ * serialized seam — the documented idempotent-overlap contract, not a second
+ * application path (the collector's eventual re-apply of the same persisted
+ * value is a no-op restatement).
  */
 class AutomationTestController(private val app: MainApplication) {
 
@@ -81,23 +93,58 @@ class AutomationTestController(private val app: MainApplication) {
         if (actions.isNotEmpty()) {
             Log.i(TAG, "Automation test: restoring ${actions.size} action(s)")
             AutomationActionExecutor(app).runActions(actions)
+            applyRestoredCameraState(actions)
         }
     }
 
-    private fun captureSnapshot() = AutomationStateSnapshot(
-        iso = app.settingsDataStore.settings.value.iso,
-        exposureTimeMs = app.settingsDataStore.settings.value.exposureTime?.let { it / 1_000_000.0 },
-        exposureCompensation = app.settingsDataStore.settings.value.exposureCompensation,
-        zoomRatio = app.settingsDataStore.settings.value.zoomRatio,
-        frameRate = app.settingsDataStore.settings.value.frameRate,
-        lensIndex = app.cameraService.selectedLens.value.index,
-        torchEnabled = app.settingsDataStore.settings.value.torchEnabled,
-        torchStrength = app.settingsDataStore.settings.value.torchStrength,
-        motionEnabled = app.settingsDataStore.motionDetectionEnabled.value,
-        soundEnabled = app.settingsDataStore.soundDetectionEnabled.value,
-        streamRunning = app.streamingManager.isServerRunning.value,
-        recordingIdle = app.recordingController.state.value is RecordingState.Idle,
-    )
+    /**
+     * The deterministic live half of the rewind, run after the restore's
+     * persisted writes: join whatever camera apply the arm-side emission
+     * still has in flight on the applier (so no pre-restore value can land
+     * after ours), then apply the exact post-restore settings — snapshot
+     * values on the touched axes (auto where the snapshot had auto, torch
+     * off where it was off) — straight onto the live session through the
+     * applier's serialized seam. When the camera session is unbound the
+     * apply parks in `activeSettings` and the next bind's post-bind rungs
+     * pick it up, exactly like every other settings apply.
+     */
+    private suspend fun applyRestoredCameraState(actions: List<AutomationActionSpec>) {
+        val applier = app.settingsApplier
+        applier.flushCameraApply()
+        applier.applyCameraSettingsNow(
+            AutomationRestorePolicy.restoredCameraSettings(
+                actions,
+                app.settingsDataStore.settings.value,
+            ),
+        )
+    }
+
+    /**
+     * Reads the world from DISK, not the shared flows' `.value`: the implicit
+     * restore in [arm] may have written the store milliseconds ago, and the
+     * DataStore → StateFlow share-in hop has no completion edge — a `.value`
+     * read here can still answer the PRE-restore values, which would become
+     * the "pre-test" snapshot and make the next restore faithfully restore
+     * exactly what it was meant to rewind (the store-left-unreset cycle).
+     * A fresh DataStore read is the read-your-write seam.
+     */
+    private suspend fun captureSnapshot(): AutomationStateSnapshot {
+        val saved = app.settingsDataStore.settingsFromDisk()
+        return AutomationStateSnapshot(
+            iso = saved.iso,
+            exposureTimeMs = saved.exposureTime?.let { it / 1_000_000.0 },
+            exposureCompensation = saved.exposureCompensation,
+            zoomRatio = saved.zoomRatio,
+            frameRate = saved.frameRate,
+            lensIndex = app.cameraService.selectedLens.value.index,
+            torchEnabled = saved.torchEnabled,
+            torchStrength = saved.torchStrength,
+            motionEnabled = app.settingsDataStore.motionDetectionEnabledFromDisk(),
+            soundEnabled = app.settingsDataStore.soundDetectionEnabledFromDisk(),
+            streamRunning = app.streamingManager.isServerRunning.value,
+            recordingIdle = app.recordingController.state.value is RecordingState.Idle,
+        )
+    }
 
     private companion object {
         const val TAG = "AutomationTest"

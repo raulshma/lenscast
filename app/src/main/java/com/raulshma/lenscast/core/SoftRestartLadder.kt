@@ -40,15 +40,14 @@ import com.raulshma.lenscast.camera.model.StreamStartOutcome
  * **The response-drop race** (the TLS-flip lesson, SettingsApplier's stop →
  * recreate → start transport cycle): the HTTP request whose handler runs this
  * ladder rode a connection accepted by the OLD listener socket, and
- * `stopServer` tears that socket down. The handler answers only AFTER
- * [startServer] re-arms — so the response is always written by the surviving
- * stack, never queued behind a teardown — but the writer transport can only
- * deliver it if the request's own connection survived the stop; a closed
- * connection drops the response no matter what ordering is chosen while the
- * listener socket is recreated. That is the documented, honest behavior: the
- * dashboard client tolerates the dropped response and polls `GET /api/system`
- * until the re-armed server answers (the same recover-by-polling pattern the
- * deep restart already uses).
+ * `stopServer` tears that socket down — so a verdict awaited inline in the
+ * handler was written onto a dead connection and never reached the client.
+ * The ladder itself stays a synchronous runner (the heartbeat tier wants the
+ * verdict); the delivery fix lives in the HTTP entry, which LAUNCHES the
+ * ladder off the request thread past the response flush and answers the
+ * acknowledgment first (MainApplication.launchSoftRestart — the same
+ * answer-before-teardown shape the deep restart uses). The dashboard's
+ * dropped-response poll fallback remains as the safety net.
  */
 class SoftRestartLadder(
     /** Stop a live recording; best-effort (the quit ladder's shape). */

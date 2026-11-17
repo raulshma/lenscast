@@ -159,6 +159,16 @@ interface AppGraph {
     fun restartApplication()
 
     /**
+     * Launch the in-process soft-restart ladder off the caller's thread,
+     * past the HTTP response flush — the same settle-then-run shape
+     * [restartApplication] uses, because the ladder's server stop tears down
+     * the listener socket the triggering request rode on. The dashboard's
+     * soft-restart route acknowledges before the ladder runs; the verdict
+     * lands in the log.
+     */
+    fun launchSoftRestart()
+
+    /**
      * The Automation Test's arm/restore owner (issue #18 item 3): fires a
      * rule's actions once through the automation executor and winds the
      * touched axes back on restore. Pulled by the automation screen and the

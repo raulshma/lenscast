@@ -228,6 +228,60 @@ class RtspOutputTest {
         assertEquals(1, opened.size) // the stream opened for the attempt was closed
     }
 
+    @Test
+    fun `a failed bind clears the active flag and reports a false start`() {
+        // The bind-failure wedge: active stayed true with no server, so the
+        // owner's flows advertised a live output nothing backed and the
+        // dashboard's start answered success. Active must follow reality.
+        val activeFlips = mutableListOf<Boolean>()
+        val failingOutput = RtspOutput(
+            audio = FakeAudio(),
+            audioConfig = { AudioStreamingManager.Config() },
+            authSpec = { null },
+            releaseAudio = {},
+            onStateChanged = { _, _ -> },
+            onActiveChanged = { activeFlips += it },
+            serverFactory = { FakeServer().also { it.startReturns = false } },
+        )
+        failingOutput.setEnabled(true)
+
+        val started = failingOutput.start()
+
+        assertFalse(started)
+        assertFalse(failingOutput.isActive())
+        assertFalse(failingOutput.isRunning())
+        // The mirror followed the same arc: armed at start, cleared by the failure.
+        assertEquals(listOf(true, false), activeFlips)
+    }
+
+    @Test
+    fun `a start after a failed bind re-attempts the bind`() {
+        // The port-freed recovery: the cleared active guard lets a later
+        // start retry from scratch instead of bouncing off the stale flag.
+        val servers = mutableListOf<FakeServer>()
+        val failingOutput = RtspOutput(
+            audio = FakeAudio(),
+            audioConfig = { AudioStreamingManager.Config() },
+            authSpec = { null },
+            releaseAudio = {},
+            onStateChanged = { _, _ -> },
+            serverFactory = {
+                FakeServer().also { server ->
+                    server.startReturns = servers.isNotEmpty() // first bind refused, later ones land
+                    servers += server
+                }
+            },
+        )
+        failingOutput.setEnabled(true)
+
+        assertFalse(failingOutput.start())
+
+        assertTrue(failingOutput.start())
+        assertTrue(failingOutput.isActive())
+        assertTrue(failingOutput.isRunning())
+        assertEquals(2, servers.size)
+    }
+
     // ── the restart ladder ──
 
     @Test

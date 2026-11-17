@@ -1,6 +1,7 @@
 package com.raulshma.lenscast.companion.session
 
 import com.raulshma.lenscast.companion.client.CompanionApiException
+import com.raulshma.lenscast.companion.client.CONNECT_TIMEOUT_S
 import com.raulshma.lenscast.companion.client.LenscastApiClient
 import com.raulshma.lenscast.companion.client.dto.DeviceStatus
 import com.raulshma.lenscast.companion.client.dto.RemoteDetectionEvent
@@ -83,6 +84,14 @@ internal data class SessionTimings(
     val detectionSseRetryMs: Long = 60_000L,
     val ladderBackoffMs: List<Long> = listOf(1_000L, 2_000L, 4_000L, 8_000L, 15_000L, 30_000L),
     val ladderGiveUpAtCapTier: Int = 3,
+    /**
+     * The probe dial's connect budget (the TLS handshake rides it). The
+     * read/call lanes keep the client factory's budgets — only the connect
+     * is injected here, so a test can fail a wrong-scheme dial (TLS against
+     * a plaintext peer) in milliseconds instead of the production seconds
+     * the ladder would otherwise pay per rung.
+     */
+    val dialConnectTimeoutMs: Long = CONNECT_TIMEOUT_S * 1000L,
 )
 
 /**
@@ -748,7 +757,7 @@ class DeviceSession(val deviceId: String) {
         val wanted = effectiveDevice() ?: return null
         client?.let { built -> if (built.device() == wanted) return built }
         val creds = credentials ?: return null
-        return LenscastApiClient(wanted) { creds.get(deviceId) }.also {
+        return LenscastApiClient(wanted, timings.dialConnectTimeoutMs) { creds.get(deviceId) }.also {
             client = it
             sseSource = null // the SSE engine rides the client's — rebuild with it
         }

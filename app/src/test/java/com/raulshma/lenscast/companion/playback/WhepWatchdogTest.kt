@@ -8,6 +8,7 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
@@ -36,6 +37,12 @@ class WhepWatchdogTest {
     private lateinit var server: MockWebServer
     private lateinit var client: LenscastApiClient
 
+    // Every Harness registers itself so tearDown can cancel its viewer
+    // scope: a test that reaches Live parks the hold loop forever by
+    // design, and an uncancelled scope leaks that loop — plus anything the
+    // engine still retries — into the rest of the suite's JVM.
+    private val harnesses = mutableListOf<Harness>()
+
     @Before
     fun setUp() {
         server = MockWebServer()
@@ -47,6 +54,8 @@ class WhepWatchdogTest {
 
     @After
     fun tearDown() {
+        harnesses.forEach { it.scope.cancel() }
+        harnesses.clear()
         server.shutdown()
     }
 
@@ -74,16 +83,21 @@ class WhepWatchdogTest {
         var clock = 0L
         val ticks = Channel<Unit>(Channel.UNLIMITED)
         val fake = FakePeer()
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
         val viewer = WhepViewer(
             api = client,
             peerFactory = { fake },
-            scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined),
+            scope = scope,
             clockMs = { clock },
             pauseMs = { ms ->
                 clock += ms
                 ticks.receive()
             },
         )
+
+        init {
+            harnesses += this
+        }
 
         fun tick(n: Int = 1) {
             repeat(n) { check(ticks.trySend(Unit).isSuccess) }
@@ -238,7 +252,10 @@ class WhepWatchdogTest {
         h.tick((WhepSignaling.FIRST_FRAME_TIMEOUT_MS / WhepViewer.WATCHDOG_TICK_MS - 1).toInt())
         h.fake.firstFrame = true
         h.tick(1)
-        assertEquals(WhepState.Live, h.viewer.state.value)
+        // awaitState, not a bare read: the Live write rides the engine's
+        // answer-processing coroutine, which under full-suite load can land
+        // after this line without a park.
+        assertEquals(WhepState.Live, h.awaitState(WhepState.Live))
         h.viewer.stop()
     }
 }

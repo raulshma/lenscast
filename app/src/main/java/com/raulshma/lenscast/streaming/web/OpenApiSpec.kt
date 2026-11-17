@@ -229,10 +229,12 @@ object OpenApiSpec {
                 listOf("system"),
                 "Restart the app: pre-check the exact-alarm grant (typed refusal without quitting when " +
                     "ungranted), schedule the relaunch, run the quit teardown, answer OK. `?mode=soft` " +
-                    "runs the in-process soft-restart ladder instead (server stop → camera rebind → " +
-                    "re-arm, no process death — the camera-preserving tier); absent or `process` keeps " +
-                    "the deep restart. The soft answer is built after the re-arm and carries " +
-                    "`mode:\"soft\"` (or the failed step in the typed-refusal shape)",
+                    "launches the in-process soft-restart ladder instead (server stop → camera rebind → " +
+                    "re-arm of the persisted-enabled outputs, no process death — the camera-preserving " +
+                    "tier); absent or `process` keeps the deep restart. The soft answer acknowledges " +
+                    "the request (`mode:\"soft\"`) before the ladder runs — its stop step tears down " +
+                    "the listener socket the request rode on, so the ladder is awaited off the " +
+                    "request thread; an unwired ladder answers the typed-refusal shape",
                 mapOf("200" to ok("SystemRestartResponse")),
                 parameters = listOf(
                     queryParam(

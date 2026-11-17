@@ -71,10 +71,13 @@ internal fun buildWebApiStack(
         restartApplication = { app.restartApplication() },
         torchStrengthMaxLevel = { app.cameraService.torchStrengthMaxLevel.value },
         // Wave 4 (blueprint P1 items 9/10 + the deferred item-7 telemetry):
-        // the soft ladder is the graph's ONE instance (the heartbeat's
-        // SOFT_RESTART tier runs the same object), the reset lever is the
-        // camera service's bounded budget, and the telemetry reads live.
-        softRestart = { app.softRestart.run() },
+        // the soft ladder LAUNCHER is the graph's ONE instance (the
+        // heartbeat's SOFT_RESTART tier runs the same object — the handler
+        // only launches it, past the response flush, because the ladder's
+        // server stop tears down the request's own socket), the reset lever
+        // is the camera service's bounded budget, and the telemetry reads
+        // live.
+        launchSoftRestart = { app.launchSoftRestart(); true },
         resetCameraLever = { app.cameraService.resetCamera() },
         crashRelaunchTelemetry = {
             val state = app.crashMarkerJournal.load()

@@ -1,5 +1,7 @@
 package com.raulshma.lenscast.automation.schedule
 
+import com.raulshma.lenscast.camera.model.CameraSettings
+
 /**
  * The pre-test state snapshot the Automation Test's restore answers from —
  * one plain value the [AutomationTestController] captures from the live
@@ -106,5 +108,24 @@ object AutomationRestorePolicy {
                 "capture_photo" -> {} // Not restorable — the capture already happened.
             }
         }
+    }
+
+    /**
+     * The post-restore [CameraSettings] the LIVE camera session must show:
+     * [restoreActions] folded over the current persisted value through the
+     * same [AutomationSchedulePolicy.mergeCameraSettings] merge the executor
+     * persists with, so the value applied live is exactly the value the
+     * restore saved (touched axes = the snapshot's, everything else
+     * untouched). This is the payload of the Automation Test Controller's
+     * direct live apply — the pure half of the "restore drives the live
+     * camera itself" contract; the auto sentinel "0" folds to null here the
+     * same way it does on the persisted path, so a snapshot with auto
+     * ISO/exposure lands as driver-auto, not as a stale manual carry-over.
+     */
+    fun restoredCameraSettings(
+        actions: List<AutomationActionSpec>,
+        base: CameraSettings,
+    ): CameraSettings = actions.fold(base) { acc, action ->
+        AutomationSchedulePolicy.mergeCameraSettings(acc, action)
     }
 }

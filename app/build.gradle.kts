@@ -35,6 +35,16 @@ fun Project.npmScriptTask(
     failureHeading: String,
     failureCommand: String,
     failureFooter: String,
+    /**
+     * The stamp written after a successful run; with no declared output the
+     * task can never be UP-TO-DATE and re-runs the (multi-second) npm
+     * script on every Gradle invocation that reaches preBuild. The stamp
+     * lives in the build dir, so `clean` (or wiping node_modules via
+     * [installWebDeps]'s inputs) reruns honestly, and a failed run never
+     * leaves one behind (deleted up front, written only past the exit-code
+     * gate).
+     */
+    stampFile: File? = null,
     configureCache: Exec.() -> Unit,
 ): TaskProvider<Exec> = tasks.register(name, Exec::class) {
     this.description = description
@@ -47,6 +57,11 @@ fun Project.npmScriptTask(
         commandLine("cmd", "/c", "npm", "run", script)
     } else {
         commandLine("npm", "run", script)
+    }
+
+    if (stampFile != null) {
+        outputs.file(stampFile)
+        doFirst { stampFile.delete() }
     }
 
     configureCache()
@@ -65,6 +80,7 @@ fun Project.npmScriptTask(
                 """.trimMargin()
             )
         }
+        stampFile?.apply { parentFile.mkdirs(); writeText("ok") }
     }
 }
 
@@ -76,6 +92,7 @@ val checkWebUiTypes = npmScriptTask(
     failureHeading = "Web UI typecheck failed",
     failureCommand = "npm run typecheck",
     failureFooter = "and fix the reported type errors before rebuilding.",
+    stampFile = layout.buildDirectory.file("webui-stamps/typecheck").get().asFile,
 ) {
     val webSrc = file("${rootProject.projectDir}/web/src")
     val webContract = file("${rootProject.projectDir}/web/contract")
@@ -94,6 +111,7 @@ val testWebUi = npmScriptTask(
     failureHeading = "Web UI tests failed",
     failureCommand = "npm run test",
     failureFooter = "and fix the reported failures before rebuilding.",
+    stampFile = layout.buildDirectory.file("webui-stamps/test").get().asFile,
 ) {
     val webSrc = file("${rootProject.projectDir}/web/src")
     val webContract = file("${rootProject.projectDir}/web/contract")
@@ -346,6 +364,7 @@ dependencies {
     testImplementation(libs.junit)
     testImplementation(libs.mockk)
     testImplementation(libs.turbine)
+    testImplementation(libs.coroutines.test)
     testImplementation(libs.robolectric)
     testImplementation(libs.compose.ui.test)
 }

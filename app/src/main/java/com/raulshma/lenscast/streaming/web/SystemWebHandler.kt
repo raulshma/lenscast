@@ -42,9 +42,12 @@ import com.raulshma.lenscast.streaming.model.SystemRestartResponse
  * below still flushes to the dashboard before the teardown begins — and the
  * typed pre-check (item 8) refuses BEFORE the seam when the relaunch grant
  * is missing, so a dashboard tap can never darken a phone it cannot bring
- * back; `?mode=soft` (wave 4, item 9) runs the in-process soft-restart
- * ladder instead, and POST /api/system/reset-camera (wave 4, item 10) is
- * the bounded camera-only recovery that never stops the server.
+ * back; `?mode=soft` (wave 4, item 9) launches the in-process soft-restart
+ * ladder off the request thread (the ladder's server stop tears down the
+ * listener socket the request rode on, so the acknowledgment must land
+ * first) and answers the accepted shape, and POST /api/system/reset-camera
+ * (wave 4, item 10) is the bounded camera-only recovery that never stops
+ * the server.
  */
 class SystemWebHandler(
     private val context: Context,
@@ -74,21 +77,23 @@ class SystemWebHandler(
         }
     },
     /**
-     * The in-process soft-restart ladder (wave 4, blueprint P1 item 9) — the
-     * SAME [SoftRestartLadder] instance the heartbeat's SOFT_RESTART tier
-     * runs: one implementation with two entry points. Suspend because the
-     * ladder awaits its stops and the server re-arm. The default is the
-     * HONEST ABSENCE (the `{ null }` telemetry precedent, in the ladder's
-     * failure shape): a graph that forgot to wire the seam must answer a
-     * typed failure — never the success it did not earn, which a mis-wired
+     * The in-process soft-restart ladder's LAUNCHER (wave 4, blueprint P1
+     * item 9) — wired to launch the SAME [SoftRestartLadder] instance the
+     * heartbeat's SOFT_RESTART tier runs, off the request thread, past the
+     * response flush. The launch-not-run shape is the response-delivery fix:
+     * the request rode a connection accepted by the web listener, and the
+     * ladder's `stopServer` step tears that listener down — a ladder awaited
+     * inline closed the socket before NanoHTTPD could write the answer, and
+     * the dashboard read an empty reply on every soft restart (the deep
+     * restart already answers before its teardown). The handler therefore
+     * acknowledges the request and the launcher runs the ladder afterwards;
+     * the dashboard's poll loop re-syncs on the re-armed server either way.
+     * False = not wired. The default is the HONEST ABSENCE (the `{ null }`
+     * telemetry precedent): a graph that forgot to wire the seam must answer
+     * a typed failure — never the success it did not earn, which a mis-wired
      * production graph would have reported forever.
      */
-    private val softRestart: suspend () -> SoftRestartLadder.Result = {
-        SoftRestartLadder.Result.StepFailed(
-            step = SOFT_RESTART_STEP_NOT_WIRED,
-            detail = "soft restart seam not wired",
-        )
-    },
+    private val launchSoftRestart: () -> Boolean = { false },
     /**
      * The bounded manual camera-rebind lever (wave 4, blueprint P1 item 10)
      * — wired to `CameraService.resetCamera` in production: the same
@@ -153,21 +158,39 @@ class SystemWebHandler(
      * answers instead: no quit, no alarm, the camera keeps running, and the
      * dashboard gets a machine-readable reason to localize.
      *
-     * `?mode=soft` (wave 4, blueprint P1 item 9) runs the in-process
+     * `?mode=soft` (wave 4, blueprint P1 item 9) launches the in-process
      * soft-restart ladder instead — the quit ladder minus process death, the
      * only automated tier that preserves the foreground-started FGS's
-     * while-in-use camera standing (resolved tension 2). The answer is built
-     * AFTER the ladder completes, so the dashboard reads the real outcome
-     * (success, or the failed step in the typed-refusal shape). The plain
-     * route, `?mode=process`, and any unknown mode keep the deep-restart
-     * semantics byte-for-byte (the legacy success shape carries no `mode`),
-     * so existing clients and the automation token path are unaffected. The
-     * soft path needs no exact-alarm pre-check — nothing is scheduled,
-     * nothing dies.
+     * while-in-use camera standing (resolved tension 2). The response is the
+     * ACKNOWLEDGMENT (`{"success":true,"mode":"soft"}` — accepted, ladder
+     * launching), not the ladder's verdict: the ladder's `stopServer` step
+     * closes the listener socket this request rode on, so a verdict awaited
+     * inline was never deliverable (the deep restart matches the same
+     * answer-before-teardown shape). The ladder runs off the request thread
+     * past the flush and its verdict lands in the log; the dashboard's poll
+     * loop re-syncs on the re-armed server either way. An unwired launcher
+     * still answers the typed refusal — the one soft failure shape that is
+     * known synchronously. The plain route, `?mode=process`, and any unknown
+     * mode keep the deep-restart semantics byte-for-byte (the legacy success
+     * shape carries no `mode`), so existing clients and the automation token
+     * path are unaffected. The soft path needs no exact-alarm pre-check —
+     * nothing is scheduled, nothing dies.
      */
     suspend fun restart(mode: String? = null): String {
         if (mode == RESTART_MODE_SOFT) {
-            return restartAdapter.toJson(softRestartResponse())
+            return restartAdapter.toJson(
+                if (launchSoftRestart()) {
+                    SystemRestartResponse(success = true, mode = RESTART_MODE_SOFT)
+                } else {
+                    SystemRestartResponse(
+                        success = false,
+                        mode = RESTART_MODE_SOFT,
+                        reason = RESTART_REASON_SOFT_RESTART_FAILED,
+                        step = SOFT_RESTART_STEP_NOT_WIRED,
+                        hint = SOFT_RESTART_HINT_PREFIX + "soft restart seam not wired",
+                    )
+                }
+            )
         }
         // The seam is named restartApplication because a member named restart()
         // shadows a same-named `restart` property: the old body's restart()
@@ -187,23 +210,6 @@ class SystemWebHandler(
         }
         restartApplication()
         return restartAdapter.toJson(SystemRestartResponse())
-    }
-
-    /**
-     * The soft ladder's typed answer: `{"success":true,"mode":"soft"}` when
-     * the server re-armed, otherwise the wave-3 refusal shape with the failed
-     * ladder step in [SystemRestartResponse.step] — never a silent 200 on a
-     * ladder that did not land.
-     */
-    private suspend fun softRestartResponse(): SystemRestartResponse = when (val result = softRestart()) {
-        is SoftRestartLadder.Result.Restarted -> SystemRestartResponse(success = true, mode = RESTART_MODE_SOFT)
-        is SoftRestartLadder.Result.StepFailed -> SystemRestartResponse(
-            success = false,
-            mode = RESTART_MODE_SOFT,
-            reason = RESTART_REASON_SOFT_RESTART_FAILED,
-            step = result.step,
-            hint = SOFT_RESTART_HINT_PREFIX + result.detail,
-        )
     }
 
     /**
@@ -401,10 +407,10 @@ class SystemWebHandler(
         const val RESTART_REASON_SOFT_RESTART_FAILED = "soft_restart_failed"
 
         /**
-         * The step name an UNWIRED [softRestart] seam reports (the honest
-         * default's shape): not a ladder step — a marker that the graph
-         * never wired the ladder, so a mis-wired production build reads as
-         * a typed failure instead of a success nothing performed.
+         * The step name an UNWIRED [launchSoftRestart] seam reports (the
+         * honest default's shape): not a ladder step — a marker that the
+         * graph never wired the ladder, so a mis-wired production build
+         * reads as a typed failure instead of a success nothing performed.
          */
         const val SOFT_RESTART_STEP_NOT_WIRED = "not_wired"
 

@@ -90,13 +90,20 @@ import kotlin.coroutines.resumeWithException
  */
 class LenscastApiClient(
     private val device: CompanionDevice,
+    /**
+     * The dial budget for this client's engine (the TLS handshake rides the
+     * connect timeout). Production default; the session manager passes its
+     * [com.raulshma.lenscast.companion.session.SessionTimings] value so
+     * tests can shrink a failed dial from seconds to milliseconds.
+     */
+    connectTimeoutMs: Long = CONNECT_TIMEOUT_S * 1000L,
     private val credentials: () -> StoredCredentials?,
 ) {
 
     private val moshi = AppJson.moshi
 
     /** The per-device engine; the shared pool the SSE and media lanes reuse. */
-    private val http: OkHttpClient = device.buildEngine()
+    private val http: OkHttpClient = device.buildEngine(connectTimeoutMs)
 
     /**
      * The session cookie captured from the latest [login] (bare

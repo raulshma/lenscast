@@ -285,7 +285,7 @@ class WhepSignalingTest {
 
         h.viewer.stop()
         assertEquals(WhepState.Idle, h.viewer.state.value)
-        assertTrue("the peer closed", h.fake.closed)
+        h.awaitPeerClosed() // the teardown close rides the cancelled session's finally, a beat behind the Idle write
         // takeRequest drains in wire order: the offer POST is consumed first,
         // the teardown DELETE is the second request on the queue.
         assertNotNull("the offer POST fired", server.takeRequest(5, TimeUnit.SECONDS))

@@ -73,11 +73,17 @@ object ContinuousRecordingPolicy {
     fun shouldStopOnDisable(enabled: Boolean, recordingActive: Boolean, armedByController: Boolean): Boolean =
         !enabled && recordingActive && armedByController
 
-    /** Idle for at least [CHAIN_BREAK_GRACE_MS] means the repeat chain is dead. */
-    fun chainBreakConfirmed(idleForMs: Long): Boolean = idleForMs >= CHAIN_BREAK_GRACE_MS
+    /**
+     * Idle for at least [graceMs] (the production constant by default — the
+     * controller passes its injected window so tests can shrink it) means the
+     * repeat chain is dead.
+     */
+    fun chainBreakConfirmed(idleForMs: Long, graceMs: Long = CHAIN_BREAK_GRACE_MS): Boolean =
+        idleForMs >= graceMs
 
-    /** The suppressed-until stamp a stop at [stopMs] sets. */
-    fun suppressedUntilMs(stopMs: Long): Long = stopMs + USER_STOP_SUPPRESSION_MS
+    /** The suppressed-until stamp a stop at [stopMs] sets ([suppressionMs]: the production constant by default). */
+    fun suppressedUntilMs(stopMs: Long, suppressionMs: Long = USER_STOP_SUPPRESSION_MS): Long =
+        stopMs + suppressionMs
 
     /** Arming is allowed again once the suppression window has lapsed. */
     fun canArm(nowMs: Long, suppressedUntilMs: Long): Boolean = nowMs >= suppressedUntilMs

@@ -334,6 +334,62 @@ class StreamToggleTest {
         assertEquals(false, transports.rtspActive)
     }
 
+    // ── the soft-restart re-arm ladder (startServerWithOutputs) ──
+
+    @Test
+    fun `startServerWithOutputs with both gates off is exactly startServer`() = runBlocking {
+        val transports = FakeTransports(webEnabled = false, rtspEnabled = false)
+        val outcome = StreamToggle(transports).startServerWithOutputs()
+
+        // The server-only shape: no output start rides the re-arm.
+        assertEquals(StreamStartOutcome.Started, outcome)
+        assertEquals(listOf("ensureServer", "beginSession"), transports.calls)
+        assertEquals(false, transports.webActive)
+        assertEquals(false, transports.rtspActive)
+    }
+
+    @Test
+    fun `startServerWithOutputs re-arms both enabled outputs through the full ladder`() = runBlocking {
+        val transports = FakeTransports()
+        val outcome = StreamToggle(transports).startServerWithOutputs()
+
+        // startBoth's discipline: web (gate → start → begin), then rtsp; the
+        // server itself comes up inside the web start (the manager's
+        // startWebStreaming → ensureServerRunning), which the fake models as
+        // its own startWeb call.
+        assertEquals(
+            listOf("startWeb", "beginSession", "startRtsp", "beginSession"),
+            transports.calls,
+        )
+        assertEquals(StreamStartOutcome.Started, outcome)
+        assertEquals(true, transports.webActive)
+        assertEquals(true, transports.rtspActive)
+    }
+
+    @Test
+    fun `a gated web does not fail the rtsp-only re-arm`() = runBlocking {
+        val transports = FakeTransports(webEnabled = false)
+        val outcome = StreamToggle(transports).startServerWithOutputs()
+
+        // Disabled is a gate rejection, not a start failure — the re-arm lands.
+        assertEquals(StreamStartOutcome.Started, outcome)
+        assertEquals(true, transports.rtspActive)
+        assertEquals(false, transports.webActive)
+    }
+
+    @Test
+    fun `a failed rtsp start folds into the whole-server failure`() = runBlocking {
+        val transports = FakeTransports(startRtspResult = false)
+        val outcome = StreamToggle(transports).startServerWithOutputs()
+
+        // The soft ladder reports the re-arm step as `startServer` (kind null),
+        // whatever output refused.
+        assertEquals(StreamStartOutcome.StartFailed(kind = null), outcome)
+        // startBoth's per-output rollback: the web start did not survive alone.
+        assertEquals(false, transports.webActive)
+        assertEquals(false, transports.rtspActive)
+    }
+
     // ── start-failure verdict ──
 
     @Test

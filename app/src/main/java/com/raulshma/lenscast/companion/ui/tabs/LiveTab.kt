@@ -71,9 +71,14 @@ import com.raulshma.lenscast.companion.ui.tabs.live.LiveViewModel
  */
 @Composable
 fun LiveTab(session: DeviceSession, modifier: Modifier = Modifier) {
-    val app = LocalContext.current.applicationContext as AppGraph
-    val device = remember(session.deviceId) { app.companion.roster.find(session.deviceId) }
-    if (device == null) {
+    // The same soft-cast shape MediaTab/SystemTab use: the graph is always
+    // present in production (MainApplication implements AppGraph), but a
+    // host without it (tests, a non-graph process) degrades to the detached
+    // shell — the same rendering a missing roster device gets — instead of
+    // a ClassCastException.
+    val app = LocalContext.current.applicationContext as? AppGraph
+    val device = remember(session.deviceId) { app?.companion?.roster?.find(session.deviceId) }
+    if (app == null || device == null) {
         LiveTabDetached(session = session, modifier = modifier)
         return
     }

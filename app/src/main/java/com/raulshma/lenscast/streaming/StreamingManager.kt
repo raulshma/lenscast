@@ -610,9 +610,10 @@ class StreamingManager(
      * The RTSP output's active mirror — written by the output's
      * [RtspOutput.onActiveChanged] at each [RtspOutput.isActive] flip. Distinct
      * from [isRtspRunning] (which mirrors a serving `server != null`): the
-     * derived [isStreaming] must read `isActive`, the exact bit
-     * [isLiveStreaming] probes, so a failed bind stays "streaming" here
-     * exactly like the synchronous verdict does.
+     * derived [isStreaming] reads `isActive`, the exact bit [isLiveStreaming]
+     * probes. A bind failure clears the output's active bit in the same
+     * failed start, so both mirrors drop together — a dead RTSP output is
+     * never advertised as streaming.
      */
     private val _isRtspActive = MutableStateFlow(false)
 
@@ -1165,16 +1166,25 @@ class StreamingManager(
         Log.d(TAG, "Web streaming stopped")
     }
 
+    /**
+     * True only when the RTSP output is actually serving after the call — a
+     * refused bind (occupied port) is a false start the Stream Toggle turns
+     * into the typed start failure, never a success nothing backs.
+     */
     fun startRtspStreaming(): Boolean {
         if (!rtspOutput.isEnabled()) {
             Log.w(TAG, "Cannot start RTSP streaming: RTSP is disabled")
             return false
         }
         if (rtspOutput.isActive()) return true
-        rtspOutput.start()
+        val started = rtspOutput.start()
         encodedHub.refresh()
-        Log.d(TAG, "RTSP streaming started")
-        return true
+        if (started) {
+            Log.d(TAG, "RTSP streaming started")
+        } else {
+            Log.w(TAG, "RTSP streaming failed to start: the server did not bind port ${rtspOutput.port()}")
+        }
+        return started
     }
 
     fun stopRtspStreaming() {

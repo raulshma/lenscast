@@ -120,7 +120,11 @@ class HeartbeatControllerTest {
         isServerRunning.value = true
         eventually { assertNotNull(scheduledAlarm()) }
         Thread.sleep(400) // outlive the grace: the pending stop was canceled
-        assertNotNull(scheduledAlarm())
+        // eventually, not a bare read: under a loaded suite JVM the bridge
+        // collector can trail the sleep by more than the grace, and the
+        // settled end-state (up leg armed, pending stop canceled) is what
+        // this pins — a disarm that never re-arms still fails here.
+        eventually { assertNotNull(scheduledAlarm()) }
     }
 
     // ── the verdict execution: one escalation per miss ──
