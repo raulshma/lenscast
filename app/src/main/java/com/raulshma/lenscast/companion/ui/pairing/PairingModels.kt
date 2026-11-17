@@ -1,6 +1,7 @@
 package com.raulshma.lenscast.companion.ui.pairing
 
 import com.raulshma.lenscast.companion.client.normalizeFingerprint
+import com.raulshma.lenscast.companion.discovery.NsdDiscoveryFilter
 import com.raulshma.lenscast.companion.discovery.PairingPayload
 import com.raulshma.lenscast.companion.model.CompanionAuthKind
 import com.raulshma.lenscast.companion.model.CompanionDevice
@@ -71,9 +72,45 @@ data class PairingForm(
     val username: String = "",
     val password: String = "",
 ) {
-    /** True when the form carries everything [PairingAssembler.inputFromForm] needs. */
+    /**
+     * True when the form carries everything [PairingAssembler.inputFromForm]
+     * needs: a host with a port in range — or the host being a full pairing
+     * link, whose payload derives the address at the boundary (the paste
+     * path; the port field may stay blank).
+     */
     val isSubmittable: Boolean
-        get() = host.isNotBlank() && port.toIntOrNull() in 1..MAX_PORT
+        get() = host.isNotBlank() &&
+            (
+                port.trim().toIntOrNull() in 1..MAX_PORT ||
+                    NsdDiscoveryFilter.parsePairingPayload(host.trim()) != null
+                )
+
+    /**
+     * The manual pane's inline host error, mirroring what the boundary
+     * rejects: interior whitespace, `@`, or any colon that does not parse
+     * as a pairing payload ([NsdDiscoveryFilter.parsePairingPayload] — a
+     * decodable link is fine, so the paste path never flags red; a bare
+     * `host:port` or a dead scheme does, because the probe would dial a
+     * broken address). Trimmed first ([PairingAssembler.inputFromForm]
+     * trims too, so stray padding must not flag red while Save works).
+     * Silent while the field is empty: no mid-typing yelling.
+     */
+    val hostInvalid: Boolean
+        get() {
+            val trimmed = host.trim()
+            return trimmed.isNotEmpty() && (
+                trimmed.any { it.isWhitespace() } ||
+                    trimmed.contains("@") ||
+                    (trimmed.contains(':') && NsdDiscoveryFilter.parsePairingPayload(trimmed) == null)
+                )
+        }
+
+    /** The manual pane's inline port error — typed and outside 1..[MAX_PORT]. */
+    val portInvalid: Boolean
+        get() {
+            val trimmed = port.trim()
+            return trimmed.isNotEmpty() && trimmed.toIntOrNull() !in 1..MAX_PORT
+        }
 
     companion object {
         const val MAX_PORT = 65535
@@ -137,11 +174,33 @@ object PairingAssembler {
 
     /**
      * Folds the live form into a [PairingInput], or null when the form is
-     * not submittable (blank host / port outside 1..65535) — the same
-     * predicate [PairingForm.isSubmittable] shows in the UI, re-checked at
-     * the boundary so the sheet can never assemble a half-address.
+     * not submittable — the same predicate [PairingForm.isSubmittable]
+     * shows in the UI, re-checked at the boundary so the sheet can never
+     * assemble a half-address.
+     *
+     * The paste path lives here: when the host field carries a full pairing
+     * link (`http(s)://host:port(#fp=…)` — "the same string the
+     * manual-pairing field accepts", [NsdDiscoveryFilter]'s contract), its
+     * payload derives host/port/TLS/fingerprint and the link is
+     * authoritative for those four (the camera's Connect sheet is the
+     * trusted source, exactly like a QR decode). The form keeps name and
+     * credentials. The field text is never rewritten mid-edit — the split
+     * happens only here, against whatever the user finally submitted.
      */
     fun inputFromForm(form: PairingForm): PairingInput? {
+        val payload = NsdDiscoveryFilter.parsePairingPayload(form.host.trim())
+        if (payload != null) {
+            return inputFromPayload(payload).copy(
+                name = form.name.trim(),
+                authKind = form.authKind,
+                token = form.token.trim().takeIf { it.isNotEmpty() },
+                username = form.username.trim().takeIf { it.isNotEmpty() },
+                // The password is the one field NOT trimmed: spaces are legal
+                // password characters and trimming them would corrupt the only
+                // secret the user typed verbatim.
+                password = form.password.takeIf { it.isNotEmpty() },
+            )
+        }
         val port = form.port.trim().toIntOrNull() ?: return null
         if (form.host.isBlank() || port !in 1..PairingForm.MAX_PORT) return null
         return PairingInput(
@@ -152,9 +211,6 @@ object PairingAssembler {
             authKind = form.authKind,
             token = form.token.trim().takeIf { it.isNotEmpty() },
             username = form.username.trim().takeIf { it.isNotEmpty() },
-            // The password is the one field NOT trimmed: spaces are legal
-            // password characters and trimming them would corrupt the only
-            // secret the user typed verbatim.
             password = form.password.takeIf { it.isNotEmpty() },
             name = form.name.trim(),
         )

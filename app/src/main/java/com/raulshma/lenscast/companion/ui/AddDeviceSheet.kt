@@ -3,6 +3,7 @@ package com.raulshma.lenscast.companion.ui
 import android.Manifest
 import android.content.Context
 import android.content.pm.PackageManager
+import android.graphics.Bitmap
 import android.graphics.ImageFormat
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -10,16 +11,17 @@ import androidx.annotation.StringRes
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageProxy
-import androidx.camera.core.Preview
 import androidx.camera.core.resolutionselector.ResolutionSelector
 import androidx.camera.core.resolutionselector.ResolutionStrategy
 import androidx.camera.lifecycle.ProcessCameraProvider
-import androidx.camera.view.PreviewView
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -27,11 +29,16 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.QrCodeScanner
+import androidx.compose.material.icons.filled.WifiTethering
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
@@ -52,6 +59,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
@@ -60,7 +71,6 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -78,6 +88,7 @@ import com.raulshma.lenscast.companion.client.CertificateFingerprintProbe
 import com.raulshma.lenscast.companion.model.CompanionAuthKind
 import com.raulshma.lenscast.companion.model.DiscoveredService
 import java.util.concurrent.Executors
+import kotlinx.coroutines.flow.MutableStateFlow
 
 /**
  * The add-device modal: three segmented modes (scan the camera's QR /
@@ -263,14 +274,15 @@ private fun AddDevicePane(
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         // The three modes. Disabled while a test is in flight — the chain
-        // owns the sheet until it lands.
+        // owns the sheet until it lands. Each segment carries its glyph so
+        // the row reads as switchable tabs, not a stray decoration.
         SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
             val modes = listOf(
-                AddDeviceMode.SCAN to R.string.companion_scan_qr,
-                AddDeviceMode.DISCOVER to R.string.companion_discover_mdns,
-                AddDeviceMode.MANUAL to R.string.companion_manual,
+                Triple(AddDeviceMode.SCAN, R.string.companion_scan_qr, Icons.Filled.QrCodeScanner),
+                Triple(AddDeviceMode.DISCOVER, R.string.companion_discover_mdns, Icons.Filled.WifiTethering),
+                Triple(AddDeviceMode.MANUAL, R.string.companion_manual, Icons.Filled.Edit),
             )
-            modes.forEachIndexed { index, (mode, label) ->
+            modes.forEachIndexed { index, (mode, label, icon) ->
                 SegmentedButton(
                     selected = editing.mode == mode,
                     onClick = { onModeChange(mode) },
@@ -279,6 +291,13 @@ private fun AddDevicePane(
                         index = index,
                         count = modes.size,
                     ),
+                    icon = {
+                        Icon(
+                            icon,
+                            contentDescription = null,
+                            modifier = Modifier.size(SegmentedButtonDefaults.IconSize),
+                        )
+                    },
                 ) {
                     Text(stringResource(label))
                 }
@@ -431,26 +450,31 @@ private fun ScanPane(
 }
 
 /**
- * The CameraX lane: one modest 960x720 analysis stream + zxing decode.
- * Binding is DisposableEffect-scoped — leaving the pane unbinds the camera
- * (CameraX lifecycle-aware), and the analyzer executor dies with it.
+ * The CameraX lane: one modest 960x720 analysis stream feeding BOTH the
+ * zxing decode lane and the aiming preview. Binding is DisposableEffect-
+ * scoped — leaving the pane unbinds the camera (CameraX lifecycle-aware),
+ * and the analyzer executor dies with it.
+ *
+ * There is deliberately NO [androidx.camera.view.PreviewView] here. Its
+ * surface inside this sheet's dialog window paints the camera image across
+ * the ENTIRE sheet on some ROMs (reproduced on a POCO F1 / custom Android
+ * 13 build, in both PERFORMANCE and COMPATIBLE modes): the mode selector
+ * and fields keep composing and taking taps, but render UNDER the camera
+ * image — the pane reads as a bare scanner with no way to add a device
+ * manually. Any AndroidView would work in the slot (a TextView lays out
+ * correctly), so the interop itself is fine; it is the preview surface.
+ * The fix: no Preview use case at all — the analyzer lowers downscaled
+ * frames into a plain Compose [androidx.compose.foundation.Image].
  */
 @Composable
 private fun QrScanPreview(onDecoded: (String) -> Unit, modifier: Modifier = Modifier) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
-    val previewView = remember {
-        PreviewView(context).apply { scaleType = PreviewView.ScaleType.FILL_CENTER }
-    }
+    val frames = remember { MutableStateFlow<ImageBitmap?>(null) }
     val executor = remember { Executors.newSingleThreadExecutor() }
+    val mainExecutor = remember { ContextCompat.getMainExecutor(context) }
 
-    // The preview + analysis use cases live for the pane's lifetime: bound
-    // once the provider resolves, unbound on dispose (sheet dismissed,
-    // pane switched, permission revoked).
     DisposableEffect(lifecycleOwner) {
-        val preview = Preview.Builder().build().also {
-            it.setSurfaceProvider(previewView.surfaceProvider)
-        }
         val analysis = ImageAnalysis.Builder()
             // Modest: the QR needs ~600px of sensor, not the full stack —
             // the closest-lower-then-higher ladder absorbs odd devices.
@@ -466,7 +490,15 @@ private fun QrScanPreview(onDecoded: (String) -> Unit, modifier: Modifier = Modi
             )
             .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
             .build()
-        analysis.setAnalyzer(executor, QrDecodeAnalyzer(onDecoded))
+        analysis.setAnalyzer(
+            executor,
+            QrDecodeAnalyzer(
+                onDecoded = onDecoded,
+                onPreviewFrame = { bitmap ->
+                    mainExecutor.execute { frames.value = bitmap.asImageBitmap() }
+                },
+            ),
+        )
 
         var provider: ProcessCameraProvider? = null
         val future = ProcessCameraProvider.getInstance(context)
@@ -475,10 +507,11 @@ private fun QrScanPreview(onDecoded: (String) -> Unit, modifier: Modifier = Modi
                 try {
                     provider = future.get()
                     provider?.unbindAll()
+                    // Analysis only — no Preview use case, no output surface
+                    // for the sheet's window to mis-composite (see KDoc).
                     provider?.bindToLifecycle(
                         lifecycleOwner,
                         CameraSelector.DEFAULT_BACK_CAMERA,
-                        preview,
                         analysis,
                     )
                 } catch (e: Exception) {
@@ -486,7 +519,7 @@ private fun QrScanPreview(onDecoded: (String) -> Unit, modifier: Modifier = Modi
                     // pane stays dark rather than crashing the sheet.
                 }
             },
-            ContextCompat.getMainExecutor(context),
+            mainExecutor,
         )
         onDispose {
             try {
@@ -499,16 +532,41 @@ private fun QrScanPreview(onDecoded: (String) -> Unit, modifier: Modifier = Modi
         }
     }
 
-    AndroidView(
-        factory = { previewView },
+    Box(
         modifier = modifier
             .fillMaxWidth()
-            .height(260.dp),
-    )
+            .height(260.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant),
+    ) {
+        val frame = frames.collectAsStateWithLifecycle().value
+        if (frame != null) {
+            Image(
+                bitmap = frame,
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize(),
+            )
+        } else {
+            // Until the first lowered frame lands: a quiet aiming placeholder.
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Icon(
+                    Icons.Filled.QrCodeScanner,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(40.dp),
+                )
+            }
+        }
+    }
 }
 
 private const val QR_ANALYSIS_WIDTH = 960
 private const val QR_ANALYSIS_HEIGHT = 720
+
+/** The aiming preview's cadence and width (height keeps the frame's aspect). */
+private const val QR_PREVIEW_INTERVAL_MS = 150L
+private const val QR_PREVIEW_WIDTH = 480
 
 /**
  * The zxing decode lane: Y-plane → luminance source, tried at the frame's
@@ -516,12 +574,21 @@ private const val QR_ANALYSIS_HEIGHT = 720
  * (analysis images are sensor-oriented; the QR text is orientation-agnostic
  * to zxing only when the buffer matches). KEEP_ONLY_LATEST upstream means a
  * slow decode drops frames rather than queueing.
+ *
+ * The same frames also lower into the aiming preview: every
+ * [QR_PREVIEW_INTERVAL_MS] the YUV image converts to a small upright ARGB
+ * bitmap and rides [onPreviewFrame] to the UI thread (the sheet's preview
+ * is a plain Compose Image — see [QrScanPreview]'s KDoc for why there is
+ * no PreviewView in this pane). Preview emission is best-effort: any
+ * conversion failure just skips the frame.
  */
 internal class QrDecodeAnalyzer(
     private val onDecoded: (String) -> Unit,
+    private val onPreviewFrame: (Bitmap) -> Unit,
 ) : ImageAnalysis.Analyzer {
 
     private val reader = MultiFormatReader()
+    private var nextPreviewAtMs = 0L
 
     init {
         reader.setHints(
@@ -532,6 +599,7 @@ internal class QrDecodeAnalyzer(
     override fun analyze(image: ImageProxy) {
         try {
             if (image.format != ImageFormat.YUV_420_888) return
+            emitPreviewFrame(image)
             val source = luminanceSource(image) ?: return
             // The analysis buffer is sensor-oriented; the QR text can sit in
             // any quadrant. Start at the rotation the frame reports, then
@@ -555,6 +623,33 @@ internal class QrDecodeAnalyzer(
             // A malformed frame must never kill the analyzer thread.
         } finally {
             image.close()
+        }
+    }
+
+    /**
+     * The throttled aiming frame: full YUV → ARGB, rotated upright by the
+     * frame's reported rotation, downscaled to [QR_PREVIEW_WIDTH]. Runs on
+     * the analyzer thread; the caller hops to main.
+     */
+    private fun emitPreviewFrame(image: ImageProxy) {
+        val now = android.os.SystemClock.elapsedRealtime()
+        if (now < nextPreviewAtMs) return
+        nextPreviewAtMs = now + QR_PREVIEW_INTERVAL_MS
+        try {
+            val bitmap = image.toBitmap()
+            val rotation = image.imageInfo.rotationDegrees
+            val upright = if (rotation != 0) {
+                val matrix = android.graphics.Matrix()
+                    .apply { postRotate(rotation.toFloat()) }
+                Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, false)
+            } else {
+                bitmap
+            }
+            val width = QR_PREVIEW_WIDTH
+            val height = maxOf(1, upright.height * width / upright.width)
+            onPreviewFrame(Bitmap.createScaledBitmap(upright, width, height, true))
+        } catch (e: Exception) {
+            // A malformed frame loses one preview tick, never the decode.
         }
     }
 
@@ -691,6 +786,15 @@ private fun ManualFields(
             value = form.host,
             onValueChange = onHostChange,
             label = { Text(stringResource(R.string.companion_host)) },
+            isError = form.hostInvalid,
+            supportingText = {
+                Text(
+                    stringResource(
+                        if (form.hostInvalid) R.string.companion_host_invalid
+                        else R.string.companion_host_paste_hint,
+                    ),
+                )
+            },
             singleLine = true,
             enabled = enabled,
             modifier = Modifier.fillMaxWidth(),
@@ -699,6 +803,12 @@ private fun ManualFields(
             value = form.port,
             onValueChange = onPortChange,
             label = { Text(stringResource(R.string.companion_port)) },
+            isError = form.portInvalid,
+            supportingText = if (form.portInvalid) {
+                { Text(stringResource(R.string.companion_port_invalid)) }
+            } else {
+                null
+            },
             singleLine = true,
             enabled = enabled,
             keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(

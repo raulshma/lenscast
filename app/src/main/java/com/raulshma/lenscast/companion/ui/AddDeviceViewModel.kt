@@ -300,6 +300,7 @@ class AddDeviceViewModel(
 
     fun onNameChange(value: String) = updateForm { it.copy(name = value) }
 
+    /** The host field stays verbatim — a full pairing link is split at the boundary ([PairingAssembler.inputFromForm]), never mid-edit. */
     fun onHostChange(value: String) = updateForm { it.copy(host = value) }
 
     fun onPortChange(value: String) = updateForm {

@@ -57,6 +57,58 @@ class PairingAssemblerTest {
         assertEquals(8080, input.port)
     }
 
+    // ── inputFromForm with a pasted pairing link ──
+
+    @Test
+    fun `pasted link in the host field derives the address, form keeps name and credentials`() {
+        val input = checkNotNull(
+            PairingAssembler.inputFromForm(
+                PairingForm(
+                    name = "Garage",
+                    host = "https://192.168.1.5:8443/#fp=AB:CD:EF:01",
+                    port = "",
+                    authKind = CompanionAuthKind.BASIC,
+                    username = "admin",
+                    password = "pw",
+                ),
+            ),
+        )
+        // The link is authoritative for the address four; the form keeps the rest.
+        assertTrue(input.useTls)
+        assertEquals("192.168.1.5", input.host)
+        assertEquals(8443, input.port)
+        assertEquals("abcdef01", input.tlsFingerprint)
+        assertEquals("Garage", input.name)
+        assertEquals(CompanionAuthKind.BASIC, input.authKind)
+        assertEquals("admin", input.username)
+        assertEquals("pw", input.password)
+    }
+
+    @Test
+    fun `pasted scheme-only link takes the scheme default port`() {
+        val input = checkNotNull(
+            PairingAssembler.inputFromForm(PairingForm(host = "http://cam.local", port = "")),
+        )
+        assertFalse(input.useTls)
+        assertEquals("cam.local", input.host)
+        assertEquals(8080, input.port)
+        assertNull(input.tlsFingerprint)
+    }
+
+    @Test
+    fun `a link host stays submittable with a blank port field`() {
+        assertTrue(PairingForm(host = "https://192.168.1.5:8443", port = "").isSubmittable)
+        // Plain hosts still need the port field.
+        assertFalse(PairingForm(host = "192.168.1.5", port = "").isSubmittable)
+    }
+
+    @Test
+    fun `a bare address being typed never parses as a link`() {
+        assertNull(PairingAssembler.inputFromForm(PairingForm(host = "192.168.1.5", port = "")))
+        assertNull(PairingAssembler.inputFromForm(PairingForm(host = "https://", port = "")))
+        assertNull(PairingAssembler.inputFromForm(PairingForm(host = "", port = "")))
+    }
+
     // ── inputFromDiscovery ──
 
     @Test
@@ -122,6 +174,41 @@ class PairingAssemblerTest {
         assertFalse(PairingForm(host = "", port = "8080").isSubmittable)
         assertFalse(PairingForm(host = "h", port = "0").isSubmittable)
         assertFalse(PairingForm(host = "h", port = "99999").isSubmittable)
+    }
+
+    // ── inline error flags ──
+
+    @Test
+    fun `hostInvalid flags interior whitespace at-sign and unparsed colons`() {
+        assertTrue(PairingForm(host = "my camera").hostInvalid)
+        assertTrue(PairingForm(host = "user@host").hostInvalid)
+        assertTrue(PairingForm(host = "ftp://10.0.0.2").hostInvalid)
+        assertTrue(PairingForm(host = "https://").hostInvalid)
+        // A bare host:port junk (a paste split by a chunky IME) would dial a
+        // broken address — flag it.
+        assertTrue(PairingForm(host = "192.168.1.5:8443").hostInvalid)
+    }
+
+    @Test
+    fun `hostInvalid stays silent while blank trim-padding plain address or a decodable link`() {
+        assertFalse(PairingForm(host = "").hostInvalid)
+        assertFalse(PairingForm(host = "   ").hostInvalid)
+        // inputFromForm trims, so padding must not flag red while Save works.
+        assertFalse(PairingForm(host = " 192.168.1.5 ").hostInvalid)
+        assertFalse(PairingForm(host = "192.168.1.5").hostInvalid)
+        assertFalse(PairingForm(host = "cam.local").hostInvalid)
+        // The paste path: a full pairing link is the supported shape.
+        assertFalse(PairingForm(host = "https://192.168.1.5:8443#fp=AB:CD").hostInvalid)
+    }
+
+    @Test
+    fun `portInvalid flags out-of-range ports only once typed`() {
+        assertTrue(PairingForm(port = "0").portInvalid)
+        assertTrue(PairingForm(port = "99999").portInvalid)
+        assertTrue(PairingForm(port = "abc").portInvalid)
+        assertFalse(PairingForm(port = "").portInvalid)
+        assertFalse(PairingForm(port = " 8443 ").portInvalid)
+        assertFalse(PairingForm(port = "8080").portInvalid)
     }
 
     // ── defaultName ladder ──

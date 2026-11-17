@@ -408,6 +408,47 @@ class PairingFlowTest {
         assertTrue(editing.qrInvalid)
     }
 
+    // ── Host-field paste ──
+
+    @Test
+    fun `a pasted link fills the gate without rewriting the field`() = runBlocking {
+        val vm = viewModel(CoroutineScope(coroutineContext))
+        vm.onModeChanged(AddDeviceMode.MANUAL)
+        vm.onHostChange("https://192.168.1.5:8443/#fp=AB:CD")
+
+        val editing = awaitState(vm) { it is AddDeviceUiState.Editing } as AddDeviceUiState.Editing
+        // The field keeps the raw link — the split happens at the boundary.
+        assertEquals("https://192.168.1.5:8443/#fp=AB:CD", editing.form.host)
+        assertEquals("", editing.form.port)
+        assertTrue(editing.form.isSubmittable)
+        assertFalse(editing.form.hostInvalid)
+    }
+
+    @Test
+    fun `typing a plain host keeps it in the host field untouched`() = runBlocking {
+        val vm = viewModel(CoroutineScope(coroutineContext))
+        vm.onModeChanged(AddDeviceMode.MANUAL)
+        vm.onHostChange("192.168.1.5")
+
+        val editing = awaitState(vm) { it is AddDeviceUiState.Editing } as AddDeviceUiState.Editing
+        assertEquals("192.168.1.5", editing.form.host)
+        assertEquals("", editing.form.port)
+        assertFalse(editing.form.isSubmittable)
+        assertFalse(editing.form.hostInvalid)
+    }
+
+    @Test
+    fun `a pasted link runs the chain through the boundary split, never INVALID_INPUT`() = runBlocking {
+        val vm = viewModel(CoroutineScope(coroutineContext))
+        vm.onModeChanged(AddDeviceMode.MANUAL)
+        vm.onHostChange("http://192.168.1.5:8443")
+        vm.onTestClicked()
+
+        // The address is unroutable in tests, but the link split must let
+        // the chain RUN (NETWORK_UNREACHABLE) instead of failing the gate.
+        assertEquals(PairingFailure.NETWORK_UNREACHABLE, awaitFailure(vm).failure)
+    }
+
     @Test
     fun `an un-submittable form fails as INVALID_INPUT without touching the wire`() = runBlocking {
         val vm = viewModel(CoroutineScope(coroutineContext))
