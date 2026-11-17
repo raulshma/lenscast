@@ -23,6 +23,7 @@ import com.raulshma.lenscast.data.CaptureHistoryStore
 import com.raulshma.lenscast.data.SettingsDataStore
 import com.raulshma.lenscast.gallery.GallerySession
 import com.raulshma.lenscast.streaming.StreamingManager
+import com.raulshma.lenscast.streaming.StreamStateJournal
 import com.raulshma.lenscast.streaming.StreamingSession
 import com.raulshma.lenscast.update.UpdateChecker
 import com.raulshma.lenscast.update.UpdateDownloader
@@ -76,6 +77,12 @@ interface AppGraph {
     val keyguardMonitor: com.raulshma.lenscast.core.KeyguardMonitor
     /** The locked-mount camera wake ([com.raulshma.lenscast.core.LockBypassController]); the service's denied-promotion and the session's denied-bind trigger. */
     val lockBypassController: com.raulshma.lenscast.core.LockBypassController
+    /**
+     * The post-death camera bring-up prompt ([com.raulshma.lenscast.core.FsiResumeController],
+     * blueprint P1 item 11): the service's server-only landing evaluates it,
+     * the resume shim and MainActivity dismiss its notification.
+     */
+    val fsiResumeController: com.raulshma.lenscast.core.FsiResumeController
     val tlsCertManager: TlsCertManager
     val pushSubscriptionStore: PushSubscriptionStore
     val vapidKeys: VapidKeys
@@ -84,6 +91,32 @@ interface AppGraph {
     val detectionCoordinator: DetectionCoordinator
     val detectionEventStore: DetectionEventStore
     val automationFireJournal: AutomationFireJournal
+    /** The boot-resume journal — the boot path's and the runtime service's single source of stream intent. */
+    val streamStateJournal: StreamStateJournal
+    /**
+     * The one start/stop ladder over every output
+     * ([com.raulshma.lenscast.camera.model.StreamToggle]): the boot receiver
+     * and the tile run their verdicts through it; the FSI-resume landing in
+     * [com.raulshma.lenscast.streaming.LockBypassActivity] joins them so no
+     * caller re-rolls a start path.
+     */
+    val streamToggle: com.raulshma.lenscast.camera.model.StreamToggle
+    /** The crash marker — the crash handler's loop-guard counter; wave 3's telemetry reads its give-up state. */
+    val crashMarkerJournal: com.raulshma.lenscast.core.CrashMarkerJournal
+    /**
+     * The alarm heartbeat (blueprint P0 item 3): arming off the server
+     * lifecycle, and the fired-alarm verdict path the runtime service's
+     * `ACTION_HEARTBEAT` start resolves.
+     */
+    val heartbeatController: com.raulshma.lenscast.core.HeartbeatController
+    /**
+     * The in-process soft-restart ladder (blueprint P1 item 9) — the quit
+     * ladder minus process death. ONE implementation with TWO entry points:
+     * the dashboard's `POST /api/system/restart?mode=soft` and the
+     * heartbeat's SOFT_RESTART tier both run this instance, so the wire and
+     * the alarm can never drift into two different recovery behaviors.
+     */
+    val softRestart: com.raulshma.lenscast.core.SoftRestartLadder
     val updateChecker: UpdateChecker
     val updateDownloader: UpdateDownloader
     val updateInstaller: UpdateInstaller

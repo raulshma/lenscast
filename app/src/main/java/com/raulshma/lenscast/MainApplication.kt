@@ -2,6 +2,7 @@ package com.raulshma.lenscast
 
 import android.app.Application
 import android.content.Context
+import android.util.Log
 import coil3.ImageLoader
 import coil3.SingletonImageLoader
 import coil3.request.crossfade
@@ -31,10 +32,18 @@ import com.raulshma.lenscast.companion.di.CompanionGraph
 import com.raulshma.lenscast.core.AppJson
 import com.raulshma.lenscast.core.AppRelaunch
 import com.raulshma.lenscast.core.ConnectivityMonitor
+import com.raulshma.lenscast.core.CrashMarkerJournal
+import com.raulshma.lenscast.core.CrashRelaunchPolicy
+import com.raulshma.lenscast.core.FsiResumeController
+import com.raulshma.lenscast.core.HeartbeatController
 import com.raulshma.lenscast.core.KeepAwakeController
 import com.raulshma.lenscast.core.KeyguardMonitor
 import com.raulshma.lenscast.core.KeystoreMediaKeyProvider
 import com.raulshma.lenscast.core.LockBypassController
+import com.raulshma.lenscast.core.LoopbackServerProbe
+import com.raulshma.lenscast.core.ServerWatchdogArming
+import com.raulshma.lenscast.core.SoftRestartLadder
+import com.raulshma.lenscast.core.WatchdogPolicy
 import com.raulshma.lenscast.core.MediaCrypto
 import com.raulshma.lenscast.core.PowerManager
 import com.raulshma.lenscast.core.SirenAutoStop
@@ -70,6 +79,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import android.os.SystemClock
 import kotlin.system.exitProcess
 
 class MainApplication : Application(), SingletonImageLoader.Factory, AppGraph {
@@ -149,7 +159,15 @@ class MainApplication : Application(), SingletonImageLoader.Factory, AppGraph {
     // manager builds the Web API stack, which builds the watchdog) and
     // recurse until the heap dies at launch.
     override val streamWatchdog: StreamWatchdog by lazy {
-        StreamWatchdog(cameraService, { streamingManager }, streamingSession)
+        StreamWatchdog(
+            cameraService,
+            { streamingManager },
+            streamingSession,
+            // The loopback /api/system liveness probe (blueprint item 5): the
+            // URL is resolved per probe so a port/TLS change moves it with
+            // the listener.
+            loopbackProbe = LoopbackServerProbe(urlProvider = { streamingManager.loopbackSystemUrl() }),
+        )
     }
     override val streamingSession: StreamingSession by lazy {
         StreamingSession(
@@ -168,6 +186,19 @@ class MainApplication : Application(), SingletonImageLoader.Factory, AppGraph {
     override val lockBypassController: LockBypassController by lazy {
         LockBypassController(this, keyguardMonitor)
     }
+    // The post-death camera bring-up prompt (blueprint P1 item 11): the
+    // journal is the trigger's input source (the same pre-death record
+    // BootResumePolicy reads) and its once-per-death-event marker lives
+    // there; the held-camera read is the same live flag the resume shim's
+    // readiness watch uses. The opt-in setting rides the Settings Applier
+    // (onSettingApplied) like every streaming flag.
+    override val fsiResumeController: FsiResumeController by lazy {
+        FsiResumeController(
+            context = this,
+            journal = streamStateJournal,
+            cameraAccessHeld = { streamingManager.isLiveStreaming() },
+        )
+    }
     // Server state -> runtime service server mode. The session still owns the
     // FGS intents; this is the app-lifetime bridge that keeps the server-only
     // mode in sync with every server start/stop path (launch, port/TLS
@@ -175,8 +206,68 @@ class MainApplication : Application(), SingletonImageLoader.Factory, AppGraph {
     val serverForegroundController: ServerForegroundController by lazy {
         ServerForegroundController(streamingSession, streamingManager.isServerRunning)
     }
+    // Server state -> the watchdog's server-liveness arming (blueprint item 2):
+    // the same flow the controller above bridges, driving the process-wide
+    // baseline so the post-relaunch server-only state is watched by
+    // construction — independent of the user-facing watchdog setting.
+    val serverWatchdogArming: ServerWatchdogArming by lazy {
+        ServerWatchdogArming(streamWatchdog, streamingManager.isServerRunning)
+    }
+    // Server state -> the alarm heartbeat's arming (blueprint item 3): the
+    // same isServerRunning flow drives the out-of-process liveness alarm —
+    // armed while the server is up, disarmed on stop (grace-windowed like
+    // the bridges above). The fired-alarm verdict path reuses wave 1's
+    // seams: the health verdict is StreamWatchdog.evaluateOnce (loopback
+    // probe included) and the SAME read supplies the snapshot's server-only
+    // mode — the decision input that keeps the escalation's first tier one
+    // that does real work without a session (a server-only SOFT would be a
+    // camera rebind with no camera bound, an interval wasted). The
+    // in-process tiers are StreamingSession.recover, the relaunch tier is
+    // the quit ladder + AppRelaunch, and the user-stopped flag is the
+    // journal's.
+    override val heartbeatController: HeartbeatController by lazy {
+        HeartbeatController(
+            context = this,
+            isServerRunning = streamingManager.isServerRunning,
+            healthCheck = {
+                val once = streamWatchdog.evaluateOnce()
+                HeartbeatController.HealthRead(
+                    healthy = once.stall == null,
+                    serverOnlyMode = once.serverOnlyMode,
+                )
+            },
+            recover = { tier -> streamingSession.recover(tier) },
+            softRestart = { softRestart.run() },
+            relaunch = { restartApplication() },
+            userStopped = { streamStateJournal.load().userStopped },
+        )
+    }
+    // The in-process soft-restart ladder (blueprint P1 item 9): the quit
+    // ladder minus exitProcess, over the seams that already exist — the
+    // camera rebind rides the session's SOFT recovery mechanics (Main-
+    // dispatched, bounded, carrying the blocked-by-lock bookkeeping). ONE
+    // instance serves both entry points: the dashboard's `?mode=soft` route
+    // (via the Web API stack) and the heartbeat's SOFT_RESTART tier (above).
+    override val softRestart: SoftRestartLadder by lazy {
+        SoftRestartLadder(
+            stopRecording = { recordingController.stop() },
+            stopServer = { streamToggle.stopServer() },
+            rebindCamera = { streamingSession.recover(WatchdogPolicy.RecoveryTier.SOFT) },
+            startServer = { streamToggle.startServer() },
+        )
+    }
+    // The crash handler's loop-guard counter (blueprint item 1): persisted
+    // beside the crash itself so the give-up decision survives the process
+    // death the handler chains into. Wave 3's telemetry reads it for
+    // GET /api/system.
+    override val crashMarkerJournal: CrashMarkerJournal by lazy {
+        CrashMarkerJournal(this)
+    }
     val settingsApplier: SettingsApplier by lazy {
-        SettingsApplier(settingsDataStore, cameraService, streamingManager, streamWatchdog, mqttAlertPublisher, onvifServer)
+        SettingsApplier(
+            settingsDataStore, cameraService, streamingManager, streamWatchdog,
+            mqttAlertPublisher, onvifServer, fsiResumeController,
+        )
     }
     // The ONVIF device service reads its advertised values live per request
     // (the same IP/URL sources the mDNS registration and the RTSP URL builder
@@ -339,7 +430,7 @@ class MainApplication : Application(), SingletonImageLoader.Factory, AppGraph {
     // instead of constructing per-composition adapters.
     override val updateDownloader: UpdateDownloader by lazy { UpdateDownloader(this) }
     override val updateInstaller: UpdateInstaller by lazy { UpdateInstaller(this) }
-    val streamStateJournal: StreamStateJournal by lazy { StreamStateJournal(this) }
+    override val streamStateJournal: StreamStateJournal by lazy { StreamStateJournal(this) }
     // The automation scheduler's once-per-day dedup journal: the rules live
     // in DataStore and survive every process start, so the journal is the
     // half that records which occurrences already ran — the boot-time
@@ -398,7 +489,7 @@ class MainApplication : Application(), SingletonImageLoader.Factory, AppGraph {
     // One toggle over one transports adapter — the boot receiver and the
     // quick-settings tile start/stop through the same ladder the camera
     // screen and the Web API use, without re-typing the adapter.
-    val streamToggle: StreamToggle by lazy {
+    override val streamToggle: StreamToggle by lazy {
         StreamToggle(StreamingTransports(streamingManager, streamingSession))
     }
     /** App-lifetime scope for work that must outlive a ViewModel or screen. */
@@ -422,13 +513,21 @@ class MainApplication : Application(), SingletonImageLoader.Factory, AppGraph {
 
     override fun onCreate() {
         super.onCreate()
+        // The crash handler installs FIRST: a crash later in onCreate (or in
+        // any lazy this method touches) must still land the deterministic
+        // relaunch instead of the OS's escalating-backoff sticky restart
+        // (blueprint P0 item 1).
+        installCrashRelaunchHandler()
         connectivityMonitor.start()
         keyguardMonitor.start()
         settingsApplier.start(appScope)
         serverForegroundController.start(appScope)
+        serverWatchdogArming.start(appScope)
+        heartbeatController.start(appScope)
         wireFramePump()
         initializeStreamStateJournal()
         initializeAutomationScheduler()
+        initializeCrashLoopReset()
         initializeKeepAwake()
         initializeTamperMonitor()
         initializeDetectionMicWatch()
@@ -490,6 +589,75 @@ class MainApplication : Application(), SingletonImageLoader.Factory, AppGraph {
         appScope.launch {
             delay(RESTART_RESPONSE_FLUSH_MS)
             quitApplication()
+        }
+    }
+
+    /**
+     * The crash-triggered relaunch (blueprint P0 item 1, ACRA
+     * `ReportExecutor`'s shape): persist the crash marker, arm the
+     * deterministic relaunch, then CHAIN to the previous handler so the
+     * platform still records the crash and kills the process — the
+     * handler's own work must never suppress the chain (every failure in
+     * the block below is caught, and the chain call is outside it).
+     *
+     * The loop guard is [CrashRelaunchPolicy]'s: the counter persists in
+     * [crashMarkerJournal] (written BEFORE the chained handler ends the
+     * process), a crash after sustained clean uptime starts a fresh
+     * series, loop crashes arm at [CrashRelaunchPolicy.relaunchDelayMs]'s
+     * backoff, and past the max the handler stops arming entirely — the
+     * OS sticky restart (blueprint resolved tension 1) is the remaining
+     * tier until clean uptime or the app-start reset clears the counter.
+     *
+     * Ordering mirrors [restartApplication]'s schedule-before-quit: the
+     * marker and the alarm are both on disk/in the AlarmManager before the
+     * chained handler ends the process. An ungranted exact alarm throws
+     * here — caught — and the sticky restart remains the fallback; the
+     * crash chain itself is never skipped either way.
+     */
+    private fun installCrashRelaunchHandler() {
+        val previousHandler = Thread.getDefaultUncaughtExceptionHandler()
+        // Measured from install time (a few ms into onCreate): noise
+        // against the 5-minute clean-uptime window, and the only clock the
+        // handler can trust across process generations (elapsedRealtime
+        // does not run during process death, only device sleep-off).
+        val installElapsedMs = SystemClock.elapsedRealtime()
+        Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
+            try {
+                val previous = crashMarkerJournal.load()
+                val uptimeMs = SystemClock.elapsedRealtime() - installElapsedMs
+                val crashCount = CrashRelaunchPolicy.nextCrashCount(previous.consecutiveCrashes, uptimeMs)
+                crashMarkerJournal.recordCrash(crashCount)
+                val verdict = CrashRelaunchPolicy.decide(crashCount)
+                if (verdict == CrashRelaunchPolicy.Verdict.GIVE_UP_STICKY_ONLY) {
+                    Log.w(TAG, "Crash loop ($crashCount consecutive crashes); relaunch not armed, sticky restart only")
+                } else {
+                    runCatching {
+                        AppRelaunch.schedule(this, CrashRelaunchPolicy.relaunchDelayMs(crashCount))
+                    }.onFailure {
+                        Log.w(TAG, "Relaunch schedule failed (${it.javaClass.simpleName}); sticky restart is the fallback")
+                    }
+                }
+            } catch (e: Throwable) {
+                Log.w(TAG, "Crash relaunch handling failed", e)
+            }
+            previousHandler?.uncaughtException(thread, throwable)
+        }
+    }
+
+    /**
+     * The crash counter's app-start reset (blueprint P0 item 1): a process
+     * start that survives [CrashRelaunchPolicy.CLEAN_UPTIME_WINDOW_MS] is a
+     * sustained clean run by construction — the coroutine's own survival is
+     * the proof — so its counter and give-up state zero out and the next
+     * crash starts a fresh series. A crash inside the window cancels this
+     * coroutine with the process: the persisted counter keeps building,
+     * which is the loop guard working.
+     */
+    private fun initializeCrashLoopReset() {
+        appScope.launch {
+            delay(CrashRelaunchPolicy.CLEAN_UPTIME_WINDOW_MS)
+            crashMarkerJournal.reset()
+            Log.d(TAG, "Crash counter reset after a clean uptime window")
         }
     }
 
@@ -733,6 +901,7 @@ class MainApplication : Application(), SingletonImageLoader.Factory, AppGraph {
     }
 
     companion object {
+        private const val TAG = "MainApplication"
         private const val DEVICE_ID_PREFS = "lenscast_device_id"
         private const val DEVICE_ID_KEY = "fallback_device_id"
 

@@ -45,6 +45,16 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+    <!--
+      The dashboard App-Restart's relaunch (AppRelaunch): an exact alarm is
+      the only foreground-service start exemption that survives the restart's
+      deliberate process death — Android 15 hard-blocks the activity-launch
+      path even with the creator opt-in, and process-state exemptions (overlay,
+      recent foreground) die with the creator. Android 12+ gates exact alarms
+      behind this permission; 13+ requires the one-time "Alarms & reminders"
+      Settings grant.
+    -->
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.BIND_QUICK_SETTINGS_TILE" />
@@ -163,6 +173,25 @@
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
+            </intent-filter>
+        </receiver>
+
+        <!--
+          The alarm heartbeat's delivery target (blueprint P0 item 3): only
+          this app's own HeartbeatController alarm ever sends the action
+          (explicit PendingIntent, same uid), so exported=false. The
+          manifest registration is the point — a receiver class the system
+          can instantiate into a freshly recreated process when the alarm
+          fires after process death; the receiver re-arms the one-shot
+          alarm and starts the foreground service (the FGS start is what
+          recreates the process under the exact-alarm exemption).
+        -->
+        <receiver
+            android:name=".streaming.HeartbeatReceiver"
+            android:enabled="true"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.raulshma.lenscast.HEARTBEAT_ALARM" />
             </intent-filter>
         </receiver>
 

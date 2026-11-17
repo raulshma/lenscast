@@ -8,10 +8,12 @@ import android.util.Log
 import com.raulshma.lenscast.core.ForegroundNotifications
 
 /**
- * Which typed foreground start ran last on the runtime service. Pure
- * bookkeeping — the recorded mode never drives a start/stop decision — it
- * only makes the implicit "which promotion is live" observable (diagnostics,
- * and the hook a future mode-handoff fix needs). [ServerOnly] is the
+ * Which typed foreground start ran last on the runtime service. Bookkeeping
+ * with exactly one decision reader: the heartbeat branch ([StreamingService]
+ * `ACTION_HEARTBEAT`) skips its server-only re-promotion while [Streaming]
+ * is live — re-typing the shared-slot FGS mid-stream would sever while-in-use
+ * camera access — so the recorded mode is what keeps a live camera stream's
+ * typed standing observable and untouchable. [ServerOnly] is the
  * CONNECTED_DEVICE promotion ([ForegroundNotifications.startConnectedDeviceForeground]),
  * [Streaming] the CAMERA/MICROPHONE one ([ForegroundNotifications.startCameraForeground]);
  * both share the one notification slot (the registry in
@@ -48,9 +50,10 @@ class StreamingService : Service() {
     /**
      * The last successful typed foreground start, cleared on teardown
      * ([onDestroy] funnels both the self-stop of a failed promotion and the
-     * session/server stopService calls). Bookkeeping only: no start/stop
-     * decision reads it. Main-thread service callbacks write it; volatile
-     * keeps a diagnostic reader honest.
+     * session/server stopService calls). One decision reads it — the
+     * heartbeat branch's streaming guard, which must not re-type a live
+     * camera stream's FGS — and no start path does. Main-thread service
+     * callbacks write it; volatile keeps a diagnostic reader honest.
      */
     @Volatile
     private var foregroundMode = ForegroundMode.None
@@ -74,10 +77,44 @@ class StreamingService : Service() {
                 url = intent.getStringExtra(EXTRA_URL),
                 includeAudio = intent.getBooleanExtra(EXTRA_AUDIO_ACTIVE, false),
             )
-            // A sticky restart has no intent. The server is the process's
-            // durable mode; the application re-issues the current mode as
-            // soon as the server comes up.
-            null -> startServerForeground(url = null, includeAudio = false)
+            // A sticky restart has no intent; the dashboard restart's relaunch
+            // (AppRelaunch) arrives as ACTION_RELAUNCH. Both are the same
+            // recovery: the server is the process's durable mode; the
+            // application re-issues the current mode as soon as the server
+            // comes up.
+            null, ACTION_RELAUNCH -> {
+                if (intent != null) Log.d(TAG, "Relaunched by the restart alarm")
+                startServerForeground(url = null, includeAudio = false)
+            }
+            // The alarm heartbeat's delivery (HeartbeatReceiver): the FGS
+            // start recreated the process if it was dead, and this start
+            // must land a foreground promotion or the timeout kills us. The
+            // promotion is the same server-only recovery landing the
+            // relaunch takes; the liveness evaluation + escalation then run
+            // on the controller (HeartbeatController — the verdict comes
+            // from WatchdogAlarmPolicy), launched off the main thread.
+            //
+            // THE STREAMING GUARD: when the CAMERA/MICROPHONE promotion is
+            // the one currently live ([foregroundMode] == Streaming), a
+            // live camera stream is running — and every 15-minute heartbeat
+            // must NOT re-promote. A CONNECTED_DEVICE-typed startForeground
+            // on the shared notification id re-types the FGS and severs
+            // while-in-use camera access on Android 14+ (the typed grant
+            // follows the LAST typed start). So mid-stream the heartbeat
+            // skips the promotion entirely — and the server-only funnel's
+            // FSI-resume evaluation with it — and goes straight to the
+            // controller's health evaluation: that half is read-only plus
+            // tier escalation, and a SOFT/MEDIUM verdict mid-stream is the
+            // existing session-recovery path, in-spec.
+            ACTION_HEARTBEAT -> {
+                Log.d(TAG, "Heartbeat alarm fired (mode=$foregroundMode)")
+                if (foregroundMode != ForegroundMode.Streaming) {
+                    startServerForeground(url = null, includeAudio = false)
+                }
+                (application as? com.raulshma.lenscast.AppGraph)
+                    ?.heartbeatController
+                    ?.onHeartbeatFired()
+            }
             else -> Log.w(TAG, "Ignoring unknown foreground action: ${intent.action}")
         }
         return START_STICKY
@@ -92,6 +129,30 @@ class StreamingService : Service() {
         removeForegroundNotification()
         super.onDestroy()
         Log.d(TAG, "StreamingService destroyed")
+    }
+
+    /**
+     * Record-only on the swipe-away (blueprint P0 item 6): stock Android
+     * keeps a foreground service through a task removal, so there is nothing
+     * to recover or restart here — and restarting would fight an explicit
+     * user stop, the wrong default. The record matters because OEM task
+     * managers (MIUI et al.) kill the process after the swipe: without the
+     * flag, the sticky restart, the boot resume, and the future heartbeat
+     * tier would all resurrect a stream the user deliberately killed. The
+     * flag's lifetime rule lives in [StreamStateJournal] — it gates exactly
+     * one boot and is cleared by the next explicit start, so it never blocks
+     * resume forever.
+     */
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        runCatching {
+            (application as? com.raulshma.lenscast.AppGraph)
+                ?.streamStateJournal
+                ?.markUserStopped()
+        }.onFailure {
+            // Losing the write only means one boot cycle may resume what the
+            // user killed — the journal's own documented failure tolerance.
+            Log.w(TAG, "Failed to record user-stopped intent: ${it.javaClass.simpleName}")
+        }
     }
 
     private fun startStreamingForeground(url: String?, includeAudio: Boolean) {
@@ -135,6 +196,22 @@ class StreamingService : Service() {
 
     private fun startServerForeground(url: String?, includeAudio: Boolean) {
         promoteServerOnly(url, includeAudio)
+        // The post-death camera bring-up prompt (blueprint P1 item 11): this
+        // method is the funnel every death-and-relaunch recovery lands
+        // through — the relaunch alarm (ACTION_RELAUNCH), the sticky
+        // restart's null intent, the heartbeat delivery (ACTION_HEARTBEAT),
+        // and the dashboard's server start. Whether the prompt fires is the
+        // pure FsiResumePolicy's call (opt-in flag, journal's pre-death
+        // live-output record, the swipe-kill stand-down, the once-per-death
+        // marker); a denied streaming promotion never reaches here — that
+        // path holds a live session and belongs to the lock-bypass wake.
+        runCatching {
+            (application as? com.raulshma.lenscast.AppGraph)
+                ?.fsiResumeController
+                ?.onServerOnlyLanded()
+        }.onFailure {
+            Log.w(TAG, "FSI resume evaluation failed: ${it.javaClass.simpleName}")
+        }
         Log.d(TAG, "Server foreground service started")
     }
 
@@ -206,6 +283,14 @@ class StreamingService : Service() {
     companion object {
         const val ACTION_START = "com.raulshma.lenscast.START_STREAMING"
         const val ACTION_SERVER = "com.raulshma.lenscast.START_SERVER"
+        const val ACTION_RELAUNCH = "com.raulshma.lenscast.RELAUNCH_FROM_RESTART_ALARM"
+
+        /**
+         * The alarm heartbeat's delivery action (HeartbeatReceiver → this
+         * service): the FGS start that recreates a dead process and the
+         * liveness evaluation's landing point.
+         */
+        const val ACTION_HEARTBEAT = "com.raulshma.lenscast.HEARTBEAT_ALARM"
         const val EXTRA_URL = "stream_url"
         const val EXTRA_AUDIO_ACTIVE = "stream_audio_active"
         private const val SERVER_CHANNEL_ID = "server_channel"
