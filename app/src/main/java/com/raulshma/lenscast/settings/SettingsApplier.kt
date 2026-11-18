@@ -323,6 +323,15 @@ class SettingsApplier(
             }
         }
 
+        // The RTSP Basic-compat toggle swaps the 401 challenge scheme without
+        // touching credentials, so it needs its own refresh — the auth flow
+        // above only re-fires on an auth save.
+        scope.launch {
+            settingsDataStore.rtspBasicAuthCompat.collectLatest {
+                streamingManager.refreshRtspAuth()
+            }
+        }
+
         // Motion detection: persisted toggle → runtime detector. The settings
         // screen writes the store; the Applier applies exactly once. Sensitivity
         // arrives as a percent and scales to the detector's 0..1 ladder; zones

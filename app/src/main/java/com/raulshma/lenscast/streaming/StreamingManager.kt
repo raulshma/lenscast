@@ -1788,6 +1788,16 @@ class StreamingManager(
         rtspOutput.setAuth()
     }
 
+    /**
+     * Re-applies the RTSP auth spec after the Basic-compat toggle moves: the
+     * challenge scheme lives in the spec, and the auth-settings flow only
+     * re-fires on credential changes, so the switch would otherwise wait for
+     * an auth save or an RTSP restart.
+     */
+    fun refreshRtspAuth() {
+        rtspOutput.setAuth()
+    }
+
     fun setOverlaySettings(settings: OverlaySettings) {
         currentOverlaySettings = settings
         // The encoded path burns the same overlay into its shared encode
