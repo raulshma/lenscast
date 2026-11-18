@@ -356,7 +356,10 @@
     <string name="settings_section_rtsp">RTSP Stream</string>
     <string name="settings_enable_rtsp">Enable RTSP Streaming</string>
     <string name="settings_rtsp_port">RTSP Port</string>
+    <string name="settings_rtsp_port_invalid">Enter a port between %1$d and %2$d</string>
     <string name="settings_rtsp_input_format">RTSP Encoder Input Format</string>
+    <string name="settings_rtsp_basic_auth">RTSP Basic Auth Compatibility</string>
+    <string name="settings_rtsp_basic_auth_description">Advertise Basic auth instead of Digest for players that cannot complete the Digest handshake (for example tinyCam). Digest is still accepted.</string>
     <string name="settings_section_rtmp">RTMP Push</string>
     <string name="settings_enable_rtmp">Enable RTMP Push</string>
     <string name="settings_rtmp_push_url">Push URL</string>

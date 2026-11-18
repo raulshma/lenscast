@@ -99,6 +99,25 @@ class AutomationScheduler(
     fun start() {
         if (loopJob?.isActive == true) return
         loopJob = scope.launch {
+            // The shared StateFlows start at their descriptor defaults
+            // (stateIn Eagerly), so the combine's first emission is the
+            // empty/disabled pair, not the disk truth. Load the persisted
+            // rules before firing the process-start cue — otherwise
+            // AppStarted evaluates against an empty cache and every
+            // app-start rule silently misses on boot.
+            val initialRules = runCatching { settingsDataStore.automationRulesFromDisk() }
+                .onFailure { Log.w(TAG, "Failed to read automation rules from disk", it) }
+                .getOrDefault(emptyList())
+            val initialEnabled = runCatching { settingsDataStore.automationEnabledFromDisk() }
+                .onFailure { Log.w(TAG, "Failed to read the automation toggle from disk", it) }
+                .getOrDefault(false)
+            rulesCache = initialRules
+            enabledCache = initialEnabled
+            if (!appStartFired) {
+                appStartFired = true
+                onEvent(AutomationEvent.AppStarted)
+            }
+
             combine(
                 settingsDataStore.automationRules,
                 settingsDataStore.automationEnabled,
@@ -106,12 +125,6 @@ class AutomationScheduler(
                 .collectLatest { (rules, enabled) ->
                     rulesCache = rules
                     enabledCache = enabled
-                    // The process-start cue: exactly once, after the first
-                    // emission guarantees the persisted rules are cached.
-                    if (!appStartFired) {
-                        appStartFired = true
-                        onEvent(AutomationEvent.AppStarted)
-                    }
                     while (currentCoroutineContext().isActive) {
                         evaluate(rules, enabled)
                         delay(StreamDefaults.AUTOMATION_POLL_SECONDS * 1000L)

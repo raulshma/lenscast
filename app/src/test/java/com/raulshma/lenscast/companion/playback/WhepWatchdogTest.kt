@@ -10,6 +10,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
@@ -117,6 +118,15 @@ class WhepWatchdogTest {
         suspend fun awaitState(target: WhepState): WhepState =
             withTimeout(5_000) { viewer.state.first { it == target } }
 
+        /**
+         * The Failed write precedes the peer close (runSession's finally):
+         * waiting on the state alone can observe Failed before the effect
+         * lands under full-suite load. Every closed-peer assert parks here.
+         */
+        suspend fun awaitPeerClosed() {
+            withTimeout(5_000) { while (!fake.closed) delay(10) }
+        }
+
         /** The handshake, settled up to (but not into) the watchdog loop. */
         suspend fun negotiate() {
             server.enqueue(answer())
@@ -173,7 +183,7 @@ class WhepWatchdogTest {
             "the reason names the media window",
             (settled as WhepState.Failed).reason.contains("no video"),
         )
-        assertTrue("the starved peer closes", h.fake.closed)
+        h.awaitPeerClosed()
         // The handshake DID mint a session — the slot must be released.
         val delete = server.takeRequest(5, TimeUnit.SECONDS)
         assertEquals("DELETE", delete?.method)
@@ -189,7 +199,7 @@ class WhepWatchdogTest {
         val settled = h.awaitSettled()
         assertTrue(settled is WhepState.Failed)
         assertTrue((settled as WhepState.Failed).reason.contains("failed"))
-        assertTrue(h.fake.closed)
+        h.awaitPeerClosed()
     }
 
     @Test
@@ -221,7 +231,7 @@ class WhepWatchdogTest {
             "the hold failure names the playback phase",
             (settled as WhepState.Failed).reason.contains("playback"),
         )
-        assertTrue(h.fake.closed)
+        h.awaitPeerClosed()
         val delete = server.takeRequest(5, TimeUnit.SECONDS)
         assertEquals("the dead session's slot is freed", "DELETE", delete?.method)
     }

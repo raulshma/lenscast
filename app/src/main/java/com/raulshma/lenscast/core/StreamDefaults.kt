@@ -228,6 +228,11 @@ object StreamDefaults {
     // MOTION_ARM_DAYS_MASK_* — the same ISO day-bit convention.
     const val AUTOMATION_POLL_SECONDS = 30
     const val AUTOMATION_ONESHOT_GRACE_MS = 10 * 60 * 1000L
+    // Stateful catch-up is a convergence, not a replay: past this window a
+    // missed light/stream/torch change is stale enough that applying it can
+    // contradict the current time of day. The next scheduled occurrence still
+    // fires normally once its own minute arrives.
+    const val AUTOMATION_STATEFUL_CATCHUP_GRACE_MS = 6 * 60 * 60 * 1000L
     const val AUTOMATION_MAX_RULES = 16
     const val AUTOMATION_MAX_ACTIONS_PER_RULE = 8
 

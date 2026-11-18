@@ -32,10 +32,20 @@ class CameraControlPlanTest {
     }
 
     @Test
-    fun `explicit exposure time passes through unclamped - only the default is clamped`() {
+    fun `explicit exposure time clamps to the sensor range and fills a paired iso`() {
         val settings = CameraSettings(exposureTime = 5_000_000_000L)
         val plan = CameraControlPlan.from(settings, isoRange, 1_000L..100_000L)
-        assertEquals(5_000_000_000L, plan.sensorExposureTimeNs)
+        assertEquals(100_000L, plan.sensorExposureTimeNs)
+        assertEquals(1650, plan.sensorSensitivity)
+        assertEquals(CaptureRequest.CONTROL_AE_MODE_OFF, plan.aeMode)
+    }
+
+    @Test
+    fun `a long manual exposure caps the fps range to one frame period`() {
+        val settings = CameraSettings(iso = 400, exposureTime = 125_000_000L, frameRate = 30)
+        val plan = CameraControlPlan.from(settings, isoRange, exposureRange)
+        assertEquals(8, plan.fpsUpper)
+        assertEquals(8, plan.fpsLower)
     }
 
     @Test

@@ -478,7 +478,7 @@ class StreamingServer(
         // the token path above never carries a session — and the cookie
         // session's role otherwise; the role gate already rejected viewers
         // past their allowance before dispatch).
-        val sessionRole = webAuthGate.sessionRoleFor(session.headers["cookie"])
+        val sessionRole = authFilter.callerRole(session.headers)
         val response = try {
             runBlocking {
                 withTimeout(API_DISPATCH_TIMEOUT_MS) {

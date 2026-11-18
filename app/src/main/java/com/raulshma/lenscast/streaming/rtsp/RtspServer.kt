@@ -613,16 +613,28 @@ class RtspServer(
                 }
                 is RtspSessionProtocol.CSeqVerdict.Ok -> {
                     cSeq = verdict.cseq
-                    lastCSeq = verdict.cseq
                 }
             }
 
-            if (authorizer.requiresAuthentication(request.method) &&
-                !authorizer.authorize(request.method, request.uri, request.headers["authorization"])
-            ) {
-                sendUnauthorized(output)
-                return
+            if (authorizer.requiresAuthentication(request.method)) {
+                when (
+                    val verdict = authorizer.authorizeVerdict(
+                        request.method,
+                        request.uri,
+                        request.headers["authorization"],
+                    )
+                ) {
+                    is RtspSessionAuthorizer.AuthVerdict.Unauthorized -> {
+                        // A 401 does not advance the CSeq floor: clients
+                        // routinely retry the same request with the same
+                        // CSeq after completing the Digest handshake.
+                        sendUnauthorized(output, stale = verdict.stale)
+                        return
+                    }
+                    RtspSessionAuthorizer.AuthVerdict.Allowed -> Unit
+                }
             }
+            lastCSeq = cSeq
 
             if (!RtspUriPolicy.isRequestUriAllowed(request.method, request.uri)) {
                 sendResponse(output, "404 Not Found")
@@ -935,10 +947,10 @@ class RtspServer(
             sendResponse(output, "200 OK")
         }
 
-        private fun sendUnauthorized(output: OutputStream) {
+        private fun sendUnauthorized(output: OutputStream, stale: Boolean = false) {
             sendResponse(
                 output, "401 Unauthorized",
-                mapOf("WWW-Authenticate" to authorizer.challengeHeader())
+                mapOf("WWW-Authenticate" to authorizer.challengeHeader(stale = stale))
             )
         }
 

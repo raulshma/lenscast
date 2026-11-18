@@ -38,7 +38,7 @@ class AuthWebHandlerTest {
 
     private fun stored(
         enabled: Boolean = true,
-        username: String = "old",
+        username: String = "dash",
         passwordHash: String = "stored-hash",
         rtspDigestHa1: String = "stored-ha1",
         viewerUsername: String? = null,
@@ -102,9 +102,45 @@ class AuthWebHandlerTest {
         assertTrue(successOf(response))
         assertEquals("stored-hash", saved.captured.passwordHash)
         assertEquals("stored-ha1", saved.captured.rtspDigestHa1)
-        // Only a real rotation invalidates sessions — a username edit or a
-        // disable must not log every browser out.
+        // No admin credential actually moved, so live browsers stay signed in.
         verify(exactly = 0) { webAuthGate.revokeAllSessions() }
+    }
+
+    @Test
+    fun `a username edit without a password is rejected when a digest HA1 exists`() {
+        val response = put(
+            stored(username = "old", rtspDigestHa1 = "stored-ha1"),
+            """{"enabled":true,"username":"new","password":""}""",
+        )
+
+        assertFalse(successOf(response))
+        nothingSaved()
+    }
+
+    @Test
+    fun `a username edit without a digest HA1 may keep the stored password`() {
+        val response = put(
+            stored(username = "old", rtspDigestHa1 = ""),
+            """{"enabled":true,"username":"new","password":""}""",
+        )
+
+        assertTrue(successOf(response))
+        assertEquals("new", saved.captured.username)
+        assertEquals("stored-hash", saved.captured.passwordHash)
+        verify(exactly = 1) { webAuthGate.revokeAllSessions() }
+    }
+
+    @Test
+    fun `an admin save that omits the viewer fields preserves the pair`() {
+        val response = put(
+            stored(viewerUsername = "doorbell", viewerPasswordHash = "viewer-hash"),
+            """{"enabled":true,"username":"dash","password":""}""",
+        )
+
+        assertTrue(successOf(response))
+        assertEquals("doorbell", saved.captured.viewerUsername)
+        assertEquals("viewer-hash", saved.captured.viewerPasswordHash)
+        verify(exactly = 0) { webAuthGate.revokeViewerSessions() }
     }
 
     // ── rejection verdicts ──
@@ -141,7 +177,9 @@ class AuthWebHandlerTest {
         assertTrue(successOf(response))
         assertEquals(false, saved.captured.enabled)
         assertEquals("stored-hash", saved.captured.passwordHash)
-        verify(exactly = 0) { webAuthGate.revokeAllSessions() }
+        // Disabling auth must not leave a live admin session that becomes
+        // valid again the moment auth is re-enabled.
+        verify(exactly = 1) { webAuthGate.revokeAllSessions() }
     }
 
     @Test
@@ -165,7 +203,7 @@ class AuthWebHandlerTest {
         assertEquals(true, config.enabled)
         assertEquals("dash", config.username)
         assertEquals("", config.password)
-        assertFalse(config.viewerEnabled)
+        assertEquals(false, config.viewerEnabled)
         assertFalse(config.viewerConfigured)
         assertNull(config.viewerUsername)
     }
@@ -183,7 +221,7 @@ class AuthWebHandlerTest {
             ),
         )
         val config = parse(handler.get())
-        assertTrue(config.viewerEnabled)
+        assertTrue(config.viewerEnabled == true)
         assertTrue(config.viewerConfigured)
         assertEquals("doorbell", config.viewerUsername)
         assertEquals("dash", config.username)

@@ -1,9 +1,9 @@
-import { Show } from 'solid-js'
+import { Show, createSignal } from 'solid-js'
 import type { AllSettings, RtspInputFormat, RtspResolution, RtspVideoCodec } from '../../../../types'
 import { API_DEFAULTS } from '../../../../api/defaults'
 import { t } from '../../../../lib/i18n'
 import { streamToggle } from '../../../../lib/streamToggle'
-import { Panel, ToggleField, SliderField, FieldRow, Select, Led } from '../../ui'
+import { Panel, ToggleField, SliderField, FieldRow, Select, Led, TextInput } from '../../ui'
 
 // The five inline streaming/audio/https/rtsp/keep-awake cards, ported onto
 // the next UI's component kit. Same exports, same props, same bindings —
@@ -32,6 +32,7 @@ function useToggles(props: StreamingCardProps) {
     httpsToggle: streamToggle(streaming, 'httpsEnabled', save),
     rtspTls: streamToggle(streaming, 'rtspTlsEnabled', save),
     rtspSubStream: streamToggle(streaming, 'rtspSubStreamEnabled', save),
+    rtspBasicAuthCompat: streamToggle(streaming, 'rtspBasicAuthCompat', save),
     keepAwake: streamToggle(streaming, 'keepAwakeEnabled', save),
   }
 }
@@ -177,8 +178,21 @@ export function HttpsCard(props: StreamingCardProps) {
 }
 
 export function RtspCard(props: StreamingCardProps) {
-  const { s, rtspTls, rtspSubStream } = useToggles(props)
+  const { s, rtspTls, rtspSubStream, rtspBasicAuthCompat } = useToggles(props)
   const rtspVideoCodec = () => s()?.streaming?.rtspVideoCodec ?? API_DEFAULTS.rtspVideoCodec
+  // The port is typed, not just dragged: a slider cannot express 8554
+  // precisely on a phone. The draft keeps an in-progress edit alive while
+  // each keystroke is out of range (typing "85" on the way to "8554").
+  const [portDraft, setPortDraft] = createSignal<string | null>(null)
+  const commitPort = () => {
+    const raw = portDraft()
+    if (raw === null) return
+    const value = Number.parseInt(raw, 10)
+    if (Number.isFinite(value) && value >= API_DEFAULTS.rtspPortMin && value <= API_DEFAULTS.rtspPortMax) {
+      props.updateStreamingAndSave({ rtspPort: value })
+    }
+    setPortDraft(null)
+  }
 
   return (
     <Panel title={t('rtsp.title')} badge={<Led tone={s()?.streaming?.rtspEnabled ?? API_DEFAULTS.rtspEnabled ? 'ok' : 'off'} />}>
@@ -206,15 +220,34 @@ export function RtspCard(props: StreamingCardProps) {
           onChange={rtspSubStream.onToggle}
         />
 
-        <SliderField
-          label={t('rtsp.port')}
-          display={`${s()?.streaming?.rtspPort ?? API_DEFAULTS.rtspPort}`}
-          min={API_DEFAULTS.rtspPortMin}
-          max={API_DEFAULTS.rtspPortMax}
-          step={1}
-          value={s()?.streaming?.rtspPort ?? API_DEFAULTS.rtspPort}
-          onChange={(v) => props.updateStreamingDebounced({ rtspPort: v })}
+        <ToggleField
+          label={t('rtsp.basicAuthCompat')}
+          hint={t('rtsp.basicAuthCompatDesc')}
+          checked={rtspBasicAuthCompat.checked()}
+          onChange={rtspBasicAuthCompat.onToggle}
         />
+
+        <FieldRow label={t('rtsp.port')}>
+          <TextInput
+            class="nx-input-num"
+            type="number"
+            small
+            mono
+            min={API_DEFAULTS.rtspPortMin}
+            max={API_DEFAULTS.rtspPortMax}
+            step={1}
+            value={portDraft() ?? String(s()?.streaming?.rtspPort ?? API_DEFAULTS.rtspPort)}
+            onInput={(raw) => {
+              setPortDraft(raw)
+              const value = Number.parseInt(raw, 10)
+              if (Number.isFinite(value) && value >= API_DEFAULTS.rtspPortMin && value <= API_DEFAULTS.rtspPortMax) {
+                props.updateStreamingDebounced({ rtspPort: value })
+              }
+            }}
+            onBlur={commitPort}
+            ariaLabel={t('rtsp.port')}
+          />
+        </FieldRow>
 
         <FieldRow label={t('rtsp.inputFormat')}>
           <Select

@@ -21,6 +21,7 @@ import com.raulshma.lenscast.capture.ml.DetectionModelStore
 import com.raulshma.lenscast.data.SettingsDataStore
 import com.raulshma.lenscast.core.StreamAuthCrypto
 import com.raulshma.lenscast.data.StreamAuthSettings
+import com.raulshma.lenscast.streaming.WebAuthGate
 import com.raulshma.lenscast.streaming.rtsp.RtspInputFormat
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
@@ -41,6 +42,8 @@ class SettingsViewModel(
     private val detectionModelStore: DetectionModelStore,
     /** The on-demand YAMNet model store; same one non-setting action as above. */
     private val audioModelStore: AudioModelStore,
+    /** Optional: revokes live web sessions when credentials rotate in-app. */
+    private val webAuthGate: WebAuthGate? = null,
 ) : ViewModel() {
 
     // Read-side settings come straight from the Settings Store's shared
@@ -80,6 +83,7 @@ class SettingsViewModel(
     val recordingAudioEnabled: StateFlow<Boolean> = settingsDataStore.recordingAudioEnabled
     val rtspEnabled: StateFlow<Boolean> = settingsDataStore.rtspEnabled
     val rtspPort: StateFlow<Int> = settingsDataStore.rtspPort
+    val rtspBasicAuthCompat: StateFlow<Boolean> = settingsDataStore.rtspBasicAuthCompat
     val rtspInputFormat: StateFlow<RtspInputFormat> = settingsDataStore.rtspInputFormat
     val rtmpEnabled: StateFlow<Boolean> = settingsDataStore.rtmpEnabled
     // Unlike the WHIP token below, the RTMP URL keeps its read-side flow:
@@ -280,6 +284,9 @@ class SettingsViewModel(
 
     fun updateRtspPort(port: Int) = save { settingsDataStore.saveRtspPort(port) }
 
+    fun updateRtspBasicAuthCompat(enabled: Boolean) =
+        save { settingsDataStore.saveRtspBasicAuthCompat(enabled) }
+
     fun updateRtspInputFormat(name: String) = save {
         settingsDataStore.saveRtspInputFormat(parseEnum(name, RtspInputFormat.AUTO))
     }
@@ -448,17 +455,30 @@ class SettingsViewModel(
     }
 
     fun updateAuthEnabled(enabled: Boolean) {
-        persistAuth(authSettings.value.copy(enabled = enabled))
+        val current = authSettings.value
+        // The gate folds a blank pair to auth-off, which would leave the
+        // switch looking enabled while the device is open. Refuse to enable
+        // until both halves exist.
+        if (enabled && (current.username.isBlank() || current.passwordHash.isBlank())) return
+        if (!enabled && current.enabled) webAuthGate?.revokeAllSessions()
+        persistAuth(current.copy(enabled = enabled))
     }
 
     fun updateAuthUsername(username: String) {
-        persistAuth(authSettings.value.copy(username = username, rtspDigestHa1 = ""))
+        val current = authSettings.value
+        // The RTSP HA1 cannot be recomputed without the password, so a
+        // username edit drops it (the authorizer falls back to Basic until
+        // the password is re-entered). Existing sessions also spoke for the
+        // old identity and must not survive.
+        if (username != current.username) webAuthGate?.revokeAllSessions()
+        persistAuth(current.copy(username = username, rtspDigestHa1 = ""))
     }
 
     fun updateAuthPassword(password: String) {
         val hash = StreamAuthCrypto.hashPassword(password)
         val username = authSettings.value.username
         val digestHa1 = StreamAuthCrypto.computeRtspDigestHa1(username, password)
+        webAuthGate?.revokeAllSessions()
         persistAuth(authSettings.value.copy(passwordHash = hash, rtspDigestHa1 = digestHa1))
     }
 
@@ -480,6 +500,7 @@ class SettingsViewModel(
         private val powerManager: PowerManager? = null,
         private val detectionModelStore: DetectionModelStore,
         private val audioModelStore: AudioModelStore,
+        private val webAuthGate: WebAuthGate? = null,
     ) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
         override fun <T : androidx.lifecycle.ViewModel> create(modelClass: Class<T>): T {
@@ -489,6 +510,7 @@ class SettingsViewModel(
                 powerManager,
                 detectionModelStore,
                 audioModelStore,
+                webAuthGate,
             ) as T
         }
     }

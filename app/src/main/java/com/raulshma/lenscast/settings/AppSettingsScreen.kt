@@ -27,6 +27,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -38,6 +39,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
@@ -95,6 +97,7 @@ fun AppSettingsScreen(
             // The detection section surfaces the on-demand model downloads.
             app.detectionModelStore,
             app.audioModelStore,
+            app.streamingManager.webAuthGate,
         )
     )
     val updateViewModel: UpdateViewModel = viewModel(
@@ -139,6 +142,7 @@ fun AppSettingsScreen(
     val recordingAudioEnabled by viewModel.recordingAudioEnabled.collectAsState()
     val rtspEnabled by viewModel.rtspEnabled.collectAsState()
     val rtspPort by viewModel.rtspPort.collectAsState()
+    val rtspBasicAuthCompat by viewModel.rtspBasicAuthCompat.collectAsState()
     val rtspInputFormat by viewModel.rtspInputFormat.collectAsState()
     val rtmpEnabled by viewModel.rtmpEnabled.collectAsState()
     val rtmpUrl by viewModel.rtmpUrl.collectAsState()
@@ -522,17 +526,66 @@ fun AppSettingsScreen(
                         onCheckedChange = { viewModel.updateRtspEnabled(it) }
                     )
                     if (rtspEnabled) {
-                        SliderSetting(
-                            title = stringResource(R.string.settings_rtsp_port),
-                            value = rtspPort.toFloat(),
-                            range = rtspPortSliderRange,
-                            onValueChange = { viewModel.updateRtspPort(it.toInt()) }
+                        // Typed entry alongside the drag slider's range:
+                        // a phone slider cannot express 8554 precisely. The
+                        // draft survives out-of-range prefixes while typing
+                        // ("8" → "85" → "855" → "8554").
+                        var rtspPortText by remember { mutableStateOf(rtspPort.toString()) }
+                        LaunchedEffect(rtspPort) {
+                            if (rtspPortText.toIntOrNull() != rtspPort) {
+                                rtspPortText = rtspPort.toString()
+                            }
+                        }
+                        val typedPort = rtspPortText.toIntOrNull()
+                        val portInRange = typedPort != null &&
+                            typedPort in StreamDefaults.RTSP_PORT_MIN..StreamDefaults.RTSP_PORT_MAX
+                        OutlinedTextField(
+                            value = rtspPortText,
+                            onValueChange = { text ->
+                                if (text.length <= 5 && text.all(Char::isDigit)) {
+                                    rtspPortText = text
+                                    text.toIntOrNull()
+                                        ?.takeIf {
+                                            it in StreamDefaults.RTSP_PORT_MIN..StreamDefaults.RTSP_PORT_MAX
+                                        }
+                                        ?.let(viewModel::updateRtspPort)
+                                }
+                            },
+                            label = { Text(stringResource(R.string.settings_rtsp_port)) },
+                            isError = rtspPortText.isNotEmpty() && !portInRange,
+                            supportingText = {
+                                if (rtspPortText.isNotEmpty() && !portInRange) {
+                                    Text(
+                                        stringResource(
+                                            R.string.settings_rtsp_port_invalid,
+                                            StreamDefaults.RTSP_PORT_MIN,
+                                            StreamDefaults.RTSP_PORT_MAX,
+                                        )
+                                    )
+                                }
+                            },
+                            keyboardOptions = KeyboardOptions(
+                                keyboardType = KeyboardType.Number,
+                                imeAction = ImeAction.Done,
+                            ),
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true,
                         )
                         DropdownSetting(
                             title = stringResource(R.string.settings_rtsp_input_format),
                             options = RtspInputFormat.entries.map { it.name },
                             selected = rtspInputFormat.name,
                             onSelect = { viewModel.updateRtspInputFormat(it) }
+                        )
+                        SwitchSetting(
+                            title = stringResource(R.string.settings_rtsp_basic_auth),
+                            checked = rtspBasicAuthCompat,
+                            onCheckedChange = { viewModel.updateRtspBasicAuthCompat(it) }
+                        )
+                        Text(
+                            text = stringResource(R.string.settings_rtsp_basic_auth_description),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                         SwitchSetting(
                             title = stringResource(R.string.settings_rtsp_sub_stream),

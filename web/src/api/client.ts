@@ -5,7 +5,11 @@ type JsonValue = Record<string, unknown> | unknown[] | string | number | boolean
 const pendingRequests = new Map<string, Promise<JsonValue>>()
 
 function dedupeKey(input: string, init: RequestInit = {}): string {
-  return `${init.method || 'GET'}:${input}`
+  // The body is part of the identity: two same-URL writes with different
+  // payloads (a slider tick followed by a toggle) must not coalesce into
+  // the first one's response.
+  const body = typeof init.body === 'string' ? init.body : ''
+  return `${init.method || 'GET'}:${input}:${body}`
 }
 
 async function requestJson<T>(input: string, init: RequestInit = {}): Promise<T> {
@@ -104,12 +108,23 @@ export async function downloadDetectionModel(): Promise<{ success: boolean }> {
   return requestJson('/api/settings/ml-model/download', { method: 'POST' })
 }
 
+function assertWriteSucceeded(body: unknown, fallback: string): void {
+  if (body && typeof body === 'object' && !Array.isArray(body)) {
+    const result = body as { success?: boolean; error?: string }
+    if (result.success === false) {
+      throw new Error(result.error?.trim() || fallback)
+    }
+  }
+}
+
 export async function updateSettings(settings: Partial<AllSettings>): Promise<{ success: boolean; error?: string }> {
-  return requestJson('/api/settings', {
+  const body = await requestJson<{ success: boolean; error?: string }>('/api/settings', {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(settings),
   })
+  assertWriteSucceeded(body, 'Settings update failed')
+  return body
 }
 
 // Settings PUTs replace the whole streaming block, so every streaming save
@@ -154,11 +169,13 @@ export async function updateAuthConfig(body: {
   viewerUsername?: string | null
   viewerPassword?: string
 }): Promise<unknown> {
-  return requestJson('/api/auth/config', {
+  const payload = await requestJson('/api/auth/config', {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   })
+  assertWriteSucceeded(payload, 'Auth update failed')
+  return payload
 }
 
 export async function revokeAuthSession(prefix: string): Promise<void> {

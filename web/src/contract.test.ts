@@ -149,6 +149,7 @@ const STREAMING_KEYS = [
   'streamAudioEchoCancellation',
   'recordingAudioEnabled',
   'rtspEnabled',
+  'rtspBasicAuthCompat',
   'rtspPort',
   'rtspInputFormat',
   'rtspVideoCodec',

@@ -108,7 +108,9 @@ awake underneath all of that — locked screens, overnight streams — is the
   rule's **missed-run policy** (`missedRunPolicy`). In the default
   `"catch_up"` mode it depends on the action's catch-up class:
   setting-convergence actions (everything except photo capture) are
-  **STATEFUL** and fire no matter how late the tick is; the one
+  **STATEFUL** and catch up within a **6-hour window** of their scheduled
+  minute (past that the state change is stale enough to contradict the
+  current time of day; the next occurrence fires normally); the one
   moment-effect action (`capture_photo`) is **ONESHOT** and only fires
   within a **10-minute grace** of its scheduled instant. In `"window"`
   mode the rule's own window is the authority — it fires only within

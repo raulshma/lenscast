@@ -171,9 +171,13 @@ class HttpAuthFilter(
         if (basic != null) {
             val role = webAuthGate.basicRole(basic.first, basic.second)
                 ?: return HttpResult.jsonError(401, "Authentication required")
+            // Header credentials are a full bearer of the role: the viewer
+            // allowance is the same for reads and writes. The old
+            // non-GET-only check let a viewer Basic caller read the
+            // admin-only GETs (/api/auth/config, /api/auth/sessions,
+            // /api/audit) that the cookie lane already protects.
             if (
                 role == SessionRole.VIEWER &&
-                method != "GET" && method != "HEAD" &&
                 RoleGatePolicy.decide(SessionRole.VIEWER, method, uri) == RoleGatePolicy.Verdict.DENY
             ) {
                 runCatching {
@@ -245,6 +249,22 @@ class HttpAuthFilter(
         val colon = decoded.indexOf(':')
         if (colon < 0) return null
         return decoded.substring(0, colon) to decoded.substring(colon + 1)
+    }
+
+    /**
+     * The role the already-authorized request speaks for. The dispatch layer
+     * used to derive this from the cookie alone, so a viewer's Basic request
+     * (which mints no cookie) dispatched as ADMIN and read unredacted admin
+     * surfaces. Mirrors [authorize]'s precedence: a presented Basic pair wins
+     * over the cookie; auth-off is ADMIN.
+     */
+    fun callerRole(headers: Map<String, String?>): SessionRole {
+        if (!webAuthGate.isEnabled) return SessionRole.ADMIN
+        val basic = basicCredentialsFrom(headers["authorization"])
+        if (basic != null) {
+            return webAuthGate.basicRole(basic.first, basic.second) ?: SessionRole.ADMIN
+        }
+        return webAuthGate.sessionRoleFor(headers["cookie"])
     }
 
     /**

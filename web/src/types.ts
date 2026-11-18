@@ -99,6 +99,8 @@ export interface StreamingSettings {
   rtspEnabled: boolean
   /** The RTSP listener's own TLS setting (rtsps://), independent of httpsEnabled. */
   rtspTlsEnabled: boolean
+  /** Advertise Basic instead of Digest for clients that cannot complete the Digest handshake. */
+  rtspBasicAuthCompat: boolean
   rtspPort: number
   rtspInputFormat: RtspInputFormat
   rtspResolution: RtspResolution

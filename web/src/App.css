@@ -3531,6 +3531,7 @@ button.timeline-segment {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+  flex-wrap: wrap;
 }
 
 .automation-rule-title {
@@ -3612,6 +3613,8 @@ button.timeline-segment {
 
 .automation-rule-buttons {
   display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   gap: 8px;
 }
 

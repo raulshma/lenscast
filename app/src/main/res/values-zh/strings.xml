@@ -350,6 +350,7 @@
     <string name="settings_section_rtsp">RTSP 视频流</string>
     <string name="settings_enable_rtsp">启用 RTSP 直播</string>
     <string name="settings_rtsp_port">RTSP 端口</string>
+    <string name="settings_rtsp_port_invalid">请输入 %1$d 到 %2$d 之间的端口</string>
     <string name="settings_rtsp_input_format">RTSP 编码器输入格式</string>
     <string name="settings_section_rtmp">RTMP 推流</string>
     <string name="settings_enable_rtmp">启用 RTMP 推流</string>

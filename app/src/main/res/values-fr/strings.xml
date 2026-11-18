@@ -357,6 +357,7 @@
     <string name="settings_section_rtsp">Flux RTSP</string>
     <string name="settings_enable_rtsp">Activer la diffusion RTSP</string>
     <string name="settings_rtsp_port">Port RTSP</string>
+    <string name="settings_rtsp_port_invalid">Saisissez un port entre %1$d et %2$d</string>
     <string name="settings_rtsp_input_format">Format d\'entrée de l\'encodeur RTSP</string>
     <string name="settings_section_rtmp">Push RTMP</string>
     <string name="settings_enable_rtmp">Activer le push RTMP</string>

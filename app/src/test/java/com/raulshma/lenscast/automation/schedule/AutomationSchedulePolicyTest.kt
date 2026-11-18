@@ -288,10 +288,17 @@ class AutomationSchedulePolicyTest {
     // ── Catch-up: STATEFUL vs ONESHOT ──
 
     @Test
-    fun `stateful actions fire hours past the occurrence`() {
-        // 800 minutes late — lateness is schedule-time, so no wall clock needed.
-        val fired = due(at = snapshot(minuteOfDay = 1_400))
+    fun `stateful actions catch up inside the stateful window`() {
+        // Five hours late — inside the six-hour stateful catch-up bound.
+        val fired = due(at = snapshot(minuteOfDay = 900))
         assertEquals(listOf("stream"), fired.single().actions.map { it.type })
+    }
+
+    @Test
+    fun `stateful actions past the stateful window are stale and dropped`() {
+        // 13+ hours late: applying a light/stream state change now would
+        // contradict the current time of day; the next occurrence fires.
+        assertTrue(due(at = snapshot(minuteOfDay = 1_400)).isEmpty())
     }
 
     @Test

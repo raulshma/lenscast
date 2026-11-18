@@ -192,6 +192,8 @@ export const en: Record<string, string> = {
   'exposure.compensation': 'Compensation',
   'exposure.iso': 'ISO',
   'exposure.time': 'Exposure Time',
+  'exposure.timeMs': "Exposure time in milliseconds",
+  'exposure.timeHint': "{ms} ms ({s} s)",
 
   // ── Focus card ──
   'focus.title': 'Focus',
@@ -393,6 +395,8 @@ export const en: Record<string, string> = {
   'rtsp.codecH264': 'H.264 (recommended)',
   'rtsp.tls': 'TLS (RTSPS)',
   'rtsp.tlsDesc': 'Serve RTSP over TLS (rtsps://) with the same self-signed identity — independent of the HTTPS toggle. Restarting a live RTSP output applies it.',
+  'rtsp.basicAuthCompat': 'Basic Auth Compatibility',
+  'rtsp.basicAuthCompatDesc': 'Advertise Basic instead of Digest for players that cannot complete the Digest handshake (for example tinyCam). Digest is still accepted.',
   'rtsp.subStream': 'Low-Res Sub-Stream (/sub)',
   'rtsp.subStreamDesc': 'Serves a second low-resolution H.264 stream for NVR detect roles.',
 

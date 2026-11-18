@@ -41,13 +41,30 @@ class RtspSessionAuthorizer(
     }
 
     /**
-     * The WWW-Authenticate value for a 401: Digest when a Digest HA1 is
-     * configured, Basic otherwise.
+     * The auth verdict. [Unauthorized.stale] is true only when a correct
+     * Digest response used a nonce this server minted but has since expired —
+     * the standard signal telling the client to retry with the fresh nonce
+     * instead of re-prompting the user.
      */
-    fun challengeHeader(): String {
-        val digestChallenge = if (specProvider()?.digestHa1?.isNotBlank() == true) {
+    sealed interface AuthVerdict {
+        data object Allowed : AuthVerdict
+        data class Unauthorized(val stale: Boolean = false) : AuthVerdict
+    }
+
+    /**
+     * The WWW-Authenticate value for a 401. Digest is advertised when a
+     * Digest HA1 is configured and the Basic compatibility mode is off;
+     * otherwise Basic. Basic verification stays available either way, so a
+     * client that chooses Basic is never rejected just because Digest was
+     * advertised.
+     */
+    fun challengeHeader(stale: Boolean = false): String {
+        val spec = specProvider()
+        val digestChallenge = if (spec?.digestHa1?.isNotBlank() == true && !spec.basicAuthCompat) {
             val nonce = createDigestNonce()
-            "Digest realm=\"$AUTH_REALM\", nonce=\"$nonce\", opaque=\"$AUTH_OPAQUE\", algorithm=MD5, qop=\"auth\""
+            val staleParam = if (stale) ", stale=TRUE" else ""
+            "Digest realm=\"$AUTH_REALM\", nonce=\"$nonce\", opaque=\"$AUTH_OPAQUE\", " +
+                "algorithm=MD5, qop=\"auth\"$staleParam"
         } else null
 
         return digestChallenge ?: "Basic realm=\"$AUTH_REALM\""
@@ -58,33 +75,43 @@ class RtspSessionAuthorizer(
      * is the raw Authorization header; null or an unrecognized scheme rejects.
      * Digest takes priority over Basic.
      */
-    fun authorize(method: String, uri: String, authHeaderValue: String?): Boolean {
-        val auth = specProvider() ?: return true
-        val authHeader = authHeaderValue ?: return false
+    fun authorize(method: String, uri: String, authHeaderValue: String?): Boolean =
+        authorizeVerdict(method, uri, authHeaderValue) == AuthVerdict.Allowed
+
+    /** The full verdict, including the stale-nonce signal the transport uses. */
+    fun authorizeVerdict(method: String, uri: String, authHeaderValue: String?): AuthVerdict {
+        val auth = specProvider() ?: return AuthVerdict.Allowed
+        val authHeader = authHeaderValue ?: return AuthVerdict.Unauthorized()
 
         if (authHeader.startsWith("Digest ", ignoreCase = true)) {
-            if (auth.digestHa1.isBlank()) return false
+            if (auth.digestHa1.isBlank()) return AuthVerdict.Unauthorized()
             return isAuthorizedDigest(authHeader, auth.username, auth.digestHa1, method, uri)
         }
-        if (!authHeader.startsWith("Basic ", ignoreCase = true)) return false
+        if (!authHeader.startsWith("Basic ", ignoreCase = true)) return AuthVerdict.Unauthorized()
 
         val payload = authHeader.substringAfter(' ', "").trim()
-        if (payload.isEmpty()) return false
+        if (payload.isEmpty()) return AuthVerdict.Unauthorized()
 
         // Strict RFC 4648 decode — Base64Codec rejects non-alphabet characters
         // and malformed padding instead of skipping them, so a tampered or
         // truncated header can never decode into credentials.
-        val decodedBytes = Base64Codec.decodeOrNull(payload) ?: return false
+        val decodedBytes = Base64Codec.decodeOrNull(payload) ?: return AuthVerdict.Unauthorized()
         val decoded = String(decodedBytes, Charsets.UTF_8)
 
         val separator = decoded.indexOf(':')
-        if (separator <= 0) return false
+        if (separator <= 0) return AuthVerdict.Unauthorized()
 
         val providedUser = decoded.substring(0, separator)
         val providedPassword = decoded.substring(separator + 1)
 
-        if (!StreamAuthCrypto.constantTimeEquals(providedUser, auth.username)) return false
-        return StreamAuthCrypto.verifyPassword(providedPassword, auth.passwordHash)
+        if (!StreamAuthCrypto.constantTimeEquals(providedUser, auth.username)) {
+            return AuthVerdict.Unauthorized()
+        }
+        return if (StreamAuthCrypto.verifyPassword(providedPassword, auth.passwordHash)) {
+            AuthVerdict.Allowed
+        } else {
+            AuthVerdict.Unauthorized()
+        }
     }
 
     private fun isAuthorizedDigest(
@@ -93,34 +120,46 @@ class RtspSessionAuthorizer(
         digestHa1: String,
         method: String,
         requestUri: String,
-    ): Boolean {
+    ): AuthVerdict {
         val params = parseDigestParams(authHeader.substringAfter(' ', ""))
 
-        val username = params["username"] ?: return false
-        val realm = params["realm"] ?: return false
-        val nonce = params["nonce"] ?: return false
-        val uri = params["uri"] ?: return false
-        val response = params["response"]?.lowercase(Locale.US) ?: return false
+        val username = params["username"] ?: return AuthVerdict.Unauthorized()
+        val realm = params["realm"] ?: return AuthVerdict.Unauthorized()
+        val nonce = params["nonce"] ?: return AuthVerdict.Unauthorized()
+        val uri = params["uri"] ?: return AuthVerdict.Unauthorized()
+        val response = params["response"]?.lowercase(Locale.US) ?: return AuthVerdict.Unauthorized()
         val qop = params["qop"]?.lowercase(Locale.US)
         val nc = params["nc"] ?: ""
         val cnonce = params["cnonce"] ?: ""
         val opaque = params["opaque"] ?: ""
 
-        if (!StreamAuthCrypto.constantTimeEquals(username, expectedUser)) return false
-        if (!StreamAuthCrypto.constantTimeEquals(realm, AUTH_REALM)) return false
-        if (!StreamAuthCrypto.constantTimeEquals(opaque, AUTH_OPAQUE)) return false
-        if (!isDigestUriMatch(uri, requestUri)) return false
-        if (!validateDigestNonce(nonce, username, cnonce, nc, qop)) return false
+        if (!StreamAuthCrypto.constantTimeEquals(username, expectedUser)) return AuthVerdict.Unauthorized()
+        if (!StreamAuthCrypto.constantTimeEquals(realm, AUTH_REALM)) return AuthVerdict.Unauthorized()
+        // RFC 2617 says the client should echo opaque, but several NVR/client
+        // stacks omit it. A present-but-wrong value is still rejected.
+        if (opaque.isNotEmpty() && !StreamAuthCrypto.constantTimeEquals(opaque, AUTH_OPAQUE)) {
+            return AuthVerdict.Unauthorized()
+        }
+        if (!isDigestUriMatch(uri, requestUri)) return AuthVerdict.Unauthorized()
 
         val ha2 = StreamAuthCrypto.md5Hex("$method:$uri")
         val expectedResponse = if (!qop.isNullOrBlank()) {
-            if (cnonce.isBlank() || nc.isBlank()) return false
+            if (cnonce.isBlank() || nc.isBlank()) return AuthVerdict.Unauthorized()
             StreamAuthCrypto.md5Hex("$digestHa1:$nonce:$nc:$cnonce:$qop:$ha2")
         } else {
             StreamAuthCrypto.md5Hex("$digestHa1:$nonce:$ha2")
         }
 
-        return StreamAuthCrypto.constantTimeEquals(response, expectedResponse)
+        // Verify the response before touching the nonce's replay counter, so
+        // a guessed request cannot consume the legitimate client's next nc.
+        if (!StreamAuthCrypto.constantTimeEquals(response, expectedResponse)) {
+            return AuthVerdict.Unauthorized()
+        }
+        return when (validateDigestNonce(nonce, username, cnonce, nc, qop)) {
+            NonceVerdict.OK -> AuthVerdict.Allowed
+            NonceVerdict.STALE -> AuthVerdict.Unauthorized(stale = true)
+            NonceVerdict.UNKNOWN -> AuthVerdict.Unauthorized()
+        }
     }
 
     /** Parses comma-separated Digest parameters; quoted values may contain escaped quotes. */
@@ -170,28 +209,35 @@ class RtspSessionAuthorizer(
         return result
     }
 
+    private enum class NonceVerdict { OK, STALE, UNKNOWN }
+
     private fun validateDigestNonce(
         nonce: String,
         username: String,
         cnonce: String,
         ncHex: String,
         qop: String?,
-    ): Boolean {
-        cleanExpiredDigestNonces()
-        val state = digestNonces[nonce] ?: return false
-        if (clock() > state.expiresAtMs) {
+    ): NonceVerdict {
+        // Look the presented nonce up before the sweep: the sweep drops
+        // expired entries, and an entry still present here is what lets a
+        // correct-but-late response get the stale=TRUE signal.
+        val presented = digestNonces[nonce]
+        if (presented != null && clock() > presented.expiresAtMs) {
             digestNonces.remove(nonce)
-            return false
+            cleanExpiredDigestNonces()
+            return NonceVerdict.STALE
         }
+        cleanExpiredDigestNonces()
+        val state = digestNonces[nonce] ?: return NonceVerdict.UNKNOWN
 
-        if (qop.isNullOrBlank()) return true
-        val nc = ncHex.toLongOrNull(16) ?: return false
-        if (cnonce.isBlank()) return false
+        if (qop.isNullOrBlank()) return NonceVerdict.OK
+        val nc = ncHex.toLongOrNull(16) ?: return NonceVerdict.UNKNOWN
+        if (cnonce.isBlank()) return NonceVerdict.UNKNOWN
         val key = "$username|$cnonce"
         val previous = state.ncTrack[key] ?: 0L
-        if (nc <= previous) return false
+        if (nc <= previous) return NonceVerdict.UNKNOWN
         state.ncTrack[key] = nc
-        return true
+        return NonceVerdict.OK
     }
 
     /** The Digest uri parameter must normalize to the same path as the request URI. */

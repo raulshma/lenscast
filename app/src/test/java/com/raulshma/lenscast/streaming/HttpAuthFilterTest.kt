@@ -622,16 +622,31 @@ class HttpAuthFilterTest {
     }
 
     @Test
-    fun `basic viewer presentation reads everywhere and is gated on writes`() {
+    fun `basic viewer presentation reads media but is denied admin-only reads and writes`() {
         val filter = HttpAuthFilter(viewerGate(), port = 8080)
         val viewer = mapOf(basicHeader("door", "viewer-pw"))
         assertNull(filter.authorize("GET", "/api/settings", viewer))
         // Media egress: the WHEP SDP offer is a viewer-allowed write.
         assertNull(filter.authorize("POST", "/whep", viewer))
-        // Admin-only writes deny 403 exactly like a viewer session cookie.
-        val result = filter.authorize("POST", "/api/settings", viewer)!!
-        assertEquals(403, result.statusCode)
-        assertNull(filter.authorize("GET", "/api/settings", viewer))
+        // The cookie lane's admin-only reads and writes deny 403 here too:
+        // header credentials are a full bearer of the role, not a read bypass.
+        assertEquals(403, filter.authorize("GET", "/api/auth/config", viewer)!!.statusCode)
+        assertEquals(403, filter.authorize("GET", "/api/auth/sessions", viewer)!!.statusCode)
+        assertEquals(403, filter.authorize("GET", "/api/audit", viewer)!!.statusCode)
+        assertEquals(403, filter.authorize("POST", "/api/settings", viewer)!!.statusCode)
+    }
+
+    @Test
+    fun `callerRole resolves a basic viewer instead of defaulting to admin`() {
+        val filter = HttpAuthFilter(viewerGate(), port = 8080)
+        assertEquals(
+            SessionRole.VIEWER,
+            filter.callerRole(mapOf(basicHeader("door", "viewer-pw"))),
+        )
+        assertEquals(
+            SessionRole.ADMIN,
+            filter.callerRole(mapOf(basicHeader("admin", "admin-pw"))),
+        )
     }
 
     @Test

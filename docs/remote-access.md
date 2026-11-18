@@ -42,7 +42,8 @@ Two toggles change how these URLs behave:
   logging in
   on the dashboard. Passwords are stored PBKDF2-hashed and failed logins are
   rate-limited. The RTSP server challenges with Digest (Basic is also
-  accepted) using the same credentials. For scripted clients that cannot hold
+  accepted) using the same credentials; an opt-in Basic compatibility mode
+  advertises Basic for clients that cannot complete the Digest handshake. For scripted clients that cannot hold
   a cookie (curl one-liners, Home Assistant's `still_image_url`), the settings
   can enable an API token: send it as `Authorization: Bearer <token>` or
   `X-Api-Token: <token>` and it authorizes GET and HEAD requests to the

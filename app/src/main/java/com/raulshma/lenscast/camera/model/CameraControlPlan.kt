@@ -77,14 +77,37 @@ data class CameraControlPlan(
 
             val iso = settings.iso?.coerceIn(isoRange)
             val exposureTimeNs = if (hasManualExposure) {
-                settings.exposureTime ?: run {
-                    // Default to 1/frameRate when ISO is set without explicit exposure time
+                // The explicit shutter is clamped too: a persisted value may
+                // predate this device or exceed a sensor's range, and an
+                // out-of-range SENSOR_EXPOSURE_TIME makes the whole capture
+                // request invalid (all controls dropped) rather than degrading.
+                val requestedNs = settings.exposureTime ?: run {
+                    // Default to 1/frameRate when ISO is set without explicit
+                    // exposure time.
                     val defaultNs = 1_000_000_000L / settings.frameRate.coerceAtLeast(1)
                     defaultNs.coerceIn(sensorExposureTimeRange.first, sensorExposureTimeRange.last)
                 }
+                requestedNs.coerceIn(sensorExposureTimeRange.first, sensorExposureTimeRange.last)
             } else {
                 null
             }
+            // AE OFF needs the full manual pair: a sensitivity out of the
+            // device range would also invalidate the request. When only the
+            // shutter was chosen, pair it with the range midpoint — a usable
+            // default rather than leaving the sensor on its last value.
+            val sensorSensitivity = if (hasManualExposure) {
+                iso ?: (isoRange.start + (isoRange.endInclusive - isoRange.start) / 2)
+            } else {
+                null
+            }
+            // A shutter longer than the frame period is incoherent with the
+            // requested fps range; the driver then either ignores the shutter
+            // or stretches frames unpredictably. Cap the range at the fastest
+            // rate the shutter physically allows.
+            val (coherentFpsLower, coherentFpsUpper) =
+                coherentFps(fpsLower, fpsUpper, exposureTimeNs)
+            fpsLower = coherentFpsLower
+            fpsUpper = coherentFpsUpper
 
             val awbMode = when (settings.whiteBalance) {
                 WhiteBalance.AUTO -> CaptureRequest.CONTROL_AWB_MODE_AUTO
@@ -117,8 +140,11 @@ data class CameraControlPlan(
             return when (settings.nightVisionMode) {
                 NightVisionMode.ON -> {
                     sceneMode = CaptureRequest.CONTROL_SCENE_MODE_NIGHT
-                    val nightFpsLower = 10
-                    val nightFpsUpper = settings.frameRate.coerceAtMost(15)
+                    val (nightFpsLower, nightFpsUpper) = coherentFps(
+                        lower = 10,
+                        upper = settings.frameRate.coerceAtMost(15),
+                        exposureTimeNs = exposureTimeNs,
+                    )
                     CameraControlPlan(
                         fpsLower = nightFpsLower,
                         fpsUpper = nightFpsUpper,
@@ -127,7 +153,7 @@ data class CameraControlPlan(
                         sceneMode = sceneMode ?: CaptureRequest.CONTROL_SCENE_MODE_NIGHT,
                         aeMode = baseAeMode,
                         aeLock = false,
-                        sensorSensitivity = iso,
+                        sensorSensitivity = sensorSensitivity,
                         sensorExposureTimeNs = exposureTimeNs,
                         awbMode = awbMode,
                         afMode = afMode,
@@ -148,7 +174,7 @@ data class CameraControlPlan(
                         sceneMode = sceneMode ?: CaptureRequest.CONTROL_SCENE_MODE_NIGHT_PORTRAIT,
                         aeMode = autoAeMode,
                         aeLock = null,
-                        sensorSensitivity = iso,
+                        sensorSensitivity = sensorSensitivity,
                         sensorExposureTimeNs = exposureTimeNs,
                         awbMode = awbMode,
                         afMode = afMode,
@@ -173,7 +199,7 @@ data class CameraControlPlan(
                         sceneMode = sceneMode ?: CaptureRequest.CONTROL_SCENE_MODE_DISABLED,
                         aeMode = offAeMode,
                         aeLock = false,
-                        sensorSensitivity = iso,
+                        sensorSensitivity = sensorSensitivity,
                         sensorExposureTimeNs = exposureTimeNs,
                         awbMode = awbMode,
                         afMode = afMode,
@@ -182,6 +208,25 @@ data class CameraControlPlan(
                     )
                 }
             }
+        }
+
+        /**
+         * Caps an fps range so a manual shutter fits inside one frame period:
+         * a 1/8 s exposure cannot be sustained at 30 fps, so the range drops
+         * to the fastest rate that exposure allows (never below 1 fps).
+         */
+        private fun coherentFps(
+            lower: Int,
+            upper: Int,
+            exposureTimeNs: Long?,
+        ): Pair<Int, Int> {
+            if (exposureTimeNs == null) return lower to upper
+            val fastestFps = (1_000_000_000L / exposureTimeNs.coerceAtLeast(1L))
+                .toInt()
+                .coerceAtLeast(1)
+            val cappedUpper = upper.coerceAtMost(fastestFps)
+            val cappedLower = lower.coerceAtMost(cappedUpper).coerceAtLeast(1)
+            return cappedLower to cappedUpper
         }
 
         /**

@@ -109,7 +109,13 @@ object RtspConfigDiff {
  * The Digest HA1 is normalized to lowercase here, matching the server's
  * storage contract.
  */
-class RtspAuthSpec(username: String, passwordHash: String, digestHa1: String) {
+class RtspAuthSpec(
+    username: String,
+    passwordHash: String,
+    digestHa1: String,
+    /** Advertise Basic instead of Digest; Digest is still accepted. */
+    val basicAuthCompat: Boolean = false,
+) {
     val username: String = username
     val passwordHash: String = passwordHash
     val digestHa1: String = digestHa1.lowercase(Locale.US)

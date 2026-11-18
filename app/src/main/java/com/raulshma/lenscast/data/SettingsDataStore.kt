@@ -218,6 +218,7 @@ private object Keys {
     val API_TOKEN_HASH = stringPreferencesKey("api_token_hash")
     val HTTPS_ENABLED = stringPreferencesKey("https_enabled")
     val RTSP_TLS = stringPreferencesKey("rtsp_tls")
+    val RTSP_BASIC_AUTH_COMPAT = stringPreferencesKey("rtsp_basic_auth_compat")
     val AUDIO_DEVICE_ID = stringPreferencesKey("audio_device_id")
     val RESUME_STREAMS_ON_BOOT = stringPreferencesKey("resume_streams_on_boot")
     val FSI_CAMERA_RESUME = stringPreferencesKey("fsi_camera_resume")
@@ -775,6 +776,13 @@ internal val httpsEnabledPref = boolPref(Keys.HTTPS_ENABLED, defaultTrue = false
 // implied by the HTTPS flag; the store's init seeds it once from the stored
 // HTTPS value so existing rtsps users keep their scheme across the update.
 internal val rtspTlsEnabledPref = boolPref(Keys.RTSP_TLS, defaultTrue = false)
+
+/**
+ * Compatibility opt-in: advertise RTSP Basic instead of Digest. Digest
+ * remains accepted; this only changes the challenge a client sees, for
+ * players that cannot complete the Digest handshake.
+ */
+internal val rtspBasicAuthCompatPref = boolPref(Keys.RTSP_BASIC_AUTH_COMPAT, defaultTrue = false)
 
 /**
  * The one-time RTSP-TLS seeding, as a pure map edit: while the `rtsp_tls`
@@ -1538,6 +1546,8 @@ class SettingsDataStore(
 
     val rtspTlsEnabled: StateFlow<Boolean> = rtspTlsEnabledPref.shared()
 
+    val rtspBasicAuthCompat: StateFlow<Boolean> = rtspBasicAuthCompatPref.shared()
+
     val audioDeviceId: StateFlow<String> = audioDeviceIdPref.shared()
 
     val resumeStreamsOnBoot: StateFlow<Boolean> = resumeStreamsOnBootPref.shared()
@@ -1828,6 +1838,8 @@ class SettingsDataStore(
     suspend fun saveHttpsEnabled(enabled: Boolean) = httpsEnabledPref.save(enabled)
 
     suspend fun saveRtspTlsEnabled(enabled: Boolean) = rtspTlsEnabledPref.save(enabled)
+
+    suspend fun saveRtspBasicAuthCompat(enabled: Boolean) = rtspBasicAuthCompatPref.save(enabled)
 
     suspend fun saveAudioDeviceId(id: String) = audioDeviceIdPref.save(id)
 

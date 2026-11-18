@@ -27,6 +27,7 @@ export const API_DEFAULTS = {
   // implies rtsps://. Before the setting existed the scheme followed
   // httpsEnabled; the device seeds the toggle once from that stored value.
   rtspTlsEnabled: false,
+  rtspBasicAuthCompat: false,
   rtspSubStreamEnabled: false,
   rtspPort: 8554,
   rtspStreamingActive: false,

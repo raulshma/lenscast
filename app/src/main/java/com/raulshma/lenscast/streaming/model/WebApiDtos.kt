@@ -83,6 +83,8 @@ data class StreamingSettingsDto(
      * the RTSP listener to TLS.
      */
     val rtspTlsEnabled: Boolean = false,
+    /** Advertise Basic instead of Digest for incompatibly strict clients. */
+    val rtspBasicAuthCompat: Boolean = false,
     val rtspPort: Int = StreamDefaults.RTSP_PORT,
     val rtspInputFormat: String = "",
     /** The RTSP output resolution wire name: "480p" | "720p" | "720p43" | "1080p" | "1080p43". */
@@ -542,7 +544,11 @@ data class ClientConnectionDetailDto(
 // ── API Response DTOs ──
 
 @JsonClass(generateAdapter = true)
-data class SuccessResponse(val success: Boolean = true)
+data class SuccessResponse(
+    val success: Boolean = true,
+    /** Optional client-facing reason on a refused 200-carrier write. */
+    val error: String? = null,
+)
 
 /**
  * POST /api/system/restart — the additive extension of [SuccessResponse]: a

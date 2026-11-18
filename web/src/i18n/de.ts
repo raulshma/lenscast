@@ -192,6 +192,8 @@ export const de: Partial<Record<MessageKey, string>> = {
   'exposure.compensation': 'Korrektur',
   'exposure.iso': 'ISO',
   'exposure.time': 'Belichtungszeit',
+  'exposure.timeMs': "Belichtungszeit in Millisekunden",
+  'exposure.timeHint': "{ms} ms ({s} s)",
 
   // ── Focus card ──
   'focus.title': 'Fokus',
@@ -378,6 +380,8 @@ export const de: Partial<Record<MessageKey, string>> = {
   'rtsp.enable': 'RTSP-Streaming aktivieren',
   'rtsp.tls': 'TLS (RTSPS)',
   'rtsp.tlsDesc': 'RTSP über TLS ausliefern (rtsps://), mit derselben selbstsignierten Identität — unabhängig vom HTTPS-Schalter. Ein laufender RTSP-Output wird dafür neu gestartet.',
+  'rtsp.basicAuthCompat': 'Basic-Auth-Kompatibilität',
+  'rtsp.basicAuthCompatDesc': 'Basic statt Digest ankündigen für Player, die den Digest-Handshake nicht abschließen können (zum Beispiel tinyCam). Digest wird weiterhin akzeptiert.',
   'rtsp.subStream': 'Sub-Stream in niedriger Auflösung (/sub)',
   'rtsp.subStreamDesc': 'Stellt einen zweiten H.264-Stream in niedriger Auflösung für NVR-Detect-Rollen bereit.',
   'rtsp.port': 'RTSP-Port',

@@ -1999,7 +1999,12 @@ class StreamingManager(
     /** Null when auth is off or incomplete — the server treats null as "auth off". */
     private fun rtspAuthSpec(settings: StreamAuthSettings): RtspAuthSpec? {
         if (!settings.enabled || settings.username.isEmpty() || settings.passwordHash.isEmpty()) return null
-        return RtspAuthSpec(settings.username, settings.passwordHash, settings.rtspDigestHa1)
+        return RtspAuthSpec(
+            settings.username,
+            settings.passwordHash,
+            settings.rtspDigestHa1,
+            basicAuthCompat = authSettingsStore.rtspBasicAuthCompat.value,
+        )
     }
 
     fun applyBatteryOptimization(result: com.raulshma.lenscast.core.BatteryOptimizationResult?) {

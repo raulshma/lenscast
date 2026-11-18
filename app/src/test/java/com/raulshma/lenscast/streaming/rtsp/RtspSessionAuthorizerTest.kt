@@ -211,7 +211,7 @@ class RtspSessionAuthorizerTest {
     }
 
     @Test
-    fun `wrong or missing opaque is rejected`() {
+    fun `wrong opaque is rejected but an omitted opaque is accepted`() {
         var now = 1_000L
         val ha1 = StreamAuthCrypto.computeRtspDigestHa1("cam", "pw")
         val authorizer = digestAuthorizer(ha1) { now }
@@ -221,12 +221,45 @@ class RtspSessionAuthorizerTest {
                 "DESCRIBE", requestUri, digestHeader("cam", ha1, nonce, opaque = "spoofed")
             )
         )
-        // A missing opaque parameter defaults to "" which never matches.
-        assertFalse(
+        // Several NVR/client stacks omit opaque even though they were
+        // challenged with it; the response itself is still verified.
+        assertTrue(
             authorizer.authorize(
                 "DESCRIBE", requestUri, digestHeader("cam", ha1, nonce, opaque = null)
             )
         )
+    }
+
+    @Test
+    fun `an expired nonce with a correct response answers stale`() {
+        var now = 1_000L
+        val ha1 = StreamAuthCrypto.computeRtspDigestHa1("cam", "pw")
+        val authorizer = digestAuthorizer(ha1) { now }
+        val nonce = nonceFrom(authorizer.challengeHeader())
+        val header = digestHeader("cam", ha1, nonce)
+
+        now += 5 * 60 * 1000 + 1
+        assertEquals(
+            RtspSessionAuthorizer.AuthVerdict.Unauthorized(stale = true),
+            authorizer.authorizeVerdict("DESCRIBE", requestUri, header),
+        )
+        assertTrue(authorizer.challengeHeader(stale = true).contains("stale=TRUE"))
+    }
+
+    @Test
+    fun `basic compatibility advertises Basic but still accepts Digest`() {
+        val ha1 = StreamAuthCrypto.computeRtspDigestHa1("cam", "pw")
+        val passwordHash = StreamAuthCrypto.hashPassword("pw")
+        var compat = false
+        val authorizer = RtspSessionAuthorizer(
+            { RtspAuthSpec("cam", passwordHash, ha1, basicAuthCompat = compat) },
+        ) { 1_000L }
+        // Mint a Digest nonce while Digest is still advertised, then flip the
+        // compatibility flag: the challenge changes, the verifier does not.
+        val nonce = nonceFrom(authorizer.challengeHeader())
+        compat = true
+        assertTrue(authorizer.challengeHeader().startsWith("Basic "))
+        assertTrue(authorizer.authorize("DESCRIBE", requestUri, digestHeader("cam", ha1, nonce)))
     }
 
     @Test

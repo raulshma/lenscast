@@ -204,7 +204,22 @@ class CameraService(private val context: Context) {
         return updated
     }
 
-    private var activeSettings = CameraSettings()
+    @Volatile private var activeSettings = CameraSettings()
+
+    // Incremented on every successful bind. Post-bind control rungs capture
+    // it and drop themselves when a newer bind has landed: the new bind
+    // schedules its own rungs, and an old rung's force-focus reapply would
+    // otherwise cancel a tap-to-focus on the session that replaced it.
+    private var bindGeneration = 0
+
+    /**
+     * Whether THIS service last drove the torch on. A settings apply that
+     * asks for off only disables a torch we own: force-off on every emission
+     * stomped a torch lit elsewhere (the system's flashlight tile, another
+     * camera app), while an externally-lit torch that we never touched is
+     * not ours to extinguish.
+     */
+    @Volatile private var torchDrivenOn = false
 
     // The streaming analysis window's aspect, steered by the encode
     // resolution's aspect through the Settings Applier. Read live at bind
@@ -404,6 +419,7 @@ class CameraService(private val context: Context) {
                 return false
             }
             cam.cameraControl.enableTorch(on)
+            torchDrivenOn = on
             true
         } catch (e: Exception) {
             Log.w(TAG, "setTorchEnabled failed", e)
@@ -1474,6 +1490,7 @@ class CameraService(private val context: Context) {
                 // caller (bindRecording) must route its control applies and
                 // observations at this instance too, not the dead predecessor.
                 liveCamera = boundCamera
+                bindGeneration++
 
                 if (writeBack) {
                     preview = useCases.filterIsInstance<Preview>().firstOrNull()
@@ -1512,6 +1529,7 @@ class CameraService(private val context: Context) {
         // Unbound camera = torch dark: the live fact dies with the session,
         // and the driven strength goes with it (TorchState's KDoc).
         drivenTorchStrengthLevel = null
+        torchDrivenOn = false
         _torchState.value = TorchState.Off
     }
 
@@ -1797,8 +1815,10 @@ class CameraService(private val context: Context) {
      * a caught-exception no-op.
      */
     private fun schedulePostBindControlsApply() {
+        val generation = bindGeneration
         ControlsApplyPolicy.applyDelaysMs().forEach { delayMs ->
             controlsHandler.postDelayed({
+                if (generation != bindGeneration) return@postDelayed
                 applyCameraControls(activeSettings, forceFocusReapply = true)
             }, delayMs)
         }
@@ -1820,23 +1840,28 @@ class CameraService(private val context: Context) {
 
         try {
             if (cam.cameraInfo.hasFlashUnit()) {
-                cam.cameraControl.enableTorch(settings.torchEnabled)
-                // Bookkeeping only — the re-assert above is unchanged: the
-                // level this apply drives feeds [torchState] (null = device
-                // default), and a torch-off apply — or an on-without-level —
-                // retires any previous level.
-                drivenTorchStrengthLevel = null
-                // Per-level torch strength (API 33+): driven ONLY while the
-                // torch should be ON — turnOnTorchWithStrengthLevel switches
-                // the flash on as a side effect when it was off, so a
-                // torch-off apply never touches it. Riding this seam means the
-                // level re-asserts on every settings emission and after every
-                // rebind, exactly like the binary torch above. The policy's
-                // null verdict (unsupported SDK, single-level flash, unknown
-                // max) skips silently — enableTorch already did everything
-                // the device can do.
-                if (settings.torchEnabled && settings.torchStrength != null) {
-                    applyTorchStrength(cam, settings.torchStrength)
+                if (settings.torchEnabled) {
+                    // Per-level torch strength (API 33+): the strength call
+                    // itself switches the flash on, so it replaces — rather
+                    // than follows — enableTorch(true). Calling enableTorch
+                    // first flashed the default level and then stepped it.
+                    // The policy's null verdict (unsupported SDK, single-level
+                    // flash, unknown max) or a failed drive falls back to the
+                    // binary torch, so light always reaches the subject.
+                    val levelApplied = settings.torchStrength != null &&
+                        applyTorchStrength(cam, settings.torchStrength)
+                    if (!levelApplied) {
+                        drivenTorchStrengthLevel = null
+                        cam.cameraControl.enableTorch(true)
+                    }
+                    torchDrivenOn = true
+                } else if (torchDrivenOn) {
+                    // Only extinguish a torch this service lit — see
+                    // [torchDrivenOn]. The level this apply drove feeds
+                    // [torchState] and dies with the off state.
+                    drivenTorchStrengthLevel = null
+                    cam.cameraControl.enableTorch(false)
+                    torchDrivenOn = false
                 }
             }
         } catch (e: Exception) {
@@ -1876,56 +1901,82 @@ class CameraService(private val context: Context) {
             }
         }
 
-        try {
-            val camera2Control = Camera2CameraControl.from(cam.cameraControl)
-            val builder = CaptureRequestOptions.Builder()
-            // The decisions live in the pure, tested CameraControlPlan; this is
-            // translation only.
-            val plan = CameraControlPlan.from(settings, _availableIsoRange.value, sensorExposureTimeRange)
+        // The decisions live in the pure, tested CameraControlPlan; this is
+        // translation only. Each group applies in its own call: a single
+        // unsupported key (an OEM missing optical stabilization, a manual
+        // shutter outside the sensor's range) must not drop every other
+        // control with it — the old one-bundle try/catch did exactly that.
+        val plan = CameraControlPlan.from(settings, _availableIsoRange.value, sensorExposureTimeRange)
+        val camera2Control = Camera2CameraControl.from(cam.cameraControl)
 
-            builder.setCaptureRequestOption(
+        applyCaptureOptions(camera2Control, "fps") {
+            setCaptureRequestOption(
                 CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE,
                 Range(plan.fpsLower, plan.fpsUpper)
             )
+        }
 
-            if (plan.videoStabilizationOn) {
-                builder.setCaptureRequestOption(CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE, CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_ON)
-            } else {
-                builder.setCaptureRequestOption(CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE, CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_OFF)
-            }
-            if (plan.opticalStabilizationOn) {
-                builder.setCaptureRequestOption(CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE, CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE_ON)
-            } else {
-                builder.setCaptureRequestOption(CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE, CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE_OFF)
-            }
+        applyCaptureOptions(camera2Control, "video stabilization") {
+            setCaptureRequestOption(
+                CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE,
+                if (plan.videoStabilizationOn) {
+                    CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_ON
+                } else {
+                    CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_OFF
+                },
+            )
+        }
 
-            builder.setCaptureRequestOption(CaptureRequest.CONTROL_SCENE_MODE, plan.sceneMode)
-            builder.setCaptureRequestOption(CaptureRequest.CONTROL_AE_MODE, plan.aeMode)
+        applyCaptureOptions(camera2Control, "optical stabilization") {
+            setCaptureRequestOption(
+                CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE,
+                if (plan.opticalStabilizationOn) {
+                    CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE_ON
+                } else {
+                    CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE_OFF
+                },
+            )
+        }
+
+        applyCaptureOptions(camera2Control, "scene/ae") {
+            setCaptureRequestOption(CaptureRequest.CONTROL_SCENE_MODE, plan.sceneMode)
+            setCaptureRequestOption(CaptureRequest.CONTROL_AE_MODE, plan.aeMode)
             plan.aeLock?.let {
-                builder.setCaptureRequestOption(CaptureRequest.CONTROL_AE_LOCK, it)
+                setCaptureRequestOption(CaptureRequest.CONTROL_AE_LOCK, it)
             }
-            plan.sensorSensitivity?.let {
-                builder.setCaptureRequestOption(CaptureRequest.SENSOR_SENSITIVITY, it)
+        }
+
+        if (plan.sensorSensitivity != null || plan.sensorExposureTimeNs != null) {
+            applyCaptureOptions(camera2Control, "manual exposure") {
+                plan.sensorSensitivity?.let {
+                    setCaptureRequestOption(CaptureRequest.SENSOR_SENSITIVITY, it)
+                }
+                plan.sensorExposureTimeNs?.let {
+                    setCaptureRequestOption(CaptureRequest.SENSOR_EXPOSURE_TIME, it)
+                }
             }
-            plan.sensorExposureTimeNs?.let {
-                builder.setCaptureRequestOption(CaptureRequest.SENSOR_EXPOSURE_TIME, it)
-            }
-            builder.setCaptureRequestOption(CaptureRequest.CONTROL_AWB_MODE, plan.awbMode)
-            // Manual WB is conveyed by AWB OFF above; the Kelvin value maps to
-            // sensor gains through the pure KelvinGainsPolicy (blackbody
-            // approximation) applied in TRANSFORM_MATRIX mode with an identity
-            // color transform, so the gains do the correction.
-            plan.colorTemperatureKelvin?.let { kelvin ->
-                val gains = KelvinGainsPolicy.gainsFor(kelvin)
-                builder.setCaptureRequestOption(
+        }
+
+        applyCaptureOptions(camera2Control, "white balance") {
+            setCaptureRequestOption(CaptureRequest.CONTROL_AWB_MODE, plan.awbMode)
+        }
+
+        // Manual WB is conveyed by AWB OFF above; the Kelvin value maps to
+        // sensor gains through the pure KelvinGainsPolicy (blackbody
+        // approximation) applied in TRANSFORM_MATRIX mode with an identity
+        // color transform, so the gains do the correction.
+        plan.colorTemperatureKelvin?.let { kelvin ->
+            val gains = KelvinGainsPolicy.gainsFor(kelvin)
+            applyCaptureOptions(camera2Control, "kelvin gains") {
+                setCaptureRequestOption(
                     CaptureRequest.COLOR_CORRECTION_MODE,
                     CaptureRequest.COLOR_CORRECTION_MODE_TRANSFORM_MATRIX,
                 )
-                builder.setCaptureRequestOption(
+                setCaptureRequestOption(
                     CaptureRequest.COLOR_CORRECTION_GAINS,
                     android.hardware.camera2.params.RggbChannelVector(gains[0], gains[1], gains[2], gains[3]),
                 )
-                builder.setCaptureRequestOption(
+                setCaptureRequestOption(
                     CaptureRequest.COLOR_CORRECTION_TRANSFORM,
                     android.hardware.camera2.params.ColorSpaceTransform(
                         arrayOf(
@@ -1935,20 +1986,37 @@ class CameraService(private val context: Context) {
                         ),
                     ),
                 )
-                Log.d(TAG, "Manual white balance Kelvin: $kelvin → gains ${gains.joinToString()}")
             }
+            Log.d(TAG, "Manual white balance Kelvin: $kelvin → gains ${gains.joinToString()}")
+        }
 
-            if (plan.afMode != null) {
-                builder.setCaptureRequestOption(CaptureRequest.CONTROL_AF_MODE, plan.afMode)
+        if (plan.afMode != null) {
+            applyCaptureOptions(camera2Control, "autofocus") {
+                setCaptureRequestOption(CaptureRequest.CONTROL_AF_MODE, plan.afMode)
                 plan.lensFocusDistance?.let {
-                    builder.setCaptureRequestOption(CaptureRequest.LENS_FOCUS_DISTANCE, it)
+                    setCaptureRequestOption(CaptureRequest.LENS_FOCUS_DISTANCE, it)
                 }
             }
-
-            camera2Control.setCaptureRequestOptions(builder.build())
-        } catch (e: Exception) {
-            Log.w(TAG, "Advanced settings failed", e)
         }
+    }
+
+    /**
+     * Applies one capture-option group in isolation. CameraX rejects the
+     * whole options bundle when one key is unsupported on the device, so
+     * grouping (and catching) per concern keeps an OEM gap from silently
+     * disabling unrelated controls.
+     */
+    @androidx.annotation.OptIn(androidx.camera.camera2.interop.ExperimentalCamera2Interop::class)
+    private inline fun applyCaptureOptions(
+        camera2Control: Camera2CameraControl,
+        what: String,
+        configure: CaptureRequestOptions.Builder.() -> Unit,
+    ) {
+        runCatching {
+            val builder = CaptureRequestOptions.Builder()
+            builder.apply(configure)
+            camera2Control.setCaptureRequestOptions(builder.build())
+        }.onFailure { Log.w(TAG, "Advanced settings ($what) failed", it) }
     }
 
     /**
@@ -1957,19 +2025,19 @@ class CameraService(private val context: Context) {
      * path, translated by [TorchStrengthPolicy] (null verdict = skip
      * silently). Runs on the BOUND camera's camera2 id — the same camera
      * whose flash unit backs enableTorch — resolved through
-     * Camera2CameraInfo. The CameraManager-level API needs no bound session,
-     * but failures (unknown id, hardware quirk, the torch having been killed
-     * underneath us) are logged and swallowed: the binary torch above already
-     * put light on the subject, strength is the refinement.
+     * Camera2CameraInfo. The CameraManager-level API needs no bound session.
+     * Returns true only when the level reached the flash; on any skip or
+     * failure the caller falls back to the binary torch, so light always
+     * reaches the subject.
      */
-    private fun applyTorchStrength(cam: Camera, requestedStrength: Int?) {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return
+    private fun applyTorchStrength(cam: Camera, requestedStrength: Int?): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return false
         val level = TorchStrengthPolicy.effectiveLevel(
             requestedStrength,
             _torchStrengthMaxLevel.value,
             Build.VERSION.SDK_INT,
-        ) ?: return
-        runCatching {
+        ) ?: return false
+        return runCatching {
             val torchCameraId = Camera2CameraInfo.from(cam.cameraInfo).cameraId
             val cameraManager =
                 context.getSystemService(Context.CAMERA_SERVICE) as android.hardware.camera2.CameraManager
@@ -1987,8 +2055,10 @@ class CameraService(private val context: Context) {
             if (applied != level) {
                 Log.w(TAG, "Torch strength read-back mismatch (set=$level device=$applied)")
             }
-        }.onFailure { e ->
+            true
+        }.getOrElse { e ->
             Log.w(TAG, "Torch strength failed (level=$level)", e)
+            false
         }
     }
 

@@ -354,6 +354,7 @@
     <string name="settings_section_rtsp">RTSP-Stream</string>
     <string name="settings_enable_rtsp">RTSP-Streaming aktivieren</string>
     <string name="settings_rtsp_port">RTSP-Port</string>
+    <string name="settings_rtsp_port_invalid">Geben Sie einen Port zwischen %1$d und %2$d ein</string>
     <string name="settings_rtsp_input_format">RTSP-Encoder-Eingangsformat</string>
     <string name="settings_section_rtmp">RTMP-Push</string>
     <string name="settings_enable_rtmp">RTMP-Push aktivieren</string>

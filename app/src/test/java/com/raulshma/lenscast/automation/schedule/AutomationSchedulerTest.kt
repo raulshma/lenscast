@@ -1,6 +1,7 @@
 package com.raulshma.lenscast.automation.schedule
 
 import com.raulshma.lenscast.data.SettingsDataStore
+import io.mockk.coEvery
 import io.mockk.every
 import io.mockk.mockk
 import java.io.File
@@ -42,6 +43,8 @@ class AutomationSchedulerTest {
     private val settingsDataStore: SettingsDataStore = mockk {
         every { automationRules } returns rulesFlow
         every { automationEnabled } returns enabledFlow
+        coEvery { automationRulesFromDisk() } answers { rulesFlow.value }
+        coEvery { automationEnabledFromDisk() } answers { enabledFlow.value }
     }
 
     @get:Rule

@@ -114,10 +114,10 @@ object AutomationSchedulePolicy {
      * [AutomationRule.missedWindowMinutes] of it.
      *
      * Catch-up: in the default [MissedRunPolicy.CATCH_UP] mode,
-     * STATEFUL actions (setting convergence) are always included when the
-     * rule fires, no matter how late the tick is, and ONESHOT actions
-     * (moment effects like a photo) only when the rule is within [graceMs]
-     * of its scheduled instant. In WINDOW mode the rule's own window is the
+     * STATEFUL actions (setting convergence) ride when the rule is within
+     * [statefulGraceMs] of its scheduled instant — a day/night state change
+     * applied more than half a day late contradicts the schedule — and
+     * ONESHOT actions (moment effects like a photo) only within [graceMs]. In WINDOW mode the rule's own window is the
      * authority — every action rides inside it, a rule may widen the
      * one-shot grace but never shrink the rule-wide bound. Lateness is
      * measured in the same wall-clock minute space as the occurrence keys —
@@ -134,6 +134,7 @@ object AutomationSchedulePolicy {
         snapshot: AutomationSensorSnapshot,
         journal: Map<String, Long>,
         graceMs: Long,
+        statefulGraceMs: Long = StreamDefaults.AUTOMATION_STATEFUL_CATCHUP_GRACE_MS,
     ): List<FiredRule> {
         if (!enabled) return emptyList()
         val currentKey = snapshot.epochDay * StreamDefaults.MINUTES_PER_DAY + snapshot.minuteOfDay
@@ -170,7 +171,9 @@ object AutomationSchedulePolicy {
                     // Unknown action ids have no catch-up class — they cannot
                     // be executed, so they cannot catch up either. (Sanitizing
                     // upstream should have dropped them; this is the last gate.)
-                    CatchUpClass.STATEFUL -> true
+                    CatchUpClass.STATEFUL ->
+                        rule.missedRunPolicy == MissedRunPolicy.WINDOW ||
+                            minutesLate * 60_000L <= statefulGraceMs
                     // Inside a rule-set window the window is the authority —
                     // the per-action grace does not further restrict it (a
                     // rule may widen a one-shot's catch-up, and the rule-wide

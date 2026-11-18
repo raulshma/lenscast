@@ -27,7 +27,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
-import java.util.concurrent.atomic.AtomicLong
+import kotlinx.coroutines.withTimeoutOrNull
 
 /**
  * Single owner of "persisted settings -> runtime" application.
@@ -65,22 +65,31 @@ class SettingsApplier(
     // camera". Deliberately not a Job: since kotlinx-coroutines 1.11 a
     // collect block runs inline on the collector coroutine — no per-emission
     // child exists, so a coroutineContext[Job] captured inside the block IS
-    // the collector, and joining it waits forever. [cameraApplyDelivered]
-    // only guards the never-started case: with no collector subscribed,
-    // nothing can be in flight.
-    private val cameraApplyDelivered = AtomicLong(0)
+    // the collector, and joining it waits forever. The started flag guards
+    // the never-started case only: a delivery counter cannot, because a
+    // direct apply can win the mutex before the collector's first emission,
+    // leaving 0 deliveries while an emission is still pending.
+    @Volatile private var cameraCollectorStarted = false
     private val lastAppliedCameraSettings = MutableStateFlow<CameraSettings?>(null)
 
     fun start(scope: CoroutineScope) {
+        cameraCollectorStarted = true
         // Camera settings. Plain collect (not collectLatest): applies run
         // serialized under the mutex in delivery order — idempotent by
         // contract — while StateFlow conflation already collapses a rapid
         // drag into the latest value.
         scope.launch {
             settingsDataStore.settings.collect { saved ->
-                cameraApplyDelivered.incrementAndGet()
                 cameraApplyMutex.withLock {
-                    cameraService.applySettings(saved)
+                    try {
+                        cameraService.applySettings(saved)
+                    } catch (e: Exception) {
+                        // One failed apply must not tear down the collector —
+                        // every later persisted change would stop reaching the
+                        // camera. Record the snapshot as delivered so a flush
+                        // does not wait forever on an apply that threw.
+                        Log.w(TAG, "Camera settings apply failed", e)
+                    }
                     lastAppliedCameraSettings.value = saved
                 }
             }
@@ -546,8 +555,13 @@ class SettingsApplier(
      * the way out, same as joining the collector would have been.
      */
     suspend fun flushCameraApply() {
-        if (cameraApplyDelivered.get() == 0L) return
-        lastAppliedCameraSettings.first { it == settingsDataStore.settings.value }
+        if (!cameraCollectorStarted) return
+        val converged = withTimeoutOrNull(CAMERA_APPLY_FLUSH_TIMEOUT_MS) {
+            lastAppliedCameraSettings.first { it == settingsDataStore.settings.value }
+        }
+        if (converged == null) {
+            Log.w(TAG, "flushCameraApply: timed out waiting for the latest camera snapshot")
+        }
     }
 
     /**
@@ -662,5 +676,6 @@ class SettingsApplier(
          * per-frame emissions collapse into a single restart.
          */
         private const val SERVER_APPLY_DEBOUNCE_MS = 300L
+        private const val CAMERA_APPLY_FLUSH_TIMEOUT_MS = 5_000L
     }
 }

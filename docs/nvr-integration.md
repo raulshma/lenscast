@@ -49,7 +49,9 @@ Notes:
 - `rtsp_transport: tcp` matters: the RTSP server negotiates RTP/AVP/TCP
   (interleaved) only — a UDP SETUP is rejected with 461 Unsupported Transport.
 - RTSP authentication is a Digest challenge (MD5, qop=auth) when stream auth
-  is enabled; Basic is also accepted by the server.
+  is enabled; Basic is also accepted by the server. If a client cannot complete
+  the Digest handshake, enable **RTSP Basic Auth Compatibility** to advertise
+  Basic instead — Digest remains accepted either way.
 - The HTTP side (including `/snapshot`) uses cookie-based session auth, not
   HTTP Basic, and the generic camera integration cannot send arbitrary
   headers — so when web auth is enabled, `still_image_url` cannot

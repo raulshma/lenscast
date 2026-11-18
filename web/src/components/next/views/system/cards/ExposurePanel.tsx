@@ -82,20 +82,36 @@ export default function ExposurePanel(props: Props) {
               id="exposure-time-input"
               type="number"
               class="nx-input nx-input-sm nx-mono nx-input-num"
-              value={s()?.camera?.exposureTime ?? ''}
-              min={100000}
-              max={500000000}
-              step={1000000}
-              placeholder="ns"
-              onChange={(e) => props.updateCamera({ exposureTime: parseInt(e.currentTarget.value) || null })}
-              aria-label={t('exposure.time')}
+              value={
+                s()?.camera?.exposureTime == null
+                  ? ''
+                  : String(Number((s()!.camera.exposureTime! / 1_000_000).toFixed(3)))
+              }
+              min={0.1}
+              max={500}
+              step={0.1}
+              placeholder="ms"
+              onChange={(e) => {
+                const ms = Number.parseFloat(e.currentTarget.value)
+                if (Number.isFinite(ms) && ms > 0) {
+                  props.updateCamera({ exposureTime: Math.round(ms * 1_000_000) })
+                } else {
+                  e.currentTarget.value = String(
+                    Number(((s()?.camera?.exposureTime ?? API_DEFAULTS.cameraExposureTime) / 1_000_000).toFixed(3)),
+                  )
+                }
+              }}
+              aria-label={t('exposure.timeMs')}
             />
           )}
         </div>
       </FieldRow>
       <Show when={s()?.camera?.exposureTime != null}>
         <div class="nx-field-hint">
-          {(s()!.camera.exposureTime! / 1_000_000).toFixed(1)}ms ({(s()!.camera.exposureTime! / 1_000_000_000).toFixed(3)}s)
+          {t('exposure.timeHint', {
+            ms: (s()!.camera.exposureTime! / 1_000_000).toFixed(1),
+            s: (s()!.camera.exposureTime! / 1_000_000_000).toFixed(3),
+          })}
         </div>
       </Show>
     </Panel>

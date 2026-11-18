@@ -77,9 +77,9 @@ import com.squareup.moshi.JsonClass
  * @param missedRunPolicy What happens when a [AutomationTriggerKind.TIME_OF_DAY]
  *   rule's scheduled moment passes without a firing — the device was off, or
  *   the ONLY WHEN conditions were unmet then became met later the same day.
- *   [MissedRunPolicy.CATCH_UP] (the default) keeps the historical behavior:
- *   stateful actions fire however late, one-shot actions within the global
- *   grace. [MissedRunPolicy.SKIP] means "at the scheduled time or not at
+ *   [MissedRunPolicy.CATCH_UP] (the default): stateful actions catch up
+ *   within the global stateful window, one-shot actions within the global
+ *   one-shot grace. [MissedRunPolicy.SKIP] means "at the scheduled time or not at
  *   all". [MissedRunPolicy.WINDOW] bounds the catch-up to
  *   [missedWindowMinutes] past the scheduled minute and lets every action
  *   ride inside it. Anything else decodes (and sanitizes) to CATCH_UP. Only

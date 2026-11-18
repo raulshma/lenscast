@@ -91,6 +91,7 @@ fun CameraSettingsScreen(
             app.cameraService, app.settingsDataStore, app.powerManager,
             app.detectionModelStore,
             app.audioModelStore,
+            app.streamingManager.webAuthGate,
         )
     )
 

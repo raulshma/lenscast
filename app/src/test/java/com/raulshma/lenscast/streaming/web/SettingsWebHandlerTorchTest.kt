@@ -74,10 +74,14 @@ class SettingsWebHandlerTorchTest {
         awaitUntil("torch-off precondition never propagated") { !store.settings.value.torchEnabled }
 
         // The dashboard's GET-merge-PUT sends the camera section it read —
-        // which has no torch fields; the save only means "iso = 800".
-        handler.put("""{"camera":{"iso":800,"frameRate":24}}""")
+        // which has no torch fields; the save only means "iso = marker".
+        // The marker must be a value the store cannot already hold: the
+        // store persists across test methods, and waiting on a stale-but-
+        // matching value would assert against the precondition's emission.
+        val marker = (store.settings.value.iso ?: 0) + 1
+        handler.put("""{"camera":{"iso":$marker,"frameRate":24}}""")
 
-        awaitUntil("saved iso never propagated") { store.settings.value.iso == 800 }
+        awaitUntil("saved iso never propagated") { store.settings.value.iso == marker }
         // The LED is lit live while the stored intent says off — a save that
         // carried the stale stored value would kill it via the applier.
         assertEquals(true, store.settings.value.torchEnabled)
@@ -91,9 +95,12 @@ class SettingsWebHandlerTorchTest {
         store.saveSettings(store.settings.value.copy(torchEnabled = true, torchStrength = null))
         awaitUntil("torch-on precondition never propagated") { store.settings.value.torchEnabled }
 
-        handler.put("""{"camera":{"exposureTime":100000000,"frameRate":24}}""")
+        // Same marker rule as the lit test: wait on a value the store cannot
+        // already hold, so the precondition's emission cannot satisfy the wait.
+        val marker = (store.settings.value.exposureTime ?: 0L) + 1_000_000L
+        handler.put("""{"camera":{"exposureTime":$marker,"frameRate":24}}""")
 
-        awaitUntil("saved exposure never propagated") { store.settings.value.exposureTime == 100_000_000L }
+        awaitUntil("saved exposure never propagated") { store.settings.value.exposureTime == marker }
         assertEquals(false, store.settings.value.torchEnabled)
         assertEquals(null, store.settings.value.torchStrength)
     }
@@ -106,9 +113,10 @@ class SettingsWebHandlerTorchTest {
             store.settings.value.torchEnabled && store.settings.value.torchStrength == 3
         }
 
-        handler.put("""{"camera":{"iso":800,"frameRate":24}}""")
+        val marker = (store.settings.value.iso ?: 0) + 1
+        handler.put("""{"camera":{"iso":$marker,"frameRate":24}}""")
 
-        awaitUntil("saved iso never propagated") { store.settings.value.iso == 800 }
+        awaitUntil("saved iso never propagated") { store.settings.value.iso == marker }
         assertEquals(true, store.settings.value.torchEnabled)
         assertEquals(3, store.settings.value.torchStrength)
     }

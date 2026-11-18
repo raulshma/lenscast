@@ -357,6 +357,7 @@
     <string name="settings_section_rtsp">Transmissão RTSP</string>
     <string name="settings_enable_rtsp">Ativar transmissão RTSP</string>
     <string name="settings_rtsp_port">Porta RTSP</string>
+    <string name="settings_rtsp_port_invalid">Digite uma porta entre %1$d e %2$d</string>
     <string name="settings_rtsp_input_format">Formato de entrada do codificador RTSP</string>
     <string name="settings_section_rtmp">Push RTMP</string>
     <string name="settings_enable_rtmp">Ativar push RTMP</string>

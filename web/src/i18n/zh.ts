@@ -192,6 +192,8 @@ export const zh: Partial<Record<MessageKey, string>> = {
   'exposure.compensation': '曝光补偿',
   'exposure.iso': 'ISO',
   'exposure.time': '曝光时间',
+  'exposure.timeMs': "曝光时间（毫秒）",
+  'exposure.timeHint': "{ms} 毫秒（{s} 秒）",
 
   // ── Focus card ──
   'focus.title': '对焦',
@@ -376,6 +378,8 @@ export const zh: Partial<Record<MessageKey, string>> = {
   'rtsp.enable': '启用 RTSP 直播',
   'rtsp.tls': 'TLS（RTSPS）',
   'rtsp.tlsDesc': '通过 TLS 提供 RTSP（rtsps://），使用同一自签名证书——独立于 HTTPS 开关。修改会重启正在运行的 RTSP 输出。',
+  'rtsp.basicAuthCompat': 'Basic 认证兼容',
+  'rtsp.basicAuthCompatDesc': '对无法完成 Digest 握手的播放器（例如 tinyCam）宣告 Basic，Digest 仍然可用。',
   'rtsp.subStream': '低分辨率子码流（/sub）',
   'rtsp.subStreamDesc': '为 NVR 检测角色提供第二条低分辨率 H.264 流。',
   'rtsp.port': 'RTSP 端口',

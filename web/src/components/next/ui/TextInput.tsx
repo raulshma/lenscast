@@ -9,6 +9,10 @@ interface Props {
   small?: boolean
   class?: string
   ariaLabel?: string
+  min?: number
+  max?: number
+  step?: number
+  onBlur?: () => void
 }
 
 /** Single-line text input, mono-capable for URLs and tokens. */
@@ -25,7 +29,11 @@ export default function TextInput(props: Props) {
       placeholder={props.placeholder}
       disabled={props.disabled}
       aria-label={props.ariaLabel}
+      min={props.min}
+      max={props.max}
+      step={props.step}
       onInput={(e) => props.onInput(e.currentTarget.value)}
+      onBlur={() => props.onBlur?.()}
     />
   )
 }
