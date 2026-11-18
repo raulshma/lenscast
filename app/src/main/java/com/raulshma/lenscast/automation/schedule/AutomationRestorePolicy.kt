@@ -1,6 +1,7 @@
 package com.raulshma.lenscast.automation.schedule
 
 import com.raulshma.lenscast.camera.model.CameraSettings
+import com.raulshma.lenscast.camera.model.NightVisionMode
 
 /**
  * The pre-test state snapshot the Automation Test's restore answers from —
@@ -18,6 +19,7 @@ data class AutomationStateSnapshot(
     val lensIndex: Int,
     val torchEnabled: Boolean,
     val torchStrength: Int?,
+    val nightVisionMode: NightVisionMode,
     val motionEnabled: Boolean,
     val soundEnabled: Boolean,
     /** Whether the whole server (web + RTSP) was running when the test armed. */
@@ -74,6 +76,14 @@ object AutomationRestorePolicy {
                 "camera_lens" -> add(
                     AutomationActionSpec(type = action.type, params = mapOf("index" to snapshot.lensIndex.toString())),
                 )
+                "night_vision" -> add(
+                    AutomationActionSpec(
+                        type = action.type,
+                        // The catalog's canonical lowercase id of the stored
+                        // enum (the merge's own vocabulary, reversed).
+                        params = mapOf("mode" to snapshot.nightVisionMode.wireMode()),
+                    ),
+                )
                 "torch" -> {
                     val params = mutableMapOf<String, String>(
                         "enabled" to snapshot.torchEnabled.toString(),
@@ -128,4 +138,7 @@ object AutomationRestorePolicy {
     ): CameraSettings = actions.fold(base) { acc, action ->
         AutomationSchedulePolicy.mergeCameraSettings(acc, action)
     }
+
+    /** The catalog's canonical `night_vision` mode id of one [NightVisionMode]. */
+    private fun NightVisionMode.wireMode(): String = name.lowercase()
 }

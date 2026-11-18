@@ -1,6 +1,7 @@
 package com.raulshma.lenscast.automation.schedule
 
 import com.raulshma.lenscast.camera.model.CameraSettings
+import com.raulshma.lenscast.camera.model.NightVisionMode
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -24,6 +25,7 @@ class AutomationRestorePolicyTest {
         lensIndex = 2,
         torchEnabled = true,
         torchStrength = 3,
+        nightVisionMode = NightVisionMode.AUTO,
         motionEnabled = false,
         soundEnabled = true,
         streamRunning = false,
@@ -98,6 +100,26 @@ class AutomationRestorePolicyTest {
                 noLevel,
             ),
         )
+    }
+
+    @Test
+    fun `night vision restores the snapshot mode as the catalog's canonical id`() {
+        // The snapshot held AUTO: the rewind speaks the merge's own lowercase
+        // vocabulary, not the enum name.
+        assertEquals(
+            listOf(AutomationActionSpec("night_vision", mapOf("mode" to "auto"))),
+            restore(AutomationActionSpec("night_vision", mapOf("mode" to "on"))),
+        )
+        // Every enum value round-trips through its canonical id.
+        for (mode in NightVisionMode.entries) {
+            assertEquals(
+                listOf(AutomationActionSpec("night_vision", mapOf("mode" to mode.name.lowercase()))),
+                AutomationRestorePolicy.restoreActions(
+                    listOf(AutomationActionSpec("night_vision", mapOf("mode" to "on"))),
+                    snapshot.copy(nightVisionMode = mode),
+                ),
+            )
+        }
     }
 
     @Test

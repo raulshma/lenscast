@@ -125,6 +125,22 @@ class AutomationUiModelTest {
     }
 
     @Test
+    fun `night vision renders its mode`() {
+        assertEquals(
+            R.string.automation_summary_night_vision_on,
+            AutomationViewModel.actionSummaryLines("night_vision", mapOf("mode" to "on")).single().res,
+        )
+        assertEquals(
+            R.string.automation_summary_night_vision_auto,
+            AutomationViewModel.actionSummaryLines("night_vision", mapOf("mode" to "auto")).single().res,
+        )
+        assertEquals(
+            R.string.automation_summary_night_vision_off,
+            AutomationViewModel.actionSummaryLines("night_vision", mapOf("mode" to "off")).single().res,
+        )
+    }
+
+    @Test
     fun `unknown type falls back to the unknown action line`() {
         assertEquals(
             R.string.automation_action_unknown,
@@ -136,7 +152,7 @@ class AutomationUiModelTest {
     fun `action type labels cover the whole catalog`() {
         for (id in listOf(
             "camera_exposure", "camera_ev", "camera_zoom", "camera_fps", "camera_lens",
-            "torch", "stream", "capture_photo", "recording", "siren", "detection",
+            "night_vision", "torch", "stream", "capture_photo", "recording", "siren", "detection",
         )) {
             assertFalse(
                 "missing label for $id",

@@ -285,8 +285,9 @@ fun AutomationScreen(onNavigateBack: () -> Unit) {
 /**
  * One rule card: the trigger badge, name (or the untitled fallback), the
  * trigger subtitle, WHEN / ONLY WHEN / THEN summary rows, the last-fired
- * line, the per-rule enable switch, and the overflow menu (duplicate /
- * delete-confirm). The whole card is tappable and opens the editor.
+ * line, the per-rule enable switch, the Automation Test icon button, and the
+ * overflow menu (duplicate / delete-confirm). The whole card is tappable and
+ * opens the editor.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -402,12 +403,29 @@ private fun AutomationRuleCard(
                     )
                 }
             }
-            // The overflow menu: duplicate and delete live behind the kebab —
-            // destructive/secondary actions don't compete with the switch.
+            // The card's action row: the Automation Test as an always-visible
+            // compact icon button, then the overflow menu (duplicate and
+            // delete behind the kebab — destructive/secondary actions don't
+            // compete with the switch). Icon buttons keep every action on the
+            // card at the minimum width — a Test text button here pushed the
+            // row's other actions off-screen on narrow phones (issue #18).
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.End,
             ) {
+                // The Automation Test (issue #18 item 3): fire once now, or —
+                // while this rule's test is armed — restore the pre-test
+                // state. The restore affordance replaces the run icon so the
+                // undo is never two taps away.
+                IconButton(onClick = { if (testArmed) onRestoreTest() else onRunTest() }) {
+                    Icon(
+                        if (testArmed) Icons.Default.RestoreFromTrash else Icons.Default.PlayArrow,
+                        contentDescription = stringResource(
+                            if (testArmed) R.string.automation_rule_restore_test
+                            else R.string.automation_rule_run_test
+                        ),
+                    )
+                }
                 Box {
                     IconButton(onClick = { menuExpanded = true }) {
                         Icon(
@@ -416,30 +434,6 @@ private fun AutomationRuleCard(
                         )
                     }
                     DropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }) {
-                        // The Automation Test (issue #18 item 3): fire once
-                        // now, or — while this rule's test is armed — restore
-                        // the pre-test state. The restore affordance replaces
-                        // the run item so the undo is never two taps away.
-                        DropdownMenuItem(
-                            text = {
-                                Text(
-                                    stringResource(
-                                        if (testArmed) R.string.automation_rule_restore_test
-                                        else R.string.automation_rule_run_test
-                                    )
-                                )
-                            },
-                            leadingIcon = {
-                                Icon(
-                                    if (testArmed) Icons.Default.RestoreFromTrash else Icons.Default.PlayArrow,
-                                    contentDescription = null,
-                                )
-                            },
-                            onClick = {
-                                menuExpanded = false
-                                if (testArmed) onRestoreTest() else onRunTest()
-                            },
-                        )
                         DropdownMenuItem(
                             text = { Text(stringResource(R.string.automation_rule_duplicate_cd)) },
                             leadingIcon = { Icon(Icons.Default.ContentCopy, contentDescription = null) },
@@ -1735,6 +1729,7 @@ private fun MissedRunEditor(
  * The param editor for one [AutomationParamSpec]:
  * - BOOL: a switch row; an optional bool (the detection gates) first gets a
  *   compact configure switch, unset = absent param = "leave unchanged".
+ * - STRING: one chip per closed catalog value (the night-vision mode).
  * - Auto-sentinel numerics (camera_exposure ISO / exposure time): configure
  *   switch, then an Auto toggle mapping onto "0", then the manual slider.
  * - Other optional numerics (torch strength, durations): configure switch,
@@ -1775,6 +1770,24 @@ private fun AutomationParamEditor(
                     checked = value != "false",
                     onCheckedChange = { onChange(if (it) "true" else "false") },
                 )
+            }
+        }
+        ParamKind.STRING -> {
+            // A closed set of canonical ids renders as one-tap chips (the
+            // mode row's Off/Auto/On); the selection rides the documented
+            // default, so a fresh editor already shows where the action
+            // folds to.
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                spec.values.forEach { mode ->
+                    FilterChip(
+                        label = enumValueLabel(mode),
+                        selected = (value ?: spec.defaultValue) == mode,
+                        onClick = { onChange(mode) },
+                    )
+                }
             }
         }
         ParamKind.INT, ParamKind.FLOAT -> {
@@ -1988,3 +2001,17 @@ private fun canonicalFor(spec: AutomationParamSpec?, value: Float): String =
     } else {
         AutomationViewModel.canonicalFloatValue(value)
     }
+
+/**
+ * The localized label of one STRING param's canonical value — the shared
+ * Off/Auto/On option words the settings screens already carry. An unknown id
+ * falls back to itself (a future vocabulary grows the labels without hiding
+ * the chip).
+ */
+@Composable
+private fun enumValueLabel(value: String): String = when (value) {
+    "off" -> stringResource(R.string.option_off)
+    "auto" -> stringResource(R.string.option_auto)
+    "on" -> stringResource(R.string.option_on)
+    else -> value
+}

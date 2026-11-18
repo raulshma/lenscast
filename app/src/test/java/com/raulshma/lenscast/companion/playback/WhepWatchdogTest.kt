@@ -119,6 +119,22 @@ class WhepWatchdogTest {
             withTimeout(5_000) { viewer.state.first { it == target } }
 
         /**
+         * Parks until the viewer settles on a state OTHER than [from]. The
+         * settled predicate also matches the state a live-hold test is
+         * leaving (Live), so a bare [awaitSettled] returns that stale value
+         * before the engine has processed the tick instead of waiting for
+         * the write — and still returns instantly when the tick DID process
+         * inline (Failed already current), which a "must differ from the
+         * sampled value" rule without the argument would get wrong.
+         */
+        suspend fun awaitSettledAfter(from: WhepState): WhepState =
+            withTimeout(5_000) {
+                viewer.state.first {
+                    it != from && (it is WhepState.Failed || it == WhepState.Live || it == WhepState.Idle)
+                }
+            }
+
+        /**
          * The Failed write precedes the peer close (runSession's finally):
          * waiting on the state alone can observe Failed before the effect
          * lands under full-suite load. Every closed-peer assert parks here.
@@ -225,7 +241,7 @@ class WhepWatchdogTest {
 
         h.fake.link = WhepPeerLinkState.FAILED
         h.tick(1)
-        val settled = h.awaitSettled()
+        val settled = h.awaitSettledAfter(WhepState.Live)
         assertTrue(settled is WhepState.Failed)
         assertTrue(
             "the hold failure names the playback phase",

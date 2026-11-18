@@ -28,6 +28,7 @@ export const AUTOMATION_ACTION_TYPES = [
   'camera_zoom',
   'camera_fps',
   'camera_lens',
+  'night_vision',
   'torch',
   'stream',
   'capture_photo',
@@ -145,6 +146,7 @@ export function automationConditionLabelKey(conditionTypeId: string): string {
  */
 const PARAM_LABEL_OVERRIDES: Record<string, string> = {
   'camera_lens/index': 'automation.param.lensIndex',
+  'night_vision/mode': 'automation.param.nightVisionMode',
   'torch/enabled': 'automation.param.torch',
   'stream/enabled': 'automation.param.stream',
   'recording/enabled': 'automation.param.recording',
@@ -249,6 +251,20 @@ export function automationSummaryLines(action: Pick<AutomationActionDto, 'type' 
     case 'camera_lens': {
       const index = params['index']
       if (index != null) lines.push({ key: 'automation.summary.lens', params: { value: index } })
+      break
+    }
+    case 'night_vision': {
+      const mode = params['mode']
+      if (mode != null) {
+        lines.push({
+          key:
+            mode === 'auto'
+              ? 'automation.summary.nightVisionAuto'
+              : mode === 'on'
+                ? 'automation.summary.nightVisionOn'
+                : 'automation.summary.nightVisionOff',
+        })
+      }
       break
     }
     case 'torch': {

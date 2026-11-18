@@ -201,6 +201,7 @@ class AutomationWebHandler(
                 optional = param.optional,
                 defaultValue = param.defaultValue,
                 autoAtZero = param.autoAtZero,
+                values = param.values.takeIf { it.isNotEmpty() },
             )
     }
 }

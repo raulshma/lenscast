@@ -1,6 +1,7 @@
 package com.raulshma.lenscast.automation.schedule
 
 import com.raulshma.lenscast.camera.model.CameraSettings
+import com.raulshma.lenscast.camera.model.NightVisionMode
 import com.raulshma.lenscast.capture.MotionArmingPolicy
 import com.raulshma.lenscast.core.StreamDefaults
 import com.raulshma.lenscast.gallery.GalleryDates
@@ -387,10 +388,13 @@ object AutomationSchedulePolicy {
 
     /**
      * Merge ONE catalog action into the current [CameraSettings]. Handles the
-     * camera_* settings the camera pipeline consumes directly: only the exact
+     * camera-valued settings the camera pipeline consumes directly
+     * (camera_* and night_vision): only the exact
      * "0" auto sentinels fold to null (the class's "driver default" shape),
-     * `exposure_time_ms` converts to nanoseconds, and `torch.strength` is
-     * applied only when the optional parameter is present. Per the executor's
+     * `exposure_time_ms` converts to nanoseconds, `torch.strength` is
+     * applied only when the optional parameter is present, and
+     * `night_vision.mode` maps its canonical catalog id onto
+     * [NightVisionMode]. Per the executor's
      * "absent/malformed = leave unchanged" contract, an absent optional param
      * AND an unparseable value both leave that field untouched — a malformed
      * value must never collapse to the auto sentinel (that would silently
@@ -454,6 +458,17 @@ object AutomationSchedulePolicy {
                 }
                 return merged
             }
+            "night_vision" -> return params["mode"]?.let { mode ->
+                // The sanitizer only persists the catalog's canonical ids, so
+                // the else-arm is the hand-built-spec guard: an unknown mode
+                // degrades to "no change", like every unparseable param.
+                when (mode) {
+                    "off" -> current.copy(nightVisionMode = NightVisionMode.OFF)
+                    "auto" -> current.copy(nightVisionMode = NightVisionMode.AUTO)
+                    "on" -> current.copy(nightVisionMode = NightVisionMode.ON)
+                    else -> current
+                }
+            } ?: current
         }
         // stream, capture_photo, recording, siren, detection, unknown ids —
         // and any camera action whose param failed to parse — come back

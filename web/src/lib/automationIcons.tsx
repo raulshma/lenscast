@@ -181,6 +181,11 @@ const GLYPHS: Record<string, JSX.Element> = {
       <path d="M10 21h4M12 3V1.5M4 9H2.5M21.5 9H20" />
     </>
   ),
+  nightlight: (
+    <>
+      <path d="M20 14.5A8.5 8.5 0 019.5 4a8.5 8.5 0 1010.5 10.5z" />
+    </>
+  ),
   // ── recording ──
   videocam: (
     <>

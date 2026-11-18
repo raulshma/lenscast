@@ -17,8 +17,8 @@ package com.raulshma.lenscast.automation.schedule
  * shared only where the two entries genuinely share a visual concept:
  * `power` (the bolt: the charging trigger and the charging condition) and
  * `radar` (the sweeping rings: the detection action and the
- * motion-detection condition). Every other visual is its own kind — 29 kinds
- * covering the 31 catalog entries today. The set is closed and pinned by a
+ * motion-detection condition). Every other visual is its own kind — 30 kinds
+ * covering the 32 catalog entries today. The set is closed and pinned by a
  * JVM test (AutomationVisualsTest) plus the web contract test; never rename
  * a kind without moving both renderers in the same commit.
  */
@@ -108,6 +108,9 @@ object AutomationIconVocabulary {
     /** An alarm bell: the siren action. */
     const val SIREN = "siren"
 
+    /** A crescent moon: the night-vision action. */
+    const val NIGHTLIGHT = "nightlight"
+
     // ── recording ──
     /** A video camera: the recording action. */
     const val VIDEOCAM = "videocam"
@@ -126,7 +129,7 @@ object AutomationIconVocabulary {
         SHIELD,
         CAST, EYE, ROCKET, BROADCAST, STREAM, PEOPLE, WIFI,
         EXPOSURE, TONALITY, ZOOM, SPEED, LENS, CAMERA,
-        TORCH, LIGHTBULB, SIREN,
+        TORCH, LIGHTBULB, SIREN, NIGHTLIGHT,
         VIDEOCAM, RECORD, THERMOSTAT,
     )
 }

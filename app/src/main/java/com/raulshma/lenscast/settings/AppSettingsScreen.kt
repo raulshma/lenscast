@@ -67,9 +67,7 @@ import com.raulshma.lenscast.ui.components.LensCastTopBar
 // Slider spans built FROM the Settings Store's StreamDefaults clamps — the
 // one home — so the UI always offers the full persisted range and can never
 // drift from the store's coercion (parity-pinned by AppSettingsRangesTest).
-internal val webPortSliderRange: ClosedFloatingPointRange<Float> =
-    StreamDefaults.WEB_PORT_MIN.toFloat()..StreamDefaults.WEB_PORT_MAX.toFloat()
-
+// The web port is typed, not a slider; its bounds are StreamDefaults directly.
 internal val jpegQualitySliderRange: ClosedFloatingPointRange<Float> =
     StreamDefaults.JPEG_QUALITY_MIN.toFloat()..StreamDefaults.JPEG_QUALITY_MAX.toFloat()
 
@@ -362,11 +360,50 @@ fun AppSettingsScreen(
                         checked = webStreamingEnabled,
                         onCheckedChange = { viewModel.updateWebStreamingEnabled(it) }
                     )
-                    SliderSetting(
-                        title = stringResource(R.string.settings_streaming_port),
-                        value = streamingPort.toFloat(),
-                        range = webPortSliderRange,
-                        onValueChange = { viewModel.updateStreamingPort(it.toInt()) }
+                    // Typed entry alongside the drag slider's range:
+                    // a phone slider cannot express 8080 precisely. The
+                    // draft survives out-of-range prefixes while typing
+                    // ("8" → "80" → "808" → "8080").
+                    var streamingPortText by remember { mutableStateOf(streamingPort.toString()) }
+                    LaunchedEffect(streamingPort) {
+                        if (streamingPortText.toIntOrNull() != streamingPort) {
+                            streamingPortText = streamingPort.toString()
+                        }
+                    }
+                    val typedStreamingPort = streamingPortText.toIntOrNull()
+                    val streamingPortInRange = typedStreamingPort != null &&
+                        typedStreamingPort in StreamDefaults.WEB_PORT_MIN..StreamDefaults.WEB_PORT_MAX
+                    OutlinedTextField(
+                        value = streamingPortText,
+                        onValueChange = { text ->
+                            if (text.length <= 5 && text.all(Char::isDigit)) {
+                                streamingPortText = text
+                                text.toIntOrNull()
+                                    ?.takeIf {
+                                        it in StreamDefaults.WEB_PORT_MIN..StreamDefaults.WEB_PORT_MAX
+                                    }
+                                    ?.let(viewModel::updateStreamingPort)
+                            }
+                        },
+                        label = { Text(stringResource(R.string.settings_streaming_port)) },
+                        isError = streamingPortText.isNotEmpty() && !streamingPortInRange,
+                        supportingText = {
+                            if (streamingPortText.isNotEmpty() && !streamingPortInRange) {
+                                Text(
+                                    stringResource(
+                                        R.string.settings_streaming_port_invalid,
+                                        StreamDefaults.WEB_PORT_MIN,
+                                        StreamDefaults.WEB_PORT_MAX,
+                                    )
+                                )
+                            }
+                        },
+                        keyboardOptions = KeyboardOptions(
+                            keyboardType = KeyboardType.Number,
+                            imeAction = ImeAction.Done,
+                        ),
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
                     )
                     SliderSetting(
                         title = stringResource(R.string.settings_jpeg_quality),

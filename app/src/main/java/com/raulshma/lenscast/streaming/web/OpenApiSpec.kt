@@ -139,7 +139,7 @@ object OpenApiSpec {
             ),
             "put" to operation(
                 listOf("settings"),
-                "Save settings (sections present persist wholesale)",
+                "Save settings (fields present in a section apply; omitted fields keep their stored values)",
                 mapOf("200" to ok("SuccessResponse")),
                 requestBody = jsonBody("SettingsUpdateRequestDto"),
             ),
@@ -894,12 +894,17 @@ object OpenApiSpec {
         ),
         "AutomationCatalogParamDto" to schema(
             "name" to stringSchema("The exact wire key inside a rule spec's params"),
-            "kind" to stringSchema("How the string value is interpreted: `BOOL` | `INT` | `FLOAT`"),
+            "kind" to stringSchema("How the string value is interpreted: `BOOL` | `INT` | `FLOAT` | `STRING`"),
             "min" to mapOf("type" to "number", "description" to "Lower bound; null when unbounded"),
             "max" to mapOf("type" to "number", "description" to "Upper bound; null when unbounded"),
             "optional" to boolSchema("When true, an absent parameter means leave the current setting unchanged"),
             "defaultValue" to stringSchema("The value an absent required or invalid value folds to; empty for optional params with no persisted default"),
             "autoAtZero" to boolSchema("'0' is the auto/unlimited sentinel — clients may render an Auto toggle; false = ordinary value"),
+            "values" to mapOf(
+                "type" to "array",
+                "items" to stringSchema("One closed value of a STRING param, canonical lowercase"),
+                "description" to "The closed value set of a STRING param; omitted for BOOL/INT/FLOAT params",
+            ),
             required = listOf("name", "kind", "optional", "defaultValue", "autoAtZero"),
         ),
         "CameraSettingsDto" to schema(

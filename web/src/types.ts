@@ -866,7 +866,7 @@ export const DEFAULT_OVERLAY_SETTINGS: Partial<StreamingSettings> = {
 // the `limits` block that publishes the editor bounds/defaults/presets.
 
 /** How a catalog param's string value is interpreted (AutomationParamSpec.kind). */
-export type AutomationParamKind = 'BOOL' | 'INT' | 'FLOAT'
+export type AutomationParamKind = 'BOOL' | 'INT' | 'FLOAT' | 'STRING'
 
 /** What happens when a rule fires late (AutomationActionType catch-up policy). */
 export type AutomationCatchUp = 'STATEFUL' | 'ONESHOT'
@@ -1021,6 +1021,8 @@ export interface AutomationCatalogParamDto {
    * unlike the nullable min/max which are omitted on the wire when null).
    */
   autoAtZero: boolean
+  /** The closed value set of a STRING param (canonical ids, in display order); omitted for BOOL/INT/FLOAT params. */
+  values?: string[]
 }
 
 /**
@@ -1108,6 +1110,7 @@ export type AutomationIconVocabulary =
   | 'torch'
   | 'lightbulb'
   | 'siren'
+  | 'nightlight'
   | 'videocam'
   | 'record'
   | 'thermostat'

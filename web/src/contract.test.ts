@@ -81,6 +81,7 @@ const AUTOMATION_CATALOG_IDS = [
   'camera_zoom',
   'camera_fps',
   'camera_lens',
+  'night_vision',
   'torch',
   'stream',
   'capture_photo',
@@ -128,7 +129,7 @@ const AUTOMATION_ICON_VOCABULARY: readonly AutomationIconVocabulary[] = [
   'power', 'battery_alert', 'battery', 'battery_saver', 'shield',
   'cast', 'eye', 'rocket', 'broadcast', 'stream', 'people', 'wifi',
   'exposure', 'tonality', 'zoom', 'speed', 'lens', 'camera',
-  'torch', 'lightbulb', 'siren', 'videocam', 'record', 'thermostat',
+  'torch', 'lightbulb', 'siren', 'nightlight', 'videocam', 'record', 'thermostat',
 ]
 
 /** The documented picker group ids per catalog (WebApiDtos/catalog docs). */
@@ -542,10 +543,17 @@ describe('DTO contract fixtures', () => {
       expect(AUTOMATION_ICON_VOCABULARY).toContain(entry.icon)
       for (const param of entry.params) {
         expectKeys(param as unknown as Record<string, unknown>, ['name', 'kind', 'optional', 'defaultValue', 'autoAtZero'])
-        expect(['BOOL', 'INT', 'FLOAT']).toContain(param.kind)
-        if (param.kind !== 'BOOL') {
+        expect(['BOOL', 'INT', 'FLOAT', 'STRING']).toContain(param.kind)
+        // Only the numerics carry bounds; a STRING param carries its closed
+        // value set instead (the canonical ids both editors render).
+        if (param.kind === 'INT' || param.kind === 'FLOAT') {
           expect(param.min).not.toBeNull()
           expect(param.max).not.toBeNull()
+        }
+        if (param.kind === 'STRING') {
+          expect(param.values?.length ?? 0).toBeGreaterThan(0)
+        } else {
+          expect(param.values).toBeUndefined()
         }
       }
     }

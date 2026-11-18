@@ -31,6 +31,7 @@ internal object AutomationParamValues {
             ParamKind.BOOL -> parseBool(raw)
             ParamKind.INT -> parseNumber(raw, param)
             ParamKind.FLOAT -> parseNumber(raw, param)
+            ParamKind.STRING -> parseEnumValue(raw, param)
         }
         // Invalid input folds to the default. For a param whose default is
         // the empty sentinel (optional, no persisted default) that renders
@@ -101,6 +102,14 @@ internal object AutomationParamValues {
         "false" -> "false"
         else -> null
     }
+
+    /**
+     * One STRING param's closed value set: lenient on case/whitespace, strict
+     * on the canonical lowercase id ("ON" → "on"); anything outside
+     * [AutomationParamSpec.values] is null (the caller folds to the default).
+     */
+    private fun parseEnumValue(raw: String, param: AutomationParamSpec): String? =
+        raw.trim().lowercase().takeIf { it in param.values }
 
     /**
      * Parse a numeric wire value and clamp it into [AutomationParamSpec.min]

@@ -107,6 +107,14 @@ class AutomationTestController(private val app: MainApplication) {
      * applier's serialized seam. When the camera session is unbound the
      * apply parks in `activeSettings` and the next bind's post-bind rungs
      * pick it up, exactly like every other settings apply.
+     *
+     * The fold's base is read from DISK, not the shared flow's `.value`:
+     * the restore's saves have just written that disk, and the share-in hop
+     * has no completion edge — a `.value` base answers the FIRED world and
+     * drives it back onto the live session the restore just rewound (the
+     * same lag the executor's merge base rides, issue #18). The executor's
+     * `settingsFromDisk` discipline keeps the live payload identical to the
+     * persisted one.
      */
     private suspend fun applyRestoredCameraState(actions: List<AutomationActionSpec>) {
         val applier = app.settingsApplier
@@ -114,7 +122,7 @@ class AutomationTestController(private val app: MainApplication) {
         applier.applyCameraSettingsNow(
             AutomationRestorePolicy.restoredCameraSettings(
                 actions,
-                app.settingsDataStore.settings.value,
+                app.settingsDataStore.settingsFromDisk(),
             ),
         )
     }
@@ -150,6 +158,7 @@ class AutomationTestController(private val app: MainApplication) {
             lensIndex = app.cameraService.selectedLens.value.index,
             torchEnabled = app.cameraService.isTorchOn(),
             torchStrength = saved.torchStrength,
+            nightVisionMode = saved.nightVisionMode,
             motionEnabled = app.settingsDataStore.motionDetectionEnabledFromDisk(),
             soundEnabled = app.settingsDataStore.soundDetectionEnabledFromDisk(),
             streamRunning = app.streamingManager.isServerRunning.value,

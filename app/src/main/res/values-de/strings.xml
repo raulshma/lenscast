@@ -325,6 +325,7 @@
     <string name="settings_section_streaming">Streaming</string>
     <string name="settings_enable_web_streaming">Web-Streaming aktivieren</string>
     <string name="settings_streaming_port">Streaming-Port</string>
+    <string name="settings_streaming_port_invalid">Geben Sie einen Port zwischen %1$d und %2$d ein</string>
     <string name="settings_adaptive_bitrate">Adaptive Bitrate</string>
     <string name="settings_adaptive_encoded_bitrate">Adaptive Encoder-Bitrate</string>
     <string name="settings_adaptive_encoded_bitrate_description">Senkt die Encoder-Bitrate bei langsamen Netzwerken oder Hitze und erhöht sie wieder, sobald Bandbreite frei wird — gemessen an den RTSP-, WebSocket- und HLS-Sendepfaden</string>
@@ -553,6 +554,7 @@
     <string name="automation_action_camera_zoom">Zoom</string>
     <string name="automation_action_camera_fps">Bildrate</string>
     <string name="automation_action_camera_lens">Objektivwechsel</string>
+    <string name="automation_action_night_vision">Nachtsicht</string>
     <string name="automation_action_torch">Taschenlampe</string>
     <string name="automation_action_stream">Stream</string>
     <string name="automation_action_capture_photo">Foto</string>
@@ -566,6 +568,7 @@
     <string name="automation_param_zoom_ratio">Zoom</string>
     <string name="automation_param_fps">FPS</string>
     <string name="automation_param_lens_index">Objektiv</string>
+    <string name="automation_param_night_vision_mode">Modus</string>
     <string name="automation_param_torch">Taschenlampe</string>
     <string name="automation_param_stream">Streaming</string>
     <string name="automation_param_recording">Aufnahme</string>
@@ -586,6 +589,9 @@
     <string name="automation_summary_zoom">Zoom %1$sx</string>
     <string name="automation_summary_fps">FPS %1$s</string>
     <string name="automation_summary_lens">Objektiv %1$s</string>
+    <string name="automation_summary_night_vision_off">Nachtsicht aus</string>
+    <string name="automation_summary_night_vision_auto">Nachtsicht automatisch</string>
+    <string name="automation_summary_night_vision_on">Nachtsicht ein</string>
     <string name="automation_summary_stream_start">Stream starten</string>
     <string name="automation_summary_stream_stop">Stream stoppen</string>
     <string name="automation_summary_photo">Foto</string>
@@ -771,6 +777,7 @@
     <string name="automation_action_desc_camera_zoom">Zoomstufe setzen</string>
     <string name="automation_action_desc_camera_fps">Bildrate des Streams ändern</string>
     <string name="automation_action_desc_camera_lens">Zwischen den Objektiven des Geräts wechseln (unterbricht den Stream kurz)</string>
+    <string name="automation_action_desc_night_vision">Schaltet den Nachtsichtmodus um (aus, automatisch oder ein)</string>
     <string name="automation_action_desc_torch">Den Blitz als Licht oder Abschreckung einschalten</string>
     <string name="automation_action_desc_stream">Den Live-Stream starten oder stoppen</string>
     <string name="automation_action_desc_capture_photo">Im Moment des Auslösens ein Foto aufnehmen</string>

@@ -7,6 +7,7 @@ import com.raulshma.lenscast.automation.schedule.AutomationActionSpec
 import com.raulshma.lenscast.capture.RecordingState
 import com.raulshma.lenscast.camera.CameraService
 import com.raulshma.lenscast.camera.model.CameraSettings
+import com.raulshma.lenscast.camera.model.NightVisionMode
 import com.raulshma.lenscast.camera.model.SelectedLens
 import com.raulshma.lenscast.capture.RecordingController
 import com.raulshma.lenscast.data.SettingsDataStore
@@ -20,6 +21,7 @@ import io.mockk.mockk
 import io.mockk.slot
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.runBlocking
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -51,6 +53,9 @@ class AutomationTestControllerTest {
     /** The store's shared flow — deliberately stale-able, like the real share-in. */
     private val settings = MutableStateFlow(CameraSettings())
 
+    /** The disk truth `settingsFromDisk()` answers (read-your-write). */
+    private var diskWorld = CameraSettings()
+
     /** The rule under test: fire manual ISO + torch on; restore rewinds both. */
     private val rule = AutomationRule(
         id = "r1",
@@ -71,14 +76,15 @@ class AutomationTestControllerTest {
 
         every { settingsDataStore.settings } returns settings
         coEvery { settingsDataStore.automationRulesFromDisk() } returns listOf(rule)
-        // The real store feeds every save back into the shared flow (the
-        // DataStore → StateFlow share-in); the executor merges each camera
-        // action onto settings.value, so a silent mock would leave the
-        // per-action accumulation out — every save would fold onto the same
-        // pre-arm base instead of the persisted state.
-        coEvery { settingsDataStore.saveSettings(any()) } answers { settings.value = firstArg() }
+        // The real store serves a save read-your-write on disk immediately
+        // and delivers it to the shared flow on the async share-in hop; the
+        // default stub models both (the hop lands inside these tests).
+        coEvery { settingsDataStore.saveSettings(any()) } answers {
+            diskWorld = firstArg()
+            settings.value = firstArg()
+        }
         // Default disk world: auto ISO/exposure, torch dark.
-        coEvery { settingsDataStore.settingsFromDisk() } returns CameraSettings()
+        coEvery { settingsDataStore.settingsFromDisk() } answers { diskWorld }
         coEvery { settingsDataStore.motionDetectionEnabledFromDisk() } returns false
         coEvery { settingsDataStore.soundDetectionEnabledFromDisk() } returns true
 
@@ -215,7 +221,7 @@ class AutomationTestControllerTest {
         // live-only writer (web torch route / deterrence) darkened it: stored
         // intent says on, the LED is off. The 0.2.2 on-device repro — a
         // snapshot answering from the store re-lit the LED on restore.
-        coEvery { settingsDataStore.settingsFromDisk() } returns CameraSettings(torchEnabled = true)
+        diskWorld = CameraSettings(torchEnabled = true)
         every { cameraService.isTorchOn() } returns false
 
         val controller = controller()
@@ -246,5 +252,70 @@ class AutomationTestControllerTest {
         val applied = slot<CameraSettings>()
         coVerify { applier.applyCameraSettingsNow(capture(applied)) }
         assertTrue(applied.captured.torchEnabled)
+    }
+
+    // ── night_vision: the mode is its own snapshot axis, rewind touches it only ──
+
+    @Test
+    fun `a night_vision rule restores the pre-test mode alongside its camera actions`() = runBlocking {
+        // The reporter's night recipe as a rule: exposure up AND night mode
+        // on. Pre-test world on disk: night mode off, auto ISO, torch dark.
+        diskWorld = CameraSettings(nightVisionMode = NightVisionMode.OFF)
+        val nightRule = AutomationRule(
+            id = "r3",
+            name = "night recipe",
+            actions = listOf(
+                AutomationActionSpec("camera_exposure", mapOf("iso" to "3200")),
+                AutomationActionSpec("night_vision", mapOf("mode" to "on")),
+            ),
+        )
+        coEvery { settingsDataStore.automationRulesFromDisk() } returns listOf(rule, nightRule)
+
+        val controller = controller()
+        assertTrue(controller.arm("r3"))
+
+        // The fire persisted BOTH configured values onto one accumulated
+        // document (the executor's disk-truth merge, composed).
+        coVerify { settingsDataStore.saveSettings(match { it.iso == 3200 && it.nightVisionMode == NightVisionMode.ON }) }
+
+        controller.restore()
+
+        // The rewind lands the snapshot's pre-test mode (OFF) on the live
+        // payload — the touched mode axis, with the auto ISO it snapshot too.
+        val applied = slot<CameraSettings>()
+        coVerify { applier.applyCameraSettingsNow(capture(applied)) }
+        assertEquals(NightVisionMode.OFF, applied.captured.nightVisionMode)
+        assertNull(applied.captured.iso)
+        coVerify { settingsDataStore.saveSettings(match { it.nightVisionMode == NightVisionMode.OFF && it.iso == null }) }
+        assertNull(controller.armedRuleId.value)
+    }
+
+    // ── the restored LIVE payload answers from disk, not the lagging flow ──
+
+    @Test
+    fun `restore drives the disk truth onto the live session, not the stale shared flow`() = runBlocking {
+        // The restore's own saves have persisted (the disk now holds the
+        // rewound world: auto ISO, the frame rate a daytime rule left), but
+        // the shared flow still answers the FIRED world — the same share-in
+        // lag the executor regression rides. The store stub below keeps the
+        // share-in undelivered for this test, the window the bug rides. A
+        // `.value` base would drive the fired values back onto the live
+        // camera the restore just rewound (issue #18: configured values
+        // briefly apply, then revert — the inverse half: reverted values
+        // briefly apply, then stick).
+        diskWorld = CameraSettings(frameRate = 15)
+        settings.value = CameraSettings(iso = 1600, frameRate = 24)
+        coEvery { settingsDataStore.saveSettings(any()) } answers { diskWorld = firstArg() }
+
+        val controller = controller()
+        assertTrue(controller.arm("r1"))
+        controller.restore()
+
+        val applied = slot<CameraSettings>()
+        coVerify { applier.applyCameraSettingsNow(capture(applied)) }
+        // Touched axis from the snapshot (auto ISO), untouched axis from the
+        // DISK truth — the persisted value the applier will re-assert.
+        assertNull(applied.captured.iso)
+        assertEquals(15, applied.captured.frameRate)
     }
 }

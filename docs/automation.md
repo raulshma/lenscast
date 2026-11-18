@@ -31,8 +31,8 @@ The headline Day / Night pair (times are local wall clock):
 
 | Rule  | Trigger | Only when | Actions                                                                |
 |-------|---------|-----------|------------------------------------------------------------------------|
-| Night | 18:00 daily | — | `camera_exposure` ISO 4000 + exposure 175 ms · `torch` on, strength 1 |
-| Day   | 07:00 daily | — | `camera_exposure` ISO auto (0) + exposure auto (0) · `torch` off      |
+| Night | 18:00 daily | — | `camera_exposure` ISO 4000 + exposure 175 ms · `night_vision` auto · `torch` on, strength 1 |
+| Day   | 07:00 daily | — | `camera_exposure` ISO auto (0) + exposure auto (0) · `night_vision` off · `torch` off      |
 
 And an if/then rule the old time-only engine could not express:
 
@@ -254,7 +254,7 @@ unknown condition id is simply never met.
 
 ## Action catalog
 
-Eleven action types. Absent optional parameters leave the current setting
+Twelve action types. Absent optional parameters leave the current setting
 unchanged; `0` on ISO / exposure time is the auto sentinel. All bounds
 below are the persistence/catalog clamps — the device's live ranges win at
 apply time.
@@ -266,6 +266,7 @@ apply time.
 | `camera_zoom`    | Zoom ratio | `ratio` FLOAT 1–10 |
 | `camera_fps`     | Camera frame rate | `fps` INT 1–120 |
 | `camera_lens`    | Switches the lens — rebinds the camera, briefly interrupting the preview/stream (flagged in the editor) | `index` INT 0–8, clamped to the device's lens inventory |
+| `night_vision`   | Night vision mode — the same setting the dashboard's camera section writes (night scene mode + flash AE) | `mode` STRING `off` \| `auto` \| `on` (default `off`) |
 | `torch`          | Torch on/off, optionally at a brightness level | `enabled` BOOL (default true); `strength` INT 1–8, optional, API 33+ multi-level flash only |
 | `stream`         | Starts/stops streaming | `enabled` BOOL (default true) |
 | `capture_photo`  | Captures one photo to the gallery — the only ONESHOT action | — |
@@ -276,7 +277,8 @@ apply time.
 Execution semantics worth knowing:
 
 - Camera-setting actions (`camera_exposure`, `camera_ev`, `camera_zoom`,
-  `camera_fps`, `torch`) merge into the **persisted** camera settings and
+  `camera_fps`, `torch`, `night_vision`) merge into the **persisted**
+  camera settings and
   the Settings Applier applies them in place — no stream interruption.
 - `stream` on is the Quick-Settings-tile start (always starts, restoring
   the web/RTSP outputs the on-device journal last recorded); `stream` off

@@ -7,6 +7,7 @@ import com.raulshma.lenscast.core.parseEnum
 import com.raulshma.lenscast.core.parseEnumOrNull
 import com.raulshma.lenscast.core.Secret
 import com.raulshma.lenscast.core.SecretUpdate
+import androidx.datastore.preferences.core.Preferences
 import com.raulshma.lenscast.capture.ml.AudioModelStore
 import com.raulshma.lenscast.capture.ml.DetectionModelStore
 import com.raulshma.lenscast.camera.model.CameraSettings
@@ -16,6 +17,112 @@ import com.raulshma.lenscast.camera.model.MotionZone
 import com.raulshma.lenscast.camera.model.OutputRotationPolicy
 import com.raulshma.lenscast.camera.model.OverlaySettings
 import com.raulshma.lenscast.data.SettingsDataStore
+import com.raulshma.lenscast.data.adaptiveBitrateEnabledPref
+import com.raulshma.lenscast.data.alertQuietHoursEnabledPref
+import com.raulshma.lenscast.data.alertQuietHoursEndMinutePref
+import com.raulshma.lenscast.data.alertQuietHoursStartMinutePref
+import com.raulshma.lenscast.data.apiTokenEnabledPref
+import com.raulshma.lenscast.data.apiTokenHashPref
+import com.raulshma.lenscast.data.audioDeviceIdPref
+import com.raulshma.lenscast.data.autoDeterrenceCooldownSecondsPref
+import com.raulshma.lenscast.data.autoSirenPref
+import com.raulshma.lenscast.data.autoTorchPref
+import com.raulshma.lenscast.data.backupEnabledPref
+import com.raulshma.lenscast.data.backupTargetPref
+import com.raulshma.lenscast.data.backupWebdavPasswordPref
+import com.raulshma.lenscast.data.backupWebdavUsernamePref
+import com.raulshma.lenscast.data.backupWebdavUrlPref
+import com.raulshma.lenscast.data.backupWifiOnlyPref
+import com.raulshma.lenscast.data.cameraSettingsPref
+import com.raulshma.lenscast.data.captureRetentionDaysPref
+import com.raulshma.lenscast.data.continuousRecordingPref
+import com.raulshma.lenscast.data.continuousSegmentMinutesPref
+import com.raulshma.lenscast.data.detectionNotificationsEnabledPref
+import com.raulshma.lenscast.data.ecoIdleFpsEnabledPref
+import com.raulshma.lenscast.data.encodedAdaptiveBitrateEnabledPref
+import com.raulshma.lenscast.data.eventRetentionDaysPref
+import com.raulshma.lenscast.data.fsiCameraResumePref
+import com.raulshma.lenscast.data.hlsDvrSegmentsPref
+import com.raulshma.lenscast.data.keepAwakeEnabledPref
+import com.raulshma.lenscast.data.jpegQualityPref
+import com.raulshma.lenscast.data.mediaEncryptionEnabledPref
+import com.raulshma.lenscast.data.mdnsEnabledPref
+import com.raulshma.lenscast.data.mlDetectionEnabledPref
+import com.raulshma.lenscast.data.mlIncludePetsPref
+import com.raulshma.lenscast.data.mlIncludePersonPref
+import com.raulshma.lenscast.data.mlIncludeVehiclesPref
+import com.raulshma.lenscast.data.mlMinScorePercentPref
+import com.raulshma.lenscast.data.motionArmDaysMaskPref
+import com.raulshma.lenscast.data.motionArmEndMinutePref
+import com.raulshma.lenscast.data.motionArmScheduleEnabledPref
+import com.raulshma.lenscast.data.motionArmStartMinutePref
+import com.raulshma.lenscast.data.motionCooldownSecondsPref
+import com.raulshma.lenscast.data.motionDetectionEnabledPref
+import com.raulshma.lenscast.data.motionPostRollSecondsPref
+import com.raulshma.lenscast.data.motionRecordingEnabledPref
+import com.raulshma.lenscast.data.motionSensitivityPref
+import com.raulshma.lenscast.data.motionZonesPref
+import com.raulshma.lenscast.data.mqttBrokerHostPref
+import com.raulshma.lenscast.data.mqttBrokerPortPref
+import com.raulshma.lenscast.data.mqttDiscoveryPrefixPref
+import com.raulshma.lenscast.data.mqttEnabledPref
+import com.raulshma.lenscast.data.mqttPasswordPref
+import com.raulshma.lenscast.data.mqttTelemetryEnabledPref
+import com.raulshma.lenscast.data.mqttTlsPref
+import com.raulshma.lenscast.data.mqttUsernamePref
+import com.raulshma.lenscast.data.onvifEnabledPref
+import com.raulshma.lenscast.data.overlaySettingsPref
+import com.raulshma.lenscast.data.pushEnabledPref
+import com.raulshma.lenscast.data.recordingAudioEnabledPref
+import com.raulshma.lenscast.data.rtmpEnabledPref
+import com.raulshma.lenscast.data.rtmpUrlPref
+import com.raulshma.lenscast.data.rtspBasicAuthCompatPref
+import com.raulshma.lenscast.data.rtspEnabledPref
+import com.raulshma.lenscast.data.rtspInputFormatPref
+import com.raulshma.lenscast.data.rtspPortPref
+import com.raulshma.lenscast.data.rtspResolutionPref
+import com.raulshma.lenscast.data.rtspSubStreamEnabledPref
+import com.raulshma.lenscast.data.rtspTlsEnabledPref
+import com.raulshma.lenscast.data.rtspVideoCodecPref
+import com.raulshma.lenscast.data.showPreviewPref
+import com.raulshma.lenscast.data.sirenDurationSecondsPref
+import com.raulshma.lenscast.data.soundAdaptiveNoiseFloorPref
+import com.raulshma.lenscast.data.soundClassificationAllowedClassesPref
+import com.raulshma.lenscast.data.soundClassificationConfidencePercentPref
+import com.raulshma.lenscast.data.soundClassificationEnabledPref
+import com.raulshma.lenscast.data.soundCooldownSecondsPref
+import com.raulshma.lenscast.data.soundDetectionEnabledPref
+import com.raulshma.lenscast.data.soundRecordingEnabledPref
+import com.raulshma.lenscast.data.soundThresholdPercentPref
+import com.raulshma.lenscast.data.soundTriggerClassesPref
+import com.raulshma.lenscast.data.soundTriggerEnabledPref
+import com.raulshma.lenscast.data.storageQuotaMbPref
+import com.raulshma.lenscast.data.streamingPortPref
+import com.raulshma.lenscast.data.httpsEnabledPref
+import com.raulshma.lenscast.data.webStreamingEnabledPref
+import com.raulshma.lenscast.data.watchdogCheckIntervalSecondsPref
+import com.raulshma.lenscast.data.watchdogCheckIntervalSecondsPref
+import com.raulshma.lenscast.data.watchdogEnabledPref
+import com.raulshma.lenscast.data.watchdogMaxRetriesPref
+import com.raulshma.lenscast.data.srtEnabledPref
+import com.raulshma.lenscast.data.srtUrlPref
+import com.raulshma.lenscast.data.streamAudioBitrateKbpsPref
+import com.raulshma.lenscast.data.streamAudioChannelsPref
+import com.raulshma.lenscast.data.streamAudioEchoCancellationPref
+import com.raulshma.lenscast.data.streamAudioEnabledPref
+import com.raulshma.lenscast.data.telegramBotTokenPref
+import com.raulshma.lenscast.data.telegramChatIdPref
+import com.raulshma.lenscast.data.tamperDetectionEnabledPref
+import com.raulshma.lenscast.data.unifiedPushEnabledPref
+import com.raulshma.lenscast.data.webhookEnabledPref
+import com.raulshma.lenscast.data.webhookHeadersPref
+import com.raulshma.lenscast.data.webhookUrlPref
+import com.raulshma.lenscast.data.whipEnabledPref
+import com.raulshma.lenscast.data.whipStunServerPref
+import com.raulshma.lenscast.data.whipTokenPref
+import com.raulshma.lenscast.data.whipUrlPref
+import com.raulshma.lenscast.data.rtmpEnabledPref
+import com.raulshma.lenscast.data.rtmpUrlPref
 import com.raulshma.lenscast.streaming.model.CameraSettingsDto
 import com.raulshma.lenscast.streaming.model.MaskingZoneDto
 import com.raulshma.lenscast.streaming.model.MotionZoneDto
@@ -27,6 +134,8 @@ import com.raulshma.lenscast.streaming.model.SuccessResponse
 import com.raulshma.lenscast.streaming.rtsp.RtspInputFormat
 import com.raulshma.lenscast.streaming.rtsp.RtspResolution
 import com.raulshma.lenscast.streaming.rtsp.RtspVideoCodec
+import com.squareup.moshi.JsonAdapter
+import com.squareup.moshi.Types
 
 /**
  * /api/settings — JSON-in/JSON-out mapping between the Web API DTOs and the
@@ -59,6 +168,19 @@ class SettingsWebHandler(
     private val updateAdapter by lazy { AppJson.moshi.adapter(SettingsUpdateRequestDto::class.java) }
     private val exportAdapter by lazy { AppJson.moshi.adapter(SettingsExportDto::class.java) }
     private val successAdapter by lazy { AppJson.moshi.adapter(SuccessResponse::class.java) }
+    private val cameraDtoAdapter by lazy { AppJson.moshi.adapter(CameraSettingsDto::class.java) }
+    private val streamingDtoAdapter by lazy { AppJson.moshi.adapter(StreamingSettingsDto::class.java) }
+
+    /**
+     * The raw body's key tree — the only way to know which section keys the
+     * client actually sent, which is exactly what the section merge below
+     * preserves vs. overlays.
+     */
+    private val rawBodyAdapter by lazy {
+        AppJson.moshi.adapter<Map<String, Any>>(
+            Types.newParameterizedType(Map::class.java, String::class.java, Any::class.java),
+        )
+    }
 
     suspend fun get(): String = responseAdapter.toJson(buildResponse())
 
@@ -66,6 +188,8 @@ class SettingsWebHandler(
      * GET /api/settings/export — the current settings document inside the
      * versioned [SettingsExportDto] envelope, for downloading as a file and
      * restoring via POST /api/settings/import on this or another device.
+     *
+     * as such.
      *
      * What the export carries: exactly what GET /api/settings returns — the
      * write-only credentials (WebDAV password, Telegram bot token, MQTT
@@ -90,9 +214,10 @@ class SettingsWebHandler(
      * update document, and applies it through the exact [put] path a
      * dashboard save uses, so every clamp and write-only-secret rule holds
      * identically. A bare document carries [SettingsUpdateRequestDto] PUT
-     * semantics: every field of a present section persists, including ones
-     * the document omits (which take their defaults) — the envelope is the
-     * lossless path and the one the dashboard's export button produces.
+     * semantics: fields present in a section apply, fields it omits keep
+     * their stored values (section-level merge — see [put]) — the envelope
+     * is the lossless path and the one the dashboard's export button
+     * produces.
      * Fails with an [IllegalArgumentException] (the router's error-payload
      * shape) for unparseable bodies, unsupported schema versions, and
      * documents with no settings at all.
@@ -110,45 +235,64 @@ class SettingsWebHandler(
         return successAdapter.toJson(SuccessResponse())
     }
 
-    private suspend fun buildResponse(): SettingsResponseDto {
-        val store = settingsDataStore
-        val overlay = store.overlaySettings.value
+    /**
+     * The response decodes one fresh file pass ([SettingsDataStore.readFresh])
+     * through the pref descriptors: a GET landing right after a save answers
+     * from the disk, never from the shared flows' lagging collector beat —
+     * the stale `iso:null` / `compat:null` echo a back-to-back curl used to
+     * observe. Only the model lifecycle stays live: runtime state, not a
+     * persisted setting.
+     */
+    private suspend fun buildResponse(): SettingsResponseDto =
+        settingsDataStore.readFresh { prefs ->
+            SettingsResponseDto(
+                camera = toCameraDto(cameraSettingsPref.decode(prefs)),
+                streaming = streamingDtoFrom(prefs),
+            )
+        }
+
+    /**
+     * The streaming section of the settings document, decoded from the
+     * [SettingsDataStore.readFresh] file pass. The same decode feeds the GET
+     * response and the PUT's stored-side merge base, so both answer and
+     * overlay come from one committed file state.
+     */
+    private fun streamingDtoFrom(prefs: Preferences): StreamingSettingsDto {
+        val overlay = overlaySettingsPref.decode(prefs)
         // Response-only model facts: the store's published lifecycle.
         val modelWire = DetectionModelStore.wireFields(detectionModelStore.state.value)
-        val response = SettingsResponseDto(
-            camera = toCameraDto(store.settings.value),
-            streaming = StreamingSettingsDto(
-                port = store.streamingPort.value,
-                webStreamingEnabled = store.webStreamingEnabled.value,
-                jpegQuality = store.jpegQuality.value,
-                showPreview = store.showPreview.value,
-                streamAudioEnabled = store.streamAudioEnabled.value,
-                streamAudioBitrateKbps = store.streamAudioBitrateKbps.value,
-                streamAudioChannels = store.streamAudioChannels.value,
-                streamAudioEchoCancellation = store.streamAudioEchoCancellation.value,
-                recordingAudioEnabled = store.recordingAudioEnabled.value,
-                rtspEnabled = store.rtspEnabled.value,
-                rtspTlsEnabled = store.rtspTlsEnabled.value,
-                rtspBasicAuthCompat = store.rtspBasicAuthCompat.value,
-                rtspPort = store.rtspPort.value,
-                rtspInputFormat = store.rtspInputFormat.value.name,
-                rtspResolution = store.rtspResolution.value.wireName,
-                rtspVideoCodec = store.rtspVideoCodec.value.wireName,
-                rtmpEnabled = store.rtmpEnabled.value,
+        return StreamingSettingsDto(
+                port = streamingPortPref.decode(prefs),
+                webStreamingEnabled = webStreamingEnabledPref.decode(prefs),
+                jpegQuality = jpegQualityPref.decode(prefs),
+                showPreview = showPreviewPref.decode(prefs),
+                streamAudioEnabled = streamAudioEnabledPref.decode(prefs),
+                streamAudioBitrateKbps = streamAudioBitrateKbpsPref.decode(prefs),
+                streamAudioChannels = streamAudioChannelsPref.decode(prefs),
+                streamAudioEchoCancellation = streamAudioEchoCancellationPref.decode(prefs),
+                recordingAudioEnabled = recordingAudioEnabledPref.decode(prefs),
+                rtspEnabled = rtspEnabledPref.decode(prefs),
+                rtspTlsEnabled = rtspTlsEnabledPref.decode(prefs),
+                rtspBasicAuthCompat = rtspBasicAuthCompatPref.decode(prefs),
+                rtspPort = rtspPortPref.decode(prefs),
+                rtspInputFormat = rtspInputFormatPref.decode(prefs).name,
+                rtspResolution = rtspResolutionPref.decode(prefs).wireName,
+                rtspVideoCodec = rtspVideoCodecPref.decode(prefs).wireName,
+                rtmpEnabled = rtmpEnabledPref.decode(prefs),
                 // Every secret below is a plain copy of its stored value: the
                 // Secret wire type (App Json) serializes all of them blank, so
                 // no stored credential ever round-trips (see core/Secret.kt).
-                rtmpUrl = Secret(store.rtmpUrl.value),
-                whipEnabled = store.whipEnabled.value,
-                whipUrl = store.whipUrl.value,
-                whipToken = Secret(store.whipToken.value),
-                whipStunServer = store.whipStunServer.value,
-                srtEnabled = store.srtEnabled.value,
-                srtUrl = Secret(store.srtUrl.value),
-                adaptiveBitrateEnabled = store.adaptiveBitrateEnabled.value,
-                adaptiveEncodedBitrateEnabled = store.encodedAdaptiveBitrateEnabled.value,
-                rtspSubStreamEnabled = store.rtspSubStreamEnabled.value,
-                hlsDvrSegments = store.hlsDvrSegments.value,
+                rtmpUrl = Secret(rtmpUrlPref.decode(prefs)),
+                whipEnabled = whipEnabledPref.decode(prefs),
+                whipUrl = whipUrlPref.decode(prefs),
+                whipToken = Secret(whipTokenPref.decode(prefs)),
+                whipStunServer = whipStunServerPref.decode(prefs),
+                srtEnabled = srtEnabledPref.decode(prefs),
+                srtUrl = Secret(srtUrlPref.decode(prefs)),
+                adaptiveBitrateEnabled = adaptiveBitrateEnabledPref.decode(prefs),
+                adaptiveEncodedBitrateEnabled = encodedAdaptiveBitrateEnabledPref.decode(prefs),
+                rtspSubStreamEnabled = rtspSubStreamEnabledPref.decode(prefs),
+                hlsDvrSegments = hlsDvrSegmentsPref.decode(prefs),
                 overlayEnabled = overlay.enabled,
                 showTimestamp = overlay.showTimestamp,
                 timestampFormat = overlay.timestampFormat,
@@ -165,97 +309,108 @@ class SettingsWebHandler(
                 overlayLineHeight = overlay.lineHeight,
                 maskingEnabled = overlay.maskingEnabled,
                 maskingZones = overlay.maskingZones.map(::toZoneDto),
-                watchdogEnabled = store.watchdogEnabled.value,
-                watchdogMaxRetries = store.watchdogMaxRetries.value,
-                watchdogCheckIntervalSeconds = store.watchdogCheckIntervalSeconds.value,
-                fsiCameraResumeEnabled = store.fsiCameraResume.value,
-                mdnsEnabled = store.mdnsEnabled.value,
-                motionDetectionEnabled = store.motionDetectionEnabled.value,
-                motionSensitivityPercent = store.motionSensitivity.value,
-                motionZones = store.motionZones.value.map(::toMotionZoneDto),
-                motionRecordingEnabled = store.motionRecordingEnabled.value,
-                motionPostRollSeconds = store.motionPostRollSeconds.value,
-                motionArmScheduleEnabled = store.motionArmScheduleEnabled.value,
-                motionArmStartMinute = store.motionArmStartMinute.value,
-                motionArmEndMinute = store.motionArmEndMinute.value,
-                motionArmDaysMask = store.motionArmDaysMask.value,
-                soundDetectionEnabled = store.soundDetectionEnabled.value,
-                soundThresholdPercent = store.soundThresholdPercent.value,
-                soundAdaptiveNoiseFloor = store.soundAdaptiveNoiseFloor.value,
-                soundRecordingEnabled = store.soundRecordingEnabled.value,
-                motionCooldownSeconds = store.motionCooldownSeconds.value,
-                soundCooldownSeconds = store.soundCooldownSeconds.value,
-                soundClassificationEnabled = store.soundClassificationEnabled.value,
-                soundClassificationConfidencePercent = store.soundClassificationConfidencePercent.value,
-                soundClassificationAllowedClasses = store.soundClassificationAllowedClasses.value.toList(),
-                soundTriggerEnabled = store.soundTriggerEnabled.value,
-                soundTriggerClasses = store.soundTriggerClasses.value.toList(),
-                webhookEnabled = store.webhookEnabled.value,
-                webhookUrl = store.webhookUrl.value,
-                webhookHeaders = store.webhookHeaders.value,
-                autoSiren = store.autoSiren.value,
-                autoTorch = store.autoTorch.value,
-                sirenDurationSeconds = store.sirenDurationSeconds.value,
-                autoDeterrenceCooldownSeconds = store.autoDeterrenceCooldownSeconds.value,
-                backupEnabled = store.backupEnabled.value,
-                backupWifiOnly = store.backupWifiOnly.value,
-                backupTarget = BackupTargetPolicy.parse(store.backupTarget.value).wireName,
-                backupWebdavUrl = store.backupWebdavUrl.value,
-                backupWebdavUsername = store.backupWebdavUsername.value,
-                backupWebdavPassword = Secret(store.backupWebdavPassword.value),
-                telegramChatId = store.telegramChatId.value,
-                telegramBotToken = Secret(store.telegramBotToken.value),
-                apiTokenEnabled = store.apiTokenEnabled.value,
-                apiTokenConfigured = store.apiTokenHash.value.isNotBlank(),
+                watchdogEnabled = watchdogEnabledPref.decode(prefs),
+                watchdogMaxRetries = watchdogMaxRetriesPref.decode(prefs),
+                watchdogCheckIntervalSeconds = watchdogCheckIntervalSecondsPref.decode(prefs),
+                fsiCameraResumeEnabled = fsiCameraResumePref.decode(prefs),
+                mdnsEnabled = mdnsEnabledPref.decode(prefs),
+                motionDetectionEnabled = motionDetectionEnabledPref.decode(prefs),
+                motionSensitivityPercent = motionSensitivityPref.decode(prefs),
+                motionZones = motionZonesPref.decode(prefs).map(::toMotionZoneDto),
+                motionRecordingEnabled = motionRecordingEnabledPref.decode(prefs),
+                motionPostRollSeconds = motionPostRollSecondsPref.decode(prefs),
+                motionArmScheduleEnabled = motionArmScheduleEnabledPref.decode(prefs),
+                motionArmStartMinute = motionArmStartMinutePref.decode(prefs),
+                motionArmEndMinute = motionArmEndMinutePref.decode(prefs),
+                motionArmDaysMask = motionArmDaysMaskPref.decode(prefs),
+                soundDetectionEnabled = soundDetectionEnabledPref.decode(prefs),
+                soundThresholdPercent = soundThresholdPercentPref.decode(prefs),
+                soundAdaptiveNoiseFloor = soundAdaptiveNoiseFloorPref.decode(prefs),
+                soundRecordingEnabled = soundRecordingEnabledPref.decode(prefs),
+                motionCooldownSeconds = motionCooldownSecondsPref.decode(prefs),
+                soundCooldownSeconds = soundCooldownSecondsPref.decode(prefs),
+                soundClassificationEnabled = soundClassificationEnabledPref.decode(prefs),
+                soundClassificationConfidencePercent = soundClassificationConfidencePercentPref.decode(prefs),
+                soundClassificationAllowedClasses = soundClassificationAllowedClassesPref.decode(prefs).toList(),
+                soundTriggerEnabled = soundTriggerEnabledPref.decode(prefs),
+                soundTriggerClasses = soundTriggerClassesPref.decode(prefs).toList(),
+                webhookEnabled = webhookEnabledPref.decode(prefs),
+                webhookUrl = webhookUrlPref.decode(prefs),
+                webhookHeaders = webhookHeadersPref.decode(prefs),
+                autoSiren = autoSirenPref.decode(prefs),
+                autoTorch = autoTorchPref.decode(prefs),
+                sirenDurationSeconds = sirenDurationSecondsPref.decode(prefs),
+                autoDeterrenceCooldownSeconds = autoDeterrenceCooldownSecondsPref.decode(prefs),
+                backupEnabled = backupEnabledPref.decode(prefs),
+                backupWifiOnly = backupWifiOnlyPref.decode(prefs),
+                backupTarget = BackupTargetPolicy.parse(backupTargetPref.decode(prefs)).wireName,
+                backupWebdavUrl = backupWebdavUrlPref.decode(prefs),
+                backupWebdavUsername = backupWebdavUsernamePref.decode(prefs),
+                backupWebdavPassword = Secret(backupWebdavPasswordPref.decode(prefs)),
+                telegramChatId = telegramChatIdPref.decode(prefs),
+                telegramBotToken = Secret(telegramBotTokenPref.decode(prefs)),
+                apiTokenEnabled = apiTokenEnabledPref.decode(prefs),
+                apiTokenConfigured = apiTokenHashPref.decode(prefs).isNotBlank(),
                 // The token's stored form is the SHA-256 hash, and there is
                 // no plaintext to copy — the field stays empty here; the
                 // Secret adapter would blank it regardless.
                 apiToken = Secret(""),
-                httpsEnabled = store.httpsEnabled.value,
-                audioDeviceId = store.audioDeviceId.value,
-                detectionNotificationsEnabled = store.detectionNotificationsEnabled.value,
-                alertQuietHoursEnabled = store.alertQuietHoursEnabled.value,
-                alertQuietHoursStartMinute = store.alertQuietHoursStartMinute.value,
-                alertQuietHoursEndMinute = store.alertQuietHoursEndMinute.value,
-                keepAwakeEnabled = store.keepAwakeEnabled.value,
-                tamperDetectionEnabled = store.tamperDetectionEnabled.value,
-                mqttEnabled = store.mqttEnabled.value,
-                mqttBrokerHost = store.mqttBrokerHost.value,
-                mqttBrokerPort = store.mqttBrokerPort.value,
-                mqttUsername = store.mqttUsername.value,
-                mqttPassword = Secret(store.mqttPassword.value),
-                mqttTls = store.mqttTls.value,
-                mqttDiscoveryPrefix = store.mqttDiscoveryPrefix.value,
-                mqttTelemetryEnabled = store.mqttTelemetryEnabled.value,
-                pushEnabled = store.pushEnabled.value,
-                unifiedPushEnabled = store.unifiedPushEnabled.value,
-                captureRetentionDays = store.captureRetentionDays.value,
-                eventRetentionDays = store.eventRetentionDays.value,
-                storageQuotaMb = store.storageQuotaMb.value,
-                mediaEncryptionEnabled = store.mediaEncryptionEnabled.value,
-                mlDetectionEnabled = store.mlDetectionEnabled.value,
-                mlMinScorePercent = store.mlMinScorePercent.value,
-                mlIncludePerson = store.mlIncludePerson.value,
-                mlIncludePets = store.mlIncludePets.value,
-                mlIncludeVehicles = store.mlIncludeVehicles.value,
+                httpsEnabled = httpsEnabledPref.decode(prefs),
+                audioDeviceId = audioDeviceIdPref.decode(prefs),
+                detectionNotificationsEnabled = detectionNotificationsEnabledPref.decode(prefs),
+                alertQuietHoursEnabled = alertQuietHoursEnabledPref.decode(prefs),
+                alertQuietHoursStartMinute = alertQuietHoursStartMinutePref.decode(prefs),
+                alertQuietHoursEndMinute = alertQuietHoursEndMinutePref.decode(prefs),
+                keepAwakeEnabled = keepAwakeEnabledPref.decode(prefs),
+                tamperDetectionEnabled = tamperDetectionEnabledPref.decode(prefs),
+                mqttEnabled = mqttEnabledPref.decode(prefs),
+                mqttBrokerHost = mqttBrokerHostPref.decode(prefs),
+                mqttBrokerPort = mqttBrokerPortPref.decode(prefs),
+                mqttUsername = mqttUsernamePref.decode(prefs),
+                mqttPassword = Secret(mqttPasswordPref.decode(prefs)),
+                mqttTls = mqttTlsPref.decode(prefs),
+                mqttDiscoveryPrefix = mqttDiscoveryPrefixPref.decode(prefs),
+                mqttTelemetryEnabled = mqttTelemetryEnabledPref.decode(prefs),
+                pushEnabled = pushEnabledPref.decode(prefs),
+                unifiedPushEnabled = unifiedPushEnabledPref.decode(prefs),
+                captureRetentionDays = captureRetentionDaysPref.decode(prefs),
+                eventRetentionDays = eventRetentionDaysPref.decode(prefs),
+                storageQuotaMb = storageQuotaMbPref.decode(prefs),
+                mediaEncryptionEnabled = mediaEncryptionEnabledPref.decode(prefs),
+                mlDetectionEnabled = mlDetectionEnabledPref.decode(prefs),
+                mlMinScorePercent = mlMinScorePercentPref.decode(prefs),
+                mlIncludePerson = mlIncludePersonPref.decode(prefs),
+                mlIncludePets = mlIncludePetsPref.decode(prefs),
+                mlIncludeVehicles = mlIncludeVehiclesPref.decode(prefs),
                 mlModelState = modelWire.state,
                 mlModelProgress = modelWire.progress,
                 mlModelError = modelWire.error,
-                continuousRecording = store.continuousRecording.value,
-                continuousSegmentMinutes = store.continuousSegmentMinutes.value,
-                onvifEnabled = store.onvifEnabled.value,
-                ecoIdleFpsEnabled = store.ecoIdleFpsEnabled.value,
-            ),
+                continuousRecording = continuousRecordingPref.decode(prefs),
+                continuousSegmentMinutes = continuousSegmentMinutesPref.decode(prefs),
+                onvifEnabled = onvifEnabledPref.decode(prefs),
+                ecoIdleFpsEnabled = ecoIdleFpsEnabledPref.decode(prefs),
         )
-        return response
     }
 
+    /**
+     * PUT /api/settings — section-level merge: the raw JSON keys the client
+     * sent overlay the stored document ([mergeSection]), so a section that
+     * omits a field keeps the stored value instead of silently resetting it
+     * to the DTO default. Full-section writers (the dashboard's GET-merge-PUT,
+     * the import envelope) carry every key and behave exactly as before; an
+     * explicit JSON null still overlays as null and resets an optional field.
+     * The camera rebuild keeps the torch contract unchanged: no torch fields
+     * ride the DTO, torchEnabled converges to the live LED fact, and the
+     * stored strength carries over.
+     */
     suspend fun put(body: String): String {
         val request = updateAdapter.fromJson(body)
             ?: throw IllegalArgumentException("Invalid settings JSON")
+        val rawSections: Map<String, Any> = rawBodyAdapter.fromJson(body) ?: emptyMap()
 
-        request.camera?.let { cam ->
-            val current = settingsDataStore.settings.value
+        request.camera?.let {
+            val current = settingsDataStore.settingsFromDisk()
+            val cam = mergeSection(cameraDtoAdapter, toCameraDto(current), rawSections["camera"])
             val newSettings = CameraSettings(
                 exposureCompensation = cam.exposureCompensation.coerceIn(
                     CameraSettings.EXPOSURE_COMPENSATION_MIN,
@@ -297,7 +452,12 @@ class SettingsWebHandler(
             settingsDataStore.saveSettings(newSettings)
         }
 
-        request.streaming?.let { stream ->
+        request.streaming?.let {
+            val stream = mergeSection(
+                streamingDtoAdapter,
+                settingsDataStore.readFresh(::streamingDtoFrom),
+                rawSections["streaming"],
+            )
             // Out-of-range numeric values are the Settings Store's clamp
             // policy, not this handler's: every saver coerces on save.
             settingsDataStore.saveStreamingPort(stream.port)
@@ -473,6 +633,21 @@ class SettingsWebHandler(
      */
     private suspend fun saveSecret(incoming: String, save: suspend (String) -> Unit) {
         if (SecretUpdate.overwrites(incoming)) save(incoming)
+    }
+
+    /**
+     * Section-level merge for the settings PUT: the incoming section's raw
+     * JSON keys overlay the stored section's value tree, so omitted keys
+     * keep their stored values while sent keys (including explicit nulls)
+     * replace them. Both sides run through the section's own Moshi adapter,
+     * so the key set can never drift from the DTO shape — no hand-written
+     * presence list to maintain.
+     */
+    private fun <T : Any> mergeSection(adapter: JsonAdapter<T>, stored: T, incoming: Any?): T {
+        if (incoming !is Map<*, *>) return stored
+        val merged = adapter.toJsonValue(stored) as MutableMap<Any?, Any?>
+        for ((key, value) in incoming) merged[key] = value
+        return adapter.fromJsonValue(merged) ?: stored
     }
 
     /**

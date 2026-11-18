@@ -521,6 +521,7 @@ class AutomationViewModel(
             "camera_zoom" to R.string.automation_action_camera_zoom,
             "camera_fps" to R.string.automation_action_camera_fps,
             "camera_lens" to R.string.automation_action_camera_lens,
+            "night_vision" to R.string.automation_action_night_vision,
             "torch" to R.string.automation_action_torch,
             "stream" to R.string.automation_action_stream,
             "capture_photo" to R.string.automation_action_capture_photo,
@@ -552,6 +553,7 @@ class AutomationViewModel(
         /** Type-specific param-label overrides, keyed "typeId/paramName". */
         private val PARAM_LABEL_OVERRIDES: Map<String, Int> = mapOf(
             "camera_lens/index" to R.string.automation_param_lens_index,
+            "night_vision/mode" to R.string.automation_param_night_vision_mode,
             "torch/enabled" to R.string.automation_param_torch,
             "stream/enabled" to R.string.automation_param_stream,
             "recording/enabled" to R.string.automation_param_recording,
@@ -600,6 +602,15 @@ class AutomationViewModel(
                 }
                 "camera_lens" -> params["index"]?.let {
                     lines.add(AutomationSummaryLine(R.string.automation_summary_lens, listOf(it)))
+                }
+                "night_vision" -> params["mode"]?.let { mode ->
+                    lines.add(
+                        when (mode) {
+                            "auto" -> AutomationSummaryLine(R.string.automation_summary_night_vision_auto)
+                            "on" -> AutomationSummaryLine(R.string.automation_summary_night_vision_on)
+                            else -> AutomationSummaryLine(R.string.automation_summary_night_vision_off)
+                        },
+                    )
                 }
                 "torch" -> {
                     if (params["enabled"] != "false") {

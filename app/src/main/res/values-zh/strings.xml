@@ -321,6 +321,7 @@
     <string name="settings_section_streaming">直播</string>
     <string name="settings_enable_web_streaming">启用网页直播</string>
     <string name="settings_streaming_port">直播端口</string>
+    <string name="settings_streaming_port_invalid">请输入 %1$d 到 %2$d 之间的端口</string>
     <string name="settings_adaptive_bitrate">自适应码率</string>
     <string name="settings_adaptive_encoded_bitrate">编码码率自适应</string>
     <string name="settings_adaptive_encoded_bitrate_description">网络变慢（或设备发热）时自动降低编码器码率，带宽恢复后再回升 — 在 RTSP、WebSocket 和 HLS 发送路径上实测</string>
@@ -548,6 +549,7 @@
     <string name="automation_action_camera_zoom">变焦</string>
     <string name="automation_action_camera_fps">帧率</string>
     <string name="automation_action_camera_lens">切换镜头</string>
+    <string name="automation_action_night_vision">夜视</string>
     <string name="automation_action_torch">手电筒</string>
     <string name="automation_action_stream">直播</string>
     <string name="automation_action_capture_photo">照片</string>
@@ -561,6 +563,7 @@
     <string name="automation_param_zoom_ratio">变焦</string>
     <string name="automation_param_fps">FPS</string>
     <string name="automation_param_lens_index">镜头</string>
+    <string name="automation_param_night_vision_mode">模式</string>
     <string name="automation_param_torch">手电筒</string>
     <string name="automation_param_stream">直播</string>
     <string name="automation_param_recording">录像</string>
@@ -581,6 +584,9 @@
     <string name="automation_summary_zoom">变焦 %1$sx</string>
     <string name="automation_summary_fps">FPS %1$s</string>
     <string name="automation_summary_lens">镜头 %1$s</string>
+    <string name="automation_summary_night_vision_off">夜视关闭</string>
+    <string name="automation_summary_night_vision_auto">夜视自动</string>
+    <string name="automation_summary_night_vision_on">夜视开启</string>
     <string name="automation_summary_stream_start">开始直播</string>
     <string name="automation_summary_stream_stop">停止直播</string>
     <string name="automation_summary_photo">照片</string>
@@ -766,6 +772,7 @@
     <string name="automation_action_desc_camera_zoom">设置变焦级别</string>
     <string name="automation_action_desc_camera_fps">更改推流帧率</string>
     <string name="automation_action_desc_camera_lens">在设备镜头间切换(会短暂中断推流)</string>
+    <string name="automation_action_desc_night_vision">切换夜视模式(关闭、自动或开启)</string>
     <string name="automation_action_desc_torch">打开闪光灯作为照明或威慑</string>
     <string name="automation_action_desc_stream">开始或停止直播推流</string>
     <string name="automation_action_desc_capture_photo">规则触发的瞬间拍摄一张照片</string>

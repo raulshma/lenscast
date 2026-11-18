@@ -344,6 +344,7 @@
     <string name="settings_section_streaming">Трансляция</string>
     <string name="settings_enable_web_streaming">Включить веб-трансляцию</string>
     <string name="settings_streaming_port">Порт трансляции</string>
+    <string name="settings_streaming_port_invalid">Введите порт от %1$d до %2$d</string>
     <string name="settings_adaptive_bitrate">Адаптивный битрейт</string>
     <string name="settings_adaptive_encoded_bitrate">Адаптивный битрейт кодированного потока</string>
     <string name="settings_adaptive_encoded_bitrate_description">Снижает битрейт кодировщика в медленной сети (или при перегреве) и восстанавливает его при улучшении канала — измеряется по отправке RTSP, WebSocket и HLS</string>
@@ -572,6 +573,7 @@
     <string name="automation_action_camera_zoom">Зум</string>
     <string name="automation_action_camera_fps">Частота кадров</string>
     <string name="automation_action_camera_lens">Переключение объектива</string>
+    <string name="automation_action_night_vision">Ночное зрение</string>
     <string name="automation_action_torch">Фонарик</string>
     <string name="automation_action_stream">Трансляция</string>
     <string name="automation_action_capture_photo">Фото</string>
@@ -585,6 +587,7 @@
     <string name="automation_param_zoom_ratio">Зум</string>
     <string name="automation_param_fps">FPS</string>
     <string name="automation_param_lens_index">Объектив</string>
+    <string name="automation_param_night_vision_mode">Режим</string>
     <string name="automation_param_torch">Фонарик</string>
     <string name="automation_param_stream">Трансляция</string>
     <string name="automation_param_recording">Запись</string>
@@ -605,6 +608,9 @@
     <string name="automation_summary_zoom">Зум %1$sx</string>
     <string name="automation_summary_fps">FPS %1$s</string>
     <string name="automation_summary_lens">Объектив %1$s</string>
+    <string name="automation_summary_night_vision_off">Ночное зрение выкл.</string>
+    <string name="automation_summary_night_vision_auto">Ночное зрение авто</string>
+    <string name="automation_summary_night_vision_on">Ночное зрение вкл.</string>
     <string name="automation_summary_stream_start">Запустить трансляцию</string>
     <string name="automation_summary_stream_stop">Остановить трансляцию</string>
     <string name="automation_summary_photo">Фото</string>
@@ -790,6 +796,7 @@
     <string name="automation_action_desc_camera_zoom">Задать уровень зума</string>
     <string name="automation_action_desc_camera_fps">Изменить частоту кадров трансляции</string>
     <string name="automation_action_desc_camera_lens">Переключить между объективами устройства (кратко прерывает трансляцию)</string>
+    <string name="automation_action_desc_night_vision">Переключает режим ночного зрения (выкл., авто или вкл.)</string>
     <string name="automation_action_desc_torch">Включить вспышку как освещение или средство отпугивания</string>
     <string name="automation_action_desc_stream">Запустить или остановить трансляцию</string>
     <string name="automation_action_desc_capture_photo">Снять фото в момент срабатывания правила</string>

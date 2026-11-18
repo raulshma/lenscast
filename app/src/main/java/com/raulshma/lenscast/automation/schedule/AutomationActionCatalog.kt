@@ -22,6 +22,8 @@ package com.raulshma.lenscast.automation.schedule
  *   folds back to absent, the only honest encoding of "no opinion".
  * @param autoAtZero '0' is the auto/unlimited sentinel — clients may render
  *   an Auto toggle for it; false means 0 is an ordinary value.
+ * @param values The closed value set of a STRING param (canonical lowercase
+ *   ids, in display order); empty for BOOL/INT/FLOAT params.
  */
 data class AutomationParamSpec(
     val name: String,
@@ -31,10 +33,15 @@ data class AutomationParamSpec(
     val optional: Boolean,
     val defaultValue: String,
     val autoAtZero: Boolean = false,
+    val values: List<String> = emptyList(),
 )
 
-/** How a parameter's string value is interpreted. */
-enum class ParamKind { BOOL, INT, FLOAT }
+/**
+ * How a parameter's string value is interpreted. STRING params carry their
+ * closed value set on [AutomationParamSpec.values] — canonical lowercase ids,
+ * parsed leniently (case/whitespace) and folded to the default when invalid.
+ */
+enum class ParamKind { BOOL, INT, FLOAT, STRING }
 
 /**
  * What happens to an action when its rule fires late (device asleep, process
@@ -188,6 +195,27 @@ object AutomationActionCatalog {
             interruptsStream = true,
             group = GROUP_CAMERA,
             icon = AutomationIconVocabulary.LENS,
+        ),
+        AutomationActionType(
+            id = "night_vision",
+            // The same camera setting the dashboard's camera section writes
+            // (NightVisionMode, applied in CameraControlPlan's scene-mode
+            // rungs) — the classic day/night rule pairs it with the exposure
+            // action in one fire. Required param at the documented default:
+            // a night_vision action always converges a definite mode, "off"
+            // included — unlike the exposure params there is no "leave
+            // unchanged" reading of an enum action.
+            params = listOf(
+                AutomationParamSpec(
+                    name = "mode", kind = ParamKind.STRING,
+                    min = null, max = null,
+                    optional = false, defaultValue = "off",
+                    values = listOf("off", "auto", "on"),
+                ),
+            ),
+            catchUp = CatchUpClass.STATEFUL,
+            group = GROUP_CAMERA,
+            icon = AutomationIconVocabulary.NIGHTLIGHT,
         ),
         AutomationActionType(
             id = "torch",

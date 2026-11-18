@@ -1147,7 +1147,7 @@ data class LabeledCountDto(
 data class AutomationCatalogParamDto(
     /** The exact wire key inside the rule's `params` maps. */
     val name: String = "",
-    /** How the string value is interpreted: `"BOOL"` | `"INT"` | `"FLOAT"`. */
+    /** How the string value is interpreted: `"BOOL"` | `"INT"` | `"FLOAT"` | `"STRING"`. */
     val kind: String = "BOOL",
     /** Lower bound, or null for unbounded. */
     val min: Double? = null,
@@ -1162,6 +1162,12 @@ data class AutomationCatalogParamDto(
      * false = ordinary value.
      */
     val autoAtZero: Boolean = false,
+    /**
+     * The closed value set of a `"STRING"` param (canonical lowercase ids, in
+     * display order); null for BOOL/INT/FLOAT params. Omitted on the wire
+     * when null, like min/max.
+     */
+    val values: List<String>? = null,
 )
 
 /**

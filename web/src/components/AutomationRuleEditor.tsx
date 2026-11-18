@@ -1028,6 +1028,25 @@ function AutomationTimeWindowEditor(props: {
 }
 
 /**
+ * The localized label of one STRING param's canonical value — the shared
+ * Off/Auto/On words (the app's AutomationScreen.enumValueLabel). An unknown
+ * id falls back to itself, so a future vocabulary grows the labels without
+ * hiding the chip.
+ */
+function enumModeLabelKey(value: string): string {
+  switch (value) {
+    case 'off':
+      return 'common.off'
+    case 'auto':
+      return 'common.auto'
+    case 'on':
+      return 'common.on'
+    default:
+      return value
+  }
+}
+
+/**
  * The param editor for one catalog param — the web twin of the app's
  * AutomationParamEditor: BOOL switches (optional ones behind a configure
  * gate), auto-sentinel numerics (iso / exposure_time_ms) with an Auto toggle
@@ -1127,6 +1146,36 @@ function AutomationParamEditor(props: {
           </div>
         </Show>
       </Show>
+    )
+  }
+
+  // ── STRING ──
+  if (props.spec.kind === 'STRING') {
+    // A closed set of canonical ids renders as one-tap chips (the
+    // night-vision mode row's Off/Auto/On), styled like the day chips. The
+    // selection rides the documented default, so a fresh editor already
+    // shows where the action folds to.
+    const effective = () => value() ?? props.spec.defaultValue
+    return (
+      <div class="field-group">
+        <div class="field-row">
+          <span class="field-label">{label()}</span>
+        </div>
+        <div class="arm-days-row" role="group" aria-label={label()}>
+          <For each={props.spec.values ?? []}>
+            {(mode) => (
+              <button
+                type="button"
+                class="arm-day-chip"
+                classList={{ active: effective() === mode }}
+                onClick={() => props.onChange(props.spec.name, mode)}
+              >
+                {t(enumModeLabelKey(mode))}
+              </button>
+            )}
+          </For>
+        </div>
+      </div>
     )
   }
 

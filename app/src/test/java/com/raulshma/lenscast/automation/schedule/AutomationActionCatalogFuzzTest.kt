@@ -174,6 +174,11 @@ class AutomationActionCatalogFuzzTest {
                         assertFalse("non-canonical integral rendering '$value'", value.contains('.'))
                     }
                 }
+                ParamKind.STRING ->
+                    assertTrue(
+                        "value '$value' outside ${param.name}'s closed set ${param.values}",
+                        value in param.values,
+                    )
             }
         }
         // The output is a fixed point: re-sanitizing changes nothing.

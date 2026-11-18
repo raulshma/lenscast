@@ -1350,6 +1350,17 @@ class SettingsDataStore(
      */
     suspend fun settingsFromDisk(): CameraSettings = cameraSettingsPref.diskValue()
 
+    /**
+     * One untorn pass over the DataStore file, handed to the caller for
+     * descriptor decodes. The read-your-write seam for whole documents: a
+     * GET or PUT reply landing right after a save answers from the file,
+     * never from the shared flows' lagging collector beat — the same race
+     * [settingsFromDisk] exists for, one file pass instead of per-pref
+     * hops, so the decoded document can never straddle a concurrent save.
+     */
+    internal suspend fun <R> readFresh(block: (Preferences) -> R): R =
+        context.dataStore.data.map(block).first()
+
     val streamingPort: StateFlow<Int> = streamingPortPref.shared()
 
     val jpegQuality: StateFlow<Int> = jpegQualityPref.shared()

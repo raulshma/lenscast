@@ -181,6 +181,27 @@
       "icon": "lens"
     },
     {
+      "id": "night_vision",
+      "params": [
+        {
+          "name": "mode",
+          "kind": "STRING",
+          "optional": false,
+          "defaultValue": "off",
+          "autoAtZero": false,
+          "values": [
+            "off",
+            "auto",
+            "on"
+          ]
+        }
+      ],
+      "catchUp": "STATEFUL",
+      "interruptsStream": false,
+      "group": "camera",
+      "icon": "nightlight"
+    },
+    {
       "id": "torch",
       "params": [
         {

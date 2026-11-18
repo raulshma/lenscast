@@ -924,18 +924,31 @@ class StreamingManager(
     }
 
     /**
-     * The persisted web port. Refused while any output is live-streaming
-     * (the Settings Applier's debounced writer is the intended caller);
-     * otherwise lands through [WebTransport.update]'s replace cycle — the
+     * The persisted web port. Refused while any output is live-streaming —
+     * the request then defers into [deferredPort] and lands through
+     * [applyPort] the moment the last output goes dark ([maybeApplyDeferredPort]
+     * on every stop path), so a port typed mid-stream no longer dies with the
+     * refusal while the disk already holds it (issue #20's sharp edge).
+     * Otherwise lands through [WebTransport.update]'s replace cycle — the
      * transport swaps listeners even while it is merely serving (not
      * streaming). The advertised stream/audio URLs are rebuilt from the new
      * scheme either way, exactly where the old recreate lambda ran them.
      */
     fun setPort(port: Int) {
         if (isLiveStreaming()) {
-            Log.w(TAG, "Cannot change port while streaming")
+            deferredPort = port
+            Log.w(TAG, "Cannot change port while streaming — deferred until streams stop")
             return
         }
+        deferredPort = null
+        applyPort(port)
+    }
+
+    /** A [setPort] refusal parked until the stop paths get a clean window. */
+    @Volatile private var deferredPort: Int? = null
+
+    /** The port apply [setPort] refuses while streaming — the transport swap itself. */
+    private fun applyPort(port: Int) {
         val outcome = webTransport.update(port = port, resolveTls = ::webTlsFactory)
         if (outcome == ReplaceOutcome.UNCHANGED) return
         _streamUrl.value = buildVideoUrl()
@@ -946,6 +959,18 @@ class StreamingManager(
             Log.e(TAG, "Failed to restart streaming server on new port $port")
         }
         Log.d(TAG, "Streaming port set to $port")
+    }
+
+    /**
+     * Called on every output's stop path: when the last live output is gone,
+     * a port deferred by a mid-stream [setPort] lands here. Latest request
+     * wins — the deferral always holds what the disk already saved.
+     */
+    private fun maybeApplyDeferredPort() {
+        if (isLiveStreaming()) return
+        val port = deferredPort ?: return
+        deferredPort = null
+        applyPort(port)
     }
 
     fun setAdaptiveBitrateEnabled(enabled: Boolean) {
@@ -1110,6 +1135,7 @@ class StreamingManager(
         stopSrtStreaming()
         webTransport.stop()
         unregisterMdnsService()
+        maybeApplyDeferredPort()
         Log.d(TAG, "Streaming stopped")
     }
 
@@ -1119,6 +1145,7 @@ class StreamingManager(
         stopRtmpStreaming()
         stopWhipStreaming()
         stopSrtStreaming()
+        maybeApplyDeferredPort()
         Log.d(TAG, "Live streaming paused (server still running)")
     }
 
@@ -1163,6 +1190,7 @@ class StreamingManager(
         lastReportedClientCount = -1
         unregisterMdnsService()
         publishWebActiveMirror()
+        maybeApplyDeferredPort()
         Log.d(TAG, "Web streaming stopped")
     }
 
@@ -1191,6 +1219,7 @@ class StreamingManager(
         if (!rtspOutput.isActive()) return
         rtspOutput.stop()
         encodedHub.refresh()
+        maybeApplyDeferredPort()
         Log.d(TAG, "RTSP streaming stopped")
     }
 
@@ -1224,6 +1253,7 @@ class StreamingManager(
     fun stopRtmpStreaming() {
         if (!rtmpOutput.isActive()) return
         rtmpOutput.stop()
+        maybeApplyDeferredPort()
         Log.d(TAG, "RTMP push stopped")
     }
 
@@ -1293,6 +1323,7 @@ class StreamingManager(
     fun stopSrtStreaming() {
         if (!srtOutput.isActive()) return
         srtOutput.stop()
+        maybeApplyDeferredPort()
         Log.d(TAG, "SRT push stopped")
     }
 
@@ -1357,6 +1388,7 @@ class StreamingManager(
     fun stopWhipStreaming() {
         if (!whipOutput.isActive()) return
         whipOutput.stop()
+        maybeApplyDeferredPort()
         Log.d(TAG, "WHIP push stopped")
     }
 

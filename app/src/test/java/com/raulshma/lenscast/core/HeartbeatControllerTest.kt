@@ -9,6 +9,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableStateFlow
+import java.util.concurrent.CopyOnWriteArrayList
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
@@ -37,9 +38,13 @@ class HeartbeatControllerTest {
     private val isServerRunning = MutableStateFlow(false)
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
-    private val recoverCalls = mutableListOf<String>()
-    private val softRestartCalls = mutableListOf<Int>()
-    private val relaunchCalls = mutableListOf<Int>()
+    // CopyOnWriteArrayList, not mutableListOf: runHeartbeat escalates on the
+    // controller's Dispatchers.Default coroutine while this thread reads the
+    // lists in eventually() — a plain ArrayList CMEs mid-iteration inside
+    // assertEquals (the recorded failure of the escalation test).
+    private val recoverCalls = CopyOnWriteArrayList<String>()
+    private val softRestartCalls = CopyOnWriteArrayList<Int>()
+    private val relaunchCalls = CopyOnWriteArrayList<Int>()
 
     private var healthy = true
     private var serverOnlyMode = false

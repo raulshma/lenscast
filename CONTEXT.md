@@ -2272,9 +2272,14 @@ Automation Action Runner by delegation). Every action id resolves through
 the Automation Action Catalog and routes through the app's shared seams —
 Stream Toggle (via `BootResumePolicy`, the QS-tile verdict), Recording
 Controller, Photo Capture Manager, CameraService, SirenPlayer with the
-app's one SirenAutoStop timer — never a second implementation. Camera-valued
-actions (`camera_*`, `torch`) merge into the persisted CameraSettings via
-`mergeCameraSettings` and the Settings Applier applies them in place with
+app's one SirenAutoStop timer — never a second implementation. no stream interruption; Camera-valued actions (`camera_*`, `torch`) merge
+into the persisted CameraSettings via `mergeCameraSettings`, reading the
+merge base from disk (`settingsDataStore.settingsFromDisk`), never the
+shared flows' lagging `.value` — a save's share-in hop has no completion
+edge, so the rule's next action would otherwise build on a stale base and
+its persisted document would revert the rule's own earlier writes (the
+issue #18 evening revert) — and the Settings Applier applies them in
+place with
 no stream interruption; `camera_lens` switches on Main, clamped into the
 live lens inventory (empty inventory and a missing index skip silently);
 `detection` writes the motion/sound toggles to the Settings Store; unknown
@@ -2302,6 +2307,10 @@ the axes the rule touched wind back, `siren` restores as a stop,
 `recording` stops only if the controller was idle at arm time (a recording
 the user started mid-test is the user's), `capture_photo` and unknown ids
 restore nothing, and torch strength restores only when the rule drove it.
+The restored camera settings the controller drives onto the live session
+fold over `settingsFromDisk()` like the arm-time snapshot — the same
+lagging-`.value` trap that would steer the just-rewound camera back to the
+fired world.
 Arming rule B restores rule A first — one armed test at a time — and the
 armed state is deliberately in-memory only: the restore list exists to wind
 back state this process changed, so a process restart simply leaves the

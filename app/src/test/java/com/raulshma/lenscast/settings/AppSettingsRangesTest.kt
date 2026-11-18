@@ -12,12 +12,6 @@ import org.junit.Test
 class AppSettingsRangesTest {
 
     @Test
-    fun `web port slider spans the store's web port clamp`() {
-        assertEquals(StreamDefaults.WEB_PORT_MIN.toFloat(), webPortSliderRange.start)
-        assertEquals(StreamDefaults.WEB_PORT_MAX.toFloat(), webPortSliderRange.endInclusive)
-    }
-
-    @Test
     fun `jpeg quality slider spans the store's jpeg quality clamp`() {
         assertEquals(StreamDefaults.JPEG_QUALITY_MIN.toFloat(), jpegQualitySliderRange.start)
         assertEquals(StreamDefaults.JPEG_QUALITY_MAX.toFloat(), jpegQualitySliderRange.endInclusive)

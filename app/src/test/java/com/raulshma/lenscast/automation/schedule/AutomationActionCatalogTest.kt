@@ -19,12 +19,12 @@ class AutomationActionCatalogTest {
     // ── The catalog contract: exact ids and param names ──
 
     @Test
-    fun `catalog holds exactly the eleven specced ids in order`() {
+    fun `catalog holds exactly the twelve specced ids in order`() {
         assertEquals(
             listOf(
                 "camera_exposure", "camera_ev", "camera_zoom", "camera_fps",
-                "camera_lens", "torch", "stream", "capture_photo", "recording",
-                "siren", "detection",
+                "camera_lens", "night_vision", "torch", "stream", "capture_photo",
+                "recording", "siren", "detection",
             ),
             AutomationActionCatalog.ACTION_TYPES.map { it.id },
         )
@@ -38,6 +38,7 @@ class AutomationActionCatalogTest {
         assertEquals(listOf("ratio"), params("camera_zoom"))
         assertEquals(listOf("fps"), params("camera_fps"))
         assertEquals(listOf("index"), params("camera_lens"))
+        assertEquals(listOf("mode"), params("night_vision"))
         assertEquals(listOf("enabled", "strength"), params("torch"))
         assertEquals(listOf("enabled"), params("stream"))
         assertEquals(emptyList<String>(), params("capture_photo"))
@@ -225,6 +226,28 @@ class AutomationActionCatalogTest {
         assertEquals(mapOf("ratio" to "1"), sanitize(AutomationActionSpec("camera_zoom", emptyMap()))!!.params)
         assertEquals(mapOf("fps" to "24"), sanitize(AutomationActionSpec("camera_fps", emptyMap()))!!.params)
         assertEquals(mapOf("enabled" to "true"), sanitize(AutomationActionSpec("torch", emptyMap()))!!.params)
+        assertEquals(mapOf("mode" to "off"), sanitize(AutomationActionSpec("night_vision", emptyMap()))!!.params)
+    }
+
+    // ── STRING values: the closed enum vocabulary ──
+
+    @Test
+    fun `string values parse leniently and write the canonical id`() {
+        assertEquals(mapOf("mode" to "on"), sanitize(AutomationActionSpec("night_vision", mapOf("mode" to "ON")))!!.params)
+        assertEquals(mapOf("mode" to "auto"), sanitize(AutomationActionSpec("night_vision", mapOf("mode" to "  Auto ")))!!.params)
+        assertEquals(mapOf("mode" to "off"), sanitize(AutomationActionSpec("night_vision", mapOf("mode" to "off")))!!.params)
+    }
+
+    @Test
+    fun `invalid string folds to the documented default`() {
+        assertEquals(
+            mapOf("mode" to "off"),
+            sanitize(AutomationActionSpec("night_vision", mapOf("mode" to "midnight")))!!.params,
+        )
+        assertEquals(
+            mapOf("mode" to "off"),
+            sanitize(AutomationActionSpec("night_vision", mapOf("mode" to "")))!!.params,
+        )
     }
 
     @Test
@@ -268,6 +291,6 @@ class AutomationActionCatalogTest {
         AutomationActionCatalog.ACTION_TYPES.forEach {
             assertEquals(it, AutomationActionCatalog.typeFor(it.id))
         }
-        assertEquals(AutomationActionCatalog.ACTION_TYPES.size, 11)
+        assertEquals(AutomationActionCatalog.ACTION_TYPES.size, 12)
     }
 }

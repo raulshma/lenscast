@@ -16,6 +16,7 @@ import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.Lens
 import androidx.compose.material.icons.filled.Lightbulb
+import androidx.compose.material.icons.filled.Nightlight
 import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material.icons.filled.Power
@@ -149,6 +150,7 @@ internal object AutomationVisuals {
         AutomationIconVocabulary.ZOOM to EntryVisual(Icons.Filled.ZoomIn, R.string.automation_action_desc_camera_zoom),
         AutomationIconVocabulary.SPEED to EntryVisual(Icons.Filled.Speed, R.string.automation_action_desc_camera_fps),
         AutomationIconVocabulary.LENS to EntryVisual(Icons.Filled.Lens, R.string.automation_action_desc_camera_lens),
+        AutomationIconVocabulary.NIGHTLIGHT to EntryVisual(Icons.Filled.Nightlight, R.string.automation_action_desc_night_vision),
         AutomationIconVocabulary.TORCH to EntryVisual(Icons.Filled.FlashlightOn, R.string.automation_action_desc_torch),
         AutomationIconVocabulary.BROADCAST to EntryVisual(Icons.Filled.WifiTethering, R.string.automation_action_desc_stream),
         AutomationIconVocabulary.CAMERA to EntryVisual(Icons.Filled.PhotoCamera, R.string.automation_action_desc_capture_photo),

@@ -74,9 +74,10 @@ class AutomationActionExecutor(private val app: MainApplication) : AutomationAct
 
     /**
      * One catalog action to its seam. Camera-valued actions
-     * (camera_exposure/ev/zoom/fps and torch) merge into the PERSISTED
-     * [com.raulshma.lenscast.camera.model.CameraSettings] — the Settings
-     * Applier applies them in place with no stream interruption. That torch
+     * (camera_exposure/ev/zoom/fps, torch and night_vision) merge into the
+     * PERSISTED [com.raulshma.lenscast.camera.model.CameraSettings] — the
+     * Settings Applier applies them in place with no stream interruption.
+     * That torch
      * mode is deliberately different from [setTorchLive]'s: the receiver's
      * SET_TORCH is LIVE deterrence (drive the camera, persist nothing — the
      * setting may disagree with reality so a toggle can compute its target),
@@ -85,7 +86,7 @@ class AutomationActionExecutor(private val app: MainApplication) : AutomationAct
      */
     private suspend fun execute(action: AutomationActionSpec) {
         when (AutomationActionCatalog.typeFor(action.type)?.id ?: return) {
-            "camera_exposure", "camera_ev", "camera_zoom", "camera_fps", "torch" ->
+            "camera_exposure", "camera_ev", "camera_zoom", "camera_fps", "torch", "night_vision" ->
                 applyCameraSetting(action)
             "camera_lens" -> switchLens(action)
             // Sanitized BOOL params are always the canonical "true"/"false"
@@ -139,9 +140,24 @@ class AutomationActionExecutor(private val app: MainApplication) : AutomationAct
      * re-assert must carry the live fact, not the stale stored intent
      * ([CameraSettings.convergeTorch]), or a camera-only rule fire darkened
      * the deterrence coordinator's live-only lit LED.
+     *
+     * The merge base is the DISK truth (`settingsFromDisk`), never the
+     * shared flow's `.value`: that flow lags in the two windows a camera
+     * rule actually fires in — a fresh process answers the descriptor
+     * default until DataStore's first read lands (the boot catch-up /
+     * app_started fire), and a save's share-in hop has no completion edge,
+     * so the NEXT action of the same rule run can still read the PREVIOUS
+     * action's base. Either read produced a wholesale save built on the
+     * stale base: the rule's own earlier camera writes and every untouched
+     * field reverted to defaults, the applier faithfully applied both saves
+     * (configured values briefly, then the reverted document), and every
+     * later camera reset or restart kept re-applying the reverted store
+     * (issue #18, 0.2.2). DataStore answers read-your-write within the
+     * process, so sequential actions accumulate on disk; the same seam the
+     * Automation Test's snapshot already uses.
      */
     private suspend fun applyCameraSetting(action: AutomationActionSpec) {
-        val current = app.settingsDataStore.settings.value
+        val current = app.settingsDataStore.settingsFromDisk()
         val merged = AutomationSchedulePolicy.mergeCameraSettings(current, action)
         app.settingsDataStore.saveSettings(
             CameraSettings.convergeTorch(
