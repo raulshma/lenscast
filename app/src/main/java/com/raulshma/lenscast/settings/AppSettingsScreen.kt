@@ -137,6 +137,7 @@ fun AppSettingsScreen(
     val webStreamingEnabled by viewModel.webStreamingEnabled.collectAsState()
     val jpegQuality by viewModel.jpegQuality.collectAsState()
     val showPreview by viewModel.showPreview.collectAsState()
+    val dynamicTheming by viewModel.dynamicThemingEnabled.collectAsState()
     val streamAudioEnabled by viewModel.streamAudioEnabled.collectAsState()
     val streamAudioBitrateKbps by viewModel.streamAudioBitrateKbps.collectAsState()
     val streamAudioChannels by viewModel.streamAudioChannels.collectAsState()
@@ -343,6 +344,8 @@ fun AppSettingsScreen(
                 DisplaySettingsSection(
                     showPreview = showPreview,
                     onTogglePreview = { viewModel.updateShowPreview(it) },
+                    dynamicTheming = dynamicTheming,
+                    onToggleDynamicTheming = { viewModel.updateDynamicThemingEnabled(it) },
                 )
             }
 

@@ -8,6 +8,8 @@ import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -61,7 +63,10 @@ class MainActivity : ComponentActivity() {
         handleNavigationIntent(intent)
 
         setContent {
-            LensCastTheme {
+            // The persisted dynamic-color intent drives the theme directly —
+            // reactive like every other store flow, no activity-scoped mirror.
+            val dynamicTheming by app.settingsDataStore.dynamicThemingEnabled.collectAsState()
+            LensCastTheme(dynamicColor = dynamicTheming) {
                 Surface(
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background

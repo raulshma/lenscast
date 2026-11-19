@@ -325,6 +325,8 @@
     <string name="settings_retry">Tentar novamente</string>
     <string name="settings_section_display">Tela</string>
     <string name="settings_show_preview">Mostrar prévia da câmera</string>
+    <string name="settings_dynamic_color">Cor dinâmica</string>
+    <string name="settings_dynamic_color_description">Aplicar as cores do papel de parede ao tema</string>
     <string name="settings_section_streaming">Streaming</string>
     <string name="settings_enable_web_streaming">Ativar transmissão web</string>
     <string name="settings_streaming_port">Porta de transmissão</string>

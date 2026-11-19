@@ -124,6 +124,7 @@ private object Keys {
     val AUTH_VIEWER_USERNAME = stringPreferencesKey("auth_viewer_username")
     val AUTH_VIEWER_PASSWORD_HASH = stringPreferencesKey("auth_viewer_password_hash")
     val SHOW_PREVIEW = stringPreferencesKey("show_preview")
+    val DYNAMIC_THEMING_ENABLED = stringPreferencesKey("dynamic_theming_enabled")
     val RTSP_ENABLED = stringPreferencesKey("rtsp_enabled")
     val RTSP_PORT = intPreferencesKey("rtsp_port")
     val RTSP_INPUT_FORMAT = stringPreferencesKey("rtsp_input_format")
@@ -272,6 +273,13 @@ internal val jpegQualityPref = intPref(
 )
 
 internal val showPreviewPref = boolPref(Keys.SHOW_PREVIEW, defaultTrue = true)
+
+/**
+ * Material You dynamic color (wallpaper-derived scheme) on Android 12+;
+ * default-on, matching the theme's pre-setting behavior. Below S the theme
+ * ignores it and falls back to the static expressive scheme.
+ */
+internal val dynamicThemingEnabledPref = boolPref(Keys.DYNAMIC_THEMING_ENABLED, defaultTrue = true)
 
 // ── Camera pro-mode settings ──
 // Viewfinder aids (grid, self-timer, spirit level) and the pro-tools
@@ -1367,6 +1375,8 @@ class SettingsDataStore(
 
     val showPreview: StateFlow<Boolean> = showPreviewPref.shared()
 
+    val dynamicThemingEnabled: StateFlow<Boolean> = dynamicThemingEnabledPref.shared()
+
     // ── Camera pro-mode settings ──
 
     val gridStyle: StateFlow<GridStyle> = gridStylePref.shared()
@@ -1640,6 +1650,8 @@ class SettingsDataStore(
     suspend fun saveJpegQuality(quality: Int) = jpegQualityPref.save(quality)
 
     suspend fun saveShowPreview(show: Boolean) = showPreviewPref.save(show)
+
+    suspend fun saveDynamicThemingEnabled(enabled: Boolean) = dynamicThemingEnabledPref.save(enabled)
 
     suspend fun saveGridStyle(style: GridStyle) = gridStylePref.save(style)
 

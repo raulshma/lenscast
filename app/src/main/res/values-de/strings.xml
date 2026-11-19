@@ -322,6 +322,8 @@
     <string name="settings_retry">Wiederholen</string>
     <string name="settings_section_display">Anzeige</string>
     <string name="settings_show_preview">Kameravorschau anzeigen</string>
+    <string name="settings_dynamic_color">Dynamische Farben</string>
+    <string name="settings_dynamic_color_description">App-Farben aus dem Wallpaper übernehmen</string>
     <string name="settings_section_streaming">Streaming</string>
     <string name="settings_enable_web_streaming">Web-Streaming aktivieren</string>
     <string name="settings_streaming_port">Streaming-Port</string>

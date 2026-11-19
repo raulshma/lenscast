@@ -325,6 +325,8 @@
     <string name="settings_retry">Réessayer</string>
     <string name="settings_section_display">Affichage</string>
     <string name="settings_show_preview">Afficher l\'aperçu de la caméra</string>
+    <string name="settings_dynamic_color">Couleurs dynamiques</string>
+    <string name="settings_dynamic_color_description">Appliquer les couleurs du fond d\'écran au thème</string>
     <string name="settings_section_streaming">Diffusion</string>
     <string name="settings_enable_web_streaming">Activer la diffusion web</string>
     <string name="settings_streaming_port">Port de diffusion</string>

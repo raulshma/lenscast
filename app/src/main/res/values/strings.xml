@@ -322,6 +322,8 @@
     <string name="settings_retry">Retry</string>
     <string name="settings_section_display">Display</string>
     <string name="settings_show_preview">Show Camera Preview</string>
+    <string name="settings_dynamic_color">Dynamic Color</string>
+    <string name="settings_dynamic_color_description">Apply wallpaper colors to the app theme</string>
     <string name="settings_section_streaming">Streaming</string>
     <string name="settings_enable_web_streaming">Enable Web Streaming</string>
     <string name="settings_streaming_port">Streaming Port</string>

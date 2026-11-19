@@ -53,6 +53,7 @@ class SettingsViewModel(
     val webStreamingEnabled: StateFlow<Boolean> = settingsDataStore.webStreamingEnabled
     val jpegQuality: StateFlow<Int> = settingsDataStore.jpegQuality
     val showPreview: StateFlow<Boolean> = settingsDataStore.showPreview
+    val dynamicThemingEnabled: StateFlow<Boolean> = settingsDataStore.dynamicThemingEnabled
 
     // ── Camera pro mode ──
     // Viewfinder aids (grid, self-timer, spirit level), the pro-tools overlay
@@ -269,6 +270,8 @@ class SettingsViewModel(
     fun updateGeotagEnabled(enabled: Boolean) = save { settingsDataStore.saveGeotagEnabled(enabled) }
 
     fun updateShowPreview(show: Boolean) = save { settingsDataStore.saveShowPreview(show) }
+
+    fun updateDynamicThemingEnabled(enabled: Boolean) = save { settingsDataStore.saveDynamicThemingEnabled(enabled) }
 
     fun updateStreamAudioEnabled(enabled: Boolean) = save { settingsDataStore.saveStreamAudioEnabled(enabled) }
 

@@ -322,6 +322,8 @@
     <string name="settings_retry">Reintentar</string>
     <string name="settings_section_display">Pantalla</string>
     <string name="settings_show_preview">Mostrar vista previa de la cámara</string>
+    <string name="settings_dynamic_color">Color dinámico</string>
+    <string name="settings_dynamic_color_description">Aplicar los colores del fondo de pantalla al tema</string>
     <string name="settings_section_streaming">Transmisión</string>
     <string name="settings_enable_web_streaming">Activar transmisión web</string>
     <string name="settings_streaming_port">Puerto de transmisión</string>
