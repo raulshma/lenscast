@@ -37,8 +37,10 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LoadingIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
@@ -97,7 +99,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
  * the frozen contract is [onDismiss] (user backed out) and [onPaired] (the
  * roster accepted the new device — the caller navigates to it).
  */
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun AddDeviceSheet(
     onDismiss: () -> Unit,
@@ -147,7 +149,7 @@ fun AddDeviceSheet(
                     .height(120.dp),
                 contentAlignment = Alignment.Center,
             ) {
-                CircularProgressIndicator()
+                LoadingIndicator()
             }
 
             is AddDeviceUiState.Saved -> {
@@ -537,7 +539,7 @@ private fun QrScanPreview(onDecoded: (String) -> Unit, modifier: Modifier = Modi
             .fillMaxWidth()
             .height(260.dp)
             .clip(RoundedCornerShape(12.dp))
-            .background(MaterialTheme.colorScheme.surfaceVariant),
+            .background(MaterialTheme.colorScheme.surfaceContainerHigh),
     ) {
         val frame = frames.collectAsStateWithLifecycle().value
         if (frame != null) {
@@ -736,8 +738,7 @@ private fun DiscoverPane(
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
                                 text = service.name,
-                                style = MaterialTheme.typography.titleSmall,
-                                fontWeight = FontWeight.SemiBold,
+                                style = MaterialTheme.typography.titleSmallEmphasized,
                             )
                             Text(
                                 text = "${service.host}:${service.port}",

@@ -119,7 +119,7 @@ fun ControlsStrip(
                     contentDescription = null,
                     modifier = Modifier.size(16.dp),
                     tint = if (state.recording?.isRecording == true) {
-                        MaterialTheme.colorScheme.error
+                        MaterialTheme.colorScheme.tertiary
                     } else {
                         MaterialTheme.colorScheme.onSurfaceVariant
                     },
@@ -143,8 +143,8 @@ fun ControlsStrip(
                         R.string.companion_live_recording_elapsed,
                         formatElapsed(recording.elapsedSeconds),
                     ),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.bodyMediumEmphasized,
+                    color = MaterialTheme.colorScheme.tertiary,
                     modifier = Modifier.padding(end = 8.dp),
                 )
             }

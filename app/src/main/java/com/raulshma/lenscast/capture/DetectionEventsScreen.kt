@@ -111,7 +111,7 @@ fun DetectionEventsScreen(
                         color = if (filter == kind) {
                             MaterialTheme.colorScheme.primaryContainer
                         } else {
-                            MaterialTheme.colorScheme.surfaceVariant
+                            MaterialTheme.colorScheme.surfaceContainerLow
                         },
                         shape = MaterialTheme.shapes.medium,
                     ) {
@@ -174,7 +174,7 @@ fun DetectionEventsScreen(
 private fun DetectionEventRow(event: DetectionEvent) {
     val timestampFormat = remember { SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()) }
     Surface(
-        color = MaterialTheme.colorScheme.surfaceVariant,
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
         shape = MaterialTheme.shapes.medium,
         modifier = Modifier.fillMaxWidth(),
     ) {
@@ -204,7 +204,7 @@ private fun DetectionEventRow(event: DetectionEvent) {
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = event.type.replaceFirstChar { it.uppercase(Locale.getDefault()) },
-                    style = MaterialTheme.typography.titleSmall,
+                    style = MaterialTheme.typography.titleSmallEmphasized,
                 )
                 Text(
                     text = timestampFormat.format(Date(event.timestampMs)),

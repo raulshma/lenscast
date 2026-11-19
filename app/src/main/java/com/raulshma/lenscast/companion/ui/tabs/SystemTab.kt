@@ -9,7 +9,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
+import androidx.compose.material3.LoadingIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
@@ -137,6 +138,7 @@ fun SystemTab(session: DeviceSession, modifier: Modifier = Modifier) {
  * its own unavailable note, the whole-load-failed retry state, and the
  * logout-confirm dialog.
  */
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 internal fun SystemTabContent(
     state: SystemUiState,
@@ -169,7 +171,7 @@ internal fun SystemTabContent(
                     modifier = Modifier.fillMaxSize(),
                     contentAlignment = Alignment.Center,
                 ) {
-                    CircularProgressIndicator()
+                    LoadingIndicator()
                 }
 
                 is SystemUiState.Ready -> {

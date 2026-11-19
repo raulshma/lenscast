@@ -12,6 +12,11 @@ activityCompose = "1.13.0"
 # older fragment transitively, so :wear declares this pin explicitly.
 fragment = "1.9.1"
 composeBom = "2026.09.00"
+# Pinned above the BOM (2026.09.00 ships material3 1.4.0): 1.5.0-rc01 is the
+# newest published androidx material3 and carries the Expressive components
+# (ButtonGroup, LoadingIndicator, MaterialShapes, FloatingToolbar, FAB menu).
+# Drop the pin once a compose-bom >= 1.5.0 lands.
+material3 = "1.5.0-rc01"
 # Held back from 2.10.x: those declare minSdk 24, but this app supports
 # Android 6 (minSdk 23) and navigation runs on every device — no runtime
 # gate possible. Bump together with minSdk.
@@ -59,7 +64,7 @@ compose-ui-graphics = { group = "androidx.compose.ui", name = "ui-graphics" }
 compose-foundation = { group = "androidx.compose.foundation", name = "foundation" }
 compose-ui-tooling = { group = "androidx.compose.ui", name = "ui-tooling" }
 compose-ui-tooling-preview = { group = "androidx.compose.ui", name = "ui-tooling-preview" }
-compose-material3 = { group = "androidx.compose.material3", name = "material3" }
+compose-material3 = { group = "androidx.compose.material3", name = "material3", version.ref = "material3" }
 compose-material-icons-extended = { group = "androidx.compose.material", name = "material-icons-extended" }
 compose-navigation = { group = "androidx.navigation", name = "navigation-compose", version.ref = "navigation" }
 

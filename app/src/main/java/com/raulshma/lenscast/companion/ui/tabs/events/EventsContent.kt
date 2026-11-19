@@ -21,9 +21,11 @@ import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
-import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LoadingIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
@@ -33,7 +35,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -76,6 +77,7 @@ fun EventsContent(
 }
 
 /** The brief pre-first-emission flash: the title plus a determinate-nothing spinner. */
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 private fun EventsLoadingContent(modifier: Modifier = Modifier) {
     Column(
@@ -89,7 +91,7 @@ private fun EventsLoadingContent(modifier: Modifier = Modifier) {
             fontWeight = FontWeight.SemiBold,
             modifier = Modifier.testTag(DeviceScreenTags.TAB_TITLE),
         )
-        CircularProgressIndicator(modifier = Modifier.padding(top = 16.dp))
+        LoadingIndicator(modifier = Modifier.padding(top = 16.dp))
     }
 }
 
@@ -148,21 +150,20 @@ private fun EventsReadyContent(
 }
 
 /**
- * The live indicator: a green "Live" pill while the session's link is
- * CONNECTED, otherwise the shared connection-state pill (same palette the
- * top bar's chip uses). The green pair mirrors ConnectionUi's connected
- * colors — that file keeps its own private; duplicating two Colors here is
- * cheaper than widening a frozen file.
+ * The live indicator: the theme's primary pair while the session's link is
+ * CONNECTED (live = primary, the migration's semantic rule), otherwise the
+ * shared connection-state pill (same palette the top bar's chip uses).
  */
-private val LiveChipColors = ConnectionChipColors(
-    container = Color(0xFF2E7D32),
-    content = Color(0xFFFFFFFF),
-)
-
 @Composable
 private fun LiveIndicator(connection: ConnectionState, modifier: Modifier = Modifier) {
-    val connected = connection == ConnectionState.CONNECTED
-    val colors = if (connected) LiveChipColors else connection.chipColor()
+    val colors = if (connection == ConnectionState.CONNECTED) {
+        ConnectionChipColors(
+            container = MaterialTheme.colorScheme.primaryContainer,
+            content = MaterialTheme.colorScheme.onPrimaryContainer,
+        )
+    } else {
+        connection.chipColor()
+    }
     Surface(
         modifier = modifier,
         shape = RoundedCornerShape(percent = 50),
@@ -180,13 +181,12 @@ private fun LiveIndicator(connection: ConnectionState, modifier: Modifier = Modi
                     .background(colors.content, CircleShape),
             )
             Text(
-                text = if (connected) {
+                text = if (connection == ConnectionState.CONNECTED) {
                     stringResource(R.string.companion_events_live)
                 } else {
                     stringResource(connection.labelRes())
                 },
-                style = MaterialTheme.typography.labelMedium,
-                fontWeight = FontWeight.SemiBold,
+                style = MaterialTheme.typography.labelLargeEmphasized,
             )
         }
     }
@@ -222,7 +222,7 @@ private fun StatChip(label: String, value: Int, modifier: Modifier = Modifier) {
     Surface(
         modifier = modifier,
         shape = RoundedCornerShape(12.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant,
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
         contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
     ) {
         Column(
@@ -231,8 +231,7 @@ private fun StatChip(label: String, value: Int, modifier: Modifier = Modifier) {
         ) {
             Text(
                 text = value.toString(),
-                style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.SemiBold,
+                style = MaterialTheme.typography.titleLargeEmphasized,
                 color = MaterialTheme.colorScheme.onSurface,
             )
             Text(
@@ -277,7 +276,13 @@ private fun EventCard(event: RemoteDetectionEvent, modifier: Modifier = Modifier
     // The age stamps at composition; a new event (or any recomposition of
     // the item) refreshes it — no per-second ticker in v1.
     val age = remember(event.id, event.timestampMs) { eventAge(event.timestampMs, System.currentTimeMillis()) }
-    Card(modifier = modifier.fillMaxWidth()) {
+    Card(
+        modifier = modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+        ),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+    ) {
         Row(
             modifier = Modifier.padding(12.dp),
             verticalAlignment = Alignment.CenterVertically,

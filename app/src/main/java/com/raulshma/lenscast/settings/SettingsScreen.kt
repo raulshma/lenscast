@@ -17,7 +17,12 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.MediumFlexibleTopAppBar
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
@@ -25,6 +30,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
@@ -34,6 +40,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
@@ -59,7 +66,6 @@ import com.raulshma.lenscast.camera.model.SelfTimerMode
 import com.raulshma.lenscast.camera.model.WhiteBalance
 import com.raulshma.lenscast.camera.model.chipLabel
 import com.raulshma.lenscast.ui.components.LensCastSectionCard
-import com.raulshma.lenscast.ui.components.LensCastTopBar
 
 /**
  * The settings screen's dropdown wiring, read off the Quick Setting Catalog's
@@ -151,11 +157,20 @@ fun CameraSettingsScreen(
         if (granted) viewModel.updateGeotagEnabled(true)
     }
 
+    val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
     Scaffold(
+        modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
         topBar = {
-            LensCastTopBar(
-                title = stringResource(R.string.settings_camera_title),
-                onNavigateBack = onNavigateBack,
+            MediumFlexibleTopAppBar(
+                title = { Text(stringResource(R.string.settings_camera_title)) },
+                navigationIcon = {
+                    IconButton(onClick = onNavigateBack) {
+                        Icon(
+                            Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = stringResource(R.string.nav_back),
+                        )
+                    }
+                },
                 actions = {
                     TextButton(onClick = onNavigateToAppSettings) {
                         Text(stringResource(R.string.settings_app_title))
@@ -164,6 +179,14 @@ fun CameraSettingsScreen(
                         Text(stringResource(R.string.settings_reset), color = MaterialTheme.colorScheme.error)
                     }
                 },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceContainer,
+                    scrolledContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    navigationIconContentColor = MaterialTheme.colorScheme.onSurface,
+                    titleContentColor = MaterialTheme.colorScheme.onSurface,
+                    actionIconContentColor = MaterialTheme.colorScheme.onSurface,
+                ),
+                scrollBehavior = scrollBehavior,
             )
         }
     ) { padding ->

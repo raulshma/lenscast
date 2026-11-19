@@ -153,7 +153,7 @@ private fun GallerySectionHeader(section: GallerySection) {
         Column {
             // The section model's title token ("Today"/"Yesterday") maps to
             // localized text here at the render layer, not in the pure math.
-            Text(localizedSectionTitle(section.title), style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onBackground, fontWeight = FontWeight.SemiBold)
+            Text(localizedSectionTitle(section.title), style = MaterialTheme.typography.titleSmallEmphasized, color = MaterialTheme.colorScheme.onBackground)
             Text(section.subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         Text(
@@ -322,9 +322,8 @@ private fun GalleryDurationBadge(durationMs: Long, modifier: Modifier = Modifier
         Text(
             text = formatDuration(durationMs),
             modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
-            style = MaterialTheme.typography.labelSmall,
+            style = MaterialTheme.typography.labelSmallEmphasized,
             color = Color.White,
-            fontWeight = FontWeight.Medium,
         )
     }
 }

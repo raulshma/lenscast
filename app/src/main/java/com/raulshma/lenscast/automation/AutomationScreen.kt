@@ -22,6 +22,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
@@ -45,6 +46,7 @@ import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.MediumFlexibleTopAppBar
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
@@ -53,6 +55,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -65,6 +68,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
@@ -95,7 +99,6 @@ import com.raulshma.lenscast.settings.SettingsSection
 import com.raulshma.lenscast.settings.SwitchSetting
 import com.raulshma.lenscast.ui.components.AutomationTimeField
 import com.raulshma.lenscast.ui.components.DayMaskChips
-import com.raulshma.lenscast.ui.components.LensCastTopBar
 import java.text.DateFormat
 import java.util.Date
 import java.util.TimeZone
@@ -142,11 +145,28 @@ fun AutomationScreen(onNavigateBack: () -> Unit) {
     var deleteCandidateId by rememberSaveable { mutableStateOf<String?>(null) }
     val deleteCandidate = rules.firstOrNull { it.id == deleteCandidateId }
 
+    val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
     Scaffold(
+        modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
         topBar = {
-            LensCastTopBar(
-                title = stringResource(R.string.automation_title),
-                onNavigateBack = onNavigateBack,
+            MediumFlexibleTopAppBar(
+                title = { Text(stringResource(R.string.automation_title)) },
+                navigationIcon = {
+                    IconButton(onClick = onNavigateBack) {
+                        Icon(
+                            Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = stringResource(R.string.nav_back),
+                        )
+                    }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceContainer,
+                    scrolledContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    navigationIconContentColor = MaterialTheme.colorScheme.onSurface,
+                    titleContentColor = MaterialTheme.colorScheme.onSurface,
+                    actionIconContentColor = MaterialTheme.colorScheme.onSurface,
+                ),
+                scrollBehavior = scrollBehavior,
             )
         },
         floatingActionButton = {
@@ -763,8 +783,7 @@ private fun AutomationRuleEditor(
                     text = stringResource(
                         if (draft.id == null) R.string.automation_editor_new_title else R.string.automation_editor_edit_title
                     ),
-                    style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.SemiBold,
+                    style = MaterialTheme.typography.titleLargeEmphasized,
                     modifier = Modifier.weight(1f),
                 )
                 // Save stays reachable but gated by the ViewModel's one
@@ -1127,9 +1146,8 @@ private fun SectionHeader(
         Spacer(modifier = Modifier.width(6.dp))
         Text(
             text = title,
-            style = MaterialTheme.typography.titleSmall,
+            style = MaterialTheme.typography.titleSmallEmphasized,
             color = tint,
-            fontWeight = FontWeight.SemiBold,
             modifier = Modifier.weight(1f),
         )
         count?.let {

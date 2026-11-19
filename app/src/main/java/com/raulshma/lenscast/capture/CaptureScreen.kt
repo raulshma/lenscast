@@ -142,7 +142,7 @@ fun CaptureScreen(
                             modifier = Modifier.weight(1f),
                             colors = when (recordingState) {
                                 is RecordingState.Recording -> ButtonDefaults.buttonColors(
-                                    containerColor = MaterialTheme.colorScheme.error
+                                    containerColor = MaterialTheme.colorScheme.tertiary
                                 )
                                 is RecordingState.Scheduled -> ButtonDefaults.buttonColors(
                                     containerColor = MaterialTheme.colorScheme.tertiaryContainer
@@ -221,7 +221,7 @@ fun CaptureScreen(
                                 onClick = { viewModel.stopIntervalCapture() },
                                 modifier = Modifier.fillMaxWidth(),
                                 colors = ButtonDefaults.outlinedButtonColors(
-                                    contentColor = MaterialTheme.colorScheme.error
+                                    contentColor = MaterialTheme.colorScheme.tertiary
                                 )
                             ) {
                                 Icon(
@@ -396,14 +396,14 @@ fun CaptureScreen(
                     if (isRecording) {
                         Text(
                             text = stringResource(R.string.capture_recording_elapsed, formatDuration(recordingElapsedMs)),
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.error
+                            style = MaterialTheme.typography.labelMediumEmphasized,
+                            color = MaterialTheme.colorScheme.tertiary
                         )
                         OutlinedButton(
                             onClick = { viewModel.toggleRecording() },
                             modifier = Modifier.fillMaxWidth(),
                             colors = ButtonDefaults.outlinedButtonColors(
-                                contentColor = MaterialTheme.colorScheme.error
+                                contentColor = MaterialTheme.colorScheme.tertiary
                             )
                         ) {
                             Icon(Icons.Default.Videocam, null, Modifier.size(18.dp))

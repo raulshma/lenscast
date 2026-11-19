@@ -36,10 +36,11 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LoadingIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.SnackbarHost
@@ -114,6 +115,7 @@ data class MediaTabActions(
  * delete buttons, selection, the confirm dialog's trigger — while keeping
  * the read surface (grid, viewer, share) intact.
  */
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 internal fun MediaTabContent(
     state: MediaUiState,
@@ -134,7 +136,7 @@ internal fun MediaTabContent(
                     modifier = Modifier.fillMaxSize(),
                     contentAlignment = Alignment.Center,
                 ) {
-                    CircularProgressIndicator()
+                    LoadingIndicator()
                 }
 
                 is MediaUiState.Ready -> ReadyBody(
@@ -380,8 +382,7 @@ private fun RecordingsCard(
         Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text(
                 text = stringResource(R.string.companion_recordings_title),
-                style = MaterialTheme.typography.titleSmall,
-                fontWeight = FontWeight.SemiBold,
+                style = MaterialTheme.typography.titleSmallEmphasized,
             )
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -392,9 +393,8 @@ private fun RecordingsCard(
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
                             text = stringResource(R.string.companion_record_active),
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.primary,
-                            fontWeight = FontWeight.SemiBold,
+                            style = MaterialTheme.typography.bodyMediumEmphasized,
+                            color = MaterialTheme.colorScheme.tertiary,
                         )
                         Text(
                             text = stringResource(
@@ -508,8 +508,7 @@ private fun IntervalCard(
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = stringResource(R.string.companion_media_interval_title),
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.SemiBold,
+                    style = MaterialTheme.typography.titleSmallEmphasized,
                 )
                 Text(
                     text = if (interval.isRunning) {

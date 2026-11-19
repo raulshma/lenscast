@@ -153,7 +153,10 @@ internal fun DeviceScreenContent(
             )
         },
         bottomBar = {
-            NavigationBar {
+            NavigationBar(
+                containerColor = MaterialTheme.colorScheme.surfaceContainer,
+                tonalElevation = 0.dp,
+            ) {
                 NavigationBarItem(
                     selected = tab == Routes.TAB_LIVE,
                     onClick = { tab = Routes.TAB_LIVE },

@@ -10,8 +10,15 @@
         touch of the libraries, so Android 6 devices run everything except the
         ML detection and sound-classification gates (fail-open — alerts pass
         through). Do NOT remove the runtime gates if removing this override.
+
+        material3 1.5.0-rc01 (and its material3-ripple) also declare minSdk 24
+        — a policy bump, not a real API floor: every unguarded framework call
+        they make exists on API 23 (the highest is Drawable.getDirtyBounds,
+        API 23); their android.icu date formatting is SDK_INT-gated in
+        CalendarModel_androidKt, and the API 33/34 predictive-back calls sit
+        in lazy-loaded Api33Impl/Api34Impl classes. No runtime gate needed.
     -->
-    <uses-sdk tools:overrideLibrary="com.google.mediapipe.tasks.vision,com.google.mediapipe.tasks.audio,com.google.mediapipe.tasks.core" />
+    <uses-sdk tools:overrideLibrary="com.google.mediapipe.tasks.vision,com.google.mediapipe.tasks.audio,com.google.mediapipe.tasks.core,androidx.compose.material3,androidx.compose.material3.ripple" />
 
     <uses-feature android:name="android.hardware.camera" android:required="true" />
 

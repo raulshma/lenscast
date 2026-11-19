@@ -3,6 +3,7 @@ package com.raulshma.lenscast.navigation
 import androidx.compose.animation.AnimatedVisibilityScope
 import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.SharedTransitionLayout
+import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -42,7 +43,11 @@ import com.raulshma.lenscast.ui.animation.LocalSharedTransitionScope
 import com.raulshma.lenscast.update.UpdateNotifier
 import androidx.compose.foundation.pager.rememberPagerState
 
-private const val ANIM_DURATION = 400
+private const val ENTER_DURATION = 300
+private const val EXIT_DURATION = 200
+
+private val EmphasizedEasing = CubicBezierEasing(0.2f, 0f, 0f, 1f)
+private val DecelerateEasing = CubicBezierEasing(0.05f, 0.7f, 0.1f, 1f)
 
 // The viewer sync's placed flag stays saveable, as it was when it lived in
 // the viewer route as a bare flag.
@@ -72,16 +77,20 @@ fun NavigationGraph() {
                 navController = navController,
                 startDestination = Routes.CAMERA,
                 enterTransition = {
-                    fadeIn(tween(ANIM_DURATION)) + slideInHorizontally(tween(ANIM_DURATION)) { it }
+                    fadeIn(tween(ENTER_DURATION, easing = DecelerateEasing)) +
+                        slideInHorizontally(tween(ENTER_DURATION, easing = DecelerateEasing)) { it }
                 },
                 exitTransition = {
-                    fadeOut(tween(ANIM_DURATION)) + slideOutHorizontally(tween(ANIM_DURATION)) { -it / 3 }
+                    fadeOut(tween(EXIT_DURATION, easing = EmphasizedEasing)) +
+                        slideOutHorizontally(tween(EXIT_DURATION, easing = EmphasizedEasing)) { -it / 3 }
                 },
                 popEnterTransition = {
-                    fadeIn(tween(ANIM_DURATION)) + slideInHorizontally(tween(ANIM_DURATION)) { -it / 3 }
+                    fadeIn(tween(ENTER_DURATION, easing = DecelerateEasing)) +
+                        slideInHorizontally(tween(ENTER_DURATION, easing = DecelerateEasing)) { -it / 3 }
                 },
                 popExitTransition = {
-                    fadeOut(tween(ANIM_DURATION)) + slideOutHorizontally(tween(ANIM_DURATION)) { it }
+                    fadeOut(tween(EXIT_DURATION, easing = EmphasizedEasing)) +
+                        slideOutHorizontally(tween(EXIT_DURATION, easing = EmphasizedEasing)) { it }
                 },
             ) {
                 composable(Routes.CAMERA) {
@@ -162,10 +171,12 @@ fun NavigationGraph() {
                 composable(
                     Routes.GALLERY,
                     enterTransition = {
-                        fadeIn(tween(ANIM_DURATION)) + slideInHorizontally(tween(ANIM_DURATION)) { it }
+                        fadeIn(tween(ENTER_DURATION, easing = DecelerateEasing)) +
+                            slideInHorizontally(tween(ENTER_DURATION, easing = DecelerateEasing)) { it }
                     },
                     exitTransition = {
-                        fadeOut(tween(ANIM_DURATION)) + slideOutHorizontally(tween(ANIM_DURATION)) { -it / 3 }
+                        fadeOut(tween(EXIT_DURATION, easing = EmphasizedEasing)) +
+                            slideOutHorizontally(tween(EXIT_DURATION, easing = EmphasizedEasing)) { -it / 3 }
                     },
                 ) {
                     CompositionLocalProvider(LocalAnimatedVisibilityScope provides this@composable) {
@@ -178,10 +189,10 @@ fun NavigationGraph() {
 
                 composable(
                     Routes.VIEWER,
-                    enterTransition = { fadeIn(tween(300)) },
-                    exitTransition = { fadeOut(tween(300)) },
-                    popEnterTransition = { fadeIn(tween(300)) },
-                    popExitTransition = { fadeOut(tween(300)) },
+                    enterTransition = { fadeIn(tween(ENTER_DURATION, easing = DecelerateEasing)) },
+                    exitTransition = { fadeOut(tween(EXIT_DURATION, easing = EmphasizedEasing)) },
+                    popEnterTransition = { fadeIn(tween(ENTER_DURATION, easing = DecelerateEasing)) },
+                    popExitTransition = { fadeOut(tween(EXIT_DURATION, easing = EmphasizedEasing)) },
                 ) { backStackEntry ->
                     val mediaId = backStackEntry.arguments?.getString("mediaId") ?: ""
                     val galleryViewModel: GalleryViewModel = viewModel(

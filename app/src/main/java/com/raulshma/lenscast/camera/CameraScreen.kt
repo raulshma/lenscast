@@ -18,6 +18,7 @@ import androidx.compose.animation.core.InfiniteTransition
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.spring
@@ -35,6 +36,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -88,14 +90,17 @@ import androidx.compose.material.icons.filled.WbSunny
 import androidx.compose.material.icons.filled.ZoomIn
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ButtonGroup
+import androidx.compose.material3.ButtonGroupDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LoadingIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Slider
@@ -115,6 +120,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
@@ -124,6 +130,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
@@ -165,6 +172,9 @@ import com.raulshma.lenscast.core.MicAccess
 import com.raulshma.lenscast.core.NetworkQualityMonitor.NetworkQualityLevel
 import com.raulshma.lenscast.core.ThermalState
 import com.raulshma.lenscast.gallery.formatDuration
+import com.raulshma.lenscast.ui.animation.expressiveMotionSpec
+import com.raulshma.lenscast.ui.theme.LensBlue
+import com.raulshma.lenscast.ui.theme.LensGreen
 import com.raulshma.lenscast.ui.theme.LensOrange
 import com.raulshma.lenscast.ui.theme.LensRed
 import com.raulshma.lenscast.ui.theme.RecordingRed
@@ -628,6 +638,7 @@ private fun ImmersiveCameraView(
             quickSettingsExpanded = quickSettingsExpanded,
             activeSetting = activeSetting,
             recordingState = recordingState,
+            flashAlpha = flashAlpha,
             onWebStreamToggle = onWebStreamToggle,
             onRtspStreamToggle = onRtspStreamToggle,
             onCapture = onCapture,
@@ -915,10 +926,23 @@ private fun CameraControlButton(
     modifier: Modifier = Modifier,
     tint: Color = Color.White,
 ) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val pressed by interactionSource.collectIsPressedAsState()
+    val pressScale by animateFloatAsState(
+        targetValue = if (pressed) 0.95f else 1f,
+        animationSpec = expressiveMotionSpec(MaterialTheme.motionScheme.fastSpatialSpec()),
+        label = "controlPressScale"
+    )
     Surface(
-        modifier = modifier.size(40.dp),
+        modifier = modifier
+            .size(40.dp)
+            .graphicsLayer {
+                scaleX = pressScale
+                scaleY = pressScale
+            },
         color = OverlayScrim,
         shape = CircleShape,
+        interactionSource = interactionSource,
         onClick = onClick
     ) {
         Box(contentAlignment = Alignment.Center) {
@@ -942,6 +966,7 @@ private fun CameraBottomOverlay(
     quickSettingsExpanded: Boolean,
     activeSetting: QuickSettingType?,
     recordingState: com.raulshma.lenscast.capture.RecordingState,
+    flashAlpha: Animatable<Float, *>,
     onWebStreamToggle: () -> Unit,
     onRtspStreamToggle: () -> Unit,
     onCapture: () -> Unit,
@@ -1000,6 +1025,7 @@ private fun CameraBottomOverlay(
             isWebEnabled = streamStatus.isWebEnabled,
             isRtspEnabled = streamStatus.isRtspEnabled,
             recordingState = recordingState,
+            flashAlpha = flashAlpha,
             quickSettingsExpanded = quickSettingsExpanded,
             onWebStreamToggle = onWebStreamToggle,
             onRtspStreamToggle = onRtspStreamToggle,
@@ -1013,7 +1039,10 @@ private fun CameraBottomOverlay(
 /**
  * The viewfinder's zoom-preset chip row: one chip per [ZoomPresetsPolicy.ZoomPreset]
  * ("0.5x" / "1x" / "2x" / "MAX"), the active one highlighted within the
- * policy's epsilon. A tap snaps zoom through the caller's write path.
+ * policy's epsilon, as one connected Expressive [ButtonGroup] — the chips
+ * share the connected shapes (the checked one on the active preset) and the
+ * press-expansion width physics. A tap snaps zoom through the caller's write
+ * path.
  */
 @Composable
 private fun ZoomPresetChipRow(
@@ -1021,35 +1050,59 @@ private fun ZoomPresetChipRow(
     currentRatio: Float,
     onPresetSelected: (Float) -> Unit,
 ) {
-    Row(
+    Box(
         modifier = Modifier
             .fillMaxWidth()
             .horizontalScroll(rememberScrollState())
             .padding(horizontal = 16.dp, vertical = 4.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
-        verticalAlignment = Alignment.CenterVertically,
+        contentAlignment = Alignment.Center,
     ) {
-        presets.forEach { preset ->
-            val active = ZoomPresetsPolicy.isActive(preset, currentRatio)
-            Surface(
-                color = if (active) {
-                    MaterialTheme.colorScheme.primary.copy(alpha = 0.92f)
-                } else {
-                    OverlayScrim.copy(alpha = 0.55f)
-                },
-                shape = RoundedCornerShape(14.dp),
-                onClick = { onPresetSelected(preset.ratio) },
-            ) {
-                Text(
-                    text = preset.label,
-                    color = if (active) {
-                        MaterialTheme.colorScheme.onPrimary
-                    } else {
-                        Color.White.copy(alpha = 0.88f)
+        ButtonGroup(
+            overflowIndicator = {},
+            horizontalArrangement = Arrangement.spacedBy(
+                ButtonGroupDefaults.ConnectedSpaceBetween,
+                Alignment.CenterHorizontally
+            ),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            presets.forEachIndexed { index, preset ->
+                val active = ZoomPresetsPolicy.isActive(preset, currentRatio)
+                customItem(
+                    buttonGroupContent = {
+                        val interactionSource = remember { MutableInteractionSource() }
+                        val pressed by interactionSource.collectIsPressedAsState()
+                        val shape = when {
+                            active -> ButtonGroupDefaults.connectedButtonCheckedShape
+                            index == 0 ->
+                                if (pressed) ButtonGroupDefaults.connectedLeadingButtonPressShape
+                                else ButtonGroupDefaults.connectedLeadingButtonShape
+                            index == presets.lastIndex ->
+                                if (pressed) ButtonGroupDefaults.connectedTrailingButtonPressShape
+                                else ButtonGroupDefaults.connectedTrailingButtonShape
+                            else ->
+                                if (pressed) ButtonGroupDefaults.connectedMiddleButtonPressShape
+                                else RectangleShape
+                        }
+                        Surface(
+                            onClick = { onPresetSelected(preset.ratio) },
+                            modifier = Modifier.animateWidth(interactionSource),
+                            color = if (active) LensBlue.copy(alpha = 0.92f) else OverlayScrim.copy(alpha = 0.55f),
+                            shape = shape,
+                            interactionSource = interactionSource,
+                        ) {
+                            Text(
+                                text = preset.label,
+                                color = if (active) Color.White else Color.White.copy(alpha = 0.88f),
+                                fontSize = 12.sp,
+                                fontWeight = if (active) FontWeight.Bold else FontWeight.Normal,
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 5.dp),
+                            )
+                        }
                     },
-                    fontSize = 12.sp,
-                    fontWeight = if (active) FontWeight.Bold else FontWeight.Normal,
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 5.dp),
+                    // Presets never overflow (the row scrolls), so the menu
+                    // content stays empty and the group's overflow indicator
+                    // is intentionally blank.
+                    menuContent = {},
                 )
             }
         }
@@ -1063,6 +1116,7 @@ private fun ShutterRow(
     isWebEnabled: Boolean,
     isRtspEnabled: Boolean,
     recordingState: com.raulshma.lenscast.capture.RecordingState,
+    flashAlpha: Animatable<Float, *>,
     quickSettingsExpanded: Boolean,
     onWebStreamToggle: () -> Unit,
     onRtspStreamToggle: () -> Unit,
@@ -1204,7 +1258,7 @@ private fun ShutterRow(
                 modifier = Modifier.size(70.dp),
                 contentAlignment = Alignment.Center
             ) {
-                ShutterButton(onClick = onCapture)
+                ShutterButton(onClick = onCapture, flashAlpha = flashAlpha)
             }
         }
     }
@@ -1259,13 +1313,40 @@ private fun StreamShutterButton(
 @Composable
 private fun ShutterButton(
     onClick: () -> Unit,
+    flashAlpha: Animatable<Float, *>,
 ) {
-    val scale = remember { Animatable(1f) }
-    val coroutineScope = rememberCoroutineScope()
+    val interactionSource = remember { MutableInteractionSource() }
+    val pressed by interactionSource.collectIsPressedAsState()
+    // The press scale is cosmetic only: it never sits on the click path, so
+    // the capture still fires at press time.
+    val pressScale by animateFloatAsState(
+        targetValue = if (pressed) 0.92f else 1f,
+        animationSpec = expressiveMotionSpec(MaterialTheme.motionScheme.fastSpatialSpec()),
+        label = "shutterPressScale"
+    )
+    // One ring breath per capture event (press, or the self-timer's fire —
+    // the flash rides the same events), settled on the effects spec; snap()
+    // under reduced motion makes it invisible. The specs resolve outside the
+    // flow collection — they are composable, the collector is not.
+    val ringScale = remember { Animatable(1f) }
+    val ringUpSpec = expressiveMotionSpec(MaterialTheme.motionScheme.fastEffectsSpec<Float>())
+    val ringSettleSpec = expressiveMotionSpec(MaterialTheme.motionScheme.defaultEffectsSpec<Float>())
+    LaunchedEffect(flashAlpha) {
+        snapshotFlow { flashAlpha.value > 0.5f }.collect { flashing ->
+            if (flashing) {
+                ringScale.animateTo(1.05f, ringUpSpec)
+                ringScale.animateTo(1f, ringSettleSpec)
+            }
+        }
+    }
 
     Box(
         modifier = Modifier
             .size(70.dp)
+            .graphicsLayer {
+                scaleX = ringScale.value
+                scaleY = ringScale.value
+            }
             .border(3.dp, Color.White.copy(alpha = 0.95f), CircleShape)
             .padding(4.dp),
         contentAlignment = Alignment.Center
@@ -1274,18 +1355,13 @@ private fun ShutterButton(
             modifier = Modifier
                 .size(56.dp)
                 .graphicsLayer {
-                    scaleX = scale.value
-                    scaleY = scale.value
+                    scaleX = pressScale
+                    scaleY = pressScale
                 },
+            interactionSource = interactionSource,
             color = Color.White,
             shape = CircleShape,
-            onClick = {
-                coroutineScope.launch {
-                    scale.snapTo(0.85f)
-                    scale.animateTo(1f, spring(stiffness = Spring.StiffnessHigh))
-                }
-                onClick()
-            }
+            onClick = onClick
         ) {
             Box(contentAlignment = Alignment.Center) {
                 Icon(
@@ -1337,32 +1413,31 @@ private fun QuickSettingPill(
     isActive: Boolean,
     onClick: () -> Unit,
 ) {
-    val scale = remember { Animatable(1f) }
-    val coroutineScope = rememberCoroutineScope()
+    val interactionSource = remember { MutableInteractionSource() }
+    val pressed by interactionSource.collectIsPressedAsState()
+    val pressScale by animateFloatAsState(
+        targetValue = if (pressed) 0.96f else 1f,
+        animationSpec = expressiveMotionSpec(MaterialTheme.motionScheme.fastSpatialSpec()),
+        label = "pillPressScale"
+    )
     val bgColor by animateColorAsState(
-        targetValue = if (isActive) MaterialTheme.colorScheme.primary.copy(alpha = 0.9f)
+        targetValue = if (isActive) LensBlue.copy(alpha = 0.9f)
         else OverlayLight,
         animationSpec = tween(200)
     )
 
     Surface(
+        modifier = Modifier.graphicsLayer {
+            scaleX = pressScale
+            scaleY = pressScale
+        },
         color = bgColor,
         shape = RoundedCornerShape(16.dp),
-        onClick = {
-            coroutineScope.launch {
-                scale.snapTo(0.92f)
-                scale.animateTo(1f, spring(stiffness = Spring.StiffnessHigh))
-            }
-            onClick()
-        }
+        interactionSource = interactionSource,
+        onClick = onClick
     ) {
         Row(
-            modifier = Modifier
-                .graphicsLayer {
-                    scaleX = scale.value
-                    scaleY = scale.value
-                }
-                .padding(horizontal = 10.dp, vertical = 6.dp),
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(4.dp)
         ) {
@@ -1370,11 +1445,11 @@ private fun QuickSettingPill(
                 imageVector = icon,
                 contentDescription = null,
                 modifier = Modifier.size(14.dp),
-                tint = if (isActive) MaterialTheme.colorScheme.onPrimary else Color.White.copy(alpha = 0.9f)
+                tint = if (isActive) Color.White else Color.White.copy(alpha = 0.9f)
             )
             Text(
                 text = label,
-                color = if (isActive) MaterialTheme.colorScheme.onPrimary else Color.White.copy(alpha = 0.85f),
+                color = if (isActive) Color.White else Color.White.copy(alpha = 0.85f),
                 fontSize = 11.sp,
                 fontWeight = if (isActive) FontWeight.Bold else FontWeight.Normal,
                 maxLines = 1
@@ -1705,6 +1780,7 @@ private fun CameraPreview(
     }
 }
 
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 private fun CameraInitializingScreen() {
     Surface(
@@ -1719,7 +1795,7 @@ private fun CameraInitializingScreen() {
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.Center
             ) {
-                CircularProgressIndicator(
+                LoadingIndicator(
                     modifier = Modifier.size(48.dp),
                     color = MaterialTheme.colorScheme.primary
                 )
@@ -1900,7 +1976,7 @@ private fun RecordingIndicator(
             Surface(
                 modifier = Modifier.size(10.dp),
                 shape = CircleShape,
-                color = RecordingRed.copy(alpha = dotAlpha)
+                color = LensGreen.copy(alpha = dotAlpha)
             ) {}
             Spacer(modifier = Modifier.size(8.dp))
             Text(

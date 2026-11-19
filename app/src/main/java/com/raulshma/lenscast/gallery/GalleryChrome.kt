@@ -43,7 +43,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.raulshma.lenscast.R
 
@@ -65,7 +64,7 @@ fun GallerySelectModeTopBar(
                     selectedCount.coerceAtMost(allCount),
                     allCount
                 ),
-                fontWeight = FontWeight.SemiBold,
+                style = MaterialTheme.typography.titleLargeEmphasized,
             )
         },
         navigationIcon = {
@@ -105,7 +104,7 @@ fun GallerySelectModeBottomBar(
 ) {
     val navBarsPadding = WindowInsets.navigationBars.asPaddingValues()
     Surface(
-        tonalElevation = 8.dp,
+        tonalElevation = 0.dp,
         color = MaterialTheme.colorScheme.surfaceContainer,
         modifier = Modifier.fillMaxWidth(),
     ) {
@@ -120,9 +119,8 @@ fun GallerySelectModeBottomBar(
             Column {
                 Text(
                     text = pluralStringResource(R.plurals.gallery_selected_count, selectedCount, selectedCount),
-                    style = MaterialTheme.typography.titleSmall,
+                    style = MaterialTheme.typography.titleSmallEmphasized,
                     color = MaterialTheme.colorScheme.onSurface,
-                    fontWeight = FontWeight.SemiBold,
                 )
                 Text(
                     text = if (selectedCount == 0) {
@@ -175,9 +173,8 @@ fun GalleryOverviewCard(
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text(
                     text = stringResource(R.string.gallery_library_title),
-                    style = MaterialTheme.typography.titleMedium,
+                    style = MaterialTheme.typography.titleMediumEmphasized,
                     color = MaterialTheme.colorScheme.onSurface,
-                    fontWeight = FontWeight.SemiBold,
                 )
                 Text(
                     text = if (overview.totalCount == 0) {
@@ -298,7 +295,7 @@ private fun GalleryStatTile(
             }
             Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 Text(title, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Text(value, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.SemiBold)
+                Text(value, style = MaterialTheme.typography.titleMediumEmphasized, color = MaterialTheme.colorScheme.onSurface)
                 if (!supporting.isNullOrBlank()) {
                     Text(supporting, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }

@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -18,8 +19,10 @@ import androidx.compose.material.icons.filled.LinkOff
 import androidx.compose.material.icons.filled.PictureInPictureAlt
 import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LoadingIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -46,6 +49,7 @@ import com.raulshma.lenscast.companion.ui.DeviceScreenTags
  * from [LiveUiState] and speaks only through [LiveActions], exactly like the
  * DevicesScreen content the Robolectric tests compose without a ViewModel.
  */
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun LiveContent(
     state: LiveUiState,
@@ -82,6 +86,14 @@ fun LiveContent(
                                 .clip(MaterialTheme.shapes.large),
                         ) {
                             videoSurface(current, runtime, Modifier.fillMaxSize())
+                            if (current.rungPhase == RungPhase.CONNECTING) {
+                                LoadingIndicator(
+                                    modifier = Modifier
+                                        .align(Alignment.Center)
+                                        .size(56.dp),
+                                    color = MaterialTheme.colorScheme.primary,
+                                )
+                            }
                         }
                     }
                 }
@@ -229,7 +241,7 @@ private fun PhaseChip(phase: RungPhase, modifier: Modifier = Modifier) {
     ) {
         Text(
             text = stringResource(labelRes),
-            style = MaterialTheme.typography.labelMedium,
+            style = MaterialTheme.typography.labelLargeEmphasized,
             modifier = modifier.padding(horizontal = 10.dp, vertical = 4.dp),
         )
     }
@@ -241,8 +253,7 @@ private fun ClientsCardHeader(state: LiveUiState.Ready, modifier: Modifier = Mod
     Column(modifier = modifier.fillMaxWidth().testTag(LiveTags.CLIENTS_CARD)) {
         Text(
             text = stringResource(R.string.companion_clients_title),
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.SemiBold,
+            style = MaterialTheme.typography.titleMediumEmphasized,
         )
         if (state.clients.isEmpty()) {
             Text(
