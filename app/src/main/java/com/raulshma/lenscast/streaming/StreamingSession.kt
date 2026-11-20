@@ -71,6 +71,21 @@ class StreamingSession(
     // live stream to the camera-free CONNECTED_DEVICE type.
     private val foregroundModeLock = Any()
     private val lifecycleMutex = Mutex()
+    // The choreography lock: one owner at a time for the two whole-session
+    // orchestrations that stop and start the server — a recovery tier
+    // ([recover]) and the soft-restart ladder (held across its entire run
+    // through [runChoreographed], via [MainApplication.launchSoftRestart]).
+    // Without it the two flows interleave their stop/start legs over the
+    // manager's lock-free fan-outs: a recovery's ensureServerRunning can
+    // restart the server behind a ladder's back between its stopServer and
+    // startServer steps, and the ladder's start then finds the port unusable
+    // — StepFailed(startServer), server dark on every port, every later
+    // start killed by the stale stop leg (the 0.2.3-beta.1 on-device repro
+    // of the soft-restart × MEDIUM-recovery race; 7775db8's serialization
+    // covers only the grace-window disarm leg). Lock order everywhere is
+    // choreography BEFORE lifecycle (the ladder's end()/begin() and the HARD
+    // tier take lifecycleMutex inside), so no ordering cycle exists.
+    private val choreographyMutex = Mutex()
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private var optimizationJob: Job? = null
     private var cameraStateJob: Job? = null
@@ -272,6 +287,20 @@ class StreamingSession(
      * restart); the caller verifies stream health either way.
      */
     suspend fun recover(tier: WatchdogPolicy.RecoveryTier): Boolean {
+        // Every tier runs under the choreography lock: the watchdog, the
+        // heartbeat, and a soft-restart ladder can never interleave their
+        // stop/start legs mid-choreography (see [choreographyMutex]).
+        return choreographyMutex.withLock { recoverLocked(tier) }
+    }
+
+    /**
+     * The choreography lock's non-locking half, for a caller that ALREADY
+     * holds it — the soft-restart ladder's rebind step, whose whole run
+     * holds the lock through [runChoreographed]. Mutexes are not reentrant:
+     * calling the locking [recover] from inside a ladder run would deadlock
+     * on the ladder's own lock. Not for any other caller.
+     */
+    suspend fun recoverLocked(tier: WatchdogPolicy.RecoveryTier): Boolean {
         return when (tier) {
             WatchdogPolicy.RecoveryTier.SOFT -> {
                 Log.d(TAG, "Soft recovery: rebinding CameraX use cases")
@@ -319,6 +348,22 @@ class StreamingSession(
             }
         }
     }
+
+    /**
+     * Runs a whole session choreography — the soft-restart ladder's stop →
+     * stop → rebind → start run — under the choreography lock, so no
+     * recovery tier can interleave its legs with the ladder's (the race
+     * that left the server dead on every port, issue-class of the
+     * 0.2.3-beta.1 on-device repro; see [choreographyMutex]). The in-flight
+     * recovery a restart meets either finished before the ladder's first
+     * step or runs after the ladder released the lock — never beside it.
+     * Anything inside must not itself take the choreography lock (use
+     * [recoverLocked] for the ladder's rebind), and must not suspend
+     * indefinitely — the watchdog's recovery waits on this lock with its
+     * backoff.
+     */
+    suspend fun <T> runChoreographed(block: suspend () -> T): T =
+        choreographyMutex.withLock { block() }
 
     /**
      * The session-attached state a recovery disturbed: battery state, thermal

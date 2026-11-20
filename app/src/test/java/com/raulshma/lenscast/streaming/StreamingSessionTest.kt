@@ -7,10 +7,12 @@ import android.os.Looper
 import com.raulshma.lenscast.camera.CameraService
 import com.raulshma.lenscast.camera.model.CameraErrorPolicy
 import com.raulshma.lenscast.camera.model.CameraState
+import com.raulshma.lenscast.camera.model.StreamStartOutcome
 import com.raulshma.lenscast.core.BatteryOptimizationResult
 import com.raulshma.lenscast.core.KeyguardMonitor
 import com.raulshma.lenscast.core.LockBypassController
 import com.raulshma.lenscast.core.PowerManager
+import com.raulshma.lenscast.core.SoftRestartLadder
 import com.raulshma.lenscast.core.StreamWatchdog
 import com.raulshma.lenscast.core.ThermalMonitor
 import com.raulshma.lenscast.core.WatchdogPolicy
@@ -23,7 +25,10 @@ import io.mockk.mockk
 import io.mockk.verify
 import io.mockk.verifyOrder
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -36,6 +41,9 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
+import java.util.concurrent.ConcurrentLinkedQueue
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 import kotlin.concurrent.thread
 
 /**
@@ -513,6 +521,82 @@ class StreamingSessionTest {
         assertFalse(recovered)
         verify(exactly = 0) { cameraService.rebindUseCases() }
         verify(exactly = 0) { streamingManager.restoreLiveOutputs(any()) }
+    }
+
+    @Test
+    fun `a soft-restart ladder run waits for an in-flight medium recovery instead of interleaving`() {
+        // The 0.2.3-beta.1 on-device repro (the restart × recovery race
+        // 7775db8's grace-window serialization cannot cover): the ladder ran
+        // beside a MEDIUM recovery parked mid-leg, the recovery restarted the
+        // server behind the ladder's back, and the ladder's startServer then
+        // found the port unusable — StepFailed(startServer), server dark on
+        // every port, every later start killed by the stale stop leg. The
+        // choreography lock is the fix; this pins its ordering: while the
+        // recovery holds the lock inside its server-restart leg, the ladder
+        // must not take a single step, and every recovery leg must land
+        // before the ladder's re-arm runs.
+        val parkedInRecoveryRestart = CountDownLatch(1)
+        val releaseRecovery = CountDownLatch(1)
+        val order = ConcurrentLinkedQueue<String>()
+        var verdict: SoftRestartLadder.Result? = null
+        val live = liveOutputs(web = true)
+        every { streamingManager.snapshotLiveOutputs() } answers { order.add("snapshot"); live }
+        every { streamingManager.pauseStreaming() } answers { order.add("pause") }
+        every { streamingManager.ensureServerRunning() } answers {
+            order.add("restart")
+            parkedInRecoveryRestart.countDown()
+            releaseRecovery.await()
+            true
+        }
+        every { cameraService.rebindUseCases() } answers { order.add("rebindRecovery"); true }
+        every { streamingManager.restoreLiveOutputs(live) } answers { order.add("restore") }
+
+        runWithMainPumped {
+            coroutineScope {
+                val recovery = launch(Dispatchers.IO) {
+                    assertTrue(session.recover(WatchdogPolicy.RecoveryTier.MEDIUM))
+                }
+                assertTrue(parkedInRecoveryRestart.await(10, TimeUnit.SECONDS))
+
+                val ladder = launch(Dispatchers.IO) {
+                    val softRestart = SoftRestartLadder(
+                        stopRecording = { order.add("stopRecording") },
+                        stopServer = { order.add("stopServer") },
+                        // The production wiring: the lock's non-locking half,
+                        // because the whole run already holds the lock.
+                        rebindCamera = {
+                            order.add("rebindCamera")
+                            session.recoverLocked(WatchdogPolicy.RecoveryTier.SOFT)
+                        },
+                        startServer = { order.add("startServer"); StreamStartOutcome.Started },
+                    )
+                    verdict = session.runChoreographed { softRestart.run() }
+                }
+
+                // The ladder must PARK on the choreography lock: no step may
+                // run while the recovery still holds the lock mid-restart.
+                repeat(30) {
+                    Thread.sleep(10)
+                    assertTrue(
+                        "ladder stepped while the recovery still held the choreography lock",
+                        order.none { it.startsWith("stop") || it.startsWith("rebindCamera") || it.startsWith("start") },
+                    )
+                }
+
+                releaseRecovery.countDown()
+                recovery.join()
+                ladder.join()
+            }
+        }
+
+        assertEquals(SoftRestartLadder.Result.Restarted, verdict)
+        assertEquals(
+            listOf(
+                "snapshot", "pause", "restart", "rebindRecovery", "restore",
+                "stopRecording", "stopServer", "rebindCamera", "rebindRecovery", "startServer",
+            ),
+            order.toList(),
+        )
     }
 
     @Test

@@ -260,7 +260,12 @@ class MainApplication : Application(), SingletonImageLoader.Factory, AppGraph, R
                 )
             },
             recover = { tier -> streamingSession.recover(tier) },
-            softRestart = { softRestart.run() },
+            // Same choreography lock the dashboard's soft restart holds —
+            // this tier is the ladder's second entry point, and an unlocked
+            // run here could interleave with a recovery or a dashboard
+            // ladder exactly like the dashboard race could (see
+            // launchSoftRestart).
+            softRestart = { streamingSession.runChoreographed { softRestart.run() } },
             relaunch = { restartApplication() },
             userStopped = { streamStateJournal.peekUserStopped() },
         )
@@ -279,7 +284,12 @@ class MainApplication : Application(), SingletonImageLoader.Factory, AppGraph, R
         SoftRestartLadder(
             stopRecording = { recordingController.stop() },
             stopServer = { streamToggle.stopServer() },
-            rebindCamera = { streamingSession.recover(WatchdogPolicy.RecoveryTier.SOFT) },
+            // recoverLocked, not recover: the ladder's whole run holds the
+            // choreography lock (launchSoftRestart wraps it in
+            // runChoreographed), and the rebind step's SOFT mechanics are
+            // that lock's non-locking half — the locking recover would
+            // deadlock on the ladder's own hold.
+            rebindCamera = { streamingSession.recoverLocked(WatchdogPolicy.RecoveryTier.SOFT) },
             startServer = { streamToggle.startServerWithOutputs() },
         )
     }
@@ -658,7 +668,19 @@ class MainApplication : Application(), SingletonImageLoader.Factory, AppGraph, R
     override fun launchSoftRestart() {
         appScope.launch {
             delay(AppRelaunch.RESTART_RESPONSE_FLUSH_MS)
-            val result = softRestart.run()
+            // The WHOLE ladder holds the session's choreography lock: a
+            // watchdog/heartbeat recovery in flight finishes (or waits)
+            // around the run instead of interleaving its stop/start legs
+            // with the ladder's — the interleave restarted the server
+            // behind the ladder's back and the ladder's startServer then
+            // failed on the held port, leaving the server dead on every
+            // port with later starts killed by the stale stop leg (the
+            // 0.2.3-beta.1 on-device repro). A cancelled watchdog loop's
+            // in-flight recovery still dies at its next suspension point
+            // mid-lock-hold, releasing the lock exactly when the ladder
+            // needs it; its partial legs are undone by the ladder's own
+            // stop/start steps.
+            val result = streamingSession.runChoreographed { softRestart.run() }
             Log.d(TAG, "Soft restart verdict: $result")
         }
     }
