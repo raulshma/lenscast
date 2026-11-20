@@ -84,14 +84,24 @@ class CameraErrorPolicyTest {
     }
 
     @Test
-    fun `policy-disabled and do-not-disturb errors have no app-side lever`() {
-        // ERROR_CAMERA_DISABLED is a device-policy verdict and DND a user
-        // toggle; a rebind cannot fix either — report (the dedicated message
-        // downstream) and wait for the policy/user to change.
-        assertEquals(
-            CameraErrorPolicy.Verdict.CAMERAX_HANDLES,
-            CameraErrorPolicy.decide(CameraErrorPolicy.CODE_CAMERA_DISABLED, 0),
-        )
+    fun `policy-disabled errors carry the distinct POLICY_DENIED verdict`() {
+        // ERROR_CAMERA_DISABLED is a device-policy verdict (the locked-mount
+        // while-in-use denial): like DND no app-side lever exists — report
+        // and wait for the policy to change — but the verdict is typed so
+        // streaming's blocked-by-lock detector never string-matches the
+        // human-readable message. Every attempt count: no lever to spend.
+        (0..CameraErrorPolicy.MAX_REBIND_ATTEMPTS + 2).forEach { attempts ->
+            assertEquals(
+                CameraErrorPolicy.Verdict.POLICY_DENIED,
+                CameraErrorPolicy.decide(CameraErrorPolicy.CODE_CAMERA_DISABLED, attempts),
+            )
+        }
+    }
+
+    @Test
+    fun `do-not-disturb errors have no app-side lever`() {
+        // DND is a user toggle; a rebind cannot fix it — report and wait for
+        // the user to change it (CAMERAX_HANDLES: no dedicated verdict).
         assertEquals(
             CameraErrorPolicy.Verdict.CAMERAX_HANDLES,
             CameraErrorPolicy.decide(CameraErrorPolicy.CODE_DO_NOT_DISTURB_MODE_ENABLED, 0),
@@ -187,6 +197,13 @@ class CameraErrorPolicyTest {
         assertEquals(
             CameraErrorPolicy.Verdict.WAIT_CAMERA_ADDED,
             CameraErrorPolicy.decideResetCamera(CameraErrorPolicy.Verdict.WAIT_CAMERA_ADDED, 0),
+        )
+        // POLICY_DENIED (the standing camera-disabled error) groups with
+        // CAMERAX_HANDLES on the manual path: surfaces verbatim, spends
+        // nothing — the wire handler's catch-all answers it.
+        assertEquals(
+            CameraErrorPolicy.Verdict.POLICY_DENIED,
+            CameraErrorPolicy.decideResetCamera(CameraErrorPolicy.Verdict.POLICY_DENIED, 0),
         )
         // A standing REBIND verdict falls through to the budget gate.
         assertEquals(

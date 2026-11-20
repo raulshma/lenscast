@@ -82,31 +82,6 @@ data class CameraSettings(
             return 1f..max
         }
 
-        /**
-         * Torch convergence for a wholesale [CameraSettings] write (issue
-         * #16): the Settings Applier re-asserts torch from stored intent on
-         * every changed-settings apply, so a write whose [touchedTorch]
-         * verdict is false must not carry the stale stored value — live-only
-         * writers (the web torch route, the deterrence coordinator) diverge
-         * from the stored pair by design, and re-asserting their stale "off"
-         * darkened a lit LED on a dashboard camera-section save, a
-         * camera-only automation fire, or a non-torch in-app quick-setting
-         * toggle. A write that DID touch torch passes through verbatim — the
-         * in-app toggle, a scheduler torch action, a test-restore undo —
-         * including an explicit same-value write, which a value-diff proxy
-         * would wrongly silence. The verdict's detection is the caller's:
-         * action-type for automation merges, transform-diff for the opaque
-         * editor lambdas. [torchStrength] is never touched: a live flip
-         * drives the device-default brightness and carries no strength
-         * intent of its own.
-         */
-        fun convergeTorch(
-            written: CameraSettings,
-            touchedTorch: Boolean,
-            liveTorchOn: Boolean,
-        ): CameraSettings =
-            if (touchedTorch) written else written.copy(torchEnabled = liveTorchOn)
-
         // The slider span offered in the UI — narrower than the persistence
         // bounds above, matching what typical sensors support.
         const val FRAME_RATE_SLIDER_MIN = 15

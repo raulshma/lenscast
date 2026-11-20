@@ -181,7 +181,6 @@ class SettingsViewModel(
     private val settingsEditor = CameraSettingsEditor(
         current = { settings.value },
         persist = { settingsDataStore.saveSettings(it) },
-        liveTorchOn = { cameraService.isTorchOn() },
     )
 
     init {

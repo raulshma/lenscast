@@ -124,13 +124,13 @@ class CameraViewModel(
 
     val isRecording: StateFlow<Boolean> = recordingController.isRecording
 
-    // One shared editor for camera-control writes: apply now for
-    // responsiveness, persist for the Settings Applier to re-apply.
+    // One shared editor for camera-control writes: persist only — the
+    // Settings Applier applies each persisted write exactly once (the
+    // apply-then-persist dual write would land the pre-convergence torch
+    // pair after the converged one; see CameraSettingsEditor).
     private val settingsEditor = CameraSettingsEditor(
         current = { settings.value },
         persist = { settingsDataStore.saveSettings(it) },
-        apply = { cameraService.applySettings(it) },
-        liveTorchOn = { cameraService.isTorchOn() },
     )
 
     // One shared clock over the controller's state (1s ticks, whole seconds).
@@ -420,7 +420,7 @@ class CameraViewModel(
      * value is converted once onto the typed [QuickSettingEditorValue] per
      * the descriptor's editor shape, then dispatched through the catalog's
      * pure write transform onto the one CameraSettingsEditor path
-     * (apply-then-persist).
+     * (persist-only; the Settings Applier applies the persisted write).
      */
     fun updateQuickSetting(type: QuickSettingType, value: Any) {
         val editorValue = QuickSettingCatalog.editorValueFor(type, value) ?: return

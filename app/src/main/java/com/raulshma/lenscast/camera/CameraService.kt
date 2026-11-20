@@ -42,6 +42,7 @@ import com.raulshma.lenscast.camera.model.CameraControlPlan
 import com.raulshma.lenscast.camera.model.KelvinGainsPolicy
 import com.raulshma.lenscast.camera.model.CameraResetResult
 import com.raulshma.lenscast.camera.model.CameraState
+import com.raulshma.lenscast.camera.model.BindChoreography
 import com.raulshma.lenscast.camera.model.CameraSessionArbiter
 import com.raulshma.lenscast.camera.model.FocusApplyPolicy
 import com.raulshma.lenscast.camera.model.FrameErrorPolicy
@@ -108,21 +109,17 @@ class CameraService(private val context: Context) {
     private var preview: Preview? = null
     private var imageCapture: ImageCapture? = null
     private var imageAnalysis: ImageAnalysis? = null
-    private var camera: Camera? = null
 
     /**
      * The camera of the LIVE session — the instance every control apply, remote
-     * PTZ/torch flip, live-zoom read, and observation attach must reach.
-     * Normally the same instance as [camera]; a recording bind ([bindRecording])
-     * replaces the session WITHOUT write-back (the preview-side fields must
-     * survive for [unbindRecording] to restore), so while a recording holds the
-     * camera this field carries the recording session's instance while
-     * [camera] still points at the dead pre-recording one. Set on every
-     * successful bind (inside [bindLargestCompatible], both write-back
-     * variants), cleared by [clearBoundUseCases]. Without this seam, every
-     * settings apply landing mid-recording silently targeted the closed
-     * session — manual ISO/exposure reset at recording start and dashboard
-     * changes went dead until the next full rebind.
+     * PTZ/torch flip, live-zoom read, and observation attach must reach. Set by
+     * [bindLargestCompatible] on every successful bind — the normal bind and
+     * the recording bind ([bindRecording]) alike, since a recording REPLACES
+     * the session and a settings apply landing mid-recording must reach the
+     * recording session's instance — and cleared by [clearBoundUseCases].
+     * Without this seam, every settings apply landing mid-recording silently
+     * targeted the closed session — manual ISO/exposure reset at recording
+     * start and dashboard changes went dead until the next full rebind.
      */
     private var liveCamera: Camera? = null
     private var lifecycleOwner: LifecycleOwner? = null
@@ -205,6 +202,26 @@ class CameraService(private val context: Context) {
     }
 
     @Volatile private var activeSettings = CameraSettings()
+
+    // Whether [applySettings] has committed at least one snapshot. The FIRST
+    // apply is the cold-start one — no previously applied settings exist, so
+    // the stored intent applies verbatim (the restart contract: a reboot
+    // re-lights the LED from the persisted torch pair), and only later
+    // applies earn the untouched-write torch convergence.
+    @Volatile private var settingsEverApplied = false
+
+    /**
+     * The camera-settings save path the untouched-write torch convergence
+     * persists through — wired once by the Settings Applier at start
+     * ([setSettingsPersister]) against its DataStore, so this service never
+     * depends on the store and the converged document rides the exact save
+     * every writer uses (one DataStore write, no new store API). Null when
+     * unwired (never started, bare unit construction): the convergence still
+     * drives per the live fact in memory, only the persisted document is
+     * left for the next wired apply to settle.
+     */
+    @Volatile
+    private var persistSettings: (suspend (CameraSettings) -> Unit)? = null
 
     // Incremented on every successful bind. Post-bind control rungs capture
     // it and drop themselves when a newer bind has landed: the new bind
@@ -455,7 +472,11 @@ class CameraService(private val context: Context) {
         }
         torchStateObserver = observer
         controlsHandler.post {
-            if (torchStateObserver === observer && liveCamera === cam) {
+            if (BindChoreography.observationAttachPlan(
+                    observerIsCurrent = torchStateObserver === observer,
+                    cameraIsLive = liveCamera === cam,
+                ) == BindChoreography.ObservationAttach.Attach
+            ) {
                 cam.cameraInfo.torchState.observeForever(observer)
             }
         }
@@ -481,7 +502,8 @@ class CameraService(private val context: Context) {
      * camera state, not as a bind exception. The observed transitions are
      * the truth: a StateError republishes [CameraState.Error] carrying the
      * [CameraErrorPolicy] verdict (ERROR_CAMERA_DISABLED keeps the dedicated
-     * [CAMERA_DISABLED_MESSAGE]; ERROR_CAMERA_FATAL_ERROR gets
+     * disabled-by-policy message and the POLICY_DENIED verdict — the typed
+     * channel streaming's blocked-by-lock detector reads; ERROR_CAMERA_FATAL_ERROR gets
      * [CAMERA_FATAL_MESSAGE] so the dashboard can tell "reboot the phone"
      * from "will self-heal" — blueprint P0 item 4), OPEN republishes Ready.
      * The policy verdict also DRIVES the shell: REBIND spends the bounded
@@ -498,59 +520,73 @@ class CameraService(private val context: Context) {
             // CameraX carries errors as a non-null StateError on the emitted
             // state (the Type enum has no ERROR member — it stays one of the
             // five lifecycle states), so the error's presence, not the type,
-            // is the check.
-            val error = state.error
-            if (error != null) {
-                val verdict = CameraErrorPolicy.decide(error.code, errorRebindAttempts.get())
-                val disabled = error.code == CameraXCameraState.ERROR_CAMERA_DISABLED
-                Log.w(TAG, "Observed camera-state error (disabled=$disabled, code=${error.code}, verdict=$verdict)")
-                _cameraOpenObserved.value = false
-                _cameraState.value = CameraState.Error(
-                    when {
-                        disabled -> CAMERA_DISABLED_MESSAGE
-                        verdict == CameraErrorPolicy.Verdict.REBOOT_REQUIRED -> CAMERA_FATAL_MESSAGE
-                        else -> "Camera error, code ${error.code}"
-                    },
-                    verdict,
+            // is the check — a null code routes to the open-fact transition.
+            when (
+                val plan = BindChoreography.openStatePlan(
+                    errorCode = state.error?.code,
+                    typeOpen = state.type == CameraXCameraState.Type.OPEN,
+                    rebindAttempts = errorRebindAttempts.get(),
+                    readyAlreadyPublished = _cameraState.value is CameraState.Ready,
                 )
-                when (verdict) {
-                    CameraErrorPolicy.Verdict.REBIND -> {
-                        errorRebindAttempts.incrementAndGet()
-                        // Posted, not inline: a bind inside the LiveData
-                        // dispatch would re-enter this observer mid-transition
-                        // (the bind's own ERROR → OPEN choreography) — the
-                        // same reason the observation attach itself is posted.
-                        controlsHandler.post {
-                            Log.d(TAG, "CameraErrorPolicy: bounded error rebind (attempt $errorRebindAttempts)")
-                            rebindUseCases()
+            ) {
+                is BindChoreography.OpenStatePlan.ErrorObservation -> {
+                    val disabled = plan.messageKind is BindChoreography.ErrorMessage.DisabledByPolicy
+                    Log.w(TAG, "Observed camera-state error (disabled=$disabled, code=${plan.errorCode}, verdict=${plan.verdict})")
+                    _cameraOpenObserved.value = false
+                    _cameraState.value = CameraState.Error(
+                        when (plan.messageKind) {
+                            BindChoreography.ErrorMessage.DisabledByPolicy ->
+                                "Camera disabled by policy (while-in-use denial)"
+                            BindChoreography.ErrorMessage.RebootRequired -> CAMERA_FATAL_MESSAGE
+                            is BindChoreography.ErrorMessage.Code ->
+                                "Camera error, code ${plan.messageKind.code}"
+                        },
+                        plan.verdict,
+                    )
+                    when (plan.followUp) {
+                        BindChoreography.ErrorFollowUp.PostRebind -> {
+                            errorRebindAttempts.incrementAndGet()
+                            // Posted, not inline: a bind inside the LiveData
+                            // dispatch would re-enter this observer mid-transition
+                            // (the bind's own ERROR → OPEN choreography) — the
+                            // same reason the observation attach itself is posted.
+                            controlsHandler.post {
+                                Log.d(TAG, "CameraErrorPolicy: bounded error rebind (attempt $errorRebindAttempts)")
+                                rebindUseCases()
+                            }
+                        }
+                        BindChoreography.ErrorFollowUp.WaitCameraAdded -> registerCameraAddedWait()
+                        // CAMERAX_HANDLES — CameraX's own retry (or the device
+                        // policy / user toggle) owns the fix; REBOOT_REQUIRED —
+                        // no sanctioned in-process lever exists. Both report only.
+                        BindChoreography.ErrorFollowUp.ReportOnly -> {}
+                    }
+                }
+                is BindChoreography.OpenStatePlan.StateObservation -> {
+                    // The open fact rides every observed transition: OPEN confirms,
+                    // anything else withdraws the confirmation.
+                    _cameraOpenObserved.value = plan.openObserved
+                    if (plan.resetRebindAttempts) {
+                        // An open camera is the only receipt that the bounded rebind
+                        // lever's budget restarts: until OPEN, each observed error
+                        // spent one (CameraErrorPolicy's caller-owned bookkeeping).
+                        if (errorRebindAttempts.getAndSet(0) > 0) {
+                            Log.d(TAG, "CameraErrorPolicy: camera opened — rebind attempts reset")
                         }
                     }
-                    CameraErrorPolicy.Verdict.WAIT_CAMERA_ADDED -> registerCameraAddedWait()
-                    // CAMERAX_HANDLES — CameraX's own retry (or the device
-                    // policy / user toggle) owns the fix; REBOOT_REQUIRED —
-                    // no sanctioned in-process lever exists. Both report only.
-                    else -> {}
-                }
-                return@Observer
-            }
-            // The open fact rides every observed transition: OPEN confirms,
-            // anything else withdraws the confirmation.
-            _cameraOpenObserved.value = state.type == CameraXCameraState.Type.OPEN
-            if (state.type == CameraXCameraState.Type.OPEN) {
-                // An open camera is the only receipt that the bounded rebind
-                // lever's budget restarts: until OPEN, each observed error
-                // spent one (CameraErrorPolicy's caller-owned bookkeeping).
-                if (errorRebindAttempts.getAndSet(0) > 0) {
-                    Log.d(TAG, "CameraErrorPolicy: camera opened — rebind attempts reset")
-                }
-                if (_cameraState.value !is CameraState.Ready) {
-                    _cameraState.value = CameraState.Ready
+                    if (plan.publishReady) {
+                        _cameraState.value = CameraState.Ready
+                    }
                 }
             }
         }
         cameraOpenStateObserver = observer
         controlsHandler.post {
-            if (cameraOpenStateObserver === observer && liveCamera === cam) {
+            if (BindChoreography.observationAttachPlan(
+                    observerIsCurrent = cameraOpenStateObserver === observer,
+                    cameraIsLive = liveCamera === cam,
+                ) == BindChoreography.ObservationAttach.Attach
+            ) {
                 cam.cameraInfo.cameraState.observeForever(observer)
             }
         }
@@ -1034,8 +1070,8 @@ class CameraService(private val context: Context) {
      * budget instead of bypassing it (a spam-clicked reset button dies at
      * [CameraErrorPolicy.MAX_REBIND_ATTEMPTS] exactly like a flapping
      * camera does), and a standing taxonomy verdict that is not REBIND
-     * (REBOOT_REQUIRED / WAIT_CAMERA_ADDED / CAMERAX_HANDLES) surfaces
-     * verbatim without spending anything. A spent attempt increments the
+     * (REBOOT_REQUIRED / WAIT_CAMERA_ADDED / CAMERAX_HANDLES / POLICY_DENIED)
+     * surfaces verbatim without spending anything. A spent attempt increments the
      * same counter, an observed OPEN still resets it — one budget, one
      * bookkeeping, two entry points (the observer and this lever).
      *
@@ -1099,7 +1135,14 @@ class CameraService(private val context: Context) {
      * the standard binding.
      *
      * This is the recording seam: callers never touch the provider, the
-     * getters, or the combination ladder directly.
+     * getters, or the combination ladder directly. The ladder itself — the
+     * settle choreography the 5ad333c fix taught this seam — is the pure
+     * [BindChoreography.recordingBindPlan]'s step list: detach the
+     * observations riding the outgoing camera, rebind (no write-back),
+     * reattach to the session that just bound, schedule the deferred
+     * controls apply. Without it the fresh session came up at platform
+     * defaults — auto AE, manual ISO/exposure silently gone for the whole
+     * recording. This method only executes the steps.
      */
     fun bindRecording(videoCapture: VideoCapture<Recorder>): Boolean {
         val provider = ensureCameraProviderAvailable() ?: run {
@@ -1112,26 +1155,44 @@ class CameraService(private val context: Context) {
             return false
         }
 
-        val base = listOfNotNull(preview, imageCapture, imageAnalysis)
+        // Captured once — the old `base` list's timing: the plan's slots
+        // resolve against exactly the standard set standing at entry.
+        val standardCases: Map<BindChoreography.BindSlot, UseCase> =
+            listOfNotNull(
+                preview?.let { BindChoreography.BindSlot.Preview to it },
+                imageCapture?.let { BindChoreography.BindSlot.ImageCapture to it },
+                imageAnalysis?.let { BindChoreography.BindSlot.ImageAnalysis to it },
+                BindChoreography.BindSlot.VideoCapture to videoCapture,
+            ).toMap()
         return try {
-            // No write-back: the preview-side fields must keep their values so
-            // [unbindRecording] can restore the standard binding.
-            //
-            // The recording bind REPLACES the live session, so it runs the same
-            // settle choreography bindUseCases runs: detach the observations
-            // riding the outgoing camera, rebind, reattach to the session that
-            // just bound, and schedule the deferred controls apply. Without it
-            // the fresh session came up at platform defaults — auto AE, manual
-            // ISO/exposure silently gone for the whole recording — and the
-            // preview-side `camera` field (deliberately not written back)
-            // routed every later settings apply to the closed session, so
-            // dashboard changes went dead until the next full rebind.
-            stopTorchObservation()
-            stopCameraOpenObservation()
-            val bound = bindLargestCompatible(provider, owner, base, extra = videoCapture, writeBack = false)
-            observeTorchState(bound)
-            observeCameraOpenState(bound)
-            schedulePostBindControlsApply()
+            val plan = BindChoreography.recordingBindPlan(
+                previewBound = preview != null,
+                imageCaptureBound = imageCapture != null,
+                imageAnalysisBound = imageAnalysis != null,
+            )
+            var bound: Camera? = null
+            for (step in plan.steps) {
+                when (step) {
+                    is BindChoreography.RecordingBindStep.DetachObservations -> {
+                        stopTorchObservation()
+                        stopCameraOpenObservation()
+                    }
+                    is BindChoreography.RecordingBindStep.BindRecordingSession -> bindLargestCompatible(
+                        provider,
+                        owner,
+                        combinations = step.attempts.map { attempt ->
+                            attempt.map { slot -> standardCases.getValue(slot) }
+                        },
+                        writeBack = step.writeBackStandardFields,
+                    ).also { bound = it }
+                    is BindChoreography.RecordingBindStep.AttachObservations -> {
+                        val cam = bound!! // the plan orders Attach after Bind — set by the step above
+                        observeTorchState(cam)
+                        observeCameraOpenState(cam)
+                    }
+                    is BindChoreography.RecordingBindStep.SchedulePostBindApplies -> schedulePostBindControlsApply()
+                }
+            }
             true
         } catch (e: Exception) {
             Log.e(TAG, "bindRecording: no compatible combination found", e)
@@ -1321,12 +1382,14 @@ class CameraService(private val context: Context) {
             stopTorchObservation()
             stopCameraOpenObservation()
             provider.unbindAll()
-            try {
-                camera = bindLargestCompatible(
+            val bound: Camera = try {
+                bindLargestCompatible(
                     provider,
                     owner,
-                    base = listOfNotNull(preview, imageCapture, imageAnalysis),
-                    extra = null,
+                    combinations = orderedCombinations(
+                        listOfNotNull(preview, imageCapture, imageAnalysis),
+                        extra = null,
+                    ),
                     writeBack = true,
                 )
             } catch (e: Exception) {
@@ -1335,7 +1398,7 @@ class CameraService(private val context: Context) {
                 return false
             }
 
-            camera?.let { cam ->
+            bound.let { cam ->
                 // The live torch fact: observe the camera just bound. Every
                 // flip (local enableTorch, a remote writer, the re-asserted
                 // strength) republishes [torchState].
@@ -1459,22 +1522,22 @@ class CameraService(private val context: Context) {
     }
 
     /**
-     * Bind the largest compatible use-case combination, largest first: every
-     * subset of [base] (optionally plus [extra]), then — via the empty subset —
-     * [extra] alone. One ladder for preview-start and recording-start so both
-     * fall back identically on constraint-limited devices. [writeBack] updates
-     * the preview/capture/analysis fields from whatever actually bound;
-     * recording passes false so [unbindRecording] can restore the standard set.
+     * Bind the largest compatible use-case combination, largest first, from
+     * the [combinations] ladder the caller passes — preview-start computes
+     * it with [orderedCombinations], the recording bind gets it as the pure
+     * [BindChoreography.recordingBindPlan]'s attempt list — then, via the
+     * empty subset, the extra alone. One ladder shape for both session
+     * producers so they fall back identically on constraint-limited
+     * devices. [writeBack] updates the preview/capture/analysis fields from
+     * whatever actually bound; recording passes false so [unbindRecording]
+     * can restore the standard set.
      */
     private fun bindLargestCompatible(
         provider: ProcessCameraProvider,
         owner: LifecycleOwner,
-        base: List<UseCase>,
-        extra: UseCase?,
+        combinations: List<List<UseCase>>,
         writeBack: Boolean,
     ): Camera {
-        val combinations = orderedCombinations(base, extra)
-
         var lastError: Exception? = null
         for (useCases in combinations) {
             if (useCases.isEmpty()) continue
@@ -1523,7 +1586,6 @@ class CameraService(private val context: Context) {
         preview = null
         imageCapture = null
         imageAnalysis = null
-        camera = null
         liveCamera = null
         boundPhotoConfig = null
         // Unbound camera = torch dark: the live fact dies with the session,
@@ -1733,10 +1795,80 @@ class CameraService(private val context: Context) {
         }
     }
 
+    /**
+     * Wire the camera-settings save path the untouched-write torch
+     * convergence persists through. Called by the Settings Applier at start
+     * — the one owner of "persisted settings → runtime" — so a converged
+     * document reaches the store through the existing save every writer
+     * uses.
+     */
+    fun setSettingsPersister(persister: suspend (CameraSettings) -> Unit) {
+        persistSettings = persister
+    }
+
+    /**
+     * The wholesale settings apply — and the ONE place the "did this write
+     * touch torch?" verdict is computed, because this is the only seam that
+     * sees both the previously applied snapshot ([activeSettings]) and the
+     * new one. The torch pair ([CameraSettings.torchEnabled] +
+     * [CameraSettings.torchStrength]) decides:
+     *
+     *  - FIRST apply (nothing committed yet — cold start): everything
+     *    applies verbatim, so a restart re-lights from the stored intent.
+     *  - Torch pair MOVED: an explicit torch write — the in-app quick-setting
+     *    toggle, a scheduler torch action, a test-restore undo — is applied
+     *    and committed as written, LED included.
+     *  - Torch pair UNCHANGED: this write does not touch torch, so the
+     *    stored intent converges to the live LED fact ([isTorchOn]) through
+     *    ONE DataStore write on the wired [setSettingsPersister] save path —
+     *    and the LED-driving below runs per the CONVERGED value, because
+     *    driving per the raw value would extinguish a live-only lit LED (the
+     *    web torch route and the deterrence coordinator diverge from the
+     *    stored pair by design).
+     *
+     * This replaces the per-writer convergence protocol — the since-deleted
+     * `CameraSettings.convergeTorch` plus a transform-diff verdict in
+     * CameraSettingsEditor, a live-fact snapshot in SettingsWebHandler's
+     * camera-section rebuild, and an action-type verdict in
+     * AutomationActionExecutor: three writers each re-deriving the same
+     * invariant, and three consecutive fixes to it (22fe040, e84b36d,
+     * 565a690; issue #16's dashboard-save-kills-the-LED repro) before the
+     * verdict moved to its single owner here. A write built from a stale
+     * base can still read as untouched while the LED has since been flipped
+     * live-only; the convergence then restates the live fact, which is the
+     * same document the next untouched write would store anyway.
+     *
+     * The LED-driving side is untouched: [applyCameraControls]' torch branch
+     * re-asserts torch on every controls apply (what makes torch survive
+     * camera rebinds) and honors [torchDrivenOn] — never extinguishing a
+     * torch lit by the system flashlight tile.
+     */
     suspend fun applySettings(settings: CameraSettings) {
         val boundSettings = activeSettings
-        activeSettings = settings
-        if (outputRotationChanged(boundSettings, settings)) {
+        val torchTouched = !settingsEverApplied ||
+            boundSettings.torchEnabled != settings.torchEnabled ||
+            boundSettings.torchStrength != settings.torchStrength
+        val effective = if (torchTouched) {
+            settings
+        } else {
+            val converged = settings.copy(torchEnabled = isTorchOn())
+            if (converged != settings) {
+                val persister = persistSettings
+                if (persister == null) {
+                    Log.w(TAG, "applySettings: no settings persister wired; torch convergence not persisted")
+                } else {
+                    Log.d(
+                        TAG,
+                        "applySettings: torch untouched — converging stored intent to the live fact (on=${converged.torchEnabled})",
+                    )
+                    persister(converged)
+                }
+            }
+            converged
+        }
+        settingsEverApplied = true
+        activeSettings = effective
+        if (outputRotationChanged(boundSettings, effective)) {
             // The ImageCapture bakes the output rotation in at bind time
             // (target rotation); a change rebinds through the same arbiter
             // consult the resolution seam rides — a busy camera picks the
@@ -1755,8 +1887,8 @@ class CameraService(private val context: Context) {
                 else -> Log.d(TAG, "applySettings: deferring output-rotation rebind until next active session")
             }
         }
-        if (settings.resolution.size != currentResolution) {
-            currentResolution = settings.resolution.size
+        if (effective.resolution.size != currentResolution) {
+            currentResolution = effective.resolution.size
             // One arbiter consult: rebind now while the camera is free, park
             // the change otherwise (ResolutionApplyPolicy beneath it).
             when (
@@ -1768,17 +1900,17 @@ class CameraService(private val context: Context) {
                     withContext(Dispatchers.Main) {
                         executeBinding(action)
                     }
-                    applyCameraControls(settings, forceFocusReapply = false)
+                    applyCameraControls(effective, forceFocusReapply = false)
                     return
                 }
                 else -> {
-                    pendingResolution = settings.resolution.size
+                    pendingResolution = effective.resolution.size
                     Log.d(TAG, "applySettings: deferring resolution change until next active session")
                 }
             }
         }
 
-        applyCameraControls(settings, forceFocusReapply = false)
+        applyCameraControls(effective, forceFocusReapply = false)
     }
 
     fun applyPendingResolution() {
@@ -1809,27 +1941,33 @@ class CameraService(private val context: Context) {
      * producer ([bindUseCases] and [bindRecording]): one apply per
      * [ControlsApplyPolicy] rung, each re-asserting [activeSettings] with
      * [forceFocusReapply] so a fresh bind's metering state matches too. Each
-     * apply resolves its target at fire time through [liveCamera] — a rung
-     * landing after a newer bind re-asserts onto the newer session, which is
-     * the desired idempotent behavior, and a rung landing after an unbind is
-     * a caught-exception no-op.
+     * rung carries the [bindGeneration] it was scheduled under, and the fire
+     * time consults [BindChoreography.rungAction]: a rung landing after a
+     * newer bind drops itself — the new bind schedules its own rungs, and
+     * this rung's force-focus reapply would otherwise cancel a tap-to-focus
+     * on the session that replaced it — while a surviving apply still
+     * resolves its target at fire time through [liveCamera], so a rung
+     * landing after an unbind is a caught-exception no-op.
      */
     private fun schedulePostBindControlsApply() {
         val generation = bindGeneration
-        ControlsApplyPolicy.applyDelaysMs().forEach { delayMs ->
+        BindChoreography.postBindRungs(generation, ControlsApplyPolicy.applyDelaysMs()).forEach { rung ->
             controlsHandler.postDelayed({
-                if (generation != bindGeneration) return@postDelayed
-                applyCameraControls(activeSettings, forceFocusReapply = true)
-            }, delayMs)
+                if (BindChoreography.rungAction(rung, bindGeneration) ==
+                    BindChoreography.RungAction.ApplyControls
+                ) {
+                    applyCameraControls(activeSettings, forceFocusReapply = true)
+                }
+            }, rung.delayMs)
         }
     }
 
     @androidx.annotation.OptIn(androidx.camera.camera2.interop.ExperimentalCamera2Interop::class)
     private fun applyCameraControls(settings: CameraSettings, forceFocusReapply: Boolean) {
-        // The live session is the target — during a recording bind the
-        // preview-side `camera` field points at the closed pre-recording
-        // camera, and every settings emission (dashboard PUT via the Settings
-        // Applier, on-device editor) must reach the session actually running.
+        // The live session is the target — during a recording bind [liveCamera]
+        // carries the recording session's instance, and every settings emission
+        // (dashboard PUT via the Settings Applier, on-device editor) must reach
+        // the session actually running.
         val cam = liveCamera ?: return
 
         try {
@@ -2137,15 +2275,6 @@ class CameraService(private val context: Context) {
             "Camera permission is not granted. Grant it, then retry."
 
         /**
-         * The observed-camera-state line for ERROR_CAMERA_DISABLED — the
-         * while-in-use policy's denial (exactly the locked-mount case). A
-         * message constant, not a flag: the streaming session matches it to
-         * drive the blocked-by-lock truth without a second state channel
-         * (the CAMERA_PERMISSION_REQUIRED_MESSAGE precedent).
-         */
-        const val CAMERA_DISABLED_MESSAGE = "Camera disabled by policy (while-in-use denial)"
-
-        /**
          * The observed-camera-state line for ERROR_CAMERA_FATAL_ERROR —
          * camera2's ERROR_CAMERA_SERVICE, whose documented answer is a device
          * reboot (CameraX taxonomy, self-healing §5; blueprint P0 item 4).
@@ -2161,34 +2290,14 @@ class CameraService(private val context: Context) {
  * The combination ladder, largest first: every subset of [base]
  * (optionally plus [extra]). Shared by preview-start and recording-start
  * so both fall back identically on constraint-limited devices. Pure list
- * math — the provider interaction stays in [CameraService] — and tested
- * directly.
+ * math — the provider interaction stays in [CameraService]. The canonical
+ * implementation lives in the pure bind choreography
+ * ([BindChoreography.orderedCombinations], whose recording plan emits this
+ * ladder in slot terms); this camera-package re-export keeps the service's
+ * call sites and the camera-package math tests unchanged.
  */
 internal fun <T> orderedCombinations(base: List<T>, extra: T?): List<List<T>> =
-    buildList {
-        for (size in base.size downTo 0) {
-            subsetsOf(base, size).forEach { subset ->
-                add(if (extra != null) subset + extra else subset)
-            }
-        }
-    }
-
-internal fun <T> subsetsOf(items: List<T>, size: Int): List<List<T>> {
-    val result = mutableListOf<List<T>>()
-    fun recurse(start: Int, current: MutableList<T>) {
-        if (current.size == size) {
-            result += current.toList()
-            return
-        }
-        for (i in start..items.lastIndex) {
-            current += items[i]
-            recurse(i + 1, current)
-            current.removeAt(current.lastIndex)
-        }
-    }
-    recurse(0, mutableListOf())
-    return result
-}
+    BindChoreography.orderedCombinations(base, extra)
 
 /**
  * The streaming analysis size: small captures pass through; large captures

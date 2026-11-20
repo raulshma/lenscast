@@ -64,7 +64,6 @@ class SettingsWebHandlerMergeTest {
             settingsDataStore = store,
             detectionModelStore = detectionModelStore,
             audioModelStore = mockk<AudioModelStore>(relaxed = true),
-            liveTorchOn = { false },
         )
     }
 

@@ -11,7 +11,8 @@ sealed class CameraState {
      * for CameraX `StateError`s the open-state observer acted on (blueprint
      * P0 item 4) — the dashboard's one field that distinguishes "will
      * self-heal" (REBIND/WAIT_CAMERA_ADDED/CAMERAX_HANDLES) from "reboot the
-     * phone" (REBOOT_REQUIRED); null for errors raised outside that path
+     * phone" (REBOOT_REQUIRED) and "the device policy denied the open"
+     * (POLICY_DENIED); null for errors raised outside that path
      * (permission gaps, bind exceptions), which have no taxonomy verdict.
      * [toString] renders the verdict only when present, so the API's
      * `cameraStateName` (the data-class toString the status handler ships)

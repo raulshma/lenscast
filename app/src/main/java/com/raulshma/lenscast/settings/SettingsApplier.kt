@@ -74,6 +74,11 @@ class SettingsApplier(
 
     fun start(scope: CoroutineScope) {
         cameraCollectorStarted = true
+        // The untouched-write torch convergence persists through this store's
+        // own save — the camera service never sees DataStore, it calls back
+        // through this lambda inside applySettings (one write, the same save
+        // every writer uses).
+        cameraService.setSettingsPersister { settingsDataStore.saveSettings(it) }
         // Camera settings. Plain collect (not collectLatest): applies run
         // serialized under the mutex in delivery order — idempotent by
         // contract — while StateFlow conflation already collapses a rapid
@@ -577,8 +582,9 @@ class SettingsApplier(
      * Applies one camera-settings value to the [CameraService] directly,
      * serialized with the collector through [cameraApplyMutex] so a direct
      * apply and a store-driven apply can never interleave mid-applies. This
-     * is the documented idempotent-overlap seam (the same contract as the
-     * camera screens' apply-then-persist): callers persist first, then drive
+     * is the documented idempotent-overlap seam (every persisted write is
+     * applied once through this applier — the camera screens included):
+     * callers persist first, then drive
      * the live session themselves, and the collector's eventual re-apply of
      * the persisted value is a no-op restatement. The Automation Test's
      * restore uses it so the live camera rewinds in the restore call, not

@@ -5,49 +5,36 @@ import com.raulshma.lenscast.camera.model.FocusMode
 import com.raulshma.lenscast.camera.model.WhiteBalance
 
 /**
- * The single camera-settings writer. Both the camera screen (apply now for
- * responsiveness, then persist — the Settings Applier re-applies
- * idempotently) and the settings screens (persist only; the Applier
- * applies) funnel transforms through [edit]. Wiring arrives as lambdas so
- * this module never touches Android and stays testable through its
- * interface; the field parsing below is the only logic both screens shared
- * by copy.
+ * The single camera-settings writer. Both the camera screen and the settings
+ * screens funnel transforms through [edit]: one persisted write per edit,
+ * run through [normalizeManualDefaults] first — every write lands in the
+ * same normalized shape, and the Settings Applier applies it to the runtime.
+ * Wiring arrives as lambdas so this module never touches Android and stays
+ * testable through its interface; the field parsing below is the only logic
+ * both screens shared by copy.
+ *
+ * Persist-ONLY, deliberately: the torch-touch verdict lives in
+ * CameraService.applySettings (the one seam that sees the previously
+ * applied snapshot and the new one), and it judges every persisted document
+ * exactly once. The old apply-then-persist dual write broke that invariant
+ * — the apply half converged and committed the live torch fact, then the
+ * persist half overwrote it with the pre-convergence snapshot the editor
+ * had read, and the applier honored that stale pair as an explicit torch
+ * write, darkening a live-only lit LED (the in-app variant of issue #16;
+ * the writer-side protocol it rode was fixes 22fe040/e84b36d/565a690).
  */
 class CameraSettingsEditor(
     private val current: () -> CameraSettings,
     private val persist: suspend (CameraSettings) -> Unit,
-    private val apply: (suspend (CameraSettings) -> Unit)? = null,
-    /**
-     * The live torch fact the edit's convergence answers to — a transform
-     * that left the torch pair untouched must not re-assert stale stored
-     * intent over a live-only lit LED. Required with no default: a defaulted
-     * `false` would silently re-create the darkened-LED bug on a forgotten
-     * construction site (see [CameraSettings.convergeTorch]).
-     */
-    private val liveTorchOn: () -> Boolean,
 ) {
 
     /**
-     * Apply-then-persist, in that order, of the transform's output run
-     * through [normalizeManualDefaults] and the torch convergence first —
-     * every write lands applied and persisted in the same normalized shape,
-     * and the [apply] call itself (which drives the torch from the value)
-     * sees the converged one, not only the persisted copy. The transform is
-     * opaque, so the torch-touch verdict is the transform-diff proxy: a
-     * toggle write always flips [CameraSettings.torchEnabled] and lands
-     * explicit; no shipped editor control writes the same torch value it
-     * read.
+     * Persist the transform's output run through [normalizeManualDefaults] —
+     * one DataStore write per edit; the Settings Applier applies it and owns
+     * the torch convergence from there.
      */
     suspend fun edit(transform: (CameraSettings) -> CameraSettings) {
-        val base = current()
-        val normalized = normalizeManualDefaults(transform(base))
-        val next = CameraSettings.convergeTorch(
-            normalized,
-            touchedTorch = normalized.torchEnabled != base.torchEnabled,
-            liveTorchOn = liveTorchOn(),
-        )
-        apply?.invoke(next)
-        persist(next)
+        persist(normalizeManualDefaults(transform(current())))
     }
 
     companion object {

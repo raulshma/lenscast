@@ -6,19 +6,24 @@ import com.raulshma.lenscast.camera.model.WhiteBalance
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
-import org.junit.Assert.assertTrue
 import org.junit.Test
 
+/**
+ * The persist-only editor: one normalized write per edit, the Settings
+ * Applier applies it. The torch-touch verdict is NOT here — it lives in
+ * CameraService.applySettings (the one seam that sees the previously
+ * applied snapshot and the new write), so these tests pin the writer-side
+ * shape only: normalization and parsing.
+ */
 class CameraSettingsEditorTest {
 
     @Test
-    fun `edit applies the transform then persists`() = runBlocking {
+    fun `edit persists the transform's output`() = runBlocking {
         var current = CameraSettings()
         var persisted: CameraSettings? = null
         val editor = CameraSettingsEditor(
             current = { current },
             persist = { persisted = it },
-            liveTorchOn = { false },
         )
 
         editor.edit { it.copy(exposureCompensation = 3) }
@@ -32,7 +37,6 @@ class CameraSettingsEditorTest {
         val editor = CameraSettingsEditor(
             current = { CameraSettings() },
             persist = { persisted = it },
-            liveTorchOn = { false },
         )
 
         editor.edit { it.copy(whiteBalance = WhiteBalance.MANUAL) }
@@ -50,7 +54,6 @@ class CameraSettingsEditorTest {
         val editor = CameraSettingsEditor(
             current = { CameraSettings() },
             persist = { persisted = it },
-            liveTorchOn = { false },
         )
 
         editor.edit { it.copy(focusMode = FocusMode.MANUAL) }
@@ -65,7 +68,6 @@ class CameraSettingsEditorTest {
         val editor = CameraSettingsEditor(
             current = { CameraSettings() },
             persist = { persisted = it },
-            liveTorchOn = { false },
         )
 
         editor.edit {
@@ -87,104 +89,12 @@ class CameraSettingsEditorTest {
         val editor = CameraSettingsEditor(
             current = { CameraSettings() },
             persist = { persisted = it },
-            liveTorchOn = { false },
         )
 
         editor.edit { it.copy(whiteBalance = WhiteBalance.AUTO, focusMode = FocusMode.AUTO) }
 
         assertNull(persisted?.colorTemperature)
         assertNull(persisted?.focusDistance)
-    }
-
-    @Test
-    fun `immediate apply runs before persist`() = runBlocking {
-        val events = mutableListOf<String>()
-        val editor = CameraSettingsEditor(
-            current = { CameraSettings() },
-            persist = { events.add("persist") },
-            apply = { events.add("apply") },
-            liveTorchOn = { false },
-        )
-
-        editor.edit { it }
-
-        assertEquals(listOf("apply", "persist"), events)
-    }
-
-    @Test
-    fun `persist-only mode skips apply`() = runBlocking {
-        var applied = false
-        var persisted = false
-        val editor = CameraSettingsEditor(
-            current = { CameraSettings() },
-            persist = { persisted = true },
-            apply = null,
-            liveTorchOn = { false },
-        )
-
-        editor.edit { it.copy(zoomRatio = 2f) }
-
-        assertEquals(false, applied)
-        assertEquals(true, persisted)
-    }
-
-    // ── torch convergence (issue #16): the applier's re-assert must not ──
-    // ── carry stale stored intent over a live-only lit LED             ──
-
-    @Test
-    fun `a transform that leaves the torch alone converges it to the live fact`() = runBlocking {
-        var current = CameraSettings(torchEnabled = false)
-        var applied: CameraSettings? = null
-        var persisted: CameraSettings? = null
-        val editor = CameraSettingsEditor(
-            current = { current },
-            persist = { persisted = it },
-            apply = { applied = it },
-            liveTorchOn = { true },
-        )
-
-        editor.edit { it.copy(iso = 800) }
-
-        // Both halves of the write see the converged value: the immediate
-        // apply drives the torch from it, and the persisted copy re-asserts
-        // the same fact through the applier later.
-        assertTrue(applied?.torchEnabled == true)
-        assertTrue(persisted?.torchEnabled == true)
-        assertEquals(800, persisted?.iso)
-    }
-
-    @Test
-    fun `a transform that writes the torch explicitly passes through verbatim`() = runBlocking {
-        var current = CameraSettings(torchEnabled = false)
-        var persisted: CameraSettings? = null
-        val editor = CameraSettingsEditor(
-            current = { current },
-            persist = { persisted = it },
-            liveTorchOn = { true },
-        )
-
-        editor.edit { it.copy(torchEnabled = true) }
-
-        // The torch toggle's write is the torch verdict — the live fact does
-        // not override it.
-        assertTrue(persisted?.torchEnabled == true)
-    }
-
-    @Test
-    fun `an untouched torch converges to dark when the LED is dark`() = runBlocking {
-        var current = CameraSettings(torchEnabled = true)
-        var persisted: CameraSettings? = null
-        val editor = CameraSettingsEditor(
-            current = { current },
-            persist = { persisted = it },
-            liveTorchOn = { false },
-        )
-
-        editor.edit { it.copy(iso = 800) }
-
-        // The opposite divergence: stored intent says on, the LED is dark —
-        // the save must not re-light it.
-        assertTrue(persisted?.torchEnabled == false)
     }
 
     @Test

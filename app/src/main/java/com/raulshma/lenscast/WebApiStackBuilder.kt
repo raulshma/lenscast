@@ -77,7 +77,7 @@ internal fun buildWebApiStack(
         // server stop tears down the request's own socket), the reset lever
         // is the camera service's bounded budget, and the telemetry reads
         // live.
-        launchSoftRestart = { app.launchSoftRestart(); true },
+        launchSoftRestart = { app.launchSoftRestart() },
         resetCameraLever = { app.cameraService.resetCamera() },
         crashRelaunchTelemetry = {
             val state = app.crashMarkerJournal.load()
@@ -117,7 +117,6 @@ internal fun buildWebApiStack(
                 settingsDataStore = app.settingsDataStore,
                 detectionModelStore = app.detectionModelStore,
                 audioModelStore = app.audioModelStore,
-                liveTorchOn = { app.cameraService.isTorchOn() },
             ),
             automation = automationHandler,
             automationTest = automationTest,

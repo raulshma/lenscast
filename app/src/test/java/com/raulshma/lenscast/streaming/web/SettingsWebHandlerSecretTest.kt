@@ -110,9 +110,6 @@ class SettingsWebHandlerSecretTest {
             settingsDataStore = store,
             detectionModelStore = detectionModelStore,
             audioModelStore = mockk<AudioModelStore>(relaxed = true),
-            // The secrets tests never exercise the torch pair — a constant
-            // dark fact keeps the camera-section rebuild deterministic here.
-            liveTorchOn = { false },
         )
         // The production DataStore is a process-wide singleton (the
         // top-level `preferencesDataStore` delegate binds to the first

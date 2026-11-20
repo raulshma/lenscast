@@ -27,10 +27,13 @@ package com.raulshma.lenscast.camera.model
  * - `ERROR_CAMERA_REMOVED` → [Verdict.WAIT_CAMERA_ADDED] always: a removed
  *   (unplugged) camera is a terminal state — unbind and wait for
  *   `CameraManager.AvailabilityCallback.onCameraAdded`, never rebind.
- * - `ERROR_CAMERA_DISABLED` (device policy) and
- *   `ERROR_DO_NOT_DISTURB_MODE_ENABLED` (user toggle) →
- *   [Verdict.CAMERAX_HANDLES]: no app-side lever exists; the dedicated
- *   message downstream is the report.
+ * - `ERROR_CAMERA_DISABLED` (device policy, the locked-mount while-in-use
+ *   denial) → [Verdict.POLICY_DENIED]: no app-side lever exists; the
+ *   dedicated message downstream is the report, and streaming's
+ *   blocked-by-lock detector keys on the verdict (never the message).
+ * - `ERROR_DO_NOT_DISTURB_MODE_ENABLED` (user toggle) →
+ *   [Verdict.CAMERAX_HANDLES]: no app-side lever exists either; the report
+ *   is the whole response.
  * - `ERROR_STREAM_CONFIG` and any code this build does not know →
  *   [Verdict.REBIND] while [rebindAttempts] is under
  *   [MAX_REBIND_ATTEMPTS]: a fresh `bindToLifecycle` is the documented lever
@@ -68,6 +71,15 @@ object CameraErrorPolicy {
         /** No app-side action — CameraX's retry machinery, device policy, or the user owns the fix; report only. */
         CAMERAX_HANDLES,
 
+        /**
+         * The device's camera policy denied the open (ERROR_CAMERA_DISABLED,
+         * the locked-mount while-in-use denial): like [CAMERAX_HANDLES] there
+         * is no app-side lever — the policy (screen unlocked, app visible)
+         * owns the fix — but streaming's blocked-by-lock detector keys on
+         * this verdict, so it is distinct in the taxonomy.
+         */
+        POLICY_DENIED,
+
         /** Rebind the use cases (`CameraService.rebindUseCases`) — the bounded lever; count the attempt. */
         REBIND,
 
@@ -86,10 +98,12 @@ object CameraErrorPolicy {
     fun decide(errorCode: Int, rebindAttempts: Int): Verdict = when (errorCode) {
         CODE_CAMERA_FATAL_ERROR -> Verdict.REBOOT_REQUIRED
         CODE_CAMERA_REMOVED -> Verdict.WAIT_CAMERA_ADDED
+        // The device policy denied the open: report-only (no lever), but
+        // typed so streaming's blocked-by-lock detector need not string-match.
+        CODE_CAMERA_DISABLED -> Verdict.POLICY_DENIED
         CODE_CAMERA_IN_USE,
         CODE_MAX_CAMERAS_IN_USE,
         CODE_OTHER_RECOVERABLE_ERROR,
-        CODE_CAMERA_DISABLED,
         CODE_DO_NOT_DISTURB_MODE_ENABLED,
         -> Verdict.CAMERAX_HANDLES
         // STREAM_CONFIG and unknown codes: the bounded rebind lever.
@@ -106,7 +120,9 @@ object CameraErrorPolicy {
      * "reboot the phone" (REBOOT_REQUIRED) and "the camera is gone"
      * (WAIT_CAMERA_ADDED) have no in-process lever to spend, and the manual
      * path must not override the taxonomy — exactly [decide]'s own table.
-     * null [publishedRecovery] (no standing classified error) or a REBIND
+     * POLICY_DENIED groups with CAMERAX_HANDLES here (report-only, no
+     * spend; the wire handler's catch-all answers it). null
+     * [publishedRecovery] (no standing classified error) or a REBIND
      * verdict fall through to the budget gate.
      */
     fun decideResetCamera(publishedRecovery: Verdict?, rebindAttempts: Int): Verdict =

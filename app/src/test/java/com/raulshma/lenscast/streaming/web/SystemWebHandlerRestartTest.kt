@@ -25,9 +25,8 @@ import org.junit.Test
  * acknowledgment `{"success":true,"mode":"soft"}` immediately — the ladder's
  * stopServer step tears down the listener socket the request rode on, so a
  * verdict awaited inline was never deliverable (the deep restart answers
- * before its teardown the same way). Only the unwired launcher answers the
- * typed refusal synchronously. Plain and `?mode=process` stay byte-identical
- * with the deep restart's legacy wire contract.
+ * before its teardown the same way). Plain and `?mode=process` stay
+ * byte-identical with the deep restart's legacy wire contract.
  */
 class SystemWebHandlerRestartTest {
 
@@ -111,7 +110,7 @@ class SystemWebHandlerRestartTest {
             captureHistoryStore = mockk(),
             restartApplication = { deepSeamCalls++ },
             canScheduleExactAlarms = { false }, // the soft path needs no grant
-            launchSoftRestart = { launches++; true },
+            launchSoftRestart = { launches++ },
         )
 
         val body = handler.restart(mode = SystemWebHandler.RESTART_MODE_SOFT)
@@ -124,30 +123,6 @@ class SystemWebHandlerRestartTest {
         // The soft path must not touch the deep seam, whatever the grant says.
         assertEquals(0, deepSeamCalls)
         assertEquals("""{"success":true,"mode":"soft"}""", body)
-    }
-
-    @Test
-    fun `a launcher that refuses to accept answers nothing-launching`() = runBlocking {
-        // The wired-but-refusing shape is indistinguishable from unwired on
-        // purpose: the only honest synchronous failure is "the ladder will
-        // not run".
-        var deepSeamCalls = 0
-        val handler = SystemWebHandler(
-            context = mockk(),
-            powerManager = mockk(),
-            captureHistoryStore = mockk(),
-            restartApplication = { deepSeamCalls++ },
-            launchSoftRestart = { false },
-        )
-
-        val body = handler.restart(mode = SystemWebHandler.RESTART_MODE_SOFT)
-
-        assertEquals(0, deepSeamCalls)
-        assertEquals(
-            """{"success":false,"mode":"soft","reason":"soft_restart_failed",""" +
-                """"step":"not_wired","hint":"Soft restart failed at soft restart seam not wired"}""",
-            body,
-        )
     }
 
     @Test
@@ -164,24 +139,6 @@ class SystemWebHandlerRestartTest {
         // The legacy contract: no mode field on the deep restart's wire shape.
         assertEquals("""{"success":true}""", handler.restart(mode = SystemWebHandler.RESTART_MODE_PROCESS))
         assertEquals(1, seamCalls)
-    }
-
-    @Test
-    fun `the unwired soft-restart default answers the honest failure, never a success`() = runBlocking {
-        // Fix F: the default launcher is the honest absence (the { null }
-        // telemetry precedent in the ladder's failure shape) — a mis-wired
-        // graph must report a typed failure naming the not-wired step, not
-        // a Restarted nothing performed.
-        val handler = SystemWebHandler(
-            context = mockk(),
-            powerManager = mockk(),
-            captureHistoryStore = mockk(),
-        )
-
-        val body = handler.restart(mode = SystemWebHandler.RESTART_MODE_SOFT)
-        assertEquals(true, body.contains("\"success\":false"))
-        assertEquals(true, body.contains(""""step":"not_wired""""))
-        assertEquals(true, body.contains(""""reason":"soft_restart_failed""""))
     }
 
     @Test

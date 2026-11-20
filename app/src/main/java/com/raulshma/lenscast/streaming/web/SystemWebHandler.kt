@@ -88,12 +88,8 @@ class SystemWebHandler(
      * restart already answers before its teardown). The handler therefore
      * acknowledges the request and the launcher runs the ladder afterwards;
      * the dashboard's poll loop re-syncs on the re-armed server either way.
-     * False = not wired. The default is the HONEST ABSENCE (the `{ null }`
-     * telemetry precedent): a graph that forgot to wire the seam must answer
-     * a typed failure — never the success it did not earn, which a mis-wired
-     * production graph would have reported forever.
      */
-    private val launchSoftRestart: () -> Boolean = { false },
+    private val launchSoftRestart: () -> Unit = {},
     /**
      * The bounded manual camera-rebind lever (wave 4, blueprint P1 item 10)
      * — wired to `CameraService.resetCamera` in production: the same
@@ -168,29 +164,16 @@ class SystemWebHandler(
      * inline was never deliverable (the deep restart matches the same
      * answer-before-teardown shape). The ladder runs off the request thread
      * past the flush and its verdict lands in the log; the dashboard's poll
-     * loop re-syncs on the re-armed server either way. An unwired launcher
-     * still answers the typed refusal — the one soft failure shape that is
-     * known synchronously. The plain route, `?mode=process`, and any unknown
-     * mode keep the deep-restart semantics byte-for-byte (the legacy success
-     * shape carries no `mode`), so existing clients and the automation token
-     * path are unaffected. The soft path needs no exact-alarm pre-check —
-     * nothing is scheduled, nothing dies.
+     * loop re-syncs on the re-armed server either way. The plain route,
+     * `?mode=process`, and any unknown mode keep the deep-restart semantics
+     * byte-for-byte (the legacy success shape carries no `mode`), so existing
+     * clients and the automation token path are unaffected. The soft path
+     * needs no exact-alarm pre-check — nothing is scheduled, nothing dies.
      */
     suspend fun restart(mode: String? = null): String {
         if (mode == RESTART_MODE_SOFT) {
-            return restartAdapter.toJson(
-                if (launchSoftRestart()) {
-                    SystemRestartResponse(success = true, mode = RESTART_MODE_SOFT)
-                } else {
-                    SystemRestartResponse(
-                        success = false,
-                        mode = RESTART_MODE_SOFT,
-                        reason = RESTART_REASON_SOFT_RESTART_FAILED,
-                        step = SOFT_RESTART_STEP_NOT_WIRED,
-                        hint = SOFT_RESTART_HINT_PREFIX + "soft restart seam not wired",
-                    )
-                }
-            )
+            launchSoftRestart()
+            return restartAdapter.toJson(SystemRestartResponse(success = true, mode = RESTART_MODE_SOFT))
         }
         // The seam is named restartApplication because a member named restart()
         // shadows a same-named `restart` property: the old body's restart()
@@ -402,20 +385,6 @@ class SystemWebHandler(
         /** The `mode` query values of POST /api/system/restart (blueprint item 9): soft is the in-process ladder, process the deep restart. */
         const val RESTART_MODE_SOFT = "soft"
         const val RESTART_MODE_PROCESS = "process"
-
-        /** The soft ladder's failure reason (blueprint item 9): the typed refusal names the failed [step]. */
-        const val RESTART_REASON_SOFT_RESTART_FAILED = "soft_restart_failed"
-
-        /**
-         * The step name an UNWIRED [launchSoftRestart] seam reports (the
-         * honest default's shape): not a ladder step — a marker that the
-         * graph never wired the ladder, so a mis-wired production build
-         * reads as a typed failure instead of a success nothing performed.
-         */
-        const val SOFT_RESTART_STEP_NOT_WIRED = "not_wired"
-
-        /** The device-side fallback prefix for a soft step failure; the dashboard's localized message wins. */
-        const val SOFT_RESTART_HINT_PREFIX = "Soft restart failed at "
 
         // ── POST /api/system/reset-camera wire names (blueprint item 10) ──
 

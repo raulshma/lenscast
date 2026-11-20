@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.Intent
 import android.os.Looper
 import com.raulshma.lenscast.camera.CameraService
+import com.raulshma.lenscast.camera.model.CameraErrorPolicy
 import com.raulshma.lenscast.camera.model.CameraState
 import com.raulshma.lenscast.core.BatteryOptimizationResult
 import com.raulshma.lenscast.core.KeyguardMonitor
@@ -341,6 +342,53 @@ class StreamingSessionTest {
         openObserved.value = true
 
         verifyUntil { verify(exactly = 1) { streamingManager.setCameraBlockedByLock(false) } }
+    }
+
+    @Test
+    fun `the camera-state watch flags blocked-by-lock on a policy-denied error under lock`() {
+        // The bind accepted but the open was denied later: CameraService's
+        // error observer publishes CameraState.Error carrying the typed
+        // CameraErrorPolicy.POLICY_DENIED verdict for ERROR_CAMERA_DISABLED —
+        // the typed channel, never the human-readable message, is the
+        // blocked-by-lock signal (the wake ladder and throttle make the
+        // re-request safe).
+        val cameraState = MutableStateFlow<CameraState>(CameraState.Idle)
+        val openObserved = MutableStateFlow(false)
+        every { cameraService.cameraState } returns cameraState
+        every { cameraService.cameraOpenObserved } returns openObserved
+        keyguardLocked.value = true
+
+        runWithMainPumped { session.begin() }
+        clearMocks(streamingManager, lockBypassController, answers = false)
+
+        cameraState.value = CameraState.Error(
+            "Camera disabled by policy (while-in-use denial)",
+            CameraErrorPolicy.Verdict.POLICY_DENIED,
+        )
+
+        verifyUntil {
+            verify(exactly = 1) { streamingManager.setCameraBlockedByLock(true) }
+            verify(exactly = 1) { lockBypassController.requestWake() }
+        }
+    }
+
+    @Test
+    fun `a generic camera error is not a lock-blocking verdict`() {
+        // Only POLICY_DENIED means the device policy denied the open — any
+        // other verdict (here CAMERAX_HANDLES, CameraX's own retry class)
+        // must not claim lock blocking or spend a wake request.
+        val cameraState = MutableStateFlow<CameraState>(CameraState.Idle)
+        val openObserved = MutableStateFlow(false)
+        every { cameraService.cameraState } returns cameraState
+        every { cameraService.cameraOpenObserved } returns openObserved
+        keyguardLocked.value = true
+
+        runWithMainPumped { session.begin() }
+
+        cameraState.value = CameraState.Error("Camera error, code 4", CameraErrorPolicy.Verdict.CAMERAX_HANDLES)
+        Thread.sleep(200)
+        verify(exactly = 0) { streamingManager.setCameraBlockedByLock(true) }
+        verify(exactly = 0) { lockBypassController.requestWake() }
     }
 
     @Test

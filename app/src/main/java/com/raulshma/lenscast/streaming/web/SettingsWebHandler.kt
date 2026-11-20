@@ -16,6 +16,7 @@ import com.raulshma.lenscast.camera.model.MaskingZone
 import com.raulshma.lenscast.camera.model.MotionZone
 import com.raulshma.lenscast.camera.model.OutputRotationPolicy
 import com.raulshma.lenscast.camera.model.OverlaySettings
+import com.raulshma.lenscast.data.SettingEntry
 import com.raulshma.lenscast.data.SettingsDataStore
 import com.raulshma.lenscast.data.adaptiveBitrateEnabledPref
 import com.raulshma.lenscast.data.alertQuietHoursEnabledPref
@@ -101,7 +102,6 @@ import com.raulshma.lenscast.data.streamingPortPref
 import com.raulshma.lenscast.data.httpsEnabledPref
 import com.raulshma.lenscast.data.webStreamingEnabledPref
 import com.raulshma.lenscast.data.watchdogCheckIntervalSecondsPref
-import com.raulshma.lenscast.data.watchdogCheckIntervalSecondsPref
 import com.raulshma.lenscast.data.watchdogEnabledPref
 import com.raulshma.lenscast.data.watchdogMaxRetriesPref
 import com.raulshma.lenscast.data.srtEnabledPref
@@ -121,8 +121,6 @@ import com.raulshma.lenscast.data.whipEnabledPref
 import com.raulshma.lenscast.data.whipStunServerPref
 import com.raulshma.lenscast.data.whipTokenPref
 import com.raulshma.lenscast.data.whipUrlPref
-import com.raulshma.lenscast.data.rtmpEnabledPref
-import com.raulshma.lenscast.data.rtmpUrlPref
 import com.raulshma.lenscast.streaming.model.CameraSettingsDto
 import com.raulshma.lenscast.streaming.model.MaskingZoneDto
 import com.raulshma.lenscast.streaming.model.MotionZoneDto
@@ -155,13 +153,6 @@ class SettingsWebHandler(
     private val audioModelStore: AudioModelStore,
     /** The export envelope's timestamp source. */
     private val nowMs: () -> Long = System::currentTimeMillis,
-    /**
-     * The live torch fact ([com.raulshma.lenscast.camera.CameraService.isTorchOn])
-     * the camera-section PUT rebuild converges the stored torch pair to.
-     * Required with no default: a defaulted `false` would silently re-create
-     * the original bug on a forgotten construction site.
-     */
-    private val liveTorchOn: () -> Boolean,
 ) {
 
     private val responseAdapter by lazy { AppJson.moshi.adapter(SettingsResponseDto::class.java) }
@@ -188,8 +179,6 @@ class SettingsWebHandler(
      * GET /api/settings/export — the current settings document inside the
      * versioned [SettingsExportDto] envelope, for downloading as a file and
      * restoring via POST /api/settings/import on this or another device.
-     *
-     * as such.
      *
      * What the export carries: exactly what GET /api/settings returns — the
      * write-only credentials (WebDAV password, Telegram bot token, MQTT
@@ -396,12 +385,21 @@ class SettingsWebHandler(
      * PUT /api/settings — section-level merge: the raw JSON keys the client
      * sent overlay the stored document ([mergeSection]), so a section that
      * omits a field keeps the stored value instead of silently resetting it
-     * to the DTO default. Full-section writers (the dashboard's GET-merge-PUT,
-     * the import envelope) carry every key and behave exactly as before; an
-     * explicit JSON null still overlays as null and resets an optional field.
-     * The camera rebuild keeps the torch contract unchanged: no torch fields
-     * ride the DTO, torchEnabled converges to the live LED fact, and the
-     * stored strength carries over.
+     * to the DTO default. Full-section writers (the import envelope) carry
+     * every key and behave exactly as before, and the dashboard PUTs its
+     * partial sections straight through for the server to merge (no
+     * client-side GET-merge-PUT chain); an explicit JSON null still overlays
+     * as null and resets an optional field.
+     * Each section then persists in ONE atomic DataStore transaction
+     * ([SettingsDataStore.saveEntries], the entries built by
+     * [streamingEntries]) — a crash mid-PUT cannot land a half-applied
+     * section, and a concurrent disk-truth reader sees the old or the new
+     * document, never a torn one. The camera rebuild keeps the torch
+     * contract: no torch fields ride the DTO, so the stored torch pair
+     * carries over verbatim — convergence to the live LED fact is
+     * CameraService.applySettings' job (the single owner; the writer-side
+     * live-fact snapshot this rebuild once took was the protocol behind
+     * fixes 22fe040/e84b36d).
      */
     suspend fun put(body: String): String {
         val request = updateAdapter.fromJson(body)
@@ -434,17 +432,18 @@ class SettingsWebHandler(
                 nightVisionMode = parseEnum(cam.nightVisionMode, current.nightVisionMode),
                 // Torch is NOT a web-camera-section setting: the camera DTO
                 // carries no torch fields (GET can't present them, PUT can't
-                // change them). The rebuild snapshots the LIVE torch fact
-                // rather than carrying the stored intent: live-only writers
-                // (POST /api/camera/torch, the deterrence coordinator) diverge
-                // from the stored pair by design, and this save re-asserts
-                // torch through the Settings Applier — carrying the stale
-                // stored value here killed a lit LED (the scheduled-automation
-                // torch, too) on every dashboard camera-section save (issue
-                // #16). torchStrength stays the stored intent: a live flip
-                // drives the device-default brightness and carries no strength
+                // change them), so the rebuild carries the STORED pair
+                // verbatim. Converging it to the live LED fact is
+                // CameraService.applySettings' job — this save lands, the
+                // applier applies it, and the untouched torch pair converges
+                // there (carrying the stale stored value used to kill a lit
+                // LED — the scheduled-automation torch, too — on every
+                // dashboard camera-section save, issue #16, fixed writer-side
+                // by 22fe040 before the verdict moved to the applier).
+                // torchStrength stays the stored intent: a live flip drives
+                // the device-default brightness and carries no strength
                 // intent of its own.
-                torchEnabled = liveTorchOn(),
+                torchEnabled = current.torchEnabled,
                 outputRotation = OutputRotationPolicy.coerce(cam.outputRotation),
                 orientationLocked = cam.orientationLocked,
                 torchStrength = current.torchStrength,
@@ -453,153 +452,247 @@ class SettingsWebHandler(
         }
 
         request.streaming?.let {
+            val rawStreaming = rawSections["streaming"] as? Map<*, *>
             val stream = mergeSection(
                 streamingDtoAdapter,
                 settingsDataStore.readFresh(::streamingDtoFrom),
-                rawSections["streaming"],
+                rawStreaming,
             )
-            // Out-of-range numeric values are the Settings Store's clamp
-            // policy, not this handler's: every saver coerces on save.
-            settingsDataStore.saveStreamingPort(stream.port)
-            settingsDataStore.saveWebStreamingEnabled(stream.webStreamingEnabled)
-            settingsDataStore.saveJpegQuality(stream.jpegQuality)
-            settingsDataStore.saveShowPreview(stream.showPreview)
-            settingsDataStore.saveStreamAudioEnabled(stream.streamAudioEnabled)
-            settingsDataStore.saveStreamAudioBitrateKbps(stream.streamAudioBitrateKbps)
-            settingsDataStore.saveStreamAudioChannels(stream.streamAudioChannels)
-            settingsDataStore.saveStreamAudioEchoCancellation(stream.streamAudioEchoCancellation)
-            settingsDataStore.saveRecordingAudioEnabled(stream.recordingAudioEnabled)
-            settingsDataStore.saveRtspEnabled(stream.rtspEnabled)
-            settingsDataStore.saveRtspTlsEnabled(stream.rtspTlsEnabled)
-            settingsDataStore.saveRtspBasicAuthCompat(stream.rtspBasicAuthCompat)
-            settingsDataStore.saveRtspPort(stream.rtspPort)
-            parseEnumOrNull<RtspInputFormat>(stream.rtspInputFormat.takeIf { it.isNotBlank() })
-                ?.let { settingsDataStore.saveRtspInputFormat(it) }
+            // The raw section's key set is the touched set: the fields the
+            // client actually sent. Only they become entries — untouched
+            // siblings keep their stored values bit-for-bit instead of being
+            // re-encoded back onto the file.
+            val touched = rawStreaming?.keys?.filterIsInstance<String>()?.toSet().orEmpty()
+            // ONE atomic section save for the whole merged document (this
+            // used to be ~103 independent saveX transactions, each its own
+            // read-modify-write pass of the preferences file). Out-of-range
+            // numeric values are still the Settings Store's clamp policy, not
+            // this handler's: the entries ride the same descriptors, which
+            // coerce on encode.
+            settingsDataStore.saveEntries(streamingEntries(stream, touched))
+        }
+
+        return successAdapter.toJson(SuccessResponse())
+    }
+
+    /** The sixteen wire fields the composite overlay descriptor covers. */
+    private val overlayWireFields = setOf(
+        "overlayEnabled", "showTimestamp", "timestampFormat", "showBranding",
+        "brandingText", "showStatus", "showCustomText", "customText",
+        "overlayPosition", "overlayFontSize", "overlayTextColor",
+        "overlayBackgroundColor", "overlayPadding", "overlayLineHeight",
+        "maskingEnabled", "maskingZones",
+    )
+
+    /**
+     * The streaming section's (descriptor → value) entries for the ONE atomic
+     * [SettingsDataStore.saveEntries] pass — one entry per wire field the
+     * client actually sent ([touched], the raw JSON key set). Every entry
+     * keeps the exact per-field convention of the saveX calls it replaces:
+     * the tolerant enum mappings skip (an absent or unknown wire name keeps
+     * the stored one), the write-only secrets overwrite only on a presented
+     * value, the apiToken keeps its hash-and-gate, and each descriptor's own
+     * encode applies the identical clamp/normalize on the way to disk. Wire
+     * fields with no saver (`mlModelState`, `apiTokenConfigured` —
+     * response-only facts) and unknown names have no entry here and are
+     * ignored, as before.
+     */
+    private fun streamingEntries(stream: StreamingSettingsDto, touched: Set<String>): List<SettingEntry<*>> {
+        if (touched.isEmpty()) return emptyList()
+        val entries = ArrayList<SettingEntry<*>>(touched.size)
+        // The overlay is ONE composite descriptor across the wire fields
+        // above: any touched overlay field lands the whole rebuilt
+        // OverlaySettings — its untouched siblings ride the merge base,
+        // exactly as before.
+        if (overlayWireFields.any(touched::contains)) {
+            entries += SettingEntry(
+                overlaySettingsPref,
+                toOverlaySettings(stream, settingsDataStore.overlaySettings.value),
+            )
+        }
+        for (key in touched) when (key) {
+            "port" -> entries += SettingEntry(streamingPortPref, stream.port)
+            "webStreamingEnabled" -> entries += SettingEntry(webStreamingEnabledPref, stream.webStreamingEnabled)
+            "jpegQuality" -> entries += SettingEntry(jpegQualityPref, stream.jpegQuality)
+            "showPreview" -> entries += SettingEntry(showPreviewPref, stream.showPreview)
+            "streamAudioEnabled" -> entries += SettingEntry(streamAudioEnabledPref, stream.streamAudioEnabled)
+            "streamAudioBitrateKbps" -> entries += SettingEntry(streamAudioBitrateKbpsPref, stream.streamAudioBitrateKbps)
+            "streamAudioChannels" -> entries += SettingEntry(streamAudioChannelsPref, stream.streamAudioChannels)
+            "streamAudioEchoCancellation" -> entries += SettingEntry(streamAudioEchoCancellationPref, stream.streamAudioEchoCancellation)
+            "recordingAudioEnabled" -> entries += SettingEntry(recordingAudioEnabledPref, stream.recordingAudioEnabled)
+            "rtspEnabled" -> entries += SettingEntry(rtspEnabledPref, stream.rtspEnabled)
+            "rtspTlsEnabled" -> entries += SettingEntry(rtspTlsEnabledPref, stream.rtspTlsEnabled)
+            "rtspBasicAuthCompat" -> entries += SettingEntry(rtspBasicAuthCompatPref, stream.rtspBasicAuthCompat)
+            "rtspPort" -> entries += SettingEntry(rtspPortPref, stream.rtspPort)
+            // Same tolerant mapping as before: an absent or unknown input
+            // format wire name is skipped, keeping the stored one.
+            "rtspInputFormat" -> parseEnumOrNull<RtspInputFormat>(stream.rtspInputFormat.takeIf { it.isNotBlank() })
+                ?.let { entries += SettingEntry(rtspInputFormatPref, it) }
             // Same tolerant mapping as the input format: an absent or unknown
             // resolution wire name is skipped, keeping the stored one.
-            RtspResolution.fromWireNameOrNull(stream.rtspResolution)
-                ?.let { settingsDataStore.saveRtspResolution(it) }
+            "rtspResolution" -> RtspResolution.fromWireNameOrNull(stream.rtspResolution)
+                ?.let { entries += SettingEntry(rtspResolutionPref, it) }
             // Same tolerant mapping as the input format/resolution: an absent
             // or unknown codec wire name is skipped, keeping the stored one.
-            RtspVideoCodec.fromWireNameOrNull(stream.rtspVideoCodec)
-                ?.let { settingsDataStore.saveRtspVideoCodec(it) }
-            settingsDataStore.saveRtmpEnabled(stream.rtmpEnabled)
+            "rtspVideoCodec" -> RtspVideoCodec.fromWireNameOrNull(stream.rtspVideoCodec)
+                ?.let { entries += SettingEntry(rtspVideoCodecPref, it) }
+            "rtmpEnabled" -> entries += SettingEntry(rtmpEnabledPref, stream.rtmpEnabled)
             // RTMP push: write-only (Secret) — an empty update keeps the
             // stored URL. A presented value is judged at start time by
             // RtmpUrl.parse (plus the H.264 codec gate).
-            saveSecret(stream.rtmpUrl.value) { settingsDataStore.saveRtmpUrl(it) }
+            "rtmpUrl" -> if (SecretUpdate.overwrites(stream.rtmpUrl.value)) {
+                entries += SettingEntry(rtmpUrlPref, stream.rtmpUrl.value)
+            }
             // WHIP push: endpoint/STUN round-trip; validity is judged at
             // start time by the output (a readable error beats silently
             // "fixing" a URL the user mistyped).
-            settingsDataStore.saveWhipEnabled(stream.whipEnabled)
-            settingsDataStore.saveWhipUrl(stream.whipUrl)
-            settingsDataStore.saveWhipStunServer(stream.whipStunServer)
+            "whipEnabled" -> entries += SettingEntry(whipEnabledPref, stream.whipEnabled)
+            "whipUrl" -> entries += SettingEntry(whipUrlPref, stream.whipUrl)
+            "whipStunServer" -> entries += SettingEntry(whipStunServerPref, stream.whipStunServer)
+            // The bearer token is write-only exactly like the MQTT password.
+            "whipToken" -> if (SecretUpdate.overwrites(stream.whipToken.value)) {
+                entries += SettingEntry(whipTokenPref, stream.whipToken.value)
+            }
             // SRT push: the enable toggle round-trips; the write-only URL is
             // judged at start time by SrtUrl.parse, exactly like the RTMP
             // push URL (Secret — an empty update keeps the stored one).
-            settingsDataStore.saveSrtEnabled(stream.srtEnabled)
-            saveSecret(stream.srtUrl.value) { settingsDataStore.saveSrtUrl(it) }
-            settingsDataStore.saveAdaptiveBitrateEnabled(stream.adaptiveBitrateEnabled)
-            settingsDataStore.saveEncodedAdaptiveBitrateEnabled(stream.adaptiveEncodedBitrateEnabled)
-            settingsDataStore.saveRtspSubStreamEnabled(stream.rtspSubStreamEnabled)
-            settingsDataStore.saveHlsDvrSegments(stream.hlsDvrSegments)
-            settingsDataStore.saveOverlaySettings(toOverlaySettings(stream, settingsDataStore.overlaySettings.value))
-            settingsDataStore.saveWatchdogEnabled(stream.watchdogEnabled)
-            settingsDataStore.saveWatchdogMaxRetries(stream.watchdogMaxRetries)
-            settingsDataStore.saveWatchdogCheckIntervalSeconds(stream.watchdogCheckIntervalSeconds)
+            "srtEnabled" -> entries += SettingEntry(srtEnabledPref, stream.srtEnabled)
+            "srtUrl" -> if (SecretUpdate.overwrites(stream.srtUrl.value)) {
+                entries += SettingEntry(srtUrlPref, stream.srtUrl.value)
+            }
+            "adaptiveBitrateEnabled" -> entries += SettingEntry(adaptiveBitrateEnabledPref, stream.adaptiveBitrateEnabled)
+            "adaptiveEncodedBitrateEnabled" -> entries += SettingEntry(
+                encodedAdaptiveBitrateEnabledPref,
+                stream.adaptiveEncodedBitrateEnabled,
+            )
+            "rtspSubStreamEnabled" -> entries += SettingEntry(rtspSubStreamEnabledPref, stream.rtspSubStreamEnabled)
+            "hlsDvrSegments" -> entries += SettingEntry(hlsDvrSegmentsPref, stream.hlsDvrSegments)
+            "watchdogEnabled" -> entries += SettingEntry(watchdogEnabledPref, stream.watchdogEnabled)
+            "watchdogMaxRetries" -> entries += SettingEntry(watchdogMaxRetriesPref, stream.watchdogMaxRetries)
+            "watchdogCheckIntervalSeconds" -> entries += SettingEntry(
+                watchdogCheckIntervalSecondsPref,
+                stream.watchdogCheckIntervalSeconds,
+            )
             // Opt-in, default off: the post-death camera bring-up prompt
             // (blueprint P1 item 11) — lights the screen by design, so the
             // flag rides the standard round-trip like every other gate.
-            settingsDataStore.saveFsiCameraResume(stream.fsiCameraResumeEnabled)
-            settingsDataStore.saveMdnsEnabled(stream.mdnsEnabled)
-            settingsDataStore.saveMotionDetectionEnabled(stream.motionDetectionEnabled)
-            settingsDataStore.saveMotionSensitivity(stream.motionSensitivityPercent)
-            settingsDataStore.saveMotionZones(stream.motionZones.map { toMotionZone(it) })
-            settingsDataStore.saveMotionRecordingEnabled(stream.motionRecordingEnabled)
-            settingsDataStore.saveMotionPostRollSeconds(stream.motionPostRollSeconds)
-            settingsDataStore.saveMotionArmScheduleEnabled(stream.motionArmScheduleEnabled)
-            settingsDataStore.saveMotionArmStartMinute(stream.motionArmStartMinute)
-            settingsDataStore.saveMotionArmEndMinute(stream.motionArmEndMinute)
-            settingsDataStore.saveMotionArmDaysMask(stream.motionArmDaysMask)
-            settingsDataStore.saveSoundDetectionEnabled(stream.soundDetectionEnabled)
-            settingsDataStore.saveSoundThresholdPercent(stream.soundThresholdPercent)
-            settingsDataStore.saveSoundAdaptiveNoiseFloor(stream.soundAdaptiveNoiseFloor)
-            settingsDataStore.saveSoundRecordingEnabled(stream.soundRecordingEnabled)
-            settingsDataStore.saveMotionCooldownSeconds(stream.motionCooldownSeconds)
-            settingsDataStore.saveSoundCooldownSeconds(stream.soundCooldownSeconds)
+            "fsiCameraResumeEnabled" -> entries += SettingEntry(fsiCameraResumePref, stream.fsiCameraResumeEnabled)
+            "mdnsEnabled" -> entries += SettingEntry(mdnsEnabledPref, stream.mdnsEnabled)
+            "motionDetectionEnabled" -> entries += SettingEntry(motionDetectionEnabledPref, stream.motionDetectionEnabled)
+            "motionSensitivityPercent" -> entries += SettingEntry(motionSensitivityPref, stream.motionSensitivityPercent)
+            "motionZones" -> entries += SettingEntry(motionZonesPref, stream.motionZones.map { toMotionZone(it) })
+            "motionRecordingEnabled" -> entries += SettingEntry(motionRecordingEnabledPref, stream.motionRecordingEnabled)
+            "motionPostRollSeconds" -> entries += SettingEntry(motionPostRollSecondsPref, stream.motionPostRollSeconds)
+            "motionArmScheduleEnabled" -> entries += SettingEntry(motionArmScheduleEnabledPref, stream.motionArmScheduleEnabled)
+            "motionArmStartMinute" -> entries += SettingEntry(motionArmStartMinutePref, stream.motionArmStartMinute)
+            "motionArmEndMinute" -> entries += SettingEntry(motionArmEndMinutePref, stream.motionArmEndMinute)
+            "motionArmDaysMask" -> entries += SettingEntry(motionArmDaysMaskPref, stream.motionArmDaysMask)
+            "soundDetectionEnabled" -> entries += SettingEntry(soundDetectionEnabledPref, stream.soundDetectionEnabled)
+            "soundThresholdPercent" -> entries += SettingEntry(soundThresholdPercentPref, stream.soundThresholdPercent)
+            "soundAdaptiveNoiseFloor" -> entries += SettingEntry(soundAdaptiveNoiseFloorPref, stream.soundAdaptiveNoiseFloor)
+            "soundRecordingEnabled" -> entries += SettingEntry(soundRecordingEnabledPref, stream.soundRecordingEnabled)
+            "motionCooldownSeconds" -> entries += SettingEntry(motionCooldownSecondsPref, stream.motionCooldownSeconds)
+            "soundCooldownSeconds" -> entries += SettingEntry(soundCooldownSecondsPref, stream.soundCooldownSeconds)
             // The allow-list normalizes on save (unknown spellings drop out, an
             // empty set folds back to the curated default), so a document that
             // omits or empties the list can never widen or disarm the gate.
-            settingsDataStore.saveSoundClassificationEnabled(stream.soundClassificationEnabled)
-            settingsDataStore.saveSoundClassificationConfidencePercent(stream.soundClassificationConfidencePercent)
-            settingsDataStore.saveSoundClassificationAllowedClasses(
+            "soundClassificationEnabled" -> entries += SettingEntry(
+                soundClassificationEnabledPref,
+                stream.soundClassificationEnabled,
+            )
+            "soundClassificationConfidencePercent" -> entries += SettingEntry(
+                soundClassificationConfidencePercentPref,
+                stream.soundClassificationConfidencePercent,
+            )
+            "soundClassificationAllowedClasses" -> entries += SettingEntry(
+                soundClassificationAllowedClassesPref,
                 stream.soundClassificationAllowedClasses.toSet(),
             )
             // The trigger set normalizes on save exactly like the allow-list:
             // unknown spellings drop out, an empty set folds back to the
             // curated trigger default — the list narrows, never disarms.
-            settingsDataStore.saveSoundTriggerEnabled(stream.soundTriggerEnabled)
-            settingsDataStore.saveSoundTriggerClasses(stream.soundTriggerClasses.toSet())
-            settingsDataStore.saveWebhookEnabled(stream.webhookEnabled)
-            settingsDataStore.saveWebhookUrl(stream.webhookUrl)
-            settingsDataStore.saveWebhookHeaders(stream.webhookHeaders)
-            settingsDataStore.saveAutoSiren(stream.autoSiren)
-            settingsDataStore.saveAutoTorch(stream.autoTorch)
-            settingsDataStore.saveSirenDurationSeconds(stream.sirenDurationSeconds)
-            settingsDataStore.saveAutoDeterrenceCooldownSeconds(stream.autoDeterrenceCooldownSeconds)
-            settingsDataStore.saveBackupEnabled(stream.backupEnabled)
-            settingsDataStore.saveBackupWifiOnly(stream.backupWifiOnly)
-            settingsDataStore.saveBackupTarget(BackupTargetPolicy.parse(stream.backupTarget).wireName)
-            settingsDataStore.saveBackupWebdavUrl(stream.backupWebdavUrl)
-            settingsDataStore.saveBackupWebdavUsername(stream.backupWebdavUsername)
-            settingsDataStore.saveTelegramChatId(stream.telegramChatId)
-            settingsDataStore.saveHttpsEnabled(stream.httpsEnabled)
-            settingsDataStore.saveAudioDeviceId(stream.audioDeviceId)
-            settingsDataStore.saveDetectionNotificationsEnabled(stream.detectionNotificationsEnabled)
-            settingsDataStore.saveAlertQuietHoursEnabled(stream.alertQuietHoursEnabled)
-            settingsDataStore.saveAlertQuietHoursStartMinute(stream.alertQuietHoursStartMinute)
-            settingsDataStore.saveAlertQuietHoursEndMinute(stream.alertQuietHoursEndMinute)
-            settingsDataStore.saveKeepAwakeEnabled(stream.keepAwakeEnabled)
-            settingsDataStore.saveTamperDetectionEnabled(stream.tamperDetectionEnabled)
-            settingsDataStore.saveMqttEnabled(stream.mqttEnabled)
-            settingsDataStore.saveMqttBrokerHost(stream.mqttBrokerHost)
-            settingsDataStore.saveMqttBrokerPort(stream.mqttBrokerPort)
-            settingsDataStore.saveMqttUsername(stream.mqttUsername)
-            settingsDataStore.saveMqttTls(stream.mqttTls)
-            settingsDataStore.saveMqttDiscoveryPrefix(stream.mqttDiscoveryPrefix)
-            settingsDataStore.saveMqttTelemetryEnabled(stream.mqttTelemetryEnabled)
+            "soundTriggerEnabled" -> entries += SettingEntry(soundTriggerEnabledPref, stream.soundTriggerEnabled)
+            "soundTriggerClasses" -> entries += SettingEntry(
+                soundTriggerClassesPref,
+                stream.soundTriggerClasses.toSet(),
+            )
+            "webhookEnabled" -> entries += SettingEntry(webhookEnabledPref, stream.webhookEnabled)
+            "webhookUrl" -> entries += SettingEntry(webhookUrlPref, stream.webhookUrl)
+            "webhookHeaders" -> entries += SettingEntry(webhookHeadersPref, stream.webhookHeaders)
+            "autoSiren" -> entries += SettingEntry(autoSirenPref, stream.autoSiren)
+            "autoTorch" -> entries += SettingEntry(autoTorchPref, stream.autoTorch)
+            "sirenDurationSeconds" -> entries += SettingEntry(sirenDurationSecondsPref, stream.sirenDurationSeconds)
+            "autoDeterrenceCooldownSeconds" -> entries += SettingEntry(
+                autoDeterrenceCooldownSecondsPref,
+                stream.autoDeterrenceCooldownSeconds,
+            )
+            "backupEnabled" -> entries += SettingEntry(backupEnabledPref, stream.backupEnabled)
+            "backupWifiOnly" -> entries += SettingEntry(backupWifiOnlyPref, stream.backupWifiOnly)
+            "backupTarget" -> entries += SettingEntry(
+                backupTargetPref,
+                BackupTargetPolicy.parse(stream.backupTarget).wireName,
+            )
+            "backupWebdavUrl" -> entries += SettingEntry(backupWebdavUrlPref, stream.backupWebdavUrl)
+            "backupWebdavUsername" -> entries += SettingEntry(backupWebdavUsernamePref, stream.backupWebdavUsername)
+            "backupWebdavPassword" -> if (SecretUpdate.overwrites(stream.backupWebdavPassword.value)) {
+                entries += SettingEntry(backupWebdavPasswordPref, stream.backupWebdavPassword.value)
+            }
+            "telegramChatId" -> entries += SettingEntry(telegramChatIdPref, stream.telegramChatId)
+            "telegramBotToken" -> if (SecretUpdate.overwrites(stream.telegramBotToken.value)) {
+                entries += SettingEntry(telegramBotTokenPref, stream.telegramBotToken.value)
+            }
+            "httpsEnabled" -> entries += SettingEntry(httpsEnabledPref, stream.httpsEnabled)
+            "audioDeviceId" -> entries += SettingEntry(audioDeviceIdPref, stream.audioDeviceId)
+            "detectionNotificationsEnabled" -> entries += SettingEntry(
+                detectionNotificationsEnabledPref,
+                stream.detectionNotificationsEnabled,
+            )
+            "alertQuietHoursEnabled" -> entries += SettingEntry(alertQuietHoursEnabledPref, stream.alertQuietHoursEnabled)
+            "alertQuietHoursStartMinute" -> entries += SettingEntry(
+                alertQuietHoursStartMinutePref,
+                stream.alertQuietHoursStartMinute,
+            )
+            "alertQuietHoursEndMinute" -> entries += SettingEntry(
+                alertQuietHoursEndMinutePref,
+                stream.alertQuietHoursEndMinute,
+            )
+            "keepAwakeEnabled" -> entries += SettingEntry(keepAwakeEnabledPref, stream.keepAwakeEnabled)
+            "tamperDetectionEnabled" -> entries += SettingEntry(tamperDetectionEnabledPref, stream.tamperDetectionEnabled)
+            "mqttEnabled" -> entries += SettingEntry(mqttEnabledPref, stream.mqttEnabled)
+            "mqttBrokerHost" -> entries += SettingEntry(mqttBrokerHostPref, stream.mqttBrokerHost)
+            "mqttBrokerPort" -> entries += SettingEntry(mqttBrokerPortPref, stream.mqttBrokerPort)
+            "mqttUsername" -> entries += SettingEntry(mqttUsernamePref, stream.mqttUsername)
+            "mqttPassword" -> if (SecretUpdate.overwrites(stream.mqttPassword.value)) {
+                entries += SettingEntry(mqttPasswordPref, stream.mqttPassword.value)
+            }
+            "mqttTls" -> entries += SettingEntry(mqttTlsPref, stream.mqttTls)
+            "mqttDiscoveryPrefix" -> entries += SettingEntry(mqttDiscoveryPrefixPref, stream.mqttDiscoveryPrefix)
+            "mqttTelemetryEnabled" -> entries += SettingEntry(mqttTelemetryEnabledPref, stream.mqttTelemetryEnabled)
             // Web Push: the master gate rides the standard round-trip; the
             // subscriptions themselves are browser-session state through the
             // /api/push routes, never this document.
-            settingsDataStore.savePushEnabled(stream.pushEnabled)
+            "pushEnabled" -> entries += SettingEntry(pushEnabledPref, stream.pushEnabled)
             // UnifiedPush is an independent gate; its targets live in the
             // push store behind /api/push/unifiedpush, never this document.
-            settingsDataStore.saveUnifiedPushEnabled(stream.unifiedPushEnabled)
+            "unifiedPushEnabled" -> entries += SettingEntry(unifiedPushEnabledPref, stream.unifiedPushEnabled)
             // Retention windows clamp on save through their descriptors
             // (0 = keep forever), like every other bounded numeric setting.
-            settingsDataStore.saveCaptureRetentionDays(stream.captureRetentionDays)
-            settingsDataStore.saveEventRetentionDays(stream.eventRetentionDays)
+            "captureRetentionDays" -> entries += SettingEntry(captureRetentionDaysPref, stream.captureRetentionDays)
+            "eventRetentionDays" -> entries += SettingEntry(eventRetentionDaysPref, stream.eventRetentionDays)
             // The storage quota clamps to its 100 MB–32 GB descriptor bounds.
-            settingsDataStore.saveStorageQuotaMb(stream.storageQuotaMb)
+            "storageQuotaMb" -> entries += SettingEntry(storageQuotaMbPref, stream.storageQuotaMb)
             // Opt-in, migration-free: existing media is never re-encrypted or
             // decrypted — the resolver sniffs each file's header per read.
-            settingsDataStore.saveMediaEncryptionEnabled(stream.mediaEncryptionEnabled)
-            settingsDataStore.saveMlDetectionEnabled(stream.mlDetectionEnabled)
-            settingsDataStore.saveMlMinScorePercent(stream.mlMinScorePercent)
-            settingsDataStore.saveMlIncludePerson(stream.mlIncludePerson)
-            settingsDataStore.saveMlIncludePets(stream.mlIncludePets)
-            settingsDataStore.saveMlIncludeVehicles(stream.mlIncludeVehicles)
-            settingsDataStore.saveContinuousRecording(stream.continuousRecording)
-            settingsDataStore.saveContinuousSegmentMinutes(stream.continuousSegmentMinutes)
-            settingsDataStore.saveOnvifEnabled(stream.onvifEnabled)
-            settingsDataStore.saveEcoIdleFpsEnabled(stream.ecoIdleFpsEnabled)
-            // The write-only secrets (Secret / SecretUpdate): an empty update
-            // keeps the stored credential — the dashboard never round-trips
-            // them, so it can only present a fresh value, never echo one.
-            saveSecret(stream.mqttPassword.value) { settingsDataStore.saveMqttPassword(it) }
-            saveSecret(stream.whipToken.value) { settingsDataStore.saveWhipToken(it) }
-            saveSecret(stream.backupWebdavPassword.value) { settingsDataStore.saveBackupWebdavPassword(it) }
-            saveSecret(stream.telegramBotToken.value) { settingsDataStore.saveTelegramBotToken(it) }
+            "mediaEncryptionEnabled" -> entries += SettingEntry(mediaEncryptionEnabledPref, stream.mediaEncryptionEnabled)
+            "mlDetectionEnabled" -> entries += SettingEntry(mlDetectionEnabledPref, stream.mlDetectionEnabled)
+            "mlMinScorePercent" -> entries += SettingEntry(mlMinScorePercentPref, stream.mlMinScorePercent)
+            "mlIncludePerson" -> entries += SettingEntry(mlIncludePersonPref, stream.mlIncludePerson)
+            "mlIncludePets" -> entries += SettingEntry(mlIncludePetsPref, stream.mlIncludePets)
+            "mlIncludeVehicles" -> entries += SettingEntry(mlIncludeVehiclesPref, stream.mlIncludeVehicles)
+            "continuousRecording" -> entries += SettingEntry(continuousRecordingPref, stream.continuousRecording)
+            "continuousSegmentMinutes" -> entries += SettingEntry(continuousSegmentMinutesPref, stream.continuousSegmentMinutes)
+            "onvifEnabled" -> entries += SettingEntry(onvifEnabledPref, stream.onvifEnabled)
+            "ecoIdleFpsEnabled" -> entries += SettingEntry(ecoIdleFpsEnabledPref, stream.ecoIdleFpsEnabled)
             // The apiToken is the ONE exception layered on the same entry
             // point: the stored form is the SHA-256 hex hash of the
             // plaintext, and its enable flag is hash-and-gated — the flag
@@ -608,31 +701,25 @@ class SettingsWebHandler(
             // plaintext and no stored hash would arm the token path without a
             // credential, so every presented token header would 401 (the gate
             // fails closed on a blank hash). Disabling always goes through.
-            val tokenConfigured = SecretUpdate.willHaveSecret(
-                stream.apiToken.value,
-                settingsDataStore.apiTokenHash.value,
+            "apiTokenEnabled" -> entries += SettingEntry(
+                apiTokenEnabledPref,
+                stream.apiTokenEnabled && SecretUpdate.willHaveSecret(
+                    stream.apiToken.value,
+                    settingsDataStore.apiTokenHash.value,
+                ),
             )
-            settingsDataStore.saveApiTokenEnabled(stream.apiTokenEnabled && tokenConfigured)
             // A non-empty token is the write-only plaintext: hash it here,
             // store only the hash, and never hand either back over the wire
             // (the Secret adapter blanks the response). An empty value keeps
             // the stored hash (disable via apiTokenEnabled).
-            if (SecretUpdate.overwrites(stream.apiToken.value)) {
-                settingsDataStore.saveApiTokenHash(StreamAuthCrypto.sha256Hex(stream.apiToken.value))
+            "apiToken" -> if (SecretUpdate.overwrites(stream.apiToken.value)) {
+                entries += SettingEntry(
+                    apiTokenHashPref,
+                    StreamAuthCrypto.sha256Hex(stream.apiToken.value),
+                )
             }
         }
-
-        return successAdapter.toJson(SuccessResponse())
-    }
-
-    /**
-     * The SecretUpdate write-side guard in one place: an empty or absent
-     * update never touches the stored credential, a presented value lands
-     * through [save]. The apiToken stays outside it — its stored form is
-     * the hash, its own exception layered below.
-     */
-    private suspend fun saveSecret(incoming: String, save: suspend (String) -> Unit) {
-        if (SecretUpdate.overwrites(incoming)) save(incoming)
+        return entries
     }
 
     /**

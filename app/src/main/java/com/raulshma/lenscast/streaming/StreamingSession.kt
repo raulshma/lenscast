@@ -5,6 +5,7 @@ import android.content.Intent
 import android.os.Build
 import android.util.Log
 import com.raulshma.lenscast.camera.CameraService
+import com.raulshma.lenscast.camera.model.CameraErrorPolicy
 import com.raulshma.lenscast.camera.model.CameraState
 import com.raulshma.lenscast.core.KeyguardMonitor
 import com.raulshma.lenscast.core.LockBypassController
@@ -436,8 +437,13 @@ class StreamingSession(
                 when {
                     state is CameraState.Ready && openObserved ->
                         streamingManager.setCameraBlockedByLock(false)
+                    // The typed verdict, not the message: CameraService's
+                    // error observer carries CameraErrorPolicy.POLICY_DENIED
+                    // for the device-policy denial (ERROR_CAMERA_DISABLED,
+                    // the locked-mount while-in-use case) — the recovery
+                    // channel is the signal, the message stays display text.
                     state is CameraState.Error &&
-                        state.message == CameraService.CAMERA_DISABLED_MESSAGE -> {
+                        state.recovery == CameraErrorPolicy.Verdict.POLICY_DENIED -> {
                         keyguardMonitor.refresh()
                         if (keyguardMonitor.isKeyguardLocked.value) {
                             streamingManager.setCameraBlockedByLock(true)
