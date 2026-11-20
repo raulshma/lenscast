@@ -30,8 +30,11 @@ import com.raulshma.lenscast.camera.model.StreamStartOutcome
  * The camera rebind and the server re-arm are decisive: a rebind that threw
  * or came back unbound, or a start that failed (throw, refused start, or a
  * rolled-back session begin), answers [Result.StepFailed] naming the step —
- * the caller (the HTTP handler) turns that into the typed refusal shape so a
- * soft restart can never report success it did not earn. Order matters for
+ * the awaiting caller logs the verdict ([MainApplication.launchSoftRestart]'s
+ * "Soft restart verdict" line), while the HTTP entry never awaits the ladder:
+ * the acknowledgment it already answered is the wire's last word, and the
+ * dashboard's dropped-response poll fallback is what observes a failure.
+ * Order matters for
  * reporting: the re-arm runs even after a failed rebind (the server being up
  * is the tier's primary contract — camera healing continues via the unlock
  * heal and the heartbeat's SOFT tier), and a failed re-arm outranks a failed
@@ -65,7 +68,7 @@ class SoftRestartLadder(
     private val startServer: suspend () -> StreamStartOutcome,
 ) {
 
-    /** The step names the wire's `step` field carries (the typed soft failure). */
+    /** The step names a decisive failure reports ([Result.StepFailed]); the dashboard's synthesized soft refusal carries its own `step` on the wire. */
     object Step {
         const val REBIND_CAMERA = "rebindCamera"
         const val START_SERVER = "startServer"
@@ -85,8 +88,9 @@ class SoftRestartLadder(
 
     /**
      * Run the ladder in order. Never throws: every step is runCatching-wrapped
-     * and the outcome is typed, so the heartbeat tier and the HTTP handler share
-     * one failure shape.
+     * and the outcome is typed, so the awaiting caller always gets one
+     * failure shape (the HTTP entry launches past the response flush and
+     * only logs the verdict).
      */
     suspend fun run(): Result {
         // Best-effort stops — the quit ladder tolerates a wedged stop for the

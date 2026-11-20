@@ -6,7 +6,7 @@ import android.os.Build
 import android.os.IBinder
 import android.util.Log
 import com.raulshma.lenscast.core.ForegroundNotifications
-import kotlinx.coroutines.launch
+import com.raulshma.lenscast.core.ReliabilityRelay
 
 /**
  * Which typed foreground start ran last on the runtime service. Bookkeeping
@@ -59,6 +59,22 @@ class StreamingService : Service() {
     @Volatile
     private var foregroundMode = ForegroundMode.None
 
+    /**
+     * The ONE cast the service makes into the app: the narrow
+     * [ReliabilityRelay] (implemented by the composition root), never the
+     * full graph. Every collaborator entry — the heartbeat's evaluation,
+     * the death-recovery aftermath with its relaunch re-arm, the
+     * denied-promotion wake, the swipe-away record — is one of the relay's
+     * four deliveries, so what each lever does stays at the composition
+     * root and a test harness can implement the interface to drive the
+     * branches the old `as? AppGraph` pulls silently no-op'd. The relay's
+     * contract is failure tolerance (implementations wrap and log their
+     * own), so these dispatches are bare.
+     */
+    private val reliabilityRelay: ReliabilityRelay? by lazy {
+        application as? ReliabilityRelay
+    }
+
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onCreate() {
@@ -77,16 +93,17 @@ class StreamingService : Service() {
             ACTION_SERVER -> startServerForeground(
                 url = intent.getStringExtra(EXTRA_URL),
                 includeAudio = intent.getBooleanExtra(EXTRA_AUDIO_ACTIVE, false),
+                rearmPersistedOutputs = false,
             )
             // A sticky restart has no intent; the dashboard restart's relaunch
             // (AppRelaunch) arrives as ACTION_RELAUNCH. Both are the same
             // recovery: the server is the process's durable mode; the
             // application re-issues the current mode as soon as the server
-            // comes up.
+            // comes up — and re-arms the persisted-enabled outputs (the
+            // dashboard's App-Restart promise), which only THIS branch does.
             null, ACTION_RELAUNCH -> {
                 if (intent != null) Log.d(TAG, "Relaunched by the restart alarm")
-                startServerForeground(url = null, includeAudio = false)
-                rearmPersistedOutputs()
+                startServerForeground(url = null, includeAudio = false, rearmPersistedOutputs = true)
             }
             // The alarm heartbeat's delivery (HeartbeatReceiver): the FGS
             // start recreated the process if it was dead, and this start
@@ -105,17 +122,15 @@ class StreamingService : Service() {
             // follows the LAST typed start). So mid-stream the heartbeat
             // skips the promotion entirely — and the server-only funnel's
             // FSI-resume evaluation with it — and goes straight to the
-            // controller's health evaluation: that half is read-only plus
+            // evaluation through the relay: that half is read-only plus
             // tier escalation, and a SOFT/MEDIUM verdict mid-stream is the
             // existing session-recovery path, in-spec.
             ACTION_HEARTBEAT -> {
                 Log.d(TAG, "Heartbeat alarm fired (mode=$foregroundMode)")
                 if (foregroundMode != ForegroundMode.Streaming) {
-                    startServerForeground(url = null, includeAudio = false)
+                    startServerForeground(url = null, includeAudio = false, rearmPersistedOutputs = false)
                 }
-                (application as? com.raulshma.lenscast.AppGraph)
-                    ?.heartbeatController
-                    ?.onHeartbeatFired()
+                reliabilityRelay?.onHeartbeatDelivered()
             }
             else -> Log.w(TAG, "Ignoring unknown foreground action: ${intent.action}")
         }
@@ -143,18 +158,13 @@ class StreamingService : Service() {
      * tier would all resurrect a stream the user deliberately killed. The
      * flag's lifetime rule lives in [StreamStateJournal] — it gates exactly
      * one boot and is cleared by the next explicit start, so it never blocks
-     * resume forever.
+     * resume forever. The record goes through the relay
+     * ([ReliabilityRelay.onUserSwipedAway]); losing the write only means one
+     * boot cycle may resume what the user killed — the journal's own
+     * documented failure tolerance, wrapped at the composition root.
      */
     override fun onTaskRemoved(rootIntent: Intent?) {
-        runCatching {
-            (application as? com.raulshma.lenscast.AppGraph)
-                ?.streamStateJournal
-                ?.markUserStopped()
-        }.onFailure {
-            // Losing the write only means one boot cycle may resume what the
-            // user killed — the journal's own documented failure tolerance.
-            Log.w(TAG, "Failed to record user-stopped intent: ${it.javaClass.simpleName}")
-        }
+        reliabilityRelay?.onUserSwipedAway()
     }
 
     private fun startStreamingForeground(url: String?, includeAudio: Boolean) {
@@ -185,35 +195,27 @@ class StreamingService : Service() {
             // lock-bypass shim — a full-screen intent over the keyguard
             // makes the app visible for the seconds the promotion and the
             // camera bind need. Unlocked denials stay with the resume seam.
-            runCatching {
-                (application as? com.raulshma.lenscast.AppGraph)
-                    ?.lockBypassController
-                    ?.requestWake()
-            }.onFailure {
-                Log.w(TAG, "Lock bypass dispatch failed: ${it.javaClass.simpleName}")
-            }
+            reliabilityRelay?.onStreamingPromotionDenied()
         }
         Log.d(TAG, "Streaming foreground service started")
     }
 
-    private fun startServerForeground(url: String?, includeAudio: Boolean) {
+    private fun startServerForeground(url: String?, includeAudio: Boolean, rearmPersistedOutputs: Boolean) {
         promoteServerOnly(url, includeAudio)
-        // The post-death camera bring-up prompt (blueprint P1 item 11): this
-        // method is the funnel every death-and-relaunch recovery lands
-        // through — the relaunch alarm (ACTION_RELAUNCH), the sticky
-        // restart's null intent, the heartbeat delivery (ACTION_HEARTBEAT),
-        // and the dashboard's server start. Whether the prompt fires is the
-        // pure FsiResumePolicy's call (opt-in flag, journal's pre-death
-        // live-output record, the swipe-kill stand-down, the once-per-death
-        // marker); a denied streaming promotion never reaches here — that
-        // path holds a live session and belongs to the lock-bypass wake.
-        runCatching {
-            (application as? com.raulshma.lenscast.AppGraph)
-                ?.fsiResumeController
-                ?.onServerOnlyLanded()
-        }.onFailure {
-            Log.w(TAG, "FSI resume evaluation failed: ${it.javaClass.simpleName}")
-        }
+        // The death-recovery aftermath (blueprint P1 item 11 + the App-Restart
+        // re-arm), through the relay: this method is the funnel every
+        // death-and-relaunch recovery lands through — the relaunch alarm
+        // (ACTION_RELAUNCH), the sticky restart's null intent, the heartbeat
+        // delivery (ACTION_HEARTBEAT), and the dashboard's server start.
+        // Whether the FSI prompt fires is the pure FsiResumePolicy's call
+        // (opt-in flag, journal's pre-death live-output record, the
+        // swipe-kill stand-down, the once-per-death marker); the persisted-
+        // output re-arm rides along ONLY on the restart recoveries
+        // ([rearmPersistedOutputs] — the routing fact this branch set owns).
+        // A denied streaming promotion never reaches here — that path holds
+        // a live session and belongs to the lock-bypass wake. Both levers,
+        // and their failure tolerance, live at the composition root.
+        reliabilityRelay?.onDeathRecoveryLanded(rearmPersistedOutputs)
         Log.d(TAG, "Server foreground service started")
     }
 
@@ -279,45 +281,6 @@ class StreamingService : Service() {
         } else {
             @Suppress("DEPRECATION")
             stopForeground(true)
-        }
-    }
-
-    /**
-     * The post-death output re-arm (the dashboard's App-Restart promise:
-     * "streams re-arm from their persisted settings"). The foreground
-     * promotion above brings the PROCESS back; the persisted-enabled outputs
-     * (web + RTSP) come back through the one Stream Toggle ladder the boot
-     * receiver and the tile use — [BootResumePolicy.execute] over
-     * [BootResumePolicy.decideRearm], whose verdict reads the persisted
-     * enables and the journal's user-stopped guard.
-     *
-     * The persisted flags are read FROM DISK, not from the shared flows: a
-     * fresh process's flows still hold the descriptor defaults (the boot
-     * receiver's documented race), and the Settings Applier's collectors may
-     * not have landed yet. The read values are landed on the manager's gates
-     * before the toggle runs (idempotent — the applier's own application of
-     * the same values no-ops), so the toggle's gates judge the persisted
-     * truth. Off the main thread; best-effort (a failed re-arm leaves the
-     * server-only recovery the promotion already landed).
-     */
-    private fun rearmPersistedOutputs() {
-        val app = application as? com.raulshma.lenscast.AppGraph ?: return
-        app.appScope.launch {
-            runCatching {
-                val webEnabled = app.settingsDataStore.webStreamingEnabledFromDisk()
-                val rtspEnabled = app.settingsDataStore.rtspEnabledFromDisk()
-                val verdict = BootResumePolicy.decideRearm(
-                    journal = app.streamStateJournal.load(),
-                    webEnabled = webEnabled,
-                    rtspEnabled = rtspEnabled,
-                )
-                app.streamingManager.setWebStreamingEnabled(webEnabled)
-                app.streamingManager.setRtspEnabled(rtspEnabled)
-                Log.d(TAG, "Relaunch re-arm verdict: $verdict")
-                BootResumePolicy.execute(toggle = app.streamToggle, verdict = verdict)
-            }.onFailure {
-                Log.w(TAG, "Relaunch re-arm failed: ${it.javaClass.simpleName}")
-            }
         }
     }
 

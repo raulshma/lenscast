@@ -22,12 +22,23 @@ import java.io.File
  * [State.userStopped] records the user's swipe-kill (`onTaskRemoved` —
  * record only; stock Android keeps the service through a swipe, but an OEM
  * kill follows, and nothing may resurrect a stream the user explicitly
- * killed). The flag's lifetime rule: it blocks exactly one boot
- * ([BootResumePolicy.decide] returns NONE for it; the boot receiver spends
- * it with [clearUserStopped] after reading) and is cleared the moment any
- * output goes live again ([recordLiveOutputs] — the next explicit start
- * supersedes the kill intent). It can never block resume forever, and it
- * never gates a manual request (the tile ignores it).
+ * killed). The flag's lifetime is the journal's own, expressed as four
+ * explicit methods — call sites never hand-roll the convention over the raw
+ * field:
+ *
+ * - **mark** — [markUserStopped] (the service's `onTaskRemoved` record, via
+ *   the [com.raulshma.lenscast.core.ReliabilityRelay]).
+ * - **consume-once-for-boot** — [consumeUserStoppedForBoot] (the boot
+ *   receiver): reads the flag, spends it, and hands back the snapshot the
+ *   boot verdict judges ([BootResumePolicy.decide] returns NONE for a
+ *   standing flag in that snapshot). The flag blocks exactly one boot — it
+ *   can never block resume forever.
+ * - **clear-on-live-output** — [recordLiveOutputs] (the journal writer): the
+ *   next explicit start supersedes the kill intent. It never gates a manual
+ *   request (the tile ignores it).
+ * - **peek** — [peekUserStopped] (the heartbeat's fire-time guard): the
+ *   non-consuming read; the flag's spending belongs to the boot path and
+ *   the next live output only.
  *
  * [State.fsiResumePrompted] is the same family of intent flag for the FSI
  * camera-resume prompt (blueprint P1 item 11): [core.FsiResumeController]
@@ -101,12 +112,38 @@ class StreamStateJournal(private val file: File) {
     }
 
     /**
-     * Spends the user-stopped flag (the boot receiver, after the one boot it
-     * gated); the recorded outputs are untouched.
+     * Spends the user-stopped flag; the recorded outputs are untouched.
+     * The boot receiver's path is [consumeUserStoppedForBoot], which reads
+     * and spends as one operation so the verdict can still honor the kill —
+     * call sites should not pair this with a prior load by hand.
      */
     fun clearUserStopped() {
         save(load().copy(userStopped = false))
     }
+
+    /**
+     * The boot consumption — the flag's read-and-spend as ONE operation
+     * (BootCompletedReceiver). Returns the journal AS THE BOOT SHOULD JUDGE
+     * it: a flag that stood at read time stays standing in the returned
+     * snapshot, so the boot verdict honors the swipe-kill — while the
+     * persisted copy spends it, because the flag gates exactly this one
+     * boot and must never block resume forever (blueprint P0 item 6). A
+     * flag that was not standing changes nothing.
+     */
+    fun consumeUserStoppedForBoot(): State {
+        val asStood = load()
+        if (asStood.userStopped) clearUserStopped()
+        return asStood
+    }
+
+    /**
+     * The non-consuming read (the heartbeat's fire-time guard via
+     * [com.raulshma.lenscast.MainApplication]'s relay seam): whether the
+     * swipe-kill flag stands right now, the persisted copy untouched —
+     * spending belongs to [consumeUserStoppedForBoot] and the
+     * clear-on-live-output path only.
+     */
+    fun peekUserStopped(): Boolean = load().userStopped
 
     /**
      * Records that the FSI camera-resume prompt fired for this death event

@@ -16,7 +16,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * What the heartbeat publishes for the telemetry surface (blueprint item 8,
@@ -88,8 +87,8 @@ data class HeartbeatState(
  * inexact fire starts the service normally.
  *
  * **Arming seam.** The server lifecycle, not the session (wave 1's seam):
- * [start] collects the same `StreamingManager.isServerRunning` flow
- * [ServerWatchdogArming] bridges, arms while the server is up, and
+ * [start] collects the same `StreamingManager.isServerRunning` flow the
+ * composition root's server-liveness leg bridges, arms while the server is up, and
  * disarms on stop — through the one shared grace-windowed bridge
  * ([GraceWindowedArming], fire-time re-check included), because the
  * restart-bounce race handling must be written once, not once per leg.
@@ -119,7 +118,7 @@ class HeartbeatController(
     private val softRestart: suspend () -> Unit = {},
     /** The death-and-relaunch lever — wired to `AppGraph.restartApplication` in production. */
     private val relaunch: () -> Unit,
-    /** The user-stopped intent flag — wired to `StreamStateJournal.load().userStopped` in production. */
+    /** The user-stopped intent flag — wired to `StreamStateJournal.peekUserStopped()` in production. */
     private val userStopped: () -> Boolean,
     private val maxMisses: Int = WatchdogAlarmPolicy.DEFAULT_MAX_MISSES,
     /** The down-leg grace; the same window [ServerForegroundController] measured restarts inside. */
@@ -133,17 +132,20 @@ class HeartbeatController(
     // nothing to run on — the alarm cannot be armed before start anyway.
     private var scope: CoroutineScope? = null
 
-    private val misses = AtomicInteger(0)
+    // The miss run is [MissCounter]'s: the fired alarm records its verdict
+    // into the counter and hands the advanced count to the policy — the
+    // increment-then-decide convention is structural, not prose.
+    private val misses = MissCounter()
 
     private val _state = MutableStateFlow(HeartbeatState())
     /** Telemetry for wave 3 (`GET /api/system`): armed, misses, last verdict. */
     val state: StateFlow<HeartbeatState> = _state.asStateFlow()
 
     /**
-     * The shared grace-windowed arm/disarm bridge (the ServerWatchdogArming
-     * leg runs the same class): up leg → [arm], a stop that survives the
-     * grace AND the fire-time re-check → [disarm]. Its scope is wired by
-     * [start]; a stop landing before that disarms immediately.
+     * The shared grace-windowed arm/disarm bridge (the composition root's
+     * server-liveness leg runs the same class): up leg → [arm], a stop that
+     * survives the grace AND the fire-time re-check → [disarm]. Its scope is
+     * wired by [start]; a stop landing before that disarms immediately.
      */
     private val armingBridge = GraceWindowedArming(
         isServerRunning = isServerRunning,
@@ -152,7 +154,7 @@ class HeartbeatController(
         disarm = ::disarm,
     )
 
-    /** One-shot wiring for the application scope (the [ServerWatchdogArming] shape). */
+    /** One-shot wiring for the application scope (the shared bridge's shape). */
     fun start(scope: CoroutineScope) {
         this.scope = scope
         armingBridge.start(scope)
@@ -190,7 +192,7 @@ class HeartbeatController(
         val manager = context.getSystemService(Context.ALARM_SERVICE) as? AlarmManager
         manager?.cancel(heartbeatPendingIntent())
         _state.update { it.copy(armed = false) }
-        misses.set(0)
+        misses.reset()
         Log.d(TAG, "Heartbeat disarmed")
     }
 
@@ -227,7 +229,7 @@ class HeartbeatController(
             Log.w(TAG, "Heartbeat health check threw: ${e.javaClass.simpleName}")
             HealthRead(healthy = false, serverOnlyMode = false)
         }
-        val miss = if (read.healthy) 0 else misses.incrementAndGet()
+        val miss = if (read.healthy) 0 else misses.recordFailure()
         val decision = WatchdogAlarmPolicy.decide(
             healthy = read.healthy,
             consecutiveMisses = miss,
@@ -249,7 +251,7 @@ class HeartbeatController(
         }
         Log.d(TAG, "Heartbeat verdict: miss=$miss action=${decision.action} tier=${decision.tier}")
         when (decision.action) {
-            WatchdogAlarmPolicy.Action.RESET -> misses.set(0)
+            WatchdogAlarmPolicy.Action.RESET -> misses.reset()
             WatchdogAlarmPolicy.Action.STAND_DOWN -> Unit
             WatchdogAlarmPolicy.Action.ESCALATE -> when (decision.tier) {
                 // The two session-recovery tiers ride the same

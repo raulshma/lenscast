@@ -40,18 +40,46 @@ import com.raulshma.lenscast.streaming.StreamingService
  * endpoint reports the missing grant and the camera keeps running, so a
  * dashboard tap can never darken a phone it cannot bring back. The alarm is
  * a one-shot — a restart that fails still leaves nothing armed.
+ *
+ * This object also owns the relaunch-pacing constants — its own delay plus
+ * the two quit-ladder timings [com.raulshma.lenscast.MainApplication] reads
+ * — because they are one ordering, not three numbers: the invariant lives in
+ * the [init] check below, enforced in code rather than prose.
  */
 object AppRelaunch {
 
     private const val TAG = "AppRelaunch"
 
     /**
+     * The settle before a restart's quit ladder — past the triggering
+     * response's flush, so the dashboard's OK reaches the socket before the
+     * teardown begins ([MainApplication.restartApplication] delays on it).
+     */
+    const val RESTART_RESPONSE_FLUSH_MS = 300L
+
+    /**
+     * The teardown window between the stop ladder and the process kill
+     * ([MainApplication.quitApplication] delays on it before exitProcess).
+     */
+    const val QUIT_TEARDOWN_GRACE_MS = 500L
+
+    /**
      * The relaunch delay: comfortably past the quit ladder's teardown grace
      * AND the restart request's response flush — the alarm must never fire
      * while the dying process still holds the socket the dashboard's OK is
-     * travelling on.
+     * travelling on. Enforced, not prose: the [init] check fails fast if a
+     * constant edit breaks the ordering.
      */
     internal const val RELAUNCH_DELAY_MS = 2_000L
+
+    init {
+        check(RELAUNCH_DELAY_MS > RESTART_RESPONSE_FLUSH_MS + QUIT_TEARDOWN_GRACE_MS) {
+            "RELAUNCH_DELAY_MS (${RELAUNCH_DELAY_MS}ms) must exceed RESTART_RESPONSE_FLUSH_MS + " +
+                "QUIT_TEARDOWN_GRACE_MS (${RESTART_RESPONSE_FLUSH_MS + QUIT_TEARDOWN_GRACE_MS}ms): " +
+                "the relaunch alarm must not fire while the dying process still holds " +
+                "the socket the dashboard's OK response is travelling on"
+        }
+    }
 
     /**
      * Register the relaunch. Idempotent per scheduling — a re-schedule

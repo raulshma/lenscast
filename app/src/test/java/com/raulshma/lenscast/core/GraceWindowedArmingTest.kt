@@ -11,8 +11,8 @@ import org.junit.Test
 
 /**
  * The one grace-windowed arm/disarm bridge both server-lifecycle consumers
- * run (ServerWatchdogArming's liveness watch, HeartbeatController's alarm):
- * the up leg arms immediately, the down leg waits out the grace, the
+ * run (the composition root's server-liveness watch leg, HeartbeatController's
+ * alarm): the up leg arms immediately, the down leg waits out the grace, the
  * pending stop cancels on a promote, and the delayed stop re-checks the
  * flow at FIRE time — the #14 race class handled once, not once per leg.
  */

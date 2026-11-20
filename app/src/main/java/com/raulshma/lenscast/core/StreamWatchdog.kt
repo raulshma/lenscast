@@ -1,10 +1,7 @@
 package com.raulshma.lenscast.core
 
 import android.util.Log
-import com.raulshma.lenscast.camera.CameraService
 import com.raulshma.lenscast.camera.model.CameraState
-import com.raulshma.lenscast.streaming.StreamingManager
-import com.raulshma.lenscast.streaming.StreamingSession
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -25,26 +22,33 @@ import com.raulshma.lenscast.core.WatchdogPolicy.WatchdogStatus
  * (camera crashes, server disconnections, frame stalls) and automatically restarts
  * the stream with escalating recovery strategies and exponential backoff.
  *
- * Recovery tiers (mechanics owned by [StreamingSession.recover]):
+ * Recovery tiers (mechanics owned by StreamingSession.recover — the
+ * injected [recover] lever in production):
  *  1. SOFT  — Rebind CameraX use cases (fixes most transient camera glitches)
  *  2. MEDIUM — Restart streaming server + rebind camera
  *  3. HARD  — Full re-initialize: CameraService.initialize() → restart everything
  *
- * This class owns the monitoring loop: the timing, the live reads, the
- * recovery calls, and state publishing. Every decision — health checks, the
- * tick's escalation verdict, the tier ladder, backoff, verification
- * windows — delegates to [WatchdogPolicy].
+ * This class owns the monitoring loop: the timing, the recovery calls, and
+ * state publishing. Every decision — health checks, the tick's escalation
+ * verdict, the tier ladder, backoff, verification windows — delegates to
+ * [WatchdogPolicy], and the live reads those decisions consume come through
+ * the [StreamFacts] seam (the streaming substrate implemented by the
+ * manager), so the loop's whole choreography runs under any injected
+ * [CoroutineScope] — production's or a test's virtual clock.
  *
  * Two arming seams, one loop (blueprint P0 item 2, resolved tension 3):
- * - **Session arming** ([startMonitoring]/[stopMonitoring], called by
- *   [StreamingSession]) runs the full analysis — every [WatchdogPolicy]
+ * - **Session arming** ([startMonitoring]/[stopMonitoring], called by the
+ *   session) runs the full analysis — every [WatchdogPolicy]
  *   branch — and is gated by the user-facing [enabled] setting (default
  *   off; wired from SettingsApplier). With it off, a camera death
  *   mid-stream leaves a zombie: the dashboard reports active while no frame
  *   reaches any client, and nothing ever recovers it.
  * - **Server-liveness arming** ([startServerLivenessWatch]/
- *   [stopServerLivenessWatch], driven by [ServerWatchdogArming] off the
- *   server lifecycle) watches the post-relaunch state every recovery tier
+ *   [stopServerLivenessWatch], driven off the server lifecycle by the
+ *   grace-windowed bridge the composition root wires — the
+ *   `serverWatchdogArming` [GraceWindowedArming] leg in MainApplication,
+ *   the former standalone arming class, inlined into that wiring) watches
+ *   the post-relaunch state every recovery tier
  *   lands in — the server up, no session live. It is deliberately NOT
  *   gated by [enabled]: server liveness must not depend on a settings
  *   screen nobody opened on an unattended mount (the old KDoc's
@@ -58,9 +62,20 @@ import com.raulshma.lenscast.core.WatchdogPolicy.WatchdogStatus
  *   what confirms the recovery).
  */
 class StreamWatchdog(
-    private val cameraService: CameraService,
-    streamingManagerProvider: () -> StreamingManager,
-    private val streamingSession: StreamingSession,
+    /**
+     * The live reads the loop decides on, resolved on first use (never
+     * during construction) — see the [facts] note below for why the
+     * provider form is load-bearing.
+     */
+    streamFacts: () -> StreamFacts,
+    /**
+     * The recovery lever — the tier's mechanics ([WatchdogPolicy.RecoveryTier]:
+     * SOFT rebind, MEDIUM server restart + rebind, HARD full re-init). In
+     * production this is `StreamingSession.recover`; a lambda seam so the
+     * JVM tests inject a recorder, exactly like [loopbackProbe] below. The
+     * watchdog owns only the timing around the call.
+     */
+    private val recover: suspend (WatchdogPolicy.RecoveryTier) -> Boolean,
     /**
      * The loopback `/api/system` liveness probe (blueprint P0 item 5) — a
      * lambda seam so JVM tests inject a fake and the production
@@ -68,13 +83,33 @@ class StreamWatchdog(
      * answered; null = probe not applicable (the caller skips it).
      */
     private val loopbackProbe: () -> Boolean? = { null },
+    /**
+     * The wall clock the stall windows measure against — the snapshot's
+     * `nowMs` and the tracking baselines' origin. A seam so the JVM tests
+     * drive the FRAME_STALL window off the same virtual clock the loop's
+     * `delay`s run on; production defaults to the system clock.
+     */
+    private val nowMs: () -> Long = System::currentTimeMillis,
+    /**
+     * The loop's scope. Production passes what this class used to build
+     * internally (`CoroutineScope(SupervisorJob() + Dispatchers.Default)`,
+     * the default); tests pass a TestScope so every `delay` — the tick
+     * interval, the backoff, the verification windows — is virtual-time
+     * advanceable. Never cancelled here: the owner's lifetime is the
+     * process, same as the internal scope it replaces.
+     */
+    scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
 ) {
 
     // Resolved on first use, never during construction: the manager builds
     // the Web API stack in its constructor, which constructs this watchdog,
-    // so a direct manager reference here would re-enter the manager's
-    // in-progress lazy initializer (recursion → OOM crash at launch).
-    private val streamingManager: StreamingManager by lazy(streamingManagerProvider)
+    // so resolving the facts eagerly would re-enter the manager's
+    // in-progress lazy initializer (recursion → OOM crash at launch). The
+    // provider keeps that wiring-order hazard impossible to trip — it is
+    // the old per-read manager provider, collapsed into one seam.
+    private val facts: StreamFacts by lazy(streamFacts)
+
+    private val loopScope: CoroutineScope = scope
 
     // ── Configuration ──
 
@@ -102,7 +137,6 @@ class StreamWatchdog(
     private val _state = MutableStateFlow(WatchdogState())
     val state: StateFlow<WatchdogState> = _state.asStateFlow()
 
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     // @Volatile: the session poll reads [isMonitoring] off the lifecycle
     // lock, so a loop launch/cancel inside it must be visible to that read.
     @Volatile
@@ -117,7 +151,10 @@ class StreamWatchdog(
      */
     private val lifecycleLock = Any()
 
-    private val consecutiveFailures = AtomicInteger(0)
+    // The tick bookkeeping's two halves: the miss run is [MissCounter]'s
+    // (the increment-then-decide convention is that type's, not prose), the
+    // recovery tally stays a plain AtomicInteger — read-mostly telemetry.
+    private val consecutiveFailures = MissCounter()
     private val totalRecoveries = AtomicInteger(0)
 
     /**
@@ -125,9 +162,11 @@ class StreamWatchdog(
      * ([WatchdogPolicy.TrackingSnapshot]) — the frame-stall baselines, the
      * last recovery timestamp, and the exposed failure reason — swapped
      * wholesale at every transition. The consecutive-failure and
-     * total-recovery counters above stay AtomicIntegers deliberately: they
-     * are the loop's tick bookkeeping, not tracking state (the policy type's
-     * doc records the split). The known [updateState] quirk — a null-status
+     * total-recovery counters above stay out of it deliberately: the miss
+     * run is the loop's [MissCounter] (the increment-then-decide convention
+     * is that type's) and the recovery tally a plain AtomicInteger — tick
+     * bookkeeping, not tracking state (the policy type's doc records the
+     * split). The known [updateState] quirk — a null-status
      * refresh re-deriving IDLE over FAILED — is untouched here.
      */
     @Volatile
@@ -212,9 +251,9 @@ class StreamWatchdog(
 
             cancelMonitorLoopLocked()
             wasStreamingActive = false
-            consecutiveFailures.set(0)
+            consecutiveFailures.reset()
             tracking = tracking.copy(failureReason = null)
-            if (streamingManager.isServerRunning.value) {
+            if (facts.isServerRunning.value) {
                 armMonitorLoopLocked(LoopOwner.SERVER)
             } else {
                 updateState(WatchdogStatus.IDLE)
@@ -225,7 +264,10 @@ class StreamWatchdog(
 
     /**
      * Arm the server-liveness baseline — the SERVER seam (blueprint P0 item
-     * 2), driven by [ServerWatchdogArming] observing the server lifecycle.
+     * 2), driven by the composition root's grace-windowed bridge observing
+     * the server lifecycle (the `serverWatchdogArming` [GraceWindowedArming]
+     * leg MainApplication wires — the former standalone arming class,
+     * inlined into that wiring).
      * Deliberately NOT gated by [enabled]: this baseline (camera error +
      * loopback probe; every session-scoped branch skipped via
      * [WatchdogPolicy.HealthSnapshot.serverOnlyMode]) is the unattended
@@ -264,19 +306,19 @@ class StreamWatchdog(
 
     /** The one loop-launch path for both seams: reset the tick bookkeeping, record the owner, launch. */
     private fun armMonitorLoopLocked(owner: LoopOwner) {
-        consecutiveFailures.set(0)
+        consecutiveFailures.reset()
         tracking = WatchdogPolicy.TrackingSnapshot(
-            processedFrameCount = streamingManager.processedFrames.value,
-            cameraFrameCount = streamingManager.cameraFrameCount(),
-            rtspAcceptedFrames = streamingManager.getRtspHealth().acceptedFrames,
-            frameCheckTimeMs = System.currentTimeMillis(),
+            processedFrameCount = facts.processedFrames.value,
+            cameraFrameCount = facts.cameraFrameCount(),
+            rtspAcceptedFrames = facts.getRtspHealth().acceptedFrames,
+            frameCheckTimeMs = nowMs(),
             recoveryTimestamp = tracking.recoveryTimestamp,
             failureReason = null,
         )
         wasStreamingActive = owner == LoopOwner.SESSION
         loopOwner = owner
 
-        monitorJob = scope.launch {
+        monitorJob = loopScope.launch {
             Log.d(TAG, "Watchdog monitoring started (mode=$owner, interval=${checkIntervalSeconds}s, maxRetries=$maxRetries)")
             updateState(WatchdogStatus.MONITORING)
 
@@ -295,26 +337,26 @@ class StreamWatchdog(
                 if (failureReason != null) {
                     Log.w(TAG, "Health check failed: $failureReason")
                     tracking = tracking.copy(failureReason = failureReason)
-                    consecutiveFailures.incrementAndGet()
+                    consecutiveFailures.recordFailure()
                 }
 
                 val tick = WatchdogPolicy.nextTick(
                     failureReason = failureReason,
-                    consecutiveFailures = consecutiveFailures.get(),
+                    consecutiveFailures = consecutiveFailures.current,
                     maxRetries = maxRetries,
                 )
 
                 when (tick.action) {
                     TickAction.RECOVER -> tick.tier?.let { recoveryTier ->
                         tick.status?.let(::updateState)
-                        Log.d(TAG, "Attempting $recoveryTier recovery (attempt ${consecutiveFailures.get()}/$maxRetries, backoff ${tick.backoffMs}ms)")
+                        Log.d(TAG, "Attempting $recoveryTier recovery (attempt ${consecutiveFailures.current}/$maxRetries, backoff ${tick.backoffMs}ms)")
 
                         delay(tick.backoffMs)
 
                         val recovered = attemptRecovery(recoveryTier)
                         val outcome = WatchdogPolicy.nextTick(
                             failureReason = failureReason,
-                            consecutiveFailures = consecutiveFailures.get(),
+                            consecutiveFailures = consecutiveFailures.current,
                             maxRetries = maxRetries,
                             recoverySucceeded = recovered,
                         )
@@ -322,18 +364,18 @@ class StreamWatchdog(
                         if (outcome.action == TickAction.RESET) {
                             Log.d(TAG, "Recovery successful after $recoveryTier attempt")
                             totalRecoveries.incrementAndGet()
-                            consecutiveFailures.set(0)
+                            consecutiveFailures.reset()
                             val acceptedFrames = try {
-                                streamingManager.getRtspHealth().acceptedFrames
+                                facts.getRtspHealth().acceptedFrames
                             } catch (_: Exception) {
                                 tracking.rtspAcceptedFrames
                             }
                             tracking = tracking.copy(
-                                processedFrameCount = streamingManager.processedFrames.value,
-                                cameraFrameCount = streamingManager.cameraFrameCount(),
+                                processedFrameCount = facts.processedFrames.value,
+                                cameraFrameCount = facts.cameraFrameCount(),
                                 rtspAcceptedFrames = acceptedFrames,
-                                frameCheckTimeMs = System.currentTimeMillis(),
-                                recoveryTimestamp = System.currentTimeMillis(),
+                                frameCheckTimeMs = nowMs(),
+                                recoveryTimestamp = nowMs(),
                             )
                         } else {
                             Log.w(TAG, "$recoveryTier recovery failed")
@@ -349,7 +391,7 @@ class StreamWatchdog(
 
                     TickAction.RESET -> {
                         Log.d(TAG, "Stream healthy again, resetting failure count")
-                        consecutiveFailures.set(0)
+                        consecutiveFailures.reset()
                         if (tick.clearsFailureReason) {
                             tracking = tracking.copy(failureReason = null)
                         }
@@ -389,13 +431,13 @@ class StreamWatchdog(
      * where it would only restate SERVER_STOPPED's evidence).
      */
     private suspend fun collectSnapshot(): WatchdogPolicy.HealthSnapshot {
-        val cameraState = cameraService.cameraState.value
+        val cameraState = facts.cameraState.value
         val rtsp = try {
-            streamingManager.getRtspHealth()
+            facts.getRtspHealth()
         } catch (_: Exception) {
             null
         }
-        val serverRunning = streamingManager.isServerRunning.value
+        val serverRunning = facts.isServerRunning.value
         val serverAnswered = if (serverRunning) {
             withContext(Dispatchers.IO) {
                 // Any throw inside the seam is itself an unanswered server.
@@ -409,15 +451,15 @@ class StreamWatchdog(
             cameraErrorMessage = (cameraState as? CameraState.Error)?.message,
             wasStreamingActive = wasStreamingActive,
             serverRunning = serverRunning,
-            liveStreaming = streamingManager.isLiveStreaming(),
-            clientCount = streamingManager.clientCount.value,
-            processedFrames = streamingManager.processedFrames.value,
+            liveStreaming = facts.isLiveStreaming(),
+            clientCount = facts.clientCount.value,
+            processedFrames = facts.processedFrames.value,
             lastProcessedFrameCount = tracking.processedFrameCount,
-            cameraFrames = streamingManager.cameraFrameCount(),
+            cameraFrames = facts.cameraFrameCount(),
             lastCameraFrames = tracking.cameraFrameCount,
             lastFrameCheckTimeMs = tracking.frameCheckTimeMs,
-            nowMs = System.currentTimeMillis(),
-            rtspActive = streamingManager.isRtspRunning.value,
+            nowMs = nowMs(),
+            rtspActive = facts.isRtspRunning.value,
             rtspPlayingClients = rtsp?.playingClients ?: 0,
             rtspHealthy = rtsp?.healthy ?: true,
             rtspAcceptedFrames = rtsp?.acceptedFrames ?: 0L,
@@ -481,14 +523,15 @@ class StreamWatchdog(
     // ── Recovery Logic ──
 
     /**
-     * The session performs the tier's mechanics ([StreamingSession.recover]
-     * owns the rebind, the attach choreography, and the conditional stream
-     * restarts); the watchdog owns the timing around them — backoff before
-     * (in the loop) and the verification window after.
+     * The injected [recover] lever performs the tier's mechanics (in
+     * production StreamingSession.recover — the rebind, the attach
+     * choreography, and the conditional stream restarts); the watchdog owns
+     * the timing around them — backoff before (in the loop) and the
+     * verification window after.
      */
     private suspend fun attemptRecovery(tier: RecoveryTier): Boolean {
         return try {
-            val recovered = streamingSession.recover(tier)
+            val recovered = recover(tier)
             if (!recovered) return false
             verifyRecovery(tier)
         } catch (e: Exception) {
@@ -512,18 +555,17 @@ class StreamWatchdog(
         // only processes for real viewers, so a headless stream's rebind
         // would never verify against processed frames. Camera frames flow
         // (or don't) regardless of who is watching.
-        val framesBeforeWait = if (spec.measureFrames) streamingManager.cameraFrameCount() else 0L
+        val framesBeforeWait = if (spec.measureFrames) facts.cameraFrameCount() else 0L
         if (spec.measureFrames) {
             delay(WatchdogPolicy.RECOVERY_VERIFICATION_WINDOW_MS)
         }
-        val framesAfterWait = if (spec.measureFrames) streamingManager.cameraFrameCount() else 0L
+        val framesAfterWait = if (spec.measureFrames) facts.cameraFrameCount() else 0L
 
         val success = WatchdogPolicy.verificationSuccess(
             tier = tier,
             framesAdvanced = spec.measureFrames && framesAfterWait > framesBeforeWait,
-            clientCount = streamingManager.clientCount.value,
-            isLive = streamingManager.isLiveStreaming(),
-            cameraReady = cameraService.cameraState.value is CameraState.Ready,
+            isLive = facts.isLiveStreaming(),
+            cameraReady = facts.cameraState.value is CameraState.Ready,
         )
 
         if (success) {
@@ -549,7 +591,7 @@ class StreamWatchdog(
         _state.value = WatchdogState(
             enabled = enabled,
             status = currentStatus,
-            consecutiveFailures = consecutiveFailures.get(),
+            consecutiveFailures = consecutiveFailures.current,
             totalRecoveries = totalRecoveries.get(),
             lastRecoveryTimestamp = tracking.recoveryTimestamp,
             lastFailureReason = tracking.failureReason,

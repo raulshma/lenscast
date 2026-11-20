@@ -40,12 +40,13 @@ import com.raulshma.lenscast.core.KeepAwakeController
 import com.raulshma.lenscast.core.KeyguardMonitor
 import com.raulshma.lenscast.core.KeystoreMediaKeyProvider
 import com.raulshma.lenscast.core.LockBypassController
+import com.raulshma.lenscast.core.GraceWindowedArming
 import com.raulshma.lenscast.core.LoopbackServerProbe
-import com.raulshma.lenscast.core.ServerWatchdogArming
 import com.raulshma.lenscast.core.SoftRestartLadder
 import com.raulshma.lenscast.core.WatchdogPolicy
 import com.raulshma.lenscast.core.MediaCrypto
 import com.raulshma.lenscast.core.PowerManager
+import com.raulshma.lenscast.core.ReliabilityRelay
 import com.raulshma.lenscast.core.SirenAutoStop
 import com.raulshma.lenscast.core.StreamWatchdog
 import com.raulshma.lenscast.core.ThermalMonitor
@@ -58,6 +59,7 @@ import com.raulshma.lenscast.data.SettingsDataStore
 import com.raulshma.lenscast.gallery.GallerySession
 import com.raulshma.lenscast.core.NetworkUtils
 import com.raulshma.lenscast.settings.SettingsApplier
+import com.raulshma.lenscast.streaming.ResumeController
 import com.raulshma.lenscast.streaming.ServerForegroundController
 import com.raulshma.lenscast.streaming.StreamStateJournal
 import com.raulshma.lenscast.streaming.StreamStateJournalWriter
@@ -82,7 +84,7 @@ import kotlinx.coroutines.launch
 import android.os.SystemClock
 import kotlin.system.exitProcess
 
-class MainApplication : Application(), SingletonImageLoader.Factory, AppGraph {
+class MainApplication : Application(), SingletonImageLoader.Factory, AppGraph, ReliabilityRelay {
     override val cameraService: CameraService by lazy { CameraService(this) }
     override val streamingManager: StreamingManager by lazy {
         StreamingManager(
@@ -160,13 +162,20 @@ class MainApplication : Application(), SingletonImageLoader.Factory, AppGraph {
     // recurse until the heap dies at launch.
     override val streamWatchdog: StreamWatchdog by lazy {
         StreamWatchdog(
-            cameraService,
-            { streamingManager },
-            streamingSession,
+            // The watchdog's reads resolve on first use — this lazy runs
+            // inside the manager's in-flight initializer (the web stack
+            // builds the watchdog), so a direct manager reference here
+            // would recurse into that lazy until the heap dies.
+            streamFacts = { streamingManager },
+            // The recovery lever: the session performs the tier's mechanics.
+            // Lambda, not the instance, so the session's own lazy resolves
+            // at first recovery instead of mid-manager-build.
+            recover = { tier -> streamingSession.recover(tier) },
             // The loopback /api/system liveness probe (blueprint item 5): the
             // URL is resolved per probe so a port/TLS change moves it with
             // the listener.
             loopbackProbe = LoopbackServerProbe(urlProvider = { streamingManager.loopbackSystemUrl() }),
+            scope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
         )
     }
     override val streamingSession: StreamingSession by lazy {
@@ -209,9 +218,23 @@ class MainApplication : Application(), SingletonImageLoader.Factory, AppGraph {
     // Server state -> the watchdog's server-liveness arming (blueprint item 2):
     // the same flow the controller above bridges, driving the process-wide
     // baseline so the post-relaunch server-only state is watched by
-    // construction — independent of the user-facing watchdog setting.
-    val serverWatchdogArming: ServerWatchdogArming by lazy {
-        ServerWatchdogArming(streamWatchdog, streamingManager.isServerRunning)
+    // construction — independent of the user-facing watchdog setting. The
+    // server lifecycle — not the streaming session — is what keys on: the
+    // server-only state is precisely what every recovery tier's relaunch
+    // lands in, and this is the same `StreamingManager.isServerRunning` flow
+    // ServerForegroundController bridges, so every server start/stop path
+    // (StreamToggle, boot resume, watchdog recovery, port/TLS restarts) arms
+    // and disarms through one observation. Mapping: server up →
+    // StreamWatchdog.startServerLivenessWatch; a stop that survives the grace
+    // window and the bridge's fire-time re-check → stopServerLivenessWatch
+    // (the mechanics are GraceWindowedArming's one implementation, shared
+    // with the foreground and heartbeat legs).
+    val serverWatchdogArming: GraceWindowedArming by lazy {
+        GraceWindowedArming(
+            isServerRunning = streamingManager.isServerRunning,
+            arm = streamWatchdog::startServerLivenessWatch,
+            disarm = streamWatchdog::stopServerLivenessWatch,
+        )
     }
     // Server state -> the alarm heartbeat's arming (blueprint item 3): the
     // same isServerRunning flow drives the out-of-process liveness alarm —
@@ -239,7 +262,7 @@ class MainApplication : Application(), SingletonImageLoader.Factory, AppGraph {
             recover = { tier -> streamingSession.recover(tier) },
             softRestart = { softRestart.run() },
             relaunch = { restartApplication() },
-            userStopped = { streamStateJournal.load().userStopped },
+            userStopped = { streamStateJournal.peekUserStopped() },
         )
     }
     // The in-process soft-restart ladder (blueprint P1 item 9): the quit
@@ -496,6 +519,25 @@ class MainApplication : Application(), SingletonImageLoader.Factory, AppGraph {
     override val streamToggle: StreamToggle by lazy {
         StreamToggle(StreamingTransports(streamingManager, streamingSession))
     }
+    // The one resume owner for BOTH variants (the BOOT_COMPLETED receiver
+    // and the post-death relaunch re-arm): the read → land-on-gates →
+    // execute ordering lives in [ResumeController] once — the seam across
+    // which drift shipped once (the soft-restart re-arm bug) is structurally
+    // ordered there and tested once. The disk reads and the manager gates
+    // ride the lambda-seam idiom (the KeepAwakeController pattern); the
+    // failure-tolerance guards stay with the callers, per the relay
+    // contract.
+    val resumeController: ResumeController by lazy {
+        ResumeController(
+            journal = streamStateJournal,
+            bootSettingEnabled = { settingsDataStore.resumeStreamsOnBootNow() },
+            webEnabledFromDisk = { settingsDataStore.webStreamingEnabledFromDisk() },
+            rtspEnabledFromDisk = { settingsDataStore.rtspEnabledFromDisk() },
+            setWebGate = streamingManager::setWebStreamingEnabled,
+            setRtspGate = streamingManager::setRtspEnabled,
+            toggle = streamToggle,
+        )
+    }
     /** App-lifetime scope for work that must outlive a ViewModel or screen. */
     override val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
@@ -573,7 +615,7 @@ class MainApplication : Application(), SingletonImageLoader.Factory, AppGraph {
         appScope.launch {
             runCatching { recordingController.stop() }
             runCatching { streamToggle.stopServer() }
-            delay(QUIT_TEARDOWN_GRACE_MS)
+            delay(AppRelaunch.QUIT_TEARDOWN_GRACE_MS)
             exitProcess(0)
         }
     }
@@ -591,7 +633,7 @@ class MainApplication : Application(), SingletonImageLoader.Factory, AppGraph {
     override fun restartApplication() {
         AppRelaunch.schedule(this)
         appScope.launch {
-            delay(RESTART_RESPONSE_FLUSH_MS)
+            delay(AppRelaunch.RESTART_RESPONSE_FLUSH_MS)
             quitApplication()
         }
     }
@@ -610,12 +652,12 @@ class MainApplication : Application(), SingletonImageLoader.Factory, AppGraph {
      * handler acknowledges the request (the dashboard's poll loop re-syncs on
      * the re-armed server either way), and the verdict — success or the
      * failed step — lands in the log where the heartbeat tier's verdicts land
-     * too. The settle mirrors [RESTART_RESPONSE_FLUSH_MS]: enough for the
-     * response bytes to reach the socket before the teardown begins.
+     * too. The settle mirrors [AppRelaunch.RESTART_RESPONSE_FLUSH_MS]: enough
+     * for the response bytes to reach the socket before the teardown begins.
      */
     override fun launchSoftRestart() {
         appScope.launch {
-            delay(RESTART_RESPONSE_FLUSH_MS)
+            delay(AppRelaunch.RESTART_RESPONSE_FLUSH_MS)
             val result = softRestart.run()
             Log.d(TAG, "Soft restart verdict: $result")
         }
@@ -929,15 +971,58 @@ class MainApplication : Application(), SingletonImageLoader.Factory, AppGraph {
         }
     }
 
+    // ── the reliability relay ([ReliabilityRelay], the runtime service's
+    // narrow entry): each delivery routes ONE fired recovery event to the
+    // lever that answers it — which controller runs and what the re-arm
+    // reads are composition-root decisions, and the failure tolerance the
+    // service used to wrap per call lives here, keeping the service's
+    // dispatches bare and the log messages where the levers are owned.
+
+    override fun onHeartbeatDelivered() {
+        heartbeatController.onHeartbeatFired()
+    }
+
+    override fun onDeathRecoveryLanded(rearmPersistedOutputs: Boolean) {
+        runCatching { fsiResumeController.onServerOnlyLanded() }
+            .onFailure { Log.w(TAG, "FSI resume evaluation failed: ${it.javaClass.simpleName}") }
+        if (rearmPersistedOutputs) rearmPersistedOutputs()
+    }
+
+    override fun onStreamingPromotionDenied() {
+        runCatching { lockBypassController.requestWake() }
+            .onFailure { Log.w(TAG, "Lock bypass dispatch failed: ${it.javaClass.simpleName}") }
+    }
+
+    override fun onUserSwipedAway() {
+        runCatching { streamStateJournal.markUserStopped() }
+            .onFailure { Log.w(TAG, "Failed to record user-stopped intent: ${it.javaClass.simpleName}") }
+    }
+
+    /**
+     * The post-death output re-arm (the dashboard's App-Restart promise:
+     * "streams re-arm from their persisted settings"). The foreground
+     * promotion in the runtime service brings the PROCESS back; the whole
+     * re-arm ordering — disk-read enables, journal guard, verdict,
+     * land-on-gates, execute — is [ResumeController]'s
+     * ([ResumeController.Source.Relaunch]; its class KDoc carries the
+     * land-before-execute contract this seam shipped a bug across once).
+     * This wrapper owns only the failure tolerance the relay contract
+     * puts on the implementation: a throw anywhere in the re-arm is caught
+     * and logged, leaving the server-only recovery the promotion already
+     * landed — and the ordering itself is untouched by it.
+     */
+    private fun rearmPersistedOutputs() {
+        appScope.launch {
+            runCatching { resumeController.resume(ResumeController.Source.Relaunch) }
+                .onFailure {
+                    Log.w(TAG, "Relaunch re-arm failed: ${it.javaClass.simpleName}")
+                }
+        }
+    }
+
     companion object {
         private const val TAG = "MainApplication"
         private const val DEVICE_ID_PREFS = "lenscast_device_id"
         private const val DEVICE_ID_KEY = "fallback_device_id"
-
-        /** The teardown window between the stop ladder and the process kill. */
-        private const val QUIT_TEARDOWN_GRACE_MS = 500L
-
-        /** The settle before a restart's quit ladder — past the triggering response's flush. */
-        private const val RESTART_RESPONSE_FLUSH_MS = 300L
     }
 }

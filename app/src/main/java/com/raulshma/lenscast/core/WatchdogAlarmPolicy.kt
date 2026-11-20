@@ -17,8 +17,8 @@ package com.raulshma.lenscast.core
  * journal flag — the same single source of intent the boot resume honors).
  *
  * **The ladder, one escalation per consecutive miss** (the caller counts the
- * current miss in — the same incremented-before-asking convention
- * [WatchdogPolicy.nextTick] documents):
+ * current miss in — a [MissCounter] advances before the ask, the same
+ * increment-then-decide convention [WatchdogPolicy.nextTick] documents):
  * - miss 1 → [EscalationTier.SOFT] — in-process rebind
  *   (`StreamingSession.recover(SOFT)`): most transient stalls die here with
  *   the foreground-started FGS (and its while-in-use camera standing)
@@ -138,8 +138,8 @@ object WatchdogAlarmPolicy {
 
     /**
      * The verdict for one fired alarm. [consecutiveMisses] includes the
-     * current miss (incremented by the caller before asking); a healthy
-     * snapshot's count is conventionally 0. [userStopped] is the
+     * current miss (advanced by the caller's [MissCounter] before asking);
+     * a healthy snapshot's count is conventionally 0. [userStopped] is the
      * StreamStateJournal's swipe-kill flag, read at fire time.
      * [serverOnlyMode] is the same health read's mode (one read, so the
      * verdict and the mode cannot disagree): true shifts the ladder's first

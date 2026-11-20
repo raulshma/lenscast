@@ -10,9 +10,8 @@ import kotlinx.coroutines.launch
 /**
  * The one grace-windowed arm/disarm bridge over the server's runtime state
  * (blueprint P0 item 2, resolved tension 3, issue #14's race class): collects
- * the same `StreamingManager.isServerRunning` flow
- * [ServerForegroundController] bridges, runs [arm] on the up leg, and delays
- * [disarm] past [stopGraceMs] on the down leg — because a server *restart*
+ * the one `StreamingManager.isServerRunning` flow, runs [arm] on the up leg,
+ * and delays [disarm] past [stopGraceMs] on the down leg — because a server *restart*
  * bounces the flow false → true within the same restart, and an immediate
  * disarm on the down leg would tear down exactly the thing performing the
  * recovery (in server-only mode the watchdog's own MEDIUM tier is what
@@ -25,10 +24,14 @@ import kotlinx.coroutines.launch
  * write landed, before the collector's up leg ran), and a delayed stop that
  * kills a just-restarted server is the #14 failure shape. So the delayed job
  * re-reads the flow at FIRE time and disarms only when the server is still
- * down. Both consumers ([ServerWatchdogArming]'s liveness watch and
- * [HeartbeatController]'s alarm) get the re-check from this one
- * implementation — the duplicate the Heartbeat leg carried was exactly that,
- * one leg's guard, and the ServerWatchdogArming leg lacked it.
+ * down. All three consumers (the composition root's server-liveness watch —
+ * the `serverWatchdogArming` leg MainApplication wires, the former
+ * standalone arming class inlined into that wiring —
+ * [HeartbeatController]'s alarm, and [ServerForegroundController]'s
+ * foreground service) get the re-check from this one implementation — the
+ * duplicate the Heartbeat leg carried was exactly that, one leg's guard, and
+ * the other two legs lacked it (the foreground leg's missing re-check was
+ * the last #14-shaped hole) until they migrated onto this bridge.
  *
  * Deliberately dumb otherwise: no decisions, no Android — the consumers hand
  * in the two lambdas and keep every policy (what "arm" and "disarm" mean)
@@ -55,6 +58,15 @@ class GraceWindowedArming(
         }
     }
 
+    /**
+     * Re-dispatch a state without waiting for the next emission — the
+     * sync/resume retry hook ([ServerForegroundController.sync] calls it
+     * while the app is visible, to heal a start Android denied in the
+     * background). The same path the collector runs, re-check included on
+     * the stop leg.
+     */
+    internal fun applyNow(running: Boolean) = apply(running)
+
     private fun apply(running: Boolean) = synchronized(this) {
         pendingStop?.cancel()
         pendingStop = null
@@ -70,7 +82,8 @@ class GraceWindowedArming(
                     // Fire-time re-check (see the class KDoc): the up leg's
                     // cancel can lose a timing race to a starved dispatcher,
                     // and a server that came back inside the window must
-                    // never lose its watch/alarm to a stale stop.
+                    // never lose its watch, alarm, or foreground service to
+                    // a stale stop.
                     if (!isServerRunning.value) {
                         disarm()
                     }

@@ -3,6 +3,7 @@ package com.raulshma.lenscast.streaming
 import com.raulshma.lenscast.streaming.rtsp.EncodedNalUnit
 import android.content.Context
 import android.util.Log
+import com.raulshma.lenscast.camera.model.CameraState
 import com.raulshma.lenscast.camera.model.OutputRotationPolicy
 import com.raulshma.lenscast.camera.model.OverlaySettings
 import com.raulshma.lenscast.AppGraph
@@ -10,6 +11,7 @@ import com.raulshma.lenscast.core.NetworkQualityMonitor
 import com.raulshma.lenscast.core.NetworkUtils
 import com.raulshma.lenscast.core.EcoIdlePolicy
 import com.raulshma.lenscast.core.StreamDefaults
+import com.raulshma.lenscast.core.StreamFacts
 import com.raulshma.lenscast.core.ThermalMonitor
 import com.raulshma.lenscast.core.SirenPlayer
 import com.raulshma.lenscast.core.ThermalState
@@ -35,6 +37,7 @@ import com.raulshma.lenscast.streaming.rtsp.RtspResolution
 import com.raulshma.lenscast.streaming.rtsp.RtspServer
 import com.raulshma.lenscast.streaming.rtsp.RtspUriPolicy
 import com.raulshma.lenscast.streaming.rtsp.RtspVideoCodec
+import com.raulshma.lenscast.streaming.rtsp.rtspAuthSpecFromPrefs
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -48,6 +51,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
@@ -65,7 +69,7 @@ class StreamingManager(
     // read without re-entering its lazy — the manager hands itself over,
     // exactly the `this` capture the builder always relied on.
     private val webApiStackFactory: (StreamingManager) -> WebApiStack,
-) {
+) : StreamFacts {
 
     private val audioStreamingManager = AudioStreamingManager(context)
 
@@ -168,7 +172,7 @@ class StreamingManager(
     private val rtspOutput: RtspOutput = RtspOutput(
         audio = audioStreamingManager,
         audioConfig = ::audioConfig,
-        authSpec = { rtspAuthSpec(authSettingsStore.authSettings.value) },
+        authSpec = { rtspAuthSpecFromDisk() },
         releaseAudio = ::releaseRtspOwnedAudio,
         onVideoBitrateChanged = encodedHub::setVideoBitrate,
         onStateChanged = { running, url ->
@@ -292,7 +296,18 @@ class StreamingManager(
     private val cameraFrameCount = AtomicLong(0L)
 
     /** The monotonic camera-frame count the watchdog's stall watch compares across ticks. */
-    fun cameraFrameCount(): Long = cameraFrameCount.get()
+    override fun cameraFrameCount(): Long = cameraFrameCount.get()
+
+    /**
+     * [StreamFacts.cameraState]: the camera HAL's published state — the
+     * watchdog's CAMERA_ERROR gate and its HARD-verification camera-Ready
+     * read. The manager holds no camera reference by design; the graph's
+     * service resolves lazily at first read, the same way [authSettingsStore]
+     * does, so no construction order constrains this.
+     */
+    override val cameraState: StateFlow<CameraState>
+        get() = (context.applicationContext as AppGraph).cameraService.cameraState
+
     private val adaptiveBitrateController = AdaptiveBitrateController(networkQualityMonitor)
     private val qualityPolicy = StreamQualityPolicy(thermalMonitor, adaptiveBitrateController)
     private val framePipeline = FramePipeline(qualityPolicy)
@@ -551,10 +566,10 @@ class StreamingManager(
     val streamUrl: StateFlow<String> = _streamUrl
 
     private val _clientCount = MutableStateFlow(0)
-    val clientCount: StateFlow<Int> = _clientCount
+    override val clientCount: StateFlow<Int> = _clientCount
 
     private val _isServerRunning = MutableStateFlow(false)
-    val isServerRunning: StateFlow<Boolean> = _isServerRunning
+    override val isServerRunning: StateFlow<Boolean> = _isServerRunning
 
     private val _audioStreamUrl = MutableStateFlow("")
     val audioStreamUrl: StateFlow<String> = _audioStreamUrl
@@ -604,7 +619,7 @@ class StreamingManager(
     val rtspUrl: StateFlow<String> = _rtspUrl
 
     private val _isRtspRunning = MutableStateFlow(false)
-    val isRtspRunning: StateFlow<Boolean> = _isRtspRunning
+    override val isRtspRunning: StateFlow<Boolean> = _isRtspRunning
 
     /**
      * The RTSP output's active mirror — written by the output's
@@ -684,7 +699,7 @@ class StreamingManager(
 
     val droppedFrames: StateFlow<Int> = framePipeline.droppedFrames
 
-    val processedFrames: StateFlow<Int> = framePipeline.processedFrames
+    override val processedFrames: StateFlow<Int> = framePipeline.processedFrames
 
     val adaptiveBitrateState: StateFlow<AdaptiveBitrateController.AdaptiveState> = adaptiveBitrateController.state
 
@@ -700,7 +715,7 @@ class StreamingManager(
     fun isRtspAudioActive(): Boolean = rtspOutput.isActive() && rtspOutput.isAudioWanted()
 
     /** RTSP health for the watchdog — playing clients + encoder counters. */
-    fun getRtspHealth(): RtspHealth = rtspOutput.healthSnapshot()
+    override fun getRtspHealth(): RtspHealth = rtspOutput.healthSnapshot()
 
     fun getRtspClientCount(): Int = getRtspHealth().playingClients
 
@@ -902,7 +917,7 @@ class StreamingManager(
     /** Per-client measured throughput/fps read seam for Web API handlers. */
     fun getFramesPerSecond(clientId: String): Double = networkQualityMonitor.getFramesPerSecond(clientId)
 
-    fun isLiveStreaming(): Boolean =
+    override fun isLiveStreaming(): Boolean =
         webStreamingActive.get() || rtspOutput.isActive() || rtmpOutput.isActive() ||
             whipOutput.isActive() || srtOutput.isActive()
 
@@ -2038,15 +2053,33 @@ class StreamingManager(
     fun tlsCertificateFingerprint(): String = tlsFingerprint
 
 
-    /** Null when auth is off or incomplete — the server treats null as "auth off". */
-    private fun rtspAuthSpec(settings: StreamAuthSettings): RtspAuthSpec? {
-        if (!settings.enabled || settings.username.isEmpty() || settings.passwordHash.isEmpty()) return null
-        return RtspAuthSpec(
-            settings.username,
-            settings.passwordHash,
-            settings.rtspDigestHa1,
-            basicAuthCompat = authSettingsStore.rtspBasicAuthCompat.value,
-        )
+    /**
+     * The RTSP auth spec, assembled from DISK truth: both inputs — the auth
+     * settings and the Basic-compat flag — decode from ONE `readFresh` file
+     * pass ([rtspAuthSpecFromPrefs]), never from the shared flows' lagging
+     * `.value`. Two `.value` reads could pair NEW credentials with the OLD
+     * compat flag or vice versa: the flows start at descriptor defaults and
+     * settle on the share-in collector's own beat, so a fresh process
+     * serving RTSP before share-in completes challenged with defaults
+     * against real disk credentials, and a section PUT's atomic save landed
+     * both keys while the auth and compat collectors fired separately (the
+     * same bug family commit 368515b fixed for automation actions with its
+     * disk-truth merge base — see the domain glossary). One snapshot, one
+     * coherent spec: the challenge scheme can never ride with a credential
+     * set from a different instant.
+     *
+     * The blocking read is rare and bounded: the provider runs when
+     * [RtspOutput] builds a config — at server start and on an auth /
+     * compat hot-swap — never per request (the server's authorizer reads
+     * its volatile [RtspConfig.auth] copy per request, so the request path
+     * pays nothing). DataStore serves the pass from its in-memory cache
+     * after the first read; the caller contexts (settings apply, server
+     * lifecycle) are background threads where a short block is harmless.
+     * Null when auth is off or incomplete — the server treats null as
+     * "auth off".
+     */
+    private fun rtspAuthSpecFromDisk(): RtspAuthSpec? = runBlocking {
+        authSettingsStore.readFresh(::rtspAuthSpecFromPrefs)
     }
 
     fun applyBatteryOptimization(result: com.raulshma.lenscast.core.BatteryOptimizationResult?) {

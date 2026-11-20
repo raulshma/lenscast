@@ -38,13 +38,10 @@ object WatchdogPolicy {
      *   forever on a locked mount.
      * - MEDIUM: the stream is live again.
      * - HARD: the stream is live and the camera is Ready.
-     * Every call site passes every argument explicitly; a tier that doesn't
-     * consult an input ignores it.
      */
     fun verificationSuccess(
         tier: RecoveryTier,
         framesAdvanced: Boolean,
-        clientCount: Int,
         isLive: Boolean,
         cameraReady: Boolean,
     ): Boolean = when (tier) {
@@ -231,11 +228,13 @@ object WatchdogPolicy {
      * swaps it wholesale (`copy`) at every transition, so a reset site cannot
      * forget a field the way the five scattered `@Volatile` vars it replaces
      * could. Deliberately NOT in here: the consecutive-failure and
-     * total-recovery counters — they stay AtomicIntegers on the runtime, the
-     * monitor loop's own tick bookkeeping published into [StreamWatchdog]'s
-     * state at every update; folding them into this pure snapshot would hand
-     * it a concurrency duty its transitions (all single-threaded loop steps
-     * plus a stop from outside) do not share.
+     * total-recovery counters — the miss run is the runtime's [MissCounter]
+     * (the increment-then-decide convention is that type's) and the recovery
+     * tally a plain AtomicInteger, the monitor loop's own tick bookkeeping
+     * published into [StreamWatchdog]'s state at every update; folding them
+     * into this pure snapshot would hand it a concurrency duty its
+     * transitions (all single-threaded loop steps plus a stop from outside)
+     * do not share.
      */
     data class TrackingSnapshot(
         /** The processed-frames count the last check left as the stall baseline. */
@@ -314,10 +313,12 @@ object WatchdogPolicy {
     /**
      * One verdict for the monitor loop's tick — the escalation choreography
      * in data-in/data-out form. In execution order:
-     * - A health-check failure whose count (the loop increments before
-     *   asking) exceeds `maxRetries` fails the watchdog; within budget it
-     *   escalates — [tierFor] names the tier, [backoffMs] sizes the wait
-     *   before the attempt, and the status goes RECOVERING.
+     * - A health-check failure whose count exceeds `maxRetries` fails the
+     *   watchdog; within budget it escalates — [tierFor] names the tier,
+     *   [backoffMs] sizes the wait before the attempt, and the status goes
+     *   RECOVERING. The count includes the failing tick — [MissCounter]'s
+     *   increment-then-decide convention (the loop's counter advances before
+     *   the ask), which is why this doc no longer carries that rule as prose.
      * - A healthy check with failures on the books resets to MONITORING and
      *   clears the exposed failure reason; an already-clean check publishes
      *   nothing.

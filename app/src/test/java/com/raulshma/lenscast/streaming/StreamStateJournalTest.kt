@@ -106,6 +106,54 @@ class StreamStateJournalTest {
         assertEquals(StreamStateJournal.State(userStopped = false), target.load())
     }
 
+    @Test
+    fun `consumeUserStoppedForBoot returns the as-stood snapshot and spends the flag`() {
+        // The consumption's two halves: the snapshot the boot verdict judges
+        // still carries the kill (decide must honor it), while the persisted
+        // copy spends it — the flag gates exactly one boot.
+        val target = journal()
+        target.save(StreamStateJournal.State(web = true, rtsp = true))
+        target.markUserStopped()
+
+        val judged = target.consumeUserStoppedForBoot()
+
+        assertEquals(StreamStateJournal.State(web = true, rtsp = true, userStopped = true), judged)
+        assertEquals(StreamStateJournal.State(web = true, rtsp = true), target.load())
+    }
+
+    @Test
+    fun `consumeUserStoppedForBoot without the flag changes nothing`() {
+        val target = journal()
+        target.save(StreamStateJournal.State(web = true, rtsp = false))
+
+        val judged = target.consumeUserStoppedForBoot()
+
+        assertEquals(StreamStateJournal.State(web = true, rtsp = false), judged)
+        assertEquals(StreamStateJournal.State(web = true, rtsp = false), target.load())
+    }
+
+    @Test
+    fun `peekUserStopped reads the flag without spending it`() {
+        // The heartbeat's fire-time guard: a peek must leave the flag for the
+        // boot path (the one consumption) and the next live output.
+        val target = journal()
+        target.markUserStopped()
+        assertEquals(true, target.peekUserStopped())
+        assertEquals(true, target.consumeUserStoppedForBoot().userStopped)
+        assertEquals(false, target.peekUserStopped())
+    }
+
+    @Test
+    fun `consumeUserStoppedForBoot preserves the camera-bearing witness in the judged snapshot`() {
+        val target = journal()
+        target.recordLiveOutputs(web = false, rtsp = true)
+        target.markUserStopped()
+
+        val judged = target.consumeUserStoppedForBoot()
+
+        assertEquals(StreamStateJournal.State(web = false, rtsp = true, userStopped = true, cameraBearing = true), judged)
+    }
+
     // ── the FSI-resume prompted marker (blueprint P1 item 11) ──
 
     @Test

@@ -10,6 +10,15 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import org.junit.After
 import org.junit.Test
 
+/**
+ * The foreground-service leg of the one grace-windowed arm/disarm bridge
+ * (issue #14's tear-down shape): the up leg arms the server-only foreground
+ * or re-asserts a live session's stronger promotion, the down leg waits out
+ * the grace, a promote inside the window cancels the pending stop, and the
+ * stop only lands if the fire-time re-check still reads the server down.
+ * The grace mechanics live in GraceWindowedArming; these tests pin the
+ * session-facing half of that one implementation.
+ */
 class ServerForegroundControllerTest {
 
     private val isServerRunning = MutableStateFlow(false)
@@ -60,6 +69,18 @@ class ServerForegroundControllerTest {
     }
 
     @Test
+    fun `a sync landing before start stops immediately instead of behind the grace`() {
+        // Pre-wiring: no scope for the delayed stop, so the down state must
+        // run the stop right away (the bridge's unwired-disarm behavior) —
+        // not silently wait for wiring that may never come.
+        isServerRunning.value = false
+
+        controller.sync()
+
+        verify(exactly = 1) { session.stopServerForegroundIfIdle() }
+    }
+
+    @Test
     fun `a transient server restart inside the stop grace never bounces the service`() {
         // Issue #14's fatal pattern: a port change bounces isServerRunning
         // false → true inside one restart. Stopping on the down leg races the
@@ -98,6 +119,37 @@ class ServerForegroundControllerTest {
         eventually { verify(exactly = 2) { session.stopServerForegroundIfIdle() } }
         Thread.sleep(400) // outlive the grace: no double-fire behind it
         verify(exactly = 2) { session.stopServerForegroundIfIdle() }
+    }
+
+    @Test
+    fun `a start arriving inside the stop grace keeps the service up past the window`() {
+        // The fire-time re-check's visible half (issue #14's kill shape): a
+        // pending stop's premise — the server is really down — goes stale the
+        // moment a restart bounces the flow true inside the grace, and a stop
+        // that fires anyway tears down the just-restarted foreground service
+        // (ForegroundServiceDidNotStartInTimeException, app killed). So once
+        // the window elapses the service must still be up and the start's arm
+        // must have run. The down-past-grace test above pins the other arm of
+        // the re-check (a server still down MUST drop the service) — together
+        // both arms of the fire-time read are pinned on this leg, mirroring
+        // the GraceWindowedArming suite.
+        val grace = ServerForegroundController(session, isServerRunning, stopGraceMs = 400)
+        grace.start(scope)
+        // The initial down leg must land first — flipping true before the
+        // collector consumed it would conflate the two emissions and never
+        // schedule the pending stop this test exercises.
+        eventually { verify(exactly = 1) { session.stopServerForegroundIfIdle() } }
+
+        isServerRunning.value = true
+        eventually { verify(exactly = 1) { session.ensureServerForeground() } }
+        isServerRunning.value = false
+        Thread.sleep(150) // a start arrives while the stop is still pending
+        isServerRunning.value = true
+        eventually { verify(exactly = 2) { session.ensureServerForeground() } }
+        Thread.sleep(600) // outlive the original grace window: 150 + 600 > 400
+        // The start won the window: the pending stop never fired behind it.
+        verify(exactly = 1) { session.stopServerForegroundIfIdle() }
+        verify(exactly = 2) { session.ensureServerForeground() }
     }
 
     private fun eventually(block: () -> Unit) {

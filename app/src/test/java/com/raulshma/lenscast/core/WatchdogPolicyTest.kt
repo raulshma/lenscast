@@ -411,7 +411,6 @@ class WatchdogPolicyTest {
             WatchdogPolicy.verificationSuccess(
                 WatchdogPolicy.RecoveryTier.SOFT,
                 framesAdvanced = true,
-                clientCount = 1,
                 isLive = false,
                 cameraReady = false,
             )
@@ -428,7 +427,6 @@ class WatchdogPolicyTest {
             WatchdogPolicy.verificationSuccess(
                 WatchdogPolicy.RecoveryTier.SOFT,
                 framesAdvanced = false,
-                clientCount = 0,
                 isLive = false,
                 cameraReady = false,
             )
@@ -438,7 +436,6 @@ class WatchdogPolicyTest {
             WatchdogPolicy.verificationSuccess(
                 WatchdogPolicy.RecoveryTier.SOFT,
                 framesAdvanced = true,
-                clientCount = 0,
                 isLive = false,
                 cameraReady = false,
             )
@@ -451,7 +448,6 @@ class WatchdogPolicyTest {
             WatchdogPolicy.verificationSuccess(
                 WatchdogPolicy.RecoveryTier.SOFT,
                 framesAdvanced = false,
-                clientCount = 3,
                 isLive = false,
                 cameraReady = false,
             )
@@ -464,7 +460,6 @@ class WatchdogPolicyTest {
             WatchdogPolicy.verificationSuccess(
                 WatchdogPolicy.RecoveryTier.MEDIUM,
                 framesAdvanced = false,
-                clientCount = 1,
                 isLive = true,
                 cameraReady = false,
             )
@@ -473,7 +468,6 @@ class WatchdogPolicyTest {
             WatchdogPolicy.verificationSuccess(
                 WatchdogPolicy.RecoveryTier.MEDIUM,
                 framesAdvanced = false,
-                clientCount = 1,
                 isLive = false,
                 cameraReady = false,
             )
@@ -486,7 +480,6 @@ class WatchdogPolicyTest {
             WatchdogPolicy.verificationSuccess(
                 WatchdogPolicy.RecoveryTier.HARD,
                 framesAdvanced = false,
-                clientCount = 1,
                 isLive = true,
                 cameraReady = true,
             )
@@ -495,7 +488,6 @@ class WatchdogPolicyTest {
             WatchdogPolicy.verificationSuccess(
                 WatchdogPolicy.RecoveryTier.HARD,
                 framesAdvanced = false,
-                clientCount = 1,
                 isLive = true,
                 cameraReady = false,
             )
@@ -504,43 +496,8 @@ class WatchdogPolicyTest {
             WatchdogPolicy.verificationSuccess(
                 WatchdogPolicy.RecoveryTier.HARD,
                 framesAdvanced = false,
-                clientCount = 1,
                 isLive = false,
                 cameraReady = true,
-            )
-        )
-    }
-
-    @Test
-    fun `unconsulted inputs never flip another tier's verdict`() {
-        // Clients alone pass neither MEDIUM nor HARD.
-        assertFalse(
-            WatchdogPolicy.verificationSuccess(
-                WatchdogPolicy.RecoveryTier.MEDIUM,
-                framesAdvanced = false,
-                clientCount = 5,
-                isLive = false,
-                cameraReady = false,
-            )
-        )
-        assertFalse(
-            WatchdogPolicy.verificationSuccess(
-                WatchdogPolicy.RecoveryTier.HARD,
-                framesAdvanced = false,
-                clientCount = 5,
-                isLive = false,
-                cameraReady = false,
-            )
-        )
-        // SOFT stays conservative without an observed frame advance: stalled
-        // frames with clients connected is not a recovery.
-        assertFalse(
-            WatchdogPolicy.verificationSuccess(
-                WatchdogPolicy.RecoveryTier.SOFT,
-                framesAdvanced = false,
-                clientCount = 1,
-                isLive = true,
-                cameraReady = false,
             )
         )
     }

@@ -1,10 +1,8 @@
 package com.raulshma.lenscast.streaming
 
+import com.raulshma.lenscast.core.GraceWindowedArming
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.launch
 
 /**
  * Maps the web server's runtime state to the foreground service's server-only
@@ -20,14 +18,19 @@ import kotlinx.coroutines.launch
  *
  * A server *restart* (port/TLS apply, watchdog recovery) is one choreography
  * that bounces [isServerRunning] false → true within the same restart, so the
- * down leg never stops the service directly: the stop is scheduled behind a
- * grace window and a promote inside that window cancels it. Tearing the
- * service down on the transient down leg races the promotion that immediately
- * follows — system_server can process the stop's bring-down after the next
- * start has armed its foreground obligation but before the service has called
- * startForeground, which throws ForegroundServiceDidNotStartInTimeException
- * in-process and kills the app (issue #14: one Streaming Port slider drag
- * restarts the transport once per frame and crashed the app ~1 drag in 10).
+ * down leg never stops the service directly: a stop fired on the transient
+ * down leg races the promotion that immediately follows — system_server can
+ * process the stop's bring-down after the next start has armed its foreground
+ * obligation but before the service has called startForeground, which throws
+ * ForegroundServiceDidNotStartInTimeException in-process and kills the app
+ * (issue #14: one Streaming Port slider drag restarts the transport once per
+ * frame and crashed the app ~1 drag in 10). The grace window, the promote
+ * cancel, and the fire-time re-check live in the one shared
+ * [GraceWindowedArming] bridge (the composition root's server-liveness
+ * watch and the HeartbeatController legs share it — the race handling is
+ * written once, not once per leg). This class keeps only the mapping: server up → the live
+ * session's promotion re-assert or the server-only foreground, a stop that
+ * survives the grace and the re-check → stop-if-idle.
  *
  * [start] is the one-shot wiring for the application scope. [sync] is the
  * retry hook for the cases Android denies a background start - call it while
@@ -39,25 +42,13 @@ class ServerForegroundController(
     private val stopGraceMs: Long = SERVER_STOP_GRACE_MS,
 ) {
 
-    // Set by [start]; a [sync] that lands before wiring has no scope for the
-    // delayed stop and falls back to the immediate stop.
-    private var scope: CoroutineScope? = null
-    private var pendingStop: Job? = null
-
-    fun start(scope: CoroutineScope) {
-        this.scope = scope
-        scope.launch {
-            isServerRunning.collect { running -> apply(running) }
-        }
-    }
-
-    /** Re-apply the current server state; safe to call from Activity.onResume. */
-    fun sync() = apply(isServerRunning.value)
-
-    private fun apply(running: Boolean) = synchronized(this) {
-        pendingStop?.cancel()
-        pendingStop = null
-        if (running) {
+    // The shared grace-windowed bridge; the arming semantics are the two
+    // lambdas below, everything else (the grace, the pending-stop cancel,
+    // the fire-time re-check) is the bridge's one implementation.
+    private val arming = GraceWindowedArming(
+        isServerRunning = isServerRunning,
+        stopGraceMs = stopGraceMs,
+        arm = {
             if (session.isActive) {
                 // A live session owns the stronger CAMERA/MICROPHONE
                 // promotion — re-assert it rather than the server-only one
@@ -68,18 +59,16 @@ class ServerForegroundController(
             } else {
                 session.ensureServerForeground()
             }
-        } else {
-            val target = scope
-            if (target == null) {
-                session.stopServerForegroundIfIdle()
-            } else {
-                pendingStop = target.launch {
-                    delay(stopGraceMs)
-                    session.stopServerForegroundIfIdle()
-                }
-            }
-        }
+        },
+        disarm = { session.stopServerForegroundIfIdle() },
+    )
+
+    fun start(scope: CoroutineScope) {
+        arming.start(scope)
     }
+
+    /** Re-apply the current server state; safe to call from Activity.onResume. */
+    fun sync() = arming.applyNow(isServerRunning.value)
 
     companion object {
         /**
