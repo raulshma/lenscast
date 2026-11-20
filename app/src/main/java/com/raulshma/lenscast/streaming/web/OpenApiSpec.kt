@@ -366,7 +366,7 @@ object OpenApiSpec {
             "/api/camera/torch",
             "post" to operation(
                 listOf("camera"),
-                "Toggle the torch (omitted body toggles)",
+                "Set the torch state (explicit body required)",
                 mapOf("200" to ok("SuccessResponse")),
                 requestBody = jsonBody("TorchRequest"),
             ),
@@ -1103,8 +1103,13 @@ object OpenApiSpec {
             "zoomRatio" to mapOf("type" to "number"),
             "ratio" to mapOf("type" to "number"),
         ),
-        "TorchRequest" to schema("enabled" to boolSchema("Omitted toggles")),
-        "SirenRequest" to schema("enabled" to boolSchema("Omitted toggles")),
+        // The torch handler requires an explicit body and an explicit
+        // `enabled` (an omitted/`{}` body throws — LensWebHandler.setTorch),
+        // so the schema marks the field required; the siren handler treats
+        // an omitted `siren` as "off" (DeterrenceWebHandler.setSiren), so
+        // its field stays optional and says so.
+        "TorchRequest" to schema("enabled" to boolSchema("The torch state"), required = listOf("enabled")),
+        "SirenRequest" to schema("siren" to boolSchema("Siren state (omitted means off)")),
         "IntervalCaptureStatusDto" to schema(
             "isRunning" to boolSchema(),
             "completedCaptures" to intSchema(),
