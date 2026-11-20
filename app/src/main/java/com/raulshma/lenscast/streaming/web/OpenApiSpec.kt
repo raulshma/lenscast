@@ -1,7 +1,7 @@
 package com.raulshma.lenscast.streaming.web
 
 /**
- * The OpenAPI 3.1 document behind GET /api/openapi.json — hand-maintained
+ * The OpenAPI 3.1 document behind GET /api/openapi.json — hand-assembled
  * (no codegen dependency), kept honest from both sides by
  * [OpenApiSpecParityTest]:
  *
@@ -11,18 +11,29 @@ package com.raulshma.lenscast.streaming.web
  *    live dispatch (a stub-router probe), so a route added without a table
  *    entry — or a table entry without a `when` branch — fails the test;
  *  - every schema pinned with `x-fixture` (the contract fixtures in
- *    web/contract/) must name real fields on both sides: the fixture's keys
- *    must appear in the schema's `properties`, and the schema's `required`
- *    fields must be present in the fixture.
+ *    web/contract/) must name exactly the fixture's fields: the fixture's
+ *    key set and the schema's `properties` must be equal in both directions
+ *    (`nullable`-marked properties may stay undemonstrated — Moshi omits
+ *    the null on the wire), and the schema's `required` fields must be
+ *    present in the fixture.
  *
+ * The DTO-backed schemas' property sets are not hand-listed:
+ * [OpenApiDtoSchemaMapper] walks the defaults instances' wire JSON (the same
+ * value trees `DtoContractFixtureTest` pins the fixtures with) and emits
+ * type, default, derivable bounds, enum domain and item schemas — so a DTO
+ * field reaches the spec when it reaches the wire, and one that strays
+ * (a list field without a mapped item schema, a default outside its own
+ * bounds or enum) fails document construction loudly. What stays
+ * hand-written: the `description` strings (merged over the generated
+ * entries; hand text wins), the `required` cores, and every non-DTO schema.
  * Schemas describe the wire surface at the level the contract fixtures pin
- * (field names + the required core), not every nullable nuance — the fixtures
- * remain the exact shape source; this document is the machine-readable map of
- * it.
+ * (field names + the required core), not every nullable nuance — the
+ * fixtures remain the exact shape source; this document is the
+ * machine-readable map of it.
  */
 object OpenApiSpec {
 
-    /** The document, built once. Values are only String/Boolean/Int/List/Map. */
+    /** The document, built once. Values are only String/Boolean/Int/Double/List/Map. */
     val document: Map<String, Any?> by lazy { build() }
 
     private val jsonAdapter by lazy {
@@ -107,6 +118,61 @@ object OpenApiSpec {
         if (required.isNotEmpty()) put("required", required)
         fixture?.let { put("x-fixture", it) }
     }
+
+    /**
+     * The same, for an already-assembled property map — the generated DTO
+     * sets from [OpenApiDtoSchemaMapper].
+     */
+    private fun schema(
+        properties: Map<String, Map<String, Any?>>,
+        required: List<String> = emptyList(),
+        fixture: String? = null,
+        description: String? = null,
+    ): Map<String, Any?> = buildMap {
+        description?.let { put("description", it) }
+        put("type", "object")
+        put("properties", properties)
+        if (required.isNotEmpty()) put("required", required)
+        fixture?.let { put("x-fixture", it) }
+    }
+
+    /**
+     * Merges a generated property set with the hand-written descriptions:
+     * the lookup is by property name and the hand string wins — everything
+     * else about the entry stays generated. A description naming a property
+     * the DTO tree no longer carries fails here rather than documenting a
+     * ghost.
+     */
+    private fun describedProperties(
+        generated: Map<String, Map<String, Any?>>,
+        descriptions: Map<String, String>,
+    ): Map<String, Map<String, Any?>> {
+        val ghosts = descriptions.keys.filterNot { it in generated }
+        require(ghosts.isEmpty()) {
+            "Hand descriptions name properties the generated set does not carry: $ghosts"
+        }
+        return generated.mapValues { (name, entry) ->
+            val description = descriptions[name] ?: return@mapValues entry
+            entry + mapOf("description" to description)
+        }
+    }
+
+    /**
+     * The hand-written property descriptions for the generated streaming
+     * settings set, keyed by property name (hand text wins over generation —
+     * type, default, bounds, enum and items all stay generated).
+     */
+    private val streamingPropertyDescriptions: Map<String, String> = mapOf(
+        "rtspTlsEnabled" to "The RTSP listener's own TLS setting (rtsps://), independent of httpsEnabled",
+        "rtspResolution" to "`480p` | `720p` | `720p43` | `1080p` | `1080p43`",
+        "rtspVideoCodec" to "`h264` | `h265`",
+        "rtmpUrl" to "Write-only: responses are blank",
+        "whipToken" to "Write-only: responses are blank",
+        "srtUrl" to "Write-only: responses are blank",
+        "mqttPassword" to "Write-only: responses are blank",
+        "keepAwakeEnabled" to "Keep the CPU awake for the process's whole life (the security-phone posture); released on quit",
+        "fsiCameraResumeEnabled" to "Opt-in, default off: after a process death or reboot lands the app back in the server-only state, post a full-screen-intent prompt (content-tap heads-up when the FSI permission is revoked) that restarts the journal-recorded outputs while visible — the only unattended camera restore; lights the screen by design",
+    )
 
     private fun stringSchema(description: String? = null): Map<String, Any?> =
         mapOf("type" to "string").let { if (description != null) it + mapOf("description" to description) else it }
@@ -234,7 +300,8 @@ object OpenApiSpec {
                     "tier); absent or `process` keeps the deep restart. The soft answer acknowledges " +
                     "the request (`mode:\"soft\"`) before the ladder runs — its stop step tears down " +
                     "the listener socket the request rode on, so the ladder is awaited off the " +
-                    "request thread; an unwired ladder answers the typed-refusal shape",
+                    "request thread; the acknowledgment is the device's last word — a ladder failure " +
+                    "surfaces through the dashboard's poll fallback, not this answer",
                 mapOf("200" to ok("SystemRestartResponse")),
                 parameters = listOf(
                     queryParam(
@@ -712,10 +779,10 @@ object OpenApiSpec {
             fixture = null,
         ),
         "SystemRestartResponse" to schema(
-            "success" to boolSchema("False = the typed refusal; the device did NOT quit (deep) or the ladder failed (soft)"),
+            "success" to boolSchema("False only on the deep restart's typed refusal (exact-alarm ungranted — the device did NOT quit); the soft answer always acknowledges"),
             "mode" to stringSchema("The mode actually run: `soft` on the soft ladder's answers; absent for the deep restart"),
-            "reason" to stringSchema("Machine-readable refusal reason (`exact_alarm_not_granted`, `soft_restart_failed`); absent on success"),
-            "step" to stringSchema("The soft ladder step that failed (`rebindCamera`, `startServer`); absent otherwise"),
+            "reason" to stringSchema("Machine-readable refusal reason (`exact_alarm_not_granted`); absent on success. `soft_restart_failed` is the dashboard's locally synthesized poll-window answer, never sent by the device"),
+            "step" to stringSchema("Always absent in device answers; the dashboard's synthesized soft-restart failure names the step locally (`rebindCamera`, `startServer`)"),
             "hint" to stringSchema("Device-side fallback text for the refusal; the dashboard maps reason to its localized message"),
             required = listOf("success"),
         ),
@@ -753,7 +820,7 @@ object OpenApiSpec {
         "AutomationTestResponseDto" to schema(
             "success" to boolSchema(),
             "armedRuleId" to stringSchema("The rule now armed (null after a restore or a failed arm)"),
-            "error" to stringSchema("The failure reason; omitted on success"),
+            "error" to (stringSchema("The failure reason; omitted on success") + mapOf("nullable" to true)),
             required = listOf("success"),
             fixture = "automation-test.json",
         ),
@@ -786,7 +853,8 @@ object OpenApiSpec {
             "triggers" to arrayOf(ref("AutomationCatalogTriggerDto")),
             "conditions" to arrayOf(ref("AutomationCatalogConditionDto")),
             "limits" to ref("AutomationLimitsDto"),
-            "testArmedRuleId" to stringSchema("The armed Automation Test's rule id (omitted when nothing is armed)"),
+            "testArmedRuleId" to (stringSchema("The armed Automation Test's rule id (omitted when nothing is armed)") +
+                mapOf("nullable" to true)),
             required = listOf("enabled", "rules", "catalog", "triggers", "conditions", "limits"),
             fixture = "automation.json",
         ),
@@ -908,74 +976,29 @@ object OpenApiSpec {
             required = listOf("name", "kind", "optional", "defaultValue", "autoAtZero"),
         ),
         "CameraSettingsDto" to schema(
-            "exposureCompensation" to intSchema(),
-            "iso" to intSchema(),
-            "exposureTime" to intSchema(),
-            "focusMode" to stringSchema(),
-            "focusDistance" to mapOf("type" to "number"),
-            "whiteBalance" to stringSchema(),
-            "colorTemperature" to intSchema(),
-            "zoomRatio" to mapOf("type" to "number"),
-            "frameRate" to intSchema(),
-            "resolution" to stringSchema(),
-            "stabilization" to boolSchema(),
-            "hdrMode" to stringSchema(),
-            "sceneMode" to stringSchema(),
-            "nightVisionMode" to stringSchema(),
-            "outputRotation" to intSchema(),
-            "orientationLocked" to boolSchema(),
+            describedProperties(OpenApiDtoSchemaMapper.cameraSettingsProperties(), emptyMap()),
             required = listOf(
                 "exposureCompensation", "focusMode", "whiteBalance", "zoomRatio",
                 "frameRate", "resolution", "stabilization", "hdrMode", "nightVisionMode",
                 "outputRotation", "orientationLocked",
             ),
+            fixture = "settings.json#/camera",
+        ),
+        "MaskingZoneDto" to schema(
+            describedProperties(OpenApiDtoSchemaMapper.maskingZoneProperties(), emptyMap()),
+            description = "One privacy-masking rectangle (StreamingSettingsDto.maskingZones items) — " +
+                "generated from the zone DTO's defaults tree.",
+        ),
+        "MotionZoneDto" to schema(
+            describedProperties(OpenApiDtoSchemaMapper.motionZoneProperties(), emptyMap()),
+            description = "One motion-analysis rectangle (StreamingSettingsDto.motionZones items) — " +
+                "generated from the zone DTO's defaults tree.",
         ),
         "StreamingSettingsDto" to schema(
-            "port" to intSchema(),
-            "webStreamingEnabled" to boolSchema(),
-            "jpegQuality" to intSchema(),
-            "showPreview" to boolSchema(),
-            "streamAudioEnabled" to boolSchema(),
-            "streamAudioBitrateKbps" to intSchema(),
-            "streamAudioChannels" to intSchema(),
-            "streamAudioEchoCancellation" to boolSchema(),
-            "recordingAudioEnabled" to boolSchema(),
-            "rtspEnabled" to boolSchema(),
-            "rtspTlsEnabled" to boolSchema("The RTSP listener's own TLS setting (rtsps://), independent of httpsEnabled"),
-            "rtspPort" to intSchema(),
-            "rtspInputFormat" to stringSchema(),
-            "rtspResolution" to stringSchema("`480p` | `720p` | `720p43` | `1080p` | `1080p43`"),
-            "rtspVideoCodec" to stringSchema("`h264` | `h265`"),
-            "rtmpEnabled" to boolSchema(),
-            "rtmpUrl" to stringSchema("Write-only: responses are blank"),
-            "whipEnabled" to boolSchema(),
-            "whipUrl" to stringSchema(),
-            "whipToken" to stringSchema("Write-only: responses are blank"),
-            "whipStunServer" to stringSchema(),
-            "srtEnabled" to boolSchema(),
-            "srtUrl" to stringSchema("Write-only: responses are blank"),
-            "mqttEnabled" to boolSchema(),
-            "mqttBrokerHost" to stringSchema(),
-            "mqttBrokerPort" to intSchema(),
-            "mqttUsername" to stringSchema(),
-            "mqttPassword" to stringSchema("Write-only: responses are blank"),
-            "mqttTls" to boolSchema(),
-            "mqttDiscoveryPrefix" to stringSchema(),
-            "mqttTelemetryEnabled" to boolSchema(),
-            "pushEnabled" to boolSchema(),
-            "unifiedPushEnabled" to boolSchema(),
-            "motionDetectionEnabled" to boolSchema(),
-            "motionRecordingEnabled" to boolSchema(),
-            "soundDetectionEnabled" to boolSchema(),
-            "tamperDetectionEnabled" to boolSchema(),
-            "keepAwakeEnabled" to boolSchema("Keep the CPU awake for the process's whole life (the security-phone posture); released on quit"),
-            "webhookEnabled" to boolSchema(),
-            "webhookUrl" to stringSchema(),
-            "watchdogEnabled" to boolSchema(),
-            "fsiCameraResumeEnabled" to boolSchema("Opt-in, default off: after a process death or reboot lands the app back in the server-only state, post a full-screen-intent prompt (content-tap heads-up when the FSI permission is revoked) that restarts the journal-recorded outputs while visible — the only unattended camera restore; lights the screen by design"),
-            "onvifEnabled" to boolSchema(),
-            "httpsEnabled" to boolSchema(),
-            "hlsDvrSegments" to intSchema(),
+            describedProperties(
+                OpenApiDtoSchemaMapper.streamingSettingsProperties(),
+                streamingPropertyDescriptions,
+            ),
             required = listOf(
                 "port",
                 "webStreamingEnabled",
@@ -985,7 +1008,9 @@ object OpenApiSpec {
                 "pushEnabled",
                 "unifiedPushEnabled",
             ),
-            description = "The settings document's streaming half; the full field set is pinned by the contract fixture.",
+            fixture = "settings.json#/streaming",
+            description = "The settings document's streaming half; the property set is generated from the " +
+                "defaults instance's wire tree, so it is exactly the field set the contract fixture pins.",
         ),
         "StatusResponseDto" to schema(
             "streaming" to ref("StreamingStatusDto"),

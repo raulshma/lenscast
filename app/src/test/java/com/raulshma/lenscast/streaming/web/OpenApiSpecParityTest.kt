@@ -22,8 +22,12 @@ import java.io.File
  *  3. [ApiRouter.ROUTE_TABLE] ↔ [OpenApiSpec] document: same path sets (via
  *     the specPath templates), same method sets per path, both directions.
  *     The spec's `x-fixture` schemas are additionally checked against the
- *     checked-in contract fixtures: every fixture key must be a documented
- *     property and every `required` field must appear in the fixture.
+ *     checked-in contract fixtures STRICTLY: the documented property set and
+ *     the fixture's key set must be EQUAL, both directions — a fixture field
+ *     without a schema property and a schema property the fixture never
+ *     carries both fail. `nullable`-marked properties are the one allowance
+ *     (Moshi omits the null on the wire, so the fixture may legitimately
+ *     leave them out), and every `required` field must appear in the fixture.
  */
 class OpenApiSpecParityTest {
 
@@ -116,18 +120,36 @@ class OpenApiSpecParityTest {
 
     // ── fixture sanity: x-fixture schemas ↔ web/contract fixtures ──
 
+    /**
+     * STRICT parity, both directions: the schema's documented property set
+     * must EQUAL the pinned fixture's key set. The one allowance is explicit
+     * in the schema: a property marked `nullable` may stay undemonstrated
+     * (Moshi omits the null on the wire), but it must be documented — so the
+     * equality is checked against the non-nullable property set. A schema
+     * property the fixture never carries is rot exactly like a fixture field
+     * the schema never documents.
+     */
     @Test
     fun `fixture-pinned schemas match their contract fixtures both ways`() {
         for ((name, schema) in OpenApiSpec.schemas()) {
             val fixtureName = schema["x-fixture"] as? String ?: continue
-            val fixture = fixtureMap(fixtureFile(fixtureName))
-            val properties = schema["properties"] as? Map<*, *> ?: emptyMap<Any, Any>()
-            val required = (schema["required"] as? List<*>) ?: emptyList<Any>()
-            val missingInSpec = fixture.keys.filterNot { it in properties }
+            val fixture = fixtureSection(fixtureName)
+            @Suppress("UNCHECKED_CAST")
+            val properties = (schema["properties"] as? Map<String, Map<String, Any?>>) ?: emptyMap()
+            val nullable = properties.filterValues { it["nullable"] == true }.keys
+            val documented = properties.keys - nullable
+            val missingInSpec = fixture.keys.filterNot { it in documented }
             assertTrue(
                 "$name (x-fixture $fixtureName): fixture keys missing from the schema: $missingInSpec",
                 missingInSpec.isEmpty(),
             )
+            val absentFromFixture = documented.filterNot { it in fixture.keys }
+            assertTrue(
+                "$name (x-fixture $fixtureName): schema properties the fixture never carries: $absentFromFixture — " +
+                    "the property set must equal the fixture's key set (mark wire-omitted nulls `nullable` to allow their absence)",
+                absentFromFixture.isEmpty(),
+            )
+            val required = (schema["required"] as? List<*>) ?: emptyList<Any>()
             val missingInFixture = required.filterNot { fixture.containsKey(it) }
             assertTrue(
                 "$name (x-fixture $fixtureName): required fields absent from the fixture: $missingInFixture",
@@ -174,6 +196,28 @@ class OpenApiSpecParityTest {
         listOf(File("../web/contract/$name"), File("web/contract/$name"))
             .firstOrNull { it.exists() }
             ?: error("Contract fixture $name not found; tried ../web/contract and web/contract")
+
+    /**
+     * The fixture (section) an `x-fixture` names: a bare file name pins the
+     * document root (`settings.json`), a `file#/section` pointer pins a
+     * nested section (`settings.json#/streaming` — the streaming and camera
+     * schemas pin inside the settings fixture's two halves).
+     */
+    private fun fixtureSection(fixtureName: String): Map<String, Any?> {
+        val parts = fixtureName.split("#/")
+        val file = fixtureFile(parts.first())
+        var node: Any? = fixtureMap(file)
+        val pointer = parts.getOrNull(1)
+        if (pointer != null) {
+            for (segment in pointer.split('/')) {
+                node = (node as? Map<*, *>)?.get(segment)
+                    ?: error("x-fixture $fixtureName has no '$segment' section in ${file.name}")
+            }
+        }
+        @Suppress("UNCHECKED_CAST")
+        val section = node as? Map<String, Any?>
+        return requireNotNull(section) { "x-fixture $fixtureName is not a JSON object" }
+    }
 
     private val mapAdapter = com.raulshma.lenscast.core.AppJson.moshi.adapter<Map<String, Any?>>(
         com.squareup.moshi.Types.newParameterizedType(Map::class.java, String::class.java, Any::class.java),

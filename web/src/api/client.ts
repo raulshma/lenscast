@@ -117,7 +117,17 @@ function assertWriteSucceeded(body: unknown, fallback: string): void {
   }
 }
 
-export async function updateSettings(settings: Partial<AllSettings>): Promise<{ success: boolean; error?: string }> {
+/**
+ * A settings PUT body: any section present may be partial — the server merges
+ * each present section's raw JSON keys over the stored document
+ * (SettingsWebHandler.put → mergeSection), so omitted fields keep their
+ * stored values instead of resetting to defaults.
+ */
+export type SettingsPatch = Omit<Partial<AllSettings>, 'streaming'> & {
+  streaming?: Partial<AllSettings['streaming']>
+}
+
+export async function updateSettings(settings: SettingsPatch): Promise<{ success: boolean; error?: string }> {
   const body = await requestJson<{ success: boolean; error?: string }>('/api/settings', {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
@@ -127,23 +137,12 @@ export async function updateSettings(settings: Partial<AllSettings>): Promise<{ 
   return body
 }
 
-// Settings PUTs replace the whole streaming block, so every streaming save
-// merges the patch into a freshly fetched snapshot — a partial object would
-// reset the other fields to their defaults server-side. Two overlapping
-// saves must not interleave their GET-merge-PUT sequences (the later save's
-// snapshot would predate the earlier save's PUT and silently revert it), so
-// every patch rides one shared chain.
-let streamingSaveChain: Promise<unknown> = Promise.resolve()
-
-export function saveStreamingPatch(patch: Partial<AllSettings['streaming']>): Promise<void> {
-  const save = streamingSaveChain.then(async () => {
-    const current = await getSettings()
-    await updateSettings({ streaming: { ...current.streaming, ...patch } })
-  })
-  // A failed save must not poison the chain for later patches; the caller
-  // still sees the rejection through the returned promise.
-  streamingSaveChain = save.catch(() => undefined)
-  return save
+// The settings PUT is a section-level merge server-side
+// (SettingsWebHandler.put → mergeSection): the streaming section's raw JSON
+// keys overlay the stored document, so the patch carries just the touched
+// fields — no client-side GET-merge-PUT chain is needed.
+export async function saveStreamingPatch(patch: Partial<AllSettings['streaming']>): Promise<void> {
+  await updateSettings({ streaming: patch })
 }
 
 export interface AuthSessionInfo {

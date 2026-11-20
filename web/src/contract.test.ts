@@ -36,6 +36,7 @@ import authConfigFixture from '../contract/auth-config.json'
 import systemFixture from '../contract/system.json'
 import detectionStatsFixture from '../contract/detection-stats.json'
 import automationFixture from '../contract/automation.json'
+import { AUTOMATION_ACTION_TYPES } from './lib/automation'
 import {
   RESTART_REASON_EXACT_ALARM_NOT_GRANTED,
   RESTART_REASON_SOFT_RESTART_FAILED,
@@ -48,47 +49,38 @@ import {
 // The checked-in JSON files in web/contract/ are the shared DTO contract:
 // app's DtoContractFixtureTest serializes the Kotlin DTOs (through the
 // production AppJson adapters) and asserts they match these exact files, so
-// any Kotlin-side shape change lands here and turns this suite red. See
-// CONTEXT.md "Web API Handlers".
+// any Kotlin-side shape change lands here and turns this suite red. The key
+// sets below are DERIVED from the fixtures (Object.keys), never hand-listed,
+// and every key assertion is exact (both directions) — a hand list could only
+// rot by matching a drifted fixture, and the fixtures are pinned to the real
+// DTOs by DtoContractFixtureTest. See CONTEXT.md "Web API Handlers".
 
-function expectKeys(obj: Record<string, unknown>, keys: string[]): void {
-  expect(Object.keys(obj)).toEqual(expect.arrayContaining(keys))
+/**
+ * Exact key-set equality, both directions: the object's keys and the
+ * expected list must match exactly. Keys in `optionalKeys` may be present or
+ * absent (wire-optional fields Moshi omits when null) but are the only
+ * allowed extras.
+ */
+function expectKeys(obj: Record<string, unknown>, keys: string[], optionalKeys: string[] = []): void {
+  const present = Object.keys(obj)
+    .filter((key) => !optionalKeys.includes(key))
+    .sort()
+  expect(present).toEqual([...keys].sort())
 }
 
-const CAMERA_KEYS = [
-  'exposureCompensation',
-  'iso',
-  'exposureTime',
-  'focusMode',
-  'focusDistance',
-  'whiteBalance',
-  'colorTemperature',
-  'zoomRatio',
-  'frameRate',
-  'resolution',
-  'stabilization',
-  'hdrMode',
-  'sceneMode',
-  'nightVisionMode',
-  'outputRotation',
-  'orientationLocked',
-]
+/** The key list a fixture (section) pins, sorted for stable diffs. */
+function keysOf(obj: unknown): string[] {
+  return Object.keys(obj as Record<string, unknown>).sort()
+}
 
-/** The catalog ids GET /api/automation publishes today (AutomationActionCatalog). */
-const AUTOMATION_CATALOG_IDS = [
-  'camera_exposure',
-  'camera_ev',
-  'camera_zoom',
-  'camera_fps',
-  'camera_lens',
-  'night_vision',
-  'torch',
-  'stream',
-  'capture_photo',
-  'recording',
-  'siren',
-  'detection',
-]
+/**
+ * The catalog ids GET /api/automation publishes today — DERIVED from the
+ * checked-in fixture, exactly like lib/automation's AUTOMATION_ACTION_TYPES:
+ * the app's DtoContractFixtureTest pins the fixture to the real
+ * AutomationActionCatalog, so this list is device truth with no hand mirror
+ * to rot (exactness is asserted below, both directions).
+ */
+const AUTOMATION_CATALOG_IDS: readonly string[] = automationFixture.catalog.map((entry) => entry.id)
 
 /** The trigger catalog ids GET /api/automation publishes (AutomationTriggerCatalog). */
 const AUTOMATION_TRIGGER_IDS = [
@@ -139,115 +131,37 @@ const AUTOMATION_GROUP_IDS = {
   conditions: ['time', 'power', 'connectivity', 'device_state'],
 }
 
-const STREAMING_KEYS = [
-  'port',
-  'webStreamingEnabled',
-  'jpegQuality',
-  'showPreview',
-  'streamAudioEnabled',
-  'streamAudioBitrateKbps',
-  'streamAudioChannels',
-  'streamAudioEchoCancellation',
-  'recordingAudioEnabled',
-  'rtspEnabled',
-  'rtspBasicAuthCompat',
-  'rtspPort',
-  'rtspInputFormat',
-  'rtspVideoCodec',
-  'rtmpEnabled',
-  'rtmpUrl',
-  'whipEnabled',
-  'whipUrl',
-  'whipToken',
-  'whipStunServer',
-  'adaptiveBitrateEnabled',
-  'adaptiveEncodedBitrateEnabled',
-  'rtspSubStreamEnabled',
-  'hlsDvrSegments',
-  'overlayEnabled',
-  'showTimestamp',
-  'timestampFormat',
-  'showBranding',
-  'brandingText',
-  'showStatus',
-  'showCustomText',
-  'customText',
-  'overlayPosition',
-  'overlayFontSize',
-  'overlayTextColor',
-  'overlayBackgroundColor',
-  'overlayPadding',
-  'overlayLineHeight',
-  'maskingEnabled',
-  'maskingZones',
-  'watchdogEnabled',
-  'watchdogMaxRetries',
-  'watchdogCheckIntervalSeconds',
-  'fsiCameraResumeEnabled',
-  'mdnsEnabled',
-  'motionDetectionEnabled',
-  'motionSensitivityPercent',
-  'motionZones',
-  'motionRecordingEnabled',
-  'motionPostRollSeconds',
-  'motionArmScheduleEnabled',
-  'motionArmStartMinute',
-  'motionArmEndMinute',
-  'motionArmDaysMask',
-  'soundDetectionEnabled',
-  'soundThresholdPercent',
-  'soundAdaptiveNoiseFloor',
-  'soundRecordingEnabled',
-  'motionCooldownSeconds',
-  'soundCooldownSeconds',
-  'soundClassificationEnabled',
-  'soundClassificationConfidencePercent',
-  'soundClassificationAllowedClasses',
-  'ecoIdleFpsEnabled',
-  'webhookEnabled',
-  'webhookUrl',
-  'webhookHeaders',
-  'autoSiren',
-  'autoTorch',
-  'sirenDurationSeconds',
-  'autoDeterrenceCooldownSeconds',
-  'backupEnabled',
-  'backupWifiOnly',
-  'backupTarget',
-  'backupWebdavUrl',
-  'backupWebdavUsername',
-  'backupWebdavPassword',
-  'telegramChatId',
-  'telegramBotToken',
-  'apiTokenEnabled',
-  'apiTokenConfigured',
-  'apiToken',
-  'httpsEnabled',
-  'audioDeviceId',
-  'detectionNotificationsEnabled',
-  'alertQuietHoursEnabled',
-  'alertQuietHoursStartMinute',
-  'alertQuietHoursEndMinute',
-  'keepAwakeEnabled',
-  'tamperDetectionEnabled',
-  'mqttEnabled',
-  'mqttBrokerHost',
-  'mqttBrokerPort',
-  'mqttUsername',
-  'mqttPassword',
-  'mqttTls',
-  'mqttDiscoveryPrefix',
-  'pushEnabled',
-  'unifiedPushEnabled',
-  'mlModelState',
-  'mlModelProgress',
-  'mlModelError',
-  'mlIncludePerson',
-  'mlIncludePets',
-  'mlIncludeVehicles',
-  'storageQuotaMb',
-  'mediaEncryptionEnabled',
+/**
+ * The automation rule's always-present wire keys. `lastFiredAt` is the one
+ * wire-optional field (Moshi omits the null, and the fixture deliberately
+ * models both shapes), so the rule assertion allows exactly that extra.
+ */
+const AUTOMATION_RULE_KEYS = [
+  'id',
+  'name',
+  'enabled',
+  'triggerType',
+  'minuteOfDay',
+  'daysMask',
+  'triggerParams',
+  'conditions',
+  'conditionMode',
+  'cooldownSeconds',
+  'missedRunPolicy',
+  'missedWindowMinutes',
+  'actions',
 ]
+
+const AUTOMATION_RULE_OPTIONAL_KEYS = ['lastFiredAt']
+
+/**
+ * The settings document's key sets, DERIVED from the fixture the Kotlin
+ * fixture test pins (Object.keys, per the header note) — the streaming half
+ * alone used to rot behind an `arrayContaining` assertion (14 keys missing
+ * while the suite stayed green), so the hand lists are gone.
+ */
+const CAMERA_KEYS = keysOf(settingsFixture.camera)
+const STREAMING_KEYS = keysOf(settingsFixture.streaming)
 
 describe('DTO contract fixtures', () => {
   it('settings fixture assigns to AllSettings', () => {
@@ -260,136 +174,60 @@ describe('DTO contract fixtures', () => {
 
   it('status fixture assigns to DeviceStatus', () => {
     const status: DeviceStatus = statusFixture as DeviceStatus
-    expectKeys(status as unknown as Record<string, unknown>, [
-      'streaming',
-      'thermal',
-      'camera',
-      'battery',
-      'torchOn',
-      'cameraBlockedByLock',
-      'zoomRatio',
-      'lensId',
-      'lensLabel',
-      'zoomRange',
-      'exposureCompensationRange',
-      'isoRange',
-    ])
-    expectKeys(status.streaming as unknown as Record<string, unknown>, [
-      'isActive',
-      'url',
-      'webStreamingEnabled',
-      'webStreamingActive',
-      'clientCount',
-      'audioEnabled',
-      'audioUrl',
-      'rtspEnabled',
-      'rtspStreamingActive',
-      'rtspUrl',
-      'whepClients',
-    ])
-    expectKeys(status.battery as unknown as Record<string, unknown>, ['level', 'isCharging', 'isPowerSaveMode'])
-    expectKeys(status.adaptiveBitrate as unknown as Record<string, unknown>, [
-      'enabled',
-      'qualityLevel',
-      'currentQuality',
-      'targetQuality',
-      'currentFps',
-      'targetFps',
-      'estimatedBandwidthKbps',
-      'minClientThroughputKbps',
-      'activeClients',
-      'adjustmentCount',
-    ])
-    expectKeys(status.connectionQuality as unknown as Record<string, unknown>, [
-      'qualityLevel',
-      'estimatedBandwidthKbps',
-      'avgThroughputKbps',
-      'minThroughputKbps',
-      'worstLatencyMs',
-      'avgFrameSizeBytes',
-      'totalBytesSent',
-      'activeClients',
-      'framesPerSecond',
-      'clientDetails',
-    ])
+    // Exact key-set equality against the fixture itself — the hand list used
+    // to omit five keys (sirenActive, the three status blocks, the encoded
+    // bitrate) behind the subset assertion.
+    expectKeys(status as unknown as Record<string, unknown>, keysOf(statusFixture))
+    expectKeys(status.streaming as unknown as Record<string, unknown>, keysOf(statusFixture.streaming))
+    expectKeys(status.battery as unknown as Record<string, unknown>, keysOf(statusFixture.battery))
+    expectKeys(status.adaptiveBitrate as unknown as Record<string, unknown>, keysOf(statusFixture.adaptiveBitrate))
+    expectKeys(
+      status.connectionQuality as unknown as Record<string, unknown>,
+      keysOf(statusFixture.connectionQuality),
+    )
     const [clientDetail] = Object.values(status.connectionQuality!.clientDetails)
-    expectKeys(clientDetail as unknown as Record<string, unknown>, [
-      'framesSent',
-      'bytesSent',
-      'avgThroughputKbps',
-      'lastFrameSizeBytes',
-      'lastSendDurationMs',
-    ])
-    expectKeys(status.watchdog as unknown as Record<string, unknown>, [
-      'enabled',
-      'status',
-      'consecutiveFailures',
-      'totalRecoveries',
-      'lastRecoveryTimestamp',
-      'lastFailureReason',
-    ])
-    expectKeys(status as unknown as Record<string, unknown>, ['encodedVideoBitrate'])
+    expectKeys(
+      clientDetail as unknown as Record<string, unknown>,
+      keysOf(Object.values(statusFixture.connectionQuality.clientDetails)[0]),
+    )
+    expectKeys(status.watchdog as unknown as Record<string, unknown>, keysOf(statusFixture.watchdog))
   })
 
   it('gallery fixture assigns to GalleryResponse', () => {
     const gallery: GalleryResponse = galleryFixture as GalleryResponse
-    expectKeys(gallery as unknown as Record<string, unknown>, ['items', 'total', 'page', 'pageSize', 'hasMore'])
+    expectKeys(gallery as unknown as Record<string, unknown>, keysOf(galleryFixture))
     expect(gallery.items.length).toBeGreaterThan(0)
+    const itemKeys = keysOf(galleryFixture.items[0])
     for (const item of gallery.items) {
-      expectKeys(item as unknown as Record<string, unknown>, [
-        'id',
-        'type',
-        'fileName',
-        'timestamp',
-        'fileSizeBytes',
-        'durationMs',
-        'thumbnailUrl',
-        'downloadUrl',
-      ])
+      expectKeys(item as unknown as Record<string, unknown>, itemKeys)
     }
   })
 
   it('recording status fixture assigns to RecordingStatus', () => {
     const recording: RecordingStatus = recordingStatusFixture as RecordingStatus
-    expectKeys(recording as unknown as Record<string, unknown>, [
-      'isRecording',
-      'elapsedSeconds',
-      'isScheduled',
-      'scheduledStartTimeMs',
-    ])
+    expectKeys(recording as unknown as Record<string, unknown>, keysOf(recordingStatusFixture))
   })
 
   it('recording sessions fixture assigns to RecordingSessionsResponse', () => {
     const sessions: RecordingSessionsResponse = recordingSessionsFixture as RecordingSessionsResponse
-    expectKeys(sessions as unknown as Record<string, unknown>, ['sessions'])
+    expectKeys(sessions as unknown as Record<string, unknown>, keysOf(recordingSessionsFixture))
     expect(sessions.sessions.length).toBeGreaterThan(0)
+    const sessionKeys = keysOf(recordingSessionsFixture.sessions[0])
     for (const session of sessions.sessions) {
-      expectKeys(session as unknown as Record<string, unknown>, [
-        'id',
-        'startMs',
-        'endMs',
-        'trigger',
-        'mediaId',
-      ])
+      expectKeys(session as unknown as Record<string, unknown>, sessionKeys)
       expect(session.endMs).toBeGreaterThan(session.startMs)
     }
   })
 
   it('lenses fixture assigns to LensesResponse', () => {
     const lenses: LensesResponse = lensesFixture as LensesResponse
-    expectKeys(lenses as unknown as Record<string, unknown>, ['lenses', 'selectedIndex'])
+    expectKeys(lenses as unknown as Record<string, unknown>, keysOf(lensesFixture))
     expect(lenses.lenses.length).toBeGreaterThan(0)
     const kinds = ['FRONT', 'BACK', 'ULTRAWIDE', 'WIDE', 'ZOOM', 'FOCAL_MM', 'CAMERA_ID']
     for (const lens of lenses.lenses) {
-      expectKeys(lens as unknown as Record<string, unknown>, [
-        'index',
-        'id',
-        'label',
-        'kind',
-        'focalLength',
-        'isFront',
-        'selected',
-      ])
+      // zoomRatio is the one wire-optional lens field (only ZOOM lenses
+      // carry a magnification; Moshi omits the null on the others).
+      expectKeys(lens as unknown as Record<string, unknown>, keysOf(lensesFixture.lenses[0]), ['zoomRatio'])
       expect(kinds).toContain(lens.kind)
       if (lens.kind === 'ZOOM') {
         expect(lens.zoomRatio).toBeGreaterThan(0)
@@ -399,23 +237,16 @@ describe('DTO contract fixtures', () => {
 
   it('interval capture status fixture assigns to IntervalCaptureStatus', () => {
     const interval: IntervalCaptureStatus = intervalCaptureStatusFixture as IntervalCaptureStatus
-    expectKeys(interval as unknown as Record<string, unknown>, ['isRunning', 'completedCaptures'])
+    expectKeys(interval as unknown as Record<string, unknown>, keysOf(intervalCaptureStatusFixture))
   })
 
   it('detection events fixture assigns to DetectionEventsResponse', () => {
     const events: DetectionEventsResponse = detectionEventsFixture as DetectionEventsResponse
-    expectKeys(events as unknown as Record<string, unknown>, ['events', 'total'])
+    expectKeys(events as unknown as Record<string, unknown>, keysOf(detectionEventsFixture))
     expect(events.events.length).toBeGreaterThan(0)
+    const eventKeys = keysOf(detectionEventsFixture.events[0])
     for (const event of events.events) {
-      expectKeys(event as unknown as Record<string, unknown>, [
-        'id',
-        'type',
-        'source',
-        'timestampMs',
-        'snapshotJpegBase64',
-        'dispatchedActions',
-        'zones',
-      ])
+      expectKeys(event as unknown as Record<string, unknown>, eventKeys)
       expect(Array.isArray(event.dispatchedActions)).toBe(true)
       expect(Array.isArray(event.zones)).toBe(true)
     }
@@ -423,37 +254,24 @@ describe('DTO contract fixtures', () => {
 
   it('settings export fixture assigns to SettingsExport', () => {
     const exportFile: SettingsExport = settingsExportFixture as SettingsExport
-    expectKeys(exportFile as unknown as Record<string, unknown>, [
-      'schemaVersion',
-      'exportedAtMs',
-      'app',
-      'settings',
-    ])
+    expectKeys(exportFile as unknown as Record<string, unknown>, keysOf(settingsExportFixture))
     expect(exportFile.schemaVersion).toBe(1)
     expect(exportFile.app).toBe('lenscast')
     // The envelope's settings document is the same AllSettings shape the
     // settings fixture pins.
     const settings: AllSettings = exportFile.settings as AllSettings
-    expectKeys(settings as unknown as Record<string, unknown>, ['camera', 'streaming'])
+    expectKeys(settings as unknown as Record<string, unknown>, keysOf(settingsExportFixture.settings))
   })
 
   it('detection test fixture assigns to DetectionTestResponse', () => {
     const test: DetectionTestResponse = detectionTestFixture as DetectionTestResponse
-    expectKeys(test as unknown as Record<string, unknown>, ['success', 'dispatchedActions'])
+    expectKeys(test as unknown as Record<string, unknown>, keysOf(detectionTestFixture))
     expect(Array.isArray(test.dispatchedActions)).toBe(true)
   })
 
   it('auth config fixture assigns to AuthConfig', () => {
     const config: AuthConfig = authConfigFixture as AuthConfig
-    expectKeys(config as unknown as Record<string, unknown>, [
-      'enabled',
-      'username',
-      'password',
-      'viewerEnabled',
-      'viewerUsername',
-      'viewerPassword',
-      'viewerConfigured',
-    ])
+    expectKeys(config as unknown as Record<string, unknown>, keysOf(authConfigFixture))
     // Write-only secrets: the wire never carries a password.
     expect(config.password).toBe('')
     expect(config.viewerPassword).toBe('')
@@ -463,41 +281,28 @@ describe('DTO contract fixtures', () => {
 
   it('audit log fixture assigns to AuditLogResponse', () => {
     const audit: AuditLogResponse = auditLogFixture as AuditLogResponse
-    expectKeys(audit as unknown as Record<string, unknown>, ['entries', 'total'])
+    expectKeys(audit as unknown as Record<string, unknown>, keysOf(auditLogFixture))
     expect(audit.entries.length).toBeGreaterThan(0)
+    const entryKeys = keysOf(auditLogFixture.entries[0])
     for (const entry of audit.entries) {
-      expectKeys(entry as unknown as Record<string, unknown>, [
-        'timestampMs',
-        'action',
-        'detail',
-        'outcome',
-      ])
+      expectKeys(entry as unknown as Record<string, unknown>, entryKeys)
     }
   })
 
   it('automation fixture assigns to AutomationStateDto', () => {
     const automation: AutomationStateDto = automationFixture as AutomationStateDto
-    expectKeys(automation as unknown as Record<string, unknown>, ['enabled', 'rules', 'catalog', 'triggers', 'conditions', 'limits'])
+    expectKeys(automation as unknown as Record<string, unknown>, keysOf(automationFixture))
     expect(automation.rules.length).toBeGreaterThan(0)
     for (const rule of automation.rules) {
-      expectKeys(rule as unknown as Record<string, unknown>, [
-        'id',
-        'name',
-        'enabled',
-        'triggerType',
-        'minuteOfDay',
-        'daysMask',
-        'triggerParams',
-        'conditions',
-        'conditionMode',
-        'cooldownSeconds',
-        'missedRunPolicy',
-        'missedWindowMinutes',
-        'actions',
-      ])
-      // lastFiredAt is optional (Moshi omits the null on the wire) — the
-      // fixture models both shapes: a decoded stamp on one rule, a
-      // never-fired rule without the key.
+      // The rule's key set: the always-present core, plus lastFiredAt as the
+      // one allowed extra — it is wire-optional (Moshi omits the null) and
+      // the fixture deliberately models both shapes: a decoded stamp on one
+      // rule, a never-fired rule without the key.
+      expectKeys(
+        rule as unknown as Record<string, unknown>,
+        AUTOMATION_RULE_KEYS,
+        AUTOMATION_RULE_OPTIONAL_KEYS,
+      )
       expect(rule.lastFiredAt == null || rule.lastFiredAt >= 0).toBe(true)
       expect(AUTOMATION_TRIGGER_IDS).toContain(rule.triggerType)
       expect(['all', 'any']).toContain(rule.conditionMode)
@@ -526,12 +331,18 @@ describe('DTO contract fixtures', () => {
     expect(automation.rules[0].lastFiredAt).toBeGreaterThanOrEqual(0)
     expect(automation.rules[1]?.lastFiredAt ?? null).toBeNull()
     expect(automation.catalog.length).toBeGreaterThan(0)
-    // The rule editor renders generically from this catalog — every id the
-    // Android side ships must be present, and every param spec must carry
-    // the fields the per-param editors key off (min/max ride alongside the
-    // INT/FLOAT bounds; nullable bounds are omitted on the wire, while the
-    // non-nullable autoAtZero boolean always serializes).
-    expect(automation.catalog.map((entry) => entry.id)).toEqual(expect.arrayContaining(AUTOMATION_CATALOG_IDS))
+    // The id list is derived, not hand-listed: the fixture's catalog ids in
+    // catalog (display) order, exactly — and lib/automation's derived
+    // AUTOMATION_ACTION_TYPES must equal them both ways. The pin travels:
+    // catalog (Kotlin) → fixture (DtoContractFixtureTest) → the web tables,
+    // so an id added or removed on the device fails here until the derived
+    // lists move with it.
+    expect(automation.catalog.map((entry) => entry.id)).toEqual(AUTOMATION_CATALOG_IDS)
+    expect(AUTOMATION_ACTION_TYPES).toEqual(AUTOMATION_CATALOG_IDS)
+    // Every param spec must carry the fields the per-param editors key off
+    // (min/max ride alongside the INT/FLOAT bounds; nullable bounds are
+    // omitted on the wire, while the non-nullable autoAtZero boolean always
+    // serializes).
     for (const entry of automation.catalog) {
       expectKeys(entry as unknown as Record<string, unknown>, ['id', 'params', 'catchUp', 'interruptsStream', 'group', 'icon'])
       expect(['STATEFUL', 'ONESHOT']).toContain(entry.catchUp)
@@ -542,7 +353,14 @@ describe('DTO contract fixtures', () => {
       expect(AUTOMATION_GROUP_IDS.catalog).toContain(entry.group)
       expect(AUTOMATION_ICON_VOCABULARY).toContain(entry.icon)
       for (const param of entry.params) {
-        expectKeys(param as unknown as Record<string, unknown>, ['name', 'kind', 'optional', 'defaultValue', 'autoAtZero'])
+        // The wire-optional param fields: only the INT/FLOAT numerics carry
+        // min/max bounds and only STRING params carry their closed value
+        // set; the rest omit the keys entirely.
+        expectKeys(
+          param as unknown as Record<string, unknown>,
+          ['name', 'kind', 'optional', 'defaultValue', 'autoAtZero'],
+          ['min', 'max', 'values'],
+        )
         expect(['BOOL', 'INT', 'FLOAT', 'STRING']).toContain(param.kind)
         // Only the numerics carry bounds; a STRING param carries its closed
         // value set instead (the canonical ids both editors render).
@@ -570,7 +388,13 @@ describe('DTO contract fixtures', () => {
         expect(documentedGroups).toContain(entry.group)
         expect(AUTOMATION_ICON_VOCABULARY).toContain(entry.icon)
         for (const param of entry.params) {
-          expectKeys(param as unknown as Record<string, unknown>, ['name', 'kind', 'optional', 'defaultValue', 'autoAtZero'])
+          // Trigger/condition params are BOOL/INT/FLOAT only: min/max ride
+          // the numerics (wire-optional), values never appears.
+          expectKeys(
+            param as unknown as Record<string, unknown>,
+            ['name', 'kind', 'optional', 'defaultValue', 'autoAtZero'],
+            ['min', 'max', 'values'],
+          )
           expect(['BOOL', 'INT', 'FLOAT']).toContain(param.kind)
         }
       }
@@ -604,13 +428,17 @@ describe('DTO contract fixtures', () => {
 
 // ── the restart/reset wire vocabulary (fix G) ──
 // These travel as bare strings on POST /api/system/restart and
-// POST /api/system/reset-camera. The Kotlin side hoists every literal into
-// SystemWebHandler consts (RESTART_REASON_*, RESTART_MODE_*, VERDICT_*,
-// RESET_REASON_*) and pins them on the wire through SystemWebHandlerRestartTest's
-// exact-JSON assertions; the web resolves them through reliabilityHints'
-// exported constants. These pins close the loop on the web side: a spelling
-// drift on either side now fails a test instead of silently degrading a
-// localized refusal into a generic device hint.
+// POST /api/system/reset-camera. The device-side literals are hoisted into
+// SystemWebHandler consts (the exact-alarm refusal reason, RESTART_MODE_*,
+// VERDICT_*, RESET_REASON_*) and pinned on the wire through
+// SystemWebHandlerRestartTest's exact-JSON assertions; the one exception is
+// `soft_restart_failed`, which no server answer carries — the dashboard
+// synthesizes it in client.ts when the post-acknowledgment poll window
+// closes (clientRestart.test pins that shape). The web resolves the
+// device-sent reasons through reliabilityHints' exported constants. These
+// pins close the loop on the web side: a spelling drift on either side now
+// fails a test instead of silently degrading a localized refusal into a
+// generic device hint.
 const RESTART_MODE_SOFT = 'soft'
 const RESTART_MODE_PROCESS = 'process'
 
@@ -784,42 +612,11 @@ describe('API_DEFAULTS lockstep with the fixtures', () => {
 
   it('system fixture assigns to SystemInfo', () => {
     const system: SystemInfo = systemFixture as SystemInfo
-    expectKeys(system as unknown as Record<string, unknown>, [
-      'appVersion',
-      'deviceModel',
-      'deviceManufacturer',
-      'androidVersion',
-      'sdkInt',
-      'osUptimeMs',
-      'processUptimeMs',
-      'battery',
-      'storage',
-      'torchStrengthMaxLevel',
-      'canScheduleExactAlarms',
-      'isIgnoringBatteryOptimizations',
-      'isDeviceInDozeMode',
-      'batteryOptimizationState',
-      // The deferred item-7 telemetry (wave 4): the crash-relaunch loop
-      // guard's and the heartbeat's live states ride the snapshot.
-      'crashRelaunch',
-      'heartbeat',
-    ])
-    expectKeys(system.battery as unknown as Record<string, unknown>, [
-      'level',
-      'isCharging',
-      'temperatureTenthsC',
-      'voltageMillivolts',
-      'health',
-      'batteryChargeCounterMah',
-      'batteryCurrentMicroAmps',
-      'batteryCycleCount',
-    ])
-    expectKeys(system.storage as unknown as Record<string, unknown>, [
-      'usedBytes',
-      'quotaBytes',
-      'freeBytes',
-      'totalBytes',
-    ])
+    // Exact key-set equality against the fixture itself; the crash-relaunch
+    // and heartbeat telemetry blocks are among its keys.
+    expectKeys(system as unknown as Record<string, unknown>, keysOf(systemFixture))
+    expectKeys(system.battery as unknown as Record<string, unknown>, keysOf(systemFixture.battery))
+    expectKeys(system.storage as unknown as Record<string, unknown>, keysOf(systemFixture.storage))
     // The reliability facts are internally consistent: the fixture's device
     // (API 35) reports the grant, and the allowlisted app reads UNRESTRICTED.
     expect(system.sdkInt).toBeGreaterThanOrEqual(31)
@@ -838,15 +635,7 @@ describe('API_DEFAULTS lockstep with the fixtures', () => {
 
   it('detection stats fixture assigns to DetectionStats', () => {
     const stats: DetectionStats = detectionStatsFixture as DetectionStats
-    expectKeys(stats as unknown as Record<string, unknown>, [
-      'last24h',
-      'last7d',
-      'allTime',
-      'perDay',
-      'totalEvents',
-      'topZones',
-      'topLabels',
-    ])
+    expectKeys(stats as unknown as Record<string, unknown>, keysOf(detectionStatsFixture))
     expect(stats.perDay.length).toBeGreaterThan(0)
     for (const day of stats.perDay) {
       expectKeys(day as unknown as Record<string, unknown>, ['day', 'count'])

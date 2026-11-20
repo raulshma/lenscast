@@ -725,9 +725,9 @@ export interface SystemRestartResponse {
   success: boolean
   /** The mode actually run: `"soft"` on the soft ladder's answers; absent for the deep restart. */
   mode?: string
-  /** Machine-readable refusal reason ("exact_alarm_not_granted", "soft_restart_failed"); absent on success. */
+  /** Machine-readable refusal reason ("exact_alarm_not_granted"); absent on success. `soft_restart_failed` is the dashboard's locally synthesized poll-window answer, never sent by the device. */
   reason?: string
-  /** The soft-restart ladder step that failed ("rebindCamera", "startServer"); absent otherwise. */
+  /** Always absent in device answers; the dashboard's synthesized soft-restart failure names the step locally ("rebindCamera", "startServer"). */
   step?: string
   /** Device-side fallback text for the refusal; the dashboard's localized message wins. */
   hint?: string

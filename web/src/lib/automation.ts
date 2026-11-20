@@ -20,22 +20,17 @@ import type {
 } from '../types'
 import { API_DEFAULTS } from '../api/defaults'
 import { isDayArmed } from '../armDays'
+import automationFixture from '../../contract/automation.json'
 
-/** Every catalog action id the label/summary tables below cover (AutomationActionCatalog). */
-export const AUTOMATION_ACTION_TYPES = [
-  'camera_exposure',
-  'camera_ev',
-  'camera_zoom',
-  'camera_fps',
-  'camera_lens',
-  'night_vision',
-  'torch',
-  'stream',
-  'capture_photo',
-  'recording',
-  'siren',
-  'detection',
-] as const
+/**
+ * Every catalog action id the label/summary tables below cover — DERIVED
+ * from the checked-in device-truth fixture (web/contract/automation.json:
+ * the app's DtoContractFixtureTest serializes the real AutomationActionCatalog
+ * into it and pins it, so the ids are device truth, not a hand list to rot).
+ * The summary switch stays hand-written — its per-action lines are the
+ * phase-2 label seam, not id bookkeeping.
+ */
+export const AUTOMATION_ACTION_TYPES: readonly string[] = automationFixture.catalog.map((entry) => entry.id)
 
 /** Every trigger catalog id the label tables cover (AutomationTriggerCatalog). */
 export const AUTOMATION_TRIGGER_TYPES = [
