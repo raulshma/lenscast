@@ -596,6 +596,34 @@ class SettingsApplier(
         }
     }
 
+    /**
+     * The automation camera action's seam: apply one camera document with an
+     * explicit torch intent, then persist it — both under ONE
+     * [cameraApplyMutex] hold, so the store-driven collector cannot run an
+     * apply between them. The intent is what makes the requested LED land:
+     * without it, an action whose requested pair already equals the
+     * previously applied snapshot reads as untouched and the verdict
+     * converges the request away toward the live LED fact (the
+     * 0.2.3-beta.1 on-device repro, issue #21), and persisting alone cannot
+     * help because the collector's own apply would run the same verdict and
+     * rewrite the store back.
+     *
+     * Ordering converges in both directions: intent apply FIRST (the
+     * collector's in-flight apply of an older document completes or waits,
+     * then the requested pair lands and [CameraService.activeSettings] holds
+     * it), persist SECOND — the collector's eventual apply of the persisted
+     * value sees a pair equal to the applied snapshot, converges to a live
+     * fact that already matches, and is the documented no-op restatement. A
+     * `null` [torchIntent] degrades to the plain persist path's semantics
+     * (the executor only declares an intent for the `torch` action).
+     */
+    suspend fun applyCameraAction(settings: CameraSettings, torchIntent: Boolean?) {
+        cameraApplyMutex.withLock {
+            cameraService.applySettings(settings, torchIntent)
+            settingsDataStore.saveSettings(settings)
+        }
+    }
+
     private data class AudioSettings(
         val enabled: Boolean,
         val bitrateKbps: Int,

@@ -1815,6 +1815,18 @@ class CameraService(private val context: Context) {
      *
      *  - FIRST apply (nothing committed yet — cold start): everything
      *    applies verbatim, so a restart re-lights from the stored intent.
+     *  - [torchIntent] declared (the automation `torch` action, through the
+     *    applier's intent-honored apply): the write IS a torch request — it
+     *    applies and commits as written, LED included, even when the pair
+     *    already equals the previously applied snapshot. A snapshot can
+     *    carry the requested value while the LED sits opposite (a live-only
+     *    flip after an earlier convergence): the pair diff then reads
+     *    "untouched" and the untouched branch would converge the request
+     *    away toward the live fact instead of moving the LED (the
+     *    0.2.3-beta.1 on-device repro, issue #21). Only an explicit intent
+     *    escapes that ambiguity — a carry whose pair happens to equal the
+     *    snapshot must still converge, or an untouched save would stomp a
+     *    live-only lit LED (the #16 guarantee below).
      *  - Torch pair MOVED: an explicit torch write — the in-app quick-setting
      *    toggle, a scheduler torch action, a test-restore undo — is applied
      *    and committed as written, LED included.
@@ -1843,9 +1855,10 @@ class CameraService(private val context: Context) {
      * camera rebinds) and honors [torchDrivenOn] — never extinguishing a
      * torch lit by the system flashlight tile.
      */
-    suspend fun applySettings(settings: CameraSettings) {
+    suspend fun applySettings(settings: CameraSettings, torchIntent: Boolean? = null) {
         val boundSettings = activeSettings
         val torchTouched = !settingsEverApplied ||
+            torchIntent != null ||
             boundSettings.torchEnabled != settings.torchEnabled ||
             boundSettings.torchStrength != settings.torchStrength
         val effective = if (torchTouched) {

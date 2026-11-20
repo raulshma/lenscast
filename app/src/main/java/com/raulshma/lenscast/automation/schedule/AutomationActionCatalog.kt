@@ -244,6 +244,15 @@ sealed interface RestoreSpec {
  *   consume (the executor routes them to their own seams); the camera-valued
  *   merges follow the "absent/malformed = leave unchanged" contract — a
  *   malformed value must never collapse a manual setting to a sentinel.
+ * @param torchIntent The explicit torch intent the action declares, read off
+ *   its params (null = this write carries no torch intent, the default).
+ *   Only the `torch` entry declares one: a requested pair that already
+ *   equals the previously applied snapshot (an earlier convergence wrote it
+ *   there) is indistinguishable from an untouched carry to the diff-based
+ *   verdict in `CameraService.applySettings`, which would then converge the
+ *   request away toward the live LED fact — the 0.2.3-beta.1 on-device repro
+ *   (issue #21). The executor hands a non-null verdict to the applier's
+ *   intent-honored apply so the LED moves to what the rule asked for.
  * @param effects The ordered dispatch steps the executor interprets. Every
  *   action declares at least one.
  * @param restore How the Automation Test winds the action back; see
@@ -254,6 +263,7 @@ data class AutomationActionType(
     val params: List<AutomationParamSpec>,
     val catchUp: CatchUpClass,
     val merge: (current: CameraSettings, params: Map<String, String>) -> CameraSettings,
+    val torchIntent: (params: Map<String, String>) -> Boolean? = { null },
     val effects: List<AutomationEffect>,
     val restore: RestoreSpec,
     val interruptsStream: Boolean = false,
@@ -546,6 +556,17 @@ object AutomationActionCatalog {
             ),
             catchUp = CatchUpClass.STATEFUL,
             merge = MERGE_TORCH,
+            // The explicit intent: a requested pair equal to the applied
+            // snapshot must still drive the LED (issue #21), so the executor
+            // routes this action through the applier's intent-honored apply.
+            // Absent/malformed enabled leaves the torch alone — no intent.
+            torchIntent = { params ->
+                when (params["enabled"]) {
+                    "true" -> true
+                    "false" -> false
+                    else -> null
+                }
+            },
             effects = listOf(AutomationEffect.MergeCameraSettings),
             // The toggle always restores (required param); only a rule that
             // drove a level restores one — and only to the snapshot's own

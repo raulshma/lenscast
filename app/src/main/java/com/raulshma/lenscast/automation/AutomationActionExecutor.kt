@@ -136,10 +136,10 @@ class AutomationActionExecutor(private val app: MainApplication) : AutomationAct
     private fun enabled(action: AutomationActionSpec): Boolean = action.params["enabled"] != "false"
 
     /**
-     * Merges one camera action into the persisted settings; the applier does
-     * the rest. The persisted document passes through verbatim — the
-     * torch-touch verdict (this save's torch pair against the previously
-     * applied snapshot, convergence to the live LED fact otherwise) is
+     * Merges one camera action into the persisted settings and lands it.
+     * The persisted document passes through verbatim — the torch-touch
+     * verdict (this save's torch pair against the previously applied
+     * snapshot, convergence to the live LED fact otherwise) is
      * CameraService.applySettings' alone, and the old action-type verdict
      * here was one of the three writer-side copies of it (e84b36d) that
      * drifted. That torch mode is deliberately different from
@@ -148,6 +148,21 @@ class AutomationActionExecutor(private val app: MainApplication) : AutomationAct
      * a toggle can compute its target), while a scheduler `torch` action
      * persists the requested state, so a device restart or a settings sync
      * restores what the rule asked for.
+     *
+     * A declared [AutomationActionType.torchIntent] routes through the
+     * applier's intent-honored apply ([SettingsApplier.applyCameraAction])
+     * instead of the plain persist: a requested pair that already equals the
+     * previously applied snapshot reads as "untouched" to the verdict's
+     * diff — an earlier convergence can put the requested value there while
+     * the LED sits opposite — and the untouched branch would converge the
+     * request away toward the live fact, reporting success while the LED
+     * never moves (the 0.2.3-beta.1 on-device repro, issue #21). The
+     * intent-honored apply drives the requested pair and persists it under
+     * one applier lock, so the collector's eventual re-apply of the
+     * persisted value is a no-op restatement. Plain persists (night vision,
+     * exposure, and any torch spec without an `enabled` verdict) stay on the
+     * store path — the Settings Applier remains the single runtime apply
+     * path for them.
      *
      * The merge base is the DISK truth (`settingsFromDisk`), never the
      * shared flow's `.value`: that flow lags in the two windows a camera
@@ -166,9 +181,13 @@ class AutomationActionExecutor(private val app: MainApplication) : AutomationAct
      */
     private suspend fun applyCameraSetting(action: AutomationActionSpec) {
         val current = app.settingsDataStore.settingsFromDisk()
-        app.settingsDataStore.saveSettings(
-            AutomationSchedulePolicy.mergeCameraSettings(current, action),
-        )
+        val merged = AutomationSchedulePolicy.mergeCameraSettings(current, action)
+        val torchIntent = AutomationActionCatalog.typeFor(action.type)?.torchIntent(action.params)
+        if (torchIntent != null) {
+            app.settingsApplier.applyCameraAction(merged, torchIntent)
+        } else {
+            app.settingsDataStore.saveSettings(merged)
+        }
     }
 
     /**

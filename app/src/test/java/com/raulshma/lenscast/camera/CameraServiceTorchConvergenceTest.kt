@@ -143,4 +143,33 @@ class CameraServiceTorchConvergenceTest {
 
         assertTrue(persistedDocuments.isEmpty())
     }
+
+    @Test
+    fun `an explicit torch intent applies verbatim even when the pair already matches the snapshot`() = runBlocking {
+        // The issue #21 world: a convergence wrote the requested value into
+        // the applied snapshot while a live-only writer left the LED
+        // opposite. The pair diff reads "untouched" — only the declared
+        // intent keeps this write a torch request: verbatim commit, no
+        // convergence write, the request never swallowed.
+        service.applySettings(CameraSettings(torchEnabled = true))
+        setLiveTorchFact(on = false)
+
+        service.applySettings(CameraSettings(torchEnabled = true), torchIntent = true)
+
+        assertTrue(persistedDocuments.isEmpty())
+    }
+
+    @Test
+    fun `an explicit torch-off intent stays verbatim through a matching snapshot`() = runBlocking {
+        // The mirror direction: the stored/snapshot pair says dark while a
+        // live-only writer lit the LED. A declared false intent is a
+        // request, not a carry — it must not fold into a convergence that
+        // would restate the lit fact.
+        service.applySettings(CameraSettings(torchEnabled = false))
+        setLiveTorchFact(on = true)
+
+        service.applySettings(CameraSettings(torchEnabled = false), torchIntent = false)
+
+        assertTrue(persistedDocuments.isEmpty())
+    }
 }

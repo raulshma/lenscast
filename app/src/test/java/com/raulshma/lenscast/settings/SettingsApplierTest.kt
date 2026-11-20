@@ -24,6 +24,7 @@ import com.raulshma.lenscast.streaming.whip.WhipStatus
 import io.mockk.clearMocks
 import io.mockk.coEvery
 import io.mockk.coVerify
+import io.mockk.coVerifyOrder
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
@@ -326,6 +327,26 @@ private val rtspTlsEnabled = MutableStateFlow(false)
             cameraSettings.value = next
             applier.flushCameraApply()
             coVerify(exactly = 1) { cameraService.applySettings(next) }
+        }
+    }
+
+    @Test
+    fun `apply camera action drives the intent-honored apply then persists under one lock`() {
+        kotlinx.coroutines.runBlocking {
+            // The automation torch action's seam (issue #21): the intent
+            // apply lands the requested pair first, the persist rides the
+            // same mutex hold, so the collector's eventual apply of the
+            // persisted value converges against a snapshot that already
+            // matches the live fact — the no-op restatement.
+            val doc = CameraSettings(torchEnabled = true, torchStrength = 3)
+            coEvery { settingsDataStore.saveSettings(any()) } returns Unit
+
+            applier.applyCameraAction(doc, true)
+
+            coVerifyOrder {
+                cameraService.applySettings(doc, true)
+                settingsDataStore.saveSettings(doc)
+            }
         }
     }
 

@@ -100,6 +100,12 @@ class AutomationTestControllerTest {
 
         coEvery { applier.flushCameraApply() } returns Unit
         coEvery { applier.applyCameraSettingsNow(any()) } returns Unit
+        // The arm/restore torch actions ride the applier's intent-honored
+        // apply (issue #21); the real seam persists the document it applied,
+        // so model that read-your-write for the later actions of a run.
+        coEvery { applier.applyCameraAction(any(), any()) } coAnswers {
+            settingsDataStore.saveSettings(firstArg())
+        }
     }
 
     private fun controller() = AutomationTestController(app)

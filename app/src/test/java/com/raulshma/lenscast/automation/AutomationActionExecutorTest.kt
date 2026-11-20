@@ -15,6 +15,7 @@ import com.raulshma.lenscast.capture.model.RecordingConfig
 import com.raulshma.lenscast.core.SirenAutoStop
 import com.raulshma.lenscast.core.SirenPlayer
 import com.raulshma.lenscast.data.SettingsDataStore
+import com.raulshma.lenscast.settings.SettingsApplier
 import com.raulshma.lenscast.streaming.StreamStateJournal
 import com.raulshma.lenscast.streaming.StreamingManager
 import io.mockk.coEvery
@@ -61,14 +62,18 @@ import org.junit.Test
  * (`settingsFromDisk` — the read-your-write seam the store documents for
  * startup-critical reads), so a rule's camera actions accumulate and the
  * persisted world keeps its configured values across restarts and resets.
- * The executor only persists — the Settings Applier stays the single
- * runtime apply path (no direct cameraService.applySettings).
+ * The executor never touches the camera directly — plain camera actions
+ * only persist (the applier collector stays the single runtime apply path),
+ * and a `torch` action additionally rides the applier's intent-honored
+ * apply so its requested pair cannot be converged away when it already
+ * equals the applied snapshot (issue #21).
  */
 class AutomationActionExecutorTest {
 
     private val app: MainApplication = mockk()
     private val settingsDataStore: SettingsDataStore = mockk()
     private val cameraService: CameraService = mockk()
+    private val settingsApplier: SettingsApplier = mockk()
     private val streamToggle: StreamToggle = mockk(relaxed = true)
     private val streamStateJournal: StreamStateJournal = mockk()
     private val photoCaptureManager: PhotoCaptureManager = mockk()
@@ -96,6 +101,7 @@ class AutomationActionExecutorTest {
     fun setUp() {
         every { app.settingsDataStore } returns settingsDataStore
         every { app.cameraService } returns cameraService
+        every { app.settingsApplier } returns settingsApplier
         every { app.streamToggle } returns streamToggle
         every { app.streamStateJournal } returns streamStateJournal
         every { app.photoCaptureManager } returns photoCaptureManager
@@ -115,10 +121,17 @@ class AutomationActionExecutorTest {
             disk = firstArg()
             savedDocuments.add(firstArg())
         }
+        // The real applier seam persists the intent-applied document; model
+        // that read-your-write so later actions of a rule accumulate on it.
+        coEvery { settingsApplier.applyCameraAction(any(), any()) } answers {
+            disk = firstArg()
+            savedDocuments.add(firstArg())
+        }
         // NOTE: cameraService.isTorchOn is deliberately NOT stubbed — the
-        // executor no longer consults the live LED fact (the torch-touch
-        // verdict is CameraService.applySettings'), and the strict mock
-        // fails any test whose path tried to read it.
+        // executor never consults the live LED fact (the torch-touch verdict
+        // is CameraService.applySettings', and a declared torch intent rides
+        // the applier seam), and the strict mock fails any test whose path
+        // tried to read it.
     }
 
     private fun executor() = AutomationActionExecutor(app)
@@ -245,24 +258,60 @@ class AutomationActionExecutorTest {
         assertEquals(1600, last.iso)
     }
 
-    // ── ownership: the executor persists; the applier stays the only runtime path ──
+    // ── ownership: torch rides the intent seam, everything else persists ──
 
     @Test
-    fun `a torch action persists its merge verbatim without consulting the live torch`() = runBlocking {
-        // Stored dark intent with a strength preference; the rule asks for
-        // torch on. The document passes through as merged — whether this
-        // save "touches torch" is CameraService.applySettings' verdict, so
-        // the executor must not rewrite the pair against the live LED fact
-        // (and the strict cameraService mock would fail the test if it
-        // read isTorchOn at all).
-        disk = CameraSettings(torchEnabled = false, torchStrength = 3)
+    fun `a torch action drives the requested pair through the applier's intent seam`() = runBlocking {
+        // The 0.2.3-beta.1 on-device repro (issue #21): stored intent says
+        // LIT — an earlier convergence wrote it there — while the live LED
+        // sits dark. The requested pair already equals the previously
+        // applied snapshot, so the verdict's pair diff reads "untouched"
+        // and a plain persist would converge the request away toward the
+        // live fact: rule reports success, LED never moves. The declared
+        // intent must reach the applier's intent-honored apply instead.
+        disk = CameraSettings(torchEnabled = true, torchStrength = 3)
         settings.value = CameraSettings()
 
         executor().runActions(listOf(AutomationActionSpec("torch", mapOf("enabled" to "true"))))
 
+        val doc = slot<CameraSettings>()
+        coVerify(exactly = 1) { settingsApplier.applyCameraAction(capture(doc), true) }
+        // The merge still folds verbatim onto the disk base — intent only
+        // changes HOW the document lands, never WHAT was merged.
+        assertTrue(doc.captured.torchEnabled)
+        assertEquals(3, doc.captured.torchStrength)
+    }
+
+    @Test
+    fun `a torch-off action declares the false intent`() = runBlocking {
+        // The mirror case: a live-only writer lit the LED while the stored
+        // intent says dark; turning the torch off is a request, not a carry.
+        disk = CameraSettings(torchEnabled = false)
+        settings.value = CameraSettings()
+
+        executor().runActions(listOf(AutomationActionSpec("torch", mapOf("enabled" to "false"))))
+
+        val doc = slot<CameraSettings>()
+        coVerify(exactly = 1) { settingsApplier.applyCameraAction(capture(doc), false) }
+        assertTrue(!doc.captured.torchEnabled)
+    }
+
+    @Test
+    fun `a torch spec without an enabled verdict stays on the plain persist path`() = runBlocking {
+        // enabled is a required param (the sanitizer folds an absence to
+        // "true"), so this is only a hand-built spec's shape — and the
+        // merge's contract says an absent enabled leaves the torch alone:
+        // no intent is declared, the save rides the store, and the verdict
+        // stays the single owner of what the LED does.
+        disk = CameraSettings(torchEnabled = true, torchStrength = 3)
+        settings.value = CameraSettings()
+
+        executor().runActions(listOf(AutomationActionSpec("torch", mapOf("strength" to "5"))))
+
+        coVerify(exactly = 0) { settingsApplier.applyCameraAction(any(), any()) }
         val last = savedDocuments.single()
         assertTrue(last.torchEnabled)
-        assertEquals(3, last.torchStrength)
+        assertEquals(5, last.torchStrength)
     }
 
     @Test
@@ -272,9 +321,12 @@ class AutomationActionExecutorTest {
 
         executor().runActions(nightRuleActions)
 
-        // One save per camera action, and NO second application path.
+        // One save per camera action, and NO second application path — the
+        // exposure/fps merges declare no torch intent, so they ride the
+        // store and the applier collector stays the single runtime apply.
         coVerify(exactly = 2) { settingsDataStore.saveSettings(any()) }
-        coVerify(exactly = 0) { cameraService.applySettings(any()) }
+        coVerify(exactly = 0) { settingsApplier.applyCameraAction(any(), any()) }
+        coVerify(exactly = 0) { cameraService.applySettings(any(), any()) }
         // The last document exists and is the accumulated one.
         assertNotNull(savedDocuments.lastOrNull())
         assertEquals(15, savedDocuments.last().frameRate)
