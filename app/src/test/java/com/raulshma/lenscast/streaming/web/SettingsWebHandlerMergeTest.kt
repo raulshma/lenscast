@@ -6,6 +6,7 @@ import com.raulshma.lenscast.capture.ml.DetectionModelStore
 import com.raulshma.lenscast.core.AppJson
 import com.raulshma.lenscast.data.SettingPref
 import com.raulshma.lenscast.data.SettingsDataStore
+import com.raulshma.lenscast.data.overlaySettingsPref
 import com.raulshma.lenscast.data.rtspBasicAuthCompatPref
 import com.raulshma.lenscast.data.rtspEnabledPref
 import com.raulshma.lenscast.data.rtspPortPref
@@ -112,6 +113,22 @@ class SettingsWebHandlerMergeTest {
         val doc = responseAdapter.fromJson(handler.get())
         assertEquals(1234, doc?.camera?.iso)
         assertEquals(8555, doc?.streaming?.rtspPort)
+    }
+
+    @Test
+    fun `overlay blank fallbacks rebuild from the fresh snapshot right after a save`() = runBlocking {
+        store.saveOverlaySettings(
+            store.readFresh(overlaySettingsPref.decode).copy(enabled = false, timestampFormat = "HH:mm:ss"),
+        )
+
+        // No propagation wait: the PUT's overlay fallback base must come from
+        // the same fresh disk pass as its merge base, not the lagging flow
+        // (which on a fresh process answers the descriptor default format).
+        handler.put("""{"streaming":{"overlayEnabled":true,"timestampFormat":""}}""")
+
+        val overlay = stored(overlaySettingsPref)
+        assertEquals(true, overlay.enabled)
+        assertEquals("HH:mm:ss", overlay.timestampFormat)
     }
 
     @Test

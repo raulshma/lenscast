@@ -16,10 +16,12 @@ import com.raulshma.lenscast.core.ThermalMonitor
 import com.raulshma.lenscast.core.WatchdogPolicy
 import io.mockk.coEvery
 import io.mockk.coVerify
+import io.mockk.coVerifyOrder
 import io.mockk.clearMocks
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
+import io.mockk.verifyOrder
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.runBlocking
@@ -62,7 +64,6 @@ class StreamingSessionTest {
         MutableStateFlow(BatteryOptimizationResult(suggestedJpegQuality = 70, batteryLevel = 80, isPowerSaveMode = false, message = ""))
     private val streamUrl = MutableStateFlow("http://0.0.0.0:8080")
     private val isAudioStreaming = MutableStateFlow(false)
-    private val isRtspRunning = MutableStateFlow(false)
     private val isServerRunning = MutableStateFlow(true)
 
     private val cameraService: CameraService = mockk(relaxed = true)
@@ -91,14 +92,11 @@ class StreamingSessionTest {
         every { cameraService.rebindUseCases() } returns true
         every { streamingManager.streamUrl } returns streamUrl
         every { streamingManager.isAudioStreaming } returns isAudioStreaming
-        every { streamingManager.isRtspRunning } returns isRtspRunning
         every { streamingManager.isServerRunning } returns isServerRunning
         every { streamingManager.isSharedMicCapturing() } returns false
         every { streamingManager.isLiveStreaming() } returns false
-        every { streamingManager.isWebStreamActive() } returns false
-        every { streamingManager.isRtspAudioActive() } returns false
-        every { streamingManager.isRtmpAudioActive() } returns false
-        every { streamingManager.isWhipAudioActive() } returns false
+        every { streamingManager.snapshotLiveOutputs() } returns liveOutputs()
+        every { streamingManager.microphoneTypeNeeded() } returns false
         every { streamingManager.ensureServerRunning() } returns true
         every { streamingManager.startStreaming() } answers { startStreamingResult }
         every { powerManager.optimizationResult } returns optimizationResult
@@ -116,6 +114,15 @@ class StreamingSessionTest {
     }
 
     // ── helpers ──
+
+    /** A pre-disturbance live-output snapshot; the manager owns the inventory. */
+    private fun liveOutputs(
+        web: Boolean = false,
+        rtsp: Boolean = false,
+        rtmp: Boolean = false,
+        srt: Boolean = false,
+        whip: Boolean = false,
+    ) = StreamingManager.LiveOutputs(web, rtsp, rtmp, srt, whip)
 
     /**
      * Runs the suspend [block] on a worker thread while the test thread
@@ -195,8 +202,8 @@ class StreamingSessionTest {
     fun `second begin after an audio output went live re-asserts the microphone foreground type`() {
         runWithMainPumped { session.begin() }
 
-        // The RTSP output starts late, already carrying its audio track.
-        every { streamingManager.isRtspAudioActive() } returns true
+        // An audio-carrying output starts late; the manager's mic verdict flips.
+        every { streamingManager.microphoneTypeNeeded() } returns true
         runWithMainPumped { session.begin() }
 
         val intents = startedServiceIntents().filter { it.action == StreamingService.ACTION_START }
@@ -458,36 +465,43 @@ class StreamingSessionTest {
     }
 
     @Test
-    fun `medium recovery restarts the server rebinds and restores only what went dark`() {
-        // Web was live before the disturbance and is dark after the pause;
-        // RTSP was live and stayed up (the manager re-attached it on restart).
-        every { streamingManager.isWebStreamActive() } returnsMany listOf(true, false)
-        isRtspRunning.value = true
+    fun `medium recovery restarts the server rebinds and restores what went dark`() {
+        // The session hands the manager's pre-disturbance snapshot straight
+        // back after the restart steps — no per-output reads or starts here.
+        val live = liveOutputs(web = true, rtsp = true)
+        every { streamingManager.snapshotLiveOutputs() } returns live
 
         val recovered = runWithMainPumped { session.recover(WatchdogPolicy.RecoveryTier.MEDIUM) }
 
         assertTrue(recovered)
-        verify(exactly = 1) { streamingManager.pauseStreaming() }
-        verify(exactly = 1) { streamingManager.ensureServerRunning() }
-        verify(exactly = 1) { cameraService.rebindUseCases() }
-        verify(exactly = 1) { streamingManager.startWebStreaming() }
+        verifyOrder {
+            streamingManager.snapshotLiveOutputs()
+            streamingManager.pauseStreaming()
+            streamingManager.ensureServerRunning()
+            cameraService.rebindUseCases()
+            streamingManager.restoreLiveOutputs(live)
+        }
+        verify(exactly = 1) { streamingManager.restoreLiveOutputs(live) }
+        verify(exactly = 0) { streamingManager.startWebStreaming() }
         verify(exactly = 0) { streamingManager.startRtspStreaming() }
         coVerify(exactly = 0) { cameraService.initialize() }
     }
 
     @Test
-    fun `medium recovery restarts an output the pause killed`() {
-        every { streamingManager.isWebStreamActive() } returns false
-        isRtspRunning.value = true
-        every { streamingManager.pauseStreaming() } answers { isRtspRunning.value = false }
+    fun `medium recovery restores a push-only stream the pause killed`() {
+        // The bug pin: pause stops all five outputs, so a live RTMP push with
+        // no web/RTSP must ride the snapshot back instead of dying into a
+        // false escalation.
+        val live = liveOutputs(rtmp = true)
+        every { streamingManager.snapshotLiveOutputs() } returns live
 
         val recovered = runWithMainPumped { session.recover(WatchdogPolicy.RecoveryTier.MEDIUM) }
 
         assertTrue(recovered)
-        // rtspWasActive snapped true before the pause, the flow reads false
-        // after → the session restarts it.
-        verify(exactly = 1) { streamingManager.startRtspStreaming() }
+        verify(exactly = 1) { streamingManager.pauseStreaming() }
+        verify(exactly = 1) { streamingManager.restoreLiveOutputs(live) }
         verify(exactly = 0) { streamingManager.startWebStreaming() }
+        verify(exactly = 0) { streamingManager.startRtspStreaming() }
     }
 
     @Test
@@ -498,18 +512,15 @@ class StreamingSessionTest {
 
         assertFalse(recovered)
         verify(exactly = 0) { cameraService.rebindUseCases() }
-        verify(exactly = 0) { streamingManager.startWebStreaming() }
+        verify(exactly = 0) { streamingManager.restoreLiveOutputs(any()) }
     }
 
     @Test
     fun `hard recovery re-initializes the camera and refreshes the disturbed session state`() {
         runWithMainPumped { session.begin() }
         verify(exactly = 1) { thermalMonitor.startMonitoring() }
-        // RTSP is live when the disturbance hits; HARD stops streaming outright
-        // and the output goes down with it.
-        isRtspRunning.value = true
-        every { streamingManager.stopStreaming() } answers { isRtspRunning.value = false }
-        every { streamingManager.isWebStreamActive() } returnsMany listOf(true, false)
+        val live = liveOutputs(web = true, rtsp = true)
+        every { streamingManager.snapshotLiveOutputs() } returns live
 
         val recovered = runWithMainPumped { session.recover(WatchdogPolicy.RecoveryTier.HARD) }
 
@@ -523,9 +534,39 @@ class StreamingSessionTest {
         verify(atLeast = 2) { powerManager.refreshBatteryState() }
         verify(atLeast = 2) { streamingManager.applyBatteryOptimization(any()) }
         verify(atLeast = 2) { cameraService.rebindUseCases() }
-        // Both outputs were live before and dark after → both restored.
-        verify(exactly = 1) { streamingManager.startWebStreaming() }
-        verify(exactly = 1) { streamingManager.startRtspStreaming() }
+        // startStreaming restarts the enabled outputs; the restore retries
+        // only what did not come back — the session starts nothing itself.
+        verify(exactly = 1) { streamingManager.restoreLiveOutputs(live) }
+        verify(exactly = 0) { streamingManager.startWebStreaming() }
+        verify(exactly = 0) { streamingManager.startRtspStreaming() }
+    }
+
+    @Test
+    fun `hard recovery snapshots before the stop and restores after the streaming restart`() {
+        val live = liveOutputs(rtmp = true, whip = true)
+        every { streamingManager.snapshotLiveOutputs() } returns live
+
+        val recovered = runWithMainPumped { session.recover(WatchdogPolicy.RecoveryTier.HARD) }
+
+        assertTrue(recovered)
+        coVerifyOrder {
+            streamingManager.snapshotLiveOutputs()
+            streamingManager.stopStreaming()
+            cameraService.initialize()
+            streamingManager.startStreaming()
+            streamingManager.restoreLiveOutputs(live)
+        }
+    }
+
+    @Test
+    fun `an all-five-live snapshot round-trips through recovery`() {
+        val live = liveOutputs(web = true, rtsp = true, rtmp = true, srt = true, whip = true)
+        every { streamingManager.snapshotLiveOutputs() } returns live
+
+        assertTrue(runWithMainPumped { session.recover(WatchdogPolicy.RecoveryTier.MEDIUM) })
+        assertTrue(runWithMainPumped { session.recover(WatchdogPolicy.RecoveryTier.HARD) })
+
+        verify(exactly = 2) { streamingManager.restoreLiveOutputs(live) }
     }
 
     @Test
@@ -538,8 +579,7 @@ class StreamingSessionTest {
         // The camera re-init ran before the restart failed, but the killed
         // outputs were left down for the watchdog's verification to retry.
         coVerify(exactly = 1) { cameraService.initialize() }
-        verify(exactly = 0) { streamingManager.startWebStreaming() }
-        verify(exactly = 0) { streamingManager.startRtspStreaming() }
+        verify(exactly = 0) { streamingManager.restoreLiveOutputs(any()) }
     }
 
     @Test
@@ -557,15 +597,37 @@ class StreamingSessionTest {
     // ── foreground intent payload ──
 
     @Test
-    fun `foreground start carries the stream url and every mic-capturing output's verdict`() {
+    fun `foreground start carries the stream url and the mic verdict fact`() {
         every { streamingManager.isAudioStreaming.value } returns true
-        every { streamingManager.isRtmpAudioActive() } returns true
+        every { streamingManager.microphoneTypeNeeded() } returns true
         runWithMainPumped { session.begin() }
 
         val intent = startedServiceIntents().first()
         assertEquals(StreamingService.ACTION_START, intent.action)
         assertEquals("http://0.0.0.0:8080", intent.getStringExtra(StreamingService.EXTRA_URL))
         assertTrue(intent.getBooleanExtra(StreamingService.EXTRA_AUDIO_ACTIVE, false))
+    }
+
+    @Test
+    fun `foreground start claims the microphone exactly when the mic verdict fact reads true`() {
+        // False half: no output wants the mic — no claim, and the session
+        // reads the one fact instead of reconstructing the per-output OR.
+        runWithMainPumped { session.begin() }
+        assertFalse(
+            startedServiceIntents().last()
+                .getBooleanExtra(StreamingService.EXTRA_AUDIO_ACTIVE, true),
+        )
+        verify(exactly = 0) { streamingManager.isRtspAudioActive() }
+        verify(exactly = 0) { streamingManager.isRtmpAudioActive() }
+        verify(exactly = 0) { streamingManager.isWhipAudioActive() }
+
+        // True half: the fact flips, the re-asserted START carries the claim.
+        every { streamingManager.microphoneTypeNeeded() } returns true
+        runWithMainPumped { session.begin() }
+        assertTrue(
+            startedServiceIntents().last()
+                .getBooleanExtra(StreamingService.EXTRA_AUDIO_ACTIVE, false),
+        )
     }
 
     @Test
@@ -610,6 +672,19 @@ class StreamingSessionTest {
         val intent = startedServiceIntents().last()
         assertEquals(StreamingService.ACTION_SERVER, intent.action)
         assertTrue(intent.getBooleanExtra(StreamingService.EXTRA_AUDIO_ACTIVE, false))
+    }
+
+    @Test
+    fun `server foreground ignores the stream mic verdict and keys on the shared capture only`() {
+        // Server mode is camera-free: an output-side mic verdict must not
+        // leak into the headless handoff — only the sound-detection hold may.
+        every { streamingManager.microphoneTypeNeeded() } returns true
+
+        session.ensureServerForeground()
+
+        val intent = startedServiceIntents().last()
+        assertEquals(StreamingService.ACTION_SERVER, intent.action)
+        assertFalse(intent.hasExtra(StreamingService.EXTRA_AUDIO_ACTIVE))
     }
 
     @Test

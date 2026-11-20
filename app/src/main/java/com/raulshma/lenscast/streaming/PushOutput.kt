@@ -94,11 +94,12 @@ internal enum class PushRestartTrigger {
  *   / [com.raulshma.lenscast.streaming.srt.SrtUrl.parse] /
  *   [com.raulshma.lenscast.streaming.whip.WhipUrl.parse]); a null verdict
  *   refuses the start with [invalidUrlMessage].
- * - [videoCodec] — the shared encode path's codec verdict, read at start.
- *   The H.264-only transports (RTMP — no standard H.265 mapping; SRT — the
- *   shared TS muxing is H.264-pinned) pass the hub's codec and refuse H.265
- *   with a readable error; WHIP passes null (no gate — libwebrtc encodes its
- *   own H.264, independent of the RTSP codec setting).
+ * - [videoCodec] — the shared encode path's codec verdict, read at start
+ *   and on [onCodecChanged]. The H.264-only transports (RTMP — no standard
+ *   H.265 mapping; SRT — the shared TS muxing is H.264-pinned) pass the
+ *   hub's codec and refuse H.265 with a readable error; WHIP passes null
+ *   (no gate — libwebrtc encodes its own H.264, independent of the RTSP
+ *   codec setting).
  * - [publisherFactory] — the transport's publisher handle seam, exactly like
  *   [RtspOutput]'s `serverFactory`; the handle comes back typed and the deep
  *   module only drives it through [startPublisher]/[stopPublisher], so the
@@ -114,12 +115,13 @@ internal enum class PushRestartTrigger {
  *   (WHIP's frame-rate handoff).
  *
  * The transition epilogue is injected, not owned: a manager-driven
- * [start]/[stop] runs [settle] after the transition lands (the encoded-hub
- * refresh + streaming-state mirror, exactly where the pre-collapse manager
- * scaffolding ran it), while an internal restart (config change, the
- * WHILE_ACTIVE trigger) and a disable-stop settle quietly — the hub's
- * per-frame policy verdict re-reads the activity flags on its own, and the
- * next manager-driven transition catches the state mirror up.
+ * [start]/[stop] (and the codec-gate stop in [onCodecChanged]) runs [settle]
+ * after the transition lands (the encoded-hub refresh + streaming-state
+ * mirror, exactly where the pre-collapse manager scaffolding ran it), while
+ * an internal restart (config change, the WHILE_ACTIVE trigger) and a
+ * disable-stop settle quietly — the hub's per-frame policy verdict re-reads
+ * the activity flags on its own, and the next manager-driven transition
+ * catches the state mirror up.
  *
  * Decisions are JVM-tested behind the publisher-handle seams in
  * [com.raulshma.lenscast.streaming.PushOutputTest] (the shared lifecycle,
@@ -284,12 +286,35 @@ internal class PushOutput<C : PushConnectConfig, P, H, S : PushStatus>(
     }
 
     /**
-     * The hook-less stop for the manager's direct-drive paths: the H.265
-     * codec-gate stop writes its own crafted Error status and runs its own
-     * epilogue after it, so no settle happens here. Same guard and teardown
-     * as [stop] — only the epilogue differs.
+     * The live codec reaction, beside the start-time gate: the owner reports
+     * the encode path's codec change AFTER the hub lands it (the [videoCodec]
+     * seam reads the live value), and a live H.264-pinned output stops itself
+     * under H.265 with the readable reason. The Error publishes BEFORE
+     * [settle] — a settling stop would run the epilogue before the reason
+     * landed on the status line. A stopped output and the null-seam
+     * transports (WHIP) no-op; a flip back to H.264 never auto-restarts (the
+     * user restarts the push).
      */
-    fun stopQuietly() {
+    fun onCodecChanged() {
+        val codec = videoCodec?.invoke() ?: return
+        if (!active.get() || codec == RtspVideoCodec.H264) return
+        stopQuietly()
+        publishStatus(
+            errorStatus(
+                "$label push stopped: the video codec changed to H.265, which $label cannot carry — " +
+                    "switch back to H.264 and restart the push",
+            ),
+        )
+        settle()
+    }
+
+    /**
+     * The hook-less stop for the internal quiet paths (the disable-stop, the
+     * restart ladder, the codec-gate stop): no settle here — [onCodecChanged]
+     * publishes its own Error and settles after it, the others settle quietly
+     * by contract. Same guard and teardown as [stop].
+     */
+    private fun stopQuietly() {
         synchronized(transitionLock) {
             if (!active.getAndSet(false)) return
             onActiveChanged(false)

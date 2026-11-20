@@ -31,7 +31,6 @@ import com.raulshma.lenscast.streaming.whip.WhipPublisher
 import com.raulshma.lenscast.streaming.whip.WhipStatus
 import com.raulshma.lenscast.streaming.whep.WhepServer
 import com.raulshma.lenscast.streaming.rtsp.RtspAuthSpec
-import com.raulshma.lenscast.streaming.rtsp.RtspConfigDiff
 import com.raulshma.lenscast.streaming.rtsp.RtspInputFormat
 import com.raulshma.lenscast.streaming.rtsp.RtspResolution
 import com.raulshma.lenscast.streaming.rtsp.RtspServer
@@ -697,6 +696,18 @@ class StreamingManager(
 
     val isStreaming: StateFlow<Boolean> = _isStreaming
 
+    init {
+        // The deferred-port landing is owned by this observation, not by stop-path
+        // call sites: every running→stopped transition (including quiet disable-stops
+        // that early-return past the manager's stop methods) lands the port by
+        // construction. Runs on monitorScope, outside every output lock; the
+        // fire-time isLiveStreaming() re-check inside maybeApplyDeferredPort guards
+        // restart gaps, and update() on a stopped transport only retains the port.
+        monitorScope.launch {
+            isStreaming.collect { live -> if (!live) maybeApplyDeferredPort() }
+        }
+    }
+
     val droppedFrames: StateFlow<Int> = framePipeline.droppedFrames
 
     override val processedFrames: StateFlow<Int> = framePipeline.processedFrames
@@ -941,9 +952,11 @@ class StreamingManager(
     /**
      * The persisted web port. Refused while any output is live-streaming —
      * the request then defers into [deferredPort] and lands through
-     * [applyPort] the moment the last output goes dark ([maybeApplyDeferredPort]
-     * on every stop path), so a port typed mid-stream no longer dies with the
-     * refusal while the disk already holds it (issue #20's sharp edge).
+     * [applyPort] the moment the last output goes dark: the aggregate-live
+     * observation beside [_isStreaming] owns the landing
+     * ([maybeApplyDeferredPort]), not the stop-path call sites, so a port
+     * typed mid-stream no longer dies with the refusal while the disk
+     * already holds it (issue #20's sharp edge).
      * Otherwise lands through [WebTransport.update]'s replace cycle — the
      * transport swaps listeners even while it is merely serving (not
      * streaming). The advertised stream/audio URLs are rebuilt from the new
@@ -977,9 +990,11 @@ class StreamingManager(
     }
 
     /**
-     * Called on every output's stop path: when the last live output is gone,
-     * a port deferred by a mid-stream [setPort] lands here. Latest request
-     * wins — the deferral always holds what the disk already saved.
+     * Fired by the aggregate-live observation on every running→stopped
+     * transition: when the last live output is gone, a port deferred by a
+     * mid-stream [setPort] lands here. The fire-time [isLiveStreaming]
+     * re-check skips a landing that raced a restart. Latest request wins —
+     * the deferral always holds what the disk already saved.
      */
     private fun maybeApplyDeferredPort() {
         if (isLiveStreaming()) return
@@ -1150,7 +1165,6 @@ class StreamingManager(
         stopSrtStreaming()
         webTransport.stop()
         unregisterMdnsService()
-        maybeApplyDeferredPort()
         Log.d(TAG, "Streaming stopped")
     }
 
@@ -1160,8 +1174,46 @@ class StreamingManager(
         stopRtmpStreaming()
         stopWhipStreaming()
         stopSrtStreaming()
-        maybeApplyDeferredPort()
         Log.d(TAG, "Live streaming paused (server still running)")
+    }
+
+    /** The five live-output bits a recovery snapshot carries. */
+    data class LiveOutputs(
+        val web: Boolean,
+        val rtsp: Boolean,
+        val rtmp: Boolean,
+        val srt: Boolean,
+        val whip: Boolean,
+    )
+
+    /**
+     * The recovery snapshot: the exact five live bits [isLiveStreaming]
+     * probes (isActive, never the serving-socket mirror or stored intent),
+     * taken before a recovery tier stops the outputs. The inventory lives
+     * here beside the start/stop fan-outs so the session's recover stays
+     * output-agnostic — symmetric with what pause/stopStreaming stop.
+     */
+    fun snapshotLiveOutputs(): LiveOutputs = LiveOutputs(
+        web = webStreamingActive.get(),
+        rtsp = rtspOutput.isActive(),
+        rtmp = rtmpOutput.isActive(),
+        srt = srtOutput.isActive(),
+        whip = whipOutput.isActive(),
+    )
+
+    /**
+     * Restart exactly the outputs [snapshotLiveOutputs] saw live that are
+     * dark now, through the same gated starts [startStreaming] uses: an
+     * output disabled during the disturbance stays disabled (each start
+     * gates on enabled) and one already back up is a no-op, so this composes
+     * with HARD's startStreaming without double-starts.
+     */
+    fun restoreLiveOutputs(snapshot: LiveOutputs) {
+        if (snapshot.web && !webStreamingActive.get()) startWebStreaming()
+        if (snapshot.rtsp && !rtspOutput.isActive()) startRtspStreaming()
+        if (snapshot.rtmp && !rtmpOutput.isActive()) startRtmpStreaming()
+        if (snapshot.srt && !srtOutput.isActive()) startSrtStreaming()
+        if (snapshot.whip && !whipOutput.isActive()) startWhipStreaming()
     }
 
     fun startWebStreaming(): Boolean {
@@ -1205,7 +1257,6 @@ class StreamingManager(
         lastReportedClientCount = -1
         unregisterMdnsService()
         publishWebActiveMirror()
-        maybeApplyDeferredPort()
         Log.d(TAG, "Web streaming stopped")
     }
 
@@ -1234,7 +1285,6 @@ class StreamingManager(
         if (!rtspOutput.isActive()) return
         rtspOutput.stop()
         encodedHub.refresh()
-        maybeApplyDeferredPort()
         Log.d(TAG, "RTSP streaming stopped")
     }
 
@@ -1268,7 +1318,6 @@ class StreamingManager(
     fun stopRtmpStreaming() {
         if (!rtmpOutput.isActive()) return
         rtmpOutput.stop()
-        maybeApplyDeferredPort()
         Log.d(TAG, "RTMP push stopped")
     }
 
@@ -1338,7 +1387,6 @@ class StreamingManager(
     fun stopSrtStreaming() {
         if (!srtOutput.isActive()) return
         srtOutput.stop()
-        maybeApplyDeferredPort()
         Log.d(TAG, "SRT push stopped")
     }
 
@@ -1403,7 +1451,6 @@ class StreamingManager(
     fun stopWhipStreaming() {
         if (!whipOutput.isActive()) return
         whipOutput.stop()
-        maybeApplyDeferredPort()
         Log.d(TAG, "WHIP push stopped")
     }
 
@@ -1473,6 +1520,21 @@ class StreamingManager(
         ecoIdleActive = ecoIdleActive,
         soundDetectionEnabled = soundDetector.enabled,
     )
+
+    /**
+     * The one MICROPHONE foreground-type verdict: true while any live output
+     * captures the mic. The RTMP push taps the same AAC path and the WHIP
+     * push owns its dedicated AudioRecord, so both count alongside RTSP; the
+     * shared capture also covers the sound-detection hold, which keeps the
+     * mic up with no stream consumers at all. SRT has no read of its own: it
+     * is covered indirectly because [EncodedStreamHub] starts the shared
+     * capture whenever audio is wanted while an encoded sink (incl. SRT) is
+     * active — so [isSharedMicCapturing] already answers for it. Keep that
+     * chain intact; a change to the hub's capture-start behavior changes this
+     * verdict.
+     */
+    fun microphoneTypeNeeded(): Boolean =
+        isSharedMicCapturing() || isRtspAudioActive() || isRtmpAudioActive() || isWhipAudioActive()
 
     /**
      * The mic-arbitration verdict the WHIP publisher is built with: audio on
@@ -1702,40 +1764,6 @@ class StreamingManager(
         }
     }
 
-    /**
-     * The audio bitrate is a NeedsRestart change in the RTSP verdict
-     * ([RtspConfigDiff]): the AAC encoder only reads its bitrate at its next
-     * start, so applying it to a live server would silently no-op. The value
-     * is retained by the RTSP output and enforced by its restart ladder —
-     * the change actually takes effect instead of doing nothing.
-     */
-    fun setStreamAudioBitrateKbps(bitrateKbps: Int) {
-        val coerced = bitrateKbps.coerceIn(StreamDefaults.AUDIO_BITRATE_MIN_KBPS, StreamDefaults.AUDIO_BITRATE_MAX_KBPS)
-        streamAudioBitrateKbps.set(coerced)
-        appliedAudioConfig = appliedAudioConfig.copy(bitrateKbps = coerced)
-        onWebAudioChanged()
-        rtspOutput.setAudioBitrate(streamAudioBitrateKbps.get())
-    }
-
-    fun setStreamAudioChannels(channels: Int) {
-        val coerced = channels.coerceIn(StreamDefaults.AUDIO_CHANNELS_MIN, StreamDefaults.AUDIO_CHANNELS_MAX)
-        streamAudioChannels.set(coerced)
-        appliedAudioConfig = appliedAudioConfig.copy(channels = coerced)
-        onWebAudioChanged()
-        // Channel count is an encoder config the AAC encoder reads at start;
-        // RTSP restart required.
-        rtspOutput.restartForAudioConfigChange()
-    }
-
-    fun setStreamAudioEchoCancellation(enabled: Boolean) {
-        streamAudioEchoCancellation.set(enabled)
-        appliedAudioConfig = appliedAudioConfig.copy(echoCancellation = enabled)
-        onWebAudioChanged()
-        // Echo cancellation is an audio-capture config applied at capture
-        // start; RTSP restart required.
-        rtspOutput.restartForAudioConfigChange()
-    }
-
     // ── Stream-audio change policy: one decision point for every audio setting ──
 
     private fun onWebAudioChanged() {
@@ -1864,7 +1892,9 @@ class StreamingManager(
      * WHILE_ACTIVE ladder — new SDP + packetizer); the encoded-stream hub
      * reconfigures stop → (new codec's) encoder → start + black frame. On
      * H265 the hub's fan-out feeds the RTSP sink only (HLS/WS stay
-     * H.264-only).
+     * H.264-only). The hub-fed push twins are then told the codec changed
+     * and gate themselves — a live RTMP/SRT push stops under H.265 with the
+     * readable reason (the deep module owns that stop and its ordering).
      */
     fun setRtspVideoCodec(codec: RtspVideoCodec) {
         rtspOutput.setVideoCodec(codec)
@@ -1877,30 +1907,10 @@ class StreamingManager(
             if (codec == RtspVideoCodec.H265) TsPacketizer.STREAM_TYPE_HEVC else TsPacketizer.STREAM_TYPE_H264,
         )
         HlsManager.reset()
-        // RTMP has no H.265 mapping: a live push under a codec flip to H265
-        // goes dark silently otherwise — stop it with the readable reason.
-        // (A flip back to H264 needs no help; the user restarts the push.)
-        // The hook-less stop keeps this path's own ordering: Error first,
-        // then the epilogue — the output's settling stop would settle before
-        // the crafted Error landed.
-        if (codec == RtspVideoCodec.H265 && rtmpOutput.isActive()) {
-            rtmpOutput.stopQuietly()
-            _rtmpStatus.value = RtmpStatus.Error(
-                "RTMP push stopped: the video codec changed to H.265, which RTMP cannot carry — " +
-                    "switch back to H.264 and restart the push",
-            )
-            encodedHub.refresh()
-        }
-        // The SRT push is the same H.264-pinned consumer — stop it the same
-        // way, with its own readable reason on its own status line.
-        if (codec == RtspVideoCodec.H265 && srtOutput.isActive()) {
-            srtOutput.stopQuietly()
-            _srtStatus.value = SrtStatus.Error(
-                "SRT push stopped: the video codec changed to H.265, which this SRT push cannot carry — " +
-                    "switch back to H.264 and restart the push",
-            )
-            encodedHub.refresh()
-        }
+        // After the hub flip: the outputs' codec seams read the hub's live
+        // value, so the notification must land behind setVideoCodec.
+        rtmpOutput.onCodecChanged()
+        srtOutput.onCodecChanged()
     }
 
     /** The encoded pipeline's live target bitrate — the adaptive controller's current value, not the static default. */

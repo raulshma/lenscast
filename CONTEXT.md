@@ -14,9 +14,11 @@ live), and `recover(tier)` (watchdog recovery for every tier — SOFT rebinds,
 MEDIUM re-rolls the attach choreography, HARD does the full refresh — all
 through the session's bounded Main seams; the watchdog keeps only the tier
 decision, backoff, verification, and state publishing). `begin()` also carries
-the foreground-service microphone verdict (web audio live *or* the RTSP output
-live with its track wanted — an RTSP-only capture without the MICROPHONE type
-is silenced by the OS) and re-asserts it when a second output starts late.
+the foreground-service microphone verdict — `StreamingManager.microphoneTypeNeeded()`,
+the one MICROPHONE-type fact (the shared mic capture, which covers SRT
+indirectly through the encoded hub, *or* RTSP/RTMP/WHIP audio live — a capture
+without the MICROPHONE type is silenced by the OS) — and re-asserts it when a
+second output starts late.
 The same foreground service has a server-only CONNECTED_DEVICE mode:
 `ensureServerForeground()` / `stopServerForegroundIfIdle()` keep the running
 web server (and its outbound alert delivery) out of the background-network
@@ -1062,8 +1064,11 @@ transport status constructors), and `beforeStart` (WHIP's frame-rate
 handoff). The manager-driven `start`/`stop` run an injected `settle`
 epilogue (the encoded-hub refresh + streaming-state mirror; WHIP settles
 the streaming state only) — internal restarts and disable-stops settle
-quietly, exactly the pre-collapse ordering. The WHIP mic-arbitration
-restart rides `PushRestartTrigger.WHILE_ACTIVE`: the verdict is a
+quietly, exactly the pre-collapse ordering. A live H.265 codec flip also
+settles the push: the manager notifies `onCodecChanged` after the hub lands
+the flip, and a live H.264-pinned output stops with its readable Error
+published *before* the settle (WHIP's null codec seam no-ops). The WHIP
+mic-arbitration restart rides `PushRestartTrigger.WHILE_ACTIVE`: the verdict is a
 publisher-construction input, so `onMicVerdictChanged` restarts a live
 output without a config field moving. The `RtmpStatus`/`SrtStatus`/
 `WhipStatus` wire contracts are unchanged; they extend the shared

@@ -13,7 +13,9 @@ import com.raulshma.lenscast.streaming.srt.SrtStats
 import com.raulshma.lenscast.streaming.srt.SrtStatus
 import com.raulshma.lenscast.streaming.whip.WhipOutput
 import com.raulshma.lenscast.streaming.whip.WhipPublisherHandle
+import com.raulshma.lenscast.streaming.whip.WhipPushConfig
 import com.raulshma.lenscast.streaming.whip.WhipStatus
+import com.raulshma.lenscast.streaming.whip.WhipUrl
 import java.util.concurrent.CountDownLatch
 import kotlin.concurrent.thread
 import org.junit.Assert.assertEquals
@@ -37,10 +39,11 @@ class PushOutputTest {
 
     // ── fakes ──
 
-    /** Canned [EncodedSource] — the hub-fed transports' codec-gate input. */
+    /** Canned [EncodedSource] — the hub-fed transports' codec-gate input, flippable for the live codec-change cases. */
     private class FakeSource(
-        override val videoCodec: RtspVideoCodec = RtspVideoCodec.H264,
+        codec: RtspVideoCodec = RtspVideoCodec.H264,
     ) : EncodedSource {
+        override var videoCodec: RtspVideoCodec = codec
         override val sps: ByteArray = byteArrayOf(0x67, 0x64, 0x00, 0x1F)
         override val pps: ByteArray = byteArrayOf(0x68.toByte(), 0xEB.toByte(), 0xEC.toByte())
         override val vps: ByteArray? = null
@@ -118,7 +121,9 @@ class PushOutputTest {
      * builds it, plus the transport-agnostic seams the shared assertions
      * read (recorders, statuses as [PushStatus], the settle counter). The
      * settles list is thread-safe because the transition-race tests run
-     * concurrent starts/stops whose epilogues append from worker threads.
+     * concurrent starts/stops whose epilogues append from worker threads;
+     * settleStatuses snapshots the status line AT settle time, so the
+     * Error-before-settle ordering is observable.
      */
     private class Fixture(
         val label: String,
@@ -130,6 +135,7 @@ class PushOutputTest {
         val publishers: MutableList<Recorder>,
         val statuses: MutableList<PushStatus>,
         val settles: MutableList<Unit>,
+        val settleStatuses: MutableList<PushStatus>,
         val activeEvents: MutableList<Boolean>,
         val setUrl: (String) -> Unit,
         val configuredUrl: () -> String,
@@ -140,24 +146,33 @@ class PushOutputTest {
         val phase: () -> PushPhase,
         val start: () -> PushOutput.StartResult,
         val stop: () -> Unit,
+        val flipCodec: (RtspVideoCodec) -> Unit,
+        /** The live codec notification; null for WHIP — the thin output exposes no seam (the base's null-seam no-op is pinned directly). */
+        val onCodecChanged: (() -> Unit)? = null,
         val fireConnecting: () -> Unit,
         val fireConnected: () -> Unit,
         val fireError: (String) -> Unit,
     )
 
     private fun rtmpFixture(codec: RtspVideoCodec = RtspVideoCodec.H264): Fixture {
+        val source = FakeSource(codec)
         val publishers = mutableListOf<Recorder>()
         val statuses = mutableListOf<PushStatus>()
         val settles = java.util.Collections.synchronizedList(mutableListOf<Unit>())
+        val settleStatuses = java.util.Collections.synchronizedList(mutableListOf<PushStatus>())
         val activeEvents = mutableListOf<Boolean>()
         val output = RtmpOutput(
-            source = FakeSource(codec),
+            source = source,
             onStatusChanged = { statuses += it },
             onActiveChanged = { activeEvents += it },
             publisherFactory = { _, onStatus ->
                 FakeRtmpPublisher(onStatus).also { publishers += it }
             },
-            settle = { settles += Unit },
+            settle = {
+                settles += Unit
+                // The status line at settle time: the last publish (idle before any).
+                settleStatuses += statuses.lastOrNull() ?: RtmpStatus.Idle
+            },
         )
         return Fixture(
             label = "RTMP",
@@ -169,6 +184,7 @@ class PushOutputTest {
             publishers = publishers,
             statuses = statuses,
             settles = settles,
+            settleStatuses = settleStatuses,
             activeEvents = activeEvents,
             setUrl = output::setUrl,
             configuredUrl = output::configuredUrl,
@@ -179,6 +195,8 @@ class PushOutputTest {
             phase = output::phase,
             start = output::start,
             stop = output::stop,
+            flipCodec = { source.videoCodec = it },
+            onCodecChanged = output::onCodecChanged,
             fireConnecting = { (publishers.last() as FakeRtmpPublisher).fire(RtmpStatus.Connecting) },
             fireConnected = { (publishers.last() as FakeRtmpPublisher).fire(RtmpStatus.Connected) },
             fireError = { message -> (publishers.last() as FakeRtmpPublisher).fire(RtmpStatus.Error(message)) },
@@ -186,18 +204,23 @@ class PushOutputTest {
     }
 
     private fun srtFixture(codec: RtspVideoCodec = RtspVideoCodec.H264): Fixture {
+        val source = FakeSource(codec)
         val publishers = mutableListOf<Recorder>()
         val statuses = mutableListOf<PushStatus>()
         val settles = java.util.Collections.synchronizedList(mutableListOf<Unit>())
+        val settleStatuses = java.util.Collections.synchronizedList(mutableListOf<PushStatus>())
         val activeEvents = mutableListOf<Boolean>()
         val output = SrtOutput(
-            source = FakeSource(codec),
+            source = source,
             onStatusChanged = { statuses += it },
             onActiveChanged = { activeEvents += it },
             publisherFactory = { _, onStatus ->
                 FakeSrtPublisher(onStatus).also { publishers += it }
             },
-            settle = { settles += Unit },
+            settle = {
+                settles += Unit
+                settleStatuses += statuses.lastOrNull() ?: SrtStatus.Idle
+            },
         )
         return Fixture(
             label = "SRT",
@@ -209,6 +232,7 @@ class PushOutputTest {
             publishers = publishers,
             statuses = statuses,
             settles = settles,
+            settleStatuses = settleStatuses,
             activeEvents = activeEvents,
             setUrl = output::setUrl,
             configuredUrl = output::configuredUrl,
@@ -219,6 +243,8 @@ class PushOutputTest {
             phase = output::phase,
             start = output::start,
             stop = output::stop,
+            flipCodec = { source.videoCodec = it },
+            onCodecChanged = output::onCodecChanged,
             fireConnecting = { (publishers.last() as FakeSrtPublisher).fire(SrtStatus.Connecting) },
             fireConnected = { (publishers.last() as FakeSrtPublisher).fire(SrtStatus.Connected) },
             fireError = { message -> (publishers.last() as FakeSrtPublisher).fire(SrtStatus.Error(message)) },
@@ -229,6 +255,7 @@ class PushOutputTest {
         val publishers = mutableListOf<Recorder>()
         val statuses = mutableListOf<PushStatus>()
         val settles = java.util.Collections.synchronizedList(mutableListOf<Unit>())
+        val settleStatuses = java.util.Collections.synchronizedList(mutableListOf<PushStatus>())
         val activeEvents = mutableListOf<Boolean>()
         val output = WhipOutput(
             audioAllowed = { audioAllowed },
@@ -237,7 +264,10 @@ class PushOutputTest {
             publisherFactory = { _, _, _, _, onStatus ->
                 FakeWhipPublisher(onStatus).also { publishers += it }
             },
-            settle = { settles += Unit },
+            settle = {
+                settles += Unit
+                settleStatuses += statuses.lastOrNull() ?: WhipStatus.Idle
+            },
         )
         return Fixture(
             label = "WHIP",
@@ -249,6 +279,7 @@ class PushOutputTest {
             publishers = publishers,
             statuses = statuses,
             settles = settles,
+            settleStatuses = settleStatuses,
             activeEvents = activeEvents,
             setUrl = output::setUrl,
             configuredUrl = output::configuredUrl,
@@ -259,6 +290,10 @@ class PushOutputTest {
             phase = output::phase,
             start = output::start,
             stop = output::stop,
+            // WHIP has no codec input — neither the flip nor the notification
+            // seam exists on the thin output (the base's null-seam no-op is
+            // pinned directly in the codec-flip section).
+            flipCodec = {},
             fireConnecting = { (publishers.last() as FakeWhipPublisher).fire(WhipStatus.Connecting) },
             fireConnected = { (publishers.last() as FakeWhipPublisher).fire(WhipStatus.Connected) },
             fireError = { message -> (publishers.last() as FakeWhipPublisher).fire(WhipStatus.Error(message)) },
@@ -349,6 +384,123 @@ class PushOutputTest {
                 assertEquals(fixture.label, PushOutput.StartResult.Started, result)
                 assertEquals(fixture.label, 1, fixture.publishers.size)
             }
+        }
+    }
+
+    // ── the live codec flip ──
+
+    @Test
+    fun `a live push stops itself on the H265 flip with the Error published before the settle`() {
+        for (fixture in listOf(rtmpFixture(), srtFixture())) {
+            fixture.startPassing()
+            val publisher = fixture.publishers.single()
+            // The unchanged codec never churns a live push.
+            fixture.onCodecChanged!!()
+            assertTrue(fixture.label, fixture.isActive())
+            assertEquals(fixture.label, 1, fixture.settles.size)
+
+            fixture.flipCodec(RtspVideoCodec.H265)
+            fixture.onCodecChanged!!()
+
+            assertFalse(fixture.label, fixture.isActive())
+            assertEquals(fixture.label, 1, publisher.stopCalls)
+            assertEquals(fixture.label, listOf(true, false), fixture.activeEvents)
+            val expected =
+                "${fixture.label} push stopped: the video codec changed to H.265, which ${fixture.label} cannot carry — " +
+                    "switch back to H.264 and restart the push"
+            assertEquals(fixture.label, expected, errorMessageOf(fixture.status()))
+            assertEquals(fixture.label, 2, fixture.settles.size)
+            // Error-before-settle: the epilogue saw the crafted Error on the
+            // status line, not the teardown's idle — the ordering the manager
+            // used to hand-craft around the hook-less stop.
+            assertEquals(fixture.label, expected, errorMessageOf(fixture.settleStatuses.last()))
+        }
+    }
+
+    @Test
+    fun `a stopped output ignores the H265 codec notification`() {
+        for (fixture in listOf(rtmpFixture(RtspVideoCodec.H265), srtFixture(RtspVideoCodec.H265))) {
+            fixture.setEnabled(true)
+            fixture.setUrl(fixture.validUrl)
+
+            fixture.onCodecChanged!!()
+
+            assertFalse(fixture.label, fixture.isActive())
+            assertEquals(fixture.label, 0, fixture.publishers.size)
+            assertEquals(fixture.label, 0, fixture.settles.size)
+            assertEquals(fixture.label, fixture.idle, fixture.status())
+        }
+    }
+
+    @Test
+    fun `the null-seam WHIP configuration ignores the codec notification while live`() {
+        // The thin WhipOutput exposes no codec seam (the manager notifies only
+        // RTMP/SRT); the no-op is pinned here through the base module wired
+        // with WHIP's own configuration points — videoCodec = null.
+        val publishers = mutableListOf<FakeWhipPublisher>()
+        val statuses = mutableListOf<PushStatus>()
+        val settles = mutableListOf<Unit>()
+        val output = directWhipOutput(publishers, statuses, settles)
+        output.setEnabled(true)
+        assertEquals(PushOutput.StartResult.Started, output.start())
+
+        output.onCodecChanged()
+
+        assertTrue(output.isActive())
+        assertEquals(1, publishers.size)
+        assertEquals(0, publishers.single().stopCalls)
+        assertEquals(1, settles.size)
+        assertEquals(WhipStatus.Idle, output.status())
+    }
+
+    /**
+     * The deep module wired with WHIP's configuration points (the null codec
+     * seam, WHIP's own statuses), built directly so the null-seam no-op stays
+     * pinned through the base after the thin output's redundant forward was
+     * deleted — the [directRtmpOutput] pattern.
+     */
+    private fun directWhipOutput(
+        publishers: MutableList<FakeWhipPublisher>,
+        statuses: MutableList<PushStatus>,
+        settles: MutableList<Unit>,
+    ): PushOutput<WhipPushConfig, WhipUrl, FakeWhipPublisher, WhipStatus> = PushOutput(
+        label = "WHIP",
+        tag = "WhipOutputTest",
+        onStatusChanged = { statuses += it },
+        settle = { settles += Unit },
+        initialConfig = WhipPushConfig(url = "http://example.com:8000/whip"),
+        parse = WhipUrl::parse,
+        invalidUrlMessage = "Invalid WHIP URL — expected http(s)://host[:port]/whip-endpoint",
+        videoCodec = null,
+        describeTarget = { "${it.hostAndPort}${it.resourcePath}" },
+        idleStatus = WhipStatus.Idle,
+        errorStatus = { reason -> WhipStatus.Error(reason) },
+        publisherFactory = { _, _, onStatus ->
+            FakeWhipPublisher(onStatus).also { publishers += it }
+        },
+        startPublisher = { it.start() },
+        stopPublisher = { it.stop() },
+    )
+
+    @Test
+    fun `a flip back to H264 while stopped never auto-restarts the push`() {
+        for (fixture in listOf(rtmpFixture(), srtFixture())) {
+            fixture.startPassing()
+            fixture.flipCodec(RtspVideoCodec.H265)
+            fixture.onCodecChanged!!()
+            assertFalse(fixture.label, fixture.isActive())
+            // A repeat notification on the already-stopped output is a no-op.
+            fixture.onCodecChanged!!()
+            assertEquals(fixture.label, 2, fixture.settles.size)
+
+            fixture.flipCodec(RtspVideoCodec.H264)
+            fixture.onCodecChanged!!()
+
+            assertFalse(fixture.label, fixture.isActive())
+            assertEquals(fixture.label, 1, fixture.publishers.size)
+            assertEquals(fixture.label, 2, fixture.settles.size)
+            // The user's restart passes the start gate again on the restored codec.
+            assertEquals(fixture.label, PushOutput.StartResult.Started, fixture.start())
         }
     }
 

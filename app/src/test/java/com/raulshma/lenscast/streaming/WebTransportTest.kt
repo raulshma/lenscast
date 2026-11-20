@@ -182,6 +182,29 @@ class WebTransportTest {
     }
 
     @Test
+    fun `a port landed after stop stays retained for the next start`() {
+        val f = Fixture()
+        assertTrue(f.transport.ensureRunning())
+        f.transport.stop()
+        f.events.clear()
+
+        // The deferred-port landing observes the aggregate-live fact and can
+        // race stopStreaming's stop: the swap must not resurrect the server,
+        // and the port must survive to the next start.
+        val outcome = f.transport.update(port = 9090) { null }
+
+        assertEquals(ReplaceOutcome.NOT_RUNNING, outcome)
+        assertFalse(f.transport.isRunning())
+        assertEquals(9090, f.transport.port())
+        assertTrue("no start may follow a landing on a stopped transport", f.events.none { it.endsWith(".start") })
+
+        assertTrue(f.transport.ensureRunning())
+        assertTrue(f.transport.isRunning())
+        assertEquals(9090, f.transport.port())
+        assertEquals("s2.start", f.events.last { it.endsWith(".start") && !it.startsWith("whep") })
+    }
+
+    @Test
     fun `unchanged port and tls are a no-op that never invokes the tls resolver`() {
         val f = Fixture()
         assertTrue(f.transport.ensureRunning())

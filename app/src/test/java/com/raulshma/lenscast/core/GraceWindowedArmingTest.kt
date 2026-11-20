@@ -7,6 +7,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableStateFlow
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
@@ -106,6 +107,44 @@ class GraceWindowedArmingTest {
         isServerRunning.value = false
         Thread.sleep(400) // the grace elapses with the server still down
         eventually { assertEquals(2, disarmCalls.size) }
+    }
+
+    @Test
+    fun `an up leg that arms while the stop job is past its delay never loses the arm to a late disarm`() {
+        // The residual #14 shape: a job past its delay cannot be canceled,
+        // so the up leg's arm must hold the monitor the stop leg's re-check
+        // + disarm needs — the re-check then sees the fresh true and skips.
+        val target = bridge(graceMs = 200)
+        target.start(scope)
+        eventually { assertEquals(1, disarmCalls.size) } // initial down leg lands; collector idle
+        target.applyNow(false) // schedule the stop under test deterministically
+        synchronized(target) {
+            Thread.sleep(400) // grace elapses with the monitor held: the stop job queues on it
+            isServerRunning.value = true
+            target.applyNow(true) // the up leg arms while the stop job waits on the monitor
+        }
+        eventually { assertTrue(armCalls.isNotEmpty()) }
+        Thread.sleep(300) // outlive the grace: the released stop job must not disarm behind the arm
+        assertEquals(1, disarmCalls.size)
+    }
+
+    @Test
+    fun `a stop leg that wins the monitor first disarms atomically and a later up leg re-arms`() {
+        // The symmetric ordering: the grace elapses with the server still
+        // down, the stop leg takes the monitor and disarms; the up leg that
+        // follows re-arms and no second disarm lands behind it.
+        val target = bridge(graceMs = 200)
+        target.start(scope)
+        eventually { assertEquals(1, disarmCalls.size) }
+        target.applyNow(false)
+        synchronized(target) {
+            Thread.sleep(400) // grace elapses with the monitor held, server still down
+        }
+        eventually { assertEquals(2, disarmCalls.size) } // stop leg wins the monitor, disarms
+        isServerRunning.value = true
+        eventually { assertEquals(listOf(0), armCalls) } // subsequent up leg re-arms
+        Thread.sleep(300)
+        assertEquals(2, disarmCalls.size)
     }
 
     private fun eventually(block: () -> Unit) {

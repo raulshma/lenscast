@@ -6,6 +6,7 @@ import com.raulshma.lenscast.capture.ml.DetectionModelStore
 import com.raulshma.lenscast.core.AppJson
 import com.raulshma.lenscast.core.StreamAuthCrypto
 import com.raulshma.lenscast.data.SettingsDataStore
+import com.raulshma.lenscast.data.apiTokenHashPref
 import com.raulshma.lenscast.streaming.model.SettingsResponseDto
 import io.mockk.every
 import io.mockk.mockk
@@ -72,16 +73,17 @@ class SettingsWebHandlerSecretTest {
 
     /**
      * Plants only the stored api token hash — the one precondition the
-     * empty-token gate pins read. The full-[plantAllSecrets] sweep costs
-     * seven serialized DataStore writes plus their propagation waits, which
-     * is needless exposure for a pin that never reads the other six secrets.
+     * empty-token gate pins read. The save commits to disk before returning,
+     * and the PUT's gate reads that disk truth ([SettingsDataStore.readFresh]),
+     * so no flow-propagation wait is needed. The full-[plantAllSecrets] sweep
+     * costs seven serialized DataStore writes, needless exposure for a pin
+     * that never reads the other six secrets.
      */
     private suspend fun plantApiTokenHash() {
         store.saveApiTokenHash("stored-token-hash")
-        awaitUntil("apiTokenHash never propagated") { store.apiTokenHash.value == "stored-token-hash" }
     }
 
-    /** Plants every stored credential; returns once the store flows carry them. */
+    /** Plants every stored credential; each save commits to disk before returning. */
     private suspend fun plantAllSecrets() {
         store.saveRtmpUrl("rtmp://user:pass@host/live/stream-key")
         store.saveWhipToken("whip-bearer-token")
@@ -90,14 +92,6 @@ class SettingsWebHandlerSecretTest {
         store.saveBackupWebdavPassword("dav-pass")
         store.saveTelegramBotToken("tg-token")
         store.saveApiTokenHash("stored-token-hash")
-
-        awaitUntil("rtmpUrl never propagated") { store.rtmpUrl.value == "rtmp://user:pass@host/live/stream-key" }
-        awaitUntil("whipToken never propagated") { store.whipToken.value == "whip-bearer-token" }
-        awaitUntil("srtUrl never propagated") { store.srtUrl.value == "srt://u:p@h:1000?streamid=secret-id" }
-        awaitUntil("mqttPassword never propagated") { store.mqttPassword.value == "mqtt-pass" }
-        awaitUntil("backupWebdavPassword never propagated") { store.backupWebdavPassword.value == "dav-pass" }
-        awaitUntil("telegramBotToken never propagated") { store.telegramBotToken.value == "tg-token" }
-        awaitUntil("apiTokenHash never propagated") { store.apiTokenHash.value == "stored-token-hash" }
     }
 
     @Before
@@ -118,13 +112,11 @@ class SettingsWebHandlerSecretTest {
         // suggests does not exist. The apiToken gate's precondition is
         // the one a leftover state breaks (an armed hash makes an empty
         // enable legitimately succeed), so every test starts from the
-        // gate's defaults.
+        // gate's defaults. The saves commit to disk before returning —
+        // the PUT reads them there, no flow settling needed.
         runBlocking {
             store.saveApiTokenEnabled(false)
             store.saveApiTokenHash("")
-        }
-        awaitUntil("gate defaults never propagated") {
-            !store.apiTokenEnabled.value && store.apiTokenHash.value == ""
         }
     }
 
@@ -190,14 +182,23 @@ class SettingsWebHandlerSecretTest {
     fun `put with empty secrets keeps the stored credentials`() = runBlocking {
         plantAllSecrets()
 
-        // The port change is the witness: a present section persists
-        // wholesale, so once it lands, the PUT's writes are complete — and
-        // the secrets, presented empty, were never touched.
+        // The assertions below read the shared flows, so wait for exactly
+        // those values to propagate (the PUT itself needs no settling — it
+        // reads disk).
         handler.put(
             """{"streaming":{"port":8099,"whipToken":"","mqttPassword":"",""" +
                 """"backupWebdavPassword":"","telegramBotToken":"","rtmpUrl":"","srtUrl":""}}""",
         )
-        awaitUntil("port never propagated") { store.streamingPort.value == 8099 }
+        awaitUntil("the kept credentials never propagated") {
+            store.streamingPort.value == 8099 &&
+                store.rtmpUrl.value == "rtmp://user:pass@host/live/stream-key" &&
+                store.whipToken.value == "whip-bearer-token" &&
+                store.srtUrl.value == "srt://u:p@h:1000?streamid=secret-id" &&
+                store.mqttPassword.value == "mqtt-pass" &&
+                store.backupWebdavPassword.value == "dav-pass" &&
+                store.telegramBotToken.value == "tg-token" &&
+                store.apiTokenHash.value == "stored-token-hash"
+        }
 
         assertEquals("an empty PUT wiped the stored rtmpUrl", "rtmp://user:pass@host/live/stream-key", store.rtmpUrl.value)
         assertEquals("an empty PUT wiped the stored whipToken", "whip-bearer-token", store.whipToken.value)
@@ -213,9 +214,14 @@ class SettingsWebHandlerSecretTest {
         plantAllSecrets()
 
         // Absent fields decode to the empty default — the same keep verdict
-        // as an explicit "".
+        // as an explicit "". The wait settles only the flows asserted below.
         handler.put("""{"streaming":{"port":8100}}""")
-        awaitUntil("port never propagated") { store.streamingPort.value == 8100 }
+        awaitUntil("the kept credentials never propagated") {
+            store.streamingPort.value == 8100 &&
+                store.rtmpUrl.value == "rtmp://user:pass@host/live/stream-key" &&
+                store.whipToken.value == "whip-bearer-token" &&
+                store.apiTokenHash.value == "stored-token-hash"
+        }
 
         assertEquals("rtmp://user:pass@host/live/stream-key", store.rtmpUrl.value)
         assertEquals("whip-bearer-token", store.whipToken.value)
@@ -298,8 +304,37 @@ class SettingsWebHandlerSecretTest {
 
         handler.put("""{"streaming":{"apiTokenEnabled":true,"apiToken":""}}""")
 
-        awaitUntil("apiTokenEnabled never propagated") { store.apiTokenEnabled.value }
+        awaitUntil("the armed gate never propagated") {
+            store.apiTokenEnabled.value && store.apiTokenHash.value == "stored-token-hash"
+        }
         assertEquals("stored-token-hash", store.apiTokenHash.value)
+    }
+
+    @Test
+    fun `enabling right after a hash save needs no flow settling`() = runBlocking {
+        // The save commits to disk before returning; the gate must read that
+        // hash from the PUT's own fresh snapshot — on a fresh process the
+        // shared flows still answer the descriptor default here.
+        store.saveApiTokenHash("stored-token-hash")
+
+        handler.put("""{"streaming":{"apiTokenEnabled":true,"apiToken":""}}""")
+
+        val doc = responseAdapter.fromJson(handler.get())!!
+        assertTrue("the enable dropped: the gate read a lagging flow", doc.streaming.apiTokenEnabled)
+        assertTrue(doc.streaming.apiTokenConfigured)
+    }
+
+    @Test
+    fun `back-to-back token then enable PUTs see each other's writes`() = runBlocking {
+        handler.put("""{"streaming":{"apiToken":"back-to-back-token"}}""")
+        handler.put("""{"streaming":{"apiTokenEnabled":true,"apiToken":""}}""")
+
+        val doc = responseAdapter.fromJson(handler.get())!!
+        assertTrue("the second PUT's gate missed the first PUT's hash", doc.streaming.apiTokenEnabled)
+        assertEquals(
+            StreamAuthCrypto.sha256Hex("back-to-back-token"),
+            store.readFresh(apiTokenHashPref.decode),
+        )
     }
 
     @Test

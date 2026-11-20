@@ -24,7 +24,11 @@ import kotlinx.coroutines.launch
  * write landed, before the collector's up leg ran), and a delayed stop that
  * kills a just-restarted server is the #14 failure shape. So the delayed job
  * re-reads the flow at FIRE time and disarms only when the server is still
- * down. All three consumers (the composition root's server-liveness watch —
+ * down. The re-check AND [disarm] run inside the same monitor as the up
+ * leg's [arm]: a job past its delay cannot be canceled, so without the
+ * shared lock a stale stop could still disarm behind a live arm (the
+ * residual #14 shape). The delay itself stays outside the monitor — the
+ * grace window is never serialized. All three consumers (the composition root's server-liveness watch —
  * the `serverWatchdogArming` leg MainApplication wires, the former
  * standalone arming class inlined into that wiring —
  * [HeartbeatController]'s alarm, and [ServerForegroundController]'s
@@ -79,13 +83,16 @@ class GraceWindowedArming(
             } else {
                 pendingStop = target.launch {
                     delay(stopGraceMs)
-                    // Fire-time re-check (see the class KDoc): the up leg's
-                    // cancel can lose a timing race to a starved dispatcher,
-                    // and a server that came back inside the window must
-                    // never lose its watch, alarm, or foreground service to
-                    // a stale stop.
-                    if (!isServerRunning.value) {
-                        disarm()
+                    // Fire-time re-check under the up leg's monitor (see the
+                    // class KDoc): a job past its delay cannot be canceled,
+                    // so the re-check + disarm must serialize against arm —
+                    // a server that came back inside the window must never
+                    // lose its watch, alarm, or foreground service to a
+                    // stale stop.
+                    synchronized(this@GraceWindowedArming) {
+                        if (!isServerRunning.value) {
+                            disarm()
+                        }
                     }
                 }
             }

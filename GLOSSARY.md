@@ -34,6 +34,12 @@ reliability wave — each term names a real module or invariant in the code now.
   composition root (`MainApplication`); the *choreography* belongs to the
   reliability modules.
 
+- **Live-output snapshot** — `StreamingManager.LiveOutputs` /
+  `snapshotLiveOutputs` / `restoreLiveOutputs`: recovery snapshots the five
+  `isActive()` live facts (never stored intent), and restore reuses the gated
+  starts only for outputs that were live and are dark now — so MEDIUM/HARD
+  recovery never loses an enabled push nor force-starts a disabled one.
+
 - **Reliability runtime** — the concept spanning "alarm fired" → "verdict
   executed": `HeartbeatController` + `StreamWatchdog` + the arming bridges.
   The Android side reaches it through the **reliability relay**
@@ -74,3 +80,11 @@ reliability wave — each term names a real module or invariant in the code now.
   behavior declared on its `AutomationActionCatalog` entry, so a new action is
   one catalog entry + locale strings, not a wave of `when` ladders. Web id
   lists derive from the contract fixture (device truth).
+
+- **Streaming field catalog** — the streaming section's wire↔pref mapping
+  declared once per field in `streaming/web/StreamingFieldCatalog.kt`: each
+  entry's sealed convention descriptor owns decode and encode both directions,
+  so a new field is one catalog entry. The completeness and round-trip gates
+  (`StreamingFieldCatalogTest`) derive the wire key set from the DTO adapter,
+  making drift a structural test failure; secrets decode blank. Sibling of the
+  **catalog-carried action**.

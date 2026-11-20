@@ -258,7 +258,7 @@ class StreamingSession(
      * decides *when* (WatchdogPolicy's tier ladder), applies backoff, and
      * verifies afterwards; this owns *what happens*: the stream-activity
      * snapshot, the camera rebind (through the bounded Main seam), and the
-     * conditional web/RTSP restarts.
+     * manager-owned restore of whatever went dark.
      *
      * Tiers, per the watchdog's historical semantics:
      *  - SOFT — rebind the camera use cases only.
@@ -282,22 +282,20 @@ class StreamingSession(
 
             WatchdogPolicy.RecoveryTier.MEDIUM -> {
                 Log.d(TAG, "Medium recovery: restarting streaming server + rebinding camera")
-                val webWasActive = streamingManager.isWebStreamActive()
-                val rtspWasActive = streamingManager.isRtspRunning.value
+                val live = streamingManager.snapshotLiveOutputs()
                 streamingManager.pauseStreaming()
                 if (!streamingManager.ensureServerRunning()) {
                     Log.e(TAG, "Medium recovery: failed to restart server")
                     return false
                 }
                 rebindCamera()
-                restartStreamsIfNotYetLive(webWasActive, rtspWasActive)
+                streamingManager.restoreLiveOutputs(live)
                 true
             }
 
             WatchdogPolicy.RecoveryTier.HARD -> {
                 Log.d(TAG, "Hard recovery: full re-initialization")
-                val webWasActive = streamingManager.isWebStreamActive()
-                val rtspWasActive = streamingManager.isRtspRunning.value
+                val live = streamingManager.snapshotLiveOutputs()
                 streamingManager.stopStreaming()
                 val cameraResult = withContext(Dispatchers.Main) {
                     cameraService.initialize()
@@ -316,7 +314,7 @@ class StreamingSession(
                     Log.e(TAG, "Hard recovery: failed to restart streaming")
                     return false
                 }
-                restartStreamsIfNotYetLive(webWasActive, rtspWasActive)
+                streamingManager.restoreLiveOutputs(live)
                 true
             }
         }
@@ -333,16 +331,6 @@ class StreamingSession(
         streamingManager.applyBatteryOptimization(powerManager.optimizationResult.value)
         if (!rebindCamera()) {
             Log.w(TAG, "Post-recovery camera rebind failed (timed out or denied)")
-        }
-    }
-
-    /** Restart only the outputs that were live before the disturbance. */
-    private fun restartStreamsIfNotYetLive(webWasActive: Boolean, rtspWasActive: Boolean) {
-        if (webWasActive && !streamingManager.isWebStreamActive()) {
-            streamingManager.startWebStreaming()
-        }
-        if (rtspWasActive && !streamingManager.isRtspRunning.value) {
-            streamingManager.startRtspStreaming()
         }
     }
 
@@ -580,19 +568,9 @@ class StreamingSession(
             putExtra(StreamingService.EXTRA_URL, streamingManager.streamUrl.value)
             when (action) {
                 StreamingService.ACTION_START -> {
-                    // Either live output capturing the mic needs the service's
-                    // MICROPHONE type - the old web-only flag left RTSP-only
-                    // streaming capturing without it, which the OS silences. The
-                    // RTMP push taps the same AAC path and the WHIP push owns its
-                    // dedicated AudioRecord, so both count the same way; the
-                    // shared capture also covers the sound-detection hold, which
-                    // keeps the mic up with no stream consumers at all.
                     putExtra(
                         StreamingService.EXTRA_AUDIO_ACTIVE,
-                        streamingManager.isSharedMicCapturing() ||
-                            streamingManager.isRtspAudioActive() ||
-                            streamingManager.isRtmpAudioActive() ||
-                            streamingManager.isWhipAudioActive(),
+                        streamingManager.microphoneTypeNeeded(),
                     )
                 }
                 StreamingService.ACTION_SERVER -> {

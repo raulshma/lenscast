@@ -87,8 +87,8 @@ internal class RtmpOutput(
     /** Stops the publisher (clean close) — no-op when already stopped. */
     fun stop() = output.stop()
 
-    /** The hook-less stop, for the manager's codec-gate path (it writes its own Error and settles itself). */
-    fun stopQuietly() = output.stopQuietly()
+    /** The live codec reaction — the deep module gates a live push on the hub's new codec (H.265 stops it). */
+    fun onCodecChanged() = output.onCodecChanged()
 
     /**
      * A new push URL lands immediately; a live output restarts on it through
