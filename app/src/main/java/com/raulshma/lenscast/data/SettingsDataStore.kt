@@ -247,6 +247,23 @@ private object Keys {
 }
 
 /**
+ * A (descriptor → value) pair for the section-atomic save
+ * ([SettingsDataStore.saveEntries]): the typed [SettingPref] and the value it
+ * should encode, carried past the generic erasure so entries of different
+ * setting types can share one list — one DataStore transaction — without the
+ * store re-widening each descriptor.
+ */
+internal class SettingEntry<T> internal constructor(
+    internal val pref: SettingPref<T>,
+    private val value: T,
+) {
+    /** Encodes exactly as the descriptor's own saver does — same coercion. */
+    internal fun encode(prefs: MutablePreferences) {
+        pref.encode(prefs, value)
+    }
+}
+
+/**
  * Every persisted setting declared exactly once as a [SettingPref] descriptor:
  * key, decode convention, encode convention, and bounds live together, so a
  * key's read side, write side, and clamp can never drift. The SettingsDataStore
@@ -1333,13 +1350,19 @@ class SettingsDataStore(
         .stateIn(shareInScope, SharingStarted.Eagerly, default)
 
     /**
-     * The current disk value of one setting, suspending until DataStore's
-     * first read lands. The shared StateFlows above start at the descriptor
-     * default, so an immediate `.value` read from a fresh process (the boot
-     * receiver) can race the disk — startup-critical reads go through here.
+     * The disk-truth read: one setting's current value, decoded straight
+     * from the DataStore file through its descriptor's own [SettingPref.decode]
+     * (one [readFresh] pass), suspending until DataStore's first read lands —
+     * never lags the share-in. The shared StateFlows above start at the
+     * descriptor default, so an immediate `.value` read from a fresh process
+     * (the boot receiver) can race the disk — startup-critical reads go
+     * through here.
+     *
+     * This is the ONE disk-read seam beside the flows: every `...FromDisk()` /
+     * `...Now()` twin below is a one-line delegate to it, so a setting can
+     * never grow a second, drifting read convention.
      */
-    private suspend fun <T> SettingPref<T>.diskValue(): T =
-        context.dataStore.data.map(decode).first()
+    internal suspend fun <T> disk(pref: SettingPref<T>): T = readFresh(pref.decode)
 
     private suspend fun <T> SettingPref<T>.save(value: T) {
         context.dataStore.edit { prefs -> encode(prefs, value) }
@@ -1349,14 +1372,14 @@ class SettingsDataStore(
 
     /**
      * The current disk value of the camera settings, suspending until
-     * DataStore's read lands (the [diskValue] discipline). The
+     * DataStore's read lands (the [disk] discipline). The
      * read-your-write seam for the Automation Test's snapshot: an arm right
      * after the implicit restore's saves must not answer from the shared
      * flow's lagging `.value` (the async share-in hop) — the pre-restore
      * values would become the "pre-test" snapshot and the next restore would
      * faithfully restore the state it was supposed to have rewound.
      */
-    suspend fun settingsFromDisk(): CameraSettings = cameraSettingsPref.diskValue()
+    suspend fun settingsFromDisk(): CameraSettings = disk(cameraSettingsPref)
 
     /**
      * One untorn pass over the DataStore file, handed to the caller for
@@ -1368,6 +1391,22 @@ class SettingsDataStore(
      */
     internal suspend fun <R> readFresh(block: (Preferences) -> R): R =
         context.dataStore.data.map(block).first()
+
+    /**
+     * One atomic section save: every entry encodes into the SAME
+     * `dataStore.edit {}` pass, and each through its own descriptor's
+     * [SettingPref.encode] — the identical clamp/normalize its per-setting
+     * saver would apply, so the section path can never drift from them.
+     * DataStore commits the pass whole or not at all: a crash mid-write
+     * leaves the previous document, and a concurrent disk-truth reader
+     * ([readFresh], the automation executor's snapshot) sees either the old
+     * or the new document, never a half-applied section.
+     */
+    internal suspend fun saveEntries(entries: List<SettingEntry<*>>) {
+        context.dataStore.edit { prefs ->
+            for (entry in entries) entry.encode(prefs)
+        }
+    }
 
     val streamingPort: StateFlow<Int> = streamingPortPref.shared()
 
@@ -1458,7 +1497,7 @@ class SettingsDataStore(
     val motionDetectionEnabled: StateFlow<Boolean> = motionDetectionEnabledPref.shared()
 
     /** The disk-read twin of [motionDetectionEnabled] — see [settingsFromDisk]. */
-    suspend fun motionDetectionEnabledFromDisk(): Boolean = motionDetectionEnabledPref.diskValue()
+    suspend fun motionDetectionEnabledFromDisk(): Boolean = disk(motionDetectionEnabledPref)
 
     val motionSensitivity: StateFlow<Int> = motionSensitivityPref.shared()
 
@@ -1491,7 +1530,7 @@ class SettingsDataStore(
     val soundDetectionEnabled: StateFlow<Boolean> = soundDetectionEnabledPref.shared()
 
     /** The disk-read twin of [soundDetectionEnabled] — see [settingsFromDisk]. */
-    suspend fun soundDetectionEnabledFromDisk(): Boolean = soundDetectionEnabledPref.diskValue()
+    suspend fun soundDetectionEnabledFromDisk(): Boolean = disk(soundDetectionEnabledPref)
 
     val soundThresholdPercent: StateFlow<Int> = soundThresholdPercentPref.shared()
 
@@ -1576,7 +1615,7 @@ class SettingsDataStore(
     val fsiCameraResume: StateFlow<Boolean> = fsiCameraResumePref.shared()
 
     /** Startup-critical: suspends on the disk value, immune to the flow's default-first race. */
-    suspend fun resumeStreamsOnBootNow(): Boolean = resumeStreamsOnBootPref.diskValue()
+    suspend fun resumeStreamsOnBootNow(): Boolean = disk(resumeStreamsOnBootPref)
 
     /**
      * The web-streaming enable's disk value, for the startup-critical read:
@@ -1584,15 +1623,15 @@ class SettingsDataStore(
      * shared flows' descriptor defaults (the same race the boot receiver
      * dodges with [resumeStreamsOnBootNow]).
      */
-    suspend fun webStreamingEnabledFromDisk(): Boolean = webStreamingEnabledPref.diskValue()
+    suspend fun webStreamingEnabledFromDisk(): Boolean = disk(webStreamingEnabledPref)
 
     /** The RTSP enable's disk value — the relaunch re-arm's other persisted gate. */
-    suspend fun rtspEnabledFromDisk(): Boolean = rtspEnabledPref.diskValue()
+    suspend fun rtspEnabledFromDisk(): Boolean = disk(rtspEnabledPref)
 
     val keepAwakeEnabled: StateFlow<Boolean> = keepAwakeEnabledPref.shared()
 
     /** Startup-critical: suspends on the disk value, immune to the flow's default-first race. */
-    suspend fun keepAwakeEnabledFromDisk(): Boolean = keepAwakeEnabledPref.diskValue()
+    suspend fun keepAwakeEnabledFromDisk(): Boolean = disk(keepAwakeEnabledPref)
 
     val detectionNotificationsEnabled: StateFlow<Boolean> = detectionNotificationsEnabledPref.shared()
 
@@ -1831,12 +1870,12 @@ class SettingsDataStore(
      * shared StateFlows above re-decode on a collector's beat after a save
      * completes, so a write path that answers with the persisted truth (PUT
      * /api/automation) reads through here instead of racing its own write —
-     * the same disk-over-flow convention as the startup-critical [diskValue]
+     * the same disk-over-flow convention as the startup-critical [disk]
      * reads.
      */
-    suspend fun automationEnabledFromDisk(): Boolean = automationEnabledPref.diskValue()
+    suspend fun automationEnabledFromDisk(): Boolean = disk(automationEnabledPref)
 
-    suspend fun automationRulesFromDisk(): List<AutomationRule> = automationRulesPref.diskValue()
+    suspend fun automationRulesFromDisk(): List<AutomationRule> = disk(automationRulesPref)
 
     suspend fun saveBackupEnabled(enabled: Boolean) = backupEnabledPref.save(enabled)
 
