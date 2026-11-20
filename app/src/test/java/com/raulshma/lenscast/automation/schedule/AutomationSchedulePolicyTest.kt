@@ -1,6 +1,7 @@
 package com.raulshma.lenscast.automation.schedule
 
 import com.raulshma.lenscast.camera.model.CameraSettings
+import com.raulshma.lenscast.camera.model.NightVisionMode
 import com.raulshma.lenscast.core.StreamDefaults
 import java.time.LocalDate
 import java.util.TimeZone
@@ -991,7 +992,119 @@ class AutomationSchedulePolicyTest {
         }
     }
 
+    @Test
+    fun `night vision merge maps the canonical ids and degrades unknown modes to no change`() {
+        val base = CameraSettings(nightVisionMode = NightVisionMode.OFF, iso = 400)
+        assertEquals(
+            NightVisionMode.ON,
+            merge(base, "night_vision", "mode" to "on").nightVisionMode,
+        )
+        assertEquals(
+            NightVisionMode.AUTO,
+            merge(base, "night_vision", "mode" to "auto").nightVisionMode,
+        )
+        assertEquals(
+            NightVisionMode.OFF,
+            merge(base, "night_vision", "mode" to "off").nightVisionMode,
+        )
+        // The hand-built-spec guard: an unknown mode degrades to "no change",
+        // like every unparseable param — and the other axes ride untouched.
+        val unknown = merge(base, "night_vision", "mode" to "midnight")
+        assertEquals(NightVisionMode.OFF, unknown.nightVisionMode)
+        assertEquals(400, unknown.iso)
+        // Absent mode: unchanged.
+        assertEquals(base, merge(base, "night_vision"))
+    }
+
+    @Test
+    fun `every catalog action merges exactly its documented axes`() {
+        // The complete 12-action merge pin — one entry per catalog id, each
+        // asserting the full document, so a merge that leaks into a foreign
+        // axis fails here. camera_lens is the deliberate no-op: the lens is a
+        // LIVE switch (SwitchLens effect), not a persisted camera value.
+        val base = CameraSettings(
+            iso = 400,
+            exposureTime = 5_000_000L,
+            exposureCompensation = 1,
+            zoomRatio = 2.0f,
+            frameRate = 30,
+            torchEnabled = false,
+            torchStrength = 2,
+            nightVisionMode = NightVisionMode.OFF,
+        )
+        val cases = listOf(
+            Triple(
+                "camera_exposure",
+                mapOf("iso" to "800", "exposure_time_ms" to "20"),
+                base.copy(iso = 800, exposureTime = 20_000_000L),
+            ),
+            Triple("camera_ev", mapOf("index" to "-4"), base.copy(exposureCompensation = -4)),
+            Triple("camera_zoom", mapOf("ratio" to "3.5"), base.copy(zoomRatio = 3.5f)),
+            Triple("camera_fps", mapOf("fps" to "60"), base.copy(frameRate = 60)),
+            Triple("camera_lens", mapOf("index" to "3"), base),
+            Triple("night_vision", mapOf("mode" to "on"), base.copy(nightVisionMode = NightVisionMode.ON)),
+            Triple(
+                "torch",
+                mapOf("enabled" to "true", "strength" to "5"),
+                base.copy(torchEnabled = true, torchStrength = 5),
+            ),
+            Triple("stream", mapOf("enabled" to "true"), base),
+            Triple("capture_photo", emptyMap(), base),
+            Triple("recording", mapOf("enabled" to "true", "duration_seconds" to "60"), base),
+            Triple("siren", mapOf("enabled" to "true", "duration_seconds" to "10"), base),
+            Triple("detection", mapOf("motion_enabled" to "true", "sound_enabled" to "false"), base),
+        )
+        cases.forEach { (type, params, expected) ->
+            assertEquals(
+                "merge: $type",
+                expected,
+                AutomationSchedulePolicy.mergeCameraSettings(base, AutomationActionSpec(type, params)),
+            )
+        }
+        // Unknown ids merge nothing (the generic fallback, no crash).
+        assertEquals(
+            base,
+            AutomationSchedulePolicy.mergeCameraSettings(
+                base, AutomationActionSpec("not_a_real_action", mapOf("x" to "1")),
+            ),
+        )
+    }
+
+    @Test
+    fun `merges are idempotent for every catalog action`() {
+        // A merge re-applied to its own output is a fixed point — the
+        // restore's restoredCameraSettings fold and the catch-up re-fires
+        // both rely on convergence, not drift.
+        val base = CameraSettings(iso = 400, torchEnabled = false, nightVisionMode = NightVisionMode.AUTO)
+        val cases = listOf(
+            "camera_exposure" to mapOf("iso" to "800", "exposure_time_ms" to "20"),
+            "camera_ev" to mapOf("index" to "-4"),
+            "camera_zoom" to mapOf("ratio" to "3.5"),
+            "camera_fps" to mapOf("fps" to "60"),
+            "camera_lens" to mapOf("index" to "3"),
+            "night_vision" to mapOf("mode" to "on"),
+            "torch" to mapOf("enabled" to "true", "strength" to "5"),
+            "stream" to mapOf("enabled" to "true"),
+            "capture_photo" to emptyMap(),
+            "recording" to mapOf("enabled" to "true"),
+            "siren" to mapOf("enabled" to "true"),
+            "detection" to mapOf("motion_enabled" to "true"),
+        )
+        cases.forEach { (type, params) ->
+            val spec = AutomationActionSpec(type, params)
+            val once = AutomationSchedulePolicy.mergeCameraSettings(base, spec)
+            assertEquals(
+                "idempotent: $type",
+                once,
+                AutomationSchedulePolicy.mergeCameraSettings(once, spec),
+            )
+        }
+    }
+
     // ── helpers ──
+
+    private fun merge(base: CameraSettings, type: String, vararg params: Pair<String, String>) =
+        AutomationSchedulePolicy.mergeCameraSettings(base, AutomationActionSpec(type, params.toMap()))
 
     private fun chargingCondition(required: Boolean) = AutomationConditionSpec(
         AutomationConditionCatalog.CHARGING,

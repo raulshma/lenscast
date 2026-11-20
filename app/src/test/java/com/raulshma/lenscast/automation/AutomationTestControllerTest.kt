@@ -91,7 +91,8 @@ class AutomationTestControllerTest {
         every { cameraService.selectedLens } returns MutableStateFlow(
             SelectedLens(CameraSelector.DEFAULT_BACK_CAMERA, isFront = false, index = 0),
         )
-        // The torch convergence reads the live fact on every camera merge;
+        // The arm-time torch snapshot reads the live LED fact (a store-
+        // answering snapshot re-lit a dark LED on restore — the 0.2.2 repro);
         // the default world here is a dark LED.
         every { cameraService.isTorchOn() } returns false
         every { streamingManager.isServerRunning } returns MutableStateFlow(false)
@@ -198,14 +199,27 @@ class AutomationTestControllerTest {
         val controller = controller()
         assertTrue(controller.arm("r2"))
 
-        // The fire's persisted write carries the lit LED, not the stale
-        // stored off — the applier's re-assert lands as a no-op on the flash.
-        coVerify { settingsDataStore.saveSettings(match { it.iso == 1600 && it.torchEnabled }) }
+        // The fire's persisted write is the disk-truth merge VERBATIM — the
+        // untouched torch pair rides the stored off. Writer-side convergence
+        // to the lit LED is gone: the verdict lives in
+        // CameraService.applySettings, which converges this save to the live
+        // fact when the applier applies it (pinned in
+        // CameraServiceTorchConvergenceTest).
+        coVerify { settingsDataStore.saveSettings(match { it.iso == 1600 && !it.torchEnabled }) }
+
+        // Model that completed convergence: the applier applied the fire's
+        // save, found the torch pair untouched, and persisted the live lit
+        // fact back through its own save. restore() flush-joins exactly that
+        // apply before it reads the disk, so the disk it folds onto already
+        // carries the lit pair.
+        diskWorld = diskWorld.copy(torchEnabled = true)
+        settings.value = diskWorld
 
         controller.restore()
 
         // The restore touches only the axes the rule moved (ISO) — the torch
-        // stays converged to the live fact on the way back too.
+        // rides the arm-time snapshot, which answered the LIVE lit fact, so
+        // the persisted store and the direct live apply both carry lit.
         coVerify { settingsDataStore.saveSettings(match { it.iso == null && it.torchEnabled }) }
         val applied = slot<CameraSettings>()
         coVerify { applier.applyCameraSettingsNow(capture(applied)) }

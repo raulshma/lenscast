@@ -1,20 +1,40 @@
 package com.raulshma.lenscast.automation
 
+import androidx.camera.core.CameraSelector
 import com.raulshma.lenscast.MainApplication
 import com.raulshma.lenscast.automation.schedule.AutomationActionSpec
 import com.raulshma.lenscast.camera.CameraService
+import com.raulshma.lenscast.camera.model.CameraLensInfo
 import com.raulshma.lenscast.camera.model.CameraSettings
+import com.raulshma.lenscast.camera.model.LensLabelKind
 import com.raulshma.lenscast.camera.model.NightVisionMode
+import com.raulshma.lenscast.camera.model.StreamToggle
+import com.raulshma.lenscast.capture.PhotoCaptureManager
+import com.raulshma.lenscast.capture.RecordingController
+import com.raulshma.lenscast.capture.model.RecordingConfig
+import com.raulshma.lenscast.core.SirenAutoStop
+import com.raulshma.lenscast.core.SirenPlayer
 import com.raulshma.lenscast.data.SettingsDataStore
+import com.raulshma.lenscast.streaming.StreamStateJournal
+import com.raulshma.lenscast.streaming.StreamingManager
 import io.mockk.coEvery
 import io.mockk.coVerify
+import io.mockk.coVerifyOrder
 import io.mockk.every
 import io.mockk.mockk
+import io.mockk.slot
+import io.mockk.verify
+import io.mockk.verifyOrder
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.test.UnconfinedTestDispatcher
+import kotlinx.coroutines.test.resetMain
+import kotlinx.coroutines.test.setMain
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 
@@ -49,6 +69,13 @@ class AutomationActionExecutorTest {
     private val app: MainApplication = mockk()
     private val settingsDataStore: SettingsDataStore = mockk()
     private val cameraService: CameraService = mockk()
+    private val streamToggle: StreamToggle = mockk(relaxed = true)
+    private val streamStateJournal: StreamStateJournal = mockk()
+    private val photoCaptureManager: PhotoCaptureManager = mockk()
+    private val recordingController: RecordingController = mockk(relaxed = true)
+    private val streamingManager: StreamingManager = mockk()
+    private val sirenPlayer: SirenPlayer = mockk(relaxed = true)
+    private val sirenAutoStop: SirenAutoStop = mockk(relaxed = true)
 
     /** The store's shared flow — deliberately lagging, like the real share-in. */
     private val settings = MutableStateFlow(CameraSettings())
@@ -69,6 +96,15 @@ class AutomationActionExecutorTest {
     fun setUp() {
         every { app.settingsDataStore } returns settingsDataStore
         every { app.cameraService } returns cameraService
+        every { app.streamToggle } returns streamToggle
+        every { app.streamStateJournal } returns streamStateJournal
+        every { app.photoCaptureManager } returns photoCaptureManager
+        every { app.recordingController } returns recordingController
+        every { app.streamingManager } returns streamingManager
+        every { app.sirenAutoStop } returns sirenAutoStop
+        every { settingsDataStore.recordingAudioEnabled } returns MutableStateFlow(false)
+        every { streamingManager.sirenController() } returns sirenPlayer
+        coEvery { streamStateJournal.load() } returns StreamStateJournal.State()
 
         every { settingsDataStore.settings } returns settings
         coEvery { settingsDataStore.settingsFromDisk() } answers { disk }
@@ -79,9 +115,10 @@ class AutomationActionExecutorTest {
             disk = firstArg()
             savedDocuments.add(firstArg())
         }
-
-        // The torch convergence reads the live fact on every camera merge.
-        every { cameraService.isTorchOn() } returns false
+        // NOTE: cameraService.isTorchOn is deliberately NOT stubbed — the
+        // executor no longer consults the live LED fact (the torch-touch
+        // verdict is CameraService.applySettings'), and the strict mock
+        // fails any test whose path tried to read it.
     }
 
     private fun executor() = AutomationActionExecutor(app)
@@ -211,6 +248,24 @@ class AutomationActionExecutorTest {
     // ── ownership: the executor persists; the applier stays the only runtime path ──
 
     @Test
+    fun `a torch action persists its merge verbatim without consulting the live torch`() = runBlocking {
+        // Stored dark intent with a strength preference; the rule asks for
+        // torch on. The document passes through as merged — whether this
+        // save "touches torch" is CameraService.applySettings' verdict, so
+        // the executor must not rewrite the pair against the live LED fact
+        // (and the strict cameraService mock would fail the test if it
+        // read isTorchOn at all).
+        disk = CameraSettings(torchEnabled = false, torchStrength = 3)
+        settings.value = CameraSettings()
+
+        executor().runActions(listOf(AutomationActionSpec("torch", mapOf("enabled" to "true"))))
+
+        val last = savedDocuments.single()
+        assertTrue(last.torchEnabled)
+        assertEquals(3, last.torchStrength)
+    }
+
+    @Test
     fun `camera actions persist through the store and never drive the camera directly`() = runBlocking {
         disk = CameraSettings()
         settings.value = CameraSettings()
@@ -223,5 +278,114 @@ class AutomationActionExecutorTest {
         // The last document exists and is the accumulated one.
         assertNotNull(savedDocuments.lastOrNull())
         assertEquals(15, savedDocuments.last().frameRate)
+    }
+
+    // ── the dispatch vocabulary: each AutomationEffect interprets at its seam ──
+    // The old per-action `when` over ids is the catalog entry's declared
+    // effects now; these tests pin the interpreter against each collaborator.
+
+    @Test
+    fun `unknown action ids skip silently`() = runBlocking {
+        executor().runActions(listOf(AutomationActionSpec("not_a_real_action", mapOf("enabled" to "true"))))
+        coVerify(exactly = 0) { settingsDataStore.saveSettings(any()) }
+        coVerify(exactly = 0) { streamToggle.stopServer() }
+    }
+
+    @Test
+    fun `stream action drives the boot-resume toggle start and stop verdicts`() = runBlocking {
+        executor().runActions(
+            listOf(
+                AutomationActionSpec("stream", mapOf("enabled" to "true")),
+                AutomationActionSpec("stream", mapOf("enabled" to "false")),
+            ),
+        )
+        // tileStart over the never-lived journal defaults to the WEB output.
+        coVerifyOrder {
+            streamToggle.startWeb()
+            streamToggle.stopServer()
+        }
+    }
+
+    @Test
+    fun `recording action starts with the clamped duration verdict and stops`() = runBlocking {
+        val started = slot<RecordingConfig>()
+        executor().runActions(
+            listOf(
+                AutomationActionSpec("recording", mapOf("enabled" to "true", "duration_seconds" to "7200")),
+                AutomationActionSpec("recording", mapOf("enabled" to "false")),
+            ),
+        )
+        verifyOrder {
+            recordingController.start(capture(started))
+            recordingController.stop()
+        }
+        // 7200 requested, the RecordingConfig ceiling (1 h) is the verdict.
+        assertEquals(3_600L, started.captured.durationSeconds)
+    }
+
+    @Test
+    fun `siren action arms the shared auto-stop only on an explicit duration`() = runBlocking {
+        executor().runActions(
+            listOf(
+                // On with a duration: start + arm the shared timer.
+                AutomationActionSpec("siren", mapOf("enabled" to "true", "duration_seconds" to "10")),
+                // On without: run until stopped — an already-armed stop stays armed.
+                AutomationActionSpec("siren", mapOf("enabled" to "true")),
+                // Off: cancel the timer, then stop.
+                AutomationActionSpec("siren", mapOf("enabled" to "false")),
+            ),
+        )
+        // Both armed runs drive the siren start (run-until-stopped still
+        // starts); only the explicit duration arms the shared timer.
+        verify(exactly = 2) { sirenPlayer.start() }
+        verify(exactly = 1) { sirenAutoStop.armAfterStart(10_000L, any()) }
+        verifyOrder {
+            sirenAutoStop.cancel()
+            sirenPlayer.stop()
+        }
+    }
+
+    @Test
+    fun `capture_photo action captures fire-and-forget through the gallery seam`() = runBlocking {
+        every { photoCaptureManager.captureToGallery(any(), any(), any()) } returns "photo.jpg"
+        executor().runActions(listOf(AutomationActionSpec("capture_photo")))
+        verify(exactly = 1) { photoCaptureManager.captureToGallery(any(), any(), any()) }
+    }
+
+    @Test
+    fun `detection action saves only the toggles the params carry`() = runBlocking {
+        coEvery { settingsDataStore.saveMotionDetectionEnabled(any()) } returns Unit
+        coEvery { settingsDataStore.saveSoundDetectionEnabled(any()) } returns Unit
+        executor().runActions(
+            listOf(
+                AutomationActionSpec("detection", mapOf("motion_enabled" to "false")),
+                AutomationActionSpec("detection", mapOf("sound_enabled" to "true")),
+            ),
+        )
+        coVerify(exactly = 1) { settingsDataStore.saveMotionDetectionEnabled(false) }
+        coVerify(exactly = 1) { settingsDataStore.saveSoundDetectionEnabled(true) }
+    }
+
+    @Test
+    fun `camera_lens action clamps into the live inventory and an empty inventory skips silently`() = runBlocking {
+        Dispatchers.setMain(UnconfinedTestDispatcher())
+        try {
+            // Empty inventory: skip rather than guess.
+            every { cameraService.availableLenses } returns MutableStateFlow(emptyList())
+            executor().runActions(listOf(AutomationActionSpec("camera_lens", mapOf("index" to "0"))))
+            verify(exactly = 0) { cameraService.selectLens(any()) }
+
+            // Out-of-range index clamps into the live enumeration.
+            every { cameraService.availableLenses } returns MutableStateFlow(
+                listOf(
+                    CameraLensInfo("0", LensLabelKind.WIDE, CameraSelector.LENS_FACING_BACK, 26f, CameraSelector.DEFAULT_BACK_CAMERA),
+                    CameraLensInfo("1", LensLabelKind.FRONT, CameraSelector.LENS_FACING_FRONT, 20f, CameraSelector.DEFAULT_FRONT_CAMERA),
+                ),
+            )
+            executor().runActions(listOf(AutomationActionSpec("camera_lens", mapOf("index" to "5"))))
+            verify(exactly = 1) { cameraService.selectLens(1) }
+        } finally {
+            Dispatchers.resetMain()
+        }
     }
 }

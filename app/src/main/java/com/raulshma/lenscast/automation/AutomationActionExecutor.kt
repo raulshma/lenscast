@@ -5,8 +5,8 @@ import com.raulshma.lenscast.MainApplication
 import com.raulshma.lenscast.automation.schedule.AutomationActionRunner
 import com.raulshma.lenscast.automation.schedule.AutomationActionSpec
 import com.raulshma.lenscast.automation.schedule.AutomationActionCatalog
+import com.raulshma.lenscast.automation.schedule.AutomationEffect
 import com.raulshma.lenscast.automation.schedule.AutomationSchedulePolicy
-import com.raulshma.lenscast.camera.model.CameraSettings
 import com.raulshma.lenscast.capture.model.RecordingConfig
 import com.raulshma.lenscast.capture.model.RecordingQuality
 import com.raulshma.lenscast.streaming.BootResumePolicy
@@ -73,73 +73,81 @@ class AutomationActionExecutor(private val app: MainApplication) : AutomationAct
     }
 
     /**
-     * One catalog action to its seam. Camera-valued actions
-     * (camera_exposure/ev/zoom/fps, torch and night_vision) merge into the
-     * PERSISTED [com.raulshma.lenscast.camera.model.CameraSettings] — the
-     * Settings Applier applies them in place with no stream interruption.
-     * That torch
-     * mode is deliberately different from [setTorchLive]'s: the receiver's
-     * SET_TORCH is LIVE deterrence (drive the camera, persist nothing — the
-     * setting may disagree with reality so a toggle can compute its target),
-     * while a scheduler `torch` action converges the persisted state, so a
-     * device restart or a settings sync restores what the rule asked for.
+     * One catalog action to its seam: iterate the entry's declared
+     * [AutomationEffect] steps and interpret each against the app's shared
+     * seams. The per-action `when` over ids is gone — the semantics live on
+     * the catalog entry ([AutomationActionType.effects]); this `when` is over
+     * the closed EFFECT vocabulary, stable machinery a new action with
+     * existing capability vocabulary never touches. An unknown id skips
+     * silently (the schedule policy's catch-up filter already drops them —
+     * this is the last gate).
      */
     private suspend fun execute(action: AutomationActionSpec) {
-        when (AutomationActionCatalog.typeFor(action.type)?.id ?: return) {
-            "camera_exposure", "camera_ev", "camera_zoom", "camera_fps", "torch", "night_vision" ->
-                applyCameraSetting(action)
-            "camera_lens" -> switchLens(action)
-            // Sanitized BOOL params are always the canonical "true"/"false"
-            // and required params always present; reading `!= "false"` keeps
-            // a hand-built spec on the documented default (enabled).
-            "stream" -> if (action.params["enabled"] != "false") startStream() else stopStream()
-            "capture_photo" -> capturePhoto(
-                onSaved = { _, _ -> },
-                onError = { Log.w(TAG, "Automation capture failed: ${it.message}") },
-            )
-            "recording" -> if (action.params["enabled"] != "false") {
-                startRecording(
-                    AutomationIntentPolicy.recordingDurationSeconds(
-                        action.params["duration_seconds"]?.toIntOrNull() ?: 0,
-                    ),
+        val entry = AutomationActionCatalog.typeFor(action.type) ?: return
+        for (effect in entry.effects) {
+            when (effect) {
+                AutomationEffect.MergeCameraSettings -> applyCameraSetting(action)
+                AutomationEffect.SwitchLens -> switchLens(action)
+                // Sanitized BOOL params are always the canonical "true"/"false"
+                // and required params always present; reading `!= "false"` keeps
+                // a hand-built spec on the documented default (enabled).
+                AutomationEffect.ToggleStream -> if (enabled(action)) startStream() else stopStream()
+                AutomationEffect.CapturePhoto -> capturePhoto(
+                    onSaved = { _, _ -> },
+                    onError = { Log.w(TAG, "Automation capture failed: ${it.message}") },
                 )
-            } else {
-                stopRecording()
-            }
-            "siren" -> if (action.params["enabled"] != "false") {
-                // Absent duration = run until stopped (null delay — an
-                // already-armed stop stays armed); present = the raw seconds
-                // in milliseconds, unclamped like the receiver's verdict.
-                setSiren(
-                    true,
-                    if ("duration_seconds" in action.params) {
-                        (action.params["duration_seconds"]?.toIntOrNull() ?: 0) * 1_000L
-                    } else {
-                        null
-                    },
-                )
-            } else {
-                setSiren(false, null)
-            }
-            "detection" -> {
-                action.params["motion_enabled"]?.let {
-                    app.settingsDataStore.saveMotionDetectionEnabled(it == "true")
+                AutomationEffect.ToggleRecording -> if (enabled(action)) {
+                    startRecording(
+                        AutomationIntentPolicy.recordingDurationSeconds(
+                            action.params["duration_seconds"]?.toIntOrNull() ?: 0,
+                        ),
+                    )
+                } else {
+                    stopRecording()
                 }
-                action.params["sound_enabled"]?.let {
-                    app.settingsDataStore.saveSoundDetectionEnabled(it == "true")
+                AutomationEffect.ToggleSiren -> if (enabled(action)) {
+                    // Absent duration = run until stopped (null delay — an
+                    // already-armed stop stays armed); present = the raw seconds
+                    // in milliseconds, unclamped like the receiver's verdict.
+                    setSiren(
+                        true,
+                        if ("duration_seconds" in action.params) {
+                            (action.params["duration_seconds"]?.toIntOrNull() ?: 0) * 1_000L
+                        } else {
+                            null
+                        },
+                    )
+                } else {
+                    setSiren(false, null)
+                }
+                AutomationEffect.SaveDetectionToggles -> {
+                    action.params["motion_enabled"]?.let {
+                        app.settingsDataStore.saveMotionDetectionEnabled(it == "true")
+                    }
+                    action.params["sound_enabled"]?.let {
+                        app.settingsDataStore.saveSoundDetectionEnabled(it == "true")
+                    }
                 }
             }
         }
     }
 
+    /** The shared BOOL `enabled` verdict behind the toggle effects. */
+    private fun enabled(action: AutomationActionSpec): Boolean = action.params["enabled"] != "false"
+
     /**
      * Merges one camera action into the persisted settings; the applier does
-     * the rest. The action type is the torch-touch verdict: a `torch` action
-     * is an explicit torch write and passes through verbatim, every other
-     * camera action leaves the pair untouched — and this save's applier
-     * re-assert must carry the live fact, not the stale stored intent
-     * ([CameraSettings.convergeTorch]), or a camera-only rule fire darkened
-     * the deterrence coordinator's live-only lit LED.
+     * the rest. The persisted document passes through verbatim — the
+     * torch-touch verdict (this save's torch pair against the previously
+     * applied snapshot, convergence to the live LED fact otherwise) is
+     * CameraService.applySettings' alone, and the old action-type verdict
+     * here was one of the three writer-side copies of it (e84b36d) that
+     * drifted. That torch mode is deliberately different from
+     * [setTorchLive]'s: the receiver's SET_TORCH is LIVE deterrence (drive
+     * the camera, persist nothing — the setting may disagree with reality so
+     * a toggle can compute its target), while a scheduler `torch` action
+     * persists the requested state, so a device restart or a settings sync
+     * restores what the rule asked for.
      *
      * The merge base is the DISK truth (`settingsFromDisk`), never the
      * shared flow's `.value`: that flow lags in the two windows a camera
@@ -158,13 +166,8 @@ class AutomationActionExecutor(private val app: MainApplication) : AutomationAct
      */
     private suspend fun applyCameraSetting(action: AutomationActionSpec) {
         val current = app.settingsDataStore.settingsFromDisk()
-        val merged = AutomationSchedulePolicy.mergeCameraSettings(current, action)
         app.settingsDataStore.saveSettings(
-            CameraSettings.convergeTorch(
-                merged,
-                touchedTorch = AutomationActionCatalog.typeFor(action.type)?.id == "torch",
-                liveTorchOn = app.cameraService.isTorchOn(),
-            ),
+            AutomationSchedulePolicy.mergeCameraSettings(current, action),
         )
     }
 

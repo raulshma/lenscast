@@ -1,5 +1,7 @@
 package com.raulshma.lenscast.automation.schedule
 
+import com.raulshma.lenscast.camera.model.CameraSettings
+import com.raulshma.lenscast.camera.model.NightVisionMode
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -292,5 +294,150 @@ class AutomationActionCatalogTest {
             assertEquals(it, AutomationActionCatalog.typeFor(it.id))
         }
         assertEquals(AutomationActionCatalog.ACTION_TYPES.size, 12)
+    }
+
+    // ── Behavior anatomy: each entry carries its own semantics ──
+    // The old per-action ladders (executor dispatch, the camera merge, the
+    // restore verdicts) are gone; these tests pin the declarations that
+    // replaced them, so a new or edited entry cannot silently rely on
+    // machinery elsewhere.
+
+    @Test
+    fun `every entry declares its dispatch effects`() {
+        val expected = mapOf(
+            "camera_exposure" to listOf(AutomationEffect.MergeCameraSettings),
+            "camera_ev" to listOf(AutomationEffect.MergeCameraSettings),
+            "camera_zoom" to listOf(AutomationEffect.MergeCameraSettings),
+            "camera_fps" to listOf(AutomationEffect.MergeCameraSettings),
+            "camera_lens" to listOf(AutomationEffect.SwitchLens),
+            "night_vision" to listOf(AutomationEffect.MergeCameraSettings),
+            "torch" to listOf(AutomationEffect.MergeCameraSettings),
+            "stream" to listOf(AutomationEffect.ToggleStream),
+            "capture_photo" to listOf(AutomationEffect.CapturePhoto),
+            "recording" to listOf(AutomationEffect.ToggleRecording),
+            "siren" to listOf(AutomationEffect.ToggleSiren),
+            "detection" to listOf(AutomationEffect.SaveDetectionToggles),
+        )
+        AutomationActionCatalog.ACTION_TYPES.forEach { entry ->
+            assertTrue("no effects declared: ${entry.id}", entry.effects.isNotEmpty())
+            assertEquals("effects: ${entry.id}", expected[entry.id], entry.effects)
+        }
+    }
+
+    @Test
+    fun `every entry declares its merge and only camera-valued ids move the document`() {
+        val base = CameraSettings(iso = 400, torchEnabled = true)
+        val cameraValued = setOf("camera_exposure", "camera_ev", "camera_zoom", "camera_fps", "torch", "night_vision")
+        AutomationActionCatalog.ACTION_TYPES.forEach { entry ->
+            if (entry.id in cameraValued) {
+                // A camera merge parses from params; an EMPTY param map must
+                // leave the document untouched (the "leave unchanged" contract).
+                assertEquals("identity on empty params: ${entry.id}", base, entry.merge(base, emptyMap()))
+            } else {
+                // Non-camera actions route to their own seams — the merge is
+                // identity whatever the params claim.
+                assertEquals(
+                    "identity merge: ${entry.id}",
+                    base,
+                    entry.merge(base, mapOf("iso" to "1", "enabled" to "true")),
+                )
+            }
+        }
+    }
+
+    @Test
+    fun `every entry declares its restore spec`() {
+        val expected = mapOf(
+            "camera_exposure" to RestoreSpec.Axes(
+                listOf(
+                    RestorableAxis(RestoreAxis.ISO, onlyIfTouched = true),
+                    RestorableAxis(RestoreAxis.EXPOSURE_TIME_MS, onlyIfTouched = true),
+                ),
+            ),
+            "camera_ev" to RestoreSpec.Axes(listOf(RestorableAxis(RestoreAxis.EV_INDEX))),
+            "camera_zoom" to RestoreSpec.Axes(listOf(RestorableAxis(RestoreAxis.ZOOM_RATIO))),
+            "camera_fps" to RestoreSpec.Axes(listOf(RestorableAxis(RestoreAxis.FRAME_RATE))),
+            "camera_lens" to RestoreSpec.Axes(listOf(RestorableAxis(RestoreAxis.LENS_INDEX))),
+            "night_vision" to RestoreSpec.Axes(listOf(RestorableAxis(RestoreAxis.NIGHT_VISION))),
+            "torch" to RestoreSpec.Axes(
+                listOf(
+                    RestorableAxis(RestoreAxis.TORCH_ENABLED),
+                    RestorableAxis(RestoreAxis.TORCH_STRENGTH, onlyIfTouched = true),
+                ),
+            ),
+            "stream" to RestoreSpec.Axes(listOf(RestorableAxis(RestoreAxis.STREAM_RUNNING))),
+            "capture_photo" to RestoreSpec.NotRestorable,
+            "recording" to RestoreSpec.StopWhenArmedAndIdle,
+            "siren" to RestoreSpec.StopWhenArmed,
+            "detection" to RestoreSpec.Axes(
+                listOf(
+                    RestorableAxis(RestoreAxis.MOTION_ENABLED, onlyIfTouched = true),
+                    RestorableAxis(RestoreAxis.SOUND_ENABLED, onlyIfTouched = true),
+                ),
+            ),
+        )
+        AutomationActionCatalog.ACTION_TYPES.forEach { entry ->
+            assertEquals("restore: ${entry.id}", expected[entry.id], entry.restore)
+        }
+    }
+
+    @Test
+    fun `restore axes stay inside the entry's own param vocabulary`() {
+        AutomationActionCatalog.ACTION_TYPES.forEach { entry ->
+            val restore = entry.restore as? RestoreSpec.Axes ?: return@forEach
+            restore.axes.forEach { declared ->
+                assertEquals("axis param in schema: ${entry.id}/${declared.axis}", declared.axis.param in entry.params.map { it.name }, true)
+            }
+        }
+    }
+
+    @Test
+    fun `the snapshot covers exactly the declared axes, recording-idle gate included`() {
+        assertEquals(
+            listOf(
+                RestoreAxis.ISO,
+                RestoreAxis.EXPOSURE_TIME_MS,
+                RestoreAxis.EV_INDEX,
+                RestoreAxis.ZOOM_RATIO,
+                RestoreAxis.FRAME_RATE,
+                RestoreAxis.LENS_INDEX,
+                RestoreAxis.NIGHT_VISION,
+                RestoreAxis.TORCH_ENABLED,
+                RestoreAxis.TORCH_STRENGTH,
+                RestoreAxis.STREAM_RUNNING,
+                RestoreAxis.RECORDING_IDLE,
+                RestoreAxis.MOTION_ENABLED,
+                RestoreAxis.SOUND_ENABLED,
+            ),
+            AutomationActionCatalog.SNAPSHOT_AXES,
+        )
+    }
+
+    @Test
+    fun `camera merges fold their documented sentinel semantics`() {
+        // Only the exact "0" is the auto sentinel; malformed values leave the
+        // field untouched; night_vision maps its canonical ids and degrades
+        // an unknown mode to no change.
+        val base = CameraSettings(iso = 400, exposureTime = 5_000_000L, nightVisionMode = NightVisionMode.OFF)
+        val exposure = AutomationActionCatalog.typeFor("camera_exposure")!!
+        val auto = exposure.merge(base, mapOf("iso" to "0", "exposure_time_ms" to "0"))
+        assertNull(auto.iso)
+        assertNull(auto.exposureTime)
+        val malformed = exposure.merge(base, mapOf("iso" to "garbage", "exposure_time_ms" to "abc"))
+        assertEquals(base, malformed)
+        val manual = exposure.merge(base, mapOf("iso" to "800", "exposure_time_ms" to "20"))
+        assertEquals(800, manual.iso)
+        assertEquals(20_000_000L, manual.exposureTime)
+
+        val nightVision = AutomationActionCatalog.typeFor("night_vision")!!
+        assertEquals(NightVisionMode.ON, nightVision.merge(base, mapOf("mode" to "on")).nightVisionMode)
+        assertEquals(base, nightVision.merge(base, mapOf("mode" to "midnight")))
+        val torch = AutomationActionCatalog.typeFor("torch")!!
+        // Strength applies only when present; absent leaves a stored level.
+        val torchKeep = torch.merge(base.copy(torchStrength = 3), mapOf("enabled" to "true"))
+        assertEquals(3, torchKeep.torchStrength)
+        assertTrue(torchKeep.torchEnabled)
+        // A camera_lens action is a LIVE switch — its merge stays identity.
+        assertEquals(base, AutomationActionCatalog.typeFor("camera_lens")!!.merge(base, mapOf("index" to "3")))
     }
 }

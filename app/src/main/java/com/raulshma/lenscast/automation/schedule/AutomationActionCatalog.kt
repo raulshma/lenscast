@@ -1,5 +1,8 @@
 package com.raulshma.lenscast.automation.schedule
 
+import com.raulshma.lenscast.camera.model.CameraSettings
+import com.raulshma.lenscast.camera.model.NightVisionMode
+
 /**
  * The value type of one automation parameter: its wire name, how to parse
  * it, its documented bounds, and the default a required-but-absent (or
@@ -54,10 +57,180 @@ enum class ParamKind { BOOL, INT, FLOAT, STRING }
 enum class CatchUpClass { STATEFUL, ONESHOT }
 
 /**
+ * One executable capability step an automation action dispatches — the
+ * closed vocabulary the executor interprets against its collaborators.
+ * Effects are deliberately param-free declarations (the WHAT, not the
+ * verdict): the executor derives each step's verdict from the action's
+ * params at dispatch, through its own seam contracts. A new action built
+ * from existing capability vocabulary declares existing effects and touches
+ * none of this machinery.
+ */
+sealed interface AutomationEffect {
+    /**
+     * Merge the action's params into the persisted
+     * [CameraSettings] document (the executor's applyCameraSetting path —
+     * the Settings Applier applies them in place with no stream
+     * interruption). The merge semantics are the entry's [AutomationActionType.merge].
+     */
+    data object MergeCameraSettings : AutomationEffect
+
+    /** Switch the live lens to the `index` param, clamped into the live inventory. */
+    data object SwitchLens : AutomationEffect
+
+    /** Start or stop the stream server per the `enabled` verdict. */
+    data object ToggleStream : AutomationEffect
+
+    /** One gallery photo capture; failures log, never throw into the rule loop. */
+    data object CapturePhoto : AutomationEffect
+
+    /** Start (with the duration verdict) or stop the Recording Controller. */
+    data object ToggleRecording : AutomationEffect
+
+    /** Arm (with the optional auto-stop delay) or cancel-and-stop the shared siren. */
+    data object ToggleSiren : AutomationEffect
+
+    /** Persist the motion/sound detection toggles, one save per param present. */
+    data object SaveDetectionToggles : AutomationEffect
+}
+
+/**
+ * The pure reading of the live world a snapshot's axes capture from: the
+ * persisted camera document (disk truth) plus the live facts no store
+ * answers for. [com.raulshma.lenscast.automation.AutomationTestController]
+ * assembles it once per arm from the app's seams; the axes' capture lambdas
+ * ([RestoreAxis.capture]) stay pure over it.
+ */
+data class AutomationLiveState(
+    /** The persisted camera document (`settingsFromDisk` — read-your-write). */
+    val camera: CameraSettings,
+    /** The live selected lens' position in the camera's own enumeration. */
+    val lensIndex: Int,
+    /** The LIVE LED fact — live-only writers can desync it from the stored intent. */
+    val torchOn: Boolean,
+    val motionEnabled: Boolean,
+    val soundEnabled: Boolean,
+    /** Whether the whole server (web + RTSP) is running. */
+    val streamRunning: Boolean,
+    /** Whether the Recording Controller is Idle — a live recording is NOT automation's doing. */
+    val recordingIdle: Boolean,
+)
+
+/**
+ * One restorable snapshot axis — a named slot of the pre-test world the
+ * Automation Test can wind back. The enum is the axis vocabulary the catalog
+ * entries declare; the snapshot itself is the rendered value per axis.
+ *
+ * @param param The wire param this axis restores through; null for a gate
+ *   axis no action param reads (the recording stop's idle gate).
+ * @param capture Renders the axis's live value from one
+ *   [AutomationLiveState] reading — the snapshot's capture loop. Returns
+ *   null when the axis has no value (the device default), which the restore
+ *   skips; renders that are never null fold their absent reading to the
+ *   documented sentinel inline (the exposure "0" auto spelling).
+ */
+enum class RestoreAxis(
+    val param: String?,
+    val capture: (AutomationLiveState) -> String?,
+) {
+    /** null ISO is driver auto — restored through the catalog's "0" auto sentinel. */
+    ISO("iso", { it.camera.iso?.toString() ?: "0" }),
+
+    /** Nanoseconds on the document, milliseconds on the wire; auto folds to "0". */
+    EXPOSURE_TIME_MS(
+        "exposure_time_ms",
+        { it.camera.exposureTime?.let { ns -> ns / 1_000_000.0 }?.toString() ?: "0" },
+    ),
+
+    EV_INDEX("index", { it.camera.exposureCompensation.toString() }),
+    ZOOM_RATIO("ratio", { it.camera.zoomRatio.toString() }),
+    FRAME_RATE("fps", { it.camera.frameRate.toString() }),
+    LENS_INDEX("index", { it.lensIndex.toString() }),
+
+    /** The enum's catalog-canonical lowercase id (the merge's own vocabulary). */
+    NIGHT_VISION("mode", { it.camera.nightVisionMode.name.lowercase() }),
+
+    TORCH_ENABLED("enabled", { it.torchOn.toString() }),
+
+    /** null = device default strength — the strength param's absence. */
+    TORCH_STRENGTH("strength", { it.camera.torchStrength?.toString() }),
+
+    STREAM_RUNNING("enabled", { it.streamRunning.toString() }),
+    MOTION_ENABLED("motion_enabled", { it.motionEnabled.toString() }),
+    SOUND_ENABLED("sound_enabled", { it.soundEnabled.toString() }),
+
+    /** The recording stop's gate, not a param: a live recording is the user's. */
+    RECORDING_IDLE(null, { it.recordingIdle.toString() }),
+}
+
+/**
+ * One axis an entry restores, with its gate: optional params restore ONLY
+ * when the rule's action actually carried them (a rule that set only ISO
+ * must not also force exposure back to auto), required params restore always
+ * (the action always converged a definite verdict for them).
+ */
+data class RestorableAxis(
+    val axis: RestoreAxis,
+    /** true = restore only when the action's params carry the axis's param. */
+    val onlyIfTouched: Boolean = false,
+)
+
+/**
+ * How the Automation Test winds one action back (issue #18 item 3 — "press
+ * again to restore the previous state"). The per-entry declaration here is
+ * the one home of the restore semantics; the restore policy just interprets
+ * them generically over the snapshot.
+ */
+sealed interface RestoreSpec {
+
+    /** The snapshot axes this spec reads — the capture loop's union input. */
+    val declaredAxes: List<RestoreAxis>
+
+    /**
+     * Restore each declared axis the rule touched from the snapshot's values.
+     * Axes the snapshot left valueless (e.g. a device-default torch strength)
+     * restore nothing.
+     */
+    data class Axes(val axes: List<RestorableAxis>) : RestoreSpec {
+        override val declaredAxes: List<RestoreAxis> get() = axes.map { it.axis }
+    }
+
+    /**
+     * Restore as an explicit stop — a test that started the effect stops it
+     * on the way back and never re-arms it; a rule whose action asked for the
+     * stopped state (`enabled = false`) has nothing to restore. Siren.
+     */
+    object StopWhenArmed : RestoreSpec {
+        override val declaredAxes: List<RestoreAxis> get() = emptyList()
+    }
+
+    /**
+     * Stop, but only when the Recording Controller was Idle at arm time — the
+     * test started the only recording that can be the test's doing, and the
+     * user's own recording survives the restore.
+     */
+    object StopWhenArmedAndIdle : RestoreSpec {
+        override val declaredAxes: List<RestoreAxis> get() = listOf(RestoreAxis.RECORDING_IDLE)
+    }
+
+    /** Not restorable — the action's product is a capture, not a state. */
+    object NotRestorable : RestoreSpec {
+        override val declaredAxes: List<RestoreAxis> get() = emptyList()
+    }
+}
+
+/**
  * One automation action the engine can execute: its id, parameter schema,
- * catch-up class, whether applying it interrupts the live stream, and the
- * published picker decorations ([group] and [icon] — see
- * [AutomationIconVocabulary] for the icon kind's closed meaning).
+ * catch-up class, and the BEHAVIOR ANATOMY — the dispatch effects, the pure
+ * [CameraSettings] merge, and the restore spec — plus the published picker
+ * decorations ([group] and [icon]; see [AutomationIconVocabulary] for the
+ * icon kind's closed meaning).
+ *
+ * The anatomy fields are the one registration point for an action's
+ * semantics: the executor iterates [effects] against its collaborators, the
+ * schedule policy delegates [merge], and the restore policy interprets
+ * [restore] over the snapshot — no per-action ladder lives outside this
+ * entry. Adding an action with existing capability vocabulary is an entry
+ * (plus locale strings); the interpreters are stable.
  *
  * [interruptsStream] is a UI warning flag only — the executor does NOT
  * force a teardown/rebind around the actions it marks. The one flagged type
@@ -65,11 +238,24 @@ enum class CatchUpClass { STATEFUL, ONESHOT }
  * `CameraSessionArbiter` rebinds immediately when the camera is free (a
  * brief preview/stream interruption) and defers to the next natural rebind
  * while an exclusive session (a recording) is active.
+ *
+ * @param merge Folds one action's params into the current persisted
+ *   [CameraSettings]. Identity for actions the camera pipeline does not
+ *   consume (the executor routes them to their own seams); the camera-valued
+ *   merges follow the "absent/malformed = leave unchanged" contract — a
+ *   malformed value must never collapse a manual setting to a sentinel.
+ * @param effects The ordered dispatch steps the executor interprets. Every
+ *   action declares at least one.
+ * @param restore How the Automation Test winds the action back; see
+ *   [RestoreSpec].
  */
 data class AutomationActionType(
     val id: String,
     val params: List<AutomationParamSpec>,
     val catchUp: CatchUpClass,
+    val merge: (current: CameraSettings, params: Map<String, String>) -> CameraSettings,
+    val effects: List<AutomationEffect>,
+    val restore: RestoreSpec,
     val interruptsStream: Boolean = false,
     /** The picker group this entry lists under — a semantic id, never renamed. */
     val group: String,
@@ -79,14 +265,17 @@ data class AutomationActionType(
 
 /**
  * The catalog of what an automation rule may do: ids, param schemas (names /
- * kinds / bounds / defaults / autoAtZero) and catch-up classes are
- * single-sourced here. Per-type EXECUTION and pretty labels dispatch at the
- * executor/UI seams by design (exhaustive `when`s over a closed set), so
- * adding an action touches the catalog plus those seams. The Settings
- * Store's codec sanitizes through it, the schedule policy merges camera
- * actions through it, and the receiver/executor resolve ids through it. The
- * catalog test pins the exact id/param-name strings, so a typo here fails a
- * JVM test instead of silently disabling a feature.
+ * kinds / bounds / defaults / autoAtZero), catch-up classes and each entry's
+ * behavior anatomy (merge / dispatch effects / restore spec) are
+ * single-sourced here — an action's semantics are known in ONE place, this
+ * entry. Pretty labels stay at the UI seams by design (exhaustive label
+ * `when`s over a closed set; the web summary switch is the same seam). The
+ * Settings Store's codec sanitizes through it, the schedule policy merges
+ * camera actions through it, the receiver/executor resolve ids and dispatch
+ * through it, and the restore policy/capture loop read its declared restore
+ * axes. The catalog test pins the exact id/param-name strings and the
+ * per-entry anatomy, so a typo or a drifted declaration fails a JVM test
+ * instead of silently disabling a feature.
  *
  * Sentinels documented per entry: `iso`/`exposure_time_ms` "0" mean auto;
  * `recording.duration_seconds` "0" means unbounded; `siren.duration_seconds`
@@ -104,6 +293,102 @@ object AutomationActionCatalog {
     const val GROUP_LIGHT_SOUND = "light_sound"
     const val GROUP_STREAM_CAPTURE = "stream_capture"
     const val GROUP_DETECTION = "detection"
+
+    /** The merge that leaves the camera document untouched (non-camera actions). */
+    private val MERGE_IDENTITY: (CameraSettings, Map<String, String>) -> CameraSettings =
+        { current, _ -> current }
+
+    /**
+     * The camera_exposure merge: ONLY the exact "0" sentinel is the auto
+     * sentinel → null (driver auto); any other parseable value is the manual
+     * ISO / the exposure milliseconds (→ nanoseconds on the document), and an
+     * unparseable one leaves its field unchanged — a malformed value must
+     * never fold a manual setting back to auto. Several axes merge in one
+     * pass, and one malformed field never blocks the parseable one.
+     */
+    private val MERGE_CAMERA_EXPOSURE: (CameraSettings, Map<String, String>) -> CameraSettings =
+        { current, params ->
+            var merged = current
+            params["iso"]?.let { raw ->
+                if (raw == "0") {
+                    merged = merged.copy(iso = null)
+                } else {
+                    raw.toIntOrNull()?.let { iso -> merged = merged.copy(iso = iso) }
+                }
+            }
+            params["exposure_time_ms"]?.let { raw ->
+                if (raw == "0") {
+                    merged = merged.copy(exposureTime = null)
+                } else {
+                    raw.toDoubleOrNull()?.let { ms ->
+                        merged = merged.copy(exposureTime = (ms * 1_000_000).toLong())
+                    }
+                }
+            }
+            merged
+        }
+
+    /** The camera_ev merge: the compensation index, unchanged on an unparseable value. */
+    private val MERGE_CAMERA_EV: (CameraSettings, Map<String, String>) -> CameraSettings =
+        { current, params ->
+            params["index"]?.toIntOrNull()?.let { index ->
+                current.copy(exposureCompensation = index)
+            } ?: current
+        }
+
+    /** The camera_zoom merge: the magnification ratio, unchanged on an unparseable value. */
+    private val MERGE_CAMERA_ZOOM: (CameraSettings, Map<String, String>) -> CameraSettings =
+        { current, params ->
+            params["ratio"]?.toFloatOrNull()?.let { ratio ->
+                current.copy(zoomRatio = ratio)
+            } ?: current
+        }
+
+    /** The camera_fps merge: the frame rate, unchanged on an unparseable value. */
+    private val MERGE_CAMERA_FPS: (CameraSettings, Map<String, String>) -> CameraSettings =
+        { current, params ->
+            params["fps"]?.toIntOrNull()?.let { fps ->
+                current.copy(frameRate = fps)
+            } ?: current
+        }
+
+    /**
+     * The torch merge: the toggle flips on the canonical "true"/"false"
+     * (absent/unknown leaves the current torch state alone), and strength
+     * applies only when the optional param is present — absent means "device
+     * default", and clobbering a strength the user set elsewhere is not this
+     * action's business.
+     */
+    private val MERGE_TORCH: (CameraSettings, Map<String, String>) -> CameraSettings =
+        { current, params ->
+            var merged = current
+            when (params["enabled"]) {
+                "true" -> merged = merged.copy(torchEnabled = true)
+                "false" -> merged = merged.copy(torchEnabled = false)
+                // absent/unknown: leave the current torch state alone
+            }
+            params["strength"]?.toIntOrNull()?.let { strength ->
+                merged = merged.copy(torchStrength = strength)
+            }
+            merged
+        }
+
+    /**
+     * The night_vision merge: the canonical catalog id maps onto
+     * [NightVisionMode]; the else-arm is the hand-built-spec guard (an
+     * unknown mode degrades to "no change", like every unparseable param).
+     */
+    private val MERGE_NIGHT_VISION: (CameraSettings, Map<String, String>) -> CameraSettings =
+        { current, params ->
+            params["mode"]?.let { mode ->
+                when (mode) {
+                    "off" -> current.copy(nightVisionMode = NightVisionMode.OFF)
+                    "auto" -> current.copy(nightVisionMode = NightVisionMode.AUTO)
+                    "on" -> current.copy(nightVisionMode = NightVisionMode.ON)
+                    else -> current
+                }
+            } ?: current
+        }
 
     /**
      * Every executable action, in display/contract order. Additive only:
@@ -135,6 +420,15 @@ object AutomationActionCatalog {
                 ),
             ),
             catchUp = CatchUpClass.STATEFUL,
+            merge = MERGE_CAMERA_EXPOSURE,
+            effects = listOf(AutomationEffect.MergeCameraSettings),
+            // Optional params: restore only the axes the rule actually touched.
+            restore = RestoreSpec.Axes(
+                listOf(
+                    RestorableAxis(RestoreAxis.ISO, onlyIfTouched = true),
+                    RestorableAxis(RestoreAxis.EXPOSURE_TIME_MS, onlyIfTouched = true),
+                ),
+            ),
             group = GROUP_CAMERA,
             icon = AutomationIconVocabulary.EXPOSURE,
         ),
@@ -148,6 +442,9 @@ object AutomationActionCatalog {
                 ),
             ),
             catchUp = CatchUpClass.STATEFUL,
+            merge = MERGE_CAMERA_EV,
+            effects = listOf(AutomationEffect.MergeCameraSettings),
+            restore = RestoreSpec.Axes(listOf(RestorableAxis(RestoreAxis.EV_INDEX))),
             group = GROUP_CAMERA,
             icon = AutomationIconVocabulary.TONALITY,
         ),
@@ -161,6 +458,9 @@ object AutomationActionCatalog {
                 ),
             ),
             catchUp = CatchUpClass.STATEFUL,
+            merge = MERGE_CAMERA_ZOOM,
+            effects = listOf(AutomationEffect.MergeCameraSettings),
+            restore = RestoreSpec.Axes(listOf(RestorableAxis(RestoreAxis.ZOOM_RATIO))),
             group = GROUP_CAMERA,
             icon = AutomationIconVocabulary.ZOOM,
         ),
@@ -174,6 +474,9 @@ object AutomationActionCatalog {
                 ),
             ),
             catchUp = CatchUpClass.STATEFUL,
+            merge = MERGE_CAMERA_FPS,
+            effects = listOf(AutomationEffect.MergeCameraSettings),
+            restore = RestoreSpec.Axes(listOf(RestorableAxis(RestoreAxis.FRAME_RATE))),
             group = GROUP_CAMERA,
             icon = AutomationIconVocabulary.SPEED,
         ),
@@ -192,6 +495,12 @@ object AutomationActionCatalog {
                 ),
             ),
             catchUp = CatchUpClass.STATEFUL,
+            // The lens is a LIVE switch, not a persisted camera value: the
+            // merge stays identity (the snapshot's lens axis rides its own
+            // live reading, and the restore drives the live switch).
+            merge = MERGE_IDENTITY,
+            effects = listOf(AutomationEffect.SwitchLens),
+            restore = RestoreSpec.Axes(listOf(RestorableAxis(RestoreAxis.LENS_INDEX))),
             interruptsStream = true,
             group = GROUP_CAMERA,
             icon = AutomationIconVocabulary.LENS,
@@ -214,6 +523,9 @@ object AutomationActionCatalog {
                 ),
             ),
             catchUp = CatchUpClass.STATEFUL,
+            merge = MERGE_NIGHT_VISION,
+            effects = listOf(AutomationEffect.MergeCameraSettings),
+            restore = RestoreSpec.Axes(listOf(RestorableAxis(RestoreAxis.NIGHT_VISION))),
             group = GROUP_CAMERA,
             icon = AutomationIconVocabulary.NIGHTLIGHT,
         ),
@@ -233,6 +545,17 @@ object AutomationActionCatalog {
                 ),
             ),
             catchUp = CatchUpClass.STATEFUL,
+            merge = MERGE_TORCH,
+            effects = listOf(AutomationEffect.MergeCameraSettings),
+            // The toggle always restores (required param); only a rule that
+            // drove a level restores one — and only to the snapshot's own
+            // level (null = device default, the strength param's absence).
+            restore = RestoreSpec.Axes(
+                listOf(
+                    RestorableAxis(RestoreAxis.TORCH_ENABLED),
+                    RestorableAxis(RestoreAxis.TORCH_STRENGTH, onlyIfTouched = true),
+                ),
+            ),
             group = GROUP_LIGHT_SOUND,
             icon = AutomationIconVocabulary.TORCH,
         ),
@@ -246,6 +569,9 @@ object AutomationActionCatalog {
                 ),
             ),
             catchUp = CatchUpClass.STATEFUL,
+            merge = MERGE_IDENTITY,
+            effects = listOf(AutomationEffect.ToggleStream),
+            restore = RestoreSpec.Axes(listOf(RestorableAxis(RestoreAxis.STREAM_RUNNING))),
             group = GROUP_STREAM_CAPTURE,
             icon = AutomationIconVocabulary.BROADCAST,
         ),
@@ -253,6 +579,9 @@ object AutomationActionCatalog {
             id = "capture_photo",
             params = emptyList(),
             catchUp = CatchUpClass.ONESHOT,
+            merge = MERGE_IDENTITY,
+            effects = listOf(AutomationEffect.CapturePhoto),
+            restore = RestoreSpec.NotRestorable,
             group = GROUP_STREAM_CAPTURE,
             icon = AutomationIconVocabulary.CAMERA,
         ),
@@ -273,6 +602,9 @@ object AutomationActionCatalog {
                 ),
             ),
             catchUp = CatchUpClass.STATEFUL,
+            merge = MERGE_IDENTITY,
+            effects = listOf(AutomationEffect.ToggleRecording),
+            restore = RestoreSpec.StopWhenArmedAndIdle,
             group = GROUP_STREAM_CAPTURE,
             icon = AutomationIconVocabulary.VIDEOCAM,
         ),
@@ -293,6 +625,9 @@ object AutomationActionCatalog {
                 ),
             ),
             catchUp = CatchUpClass.STATEFUL,
+            merge = MERGE_IDENTITY,
+            effects = listOf(AutomationEffect.ToggleSiren),
+            restore = RestoreSpec.StopWhenArmed,
             group = GROUP_LIGHT_SOUND,
             icon = AutomationIconVocabulary.SIREN,
         ),
@@ -311,10 +646,28 @@ object AutomationActionCatalog {
                 ),
             ),
             catchUp = CatchUpClass.STATEFUL,
+            merge = MERGE_IDENTITY,
+            effects = listOf(AutomationEffect.SaveDetectionToggles),
+            // Optional params: restore only the toggles the rule touched.
+            restore = RestoreSpec.Axes(
+                listOf(
+                    RestorableAxis(RestoreAxis.MOTION_ENABLED, onlyIfTouched = true),
+                    RestorableAxis(RestoreAxis.SOUND_ENABLED, onlyIfTouched = true),
+                ),
+            ),
             group = GROUP_DETECTION,
             icon = AutomationIconVocabulary.RADAR,
         ),
     )
+
+    /**
+     * Every snapshot axis any entry's restore reads — the declared axes in
+     * catalog order plus the stop gates. The snapshot's capture loop is this
+     * list: one render per axis from a single [AutomationLiveState] reading,
+     * in place of the old hand-wired per-axis fields.
+     */
+    val SNAPSHOT_AXES: List<RestoreAxis> =
+        ACTION_TYPES.flatMap { it.restore.declaredAxes }.distinct()
 
     private val byId: Map<String, AutomationActionType> = ACTION_TYPES.associateBy { it.id }
 

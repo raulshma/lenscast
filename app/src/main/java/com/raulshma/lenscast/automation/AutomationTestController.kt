@@ -3,6 +3,7 @@ package com.raulshma.lenscast.automation
 import android.util.Log
 import com.raulshma.lenscast.MainApplication
 import com.raulshma.lenscast.automation.schedule.AutomationActionSpec
+import com.raulshma.lenscast.automation.schedule.AutomationLiveState
 import com.raulshma.lenscast.automation.schedule.AutomationRestorePolicy
 import com.raulshma.lenscast.automation.schedule.AutomationStateSnapshot
 import com.raulshma.lenscast.capture.RecordingState
@@ -146,25 +147,25 @@ class AutomationTestController(private val app: MainApplication) {
      * in e84b36d; the snapshot reads it too. STRENGTH stays the stored
      * intent: a live flip drives the device-default brightness and carries
      * no strength intent of its own (SettingsWebHandler's rebuild precedent).
+     *
+     * This is only the seam-facing half: one [AutomationLiveState] reading,
+     * assembled here because the collaborators live in MainApplication's
+     * lazy seam graph. The per-axis rendering is the catalog's —
+     * [AutomationRestorePolicy.captureSnapshot] loops the entries' declared
+     * axes, so a snapshot value cannot exist without a declaring entry.
      */
-    private suspend fun captureSnapshot(): AutomationStateSnapshot {
-        val saved = app.settingsDataStore.settingsFromDisk()
-        return AutomationStateSnapshot(
-            iso = saved.iso,
-            exposureTimeMs = saved.exposureTime?.let { it / 1_000_000.0 },
-            exposureCompensation = saved.exposureCompensation,
-            zoomRatio = saved.zoomRatio,
-            frameRate = saved.frameRate,
-            lensIndex = app.cameraService.selectedLens.value.index,
-            torchEnabled = app.cameraService.isTorchOn(),
-            torchStrength = saved.torchStrength,
-            nightVisionMode = saved.nightVisionMode,
-            motionEnabled = app.settingsDataStore.motionDetectionEnabledFromDisk(),
-            soundEnabled = app.settingsDataStore.soundDetectionEnabledFromDisk(),
-            streamRunning = app.streamingManager.isServerRunning.value,
-            recordingIdle = app.recordingController.state.value is RecordingState.Idle,
+    private suspend fun captureSnapshot(): AutomationStateSnapshot =
+        AutomationRestorePolicy.captureSnapshot(
+            AutomationLiveState(
+                camera = app.settingsDataStore.settingsFromDisk(),
+                lensIndex = app.cameraService.selectedLens.value.index,
+                torchOn = app.cameraService.isTorchOn(),
+                motionEnabled = app.settingsDataStore.motionDetectionEnabledFromDisk(),
+                soundEnabled = app.settingsDataStore.soundDetectionEnabledFromDisk(),
+                streamRunning = app.streamingManager.isServerRunning.value,
+                recordingIdle = app.recordingController.state.value is RecordingState.Idle,
+            ),
         )
-    }
 
     private companion object {
         const val TAG = "AutomationTest"

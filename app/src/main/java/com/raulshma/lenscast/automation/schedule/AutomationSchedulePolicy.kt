@@ -1,7 +1,6 @@
 package com.raulshma.lenscast.automation.schedule
 
 import com.raulshma.lenscast.camera.model.CameraSettings
-import com.raulshma.lenscast.camera.model.NightVisionMode
 import com.raulshma.lenscast.capture.MotionArmingPolicy
 import com.raulshma.lenscast.core.StreamDefaults
 import com.raulshma.lenscast.gallery.GalleryDates
@@ -387,92 +386,16 @@ object AutomationSchedulePolicy {
         rules.take(StreamDefaults.AUTOMATION_MAX_RULES).map(::sanitizeRule)
 
     /**
-     * Merge ONE catalog action into the current [CameraSettings]. Handles the
-     * camera-valued settings the camera pipeline consumes directly
-     * (camera_* and night_vision): only the exact
-     * "0" auto sentinels fold to null (the class's "driver default" shape),
-     * `exposure_time_ms` converts to nanoseconds, `torch.strength` is
-     * applied only when the optional parameter is present, and
-     * `night_vision.mode` maps its canonical catalog id onto
-     * [NightVisionMode]. Per the executor's
-     * "absent/malformed = leave unchanged" contract, an absent optional param
-     * AND an unparseable value both leave that field untouched — a malformed
-     * value must never collapse to the auto sentinel (that would silently
-     * hand a manual setting back to the driver). Non-camera types
-     * (stream/recording/siren/detection/capture_photo) come back unchanged;
-     * the executor routes them to their own seams, not the camera settings.
-     * Malformed values cannot reach here through the store path (the catalog
-     * sanitizer clamps or folds them upstream), but the parsers stay
-     * null-safe so a hand-built action degrades to "no change" instead of a
-     * crash.
+     * Merge ONE catalog action into the current [CameraSettings]. The merge
+     * semantics are the catalog entry's ([AutomationActionType.merge] — the
+     * one declaration; camera_* and night_vision fold their documented axes,
+     * only the exact "0" auto sentinels fold to null, and every
+     * absent/malformed param leaves its field untouched — a malformed value
+     * must never collapse a manual setting back to a sentinel); this is the
+     * thin delegation the executor and the restore policy keep calling, so
+     * the policy stays the one seam. Non-camera types and unknown ids come
+     * back unchanged — the executor routes them to their own seams.
      */
-    fun mergeCameraSettings(current: CameraSettings, action: AutomationActionSpec): CameraSettings {
-        val params = action.params
-        when (action.type) {
-            "camera_exposure" -> {
-                var merged = current
-                // ONLY the exact "0" sentinel is the auto sentinel → null
-                // (driver auto); any other parseable value is the manual
-                // ISO, and an unparseable one leaves the field unchanged.
-                params["iso"]?.let { raw ->
-                    if (raw == "0") {
-                        merged = merged.copy(iso = null)
-                    } else {
-                        raw.toIntOrNull()?.let { iso -> merged = merged.copy(iso = iso) }
-                    }
-                }
-                // "0" is auto → null; a parseable value is milliseconds →
-                // nanoseconds; an unparseable one leaves the field unchanged.
-                params["exposure_time_ms"]?.let { raw ->
-                    if (raw == "0") {
-                        merged = merged.copy(exposureTime = null)
-                    } else {
-                        raw.toDoubleOrNull()?.let { ms ->
-                            merged = merged.copy(exposureTime = (ms * 1_000_000).toLong())
-                        }
-                    }
-                }
-                return merged
-            }
-            "camera_ev" -> params["index"]?.toIntOrNull()?.let { index ->
-                return current.copy(exposureCompensation = index)
-            }
-            "camera_zoom" -> params["ratio"]?.toFloatOrNull()?.let { ratio ->
-                return current.copy(zoomRatio = ratio)
-            }
-            "camera_fps" -> params["fps"]?.toIntOrNull()?.let { fps ->
-                return current.copy(frameRate = fps)
-            }
-            "torch" -> {
-                var merged = current
-                when (params["enabled"]) {
-                    "true" -> merged = merged.copy(torchEnabled = true)
-                    "false" -> merged = merged.copy(torchEnabled = false)
-                    // absent/unknown: leave the current torch state alone
-                }
-                // Strength applies only when the optional param is present:
-                // absent means "device default", and clobbering a strength
-                // the user set elsewhere is not this action's business.
-                params["strength"]?.toIntOrNull()?.let { strength ->
-                    merged = merged.copy(torchStrength = strength)
-                }
-                return merged
-            }
-            "night_vision" -> return params["mode"]?.let { mode ->
-                // The sanitizer only persists the catalog's canonical ids, so
-                // the else-arm is the hand-built-spec guard: an unknown mode
-                // degrades to "no change", like every unparseable param.
-                when (mode) {
-                    "off" -> current.copy(nightVisionMode = NightVisionMode.OFF)
-                    "auto" -> current.copy(nightVisionMode = NightVisionMode.AUTO)
-                    "on" -> current.copy(nightVisionMode = NightVisionMode.ON)
-                    else -> current
-                }
-            } ?: current
-        }
-        // stream, capture_photo, recording, siren, detection, unknown ids —
-        // and any camera action whose param failed to parse — come back
-        // unchanged; the executor routes non-camera types to their own seams.
-        return current
-    }
+    fun mergeCameraSettings(current: CameraSettings, action: AutomationActionSpec): CameraSettings =
+        AutomationActionCatalog.typeFor(action.type)?.merge(current, action.params) ?: current
 }
