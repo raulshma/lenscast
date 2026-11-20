@@ -151,12 +151,14 @@ blocks downgrades, so that ABI's testers would be stranded until the
 release after), and the workflow refuses to cut it — ship the stable or
 bump the literals first.
 
-Beta tags stay invisible outside GitHub pre-releases with no fdroid-side
-change: F-Droid's Tags-mode checker parses the Gradle literals at the
-tagged commit, and beta commits carry the last shipped stable's literals —
+Beta tags stay invisible to the default update channel and to F-Droid with
+no fdroid-side change: store builds only see pre-releases when the user
+opts into **Include Beta Releases** in App Settings → Updates (off by
+default), and F-Droid's Tags-mode checker parses the Gradle literals at the
+tagged commit, where beta commits carry the last shipped stable's literals —
 so every beta tag reads back as "up to date" and generates no F-Droid
-build. That relies on each release's literal bump landing on `main`
-(see `release.yml`'s literal gate); cut betas from an up-to-date `main`.
+build. That relies on each release's literal bump landing on `main` (see
+`release.yml`'s literal gate); cut betas from an up-to-date `main`.
 One guard is still needed in-repo: `release.yml` filters its "next patch"
 tag glob to stable-shaped tags, so `sort -V` cannot rank a beta tag above
 the last stable and skew the next release's version.

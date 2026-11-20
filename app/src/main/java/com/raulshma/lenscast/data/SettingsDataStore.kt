@@ -167,6 +167,7 @@ private object Keys {
     val WATCHDOG_MAX_RETRIES = intPreferencesKey("watchdog_max_retries")
     val WATCHDOG_CHECK_INTERVAL_SECONDS = intPreferencesKey("watchdog_check_interval_seconds")
     val UPDATE_AUTO_CHECK_ENABLED = stringPreferencesKey("update_auto_check_enabled")
+    val UPDATE_INCLUDE_BETA = stringPreferencesKey("update_include_beta")
     val UPDATE_LAST_CHECK_TIME = longPreferencesKey("update_last_check_time")
     val UPDATE_DISMISSED_VERSION = stringPreferencesKey("update_dismissed_version")
     val MOTION_SENSITIVITY = intPreferencesKey("motion_sensitivity_percent")
@@ -971,6 +972,10 @@ internal val overlaySettingsPref = SettingPref(
 
 internal val updateAutoCheckEnabledPref = boolPref(Keys.UPDATE_AUTO_CHECK_ENABLED, defaultTrue = true)
 
+// Opt-in GitHub pre-release channel. Stable-only by default; the fdroid
+// flavor has no self-updater, so nothing reads this there.
+internal val updateIncludeBetaPref = boolPref(Keys.UPDATE_INCLUDE_BETA, defaultTrue = false)
+
 internal val updateLastCheckTimePref = longPref(Keys.UPDATE_LAST_CHECK_TIME, default = 0L)
 
 internal val updateDismissedVersionPref = stringPref(Keys.UPDATE_DISMISSED_VERSION, default = "")
@@ -1678,6 +1683,8 @@ class SettingsDataStore(
 
     val updateAutoCheckEnabled: StateFlow<Boolean> = updateAutoCheckEnabledPref.shared()
 
+    val updateIncludeBeta: StateFlow<Boolean> = updateIncludeBetaPref.shared()
+
     val updateLastCheckTime: StateFlow<Long> = updateLastCheckTimePref.shared()
 
     val updateDismissedVersion: StateFlow<String> = updateDismissedVersionPref.shared()
@@ -1947,6 +1954,8 @@ class SettingsDataStore(
     suspend fun saveOverlaySettings(settings: OverlaySettings) = overlaySettingsPref.save(settings)
 
     suspend fun saveUpdateAutoCheckEnabled(enabled: Boolean) = updateAutoCheckEnabledPref.save(enabled)
+
+    suspend fun saveUpdateIncludeBeta(enabled: Boolean) = updateIncludeBetaPref.save(enabled)
 
     suspend fun saveUpdateLastCheckTime(timeMs: Long) = updateLastCheckTimePref.save(timeMs)
 

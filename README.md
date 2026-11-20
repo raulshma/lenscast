@@ -153,7 +153,7 @@ LensCast is an Android camera application with live video/audio streaming to web
 - OS-level cloud backup / device transfer never carries the auth session tokens (`auth/sessions.json`) or the detection-event log (`detection_events.json` — its entries embed base64 camera snapshots); both are excluded via `backup_rules.xml` / `data_extraction_rules.xml` and stay device-only
 
 ### Self-Update
-- In-app update check against GitHub releases with a SHA-256 digest + APK size integrity gate before install — verification is skipped (the update proceeds unverified) when a release omits the digest
+- In-app update check against GitHub releases with a SHA-256 digest + APK size integrity gate before install — verification is skipped (the update proceeds unverified) when a release omits the digest. Stable releases only by default; an opt-in **Include Beta Releases** switch in App Settings → Updates also offers GitHub pre-releases (store builds only — the F-Droid flavor has no self-updater)
 
 ### Capture
 - One-tap quick photo and video capture
@@ -204,8 +204,10 @@ early testing, and install on your existing LensCast:
 
 - **Same app, same signature** — a beta installs straight over stable and
   keeps your settings.
-- **Beta-to-beta updates are manual**: grab the newest pre-release asset.
-  The in-app updater never offers betas — it only ever sees stable
+- **Beta updates are opt-in**: in App Settings → Updates, enable *Include
+  Beta Releases* (GitHub/store builds only — the F-Droid flavor ships
+  without the self-updater). With it on, the in-app updater also offers
+  newer GitHub pre-releases; off (the default), it only sees stable
   releases.
 - **You cannot return to the current stable** after installing a beta
   (Android blocks version downgrades); the next stable release upgrades

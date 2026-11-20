@@ -66,10 +66,34 @@ class UpdatePolicyTest {
     }
 
     @Test
-    fun `non-numeric suffix counts as zero`() {
+    fun `a pre-release suffix never outranks its stable core`() {
         assertFalse(UpdatePolicy.isNewer("1.2.0-beta", "1.2.0"))
+        assertTrue(UpdatePolicy.isNewer("1.2.0", "1.2.0-beta"))
         assertTrue(UpdatePolicy.isNewer("1.3.0-beta", "1.2.0"))
-        assertFalse(UpdatePolicy.isNewer("1.2.0", "1.2.0-beta"))
+    }
+
+    @Test
+    fun `a beta of the next patch is newer than the current stable`() {
+        assertTrue(UpdatePolicy.isNewer("0.2.3-beta.1", "0.2.2"))
+    }
+
+    @Test
+    fun `a stable release is newer than its own beta`() {
+        assertTrue(UpdatePolicy.isNewer("0.2.3", "0.2.3-beta.1"))
+        assertFalse(UpdatePolicy.isNewer("0.2.3-beta.1", "0.2.3"))
+    }
+
+    @Test
+    fun `a newer beta counter is newer`() {
+        assertTrue(UpdatePolicy.isNewer("0.2.3-beta.2", "0.2.3-beta.1"))
+        assertTrue(UpdatePolicy.isNewer("0.2.3-beta.10", "0.2.3-beta.2"))
+        assertFalse(UpdatePolicy.isNewer("0.2.3-beta.1", "0.2.3-beta.2"))
+        assertFalse(UpdatePolicy.isNewer("0.2.3-beta.1", "0.2.3-beta.1"))
+    }
+
+    @Test
+    fun `an installed beta is not offered the previous stable`() {
+        assertFalse(UpdatePolicy.isNewer("0.2.2", "0.2.3-beta.1"))
     }
 
     // shouldAutoCheck
@@ -217,6 +241,63 @@ class UpdatePolicyTest {
         // Pinned: today's ladder matches ".apk" exactly, so an ".APK" asset
         // is not picked up — loosening that is a deliberate policy change.
         assertNull(UpdatePolicy.selectApkAsset(listOf(asset("lenscast-universal.APK"))))
+    }
+
+    // selectRelease
+
+    private fun release(tag: String, prerelease: Boolean = false) = GitHubRelease(
+        tagName = tag,
+        name = "Release $tag",
+        body = "notes",
+        htmlUrl = "https://example.invalid",
+        assets = listOf(asset("lenscast-universal.apk")),
+        prerelease = prerelease,
+    )
+
+    @Test
+    fun `stable selection ignores pre-releases`() {
+        val stable = release("v1.2.0")
+        val beta = release("v1.3.0-beta.1", prerelease = true)
+        assertEquals(stable, UpdatePolicy.selectRelease(listOf(beta, stable), includePrereleases = false))
+    }
+
+    @Test
+    fun `beta selection picks a newer pre-release`() {
+        val stable = release("v1.2.0")
+        val beta = release("v1.3.0-beta.1", prerelease = true)
+        assertEquals(beta, UpdatePolicy.selectRelease(listOf(stable, beta), includePrereleases = true))
+    }
+
+    @Test
+    fun `beta selection still prefers the stable that outranks its betas`() {
+        val stable = release("v1.3.0")
+        val beta = release("v1.3.0-beta.2", prerelease = true)
+        assertEquals(stable, UpdatePolicy.selectRelease(listOf(beta, stable), includePrereleases = true))
+    }
+
+    @Test
+    fun `beta selection falls back to the newest stable when no beta exists`() {
+        val stable = release("v1.2.0")
+        assertEquals(stable, UpdatePolicy.selectRelease(listOf(stable), includePrereleases = true))
+    }
+
+    @Test
+    fun `release selection follows version, not API order`() {
+        val newest = release("v2.0.0")
+        val older = release("v1.9.0")
+        assertEquals(newest, UpdatePolicy.selectRelease(listOf(newest, older), includePrereleases = false))
+        assertEquals(newest, UpdatePolicy.selectRelease(listOf(older, newest), includePrereleases = false))
+    }
+
+    @Test
+    fun `no eligible release yields null`() {
+        assertNull(UpdatePolicy.selectRelease(emptyList(), includePrereleases = true))
+        assertNull(
+            UpdatePolicy.selectRelease(
+                listOf(release("v1.3.0-beta.1", prerelease = true)),
+                includePrereleases = false,
+            )
+        )
     }
 
     // shouldNotifyAfterCheck

@@ -1,16 +1,20 @@
 name: Beta
 
 # Beta channel: signed store-flavor APKs cut from main and published as
-# GitHub PRE-releases (tag v<version>-beta.<n>). Three properties make this
-# safe without touching app code:
+# GitHub PRE-releases (tag v<version>-beta.<n>). Four properties keep this
+# safe:
 #
-# 1. GitHub's /releases/latest endpoint excludes pre-releases, so the
-#    stable in-app updater (update/UpdateChecker.kt) never sees a beta.
+# 1. Pre-releases stay invisible to the default update channel: the in-app
+#    updater (update/UpdateChecker.kt) filters them out unless the user
+#    opts into "Include Beta Releases" in App Settings (store builds only;
+#    the fdroid flavor has no self-updater). GitHub's /releases/latest
+#    hides them too, but the checker reads the release list so the opt-in
+#    can see them.
 # 2. Same applicationId + keystore as stable: a beta installs straight over
 #    stable, and when the next stable ships, its higher versionCode beats
 #    every beta slot — the updater converges testers automatically
-#    (UpdatePolicy.isNewer("0.2.2", "0.2.2-beta.1") parses the "-beta" part
-#    to 0, so the shipped stable reads as newer).
+#    (UpdatePolicy.isNewer treats "-beta.<n>" as a pre-release of the same
+#    core, so the shipped stable reads as newer).
 # 3. Beta versionCodes occupy the free slots between the last stable
 #    literal and the next patch release's codes — at most three betas fit
 #    per patch cycle; the compute step below fails loudly past that.
@@ -185,8 +189,9 @@ jobs:
           tag_name: "${{ steps.version.outputs.tag }}"
           name: "Beta ${{ steps.version.outputs.version_name }}"
           files: lenscast-*.apk
-          # prerelease is what keeps the stable in-app updater blind: the
-          # /releases/latest endpoint it polls skips pre-releases.
+          # prerelease is what marks the build as beta: the default update
+          # channel filters it out, and only users who opt into "Include
+          # Beta Releases" see it.
           prerelease: true
           draft: false
           generate_release_notes: true
@@ -196,6 +201,6 @@ jobs:
             Unstable beta build from commit ${{ github.sha }}, cut ahead of the next stable release.
 
             - Installs straight over LensCast stable — same app, same settings. Most phones want the `arm64-v8a` APK.
-            - Beta-to-beta updates are manual: grab the newest pre-release asset here. The in-app updater only ever sees stable releases.
+            - Beta-to-beta updates: enable "Include Beta Releases" in App Settings → Updates (GitHub/store builds only; F-Droid has no self-updater) and the in-app updater offers newer betas automatically.
             - Going back to the *current* stable is not possible after installing a beta (Android blocks downgrades) — the next stable release replaces it and the in-app updater will offer it as usual.
             - Feedback welcome: [open an issue](https://github.com/raulshma/lenscast/issues) and mention the beta version you were on.

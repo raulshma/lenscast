@@ -13,6 +13,10 @@ data class GitHubRelease(
     @param:Json(name = "body") val body: String,
     @param:Json(name = "html_url") val htmlUrl: String,
     @param:Json(name = "assets") val assets: List<GitHubAsset>,
+    // GitHub's own pre-release flag (beta.yml publishes with
+    // `prerelease: true`). Absent defaults to false so a stable-shaped
+    // response keeps parsing.
+    @param:Json(name = "prerelease") val prerelease: Boolean = false,
 )
 
 @Keep

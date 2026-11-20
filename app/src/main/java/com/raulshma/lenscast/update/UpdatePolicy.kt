@@ -1,6 +1,7 @@
 package com.raulshma.lenscast.update
 
 import com.raulshma.lenscast.update.model.GitHubAsset
+import com.raulshma.lenscast.update.model.GitHubRelease
 import com.raulshma.lenscast.update.model.UpdateCheckResult
 
 /**
@@ -16,8 +17,9 @@ data class UpdateDecision(
 
 /**
  * Pure update-check policy: version comparison, auto-check gating,
- * post-check decisions, dismissal checks, and the release-asset ladder
- * ([selectApkAsset]). No Android dependencies — unit-tested on the JVM.
+ * post-check decisions, dismissal checks, and the release/asset ladders
+ * ([selectRelease], [selectApkAsset]). No Android dependencies —
+ * unit-tested on the JVM.
  *
  * Single owner of these decisions; [UpdateChecker], `MainApplication`, and
  * [UpdateViewModel] delegate instead of hand-rolling `trimStart('v')` and
@@ -34,20 +36,64 @@ object UpdatePolicy {
         version.trim().removePrefix("v")
 
     /**
-     * Numeric dot-part comparison; non-numeric parts count as 0 and the
-     * shorter version is padded with 0 ("1.2" == "1.2.0").
+     * Version precedence for release tags. The dot-separated numeric core
+     * compares numerically (the shorter side padded with 0, so "1.2" ==
+     * "1.2.0"), and a `-<pre>` suffix marks a pre-release that sorts BELOW
+     * the same core without one. Pre-releases of the same core compare
+     * identifier by identifier ("beta.2" > "beta.1"; a numeric identifier
+     * sorts below an alphanumeric one, per SemVer).
+     *
+     * The beta channel relies on both halves: `0.2.3-beta.1` is newer than
+     * stable `0.2.2` (the patch core moved), while stable `0.2.3` is newer
+     * than its own `0.2.3-beta.1` (a beta never outranks its stable).
      */
     fun isNewer(remoteTag: String, localVersion: String): Boolean {
-        val remoteParts = normalize(remoteTag).split('.').map { it.toIntOrNull() ?: 0 }
-        val localParts = normalize(localVersion).split('.').map { it.toIntOrNull() ?: 0 }
-        val maxLen = maxOf(remoteParts.size, localParts.size)
-        for (i in 0 until maxLen) {
-            val r = remoteParts.getOrElse(i) { 0 }
-            val l = localParts.getOrElse(i) { 0 }
-            if (r > l) return true
-            if (r < l) return false
+        val remote = parseVersion(remoteTag)
+        val local = parseVersion(localVersion)
+
+        val coreLength = maxOf(remote.core.size, local.core.size)
+        for (i in 0 until coreLength) {
+            val r = remote.core.getOrElse(i) { 0 }
+            val l = local.core.getOrElse(i) { 0 }
+            if (r != l) return r > l
+        }
+
+        // Same core: a stable release outranks any pre-release of that core.
+        if (local.prerelease.isEmpty()) return false
+        if (remote.prerelease.isEmpty()) return true
+
+        val prereleaseLength = maxOf(remote.prerelease.size, local.prerelease.size)
+        for (i in 0 until prereleaseLength) {
+            val r = remote.prerelease.getOrNull(i) ?: return false
+            val l = local.prerelease.getOrNull(i) ?: return true
+            val comparison = comparePrereleaseIdentifier(r, l)
+            if (comparison != 0) return comparison > 0
         }
         return false
+    }
+
+    private data class ParsedVersion(val core: List<Int>, val prerelease: List<String>)
+
+    private fun parseVersion(version: String): ParsedVersion {
+        val normalized = normalize(version)
+        val core = normalized.substringBefore('-')
+        val prerelease = normalized.substringAfter('-', missingDelimiterValue = "")
+        return ParsedVersion(
+            core = core.split('.').map { it.toIntOrNull() ?: 0 },
+            prerelease = if (prerelease.isEmpty()) emptyList() else prerelease.split('.'),
+        )
+    }
+
+    private fun comparePrereleaseIdentifier(remote: String, local: String): Int {
+        val remoteNumber = remote.toIntOrNull()
+        val localNumber = local.toIntOrNull()
+        return when {
+            remoteNumber != null && localNumber != null -> remoteNumber.compareTo(localNumber)
+            // SemVer: numeric identifiers always rank below alphanumeric ones.
+            remoteNumber != null -> -1
+            localNumber != null -> 1
+            else -> remote.compareTo(local)
+        }
     }
 
     /**
@@ -75,6 +121,23 @@ object UpdatePolicy {
         if (dismissedVersion.isNullOrBlank()) return true
         return normalize(dismissedVersion) != normalize(remoteTag)
     }
+
+    /**
+     * The release the checker should consider: the highest-versioned entry
+     * per [isNewer], skipping GitHub pre-releases unless [includePrereleases]
+     * is set. API order is irrelevant — the version, not the publish date,
+     * decides. Null when nothing qualifies (an empty list, or only
+     * pre-releases with the beta channel off).
+     */
+    fun selectRelease(
+        releases: List<GitHubRelease>,
+        includePrereleases: Boolean,
+    ): GitHubRelease? =
+        releases
+            .filter { includePrereleases || !it.prerelease }
+            .reduceOrNull { best, candidate ->
+                if (isNewer(candidate.tagName, best.tagName)) candidate else best
+            }
 
     /**
      * The release-asset ladder: the APK built for the device's best

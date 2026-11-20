@@ -7,27 +7,33 @@ import android.util.Log
 import com.raulshma.lenscast.update.model.GitHubRelease
 import com.raulshma.lenscast.update.model.UpdateCheckResult
 import com.raulshma.lenscast.core.AppJson
+import com.squareup.moshi.Types
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
 class UpdateChecker(private val context: Context) {
 
     companion object {
-        private const val API_URL =
-            "https://api.github.com/repos/raulshma/lenscast/releases/latest"
+        // The list endpoint carries stable releases AND pre-releases; the
+        // policy filters/picks per the user's beta opt-in. /releases/latest
+        // would hide betas entirely — that is exactly the stable channel.
+        private const val RELEASES_URL =
+            "https://api.github.com/repos/raulshma/lenscast/releases?per_page=100"
         private const val TAG = "UpdateChecker"
         private const val CONNECT_TIMEOUT_MS = 15_000
         private const val READ_TIMEOUT_MS = 15_000
     }
 
-    private val releaseAdapter by lazy {
-        AppJson.moshi.adapter(GitHubRelease::class.java)
+    private val releaseListAdapter by lazy {
+        AppJson.moshi.adapter<List<GitHubRelease>>(
+            Types.newParameterizedType(List::class.java, GitHubRelease::class.java)
+        )
     }
 
-    suspend fun checkForUpdate(): UpdateCheckResult = withContext(Dispatchers.IO) {
+    suspend fun checkForUpdate(includePrereleases: Boolean = false): UpdateCheckResult = withContext(Dispatchers.IO) {
         try {
-            Log.d(TAG, "Checking for updates: $API_URL")
-            val connection = UpdateHttp.openConnection(API_URL, CONNECT_TIMEOUT_MS, READ_TIMEOUT_MS)
+            Log.d(TAG, "Checking for updates: $RELEASES_URL (includePrereleases=$includePrereleases)")
+            val connection = UpdateHttp.openConnection(RELEASES_URL, CONNECT_TIMEOUT_MS, READ_TIMEOUT_MS)
                 .apply { setRequestProperty("Accept", "application/vnd.github+json") }
 
             val responseCode = connection.responseCode
@@ -47,7 +53,10 @@ class UpdateChecker(private val context: Context) {
             val body = connection.inputStream.bufferedReader().use { it.readText() }
             connection.disconnect()
 
-            return@withContext UpdateHttp.mapCheckOutcome(responseCode, parsed = parseReleaseResult(body))
+            return@withContext UpdateHttp.mapCheckOutcome(
+                responseCode,
+                parsed = parseReleaseResult(body, includePrereleases),
+            )
         } catch (e: Exception) {
             Log.e(TAG, "Update check failed", e)
             UpdateCheckResult.Error(e.message ?: "Unknown error")
@@ -55,15 +64,18 @@ class UpdateChecker(private val context: Context) {
     }
 
     /**
-     * The release body parsed and wrapped the way a 200 reports it
-     * (UpToDate/UpdateAvailable/Error) — null when the body is not a release,
+     * The release list parsed and the eligible release selected per the
+     * beta opt-in, wrapped the way a 200 reports it (UpToDate/
+     * UpdateAvailable/Error) — null when the body is not a release list,
      * which [UpdateHttp.mapCheckOutcome] turns into the parse-failure error.
      */
-    private fun parseReleaseResult(body: String): UpdateCheckResult? {
+    private fun parseReleaseResult(body: String, includePrereleases: Boolean): UpdateCheckResult? {
         Log.d(TAG, "Parsing release JSON (${body.length} chars)")
-        val release = releaseAdapter.fromJson(body) ?: return null
+        val releases = releaseListAdapter.fromJson(body) ?: return null
+        val release = UpdatePolicy.selectRelease(releases, includePrereleases)
+            ?: return UpdateCheckResult.Error("No release found")
 
-        Log.d(TAG, "Latest release: ${release.tagName} with ${release.assets.size} assets")
+        Log.d(TAG, "Selected release: ${release.tagName} (prerelease=${release.prerelease}, ${release.assets.size} assets)")
         val apkAsset = UpdatePolicy.selectApkAsset(release.assets, Build.SUPPORTED_ABIS.toList())
             ?: return UpdateCheckResult.Error("No APK found in release")
 

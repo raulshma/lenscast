@@ -4,6 +4,7 @@ import com.raulshma.lenscast.core.AppJson
 import com.raulshma.lenscast.update.model.GitHubAsset
 import com.raulshma.lenscast.update.model.GitHubRelease
 import com.raulshma.lenscast.update.UpdateIntegrity.Verdict
+import com.squareup.moshi.Types
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -129,5 +130,36 @@ class UpdateIntegrityTest {
         )
         val adapter = AppJson.moshi.adapter(GitHubRelease::class.java)
         assertEquals("sha256:ff00", adapter.fromJson(adapter.toJson(release))?.assets?.single()?.digest)
+    }
+
+    @Test
+    fun `the release model decodes the prerelease flag and defaults it to false`() {
+        val adapter = AppJson.moshi.adapter(GitHubRelease::class.java)
+
+        val beta = adapter.fromJson(
+            """{"tag_name":"v1.3.0-beta.1","name":"Beta","body":"Notes",""" +
+                """"html_url":"https://example.invalid","assets":[],"prerelease":true}""",
+        )
+        assertTrue(beta?.prerelease == true)
+
+        val stable = adapter.fromJson(
+            """{"tag_name":"v1.2.0","name":"Release","body":"Notes",""" +
+                """"html_url":"https://example.invalid","assets":[]}""",
+        )
+        assertFalse(stable?.prerelease == true)
+    }
+
+    @Test
+    fun `the release list decodes with its per-release prerelease flags`() {
+        val adapter = AppJson.moshi.adapter<List<GitHubRelease>>(
+            Types.newParameterizedType(List::class.java, GitHubRelease::class.java),
+        )
+        val releases = adapter.fromJson(
+            """[{"tag_name":"v1.2.0","name":"Stable","body":"","html_url":"https://example.invalid","assets":[]},""" +
+                """{"tag_name":"v1.3.0-beta.1","name":"Beta","body":"","html_url":"https://example.invalid","assets":[],"prerelease":true}]""",
+        )!!
+
+        assertEquals(listOf("v1.2.0", "v1.3.0-beta.1"), releases.map { it.tagName })
+        assertEquals(listOf(false, true), releases.map { it.prerelease })
     }
 }

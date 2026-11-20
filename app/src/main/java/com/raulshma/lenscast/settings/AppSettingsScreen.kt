@@ -171,6 +171,7 @@ fun AppSettingsScreen(
 
     val updateState by updateViewModel.updateState.collectAsState()
     val autoCheckEnabled by updateViewModel.autoCheckEnabled.collectAsState()
+    val includeBeta by updateViewModel.includeBeta.collectAsState()
     val lastCheckTime by updateViewModel.lastCheckTime.collectAsState()
 
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
@@ -239,6 +240,13 @@ fun AppSettingsScreen(
                         title = stringResource(R.string.settings_auto_check),
                         checked = autoCheckEnabled,
                         onCheckedChange = { updateViewModel.setAutoCheckEnabled(it) }
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    SwitchSetting(
+                        title = stringResource(R.string.settings_include_beta),
+                        description = stringResource(R.string.settings_include_beta_description),
+                        checked = includeBeta,
+                        onCheckedChange = { updateViewModel.setIncludeBeta(it) }
                     )
                     Spacer(modifier = Modifier.height(8.dp))
                     when (val state = updateState) {

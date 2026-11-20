@@ -311,6 +311,8 @@
     <string name="settings_current_version">Current Version</string>
     <string name="settings_last_check">Last checked: %1$s</string>
     <string name="settings_auto_check">Auto-check on App Start</string>
+    <string name="settings_include_beta">Include Beta Releases</string>
+    <string name="settings_include_beta_description">Get GitHub pre-release builds ahead of stable. Betas may be unstable.</string>
     <string name="settings_check_updates">Check for Updates</string>
     <string name="settings_up_to_date">You\'re on the latest version (latest: %1$s)</string>
     <string name="settings_checking">Checking for updates...</string>

@@ -314,6 +314,8 @@
     <string name="settings_current_version">Versão atual</string>
     <string name="settings_last_check">Última verificação: %1$s</string>
     <string name="settings_auto_check">Verificar automaticamente ao iniciar o app</string>
+    <string name="settings_include_beta">Incluir versões beta</string>
+    <string name="settings_include_beta_description">Receba compilações de pré-lançamento do GitHub antes das estáveis. Betas podem ser instáveis.</string>
     <string name="settings_check_updates">Verificar atualizações</string>
     <string name="settings_up_to_date">Você já está na versão mais recente (última: %1$s)</string>
     <string name="settings_checking">Verificando atualizações...</string>

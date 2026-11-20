@@ -314,6 +314,8 @@
     <string name="settings_current_version">Version actuelle</string>
     <string name="settings_last_check">Dernière vérification : %1$s</string>
     <string name="settings_auto_check">Vérification automatique au démarrage</string>
+    <string name="settings_include_beta">Inclure les versions bêta</string>
+    <string name="settings_include_beta_description">Recevez les versions préliminaires de GitHub avant les stables. Les bêtas peuvent être instables.</string>
     <string name="settings_check_updates">Rechercher des mises à jour</string>
     <string name="settings_up_to_date">Vous êtes sur la dernière version (dernière : %1$s)</string>
     <string name="settings_checking">Recherche de mises à jour...</string>

@@ -1722,15 +1722,18 @@ implementation, not copy-paste.
 
 ### Update Policy
 **`update/UpdatePolicy.kt`** — the pure update-check decisions: version
-`normalize`, numeric `isNewer` comparison, 24h `shouldAutoCheck` gate,
-`shouldNotify` dismissal check, `shouldNotifyAfterCheck(result,
-dismissedVersion)` — the one verdict on notify/saveLastCheck that both the
-startup auto-check and the manual ViewModel check consume — and
+`normalize`, `isNewer` (numeric core with SemVer-style pre-release
+precedence: `0.2.3-beta.1` > `0.2.2`, stable `0.2.3` > its own beta), 24h
+`shouldAutoCheck` gate, `shouldNotify` dismissal check,
+`shouldNotifyAfterCheck(result, dismissedVersion)` — the one verdict on
+notify/saveLastCheck that both the startup auto-check and the manual
+ViewModel check consume — `selectRelease` (the highest-versioned release,
+skipping GitHub pre-releases unless the beta opt-in is on), and
 `selectApkAsset` (the APK for the device's best supported ABI, else the
-universal APK, else any APK), the release-asset
-ladder the network checker delegates to. The checker's 403
-path produces the real `UpdateCheckResult.RateLimited` (silent, like Error);
-no caller re-types the outcome choreography.
+universal APK, else any APK), the release-asset ladder the network checker
+delegates to. The checker's 403 path produces the real
+`UpdateCheckResult.RateLimited` (silent, like Error); no caller re-types
+the outcome choreography.
 
 ### Update Check Pipeline
 **`update/UpdateCheckPipeline.kt`** — the check choreography the policy

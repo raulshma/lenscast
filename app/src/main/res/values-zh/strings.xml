@@ -307,6 +307,8 @@
     <string name="settings_current_version">当前版本</string>
     <string name="settings_last_check">上次检查：%1$s</string>
     <string name="settings_auto_check">启动应用时自动检查</string>
+    <string name="settings_include_beta">包含测试版</string>
+    <string name="settings_include_beta_description">提前获取 GitHub 预发布版本。测试版可能不稳定。</string>
     <string name="settings_check_updates">检查更新</string>
     <string name="settings_up_to_date">您已是最新版本（最新：%1$s）</string>
     <string name="settings_checking">正在检查更新...</string>

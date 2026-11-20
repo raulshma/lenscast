@@ -35,6 +35,7 @@ class UpdateViewModel(
 
     // Store flows exposed directly — like every other ViewModel, no mirrors.
     val autoCheckEnabled: StateFlow<Boolean> = settingsDataStore.updateAutoCheckEnabled
+    val includeBeta: StateFlow<Boolean> = settingsDataStore.updateIncludeBeta
     val lastCheckTime: StateFlow<Long> = settingsDataStore.updateLastCheckTime
 
     private var downloadJob: Job? = null
@@ -135,6 +136,12 @@ class UpdateViewModel(
     fun setAutoCheckEnabled(enabled: Boolean) {
         viewModelScope.launch {
             settingsDataStore.saveUpdateAutoCheckEnabled(enabled)
+        }
+    }
+
+    fun setIncludeBeta(enabled: Boolean) {
+        viewModelScope.launch {
+            settingsDataStore.saveUpdateIncludeBeta(enabled)
         }
     }
 

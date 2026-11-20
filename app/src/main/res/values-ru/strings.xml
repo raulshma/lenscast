@@ -330,6 +330,8 @@
     <string name="settings_current_version">Текущая версия</string>
     <string name="settings_last_check">Последняя проверка: %1$s</string>
     <string name="settings_auto_check">Проверять автоматически при запуске</string>
+    <string name="settings_include_beta">Включать бета-версии</string>
+    <string name="settings_include_beta_description">Получайте предварительные версии GitHub раньше стабильных. Бета-версии могут быть нестабильными.</string>
     <string name="settings_check_updates">Проверить обновления</string>
     <string name="settings_up_to_date">У вас установлена последняя версия (последняя: %1$s)</string>
     <string name="settings_checking">Проверка обновлений...</string>

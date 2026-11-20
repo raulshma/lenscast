@@ -101,7 +101,10 @@ class UpdateCheckPipeline(
             notifier: UpdateNotifier,
             settings: SettingsDataStore,
         ): UpdateCheckPipeline = UpdateCheckPipeline(
-            checker = checker::checkForUpdate,
+            // The beta opt-in is read per check, so toggling it applies to
+            // the very next manual or automatic check without rebuilding
+            // the pipeline.
+            checker = { checker.checkForUpdate(settings.updateIncludeBeta.first()) },
             store = object : Store {
                 override suspend fun dismissedVersion(): String =
                     settings.updateDismissedVersion.first()
