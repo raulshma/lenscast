@@ -56,6 +56,9 @@ class StreamToggle(
     suspend fun toggleWeb(): StreamStartOutcome =
         if (transports.webActive) stopWeb() else startWeb()
 
+    /** True while the web output is live — the demand seam's cheap pre-check before [startWeb]. */
+    fun isWebActive(): Boolean = transports.webActive
+
     /** Toggles the RTSP output: stop (with session end) when active, else the start ladder. */
     suspend fun toggleRtsp(): StreamStartOutcome =
         if (transports.rtspActive) stopRtsp() else startRtsp()

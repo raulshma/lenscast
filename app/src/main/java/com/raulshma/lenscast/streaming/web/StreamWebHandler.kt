@@ -63,6 +63,23 @@ class StreamWebHandler(
     suspend fun startWeb(): String =
         startOutput(StreamKind.WEB, url = { streamingManager.streamUrl.value })
 
+    /**
+     * The `/stream` transport's viewer demand: a connecting viewer is a
+     * reason for the web output to be live. The server is the process's
+     * durable mode (it starts at launch and after a reboot, while outputs
+     * only start on user action, automation, or the opt-in boot resume), so
+     * without this a viewer of a server-only process was counted and then
+     * blocked forever — the MJPEG body waits for a frame the stopped output
+     * never produces (issue #24). The start runs the same gate → start →
+     * session begin → rollback ladder every other start uses; a live output
+     * is a no-op. False means the output was not (and did not become) live —
+     * the transport answers 503 instead of hanging.
+     */
+    suspend fun ensureWebLive(): Boolean {
+        if (streamToggle.isWebActive()) return true
+        return streamToggle.start(StreamKind.WEB) is StreamStartOutcome.Started
+    }
+
     suspend fun startRtsp(): String =
         startOutput(StreamKind.RTSP, url = { streamingManager.rtspUrl.value })
 

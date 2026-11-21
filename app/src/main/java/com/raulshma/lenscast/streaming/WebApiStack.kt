@@ -13,6 +13,7 @@ import com.raulshma.lenscast.streaming.web.DeterrenceWebHandler
 import com.raulshma.lenscast.streaming.web.GalleryWebHandler
 import com.raulshma.lenscast.streaming.web.PushWebHandler
 import com.raulshma.lenscast.streaming.web.StatusWebHandler
+import com.raulshma.lenscast.streaming.web.StreamWebHandler
 import com.raulshma.lenscast.streaming.web.SystemWebHandler
 import com.raulshma.lenscast.streaming.web.UnifiedPushWebHandler
 
@@ -23,6 +24,12 @@ import com.raulshma.lenscast.streaming.web.UnifiedPushWebHandler
 data class WebApiStack(
     val router: ApiRouter,
     val status: StatusWebHandler,
+    /**
+     * The stream lifecycle module, also reachable through the router — the
+     * transport asks it for viewer demand on `/stream` (a viewer connecting
+     * to a server-only process brings the web output up).
+     */
+    val stream: StreamWebHandler,
     val gallery: GalleryWebHandler,
     val capture: PhotoCaptureManager,
     val deterrence: DeterrenceWebHandler,

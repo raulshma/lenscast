@@ -40,6 +40,7 @@ class StreamingServerEmbeddedTest {
     private val context: android.content.Context = mockk()
     private val router: ApiRouter = mockk()
     private val statusHandler: com.raulshma.lenscast.streaming.web.StatusWebHandler = mockk()
+    private val streamHandler: com.raulshma.lenscast.streaming.web.StreamWebHandler = mockk()
     private val auditLog: com.raulshma.lenscast.streaming.web.AuditLog = mockk(relaxed = true)
     private val authGate = WebAuthGate()
 
@@ -51,6 +52,7 @@ class StreamingServerEmbeddedTest {
         val webApi: WebApiStack = mockk()
         every { webApi.router } returns router
         every { webApi.status } returns statusHandler
+        every { webApi.stream } returns streamHandler
         every { webApi.gallery } returns mockk()
         every { webApi.capture } returns mockk()
         every { webApi.detectionEvents } returns mockk()
@@ -210,6 +212,30 @@ class StreamingServerEmbeddedTest {
 
         val json = rawHeadersFor("GET", "/api/status", acceptEncoding = "gzip")
         assertEquals("finite JSON keeps NanoHTTPD's default compression", "gzip", json.header("Content-Encoding"))
+    }
+
+    // ── /stream viewer demand ──
+
+    @Test
+    fun `a stream viewer whose demand start fails answers 503 instead of hanging`() {
+        coEvery { streamHandler.ensureWebLive() } returns false
+
+        val reply = exchange("GET", "/stream")
+
+        assertEquals(503, reply.status)
+        assertEquals("Web streaming unavailable", reply.bodyText)
+        coVerify(exactly = 1) { streamHandler.ensureWebLive() }
+    }
+
+    @Test
+    fun `a disabled web output answers 503 before any demand start is attempted`() {
+        server.setWebStreamingEnabled(false)
+
+        val reply = exchange("GET", "/stream")
+
+        assertEquals(503, reply.status)
+        assertTrue(reply.bodyText.contains("disabled"))
+        coVerify(exactly = 0) { streamHandler.ensureWebLive() }
     }
 
     /** Raw-socket GET that reads only the response head — the SSE body never ends. */

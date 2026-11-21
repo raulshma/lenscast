@@ -111,6 +111,9 @@ internal fun buildWebApiStack(
         testController = app.automationTestController,
     )
     val automationTest = AutomationTestWebHandler(controller = { app.automationTestController })
+    // One instance for both the router's /api/stream routes and the
+    // transport's viewer-demand seam on /stream.
+    val streamHandler = StreamWebHandler(manager, app.streamingSession)
     return WebApiStack(
         router = ApiRouter(
             settings = SettingsWebHandler(
@@ -121,7 +124,7 @@ internal fun buildWebApiStack(
             automation = automationHandler,
             automationTest = automationTest,
             status = statusHandler,
-            stream = StreamWebHandler(manager, app.streamingSession),
+            stream = streamHandler,
             capture = CaptureWebHandler(app.photoCaptureManager),
             lens = LensWebHandler(app.cameraService, app.settingsDataStore),
             interval = IntervalCaptureWebHandler(context),
@@ -143,6 +146,7 @@ internal fun buildWebApiStack(
         ),
         gallery = gallery,
         status = statusHandler,
+        stream = streamHandler,
         capture = app.photoCaptureManager,
         deterrence = deterrence,
         auth = authHandler,

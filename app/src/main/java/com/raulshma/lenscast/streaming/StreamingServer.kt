@@ -14,9 +14,14 @@ import com.raulshma.lenscast.streaming.web.AuditEntry
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.TimeoutCancellationException
+import fi.iki.elonen.NanoHTTPD
 import fi.iki.elonen.NanoHTTPD.IHTTPSession
 import fi.iki.elonen.NanoWSD
 import java.io.ByteArrayInputStream
+import java.net.ServerSocket
+import java.net.Socket
+import java.net.SocketAddress
+import java.net.SocketException
 import javax.net.ssl.SSLServerSocketFactory
 
 /**
@@ -80,6 +85,15 @@ class StreamingServer(
         if (tlsServerSocketFactory != null) {
             makeSecure(tlsServerSocketFactory, null)
         }
+        // MakeSecure (when taken) installs its own factory; wrapping whatever
+        // is installed now keeps the TLS path's protocol/client-auth setup
+        // and adds one behavior to every accepted socket: TCP_NODELAY. NanoHTTPD
+        // leaves Nagle enabled on its HTTP sockets (the RTSP listener sets the
+        // option itself, [RtspServer.acceptLoop]) — on the MJPEG pump, where a
+        // ~800-byte header write is followed by a frame write per part, Nagle
+        // can hold the small write behind the previous segment's ack. Local
+        // { @link TcpNoDelayServerSocketFactory }.
+        setServerSocketFactory(TcpNoDelayServerSocketFactory(serverSocketFactory))
     }
 
     private val authFilter = HttpAuthFilter(
@@ -244,7 +258,23 @@ class StreamingServer(
         }
 
         val response = when {
-            uri == "/stream" -> translate(mjpegPump.openStream())
+            uri == "/stream" -> {
+                // A viewer connecting IS demand: the server outlives the
+                // outputs (it starts at launch and after a reboot, the web
+                // output only on user action, automation, or the opt-in boot
+                // resume), so a server-only process used to accept the
+                // viewer, count them, and block forever — the MJPEG body
+                // waits for a frame the stopped output never produces
+                // (issue #24). Bring the output up first; a disabled or
+                // failed start answers 503 instead of hanging.
+                if (!mjpegPump.isEnabled()) {
+                    translate(HttpResult.streamingDisabled())
+                } else if (!demandWebOutput()) {
+                    translate(HttpResult.plainText(503, "Web streaming unavailable"))
+                } else {
+                    translate(mjpegPump.openStream())
+                }
+            }
             uri == "/audio" -> translate(
                 mediaResponder.serveAudio(mjpegPump.isEnabled()),
             )
@@ -377,6 +407,24 @@ class StreamingServer(
             ONVIF_CONTENT_TYPE,
             onvifServer.handle(body.toString(Charsets.UTF_8)),
         ).apply { addSecurityHeaders() }
+    }
+
+    /**
+     * The `/stream` viewer demand: awaits the start ladder on this request's
+     * worker thread (never Main) under the same bounded-dispatch discipline
+     * the API routes use, so a wedged start can't hold the viewer's socket
+     * open indefinitely. False on timeout or failure — the route answers 503.
+     */
+    private fun demandWebOutput(): Boolean = try {
+        runBlocking {
+            withTimeout(WEB_DEMAND_TIMEOUT_MS) { webApi.stream.ensureWebLive() }
+        }
+    } catch (_: TimeoutCancellationException) {
+        Log.w(TAG, "Web stream demand timed out")
+        false
+    } catch (e: Exception) {
+        Log.e(TAG, "Web stream demand failed", e)
+        false
     }
 
     private fun translate(result: HttpResult): Response {
@@ -615,6 +663,14 @@ class StreamingServer(
         private const val API_DISPATCH_TIMEOUT_MS = 10_000L
 
         /**
+         * The `/stream` viewer demand's bound: the start ladder's camera
+         * attach dispatches to Main with its own 2 s cap, so this only needs
+         * to cover a queue of those — long enough for a legitimate cold
+         * start, short enough that a wedged start answers 503, not a hang.
+         */
+        private const val WEB_DEMAND_TIMEOUT_MS = 10_000L
+
+        /**
          * The credential-body cap for the login route: the JSON login body is
          * two short strings, so 64 KiB is orders of magnitude above any real
          * request while keeping an attacker's allocation bounded.
@@ -629,5 +685,52 @@ class StreamingServer(
 
         /** A DELETE-body session id is 32 hex characters — the cap is generous. */
         private const val SESSION_ID_BODY_MAX_BYTES = 256L
+    }
+}
+
+/**
+ * The one interception point NanoHTTPD offers: its factory seam returns the
+ * server socket *unbound* (the framework binds it in ServerRunnable), so a
+ * factory that wraps the socket the backing factory returns can shape every
+ * connection this listener accepts. The TLS factory's protocol and
+ * client-auth configuration happened inside its own [create][NanoHTTPD.ServerSocketFactory.create]
+ * and rides the wrapped socket untouched.
+ */
+private class TcpNoDelayServerSocketFactory(
+    private val backing: NanoHTTPD.ServerSocketFactory,
+) : NanoHTTPD.ServerSocketFactory {
+    override fun create(): ServerSocket = TcpNoDelayServerSocket(backing.create())
+}
+
+/**
+ * A delegating socket over the factory's product. The constructor's own
+ * [ServerSocket] stays unbound forever — every call the framework makes on
+ * the returned socket must land on [inner]: bind before the accept loop
+ * (ServerRunnable), reuseAddress at start, accept/isClosed in the loop, and
+ * close/localPort at stop.
+ */
+private class TcpNoDelayServerSocket(
+    private val inner: ServerSocket,
+) : ServerSocket() {
+    override fun accept(): Socket = inner.accept().apply {
+        try {
+            tcpNoDelay = true
+        } catch (_: SocketException) {
+            // A race with a concurrent close; the option is best-effort.
+        }
+    }
+
+    override fun bind(endpoint: SocketAddress) = inner.bind(endpoint)
+
+    override fun close() = inner.close()
+
+    override fun isClosed(): Boolean = inner.isClosed
+
+    override fun getLocalPort(): Int = inner.localPort
+
+    override fun getReuseAddress(): Boolean = inner.reuseAddress
+
+    override fun setReuseAddress(on: Boolean) {
+        inner.reuseAddress = on
     }
 }
