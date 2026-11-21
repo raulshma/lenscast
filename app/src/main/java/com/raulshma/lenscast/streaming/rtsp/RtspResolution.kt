@@ -13,10 +13,12 @@ import com.raulshma.lenscast.core.parseWireNameOrNull
  *
  * The entries deliberately do not use the camera `Resolution` enum: the RTSP
  * output encodes a fixed-size stream of its own choosing, independent of the
- * camera preview's capture resolution. The [aspect] does flow to the camera,
- * though: the Settings Applier steers the streaming analysis window with it,
- * so a 4:3 tier encodes the full sensor width instead of cropping 16:9
- * analysis frames.
+ * camera preview's capture resolution. The [width]/[height] and [aspect] do
+ * flow to the camera, though: the Settings Applier steers the streaming
+ * analysis window with them, so a 4:3 tier analyzes the full sensor width
+ * instead of cropping 16:9 analysis frames, and a 1080p tier raises the
+ * preview rungs (MJPEG/WHEP) to the same window instead of leaving them at
+ * the 720p baseline.
  */
 enum class RtspResolution(
     val wireName: String,

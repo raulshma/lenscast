@@ -7,6 +7,7 @@ import com.raulshma.lenscast.camera.model.OverlaySettings
 import com.raulshma.lenscast.camera.model.PhotoAspectRatio
 import com.raulshma.lenscast.camera.model.PhotoCapturePlan
 import com.raulshma.lenscast.camera.model.StreamAspect
+import com.raulshma.lenscast.camera.model.StreamTarget
 import com.raulshma.lenscast.core.FsiResumeController
 import com.raulshma.lenscast.core.StreamWatchdog
 import com.raulshma.lenscast.core.mqtt.MqttAlertPublisher
@@ -534,35 +535,43 @@ private val rtspTlsEnabled = MutableStateFlow(false)
         verify(exactly = 2) { streamingManager.setRtspTlsEnabled(any()) }
     }
 
-    // ── encode resolution aspect → camera analysis seam ──
+    // ── encode resolution → camera analysis seam ──
 
     @Test
-    fun `the encode resolution's aspect lands on the camera analysis seam`() {
+    fun `the encode resolution's tier lands on the camera analysis seam`() {
         eventually {
-            coVerify(exactly = 1) { cameraService.setStreamAspectRatio(StreamAspect.WIDE_16_9) }
+            coVerify(exactly = 1) {
+                cameraService.setStreamTarget(StreamTarget(1280, 720, StreamAspect.WIDE_16_9))
+            }
         }
         rtspResolution.value = RtspResolution.P720_43
         eventually {
-            coVerify(exactly = 1) { cameraService.setStreamAspectRatio(StreamAspect.STANDARD_4_3) }
+            coVerify(exactly = 1) {
+                cameraService.setStreamTarget(StreamTarget(960, 720, StreamAspect.STANDARD_4_3))
+            }
         }
         // A same-aspect tier change still emits — the seam itself dedupes.
         rtspResolution.value = RtspResolution.P1080_43
         eventually {
             verify(exactly = 1) { streamingManager.setRtspResolution(RtspResolution.P1080_43) }
-            coVerify(exactly = 2) { cameraService.setStreamAspectRatio(StreamAspect.STANDARD_4_3) }
+            coVerify(exactly = 1) {
+                cameraService.setStreamTarget(StreamTarget(1440, 1080, StreamAspect.STANDARD_4_3))
+            }
         }
     }
 
     @Test
-    fun `an unrelated rtsp field change does not re-fire the camera aspect`() {
+    fun `an unrelated rtsp field change does not re-fire the camera tier`() {
         eventually {
-            coVerify(exactly = 1) { cameraService.setStreamAspectRatio(StreamAspect.WIDE_16_9) }
+            coVerify(exactly = 1) {
+                cameraService.setStreamTarget(StreamTarget(1280, 720, StreamAspect.WIDE_16_9))
+            }
         }
         rtspPort.value = 9555
         eventually {
             verify(exactly = 1) { streamingManager.setRtspPort(9555) }
         }
-        coVerify(exactly = 1) { cameraService.setStreamAspectRatio(any()) }
+        coVerify(exactly = 1) { cameraService.setStreamTarget(any()) }
     }
 
     // ── push outputs: RTMP / WHIP / SRT lifecycle rule ──

@@ -346,7 +346,19 @@ class StreamingManager(
     )
 
     private val webStreamingActive = AtomicBoolean(false)
-    private val jpegQuality = AtomicInteger(StreamDefaults.JPEG_QUALITY)
+
+    /**
+     * The user's persisted JPEG quality — the frame path's base. The battery
+     * and thermal ladders clamp it per frame; neither may replace it, or a
+     * periodic poll would silently rewind every setting above the ladder's
+     * tier (issue #23: a 30s battery poll reset a requested 100 back to 70).
+     */
+    @Volatile
+    private var userJpegQuality = StreamDefaults.JPEG_QUALITY
+
+    /** The battery ladder's ceiling; [StreamDefaults.JPEG_QUALITY_MAX] means no reduction. */
+    @Volatile
+    private var batteryJpegCeiling = StreamDefaults.JPEG_QUALITY_MAX
     private val streamAudioEnabled = AtomicBoolean(true)
     private val streamAudioBitrateKbps = AtomicInteger(StreamDefaults.AUDIO_BITRATE_KBPS)
     private val streamAudioChannels = AtomicInteger(StreamDefaults.AUDIO_CHANNELS)
@@ -1652,7 +1664,17 @@ class StreamingManager(
     }
 
     fun setJpegQuality(quality: Int) {
-        framePipeline.setJpegQuality(quality.coerceIn(StreamDefaults.JPEG_QUALITY_MIN, StreamDefaults.JPEG_QUALITY_MAX))
+        userJpegQuality = quality.coerceIn(StreamDefaults.JPEG_QUALITY_MIN, StreamDefaults.JPEG_QUALITY_MAX)
+        applyEffectiveJpegQuality()
+    }
+
+    /**
+     * The effective base quality: the user's value clamped by the battery
+     * ceiling. Thermal (per tier) and network (per level) still resolve on
+     * top of this base inside the Frame Pipeline's quality policy.
+     */
+    private fun applyEffectiveJpegQuality() {
+        framePipeline.setJpegQuality(minOf(userJpegQuality, batteryJpegCeiling))
     }
 
     /**
@@ -2094,10 +2116,13 @@ class StreamingManager(
 
     fun applyBatteryOptimization(result: com.raulshma.lenscast.core.BatteryOptimizationResult?) {
         if (result == null) return
-        // The battery suggestion becomes the policy's base quality — thermal
-        // still clamps it and the network ladder still scales it per push.
-        setJpegQuality(result.suggestedJpegQuality)
-        Log.d(TAG, "Battery optimization applied: quality=${result.suggestedJpegQuality} (${result.message})")
+        // The battery ladder is a CEILING on the user's quality, never a
+        // replacement: the poll re-applies it every 30s, so writing it
+        // straight onto the base erased every setting above it (issue #23).
+        batteryJpegCeiling = result.suggestedJpegQuality
+            .coerceIn(StreamDefaults.JPEG_QUALITY_MIN, StreamDefaults.JPEG_QUALITY_MAX)
+        applyEffectiveJpegQuality()
+        Log.d(TAG, "Battery optimization applied: ceiling=${result.suggestedJpegQuality} (${result.message})")
     }
 
     fun release() {

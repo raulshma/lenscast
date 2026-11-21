@@ -107,6 +107,37 @@ class WsMediaRoutes(
     /** Live /ws/video client count — the encoded-stream policy's WS input. */
     fun videoClientCount(): Int = videoClients.size
 
+    /**
+     * NanoWSD's handler thread reads the socket with NanoHTTPD's 5s
+     * `SOCKET_READ_TIMEOUT`, and browsers send nothing after the handshake
+     * — so an un-pinged video socket was closed ~5s in and the dashboard
+     * preview froze for good (issue #23, every browser). A server Ping every
+     * [KEEPALIVE_INTERVAL_MS] makes the browser answer with a Pong, which
+     * resets the read window. Pings ride [WebSocket.ping] (sendFrame), so
+     * they serialize with the video frames. Ends when the socket closes or
+     * a write fails; [stopKeepAlive] interrupts a sleeping waiter.
+     */
+    private fun startKeepAlive(socket: WebSocket): Thread {
+        val thread = Thread({
+            while (socket.isOpen) {
+                try {
+                    Thread.sleep(KEEPALIVE_INTERVAL_MS)
+                } catch (_: InterruptedException) {
+                    return@Thread
+                }
+                if (!socket.isOpen) return@Thread
+                if (runCatching { socket.ping(KEEPALIVE_PING) }.isFailure) return@Thread
+            }
+        }, "ws-keepalive")
+        thread.isDaemon = true
+        thread.start()
+        return thread
+    }
+
+    private fun stopKeepAlive(thread: Thread?) {
+        thread?.interrupt()
+    }
+
     /** The transport's single upgrade entry: path gate, cookie gate, then the socket. */
     fun openWebSocket(handshake: IHTTPSession): WebSocket {
         val path = handshake.uri?.substringBefore("?") ?: ""
@@ -123,6 +154,8 @@ class WsMediaRoutes(
     }
 
     private inner class VideoSocket(handshake: IHTTPSession) : WebSocket(handshake) {
+        private var keepAlive: Thread? = null
+
         init {
             videoClients.add(this)
         }
@@ -144,10 +177,13 @@ class WsMediaRoutes(
                     sendFrame(WebSocketFrame(WebSocketFrame.OpCode.Binary, true, payload))
                 }
             }
+            keepAlive = startKeepAlive(this)
             Log.d(TAG, "WS video client connected (${videoClients.size})")
         }
 
         override fun onClose(code: WebSocketFrame.CloseCode, reason: String?, initiatedByRemote: Boolean) {
+            stopKeepAlive(keepAlive)
+            keepAlive = null
             videoClients.remove(this)
             Log.d(TAG, "WS video client gone (${videoClients.size})")
         }
@@ -162,10 +198,15 @@ class WsMediaRoutes(
     }
 
     private inner class TalkbackSocket(handshake: IHTTPSession) : WebSocket(handshake) {
+        private var keepAlive: Thread? = null
 
-        override fun onOpen() = Unit
+        override fun onOpen() {
+            keepAlive = startKeepAlive(this)
+        }
 
         override fun onClose(code: WebSocketFrame.CloseCode, reason: String?, initiatedByRemote: Boolean) {
+            stopKeepAlive(keepAlive)
+            keepAlive = null
             audioStreamingManager.stopTalkback()
         }
 
@@ -204,5 +245,9 @@ class WsMediaRoutes(
         private const val TAG = "WsMediaRoutes"
         const val VIDEO_PATH = "/ws/video"
         const val TALKBACK_PATH = "/ws/talkback"
+
+        /** Comfortably inside NanoHTTPD's 5s socket read timeout. */
+        private const val KEEPALIVE_INTERVAL_MS = 2_000L
+        private val KEEPALIVE_PING = byteArrayOf(0)
     }
 }

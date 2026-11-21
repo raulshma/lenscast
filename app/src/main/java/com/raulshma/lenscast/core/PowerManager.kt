@@ -91,7 +91,7 @@ class PowerManager(private val context: Context) {
 
     private val _optimizationResult = MutableStateFlow(
         BatteryOptimizationResult(
-            suggestedJpegQuality = StreamDefaults.JPEG_QUALITY,
+            suggestedJpegQuality = StreamDefaults.JPEG_QUALITY_MAX,
             batteryLevel = 100,
             isPowerSaveMode = false,
             message = "Normal operation"

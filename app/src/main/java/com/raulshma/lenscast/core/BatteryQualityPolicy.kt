@@ -9,7 +9,10 @@ package com.raulshma.lenscast.core
 object BatteryQualityPolicy {
 
     // The ladder's quality tiers. They are this policy's own knowledge, not
-    // cross-module config — kept here instead of StreamDefaults.
+    // cross-module config — kept here instead of StreamDefaults. The two
+    // unconstrained tiers report JPEG_QUALITY_MAX (no ceiling): the base is
+    // the user's setting, and a fixed 70 here silently capped every request
+    // above it on every 30s poll (issue #23).
     const val DOZE_QUALITY = 40
     const val CRITICAL_BATTERY_QUALITY = 50
     const val LOW_BATTERY_QUALITY = 60
@@ -26,7 +29,7 @@ object BatteryQualityPolicy {
     ): BatteryOptimizationResult {
         return when {
             isCharging -> BatteryOptimizationResult(
-                suggestedJpegQuality = StreamDefaults.JPEG_QUALITY,
+                suggestedJpegQuality = StreamDefaults.JPEG_QUALITY_MAX,
                 batteryLevel = batteryLevel,
                 isPowerSaveMode = isPowerSave,
                 message = "Charging - full quality"
@@ -56,7 +59,7 @@ object BatteryQualityPolicy {
                 message = "Battery saver - balanced quality"
             )
             else -> BatteryOptimizationResult(
-                suggestedJpegQuality = StreamDefaults.JPEG_QUALITY,
+                suggestedJpegQuality = StreamDefaults.JPEG_QUALITY_MAX,
                 batteryLevel = batteryLevel,
                 isPowerSaveMode = isPowerSave,
                 message = "Normal operation"

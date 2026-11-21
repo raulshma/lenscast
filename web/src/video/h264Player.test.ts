@@ -38,6 +38,54 @@ describe('h264Player without WebCodecs support', () => {
   })
 })
 
+// The socket lifecycle: a server-initiated close while playing must surface
+// as an error (the caller demotes or retries). Reporting 'idle' left the
+// canvas on its last frame forever — the frozen H.264 preview of issue #23.
+// stop() flips to idle first, so a deliberate teardown still never errors.
+describe('h264Player socket lifecycle', () => {
+  it('an unexpected close while playing reports an error', () => {
+    createRoot((dispose) => {
+      const statuses: string[] = []
+      const RealWebSocket = globalThis.WebSocket
+      const RealDecoder = (globalThis as any).VideoDecoder
+      let socket: any = null
+      class FakeWebSocket {
+        onopen: (() => void) | null = null
+        onclose: (() => void) | null = null
+        onerror: (() => void) | null = null
+        onmessage: ((event: any) => void) | null = null
+        binaryType = ''
+        constructor(public url: string) { socket = this }
+        close() { }
+      }
+      class FakeDecoder {
+        state = 'configured'
+        constructor(_init: any) { }
+        configure(_config: any) { }
+        decode(_chunk: any) { }
+        close() { }
+      }
+      ;(globalThis as any).WebSocket = FakeWebSocket
+      ;(globalThis as any).VideoDecoder = FakeDecoder
+      try {
+        const player = createH264Player({ onStatus: (s) => statuses.push(s) })
+        player.start(document.createElement('canvas'))
+        socket.onopen?.()
+        expect(player.status()).toBe('playing')
+        socket.onclose?.()
+        expect(statuses).toEqual(['playing', 'error'])
+        expect(player.status()).toBe('error')
+        player.stop()
+      } finally {
+        ;(globalThis as any).WebSocket = RealWebSocket
+        if (RealDecoder === undefined) delete (globalThis as any).VideoDecoder
+        else (globalThis as any).VideoDecoder = RealDecoder
+        dispose()
+      }
+    })
+  })
+})
+
 // Same-origin WS URLs: the socket rides the page's own origin (host + port
 // included) under /ws/, so a reverse proxy on any port forwards one hop and
 // an https page upgrades the scheme to wss. The location is injectable —

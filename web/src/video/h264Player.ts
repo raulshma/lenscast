@@ -180,9 +180,14 @@ export function createH264Player(options: { onStatus?: (s: 'idle' | 'playing' | 
     }
     socket.onclose = () => {
       clearConfigTimer()
+      // A close while playing is never ours (stop() flips to idle first):
+      // the server dropped the socket, and the canvas would keep the last
+      // frame forever. Report it as an error so the caller's ladder
+      // demotes/retries instead of freezing on a stale image
+      // (issue #23: the server's 5s idle timeout closed the WS mid-play).
       if (status() === 'playing') {
-        setStatus('idle')
-        options.onStatus?.('idle')
+        setStatus('error')
+        options.onStatus?.('error')
       }
     }
   }

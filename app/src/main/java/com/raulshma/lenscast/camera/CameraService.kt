@@ -52,6 +52,7 @@ import com.raulshma.lenscast.camera.model.PhotoAspectRatioPolicy
 import com.raulshma.lenscast.camera.model.SelectedLens
 import com.raulshma.lenscast.camera.model.SessionDemand
 import com.raulshma.lenscast.camera.model.StreamAspect
+import com.raulshma.lenscast.camera.model.StreamTarget
 import com.raulshma.lenscast.camera.model.TorchState
 import com.raulshma.lenscast.camera.model.TorchStrengthPolicy
 import com.raulshma.lenscast.camera.model.ControlsApplyPolicy
@@ -238,10 +239,11 @@ class CameraService(private val context: Context) {
      */
     @Volatile private var torchDrivenOn = false
 
-    // The streaming analysis window's aspect, steered by the encode
-    // resolution's aspect through the Settings Applier. Read live at bind
-    // time, so a busy camera picks a change up at the next natural rebind.
-    @Volatile private var streamAspect: StreamAspect = StreamAspect.WIDE_16_9
+    // The streaming analysis window's tier, steered by the encode resolution
+    // through the Settings Applier. Read live at bind time, so a busy camera
+    // picks a change up at the next natural rebind.
+    @Volatile private var streamTarget: StreamTarget =
+        StreamTarget(WIDE_ANALYSIS_WIDTH, WIDE_ANALYSIS_HEIGHT, StreamAspect.WIDE_16_9)
 
     private val controlsHandler = android.os.Handler(android.os.Looper.getMainLooper())
 
@@ -1128,6 +1130,30 @@ class CameraService(private val context: Context) {
     }
 
     /**
+     * The applier-dispatched rebind's stale-decision guard: the arbiter
+     * consult that produced [action] read [sessionDemand] on the Settings
+     * Applier's Default-dispatcher collector, while every demand writer is
+     * Main-confined ([updateDemand]) — so [beginExclusiveSession] can bracket
+     * a recording bind in the window between the free verdict and this Main
+     * hop, and the stale Rebind would tear the recording's exclusive session
+     * down at [bindUseCases]' unbindAll. Run on Main immediately before
+     * [executeBinding], the recheck closes that window: an exclusive session
+     * started in it skips the rebind (the change lands at the next natural
+     * rebind, the same defer the arbiter's Noop verdict means, and the skip
+     * reads as success like [rebindUseCases]'s exclusive-session skip); with
+     * none, [action] executes exactly as the arbiter returned it.
+     */
+    private fun executeBindingUnlessExclusiveStarted(
+        action: CameraSessionArbiter.BindingAction,
+    ): Boolean =
+        if (demandState(CameraSessionArbiter.Trigger.RebindIfFree).exclusiveSessionActive) {
+            Log.d(TAG, "executeBindingUnlessExclusiveStarted: exclusive session started since the consult — skipping")
+            true
+        } else {
+            executeBinding(action)
+        }
+
+    /**
      * Bind a recording [VideoCapture] alongside the current use-case set,
      * trying progressively smaller combinations before falling back to the
      * VideoCapture alone. The caller brackets the recording with
@@ -1209,9 +1235,9 @@ class CameraService(private val context: Context) {
         val (width, height) = analysisSizeFor(
             captureResolution.width,
             captureResolution.height,
-            MAX_ANALYSIS_WIDTH,
-            MAX_ANALYSIS_HEIGHT,
-            streamAspect,
+            streamTarget.width,
+            streamTarget.height,
+            streamTarget.aspect,
         )
         return Size(width, height)
     }
@@ -1772,15 +1798,15 @@ class CameraService(private val context: Context) {
 
     @androidx.annotation.OptIn(androidx.camera.camera2.interop.ExperimentalCamera2Interop::class)
     /**
-     * The streaming analysis aspect, applied by the Settings Applier when the
-     * encode resolution's aspect moves. Mirrors the output-rotation seam: a
-     * free camera rebinds now, a busy one picks the change up at the next
-     * natural rebind — [getStreamingAnalysisResolution] reads the field live,
-     * so nothing needs parking.
+     * The streaming analysis tier, applied by the Settings Applier when the
+     * encode resolution moves. Mirrors the output-rotation seam: a free
+     * camera rebinds now, a busy one picks the change up at the next natural
+     * rebind — [getStreamingAnalysisResolution] reads the field live, so
+     * nothing needs parking.
      */
-    suspend fun setStreamAspectRatio(aspect: StreamAspect) {
-        if (aspect == streamAspect) return
-        streamAspect = aspect
+    suspend fun setStreamTarget(target: StreamTarget) {
+        if (target == streamTarget) return
+        streamTarget = target
         when (
             val action = CameraSessionArbiter.decide(
                 demandState(CameraSessionArbiter.Trigger.RebindIfFree)
@@ -1788,10 +1814,10 @@ class CameraService(private val context: Context) {
         ) {
             is CameraSessionArbiter.BindingAction -> {
                 withContext(Dispatchers.Main) {
-                    executeBinding(action)
+                    executeBindingUnlessExclusiveStarted(action)
                 }
             }
-            else -> Log.d(TAG, "setStreamAspectRatio: deferring $aspect rebind until next active session")
+            else -> Log.d(TAG, "setStreamTarget: deferring $target rebind until next active session")
         }
     }
 
@@ -1894,7 +1920,7 @@ class CameraService(private val context: Context) {
             ) {
                 is CameraSessionArbiter.BindingAction -> {
                     withContext(Dispatchers.Main) {
-                        executeBinding(action)
+                        executeBindingUnlessExclusiveStarted(action)
                     }
                 }
                 else -> Log.d(TAG, "applySettings: deferring output-rotation rebind until next active session")
@@ -1911,7 +1937,7 @@ class CameraService(private val context: Context) {
             ) {
                 is CameraSessionArbiter.BindingAction -> {
                     withContext(Dispatchers.Main) {
-                        executeBinding(action)
+                        executeBindingUnlessExclusiveStarted(action)
                     }
                     applyCameraControls(effective, forceFocusReapply = false)
                     return
@@ -2278,8 +2304,13 @@ class CameraService(private val context: Context) {
     companion object {
         private const val TAG = "CameraService"
 
-        internal const val MAX_ANALYSIS_WIDTH = 1280
-        internal const val MAX_ANALYSIS_HEIGHT = 720
+        /**
+         * The baseline analysis windows. A tier never drops the analysis
+         * feed below these: a 480p encode rung must not degrade motion/ML
+         * analysis, so the window is a floor, not a target.
+         */
+        internal const val WIDE_ANALYSIS_WIDTH = 1280
+        internal const val WIDE_ANALYSIS_HEIGHT = 720
         internal const val FOUR_THREE_ANALYSIS_WIDTH = 960
         internal const val FOUR_THREE_ANALYSIS_HEIGHT = 720
 
@@ -2313,26 +2344,40 @@ internal fun <T> orderedCombinations(base: List<T>, extra: T?): List<List<T>> =
     BindChoreography.orderedCombinations(base, extra)
 
 /**
- * The streaming analysis size: small captures pass through; large captures
- * drop to the desired aspect's window — 960x720 for 4:3 (the full sensor
- * width), the 16:9 ceiling otherwise. The aspect is the encode resolution's,
- * not the capture's: a 4:3 encode tier must not crop 16:9 analysis frames.
- * Pure ints — the `Size` wrapping stays at the call site.
+ * The streaming analysis size for an encode tier: the tier's own window
+ * (floored at the historical 720-line baseline so a low encode rung never
+ * degrades analysis), fitted inside the capture so the use case never asks
+ * the sensor for an upscale. Captures already inside the baseline window
+ * pass through untouched; a larger capture is re-windowed even when it would
+ * fit the tier's box, so the aspect is the tier's, not the capture's — a 4:3
+ * tier analyzes 4:3 frames so the encode aspect-fills without cropping.
+ * Pure ints; the `Size` wrapping stays at the call site.
  */
 internal fun analysisSizeFor(
     captureWidth: Int,
     captureHeight: Int,
-    maxWidth: Int,
-    maxHeight: Int,
+    tierWidth: Int,
+    tierHeight: Int,
     aspect: StreamAspect = StreamAspect.WIDE_16_9,
 ): Pair<Int, Int> {
-    if (captureWidth <= maxWidth && captureHeight <= maxHeight) {
-        return captureWidth to captureHeight
-    }
-
-    return when (aspect) {
-        StreamAspect.WIDE_16_9 -> maxWidth to maxHeight
+    val (floorWidth, floorHeight) = when (aspect) {
+        StreamAspect.WIDE_16_9 -> CameraService.WIDE_ANALYSIS_WIDTH to CameraService.WIDE_ANALYSIS_HEIGHT
         StreamAspect.STANDARD_4_3 ->
             CameraService.FOUR_THREE_ANALYSIS_WIDTH to CameraService.FOUR_THREE_ANALYSIS_HEIGHT
     }
+    val targetWidth = maxOf(tierWidth, floorWidth)
+    val targetHeight = maxOf(tierHeight, floorHeight)
+
+    if (captureWidth <= floorWidth && captureHeight <= floorHeight) {
+        return captureWidth to captureHeight
+    }
+
+    // The largest window of the target's aspect that fits the capture.
+    var width = minOf(targetWidth, captureWidth)
+    var height = width * targetHeight / targetWidth
+    if (height > captureHeight) {
+        height = captureHeight
+        width = height * targetWidth / targetHeight
+    }
+    return width to height
 }

@@ -10,9 +10,10 @@ object ThermalThrottlePolicy {
 
     // The ladder's quality tiers. They are this policy's own knowledge, not
     // cross-module config — kept here instead of StreamDefaults, mirroring
-    // BatteryQualityPolicy. The NORMAL tier restores the StreamDefaults
-    // baseline rather than a policy-local constant, so a settings change to
-    // the default JPEG quality follows the ladder back down.
+    // BatteryQualityPolicy. The NORMAL tier imposes NO ceiling
+    // (JPEG_QUALITY_MAX): the base is the user's setting, and a NORMAL tier
+    // fixed at the default 70 silently capped every request above it
+    // (issue #23). The throttled tiers are absolute ceilings.
     const val LIGHT_FRAME_RATE_MULTIPLIER = 0.9f
     const val LIGHT_JPEG_QUALITY = 60
     const val MODERATE_FRAME_RATE_MULTIPLIER = 0.7f
@@ -26,7 +27,7 @@ object ThermalThrottlePolicy {
         return when (state) {
             ThermalState.NORMAL -> ThermalThrottlingResult(
                 frameRateMultiplier = 1.0f,
-                jpegQuality = StreamDefaults.JPEG_QUALITY,
+                jpegQuality = StreamDefaults.JPEG_QUALITY_MAX,
                 shouldPause = false,
             )
             ThermalState.LIGHT -> ThermalThrottlingResult(

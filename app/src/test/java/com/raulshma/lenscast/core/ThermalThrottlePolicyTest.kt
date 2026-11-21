@@ -12,9 +12,11 @@ class ThermalThrottlePolicyTest {
     // ── tier mapping: every thermal state lands in its own tier ──
 
     @Test
-    fun `normal restores the stream defaults baseline`() {
+    fun `normal imposes no quality ceiling`() {
         val result = resolve(ThermalState.NORMAL)
-        assertEquals(StreamDefaults.JPEG_QUALITY, result.jpegQuality)
+        // The frame path's base is the user's setting; a NORMAL tier fixed
+        // at the default 70 capped every request above it (issue #23).
+        assertEquals(StreamDefaults.JPEG_QUALITY_MAX, result.jpegQuality)
         assertEquals(1.0f, result.frameRateMultiplier)
         assertFalse(result.shouldPause)
     }

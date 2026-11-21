@@ -3,6 +3,7 @@ package com.raulshma.lenscast.settings
 import android.util.Log
 import com.raulshma.lenscast.camera.CameraService
 import com.raulshma.lenscast.camera.model.PhotoCapturePlan
+import com.raulshma.lenscast.camera.model.StreamTarget
 import com.raulshma.lenscast.core.StreamWatchdog
 import com.raulshma.lenscast.core.mqtt.MqttAlertPublisher
 import com.raulshma.lenscast.core.mqtt.MqttTopics
@@ -211,14 +212,19 @@ class SettingsApplier(
             }
         }
 
-        // The encode resolution's aspect steers the camera's streaming
-        // analysis window (issue #17): a 4:3 tier analyzes 4:3 frames so the
-        // encode aspect-fills without cropping. A dedicated single-flow rule
-        // like the sub-stream's — the RTSP group above fires on any of five
-        // settings, and the camera seam only cares when the aspect moves.
+        // The encode resolution steers the camera's streaming analysis
+        // window (issue #17, raised to the full tier by issue #23): the
+        // window follows the tier's size and aspect, floored at the 720-line
+        // baseline and capped by the capture, so a 1080p encode setting
+        // raises MJPEG/WHEP instead of leaving them at the 720p window. A
+        // dedicated single-flow rule like the sub-stream's — the RTSP group
+        // above fires on any of five settings, and the camera seam only
+        // cares when the tier moves.
         scope.launch {
             settingsDataStore.rtspResolution.collectLatest { resolution ->
-                cameraService.setStreamAspectRatio(resolution.aspect)
+                cameraService.setStreamTarget(
+                    StreamTarget(resolution.width, resolution.height, resolution.aspect)
+                )
             }
         }
 

@@ -19,7 +19,7 @@ class BatteryQualityPolicyTest {
     @Test
     fun `charging wins over everything at full quality`() {
         val result = resolve(batteryLevel = 5, isPowerSave = true, isCharging = true, inDoze = true)
-        assertEquals(StreamDefaults.JPEG_QUALITY, result.suggestedJpegQuality)
+        assertEquals(StreamDefaults.JPEG_QUALITY_MAX, result.suggestedJpegQuality)
         assertEquals(5, result.batteryLevel)
         assertTrue(result.isPowerSaveMode) // echoes the isPowerSave input
         assertEquals("Charging - full quality", result.message)
@@ -28,7 +28,7 @@ class BatteryQualityPolicyTest {
     @Test
     fun `charging with healthy battery reports normal power-save state`() {
         val result = resolve(batteryLevel = 90, isCharging = true)
-        assertEquals(StreamDefaults.JPEG_QUALITY, result.suggestedJpegQuality)
+        assertEquals(StreamDefaults.JPEG_QUALITY_MAX, result.suggestedJpegQuality)
         assertFalse(result.isPowerSaveMode)
         assertEquals("Charging - full quality", result.message)
     }
@@ -88,7 +88,7 @@ class BatteryQualityPolicyTest {
     @Test
     fun `healthy battery with no savings active is normal operation`() {
         val result = resolve(batteryLevel = 100)
-        assertEquals(StreamDefaults.JPEG_QUALITY, result.suggestedJpegQuality)
+        assertEquals(StreamDefaults.JPEG_QUALITY_MAX, result.suggestedJpegQuality)
         assertFalse(result.isPowerSaveMode)
         assertEquals("Normal operation", result.message)
     }
@@ -121,7 +121,7 @@ class BatteryQualityPolicyTest {
             resolve(batteryLevel = 49).suggestedJpegQuality
         )
         assertEquals(
-            StreamDefaults.JPEG_QUALITY,
+            StreamDefaults.JPEG_QUALITY_MAX,
             resolve(batteryLevel = 50).suggestedJpegQuality
         )
     }
@@ -133,7 +133,7 @@ class BatteryQualityPolicyTest {
             resolve(batteryLevel = 50, isPowerSave = true).suggestedJpegQuality
         )
         assertEquals(
-            StreamDefaults.JPEG_QUALITY,
+            StreamDefaults.JPEG_QUALITY_MAX,
             resolve(batteryLevel = 51).suggestedJpegQuality
         )
     }

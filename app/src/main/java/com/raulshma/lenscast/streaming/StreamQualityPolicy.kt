@@ -17,13 +17,14 @@ interface NetworkAdjustmentSource {
 }
 
 /**
- * The single quality-resolution order for the frame path: the battery
- * suggestion arrives as the base (see `applyBatteryOptimization`), thermal
- * clamps it, and the network ladder scales it. The frame path resolves the
- * interval first and the quality only for frames that pass the throttle —
- * the adaptive module's driven-state publishing must observe exactly the
- * frames that flow, never dropped ones. Call order inside each function
- * matches the historical sensor sequence.
+ * The single quality-resolution order for the frame path: the base is the
+ * user's persisted quality, already clamped by the battery ceiling in
+ * `StreamingManager.applyBatteryOptimization`; thermal clamps it, and the
+ * network ladder scales it. The frame path resolves the interval first and
+ * the quality only for frames that pass the throttle — the adaptive module's
+ * driven-state publishing must observe exactly the frames that flow, never
+ * dropped ones. Call order inside each function matches the historical
+ * sensor sequence.
  */
 class StreamQualityPolicy(
     private val thermal: ThermalAdjustmentSource,

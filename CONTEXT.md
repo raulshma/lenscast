@@ -1016,17 +1016,22 @@ dimensions; a width/height change is NEEDS_RESTART because MediaCodec
 dimensions are set at `configure`. The entries deliberately do not use the
 camera `Resolution` enum — the RTSP output encodes a fixed-size stream of
 its own choosing, independent of the preview's capture resolution. The
-*aspect* does cross into the camera, though: a dedicated Settings Applier
-collector lands it on CameraService's `setStreamAspectRatio` seam, and the
-streaming analysis window follows (960×720 for 4:3, the 1280×720 ceiling
-for 16:9 — `analysisSizeFor`), so a 4:3 tier encodes the full sensor width
-instead of cropping 16:9 analysis frames. Incoming frames are aspect-filled
-onto the configured size (`YuvConverter.scaleNv21`), so the stream is
-exactly that size whatever the camera analysis produces. Two accepted
-crops: a sensor without a 4:3 analysis mode falls back (CameraX
-closest-lower-then-higher) to a 16:9 frame that aspect-fills with a centered
-horizontal crop, and a small capture (SD_480P's 720×480) passes through
-unchanged and aspect-fills the same way — no distortion either way.
+*whole tier* (width, height, aspect) does cross into the camera, though: a
+dedicated Settings Applier collector lands it on CameraService's
+`setStreamTarget` seam, and the streaming analysis window follows it
+(`analysisSizeFor`) — the historical 960×720 (4:3) / 1280×720 (16:9)
+windows are floors, a 1080p tier raises the window to 1440×1080 /
+1920×1080 (issue #23: MJPEG and WHEP were pinned at the 720p window while
+the encode tier said 1080p), and the capture size caps it. Because the
+preview rungs consume the same analysis frames, a 1080p encode setting
+raises MJPEG/WHEP with the hub instead of leaving them behind. Incoming
+frames are aspect-filled onto the configured size
+(`YuvConverter.scaleNv21`), so the stream is exactly that size whatever
+the camera analysis produces. Two accepted crops: a sensor without a 4:3
+analysis mode falls back (CameraX closest-lower-then-higher) to a 16:9
+frame that aspect-fills with a centered horizontal crop, and a small
+capture (SD_480P's 720×480) passes through unchanged and aspect-fills the
+same way — no distortion either way.
 
 ### RTSP Video Codec
 **`streaming/rtsp/RtspVideoCodec.kt`** — the wire name → codec mapper
@@ -1537,8 +1542,11 @@ the wave 3 telemetry surface.
 ### Battery Quality Policy
 **`core/BatteryQualityPolicy.kt`** — the pure battery→quality ladder:
 `resolve(level, isPowerSave, isCharging, inDoze)` returns the
-`BatteryOptimizationResult` (suggested JPEG quality + user-facing message)
-with charging beating doze beating low battery. `PowerManager` keeps the
+`BatteryOptimizationResult` (a suggested JPEG-quality **ceiling** +
+user-facing message) with charging beating doze beating low battery.
+The two unconstrained tiers (charging, normal operation) report
+`JPEG_QUALITY_MAX` — no reduction — so the ladder never rewinds a user
+setting the constrained tiers would allow. `PowerManager` keeps the
 receivers, wake lock, and battery reads and delegates; the thresholds and
 tier qualities live here as named constants — this ladder's own knowledge,
 not cross-module config — locked by test.
@@ -1570,14 +1578,17 @@ the Web API path).
 
 ### Stream Quality Policy
 **`streaming/StreamQualityPolicy.kt`** — the single quality-resolution
-order for the frame path: the battery suggestion arrives as the base
-quality, thermal clamps it, the network ladder scales it, one
-`resolve()` per push. The sensor seams (`ThermalAdjustmentSource`,
-`NetworkAdjustmentSource`) are implemented by the Thermal Monitor and the
-Adaptive Bitrate Controller in production and by fakes in tests; the
-Frame Pipeline takes the policy instead of the two sensors. Display
-bandwidth stays 0-while-idle while the adaptation ladder keeps its
-default-aware view — the split is documented and locked by test.
+order for the frame path: the user's persisted JPEG quality is the base,
+the battery ladder clamps it (a ceiling, never a replacement — its 30s
+poll must not rewind the setting), thermal clamps the result, and the
+network ladder scales it, one `resolve()` per push. Thermal's NORMAL tier
+is no ceiling (`JPEG_QUALITY_MAX`); only the throttled tiers cap. The
+sensor seams (`ThermalAdjustmentSource`, `NetworkAdjustmentSource`) are
+implemented by the Thermal Monitor and the Adaptive Bitrate Controller in
+production and by fakes in tests; the Frame Pipeline takes the policy
+instead of the two sensors. Display bandwidth stays 0-while-idle while the
+adaptation ladder keeps its default-aware view — the split is documented
+and locked by test.
 
 ### Connectivity Monitor
 **`core/ConnectivityMonitor.kt`** — app-scoped observer of Wi-Fi connectivity.
