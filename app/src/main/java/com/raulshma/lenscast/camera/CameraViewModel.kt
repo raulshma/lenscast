@@ -4,7 +4,6 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.pm.PackageManager
-import android.os.SystemClock
 import android.util.Log
 import android.widget.Toast
 import androidx.camera.core.ImageCapture
@@ -18,6 +17,7 @@ import com.raulshma.lenscast.capture.model.FlashMode
 import com.raulshma.lenscast.capture.model.FlashModePolicy
 import com.raulshma.lenscast.camera.model.CameraInitRetry
 import com.raulshma.lenscast.camera.model.CameraLensInfo
+import com.raulshma.lenscast.camera.model.ConsoleCapabilities
 import com.raulshma.lenscast.camera.model.CountdownState
 import com.raulshma.lenscast.camera.model.CameraSettings
 import com.raulshma.lenscast.camera.model.CameraState
@@ -59,9 +59,6 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.collectLatest
-import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.flow.stateIn
-import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.launch
 
 class CameraViewModel(
@@ -75,54 +72,62 @@ class CameraViewModel(
     connectivityMonitor: ConnectivityMonitor,
     private val recordingController: com.raulshma.lenscast.capture.RecordingController,
     private val photoCaptureManager: com.raulshma.lenscast.capture.PhotoCaptureManager,
-    ) : ViewModel() {
+    ) : ViewModel(), CameraConsole {
         private val context: Context = context.applicationContext
 
     val watchdogState = streamWatchdog.state
 
     // Live app-scoped state exposed directly — no ViewModel mirrors for state
     // that outlives this ViewModel.
-    val wifiConnected: StateFlow<Boolean> = connectivityMonitor.isWifiConnected
-    val thermalState: StateFlow<ThermalState> = thermalMonitor.thermalState
-    val adaptiveBitrateState: StateFlow<AdaptiveBitrateController.AdaptiveState> =
+    override val wifiConnected: StateFlow<Boolean> = connectivityMonitor.isWifiConnected
+    override val thermalState: StateFlow<ThermalState> = thermalMonitor.thermalState
+    override val adaptiveBitrateState: StateFlow<AdaptiveBitrateController.AdaptiveState> =
         streamingManager.adaptiveBitrateState
 
-    private val _cameraState = MutableStateFlow<CameraState>(CameraState.Idle)
-    val cameraState: StateFlow<CameraState> = _cameraState.asStateFlow()
+    // The console seam's capability table (see CameraConsole): the local
+    // backend honors everything the dashboard renders, so the constant
+    // local set is the whole verdict — the screen hides nothing. A flow,
+    // not a val, only so the remote console backend can republish as its
+    // device probe answers; this one never rewrites it.
+    override val capabilities: StateFlow<ConsoleCapabilities> =
+        MutableStateFlow(ConsoleCapabilities.local())
 
-    val settings: StateFlow<CameraSettings> = settingsDataStore.settings
+    private val _cameraState = MutableStateFlow<CameraState>(CameraState.Idle)
+    override val cameraState: StateFlow<CameraState> = _cameraState.asStateFlow()
+
+    override val settings: StateFlow<CameraSettings> = settingsDataStore.settings
 
     private val _streamStatus = MutableStateFlow(StreamStatus())
-    val streamStatus: StateFlow<StreamStatus> = _streamStatus.asStateFlow()
+    override val streamStatus: StateFlow<StreamStatus> = _streamStatus.asStateFlow()
 
     private val _hasCameraPermission = MutableStateFlow(false)
     val hasCameraPermission: StateFlow<Boolean> = _hasCameraPermission.asStateFlow()
 
     private val _hasAudioPermission = MutableStateFlow(false)
-    val hasAudioPermission: StateFlow<Boolean> = _hasAudioPermission.asStateFlow()
+    override val hasAudioPermission: StateFlow<Boolean> = _hasAudioPermission.asStateFlow()
 
     // The POST_NOTIFICATIONS ask-once budget: the verdict is
     // NotificationPermissionPolicy's, this state only makes "asked before"
     // survive recompositions and configuration changes with the screen's
     // ViewModel (the old home was a process-global var in the screen).
     private val _notificationPermissionAsked = MutableStateFlow(false)
-    val notificationPermissionAsked: StateFlow<Boolean> = _notificationPermissionAsked.asStateFlow()
+    override val notificationPermissionAsked: StateFlow<Boolean> = _notificationPermissionAsked.asStateFlow()
 
     private val _isFrontCamera = MutableStateFlow(false)
     val isFrontCamera: StateFlow<Boolean> = _isFrontCamera.asStateFlow()
 
-    val availableLenses: StateFlow<List<CameraLensInfo>> = cameraService.availableLenses
-    val selectedLensIndex: StateFlow<Int> = cameraService.selectedLensIndex
-    val availableIsoRange: StateFlow<ClosedRange<Int>> = cameraService.availableIsoRange
-    val availableZoomRange: StateFlow<ClosedFloatingPointRange<Float>> = cameraService.availableZoomRange
-    val availableExposureRange: StateFlow<ClosedRange<Int>> = cameraService.availableExposureRange
+    override val availableLenses: StateFlow<List<CameraLensInfo>> = cameraService.availableLenses
+    override val selectedLensIndex: StateFlow<Int> = cameraService.selectedLensIndex
+    override val availableIsoRange: StateFlow<ClosedRange<Int>> = cameraService.availableIsoRange
+    override val availableZoomRange: StateFlow<ClosedFloatingPointRange<Float>> = cameraService.availableZoomRange
+    override val availableExposureRange: StateFlow<ClosedRange<Int>> = cameraService.availableExposureRange
 
     // Recording truth lives in the app-scoped RecordingController; this
     // ViewModel only derives display state from it.
-    val recordingState: StateFlow<com.raulshma.lenscast.capture.RecordingState> =
+    override val recordingState: StateFlow<com.raulshma.lenscast.capture.RecordingState> =
         recordingController.state
 
-    val isRecording: StateFlow<Boolean> = recordingController.isRecording
+    override val isRecording: StateFlow<Boolean> = recordingController.isRecording
 
     // One shared editor for camera-control writes: persist only — the
     // Settings Applier applies each persisted write exactly once (the
@@ -139,33 +144,33 @@ class CameraViewModel(
         scope = viewModelScope,
         tickMs = 1000L,
     )
-    val recordingElapsedSeconds: StateFlow<Int> = recordingClock.elapsedSeconds
+    override val recordingElapsedSeconds: StateFlow<Int> = recordingClock.elapsedSeconds
 
-    val showPreview: StateFlow<Boolean> = settingsDataStore.showPreview
+    override val showPreview: StateFlow<Boolean> = settingsDataStore.showPreview
 
     private val streamAudioEnabled: StateFlow<Boolean> = settingsDataStore.streamAudioEnabled
 
     private val recordingAudioEnabled: StateFlow<Boolean> = settingsDataStore.recordingAudioEnabled
 
     private val _connectionQualityStats = MutableStateFlow<NetworkQualityMonitor.NetworkStatsSnapshot?>(null)
-    val connectionQualityStats: StateFlow<NetworkQualityMonitor.NetworkStatsSnapshot?> = _connectionQualityStats.asStateFlow()
+    override val connectionQualityStats: StateFlow<NetworkQualityMonitor.NetworkStatsSnapshot?> = _connectionQualityStats.asStateFlow()
 
     // ── Camera pro mode ──
     // Viewfinder aids (grid, spirit level, pro-tools overlays) and the
     // self-timer read straight from the Settings Store; the analyzer/monitor
     // runtimes own only plumbing — every verdict is their pure policy's.
 
-    val gridStyle: StateFlow<GridStyle> = settingsDataStore.gridStyle
+    override val gridStyle: StateFlow<GridStyle> = settingsDataStore.gridStyle
 
     val selfTimer: StateFlow<SelfTimerMode> = settingsDataStore.selfTimer
 
     val spiritLevelEnabled: StateFlow<Boolean> = settingsDataStore.spiritLevelEnabled
 
-    val histogramEnabled: StateFlow<Boolean> = settingsDataStore.histogramEnabled
+    override val histogramEnabled: StateFlow<Boolean> = settingsDataStore.histogramEnabled
 
-    val zebrasEnabled: StateFlow<Boolean> = settingsDataStore.zebrasEnabled
+    override val zebrasEnabled: StateFlow<Boolean> = settingsDataStore.zebrasEnabled
 
-    val peakingEnabled: StateFlow<Boolean> = settingsDataStore.peakingEnabled
+    override val peakingEnabled: StateFlow<Boolean> = settingsDataStore.peakingEnabled
 
     private val geotagEnabled: StateFlow<Boolean> = settingsDataStore.geotagEnabled
 
@@ -180,33 +185,32 @@ class CameraViewModel(
             )
         },
     )
-    val proToolsFrame: StateFlow<ProToolsPolicy.ProToolsFrame?> = proToolsFrameAnalyzer.frame
+    override val proToolsFrame: StateFlow<ProToolsPolicy.ProToolsFrame?> = proToolsFrameAnalyzer.frame
 
     // The level's sensors run only while both the setting is on and the
     // preview is showing (the second gate lives in start/stopPreview).
     private val spiritLevelMonitor = SpiritLevelMonitor(context)
-    val levelLineState: StateFlow<LevelIndicatorPolicy.LevelLineState?> = spiritLevelMonitor.lineState
+    override val levelLineState: StateFlow<LevelIndicatorPolicy.LevelLineState?> = spiritLevelMonitor.lineState
 
-    // The self-timer countdown's state machine (Idle → Counting → Firing →
-    // Idle); every transition is SelfTimerPolicy's, this holds the state and
-    // the countdown job only. The initial Counting lands synchronously at
-    // start — before the job launches — so an immediate cancel observes a
-    // counting state instead of the pre-write null the old seconds-nullable
-    // shape allowed.
-    private val _selfTimerState = MutableStateFlow<CountdownState>(CountdownState.Idle)
-    val selfTimerState: StateFlow<CountdownState> = _selfTimerState.asStateFlow()
+    // The self-timer countdown machinery (Idle → Counting → Firing → Idle)
+    // lives in the shared SelfTimerRunner — the same holder the remote
+    // console backend runs, so the countdown behavior is identical over both
+    // backends. Every verdict is SelfTimerPolicy's; the runner holds only the
+    // job and the state flow.
+    private val selfTimerRunner = SelfTimerRunner(
+        scope = viewModelScope,
+        onFire = { capturePhoto() },
+    )
+    val selfTimerState: StateFlow<CountdownState> = selfTimerRunner.state
 
     // Derived remaining-seconds the countdown overlay renders (null when no
     // countdown is counting — Idle and Firing both render as "none").
-    val selfTimerSecondsRemaining: StateFlow<Int?> = _selfTimerState
-        .map { (it as? CountdownState.Counting)?.secondsRemaining }
-        .stateIn(viewModelScope, SharingStarted.Eagerly, null)
-    private var selfTimerJob: Job? = null
+    override val selfTimerSecondsRemaining: StateFlow<Int?> = selfTimerRunner.secondsRemaining
 
     // One-shot signal per actual capture (immediate or timer fire) — the
     // screen's shutter flash rides it, so a countdown flashes at fire time.
     private val _captureFlashEvents = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
-    val captureFlashEvents: SharedFlow<Unit> = _captureFlashEvents.asSharedFlow()
+    override val captureFlashEvents: SharedFlow<Unit> = _captureFlashEvents.asSharedFlow()
 
     init {
         viewModelScope.launch {
@@ -297,8 +301,8 @@ class CameraViewModel(
         // any quick-setting write tomorrow).
         viewModelScope.launch {
             settingsDataStore.selfTimer.collect { mode ->
-                if (mode == SelfTimerMode.OFF && _selfTimerState.value is CountdownState.Counting) {
-                    cancelSelfTimerCountdown()
+                if (mode == SelfTimerMode.OFF && selfTimerRunner.state.value is CountdownState.Counting) {
+                    selfTimerRunner.cancelCountdown()
                 }
             }
         }
@@ -316,7 +320,7 @@ class CameraViewModel(
         }
     }
 
-    fun onPermissionResult(cameraGranted: Boolean, audioGranted: Boolean) {
+    override fun onPermissionResult(cameraGranted: Boolean, audioGranted: Boolean) {
         _hasCameraPermission.value = cameraGranted
         _hasAudioPermission.value = audioGranted
         if (cameraGranted) {
@@ -326,7 +330,7 @@ class CameraViewModel(
         }
     }
 
-    fun onAudioPermissionResult(granted: Boolean) {
+    override fun onAudioPermissionResult(granted: Boolean) {
         _hasAudioPermission.value = granted
         if (granted && _streamStatus.value.isActive && streamAudioEnabled.value) {
             streamingManager.setStreamAudioEnabled(true)
@@ -334,7 +338,7 @@ class CameraViewModel(
     }
 
     /** Consumes the notification ask-once budget (the screen marks on its first composition, before any verdict). */
-    fun markNotificationPermissionAsked() {
+    override fun markNotificationPermissionAsked() {
         _notificationPermissionAsked.value = true
     }
 
@@ -359,7 +363,7 @@ class CameraViewModel(
 
     private var retryCount = 0
 
-    fun retryCameraInit() {
+    override fun retryCameraInit() {
         if (CameraInitRetry.shouldRetry(retryCount)) {
             retryCount++
             initializeCamera()
@@ -373,7 +377,7 @@ class CameraViewModel(
     }
 
     @androidx.annotation.OptIn(androidx.camera.camera2.interop.ExperimentalCamera2Interop::class)
-    fun startPreview(previewView: PreviewView, lifecycleOwner: androidx.lifecycle.LifecycleOwner) {
+    override fun startPreview(previewView: PreviewView, lifecycleOwner: androidx.lifecycle.LifecycleOwner) {
         cameraService.setLifecycleOwner(lifecycleOwner)
         cameraService.startPreview(previewView)
         // The pro-tools analyzer rides the analysis frames only while a
@@ -387,7 +391,7 @@ class CameraViewModel(
         }
     }
 
-    fun stopPreview() {
+    override fun stopPreview() {
         cameraService.stopPreview()
         cameraService.setProToolsFrameListener(null)
         // Drop the retained overlay frame with the preview: a re-enabled
@@ -397,21 +401,21 @@ class CameraViewModel(
     }
 
     // The service owns its own preview view; switching works headless too.
-    fun switchCamera() {
+    override fun switchCamera() {
         cameraService.switchCamera()
     }
 
-    fun selectLens(index: Int) {
+    override fun selectLens(index: Int) {
         cameraService.selectLens(index)
     }
 
     /** Normalized (0..1) preview tap coordinates; user-initiated metering. */
-    fun tapToFocus(x: Float, y: Float) {
+    override fun tapToFocus(x: Float, y: Float) {
         cameraService.tapToFocus(x, y)
     }
 
     /** Pinch-zoom path — the only per-field writer left; everything else funnels through [updateQuickSetting]. */
-    fun updateZoom(ratio: Float) {
+    override fun updateZoom(ratio: Float) {
         updateSettings { it.copy(zoomRatio = ratio) }
     }
 
@@ -422,12 +426,12 @@ class CameraViewModel(
      * pure write transform onto the one CameraSettingsEditor path
      * (persist-only; the Settings Applier applies the persisted write).
      */
-    fun updateQuickSetting(type: QuickSettingType, value: Any) {
+    override fun updateQuickSetting(type: QuickSettingType, value: Any) {
         val editorValue = QuickSettingCatalog.editorValueFor(type, value) ?: return
         updateSettings { current -> QuickSettingCatalog.descriptorFor(type).write(current, editorValue) }
     }
 
-    fun togglePreview() {
+    override fun togglePreview() {
         viewModelScope.launch {
             settingsDataStore.saveShowPreview(!showPreview.value)
         }
@@ -444,7 +448,7 @@ class CameraViewModel(
     /** The server-start failure line the server status panel renders — written
      *  only by the stream outcome mapping below (no ladder sets it directly);
      *  cleared by the next successful start — retrying is the natural dismiss. */
-    val lastServerError: StateFlow<String?> = _lastServerError.asStateFlow()
+    override val lastServerError: StateFlow<String?> = _lastServerError.asStateFlow()
 
     // One stream start/stop seam for both outputs and the server: the
     // gate → start → session begin → rollback ladder lives once in
@@ -474,15 +478,15 @@ class CameraViewModel(
         },
     )
 
-    fun toggleWebStreaming() {
+    override fun toggleWebStreaming() {
         viewModelScope.launch { handleStreamOutcome(streamToggle.toggleWeb()) }
     }
 
-    fun toggleRtspStreaming() {
+    override fun toggleRtspStreaming() {
         viewModelScope.launch { handleStreamOutcome(streamToggle.toggleRtsp()) }
     }
 
-    fun toggleServer() {
+    override fun toggleServer() {
         viewModelScope.launch {
             if (_streamStatus.value.isServerRunning) {
                 // Stopped outcome needs no user-facing report — the derived
@@ -544,7 +548,7 @@ class CameraViewModel(
         }
     }
 
-    fun copyStreamUrl() {
+    override fun copyStreamUrl() {
         copyUrlToClipboard(
             url = _streamStatus.value.url,
             fallback = streamingManager.streamUrl.value,
@@ -553,7 +557,7 @@ class CameraViewModel(
         )
     }
 
-    fun copyRtspUrl() {
+    override fun copyRtspUrl() {
         copyUrlToClipboard(
             url = _streamStatus.value.rtspUrl,
             fallback = streamingManager.rtspUrl.value,
@@ -562,7 +566,7 @@ class CameraViewModel(
         )
     }
 
-    fun getConnectInfo(): com.raulshma.lenscast.streaming.StreamingManager.ConnectInfo =
+    override fun getConnectInfo(): com.raulshma.lenscast.streaming.StreamingManager.ConnectInfo =
         streamingManager.getConnectInfo()
 
     /**
@@ -571,9 +575,9 @@ class CameraViewModel(
      * here — once per open — instead of reaching around this ViewModel into
      * the app-scoped manager.
      */
-    fun tlsCertificateFingerprint(): String = streamingManager.tlsCertificateFingerprint()
+    override fun tlsCertificateFingerprint(): String = streamingManager.tlsCertificateFingerprint()
 
-    fun copyHlsUrl() {
+    override fun copyHlsUrl() {
         val info = streamingManager.getConnectInfo()
         copyUrlToClipboard(
             url = info.hlsUrl,
@@ -584,60 +588,17 @@ class CameraViewModel(
     }
 
     /**
-     * The shutter press: the capture-now/countdown verdict is SelfTimerPolicy's;
-     * a countdown keeps only the job and the state machine and fires the same
+     * The shutter press: the capture-now/countdown verdict is SelfTimerPolicy's
+     * (dispatched inside the shared runner); a countdown fires the same
      * [capturePhoto] path at the policy's Fire boundary.
      */
-    fun onShutterPress() {
-        when (val press = SelfTimerPolicy.onShutterPress(selfTimer.value)) {
-            is SelfTimerPolicy.ShutterPress.CaptureNow -> capturePhoto()
-            is SelfTimerPolicy.ShutterPress.StartCountdown -> startSelfTimerCountdown(press)
-        }
-    }
-
-    private fun startSelfTimerCountdown(countdown: SelfTimerPolicy.ShutterPress.StartCountdown) {
-        selfTimerJob?.cancel()
-        // Synchronous, before the job launches: an immediate cancel must see
-        // Counting, or it reads Idle and cannot cancel.
-        _selfTimerState.value = CountdownState.Counting(countdown.initialSeconds)
-        selfTimerJob = viewModelScope.launch {
-            val startedAtMs = SystemClock.elapsedRealtime()
-            while (true) {
-                delay(SelfTimerPolicy.TICK_MS)
-                when (
-                    val tick = SelfTimerPolicy.onTick(
-                        countdown.durationMs,
-                        SystemClock.elapsedRealtime() - startedAtMs,
-                    )
-                ) {
-                    is SelfTimerPolicy.Tick.Counting ->
-                        _selfTimerState.value = CountdownState.Counting(tick.secondsRemaining)
-                    SelfTimerPolicy.Tick.Fire -> {
-                        _selfTimerState.value = CountdownState.Firing
-                        selfTimerJob = null
-                        capturePhoto()
-                        _selfTimerState.value = CountdownState.Idle
-                        return@launch
-                    }
-                }
-            }
-        }
+    override fun onShutterPress() {
+        selfTimerRunner.onShutterPress(selfTimer.value) { capturePhoto() }
     }
 
     /** A tap while the countdown runs cancels it (the verdict is SelfTimerPolicy's). */
-    fun cancelSelfTimer() {
-        if (SelfTimerPolicy.onTap(_selfTimerState.value is CountdownState.Counting) ==
-            SelfTimerPolicy.TapVerdict.CANCEL_COUNTDOWN
-        ) {
-            cancelSelfTimerCountdown()
-        }
-    }
-
-    /** The one cancel seam: kill the job and return the machine to Idle. */
-    private fun cancelSelfTimerCountdown() {
-        selfTimerJob?.cancel()
-        selfTimerJob = null
-        _selfTimerState.value = CountdownState.Idle
+    override fun cancelSelfTimer() {
+        selfTimerRunner.cancelSelfTimer()
     }
 
     fun capturePhoto() {
@@ -661,10 +622,10 @@ class CameraViewModel(
     }
 
     /** The persisted main-shutter flash mode (OFF / AUTO / ON). */
-    val flashModeSetting: StateFlow<FlashMode> = settingsDataStore.flashMode
+    override val flashModeSetting: StateFlow<FlashMode> = settingsDataStore.flashMode
 
     /** A tap on the flash chip: the cycle order is FlashModePolicy's. */
-    fun cycleFlashMode() {
+    override fun cycleFlashMode() {
         viewModelScope.launch {
             settingsDataStore.saveFlashMode(FlashModePolicy.next(flashModeSetting.value))
         }
@@ -719,7 +680,7 @@ class CameraViewModel(
      * toggle's pre-start hook, so a stop never refreshes permissions or
      * warns.
      */
-    fun toggleRecording() {
+    override fun toggleRecording() {
         when (val decision = RecordingToggle.decide(
             currentState = recordingState.value,
             startConfig = RecordingConfig(includeAudio = recordingAudioEnabled.value),
@@ -769,7 +730,7 @@ class CameraViewModel(
     }
 
     override fun onCleared() {
-        selfTimerJob?.cancel()
+        selfTimerRunner.dispose()
         cameraService.setProToolsFrameListener(null)
         spiritLevelMonitor.setPreviewActive(false)
         super.onCleared()

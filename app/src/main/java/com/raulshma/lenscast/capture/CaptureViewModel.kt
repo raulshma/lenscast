@@ -1,7 +1,5 @@
 package com.raulshma.lenscast.capture
 
-import android.content.Context
-import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
@@ -9,10 +7,6 @@ import com.raulshma.lenscast.capture.model.IntervalCaptureConfig
 import com.raulshma.lenscast.capture.model.IntervalCaptureState
 import com.raulshma.lenscast.capture.model.RecordingConfig
 import com.raulshma.lenscast.capture.model.TimelapseState
-import com.raulshma.lenscast.camera.model.RecordingToggle
-import com.raulshma.lenscast.core.MicGate
-import com.raulshma.lenscast.data.SettingsDataStore
-import com.raulshma.lenscast.data.CaptureHistoryStore
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -22,248 +16,166 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
 /**
- * Write-side surface for capture features. Recording start/stop/schedule goes
- * through the app-scoped RecordingController — this ViewModel holds only the
- * screen's input state (config editors) and display tickers.
+ * The capture screen's state owner — pure UI state (the two config drafts)
+ * over the [CaptureSource] seam, one interface over this phone's local
+ * pipeline and the paired device's capture routes. The source owns
+ * everything that differs between backends (interval truth, recording state
+ * and elapsed, the timelapse pipeline, the mic consult, the write gates);
+ * this ViewModel owns the draft editors and the derived projections both
+ * backends share, and routes every control to the source.
+ *
+ * The recording draft's `includeAudio` seeds from the source's
+ * [CaptureSource.includeAudioDefault] (null = no carrier — the remote
+ * backend), keeping the draft in sync with the persisted setting
+ * continuously until the user makes an explicit audio choice; other user
+ * edits to the draft are preserved.
  */
 class CaptureViewModel(
-    context: Context,
-    private val captureHistoryStore: CaptureHistoryStore,
-    private val settingsDataStore: SettingsDataStore,
-    private val recordingController: RecordingController,
-    private val photoCaptureManager: PhotoCaptureManager,
-    /** The one timelapse pipeline (MediaStore + encryption publish seam). */
-    private val timelapseComposer: TimelapseComposer? = null,
+    private val source: CaptureSource,
 ) : ViewModel() {
-    private val context: Context = context.applicationContext
-
-    // The mic warn-and-degrade gate behind every recording start — the same
-    // gate the camera screen consults: one refresh-then-consult behavior,
-    // one warning wording, one toast sink.
-    private val micGate = MicGate(context)
-
-    /**
-     * The mic warn-and-degrade consult, shared by the toggle's pre-start
-     * hook and the schedule command: refresh-then-consult through the gate —
-     * a degrade warns through the shared sink and the start proceeds either
-     * way (warn-and-degrade is the mic policy; the service guards the live
-     * permission at record time).
-     */
-    private val consultMic = micGate.recordingConfigConsult(label = "Recording video")
 
     private val _intervalConfig = MutableStateFlow(IntervalCaptureConfig())
     val intervalConfig: StateFlow<IntervalCaptureConfig> = _intervalConfig.asStateFlow()
 
-    // Interval-capture truth lives in WorkManager; derive directly from the
-    // scheduler's cold flow — no manual mirrors to drift. The tri-state keeps
-    // "no snapshot observed yet" (Unknown) distinct from a confirmed Stopped,
-    // so the screen never renders a tappable Start while the first
-    // WorkManager read is still in flight.
-    private val intervalStatus: StateFlow<IntervalCaptureStatusSnapshot?> =
-        IntervalCaptureScheduler.observeStatus(context)
-            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(SUBSCRIBE_TIMEOUT_MS), null)
-
-    val intervalState: StateFlow<IntervalCaptureState> = intervalStatus
-        .map { status ->
-            when (status) {
-                null -> IntervalCaptureState.Unknown
-                else -> if (status.isRunning) IntervalCaptureState.Running(status)
-                else IntervalCaptureState.Stopped
-            }
-        }
-        .stateIn(
-            viewModelScope,
-            SharingStarted.WhileSubscribed(SUBSCRIBE_TIMEOUT_MS),
-            IntervalCaptureState.Unknown,
-        )
-
-    // The boolean view of [intervalState]: Running → true, everything else
-    // false — exactly the pre-tri-state `snapshot?.isRunning == true`.
-    val isIntervalRunning: StateFlow<Boolean> = intervalState
-        .map { it is IntervalCaptureState.Running }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(SUBSCRIBE_TIMEOUT_MS), false)
-
-    val recordingState: StateFlow<RecordingState> = recordingController.state
-
-    val isRecording: StateFlow<Boolean> = recordingController.isRecording
-
     private val _recordingConfig = MutableStateFlow(RecordingConfig())
     val recordingConfig: StateFlow<RecordingConfig> = _recordingConfig.asStateFlow()
 
-    // Same shared clock as the camera screen (500ms ticks here).
-    private val recordingClock = RecordingClock(
-        recordingState = recordingController.state,
-        scope = viewModelScope,
-        tickMs = 500L,
-    )
-    val recordingElapsedMs: StateFlow<Long> = recordingClock.elapsedMs
+    /**
+     * Whether the user has explicitly chosen the recording draft's audio:
+     * once set, later default emissions stop overwriting the draft's
+     * [RecordingConfig.includeAudio] (the sync below defers to it) and both
+     * start paths send the chosen value as-is.
+     */
+    private var audioExplicitlyChosen = false
 
     init {
-        // Keep the recording draft's includeAudio in sync with the persisted
-        // setting continuously; other user edits to the draft are preserved.
+        // Keep the recording draft's includeAudio in sync with the backend's
+        // default continuously; other user edits to the draft are preserved,
+        // and so is an explicit audio choice — a later default emission must
+        // not overwrite the user's own flip of the switch.
         viewModelScope.launch {
-            settingsDataStore.recordingAudioEnabled.collect {
-                _recordingConfig.value = _recordingConfig.value.copy(includeAudio = it)
+            source.includeAudioDefault.collect { default ->
+                default?.let { enabled ->
+                    if (!audioExplicitlyChosen) {
+                        _recordingConfig.value = _recordingConfig.value.copy(includeAudio = enabled)
+                    }
+                }
             }
         }
     }
 
-    fun capturePhoto() {
-        val fileName = photoCaptureManager.captureToGallery(
-            onSaved = { filePath, _ -> Log.d(TAG, "Photo saved: $filePath") },
-            onError = { exception -> Log.e(TAG, "Photo capture failed", exception) },
-        )
-        if (fileName == null) {
-            Log.w(TAG, "capturePhoto: camera use case unavailable")
-        }
-    }
+    // ── reads (straight from the source — no mirrors) ──
 
-    fun startIntervalCapture(config: IntervalCaptureConfig) {
-        IntervalCaptureScheduler.start(
-            context = context,
-            intervalSeconds = config.intervalSeconds,
-            totalCaptures = config.totalCaptures,
-            flashMode = config.flashMode.name,
-            completedCaptures = 0,
-        )
-        Log.d(TAG, "Interval capture started: every ${config.intervalSeconds}s")
-    }
+    val intervalState: StateFlow<IntervalCaptureState> = source.intervalState
 
-    fun stopIntervalCapture() {
-        IntervalCaptureScheduler.stop(context)
-        Log.d(TAG, "Interval capture stopped")
-    }
+    /**
+     * The record control's one atomic read (the [RecordingSnapshot.Confirmed]
+     * state or the unconfirmed placeholder) — the enable gate, the look, and
+     * the press's intended start/stop action all answer it.
+     */
+    val recordingSnapshot: StateFlow<RecordingSnapshot> = source.recordingSnapshot
 
-    // The manual timelapse run's state machine (Idle / Running / Done) —
-    // the old two-flow shape (busy + message) never reset its message, so a
-    // stale success/failure line persisted into the next run; the machine's
-    // Running re-assert at each run's start is the fix.
-    private val _timelapseState = MutableStateFlow<TimelapseState>(TimelapseState.Idle)
-    val timelapseState: StateFlow<TimelapseState> = _timelapseState.asStateFlow()
+    /**
+     * The [RecordingState] view of the snapshot for the schedule row
+     * (Unconfirmed reads as the Idle placeholder — the row renders nothing
+     * there, exactly as the pre-read flow always did).
+     */
+    val recordingState: StateFlow<RecordingState> = source.recordingSnapshot
+        .map { (it as? RecordingSnapshot.Confirmed)?.state ?: RecordingState.Idle }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(SUBSCRIBE_TIMEOUT_MS), RecordingState.Idle)
 
-    /** The persisted auto-assemble-on-completion toggle. */
-    val autoTimelapseEnabled: StateFlow<Boolean> = settingsDataStore.autoTimelapseEnabled
+    // The boolean view of the snapshot: confirmed Recording → true,
+    // everything else false — exactly the pre-seam `controller.isRecording` shape.
+    val isRecording: StateFlow<Boolean> = source.recordingSnapshot
+        .map { it is RecordingSnapshot.Confirmed && it.state is RecordingState.Recording }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(SUBSCRIBE_TIMEOUT_MS), false)
 
-    fun setAutoTimelapseEnabled(enabled: Boolean) {
-        viewModelScope.launch { settingsDataStore.saveAutoTimelapseEnabled(enabled) }
-    }
+    val recordingElapsedMs: StateFlow<Long> = source.recordingElapsedMs
 
-    /** Assemble the most recent interval photos into an MP4 timelapse. */
-    fun assembleTimelapse(lastN: Int = 100, fps: Int = 30) {
-        if (_timelapseState.value is TimelapseState.Running) return
-        // Running at the START of each run — the previous run's Done stops
-        // rendering the moment a new one begins.
-        _timelapseState.value = TimelapseState.Running
-        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
-            try {
-                // The one timelapse pipeline: source selection, decrypting
-                // reads, MediaCodec assembly, and the MediaStore + encryption
-                // publish seam all live in the composer (shared with the
-                // interval worker's auto-assembly). Output never lands in a
-                // legacy public folder as plaintext.
-                val result = timelapseComposer?.assembleLatest(lastN, fps)
-                    // A missing composer is the failed shape (the message
-                    // mapping folds it onto the same "Timelapse failed" text
-                    // the old null branch rendered).
-                    ?: TimelapseComposer.Result.NotSaved(TimelapseComposer.Reason.ASSEMBLY_FAILED)
-                _timelapseState.value = TimelapseState.Done(result)
-            } catch (e: Exception) {
-                Log.e(TAG, "Timelapse failed", e)
-                _timelapseState.value = TimelapseState.Done(
-                    TimelapseComposer.Result.NotSaved(
-                        TimelapseComposer.Reason.ASSEMBLY_FAILED,
-                        e.message ?: "",
-                    ),
-                )
-            }
-        }
-    }
+    val timelapseState: StateFlow<TimelapseState> = source.timelapseState
+
+    val autoTimelapseEnabled: StateFlow<Boolean> = source.autoTimelapseEnabled
+
+    // ── draft editors (screen input state, not backend truth) ──
 
     fun updateIntervalConfig(config: IntervalCaptureConfig) {
         _intervalConfig.value = config
     }
 
     fun updateRecordingConfig(config: RecordingConfig) {
+        // An includeAudio change is the user's explicit audio choice — it
+        // wins over the synced default from here on (the default-sync
+        // collector and both start paths defer to it).
+        if (config.includeAudio != _recordingConfig.value.includeAudio) {
+            audioExplicitlyChosen = true
+        }
         _recordingConfig.value = config
     }
 
+    // ── controls (routed to the source; gates hide the affordances) ──
+
+    fun capturePhoto() = source.capturePhoto()
+
+    fun startIntervalCapture(config: IntervalCaptureConfig) = source.startIntervalCapture(config)
+
+    fun stopIntervalCapture() = source.stopIntervalCapture()
+
     /**
-     * The record button: the stop-vs-start verdict and the draft start
-     * config are [RecordingToggle]'s — the same decide the camera screen
-     * answers — and this ViewModel only executes the decision. The mic gate
-     * rides the toggle's pre-start hook, so a stop never refreshes
-     * permissions or warns.
+     * The record control's intended START (its confirmed-Idle snapshot
+     * decided already): the draft is this ViewModel's, the mic consult and
+     * the command path the source's.
      */
-    fun toggleRecording() {
-        when (val decision = RecordingToggle.decide(
-            currentState = recordingState.value,
-            startConfig = _recordingConfig.value,
-            onBeforeStart = consultMic,
-        )) {
-            is RecordingToggle.ToggleDecision.Start -> startRecordingWithConfig(decision.config)
-            RecordingToggle.ToggleDecision.Stop -> stopRecording()
-        }
-    }
+    fun startRecording() = source.startRecording(startDraft())
 
-    fun startScheduledRecording() {
-        // Goes through the same start path as an immediate start so the
-        // max-duration/repeat policy is armed for scheduled recordings too —
-        // the policy waits out the Scheduled phase itself. The picked time
-        // rides in the config draft's `startTimeMs`; the controller turns a
-        // future start into its Scheduled state, which becomes the only truth
-        // the screen renders. A schedule command is a start, not a toggle —
-        // the mic consult runs, but no stop verdict is asked.
-        startRecordingWithConfig(consultMic(_recordingConfig.value))
+    /** The record control's intended STOP — no draft, no consult. */
+    fun stopRecording() = source.stopRecording()
+
+    /** The schedule command: a start, not a toggle — the draft rides whole. */
+    fun startScheduledRecording() = source.startScheduledRecording(startDraft())
+
+    /**
+     * The start's draft: an explicit audio choice rides whole; a
+     * never-chosen draft lets the hydrated default own includeAudio at
+     * start time — taken from the source's seed when it has landed, left
+     * to the source's start gate (the disk twin) while the seed still
+     * holds the null readiness verdict — so a stale pre-sync draft value
+     * is never sent.
+     */
+    private fun startDraft(): RecordingConfig {
+        val draft = _recordingConfig.value
+        if (audioExplicitlyChosen) return draft
+        source.includeAudioDefault.value?.let { default ->
+            if (draft.includeAudio != default) return draft.copy(includeAudio = default)
+        }
+        return draft
     }
 
     /**
-     * The clear (trash) button: cancels the controller's real armed schedule
-     * — not a screen-local shadow of it — and clears the picked time from the
+     * The clear (trash) button: cancels the backend's real armed schedule —
+     * not a screen-local shadow of it — and clears the picked time from the
      * config draft so the next start is immediate.
      */
     fun cancelScheduledRecording() {
-        recordingController.cancelSchedule()
+        source.cancelScheduledRecording()
         _recordingConfig.value = _recordingConfig.value.copy(startTimeMs = null)
     }
 
-    /**
-     * Executes a decided start: the max-duration auto-stop and repeat policy
-     * is armed by the RecordingController itself, so it holds no matter
-     * which client started the recording and survives navigating away from
-     * this screen. A future `startTimeMs` in the config becomes the
-     * controller's Scheduled state.
-     */
-    private fun startRecordingWithConfig(config: RecordingConfig) {
-        recordingController.start(config)
-    }
+    /** Assemble the most recent interval photos into an MP4 timelapse. */
+    fun assembleTimelapse(lastN: Int = 100, fps: Int = 30) = source.assembleTimelapse(lastN, fps)
 
-    private fun stopRecording() {
-        recordingController.stop()
-    }
+    fun setAutoTimelapseEnabled(enabled: Boolean) = source.setAutoTimelapseEnabled(enabled)
 
     class Factory(
-        private val context: Context,
-        private val captureHistoryStore: CaptureHistoryStore,
-        private val settingsDataStore: SettingsDataStore,
-        private val recordingController: RecordingController,
-        private val photoCaptureManager: PhotoCaptureManager,
-        private val timelapseComposer: TimelapseComposer? = null,
+        /** The backend for this route's device argument (local when absent). */
+        private val source: CaptureSource,
     ) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
-        override fun <T : androidx.lifecycle.ViewModel> create(modelClass: Class<T>): T {
-            return CaptureViewModel(
-                context,
-                captureHistoryStore,
-                settingsDataStore,
-                recordingController,
-                photoCaptureManager,
-                timelapseComposer
-            ) as T
+        override fun <T : ViewModel> create(modelClass: Class<T>): T {
+            return CaptureViewModel(source) as T
         }
     }
 
     companion object {
-        private const val TAG = "CaptureViewModel"
         private const val SUBSCRIBE_TIMEOUT_MS = 5000L
     }
 }

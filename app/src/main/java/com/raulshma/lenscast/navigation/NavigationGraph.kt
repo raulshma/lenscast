@@ -19,14 +19,15 @@ import androidx.compose.runtime.saveable.Saver
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import androidx.navigation.navArgument
 import com.raulshma.lenscast.AppGraph
 import com.raulshma.lenscast.MainActivity
 import com.raulshma.lenscast.automation.AutomationScreen
 import com.raulshma.lenscast.camera.CameraScreen
-import com.raulshma.lenscast.companion.ui.DeviceScreen
 import com.raulshma.lenscast.companion.ui.DevicesScreen
 import com.raulshma.lenscast.capture.CaptureScreen
 import com.raulshma.lenscast.capture.DetectionEventsScreen
@@ -45,6 +46,21 @@ import androidx.compose.foundation.pager.rememberPagerState
 
 private const val ENTER_DURATION = 300
 private const val EXIT_DURATION = 200
+
+/**
+ * The optional-`device` query argument every companion-parameterized
+ * destination declares, single-sourced: null (the route without the query
+ * arg) selects this phone's local backend, an id the paired device's remote
+ * one. The destination reads `backStackEntry.arguments?.getString("device")`,
+ * so each route pattern's placeholder must be named `device` too —
+ * Navigation binds the query value under the placeholder's name, and the
+ * route tests navigate the registered destinations to pin the binding.
+ */
+internal val deviceNavArgument = navArgument("device") {
+    type = NavType.StringType
+    nullable = true
+    defaultValue = null
+}
 
 private val EmphasizedEasing = CubicBezierEasing(0.2f, 0f, 0f, 1f)
 private val DecelerateEasing = CubicBezierEasing(0.05f, 0.7f, 0.1f, 1f)
@@ -75,7 +91,7 @@ fun NavigationGraph() {
         CompositionLocalProvider(LocalSharedTransitionScope provides this@SharedTransitionLayout) {
             NavHost(
                 navController = navController,
-                startDestination = Routes.CAMERA,
+                startDestination = Routes.CAMERA_LOCAL,
                 enterTransition = {
                     fadeIn(tween(ENTER_DURATION, easing = DecelerateEasing)) +
                         slideInHorizontally(tween(ENTER_DURATION, easing = DecelerateEasing)) { it }
@@ -93,13 +109,46 @@ fun NavigationGraph() {
                         slideOutHorizontally(tween(EXIT_DURATION, easing = EmphasizedEasing)) { it }
                 },
             ) {
-                composable(Routes.CAMERA) {
+                composable(
+                    Routes.CAMERA,
+                    arguments = listOf(deviceNavArgument),
+                ) { backStackEntry ->
+                    // Null device = the local dashboard (the start-destination
+                    // form); an id opens the same dashboard against the paired
+                    // device's remote console.
+                    val remoteDeviceId = backStackEntry.arguments?.getString("device")
                     CompositionLocalProvider(LocalAnimatedVisibilityScope provides this@composable) {
                         CameraScreen(
-                            onNavigateToSettings = { navController.navigate(Routes.SETTINGS) },
-                            onNavigateToCapture = { navController.navigate(Routes.CAPTURE) },
-                            onNavigateToGallery = { navController.navigate(Routes.GALLERY) },
-                            onNavigateToDevices = { navController.navigate(Routes.DEVICES) },
+                            remoteDeviceId = remoteDeviceId,
+                            // The per-camera settings ride the same device
+                            // argument: the local dashboard opens this
+                            // phone's settings, the console opens the
+                            // device's settings document (P6 restored).
+                            onNavigateToSettings = { navController.navigate(Routes.settings(remoteDeviceId)) },
+                            // The capture tools ride the same device argument:
+                            // the local dashboard opens this phone's pipeline,
+                            // the console opens the device's capture routes.
+                            onNavigateToCapture = { navController.navigate(Routes.capture(remoteDeviceId)) },
+                            // The gallery rides the same device argument: the
+                            // local dashboard opens the local library, the
+                            // console opens the device's remote gallery.
+                            onNavigateToGallery = { navController.navigate(Routes.gallery(remoteDeviceId)) },
+                            // Remote-only (null on the local dashboard, whose
+                            // chrome never offers it): the device's event log.
+                            onNavigateToEvents = remoteDeviceId?.let { id ->
+                                { navController.navigate(Routes.detectionEvents(id)) }
+                            },
+                            onNavigateToDevices = {
+                                // Remote: the roster is the screen this route
+                                // came from — pop back to it (no duplicate
+                                // roster push); a deep link with no roster
+                                // beneath falls back to pushing it.
+                                if (remoteDeviceId == null) {
+                                    navController.navigate(Routes.DEVICES)
+                                } else if (!navController.popBackStack(Routes.DEVICES, false)) {
+                                    navController.navigate(Routes.DEVICES)
+                                }
+                            },
                         )
                     }
                 }
@@ -108,61 +157,117 @@ fun NavigationGraph() {
                     CompositionLocalProvider(LocalAnimatedVisibilityScope provides this@composable) {
                         DevicesScreen(
                             onBack = { navController.popBackStack() },
+                            // A row tap lands the device in the camera
+                            // dashboard over its remote console — the paired
+                            // device gets the main UI, not a bespoke shell.
                             onOpenDevice = { deviceId ->
-                                navController.navigate(Routes.device(deviceId, Routes.TAB_LIVE))
+                                navController.navigate(Routes.camera(deviceId))
                             },
                         )
                     }
                 }
 
-                composable(Routes.DEVICE) { backStackEntry ->
-                    CompositionLocalProvider(LocalAnimatedVisibilityScope provides this@composable) {
-                        DeviceScreen(
-                            deviceId = backStackEntry.arguments?.getString("deviceId").orEmpty(),
-                            initialTab = backStackEntry.arguments?.getString("tab") ?: Routes.TAB_LIVE,
-                            onBack = { navController.popBackStack() },
-                        )
-                    }
-                }
-
-                composable(Routes.SETTINGS) {
+                composable(
+                    Routes.SETTINGS,
+                    arguments = listOf(deviceNavArgument),
+                ) { backStackEntry ->
+                    // Null device = this phone's camera settings (the local
+                    // store passthrough); an id opens the same screen against
+                    // the paired device's settings document.
+                    val remoteDeviceId = backStackEntry.arguments?.getString("device")
                     CompositionLocalProvider(LocalAnimatedVisibilityScope provides this@composable) {
                         CameraSettingsScreen(
                             onNavigateBack = { navController.popBackStack() },
-                            onNavigateToAppSettings = { navController.navigate(Routes.APP_SETTINGS) },
+                            onNavigateToAppSettings = {
+                                navController.navigate(Routes.appSettings(remoteDeviceId))
+                            },
+                            source = if (remoteDeviceId == null) {
+                                app.localSettingsSource
+                            } else {
+                                app.companion.settingsSource(remoteDeviceId, context.applicationContext)
+                            },
                         )
                     }
                 }
 
-                composable(Routes.APP_SETTINGS) {
+                composable(
+                    Routes.APP_SETTINGS,
+                    arguments = listOf(deviceNavArgument),
+                ) { backStackEntry ->
+                    // Null device = this phone's app settings; an id opens the
+                    // same screen against the paired device's settings
+                    // document, plus its folded diagnostics section.
+                    val remoteDeviceId = backStackEntry.arguments?.getString("device")
                     CompositionLocalProvider(LocalAnimatedVisibilityScope provides this@composable) {
                         AppSettingsScreen(
                             onNavigateBack = { navController.popBackStack() },
-                            onOpenEventLog = { navController.navigate(Routes.DETECTION_EVENTS) },
-                            onOpenAutomation = { navController.navigate(Routes.AUTOMATION) },
+                            // The entry rows ride the same device argument:
+                            // the local screen opens this phone's log/rules,
+                            // the remote screen the device's.
+                            onOpenEventLog = { navController.navigate(Routes.detectionEvents(remoteDeviceId)) },
+                            onOpenAutomation = { navController.navigate(Routes.automation(remoteDeviceId)) },
+                            source = if (remoteDeviceId == null) {
+                                app.localSettingsSource
+                            } else {
+                                app.companion.settingsSource(remoteDeviceId, context.applicationContext)
+                            },
+                            diagnostics = remoteDeviceId?.let {
+                                app.companion.settingsDiagnostics(it)
+                            },
                         )
                     }
                 }
 
-                composable(Routes.AUTOMATION) {
+                composable(
+                    Routes.AUTOMATION,
+                    arguments = listOf(deviceNavArgument),
+                ) { backStackEntry ->
+                    // Null device = this phone's rules; an id opens the same
+                    // editor against the paired device's automation document.
+                    val remoteDeviceId = backStackEntry.arguments?.getString("device")
                     CompositionLocalProvider(LocalAnimatedVisibilityScope provides this@composable) {
                         AutomationScreen(
+                            source = if (remoteDeviceId == null) {
+                                app.localAutomationSource
+                            } else {
+                                app.companion.automationSource(remoteDeviceId)
+                            },
                             onNavigateBack = { navController.popBackStack() },
                         )
                     }
                 }
 
-                composable(Routes.CAPTURE) {
+                composable(
+                    Routes.CAPTURE,
+                    arguments = listOf(deviceNavArgument),
+                ) { backStackEntry ->
+                    // Null device = this phone's pipeline; an id drives the
+                    // same screen against the paired device's capture routes.
+                    val remoteDeviceId = backStackEntry.arguments?.getString("device")
                     CompositionLocalProvider(LocalAnimatedVisibilityScope provides this@composable) {
                         CaptureScreen(
+                            source = if (remoteDeviceId == null) {
+                                app.localCaptureSource
+                            } else {
+                                app.companion.captureSource(remoteDeviceId)
+                            },
                             onNavigateBack = { navController.popBackStack() },
                         )
                     }
                 }
 
-                composable(Routes.DETECTION_EVENTS) {
+                composable(
+                    Routes.DETECTION_EVENTS,
+                    arguments = listOf(deviceNavArgument),
+                ) { backStackEntry ->
+                    val remoteDeviceId = backStackEntry.arguments?.getString("device")
                     CompositionLocalProvider(LocalAnimatedVisibilityScope provides this@composable) {
                         DetectionEventsScreen(
+                            source = if (remoteDeviceId == null) {
+                                app.localEventsSource
+                            } else {
+                                app.companion.eventsSource(remoteDeviceId)
+                            },
                             onNavigateBack = { navController.popBackStack() },
                         )
                     }
@@ -170,6 +275,7 @@ fun NavigationGraph() {
 
                 composable(
                     Routes.GALLERY,
+                    arguments = listOf(deviceNavArgument),
                     enterTransition = {
                         fadeIn(tween(ENTER_DURATION, easing = DecelerateEasing)) +
                             slideInHorizontally(tween(ENTER_DURATION, easing = DecelerateEasing)) { it }
@@ -178,31 +284,62 @@ fun NavigationGraph() {
                         fadeOut(tween(EXIT_DURATION, easing = EmphasizedEasing)) +
                             slideOutHorizontally(tween(EXIT_DURATION, easing = EmphasizedEasing)) { -it / 3 }
                     },
-                ) {
+                ) { backStackEntry ->
+                    val remoteDeviceId = backStackEntry.arguments?.getString("device")
                     CompositionLocalProvider(LocalAnimatedVisibilityScope provides this@composable) {
                         GalleryScreen(
+                            source = if (remoteDeviceId == null) {
+                                app.localGallerySource
+                            } else {
+                                app.companion.gallerySource(remoteDeviceId)
+                            },
                             onNavigateBack = { navController.popBackStack() },
-                            onViewMedia = { mediaId -> navController.navigate(Routes.viewer(mediaId)) },
+                            // The viewer carries the device argument along so
+                            // a remote gallery's tap-through pages the same
+                            // remote items.
+                            onViewMedia = { mediaId ->
+                                navController.navigate(Routes.viewer(mediaId, remoteDeviceId))
+                            },
                         )
                     }
                 }
 
                 composable(
                     Routes.VIEWER,
+                    arguments = listOf(deviceNavArgument),
                     enterTransition = { fadeIn(tween(ENTER_DURATION, easing = DecelerateEasing)) },
                     exitTransition = { fadeOut(tween(EXIT_DURATION, easing = EmphasizedEasing)) },
                     popEnterTransition = { fadeIn(tween(ENTER_DURATION, easing = DecelerateEasing)) },
                     popExitTransition = { fadeOut(tween(EXIT_DURATION, easing = EmphasizedEasing)) },
                 ) { backStackEntry ->
                     val mediaId = backStackEntry.arguments?.getString("mediaId") ?: ""
+                    val remoteDeviceId = backStackEntry.arguments?.getString("device")
+                    // One source for this viewer route: the remote one is
+                    // cached per device, so the viewer's ViewModel pages the
+                    // same list the gallery grid had — the pager index
+                    // carries over.
+                    val gallerySource = if (remoteDeviceId == null) {
+                        app.localGallerySource
+                    } else {
+                        app.companion.gallerySource(remoteDeviceId)
+                    }
                     val galleryViewModel: GalleryViewModel = viewModel(
-                        factory = GalleryViewModel.Factory(app.captureHistoryStore, app.gallerySession)
+                        // The viewer's instance never flushes on clear (the
+                        // grid's undo window must survive this route's pop).
+                        factory = GalleryViewModel.Factory(gallerySource, flushOnCleared = false)
                     )
+                    // The viewer route owns its loading: no grid composes
+                    // beneath it to drive refreshOnEntry or the scroll-end
+                    // trigger, and a process-death restore hands it a fresh
+                    // source holding only page 0 — this pages until the routed
+                    // id is loaded (loadMore only; never a reset that would
+                    // wipe the accumulated pages under the pager).
+                    LaunchedEffect(mediaId) {
+                        galleryViewModel.pageUntilFound(mediaId)
+                    }
                     // The viewer's list excludes staged (pending-undo) deletes,
                     // so a staged delete advances the pager like a real one.
                     val allItems by galleryViewModel.viewerItems.collectAsState()
-                    val decryptedPhotos by galleryViewModel.decryptedPhotos.collectAsState()
-                    val encryptedVideoIds by galleryViewModel.encryptedVideoIds.collectAsState()
 
                     val initialIndex = initialIndexFor(allItems, mediaId)
                     val pagerState = rememberPagerState(
@@ -230,9 +367,8 @@ fun NavigationGraph() {
                             allItems = allItems,
                             initialMediaId = mediaId,
                             pagerState = pagerState,
+                            source = gallerySource,
                             onNavigateBack = { navController.popBackStack() },
-                            decryptedPhotos = decryptedPhotos,
-                            encryptedVideoIds = encryptedVideoIds,
                             onDelete = { id ->
                                 // The dialog confirmed against its snapshotted
                                 // id — the item the user saw, even if the list

@@ -65,6 +65,15 @@ interface AppGraph {
      * instead of two NavBackStackEntry-scoped copies.
      */
     val gallerySession: GallerySession
+    /**
+     * The gallery's LOCAL backend — [GallerySource] over [captureHistoryStore]
+     * + [gallerySession] (deletes stage into the shared session, media
+     * decodes from this phone's bytes). Process-scoped like the stores it
+     * wraps: the routes' ViewModels are per-entry, the items and the staged
+     * set are not. The remote counterpart is
+     * [com.raulshma.lenscast.companion.di.CompanionGraph.gallerySource].
+     */
+    val localGallerySource: com.raulshma.lenscast.gallery.GallerySource
     val recordingController: RecordingController
     val timelapseComposer: TimelapseComposer
     val photoCaptureManager: PhotoCaptureManager
@@ -90,6 +99,38 @@ interface AppGraph {
     val audioModelStore: AudioModelStore
     val detectionCoordinator: DetectionCoordinator
     val detectionEventStore: DetectionEventStore
+    /**
+     * The event log's LOCAL backend — [com.raulshma.lenscast.capture.EventsSource]
+     * over [detectionEventStore] (the screen's old inline store reads,
+     * lifted into a source). The remote counterpart is
+     * [com.raulshma.lenscast.companion.di.CompanionGraph.eventsSource].
+     */
+    val localEventsSource: com.raulshma.lenscast.capture.EventsSource
+    /**
+     * The capture screen's LOCAL backend —
+     * [com.raulshma.lenscast.capture.CaptureSource] over this phone's
+     * pipeline singletons ([recordingController], [photoCaptureManager],
+     * [timelapseComposer], the settings store). The remote counterpart is
+     * [com.raulshma.lenscast.companion.di.CompanionGraph.captureSource].
+     */
+    val localCaptureSource: com.raulshma.lenscast.capture.CaptureSource
+    /**
+     * The automation screen's LOCAL backend —
+     * [com.raulshma.lenscast.automation.AutomationSource] over the settings
+     * store's automation surface + [automationFireJournal] + the test
+     * controller. The remote counterpart is
+     * [com.raulshma.lenscast.companion.di.CompanionGraph.automationSource].
+     */
+    val localAutomationSource: com.raulshma.lenscast.automation.AutomationSource
+    /**
+     * The settings screens' LOCAL backend —
+     * [com.raulshma.lenscast.settings.SettingsSource] over
+     * [settingsDataStore] + the camera/power/model collaborators (the
+     * SettingsViewModel's old graph members, lifted into a source). The
+     * remote counterpart is
+     * [com.raulshma.lenscast.companion.di.CompanionGraph.settingsSource].
+     */
+    val localSettingsSource: com.raulshma.lenscast.settings.SettingsSource
     val automationFireJournal: AutomationFireJournal
     /** The boot-resume journal — the boot path's and the runtime service's single source of stream intent. */
     val streamStateJournal: StreamStateJournal

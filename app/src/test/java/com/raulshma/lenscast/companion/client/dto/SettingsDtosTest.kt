@@ -23,11 +23,16 @@ class SettingsDtosTest {
 
     private val moshi = AppJson.moshi
 
-    /** Unit tests run from the app module dir; fixtures live beside the test sources and in web/contract. */
+    /**
+     * Unit tests run from the app module dir; fixtures live in this test
+     * package's fixtures/ dir and in web/contract. (The fixture was re-homed
+     * here from the retired System tab's test dir — the DTO contract it pins
+     * is the client package's.)
+     */
     private fun fixtureText(name: String): String =
         listOf(
-            File("src/test/java/com/raulshma/lenscast/companion/ui/tabs/system/$name"),
-            File("../app/src/test/java/com/raulshma/lenscast/companion/ui/tabs/system/$name"),
+            File("src/test/java/com/raulshma/lenscast/companion/client/dto/fixtures/$name"),
+            File("../app/src/test/java/com/raulshma/lenscast/companion/client/dto/fixtures/$name"),
         ).firstOrNull { it.exists() }?.readText()
             ?: error("Fixture $name not found")
 
@@ -59,6 +64,11 @@ class SettingsDtosTest {
         assertEquals(1320, streaming.motionArmStartMinute)
         assertEquals(420, streaming.motionArmEndMinute)
         assertEquals(125, streaming.motionArmDaysMask)
+
+        // The RTSP group: the legacy-compat knob rides NON-default (true —
+        // the round trip below re-encodes it verbatim), the additive field
+        // the older-device decode test covers as its absent-field case.
+        assertTrue(streaming.rtspBasicAuthCompat)
 
         assertTrue(streaming.soundDetectionEnabled)
         assertEquals(45, streaming.soundThresholdPercent)
@@ -193,6 +203,9 @@ class SettingsDtosTest {
         assertEquals(8080, streaming.port)
         assertEquals("AUTO", streaming.rtspInputFormat)
         assertEquals("720p", streaming.rtspResolution)
+        // The compat knob is this test's own absent-field case: omitted →
+        // the default false (the checked-in fixture carries the true side).
+        assertEquals(false, streaming.rtspBasicAuthCompat)
         assertEquals(127, streaming.motionArmDaysMask)
         assertEquals(false, streaming.mlDetectionEnabled)
         assertEquals("not_downloaded", streaming.mlModelState)

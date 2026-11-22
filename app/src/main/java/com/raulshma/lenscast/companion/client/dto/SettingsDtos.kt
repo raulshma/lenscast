@@ -113,6 +113,13 @@ data class StreamingSettings(
     val recordingAudioEnabled: Boolean = true,
     val rtspEnabled: Boolean = false,
     val rtspPort: Int = 8554,
+    /**
+     * Send RTSP Basic auth instead of Digest when the client cannot speak
+     * Digest (the legacy-compat knob). Additive to this transcription
+     * (P6): the server DTO and the web console carry it; the app settings
+     * screen edits it.
+     */
+    val rtspBasicAuthCompat: Boolean = false,
     /** `AUTO` | `NV21` | `NV12` | `I420`. */
     val rtspInputFormat: String = "AUTO",
     /** `480p` | `720p` | `720p43` | `1080p` | `1080p43`. */

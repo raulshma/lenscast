@@ -50,7 +50,6 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.raulshma.lenscast.AppGraph
 import com.raulshma.lenscast.R
 import com.raulshma.lenscast.camera.model.CameraDashboardPolicy
 import com.raulshma.lenscast.camera.model.CameraSettings
@@ -89,16 +88,11 @@ private fun chipsEditor(type: QuickSettingType): QuickSettingEditor.Chips =
 fun CameraSettingsScreen(
     onNavigateBack: () -> Unit,
     onNavigateToAppSettings: () -> Unit = {},
+    source: SettingsSource,
 ) {
     val context = LocalContext.current
-    val app = context.applicationContext as AppGraph
     val viewModel: SettingsViewModel = viewModel(
-        factory = SettingsViewModel.Factory(
-            app.cameraService, app.settingsDataStore, app.powerManager,
-            app.detectionModelStore,
-            app.audioModelStore,
-            app.streamingManager.webAuthGate,
-        )
+        factory = SettingsViewModel.Factory(source)
     )
 
     // Re-read on every resume: returning from the system battery-optimization
@@ -116,6 +110,7 @@ fun CameraSettingsScreen(
     }
 
     val settings by viewModel.settings.collectAsState()
+    val capabilities by viewModel.capabilities.collectAsState()
     val zoomRange by viewModel.availableZoomRange.collectAsState()
     val exposureRange by viewModel.availableExposureRange.collectAsState()
     val isoRange by viewModel.availableIsoRange.collectAsState()
@@ -175,8 +170,12 @@ fun CameraSettingsScreen(
                     TextButton(onClick = onNavigateToAppSettings) {
                         Text(stringResource(R.string.settings_app_title))
                     }
-                    TextButton(onClick = { viewModel.resetToDefaults() }) {
-                        Text(stringResource(R.string.settings_reset), color = MaterialTheme.colorScheme.error)
+                    // The Reset is a device-side write: viewer pairings hide
+                    // it (the P4/P5 hide-write decision).
+                    if (capabilities.canEdit) {
+                        TextButton(onClick = { viewModel.resetToDefaults() }) {
+                            Text(stringResource(R.string.settings_reset), color = MaterialTheme.colorScheme.error)
+                        }
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
@@ -197,6 +196,20 @@ fun CameraSettingsScreen(
             contentPadding = PaddingValues(16.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
+            // The viewer-role banner: the device-side sections below render
+            // their controls disabled (values still shown) and their writes
+            // are gated at the source (they no-op) — the banner says why —
+            // the companion System tab's single-homed copy. Viewer-local
+            // lanes (display, viewfinder aids) stay interactive.
+            if (!capabilities.canEdit) {
+                item {
+                    Text(
+                        text = stringResource(R.string.companion_system_settings_read_only),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
             item {
                 DisplaySettingsSection(
                     showPreview = showPreview,
@@ -206,35 +219,45 @@ fun CameraSettingsScreen(
 
             item {
                 SettingsSection(title = stringResource(R.string.settings_section_exposure)) {
+                    // Device-side editing: the controls below carry the
+                    // camera section's wire values, so a viewer renders them
+                    // disabled (values still shown); interactive only when
+                    // capabilities.canEdit.
+                    val canEdit = capabilities.canEdit
                     SliderSetting(
                         title = stringResource(R.string.settings_exposure_compensation),
                         value = settings.exposureCompensation.toFloat(),
                         range = exposureRange.start.toFloat()..exposureRange.endInclusive.toFloat(),
-                        onValueChange = { viewModel.updateQuickSetting(QuickSettingType.EXPOSURE, it) }
+                        onValueChange = { viewModel.updateQuickSetting(QuickSettingType.EXPOSURE, it) },
+                        enabled = canEdit,
                     )
                     DropdownSetting(
                         title = stringResource(R.string.settings_iso),
                         options = chipOptions(QuickSettingType.ISO, deviceRanges),
                         selected = chipSelected(QuickSettingType.ISO, settings),
-                        onSelect = { viewModel.updateQuickSetting(QuickSettingType.ISO, it) }
+                        onSelect = { viewModel.updateQuickSetting(QuickSettingType.ISO, it) },
+                        enabled = canEdit,
                     )
                 }
             }
 
             item {
                 SettingsSection(title = stringResource(R.string.settings_section_focus)) {
+                    val canEdit = capabilities.canEdit
                     DropdownSetting(
                         title = stringResource(R.string.settings_focus_mode),
                         options = chipOptions(QuickSettingType.FOCUS, deviceRanges),
                         selected = chipSelected(QuickSettingType.FOCUS, settings),
-                        onSelect = { viewModel.updateQuickSetting(QuickSettingType.FOCUS, it) }
+                        onSelect = { viewModel.updateQuickSetting(QuickSettingType.FOCUS, it) },
+                        enabled = canEdit,
                     )
                     if (settings.focusMode == FocusMode.MANUAL) {
                         SliderSetting(
                             title = stringResource(R.string.settings_focus_distance),
                             value = settings.focusDistance ?: 0f,
                             range = QuickSettingCatalog.focusDistanceRange(),
-                            onValueChange = { viewModel.updateFocusDistance(it) }
+                            onValueChange = { viewModel.updateFocusDistance(it) },
+                            enabled = canEdit,
                         )
                     }
                 }
@@ -242,18 +265,21 @@ fun CameraSettingsScreen(
 
             item {
                 SettingsSection(title = stringResource(R.string.settings_white_balance)) {
+                    val canEdit = capabilities.canEdit
                     DropdownSetting(
                         title = stringResource(R.string.settings_white_balance),
                         options = chipOptions(QuickSettingType.WHITE_BALANCE, deviceRanges),
                         selected = chipSelected(QuickSettingType.WHITE_BALANCE, settings),
-                        onSelect = { viewModel.updateQuickSetting(QuickSettingType.WHITE_BALANCE, it) }
+                        onSelect = { viewModel.updateQuickSetting(QuickSettingType.WHITE_BALANCE, it) },
+                        enabled = canEdit,
                     )
                     if (settings.whiteBalance == WhiteBalance.MANUAL) {
                         SliderSetting(
                             title = stringResource(R.string.settings_color_temperature),
                             value = (settings.colorTemperature ?: CameraSettings.DEFAULT_COLOR_TEMPERATURE_K).toFloat(),
                             range = QuickSettingCatalog.colorTemperatureRange(),
-                            onValueChange = { viewModel.updateColorTemperature(it.toInt()) }
+                            onValueChange = { viewModel.updateColorTemperature(it.toInt()) },
+                            enabled = canEdit,
                         )
                     }
                 }
@@ -265,30 +291,35 @@ fun CameraSettingsScreen(
                         title = stringResource(R.string.settings_zoom),
                         value = settings.zoomRatio,
                         range = zoomRange,
-                        onValueChange = { viewModel.updateQuickSetting(QuickSettingType.ZOOM, it) }
+                        onValueChange = { viewModel.updateQuickSetting(QuickSettingType.ZOOM, it) },
+                        enabled = capabilities.canEdit,
                     )
                 }
             }
 
             item {
                 SettingsSection(title = stringResource(R.string.settings_section_capture)) {
+                    val canEdit = capabilities.canEdit
                     DropdownSetting(
                         title = stringResource(R.string.settings_resolution),
                         options = chipOptions(QuickSettingType.RESOLUTION, deviceRanges),
                         selected = chipSelected(QuickSettingType.RESOLUTION, settings),
-                        onSelect = { viewModel.updateQuickSetting(QuickSettingType.RESOLUTION, it) }
+                        onSelect = { viewModel.updateQuickSetting(QuickSettingType.RESOLUTION, it) },
+                        enabled = canEdit,
                     )
                     SliderSetting(
                         title = stringResource(R.string.settings_frame_rate),
                         value = settings.frameRate.toFloat(),
                         range = QuickSettingCatalog.frameRateRange(),
-                        onValueChange = { viewModel.updateQuickSetting(QuickSettingType.FRAME_RATE, it) }
+                        onValueChange = { viewModel.updateQuickSetting(QuickSettingType.FRAME_RATE, it) },
+                        enabled = canEdit,
                     )
                     DropdownSetting(
                         title = stringResource(R.string.settings_hdr),
                         options = chipOptions(QuickSettingType.HDR, deviceRanges),
                         selected = chipSelected(QuickSettingType.HDR, settings),
-                        onSelect = { viewModel.updateQuickSetting(QuickSettingType.HDR, it) }
+                        onSelect = { viewModel.updateQuickSetting(QuickSettingType.HDR, it) },
+                        enabled = canEdit,
                     )
                 }
             }
@@ -298,7 +329,8 @@ fun CameraSettingsScreen(
                     SwitchSetting(
                         title = stringResource(R.string.settings_image_stabilization),
                         checked = settings.stabilization,
-                        onCheckedChange = { viewModel.updateQuickSetting(QuickSettingType.STABILIZATION, it) }
+                        onCheckedChange = { viewModel.updateQuickSetting(QuickSettingType.STABILIZATION, it) },
+                        enabled = capabilities.canEdit,
                     )
                 }
             }
@@ -345,7 +377,10 @@ fun CameraSettingsScreen(
                 }
             }
 
-            item {
+            // The photo-capture knobs have no settings-wire carrier — the
+            // section degrades to hidden against a paired device (the P5
+            // wire-lacks-a-carrier precedent; the local backend renders it).
+            if (capabilities.photoCaptureSection) item {
                 SettingsSection(title = stringResource(R.string.settings_section_photo_capture)) {
                     SliderSetting(
                         title = stringResource(R.string.settings_jpeg_quality),
@@ -431,7 +466,8 @@ fun CameraSettingsScreen(
                         title = stringResource(R.string.settings_mode),
                         options = chipOptions(QuickSettingType.NIGHT_VISION, deviceRanges),
                         selected = chipSelected(QuickSettingType.NIGHT_VISION, settings),
-                        onSelect = { viewModel.updateQuickSetting(QuickSettingType.NIGHT_VISION, it) }
+                        onSelect = { viewModel.updateQuickSetting(QuickSettingType.NIGHT_VISION, it) },
+                        enabled = capabilities.canEdit,
                     )
                     Spacer(modifier = Modifier.height(8.dp))
                     Text(
@@ -448,7 +484,8 @@ fun CameraSettingsScreen(
                         title = stringResource(R.string.settings_scene_mode),
                         options = QuickSettingCatalog.sceneModeOptions,
                         selected = settings.sceneMode ?: "OFF",
-                        onSelect = { viewModel.updateSceneMode(it) }
+                        onSelect = { viewModel.updateSceneMode(it) },
+                        enabled = capabilities.canEdit,
                     )
                 }
             }
@@ -473,6 +510,7 @@ fun SliderSetting(
     range: ClosedFloatingPointRange<Float>,
     onValueChange: (Float) -> Unit,
     steps: Int = 0,
+    enabled: Boolean = true,
 ) {
     Column(modifier = Modifier.fillMaxWidth()) {
         Row(
@@ -496,6 +534,7 @@ fun SliderSetting(
             onValueChange = onValueChange,
             valueRange = range,
             steps = steps,
+            enabled = enabled,
             colors = SliderDefaults.colors(
                 activeTrackColor = MaterialTheme.colorScheme.primary
             )
@@ -557,6 +596,7 @@ fun DropdownSetting(
     options: List<String>,
     selected: String,
     onSelect: (String) -> Unit,
+    enabled: Boolean = true,
 ) {
     Column(modifier = Modifier.fillMaxWidth()) {
         Text(
@@ -575,7 +615,8 @@ fun DropdownSetting(
                 FilterChip(
                     label = dropdownOptionLabel(option),
                     selected = option == selected,
-                    onClick = { onSelect(option) }
+                    onClick = { onSelect(option) },
+                    enabled = enabled,
                 )
             }
         }
@@ -588,6 +629,7 @@ fun SwitchSetting(
     checked: Boolean,
     onCheckedChange: (Boolean) -> Unit,
     description: String? = null,
+    enabled: Boolean = true,
 ) {
     Row(
         modifier = Modifier.fillMaxWidth(),
@@ -609,7 +651,7 @@ fun SwitchSetting(
             }
         }
         Spacer(modifier = Modifier.width(12.dp))
-        Switch(checked = checked, onCheckedChange = onCheckedChange)
+        Switch(checked = checked, onCheckedChange = onCheckedChange, enabled = enabled)
     }
 }
 
@@ -625,9 +667,11 @@ fun FilterChip(
     label: String,
     selected: Boolean,
     onClick: () -> Unit,
+    enabled: Boolean = true,
 ) {
     Surface(
         onClick = onClick,
+        enabled = enabled,
         color = if (selected) MaterialTheme.colorScheme.primaryContainer
         else MaterialTheme.colorScheme.surfaceVariant,
         shape = MaterialTheme.shapes.medium

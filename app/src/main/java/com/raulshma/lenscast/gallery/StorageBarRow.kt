@@ -10,24 +10,24 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.raulshma.lenscast.R
-import com.raulshma.lenscast.data.CaptureHistoryStore
 import com.raulshma.lenscast.camera.model.CameraDashboardPolicy.formatBytes
 
 /**
  * Storage manager row: quota bar + free-space action, against the configured
- * quota (the store reads the live storage-quota setting per call).
+ * quota. Rendered from the source's [com.raulshma.lenscast.gallery.GallerySource.storageBar]
+ * snapshot (the store re-computes it per history change) rather than from the
+ * store directly — the remote backend holds the bar null and this row never
+ * renders there.
  */
 @Composable
-fun StorageBarRow(store: CaptureHistoryStore) {
-    val history by store.history.collectAsState()
-    val bar = remember(history) { store.storageBar() }
+fun StorageBarRow(
+    bar: com.raulshma.lenscast.data.CaptureHistoryStore.StorageBar,
+    onFreeSpace: () -> Unit,
+) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -42,7 +42,7 @@ fun StorageBarRow(store: CaptureHistoryStore) {
                 stringResource(R.string.gallery_storage_usage, formatBytes(bar.usedBytes), formatBytes(bar.quotaBytes)),
                 style = MaterialTheme.typography.bodySmall,
             )
-            TextButton(onClick = { store.enforceQuota() }) {
+            TextButton(onClick = onFreeSpace) {
                 Text(stringResource(R.string.gallery_free_space))
             }
         }

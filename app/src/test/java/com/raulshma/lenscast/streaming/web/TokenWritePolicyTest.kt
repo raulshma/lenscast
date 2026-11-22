@@ -38,6 +38,12 @@ class TokenWritePolicyTest {
     fun `recording routes are writable`() {
         assertTrue(TokenWritePolicy.allowsPost("/api/recording/start"))
         assertTrue(TokenWritePolicy.allowsPost("/api/recording/stop"))
+        // The schedule-only cancel rides the same token ladder (a token
+        // pairing's capture screen cancels through it). This file pins the
+        // token allow-list only — the paired-session role matrix (a viewer
+        // credential denied before the handler cancels) is RoleGatePolicy's
+        // verdict, covered there.
+        assertTrue(TokenWritePolicy.allowsPost("/api/recording/cancel-schedule"))
     }
 
     @Test
@@ -126,6 +132,7 @@ class TokenWritePolicyTest {
                 "/api/capture",
                 "/api/recording/start",
                 "/api/recording/stop",
+                "/api/recording/cancel-schedule",
                 "/api/deterrence/siren",
                 "/api/camera/torch",
                 "/api/camera/zoom",

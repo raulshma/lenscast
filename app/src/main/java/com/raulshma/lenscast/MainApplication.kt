@@ -21,6 +21,8 @@ import com.raulshma.lenscast.capture.CaptureMediaResolver
 import com.raulshma.lenscast.capture.DetectionCoordinator
 import com.raulshma.lenscast.capture.DetectionEventStore
 import com.raulshma.lenscast.capture.DetectionNotifier
+import com.raulshma.lenscast.capture.EventsSource
+import com.raulshma.lenscast.capture.LocalEventsSource
 import com.raulshma.lenscast.capture.PhotoCaptureManager
 import com.raulshma.lenscast.capture.RecordingController
 import com.raulshma.lenscast.capture.TamperMonitor
@@ -57,6 +59,8 @@ import com.raulshma.lenscast.core.mqtt.MqttTopics
 import com.raulshma.lenscast.data.CaptureHistoryStore
 import com.raulshma.lenscast.data.SettingsDataStore
 import com.raulshma.lenscast.gallery.GallerySession
+import com.raulshma.lenscast.gallery.GallerySource
+import com.raulshma.lenscast.gallery.LocalGallerySource
 import com.raulshma.lenscast.core.NetworkUtils
 import com.raulshma.lenscast.settings.SettingsApplier
 import com.raulshma.lenscast.streaming.ResumeController
@@ -129,6 +133,65 @@ class MainApplication : Application(), SingletonImageLoader.Factory, AppGraph, R
             captureHistoryStore = captureHistoryStore,
             photoCache = decryptedPhotoCache,
             appScope = appScope,
+        )
+    }
+    // The gallery's LOCAL backend (the source seam's this-phone half): wraps
+    // the same store + session the screens have always read, process-scoped
+    // like them.
+    override val localGallerySource: GallerySource by lazy {
+        LocalGallerySource(
+            store = captureHistoryStore,
+            session = gallerySession,
+            mediaKeyProvider = mediaKeyProvider,
+            scope = appScope,
+        )
+    }
+    // The event log's LOCAL backend: the detection screen's old inline
+    // store tail, lifted into a source over the same singleton store.
+    override val localEventsSource: EventsSource by lazy {
+        LocalEventsSource(
+            store = detectionEventStore,
+            scope = appScope,
+        )
+    }
+    // The capture screen's LOCAL backend: the CaptureViewModel's old
+    // collaborator set (controller, photo manager, composer, settings,
+    // scheduler context, mic gate), lifted into a source over the same
+    // singletons.
+    override val localCaptureSource: com.raulshma.lenscast.capture.CaptureSource by lazy {
+        com.raulshma.lenscast.capture.LocalCaptureSource(
+            context = this,
+            recordingController = recordingController,
+            photoCaptureManager = photoCaptureManager,
+            settingsDataStore = settingsDataStore,
+            timelapseComposer = timelapseComposer,
+            scope = appScope,
+        )
+    }
+    // The automation screen's LOCAL backend: the settings store's automation
+    // surface, the fire journal's polled read, the test controller, and the
+    // camera's flash verdict — the AutomationViewModel's old collaborators.
+    override val localAutomationSource: com.raulshma.lenscast.automation.AutomationSource by lazy {
+        com.raulshma.lenscast.automation.LocalAutomationSource(
+            settingsDataStore = settingsDataStore,
+            testController = automationTestController,
+            fireJournal = automationFireJournal,
+            torchMaxLevel = cameraService.torchStrengthMaxLevel,
+            scope = appScope,
+        )
+    }
+    // The settings screens' LOCAL backend: the settings store's passthrough
+    // plus the camera/power/model/auth collaborators — the SettingsViewModel's
+    // old graph members, lifted into a source (P6's settings wave).
+    override val localSettingsSource: com.raulshma.lenscast.settings.SettingsSource by lazy {
+        com.raulshma.lenscast.settings.LocalSettingsSource(
+            settingsDataStore = settingsDataStore,
+            cameraService = cameraService,
+            powerManager = powerManager,
+            detectionModelStore = detectionModelStore,
+            audioModelStore = audioModelStore,
+            webAuthGate = streamingManager.webAuthGate,
+            scope = appScope,
         )
     }
     override val recordingController: RecordingController by lazy { RecordingController(this) }

@@ -239,6 +239,31 @@ internal object StreamingFieldCatalog {
     }
 
     /**
+     * A credential-bearing plain string the GET answer redacts (the handler
+     * blanks the field; only the admin-only export envelope carries it
+     * verbatim): decode renders the stored value — the export's lossless
+     * path and the PUT's merge base read it — while encode overwrites only
+     * on a presented non-blank value ([SecretUpdate.overwrites]), so the
+     * blank echo a whole-section save sends back after a redacted GET keeps
+     * the stored value — the [SecretOverwrite] keep rule without the
+     * always-blank decode.
+     */
+    internal data class RedactedOverwrite(
+        val pref: SettingPref<String>,
+        val wireKey: String,
+        val accessor: (StreamingSettingsDto) -> String,
+    ) : Convention {
+        override val wireKeys = setOf(wireKey)
+        override fun decode(prefs: Preferences) = mapOf(wireKey to pref.decode(prefs))
+        override fun encode(stream: StreamingSettingsDto, touched: Set<String>, fresh: Preferences) =
+            if (wireKey in touched && SecretUpdate.overwrites(accessor(stream))) {
+                listOf(SettingEntry(pref, accessor(stream)))
+            } else {
+                emptyList()
+            }
+    }
+
+    /**
      * A string-set field carried as a wire list: decode renders the stored set
      * as a list, encode folds the presented list back to a set. The descriptor
      * owns the class-gate normalization on both sides (unknown spellings drop,
@@ -444,7 +469,11 @@ internal object StreamingFieldCatalog {
         StringSet(soundTriggerClassesPref, "soundTriggerClasses") { it.soundTriggerClasses },
         Plain(webhookEnabledPref, "webhookEnabled") { it.webhookEnabled },
         Plain(webhookUrlPref, "webhookUrl") { it.webhookUrl },
-        Plain(webhookHeadersPref, "webhookHeaders") { it.webhookHeaders },
+        // The header map frequently carries an Authorization header, so the
+        // GET answer redacts it (SettingsWebHandler.get) and a blank echo
+        // keeps the stored headers — the export envelope alone carries it
+        // verbatim.
+        RedactedOverwrite(webhookHeadersPref, "webhookHeaders") { it.webhookHeaders },
         Plain(autoSirenPref, "autoSiren") { it.autoSiren },
         Plain(autoTorchPref, "autoTorch") { it.autoTorch },
         Plain(sirenDurationSecondsPref, "sirenDurationSeconds") { it.sirenDurationSeconds },

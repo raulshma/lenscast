@@ -58,7 +58,24 @@ class SettingsWebHandler(
         )
     }
 
-    suspend fun get(): String = responseAdapter.toJson(buildResponse())
+    /**
+     * GET /api/settings — the settings document with `webhookHeaders`
+     * redacted. The header map is a user-authored credential carrier
+     * (frequently an Authorization header), and the role gate cannot split
+     * this route by caller (the handler never sees the session's role), so
+     * the read answer is viewer-safe by construction: every session reads
+     * the document blank-headers, the same write-only shape the [Secret]
+     * fields serialize — the field catalog's keep-on-blank encode keeps the
+     * stored headers alive under the blank echo a whole-section save sends
+     * back. The admin-only export twin ([export]) carries the stored value
+     * verbatim and stays the lossless path.
+     */
+    suspend fun get(): String {
+        val doc = buildResponse()
+        return responseAdapter.toJson(
+            doc.copy(streaming = doc.streaming.copy(webhookHeaders = "")),
+        )
+    }
 
     /**
      * GET /api/settings/export — the current settings document inside the

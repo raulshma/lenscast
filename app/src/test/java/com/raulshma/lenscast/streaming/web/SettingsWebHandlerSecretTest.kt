@@ -92,6 +92,10 @@ class SettingsWebHandlerSecretTest {
         store.saveBackupWebdavPassword("dav-pass")
         store.saveTelegramBotToken("tg-token")
         store.saveApiTokenHash("stored-token-hash")
+        // The header map is the one credential the GET redacts handler-side
+        // (a plain field, not a Secret) — planted so the tests below can pin
+        // both halves: the GET's blank and the export's verbatim value.
+        store.saveWebhookHeaders("""{"Authorization":"Bearer webhook-secret"}""")
     }
 
     @Before
@@ -135,6 +139,10 @@ class SettingsWebHandlerSecretTest {
         assertTrue("wire JSON should carry \"backupWebdavPassword\":\"\"", json.contains("\"backupWebdavPassword\":\"\""))
         assertTrue("wire JSON should carry \"telegramBotToken\":\"\"", json.contains("\"telegramBotToken\":\"\""))
         assertTrue("wire JSON should carry \"apiToken\":\"\"", json.contains("\"apiToken\":\"\""))
+        // The webhook header map is not a Secret field, but the GET answers
+        // it blank just the same — a viewer session reads this route, and the
+        // user-authored map frequently carries an Authorization header.
+        assertTrue("wire JSON should carry \"webhookHeaders\":\"\"", json.contains("\"webhookHeaders\":\"\""))
         for (leaked in listOf(
             "rtmp://user:pass@host/live/stream-key",
             "whip-bearer-token",
@@ -145,6 +153,7 @@ class SettingsWebHandlerSecretTest {
             // The apiToken's stored form is only ever the hash — it must not
             // ride the wire either.
             "stored-token-hash",
+            "Bearer webhook-secret",
         )) {
             assertFalse("the stored credential leaked onto the wire: $leaked", json.contains(leaked))
         }
@@ -174,6 +183,29 @@ class SettingsWebHandlerSecretTest {
             assertFalse("the export leaked a stored credential: $leaked", json.contains(leaked))
         }
         assertTrue(json.contains("\"whipToken\":\"\""))
+        // The redacted webhook headers are the export's one verbatim
+        // credential — the lossless path the import envelope restores from,
+        // gated admin-only by the role gate.
+        assertTrue("the export lost the webhook headers", json.contains("Bearer webhook-secret"))
+    }
+
+    @Test
+    fun `put with empty webhook headers keeps the stored map and a value overwrites it`() = runBlocking {
+        plantAllSecrets()
+
+        // The blank echo a whole-section save sends back after a redacted
+        // GET (the dashboard and the companion both PUT whole sections from
+        // their GET state) must never wipe the stored headers.
+        handler.put("""{"streaming":{"port":8104,"webhookHeaders":""}}""")
+        awaitUntil("the kept webhook headers never propagated") {
+            store.streamingPort.value == 8104 &&
+                store.webhookHeaders.value == """{"Authorization":"Bearer webhook-secret"}"""
+        }
+
+        handler.put("""{"streaming":{"webhookHeaders":"{\"X-Auth\":\"tok\"}"}}""")
+        awaitUntil("the presented webhook headers never propagated") {
+            store.webhookHeaders.value == """{"X-Auth":"tok"}"""
+        }
     }
 
     // ── the PUT half: empty/absent keeps, a value overwrites ──

@@ -33,6 +33,7 @@ object TokenWritePolicy {
         // Recording lifecycle
         "/api/recording/start",
         "/api/recording/stop",
+        "/api/recording/cancel-schedule",
         // Deterrence: the siren route plus the torch route the router registers
         "/api/deterrence/siren",
         "/api/camera/torch",

@@ -124,6 +124,7 @@ class ApiRouter(
         "/api/capture/interval/stop" -> ApiResponse.ok(interval.stop())
         "/api/recording/start" -> ApiResponse.ok(recording.start(r.body))
         "/api/recording/stop" -> ApiResponse.ok(recording.stop())
+        "/api/recording/cancel-schedule" -> ApiResponse.ok(recording.cancelSchedule())
         "/api/deterrence/siren" -> ApiResponse.ok(deterrence.setSiren(r.body))
         "/api/detection/test" -> ApiResponse.ok(detectionTest.test())
         // The restart route's `mode` query (blueprint P1 item 9): "soft" runs
@@ -249,6 +250,7 @@ class ApiRouter(
             Route(ApiMethod.POST, "/api/capture/interval/stop"),
             Route(ApiMethod.POST, "/api/recording/start"),
             Route(ApiMethod.POST, "/api/recording/stop"),
+            Route(ApiMethod.POST, "/api/recording/cancel-schedule"),
             Route(ApiMethod.POST, "/api/deterrence/siren"),
             Route(ApiMethod.POST, "/api/detection/test"),
             Route(ApiMethod.POST, "/api/system/restart"),

@@ -161,7 +161,7 @@ class HttpAuthFilter(
         }
         // The RFC 7617 lane: the companion's username/password pairing sends
         // `Authorization: Basic` on every request and mints no session cookie
-        // (LiveViewModel's basic dial) — the lane simply never authenticated
+        // (the companion client's basic dial) — the lane simply never authenticated
         // before this branch, so the pairing UI's own "Test connection" failed
         // against the very device it was pointed at. Header-authenticated like
         // the token lane: no ambient cookie credentials, so the CSRF check is

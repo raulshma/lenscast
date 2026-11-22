@@ -101,6 +101,8 @@ fun GallerySelectModeBottomBar(
     selectedCount: Int,
     onShareSelected: () -> Unit,
     onDeleteSelected: () -> Unit,
+    /** False hides the share pill (the backend's items have no local bytes to share). */
+    canShare: Boolean = true,
 ) {
     val navBarsPadding = WindowInsets.navigationBars.asPaddingValues()
     Surface(
@@ -133,14 +135,16 @@ fun GallerySelectModeBottomBar(
                 )
             }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                GalleryActionPill(
-                    label = stringResource(R.string.gallery_share),
-                    icon = Icons.Default.Share,
-                    enabled = selectedCount > 0,
-                    destructive = false,
-                    loading = false,
-                    onClick = onShareSelected,
-                )
+                if (canShare) {
+                    GalleryActionPill(
+                        label = stringResource(R.string.gallery_share),
+                        icon = Icons.Default.Share,
+                        enabled = selectedCount > 0,
+                        destructive = false,
+                        loading = false,
+                        onClick = onShareSelected,
+                    )
+                }
                 GalleryActionPill(
                     label = stringResource(R.string.gallery_delete),
                     icon = Icons.Default.Delete,

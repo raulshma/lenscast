@@ -23,6 +23,8 @@
     <string name="camera_menu_settings">Settings</string>
     <string name="camera_menu_quit">Quit application</string>
     <string name="camera_collapse_quick_settings_cd">Collapse quick settings</string>
+
+    <!-- Device console (the camera dashboard's remote backend): transitional chrome -->
     <string name="camera_stop_recording_cd">Stop recording</string>
     <string name="camera_record_video_cd">Record video</string>
     <string name="camera_recording_scheduled_cd">Recording scheduled</string>
@@ -111,6 +113,9 @@
     <string name="capture_flash_mode">Flash Mode</string>
     <string name="capture_stop_interval">Stop Interval</string>
     <string name="capture_start_interval">Start Interval</string>
+    <string name="capture_interval_running">Interval capture running</string>
+    <string name="capture_interval_stopped">Interval capture stopped</string>
+    <string name="capture_interval_unknown">Interval status unknown</string>
     <string name="capture_assembling">Assembling…</string>
     <string name="capture_assemble_timelapse">Assemble Timelapse (last 100 photos)</string>
     <string name="capture_auto_timelapse">Auto-Timelapse on Completion</string>
@@ -188,6 +193,7 @@
     <string name="gallery_search_hint">Search by file name</string>
     <string name="gallery_search_clear_cd">Clear search</string>
     <string name="gallery_favorite_cd">Mark as favorite</string>
+    <string name="gallery_favorited_cd">Favorited</string>
     <string name="gallery_unfavorite_cd">Remove from favorites</string>
     <string name="gallery_undo">Undo</string>
     <string name="gallery_empty_none_title">No media yet</string>
@@ -839,10 +845,6 @@
     <string name="companion_last_seen">Last seen %1$s</string>
 
     <!-- Device screen tabs -->
-    <string name="companion_tab_live">Live</string>
-    <string name="companion_tab_events">Events</string>
-    <string name="companion_tab_media">Media</string>
-    <string name="companion_tab_system">System</string>
 
     <!-- Connection states -->
     <string name="companion_connecting">Connecting…</string>
@@ -891,70 +893,33 @@
     <string name="companion_stop_audio">Stop listening</string>
     <string name="companion_talkback_start">Talk</string>
     <string name="companion_talkback_stop">Stop talking</string>
-    <string name="companion_talkback_active">Talking to the camera</string>
-    <string name="companion_capture_cd">Capture a photo</string>
-    <string name="companion_torch_on_cd">Turn torch on</string>
-    <string name="companion_torch_off_cd">Turn torch off</string>
-    <string name="companion_zoom_cd">Zoom</string>
     <!-- unused: reserved for phase 2 tap-to-focus (web console's focus quick-selects) -->
-    <string name="companion_focus_cd">Tap to focus</string>
-    <string name="companion_siren_on">Sound siren</string>
-    <string name="companion_siren_off">Stop siren</string>
-    <string name="companion_stream_start">Start stream</string>
-    <string name="companion_stream_stop">Stop stream</string>
     <string name="companion_clients_title">Connected clients</string>
     <string name="companion_clients_empty">No clients connected</string>
     <string name="companion_kick_cd">Disconnect client %1$s</string>
     <!-- unused: reserved for phase 2 fullscreen (web console's fullscreen preview) -->
-    <string name="companion_fullscreen_cd">Fullscreen</string>
     <string name="companion_pip_cd">Picture-in-picture</string>
 
     <!-- Events tab -->
-    <string name="companion_events_empty">No detection events yet</string>
     <!-- unused: reserved for phase 2 event filters (web console's events.filter.*) -->
-    <string name="companion_filter_all">All</string>
     <!-- unused: reserved for phase 2 event filters (web console's events.filter.*) -->
-    <string name="companion_filter_motion">Motion</string>
     <!-- unused: reserved for phase 2 event filters (web console's events.filter.*) -->
-    <string name="companion_filter_sound">Sound</string>
     <!-- unused: reserved for phase 2 event filters (web console's events.filter.*) -->
-    <string name="companion_filter_tamper">Tamper</string>
     <!-- unused: reserved for phase 2 stats card header (web console's stats card) -->
-    <string name="companion_stats_title">Statistics</string>
-    <string name="companion_stats_24h">24 hours</string>
-    <string name="companion_stats_7d">7 days</string>
     <!-- unused: reserved for phase 2 all-time stats window (web console's stats card) -->
-    <string name="companion_stats_all">All time</string>
-    <string name="companion_stats_total">Total events</string>
     <!-- unused: reserved for phase 2 event snapshots (web console's event snapshot view) -->
-    <string name="companion_snapshot_cd">View snapshot</string>
     <!-- unused: reserved for phase 2 event clips (web console's events.viewClip) -->
-    <string name="companion_clip_cd">View clip</string>
 
     <!-- Media tab -->
-    <string name="companion_media_empty">No captures on this device</string>
-    <string name="companion_delete_cd">Delete %1$s</string>
     <!-- unused: reserved for phase 2 file downloads (web console's gallery.download) -->
-    <string name="companion_download_cd">Download</string>
-    <string name="companion_share_cd">Share</string>
-    <string name="companion_recordings_title">Recording sessions</string>
-    <string name="companion_record_start">Record</string>
-    <string name="companion_record_stop">Stop recording</string>
-    <string name="companion_record_active">Recording</string>
     <!-- unused: reserved for phase 2 day-grouped gallery timeline (web console's gallery.today) -->
-    <string name="companion_timeline_today">Today</string>
     <!-- unused: reserved for phase 2 gallery file-name search (web console's gallery.searchPlaceholder) -->
-    <string name="companion_search_hint">Search captures</string>
     <!-- unused: reserved for phase 2 gallery load-more (web console's gallery.loadMore) -->
-    <string name="companion_load_more">Load more</string>
 
     <!-- System tab -->
-    <string name="companion_role_readonly_banner">Signed in as viewer — controls are read-only</string>
 
     <!-- Device screen shell (per-device tabs) -->
     <string name="companion_conn_idle">Idle</string>
-    <string name="companion_device_missing_title">Device not found</string>
-    <string name="companion_device_missing_body">This device is no longer in your devices list. It may have been removed.</string>
 
     <!-- Roster chrome (devices screen) -->
     <string name="companion_refresh_cd">Refresh device status</string>
@@ -1004,60 +969,10 @@
     <string name="companion_system_info_unavailable">Device information unavailable</string>
 
     <!-- System tab: settings editor -->
-    <string name="companion_system_settings_title">Detection &amp; capture settings</string>
     <string name="companion_system_settings_read_only">Viewer session — settings are read-only</string>
-    <string name="companion_system_settings_unavailable">Settings unavailable</string>
     <string name="companion_system_settings_dirty_save">Save</string>
-    <string name="companion_system_settings_revert">Revert</string>
-    <string name="companion_system_settings_saving">Saving…</string>
-    <string name="companion_system_group_motion">Motion detection</string>
-    <string name="companion_system_motion_enabled">Motion detection</string>
-    <string name="companion_system_motion_sensitivity">Sensitivity</string>
-    <string name="companion_system_motion_recording">Record on motion</string>
-    <string name="companion_system_motion_post_roll">Post-roll (seconds)</string>
-    <string name="companion_system_motion_cooldown">Motion cooldown (seconds)</string>
-    <string name="companion_system_motion_arm">Arm schedule</string>
-    <string name="companion_system_motion_arm_start">Start (minute of day)</string>
-    <string name="companion_system_motion_arm_end">End (minute of day)</string>
-    <string name="companion_system_motion_arm_days">Days</string>
-    <string-array name="companion_system_day_names">
-        <item>Mo</item>
-        <item>Tu</item>
-        <item>We</item>
-        <item>Th</item>
-        <item>Fr</item>
-        <item>Sa</item>
-        <item>Su</item>
-    </string-array>
-    <string name="companion_system_group_sound">Sound detection</string>
-    <string name="companion_system_sound_enabled">Sound detection</string>
-    <string name="companion_system_sound_threshold">Threshold</string>
-    <string name="companion_system_sound_adaptive">Adaptive noise floor</string>
-    <string name="companion_system_sound_recording">Record on sound</string>
-    <string name="companion_system_sound_cooldown">Sound cooldown (seconds)</string>
-    <string name="companion_system_group_ml">Object detection (ML gate)</string>
-    <string name="companion_system_ml_enabled">Object detection</string>
-    <string name="companion_system_ml_min_score">Minimum confidence</string>
-    <string name="companion_system_ml_person">People</string>
-    <string name="companion_system_ml_pets">Pets</string>
-    <string name="companion_system_ml_vehicles">Vehicles</string>
-    <string name="companion_system_group_tamper">Tamper detection</string>
-    <string name="companion_system_tamper_enabled">Tamper detection</string>
-    <string name="companion_system_group_storage">Capture &amp; storage</string>
-    <string name="companion_system_capture_retention">Capture retention (days, 0 = forever)</string>
-    <string name="companion_system_event_retention">Event retention (days, 0 = forever)</string>
-    <string name="companion_system_storage_quota">Storage quota (MB)</string>
 
     <!-- System tab: web sessions card -->
-    <string name="companion_system_auth_title">Web sessions</string>
-    <string name="companion_system_auth_not_required">This device does not require a sign-in</string>
-    <string name="companion_system_auth_signed_in">Signed in</string>
-    <string name="companion_system_auth_expired">Session expired — re-pair the device</string>
-    <string name="companion_system_auth_unavailable">Session information unavailable</string>
-    <string name="companion_system_sessions_empty">No active sessions</string>
-    <string name="companion_system_session_revoke">Revoke</string>
-    <string name="companion_system_logout">Sign out</string>
-    <string name="companion_system_logout_confirm">Sign out of this device\'s dashboard session?</string>
 
     <!-- System tab: audit card -->
     <string name="companion_system_audit_title">Audit log</string>
@@ -1067,88 +982,44 @@
     <string name="companion_system_audit_unavailable">Audit log unavailable</string>
 
     <!-- System tab: shell states + snackbars -->
-    <string name="companion_system_no_device">This device is no longer in your roster</string>
-    <string name="companion_system_retry">Retry</string>
-    <string name="companion_system_error_load">Could not reach the device</string>
-    <string name="companion_system_error_forbidden">The device denied this action — viewer permissions</string>
-    <string name="companion_system_error_auth">Session expired — re-pair the device</string>
-    <string name="companion_system_error_network">Device unreachable</string>
-    <string name="companion_system_error_http">The device answered with an error</string>
-    <string name="companion_system_settings_saved">Settings saved</string>
-    <string name="companion_system_settings_save_failed">Save failed — changes reverted</string>
-    <string name="companion_system_session_revoked">Session revoked</string>
-    <string name="companion_system_logged_out">Signed out</string>
+
+    <!-- Settings screens (P6): the remote App-settings screen\'s folded diagnostics section.
+         Reuses the System tab\'s info/audit/clients/kick copy single-homed above. -->
+    <string name="settings_diagnostics_title">Diagnostics</string>
+    <string name="settings_diagnostics_maintenance_title">Maintenance</string>
+    <string name="settings_diagnostics_restart_soft">Soft restart</string>
+    <string name="settings_diagnostics_restart_full">Restart app</string>
+    <string name="settings_diagnostics_reset_camera">Reset camera</string>
+    <string name="settings_diagnostics_restart_confirm_title">Restart the device\'s app?</string>
+    <string name="settings_diagnostics_restart_confirm_body">The camera app on the device restarts; live viewers and in-flight captures are dropped.</string>
+    <string name="settings_diagnostics_reset_confirm_title">Reset the device\'s camera?</string>
+    <string name="settings_diagnostics_reset_confirm_body">The camera pipeline rebinds; a capture in flight is dropped.</string>
+    <string name="settings_diagnostics_restart_sent">Restarting — the device comes back on its own</string>
+    <string name="settings_diagnostics_reset_sent">Camera reset requested</string>
+    <string name="settings_diagnostics_export">Export settings</string>
+    <string name="settings_diagnostics_import">Import settings</string>
+    <string name="settings_diagnostics_export_done">Settings exported</string>
+    <string name="settings_diagnostics_export_failed">Export failed — the settings document could not be fetched or saved</string>
+    <string name="settings_diagnostics_import_done">Settings imported</string>
+    <string name="settings_diagnostics_import_failed">Import failed — the file was not a settings export</string>
+    <string name="settings_diagnostics_backup_note">Export carries the device\'s whole settings document; write-only credentials are left blank and survive an import untouched.</string>
 
     <!-- Events tab (wave 3): live chip, refresh, clear-all, test-fire, relative ages -->
-    <string name="companion_events_live">Live</string>
-    <string name="companion_events_refresh_cd">Refresh events</string>
-    <string name="companion_events_clear">Clear log</string>
     <string name="companion_events_clear_confirm_title">Clear the event log?</string>
     <string name="companion_events_clear_confirm_body">Every detection event stored on the device is deleted permanently.</string>
     <string name="companion_events_clear_confirm_action">Clear</string>
-    <string name="companion_events_cleared">Event log cleared</string>
-    <string name="companion_events_clear_failed">Could not clear the event log</string>
-    <string name="companion_events_test_fire">Test alert</string>
-    <string name="companion_events_test_fired">Test alert dispatched to: %1$s</string>
-    <string name="companion_events_test_no_sinks">Test alert dispatched — no sinks are configured</string>
-    <string name="companion_events_test_failed">The test alert did not dispatch</string>
-    <string name="companion_events_forbidden">This action needs an admin sign-in</string>
-    <string name="companion_events_signin_required">Sign-in required — pair the device again</string>
-    <string name="companion_events_action_failed">The device did not answer — try again</string>
-    <string name="companion_events_time_now">Just now</string>
-    <string name="companion_events_time_minutes">%1$d min ago</string>
-    <string name="companion_events_time_hours">%1$d h ago</string>
-    <string name="companion_events_time_days">%1$d d ago</string>
 
     <!-- Media tab (wave 3): filter chips, viewer, delete/share, recordings, interval capture -->
-    <string name="companion_media_filter_all">All</string>
-    <string name="companion_media_filter_photos">Photos</string>
-    <string name="companion_media_filter_videos">Videos</string>
-    <string name="companion_media_empty_filtered">Nothing matches this filter</string>
-    <string name="companion_media_delete">Delete</string>
     <string name="companion_media_delete_confirm_single">Delete %1$s from the device? This cannot be undone.</string>
     <string name="companion_media_delete_confirm_batch">Delete %1$d captures from the device? This cannot be undone.</string>
-    <string name="companion_media_deleted">Deleted %1$d item(s)</string>
-    <string name="companion_media_select_count">%1$d selected</string>
-    <string name="companion_media_clear_selection_cd">Clear selection</string>
-    <string name="companion_media_share_chooser">Share media link</string>
-    <string name="companion_media_viewer_close_cd">Close viewer</string>
-    <string name="companion_media_not_recording">Not recording</string>
-    <string name="companion_media_elapsed">Elapsed %1$s</string>
-    <string name="companion_media_sessions_empty">No recording sessions yet</string>
-    <string name="companion_media_trigger_manual">Manual</string>
-    <string name="companion_media_trigger_motion">Motion</string>
-    <string name="companion_media_trigger_sound">Sound</string>
-    <string name="companion_media_trigger_continuous">Continuous</string>
-    <string name="companion_media_trigger_scheduled">Scheduled</string>
-    <string name="companion_media_trigger_interval">Interval</string>
-    <string name="companion_media_interval_title">Interval capture</string>
-    <string name="companion_media_interval_idle">Interval capture is off</string>
-    <string name="companion_media_interval_running">Running — %1$d captures so far</string>
-    <string name="companion_media_interval_seconds">Seconds between captures</string>
-    <string name="companion_media_interval_seconds_range">Enter a number between 1 and 3600</string>
-    <string name="companion_media_interval_start">Start</string>
-    <string name="companion_media_interval_stop">Stop</string>
-    <string name="companion_media_error_gallery">Could not load the capture library</string>
-    <string name="companion_media_error_recordings">Could not load the recording sessions</string>
-    <string name="companion_media_error_interval">Could not load the interval-capture status</string>
-    <string name="companion_media_retry">Retry</string>
-    <string name="companion_media_action_failed">The device did not answer — try again</string>
 
     <!-- Live tab (wave 3): verdict snackbars, kick dialog, client kinds, recording elapsed -->
     <string name="companion_live_forbidden">Viewer permissions — this camera refused the control</string>
     <string name="companion_live_control_auth">Sign-in required — check this device\'s credentials</string>
     <string name="companion_live_control_failed">The camera refused that control</string>
-    <string name="companion_live_capture_ok">Photo saved on the camera</string>
     <string name="companion_live_kick_confirm_body">Disconnect %1$s from the camera\'s stream?</string>
     <string name="companion_live_kick_yes">Disconnect</string>
-    <string name="companion_live_kick_ok">Client disconnected</string>
-    <string name="companion_live_kick_failed">Could not disconnect the client</string>
-    <string name="companion_live_client_web">Web viewer</string>
-    <string name="companion_live_client_rtsp">RTSP</string>
-    <string name="companion_live_client_since">since %1$s</string>
     <string name="companion_live_audio_failed">Live audio failed</string>
     <string name="companion_live_talkback_failed">Talkback connection failed</string>
     <string name="companion_live_talkback_needs_login">Talkback needs a signed-in session — pair this device with a username and password to talk</string>
-    <string name="companion_live_recording_elapsed">Recording · %1$s</string>
 </resources>

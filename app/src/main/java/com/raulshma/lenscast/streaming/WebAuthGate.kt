@@ -265,8 +265,8 @@ class WebAuthGate(
 
     /**
      * The RFC 7617 verdict for an `Authorization: Basic` presentation — the
-     * companion pairing lane that mints no session cookie (LiveViewModel's
-     * basic dial): the role whose credential pair matched, or null on
+     * companion pairing lane that mints no session cookie (the companion
+     * client's basic dial): the role whose credential pair matched, or null on
      * failure. Shares the login rate-limit budget, keyed per username, so
      * header credential-guessing is bounded exactly like form login. Both
      * failure shapes fold to null — a wrong password never reveals which

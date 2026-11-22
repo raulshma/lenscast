@@ -1,519 +1,376 @@
 package com.raulshma.lenscast.settings
 
 import android.app.Activity
-import androidx.compose.runtime.mutableStateOf
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
-import androidx.lifecycle.viewModelScope
-import com.raulshma.lenscast.camera.CameraService
-import com.raulshma.lenscast.camera.CameraSettingsEditor
 import com.raulshma.lenscast.camera.model.CameraSettings
 import com.raulshma.lenscast.camera.model.GridStyle
 import com.raulshma.lenscast.camera.model.PhotoAspectRatio
-import com.raulshma.lenscast.camera.model.SelfTimerMode
-import com.raulshma.lenscast.camera.model.QuickSettingCatalog
 import com.raulshma.lenscast.camera.model.QuickSettingType
-import com.raulshma.lenscast.core.PowerManager
-import com.raulshma.lenscast.core.SecretUpdate
-import com.raulshma.lenscast.core.parseEnum
+import com.raulshma.lenscast.camera.model.SelfTimerMode
 import com.raulshma.lenscast.capture.ml.AudioModelStore
 import com.raulshma.lenscast.capture.ml.DetectionModelStore
-import com.raulshma.lenscast.data.SettingsDataStore
-import com.raulshma.lenscast.core.StreamAuthCrypto
 import com.raulshma.lenscast.data.StreamAuthSettings
-import com.raulshma.lenscast.streaming.WebAuthGate
 import com.raulshma.lenscast.streaming.rtsp.RtspInputFormat
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.launch
 
 /**
- * Write-side settings interface for the settings screens. Persisted values are
- * exposed directly from the SettingsDataStore — the store is the single source
- * of truth and there is no mirror state to drift. Runtime application is owned
- * by SettingsApplier; this ViewModel only writes. Camera settings funnel
- * through the Quick Setting Catalog's write table via [updateQuickSetting];
- * every other write is a one-line store save through [save].
+ * The settings screens' write-side ViewModel — now a thin shell over the
+ * [SettingsSource] seam (P6's one-interface-two-backends wave): every flow
+ * read and every write rides the source, so the same screens render against
+ * this phone's store ([LocalSettingsSource]) or a paired device's settings
+ * document ([com.raulshma.lenscast.companion.console.RemoteSettingsSource])
+ * with no screen-side branching. The source carries the lane partition
+ * KDoc's contract (device-side vs viewer-local vs phone-only); this class
+ * adds nothing but the [Factory] and the ViewModel lifecycle.
  */
 class SettingsViewModel(
-    private val cameraService: CameraService,
-    private val settingsDataStore: SettingsDataStore,
-    private val powerManager: PowerManager? = null,
-    /** The on-demand ML model store; its download is the one non-setting action here. */
-    private val detectionModelStore: DetectionModelStore,
-    /** The on-demand YAMNet model store; same one non-setting action as above. */
-    private val audioModelStore: AudioModelStore,
-    /** Optional: revokes live web sessions when credentials rotate in-app. */
-    private val webAuthGate: WebAuthGate? = null,
+    /** The backend: this phone's store passthrough or the paired device's. */
+    private val source: SettingsSource,
 ) : ViewModel() {
 
-    // Read-side settings come straight from the Settings Store's shared
-    // StateFlows — no per-ViewModel stateIn, no retyped defaults.
-    val settings: StateFlow<CameraSettings> = settingsDataStore.settings
-    val streamingPort: StateFlow<Int> = settingsDataStore.streamingPort
-    val webStreamingEnabled: StateFlow<Boolean> = settingsDataStore.webStreamingEnabled
-    val jpegQuality: StateFlow<Int> = settingsDataStore.jpegQuality
-    val showPreview: StateFlow<Boolean> = settingsDataStore.showPreview
-    val dynamicThemingEnabled: StateFlow<Boolean> = settingsDataStore.dynamicThemingEnabled
-
-    // ── Camera pro mode ──
-    // Viewfinder aids (grid, self-timer, spirit level), the pro-tools overlay
-    // toggles, the photo-capture quality/RAW knobs, and the EXIF geotag —
-    // all plain store flows with no ViewModel mirror.
-    val gridStyle: StateFlow<GridStyle> = settingsDataStore.gridStyle
-    val selfTimer: StateFlow<SelfTimerMode> = settingsDataStore.selfTimer
-    val spiritLevelEnabled: StateFlow<Boolean> = settingsDataStore.spiritLevelEnabled
-    val histogramEnabled: StateFlow<Boolean> = settingsDataStore.histogramEnabled
-    val zebrasEnabled: StateFlow<Boolean> = settingsDataStore.zebrasEnabled
-    val peakingEnabled: StateFlow<Boolean> = settingsDataStore.peakingEnabled
-    val photoJpegQuality: StateFlow<Int> = settingsDataStore.photoJpegQuality
-    val photoMaximizeQuality: StateFlow<Boolean> = settingsDataStore.photoMaximizeQuality
-    val rawCaptureEnabled: StateFlow<Boolean> = settingsDataStore.rawCaptureEnabled
-    val photoAspectRatio: StateFlow<PhotoAspectRatio> = settingsDataStore.photoAspectRatio
-    val geotagEnabled: StateFlow<Boolean> = settingsDataStore.geotagEnabled
-
-    /** The sound-class triggers (feature gate + the narrowed YAMNet class set). */
-    val soundTriggerEnabled: StateFlow<Boolean> = settingsDataStore.soundTriggerEnabled
-    val soundTriggerClasses: StateFlow<Set<String>> = settingsDataStore.soundTriggerClasses
-
-    // The bound camera's live RAW verdict, for the RAW row's capability note.
-    val isRawCaptureSupported: StateFlow<Boolean> = cameraService.isRawCaptureSupported
-    val streamAudioEnabled: StateFlow<Boolean> = settingsDataStore.streamAudioEnabled
-    val streamAudioBitrateKbps: StateFlow<Int> = settingsDataStore.streamAudioBitrateKbps
-    val streamAudioChannels: StateFlow<Int> = settingsDataStore.streamAudioChannels
-    val streamAudioEchoCancellation: StateFlow<Boolean> = settingsDataStore.streamAudioEchoCancellation
-    val recordingAudioEnabled: StateFlow<Boolean> = settingsDataStore.recordingAudioEnabled
-    val rtspEnabled: StateFlow<Boolean> = settingsDataStore.rtspEnabled
-    val rtspPort: StateFlow<Int> = settingsDataStore.rtspPort
-    val rtspBasicAuthCompat: StateFlow<Boolean> = settingsDataStore.rtspBasicAuthCompat
-    val rtspInputFormat: StateFlow<RtspInputFormat> = settingsDataStore.rtspInputFormat
-    val rtmpEnabled: StateFlow<Boolean> = settingsDataStore.rtmpEnabled
-    // Unlike the WHIP token below, the RTMP URL keeps its read-side flow:
-    // the write-only contract is the Web API's (the stream key embedded in
-    // the URL never echoes over the wire), while the in-app screen is the
-    // device owner editing locally and prefills the field from the store.
-    val rtmpUrl: StateFlow<String> = settingsDataStore.rtmpUrl
-    // The WHIP bearer token has no read-side flow: it is write-only, the
-    // screen types into local state and the store never echoes it back.
-    val whipEnabled: StateFlow<Boolean> = settingsDataStore.whipEnabled
-    val whipUrl: StateFlow<String> = settingsDataStore.whipUrl
-    val whipStunServer: StateFlow<String> = settingsDataStore.whipStunServer
-    // The SRT push URL keeps its read-side flow like the RTMP one: the
-    // write-only contract is the Web API's, the screen is the device owner.
-    val srtEnabled: StateFlow<Boolean> = settingsDataStore.srtEnabled
-    val srtUrl: StateFlow<String> = settingsDataStore.srtUrl
-    val adaptiveBitrateEnabled: StateFlow<Boolean> = settingsDataStore.adaptiveBitrateEnabled
-    val adaptiveEncodedBitrateEnabled: StateFlow<Boolean> = settingsDataStore.encodedAdaptiveBitrateEnabled
-    val rtspSubStreamEnabled: StateFlow<Boolean> = settingsDataStore.rtspSubStreamEnabled
-    val hlsDvrSegments: StateFlow<Int> = settingsDataStore.hlsDvrSegments
-    val mdnsEnabled: StateFlow<Boolean> = settingsDataStore.mdnsEnabled
-    val motionDetectionEnabled: StateFlow<Boolean> = settingsDataStore.motionDetectionEnabled
-    val motionSensitivityPercent: StateFlow<Int> = settingsDataStore.motionSensitivity
-    val motionRecordingEnabled: StateFlow<Boolean> = settingsDataStore.motionRecordingEnabled
-    val motionPostRollSeconds: StateFlow<Int> = settingsDataStore.motionPostRollSeconds
-    val motionArmScheduleEnabled: StateFlow<Boolean> = settingsDataStore.motionArmScheduleEnabled
-    val motionArmStartMinute: StateFlow<Int> = settingsDataStore.motionArmStartMinute
-    val motionArmEndMinute: StateFlow<Int> = settingsDataStore.motionArmEndMinute
-    val motionArmDaysMask: StateFlow<Int> = settingsDataStore.motionArmDaysMask
-    val soundDetectionEnabled: StateFlow<Boolean> = settingsDataStore.soundDetectionEnabled
-    val soundThresholdPercent: StateFlow<Int> = settingsDataStore.soundThresholdPercent
-    val soundAdaptiveNoiseFloor: StateFlow<Boolean> = settingsDataStore.soundAdaptiveNoiseFloor
-    val alertQuietHoursEnabled: StateFlow<Boolean> = settingsDataStore.alertQuietHoursEnabled
-    val alertQuietHoursStartMinute: StateFlow<Int> = settingsDataStore.alertQuietHoursStartMinute
-    val alertQuietHoursEndMinute: StateFlow<Int> = settingsDataStore.alertQuietHoursEndMinute
-    val soundRecordingEnabled: StateFlow<Boolean> = settingsDataStore.soundRecordingEnabled
-    val motionCooldownSeconds: StateFlow<Int> = settingsDataStore.motionCooldownSeconds
-    val soundCooldownSeconds: StateFlow<Int> = settingsDataStore.soundCooldownSeconds
-    val mlDetectionEnabled: StateFlow<Boolean> = settingsDataStore.mlDetectionEnabled
-    val mlMinScorePercent: StateFlow<Int> = settingsDataStore.mlMinScorePercent
-    val mlIncludePerson: StateFlow<Boolean> = settingsDataStore.mlIncludePerson
-    val mlIncludePets: StateFlow<Boolean> = settingsDataStore.mlIncludePets
-    val mlIncludeVehicles: StateFlow<Boolean> = settingsDataStore.mlIncludeVehicles
-    val soundClassificationEnabled: StateFlow<Boolean> = settingsDataStore.soundClassificationEnabled
-    val soundClassificationConfidencePercent: StateFlow<Int> = settingsDataStore.soundClassificationConfidencePercent
-    val soundClassificationAllowedClasses: StateFlow<Set<String>> = settingsDataStore.soundClassificationAllowedClasses
-
-    // The detection model's download lifecycle, straight from the store.
-    val detectionModelState: StateFlow<DetectionModelStore.State> =
-        detectionModelStore.state
-
-    // The YAMNet audio model's download lifecycle, same contract.
-    val audioModelState: StateFlow<AudioModelStore.State> =
-        audioModelStore.state
-    val continuousRecording: StateFlow<Boolean> = settingsDataStore.continuousRecording
-    val continuousSegmentMinutes: StateFlow<Int> = settingsDataStore.continuousSegmentMinutes
-    val ecoIdleFpsEnabled: StateFlow<Boolean> = settingsDataStore.ecoIdleFpsEnabled
-    val detectionNotificationsEnabled: StateFlow<Boolean> = settingsDataStore.detectionNotificationsEnabled
-    val tamperDetectionEnabled: StateFlow<Boolean> = settingsDataStore.tamperDetectionEnabled
-    val pushEnabled: StateFlow<Boolean> = settingsDataStore.pushEnabled
-    val unifiedPushEnabled: StateFlow<Boolean> = settingsDataStore.unifiedPushEnabled
-    val pushVapidSubject: StateFlow<String> = settingsDataStore.pushVapidSubject
-    val watchdogEnabled: StateFlow<Boolean> = settingsDataStore.watchdogEnabled
-    val watchdogMaxRetries: StateFlow<Int> = settingsDataStore.watchdogMaxRetries
-    val watchdogCheckIntervalSeconds: StateFlow<Int> = settingsDataStore.watchdogCheckIntervalSeconds
-    val backupEnabled: StateFlow<Boolean> = settingsDataStore.backupEnabled
-    val backupWifiOnly: StateFlow<Boolean> = settingsDataStore.backupWifiOnly
-    val backupWebdavUrl: StateFlow<String> = settingsDataStore.backupWebdavUrl
-    val backupWebdavUsername: StateFlow<String> = settingsDataStore.backupWebdavUsername
-    val backupWebdavPassword: StateFlow<String> = settingsDataStore.backupWebdavPassword
-    val captureRetentionDays: StateFlow<Int> = settingsDataStore.captureRetentionDays
-    val eventRetentionDays: StateFlow<Int> = settingsDataStore.eventRetentionDays
-    val storageQuotaMb: StateFlow<Int> = settingsDataStore.storageQuotaMb
-    val mediaEncryptionEnabled: StateFlow<Boolean> = settingsDataStore.mediaEncryptionEnabled
-    val httpsEnabled: StateFlow<Boolean> = settingsDataStore.httpsEnabled
-    val audioDeviceId: StateFlow<String> = settingsDataStore.audioDeviceId
-    val resumeStreamsOnBoot: StateFlow<Boolean> = settingsDataStore.resumeStreamsOnBoot
-    val keepAwakeEnabled: StateFlow<Boolean> = settingsDataStore.keepAwakeEnabled
-    val fsiCameraResume: StateFlow<Boolean> = settingsDataStore.fsiCameraResume
-
-    // Auth state comes straight from the Settings Store — no writable mirror.
-    // Typing responsiveness comes from the store flow re-emit on save.
-    val authSettings: StateFlow<StreamAuthSettings> = settingsDataStore.authSettings
-
-    private val _isIgnoringBatteryOptimizations = mutableStateOf(false)
-    val isIgnoringBatteryOptimizations = _isIgnoringBatteryOptimizations
-
-    val availableZoomRange: StateFlow<ClosedFloatingPointRange<Float>> = cameraService.availableZoomRange
-    val availableExposureRange: StateFlow<ClosedRange<Int>> = cameraService.availableExposureRange
-    val availableIsoRange: StateFlow<ClosedRange<Int>> = cameraService.availableIsoRange
-
-    // Same editor as the camera screen, persist-only: runtime application is
-    // the Settings Applier's. Field parsing stays shared through it.
-    private val settingsEditor = CameraSettingsEditor(
-        current = { settings.value },
-        persist = { settingsDataStore.saveSettings(it) },
-    )
+    /** The backend's render verdict table (the screens' capability gates). */
+    val capabilities: StateFlow<SettingsCapabilities> = source.capabilities
+
+    // ── Camera section ──
+    val settings: StateFlow<CameraSettings> = source.settings
+    val availableZoomRange: StateFlow<ClosedFloatingPointRange<Float>> = source.availableZoomRange
+    val availableExposureRange: StateFlow<ClosedRange<Int>> = source.availableExposureRange
+    val availableIsoRange: StateFlow<ClosedRange<Int>> = source.availableIsoRange
+    val isRawCaptureSupported: StateFlow<Boolean> = source.isRawCaptureSupported
+
+    // ── Streaming / app settings ──
+    val streamingPort: StateFlow<Int> = source.streamingPort
+    val webStreamingEnabled: StateFlow<Boolean> = source.webStreamingEnabled
+    val jpegQuality: StateFlow<Int> = source.jpegQuality
+    val adaptiveBitrateEnabled: StateFlow<Boolean> = source.adaptiveBitrateEnabled
+    val adaptiveEncodedBitrateEnabled: StateFlow<Boolean> = source.adaptiveEncodedBitrateEnabled
+    val hlsDvrSegments: StateFlow<Int> = source.hlsDvrSegments
+    val ecoIdleFpsEnabled: StateFlow<Boolean> = source.ecoIdleFpsEnabled
+    val mdnsEnabled: StateFlow<Boolean> = source.mdnsEnabled
+
+    // ── Camera pro mode (viewer-local lanes) ──
+    val showPreview: StateFlow<Boolean> = source.showPreview
+    val dynamicThemingEnabled: StateFlow<Boolean> = source.dynamicThemingEnabled
+    val gridStyle: StateFlow<GridStyle> = source.gridStyle
+    val selfTimer: StateFlow<SelfTimerMode> = source.selfTimer
+    val spiritLevelEnabled: StateFlow<Boolean> = source.spiritLevelEnabled
+    val histogramEnabled: StateFlow<Boolean> = source.histogramEnabled
+    val zebrasEnabled: StateFlow<Boolean> = source.zebrasEnabled
+    val peakingEnabled: StateFlow<Boolean> = source.peakingEnabled
+
+    // ── Photo capture knobs ──
+    val photoJpegQuality: StateFlow<Int> = source.photoJpegQuality
+    val photoMaximizeQuality: StateFlow<Boolean> = source.photoMaximizeQuality
+    val rawCaptureEnabled: StateFlow<Boolean> = source.rawCaptureEnabled
+    val photoAspectRatio: StateFlow<PhotoAspectRatio> = source.photoAspectRatio
+    val geotagEnabled: StateFlow<Boolean> = source.geotagEnabled
+
+    // ── Audio ──
+    val streamAudioEnabled: StateFlow<Boolean> = source.streamAudioEnabled
+    val streamAudioBitrateKbps: StateFlow<Int> = source.streamAudioBitrateKbps
+    val streamAudioChannels: StateFlow<Int> = source.streamAudioChannels
+    val streamAudioEchoCancellation: StateFlow<Boolean> = source.streamAudioEchoCancellation
+    val recordingAudioEnabled: StateFlow<Boolean> = source.recordingAudioEnabled
+    val audioDeviceId: StateFlow<String> = source.audioDeviceId
+
+    // ── Detection ──
+    val motionDetectionEnabled: StateFlow<Boolean> = source.motionDetectionEnabled
+    val motionSensitivityPercent: StateFlow<Int> = source.motionSensitivityPercent
+    val motionRecordingEnabled: StateFlow<Boolean> = source.motionRecordingEnabled
+    val motionPostRollSeconds: StateFlow<Int> = source.motionPostRollSeconds
+    val motionArmScheduleEnabled: StateFlow<Boolean> = source.motionArmScheduleEnabled
+    val motionArmStartMinute: StateFlow<Int> = source.motionArmStartMinute
+    val motionArmEndMinute: StateFlow<Int> = source.motionArmEndMinute
+    val motionArmDaysMask: StateFlow<Int> = source.motionArmDaysMask
+    val motionCooldownSeconds: StateFlow<Int> = source.motionCooldownSeconds
+    val soundDetectionEnabled: StateFlow<Boolean> = source.soundDetectionEnabled
+    val soundThresholdPercent: StateFlow<Int> = source.soundThresholdPercent
+    val soundAdaptiveNoiseFloor: StateFlow<Boolean> = source.soundAdaptiveNoiseFloor
+    val soundRecordingEnabled: StateFlow<Boolean> = source.soundRecordingEnabled
+    val soundCooldownSeconds: StateFlow<Int> = source.soundCooldownSeconds
+    val soundClassificationEnabled: StateFlow<Boolean> = source.soundClassificationEnabled
+    val soundClassificationConfidencePercent: StateFlow<Int> =
+        source.soundClassificationConfidencePercent
+    val soundClassificationAllowedClasses: StateFlow<Set<String>> =
+        source.soundClassificationAllowedClasses
+    val soundTriggerEnabled: StateFlow<Boolean> = source.soundTriggerEnabled
+    val soundTriggerClasses: StateFlow<Set<String>> = source.soundTriggerClasses
+    val mlDetectionEnabled: StateFlow<Boolean> = source.mlDetectionEnabled
+    val mlMinScorePercent: StateFlow<Int> = source.mlMinScorePercent
+    val mlIncludePerson: StateFlow<Boolean> = source.mlIncludePerson
+    val mlIncludePets: StateFlow<Boolean> = source.mlIncludePets
+    val mlIncludeVehicles: StateFlow<Boolean> = source.mlIncludeVehicles
+    val tamperDetectionEnabled: StateFlow<Boolean> = source.tamperDetectionEnabled
+    val detectionNotificationsEnabled: StateFlow<Boolean> = source.detectionNotificationsEnabled
+    val alertQuietHoursEnabled: StateFlow<Boolean> = source.alertQuietHoursEnabled
+    val alertQuietHoursStartMinute: StateFlow<Int> = source.alertQuietHoursStartMinute
+    val alertQuietHoursEndMinute: StateFlow<Int> = source.alertQuietHoursEndMinute
+    val pushEnabled: StateFlow<Boolean> = source.pushEnabled
+    val unifiedPushEnabled: StateFlow<Boolean> = source.unifiedPushEnabled
+    val pushVapidSubject: StateFlow<String> = source.pushVapidSubject
+    val detectionModelState: StateFlow<DetectionModelStore.State> = source.detectionModelState
+    val audioModelState: StateFlow<AudioModelStore.State?> = source.audioModelState
+
+    // ── Storage / recording / reliability / integrations ──
+    val storageQuotaMb: StateFlow<Int> = source.storageQuotaMb
+    val mediaEncryptionEnabled: StateFlow<Boolean> = source.mediaEncryptionEnabled
+    val continuousRecording: StateFlow<Boolean> = source.continuousRecording
+    val continuousSegmentMinutes: StateFlow<Int> = source.continuousSegmentMinutes
+    val watchdogEnabled: StateFlow<Boolean> = source.watchdogEnabled
+    val watchdogMaxRetries: StateFlow<Int> = source.watchdogMaxRetries
+    val watchdogCheckIntervalSeconds: StateFlow<Int> = source.watchdogCheckIntervalSeconds
+    val backupEnabled: StateFlow<Boolean> = source.backupEnabled
+    val backupWifiOnly: StateFlow<Boolean> = source.backupWifiOnly
+    val backupWebdavUrl: StateFlow<String> = source.backupWebdavUrl
+    val backupWebdavUsername: StateFlow<String> = source.backupWebdavUsername
+    val httpsEnabled: StateFlow<Boolean> = source.httpsEnabled
+    val keepAwakeEnabled: StateFlow<Boolean> = source.keepAwakeEnabled
+    val resumeStreamsOnBoot: StateFlow<Boolean> = source.resumeStreamsOnBoot
+    val fsiCameraResume: StateFlow<Boolean> = source.fsiCameraResume
+    val authSettings: StateFlow<StreamAuthSettings> = source.authSettings
+    val rtspEnabled: StateFlow<Boolean> = source.rtspEnabled
+    val rtspPort: StateFlow<Int> = source.rtspPort
+    val rtspBasicAuthCompat: StateFlow<Boolean> = source.rtspBasicAuthCompat
+    val rtspInputFormat: StateFlow<RtspInputFormat> = source.rtspInputFormat
+    val rtspSubStreamEnabled: StateFlow<Boolean> = source.rtspSubStreamEnabled
+    val rtmpEnabled: StateFlow<Boolean> = source.rtmpEnabled
+    val rtmpUrl: StateFlow<String> = source.rtmpUrl
+    val whipEnabled: StateFlow<Boolean> = source.whipEnabled
+    val whipUrl: StateFlow<String> = source.whipUrl
+    val whipStunServer: StateFlow<String> = source.whipStunServer
+    val srtEnabled: StateFlow<Boolean> = source.srtEnabled
+    val srtUrl: StateFlow<String> = source.srtUrl
 
-    init {
-        refreshBatteryOptimizationStatus()
-    }
+    // ── Phone-only ──
+    val isIgnoringBatteryOptimizations = source.isIgnoringBatteryOptimizations
 
-    fun refreshBatteryOptimizationStatus() {
-        _isIgnoringBatteryOptimizations.value = powerManager?.isIgnoringBatteryOptimizations() == true
-    }
+    fun refreshBatteryOptimizationStatus() = source.refreshBatteryOptimizationStatus()
 
-    fun requestIgnoreBatteryOptimization(activity: Activity) {
-        powerManager?.requestIgnoreBatteryOptimization(activity)
-    }
+    fun requestIgnoreBatteryOptimization(activity: Activity) =
+        source.requestIgnoreBatteryOptimization(activity)
 
-    // ── Camera settings writes ──
-    // One funnel onto the Quick Setting Catalog's write table through the
-    // persist-only CameraSettingsEditor. Focus distance, color temperature,
-    // and scene mode have no catalog row — their three writers stay explicit.
+    // ── Writes (one-line delegates; the source owns the lane semantics) ──
 
-    /**
-     * The settings screen's single camera-settings write entry, mirroring
-     * CameraViewModel.updateQuickSetting: the raw editor callback value is
-     * converted once onto the typed QuickSettingEditorValue per the
-     * descriptor's editor shape, then dispatched through the catalog's pure
-     * write transform onto the one CameraSettingsEditor path (persist-only;
-     * the Settings Applier applies).
-     */
-    fun updateQuickSetting(type: QuickSettingType, value: Any) {
-        val editorValue = QuickSettingCatalog.editorValueFor(type, value) ?: return
-        update { current -> QuickSettingCatalog.descriptorFor(type).write(current, editorValue) }
-    }
+    fun updateQuickSetting(type: QuickSettingType, value: Any) =
+        source.updateQuickSetting(type, value)
 
-    /** The manual-focus slider; the catalog's FOCUS row covers only the mode. */
-    fun updateFocusDistance(distance: Float?) {
-        update { it.copy(focusDistance = distance) }
-    }
+    fun updateFocusDistance(distance: Float?) = source.updateFocusDistance(distance)
 
-    /** The manual white-balance Kelvin slider; the WHITE_BALANCE row covers only the mode. */
-    fun updateColorTemperature(temp: Int?) {
-        update { it.copy(colorTemperature = temp) }
-    }
+    fun updateColorTemperature(temp: Int?) = source.updateColorTemperature(temp)
 
-    /** The scene-mode dropdown; "OFF" clears the override (no catalog row). */
-    fun updateSceneMode(mode: String) {
-        update { it.copy(sceneMode = CameraSettingsEditor.parseSceneMode(mode)) }
-    }
+    fun updateSceneMode(mode: String) = source.updateSceneMode(mode)
 
-    // ── Streaming / app settings writes ──
-    // Plain store saves; the Settings Applier reacts to the flow.
+    fun resetToDefaults() = source.resetToDefaults()
 
-    fun updateStreamingPort(port: Int) = save { settingsDataStore.saveStreamingPort(port) }
+    fun updateStreamingPort(port: Int) = source.updateStreamingPort(port)
 
-    fun updateWebStreamingEnabled(enabled: Boolean) = save { settingsDataStore.saveWebStreamingEnabled(enabled) }
+    fun updateWebStreamingEnabled(enabled: Boolean) = source.updateWebStreamingEnabled(enabled)
 
-    fun updateJpegQuality(quality: Int) = save { settingsDataStore.saveJpegQuality(quality) }
+    fun updateJpegQuality(quality: Int) = source.updateJpegQuality(quality)
 
-    // ── Camera pro mode writes ──
-    // Plain store saves; the Settings Applier carries the photo-capture
-    // config onto the camera, and the camera screen's ViewModel the rest.
+    fun updateAdaptiveBitrateEnabled(enabled: Boolean) =
+        source.updateAdaptiveBitrateEnabled(enabled)
 
-    fun updateGridStyle(name: String) = save {
-        settingsDataStore.saveGridStyle(parseEnum(name, GridStyle.OFF))
-    }
+    fun updateAdaptiveEncodedBitrateEnabled(enabled: Boolean) =
+        source.updateAdaptiveEncodedBitrateEnabled(enabled)
 
-    fun updateSelfTimer(name: String) = save {
-        settingsDataStore.saveSelfTimer(parseEnum(name, SelfTimerMode.OFF))
-    }
+    fun updateRtspSubStreamEnabled(enabled: Boolean) = source.updateRtspSubStreamEnabled(enabled)
 
-    fun updateSpiritLevelEnabled(enabled: Boolean) = save { settingsDataStore.saveSpiritLevelEnabled(enabled) }
+    fun updateHlsDvrSegments(segments: Int) = source.updateHlsDvrSegments(segments)
 
-    fun updateHistogramEnabled(enabled: Boolean) = save { settingsDataStore.saveHistogramEnabled(enabled) }
+    fun updateEcoIdleFpsEnabled(enabled: Boolean) = source.updateEcoIdleFpsEnabled(enabled)
 
-    fun updateZebrasEnabled(enabled: Boolean) = save { settingsDataStore.saveZebrasEnabled(enabled) }
+    fun updateMdnsEnabled(enabled: Boolean) = source.updateMdnsEnabled(enabled)
 
-    fun updatePeakingEnabled(enabled: Boolean) = save { settingsDataStore.savePeakingEnabled(enabled) }
+    fun updateGridStyle(name: String) = source.updateGridStyle(name)
 
-    fun updatePhotoJpegQuality(quality: Int) = save { settingsDataStore.savePhotoJpegQuality(quality) }
+    fun updateSelfTimer(name: String) = source.updateSelfTimer(name)
 
-    fun updatePhotoMaximizeQuality(enabled: Boolean) = save { settingsDataStore.savePhotoMaximizeQuality(enabled) }
+    fun updateSpiritLevelEnabled(enabled: Boolean) = source.updateSpiritLevelEnabled(enabled)
 
-    fun updateRawCaptureEnabled(enabled: Boolean) = save { settingsDataStore.saveRawCaptureEnabled(enabled) }
+    fun updateHistogramEnabled(enabled: Boolean) = source.updateHistogramEnabled(enabled)
 
-    fun updatePhotoAspectRatio(aspect: PhotoAspectRatio) =
-        save { settingsDataStore.savePhotoAspectRatio(aspect) }
+    fun updateZebrasEnabled(enabled: Boolean) = source.updateZebrasEnabled(enabled)
 
-    fun updateGeotagEnabled(enabled: Boolean) = save { settingsDataStore.saveGeotagEnabled(enabled) }
+    fun updatePeakingEnabled(enabled: Boolean) = source.updatePeakingEnabled(enabled)
 
-    fun updateShowPreview(show: Boolean) = save { settingsDataStore.saveShowPreview(show) }
+    fun updatePhotoJpegQuality(quality: Int) = source.updatePhotoJpegQuality(quality)
 
-    fun updateDynamicThemingEnabled(enabled: Boolean) = save { settingsDataStore.saveDynamicThemingEnabled(enabled) }
+    fun updatePhotoMaximizeQuality(enabled: Boolean) = source.updatePhotoMaximizeQuality(enabled)
 
-    fun updateStreamAudioEnabled(enabled: Boolean) = save { settingsDataStore.saveStreamAudioEnabled(enabled) }
+    fun updateRawCaptureEnabled(enabled: Boolean) = source.updateRawCaptureEnabled(enabled)
 
-    fun updateStreamAudioBitrateKbps(bitrateKbps: Int) = save { settingsDataStore.saveStreamAudioBitrateKbps(bitrateKbps) }
+    fun updatePhotoAspectRatio(aspect: PhotoAspectRatio) = source.updatePhotoAspectRatio(aspect)
 
-    fun updateStreamAudioChannels(channels: Int) = save { settingsDataStore.saveStreamAudioChannels(channels) }
+    fun updateGeotagEnabled(enabled: Boolean) = source.updateGeotagEnabled(enabled)
 
-    fun updateStreamAudioEchoCancellation(enabled: Boolean) = save { settingsDataStore.saveStreamAudioEchoCancellation(enabled) }
+    fun updateShowPreview(show: Boolean) = source.updateShowPreview(show)
 
-    fun updateRecordingAudioEnabled(enabled: Boolean) = save { settingsDataStore.saveRecordingAudioEnabled(enabled) }
+    fun updateDynamicThemingEnabled(enabled: Boolean) = source.updateDynamicThemingEnabled(enabled)
 
-    fun updateRtspEnabled(enabled: Boolean) = save { settingsDataStore.saveRtspEnabled(enabled) }
+    fun updateStreamAudioEnabled(enabled: Boolean) = source.updateStreamAudioEnabled(enabled)
 
-    fun updateRtspPort(port: Int) = save { settingsDataStore.saveRtspPort(port) }
+    fun updateStreamAudioBitrateKbps(bitrateKbps: Int) =
+        source.updateStreamAudioBitrateKbps(bitrateKbps)
 
-    fun updateRtspBasicAuthCompat(enabled: Boolean) =
-        save { settingsDataStore.saveRtspBasicAuthCompat(enabled) }
+    fun updateStreamAudioChannels(channels: Int) = source.updateStreamAudioChannels(channels)
 
-    fun updateRtspInputFormat(name: String) = save {
-        settingsDataStore.saveRtspInputFormat(parseEnum(name, RtspInputFormat.AUTO))
-    }
+    fun updateStreamAudioEchoCancellation(enabled: Boolean) =
+        source.updateStreamAudioEchoCancellation(enabled)
 
-    fun updateRtmpEnabled(enabled: Boolean) = save { settingsDataStore.saveRtmpEnabled(enabled) }
+    fun updateRecordingAudioEnabled(enabled: Boolean) = source.updateRecordingAudioEnabled(enabled)
 
-    fun updateRtmpUrl(url: String) = save { settingsDataStore.saveRtmpUrl(url) }
+    fun updateRtspEnabled(enabled: Boolean) = source.updateRtspEnabled(enabled)
 
-    fun updateWhipEnabled(enabled: Boolean) = save { settingsDataStore.saveWhipEnabled(enabled) }
+    fun updateRtspPort(port: Int) = source.updateRtspPort(port)
 
-    fun updateWhipUrl(url: String) = save { settingsDataStore.saveWhipUrl(url) }
+    fun updateRtspBasicAuthCompat(enabled: Boolean) = source.updateRtspBasicAuthCompat(enabled)
 
-    /** Write-only (Secret / SecretUpdate): an empty field keeps the stored token. */
-    fun updateWhipToken(token: String) {
-        if (SecretUpdate.overwrites(token)) save { settingsDataStore.saveWhipToken(token) }
-    }
+    fun updateRtspInputFormat(name: String) = source.updateRtspInputFormat(name)
 
-    fun updateWhipStunServer(server: String) = save { settingsDataStore.saveWhipStunServer(server) }
+    fun updateRtmpEnabled(enabled: Boolean) = source.updateRtmpEnabled(enabled)
 
-    fun updateSrtEnabled(enabled: Boolean) = save { settingsDataStore.saveSrtEnabled(enabled) }
+    fun updateRtmpUrl(url: String) = source.updateRtmpUrl(url)
 
-    fun updateSrtUrl(url: String) = save { settingsDataStore.saveSrtUrl(url) }
+    fun updateWhipEnabled(enabled: Boolean) = source.updateWhipEnabled(enabled)
 
-    fun updateAdaptiveBitrateEnabled(enabled: Boolean) = save { settingsDataStore.saveAdaptiveBitrateEnabled(enabled) }
-    fun updateAdaptiveEncodedBitrateEnabled(enabled: Boolean) = save { settingsDataStore.saveEncodedAdaptiveBitrateEnabled(enabled) }
-    fun updateRtspSubStreamEnabled(enabled: Boolean) = save { settingsDataStore.saveRtspSubStreamEnabled(enabled) }
-    fun updateHlsDvrSegments(segments: Int) = save { settingsDataStore.saveHlsDvrSegments(segments) }
+    fun updateWhipUrl(url: String) = source.updateWhipUrl(url)
 
-    fun updateMdnsEnabled(enabled: Boolean) = save { settingsDataStore.saveMdnsEnabled(enabled) }
+    fun updateWhipToken(token: String) = source.updateWhipToken(token)
 
-    fun updateMotionDetectionEnabled(enabled: Boolean) = save { settingsDataStore.saveMotionDetectionEnabled(enabled) }
+    fun updateWhipStunServer(server: String) = source.updateWhipStunServer(server)
 
-    fun updateMotionSensitivity(percent: Int) = save { settingsDataStore.saveMotionSensitivity(percent) }
+    fun updateSrtEnabled(enabled: Boolean) = source.updateSrtEnabled(enabled)
 
-    fun updateMotionRecordingEnabled(enabled: Boolean) = save { settingsDataStore.saveMotionRecordingEnabled(enabled) }
+    fun updateSrtUrl(url: String) = source.updateSrtUrl(url)
 
-    fun updateMotionPostRollSeconds(seconds: Int) = save { settingsDataStore.saveMotionPostRollSeconds(seconds) }
+    fun updateMotionDetectionEnabled(enabled: Boolean) = source.updateMotionDetectionEnabled(enabled)
 
-    fun updateMotionArmScheduleEnabled(enabled: Boolean) = save { settingsDataStore.saveMotionArmScheduleEnabled(enabled) }
+    fun updateMotionSensitivity(percent: Int) = source.updateMotionSensitivity(percent)
 
-    fun updateMotionArmStartMinute(minute: Int) = save { settingsDataStore.saveMotionArmStartMinute(minute) }
+    fun updateMotionRecordingEnabled(enabled: Boolean) =
+        source.updateMotionRecordingEnabled(enabled)
 
-    fun updateMotionArmEndMinute(minute: Int) = save { settingsDataStore.saveMotionArmEndMinute(minute) }
+    fun updateMotionPostRollSeconds(seconds: Int) = source.updateMotionPostRollSeconds(seconds)
 
-    fun updateMotionArmDaysMask(mask: Int) = save { settingsDataStore.saveMotionArmDaysMask(mask) }
+    fun updateMotionArmScheduleEnabled(enabled: Boolean) =
+        source.updateMotionArmScheduleEnabled(enabled)
 
-    fun updateSoundDetectionEnabled(enabled: Boolean) = save { settingsDataStore.saveSoundDetectionEnabled(enabled) }
+    fun updateMotionArmStartMinute(minute: Int) = source.updateMotionArmStartMinute(minute)
 
-    fun updateSoundThresholdPercent(percent: Int) = save { settingsDataStore.saveSoundThresholdPercent(percent) }
+    fun updateMotionArmEndMinute(minute: Int) = source.updateMotionArmEndMinute(minute)
+
+    fun updateMotionArmDaysMask(mask: Int) = source.updateMotionArmDaysMask(mask)
+
+    fun updateSoundDetectionEnabled(enabled: Boolean) = source.updateSoundDetectionEnabled(enabled)
+
+    fun updateSoundThresholdPercent(percent: Int) = source.updateSoundThresholdPercent(percent)
 
     fun updateSoundAdaptiveNoiseFloor(enabled: Boolean) =
-        save { settingsDataStore.saveSoundAdaptiveNoiseFloor(enabled) }
+        source.updateSoundAdaptiveNoiseFloor(enabled)
 
-    fun updateAlertQuietHoursEnabled(enabled: Boolean) =
-        save { settingsDataStore.saveAlertQuietHoursEnabled(enabled) }
+    fun updateSoundRecordingEnabled(enabled: Boolean) = source.updateSoundRecordingEnabled(enabled)
 
-    fun updateAlertQuietHoursStartMinute(minute: Int) =
-        save { settingsDataStore.saveAlertQuietHoursStartMinute(minute) }
+    fun updateMotionCooldownSeconds(seconds: Int) = source.updateMotionCooldownSeconds(seconds)
 
-    fun updateAlertQuietHoursEndMinute(minute: Int) =
-        save { settingsDataStore.saveAlertQuietHoursEndMinute(minute) }
+    fun updateSoundCooldownSeconds(seconds: Int) = source.updateSoundCooldownSeconds(seconds)
 
-    fun updateSoundRecordingEnabled(enabled: Boolean) = save { settingsDataStore.saveSoundRecordingEnabled(enabled) }
+    fun updateMlDetectionEnabled(enabled: Boolean) = source.updateMlDetectionEnabled(enabled)
 
-    fun updateMotionCooldownSeconds(seconds: Int) = save { settingsDataStore.saveMotionCooldownSeconds(seconds) }
+    fun updateMlMinScorePercent(percent: Int) = source.updateMlMinScorePercent(percent)
 
-    fun updateSoundCooldownSeconds(seconds: Int) = save { settingsDataStore.saveSoundCooldownSeconds(seconds) }
+    fun updateMlIncludePerson(enabled: Boolean) = source.updateMlIncludePerson(enabled)
 
-    fun updateMlDetectionEnabled(enabled: Boolean) = save { settingsDataStore.saveMlDetectionEnabled(enabled) }
+    fun updateMlIncludePets(enabled: Boolean) = source.updateMlIncludePets(enabled)
 
-    fun updateMlMinScorePercent(percent: Int) = save { settingsDataStore.saveMlMinScorePercent(percent) }
+    fun updateMlIncludeVehicles(enabled: Boolean) = source.updateMlIncludeVehicles(enabled)
 
-    fun updateMlIncludePerson(enabled: Boolean) = save { settingsDataStore.saveMlIncludePerson(enabled) }
-
-    fun updateMlIncludePets(enabled: Boolean) = save { settingsDataStore.saveMlIncludePets(enabled) }
-
-    fun updateMlIncludeVehicles(enabled: Boolean) = save { settingsDataStore.saveMlIncludeVehicles(enabled) }
-
-    /**
-     * The one write here that is not a persisted setting: asks the model store
-     * to fetch the detection model (idempotent there — Ready/in-flight are
-     * no-ops). Progress lands on [detectionModelState].
-     */
-    fun downloadDetectionModel() {
-        detectionModelStore.requestDownload()
-    }
+    fun downloadDetectionModel() = source.downloadDetectionModel()
 
     fun updateSoundClassificationEnabled(enabled: Boolean) =
-        save { settingsDataStore.saveSoundClassificationEnabled(enabled) }
+        source.updateSoundClassificationEnabled(enabled)
 
     fun updateSoundClassificationConfidencePercent(percent: Int) =
-        save { settingsDataStore.saveSoundClassificationConfidencePercent(percent) }
+        source.updateSoundClassificationConfidencePercent(percent)
 
     fun updateSoundClassificationAllowedClasses(classes: Set<String>) =
-        save { settingsDataStore.saveSoundClassificationAllowedClasses(classes) }
+        source.updateSoundClassificationAllowedClasses(classes)
 
-    fun updateSoundTriggerEnabled(enabled: Boolean) =
-        save { settingsDataStore.saveSoundTriggerEnabled(enabled) }
+    fun updateSoundTriggerEnabled(enabled: Boolean) = source.updateSoundTriggerEnabled(enabled)
 
-    fun updateSoundTriggerClasses(classes: Set<String>) =
-        save { settingsDataStore.saveSoundTriggerClasses(classes) }
+    fun updateSoundTriggerClasses(classes: Set<String>) = source.updateSoundTriggerClasses(classes)
 
-    /** The YAMNet model fetch — same idempotent contract as the detection model's. */
-    fun downloadAudioModel() {
-        audioModelStore.requestDownload()
-    }
+    fun downloadAudioModel() = source.downloadAudioModel()
 
-    fun updateContinuousRecording(enabled: Boolean) = save { settingsDataStore.saveContinuousRecording(enabled) }
+    fun updateContinuousRecording(enabled: Boolean) = source.updateContinuousRecording(enabled)
 
-    fun updateContinuousSegmentMinutes(minutes: Int) = save { settingsDataStore.saveContinuousSegmentMinutes(minutes) }
-
-    fun updateEcoIdleFpsEnabled(enabled: Boolean) = save { settingsDataStore.saveEcoIdleFpsEnabled(enabled) }
+    fun updateContinuousSegmentMinutes(minutes: Int) =
+        source.updateContinuousSegmentMinutes(minutes)
 
     fun updateDetectionNotificationsEnabled(enabled: Boolean) =
-        save { settingsDataStore.saveDetectionNotificationsEnabled(enabled) }
+        source.updateDetectionNotificationsEnabled(enabled)
 
-    fun updateTamperDetectionEnabled(enabled: Boolean) =
-        save { settingsDataStore.saveTamperDetectionEnabled(enabled) }
+    fun updateAlertQuietHoursEnabled(enabled: Boolean) =
+        source.updateAlertQuietHoursEnabled(enabled)
 
-    fun updatePushEnabled(enabled: Boolean) =
-        save { settingsDataStore.savePushEnabled(enabled) }
+    fun updateAlertQuietHoursStartMinute(minute: Int) =
+        source.updateAlertQuietHoursStartMinute(minute)
 
-    fun updateUnifiedPushEnabled(enabled: Boolean) =
-        save { settingsDataStore.saveUnifiedPushEnabled(enabled) }
+    fun updateAlertQuietHoursEndMinute(minute: Int) =
+        source.updateAlertQuietHoursEndMinute(minute)
 
-    fun updatePushVapidSubject(subject: String) =
-        save { settingsDataStore.savePushVapidSubject(subject) }
+    fun updateTamperDetectionEnabled(enabled: Boolean) = source.updateTamperDetectionEnabled(enabled)
 
-    fun updateWatchdogEnabled(enabled: Boolean) = save { settingsDataStore.saveWatchdogEnabled(enabled) }
+    fun updatePushEnabled(enabled: Boolean) = source.updatePushEnabled(enabled)
 
-    fun updateWatchdogMaxRetries(retries: Int) = save { settingsDataStore.saveWatchdogMaxRetries(retries) }
+    fun updateUnifiedPushEnabled(enabled: Boolean) = source.updateUnifiedPushEnabled(enabled)
 
-    fun updateWatchdogCheckIntervalSeconds(seconds: Int) = save { settingsDataStore.saveWatchdogCheckIntervalSeconds(seconds) }
+    fun updatePushVapidSubject(subject: String) = source.updatePushVapidSubject(subject)
 
-    fun updateBackupEnabled(enabled: Boolean) = save { settingsDataStore.saveBackupEnabled(enabled) }
+    fun updateWatchdogEnabled(enabled: Boolean) = source.updateWatchdogEnabled(enabled)
 
-    fun updateBackupWifiOnly(wifiOnly: Boolean) = save { settingsDataStore.saveBackupWifiOnly(wifiOnly) }
+    fun updateWatchdogMaxRetries(retries: Int) = source.updateWatchdogMaxRetries(retries)
 
-    fun updateBackupWebdavUrl(url: String) = save { settingsDataStore.saveBackupWebdavUrl(url) }
+    fun updateWatchdogCheckIntervalSeconds(seconds: Int) =
+        source.updateWatchdogCheckIntervalSeconds(seconds)
 
-    fun updateBackupWebdavUsername(username: String) = save { settingsDataStore.saveBackupWebdavUsername(username) }
+    fun updateBackupEnabled(enabled: Boolean) = source.updateBackupEnabled(enabled)
 
-    fun updateHttpsEnabled(enabled: Boolean) = save { settingsDataStore.saveHttpsEnabled(enabled) }
+    fun updateBackupWifiOnly(wifiOnly: Boolean) = source.updateBackupWifiOnly(wifiOnly)
 
-    fun updateAudioDeviceId(id: String) = save { settingsDataStore.saveAudioDeviceId(id) }
+    fun updateBackupWebdavUrl(url: String) = source.updateBackupWebdavUrl(url)
 
-    fun updateResumeStreamsOnBoot(enabled: Boolean) = save { settingsDataStore.saveResumeStreamsOnBoot(enabled) }
+    fun updateBackupWebdavUsername(username: String) = source.updateBackupWebdavUsername(username)
 
-    fun updateKeepAwakeEnabled(enabled: Boolean) = save { settingsDataStore.saveKeepAwakeEnabled(enabled) }
+    fun updateHttpsEnabled(enabled: Boolean) = source.updateHttpsEnabled(enabled)
 
-    fun updateFsiCameraResume(enabled: Boolean) = save { settingsDataStore.saveFsiCameraResume(enabled) }
+    fun updateAudioDeviceId(id: String) = source.updateAudioDeviceId(id)
 
-    fun updateCaptureRetentionDays(days: Int) = save { settingsDataStore.saveCaptureRetentionDays(days) }
+    fun updateResumeStreamsOnBoot(enabled: Boolean) = source.updateResumeStreamsOnBoot(enabled)
 
-    fun updateEventRetentionDays(days: Int) = save { settingsDataStore.saveEventRetentionDays(days) }
+    fun updateKeepAwakeEnabled(enabled: Boolean) = source.updateKeepAwakeEnabled(enabled)
 
-    fun updateStorageQuotaMb(quotaMb: Int) = save { settingsDataStore.saveStorageQuotaMb(quotaMb) }
+    fun updateFsiCameraResume(enabled: Boolean) = source.updateFsiCameraResume(enabled)
 
-    fun updateMediaEncryptionEnabled(enabled: Boolean) =
-        save { settingsDataStore.saveMediaEncryptionEnabled(enabled) }
+    fun updateStorageQuotaMb(quotaMb: Int) = source.updateStorageQuotaMb(quotaMb)
 
+    fun updateMediaEncryptionEnabled(enabled: Boolean) = source.updateMediaEncryptionEnabled(enabled)
 
-    /** Write-only (Secret / SecretUpdate): an empty field keeps the stored password. */
-    fun updateBackupWebdavPassword(password: String) {
-        if (SecretUpdate.overwrites(password)) save { settingsDataStore.saveBackupWebdavPassword(password) }
-    }
+    fun updateBackupWebdavPassword(password: String) = source.updateBackupWebdavPassword(password)
 
-    fun updateAuthEnabled(enabled: Boolean) {
-        val current = authSettings.value
-        // The gate folds a blank pair to auth-off, which would leave the
-        // switch looking enabled while the device is open. Refuse to enable
-        // until both halves exist.
-        if (enabled && (current.username.isBlank() || current.passwordHash.isBlank())) return
-        if (!enabled && current.enabled) webAuthGate?.revokeAllSessions()
-        persistAuth(current.copy(enabled = enabled))
-    }
+    fun updateAuthEnabled(enabled: Boolean) = source.updateAuthEnabled(enabled)
 
-    fun updateAuthUsername(username: String) {
-        val current = authSettings.value
-        // The RTSP HA1 cannot be recomputed without the password, so a
-        // username edit drops it (the authorizer falls back to Basic until
-        // the password is re-entered). Existing sessions also spoke for the
-        // old identity and must not survive.
-        if (username != current.username) webAuthGate?.revokeAllSessions()
-        persistAuth(current.copy(username = username, rtspDigestHa1 = ""))
-    }
+    fun updateAuthUsername(username: String) = source.updateAuthUsername(username)
 
-    fun updateAuthPassword(password: String) {
-        val hash = StreamAuthCrypto.hashPassword(password)
-        val username = authSettings.value.username
-        val digestHa1 = StreamAuthCrypto.computeRtspDigestHa1(username, password)
-        webAuthGate?.revokeAllSessions()
-        persistAuth(authSettings.value.copy(passwordHash = hash, rtspDigestHa1 = digestHa1))
-    }
-
-    fun resetToDefaults() = save { settingsDataStore.saveSettings(CameraSettings()) }
-
-    /** The one persist seam: every plain store write launches through here. */
-    private fun save(block: suspend () -> Unit) {
-        viewModelScope.launch { block() }
-    }
-
-    /** The camera-settings funnel: persist-only through the editor (apply is the Settings Applier's). */
-    private fun update(transform: (CameraSettings) -> CameraSettings) = save { settingsEditor.edit(transform) }
-
-    private fun persistAuth(newAuth: StreamAuthSettings) = save { settingsDataStore.saveAuthSettings(newAuth) }
+    fun updateAuthPassword(password: String) = source.updateAuthPassword(password)
 
     class Factory(
-        private val cameraService: CameraService,
-        private val settingsDataStore: SettingsDataStore,
-        private val powerManager: PowerManager? = null,
-        private val detectionModelStore: DetectionModelStore,
-        private val audioModelStore: AudioModelStore,
-        private val webAuthGate: WebAuthGate? = null,
+        private val source: SettingsSource,
     ) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
-        override fun <T : androidx.lifecycle.ViewModel> create(modelClass: Class<T>): T {
-            return SettingsViewModel(
-                cameraService,
-                settingsDataStore,
-                powerManager,
-                detectionModelStore,
-                audioModelStore,
-                webAuthGate,
-            ) as T
+        override fun <T : ViewModel> create(modelClass: Class<T>): T {
+            return SettingsViewModel(source) as T
         }
     }
 }

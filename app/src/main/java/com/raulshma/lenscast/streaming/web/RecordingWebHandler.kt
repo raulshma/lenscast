@@ -54,4 +54,17 @@ class RecordingWebHandler(private val recordingController: RecordingController) 
         recordingController.stop()
         return successAdapter.toJson(SuccessResponse())
     }
+
+    /**
+     * POST /api/recording/cancel-schedule — the schedule-only cancel: drops
+     * a pending scheduled start without touching a live recording. The
+     * controller's own lock makes the state check atomic — a schedule that
+     * became due before this call lands no-ops here (the fired job is no
+     * longer cancellable and the state left Scheduled), so a stale client
+     * snapshot can never stop a recording that already started.
+     */
+    suspend fun cancelSchedule(): String {
+        recordingController.cancelSchedule()
+        return successAdapter.toJson(SuccessResponse())
+    }
 }

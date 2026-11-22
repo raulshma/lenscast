@@ -13,9 +13,11 @@ import com.raulshma.lenscast.streaming.SessionRole
  * The matrix, as implemented:
  *
  * - ADMIN (and the API token, and auth-off): ALLOW everything — unchanged.
- * - VIEWER reads (GET/HEAD/OPTIONS): ALLOW on every route EXCEPT the three
- *   admin-only reads — `/api/auth/config` (credential surface), `/api/auth/sessions`
- *   (the session registry), and `/api/audit` (the audit trail). The stream
+ * - VIEWER reads (GET/HEAD/OPTIONS): ALLOW on every route EXCEPT the admin-only
+ *   reads — `/api/auth/config` (credential surface), `/api/auth/sessions`
+ *   (the session registry), `/api/audit` (the audit trail), and
+ *   `/api/settings/export` (the settings document carries the user-authored
+ *   `webhookHeaders` verbatim). The stream
  *   transports (`/stream`, `/audio`, `/snapshot`, the `/hls/` family), the
  *   media reads (the `/api/media/` family), and every other GET ride exactly
  *   today's authed-read behavior.
@@ -47,6 +49,12 @@ object RoleGatePolicy {
         "/api/auth/config",
         "/api/auth/sessions",
         "/api/audit",
+        // The settings export: configuration is admin-only — the write-only
+        // credentials serialize blank through the Secret wire type, but
+        // `webhookHeaders` is a user-authored map that round-trips in full
+        // and frequently carries an Authorization header, so the document
+        // is not viewer-safe.
+        "/api/settings/export",
     )
 
     /**

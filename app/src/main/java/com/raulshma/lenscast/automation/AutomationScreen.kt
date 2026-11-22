@@ -69,7 +69,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.nestedscroll.nestedScroll
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -78,7 +77,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.raulshma.lenscast.AppGraph
 import com.raulshma.lenscast.R
 import com.raulshma.lenscast.automation.schedule.AutomationActionCatalog
 import com.raulshma.lenscast.automation.schedule.AutomationActionSpec
@@ -116,20 +114,25 @@ import java.util.TimeZone
  * empty state with the add CTA when no rules exist yet. Rules stay visible
  * (and editable) while the engine is off; a banner explains they will not
  * fire until it is on.
+ *
+ * One screen over the [AutomationSource] seam (this phone's settings store
+ * locally, the paired device's automation document remotely). The write
+ * affordances gate on [AutomationSource.canEdit] — a viewer-role pairing
+ * reads the rules exactly as the device runs them: the card switches render
+ * read-only (the enabled state stays visible, flipping disabled) and every
+ * other write control (master switch, add FAB, the duplicate/delete menu,
+ * the Automation Test) hides instead of 403ing — never a backend branch here.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun AutomationScreen(onNavigateBack: () -> Unit) {
-    val context = LocalContext.current
-    val app = context.applicationContext as AppGraph
+fun AutomationScreen(
+    source: AutomationSource,
+    onNavigateBack: () -> Unit,
+) {
     val viewModel: AutomationViewModel = viewModel(
-        factory = AutomationViewModel.Factory(
-            app.cameraService,
-            app.settingsDataStore,
-            app.automationFireJournal,
-            app.automationTestController,
-        )
+        factory = AutomationViewModel.Factory(source)
     )
+    val canEdit = viewModel.canEdit
     val automationEnabled by viewModel.automationEnabled.collectAsState()
     val rules by viewModel.automationRules.collectAsState()
     val canAddRule by viewModel.canAddRule.collectAsState()
@@ -170,7 +173,8 @@ fun AutomationScreen(onNavigateBack: () -> Unit) {
             )
         },
         floatingActionButton = {
-            if (canAddRule) {
+            // The add CTA is a write affordance — hidden for a read-only role.
+            if (canEdit && canAddRule) {
                 ExtendedFloatingActionButton(
                     onClick = { editorDraft = RuleDraft.new() },
                     icon = { Icon(Icons.Default.Add, contentDescription = null) },
@@ -189,11 +193,15 @@ fun AutomationScreen(onNavigateBack: () -> Unit) {
         ) {
             item {
                 SettingsSection(title = stringResource(R.string.automation_master_section_title)) {
-                    SwitchSetting(
-                        title = stringResource(R.string.automation_master_enabled),
-                        checked = automationEnabled,
-                        onCheckedChange = { viewModel.setEnabled(it) }
-                    )
+                    // The master switch is a config write — a read-only role
+                    // sees the state (banner + count below) but no switch.
+                    if (canEdit) {
+                        SwitchSetting(
+                            title = stringResource(R.string.automation_master_enabled),
+                            checked = automationEnabled,
+                            onCheckedChange = { viewModel.setEnabled(it) }
+                        )
+                    }
                     if (!automationEnabled) {
                         Spacer(modifier = Modifier.height(4.dp))
                         // The engine gate: the schedule poller consults the same
@@ -235,7 +243,11 @@ fun AutomationScreen(onNavigateBack: () -> Unit) {
 
             if (rules.isEmpty()) {
                 item {
-                    AutomationEmptyState(onAddRule = { editorDraft = RuleDraft.new() })
+                    AutomationEmptyState(
+                        onAddRule = { editorDraft = RuleDraft.new() },
+                        // The empty state's add button is a write affordance.
+                        showAdd = canEdit && canAddRule,
+                    )
                 }
             }
 
@@ -250,6 +262,7 @@ fun AutomationScreen(onNavigateBack: () -> Unit) {
                     lastFiredKey = rule.id?.let(lastFiredKeys::get),
                     lastFiredNowMs = lastFiredNowMs,
                     testArmed = rule.id != null && rule.id == armedTestRuleId,
+                    editable = canEdit,
                     onToggleEnabled = { enabled ->
                         rule.id?.let { id -> viewModel.setRuleEnabled(id, enabled) }
                     },
@@ -317,6 +330,8 @@ private fun AutomationRuleCard(
     lastFiredNowMs: Long,
     /** True while this rule's Automation Test is armed (restore pending). */
     testArmed: Boolean,
+    /** Whether the write affordances render (the source's role verdict). */
+    editable: Boolean,
     onToggleEnabled: (Boolean) -> Unit,
     onEdit: () -> Unit,
     onDuplicate: () -> Unit,
@@ -326,7 +341,10 @@ private fun AutomationRuleCard(
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
     Card(
+        // The whole card opens the editor — a read-only role's card is inert
+        // (the rules render as the device runs them, nothing more).
         onClick = onEdit,
+        enabled = editable,
         modifier = Modifier.fillMaxWidth(),
         shape = MaterialTheme.shapes.large,
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
@@ -367,7 +385,14 @@ private fun AutomationRuleCard(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
-                Switch(checked = rule.enabled, onCheckedChange = onToggleEnabled)
+                // The per-rule kill switch: every role sees the rule's
+                // enabled state; only an editable role may flip it (a
+                // viewer's switch renders non-interactive — the standard
+                // read-only Switch with a null callback).
+                Switch(
+                    checked = rule.enabled,
+                    onCheckedChange = if (editable) onToggleEnabled else null,
+                )
             }
             Spacer(modifier = Modifier.height(10.dp))
             // WHEN: the schedule for time rules, the "when …" line for events.
@@ -423,53 +448,56 @@ private fun AutomationRuleCard(
                     )
                 }
             }
-            // The card's action row: the Automation Test as an always-visible
-            // compact icon button, then the overflow menu (duplicate and
-            // delete behind the kebab — destructive/secondary actions don't
-            // compete with the switch). Icon buttons keep every action on the
-            // card at the minimum width — a Test text button here pushed the
+            // The card's action row (writes both, so read-only roles see no
+            // row at all): the Automation Test as an always-visible compact
+            // icon button, then the overflow menu (duplicate and delete
+            // behind the kebab — destructive/secondary actions don't compete
+            // with the switch). Icon buttons keep every action on the card
+            // at the minimum width — a Test text button here pushed the
             // row's other actions off-screen on narrow phones (issue #18).
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.End,
-            ) {
-                // The Automation Test (issue #18 item 3): fire once now, or —
-                // while this rule's test is armed — restore the pre-test
-                // state. The restore affordance replaces the run icon so the
-                // undo is never two taps away.
-                IconButton(onClick = { if (testArmed) onRestoreTest() else onRunTest() }) {
-                    Icon(
-                        if (testArmed) Icons.Default.RestoreFromTrash else Icons.Default.PlayArrow,
-                        contentDescription = stringResource(
-                            if (testArmed) R.string.automation_rule_restore_test
-                            else R.string.automation_rule_run_test
-                        ),
-                    )
-                }
-                Box {
-                    IconButton(onClick = { menuExpanded = true }) {
+            if (editable) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End,
+                ) {
+                    // The Automation Test (issue #18 item 3): fire once now, or —
+                    // while this rule's test is armed — restore the pre-test
+                    // state. The restore affordance replaces the run icon so the
+                    // undo is never two taps away.
+                    IconButton(onClick = { if (testArmed) onRestoreTest() else onRunTest() }) {
                         Icon(
-                            Icons.Default.MoreVert,
-                            contentDescription = stringResource(R.string.automation_rule_menu_cd),
+                            if (testArmed) Icons.Default.RestoreFromTrash else Icons.Default.PlayArrow,
+                            contentDescription = stringResource(
+                                if (testArmed) R.string.automation_rule_restore_test
+                                else R.string.automation_rule_run_test
+                            ),
                         )
                     }
-                    DropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }) {
-                        DropdownMenuItem(
-                            text = { Text(stringResource(R.string.automation_rule_duplicate_cd)) },
-                            leadingIcon = { Icon(Icons.Default.ContentCopy, contentDescription = null) },
-                            onClick = {
-                                menuExpanded = false
-                                onDuplicate()
-                            },
-                        )
-                        DropdownMenuItem(
-                            text = { Text(stringResource(R.string.automation_delete_rule_cd)) },
-                            leadingIcon = { Icon(Icons.Default.Delete, contentDescription = null) },
-                            onClick = {
-                                menuExpanded = false
-                                onDelete()
-                            },
-                        )
+                    Box {
+                        IconButton(onClick = { menuExpanded = true }) {
+                            Icon(
+                                Icons.Default.MoreVert,
+                                contentDescription = stringResource(R.string.automation_rule_menu_cd),
+                            )
+                        }
+                        DropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }) {
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.automation_rule_duplicate_cd)) },
+                                leadingIcon = { Icon(Icons.Default.ContentCopy, contentDescription = null) },
+                                onClick = {
+                                    menuExpanded = false
+                                    onDuplicate()
+                                },
+                            )
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.automation_delete_rule_cd)) },
+                                leadingIcon = { Icon(Icons.Default.Delete, contentDescription = null) },
+                                onClick = {
+                                    menuExpanded = false
+                                    onDelete()
+                                },
+                            )
+                        }
                     }
                 }
             }
@@ -504,9 +532,9 @@ private fun SummaryRow(
     }
 }
 
-/** The empty state: what rules are, and the way to the first one. */
+/** The empty state: what rules are, and — for a writer — the way to the first one. */
 @Composable
-private fun AutomationEmptyState(onAddRule: () -> Unit) {
+private fun AutomationEmptyState(onAddRule: () -> Unit, showAdd: Boolean) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = MaterialTheme.shapes.large,
@@ -546,15 +574,17 @@ private fun AutomationEmptyState(onAddRule: () -> Unit) {
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = TextAlign.Center,
             )
-            Spacer(modifier = Modifier.height(16.dp))
-            Button(onClick = onAddRule) {
-                Icon(
-                    Icons.Default.Add,
-                    contentDescription = null,
-                    modifier = Modifier.size(18.dp),
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(text = stringResource(R.string.automation_add_rule))
+            if (showAdd) {
+                Spacer(modifier = Modifier.height(16.dp))
+                Button(onClick = onAddRule) {
+                    Icon(
+                        Icons.Default.Add,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp),
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(text = stringResource(R.string.automation_add_rule))
+                }
             }
         }
     }

@@ -48,102 +48,138 @@ class AuthWebHandler(
     }
 
     /**
+     * A validation verdict thrown out of the [SettingsDataStore.editAuthSettings]
+     * transform: DataStore abandons a transaction whose transform throws, so
+     * a rejected config is answered without any write landing — and the
+     * checks ran against the record the write would actually have folded
+     * onto, not a snapshot taken before it.
+     */
+    private class AuthConfigRejected(val reason: String) : RuntimeException(reason)
+
+    /**
      * Rotate credentials: an empty password keeps the stored hash (the
      * write-only-secret contract). A rotated admin password revokes every
      * session so stale browsers re-authenticate. The viewer section follows
      * the same contract: an empty viewerPassword keeps the stored viewer hash,
      * and any viewer change (username edit, password rotation, enable/disable)
      * revokes only the viewer sessions — admin browsers stay signed in.
+     *
+     * The whole merge runs inside the store's [SettingsDataStore.editAuthSettings]
+     * transaction — the fold base is the on-disk record, never the lagging
+     * shared flow — so a concurrent phone-side auth edit survives this
+     * rotation, and this rotation survives the phone's drain.
      */
     suspend fun put(body: String): String {
         val request = configAdapter.fromJson(body)
             ?: return failure("Invalid auth config")
-        val current = settingsDataStore.authSettings.value
         val username = request.username.trim()
-        if (request.enabled && (username.isEmpty() || (request.password.isEmpty() && current.passwordHash.isEmpty()))) {
-            return failure("Username and password are required to enable authentication")
-        }
-        // The RTSP Digest HA1 is md5(username:realm:password). Only the
-        // password hash is stored, so a username change cannot recompute it
-        // without the plaintext password; keeping the old HA1 would lock out
-        // both the old and the new username (the verifier also checks the
-        // presented username). Require the password instead of silently
-        // leaving RTSP in a broken state.
-        if (request.enabled && username != current.username && request.password.isEmpty() &&
-            current.rtspDigestHa1.isNotBlank()
-        ) {
-            return failure("Password is required when changing the username")
-        }
+
+        // PBKDF2 runs BEFORE the transaction: hashing inside the store's
+        // edit would hold the settings write lock for the whole derivation.
+        // The hashes bind only to the request text, so precomputing them is
+        // safe — the transform below decides keep-or-overwrite against the
+        // record it actually folds onto.
         val passwordHash = if (request.password.isEmpty()) {
-            current.passwordHash
+            null
         } else {
             StreamAuthCrypto.hashPassword(request.password)
         }
-        val digestHa1 = when {
-            request.password.isNotEmpty() -> StreamAuthCrypto.computeRtspDigestHa1(username, request.password)
-            // A rename while auth is off cannot keep the old HA1 (it would
-            // bind the old username to the new stored one). Drop it; RTSP
-            // falls back to Basic until a password is entered.
-            !request.enabled && username != current.username -> ""
-            else -> current.rtspDigestHa1
+        val passwordHa1 = if (request.password.isEmpty()) {
+            null
+        } else {
+            StreamAuthCrypto.computeRtspDigestHa1(username, request.password)
+        }
+        val viewerHash = if (request.viewerPassword.isEmpty()) {
+            null
+        } else {
+            StreamAuthCrypto.hashPassword(request.viewerPassword)
         }
 
-        // The viewer pair mirrors the admin write-only-secret contract. The
-        // whole-config DTO cannot tell an omitted viewer section from an
-        // explicit disable, so viewerEnabled is nullable: null preserves the
-        // stored pair (the admin section's own save), and only an explicit
-        // viewer write may clear or rotate it.
-        val storedViewerUsername = current.viewerUsername.orEmpty()
-        val storedViewerHash = current.viewerPasswordHash.orEmpty()
-        var nextViewerUsername = current.viewerUsername
-        var nextViewerHash = current.viewerPasswordHash
+        var adminCredentialsChanged = false
+        var disabledNow = false
         var viewerChanged = false
-        val viewerTouched = request.viewerEnabled != null ||
-            request.viewerUsername != null ||
-            request.viewerPassword.isNotEmpty()
-        if (viewerTouched) {
-            when (request.viewerEnabled) {
-                false -> {
-                    // Disabling clears the pair; a previously configured viewer
-                    // loses its sessions exactly like a rotation would.
-                    viewerChanged = storedViewerUsername.isNotEmpty() || storedViewerHash.isNotEmpty()
-                    nextViewerUsername = null
-                    nextViewerHash = null
+        try {
+            settingsDataStore.editAuthSettings { current ->
+                if (request.enabled &&
+                    (username.isEmpty() || (request.password.isEmpty() && current.passwordHash.isEmpty()))
+                ) {
+                    throw AuthConfigRejected("Username and password are required to enable authentication")
                 }
-                else -> {
-                    val candidateUsername = request.viewerUsername?.trim()
-                        ?.takeIf { it.isNotEmpty() }
-                        ?: storedViewerUsername
-                    val candidateHash = if (request.viewerPassword.isEmpty()) {
-                        storedViewerHash
-                    } else {
-                        StreamAuthCrypto.hashPassword(request.viewerPassword)
-                    }
-                    // Enabling without a usable pair is rejected without
-                    // saving — the same verdict the admin section gets.
-                    if (candidateUsername.isEmpty() || candidateHash.isEmpty()) {
-                        return failure("Viewer username and password are required")
-                    }
-                    nextViewerUsername = candidateUsername
-                    nextViewerHash = candidateHash
-                    viewerChanged = request.viewerPassword.isNotEmpty() ||
-                        candidateUsername != storedViewerUsername
+                // The RTSP Digest HA1 is md5(username:realm:password). Only the
+                // password hash is stored, so a username change cannot recompute it
+                // without the plaintext password; keeping the old HA1 would lock out
+                // both the old and the new username (the verifier also checks the
+                // presented username). Require the password instead of silently
+                // leaving RTSP in a broken state.
+                if (request.enabled && username != current.username && request.password.isEmpty() &&
+                    current.rtspDigestHa1.isNotBlank()
+                ) {
+                    throw AuthConfigRejected("Password is required when changing the username")
                 }
-            }
-        }
 
-        settingsDataStore.saveAuthSettings(
-            StreamAuthSettings(
-                enabled = request.enabled,
-                username = username,
-                passwordHash = passwordHash,
-                rtspDigestHa1 = digestHa1,
-                viewerUsername = nextViewerUsername,
-                viewerPasswordHash = nextViewerHash,
-            ),
-        )
-        val adminCredentialsChanged = request.password.isNotEmpty() || username != current.username
-        val disabledNow = current.enabled && !request.enabled
+                // The viewer pair mirrors the admin write-only-secret contract. The
+                // whole-config DTO cannot tell an omitted viewer section from an
+                // explicit disable, so viewerEnabled is nullable: null preserves the
+                // stored pair (the admin section's own save), and only an explicit
+                // viewer write may clear or rotate it.
+                val storedViewerUsername = current.viewerUsername.orEmpty()
+                val storedViewerHash = current.viewerPasswordHash.orEmpty()
+                var nextViewerUsername = current.viewerUsername
+                var nextViewerHash = current.viewerPasswordHash
+                val viewerTouched = request.viewerEnabled != null ||
+                    request.viewerUsername != null ||
+                    request.viewerPassword.isNotEmpty()
+                if (viewerTouched) {
+                    when (request.viewerEnabled) {
+                        false -> {
+                            // Disabling clears the pair; a previously configured viewer
+                            // loses its sessions exactly like a rotation would.
+                            viewerChanged =
+                                storedViewerUsername.isNotEmpty() || storedViewerHash.isNotEmpty()
+                            nextViewerUsername = null
+                            nextViewerHash = null
+                        }
+                        else -> {
+                            val candidateUsername = request.viewerUsername?.trim()
+                                ?.takeIf { it.isNotEmpty() }
+                                ?: storedViewerUsername
+                            val candidateHash = viewerHash ?: storedViewerHash
+                            // Enabling without a usable pair is rejected without
+                            // saving — the same verdict the admin section gets.
+                            if (candidateUsername.isEmpty() || candidateHash.isEmpty()) {
+                                throw AuthConfigRejected("Viewer username and password are required")
+                            }
+                            nextViewerUsername = candidateUsername
+                            nextViewerHash = candidateHash
+                            viewerChanged = request.viewerPassword.isNotEmpty() ||
+                                candidateUsername != storedViewerUsername
+                        }
+                    }
+                }
+
+                val next = StreamAuthSettings(
+                    enabled = request.enabled,
+                    username = username,
+                    passwordHash = passwordHash ?: current.passwordHash,
+                    rtspDigestHa1 = passwordHa1 ?: when {
+                        // A rename while auth is off cannot keep the old HA1 (it would
+                        // bind the old username to the new stored one). Drop it; RTSP
+                        // falls back to Basic until a password is entered.
+                        !request.enabled && username != current.username -> ""
+                        else -> current.rtspDigestHa1
+                    },
+                    viewerUsername = nextViewerUsername,
+                    viewerPasswordHash = nextViewerHash,
+                )
+                adminCredentialsChanged = request.password.isNotEmpty() || username != current.username
+                disabledNow = current.enabled && !request.enabled
+                next
+            }
+        } catch (e: AuthConfigRejected) {
+            return failure(e.reason)
+        }
+        // Revocation rides the committed transaction: the verdicts above were
+        // computed against the record the write actually folded onto.
         if (adminCredentialsChanged || disabledNow) {
             webAuthGate.revokeAllSessions()
         }

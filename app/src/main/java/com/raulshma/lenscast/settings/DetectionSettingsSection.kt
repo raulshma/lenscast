@@ -39,6 +39,7 @@ import com.raulshma.lenscast.ui.components.DayMaskChips
  */
 @Composable
 fun DetectionSettingsSection(viewModel: SettingsViewModel, onOpenEventLog: (() -> Unit)? = null) {
+    val capabilities by viewModel.capabilities.collectAsState()
     val motionDetectionEnabled by viewModel.motionDetectionEnabled.collectAsState()
     val motionSensitivity by viewModel.motionSensitivityPercent.collectAsState()
     val motionRecordingEnabled by viewModel.motionRecordingEnabled.collectAsState()
@@ -250,11 +251,15 @@ fun DetectionSettingsSection(viewModel: SettingsViewModel, onOpenEventLog: (() -
                 }
                 // The YAMNet model ships outside the APK — this row is its only
                 // user-facing fetch control (the classifier's feed also
-                // auto-requests the download, throttled).
-                AudioModelRow(
-                    state = audioModelState,
-                    onDownload = { viewModel.downloadAudioModel() },
-                )
+                // auto-requests the download, throttled). No wire carrier for
+                // the model state remotely (null = the no-carrier degrade),
+                // so the row renders only when the backend can read it.
+                audioModelState?.let { state ->
+                    AudioModelRow(
+                        state = state,
+                        onDownload = { viewModel.downloadAudioModel() },
+                    )
+                }
             }
         }
         SwitchSetting(
@@ -331,10 +336,12 @@ fun DetectionSettingsSection(viewModel: SettingsViewModel, onOpenEventLog: (() -
             )
             Spacer(modifier = Modifier.height(4.dp))
         }
-        if (pushEnabled || unifiedPushEnabled) {
+        if ((pushEnabled || unifiedPushEnabled) && capabilities.pushVapidSubjectField) {
             // Live RFC 8292 sub check: the field saves per keystroke, and an
             // invalid sub only fails later at dispatch — every push service
             // rejects the JWT outright, so the mistake must be visible here.
+            // The subject has no settings-wire carrier, so the field renders
+            // only on the local backend (the toggles stay device-side).
             val vapidSubjectUsable = VapidSubjectPolicy.isUsable(pushVapidSubject)
             OutlinedTextField(
                 value = pushVapidSubject,

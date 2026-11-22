@@ -7,8 +7,7 @@ import com.raulshma.lenscast.data.StreamAuthSettings
 import com.raulshma.lenscast.streaming.SessionRole
 import com.raulshma.lenscast.streaming.WebAuthGate
 import com.raulshma.lenscast.streaming.model.SuccessResponse
-import io.mockk.coJustRun
-import io.mockk.coVerify
+import io.mockk.coEvery
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.slot
@@ -29,6 +28,8 @@ import org.junit.Test
  * follows the same contract with a targeted revocation (viewer sessions
  * only), and the config read redacts the admin username from a viewer-role
  * caller. Deps are mocked; the handler's validation is the decision under test.
+ * The store mock folds the handler's editAuthSettings transform onto `current`
+ * — the same base the real transaction hands the transform.
  */
 class AuthWebHandlerTest {
 
@@ -54,7 +55,10 @@ class AuthWebHandlerTest {
 
     private fun handlerWith(current: StreamAuthSettings): AuthWebHandler {
         every { settingsDataStore.authSettings } returns MutableStateFlow(current)
-        coJustRun { settingsDataStore.saveAuthSettings(capture(saved)) }
+        coEvery { settingsDataStore.editAuthSettings(any()) } answers {
+            val transform = firstArg<(StreamAuthSettings) -> StreamAuthSettings>()
+            saved.captured = transform(current)
+        }
         return AuthWebHandler(settingsDataStore, webAuthGate)
     }
 
@@ -65,7 +69,9 @@ class AuthWebHandlerTest {
         AppJson.moshi.adapter(SuccessResponse::class.java).fromJson(body)!!.success
 
     private fun nothingSaved() {
-        coVerify(exactly = 0) { settingsDataStore.saveAuthSettings(any()) }
+        // Rejections throw out of the store call's transform — DataStore
+        // abandons that transaction, so nothing ever commits into the slot.
+        assertFalse(saved.isCaptured)
         verify(exactly = 0) { webAuthGate.revokeAllSessions() }
         verify(exactly = 0) { webAuthGate.revokeViewerSessions() }
     }

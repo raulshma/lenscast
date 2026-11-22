@@ -58,6 +58,7 @@ import com.raulshma.lenscast.R
 import com.raulshma.lenscast.streaming.rtsp.RtspInputFormat
 import com.raulshma.lenscast.streaming.rtmp.RtmpStatus
 import com.raulshma.lenscast.streaming.rtmp.RtmpUrl
+import com.raulshma.lenscast.streaming.srt.SrtStats
 import com.raulshma.lenscast.streaming.srt.SrtStatus
 import com.raulshma.lenscast.streaming.srt.SrtUrl
 import com.raulshma.lenscast.streaming.whip.WhipStatus
@@ -89,18 +90,21 @@ fun AppSettingsScreen(
     onNavigateBack: () -> Unit,
     onOpenEventLog: (() -> Unit)? = null,
     onOpenAutomation: (() -> Unit)? = null,
+    source: SettingsSource,
+    /**
+     * The paired device's diagnostics seam — non-null ONLY on the remote
+     * backend (the route's device argument built it). This is the folded
+     * remote-only section's carrier: the local surface renders nothing for
+     * it (parity = the local screen), the remote surface renders the legacy
+     * System tab's cards beneath the settings sections.
+     */
+    diagnostics: com.raulshma.lenscast.companion.console.SettingsDiagnostics? = null,
 ) {
     val context = LocalContext.current
     val activity = context as ComponentActivity
     val app = context.applicationContext as AppGraph
     val viewModel: SettingsViewModel = viewModel(
-        factory = SettingsViewModel.Factory(
-            app.cameraService, app.settingsDataStore, app.powerManager,
-            // The detection section surfaces the on-demand model downloads.
-            app.detectionModelStore,
-            app.audioModelStore,
-            app.streamingManager.webAuthGate,
-        )
+        factory = SettingsViewModel.Factory(source)
     )
     val updateViewModel: UpdateViewModel = viewModel(
         factory = UpdateViewModel.Factory(
@@ -132,6 +136,7 @@ fun AppSettingsScreen(
     }
 
     val authSettings by viewModel.authSettings.collectAsState()
+    val capabilities by viewModel.capabilities.collectAsState()
     val httpsEnabled by viewModel.httpsEnabled.collectAsState()
     val streamingPort by viewModel.streamingPort.collectAsState()
     val webStreamingEnabled by viewModel.webStreamingEnabled.collectAsState()
@@ -174,6 +179,13 @@ fun AppSettingsScreen(
     val includeBeta by updateViewModel.includeBeta.collectAsState()
     val lastCheckTime by updateViewModel.lastCheckTime.collectAsState()
 
+    // The diagnostics export flow lives HERE — the screen destination, not
+    // the diagnostics card: the card is a LazyColumn item whose disposal
+    // during scrolling would cancel a card-scoped fetch and unregister the
+    // picker's result callback mid-flow. Null on the local surface (the
+    // section itself is remote-only).
+    val export = diagnostics?.let { rememberRemoteSettingsExport(it) }
+
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
     Scaffold(
         modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
@@ -206,7 +218,21 @@ fun AppSettingsScreen(
             contentPadding = PaddingValues(16.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            if (com.raulshma.lenscast.BuildConfig.SELF_UPDATE) item {
+            // The viewer-role banner: the device-side sections below render
+            // their controls disabled (values still shown) and their writes
+            // are gated at the source (they no-op) — the banner says why —
+            // the companion System tab's single-homed copy. Viewer-local
+            // lanes (display) and navigation rows stay available.
+            if (!capabilities.canEdit) {
+                item {
+                    Text(
+                        text = stringResource(R.string.companion_system_settings_read_only),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+            if (com.raulshma.lenscast.BuildConfig.SELF_UPDATE && capabilities.selfUpdate) item {
                 SettingsSection(title = stringResource(R.string.settings_section_updates)) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -387,10 +413,16 @@ fun AppSettingsScreen(
 
             item {
                 SettingsSection(title = stringResource(R.string.settings_section_streaming)) {
+                    // Device-side editing: these controls carry the streaming
+                    // section's wire values, so a viewer renders them
+                    // disabled (values still shown); interactive only when
+                    // capabilities.canEdit.
+                    val canEdit = capabilities.canEdit
                     SwitchSetting(
                         title = stringResource(R.string.settings_enable_web_streaming),
                         checked = webStreamingEnabled,
-                        onCheckedChange = { viewModel.updateWebStreamingEnabled(it) }
+                        onCheckedChange = { viewModel.updateWebStreamingEnabled(it) },
+                        enabled = canEdit,
                     )
                     // Typed entry alongside the drag slider's range:
                     // a phone slider cannot express 8080 precisely. The
@@ -436,22 +468,26 @@ fun AppSettingsScreen(
                         ),
                         modifier = Modifier.fillMaxWidth(),
                         singleLine = true,
+                        enabled = canEdit,
                     )
                     SliderSetting(
                         title = stringResource(R.string.settings_jpeg_quality),
                         value = jpegQuality.toFloat(),
                         range = jpegQualitySliderRange,
-                        onValueChange = { viewModel.updateJpegQuality(it.toInt()) }
+                        onValueChange = { viewModel.updateJpegQuality(it.toInt()) },
+                        enabled = canEdit,
                     )
                     SwitchSetting(
                         title = stringResource(R.string.settings_adaptive_bitrate),
                         checked = adaptiveBitrateEnabled,
-                        onCheckedChange = { viewModel.updateAdaptiveBitrateEnabled(it) }
+                        onCheckedChange = { viewModel.updateAdaptiveBitrateEnabled(it) },
+                        enabled = canEdit,
                     )
                     SwitchSetting(
                         title = stringResource(R.string.settings_adaptive_encoded_bitrate),
                         checked = adaptiveEncodedBitrateEnabled,
-                        onCheckedChange = { viewModel.updateAdaptiveEncodedBitrateEnabled(it) }
+                        onCheckedChange = { viewModel.updateAdaptiveEncodedBitrateEnabled(it) },
+                        enabled = canEdit,
                     )
                     if (adaptiveEncodedBitrateEnabled) {
                         Text(
@@ -465,7 +501,8 @@ fun AppSettingsScreen(
                         value = hlsDvrSegments.toFloat(),
                         range = StreamDefaultsRange.HLS_DVR_SEGMENTS,
                         steps = StreamDefaultsRange.HLS_DVR_STEPS,
-                        onValueChange = { viewModel.updateHlsDvrSegments(it.toInt()) }
+                        onValueChange = { viewModel.updateHlsDvrSegments(it.toInt()) },
+                        enabled = canEdit,
                     )
                     Text(
                         text = stringResource(R.string.settings_hls_dvr_description),
@@ -475,7 +512,8 @@ fun AppSettingsScreen(
                     SwitchSetting(
                         title = stringResource(R.string.settings_eco_idle),
                         checked = ecoIdleFpsEnabled,
-                        onCheckedChange = { viewModel.updateEcoIdleFpsEnabled(it) }
+                        onCheckedChange = { viewModel.updateEcoIdleFpsEnabled(it) },
+                        enabled = canEdit,
                     )
                     if (ecoIdleFpsEnabled) {
                         Text(
@@ -487,7 +525,8 @@ fun AppSettingsScreen(
                     SwitchSetting(
                         title = stringResource(R.string.settings_mdns),
                         checked = mdnsEnabled,
-                        onCheckedChange = { viewModel.updateMdnsEnabled(it) }
+                        onCheckedChange = { viewModel.updateMdnsEnabled(it) },
+                        enabled = canEdit,
                     )
                 }
             }
@@ -499,12 +538,26 @@ fun AppSettingsScreen(
                 )
             }
 
+            // The folded diagnostics section: remote-only (the route's device
+            // argument built the seam), rendered beneath the settings so the
+            // legacy System tab's cards retire into this surface (P7).
+            if (diagnostics != null && export != null) {
+                item {
+                    RemoteDiagnosticsSection(
+                        diagnostics = diagnostics,
+                        export = export,
+                    )
+                }
+            }
+
             item {
                 SettingsSection(title = stringResource(R.string.settings_section_recording)) {
+                    val canEdit = capabilities.canEdit
                     SwitchSetting(
                         title = stringResource(R.string.settings_continuous_recording),
                         checked = continuousRecording,
-                        onCheckedChange = { viewModel.updateContinuousRecording(it) }
+                        onCheckedChange = { viewModel.updateContinuousRecording(it) },
+                        enabled = canEdit,
                     )
                     if (continuousRecording) {
                         Text(
@@ -517,7 +570,8 @@ fun AppSettingsScreen(
                             value = continuousSegmentMinutes.toFloat(),
                             range = StreamDefaultsRange.CONTINUOUS_SEGMENT_MINUTES,
                             steps = StreamDefaultsRange.CONTINUOUS_SEGMENT_STEPS,
-                            onValueChange = { viewModel.updateContinuousSegmentMinutes(it.toInt()) }
+                            onValueChange = { viewModel.updateContinuousSegmentMinutes(it.toInt()) },
+                            enabled = canEdit,
                         )
                     }
                 }
@@ -525,12 +579,14 @@ fun AppSettingsScreen(
 
             item {
                 SettingsSection(title = stringResource(R.string.settings_section_storage)) {
+                    val canEdit = capabilities.canEdit
                     SliderSetting(
                         title = stringResource(R.string.settings_storage_quota),
                         value = storageQuotaMb.toFloat(),
                         range = storageQuotaSliderRange,
                         steps = StreamDefaultsRange.STORAGE_QUOTA_STEPS,
-                        onValueChange = { viewModel.updateStorageQuotaMb(it.toInt()) }
+                        onValueChange = { viewModel.updateStorageQuotaMb(it.toInt()) },
+                        enabled = canEdit,
                     )
                     Text(
                         text = stringResource(R.string.settings_storage_quota_description),
@@ -541,7 +597,8 @@ fun AppSettingsScreen(
                     SwitchSetting(
                         title = stringResource(R.string.settings_encrypt_captures),
                         checked = mediaEncryptionEnabled,
-                        onCheckedChange = { viewModel.updateMediaEncryptionEnabled(it) }
+                        onCheckedChange = { viewModel.updateMediaEncryptionEnabled(it) },
+                        enabled = canEdit,
                     )
                     Text(
                         text = stringResource(R.string.settings_encrypt_captures_description),
@@ -553,29 +610,40 @@ fun AppSettingsScreen(
 
             item {
                 SettingsSection(title = stringResource(R.string.settings_section_background)) {
-                    SwitchSetting(
-                        title = stringResource(R.string.settings_disable_battery_opt),
-                        description = stringResource(R.string.settings_disable_battery_opt_description),
-                        checked = isIgnoringBatteryOptimizations,
-                        onCheckedChange = { viewModel.requestIgnoreBatteryOptimization(activity) }
-                    )
+                    // The battery row is an intent on THIS phone only — the
+                    // capability hides it against a paired device.
+                    if (capabilities.batteryOptimizationRow) {
+                        SwitchSetting(
+                            title = stringResource(R.string.settings_disable_battery_opt),
+                            description = stringResource(R.string.settings_disable_battery_opt_description),
+                            checked = isIgnoringBatteryOptimizations,
+                            onCheckedChange = { viewModel.requestIgnoreBatteryOptimization(activity) }
+                        )
+                    }
                     SwitchSetting(
                         title = stringResource(R.string.settings_keep_awake),
                         description = stringResource(R.string.settings_keep_awake_description),
                         checked = keepAwakeEnabled,
-                        onCheckedChange = { viewModel.updateKeepAwakeEnabled(it) }
+                        onCheckedChange = { viewModel.updateKeepAwakeEnabled(it) },
+                        enabled = capabilities.canEdit,
                     )
-                    SwitchSetting(
-                        title = stringResource(R.string.settings_resume_on_boot),
-                        checked = resumeStreamsOnBoot,
-                        onCheckedChange = { viewModel.updateResumeStreamsOnBoot(it) }
-                    )
-                    SwitchSetting(
-                        title = stringResource(R.string.settings_fsi_camera_resume),
-                        description = stringResource(R.string.settings_fsi_camera_resume_description),
-                        checked = fsiCameraResume,
-                        onCheckedChange = { viewModel.updateFsiCameraResume(it) }
-                    )
+                    // Resume-on-boot / FSI-resume are phone-local levers with
+                    // no wire carrier — hidden against a paired device.
+                    if (capabilities.resumeOnBootRow) {
+                        SwitchSetting(
+                            title = stringResource(R.string.settings_resume_on_boot),
+                            checked = resumeStreamsOnBoot,
+                            onCheckedChange = { viewModel.updateResumeStreamsOnBoot(it) }
+                        )
+                    }
+                    if (capabilities.fsiResumeRow) {
+                        SwitchSetting(
+                            title = stringResource(R.string.settings_fsi_camera_resume),
+                            description = stringResource(R.string.settings_fsi_camera_resume_description),
+                            checked = fsiCameraResume,
+                            onCheckedChange = { viewModel.updateFsiCameraResume(it) }
+                        )
+                    }
                 }
             }
 
@@ -589,10 +657,12 @@ fun AppSettingsScreen(
 
             item {
                 SettingsSection(title = stringResource(R.string.settings_section_rtsp)) {
+                    val canEdit = capabilities.canEdit
                     SwitchSetting(
                         title = stringResource(R.string.settings_enable_rtsp),
                         checked = rtspEnabled,
-                        onCheckedChange = { viewModel.updateRtspEnabled(it) }
+                        onCheckedChange = { viewModel.updateRtspEnabled(it) },
+                        enabled = canEdit,
                     )
                     if (rtspEnabled) {
                         // Typed entry alongside the drag slider's range:
@@ -639,17 +709,20 @@ fun AppSettingsScreen(
                             ),
                             modifier = Modifier.fillMaxWidth(),
                             singleLine = true,
+                            enabled = canEdit,
                         )
                         DropdownSetting(
                             title = stringResource(R.string.settings_rtsp_input_format),
                             options = RtspInputFormat.entries.map { it.name },
                             selected = rtspInputFormat.name,
-                            onSelect = { viewModel.updateRtspInputFormat(it) }
+                            onSelect = { viewModel.updateRtspInputFormat(it) },
+                            enabled = canEdit,
                         )
                         SwitchSetting(
                             title = stringResource(R.string.settings_rtsp_basic_auth),
                             checked = rtspBasicAuthCompat,
-                            onCheckedChange = { viewModel.updateRtspBasicAuthCompat(it) }
+                            onCheckedChange = { viewModel.updateRtspBasicAuthCompat(it) },
+                            enabled = canEdit,
                         )
                         Text(
                             text = stringResource(R.string.settings_rtsp_basic_auth_description),
@@ -659,7 +732,8 @@ fun AppSettingsScreen(
                         SwitchSetting(
                             title = stringResource(R.string.settings_rtsp_sub_stream),
                             checked = rtspSubStreamEnabled,
-                            onCheckedChange = { viewModel.updateRtspSubStreamEnabled(it) }
+                            onCheckedChange = { viewModel.updateRtspSubStreamEnabled(it) },
+                            enabled = canEdit,
                         )
                         if (rtspSubStreamEnabled) {
                             Text(
@@ -677,13 +751,20 @@ fun AppSettingsScreen(
                 // push target (rtmp[s]://host/app/stream-key — the stream key
                 // rides the URL and is never displayed back), and the status
                 // line mirrors the publisher's live lifecycle, including the
-                // readable refusal/error text.
-                val rtmpStatus by app.streamingManager.rtmpStatus.collectAsState()
+                // readable refusal/error text. The status line rides THIS
+                // phone's publisher, so it renders only on the local backend.
+                val rtmpStatus = if (capabilities.livePublisherStatus) {
+                    app.streamingManager.rtmpStatus.collectAsState().value
+                } else {
+                    null
+                }
                 SettingsSection(title = stringResource(R.string.settings_section_rtmp)) {
+                    val canEdit = capabilities.canEdit
                     SwitchSetting(
                         title = stringResource(R.string.settings_enable_rtmp),
                         checked = rtmpEnabled,
-                        onCheckedChange = { viewModel.updateRtmpEnabled(it) }
+                        onCheckedChange = { viewModel.updateRtmpEnabled(it) },
+                        enabled = canEdit,
                     )
                     if (rtmpEnabled) {
                         OutlinedTextField(
@@ -692,7 +773,8 @@ fun AppSettingsScreen(
                             label = { Text(stringResource(R.string.settings_rtmp_push_url)) },
                             placeholder = { Text(stringResource(R.string.settings_rtmp_url_hint)) },
                             modifier = Modifier.fillMaxWidth(),
-                            singleLine = true
+                            singleLine = true,
+                            enabled = canEdit,
                         )
                         if (rtmpUrl.isNotBlank() && RtmpUrl.parse(rtmpUrl) == null) {
                             Text(
@@ -709,17 +791,20 @@ fun AppSettingsScreen(
                             RtmpStatus.Idle -> stringResource(R.string.settings_rtmp_status_idle)
                             RtmpStatus.Connecting -> stringResource(R.string.settings_rtmp_status_connecting)
                             RtmpStatus.Connected -> stringResource(R.string.settings_rtmp_status_connected)
+                            null -> null
                         }
-                        val statusText = stringResource(R.string.settings_rtmp_status, statusName)
-                        Text(
-                            statusText,
-                            color = if (rtmpStatus is RtmpStatus.Error) {
-                                MaterialTheme.colorScheme.error
-                            } else {
-                                MaterialTheme.colorScheme.onSurface
-                            },
-                            style = MaterialTheme.typography.bodySmall
-                        )
+                        if (statusName != null) {
+                            val statusText = stringResource(R.string.settings_rtmp_status, statusName)
+                            Text(
+                                statusText,
+                                color = if (rtmpStatus is RtmpStatus.Error) {
+                                    MaterialTheme.colorScheme.error
+                                } else {
+                                    MaterialTheme.colorScheme.onSurface
+                                },
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                        }
                         Text(
                             stringResource(R.string.settings_rtmp_h264_note),
                             style = MaterialTheme.typography.bodySmall
@@ -733,13 +818,19 @@ fun AppSettingsScreen(
                 // difference — the endpoint carries no embedded secret, so it
                 // round-trips; the bearer token is the write-only field (type
                 // once, never displayed back), and the STUN setting may be
-                // blanked for LAN-only ICE.
-                val whipStatus by app.streamingManager.whipStatus.collectAsState()
+                // blanked for LAN-only ICE. Status line: local backend only.
+                val whipStatus = if (capabilities.livePublisherStatus) {
+                    app.streamingManager.whipStatus.collectAsState().value
+                } else {
+                    null
+                }
                 SettingsSection(title = stringResource(R.string.settings_section_whip)) {
+                    val canEdit = capabilities.canEdit
                     SwitchSetting(
                         title = stringResource(R.string.settings_enable_whip),
                         checked = whipEnabled,
-                        onCheckedChange = { viewModel.updateWhipEnabled(it) }
+                        onCheckedChange = { viewModel.updateWhipEnabled(it) },
+                        enabled = canEdit,
                     )
                     if (whipEnabled) {
                         OutlinedTextField(
@@ -748,7 +839,8 @@ fun AppSettingsScreen(
                             label = { Text(stringResource(R.string.settings_whip_url)) },
                             placeholder = { Text(stringResource(R.string.settings_whip_url_hint)) },
                             modifier = Modifier.fillMaxWidth(),
-                            singleLine = true
+                            singleLine = true,
+                            enabled = canEdit,
                         )
                         if (whipUrl.isNotBlank() && WhipUrl.parse(whipUrl) == null) {
                             Text(
@@ -775,7 +867,8 @@ fun AppSettingsScreen(
                                     }
                                     keyboardController?.hide()
                                 }
-                            )
+                            ),
+                            enabled = canEdit,
                         )
                         OutlinedTextField(
                             value = whipStunServer,
@@ -783,7 +876,8 @@ fun AppSettingsScreen(
                             label = { Text(stringResource(R.string.settings_whip_stun)) },
                             placeholder = { Text(stringResource(R.string.settings_whip_stun_hint)) },
                             modifier = Modifier.fillMaxWidth(),
-                            singleLine = true
+                            singleLine = true,
+                            enabled = canEdit,
                         )
                         // The wireName stays the state key; the display name
                         // routes through resources (the error state carries
@@ -793,17 +887,20 @@ fun AppSettingsScreen(
                             WhipStatus.Idle -> stringResource(R.string.settings_whip_status_idle)
                             WhipStatus.Connecting -> stringResource(R.string.settings_whip_status_connecting)
                             WhipStatus.Connected -> stringResource(R.string.settings_whip_status_connected)
+                            null -> null
                         }
-                        val whipStatusText = stringResource(R.string.settings_whip_status, whipStatusName)
-                        Text(
-                            whipStatusText,
-                            color = if (whipStatus is WhipStatus.Error) {
-                                MaterialTheme.colorScheme.error
-                            } else {
-                                MaterialTheme.colorScheme.onSurface
-                            },
-                            style = MaterialTheme.typography.bodySmall
-                        )
+                        if (whipStatusName != null) {
+                            val whipStatusText = stringResource(R.string.settings_whip_status, whipStatusName)
+                            Text(
+                                whipStatusText,
+                                color = if (whipStatus is WhipStatus.Error) {
+                                    MaterialTheme.colorScheme.error
+                                } else {
+                                    MaterialTheme.colorScheme.onSurface
+                                },
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                        }
                         Text(
                             stringResource(R.string.settings_whip_note),
                             style = MaterialTheme.typography.bodySmall
@@ -817,14 +914,25 @@ fun AppSettingsScreen(
                 // gate arms it, the URL is the push target (srt://host:port
                 // ?streamid=... — the stream id never displays back on the
                 // web API), and the status line mirrors the publisher's live
-                // lifecycle with the measured RTT while connected.
-                val srtStatus by app.streamingManager.srtStatus.collectAsState()
-                val srtStats = app.streamingManager.srtStats()
+                // lifecycle with the measured RTT while connected. Status:
+                // local backend only.
+                val srtStatus = if (capabilities.livePublisherStatus) {
+                    app.streamingManager.srtStatus.collectAsState().value
+                } else {
+                    null
+                }
+                val srtStats = if (capabilities.livePublisherStatus) {
+                    app.streamingManager.srtStats()
+                } else {
+                    SrtStats()
+                }
                 SettingsSection(title = stringResource(R.string.settings_section_srt)) {
+                    val canEdit = capabilities.canEdit
                     SwitchSetting(
                         title = stringResource(R.string.settings_enable_srt),
                         checked = srtEnabled,
-                        onCheckedChange = { viewModel.updateSrtEnabled(it) }
+                        onCheckedChange = { viewModel.updateSrtEnabled(it) },
+                        enabled = canEdit,
                     )
                     if (srtEnabled) {
                         OutlinedTextField(
@@ -833,7 +941,8 @@ fun AppSettingsScreen(
                             label = { Text(stringResource(R.string.settings_srt_url)) },
                             placeholder = { Text(stringResource(R.string.settings_srt_url_hint)) },
                             modifier = Modifier.fillMaxWidth(),
-                            singleLine = true
+                            singleLine = true,
+                            enabled = canEdit,
                         )
                         if (srtUrl.isNotBlank() && SrtUrl.parse(srtUrl) == null) {
                             Text(
@@ -847,17 +956,20 @@ fun AppSettingsScreen(
                             SrtStatus.Idle -> stringResource(R.string.settings_srt_status_idle)
                             SrtStatus.Connecting -> stringResource(R.string.settings_srt_status_connecting)
                             SrtStatus.Connected -> stringResource(R.string.settings_srt_status_connected)
+                            null -> null
                         }
-                        val srtStatusText = stringResource(R.string.settings_srt_status, srtStatusName)
-                        Text(
-                            srtStatusText,
-                            color = if (srtStatus is SrtStatus.Error) {
-                                MaterialTheme.colorScheme.error
-                            } else {
-                                MaterialTheme.colorScheme.onSurface
-                            },
-                            style = MaterialTheme.typography.bodySmall
-                        )
+                        if (srtStatusName != null) {
+                            val srtStatusText = stringResource(R.string.settings_srt_status, srtStatusName)
+                            Text(
+                                srtStatusText,
+                                color = if (srtStatus is SrtStatus.Error) {
+                                    MaterialTheme.colorScheme.error
+                                } else {
+                                    MaterialTheme.colorScheme.onSurface
+                                },
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                        }
                         if (srtStats.rttMs > 0.0) {
                             Text(
                                 stringResource(R.string.settings_srt_rtt, String.format(java.util.Locale.US, "%.0f", srtStats.rttMs)),
@@ -874,37 +986,46 @@ fun AppSettingsScreen(
 
             item {
                 SettingsSection(title = stringResource(R.string.settings_section_audio)) {
+                    val canEdit = capabilities.canEdit
                     SwitchSetting(
                         title = stringResource(R.string.settings_stream_audio),
                         checked = streamAudioEnabled,
-                        onCheckedChange = { viewModel.updateStreamAudioEnabled(it) }
+                        onCheckedChange = { viewModel.updateStreamAudioEnabled(it) },
+                        enabled = canEdit,
                     )
-                    // Preferred microphone: blank = platform default.
-                    val app = context.applicationContext as AppGraph
-                    val audioDevices = remember { app.streamingManager.audioInputDevices() }
+                    // Preferred microphone: blank = platform default. The
+                    // OPTIONS enumerate THIS phone's mics, so the picker
+                    // renders only on the local backend (the setting value
+                    // itself stays device-side and rides the document).
                     val selectedAudioDevice by viewModel.audioDeviceId.collectAsState()
                     val defaultAudioLabel = stringResource(R.string.settings_audio_default)
-                    DropdownSetting(
-                        title = stringResource(R.string.settings_microphone),
-                        options = listOf(defaultAudioLabel) + audioDevices.map { it.second },
-                        selected = audioDevices.firstOrNull { it.first.toString() == selectedAudioDevice }?.second
-                            ?: defaultAudioLabel,
-                        onSelect = { label ->
-                            viewModel.updateAudioDeviceId(
-                                audioDevices.firstOrNull { it.second == label }?.first?.toString() ?: ""
-                            )
-                        }
-                    )
+                    if (capabilities.microphonePicker) {
+                        val app = context.applicationContext as AppGraph
+                        val audioDevices = remember { app.streamingManager.audioInputDevices() }
+                        DropdownSetting(
+                            title = stringResource(R.string.settings_microphone),
+                            options = listOf(defaultAudioLabel) + audioDevices.map { it.second },
+                            selected = audioDevices.firstOrNull { it.first.toString() == selectedAudioDevice }?.second
+                                ?: defaultAudioLabel,
+                            onSelect = { label ->
+                                viewModel.updateAudioDeviceId(
+                                    audioDevices.firstOrNull { it.second == label }?.first?.toString() ?: ""
+                                )
+                            }
+                        )
+                    }
                     SwitchSetting(
                         title = stringResource(R.string.settings_echo_cancellation),
                         checked = streamAudioEchoCancellation,
-                        onCheckedChange = { viewModel.updateStreamAudioEchoCancellation(it) }
+                        onCheckedChange = { viewModel.updateStreamAudioEchoCancellation(it) },
+                        enabled = canEdit,
                     )
                     SliderSetting(
                         title = stringResource(R.string.settings_audio_bitrate),
                         value = streamAudioBitrateKbps.toFloat(),
                         range = audioBitrateSliderRange,
-                        onValueChange = { viewModel.updateStreamAudioBitrateKbps(it.toInt()) }
+                        onValueChange = { viewModel.updateStreamAudioBitrateKbps(it.toInt()) },
+                        enabled = canEdit,
                     )
                     val monoLabel = stringResource(R.string.settings_mono)
                     val stereoLabel = stringResource(R.string.settings_stereo)
@@ -912,17 +1033,21 @@ fun AppSettingsScreen(
                         title = stringResource(R.string.settings_audio_channels),
                         options = listOf(monoLabel, stereoLabel),
                         selected = if (streamAudioChannels == 2) stereoLabel else monoLabel,
-                        onSelect = { viewModel.updateStreamAudioChannels(if (it == stereoLabel) 2 else 1) }
+                        onSelect = { viewModel.updateStreamAudioChannels(if (it == stereoLabel) 2 else 1) },
+                        enabled = canEdit,
                     )
                     SwitchSetting(
                         title = stringResource(R.string.settings_recording_audio),
                         checked = recordingAudioEnabled,
-                        onCheckedChange = { viewModel.updateRecordingAudioEnabled(it) }
+                        onCheckedChange = { viewModel.updateRecordingAudioEnabled(it) },
+                        enabled = canEdit,
                     )
                 }
             }
 
-            item {
+            // The credential section rides /api/auth/config — an admin-only
+            // read (the RoleGatePolicy set), so a viewer pairing hides it.
+            if (capabilities.securitySection) item {
                 SettingsSection(title = stringResource(R.string.settings_section_security)) {
                     SwitchSetting(
                         title = stringResource(R.string.settings_https),

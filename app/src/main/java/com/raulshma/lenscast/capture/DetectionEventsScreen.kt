@@ -17,32 +17,28 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import com.raulshma.lenscast.AppGraph
 import com.raulshma.lenscast.R
 import com.raulshma.lenscast.core.EventKind
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
 import com.raulshma.lenscast.ui.components.LensCastTopBar
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -52,32 +48,50 @@ import java.util.Locale
 const val DETECTION_EVENTS_ROUTE = "detection-events"
 
 /**
- * The on-device detection-event log — the app-side twin of the dashboard's
- * event feed: type-filtered newest-first list with the trigger snapshot, the
- * dispatched actions, the zone/ML labels, and the linked clip's file name.
- * Reads the shared [DetectionEventStore]; live updates arrive through the
- * same flow the SSE stream tails, and Clear goes through the store like the
- * web route does.
+ * The detection-event log — the app-side twin of the dashboard's event feed:
+ * type-filtered newest-first list with the trigger snapshot, the dispatched
+ * actions, the zone/ML labels, and the linked clip's file name. One screen
+ * over the [EventsSource] seam (this phone's [DetectionEventStore] locally,
+ * the paired device's session feed remotely): the list, its order contract,
+ * the filter chips, and the row rendering are identical for both — only the
+ * Clear affordance differs by verdict ([EventsSource.canClear] hides it for
+ * a viewer pairing; [EventsSource.clearNeedsConfirm] arms the permanent-wipe
+ * dialog for the remote log).
  */
 @Composable
 fun DetectionEventsScreen(
+    source: EventsSource,
     onNavigateBack: () -> Unit,
 ) {
-    val context = LocalContext.current
-    val store = (context.applicationContext as AppGraph).detectionEventStore
-    val scope = rememberCoroutineScope()
     // The active filter as the EventKind itself (null = ALL): the chips toggle
     // enum values and the list match on the kind's wire name.
     var filter by remember { mutableStateOf<EventKind?>(null) }
-    var events by remember { mutableStateOf(store.events()) }
+    var pendingClearConfirm by remember { mutableStateOf(false) }
 
-    // Live tail: every record or clip-link update re-reads the store (the
-    // flow carries the event, but the filter needs the whole list anyway).
-    // clear() emits nothing on the flow, so its handler re-reads too.
-    LaunchedEffect(Unit) {
-        store.eventsFlow.collect {
-            events = store.events()
-        }
+    val events by source.events.collectAsState()
+
+    if (pendingClearConfirm) {
+        AlertDialog(
+            onDismissRequest = { pendingClearConfirm = false },
+            title = { Text(stringResource(R.string.companion_events_clear_confirm_title)) },
+            text = { Text(stringResource(R.string.companion_events_clear_confirm_body)) },
+            confirmButton = {
+                TextButton(onClick = {
+                    pendingClearConfirm = false
+                    source.clear()
+                }) {
+                    Text(
+                        stringResource(R.string.companion_events_clear_confirm_action),
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingClearConfirm = false }) {
+                    Text(stringResource(R.string.gallery_cancel))
+                }
+            },
+        )
     }
 
     Scaffold(
@@ -128,15 +142,15 @@ fun DetectionEventsScreen(
                     }
                 }
                 Spacer(modifier = Modifier.weight(1f))
-                TextButton(onClick = {
-                    // clear() persists the emptied log — disk I/O belongs off
-                    // the UI thread; the reload re-reads whatever landed.
-                    scope.launch(Dispatchers.IO) {
-                        store.clear()
-                        events = store.events()
+                if (source.canClear) {
+                    TextButton(onClick = {
+                        // Local: one tap, as always (the log is app-private).
+                        // Remote: the wipe empties the device's persisted log
+                        // permanently — the confirm dialog guards it first.
+                        if (source.clearNeedsConfirm) pendingClearConfirm = true else source.clear()
+                    }) {
+                        Text(stringResource(R.string.detection_clear))
                     }
-                }) {
-                    Text(stringResource(R.string.detection_clear))
                 }
             }
 

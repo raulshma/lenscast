@@ -34,8 +34,13 @@ class StreamWebHandler(
      * (which brings the server up when needed), then RTSP; a failed RTSP
      * start after the web started rolls the web output back per-output, not
      * the whole server. The aggregate verdict keeps the historical payload:
-     * any Started output answers success with the web URL; nothing started
-     * answers the "Failed to start streaming server" error.
+     * an output actually live answers success with the web URL; nothing
+     * started answers the "Failed to start streaming server" error. The
+     * verdict reads the pair through the toggle's rollback contract, not the
+     * outcome values alone — a RTSP start failure takes the pair's web
+     * Started with it ([StreamToggle.startBoth] stops the web output), so
+     * answering success from the stale value told callers the device was
+     * streaming while nothing was.
      */
     suspend fun startAll(): String {
         val (web, rtsp) = streamToggle.startBoth()
@@ -44,7 +49,12 @@ class StreamWebHandler(
         // like the per-output start paths.
         (web as? StreamStartOutcome.BeginFailedRolledBack)?.let { throw it.cause }
         (rtsp as? StreamStartOutcome.BeginFailedRolledBack)?.let { throw it.cause }
-        val anyStarted = web is StreamStartOutcome.Started || rtsp is StreamStartOutcome.Started
+        // A web Started survives only when the RTSP start did not fail —
+        // startBoth's per-output rollback stops the web output in that shape,
+        // so the stale outcome value must not answer success: reported
+        // status has to match the outputs actually live.
+        val anyStarted = (web is StreamStartOutcome.Started && rtsp?.isStartFailure != true) ||
+            rtsp is StreamStartOutcome.Started
         return if (anyStarted) {
             actionAdapter.toJson(
                 StreamActionResponse(

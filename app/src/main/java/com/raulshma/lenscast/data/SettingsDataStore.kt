@@ -1459,6 +1459,9 @@ class SettingsDataStore(
 
     val recordingAudioEnabled: StateFlow<Boolean> = recordingAudioEnabledPref.shared()
 
+    /** The disk-read twin of [recordingAudioEnabled] — see [settingsFromDisk]. */
+    suspend fun recordingAudioEnabledFromDisk(): Boolean = disk(recordingAudioEnabledPref)
+
     val webStreamingEnabled: StateFlow<Boolean> = webStreamingEnabledPref.shared()
 
     val authSettings: StateFlow<StreamAuthSettings> = authSettingsPref.shared()
@@ -1703,6 +1706,9 @@ class SettingsDataStore(
 
     suspend fun saveSelfTimer(mode: SelfTimerMode) = selfTimerPref.save(mode)
 
+    /** The disk-read twin of [selfTimer] — see [settingsFromDisk]. */
+    suspend fun selfTimerFromDisk(): SelfTimerMode = disk(selfTimerPref)
+
     suspend fun saveSpiritLevelEnabled(enabled: Boolean) = spiritLevelEnabledPref.save(enabled)
 
     suspend fun saveHistogramEnabled(enabled: Boolean) = histogramEnabledPref.save(enabled)
@@ -1738,7 +1744,20 @@ class SettingsDataStore(
 
     suspend fun saveWebStreamingEnabled(enabled: Boolean) = webStreamingEnabledPref.save(enabled)
 
-    suspend fun saveAuthSettings(settings: StreamAuthSettings) = authSettingsPref.save(settings)
+    /**
+     * The atomic auth-record write: the transform runs on the value decoded
+     * from the SAME `dataStore.edit` pass that encodes its result — under
+     * DataStore's own write lock — so both auth writers (the settings drain
+     * and the web credential rotation) fold onto the record as it exists
+     * inside their transaction, and neither can clobber the other's
+     * read-modify-write. There is deliberately no whole-record saver beside
+     * it: a bare record save would re-open the lost-update race this closes.
+     */
+    suspend fun editAuthSettings(transform: (StreamAuthSettings) -> StreamAuthSettings) {
+        context.dataStore.edit { prefs ->
+            authSettingsPref.encode(prefs, transform(authSettingsPref.decode(prefs)))
+        }
+    }
 
     suspend fun saveRtspEnabled(enabled: Boolean) = rtspEnabledPref.save(enabled)
 

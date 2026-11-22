@@ -22,7 +22,7 @@ class RoleGatePolicyTest {
         // Media reads (router-adjacent, served by the transport).
         "media read" to listOf("/api/media/IMG_1.jpg", "/api/media/IMG_1.jpg/thumbnail"),
         // The admin-only reads.
-        "admin read" to listOf("/api/auth/config", "/api/auth/sessions", "/api/audit"),
+        "admin read" to listOf("/api/auth/config", "/api/auth/sessions", "/api/audit", "/api/settings/export"),
         // The viewer-allowed self checks.
         "self check" to listOf("/api/auth/session", "/api/auth/status"),
         // Viewer's own logout.
@@ -31,7 +31,7 @@ class RoleGatePolicyTest {
         "talkback" to listOf("/api/audio/uplink"),
         // Every other read route the ApiRouter registers.
         "other api read" to listOf(
-            "/api/settings", "/api/settings/export", "/api/status", "/api/camera/lenses",
+            "/api/settings", "/api/status", "/api/camera/lenses",
             "/api/stream/clients", "/api/capture/interval/status", "/api/recording/status",
             "/api/recordings/sessions", "/api/gallery", "/api/detection/events",
             "/api/detection/events/export", "/api/detection/stats", "/api/system",
@@ -43,7 +43,7 @@ class RoleGatePolicyTest {
         "stream lifecycle" to listOf("/api/stream/start", "/api/stream/stop", "/api/stream/web/start", "/api/stream/web/stop"),
         "capture" to listOf("/api/capture", "/api/capture/interval/start", "/api/capture/interval/stop"),
         "camera control" to listOf("/api/camera/lens", "/api/camera/focus", "/api/camera/zoom", "/api/camera/torch"),
-        "recording control" to listOf("/api/recording/start", "/api/recording/stop"),
+        "recording control" to listOf("/api/recording/start", "/api/recording/stop", "/api/recording/cancel-schedule"),
         "deterrence" to listOf("/api/deterrence/siren", "/api/detection/test"),
         "media write" to listOf("/api/media/batch-delete", "/api/media/IMG_1.jpg"),
         "session revoke" to listOf("/api/auth/sessions/tok12345"),

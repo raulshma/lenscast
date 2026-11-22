@@ -1909,22 +1909,102 @@ base URL and credentials locally on the watch.
 
 ### Companion Mode
 **`companion/`** — the phone-app remote that VIEWs and CONTROLs other
-LensCast devices (web-console parity, inside `:app`). One
+LensCast devices by serving them the MAIN UI over the device's HTTP API:
+a paired device opens the same camera dashboard, gallery, event log,
+capture, automation, and settings screens the phone's own camera gets
+(see Camera Console Seam, Device Console Backend, and Remote Source
+Family) — the bespoke per-device tab shell is gone. One
 `CompanionGraph` under AppGraph owns the collaborators: `DeviceRosterStore`
 (paired devices; `CompanionDevice` snapshots), `CompanionCredentialStore`
 (credentials AES-GCM-encrypted via the Android Keystore — no plaintext
 fallback, never logged or exported), `DeviceSessionManager` (one cached
 `DeviceSession` per device id — the connection state machine + the conflated
-status SSE/poll ladder + the detection-event feed; `manualDetectionPoll` /
-`clearDetectionFeed` are the on-demand seams the events tab drives), and
+status SSE/poll ladder + the detection-event feed), and
 `LenscastApiClient` (JSON + SSE over a shared engine; `CertificateFingerprintProbe`
 is the ONLY trust-all TLS path — user-confirmed TOFU at pairing; pinned
-fingerprints ride `DevicePinning` thereafter). The UI is strict MVI per
-screen: `DevicesScreen` (roster, probes, capture-all volley, removal) →
-`DeviceScreen` shell → Live/Events/Media/System tabs, each a stateless
-render half (data-class-of-lambdas actions) beside a ViewModel. Playback is
-the ladder `PlayerLadder` (WHEP → HLS → MJPEG) in `playback/`; pairing
-is `ui/pairing/` over the probe chain (TLS → auth → sign-in).
+fingerprints ride `DevicePinning` thereafter). The surviving UI is the
+roster: `DevicesScreen` (probes, capture-all volley, removal) whose row tap
+navigates `Routes.camera(deviceId)`, and pairing is `ui/pairing/` over the
+probe chain (TLS → auth → sign-in). Playback is the ladder `PlayerLadder`
+(WHEP → HLS → MJPEG) in `playback/`, driven by the console backend.
+
+### Camera Console Seam
+**`camera/CameraConsole.kt` + `camera/model/ConsoleCapabilities.kt`** — the
+camera dashboard's render contract, "one interface, two backends": the
+screen binds to the [CameraConsole] interface (the state flows and actions
+`CameraViewModel` already served locally) and reads the [ConsoleCapabilities]
+boolean verdicts to hide what a backend can't honor, so no composable
+carries an `if (remote)` branch. The LOCAL backend is CameraViewModel
+verbatim; the REMOTE backend is the Device Console Backend. Every
+hide/disable decision on the dashboard is a capability read
+(`canControl`, `flashControl`, `serverPanel`, `talkback`, `liveAudio`,
+`pip`, …), with the local backend pinning the server chrome true and the
+remote backend deriving all of them from the paired device's status and
+roster role.
+
+### Device Console Backend
+**`companion/console/DeviceConsoleViewModel.kt`** — the paired device's
+CameraConsole backend: a DeviceSession's HTTP API mapped onto the
+dashboard's state flows. `DeviceStatusMappers` projects the conflated
+status SSE onto camera/stream/thermal state; `RemoteSettingsMapper` maps
+the device's settings document; the viewer-local preference lanes (grid,
+self-timer mode, preview toggle, flash chip) stay in this phone's
+`SettingsDataStore` — a viewer preference with no device carrier. Writes
+keep the optimistic discipline (mirror flips first, POST follows, ANY
+failure reverts, per-field in-flight flags guard against status stomps) and
+failures publish one-shot notices on `consoleEvents` (the dashboard renders
+them as toasts). Playback owns a `PlayerLadder` (WHEP → HLS → MJPEG)
+exposed on the CONCRETE class; `RemotePreviewStage` renders it inside the
+dashboard's preview box (one AndroidView per rung, overlays as
+corner chips that never block the preview's gestures). The console does
+NOT own the session: it starts it once if IDLE, mirrors its flows, and
+`dispose` follows the device shell's freeze-then-stop contract; composition
+visibility rides `setActive`.
+
+### Remote Source Family
+**`companion/console/Remote*Source.kt`** — the per-screen seams' REMOTE
+backends: `RemoteGallerySource` (`/api/gallery` paging + wire delete),
+`RemoteEventsSource` (the device's detection feed), `RemoteCaptureSource`
+(interval/scheduled capture routes), `RemoteAutomationSource`
+(`GET/PUT /api/automation`), `RemoteSettingsSource` (the settings document
+on a WhileSubscribed poll beat) and `RemoteDiagnosticsSource` (the folded
+App-settings diagnostics: `/api/system` + lenses + stream clients + kick,
+restart/reset-camera maintenance, settings export/import, and the paged
+`AuditBlock` audit trail — re-homed from the retired System tab with the
+settings screen's cards). All poll beats ride the injectable
+`ConsoleTimings` record (MockWebServer tests shrink it — never a virtual
+clock); every write is gated by the roster role (`canDelete`/`canEdit`/
+`canManage` — a viewer pairing hides the affordance instead of waiting for
+the device's 403), and `CompanionGraph` caches one instance per device so
+two routes over the same seam (gallery grid + viewer) read one item list.
+
+### Screen Source Seams
+**`gallery/GallerySource.kt`, `capture/EventsSource.kt`,
+`capture/CaptureSource.kt`, `automation/AutomationSource.kt`,
+`settings/SettingsSource.kt`** — one plain interface per main screen, the
+same "one interface, two backends" pattern as the Camera Console Seam: the
+screen binds to the interface, reads its boolean verdicts
+(`canDelete`, `canFavorite`, `canEdit`, `canShareExternally`, …) to hide
+what the current backend can't honor, and never branches on which backend
+it got. The LOCAL implementations wrap today's graph singletons unchanged
+(`LocalGallerySource` over `CaptureHistoryStore` + `GallerySession`, the
+local settings/automation/capture stores); the REMOTE implementations are
+the Remote Source Family. The remote App-settings surface additionally
+folds in `settings/DiagnosticsSection.kt`, rendered only when the route
+carries a paired device (parity is the local surface; diagnostics is the
+remote-only addition).
+
+### Self-Timer Runner
+**`camera/SelfTimerRunner.kt`** — the self-timer countdown's shared holder:
+the job + `CountdownState` machinery BOTH console backends run, extracted
+verbatim from CameraViewModel so the remote dashboard's countdown is
+bit-identical to the local one (same tick loop, same synchronous initial
+`Counting` write, same `SelfTimerPolicy.TICK_MS` cadence). Every verdict
+stays in `SelfTimerPolicy` — the runner only owns the coroutine walking the
+policy's answers plus the shutter dispatch (a now-capture delegates to the
+caller's lambda, a countdown fires the shared `onFire` at the policy's Fire
+boundary). Injectable clock + pacing keep it JVM-testable without virtual
+time; `dispose` cancels the job.
 
 ### Automation Rule
 **`automation/schedule/AutomationRule.kt`** — one if/then rule as the user
@@ -2537,6 +2617,35 @@ note: the former `AutomationRuleJson` DTO clones are gone (see Automation
 Rule); the object is the Moshi instance, not a data clone. RuleDraft keeps
 wire strings and converts at the boundary; the catalogs stay the
 parameter-schema authority — the enums are the decode/compare form.
+
+### Store Hydration (the default-first race)
+**`data/SettingsDataStore.kt`** — cross-cutting rule for every consumer of
+the store's shared flows. The shared flows (`SettingPref.shared()`) are
+`stateIn(Eagerly, default)`: the eager collector STARTS immediately, but
+the flow's VALUE holds the descriptor default — the empty/zero
+placeholder — until DataStore's first disk read lands (the store's KDocs
+call this the default-first race). Subscribing replays that current
+value, so a first emission is never a hydration signal. The store's
+`*FromDisk()` twins (`settingsFromDisk()`, `automationRulesFromDisk()`,
+`resumeStreamsOnBootNow()`, …) suspend until that read lands — they are
+the one hydration signal, and every consumer that gates a whole-document
+write on "has the store hydrated" must anchor on them (the Automation
+Test Controller's arm-time snapshot, the Automation Action Runner's
+merge base, the boot receivers' startup-critical reads — all do).
+Content heuristics are always racy and review rejects them: equality
+with an earlier snapshot mis-classifies any write landing inside the
+window — a wholesale deletion can empty the shared flow while the
+snapshot read a nonempty list, and the StateFlow's dedupe never re-fires
+the check, wedging the latch shut forever; non-emptiness is safer (the
+placeholder is empty, so non-empty is necessarily post-read) but cannot
+classify the empty cases — exactly the placeholder/truth ambiguity. The
+worked example is the rules mirror's readiness latch:
+`LocalAutomationSource.rulesReady` took three review rounds (a pinned
+`true`; equality-with-snapshot arming on the replayed placeholder; the
+deletion wedge) before collapsing to the disk-twin anchor;
+`LocalAutomationSourceTest` pins the value contract (a placeholder
+replay never arms; an empty persisted list is a hydrated verdict; the
+deletion window arms through the disk re-consult).
 
 ## State Machines
 

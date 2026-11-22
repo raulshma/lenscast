@@ -24,6 +24,7 @@ import com.raulshma.lenscast.companion.client.dto.LoginResponse
 import com.raulshma.lenscast.companion.client.dto.RecordingStartRequest
 import com.raulshma.lenscast.companion.client.dto.RecordingStatus
 import com.raulshma.lenscast.companion.client.dto.RecordingsResponse
+import com.raulshma.lenscast.companion.client.dto.RemoteCameraSettings
 import com.raulshma.lenscast.companion.client.dto.SettingsUpdate
 import com.raulshma.lenscast.companion.client.dto.SirenRequest
 import com.raulshma.lenscast.companion.client.dto.StreamingSettings
@@ -238,6 +239,15 @@ class LenscastApiClient(
     suspend fun recordingStop(): CommandResponse =
         decode(send(Verb.POST, "/api/recording/stop"))
 
+    /**
+     * POST /api/recording/cancel-schedule — the schedule-only cancel: drops
+     * a pending scheduled start atomically server-side (the device's
+     * controller state check), leaving a live recording untouched — a
+     * schedule that became due before the call lands no-ops.
+     */
+    suspend fun recordingCancelSchedule(): CommandResponse =
+        decode(send(Verb.POST, "/api/recording/cancel-schedule"))
+
     /** GET /api/capture/interval/status — the interval-capture scheduler state. */
     suspend fun intervalCaptureStatus(): IntervalCaptureStatus =
         decode(send(Verb.GET, "/api/capture/interval/status"))
@@ -303,6 +313,18 @@ class LenscastApiClient(
     /** POST /api/stream/rtsp/start|stop — the RTSP output toggle. */
     suspend fun setRtspStreamRunning(start: Boolean): CommandResponse =
         decode(send(Verb.POST, if (start) "/api/stream/rtsp/start" else "/api/stream/rtsp/stop"))
+
+    /**
+     * POST /api/stream/start|stop — the device's WHOLE-stream toggle
+     * (StreamWebHandler.startAll/stopAll: web first then RTSP through the
+     * device-side Stream Toggle's ladder, stop pauses everything). The
+     * remote console backend's server-panel toggle drives this pair — the
+     * honest mapping of "the whole server" onto a device whose HTTP listener
+     * is always-on (the answer carries `success:false` + the device-side
+     * error string when the device's own enable gates refused).
+     */
+    suspend fun setAllStreamsRunning(start: Boolean): CommandResponse =
+        decode(send(Verb.POST, if (start) "/api/stream/start" else "/api/stream/stop"))
 
     /** DELETE /api/stream/clients/{id} — drop one HTTP viewer's connection. */
     suspend fun kickClient(id: String): CommandResponse =
@@ -429,6 +451,13 @@ class LenscastApiClient(
 
     /** A gallery capture's media route (image loader / player source). */
     fun mediaUrl(id: String): String = url("/api/media/${encodeSegment(id)}")
+
+    /**
+     * The same capture's downscaled grid-thumbnail route (`/thumbnail`) —
+     * the server decodes+downscales once, so a grid page of tiles moves
+     * tile-sized bytes instead of full-size originals.
+     */
+    fun mediaThumbnailUrl(id: String): String = url("/api/media/${encodeSegment(id)}/thumbnail")
 
     /** The same media, forced download (`?download=1` — Content-Disposition). */
     fun mediaDownloadUrl(id: String): String = "${mediaUrl(id)}?download=1"
@@ -634,9 +663,151 @@ class LenscastApiClient(
      * never contains the local app's credentials (the write-only secrets in
      * a fetched document are blank, and a blank echo is the server's
      * keep-stored-value contract).
+     *
+     * The camera section rides WITH explicit JSON nulls
+     * ([settingsUpdateBody]): the server merges a section at the sent-key
+     * level — an omitted key keeps the stored value — so clearing an
+     * optional camera override (`updateFocusDistance(null)`, and the same
+     * nullable iso/exposureTime/colorTemperature/sceneMode overrides) must
+     * ride as a visible `"field":null`, never as an omitted key.
      */
     suspend fun putSettings(update: SettingsUpdate): CommandResponse =
-        decode(send(Verb.PUT, "/api/settings", update))
+        decode(send(Verb.PUT, "/api/settings", settingsUpdateBody(update)))
+
+    /**
+     * The PUT body assembly: the top level keeps Moshi's nulls-off default
+     * (a null section stays ABSENT — the server decodes absent = untouched),
+     * while the camera section is written with serializeNulls ON so its
+     * nullable overrides travel as explicit JSON nulls. The streaming
+     * section carries no nullable fields, so the default writer is exact
+     * there.
+     */
+    private fun settingsUpdateBody(update: SettingsUpdate): RequestBody {
+        val buffer = okio.Buffer()
+        val writer = com.squareup.moshi.JsonWriter.of(buffer)
+        writer.serializeNulls = false
+        writer.beginObject()
+        update.camera?.let {
+            writer.name("camera")
+            writer.serializeNulls = true
+            moshi.adapter(RemoteCameraSettings::class.java).toJson(writer, it)
+            writer.serializeNulls = false
+        }
+        update.streaming?.let {
+            writer.name("streaming")
+            moshi.adapter(StreamingSettings::class.java).toJson(writer, it)
+        }
+        writer.endObject()
+        writer.close()
+        return buffer.readUtf8().toRequestBody(jsonMediaType)
+    }
+
+    // ── Automation (P5, the capture/automation screen seams) ──
+    // Appended additively after the settings block. The rule graph rides
+    // AutomationRuleJson's Moshi instance (the vocabulary enums' wire-id
+    // adapters — plain AppJson would emit enum NAMES, a wire break against
+    // every persisted document and the web/contract fixtures), so these
+    // methods bypass the AppJson-based decode helper.
+
+    /** The one adapter pair for the automation document graph. */
+    private val automationStateAdapter by lazy {
+        com.raulshma.lenscast.automation.schedule.AutomationRuleJson.moshi
+            .adapter(com.raulshma.lenscast.companion.client.dto.RemoteAutomationState::class.java)
+    }
+
+    private val automationUpdateAdapter by lazy {
+        com.raulshma.lenscast.automation.schedule.AutomationRuleJson.moshi
+            .adapter(com.raulshma.lenscast.companion.client.dto.RemoteAutomationUpdateRequest::class.java)
+    }
+
+    /** GET /api/automation — the state document (enabled, rules, armed test id). */
+    suspend fun getAutomation(): com.raulshma.lenscast.companion.client.dto.RemoteAutomationState =
+        automationStateAdapter.fromJson(send(Verb.GET, "/api/automation"))
+            ?: error("RemoteAutomationState decoded to null")
+
+    /**
+     * PUT /api/automation — persists the master toggle and the rule list
+     * wholesale and answers the persisted sanitized truth (clamped values,
+     * minted ids), which becomes the caller's new document.
+     */
+    suspend fun putAutomation(
+        enabled: Boolean,
+        rules: List<com.raulshma.lenscast.automation.schedule.AutomationRule>,
+    ): com.raulshma.lenscast.companion.client.dto.RemoteAutomationState {
+        val body = automationUpdateAdapter.toJson(
+            com.raulshma.lenscast.companion.client.dto.RemoteAutomationUpdateRequest(
+                enabled = enabled,
+                rules = rules,
+            ),
+        ).toRequestBody(jsonMediaType)
+        return automationStateAdapter.fromJson(send(Verb.PUT, "/api/automation", body))
+            ?: error("RemoteAutomationState decoded to null")
+    }
+
+    /** POST /api/automation/test — fire [ruleId]'s actions once (snapshot held for the restore). */
+    suspend fun automationTest(ruleId: String): com.raulshma.lenscast.companion.client.dto.RemoteAutomationTestResponse {
+        val requestAdapter = AppJson.moshi.adapter(
+            com.raulshma.lenscast.companion.client.dto.RemoteAutomationTestRequest::class.java,
+        )
+        val responseAdapter = AppJson.moshi.adapter(
+            com.raulshma.lenscast.companion.client.dto.RemoteAutomationTestResponse::class.java,
+        )
+        return responseAdapter.fromJson(
+            send(Verb.POST, "/api/automation/test", requestAdapter.toJson(
+                com.raulshma.lenscast.companion.client.dto.RemoteAutomationTestRequest(ruleId),
+            ).toRequestBody(jsonMediaType)),
+        ) ?: error("RemoteAutomationTestResponse decoded to null")
+    }
+
+    /** POST /api/automation/test/restore — wind the armed test back (a no-op success when nothing is armed). */
+    suspend fun automationTestRestore(): com.raulshma.lenscast.companion.client.dto.RemoteAutomationTestResponse =
+        AppJson.moshi.adapter(
+            com.raulshma.lenscast.companion.client.dto.RemoteAutomationTestResponse::class.java,
+        ).fromJson(send(Verb.POST, "/api/automation/test/restore"))
+            ?: error("RemoteAutomationTestResponse decoded to null")
+
+    // ── Diagnostics & maintenance (P6, the settings screens' remote seams) ──
+    // Appended additively after the automation block. The system routes'
+    // richer answer shapes (SystemRestartResponse's mode/reason/step/hint)
+    // decode-ignore into [CommandResponse] — the settings surfaces render the
+    // success verdict, not the refusal taxonomy.
+
+    /**
+     * POST /api/system/restart — the device's app restart. `mode = "soft"`
+     * runs the in-process soft-restart ladder; null (absent query) keeps the
+     * deep (quit + relaunch) restart. The device answers OK before its
+     * teardown, so the OK here lands before the connection dies.
+     */
+    suspend fun restartApp(mode: String? = null): CommandResponse =
+        decode(send(Verb.POST, queryUrl("/api/system/restart", "mode" to mode)))
+
+    /** POST /api/system/reset-camera — the bounded camera-subsystem recovery. */
+    suspend fun resetCamera(): CommandResponse =
+        decode(send(Verb.POST, "/api/system/reset-camera"))
+
+    /** POST /api/settings/ml-model/download — the device's on-demand detection model fetch. */
+    suspend fun downloadDetectionModel(): CommandResponse =
+        decode(send(Verb.POST, "/api/settings/ml-model/download"))
+
+    /** POST /api/settings/audio-model/download — the device's on-demand YAMNet model fetch. */
+    suspend fun downloadAudioModel(): CommandResponse =
+        decode(send(Verb.POST, "/api/settings/audio-model/download"))
+
+    /**
+     * GET /api/settings/export — the versioned export envelope's RAW JSON
+     * (deliberately not decoded: the caller passes it through to a share
+     * sheet or back to [importSettings] verbatim, and the envelope's shape
+     * is the route's own parser's contract).
+     */
+    suspend fun exportSettings(): String = send(Verb.GET, "/api/settings/export")
+
+    /**
+     * POST /api/settings/import — the raw-body passthrough twin of
+     * [exportSettings]: an export envelope or a bare settings document, parsed
+     * by the device through the exact save path a dashboard PUT uses.
+     */
+    suspend fun importSettings(json: String): CommandResponse =
+        decode(send(Verb.POST, "/api/settings/import", json.toRequestBody(jsonMediaType)))
 }
 
 /**

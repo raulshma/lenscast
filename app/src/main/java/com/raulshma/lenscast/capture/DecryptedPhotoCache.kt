@@ -6,6 +6,7 @@ import com.raulshma.lenscast.capture.model.CaptureHistory
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.util.UUID
 
 /**
  * The decrypted-photo cache behind the gallery's Coil loading. Decryption is
@@ -53,7 +54,10 @@ class DecryptedPhotoCache(
      * Decrypts [filePath] into the cache when it is encrypted at rest; a
      * plaintext file answers null (nothing to override). Writes through a
      * `.part` file + atomic rename, so a killed mid-decrypt never leaves a
-     * truncated image cached as complete.
+     * truncated image cached as complete. The part name is unique per call
+     * (the session's warm loop and a gallery tile's direct entry can run
+     * ensure concurrently against the same target), so each caller renames
+     * its own complete file instead of racing one shared temp.
      */
     suspend fun ensure(id: String, fileName: String, filePath: String): File? =
         withContext(Dispatchers.IO) {
@@ -63,7 +67,13 @@ class DecryptedPhotoCache(
                 val target = cacheFile(id, fileName)
                 if (target.exists()) return@withContext target
                 if (!mediaResolver.isEncryptedAtRest(filePath)) return@withContext null
-                val part = File(target.parentFile, target.name + PART_SUFFIX)
+                // Unique per call: a shared deterministic part name lets two
+                // writers truncate each other's temp and rename torn bytes
+                // into place — distinct names keep every rename whole.
+                val part = File(
+                    target.parentFile,
+                    "${target.name}.${UUID.randomUUID()}$PART_SUFFIX",
+                )
                 val ok = mediaResolver.openDecryptedStream(filePath)?.use { input ->
                     part.outputStream().use { output -> input.copyTo(output) }
                     part.renameTo(target)

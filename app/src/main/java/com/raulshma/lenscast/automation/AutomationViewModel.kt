@@ -9,7 +9,6 @@ import com.raulshma.lenscast.automation.schedule.AutomationActionCatalog
 import com.raulshma.lenscast.automation.schedule.AutomationActionSpec
 import com.raulshma.lenscast.automation.schedule.AutomationConditionCatalog
 import com.raulshma.lenscast.automation.schedule.AutomationConditionSpec
-import com.raulshma.lenscast.automation.schedule.AutomationFireJournal
 import com.raulshma.lenscast.automation.schedule.AutomationParamSpec
 import com.raulshma.lenscast.automation.schedule.AutomationRule
 import com.raulshma.lenscast.automation.schedule.AutomationSchedulePolicy
@@ -17,20 +16,25 @@ import com.raulshma.lenscast.automation.schedule.AutomationTriggerCatalog
 import com.raulshma.lenscast.automation.schedule.AutomationTriggerKind
 import com.raulshma.lenscast.automation.schedule.MissedRunPolicy
 import com.raulshma.lenscast.capture.MotionArmingPolicy
-import com.raulshma.lenscast.camera.CameraService
 import com.raulshma.lenscast.core.StreamDefaults
-import com.raulshma.lenscast.data.SettingsDataStore
 import com.raulshma.lenscast.gallery.GalleryDates
-import kotlinx.coroutines.delay
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import java.util.Calendar
+import java.util.Collections
 import java.util.TimeZone
 import java.util.UUID
+import java.util.WeakHashMap
 
 /**
  * One rendered action-summary line: the string resource plus its positional
@@ -68,115 +72,293 @@ sealed interface AutomationDurationLabel {
 }
 
 /**
- * Write-side ViewModel for the automation (schedule-rules) screen. Persisted
- * values are exposed straight from the Settings Store — the store is the
- * single source of truth and there is no mirror state to drift, the same
- * contract as [com.raulshma.lenscast.settings.SettingsViewModel]. The derived
- * reads are [canAddRule] (the screen greys the add button out at
- * [StreamDefaults.AUTOMATION_MAX_RULES]) and [lastFiredKeys] (the fire
- * journal's read side, polled on the engine's cadence while the screen
- * shows).
- *
- * Every write funnels through [AutomationSchedulePolicy.sanitizeRules] before
- * it reaches the store, so an edit is clamped into the persisted/usable shape
- * (name trimmed, minute/mask bounds, action list sanitized and capped) with
- * no second gate to bypass. Pure rule-list transforms and the display-string
- * builders live in the [Companion] and are unit-tested directly.
+ * The automation screen's state owner — the pure rule-list transforms and
+ * display-string builders over the [AutomationSource] seam, one interface
+ * over this phone's settings-store backend and the paired device's
+ * automation document. The source owns everything that differs between
+ * backends (the persisted truth, the journal read, the test controller, the
+ * write gate); this ViewModel owns the derived reads and the rule-list
+ * transforms, which fold through [AutomationSchedulePolicy.sanitizeRules]
+ * into the source's one write seam ([AutomationSource.saveRules]) — an edit
+ * is clamped into the persisted/usable shape with no second gate to bypass.
+ * Pure transforms and display strings live in the [Companion] and are
+ * unit-tested directly.
  */
 class AutomationViewModel(
-    private val cameraService: CameraService,
-    private val settingsDataStore: SettingsDataStore,
-    private val fireJournal: AutomationFireJournal,
-    /** The Automation Test's arm/restore owner (issue #18 item 3). */
-    private val testController: AutomationTestController,
+    private val source: AutomationSource,
 ) : ViewModel() {
 
-    // Read-side state straight from the Settings Store — no per-ViewModel
+    // Read-side state straight from the source — no per-ViewModel
     // stateIn, no retyped defaults.
-    val automationEnabled: StateFlow<Boolean> = settingsDataStore.automationEnabled
-    val automationRules: StateFlow<List<AutomationRule>> = settingsDataStore.automationRules
+    val automationEnabled: StateFlow<Boolean> = source.automationEnabled
+    val automationRules: StateFlow<List<AutomationRule>> = source.automationRules
 
     /** The armed Automation Test's rule id; null = nothing armed. */
-    val armedTestRuleId: StateFlow<String?> = testController.armedRuleId
+    val armedTestRuleId: StateFlow<String?> = source.armedTestRuleId
 
     /** The bound camera's multi-level flash ceiling (null = no levels / unsupported). */
-    val torchStrengthMaxLevel: StateFlow<Int?> = cameraService.torchStrengthMaxLevel
+    val torchStrengthMaxLevel: StateFlow<Int?> = source.torchStrengthMaxLevel
 
     /** False once the rule list is at the cap — the screen greys the add button out. */
-    val canAddRule: StateFlow<Boolean> = settingsDataStore.automationRules
+    val canAddRule: StateFlow<Boolean> = source.automationRules
         .map { it.size < StreamDefaults.AUTOMATION_MAX_RULES }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), true)
 
+    /** Whether write affordances render at all (the source's role verdict). */
+    val canEdit: Boolean = source.canEdit
+
     /**
-     * Rule id → last fired occurrence key, re-read from the fire journal on a
-     * beat matching the engine's own poll cadence (the journal is a tiny
-     * per-rule long map on disk — its load is the designed read path). Only
-     * collected while the screen is subscribed, so nothing polls in the
-     * background.
+     * Rule id → last fired occurrence key — the journal read side, straight
+     * from the source (locally the on-disk journal on its poll beat,
+     * remotely the document's `lastFiredAt` decoration).
      */
-    val lastFiredKeys: StateFlow<Map<String, Long>> = flow {
-        while (true) {
-            emit(fireJournal.load())
-            delay(FIRE_POLL_MILLIS)
+    val lastFiredKeys: StateFlow<Map<String, Long>> = source.lastFiredKeys
+
+    fun setEnabled(enabled: Boolean) = source.setEnabled(enabled)
+
+    // The pending edit overlay: the last rules list sent through [saveRules]
+    // (by THIS instance or an older one — see [SharedWrites]), still
+    // unacknowledged by the source. The source's automationRules only
+    // reflects a write after the backend's round trip (the store's save
+    // locally, the PUT answer remotely) — it is NOT updated before another
+    // edit can run — so a rapid second edit that read the source directly
+    // would build on the pre-edit list and its write would restore what the
+    // first edit changed (disabling A then B would leave A enabled). Each
+    // edit instead builds on the pending list until the source acknowledges
+    // it ([isAcknowledged], watched by the init collector below), so the
+    // overlay lives only while that revision is outstanding — or until the
+    // write FAILS: the save's handle completes exceptionally and the failed
+    // revision retires, so a later edit never silently builds on (and
+    // re-saves) an edit the backend refused. Edits run on the main thread
+    // (the screen's callbacks), so the shared holder's plain fields are
+    // enough.
+    private val writes = sharedWritesFor(source)
+
+    init {
+        // The overlay's acknowledgment watcher: the source's rule flow
+        // retires the pending revision the moment it provably carries it.
+        // A newer pending revision is never cleared by an OLDER one's
+        // acknowledgment — the comparison runs against the current overlay,
+        // which a newer edit has already replaced (and an older revision
+        // matching the latest list cannot also match the newer pending
+        // unless the edits produced equal lists, where retiring is right).
+        viewModelScope.launch {
+            source.automationRules.collect { latest ->
+                val pending = writes.pendingRules ?: return@collect
+                if (isAcknowledged(latest, pending, writes.removedIds)) {
+                    writes.pendingRules = null
+                    writes.removedIds = emptySet()
+                }
+            }
         }
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyMap())
+    }
 
-    fun setEnabled(enabled: Boolean) = save { settingsDataStore.saveAutomationEnabled(enabled) }
+    fun addRule(rule: AutomationRule) = persistRules { base -> withRuleAdded(base, rule) }
 
-    fun addRule(rule: AutomationRule) =
-        persistRules(withRuleAdded(settingsDataStore.automationRules.value, rule))
+    fun updateRule(rule: AutomationRule) = persistRules { base -> withRuleUpdated(base, rule) }
 
-    fun updateRule(rule: AutomationRule) =
-        persistRules(withRuleUpdated(settingsDataStore.automationRules.value, rule))
-
-    fun removeRule(ruleId: String) =
-        persistRules(withRuleRemoved(settingsDataStore.automationRules.value, ruleId))
+    fun removeRule(ruleId: String) = persistRules { base -> withRuleRemoved(base, ruleId) }
 
     fun setRuleEnabled(ruleId: String, enabled: Boolean) =
-        persistRules(withRuleEnabled(settingsDataStore.automationRules.value, ruleId, enabled))
+        persistRules { base -> withRuleEnabled(base, ruleId, enabled) }
 
     fun duplicateRule(rule: AutomationRule, copyName: String) =
-        persistRules(withRuleDuplicated(settingsDataStore.automationRules.value, rule, copyName))
+        persistRules { base -> withRuleDuplicated(base, rule, copyName) }
+
+    /**
+     * The list the next edit transforms: the source's current rules, unless
+     * an earlier edit's write is still pending — then the pending list (the
+     * source is not current until that write's truth lands). A pending write
+     * the source has already acknowledged retires here (belt-and-braces:
+     * the init collector clears it on the flow beat).
+     */
+    private fun baseRules(): List<AutomationRule> {
+        val pending = writes.pendingRules ?: return source.automationRules.value
+        val latest = source.automationRules.value
+        return if (isAcknowledged(latest, pending, writes.removedIds)) latest else pending
+    }
 
     /**
      * The Automation Test: fire [ruleId]'s actions once (snapshot held), or
-     * wind the armed test back. The arm verifies the id against the persisted
-     * rules, so an unknown id is a logged no-op — the card action only
-     * appears for rules that exist.
+     * wind the armed test back. The backend verifies the id against the
+     * persisted rules, so an unknown id is a logged no-op — the card action
+     * only appears for rules that exist.
      */
-    fun runRuleTest(ruleId: String) {
-        save { testController.arm(ruleId) }
+    fun runRuleTest(ruleId: String) = source.runRuleTest(ruleId)
+
+    fun restoreRuleTest() = source.restoreRuleTest()
+
+    /**
+     * The single persist seam: every rules edit enqueues its transform onto
+     * the serialized write chain ([SharedWrites.writeChain]). The write
+     * coroutine builds its list on [baseRules] only after the preceding
+     * write has settled — so the base is the latest persisted rules (or the
+     * pending overlay in the acknowledged-write round-trip gap), sanitizes,
+     * saves — and parks the sanitized list as the pending edit state
+     * [baseRules] builds on until the source's flows acknowledge it (or the
+     * write fails).
+     */
+    private fun persistRules(build: (List<AutomationRule>) -> List<AutomationRule>) {
+        if (source.rulesReady.value) {
+            enqueuePersist(build)
+            return
+        }
+        // The backend's rule truth has not loaded: the source's flow still
+        // carries its placeholder (empty) list, and building the edit on it
+        // would save that placeholder wholesale — a wipe of the device's
+        // rules. The wait is deliberately UNBOUNDED (cancellation aside): a
+        // timed-out wait silently DROPPED the edit — the user's save would
+        // vanish with no error anywhere. The edit stays parked here until
+        // the backend answers or the user leaves the screen (the ViewModel's
+        // scope tears down); once ready, the existing save and error
+        // behavior takes over unchanged.
+        viewModelScope.launch {
+            source.rulesReady.first { it }
+            enqueuePersist(build)
+        }
     }
 
-    fun restoreRuleTest() {
-        save { testController.restore() }
+    /** Links one edit's write onto the chain: it starts when the previous write settles. */
+    private fun enqueuePersist(build: (List<AutomationRule>) -> List<AutomationRule>) {
+        val previous = writes.writeChain
+        writes.writeChain = viewModelScope.launch {
+            previous?.join()
+            resyncIfNeeded()
+            val base = baseRules()
+            persistNow(build(base), base)
+        }
     }
 
-    /** The single persist seam: every rules write sanitizes, then saves. */
-    private fun persistRules(rules: List<AutomationRule>) = save {
-        settingsDataStore.saveAutomationRules(AutomationSchedulePolicy.sanitizeRules(rules))
+    /**
+     * The ambiguous-write reconcile ([SharedWrites.needsResync]): a refused
+     * or dropped write may have committed anyway (a lost PUT reply), so the
+     * next edit must not build on the pre-failure mirror — its wholesale
+     * save would carry a stale rule set and restore a remotely committed
+     * removal. Wait (bounded — an unreachable backend must not park the
+     * queued edit forever) for the source's next authoritative emission and
+     * let the chain's [baseRules] read it; on timeout the current mirror is
+     * the freshest visible truth and serves as the base.
+     */
+    private suspend fun resyncIfNeeded() {
+        if (!writes.needsResync) return
+        writes.needsResync = false
+        withTimeoutOrNull(RESYNC_TIMEOUT_MS) {
+            source.automationRules.drop(1).first()
+        }
     }
 
-    private fun save(block: suspend () -> Unit) {
-        viewModelScope.launch { block() }
+    private suspend fun persistNow(rules: List<AutomationRule>, base: List<AutomationRule>) {
+        val sanitized = AutomationSchedulePolicy.sanitizeRules(rules)
+        writes.pendingRules = sanitized
+        writes.removedIds = base.mapNotNull { it.id }.toSet() - sanitized.mapNotNull { it.id }.toSet()
+        val handle = source.saveRules(sanitized)
+        // The write outlives this ViewModel (it runs on the source's own
+        // scope), so its verdict must be observed even when the awaiting
+        // coroutine is gone: a refusal landing after a route change abandoned
+        // the await must still retire the shared revision, or a later
+        // instance's edit would build on (and re-save) it. Success retires
+        // nothing here — the overlay holds until the flows acknowledge it,
+        // because the read side can lag the settle.
+        handle.invokeOnCompletion { cause ->
+            if (cause != null && writes.pendingRules === sanitized) retireRevision()
+        }
+        try {
+            handle.await()
+        } catch (e: CancellationException) {
+            if (currentCoroutineContext().isActive) {
+                // The WRITE HANDLE was cancelled out of band — the source's
+                // write scope died or the round trip was abandoned — while
+                // this ViewModel's coroutine is still active. The write will
+                // never settle observably, so retire the overlay exactly
+                // like a refused write (the completion listener above has
+                // usually done it; same verdict, same guard) and flag the
+                // next edit's authoritative reconcile. The ViewModel's OWN
+                // cancellation (an inactive context — the scope tearing
+                // down) still propagates.
+                if (writes.pendingRules === sanitized) retireRevision()
+            } else {
+                throw e
+            }
+        } catch (_: Exception) {
+            // The backend refused or dropped the write: the completion
+            // listener above already retired the failed revision and flagged
+            // the resync — a later edit must neither build on (and re-save)
+            // it nor skip reconciling with the authoritative rules.
+        }
+    }
+
+    /** Retires the outstanding revision and flags the next edit's authoritative reconcile. */
+    private fun retireRevision() {
+        writes.pendingRules = null
+        writes.removedIds = emptySet()
+        writes.needsResync = true
     }
 
     class Factory(
-        private val cameraService: CameraService,
-        private val settingsDataStore: SettingsDataStore,
-        private val fireJournal: AutomationFireJournal,
-        private val testController: AutomationTestController,
+        /** The backend for this route's device argument (local when absent). */
+        private val source: AutomationSource,
     ) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
         override fun <T : ViewModel> create(modelClass: Class<T>): T {
-            return AutomationViewModel(cameraService, settingsDataStore, fireJournal, testController) as T
+            return AutomationViewModel(source) as T
         }
+    }
+
+    /**
+     * The write coordination shared by every ViewModel instance over the
+     * same [AutomationSource]: the screen's `viewModel()` is
+     * backstack-entry scoped, so a route away-and-back builds a FRESH
+     * instance over the ONE app-scoped source while the old instance's
+     * write may still be unsettled (it runs on the source's own scope and
+     * survives the instance). Per-instance chain and overlay state would let
+     * the new instance's first edit build on the pre-write mirror and
+     * wholesale-save it — resurrecting what the older write had just removed
+     * (remove A, navigate away and back, remove B: A comes back). Keying the
+     * overlay, the chain, and the resync flag by the source keeps both
+     * instances in ONE serialization: the next edit's transform applies to
+     * the unsettled revision, and both edits land. Edits and the
+     * acknowledgment watcher run on the main thread (the screen's
+     * callbacks), so the holder's plain fields are enough; the map is only
+     * a lookup aid.
+     */
+    private class SharedWrites {
+        /** The outstanding revision's list — [AutomationViewModel.baseRules]' base. */
+        var pendingRules: List<AutomationRule>? = null
+
+        /** The ids [pendingRules] dropped — the acknowledgment's removal evidence. */
+        var removedIds: Set<String> = emptySet()
+
+        /** The last enqueued edit's write coroutine (the serialization chain). */
+        var writeChain: Job? = null
+
+        /**
+         * Set when a write settles ambiguously (refused, dropped, or a lost
+         * reply that may have committed anyway): the next edit must
+         * reconcile with the authoritative rules before transforming.
+         */
+        var needsResync: Boolean = false
     }
 
     companion object {
 
-        /** The last-fired poll beat, matching the scheduler's own poll cadence. */
-        private val FIRE_POLL_MILLIS = StreamDefaults.AUTOMATION_POLL_SECONDS * 1_000L
+        /**
+         * The bounded wait for an authoritative emission during
+         * [AutomationViewModel.resyncIfNeeded]'s reconcile: the remote beat
+         * re-fetches within a poll interval, a healthy device answers in
+         * this span, and a backend that never emits again leaves the current
+         * mirror (already the freshest visible truth) as the base rather
+         * than parking the queued edit forever.
+         */
+        private const val RESYNC_TIMEOUT_MS = 5_000L
+
+        /** One [SharedWrites] per source — app-scoped singletons, so keyed by identity. */
+        private val sharedWrites: MutableMap<AutomationSource, SharedWrites> =
+            Collections.synchronizedMap(WeakHashMap<AutomationSource, SharedWrites>())
+
+        private fun sharedWritesFor(source: AutomationSource): SharedWrites =
+            synchronized(sharedWrites) {
+                sharedWrites[source] ?: SharedWrites().also { sharedWrites[source] = it }
+            }
 
         // ── pure rule-list transforms (JVM-tested) ──
 
@@ -222,8 +404,6 @@ class AutomationViewModel(
             return rules.toMutableList().apply { add(index + 1, copy) }
         }
 
-
-
         /** Replace the entry with [rule]'s id; unknown or id-less rules are no-ops. */
         fun withRuleUpdated(rules: List<AutomationRule>, rule: AutomationRule): List<AutomationRule> {
             val id = rule.id ?: return rules
@@ -239,6 +419,42 @@ class AutomationViewModel(
             ruleId: String,
             enabled: Boolean,
         ): List<AutomationRule> = rules.map { if (it.id == ruleId) it.copy(enabled = enabled) else it }
+
+        /**
+         * Whether the source's emitted [latest] rules already carry the
+         * pending write — [pending], which dropped [removedIds] — so the
+         * overlay may retire onto [latest] as the next edit's base.
+         *
+         * Equality with the read-only `lastFiredAt` fire stamp stripped is
+         * the exact echo (the remote document decorates rules with it and
+         * [AutomationSchedulePolicy.sanitizeRules] resets it, so the raw
+         * lists can differ on that read-only field alone while every
+         * configured value matches). Supersession is the conflict-aware
+         * half: every kept rule verbatim in [latest] AND every removed id
+         * still absent means the emission's snapshot provably post-dates the
+         * write — a pre-write snapshot cannot carry a kept rule's NEW
+         * content, nor miss a rule the base had. Equality alone would wedge
+         * the overlay shut forever when a concurrent writer changed the
+         * document after our commit (a web console adding rule C: the echo
+         * of our edit never lands as an exact match), and every later edit
+         * would re-save the stale overlay wholesale — wiping C; retirement
+         * must wait for the authoritative list either way (the read side
+         * lags the settle), but when it does land it may already be past
+         * the write. The removal evidence keeps the predicate sound: for a
+         * removal, a PRE-write snapshot trivially contains every kept rule,
+         * so "removed ids still absent" is what separates it from the
+         * post-write truth.
+         */
+        fun isAcknowledged(
+            latest: List<AutomationRule>,
+            pending: List<AutomationRule>,
+            removedIds: Set<String> = emptySet(),
+        ): Boolean {
+            val stripped = latest.map { it.copy(lastFiredAt = null) }
+            if (stripped == pending) return true
+            if (!stripped.containsAll(pending)) return false
+            return removedIds.none { id -> latest.any { it.id == id } }
+        }
 
         /**
          * The params a freshly picked action starts with: every required param

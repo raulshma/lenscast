@@ -272,11 +272,17 @@ class RecordingController(
                 val self = kotlin.coroutines.coroutineContext[Job]
                 val delayMs = startAtMs - System.currentTimeMillis()
                 if (delayMs > 0) delay(delayMs)
-                // A stop() past the delay point cannot cancel this job anymore;
-                // only fire if we are still the active schedule.
-                val fire = synchronized(lock) { scheduledJob === self }
-                if (fire) {
-                    launchService(startIntent(scheduled), foreground = true)
+                // Fire-or-cancel is ONE lock turn: the still-current check and
+                // the START launch share [lock] with cancelScheduleLocked/stop,
+                // so a cancel either lands entirely before the fire (the check
+                // fails, no intent) or entirely after it (a live recording the
+                // cancel must not touch) — a cancel between verdict and launch
+                // could otherwise slip a START past its own cancellation (the
+                // same fire-time re-check discipline as the #14 grace window).
+                synchronized(lock) {
+                    if (scheduledJob === self) {
+                        launchService(startIntent(scheduled), foreground = true)
+                    }
                 }
             }
         }

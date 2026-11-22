@@ -1,10 +1,5 @@
 package com.raulshma.lenscast.gallery
 
-import android.view.Gravity
-import android.view.ViewGroup
-import android.widget.FrameLayout
-import android.widget.MediaController
-import android.widget.VideoView
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.fadeIn
@@ -16,10 +11,8 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.pager.HorizontalPager
@@ -33,11 +26,9 @@ import androidx.compose.material.icons.filled.ChevronLeft
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Info
-import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.StarBorder
-import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -47,7 +38,6 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -59,7 +49,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
@@ -70,11 +59,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.viewinterop.AndroidView
 import kotlinx.coroutines.launch
-import coil3.compose.AsyncImage
-import coil3.request.ImageRequest
-import coil3.request.crossfade
 import com.raulshma.lenscast.R
 import com.raulshma.lenscast.capture.model.CaptureHistory
 import com.raulshma.lenscast.capture.model.CaptureType
@@ -95,14 +80,16 @@ fun MediaViewerScreen(
     allItems: List<CaptureHistory>,
     initialMediaId: String,
     pagerState: PagerState,
+    /**
+     * The [GallerySource] whose render slots decode the paged media and whose
+     * verdicts gate the mutating affordances (favorite toggle, share,
+     * open-externally, delete copy).
+     */
+    source: GallerySource,
     /** The snapshotted id the delete dialog confirmed against. */
     onDelete: (String) -> Unit,
     onToggleFavorite: (String) -> Unit = {},
     onNavigateBack: () -> Unit,
-    /** Encrypted-at-rest photos' decrypted cache files, keyed by history id. */
-    decryptedPhotos: Map<String, java.io.File> = emptyMap(),
-    /** Encrypted-at-rest videos: played through the decrypting stream. */
-    encryptedVideoIds: Set<String> = emptySet(),
 ) {
     if (allItems.isEmpty()) {
         Box(modifier = Modifier.fillMaxSize().background(Color.Black), contentAlignment = Alignment.Center) {
@@ -124,7 +111,16 @@ fun MediaViewerScreen(
         AlertDialog(
             onDismissRequest = { deleteTarget = null },
             title = { Text(stringResource(R.string.gallery_delete)) },
-            text = { Text(stringResource(R.string.gallery_delete_item_message, pendingDelete.fileName)) },
+            text = {
+                // Staging deletes read as a simple confirm (the undo snackbar
+                // follows in the grid); the remote wire delete is permanent —
+                // the companion media tab's "cannot be undone" copy says so.
+                if (source.deleteIsUndoable) {
+                    Text(stringResource(R.string.gallery_delete_item_message, pendingDelete.fileName))
+                } else {
+                    Text(stringResource(R.string.companion_media_delete_confirm_single, pendingDelete.fileName))
+                }
+            },
             confirmButton = {
                 TextButton(onClick = { deleteTarget = null; onDelete(pendingDelete.id) }) {
                     Text(stringResource(R.string.gallery_delete), color = MaterialTheme.colorScheme.error)
@@ -144,14 +140,13 @@ fun MediaViewerScreen(
             val item = allItems.getOrElse(page) { return@HorizontalPager }
             when (item.type) {
                 CaptureType.PHOTO -> PhotoViewer(
-                    filePath = item.filePath,
-                    mediaId = item.id,
+                    item = item,
                     enableSharedElement = item.id == initialMediaId,
-                    decryptedModel = decryptedPhotos[item.id],
+                    source = source,
                 )
                 CaptureType.VIDEO -> VideoViewer(
-                    filePath = item.filePath,
-                    encrypted = item.id in encryptedVideoIds,
+                    item = item,
+                    source = source,
                 )
             }
         }
@@ -187,15 +182,21 @@ fun MediaViewerScreen(
                 IconButton(onClick = { detailsExpanded = !detailsExpanded }) {
                     Icon(Icons.Default.Info, contentDescription = stringResource(R.string.gallery_toggle_details_cd), tint = Color.White)
                 }
-                IconButton(onClick = { shareGalleryMedia(context, listOf(mediaItem)) }) {
-                    Icon(Icons.Default.Share, contentDescription = stringResource(R.string.gallery_share_cd), tint = Color.White)
+                // Share / open-externally hand local bytes to other apps —
+                // hidden where the backend's media has none (remote items).
+                if (source.canShareExternally) {
+                    IconButton(onClick = { shareGalleryMedia(context, listOf(mediaItem)) }) {
+                        Icon(Icons.Default.Share, contentDescription = stringResource(R.string.gallery_share_cd), tint = Color.White)
+                    }
+                    IconButton(onClick = { openMediaExternal(context, mediaItem) }) {
+                        Icon(Icons.AutoMirrored.Filled.OpenInNew, contentDescription = stringResource(R.string.gallery_open_externally_cd), tint = Color.White)
+                    }
                 }
-                IconButton(onClick = { openMediaExternal(context, mediaItem) }) {
-                    Icon(Icons.AutoMirrored.Filled.OpenInNew, contentDescription = stringResource(R.string.gallery_open_externally_cd), tint = Color.White)
-                }
-                IconButton(onClick = { onToggleFavorite(mediaItem.id) }) {
+                IconButton(onClick = { onToggleFavorite(mediaItem.id) }, enabled = source.canFavorite) {
                     // The viewer's star toggle; the grid badge and the favorites
-                    // filter read the same persisted flag.
+                    // filter read the same persisted flag. Where the backend
+                    // carries it read-only (the remote wire), the star stays as
+                    // a state indicator, disabled rather than hidden.
                     Icon(
                         if (mediaItem.favorite) Icons.Default.Star else Icons.Default.StarBorder,
                         contentDescription = stringResource(
@@ -263,11 +264,9 @@ fun MediaViewerScreen(
 @OptIn(ExperimentalSharedTransitionApi::class)
 @Composable
 private fun PhotoViewer(
-    filePath: String,
-    mediaId: String,
+    item: CaptureHistory,
     enableSharedElement: Boolean,
-    /** The decrypted cache file, when the photo is encrypted at rest. */
-    decryptedModel: Any? = null,
+    source: GallerySource,
 ) {
     val sharedTransitionScope = LocalSharedTransitionScope.current
     val animatedVisibilityScope = LocalAnimatedVisibilityScope.current
@@ -278,7 +277,6 @@ private fun PhotoViewer(
     // against, not part of the output.
     var transform by remember { mutableStateOf(ViewerZoomPolicy.Transform(1f, 0f, 0f)) }
     var viewport by remember { mutableStateOf(IntSize.Zero) }
-    val imageModel = decryptedModel ?: resolveMediaModel(filePath)
 
     Box(
         modifier = Modifier
@@ -307,114 +305,41 @@ private fun PhotoViewer(
             },
         contentAlignment = Alignment.Center,
     ) {
-        if (imageModel != null) {
-            AsyncImage(
-                model = ImageRequest.Builder(LocalContext.current).data(imageModel).crossfade(true).build(),
-                contentDescription = null,
-                modifier = Modifier
-                    .fillMaxSize()
-                    .then(
-                        if (enableSharedElement && sharedTransitionScope != null && animatedVisibilityScope != null) {
-                            with(sharedTransitionScope) {
-                                Modifier.sharedElement(
-                                    rememberSharedContentState(key = "media-$mediaId"),
-                                    animatedVisibilityScope,
-                                )
-                            }
-                        } else Modifier
-                    )
-                    .graphicsLayer {
-                        scaleX = transform.scale
-                        scaleY = transform.scale
-                        translationX = transform.offsetX
-                        translationY = transform.offsetY
-                    }
-                    .onSizeChanged { viewport = it },
-                contentScale = ContentScale.Fit,
-            )
-        } else {
-            ViewerUnavailable(icon = Icons.Default.PhotoCamera, label = stringResource(R.string.gallery_image_unavailable))
-        }
-    }
-}
-
-@Composable
-private fun VideoViewer(filePath: String, encrypted: Boolean) {
-    val context = androidx.compose.ui.platform.LocalContext.current
-    val app = context.applicationContext as com.raulshma.lenscast.AppGraph
-    // The four-way display verdict, resolved as a type: encryption wins by
-    // TYPE inside resolveViewerMedia, so this when is exhaustive and order-free.
-    val resolved = resolveViewerMedia(filePath, encrypted)
-    val exoPlayer = androidx.compose.runtime.remember {
-        androidx.media3.exoplayer.ExoPlayer.Builder(context).build().apply {
-            repeatMode = androidx.media3.common.Player.REPEAT_MODE_OFF
-        }
-    }
-    androidx.compose.runtime.DisposableEffect(resolved) {
-        when (resolved) {
-            // Encrypted at rest: the media never exists as plaintext bytes the
-            // player could open, so playback rides the decrypting DataSource
-            // (seeks are sequential decrypt-and-discard — see the source).
-            ResolvedMedia.EncryptedVideo -> {
-                val resolver = com.raulshma.lenscast.capture.CaptureMediaResolver(
-                    context.contentResolver,
-                    app.mediaKeyProvider,
-                )
-                val mediaSource = androidx.media3.exoplayer.source.DefaultMediaSourceFactory(
-                    DecryptingDataSourceFactory(resolver, filePath),
-                ).createMediaSource(
-                    androidx.media3.common.MediaItem.fromUri(
-                        android.net.Uri.parse("lenscast://decrypted/$filePath")
-                    ),
-                )
-                exoPlayer.setMediaSource(mediaSource)
-                exoPlayer.prepare()
-                exoPlayer.playWhenReady = true
-            }
-            is ResolvedMedia.SchemeUri -> {
-                exoPlayer.setMediaItem(androidx.media3.common.MediaItem.fromUri(resolved.uri))
-                exoPlayer.prepare()
-                exoPlayer.playWhenReady = true
-            }
-            is ResolvedMedia.PlainFile -> {
-                exoPlayer.setMediaItem(
-                    androidx.media3.common.MediaItem.fromUri(android.net.Uri.fromFile(resolved.file))
-                )
-                exoPlayer.prepare()
-                exoPlayer.playWhenReady = true
-            }
-            ResolvedMedia.Missing -> Unit
-        }
-        onDispose { exoPlayer.stop() }
-    }
-    androidx.compose.runtime.DisposableEffect(Unit) {
-        onDispose { exoPlayer.release() }
-    }
-
-    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        when (resolved) {
-            ResolvedMedia.Missing ->
-                ViewerUnavailable(icon = Icons.Default.Videocam, label = stringResource(R.string.gallery_video_unavailable))
-            else ->
-                AndroidView(
-                    modifier = Modifier.fillMaxSize(),
-                    factory = { ctx ->
-                        androidx.media3.ui.PlayerView(ctx).apply {
-                            player = exoPlayer
-                            useController = true
+        // The decode is the source's slot (Coil over this phone's bytes, or
+        // the authed fetch over the device's media route); the screen owns
+        // the gesture transform and the shared-element binding.
+        source.photo(
+            item,
+            Modifier
+                .fillMaxSize()
+                .then(
+                    if (enableSharedElement && sharedTransitionScope != null && animatedVisibilityScope != null) {
+                        with(sharedTransitionScope) {
+                            Modifier.sharedElement(
+                                rememberSharedContentState(key = "media-${item.id}"),
+                                animatedVisibilityScope,
+                            )
                         }
-                    },
+                    } else Modifier
                 )
-        }
+                .graphicsLayer {
+                    scaleX = transform.scale
+                    scaleY = transform.scale
+                    translationX = transform.offsetX
+                    translationY = transform.offsetY
+                }
+                .onSizeChanged { viewport = it },
+        )
     }
 }
 
 @Composable
-private fun ViewerUnavailable(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String) {
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Icon(icon, contentDescription = null, modifier = Modifier.size(64.dp), tint = Color.White.copy(alpha = 0.5f))
-        Spacer(modifier = Modifier.height(8.dp))
-        Text(label, color = Color.White.copy(alpha = 0.75f), style = MaterialTheme.typography.bodyMedium)
+private fun VideoViewer(item: CaptureHistory, source: GallerySource) {
+    // Playback binding is the source's slot: this phone's files/decrypting
+    // stream locally, the authed media route over the device's engine
+    // remotely. The slot owns its unavailable state too.
+    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        source.video(item, Modifier.fillMaxSize())
     }
 }
 

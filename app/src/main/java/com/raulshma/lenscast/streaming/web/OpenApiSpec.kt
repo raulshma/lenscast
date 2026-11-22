@@ -475,6 +475,14 @@ object OpenApiSpec {
             ),
         )
         path(
+            "/api/recording/cancel-schedule",
+            "post" to operation(
+                listOf("recording"),
+                "Cancel a pending scheduled start without touching a live recording",
+                mapOf("200" to ok("SuccessResponse")),
+            ),
+        )
+        path(
             "/api/recordings/sessions",
             "get" to operation(
                 listOf("recording"),

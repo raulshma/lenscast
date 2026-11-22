@@ -683,24 +683,53 @@ class DeviceSession(val deviceId: String) {
         }
     }
 
+    // ── Detection feed clear ordering ──
+    // One lock makes each merge-and-publish (SSE frame, poll page) and the
+    // clear itself (epoch bump + wipe + publish) indivisible against the
+    // others: a feed write lands entirely before the clear (the wipe erases
+    // it) or entirely after it. Only the GETs stay outside the lock — a slow
+    // request must never delay a clear.
+
+    /**
+     * The detection feed's clear epoch: bumped by every [clearDetectionFeed]
+     * under [detectionFeedLock]. A poll stamps the epoch before dialing and
+     * merges only if it still holds — a page captured before a confirmed
+     * DELETE cannot merge after the clear and resurrect wiped events.
+     */
+    private val detectionFeedLock = Any()
+    private var detectionClearEpoch = 0L
+
     /** One detection poll: merge the page through the buffer's dedupe (transient errors leave the feed untouched — web parity). */
     private suspend fun pollDetection(client: LenscastApiClient) {
+        val epoch = synchronized(detectionFeedLock) { detectionClearEpoch }
         val page = probeCatching { client.getDetectionEvents(limit = DETECTION_POLL_LIMIT) }.getOrNull() ?: return
-        detectionBuffer.onPollRefresh(page.events)
-        publishDetectionFeed()
+        synchronized(detectionFeedLock) {
+            if (detectionClearEpoch == epoch) {
+                detectionBuffer.onPollRefresh(page.events)
+                publishDetectionFeed()
+            }
+        }
     }
 
-    /** The SSE frame handler: data-only frames decode into the deduped, capped, newest-first buffer. */
+    /**
+     * The SSE frame handler: data-only frames decode into the deduped, capped,
+     * newest-first buffer. The lock alone cannot keep the stream's in-flight
+     * backlog out — the connect-time replay burst sits buffered ahead of the
+     * collector, so a frame processed after the clear may carry an event the
+     * wipe already deleted; [reconcileDetectionFeedAfterClear] scrubs those.
+     */
     private fun onDetectionFrame(event: SseEvent) {
         // The detection stream's wire shape is the SSE-spec default (unnamed)
         // event; a named frame here is not detection telemetry.
         if (event.name != null) return
         val decoded = runCatching { detectionAdapter.fromJson(event.data) }.getOrNull() ?: return
-        detectionBuffer.onSse(decoded)
-        publishDetectionFeed()
+        synchronized(detectionFeedLock) {
+            detectionBuffer.onSse(decoded)
+            publishDetectionFeed()
+        }
     }
 
-    /** Republishes the buffer's snapshot into the conflated feed flow. */
+    /** Republishes the buffer's snapshot into the conflated feed flow. Callers hold [detectionFeedLock]. */
     private fun publishDetectionFeed() {
         _detectionEvents.update { detectionBuffer.snapshot() }
     }
@@ -729,11 +758,45 @@ class DeviceSession(val deviceId: String) {
      * calls it once the device confirmed `DELETE /api/detection/events`, so
      * the feed mirrors the emptied device log immediately instead of waiting
      * for the lane's next poll refresh to reconcile. (Retires the former
-     * documented deviation — the buffer surviving a clear.)
+     * documented deviation — the buffer surviving a clear.) Follow it with
+     * [reconcileDetectionFeedAfterClear], which scrubs the stream's in-flight
+     * pre-delete frames now that the wipe landed.
      */
     fun clearDetectionFeed() {
-        detectionBuffer.clear()
-        publishDetectionFeed()
+        // The epoch bumps BEFORE the buffer clears — atomically, under the
+        // lock: any poll response still in flight that stamped the previous
+        // epoch rejects itself at merge time instead of repopulating the
+        // just-emptied feed.
+        synchronized(detectionFeedLock) {
+            detectionClearEpoch += 1
+            detectionBuffer.clear()
+            publishDetectionFeed()
+        }
+    }
+
+    /**
+     * The clear boundary's second half: one GET of the device's post-clear
+     * truth merged as a REPLACE (wipe + page, not the merge-only poll), so a
+     * pre-delete SSE frame the lane was still delivering across the wipe —
+     * the replay backlog sits buffered ahead of the collector — cannot
+     * restore deleted events. Genuinely post-clear recordings survive: they
+     * are persisted on the device and hence in the page, and anything the
+     * page predates still arrives live and merges normally. Epoch-guarded
+     * like the poll (a page captured before an even newer clear cannot land),
+     * and silent on failure — a transient error leaves the feed as-is
+     * ([pollDetection]'s web parity).
+     */
+    suspend fun reconcileDetectionFeedAfterClear() {
+        val client = requireClient() ?: return
+        val epoch = synchronized(detectionFeedLock) { detectionClearEpoch }
+        val page = probeCatching { client.getDetectionEvents(limit = DETECTION_POLL_LIMIT) }.getOrNull() ?: return
+        synchronized(detectionFeedLock) {
+            if (detectionClearEpoch == epoch) {
+                detectionBuffer.clear()
+                detectionBuffer.onPollRefresh(page.events)
+                publishDetectionFeed()
+            }
+        }
     }
 
     // ── Small helpers ──

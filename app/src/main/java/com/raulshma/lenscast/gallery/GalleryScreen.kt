@@ -35,21 +35,42 @@ import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.raulshma.lenscast.AppGraph
 import com.raulshma.lenscast.R
 import com.raulshma.lenscast.ui.components.LensCastTopBar
 
+/**
+ * The gallery grid — one screen over the [GallerySource] seam (local store
+ * or the paired device's `/api/gallery`). Backend differences ride the
+ * source's verdicts, never a branch here: the delete star, select mode, and
+ * share affordances gate on [GallerySource.canFavorite]/[canDelete]/
+ * [canShareExternally]; the delete-confirm copy picks between the undoable
+ * (soft-delete staging) and permanent (remote wire delete) wording from
+ * [GallerySource.deleteIsUndoable]; the quota row renders only while
+ * [GallerySource.storageBar] is non-null; and every tile/viewer media decode
+ * goes through the source's render slots.
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun GalleryScreen(
+    source: GallerySource,
     onNavigateBack: () -> Unit,
     onViewMedia: (String) -> Unit,
 ) {
     val context = LocalContext.current
-    val app = context.applicationContext as AppGraph
     val viewModel: GalleryViewModel = viewModel(
-        factory = GalleryViewModel.Factory(app.captureHistoryStore, app.gallerySession)
+        factory = GalleryViewModel.Factory(source)
     )
+
+    // The library refresh, exactly once per ViewModel lifetime — the guard is
+    // the ViewModel's (refreshOnEntry), not a saveable flag here: the flag
+    // must live exactly as long as the library it refreshed. A rotation and a
+    // viewer push/pop re-compose this screen against the SAME ViewModel and
+    // skip; a fresh entry — including a process-death restore, which used to
+    // re-create the ViewModel with an empty library while the saveable flag
+    // replayed "already refreshed" and stranded the grid — refreshes once.
+    LaunchedEffect(Unit) {
+        viewModel.refreshOnEntry()
+    }
 
     val allItems by viewModel.allItems.collectAsState()
     val galleryItems by viewModel.galleryItems.collectAsState()
@@ -57,11 +78,11 @@ fun GalleryScreen(
     val searchQuery by viewModel.searchQuery.collectAsState()
     val selectMode by viewModel.selectMode.collectAsState()
     val selectedIds by viewModel.selectedIds.collectAsState()
-    val decryptedPhotos by viewModel.decryptedPhotos.collectAsState()
-    val encryptedVideoIds by viewModel.encryptedVideoIds.collectAsState()
+    val storageBar by viewModel.storageBar.collectAsState()
 
     // The trash/undo surface: each staged set arms one snackbar state holding
-    // the ids that staging burst put in the trash.
+    // the ids that staging burst put in the trash (null on the remote backend —
+    // its deletes are confirmed before the list moves, so nothing is staged).
     val undoSnackbar by viewModel.undoSnackbar.collectAsState()
 
     val overview = remember(allItems) { buildGalleryOverview(allItems) }
@@ -104,7 +125,15 @@ fun GalleryScreen(
             onDismissRequest = { pendingDeleteSelection = null },
             title = { Text(stringResource(R.string.gallery_delete_selected_title)) },
             text = {
-                Text(pluralStringResource(R.plurals.gallery_delete_selected_message, deleteSelection.size, deleteSelection.size))
+                // The staging backend deletes softly (undoable, so the local
+                // plural copy); the remote backend deletes permanently the
+                // moment the device confirms (the companion media tab's
+                // "cannot be undone" copy, single-homed there).
+                if (source.deleteIsUndoable) {
+                    Text(pluralStringResource(R.plurals.gallery_delete_selected_message, deleteSelection.size, deleteSelection.size))
+                } else {
+                    Text(stringResource(R.string.companion_media_delete_confirm_batch, deleteSelection.size))
+                }
             },
             confirmButton = {
                 TextButton(
@@ -149,8 +178,10 @@ fun GalleryScreen(
                     onNavigateBack = onNavigateBack,
                     actions = {
                         IconButton(
+                            // Select mode exists to delete in bulk — hidden
+                            // where the backend can't delete at all.
                             onClick = { viewModel.setSelectMode(true) },
-                            enabled = allItems.isNotEmpty(),
+                            enabled = source.canDelete && allItems.isNotEmpty(),
                         ) {
                             Icon(
                                 Icons.Default.SelectAll,
@@ -169,6 +200,8 @@ fun GalleryScreen(
             ) {
                 GallerySelectModeBottomBar(
                     selectedCount = selectedIds.size,
+                    // Remote items have no local bytes to hand a share intent.
+                    canShare = source.canShareExternally,
                     onShareSelected = {
                         shareGalleryMedia(context, allItems.filter { it.id in selectedIds })
                     },
@@ -197,7 +230,9 @@ fun GalleryScreen(
                 onFilterChanged = viewModel::setFilter,
                 overview = overview,
             )
-            StorageBarRow(store = app.captureHistoryStore)
+            storageBar?.let { bar ->
+                StorageBarRow(bar = bar, onFreeSpace = viewModel::enforceQuota)
+            }
 
             if (galleryItems.isEmpty()) {
                 GalleryEmptyState(
@@ -209,16 +244,27 @@ fun GalleryScreen(
                     sections = sections,
                     selectMode = selectMode,
                     selectedIds = selectedIds,
+                    thumbnail = { item, modifier -> source.thumbnail(item, modifier) },
+                    // Long-press select entry is delete plumbing too — the
+                    // gate keeps a read-only library from entering the mode
+                    // through either affordance.
+                    onItemLongClick = { item ->
+                        if (source.canDelete) {
+                            if (!selectMode) viewModel.setSelectMode(true)
+                            viewModel.toggleSelect(item.id)
+                        }
+                    },
                     onItemClick = { item ->
                         if (selectMode) viewModel.toggleSelect(item.id) else onViewMedia(item.id)
                     },
-                    onItemLongClick = { item ->
-                        if (!selectMode) viewModel.setSelectMode(true)
-                        viewModel.toggleSelect(item.id)
-                    },
                     onToggleFavorite = { item -> viewModel.toggleFavorite(item.id) },
-                    decryptedPhotos = decryptedPhotos,
-                    encryptedVideoIds = encryptedVideoIds,
+                    canToggleFavorite = source.canFavorite,
+                    onLoadMore = viewModel::loadMore,
+                    // The paging signal: the loaded library's size — a page
+                    // that filters to no visible tiles (Favorites/search)
+                    // changes nothing in the grid, and this is what keeps
+                    // the load-more walk alive past it.
+                    librarySize = allItems.size,
                 )
             }
         }
