@@ -1192,9 +1192,15 @@ with `acquireKeepAlive()` / `beginExclusiveSession()` and restore with
 ### Camera Control Plan
 **`camera/model/CameraControlPlan.kt`** — the CaptureRequest *decisions*
 (fps range, exposure, scene mode, white balance, focus, color temperature) as
-pure data built from `CameraSettings` plus the device's live ranges.
-`CameraService` only translates the plan into `CaptureRequestOptions` — the
-ISO/fps/night-vision math is unit-tested on the JVM instead of hiding in the
+pure data built from `CameraSettings` plus the device's live ranges, in two
+stages: what the settings ask for, then what the bound camera advertises
+(Capture Support) — an unadvertised value is neutralised to the camera2
+default every device honours and named in `plan.unsupported`, so one
+unsupported control never costs its neighbours. The `support` parameter
+defaults to unknown/unrestricted: a caller that does not know the capability
+lists gets the plan exactly as requested. `CameraService` only translates
+the plan into `CaptureRequestOptions` — the ISO/fps/night-vision math and
+the capability fold are unit-tested on the JVM instead of hiding in the
 service. The plan also owns the exposure-index decision
 (`exposureIndex`: clamp to the live range, skip when unchanged) and the
 metering ladder (`meteringOnApply` / `meteringOnTap` returning a
@@ -1223,7 +1229,14 @@ the post-bind controls choreography and the mid-recording apply target
 deferred controls apply is scheduled at 400 ms (the empirically-settled
 first rung — CameraX drops control calls issued synchronously inside the
 bind window) and again at 1500 ms, bounded by the settle budget; applies
-are idempotent, so rungs are cheap. `bindRecording` rebinds with
+are idempotent, so rungs are cheap. A third, event-driven rung re-asserts on
+the observed OPEN's rising edge (`BindChoreography.openStatePlan`'s
+`reassertControls`, executed inline in `observeCameraOpenState`): both timed
+rungs count from the bind and fire before a camera that opens late can take
+controls, and the observed open is the first receipt that it can. An edge,
+not an emission — LiveData re-delivers OPEN on every attach — because a
+re-assert carries a force-focus apply that would cancel a deliberate
+tap-to-focus. `bindRecording` rebinds with
 `writeBack=false` — the fresh session starts at platform defaults — so the
 same ladder runs for the recording session, and the returned Camera is
 tracked in `liveCamera` (the camera of the LIVE session): every remote,
@@ -1232,6 +1245,55 @@ observer identity guards) targets `liveCamera` first, so mid-recording
 dashboard changes land on the live session instead of silently targeting
 the closed one. `clearBoundUseCases` clears the seam and cancels pending
 applies.
+
+### Capture Options Submit
+**`camera/CameraService.kt` `CaptureOptionsSubmitter` + the tail of
+`applyCameraControls`** — the device write of the CaptureRequest bundle:
+ONE `CaptureRequestOptions` carrying every non-null plan field, submitted
+exactly once per controls apply through a `fun interface` seam. Production
+rides `Camera2CameraControl.setCaptureRequestOptions`; a recording submitter
+is injected through the internal constructor so the bundle a settings apply
+submits is JVM-assertable (`CameraServiceCaptureBundleTest`).
+
+**Replace semantics — the lesson of issue #25.** `setCaptureRequestOptions`
+first clears every option already set, then applies what it is given (the
+merging variant is `addCaptureRequestOptions`). 0.2.3 submitted its controls
+in five to eight per-group calls so one unsupported key would not drop every
+other control (1794645) — and each call wiped the one before it, so only the
+last group, white balance, reached the device. Manual ISO/exposure and night
+vision silently stopped working from every writer (dashboard, automation,
+the Run-now test) while exposure compensation, zoom and torch carried on:
+those ride CameraX's native APIs, not the bundle. Replace semantics are also
+what the fix relies on — a manual → auto apply simply omits the sensor keys,
+and AE and the scene mode return to defaults in the same write.
+
+**Validate, never split.** Isolation against unsupported keys belongs on the
+VALUES — the Camera Control Plan retires what the camera does not advertise
+(Capture Support) — never on the submit. A per-group `setCaptureRequestOptions`
+here is the regression, whatever its rationale. The future the submit returns
+is watched: a cancel (superseded by a newer submit, or the session closed
+under it) logs at debug, anything else at warn with the cause. Device-side
+log lines: `Capture options not supported by this camera: …` (one per apply
+that retired something) and `Capture options submit failed`.
+
+### Capture Support
+**`camera/model/CaptureSupport.kt`** — the values the bound camera
+advertises for the capture-request keys the plan sets: nullable sets of
+camera2 constants (`CONTROL_AVAILABLE_SCENE_MODES`,
+`CONTROL_AE_AVAILABLE_MODES`, `CONTROL_AWB_AVAILABLE_MODES`,
+`CONTROL_AF_AVAILABLE_MODES`, `LENS_INFO_AVAILABLE_OPTICAL_STABILIZATION`,
+`CONTROL_AVAILABLE_VIDEO_STABILIZATION_MODES`) plus the
+`MANUAL_POST_PROCESSING` capability flag. **Null = unknown =
+unrestricted**: the key keeps being sent exactly as before the type existed
+— an unreadable capability must never read as "unsupported" and neutralise
+a control that works. `CameraService.bindUseCases` reads the lists beside
+the sensor ranges, from the logical camera's `CameraCharacteristics`
+intersected (`intersect`) with the selected physical lens's when one drives
+the use cases: a logical multi-camera can advertise what only one of its
+physical lenses has (optical stabilization on the zoom lens, none on the
+wide one), so only the intersection is what the selected lens can honour. A
+missing list on either side leaves that set unrestricted; a failed query
+keeps the previous value.
 
 ### Quick Setting Catalog
 **`camera/model/QuickSettingCatalog.kt`** — one pure descriptor per

@@ -11,6 +11,11 @@ import android.hardware.camera2.CaptureRequest
  * exposure-index decisions ([meteringOnApply], [exposureIndex]) live here too,
  * as pure data — the [FocusMeteringAction][androidx.camera.core.FocusMeteringAction]
  * construction itself stays in the service.
+ *
+ * Built in two stages ([from]): what the settings ask for, then what the bound
+ * camera advertises ([CaptureSupport]) — an unadvertised value is neutralised
+ * here and listed in [unsupported], so the service can submit every control in
+ * ONE capture-request bundle without one unsupported key costing the rest.
  */
 data class CameraControlPlan(
     val fpsLower: Int,
@@ -35,7 +40,108 @@ data class CameraControlPlan(
      * provided; null otherwise (auto WB modes ignore any stored temperature).
      */
     val colorTemperatureKelvin: Int?,
+    /**
+     * The controls this camera does not advertise, each neutralised to its
+     * camera2 default above — short control names for the apply-time log
+     * line. Empty when the device honours every requested value, and always
+     * empty under [CaptureSupport.UNRESTRICTED]: an unknown list restricts
+     * nothing.
+     */
+    val unsupported: List<String> = emptyList(),
 ) {
+    /**
+     * Folds the device's advertised capabilities onto this — the requested —
+     * plan. A value the camera does not advertise is replaced by the
+     * camera2 default every device honours and named in [unsupported];
+     * everything else passes through untouched, so one unadvertised control
+     * never costs its neighbours. This is where the isolation lives that
+     * 1794645 tried to get by splitting the submit: the service sends ONE
+     * bundle, so a value the HAL would reject has to be retired here, before
+     * it can take the whole request down with it.
+     *
+     * The defaults are the ones camera2 guarantees on every device: scene mode
+     * DISABLED, AE mode ON, AWB mode AUTO. Night-vision AUTO's ON_AUTO_FLASH
+     * drops to plain ON; an OFF mode the device does not advertise — manual
+     * white balance, manual focus — drops to its default and takes its
+     * dependant with it (the Kelvin gains ride AWB OFF, the focus distance
+     * rides AF OFF), which would otherwise be ignored or, worse, half-applied.
+     */
+    private fun limitedTo(support: CaptureSupport): CameraControlPlan {
+        val dropped = mutableListOf<String>()
+
+        // DISABLED is always valid whether or not the device lists it.
+        var supportedSceneMode = sceneMode
+        if (supportedSceneMode != CaptureRequest.CONTROL_SCENE_MODE_DISABLED &&
+            !support.sceneModes.advertises(supportedSceneMode)
+        ) {
+            dropped += UNSUPPORTED_SCENE_MODE
+            supportedSceneMode = CaptureRequest.CONTROL_SCENE_MODE_DISABLED
+        }
+
+        var supportedAeMode = aeMode
+        if (!support.aeModes.advertises(supportedAeMode)) {
+            dropped += UNSUPPORTED_AE_MODE
+            supportedAeMode = CaptureRequest.CONTROL_AE_MODE_ON
+        }
+
+        var supportedAwbMode = awbMode
+        var supportedKelvin = colorTemperatureKelvin
+        if (!support.awbModes.advertises(supportedAwbMode)) {
+            dropped += UNSUPPORTED_WHITE_BALANCE
+            supportedAwbMode = CaptureRequest.CONTROL_AWB_MODE_AUTO
+            supportedKelvin = null
+        }
+        if (supportedKelvin != null && support.manualPostProcessing == false) {
+            // The color-correction gains need MANUAL_POST_PROCESSING; without
+            // it the device would keep running its own white balance over
+            // AWB OFF, so the Kelvin value has nothing to drive.
+            dropped += UNSUPPORTED_MANUAL_WHITE_BALANCE
+            supportedKelvin = null
+        }
+
+        var supportedAfMode = afMode
+        var supportedFocusDistance = lensFocusDistance
+        if (supportedAfMode != null && !support.afModes.advertises(supportedAfMode)) {
+            // Back to cameraX's default continuous AF: the lens is the
+            // autofocus algorithm's again, so a stored distance must not
+            // ride along.
+            dropped += UNSUPPORTED_FOCUS
+            supportedAfMode = null
+            supportedFocusDistance = null
+        }
+
+        // Only ON can be unadvertised — camera2 lists OFF on every device — so
+        // the neutralised plan still sends OFF: the mode switches off, it is
+        // never left dangling on the previous request's value.
+        var supportedOpticalStabilization = opticalStabilizationOn
+        if (supportedOpticalStabilization &&
+            !support.opticalStabilizationModes.advertises(CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE_ON)
+        ) {
+            dropped += UNSUPPORTED_OPTICAL_STABILIZATION
+            supportedOpticalStabilization = false
+        }
+
+        var supportedVideoStabilization = videoStabilizationOn
+        if (supportedVideoStabilization &&
+            !support.videoStabilizationModes.advertises(CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_ON)
+        ) {
+            dropped += UNSUPPORTED_VIDEO_STABILIZATION
+            supportedVideoStabilization = false
+        }
+
+        return copy(
+            videoStabilizationOn = supportedVideoStabilization,
+            opticalStabilizationOn = supportedOpticalStabilization,
+            sceneMode = supportedSceneMode,
+            aeMode = supportedAeMode,
+            awbMode = supportedAwbMode,
+            afMode = supportedAfMode,
+            lensFocusDistance = supportedFocusDistance,
+            colorTemperatureKelvin = supportedKelvin,
+            unsupported = dropped,
+        )
+    }
+
     /** How a metering action should fire — the mode ladder in [meteringOnApply]. */
     sealed interface MeteringDecision {
         /** Meter, then auto-cancel after [METERING_AUTO_CANCEL_SECONDS]. */
@@ -52,7 +158,30 @@ data class CameraControlPlan(
         /** The auto-cancel window, in seconds, for deliberate metering. */
         const val METERING_AUTO_CANCEL_SECONDS = 5L
 
+        /** The [CameraControlPlan.unsupported] names — one per control the plan can neutralise. */
+        const val UNSUPPORTED_SCENE_MODE = "scene mode"
+        const val UNSUPPORTED_AE_MODE = "AE mode"
+        const val UNSUPPORTED_WHITE_BALANCE = "white balance mode"
+        const val UNSUPPORTED_MANUAL_WHITE_BALANCE = "manual white balance (Kelvin)"
+        const val UNSUPPORTED_FOCUS = "manual focus"
+        const val UNSUPPORTED_OPTICAL_STABILIZATION = "optical stabilization"
+        const val UNSUPPORTED_VIDEO_STABILIZATION = "video stabilization"
+
+        /**
+         * The plan in two stages: what the settings ask for ([requested]),
+         * then what this camera can honour ([support] — the advertised
+         * capability lists, defaulting to unknown/unrestricted so every
+         * caller that does not know them gets the plan as requested).
+         */
         fun from(
+            settings: CameraSettings,
+            isoRange: ClosedRange<Int>,
+            sensorExposureTimeRange: LongRange,
+            support: CaptureSupport = CaptureSupport.UNRESTRICTED,
+        ): CameraControlPlan = requested(settings, isoRange, sensorExposureTimeRange).limitedTo(support)
+
+        /** The plan exactly as the settings and the sensor's ranges ask for it — no capability fold yet. */
+        private fun requested(
             settings: CameraSettings,
             isoRange: ClosedRange<Int>,
             sensorExposureTimeRange: LongRange,
@@ -265,3 +394,6 @@ data class CameraControlPlan(
         fun meteringOnTap(): MeteringDecision = MeteringDecision.AutoCancelMetering
     }
 }
+
+/** Whether an advertised list contains [value]; an unknown (null) list advertises everything. */
+private fun <T> Set<T>?.advertises(value: T): Boolean = this == null || value in this

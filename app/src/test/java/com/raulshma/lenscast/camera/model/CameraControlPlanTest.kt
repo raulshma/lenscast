@@ -4,6 +4,7 @@ import android.hardware.camera2.CaptureRequest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class CameraControlPlanTest {
@@ -212,5 +213,307 @@ class CameraControlPlanTest {
     @Test
     fun `the auto-cancel window is five seconds`() {
         assertEquals(5L, CameraControlPlan.METERING_AUTO_CANCEL_SECONDS)
+    }
+
+    // ── the capability fold: what the bound camera advertises ──
+
+    private fun planFor(settings: CameraSettings, support: CaptureSupport? = null): CameraControlPlan =
+        if (support == null) {
+            CameraControlPlan.from(settings, isoRange, exposureRange)
+        } else {
+            CameraControlPlan.from(settings, isoRange, exposureRange, support)
+        }
+
+    @Test
+    fun `the unrestricted default produces the same plan as before`() {
+        // Every settings shape the plan knows, with and without the new
+        // parameter: unknown capability lists must not move a single field,
+        // and nothing may be reported as unsupported.
+        val shapes = listOf(
+            CameraSettings(),
+            CameraSettings(iso = 800, exposureTime = 20_000_000L, frameRate = 30),
+            CameraSettings(nightVisionMode = NightVisionMode.ON, frameRate = 60),
+            CameraSettings(nightVisionMode = NightVisionMode.AUTO),
+            CameraSettings(nightVisionMode = NightVisionMode.AUTO, iso = 400),
+            CameraSettings(hdrMode = HdrMode.ON),
+            CameraSettings(sceneMode = CaptureRequest.CONTROL_SCENE_MODE_SPORTS.toString()),
+            CameraSettings(focusMode = FocusMode.MANUAL, focusDistance = 3f),
+            CameraSettings(whiteBalance = WhiteBalance.MANUAL, colorTemperature = 4200),
+            CameraSettings(whiteBalance = WhiteBalance.CLOUDY, stabilization = false),
+        )
+        shapes.forEach { settings ->
+            val before = planFor(settings)
+            assertEquals(before, planFor(settings, CaptureSupport.UNRESTRICTED))
+            assertEquals(before, planFor(settings, CaptureSupport()))
+            assertTrue("nothing unsupported under unknown lists: $settings", before.unsupported.isEmpty())
+        }
+    }
+
+    @Test
+    fun `an unadvertised scene mode resets to disabled and is reported`() {
+        val plan = planFor(
+            CameraSettings(nightVisionMode = NightVisionMode.ON, frameRate = 60),
+            CaptureSupport(sceneModes = setOf(CaptureRequest.CONTROL_SCENE_MODE_DISABLED, CaptureRequest.CONTROL_SCENE_MODE_HDR)),
+        )
+
+        // Only the scene key is neutralised: the night-vision fps range and
+        // the AE unlock are the plan's own decisions and stand.
+        assertEquals(CaptureRequest.CONTROL_SCENE_MODE_DISABLED, plan.sceneMode)
+        assertEquals(listOf(CameraControlPlan.UNSUPPORTED_SCENE_MODE), plan.unsupported)
+        assertEquals(10, plan.fpsLower)
+        assertEquals(15, plan.fpsUpper)
+        assertFalse(plan.aeLock!!)
+    }
+
+    @Test
+    fun `an advertised scene mode passes through`() {
+        val plan = planFor(
+            CameraSettings(nightVisionMode = NightVisionMode.ON),
+            CaptureSupport(sceneModes = setOf(CaptureRequest.CONTROL_SCENE_MODE_NIGHT)),
+        )
+
+        assertEquals(CaptureRequest.CONTROL_SCENE_MODE_NIGHT, plan.sceneMode)
+        assertTrue(plan.unsupported.isEmpty())
+    }
+
+    @Test
+    fun `scene mode disabled is always valid even when the device omits it from its list`() {
+        val plan = planFor(
+            CameraSettings(),
+            CaptureSupport(sceneModes = setOf(CaptureRequest.CONTROL_SCENE_MODE_HDR)),
+        )
+
+        assertEquals(CaptureRequest.CONTROL_SCENE_MODE_DISABLED, plan.sceneMode)
+        assertTrue(plan.unsupported.isEmpty())
+    }
+
+    @Test
+    fun `an unadvertised AE mode falls back to on`() {
+        // Night-vision AUTO asks for ON_AUTO_FLASH; a camera without a flash
+        // unit does not advertise it and gets plain automatic exposure.
+        val plan = planFor(
+            CameraSettings(nightVisionMode = NightVisionMode.AUTO),
+            CaptureSupport(aeModes = setOf(CaptureRequest.CONTROL_AE_MODE_ON, CaptureRequest.CONTROL_AE_MODE_OFF)),
+        )
+
+        assertEquals(CaptureRequest.CONTROL_AE_MODE_ON, plan.aeMode)
+        assertEquals(listOf(CameraControlPlan.UNSUPPORTED_AE_MODE), plan.unsupported)
+        // The rest of the night-vision AUTO plan is untouched.
+        assertEquals(CaptureRequest.CONTROL_SCENE_MODE_NIGHT_PORTRAIT, plan.sceneMode)
+        assertNull(plan.aeLock)
+    }
+
+    @Test
+    fun `an advertised AE mode passes through`() {
+        val plan = planFor(
+            CameraSettings(nightVisionMode = NightVisionMode.AUTO),
+            CaptureSupport(aeModes = setOf(CaptureRequest.CONTROL_AE_MODE_ON_AUTO_FLASH)),
+        )
+
+        assertEquals(CaptureRequest.CONTROL_AE_MODE_ON_AUTO_FLASH, plan.aeMode)
+        assertTrue(plan.unsupported.isEmpty())
+    }
+
+    @Test
+    fun `an unadvertised white balance mode falls back to auto and drops the Kelvin value`() {
+        val plan = planFor(
+            CameraSettings(whiteBalance = WhiteBalance.MANUAL, colorTemperature = 4200),
+            CaptureSupport(awbModes = setOf(CaptureRequest.CONTROL_AWB_MODE_AUTO)),
+        )
+
+        assertEquals(CaptureRequest.CONTROL_AWB_MODE_AUTO, plan.awbMode)
+        assertNull(plan.colorTemperatureKelvin)
+        assertEquals(listOf(CameraControlPlan.UNSUPPORTED_WHITE_BALANCE), plan.unsupported)
+    }
+
+    @Test
+    fun `an advertised white balance mode keeps its Kelvin value`() {
+        val plan = planFor(
+            CameraSettings(whiteBalance = WhiteBalance.MANUAL, colorTemperature = 4200),
+            CaptureSupport(awbModes = setOf(CaptureRequest.CONTROL_AWB_MODE_AUTO, CaptureRequest.CONTROL_AWB_MODE_OFF)),
+        )
+
+        assertEquals(CaptureRequest.CONTROL_AWB_MODE_OFF, plan.awbMode)
+        assertEquals(4200, plan.colorTemperatureKelvin)
+        assertTrue(plan.unsupported.isEmpty())
+    }
+
+    @Test
+    fun `a camera without manual post-processing drops the Kelvin value only`() {
+        val plan = planFor(
+            CameraSettings(whiteBalance = WhiteBalance.MANUAL, colorTemperature = 4200),
+            CaptureSupport(
+                awbModes = setOf(CaptureRequest.CONTROL_AWB_MODE_AUTO, CaptureRequest.CONTROL_AWB_MODE_OFF),
+                manualPostProcessing = false,
+            ),
+        )
+
+        // AWB OFF is advertised and stays; only the color-correction gains
+        // it would have driven are retired.
+        assertEquals(CaptureRequest.CONTROL_AWB_MODE_OFF, plan.awbMode)
+        assertNull(plan.colorTemperatureKelvin)
+        assertEquals(listOf(CameraControlPlan.UNSUPPORTED_MANUAL_WHITE_BALANCE), plan.unsupported)
+    }
+
+    @Test
+    fun `a null manual post-processing flag keeps the Kelvin value`() {
+        val plan = planFor(
+            CameraSettings(whiteBalance = WhiteBalance.MANUAL, colorTemperature = 4200),
+            CaptureSupport(manualPostProcessing = null),
+        )
+
+        assertEquals(4200, plan.colorTemperatureKelvin)
+        assertTrue(plan.unsupported.isEmpty())
+    }
+
+    @Test
+    fun `an unadvertised focus mode drops AF off and the focus distance`() {
+        val plan = planFor(
+            CameraSettings(focusMode = FocusMode.MANUAL, focusDistance = 5.5f),
+            CaptureSupport(afModes = setOf(CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE)),
+        )
+
+        assertNull(plan.afMode)
+        assertNull(plan.lensFocusDistance)
+        assertEquals(listOf(CameraControlPlan.UNSUPPORTED_FOCUS), plan.unsupported)
+    }
+
+    @Test
+    fun `an advertised focus mode passes through`() {
+        val plan = planFor(
+            CameraSettings(focusMode = FocusMode.MANUAL, focusDistance = 5.5f),
+            CaptureSupport(afModes = setOf(CaptureRequest.CONTROL_AF_MODE_OFF, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE)),
+        )
+
+        assertEquals(CaptureRequest.CONTROL_AF_MODE_OFF, plan.afMode)
+        assertEquals(5.5f, plan.lensFocusDistance)
+        assertTrue(plan.unsupported.isEmpty())
+    }
+
+    @Test
+    fun `unadvertised optical stabilization switches off and is reported`() {
+        val plan = planFor(
+            CameraSettings(),
+            CaptureSupport(opticalStabilizationModes = setOf(CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE_OFF)),
+        )
+
+        assertFalse(plan.opticalStabilizationOn)
+        assertEquals(listOf(CameraControlPlan.UNSUPPORTED_OPTICAL_STABILIZATION), plan.unsupported)
+        // Video stabilization is a different list and is untouched.
+        assertTrue(plan.videoStabilizationOn)
+    }
+
+    @Test
+    fun `unadvertised video stabilization switches off and is reported`() {
+        val plan = planFor(
+            CameraSettings(),
+            CaptureSupport(videoStabilizationModes = setOf(CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_OFF)),
+        )
+
+        assertFalse(plan.videoStabilizationOn)
+        assertEquals(listOf(CameraControlPlan.UNSUPPORTED_VIDEO_STABILIZATION), plan.unsupported)
+        assertTrue(plan.opticalStabilizationOn)
+    }
+
+    @Test
+    fun `stabilization that is already off is not reported`() {
+        // Nothing was asked of the lens, so nothing was dropped — the log
+        // line must not cry wolf on every lens without OIS.
+        val plan = planFor(
+            CameraSettings(stabilization = false),
+            CaptureSupport(
+                opticalStabilizationModes = setOf(CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE_OFF),
+                videoStabilizationModes = setOf(CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_OFF),
+            ),
+        )
+
+        assertFalse(plan.opticalStabilizationOn)
+        assertFalse(plan.videoStabilizationOn)
+        assertTrue(plan.unsupported.isEmpty())
+    }
+
+    @Test
+    fun `one unadvertised control leaves its neighbours untouched`() {
+        // The isolation 1794645's per-group split was after, now on the
+        // values: manual exposure, night vision, manual focus and manual
+        // white balance all stand; only the OIS request is retired.
+        val settings = CameraSettings(
+            iso = 1600,
+            exposureTime = 50_000_000L,
+            nightVisionMode = NightVisionMode.ON,
+            focusMode = FocusMode.MANUAL,
+            focusDistance = 2f,
+            whiteBalance = WhiteBalance.MANUAL,
+            colorTemperature = 5000,
+        )
+        val requested = planFor(settings)
+
+        val plan = planFor(
+            settings,
+            CaptureSupport(
+                sceneModes = setOf(CaptureRequest.CONTROL_SCENE_MODE_NIGHT, CaptureRequest.CONTROL_SCENE_MODE_DISABLED),
+                aeModes = setOf(CaptureRequest.CONTROL_AE_MODE_OFF, CaptureRequest.CONTROL_AE_MODE_ON),
+                awbModes = setOf(CaptureRequest.CONTROL_AWB_MODE_OFF, CaptureRequest.CONTROL_AWB_MODE_AUTO),
+                afModes = setOf(CaptureRequest.CONTROL_AF_MODE_OFF),
+                opticalStabilizationModes = setOf(CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE_OFF),
+                videoStabilizationModes = setOf(CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_ON, CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_OFF),
+                manualPostProcessing = true,
+            ),
+        )
+
+        assertEquals(requested.copy(opticalStabilizationOn = false, unsupported = listOf(CameraControlPlan.UNSUPPORTED_OPTICAL_STABILIZATION)), plan)
+    }
+
+    @Test
+    fun `a fully capable camera returns the requested plan`() {
+        val settings = CameraSettings(iso = 1600, nightVisionMode = NightVisionMode.ON, focusMode = FocusMode.MANUAL, focusDistance = 2f)
+        val everything = CaptureSupport(
+            sceneModes = setOf(CaptureRequest.CONTROL_SCENE_MODE_NIGHT, CaptureRequest.CONTROL_SCENE_MODE_DISABLED),
+            aeModes = setOf(CaptureRequest.CONTROL_AE_MODE_OFF, CaptureRequest.CONTROL_AE_MODE_ON, CaptureRequest.CONTROL_AE_MODE_ON_AUTO_FLASH),
+            awbModes = setOf(CaptureRequest.CONTROL_AWB_MODE_AUTO, CaptureRequest.CONTROL_AWB_MODE_OFF),
+            afModes = setOf(CaptureRequest.CONTROL_AF_MODE_OFF, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE),
+            opticalStabilizationModes = setOf(CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE_OFF, CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE_ON),
+            videoStabilizationModes = setOf(CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_OFF, CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_ON),
+            manualPostProcessing = true,
+        )
+
+        assertEquals(planFor(settings), planFor(settings, everything))
+    }
+
+    @Test
+    fun `the unsupported report names each dropped control once in a stable order`() {
+        val plan = planFor(
+            CameraSettings(
+                nightVisionMode = NightVisionMode.AUTO,
+                focusMode = FocusMode.MANUAL,
+                focusDistance = 2f,
+                whiteBalance = WhiteBalance.MANUAL,
+                colorTemperature = 5000,
+            ),
+            CaptureSupport(
+                sceneModes = emptySet(),
+                aeModes = emptySet(),
+                awbModes = emptySet(),
+                afModes = emptySet(),
+                opticalStabilizationModes = emptySet(),
+                videoStabilizationModes = emptySet(),
+                manualPostProcessing = false,
+            ),
+        )
+
+        // Report order is the fold's: scene, AE, WB, focus, then the two
+        // stabilization lists. Manual white balance is not reported twice —
+        // the Kelvin value was already retired by the WB fallback above.
+        assertEquals(
+            listOf(
+                CameraControlPlan.UNSUPPORTED_SCENE_MODE,
+                CameraControlPlan.UNSUPPORTED_AE_MODE,
+                CameraControlPlan.UNSUPPORTED_WHITE_BALANCE,
+                CameraControlPlan.UNSUPPORTED_FOCUS,
+                CameraControlPlan.UNSUPPORTED_OPTICAL_STABILIZATION,
+                CameraControlPlan.UNSUPPORTED_VIDEO_STABILIZATION,
+            ),
+            plan.unsupported,
+        )
     }
 }

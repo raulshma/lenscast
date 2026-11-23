@@ -8,6 +8,7 @@ import android.util.Log
 import android.util.Size
 import androidx.camera.camera2.interop.Camera2CameraInfo
 import androidx.camera.core.Camera
+import androidx.camera.core.CameraControl
 import androidx.camera.core.CameraInfo
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.FocusMeteringAction
@@ -43,6 +44,7 @@ import com.raulshma.lenscast.camera.model.KelvinGainsPolicy
 import com.raulshma.lenscast.camera.model.CameraResetResult
 import com.raulshma.lenscast.camera.model.CameraState
 import com.raulshma.lenscast.camera.model.BindChoreography
+import com.raulshma.lenscast.camera.model.CaptureSupport
 import com.raulshma.lenscast.camera.model.CameraSessionArbiter
 import com.raulshma.lenscast.camera.model.FocusApplyPolicy
 import com.raulshma.lenscast.camera.model.FrameErrorPolicy
@@ -75,10 +77,23 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.math.max
 import android.os.Build
+import com.google.common.util.concurrent.ListenableFuture
+import java.util.concurrent.CancellationException
+import java.util.concurrent.ExecutionException
+import java.util.concurrent.Executor
 import java.util.concurrent.TimeUnit
 
 @androidx.annotation.OptIn(androidx.camera.camera2.interop.ExperimentalCamera2Interop::class)
-class CameraService(private val context: Context) {
+class CameraService internal constructor(
+    private val context: Context,
+    // The capture-request device write, injectable so the bundle a settings
+    // apply submits is assertable on the JVM (see [CaptureOptionsSubmitter]).
+    // This constructor is internal because the seam type is; the public
+    // one below keeps every CameraService(context) call site unchanged.
+    private val captureOptionsSubmitter: CaptureOptionsSubmitter,
+) {
+    /** The production shape — the capture-request write rides CameraX. */
+    constructor(context: Context) : this(context, DefaultCaptureOptionsSubmitter)
 
     private class KeepAliveLifecycle : LifecycleOwner {
         private val registry = LifecycleRegistry(this)
@@ -333,6 +348,21 @@ class CameraService(private val context: Context) {
 
     private var sensorExposureTimeRange: LongRange = 1L..1_000_000_000L
 
+    /**
+     * The capture-request capability lists of the camera bound last — what
+     * the session and the selected physical lens advertise for the keys
+     * [CameraControlPlan] sets, read beside the sensor ranges in
+     * [bindUseCases]. [CaptureSupport.UNRESTRICTED] until a bind reports
+     * (and again after a failed query): unknown must keep sending, exactly
+     * as before this field existed. Volatile because applies read it from
+     * the applier's dispatchers while binds write it on main.
+     */
+    @Volatile private var captureSupport: CaptureSupport = CaptureSupport.UNRESTRICTED
+
+    // The capture-options future's listener runs on whatever thread
+    // completes it; no hop is needed for a log line.
+    private val directExecutor = Executor { it.run() }
+
     private val _availableLenses = MutableStateFlow<List<CameraLensInfo>>(emptyList())
     val availableLenses: StateFlow<List<CameraLensInfo>> = _availableLenses.asStateFlow()
 
@@ -512,10 +542,12 @@ class CameraService(private val context: Context) {
      * `rebindUseCases` lever, WAIT_CAMERA_ADDED registers the
      * [CameraManager.AvailabilityCallback] wait, and an observed OPEN resets
      * the attempt counter — until the camera actually opens, every error
-     * consumed a lever attempt. LiveData's initial dispatch re-states the
-     * current state, so a rebind into an already-open camera re-asserts
-     * Ready; the identity guard drops a stale attach when a fast rebind
-     * replaced the camera before this ran.
+     * consumed a lever attempt. An observed OPEN additionally re-asserts the
+     * controls on the open fact's rising edge — the event-driven rung beside
+     * the timed post-bind ones, for a camera that opens after both fired.
+     * LiveData's initial dispatch re-states the current state, so a rebind
+     * into an already-open camera re-asserts Ready; the identity guard drops
+     * a stale attach when a fast rebind replaced the camera before this ran.
      */
     private fun observeCameraOpenState(cam: Camera) {
         val observer = Observer<CameraXCameraState> { state ->
@@ -529,6 +561,9 @@ class CameraService(private val context: Context) {
                     typeOpen = state.type == CameraXCameraState.Type.OPEN,
                     rebindAttempts = errorRebindAttempts.get(),
                     readyAlreadyPublished = _cameraState.value is CameraState.Ready,
+                    // Read before this emission's own verdict folds into the
+                    // fact below: the edge is "OPEN while the fact was down".
+                    previouslyObserved = _cameraOpenObserved.value,
                 )
             ) {
                 is BindChoreography.OpenStatePlan.ErrorObservation -> {
@@ -578,6 +613,19 @@ class CameraService(private val context: Context) {
                     }
                     if (plan.publishReady) {
                         _cameraState.value = CameraState.Ready
+                    }
+                    if (plan.reassertControls && liveCamera === cam) {
+                        // The event-driven third rung (BindChoreography's
+                        // reassertControls): the timed ones count from the
+                        // bind and both fire before a camera that opens late
+                        // can take controls — this is the first moment the
+                        // session is known to accept them. The same
+                        // re-assert a post-bind rung performs, inline — it
+                        // drives controls and never rebinds, so unlike the
+                        // posted error rebind above it cannot re-enter this
+                        // observer mid-transition. The identity guard drops a
+                        // late dispatch from a camera a newer bind replaced.
+                        applyCameraControls(activeSettings, forceFocusReapply = true)
                     }
                 }
             }
@@ -1470,6 +1518,34 @@ class CameraService(private val context: Context) {
                     Log.w(TAG, "Failed to query sensor ranges", e)
                 }
 
+                // The capture-request capability lists, read beside the
+                // sensor ranges: the LOGICAL camera the session opened,
+                // intersected with the selected physical lens when one drives
+                // the use cases — a logical multi-camera can advertise what
+                // only one of its physical lenses has, so the intersection is
+                // what the selected lens can honour. The plan folds them
+                // (CameraControlPlan's capability stage) so an unadvertised
+                // value never reaches the one capture bundle. A missing list
+                // stays unrestricted (CaptureSupport's null contract); a
+                // failed query keeps the previous value — an unreadable
+                // capability must not read as "unsupported" and neutralise a
+                // control that works.
+                try {
+                    val cameraManager =
+                        context.getSystemService(Context.CAMERA_SERVICE) as android.hardware.camera2.CameraManager
+                    val logicalId = Camera2CameraInfo.from(cam.cameraInfo).cameraId
+                    val logical = captureSupportOf(cameraManager.getCameraCharacteristics(logicalId))
+                    val physicalId = selectedLens?.physicalCameraId
+                    captureSupport = if (physicalId != null) {
+                        logical.intersect(captureSupportOf(cameraManager.getCameraCharacteristics(physicalId)))
+                    } else {
+                        logical
+                    }
+                    Log.d(TAG, "Capture support for camera $logicalId (physical=$physicalId): $captureSupport")
+                } catch (e: Exception) {
+                    Log.w(TAG, "Failed to query capture support — keeping the previous capability lists", e)
+                }
+
                 // Torch strength ceiling for the API 33+ per-level torch API.
                 // Read from the BOUND camera's own characteristics — the same
                 // camera whose flash unit backs enableTorch (the torch lives
@@ -1634,6 +1710,25 @@ class CameraService(private val context: Context) {
         Log.w(TAG, "RAW capability query failed", e)
         false
     }
+
+    /**
+     * One camera's camera2 "available" lists as [CaptureSupport] —
+     * translation only: each list read into its set, a key the device did
+     * not publish left null (unknown = unrestricted, the type's contract).
+     * What the lists mean for a plan is [CameraControlPlan]'s decision.
+     */
+    private fun captureSupportOf(chars: CameraCharacteristics): CaptureSupport = CaptureSupport(
+        sceneModes = chars.get(CameraCharacteristics.CONTROL_AVAILABLE_SCENE_MODES)?.toSet(),
+        aeModes = chars.get(CameraCharacteristics.CONTROL_AE_AVAILABLE_MODES)?.toSet(),
+        awbModes = chars.get(CameraCharacteristics.CONTROL_AWB_AVAILABLE_MODES)?.toSet(),
+        afModes = chars.get(CameraCharacteristics.CONTROL_AF_AVAILABLE_MODES)?.toSet(),
+        opticalStabilizationModes =
+            chars.get(CameraCharacteristics.LENS_INFO_AVAILABLE_OPTICAL_STABILIZATION)?.toSet(),
+        videoStabilizationModes =
+            chars.get(CameraCharacteristics.CONTROL_AVAILABLE_VIDEO_STABILIZATION_MODES)?.toSet(),
+        manualPostProcessing = chars.get(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES)
+            ?.contains(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES_MANUAL_POST_PROCESSING),
+    )
 
     fun switchCamera() {
         val lenses = _availableLenses.value
@@ -2079,81 +2174,79 @@ class CameraService(private val context: Context) {
         }
 
         // The decisions live in the pure, tested CameraControlPlan; this is
-        // translation only. Each group applies in its own call: a single
-        // unsupported key (an OEM missing optical stabilization, a manual
-        // shutter outside the sensor's range) must not drop every other
-        // control with it — the old one-bundle try/catch did exactly that.
-        val plan = CameraControlPlan.from(settings, _availableIsoRange.value, sensorExposureTimeRange)
-        val camera2Control = Camera2CameraControl.from(cam.cameraControl)
-
-        applyCaptureOptions(camera2Control, "fps") {
-            setCaptureRequestOption(
-                CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE,
-                Range(plan.fpsLower, plan.fpsUpper)
-            )
+        // translation only — ONE bundle, ONE submit. CameraX's
+        // setCaptureRequestOptions REPLACES the session's whole option set (it
+        // clears everything set, then applies), so the per-group submits this
+        // used to make left only the last group standing: AE, manual
+        // ISO/exposure, scene mode, the fps range and both stabilization keys
+        // were wiped on every apply and only white balance survived (issue
+        // #25; 1794645 introduced the split). A value the device cannot take
+        // is retired inside the plan instead — validate, never split; see
+        // [CaptureOptionsSubmitter].
+        val plan = CameraControlPlan.from(
+            settings,
+            _availableIsoRange.value,
+            sensorExposureTimeRange,
+            captureSupport,
+        )
+        if (plan.unsupported.isNotEmpty()) {
+            Log.i(TAG, "Capture options not supported by this camera: ${plan.unsupported.joinToString()}")
         }
 
-        applyCaptureOptions(camera2Control, "video stabilization") {
-            setCaptureRequestOption(
-                CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE,
-                if (plan.videoStabilizationOn) {
-                    CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_ON
-                } else {
-                    CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_OFF
-                },
-            )
-        }
-
-        applyCaptureOptions(camera2Control, "optical stabilization") {
-            setCaptureRequestOption(
-                CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE,
-                if (plan.opticalStabilizationOn) {
-                    CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE_ON
-                } else {
-                    CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE_OFF
-                },
-            )
-        }
-
-        applyCaptureOptions(camera2Control, "scene/ae") {
-            setCaptureRequestOption(CaptureRequest.CONTROL_SCENE_MODE, plan.sceneMode)
-            setCaptureRequestOption(CaptureRequest.CONTROL_AE_MODE, plan.aeMode)
+        try {
+            val builder = CaptureRequestOptions.Builder()
+                .setCaptureRequestOption(
+                    CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE,
+                    Range(plan.fpsLower, plan.fpsUpper)
+                )
+                .setCaptureRequestOption(
+                    CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE,
+                    if (plan.videoStabilizationOn) {
+                        CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_ON
+                    } else {
+                        CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_OFF
+                    },
+                )
+                .setCaptureRequestOption(
+                    CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE,
+                    if (plan.opticalStabilizationOn) {
+                        CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE_ON
+                    } else {
+                        CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE_OFF
+                    },
+                )
+                .setCaptureRequestOption(CaptureRequest.CONTROL_SCENE_MODE, plan.sceneMode)
+                .setCaptureRequestOption(CaptureRequest.CONTROL_AE_MODE, plan.aeMode)
             plan.aeLock?.let {
-                setCaptureRequestOption(CaptureRequest.CONTROL_AE_LOCK, it)
+                builder.setCaptureRequestOption(CaptureRequest.CONTROL_AE_LOCK, it)
             }
-        }
-
-        if (plan.sensorSensitivity != null || plan.sensorExposureTimeNs != null) {
-            applyCaptureOptions(camera2Control, "manual exposure") {
-                plan.sensorSensitivity?.let {
-                    setCaptureRequestOption(CaptureRequest.SENSOR_SENSITIVITY, it)
-                }
-                plan.sensorExposureTimeNs?.let {
-                    setCaptureRequestOption(CaptureRequest.SENSOR_EXPOSURE_TIME, it)
-                }
+            // The sensor keys ride only a manual plan, and their ABSENCE is
+            // what hands the sensor back to automatic exposure on the way to
+            // defaults: replace semantics drop them in the very submit that
+            // sets AE ON, so manual → auto is one coherent write.
+            plan.sensorSensitivity?.let {
+                builder.setCaptureRequestOption(CaptureRequest.SENSOR_SENSITIVITY, it)
             }
-        }
+            plan.sensorExposureTimeNs?.let {
+                builder.setCaptureRequestOption(CaptureRequest.SENSOR_EXPOSURE_TIME, it)
+            }
+            builder.setCaptureRequestOption(CaptureRequest.CONTROL_AWB_MODE, plan.awbMode)
 
-        applyCaptureOptions(camera2Control, "white balance") {
-            setCaptureRequestOption(CaptureRequest.CONTROL_AWB_MODE, plan.awbMode)
-        }
-
-        // Manual WB is conveyed by AWB OFF above; the Kelvin value maps to
-        // sensor gains through the pure KelvinGainsPolicy (blackbody
-        // approximation) applied in TRANSFORM_MATRIX mode with an identity
-        // color transform, so the gains do the correction.
-        plan.colorTemperatureKelvin?.let { kelvin ->
-            val gains = KelvinGainsPolicy.gainsFor(kelvin)
-            applyCaptureOptions(camera2Control, "kelvin gains") {
-                setCaptureRequestOption(
+            // Manual WB is conveyed by AWB OFF above; the Kelvin value maps to
+            // sensor gains through the pure KelvinGainsPolicy (blackbody
+            // approximation) applied in TRANSFORM_MATRIX mode with an identity
+            // color transform, so the gains do the correction.
+            plan.colorTemperatureKelvin?.let { kelvin ->
+                val gains = KelvinGainsPolicy.gainsFor(kelvin)
+                builder.setCaptureRequestOption(
                     CaptureRequest.COLOR_CORRECTION_MODE,
                     CaptureRequest.COLOR_CORRECTION_MODE_TRANSFORM_MATRIX,
                 )
-                setCaptureRequestOption(
+                builder.setCaptureRequestOption(
                     CaptureRequest.COLOR_CORRECTION_GAINS,
                     android.hardware.camera2.params.RggbChannelVector(gains[0], gains[1], gains[2], gains[3]),
                 )
-                setCaptureRequestOption(
+                builder.setCaptureRequestOption(
                     CaptureRequest.COLOR_CORRECTION_TRANSFORM,
                     android.hardware.camera2.params.ColorSpaceTransform(
                         arrayOf(
@@ -2163,37 +2256,55 @@ class CameraService(private val context: Context) {
                         ),
                     ),
                 )
+                Log.d(TAG, "Manual white balance Kelvin: $kelvin → gains ${gains.joinToString()}")
             }
-            Log.d(TAG, "Manual white balance Kelvin: $kelvin → gains ${gains.joinToString()}")
-        }
 
-        if (plan.afMode != null) {
-            applyCaptureOptions(camera2Control, "autofocus") {
-                setCaptureRequestOption(CaptureRequest.CONTROL_AF_MODE, plan.afMode)
-                plan.lensFocusDistance?.let {
-                    setCaptureRequestOption(CaptureRequest.LENS_FOCUS_DISTANCE, it)
-                }
+            // AF mode and focus distance ride only a manual-focus plan; a
+            // plan without them leaves the session on cameraX's continuous AF.
+            plan.afMode?.let {
+                builder.setCaptureRequestOption(CaptureRequest.CONTROL_AF_MODE, it)
             }
+            plan.lensFocusDistance?.let {
+                builder.setCaptureRequestOption(CaptureRequest.LENS_FOCUS_DISTANCE, it)
+            }
+
+            submitCaptureOptions(cam, builder.build())
+        } catch (e: Exception) {
+            Log.w(TAG, "Capture options failed", e)
         }
     }
 
     /**
-     * Applies one capture-option group in isolation. CameraX rejects the
-     * whole options bundle when one key is unsupported on the device, so
-     * grouping (and catching) per concern keeps an OEM gap from silently
-     * disabling unrelated controls.
+     * The one capture-request device write — the whole bundle through the
+     * [captureOptionsSubmitter] seam — plus the failure visibility the
+     * submit used to lack: the returned future was dropped on the floor, so
+     * a rejected or canceled write was indistinguishable from a landed one.
+     * A cancel is expected traffic (superseded by a newer submit, or the
+     * session closed under it — the newer submit carries the whole option
+     * set anyway) and logs at debug; anything else means the write did not
+     * land, and logs at warn with the cause.
      */
-    @androidx.annotation.OptIn(androidx.camera.camera2.interop.ExperimentalCamera2Interop::class)
-    private inline fun applyCaptureOptions(
-        camera2Control: Camera2CameraControl,
-        what: String,
-        configure: CaptureRequestOptions.Builder.() -> Unit,
-    ) {
-        runCatching {
-            val builder = CaptureRequestOptions.Builder()
-            builder.apply(configure)
-            camera2Control.setCaptureRequestOptions(builder.build())
-        }.onFailure { Log.w(TAG, "Advanced settings ($what) failed", it) }
+    private fun submitCaptureOptions(cam: Camera, bundle: CaptureRequestOptions) {
+        val future = captureOptionsSubmitter.submit(cam, bundle)
+        future.addListener({
+            val failure = try {
+                future.get() // already complete inside the listener — never blocks
+                null
+            } catch (e: ExecutionException) {
+                e.cause
+            } catch (e: CancellationException) {
+                e
+            } catch (e: InterruptedException) {
+                Thread.currentThread().interrupt()
+                e
+            }
+            when (failure) {
+                null -> {}
+                is CameraControl.OperationCanceledException ->
+                    Log.d(TAG, "Capture options submit canceled (superseded or camera closed)")
+                else -> Log.w(TAG, "Capture options submit failed", failure)
+            }
+        }, directExecutor)
     }
 
     /**
@@ -2328,6 +2439,50 @@ class CameraService(private val context: Context) {
          */
         const val CAMERA_FATAL_MESSAGE = "Camera fatal error — reboot the device"
     }
+}
+
+/**
+ * The capture-request device write — the ONE seam through which
+ * [CameraService] hands a capture-request bundle to the live camera. It
+ * exists so the bundle a settings apply submits is assertable on the JVM
+ * (a recording submitter injected through the internal constructor) while
+ * production rides CameraX.
+ *
+ * THE RULE — validate, never split. [submit] REPLACES the session's whole
+ * capture-request option set: `Camera2CameraControl.setCaptureRequestOptions`
+ * first clears every option already set, then applies the bundle it is
+ * given (the merging variant is `addCaptureRequestOptions`). That is
+ * deliberate and this seam depends on it — a manual → auto apply simply
+ * omits the sensor keys and AE returns to its default in the same write —
+ * but it also means a second submit does not ADD to the first, it erases
+ * it. 0.2.3 submitted its controls in five to eight per-group calls to keep
+ * one unsupported key from dropping every other control; each call wiped the
+ * one before it, so only the last group (white balance) ever reached the
+ * device and manual ISO/exposure and night vision silently stopped working
+ * (issue #25; the split came in with 1794645). Isolation belongs on the
+ * VALUES: [CameraControlPlan] retires anything the camera does not
+ * advertise ([CaptureSupport]) and the whole plan travels as ONE bundle in
+ * ONE submit. Do not reintroduce a per-group submit here.
+ */
+@androidx.annotation.OptIn(androidx.camera.camera2.interop.ExperimentalCamera2Interop::class)
+internal fun interface CaptureOptionsSubmitter {
+    /**
+     * Replaces the session's whole capture-request option set with [bundle].
+     * The future's element is nullable because that is what CameraX
+     * returns; only its failure is ever read.
+     */
+    fun submit(camera: Camera, bundle: CaptureRequestOptions): ListenableFuture<Void?>
+}
+
+/**
+ * The production submitter: Camera2CameraControl's replace-semantics write
+ * on the camera's own control. An object rather than a top-level lambda so
+ * the opt-in marker sits on a declaration lint reads for the calls inside.
+ */
+@androidx.annotation.OptIn(androidx.camera.camera2.interop.ExperimentalCamera2Interop::class)
+private object DefaultCaptureOptionsSubmitter : CaptureOptionsSubmitter {
+    override fun submit(camera: Camera, bundle: CaptureRequestOptions): ListenableFuture<Void?> =
+        Camera2CameraControl.from(camera.cameraControl).setCaptureRequestOptions(bundle)
 }
 
 /**
