@@ -1274,7 +1274,8 @@ here is the regression, whatever its rationale. The future the submit returns
 is watched: a cancel (superseded by a newer submit, or the session closed
 under it) logs at debug, anything else at warn with the cause. Device-side
 log lines: `Capture options not supported by this camera: …` (one per apply
-that retired something) and `Capture options submit failed`.
+that retired something) and `Capture options submit failed`. What the
+device then reports it is running is the Capture Read-back's.
 
 ### Capture Support
 **`camera/model/CaptureSupport.kt`** — the values the bound camera
@@ -1294,6 +1295,51 @@ physical lenses has (optical stabilization on the zoom lens, none on the
 wide one), so only the intersection is what the selected lens can honour. A
 missing list on either side leaves that set unrestricted; a failed query
 keeps the previous value.
+
+### Capture Read-back
+**`camera/model/CaptureReadbackPolicy.kt` + `camera/model/CaptureReadbackTracker.kt`
++ `CameraService.onCaptureResult`** — the on-device oracle for the Capture
+Options Submit: what the device *reports it is running*, against what the
+last submit asked for. CameraX accepting a bundle is no proof — the HAL can
+clamp, rewrite or drop a control without an error — so every submit arms the
+read-back with the plan's submitted values (after the capability fold and
+the clamps), and the line it concludes with is what the issue #25
+verification greps logcat for.
+
+**Where the frames come from.** CameraX 1.6.2 has no `Camera2CameraCaptureResult`
+and `ImageInfo` exposes no capture-result values. The hook is the public
+interop one: `Camera2Interop.Extender(analysisBuilder).setSessionCaptureCallback`,
+registered where the analysis use case is built. Camera2Interop stores the
+callback as a config option of the use case and re-reads it on every bind, so
+it belongs to the built `ImageAnalysis` instance and outlives rebinds — the
+recording bind re-binds that same instance and keeps the read-back. Each
+frame it receives the framework's real `TotalCaptureResult`, on CameraX's
+callback executor. The only alternative was restricted
+`androidx.camera.core.impl` API, deliberately not used.
+
+**Per frame, forever.** While nothing is armed the hook is two volatile
+reads and a return — nothing allocated, the capture result not opened. A
+hook that throws switches the read-back off for the process with one line
+rather than risk CameraX's executor thread.
+
+**The policy** is the verdict and the lines: the sensor pair (ISO, shutter)
+is compared only when AE is expected OFF — under automatic exposure the
+device varies both by design — and a missing value is `Unknown`, never a
+match or a mismatch. The comparison itself is exact. **The tracker** is the
+sampling state machine, clock-free (every call takes the time in ms): at
+most one sample per `SAMPLE_INTERVAL_MS`, concluded exactly once — on the
+first match, or when the window closes after `TIMEOUT_MS` with the last
+state seen. A first-sample mismatch is not reported at once; the results
+right behind a submit can still carry the previous request, so it keeps
+sampling and only a device still disagreeing at the end is a mismatch. A
+submit that lands while an apply is pending re-arms the tracker, and the
+superseded apply owes no line. The tracker owns no thread: a stalled stream
+is concluded, as unknown, by the next frame whenever it arrives.
+
+Lines, tag `CameraService`, exact prefix `Camera controls readback: ` —
+`ok (AE=OFF ISO=3200 exp=100000000ns scene=NIGHT)` at info,
+`MISMATCH requested … | device …` and `UNKNOWN requested … | device …` at
+warn.
 
 ### Quick Setting Catalog
 **`camera/model/QuickSettingCatalog.kt`** — one pure descriptor per

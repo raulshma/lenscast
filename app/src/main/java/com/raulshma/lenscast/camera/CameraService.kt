@@ -2,8 +2,11 @@ package com.raulshma.lenscast.camera
 
 
 import android.content.Context
+import android.hardware.camera2.CameraCaptureSession
 import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CameraManager
+import android.hardware.camera2.CaptureResult
+import android.hardware.camera2.TotalCaptureResult
 import android.util.Log
 import android.util.Size
 import androidx.camera.camera2.interop.Camera2CameraInfo
@@ -45,6 +48,8 @@ import com.raulshma.lenscast.camera.model.CameraResetResult
 import com.raulshma.lenscast.camera.model.CameraState
 import com.raulshma.lenscast.camera.model.BindChoreography
 import com.raulshma.lenscast.camera.model.CaptureSupport
+import com.raulshma.lenscast.camera.model.CaptureReadbackPolicy
+import com.raulshma.lenscast.camera.model.CaptureReadbackTracker
 import com.raulshma.lenscast.camera.model.CameraSessionArbiter
 import com.raulshma.lenscast.camera.model.FocusApplyPolicy
 import com.raulshma.lenscast.camera.model.FrameErrorPolicy
@@ -77,6 +82,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.math.max
 import android.os.Build
+import android.os.SystemClock
 import com.google.common.util.concurrent.ListenableFuture
 import java.util.concurrent.CancellationException
 import java.util.concurrent.ExecutionException
@@ -362,6 +368,51 @@ class CameraService internal constructor(
     // The capture-options future's listener runs on whatever thread
     // completes it; no hop is needed for a log line.
     private val directExecutor = Executor { it.run() }
+
+    /**
+     * The capture-result read-back — the on-device oracle for the one-bundle
+     * submit (issue #25). A submit CameraX accepted can still be clamped,
+     * rewritten or dropped by the HAL without any error, so the only proof
+     * that manual ISO/exposure and night vision reached the sensor is what
+     * the device reports it is running. Every submit arms the tracker with
+     * the values it sent; the frame hook below feeds it capture results and
+     * logs the single line an armed apply concludes with
+     * (`Camera controls readback:`). The sampling rules are
+     * [CaptureReadbackTracker]'s, the verdict and the line format
+     * [CaptureReadbackPolicy]'s.
+     */
+    private val captureReadback = CaptureReadbackTracker()
+
+    /**
+     * Whether the frame hook has given up for this process. The hook runs on
+     * CameraX's callback executor for every frame of every session, so a
+     * read-back must never be able to take that thread down with it: a hook
+     * that throws is switched off for good, with one log line to say so.
+     */
+    @Volatile private var captureReadbackDisabled = false
+
+    /**
+     * The read-back's frame hook, registered on the analysis use case at
+     * [bindUseCases] through Camera2Interop's session capture callback. It
+     * belongs to the built use case — CameraX stores it as a config option
+     * of the use case and re-registers it on every bind — so the recording
+     * bind, which re-binds the same `imageAnalysis` instance, keeps the
+     * read-back.
+     *
+     * The public interop route is deliberate: CameraX 1.6.2 offers no other
+     * supported way to read `CaptureResult` values (there is no
+     * `Camera2CameraCaptureResult` on the classpath), and the only
+     * alternative is restricted `androidx.camera.core.impl` API.
+     */
+    private val captureReadbackCallback = object : CameraCaptureSession.CaptureCallback() {
+        override fun onCaptureCompleted(
+            session: CameraCaptureSession,
+            request: CaptureRequest,
+            result: TotalCaptureResult,
+        ) {
+            onCaptureResult(result)
+        }
+    }
 
     private val _availableLenses = MutableStateFlow<List<CameraLensInfo>>(emptyList())
     val availableLenses: StateFlow<List<CameraLensInfo>> = _availableLenses.asStateFlow()
@@ -1418,6 +1469,10 @@ class CameraService internal constructor(
         val analysisBuilder = ImageAnalysis.Builder()
             .setResolutionSelector(analysisResolutionSelector)
             .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+        // The read-back's frame hook. Registered here because this is the
+        // only place an analysis use case is built; the recording bind
+        // re-binds the instance, and the hook with it.
+        Camera2Interop.Extender(analysisBuilder).setSessionCaptureCallback(captureReadbackCallback)
 
         val selectedLens = _availableLenses.value.getOrNull(_selectedLens.value.index)
         // setPhysicalCameraId is API 28+; below P the logical camera serves
@@ -2269,6 +2324,13 @@ class CameraService internal constructor(
             }
 
             submitCaptureOptions(cam, builder.build())
+            // Every submit arms the read-back with what it sent — the plan
+            // after its capability fold, i.e. the values now in the bundle.
+            // Armed after the submit, so a submit that threw never waits
+            // for a confirmation of something the device was not told.
+            if (!captureReadbackDisabled) {
+                captureReadback.arm(CaptureReadbackPolicy.expectedFrom(plan), SystemClock.elapsedRealtime())
+            }
         } catch (e: Exception) {
             Log.w(TAG, "Capture options failed", e)
         }
@@ -2305,6 +2367,33 @@ class CameraService internal constructor(
                 else -> Log.w(TAG, "Capture options submit failed", failure)
             }
         }, directExecutor)
+    }
+
+    /**
+     * The frame hook's whole body, and deliberately almost nothing: it runs
+     * per frame for the life of the session, so while nothing is armed it is
+     * two volatile reads and a return — nothing allocated, the capture
+     * result not touched. Armed, the tracker samples at most once a second
+     * and hands back one line per armed apply, logged here: a confirmation
+     * at info, a mismatch or an inconclusive window at warn.
+     */
+    private fun onCaptureResult(result: CaptureResult) {
+        if (captureReadbackDisabled || !captureReadback.isArmed) return
+        try {
+            val line = captureReadback.onFrame(
+                nowMs = SystemClock.elapsedRealtime(),
+                reported = CaptureReadbackPolicy.Reported(
+                    aeMode = result.get(CaptureResult.CONTROL_AE_MODE),
+                    sensorSensitivity = result.get(CaptureResult.SENSOR_SENSITIVITY),
+                    sensorExposureTimeNs = result.get(CaptureResult.SENSOR_EXPOSURE_TIME),
+                    sceneMode = result.get(CaptureResult.CONTROL_SCENE_MODE),
+                ),
+            ) ?: return
+            if (line.level == CaptureReadbackPolicy.Level.Warning) Log.w(TAG, line.message) else Log.i(TAG, line.message)
+        } catch (e: Exception) {
+            captureReadbackDisabled = true
+            Log.w(TAG, "Camera controls readback: disabled — the capture-result hook failed", e)
+        }
     }
 
     /**
