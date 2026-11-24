@@ -11,7 +11,8 @@ import java.util.concurrent.atomic.AtomicReference
 /**
  * The read-back's sampling state machine — when to look at a capture result
  * and when to conclude. [CaptureReadbackPolicy] decides what a result means;
- * CameraService feeds the frames and logs what this hands back.
+ * CameraService feeds the frames and logs what this hands back (the full
+ * account is CONTEXT.md's "Capture Read-back").
  *
  * One armed apply, one line. A submit arms the tracker with the values it
  * sent; the frame hook then examines at most one result per
@@ -35,13 +36,16 @@ import java.util.concurrent.atomic.AtomicReference
  *
  * Threads: submits arm from the applier's dispatchers and from main, frames
  * arrive on the camera's callback executor. The state is one
- * [AtomicReference] to an immutable [Epoch]; a step reads it, computes, and
- * swaps its result in with compare-and-set, so a step built on a state a
- * newer arm has since replaced simply loses and is dropped. The concluding
- * swap is also the right to log: only the thread that moves the epoch out
- * emits its line, and never for an epoch that was superseded under it.
- * While nothing is armed, [onFrame] is one volatile read and a return —
- * nothing is allocated and no capture result is touched.
+ * [AtomicReference] to an immutable [Epoch], and every step is a
+ * compare-and-set loop: read, decide, swap — and on a lost race, read again.
+ * A step built on a state that a newer arm has replaced is simply retried
+ * against the new one; a step that lost to a concurrent frame of the same
+ * epoch merges into the winner's state by timestamp, so the newest sample is
+ * never the one dropped. The concluding swap is the right to log: only the
+ * thread that moves the epoch out emits its line, and never for an epoch
+ * that was superseded under it. While nothing is armed, [onFrame] is one
+ * volatile read and a return — nothing is allocated and no capture result
+ * is touched.
  */
 class CaptureReadbackTracker {
 
@@ -70,31 +74,41 @@ class CaptureReadbackTracker {
      * conclusion.
      */
     fun onFrame(nowMs: Long, reported: Reported): Line? {
-        val epoch = armed.get() ?: return null
-        val last = epoch.lastSample
-        // The window first: a frame at or past the timeout concludes with
-        // what was seen inside it, and is itself not sampled.
-        if (nowMs - epoch.armedAtMs >= TIMEOUT_MS) return conclude(epoch, last)
-        if (last != null && nowMs - last.atMs < SAMPLE_INTERVAL_MS) return null
+        while (true) {
+            val epoch = armed.get() ?: return null
+            val last = epoch.lastSample
+            // The window first: a frame at or past the timeout concludes with
+            // what was seen inside it, and is itself not sampled.
+            if (nowMs - epoch.armedAtMs >= TIMEOUT_MS) {
+                if (armed.compareAndSet(epoch, null)) return conclude(epoch.expected, last)
+                continue
+            }
+            if (last != null && nowMs - last.atMs < SAMPLE_INTERVAL_MS) return null
 
-        val verdict = CaptureReadbackPolicy.compare(epoch.expected, reported)
-        if (verdict == Verdict.Match) return conclude(epoch, Sample(nowMs, reported, verdict))
+            val verdict = CaptureReadbackPolicy.compare(epoch.expected, reported)
+            if (verdict == Verdict.Match) {
+                if (armed.compareAndSet(epoch, null)) return CaptureReadbackPolicy.ok(epoch.expected)
+                continue
+            }
 
-        // A mismatch or a missing value is not a conclusion: remember the
-        // sample as the window's current state and keep looking.
-        armed.compareAndSet(epoch, epoch.copy(lastSample = Sample(nowMs, reported, verdict)))
-        return null
-    }
-
-    /** Disarms [epoch] and produces its line — unless a newer submit has already replaced it. */
-    private fun conclude(epoch: Epoch, last: Sample?): Line? {
-        if (!armed.compareAndSet(epoch, null)) return null
-        val sample = last
-        return when {
-            sample == null -> CaptureReadbackPolicy.unknown(epoch.expected, reported = null)
-            sample.verdict == Verdict.Match -> CaptureReadbackPolicy.ok(epoch.expected)
-            sample.verdict == Verdict.Mismatch -> CaptureReadbackPolicy.mismatch(epoch.expected, sample.reported)
-            else -> CaptureReadbackPolicy.unknown(epoch.expected, sample.reported)
+            // A mismatch or a missing value is not a conclusion: remember the
+            // sample as the window's current state and keep looking.
+            val sample = Sample(nowMs, reported, verdict)
+            if (armed.compareAndSet(epoch, epoch.copy(lastSample = newest(last, sample)))) return null
+            // Lost the race to another frame: take its state and merge.
         }
     }
+
+    /** The line an epoch concludes with — the caller has already disarmed it, and alone. */
+    private fun conclude(expected: Expected, last: Sample?): Line {
+        val sample = last
+        return when {
+            sample == null -> CaptureReadbackPolicy.unknown(expected, reported = null)
+            sample.verdict == Verdict.Mismatch -> CaptureReadbackPolicy.mismatch(expected, sample.reported)
+            else -> CaptureReadbackPolicy.unknown(expected, sample.reported)
+        }
+    }
+
+    /** The later of the two samples — whichever thread observed it. */
+    private fun newest(a: Sample?, b: Sample): Sample = if (a != null && a.atMs > b.atMs) a else b
 }

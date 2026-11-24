@@ -371,17 +371,24 @@ class CameraService internal constructor(
 
     /**
      * The capture-result read-back — the on-device oracle for the one-bundle
-     * submit (issue #25). A submit CameraX accepted can still be clamped,
-     * rewritten or dropped by the HAL without any error, so the only proof
-     * that manual ISO/exposure and night vision reached the sensor is what
-     * the device reports it is running. Every submit arms the tracker with
-     * the values it sent; the frame hook below feeds it capture results and
-     * logs the single line an armed apply concludes with
-     * (`Camera controls readback:`). The sampling rules are
-     * [CaptureReadbackTracker]'s, the verdict and the line format
-     * [CaptureReadbackPolicy]'s.
+     * submit: what the device *reports it is running*, checked against what
+     * the last submit asked for (CONTEXT.md, "Capture Read-back"). Every
+     * submit arms the tracker with the values it sent; the frame hook below
+     * feeds it capture results and logs the single line an armed apply
+     * concludes with. The sampling rules are [CaptureReadbackTracker]'s, the
+     * verdict and the line format [CaptureReadbackPolicy]'s.
      */
     private val captureReadback = CaptureReadbackTracker()
+
+    /**
+     * Serialises the submit and its arm into one step. Applies arrive from
+     * several threads — the Settings Applier's dispatchers, the settings
+     * editor's scope, the post-bind rungs and the OPEN re-assert on main —
+     * and the applier's own mutex does not cover the last three. Without
+     * this lock two applies could interleave submit/submit/arm/arm and arm
+     * the tracker with values that are not what the device is running.
+     */
+    private val captureSubmitLock = Any()
 
     /**
      * Whether the frame hook has given up for this process. The hook runs on
@@ -615,6 +622,7 @@ class CameraService internal constructor(
                     // Read before this emission's own verdict folds into the
                     // fact below: the edge is "OPEN while the fact was down".
                     previouslyObserved = _cameraOpenObserved.value,
+                    cameraIsLive = liveCamera === cam,
                 )
             ) {
                 is BindChoreography.OpenStatePlan.ErrorObservation -> {
@@ -665,17 +673,17 @@ class CameraService internal constructor(
                     if (plan.publishReady) {
                         _cameraState.value = CameraState.Ready
                     }
-                    if (plan.reassertControls && liveCamera === cam) {
-                        // The event-driven third rung (BindChoreography's
-                        // reassertControls): the timed ones count from the
-                        // bind and both fire before a camera that opens late
-                        // can take controls — this is the first moment the
-                        // session is known to accept them. The same
-                        // re-assert a post-bind rung performs, inline — it
-                        // drives controls and never rebinds, so unlike the
-                        // posted error rebind above it cannot re-enter this
-                        // observer mid-transition. The identity guard drops a
-                        // late dispatch from a camera a newer bind replaced.
+                    if (plan.reassertControls) {
+                        // The event-driven third rung: the timed ones count
+                        // from the bind and both fire before a camera that
+                        // opens late can take controls — this is the first
+                        // moment the session is known to accept them. The
+                        // same re-assert a post-bind rung performs, inline —
+                        // it drives controls and never rebinds, so unlike
+                        // the posted error rebind above it cannot re-enter
+                        // this observer mid-transition. The plan has already
+                        // dropped a late dispatch from a camera a newer bind
+                        // replaced (the identity guard is its input).
                         applyCameraControls(activeSettings, forceFocusReapply = true)
                     }
                 }
@@ -2230,14 +2238,10 @@ class CameraService internal constructor(
 
         // The decisions live in the pure, tested CameraControlPlan; this is
         // translation only — ONE bundle, ONE submit. CameraX's
-        // setCaptureRequestOptions REPLACES the session's whole option set (it
-        // clears everything set, then applies), so the per-group submits this
-        // used to make left only the last group standing: AE, manual
-        // ISO/exposure, scene mode, the fps range and both stabilization keys
-        // were wiped on every apply and only white balance survived (issue
-        // #25; 1794645 introduced the split). A value the device cannot take
-        // is retired inside the plan instead — validate, never split; see
-        // [CaptureOptionsSubmitter].
+        // setCaptureRequestOptions REPLACES the session's whole option set
+        // (it clears everything set, then applies), so a per-group split is
+        // the regression this closes (issue #25): a value the device cannot
+        // take is retired inside the plan instead — validate, never split.
         val plan = CameraControlPlan.from(
             settings,
             _availableIsoRange.value,
@@ -2323,13 +2327,16 @@ class CameraService internal constructor(
                 builder.setCaptureRequestOption(CaptureRequest.LENS_FOCUS_DISTANCE, it)
             }
 
-            submitCaptureOptions(cam, builder.build())
-            // Every submit arms the read-back with what it sent — the plan
-            // after its capability fold, i.e. the values now in the bundle.
-            // Armed after the submit, so a submit that threw never waits
-            // for a confirmation of something the device was not told.
-            if (!captureReadbackDisabled) {
-                captureReadback.arm(CaptureReadbackPolicy.expectedFrom(plan), SystemClock.elapsedRealtime())
+            // Submit and arm are one step under [captureSubmitLock]: the
+            // armed expectation must always belong to the last submitted
+            // bundle, never to an interleaved older apply. Armed after the
+            // submit, so a submit that threw never waits for a confirmation
+            // of something the device was not told.
+            synchronized(captureSubmitLock) {
+                submitCaptureOptions(cam, builder.build())
+                if (!captureReadbackDisabled) {
+                    captureReadback.arm(CaptureReadbackPolicy.expectedFrom(plan), SystemClock.elapsedRealtime())
+                }
             }
         } catch (e: Exception) {
             Log.w(TAG, "Capture options failed", e)
@@ -2392,7 +2399,7 @@ class CameraService internal constructor(
             if (line.level == CaptureReadbackPolicy.Level.Warning) Log.w(TAG, line.message) else Log.i(TAG, line.message)
         } catch (e: Exception) {
             captureReadbackDisabled = true
-            Log.w(TAG, "Camera controls readback: disabled — the capture-result hook failed", e)
+            Log.w(TAG, CaptureReadbackPolicy.disabled().message, e)
         }
     }
 
@@ -2537,21 +2544,13 @@ class CameraService internal constructor(
  * (a recording submitter injected through the internal constructor) while
  * production rides CameraX.
  *
- * THE RULE — validate, never split. [submit] REPLACES the session's whole
- * capture-request option set: `Camera2CameraControl.setCaptureRequestOptions`
- * first clears every option already set, then applies the bundle it is
- * given (the merging variant is `addCaptureRequestOptions`). That is
- * deliberate and this seam depends on it — a manual → auto apply simply
- * omits the sensor keys and AE returns to its default in the same write —
- * but it also means a second submit does not ADD to the first, it erases
- * it. 0.2.3 submitted its controls in five to eight per-group calls to keep
- * one unsupported key from dropping every other control; each call wiped the
- * one before it, so only the last group (white balance) ever reached the
- * device and manual ISO/exposure and night vision silently stopped working
- * (issue #25; the split came in with 1794645). Isolation belongs on the
- * VALUES: [CameraControlPlan] retires anything the camera does not
- * advertise ([CaptureSupport]) and the whole plan travels as ONE bundle in
- * ONE submit. Do not reintroduce a per-group submit here.
+ * THE RULE — validate, never split (CONTEXT.md, "Capture Options Submit").
+ * [submit] REPLACES the session's whole capture-request option set
+ * (`Camera2CameraControl.setCaptureRequestOptions` clears everything set,
+ * then applies what it is given), so a second submit erases the first and a
+ * per-group submit here is the regression behind issue #25. Isolation
+ * belongs on the values — [CameraControlPlan] retires what the camera does
+ * not advertise ([CaptureSupport]) and the whole plan travels as ONE bundle.
  */
 @androidx.annotation.OptIn(androidx.camera.camera2.interop.ExperimentalCamera2Interop::class)
 internal fun interface CaptureOptionsSubmitter {

@@ -51,95 +51,111 @@ data class CameraControlPlan(
 ) {
     /**
      * Folds the device's advertised capabilities onto this — the requested —
-     * plan. A value the camera does not advertise is replaced by the
-     * camera2 default every device honours and named in [unsupported];
-     * everything else passes through untouched, so one unadvertised control
-     * never costs its neighbours. This is where the isolation lives that
-     * 1794645 tried to get by splitting the submit: the service sends ONE
-     * bundle, so a value the HAL would reject has to be retired here, before
-     * it can take the whole request down with it.
+     * plan: a value the camera does not advertise is retired to the camera2
+     * default every device honours and named in [unsupported], and everything
+     * else passes untouched. This is the isolation a one-bundle submit needs
+     * (CONTEXT.md, "Capture Options Submit").
      *
-     * The defaults are the ones camera2 guarantees on every device: scene mode
-     * DISABLED, AE mode ON, AWB mode AUTO. Night-vision AUTO's ON_AUTO_FLASH
-     * drops to plain ON; an OFF mode the device does not advertise — manual
-     * white balance, manual focus — drops to its default and takes its
-     * dependant with it (the Kelvin gains ride AWB OFF, the focus distance
-     * rides AF OFF), which would otherwise be ignored or, worse, half-applied.
+     * Two invariants hold on every folded plan. The sensor pair rides only an
+     * AE OFF plan: the HAL ignores `SENSOR_*` under automatic exposure, so a
+     * manual exposure the AE fallback takes away must not keep travelling.
+     * And manual white balance rides only a camera that can apply it.
      */
     private fun limitedTo(support: CaptureSupport): CameraControlPlan {
-        val dropped = mutableListOf<String>()
+        val fold = Retired()
 
         // DISABLED is always valid whether or not the device lists it.
-        var supportedSceneMode = sceneMode
-        if (supportedSceneMode != CaptureRequest.CONTROL_SCENE_MODE_DISABLED &&
-            !support.sceneModes.advertises(supportedSceneMode)
-        ) {
-            dropped += UNSUPPORTED_SCENE_MODE
-            supportedSceneMode = CaptureRequest.CONTROL_SCENE_MODE_DISABLED
-        }
+        val supportedSceneMode =
+            if (sceneMode == CaptureRequest.CONTROL_SCENE_MODE_DISABLED) {
+                sceneMode
+            } else {
+                fold.mode(support.sceneModes, sceneMode, CaptureRequest.CONTROL_SCENE_MODE_DISABLED, UNSUPPORTED_SCENE_MODE)
+            }
+        val supportedAeMode = fold.mode(support.aeModes, aeMode, CaptureRequest.CONTROL_AE_MODE_ON, UNSUPPORTED_AE_MODE)
 
-        var supportedAeMode = aeMode
-        if (!support.aeModes.advertises(supportedAeMode)) {
-            dropped += UNSUPPORTED_AE_MODE
-            supportedAeMode = CaptureRequest.CONTROL_AE_MODE_ON
-        }
+        val manualExposure = supportedAeMode == CaptureRequest.CONTROL_AE_MODE_OFF
+        val supportedSensitivity = fold.value(
+            sensorSensitivity,
+            retired = !manualExposure && sensorSensitivity != null,
+            fallback = null,
+            name = UNSUPPORTED_MANUAL_EXPOSURE,
+        )
+        val supportedExposureTimeNs = if (manualExposure) sensorExposureTimeNs else null
 
-        var supportedAwbMode = awbMode
-        var supportedKelvin = colorTemperatureKelvin
-        if (!support.awbModes.advertises(supportedAwbMode)) {
-            dropped += UNSUPPORTED_WHITE_BALANCE
-            supportedAwbMode = CaptureRequest.CONTROL_AWB_MODE_AUTO
-            supportedKelvin = null
-        }
-        if (supportedKelvin != null && support.manualPostProcessing == false) {
-            // The color-correction gains need MANUAL_POST_PROCESSING; without
-            // it the device would keep running its own white balance over
-            // AWB OFF, so the Kelvin value has nothing to drive.
-            dropped += UNSUPPORTED_MANUAL_WHITE_BALANCE
-            supportedKelvin = null
-        }
+        val advertisedAwbMode = fold.mode(support.awbModes, awbMode, CaptureRequest.CONTROL_AWB_MODE_AUTO, UNSUPPORTED_WHITE_BALANCE)
+        // Manual white balance is AWB OFF driven by the color-correction
+        // gains, and the gains need MANUAL_POST_PROCESSING. Without it AWB
+        // OFF is not a manual white balance but white balance off at the
+        // default gains, so the request goes back to automatic altogether.
+        val supportedAwbMode = fold.value(
+            advertisedAwbMode,
+            retired = advertisedAwbMode == CaptureRequest.CONTROL_AWB_MODE_OFF && support.manualPostProcessing == false,
+            fallback = CaptureRequest.CONTROL_AWB_MODE_AUTO,
+            name = UNSUPPORTED_MANUAL_WHITE_BALANCE,
+        )
+        val supportedKelvin = colorTemperatureKelvin.takeIf { supportedAwbMode == CaptureRequest.CONTROL_AWB_MODE_OFF }
 
-        var supportedAfMode = afMode
-        var supportedFocusDistance = lensFocusDistance
-        if (supportedAfMode != null && !support.afModes.advertises(supportedAfMode)) {
-            // Back to cameraX's default continuous AF: the lens is the
-            // autofocus algorithm's again, so a stored distance must not
-            // ride along.
-            dropped += UNSUPPORTED_FOCUS
-            supportedAfMode = null
-            supportedFocusDistance = null
-        }
+        // Back to cameraX's default continuous AF when AF OFF is not
+        // advertised: the lens is the autofocus algorithm's again, so a
+        // stored distance must not ride along.
+        val supportedAfMode = fold.value(
+            afMode,
+            retired = afMode != null && !support.afModes.advertises(afMode),
+            fallback = null,
+            name = UNSUPPORTED_FOCUS,
+        )
+        val supportedFocusDistance = if (supportedAfMode != null) lensFocusDistance else null
 
-        // Only ON can be unadvertised — camera2 lists OFF on every device — so
-        // the neutralised plan still sends OFF: the mode switches off, it is
+        // Only ON can be unadvertised — camera2 lists OFF on every device —
+        // so a retired request still sends OFF: the mode switches off, it is
         // never left dangling on the previous request's value.
-        var supportedOpticalStabilization = opticalStabilizationOn
-        if (supportedOpticalStabilization &&
-            !support.opticalStabilizationModes.advertises(CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE_ON)
-        ) {
-            dropped += UNSUPPORTED_OPTICAL_STABILIZATION
-            supportedOpticalStabilization = false
-        }
-
-        var supportedVideoStabilization = videoStabilizationOn
-        if (supportedVideoStabilization &&
-            !support.videoStabilizationModes.advertises(CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_ON)
-        ) {
-            dropped += UNSUPPORTED_VIDEO_STABILIZATION
-            supportedVideoStabilization = false
-        }
+        val supportedOpticalStabilization = fold.value(
+            opticalStabilizationOn,
+            retired = opticalStabilizationOn &&
+                !support.opticalStabilizationModes.advertises(CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE_ON),
+            fallback = false,
+            name = UNSUPPORTED_OPTICAL_STABILIZATION,
+        )
+        val supportedVideoStabilization = fold.value(
+            videoStabilizationOn,
+            retired = videoStabilizationOn &&
+                !support.videoStabilizationModes.advertises(CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_ON),
+            fallback = false,
+            name = UNSUPPORTED_VIDEO_STABILIZATION,
+        )
 
         return copy(
             videoStabilizationOn = supportedVideoStabilization,
             opticalStabilizationOn = supportedOpticalStabilization,
             sceneMode = supportedSceneMode,
             aeMode = supportedAeMode,
+            sensorSensitivity = supportedSensitivity,
+            sensorExposureTimeNs = supportedExposureTimeNs,
             awbMode = supportedAwbMode,
             afMode = supportedAfMode,
             lensFocusDistance = supportedFocusDistance,
             colorTemperatureKelvin = supportedKelvin,
-            unsupported = dropped,
+            unsupported = fold.names,
         )
+    }
+
+    /**
+     * The capability fold's bookkeeping: every control [limitedTo] retires
+     * is named here, once, in fold order.
+     */
+    private class Retired {
+        val names = mutableListOf<String>()
+
+        /** [requested] when [modes] advertises it; otherwise [default], retired under [name]. */
+        fun mode(modes: Set<Int>?, requested: Int, default: Int, name: String): Int =
+            value(requested, retired = !modes.advertises(requested), fallback = default, name = name)
+
+        /** [requested] kept unless [retired]: then [fallback] takes its place and [name] is reported. */
+        fun <T> value(requested: T, retired: Boolean, fallback: T, name: String): T {
+            if (!retired) return requested
+            names += name
+            return fallback
+        }
     }
 
     /** How a metering action should fire — the mode ladder in [meteringOnApply]. */
@@ -161,6 +177,7 @@ data class CameraControlPlan(
         /** The [CameraControlPlan.unsupported] names — one per control the plan can neutralise. */
         const val UNSUPPORTED_SCENE_MODE = "scene mode"
         const val UNSUPPORTED_AE_MODE = "AE mode"
+        const val UNSUPPORTED_MANUAL_EXPOSURE = "manual exposure"
         const val UNSUPPORTED_WHITE_BALANCE = "white balance mode"
         const val UNSUPPORTED_MANUAL_WHITE_BALANCE = "manual white balance (Kelvin)"
         const val UNSUPPORTED_FOCUS = "manual focus"

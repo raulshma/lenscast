@@ -1,28 +1,20 @@
 package com.raulshma.lenscast.camera
 
-import android.app.Application
 import android.hardware.camera2.CaptureRequest
 import android.os.Looper
 import android.util.Log
 import android.util.Range
-import androidx.camera.camera2.interop.CaptureRequestOptions
 import androidx.camera.core.Camera
 import androidx.camera.core.CameraControl
-import androidx.camera.core.CameraInfo
 import androidx.camera.core.CameraState
-import androidx.camera.core.ExposureState
-import androidx.camera.core.ZoomState
 import androidx.camera.core.impl.Config as CameraXConfig
-import androidx.lifecycle.MutableLiveData
-import com.google.common.util.concurrent.SettableFuture
+import com.raulshma.lenscast.camera.model.CameraControlPlan
 import com.raulshma.lenscast.camera.model.CameraSettings
 import com.raulshma.lenscast.camera.model.CaptureSupport
 import com.raulshma.lenscast.camera.model.FocusMode
 import com.raulshma.lenscast.camera.model.NightVisionMode
 import com.raulshma.lenscast.camera.model.WhiteBalance
-import io.mockk.every
 import io.mockk.mockk
-import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -30,7 +22,6 @@ import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
-import org.robolectric.RuntimeEnvironment
 import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
 import org.robolectric.shadows.ShadowLog
@@ -39,52 +30,30 @@ import java.time.Duration
 
 /**
  * The one-bundle contract of the controls apply — issue #25 pinned where it
- * happened. 0.2.3 submitted its capture-request options in five to eight
- * per-group `setCaptureRequestOptions` calls, and each call REPLACED the
- * session's whole option set, so only the last group reached the device:
- * manual ISO/exposure and night vision silently stopped working while
- * white balance (the last group) and zoom, torch and exposure compensation
- * (CameraX's native APIs) carried on.
- *
- * The device write rides the [CaptureOptionsSubmitter] seam, so a recording
- * submitter shows exactly what a settings apply hands the camera: how many
- * times, and which Camera2 keys each bundle carries.
- *
- * JVM-level limits, deliberately not papered over: the bound camera is a
- * mock standing in as `liveCamera`, and the capability lists
- * (`captureSupport`) are planted through the same reflective seam rather
- * than read at a real bind — the bind-time query itself is device-only code.
+ * happened: the capture-request options travel in ONE bundle, submitted once
+ * per apply, through the [CaptureOptionsSubmitter] seam. The capability fold
+ * retires what the bound camera does not advertise, so one unsupported
+ * control never costs its neighbours — and never rides as a value the
+ * device would ignore. The full account is CONTEXT.md's "Capture Options
+ * Submit"; the shared stand-in is [CameraServiceFixture].
  */
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [34], application = CameraServiceCaptureBundleTest.PlainApplication::class)
+@Config(sdk = [34], application = CameraServiceTestApplication::class)
 class CameraServiceCaptureBundleTest {
 
-    class PlainApplication : Application()
-
-    private lateinit var service: CameraService
+    private val fixture = CameraServiceFixture()
 
     /** Every bundle handed to the device, in submit order. */
-    private val submitted = ArrayList<CaptureRequestOptions>()
+    private val submitted get() = fixture.submitted
 
-    /** The future each submit handed back — completed by the failure-visibility test. */
-    private val submitFutures = ArrayList<SettableFuture<Void?>>()
+    private val submitFutures get() = fixture.submitFutures
 
-    private val cameraInfo = mockk<CameraInfo>(relaxed = true)
-    private val cameraControl = mockk<CameraControl>(relaxed = true)
-    private val camera = mockk<Camera>(relaxed = true)
+    /** The center meterings the applies fired, in order — the force-focus reapply's record. */
+    private val meterings get() = fixture.meteringActions
 
-    /** The bound camera's open-state LiveData — empty until a test publishes a state. */
-    private val cameraState = MutableLiveData<CameraState>()
+    private fun setCaptureSupport(support: CaptureSupport) = fixture.setCaptureSupport(support)
 
-    private fun setServiceField(name: String, value: Any) {
-        CameraService::class.java.getDeclaredField(name).apply { isAccessible = true }.set(service, value)
-    }
-
-    private fun setLiveCamera(cam: Camera) = setServiceField("liveCamera", cam)
-
-    private fun setCaptureSupport(support: CaptureSupport) = setServiceField("captureSupport", support)
-
-    private fun apply(settings: CameraSettings) = runBlocking { service.applySettings(settings) }
+    private fun apply(settings: CameraSettings) = fixture.apply(settings)
 
     private fun mainLooper(): ShadowLooper = shadowOf(Looper.getMainLooper())
 
@@ -96,23 +65,7 @@ class CameraServiceCaptureBundleTest {
 
     @Before
     fun setUp() {
-        every { camera.cameraInfo } returns cameraInfo
-        every { camera.cameraControl } returns cameraControl
-        every { cameraInfo.hasFlashUnit() } returns false
-        // CameraX types zoomState @NonNull: an empty LiveData is the "no
-        // live zoom state yet" stand-in, so the zoom clamp falls open to the
-        // persistence ceiling exactly as it does before the first state.
-        every { cameraInfo.zoomState } returns MutableLiveData<ZoomState>()
-        every { cameraInfo.cameraState } returns cameraState
-        every { cameraInfo.exposureState } returns mockk<ExposureState>(relaxed = true).also { state ->
-            every { state.exposureCompensationRange } returns Range(-12, 12)
-            every { state.exposureCompensationIndex } returns 0
-        }
-        service = CameraService(RuntimeEnvironment.getApplication(), CaptureOptionsSubmitter { _, bundle ->
-            submitted += bundle
-            SettableFuture.create<Void?>().also { submitFutures += it }
-        })
-        setLiveCamera(camera)
+        fixture.install()
     }
 
     // ── bundle readers ──
@@ -122,11 +75,11 @@ class CameraServiceCaptureBundleTest {
      * token is its own [CaptureRequest.Key], so a key the bundle does not
      * carry is simply absent from this set.
      */
-    private fun CaptureRequestOptions.keyNames(): Set<String> =
+    private fun androidx.camera.camera2.interop.CaptureRequestOptions.keyNames(): Set<String> =
         listOptions().mapNotNull { (it.token as? CaptureRequest.Key<*>)?.name }.toSet()
 
     /** The bundle as key name → value (`retrieveOption`), for whole-bundle comparisons. */
-    private fun CaptureRequestOptions.byKey(): Map<String, Any?> = listOptions().associate { option ->
+    private fun androidx.camera.camera2.interop.CaptureRequestOptions.byKey(): Map<String, Any?> = listOptions().associate { option ->
         @Suppress("UNCHECKED_CAST")
         (option.token as CaptureRequest.Key<*>).name to retrieveOption(option as CameraXConfig.Option<Any?>)
     }
@@ -262,8 +215,8 @@ class CameraServiceCaptureBundleTest {
         val unrestricted = submitted.single().byKey()
         assertTrue(unsupportedReports().isEmpty())
 
-        // A lens without OIS — the common case behind the per-group split:
-        // stabilization defaults to on, so OIS-on is requested on every lens.
+        // A lens without OIS: stabilization defaults to on, so OIS-on is
+        // requested on every lens whether or not the lens has it.
         setCaptureSupport(
             CaptureSupport(opticalStabilizationModes = setOf(CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE_OFF)),
         )
@@ -278,6 +231,58 @@ class CameraServiceCaptureBundleTest {
         // Video stabilization is a separate list and was never restricted.
         assertEquals(CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_ON, bundle[videoStabilization])
         assertEquals(listOf("Capture options not supported by this camera: optical stabilization"), unsupportedReports())
+    }
+
+    @Test
+    fun `manual white balance on a lens without manual post-processing goes out as automatic`() {
+        setCaptureSupport(CaptureSupport(manualPostProcessing = false))
+
+        apply(CameraSettings(whiteBalance = WhiteBalance.MANUAL, colorTemperature = 4200))
+
+        // Manual white balance is AWB OFF driven by the color-correction
+        // gains; without MANUAL_POST_PROCESSING the gains have nothing to
+        // drive and bare AWB OFF would be white balance OFF at the default
+        // gains — so the whole request falls back to automatic.
+        assertEquals(1, submitted.size)
+        val bundle = submitted.single()
+        assertEquals(CaptureRequest.CONTROL_AWB_MODE_AUTO, bundle.getCaptureRequestOption(CaptureRequest.CONTROL_AWB_MODE))
+        assertFalse(CaptureRequest.COLOR_CORRECTION_MODE.name in bundle.keyNames())
+        assertFalse(CaptureRequest.COLOR_CORRECTION_GAINS.name in bundle.keyNames())
+        assertFalse(CaptureRequest.COLOR_CORRECTION_TRANSFORM.name in bundle.keyNames())
+        assertEquals(
+            listOf("Capture options not supported by this camera: ${CameraControlPlan.UNSUPPORTED_MANUAL_WHITE_BALANCE}"),
+            unsupportedReports(),
+        )
+    }
+
+    @Test
+    fun `a manual exposure a lens cannot hold in AE goes out without the sensor keys`() {
+        // AE OFF is not advertised: the HAL would ignore SENSOR_* under its
+        // automatic exposure, and the read-back would compare against values
+        // the device never runs — so the fold retires the pair with AE.
+        setCaptureSupport(
+            CaptureSupport(aeModes = setOf(CaptureRequest.CONTROL_AE_MODE_ON, CaptureRequest.CONTROL_AE_MODE_ON_AUTO_FLASH)),
+        )
+
+        apply(CameraSettings(iso = 3200, exposureTime = 100_000_000L, nightVisionMode = NightVisionMode.ON))
+
+        assertEquals(1, submitted.size)
+        val bundle = submitted.single()
+        assertEquals(CaptureRequest.CONTROL_AE_MODE_ON, bundle.getCaptureRequestOption(CaptureRequest.CONTROL_AE_MODE))
+        assertFalse(sensorSensitivity in bundle.keyNames())
+        assertFalse(sensorExposureTime in bundle.keyNames())
+        // Everything the camera does advertise stands: the night scene, the
+        // fps range, AWB.
+        assertEquals(CaptureRequest.CONTROL_SCENE_MODE_NIGHT, bundle.getCaptureRequestOption(CaptureRequest.CONTROL_SCENE_MODE))
+        assertEquals(Range(10, 10), bundle.getCaptureRequestOption(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE))
+        assertEquals(CaptureRequest.CONTROL_AWB_MODE_AUTO, bundle.getCaptureRequestOption(CaptureRequest.CONTROL_AWB_MODE))
+        assertEquals(
+            listOf(
+                "Capture options not supported by this camera: " +
+                    "${CameraControlPlan.UNSUPPORTED_AE_MODE}, ${CameraControlPlan.UNSUPPORTED_MANUAL_EXPOSURE}",
+            ),
+            unsupportedReports(),
+        )
     }
 
     @Test
@@ -299,14 +304,18 @@ class CameraServiceCaptureBundleTest {
     // ── the re-assert rungs ──
 
     @Test
-    fun `each post-bind rung is one submit`() {
+    fun `each post-bind rung is one submit and one forced metering`() {
         apply(CameraSettings(iso = 800))
         assertEquals(1, submitted.size)
+        // The first (cold) apply establishes the metering — and a later
+        // apply with unchanged focus fields must not re-fire it (pinned
+        // separately below); the rungs are forced re-applies and do.
+        assertEquals(1, meterings.size)
 
         // The bind's deferred ladder, on the main looper the rungs ride.
         CameraService::class.java.getDeclaredMethod("schedulePostBindControlsApply").apply {
             isAccessible = true
-        }.invoke(service)
+        }.invoke(fixture.service)
         val looper = mainLooper()
         looper.idle()
         // Scheduled, not fired: the settle window is still open.
@@ -320,9 +329,11 @@ class CameraServiceCaptureBundleTest {
         assertEquals("the 1500 ms rung has not fired yet", 2, submitted.size)
         looper.idleFor(Duration.ofMillis(2))
         assertEquals("the 1500 ms rung", 3, submitted.size)
-        // A rung re-asserts the applied settings verbatim.
+        // A rung re-asserts the applied settings verbatim — and forces the
+        // metering with it.
         assertEquals(submitted[0].byKey(), submitted[1].byKey())
         assertEquals(submitted[0].byKey(), submitted[2].byKey())
+        assertEquals(3, meterings.size)
     }
 
     @Test
@@ -337,12 +348,15 @@ class CameraServiceCaptureBundleTest {
         assertEquals(0, submitted.size)
         cameraState.value = CameraState.create(CameraState.Type.OPEN)
         assertEquals(1, submitted.size)
-        assertTrue(service.cameraOpenObserved.value)
+        assertTrue(fixture.service.cameraOpenObserved.value)
+        // The re-assert is forced: the metering fires with it.
+        assertEquals(1, meterings.size)
 
         // LiveData re-delivers the current value: not an edge, no re-assert
         // (a re-assert carries a force-focus apply).
         cameraState.value = CameraState.create(CameraState.Type.OPEN)
         assertEquals(1, submitted.size)
+        assertEquals(1, meterings.size)
     }
 
     @Test
@@ -350,11 +364,26 @@ class CameraServiceCaptureBundleTest {
         observeCameraOpenState()
         mainLooper().idle()
         // A newer bind landed before this camera's open was observed.
-        setLiveCamera(mockk<Camera>(relaxed = true))
+        fixture.setLiveCamera(mockk<Camera>(relaxed = true))
 
         cameraState.value = CameraState.create(CameraState.Type.OPEN)
 
         assertEquals(0, submitted.size)
+        assertEquals(0, meterings.size)
+    }
+
+    @Test
+    fun `a plain re-apply of unchanged focus fields does not re-fire the metering`() {
+        apply(CameraSettings(iso = 800))
+        assertEquals(1, meterings.size)
+
+        // The settings path applies on every slider tick (twice, editor and
+        // Applier): a write that does not move the focus-relevant fields
+        // must not cancel a deliberate tap-to-focus with a fresh metering.
+        apply(CameraSettings(iso = 1600))
+
+        assertEquals(2, submitted.size)
+        assertEquals(1, meterings.size)
     }
 
     // ── failure visibility ──
@@ -380,9 +409,11 @@ class CameraServiceCaptureBundleTest {
 
     // ── helpers ──
 
+    private val cameraState get() = fixture.cameraState
+
     private fun observeCameraOpenState() {
         CameraService::class.java.getDeclaredMethod("observeCameraOpenState", Camera::class.java).apply {
             isAccessible = true
-        }.invoke(service, camera)
+        }.invoke(fixture.service, fixture.camera)
     }
 }

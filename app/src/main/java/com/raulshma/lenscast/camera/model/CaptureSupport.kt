@@ -6,15 +6,9 @@ package com.raulshma.lenscast.camera.model
  * plain sets of Camera2 constants. The service reads them from the
  * `CameraCharacteristics` of the camera it just bound and hands them to
  * [CameraControlPlan.from], which neutralises a requested value the device
- * does not advertise *before* it reaches the capture request.
- *
- * This is the isolation 1794645's per-group capture applies were after: one
- * unsupported key must not cost every other control. That split reached the
- * goal by submitting group by group, and each submit replaced the previous
- * group's options (Camera2CameraControl's set semantics), so the app
- * silently lost AE, manual exposure and scene mode. Isolation belongs on the
- * *values* — validate against what the device advertises, then submit one
- * bundle — never on the submit.
+ * does not advertise *before* it reaches the capture request: isolating
+ * unsupported values here is what makes the ONE-bundle submit safe
+ * (CONTEXT.md, "Capture Support").
  *
  * Null = unknown = UNRESTRICTED: the key keeps being sent exactly as it was
  * before this type existed. An absent capability list must never read as

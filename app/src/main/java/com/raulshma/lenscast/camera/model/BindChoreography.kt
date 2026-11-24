@@ -140,17 +140,21 @@ object BindChoreography {
             val publishReady: Boolean,
 
             /**
-             * Re-assert the controls — the RISING EDGE of the open fact: OPEN
-             * arrived while the fact was not standing. The two timed rungs
-             * ([postBindRungs]) count milliseconds from the bind, so a camera
-             * that opens later than both — a slow HAL, a while-in-use denial
-             * that clears, a recording session rebinding an open camera —
-             * never takes its settings: both rungs fired at a camera that
-             * could not take them yet. The observed open is the only receipt
-             * that the session CAN take controls, so it re-asserts too. An
-             * edge, not an emission: LiveData re-delivers the current value
-             * on attach and on lifecycle moves, and a re-assert carries a
-             * force-focus apply that would cancel a deliberate tap-to-focus.
+             * Re-assert the controls — the RISING EDGE of the open fact on
+             * the LIVE camera: OPEN arrived while the fact was not standing
+             * and the camera observed is still the bound one. The two timed
+             * rungs ([postBindRungs]) count milliseconds from the bind, so a
+             * camera that opens later than both — a slow HAL, a while-in-use
+             * denial that clears, a recording session rebinding an open
+             * camera — never takes its settings: both rungs fired at a camera
+             * that could not take them yet. The observed open is the only
+             * receipt that the session CAN take controls, so it re-asserts
+             * too. An edge, not an emission: LiveData re-delivers the current
+             * value on attach and on lifecycle moves, and a re-assert carries
+             * a force-focus apply that would cancel a deliberate
+             * tap-to-focus. The identity guard is data like every other
+             * attach guard here: a late dispatch from a camera a newer bind
+             * replaced is dropped in the plan, not at the execution site.
              */
             val reassertControls: Boolean,
         ) : OpenStatePlan
@@ -164,8 +168,9 @@ object BindChoreography {
      * read at dispatch; [readyAlreadyPublished] whether the session's bind
      * already claimed Ready; [previouslyObserved] whether the open fact stood
      * before this emission (the service reads it before folding the
-     * emission's own verdict into it). The verdict is folded through
-     * [CameraErrorPolicy.decide] — composed, not re-derived.
+     * emission's own verdict into it); [cameraIsLive] whether the camera the
+     * emission came from is still the bound one. The verdict is folded
+     * through [CameraErrorPolicy.decide] — composed, not re-derived.
      */
     fun openStatePlan(
         errorCode: Int?,
@@ -173,12 +178,13 @@ object BindChoreography {
         rebindAttempts: Int,
         readyAlreadyPublished: Boolean,
         previouslyObserved: Boolean,
+        cameraIsLive: Boolean,
     ): OpenStatePlan {
         val code = errorCode ?: return OpenStatePlan.StateObservation(
             openObserved = typeOpen,
             resetRebindAttempts = typeOpen,
             publishReady = typeOpen && !readyAlreadyPublished,
-            reassertControls = typeOpen && !previouslyObserved,
+            reassertControls = typeOpen && !previouslyObserved && cameraIsLive,
         )
         val verdict = CameraErrorPolicy.decide(code, rebindAttempts)
         val messageKind = when {

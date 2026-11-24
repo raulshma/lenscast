@@ -9,6 +9,9 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.util.concurrent.ConcurrentLinkedQueue
+import java.util.concurrent.CountDownLatch
+import kotlin.concurrent.thread
 
 /**
  * Pins the read-back's sampling state machine: armed by a submit, at most
@@ -244,4 +247,100 @@ class CaptureReadbackTrackerTest {
         assertNull(tracker.onFrame(nowMs = 19_990, reported = stillAutomatic))
         assertTrue(tracker.isArmed)
     }
+
+    // ── the tolerance ──
+
+    @Test
+    fun `a device that quantises shutter and gain is confirmed by the ok line`() {
+        // HALs round both to their own steps: a few percent off is the
+        // control landing, not failing — and the line names the request.
+        armManualNight()
+
+        val line = tracker.onFrame(
+            nowMs = 40,
+            reported = Reported(
+                aeMode = CaptureRequest.CONTROL_AE_MODE_OFF,
+                sensorSensitivity = 3_300,
+                sensorExposureTimeNs = 103_000_000L,
+                sceneMode = CaptureRequest.CONTROL_SCENE_MODE_NIGHT,
+            ),
+        )
+
+        assertEquals("Camera controls readback: ok (AE=OFF ISO=3200 exp=100000000ns scene=NIGHT)", line?.message)
+    }
+
+    // ── threads: submits arm from the appliers, frames arrive on the camera's callback executor ──
+
+    @Test
+    fun `an armer racing an observer concludes each epoch once and never loses the last arm`() {
+        val lines = ConcurrentLinkedQueue<CaptureReadbackPolicy.Line>()
+        val epochs = 20_000
+        val start = CountDownLatch(1)
+        val armer = thread(name = "armer") {
+            start.await()
+            for (i in 1..epochs) tracker.arm(manualNight.copy(sensorSensitivity = i), nowMs = 0)
+        }
+        // A frame past the timeout concludes whatever epoch it reads, with no
+        // sample: one line, naming that epoch's ISO.
+        val observer = thread(name = "observer") {
+            start.await()
+            while (armer.isAlive) {
+                tracker.onFrame(nowMs = timeout, reported = landed())?.let(lines::add)
+            }
+        }
+        start.countDown()
+        armer.join()
+        observer.join()
+
+        // However the two interleaved, no epoch concluded twice …
+        val concluded = lines.map { requestedIso(it) }
+        assertEquals(concluded.size, concluded.toSet().size)
+        assertTrue(concluded.all { it in 1..epochs })
+        // … and the last arm was never lost: it concluded exactly once — to
+        // the racing observer, or to the frame after it.
+        tracker.onFrame(nowMs = timeout, reported = landed())?.let(lines::add)
+        assertEquals(1, lines.count { requestedIso(it) == epochs })
+        assertFalse(tracker.isArmed)
+        assertNull(tracker.onFrame(nowMs = timeout, reported = landed()))
+    }
+
+    @Test
+    fun `two observers racing on one epoch conclude it once and keep the newest sample`() {
+        val lines = ConcurrentLinkedQueue<CaptureReadbackPolicy.Line>()
+        // A stress net, not a proof: the race this guards — a frame reading
+        // the epoch, a second frame with an older timestamp swapping first,
+        // the first frame's sample dropped — needs a preemption between a
+        // read and its swap, so every run walks a different interleaving.
+        repeat(300) {
+            tracker.arm(manualNight, nowMs = 0)
+            lines.clear()
+            // Both threads sample the same nine instants, each reporting its
+            // own rising ISO: at every instant the two candidates differ, so a
+            // final state older than the newest instant is visible.
+            fun observer(base: Int) = thread {
+                for (k in 0..8) {
+                    tracker.onFrame(nowMs = interval * k + 40, reported = stillAutomatic.copy(sensorSensitivity = base + 100 * k))
+                        ?.let(lines::add)
+                }
+            }
+            listOf(observer(200), observer(5_000)).forEach { it.join() }
+
+            // A sample is never a conclusion, the window is still open …
+            assertTrue("no line mid-window: $lines", lines.isEmpty())
+            assertTrue(tracker.isArmed)
+            // … and the one conclusion carries the newest sample: instant 8,
+            // from either thread.
+            val line = tracker.onFrame(nowMs = timeout, reported = landed())
+            assertTrue("newest sample kept: ${line?.message}", line != null && deviceIso(line) in setOf(1_000, 5_800))
+            assertFalse(tracker.isArmed)
+        }
+    }
+
+    /** The ISO on the requested side of a concluded line. */
+    private fun requestedIso(line: CaptureReadbackPolicy.Line): Int =
+        Regex("requested AE=\\w+ ISO=(\\d+)").find(line.message)!!.groupValues[1].toInt()
+
+    /** The ISO on the device side of a concluded line. */
+    private fun deviceIso(line: CaptureReadbackPolicy.Line): Int =
+        Regex("device AE=\\w+ ISO=(\\d+)").find(line.message)!!.groupValues[1].toInt()
 }

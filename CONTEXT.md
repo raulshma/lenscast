@@ -1211,7 +1211,15 @@ auto-cancel constant named here); the service deduplicates all
 (`COLOR_TEMPERATURE_MIN..MAX`, null unless white balance is MANUAL); manual
 mode is conveyed by AWB OFF and the Kelvin value is logged at apply time —
 per-sensor gains/matrix mapping stays device-default until a calibrated
-Kelvin→gains table exists.
+Kelvin→gains table exists. Two invariants hold on every folded plan, pin as
+data in the fold: **the sensor pair rides only an AE OFF plan** — the HAL
+ignores `SENSOR_*` under automatic exposure, so when AE OFF is not
+advertised the ISO/shutter are retired with the AE mode, or the bundle would
+claim a manual exposure the device never runs and the read-back would chase
+it; and **manual white balance rides only a camera that can apply it** — it
+is AWB OFF driven by the color-correction gains, which need
+`MANUAL_POST_PROCESSING`, so without that capability the whole request falls
+back to AWB AUTO (Kelvin null), never bare AWB OFF at the default gains.
 
 ### Focus Apply Policy
 **`camera/model/FocusApplyPolicy.kt`** — the pure verdict on whether a
@@ -1230,8 +1238,10 @@ deferred controls apply is scheduled at 400 ms (the empirically-settled
 first rung — CameraX drops control calls issued synchronously inside the
 bind window) and again at 1500 ms, bounded by the settle budget; applies
 are idempotent, so rungs are cheap. A third, event-driven rung re-asserts on
-the observed OPEN's rising edge (`BindChoreography.openStatePlan`'s
-`reassertControls`, executed inline in `observeCameraOpenState`): both timed
+the observed OPEN's rising edge on the LIVE camera
+(`BindChoreography.openStatePlan`'s `reassertControls`, computed from the
+`cameraIsLive` fact the observer passes in like every other identity guard,
+executed inline in `observeCameraOpenState`): both timed
 rungs count from the bind and fire before a camera that opens late can take
 controls, and the observed open is the first receipt that it can. An edge,
 not an emission — LiveData re-delivers OPEN on every attach — because a
@@ -1325,7 +1335,12 @@ rather than risk CameraX's executor thread.
 **The policy** is the verdict and the lines: the sensor pair (ISO, shutter)
 is compared only when AE is expected OFF — under automatic exposure the
 device varies both by design — and a missing value is `Unknown`, never a
-match or a mismatch. The comparison itself is exact. **The tracker** is the
+match or a mismatch. The AE and scene modes compare exactly (there is no
+"near" mode); ISO and shutter are accepted within
+`SENSOR_TOLERANCE_PERCENT` (10) of the request, because HALs quantise both —
+shutter to line times, gain to their own steps — and an exact comparison
+would report every manual exposure on such a device as a mismatch. **The
+tracker** is the
 sampling state machine, clock-free (every call takes the time in ms): at
 most one sample per `SAMPLE_INTERVAL_MS`, concluded exactly once — on the
 first match, or when the window closes after `TIMEOUT_MS` with the last
@@ -1334,12 +1349,15 @@ right behind a submit can still carry the previous request, so it keeps
 sampling and only a device still disagreeing at the end is a mismatch. A
 submit that lands while an apply is pending re-arms the tracker, and the
 superseded apply owes no line. The tracker owns no thread: a stalled stream
-is concluded, as unknown, by the next frame whenever it arrives.
+is concluded, as unknown, by the next frame whenever it arrives. Submit and
+arm are one step under CameraService's `captureSubmitLock` — applies arrive
+from several threads the applier's mutex does not cover, and the armed
+expectation must always belong to the last submitted bundle.
 
-Lines, tag `CameraService`, exact prefix `Camera controls readback: ` —
-`ok (AE=OFF ISO=3200 exp=100000000ns scene=NIGHT)` at info,
-`MISMATCH requested … | device …` and `UNKNOWN requested … | device …` at
-warn.
+Lines, tag `CameraService`, exact prefix `Camera controls readback: ` — all
+four: `ok (AE=OFF ISO=3200 exp=100000000ns scene=NIGHT)` at info;
+`MISMATCH requested … | device …`, `UNKNOWN requested … | device …` and
+`disabled — the capture-result hook failed` at warn.
 
 ### Quick Setting Catalog
 **`camera/model/QuickSettingCatalog.kt`** — one pure descriptor per

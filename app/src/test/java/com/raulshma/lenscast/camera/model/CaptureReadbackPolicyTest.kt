@@ -59,6 +59,73 @@ class CaptureReadbackPolicyTest {
         )
     }
 
+    // ── the tolerance: HALs quantise shutter and gain ──
+
+    private fun verdictFor(sensorSensitivity: Int? = 3200, sensorExposureTimeNs: Long? = 100_000_000L) =
+        CaptureReadbackPolicy.compare(manualNight, reported(sensorSensitivity = sensorSensitivity, sensorExposureTimeNs = sensorExposureTimeNs))
+
+    @Test
+    fun `an ISO within ten percent of the request is a match`() {
+        // The boundary itself is inside, on both sides of the request.
+        assertEquals(CaptureReadbackPolicy.Verdict.Match, verdictFor(sensorSensitivity = 2880))
+        assertEquals(CaptureReadbackPolicy.Verdict.Match, verdictFor(sensorSensitivity = 3520))
+        assertEquals(CaptureReadbackPolicy.Verdict.Mismatch, verdictFor(sensorSensitivity = 2879))
+        assertEquals(CaptureReadbackPolicy.Verdict.Mismatch, verdictFor(sensorSensitivity = 3521))
+    }
+
+    @Test
+    fun `an exposure time within ten percent of the request is a match`() {
+        assertEquals(CaptureReadbackPolicy.Verdict.Match, verdictFor(sensorExposureTimeNs = 90_000_000L))
+        assertEquals(CaptureReadbackPolicy.Verdict.Match, verdictFor(sensorExposureTimeNs = 110_000_000L))
+        assertEquals(CaptureReadbackPolicy.Verdict.Mismatch, verdictFor(sensorExposureTimeNs = 89_999_999L))
+        assertEquals(CaptureReadbackPolicy.Verdict.Mismatch, verdictFor(sensorExposureTimeNs = 110_000_001L))
+    }
+
+    @Test
+    fun `the tolerance is relative to the request and does not round at the boundary`() {
+        // Ten percent of 1650 is 165: 1485 and 1815 are inside, one step
+        // beyond either is not.
+        val requested = manualNight.copy(sensorSensitivity = 1650)
+        fun verdict(iso: Int) = CaptureReadbackPolicy.compare(requested, reported(sensorSensitivity = iso))
+
+        assertEquals(CaptureReadbackPolicy.Verdict.Match, verdict(1485))
+        assertEquals(CaptureReadbackPolicy.Verdict.Match, verdict(1815))
+        assertEquals(CaptureReadbackPolicy.Verdict.Mismatch, verdict(1484))
+        assertEquals(CaptureReadbackPolicy.Verdict.Mismatch, verdict(1816))
+    }
+
+    @Test
+    fun `both sensor values must be inside the tolerance`() {
+        assertEquals(CaptureReadbackPolicy.Verdict.Mismatch, verdictFor(sensorSensitivity = 3300, sensorExposureTimeNs = 80_000_000L))
+        assertEquals(CaptureReadbackPolicy.Verdict.Mismatch, verdictFor(sensorSensitivity = 2500, sensorExposureTimeNs = 105_000_000L))
+        assertEquals(CaptureReadbackPolicy.Verdict.Match, verdictFor(sensorSensitivity = 3300, sensorExposureTimeNs = 105_000_000L))
+    }
+
+    @Test
+    fun `the AE mode and the scene mode take no tolerance`() {
+        // There is no "near" mode: a neighbouring one is the control not landing.
+        assertEquals(
+            CaptureReadbackPolicy.Verdict.Mismatch,
+            CaptureReadbackPolicy.compare(manualNight, reported(aeMode = CaptureRequest.CONTROL_AE_MODE_ON_AUTO_FLASH, sensorSensitivity = 3300)),
+        )
+        assertEquals(
+            CaptureReadbackPolicy.Verdict.Mismatch,
+            CaptureReadbackPolicy.compare(manualNight, reported(sceneMode = CaptureRequest.CONTROL_SCENE_MODE_NIGHT_PORTRAIT, sensorSensitivity = 3300)),
+        )
+    }
+
+    @Test
+    fun `a sensor value outside the tolerance is a mismatch that shows both values`() {
+        val line = CaptureReadbackPolicy.mismatch(manualNight, reported(sensorExposureTimeNs = 80_000_000L))
+
+        assertEquals(CaptureReadbackPolicy.Level.Warning, line.level)
+        assertEquals(
+            "Camera controls readback: MISMATCH requested AE=OFF ISO=3200 exp=100000000ns scene=NIGHT " +
+                "| device AE=OFF ISO=3200 exp=80000000ns scene=NIGHT",
+            line.message,
+        )
+    }
+
     @Test
     fun `a missing value is unknown`() {
         // Null means the device did not report the key: neither a match nor
@@ -189,12 +256,23 @@ class CaptureReadbackPolicyTest {
     }
 
     @Test
+    fun `the disabled line is the fourth read-back line`() {
+        // The hook gave up: it names no plan, it explains why none of the
+        // other lines will appear.
+        val line = CaptureReadbackPolicy.disabled()
+
+        assertEquals(CaptureReadbackPolicy.Level.Warning, line.level)
+        assertEquals("Camera controls readback: disabled — the capture-result hook failed", line.message)
+    }
+
+    @Test
     fun `every conclusion carries the exact logcat prefix`() {
         val lines = listOf(
             CaptureReadbackPolicy.ok(manualNight),
             CaptureReadbackPolicy.mismatch(manualNight, reported(aeMode = CaptureRequest.CONTROL_AE_MODE_ON)),
             CaptureReadbackPolicy.unknown(manualNight, reported(aeMode = null)),
             CaptureReadbackPolicy.unknown(manualNight, null),
+            CaptureReadbackPolicy.disabled(),
         )
 
         lines.forEach { line ->
@@ -204,7 +282,7 @@ class CaptureReadbackPolicyTest {
         // without a confirmation is a warning.
         assertEquals(CaptureReadbackPolicy.Level.Info, lines[0].level)
         assertEquals(
-            List(3) { CaptureReadbackPolicy.Level.Warning },
+            List(4) { CaptureReadbackPolicy.Level.Warning },
             lines.drop(1).map { it.level },
         )
     }

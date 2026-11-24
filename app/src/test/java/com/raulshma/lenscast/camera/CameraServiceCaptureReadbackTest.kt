@@ -1,27 +1,16 @@
 package com.raulshma.lenscast.camera
 
-import android.app.Application
 import android.hardware.camera2.CameraCaptureSession
 import android.hardware.camera2.CaptureRequest
 import android.hardware.camera2.CaptureResult
 import android.hardware.camera2.TotalCaptureResult
-import android.util.Log
-import android.util.Range
 import android.os.Looper
-import androidx.camera.camera2.interop.CaptureRequestOptions
-import androidx.camera.core.Camera
-import androidx.camera.core.CameraControl
-import androidx.camera.core.CameraInfo
-import androidx.camera.core.ExposureState
+import android.util.Log
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.UseCase
-import androidx.camera.core.ZoomState
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.video.Recorder
 import androidx.camera.video.VideoCapture
-import androidx.lifecycle.LifecycleOwner
-import androidx.lifecycle.MutableLiveData
-import com.google.common.util.concurrent.SettableFuture
 import com.raulshma.lenscast.camera.model.CameraSettings
 import com.raulshma.lenscast.camera.model.CaptureSupport
 import com.raulshma.lenscast.camera.model.NightVisionMode
@@ -30,7 +19,6 @@ import io.mockk.confirmVerified
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
-import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertSame
@@ -39,19 +27,24 @@ import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
-import org.robolectric.RuntimeEnvironment
 import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
 import org.robolectric.shadows.ShadowLog
 import org.robolectric.shadows.ShadowSystemClock
 import java.time.Duration
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
+import kotlin.concurrent.thread
 
 /**
  * The read-back's Android half — CameraService's per-frame hook over the pure
- * [com.raulshma.lenscast.camera.model.CaptureReadbackTracker]: a submit arms
- * it, a capture result feeds it, and the line it concludes with is logged.
- * The verdicts, the line format and the sampling rules are pinned in their
- * own JVM suites; this pins the wiring around them.
+ * tracker: a submit arms it, a capture result feeds it, and the line it
+ * concludes with is logged. The verdicts, the line format and the sampling
+ * rules are pinned in their own JVM suites; this pins the wiring around
+ * them, the submit+arm serialisation, and the bind-time capability read.
+ * The full account is CONTEXT.md's "Capture Read-back"; the shared stand-in
+ * is [CameraServiceFixture].
  *
  * JVM-level limits, deliberately not papered over: the hook is driven by hand
  * with a stub `TotalCaptureResult` (a real one only exists on a device), and
@@ -59,51 +52,25 @@ import java.time.Duration
  * cases inside a real session is device-only code.
  */
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [34], application = CameraServiceCaptureReadbackTest.PlainApplication::class)
+@Config(sdk = [34], application = CameraServiceTestApplication::class)
 class CameraServiceCaptureReadbackTest {
 
-    class PlainApplication : Application()
+    private val fixture = CameraServiceFixture()
 
-    private lateinit var service: CameraService
+    private val submitted get() = fixture.submitted
 
     /** The read-back's frame hook, as registered on the analysis use case. */
     private lateinit var hook: CameraCaptureSession.CaptureCallback
 
-    /** Every bundle handed to the device — one per controls apply. */
-    private val submitted = ArrayList<CaptureRequestOptions>()
-
     @Before
     fun setUp() {
-        service = CameraService(RuntimeEnvironment.getApplication(), CaptureOptionsSubmitter { _, bundle ->
-            submitted += bundle
-            SettableFuture.create<Void?>()
-        })
-        setServiceField("liveCamera", standInCamera())
-        hook = CameraService::class.java.getDeclaredField("captureReadbackCallback").apply {
-            isAccessible = true
-        }.get(service) as CameraCaptureSession.CaptureCallback
+        fixture.install()
+        hook = fixture.serviceField("captureReadbackCallback")
     }
 
-    private fun setServiceField(name: String, value: Any) {
-        CameraService::class.java.getDeclaredField(name).apply { isAccessible = true }.set(service, value)
-    }
+    private fun setCaptureSupport(support: CaptureSupport) = fixture.setCaptureSupport(support)
 
-    /** A bound camera with no flash unit, no zoom state and a usable exposure state. */
-    private fun standInCamera(): Camera {
-        val info = mockk<CameraInfo>(relaxed = true)
-        every { info.hasFlashUnit() } returns false
-        every { info.zoomState } returns MutableLiveData<ZoomState>()
-        every { info.exposureState } returns mockk<ExposureState>(relaxed = true).also { state ->
-            every { state.exposureCompensationRange } returns Range(-12, 12)
-            every { state.exposureCompensationIndex } returns 0
-        }
-        return mockk<Camera>(relaxed = true).also { cam ->
-            every { cam.cameraInfo } returns info
-            every { cam.cameraControl } returns mockk<CameraControl>(relaxed = true)
-        }
-    }
-
-    private fun apply(settings: CameraSettings) = runBlocking { service.applySettings(settings) }
+    private fun apply(settings: CameraSettings) = fixture.apply(settings)
 
     /** A capture result reporting the given values; null means the device did not report the key. */
     private fun captureResult(
@@ -191,7 +158,7 @@ class CameraServiceCaptureReadbackTest {
         // A lens without the NIGHT scene mode: the plan retired it and the
         // bundle that went out carries DISABLED — so DISABLED is a
         // confirmation, not a mismatch.
-        setServiceField("captureSupport", CaptureSupport(sceneModes = setOf(CaptureRequest.CONTROL_SCENE_MODE_DISABLED)))
+        setCaptureSupport(CaptureSupport(sceneModes = setOf(CaptureRequest.CONTROL_SCENE_MODE_DISABLED)))
         armManualNight()
 
         frame(captureResult(sceneMode = CaptureRequest.CONTROL_SCENE_MODE_DISABLED))
@@ -258,7 +225,7 @@ class CameraServiceCaptureReadbackTest {
         val lines = readbackLines()
         assertEquals(1, lines.size)
         assertEquals(Log.WARN, lines.single().type)
-        assertTrue(lines.single().msg.startsWith("Camera controls readback: disabled"))
+        assertEquals("Camera controls readback: disabled — the capture-result hook failed", lines.single().msg)
         assertTrue(lines.single().throwable is IllegalStateException)
 
         // Off for good: later submits do not arm, so a healthy frame is not
@@ -270,40 +237,102 @@ class CameraServiceCaptureReadbackTest {
         assertEquals(1, readbackLines().size)
     }
 
+    // ── submit and arm are one step ──
+
+    @Test
+    fun `a submit and its arm are serialised - the armed expectation is the last submitted bundle`() {
+        // Apply A parks INSIDE its submit; apply B must not be able to slip
+        // its own submit+arm past it, or the tracker ends up armed with A's
+        // values while the device is running B's.
+        val aParked = CountDownLatch(1)
+        val releaseA = CountDownLatch(1)
+        val parked = AtomicBoolean(false)
+        fixture.onSubmitInterceptors += { _ ->
+            if (parked.compareAndSet(false, true)) {
+                aParked.countDown()
+                releaseA.await(5, TimeUnit.SECONDS)
+            }
+        }
+
+        val applyA = thread {
+            fixture.apply(CameraSettings(iso = 800, exposureTime = 41_666_666L))
+        }
+        assertTrue("A reached its submit", aParked.await(5, TimeUnit.SECONDS))
+
+        val applyB = thread {
+            fixture.apply(CameraSettings(iso = 1600, exposureTime = 41_666_666L))
+        }
+        // Whatever B does, it must not submit while A holds the step: give
+        // it every chance to rush through before A is released.
+        Thread.sleep(300)
+        assertEquals("B waited for A's submit+arm", 1, submitted.size)
+
+        releaseA.countDown()
+        applyA.join(5_000)
+        applyB.join(5_000)
+        assertFalse("A finished", applyA.isAlive)
+        assertFalse("B finished", applyB.isAlive)
+        assertEquals(2, submitted.size)
+
+        // The armed expectation is B's — the LAST submitted bundle: a frame
+        // reporting exactly B's values is a confirmation. Had the tracker
+        // been left armed with A's interleaved bundle, this frame would sit
+        // outside A's tolerance (ISO 1600 vs 800) and conclude nothing.
+        frame(
+            captureResult(
+                sensorSensitivity = 1600,
+                sensorExposureTimeNs = 41_666_666L,
+                sceneMode = CaptureRequest.CONTROL_SCENE_MODE_DISABLED,
+            ),
+        )
+        assertEquals(
+            listOf("Camera controls readback: ok (AE=OFF ISO=1600 exp=41666666ns scene=DISABLED)"),
+            readbackLines().map { it.msg },
+        )
+    }
+
+    // ── the bind-time capability read ──
+
+    @Test
+    fun `a failing capability query at bind keeps the previous support lists`() {
+        val known = CaptureSupport(sceneModes = setOf(7))
+        fixture.setCaptureSupport(known)
+        fixture.plantStandardProvider()
+        fixture.service.setLifecycleOwner(mockk<androidx.lifecycle.LifecycleOwner>(relaxed = true))
+
+        // The stand-in camera has no Camera2 interop info, so the bind-time
+        // query cannot read a camera id: the failure must leave the previous
+        // lists standing, not empty them into "unsupported".
+        val bound = bindUseCases()
+
+        assertTrue(bound)
+        assertEquals(known, fixture.serviceField<CaptureSupport>("captureSupport"))
+        assertTrue(
+            "the failure is logged",
+            ShadowLog.getLogsForTag("CameraService")
+                .any { it.msg.startsWith("Failed to query capture support") },
+        )
+        shadowOf(Looper.getMainLooper()).idle()
+    }
+
     // ── the registration ──
 
     @Test
     fun `the recording bind re-binds the analysis use case that carries the read-back hook`() {
-        // A stand-in provider that records every use case it is handed. The
-        // camera it returns is a bare stand-in: the capability queries in
-        // the bind are each caught and logged, as on a device whose
-        // characteristics cannot be read.
-        val binds = ArrayList<List<UseCase>>()
-        val provider = mockk<ProcessCameraProvider>(relaxed = true)
-        every { provider.bindToLifecycle(any(), any(), *anyVararg()) } answers {
-            @Suppress("UNCHECKED_CAST")
-            binds += when (val third = args[2]) {
-                is Array<*> -> third.filterIsInstance<UseCase>()
-                is Collection<*> -> third.filterIsInstance<UseCase>()
-                else -> emptyList()
-            }
-            standInCamera()
-        }
-        setServiceField("cameraProvider", provider)
-        val owner = mockk<LifecycleOwner>(relaxed = true)
-        service.setLifecycleOwner(owner)
+        fixture.plantStandardProvider()
+        fixture.service.setLifecycleOwner(mockk<androidx.lifecycle.LifecycleOwner>(relaxed = true))
 
-        bindUseCases(provider, owner)
-        assertTrue(service.bindRecording(mockk<VideoCapture<Recorder>>(relaxed = true)))
+        bindUseCases()
+        assertTrue(fixture.service.bindRecording(mockk<VideoCapture<Recorder>>(relaxed = true)))
 
         // The standard bind built the analysis use case with the hook, and
         // the recording bind handed CameraX that very instance again.
-        assertEquals(2, binds.size)
-        val analyses = binds.map { it.filterIsInstance<ImageAnalysis>() }
+        assertEquals(2, fixture.binds.size)
+        val analyses = fixture.binds.map { it.filterIsInstance<ImageAnalysis>() }
         assertEquals(listOf(1, 1), analyses.map { it.size })
         val analysis = analyses[0].single()
         assertSame(analysis, analyses[1].single())
-        assertTrue(analyses[1].single() in binds[1])
+        assertTrue(analyses[1].single() in fixture.binds[1])
         // The hook is an option of the use case's own config — what every
         // bind re-reads — and the config is immutable: still there after the
         // standard bind, so the recording bind carries it too.
@@ -314,11 +343,13 @@ class CameraServiceCaptureReadbackTest {
         shadowOf(Looper.getMainLooper()).idle()
     }
 
-    private fun bindUseCases(provider: ProcessCameraProvider, owner: LifecycleOwner) {
-        CameraService::class.java
-            .getDeclaredMethod("bindUseCases", ProcessCameraProvider::class.java, LifecycleOwner::class.java)
+    private fun bindUseCases(): Boolean {
+        val provider = fixture.serviceField<ProcessCameraProvider>("cameraProvider")
+        val owner = fixture.service.getEffectiveLifecycleOwner()!!
+        return CameraService::class.java
+            .getDeclaredMethod("bindUseCases", ProcessCameraProvider::class.java, androidx.lifecycle.LifecycleOwner::class.java)
             .apply { isAccessible = true }
-            .invoke(service, provider, owner)
+            .invoke(fixture.service, provider, owner) as Boolean
     }
 
     /**

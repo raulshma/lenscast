@@ -10,6 +10,7 @@ import com.raulshma.lenscast.camera.model.BindChoreography.RecordingBindStep
 import com.raulshma.lenscast.camera.model.BindChoreography.RungAction
 import com.raulshma.lenscast.camera.model.CameraErrorPolicy.Verdict
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -28,12 +29,14 @@ class BindChoreographyTest {
         rebindAttempts: Int = 0,
         readyAlreadyPublished: Boolean = false,
         previouslyObserved: Boolean = false,
+        cameraIsLive: Boolean = true,
     ) = BindChoreography.openStatePlan(
         errorCode = errorCode,
         typeOpen = typeOpen,
         rebindAttempts = rebindAttempts,
         readyAlreadyPublished = readyAlreadyPublished,
         previouslyObserved = previouslyObserved,
+        cameraIsLive = cameraIsLive,
     )
 
     // ── the observation attach identity guard ──
@@ -200,6 +203,31 @@ class BindChoreographyTest {
             as OpenStatePlan.StateObservation
         assertEquals(false, plan.publishReady)
         assertTrue(plan.reassertControls)
+    }
+
+    @Test
+    fun `an OPEN observed for a camera that is no longer live does not re-assert`() {
+        // The stale-generation half of the guard, as data: a late dispatch
+        // from a camera a newer bind replaced must not drive its force-focus
+        // apply onto the session that replaced it. The open fact itself is
+        // the emission's and still stands.
+        val plan = openPlan(typeOpen = true, previouslyObserved = false, cameraIsLive = false)
+            as OpenStatePlan.StateObservation
+        assertEquals(false, plan.reassertControls)
+        assertTrue(plan.openObserved)
+        assertTrue(plan.resetRebindAttempts)
+    }
+
+    @Test
+    fun `the re-assert needs the edge and the live camera together`() {
+        assertFalse(
+            (openPlan(typeOpen = true, previouslyObserved = true, cameraIsLive = false)
+                as OpenStatePlan.StateObservation).reassertControls,
+        )
+        assertTrue(
+            (openPlan(typeOpen = true, previouslyObserved = false, cameraIsLive = true)
+                as OpenStatePlan.StateObservation).reassertControls,
+        )
     }
 
     @Test

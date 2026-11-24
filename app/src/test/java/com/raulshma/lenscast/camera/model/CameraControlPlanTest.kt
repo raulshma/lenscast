@@ -339,7 +339,7 @@ class CameraControlPlanTest {
     }
 
     @Test
-    fun `a camera without manual post-processing drops the Kelvin value only`() {
+    fun `a camera without manual post-processing falls back to automatic white balance`() {
         val plan = planFor(
             CameraSettings(whiteBalance = WhiteBalance.MANUAL, colorTemperature = 4200),
             CaptureSupport(
@@ -348,11 +348,53 @@ class CameraControlPlanTest {
             ),
         )
 
-        // AWB OFF is advertised and stays; only the color-correction gains
-        // it would have driven are retired.
-        assertEquals(CaptureRequest.CONTROL_AWB_MODE_OFF, plan.awbMode)
+        // Manual white balance is AWB OFF driven by the color-correction
+        // gains, and the gains need MANUAL_POST_PROCESSING. AWB OFF without
+        // them is not a manual white balance — it is white balance off at
+        // the default gains — so the whole request goes back to automatic.
+        assertEquals(CaptureRequest.CONTROL_AWB_MODE_AUTO, plan.awbMode)
         assertNull(plan.colorTemperatureKelvin)
         assertEquals(listOf(CameraControlPlan.UNSUPPORTED_MANUAL_WHITE_BALANCE), plan.unsupported)
+    }
+
+    @Test
+    fun `manual white balance without a temperature falls back to automatic white balance too`() {
+        // The fallback keys on the plan wanting manual white balance (AWB
+        // OFF), not on a Kelvin value: with no temperature there are no
+        // gains to send either way, and bare AWB OFF is the same hazard.
+        val plan = planFor(
+            CameraSettings(whiteBalance = WhiteBalance.MANUAL),
+            CaptureSupport(manualPostProcessing = false),
+        )
+
+        assertEquals(CaptureRequest.CONTROL_AWB_MODE_AUTO, plan.awbMode)
+        assertNull(plan.colorTemperatureKelvin)
+        assertEquals(listOf(CameraControlPlan.UNSUPPORTED_MANUAL_WHITE_BALANCE), plan.unsupported)
+    }
+
+    @Test
+    fun `a camera with manual post-processing keeps manual white balance`() {
+        val plan = planFor(
+            CameraSettings(whiteBalance = WhiteBalance.MANUAL, colorTemperature = 4200),
+            CaptureSupport(manualPostProcessing = true),
+        )
+
+        assertEquals(CaptureRequest.CONTROL_AWB_MODE_OFF, plan.awbMode)
+        assertEquals(4200, plan.colorTemperatureKelvin)
+        assertTrue(plan.unsupported.isEmpty())
+    }
+
+    @Test
+    fun `manual white balance is reported once even when the camera lacks both ways to it`() {
+        // AWB OFF is not advertised and there is no manual post-processing:
+        // one fallback (to automatic), one name.
+        val plan = planFor(
+            CameraSettings(whiteBalance = WhiteBalance.MANUAL, colorTemperature = 4200),
+            CaptureSupport(awbModes = setOf(CaptureRequest.CONTROL_AWB_MODE_AUTO), manualPostProcessing = false),
+        )
+
+        assertEquals(CaptureRequest.CONTROL_AWB_MODE_AUTO, plan.awbMode)
+        assertEquals(listOf(CameraControlPlan.UNSUPPORTED_WHITE_BALANCE), plan.unsupported)
     }
 
     @Test
@@ -364,6 +406,86 @@ class CameraControlPlanTest {
 
         assertEquals(4200, plan.colorTemperatureKelvin)
         assertTrue(plan.unsupported.isEmpty())
+    }
+
+    @Test
+    fun `a camera without AE off drops the sensor pair with the AE mode`() {
+        val plan = planFor(
+            CameraSettings(iso = 3200, exposureTime = 100_000_000L, nightVisionMode = NightVisionMode.ON),
+            CaptureSupport(aeModes = setOf(CaptureRequest.CONTROL_AE_MODE_ON, CaptureRequest.CONTROL_AE_MODE_ON_AUTO_FLASH)),
+        )
+
+        // The HAL ignores SENSOR_* under automatic exposure: sent anyway they
+        // would claim a manual exposure the device never runs.
+        assertEquals(CaptureRequest.CONTROL_AE_MODE_ON, plan.aeMode)
+        assertNull(plan.sensorSensitivity)
+        assertNull(plan.sensorExposureTimeNs)
+        assertEquals(
+            listOf(CameraControlPlan.UNSUPPORTED_AE_MODE, CameraControlPlan.UNSUPPORTED_MANUAL_EXPOSURE),
+            plan.unsupported,
+        )
+        // The rest of the plan is the fold's usual business: the night scene
+        // mode is advertised and stands.
+        assertEquals(CaptureRequest.CONTROL_SCENE_MODE_NIGHT, plan.sceneMode)
+    }
+
+    @Test
+    fun `a camera without AE off does not report manual exposure when none was requested`() {
+        val plan = planFor(
+            CameraSettings(nightVisionMode = NightVisionMode.AUTO),
+            CaptureSupport(aeModes = setOf(CaptureRequest.CONTROL_AE_MODE_ON)),
+        )
+
+        assertEquals(CaptureRequest.CONTROL_AE_MODE_ON, plan.aeMode)
+        assertEquals(listOf(CameraControlPlan.UNSUPPORTED_AE_MODE), plan.unsupported)
+    }
+
+    @Test
+    fun `the sensor pair rides a plan if and only if its AE mode is off`() {
+        // The bundle's sensor keys and its AE mode must agree on every plan
+        // the service can build — requested, folded, defaulted. A sensor pair
+        // under AE ON would be ignored by the device and would give the
+        // read-back values to compare that never run.
+        val shapes = listOf(
+            CameraSettings(),
+            CameraSettings(iso = 800),
+            CameraSettings(exposureTime = 20_000_000L),
+            CameraSettings(iso = 1600, exposureTime = 125_000_000L, frameRate = 30),
+            CameraSettings(nightVisionMode = NightVisionMode.ON, frameRate = 60),
+            CameraSettings(nightVisionMode = NightVisionMode.AUTO),
+            CameraSettings(nightVisionMode = NightVisionMode.AUTO, iso = 400),
+            CameraSettings(hdrMode = HdrMode.ON),
+        )
+        val supports = listOf(
+            CaptureSupport.UNRESTRICTED,
+            CaptureSupport(aeModes = setOf(CaptureRequest.CONTROL_AE_MODE_OFF, CaptureRequest.CONTROL_AE_MODE_ON)),
+            CaptureSupport(aeModes = setOf(CaptureRequest.CONTROL_AE_MODE_ON)),
+            CaptureSupport(
+                aeModes = setOf(CaptureRequest.CONTROL_AE_MODE_ON, CaptureRequest.CONTROL_AE_MODE_ON_AUTO_FLASH),
+                sceneModes = emptySet(),
+                awbModes = emptySet(),
+                afModes = emptySet(),
+                opticalStabilizationModes = emptySet(),
+                videoStabilizationModes = emptySet(),
+                manualPostProcessing = false,
+            ),
+        )
+        shapes.forEach { settings ->
+            supports.forEach { support ->
+                val plan = planFor(settings, support)
+                val carriesSensor = plan.sensorSensitivity != null || plan.sensorExposureTimeNs != null
+                assertEquals(
+                    "sensor keys iff AE OFF, for $settings under $support",
+                    plan.aeMode == CaptureRequest.CONTROL_AE_MODE_OFF,
+                    carriesSensor,
+                )
+                assertEquals(
+                    "ISO and shutter travel together, for $settings under $support",
+                    plan.sensorSensitivity != null,
+                    plan.sensorExposureTimeNs != null,
+                )
+            }
+        }
     }
 
     @Test
@@ -434,7 +556,7 @@ class CameraControlPlanTest {
 
     @Test
     fun `one unadvertised control leaves its neighbours untouched`() {
-        // The isolation 1794645's per-group split was after, now on the
+        // The isolation the per-group submit split was after, now on the
         // values: manual exposure, night vision, manual focus and manual
         // white balance all stand; only the OIS request is retired.
         val settings = CameraSettings(

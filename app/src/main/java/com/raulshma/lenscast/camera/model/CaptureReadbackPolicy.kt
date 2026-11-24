@@ -1,14 +1,13 @@
 package com.raulshma.lenscast.camera.model
 
 import android.hardware.camera2.CaptureRequest
+import kotlin.math.abs
 
 /**
  * The read-back verdict: does a capture result report the values the last
- * SUBMITTED plan asked for? This is the on-device oracle for issue #25 — a
- * submitted bundle can be refused, clamped or silently rewritten by the HAL
- * without CameraX reporting an error, so the only proof that manual
- * ISO/exposure and night vision reached the sensor is what the device says
- * it is running.
+ * SUBMITTED plan asked for? A bundle CameraX accepted can still be clamped or
+ * rewritten by the HAL without an error, so what the device reports running
+ * is the only proof a control landed (CONTEXT.md, "Capture Read-back").
  *
  * Pure comparison and formatting. The sampling (when to look, how long to
  * wait) is [CaptureReadbackTracker]; reading the `CaptureResult` and writing
@@ -33,6 +32,15 @@ object CaptureReadbackPolicy {
     const val TIMEOUT_MS = 10_000L
 
     /**
+     * How far the device's ISO and shutter may sit from the requested values,
+     * in percent of the requested one, and still count as the control
+     * landing. HALs quantise both — the shutter to line times, the gain to
+     * their own steps — so an exact comparison would report every manual
+     * exposure on such a device as a mismatch.
+     */
+    const val SENSOR_TOLERANCE_PERCENT = 10L
+
+    /**
      * What the plan asked the device for — its AE mode, sensor ISO and
      * shutter and scene mode after the capability fold and the clamps,
      * i.e. exactly the values that were submitted.
@@ -53,10 +61,10 @@ object CaptureReadbackPolicy {
     )
 
     enum class Verdict {
-        /** The device runs exactly the submitted values. */
+        /** The device runs the submitted plan: the modes exactly, the sensor pair within [SENSOR_TOLERANCE_PERCENT]. */
         Match,
 
-        /** The device reports different values: the control did not land as submitted. */
+        /** The device reports values other than the submitted ones: a control did not land as submitted. */
         Mismatch,
 
         /** A needed value is missing from the result: nothing may be concluded. */
@@ -81,23 +89,32 @@ object CaptureReadbackPolicy {
      * Compares one capture result with the plan. The sensor pair is compared
      * only when AE is expected OFF: under automatic exposure (and its flash
      * variants) the device varies ISO and shutter by design, so a sensor
-     * value the plan never asked for must not fail the read-back. A missing
+     * value the plan never asked for must not fail the read-back. The modes
+     * take no tolerance — there is no "near" mode; ISO and shutter are
+     * accepted within [SENSOR_TOLERANCE_PERCENT] of the request. A missing
      * value is [Verdict.Unknown] — neither a match nor a mismatch may be
      * claimed from what the device did not say.
      */
     fun compare(expected: Expected, reported: Reported): Verdict {
-        val sensorPinned = pinsSensor(expected)
         if (reported.aeMode == null || reported.sceneMode == null) return Verdict.Unknown
-        if (sensorPinned && (reported.sensorSensitivity == null || reported.sensorExposureTimeNs == null)) {
-            return Verdict.Unknown
-        }
-        val matches = reported.aeMode == expected.aeMode &&
-            reported.sceneMode == expected.sceneMode &&
-            (!sensorPinned ||
-                (reported.sensorSensitivity == expected.sensorSensitivity &&
-                    reported.sensorExposureTimeNs == expected.sensorExposureTimeNs))
-        return if (matches) Verdict.Match else Verdict.Mismatch
+        val modesMatch = reported.aeMode == expected.aeMode && reported.sceneMode == expected.sceneMode
+        if (!pinsSensor(expected)) return if (modesMatch) Verdict.Match else Verdict.Mismatch
+
+        val requestedSensitivity = expected.sensorSensitivity ?: return Verdict.Unknown
+        val requestedExposureTimeNs = expected.sensorExposureTimeNs ?: return Verdict.Unknown
+        val deviceSensitivity = reported.sensorSensitivity ?: return Verdict.Unknown
+        val deviceExposureTimeNs = reported.sensorExposureTimeNs ?: return Verdict.Unknown
+        val sensorMatches = withinTolerance(requestedSensitivity, deviceSensitivity) &&
+            withinTolerance(requestedExposureTimeNs, deviceExposureTimeNs)
+        return if (modesMatch && sensorMatches) Verdict.Match else Verdict.Mismatch
     }
+
+    /** Whether [device] sits within [SENSOR_TOLERANCE_PERCENT] of [requested]. Whole-number maths: the boundary does not round. */
+    private fun withinTolerance(requested: Int, device: Int): Boolean =
+        abs(device - requested).toLong() * 100 <= requested.toLong() * SENSOR_TOLERANCE_PERCENT
+
+    private fun withinTolerance(requested: Long, device: Long): Boolean =
+        abs(device - requested) * 100 <= requested * SENSOR_TOLERANCE_PERCENT
 
     /** The confirmation: the device runs the submitted plan. */
     fun ok(expected: Expected): Line = Line(Level.Info, LOG_PREFIX + "ok (${describe(expected)})")
@@ -116,6 +133,13 @@ object CaptureReadbackPolicy {
             ?: "reported no capture result within ${TIMEOUT_MS}ms"
         return Line(Level.Warning, LOG_PREFIX + "UNKNOWN requested ${describe(expected)} | device $device")
     }
+
+    /**
+     * The fourth line: the frame hook failed and the read-back is off for the
+     * rest of the process. It names no plan — it explains why none of the
+     * other three will appear.
+     */
+    fun disabled(): Line = Line(Level.Warning, LOG_PREFIX + "disabled — the capture-result hook failed")
 
     /** The requested side: `AE=OFF ISO=3200 exp=100000000ns scene=NIGHT`. */
     private fun describe(expected: Expected): String = describe(
