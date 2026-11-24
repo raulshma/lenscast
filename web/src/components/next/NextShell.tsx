@@ -144,23 +144,24 @@ export default function NextShell(props: Props) {
   const channels = () => channelStates(state.status())
 
   // TX/FPS read the measured lanes via the picker (issue #25): the encoded
-  // lane's measured bitrate/fps while an encoded stream runs, else the
-  // MJPEG clients' measured throughput — never the adaptation ladders'
-  // congestion estimate, and nothing once both lanes go quiet. The stats
-  // overlay toggle gates them: off hides, on shows measured data, auto
-  // keeps the legacy live-stream requirement.
+  // lane's measured bitrate/fps whenever the encodedStream block is present
+  // (presence is the running fact), else the MJPEG clients' measured
+  // throughput — never the adaptation ladders' congestion estimate, and
+  // nothing once both lanes go quiet. streamStatsChipVisible is the single
+  // visibility source of truth (toggle mode + live requirement + honest
+  // zero): a null label from here hides the chip, no second gate.
   const statsOverlay = streamStatsOverlayStore()
   const measured = () => pickMeasuredRates(state.status())
+  const chipVisible = (value: number | null): boolean =>
+    streamStatsChipVisible(statsOverlay.mode(), isLive(), value)
   const txLabel = (): string | null => {
     const kbps = measured().bitrateKbps
-    return kbps ? formatKbps(kbps) : null
+    return chipVisible(kbps) && kbps ? formatKbps(kbps) : null
   }
   const fpsLabel = (): number | null => {
     const fps = measured().fps
-    return fps && fps > 0 ? fps : null
+    return chipVisible(fps) && fps && fps > 0 ? fps : null
   }
-  const showTxChip = () => streamStatsChipVisible(statsOverlay.mode(), isLive(), measured().bitrateKbps)
-  const showFpsChip = () => streamStatsChipVisible(statsOverlay.mode(), isLive(), measured().fps)
 
   const clientsLabel = (): number | null => {
     const s = streaming()
@@ -363,12 +364,12 @@ export default function NextShell(props: Props) {
               )}
             </For>
 
-            <Show when={showTxChip() && txLabel()}>
+            <Show when={txLabel()}>
               <span class="nx-chip nx-strip-hide-lg" title={t('next.strip.throughput')}>
                 TX {txLabel()}
               </span>
             </Show>
-            <Show when={showFpsChip() && fpsLabel()}>
+            <Show when={fpsLabel()}>
               <span class="nx-chip nx-strip-hide-lg">{fpsLabel()}FPS</span>
             </Show>
             <Show when={clientsLabel() !== null}>

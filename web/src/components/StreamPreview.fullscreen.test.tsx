@@ -237,7 +237,6 @@ describe('Stream stats overlay', () => {
   const adaptiveOn = { adaptiveBitrate: { enabled: true } }
   const encodedStatus = {
     encodedStream: {
-      running: true,
       measuredBitrateKbps: 1890,
       fps: 23.5,
       targetBitrateKbps: 2000,
@@ -316,6 +315,17 @@ describe('Stream stats overlay', () => {
     installH264Rung()
     streamStatsOverlayStore().set('on')
     renderPreview({ live: true, mode: 'h264', stats: mjpegStatus })
+    expect(badge()).toBeNull()
+  })
+
+  // The deliberate auto-gate narrowing (issue #25 review round): the old
+  // gate only asked "connectionQuality present", so an encoded-rung preview
+  // under Adaptive Bitrate showed the wrong lane's MJPEG numbers whenever no
+  // encoded stream ran. auto now requires the picked lane's data — with the
+  // encoded block absent the indicator hides instead of borrowing.
+  it('auto on an encoded rung with Adaptive Bitrate on but no encoded stream hides (no wrong-lane numbers)', () => {
+    installH264Rung()
+    renderPreview({ live: true, mode: 'h264', stats: { ...mjpegStatus, ...adaptiveOn } })
     expect(badge()).toBeNull()
   })
 

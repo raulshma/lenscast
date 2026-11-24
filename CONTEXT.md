@@ -1577,20 +1577,23 @@ measured-vs-target, codec, geometry), strict — an absent block picks null
 (the UI hides or dashes) instead of borrowing the other lane's numbers, and
 non-finite wire values read as absence, never NaN. `pickMeasuredRates` is
 the lane-agnostic read the next shell's TX/FPS chips consume: encoded-lane
-measured while an encoded stream runs, else the MJPEG lane's measured rates.
-The consumer of the first half is the lane-aware
+measured whenever the `encodedStream` block is present (presence is the
+running fact — the wire carries no flag), else the MJPEG lane's measured
+rates. The consumer of the first half is the lane-aware
 `ConnectionQualityIndicator`: the badge shows the picked lane's measured
 numbers (the quality dot stays MJPEG-only — it is that lane's network
 verdict), and the detail panel is three sections — "Preview" (the active
 lane's rows), "Encoded stream" (measured vs target, fps, codec,
 resolution, shown only while `encodedStream` exists — presence is the
 running fact), and "MJPEG viewers"
-(the per-client rows). The old duplicate "Bandwidth" row is gone (it
+(the per-client rows); both places the encoded lane renders share one row
+helper. The old duplicate "Bandwidth" row is gone (it
 displayed the ladders' drain-based congestion estimate), the "Latency" row
 is renamed "Send time" (what still backs it is the worst client's last
 frame-send duration, `worstLatencyMs`/`lastSendDurationMs` — a stopwatch on
 the send loop, not network latency), and the trend sparkline now rides the
-picked lane's measured bitrate instead of the congestion estimate.
+picked lane's measured bitrate instead of the congestion estimate, resetting
+on a rung switch so samples never mix lanes.
 
 ### Stream Stats Overlay Toggle
 **`web/src/lib/streamStatsOverlay.ts`** — the stats blocks' visibility
@@ -1603,7 +1606,10 @@ VISIBILITY only — what they display is always the picker's measured lane.
 `auto` preserves the pre-toggle gate exactly (stream up + preview visible +
 Adaptive Bitrate enabled + lane data — for MJPEG, `connectionQuality`
 present); `on` drops only the adaptive condition (stats work with
-adaptation off, still live-preview + lane data); `off` never shows. The
+adaptation off, still live-preview + lane data); `off` never shows. One
+deliberate narrowing is pinned by test: on an encoded rung with Adaptive
+Bitrate enabled but no `encodedStream` block, auto hides where the old
+gate showed wrong-lane MJPEG numbers. The
 chips read measured values now (`pickMeasuredRates`) — never the stale
 adaptive-only numbers, and a null/0 value hides a chip in every mode (the
 honest idle convention); the CL chip stays the honest client count

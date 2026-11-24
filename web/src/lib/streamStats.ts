@@ -41,8 +41,10 @@ export function laneForMode(mode: PlayerMode | undefined): StreamLaneKind {
   return mode === 'mjpeg' ? 'mjpeg' : 'encoded'
 }
 
-/** Finite numbers only — a wire anomaly renders as absence, never NaN. */
-function finiteOrNull(value: unknown): number | null {
+/** Finite numbers only — a wire anomaly renders as absence, never NaN.
+ *  The one coerce shape: display layers compose it (?? 0), never re-roll
+ *  their own. */
+export function finiteOrNull(value: unknown): number | null {
   const n = typeof value === 'number' ? value : Number(value)
   return Number.isFinite(n) ? n : null
 }
@@ -90,14 +92,15 @@ export interface MeasuredRates {
 
 /**
  * The TX/FPS chips' read, lane-agnostic by priority: the encoded lane's
- * measured rates while an encoded stream runs, else the MJPEG lane's
+ * measured rates whenever the `encodedStream` block is present (presence IS
+ * the running fact — the wire carries no flag), else the MJPEG lane's
  * measured rates. Nulls when neither lane has data — the chips render their
  * idle convention (hidden), never the adaptation ladders' congestion
  * estimate or a frozen last value.
  */
 export function pickMeasuredRates(status: DeviceStatus | null | undefined): MeasuredRates {
   const encoded = status?.encodedStream
-  if (encoded && encoded.running) {
+  if (encoded) {
     return { bitrateKbps: finiteOrNull(encoded.measuredBitrateKbps), fps: finiteOrNull(encoded.fps) }
   }
   const quality = status?.connectionQuality

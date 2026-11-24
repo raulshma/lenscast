@@ -6,7 +6,7 @@ import { useSignalHistory } from '../hooks/useSignalHistory'
 import { formatBytes } from '../format'
 import Sparkline from './Sparkline'
 import { t } from '../lib/i18n'
-import { pickPreviewLane, type LaneStats } from '../lib/streamStats'
+import { encodedLane, finiteOrNull, pickPreviewLane, type LaneStats } from '../lib/streamStats'
 
 interface Props {
   /** The full device status: the picked lane drives the readout, battery feeds the trend sparkline. */
@@ -35,14 +35,14 @@ const QUALITY_LABELS: Record<string, string> = {
   CRITICAL: 'CRIT',
 }
 
+/** Display view of the lib's one coerce shape (finiteOrNull): non-finite
+    reads as absence, shown as the honest 0. */
+const num = (value: unknown): number => finiteOrNull(value) ?? 0
+
 export default function ConnectionQualityIndicator(props: Props) {
   const [expanded, setExpanded] = createSignal(false)
 
   const conn = (): ConnectionQualityStatus | undefined => props.status()?.connectionQuality
-  const safeNumber = (value: unknown, fallback = 0): number => {
-    const n = typeof value === 'number' ? value : Number(value)
-    return Number.isFinite(n) ? n : fallback
-  }
   // The preview's lane: measured numbers only, null when the lane has no
   // data (the gate in StreamPreview keeps this hidden then).
   const lane = (): LaneStats | null => pickPreviewLane(props.previewMode?.(), props.status())
@@ -61,7 +61,17 @@ export default function ConnectionQualityIndicator(props: Props) {
   const throughputHistory = useSignalHistory()
   const batteryHistory = useSignalHistory()
 
+  // The sparkline never mixes lanes: a rung switch (MJPEG ↔ encoded) resets
+  // the series, so a sample from the previous lane can never sit next to one
+  // from the new one (the reset fires before the push — one effect, in
+  // order).
+  let historyLane: LaneStats['lane'] | null = null
   createEffect(() => {
+    const kind = lane()?.lane ?? null
+    if (kind !== historyLane) {
+      historyLane = kind
+      throughputHistory.reset()
+    }
     const kbps = lane()?.bitrateKbps
     if (kbps == null) return
     throughputHistory.push(kbps)
@@ -70,7 +80,7 @@ export default function ConnectionQualityIndicator(props: Props) {
   createEffect(() => {
     const level = props.status()?.battery?.level
     if (level == null) return
-    batteryHistory.push(safeNumber(level))
+    batteryHistory.push(num(level))
   })
 
   const lastBatteryPercent = () => {
@@ -127,7 +137,7 @@ export default function ConnectionQualityIndicator(props: Props) {
               color: 'rgba(255, 255, 255, 0.7)',
             }}
           >
-            {safeNumber(lane()?.fps).toFixed(1)} fps · {safeNumber(lane()?.bitrateKbps)} kbps
+            {num(lane()?.fps).toFixed(1)} fps · {num(lane()?.bitrateKbps)} kbps
           </span>
         </Show>
       </div>
@@ -164,52 +174,31 @@ export default function ConnectionQualityIndicator(props: Props) {
           {/* Preview — the active lane's measured numbers. */}
           <Show when={lane()}>
             <PanelSection title={t('cq.section.preview')}>
-              <Show when={isMjpegLane()} fallback={
-                <div style={{ display: 'flex', 'flex-direction': 'column', gap: '4px' }}>
-                  <CqStatRow label={t('cq.fps')} value={safeNumber(lane()?.fps).toFixed(1)} />
-                  <CqStatRow label={t('cq.encoded.bitrate')} value={`${safeNumber(lane()?.bitrateKbps)} kbps`} />
-                  <Show when={lane()?.codec}>
-                    <CqStatRow label={t('cq.encoded.codec')} value={lane()!.codec!} />
-                  </Show>
-                  <Show when={lane()?.width && lane()?.height}>
-                    <CqStatRow label={t('cq.encoded.resolution')} value={`${lane()!.width}×${lane()!.height}`} />
-                  </Show>
-                </div>
-              }>
+              <Show when={isMjpegLane()} fallback={<EncodedStatRows lane={lane} />}>
                 <div style={{ display: 'flex', 'flex-direction': 'column', gap: '4px' }}>
                   <CqStatRow label={t('cq.quality')} value={label()} valueColor={colors().dot} />
-                  <CqStatRow label={t('cq.avgThroughput')} value={`${safeNumber(conn()?.avgThroughputKbps)} kbps`} />
-                  <CqStatRow label={t('cq.minThroughput')} value={`${safeNumber(conn()?.minThroughputKbps)} kbps`} />
+                  <CqStatRow label={t('cq.avgThroughput')} value={`${num(conn()?.avgThroughputKbps)} kbps`} />
+                  <CqStatRow label={t('cq.minThroughput')} value={`${num(conn()?.minThroughputKbps)} kbps`} />
                   {/* worstLatencyMs is the worst client's last frame send
                       duration (the send loop's stopwatch), not network
                       latency — the label says so now. */}
-                  <CqStatRow label={t('cq.sendTime')} value={`${safeNumber(conn()?.worstLatencyMs)} ms`} />
-                  <CqStatRow label={t('cq.avgFrame')} value={`${(safeNumber(conn()?.avgFrameSizeBytes) / 1024).toFixed(1)} KB`} />
-                  <CqStatRow label={t('cq.fps')} value={safeNumber(conn()?.framesPerSecond).toFixed(1)} />
-                  <CqStatRow label={t('cq.clients')} value={`${safeNumber(conn()?.activeClients)}`} />
-                  <CqStatRow label={t('cq.totalSent')} value={formatBytes(safeNumber(conn()?.totalBytesSent))} />
+                  <CqStatRow label={t('cq.sendTime')} value={`${num(conn()?.worstLatencyMs)} ms`} />
+                  <CqStatRow label={t('cq.avgFrame')} value={`${(num(conn()?.avgFrameSizeBytes) / 1024).toFixed(1)} KB`} />
+                  <CqStatRow label={t('cq.fps')} value={num(conn()?.framesPerSecond).toFixed(1)} />
+                  <CqStatRow label={t('cq.clients')} value={`${num(conn()?.activeClients)}`} />
+                  <CqStatRow label={t('cq.totalSent')} value={formatBytes(num(conn()?.totalBytesSent))} />
                 </div>
               </Show>
             </PanelSection>
           </Show>
 
-          {/* Encoded stream — the shared encoder's measured output, when one runs. */}
+          {/* Encoded stream — the shared encoder's measured output whenever
+              the block exists (presence IS the running fact). Shown even
+              while the preview rides another lane: it is device truth, not
+              the preview's lane. */}
           <Show when={encoded()}>
             <PanelSection title={t('cq.section.encoded')}>
-              <div style={{ display: 'flex', 'flex-direction': 'column', gap: '4px' }}>
-                <CqStatRow
-                  label={t('cq.encoded.status')}
-                  value={encoded()!.running ? t('cq.encoded.live') : t('cq.encoded.stopped')}
-                  valueColor={encoded()!.running ? '#4CAF50' : undefined}
-                />
-                <CqStatRow label={t('cq.encoded.bitrate')} value={`${safeNumber(encoded()?.measuredBitrateKbps)} kbps`} />
-                <CqStatRow label={t('cq.encoded.target')} value={`${safeNumber(encoded()?.targetBitrateKbps)} kbps`} />
-                <CqStatRow label={t('cq.fps')} value={safeNumber(encoded()?.fps).toFixed(1)} />
-                <CqStatRow label={t('cq.encoded.codec')} value={encoded()?.codec ?? '—'} />
-                <Show when={encoded()?.width && encoded()?.height}>
-                  <CqStatRow label={t('cq.encoded.resolution')} value={`${encoded()!.width}×${encoded()!.height}`} />
-                </Show>
-              </div>
+              <EncodedStatRows lane={() => encodedLane(encoded())} />
             </PanelSection>
           </Show>
 
@@ -218,7 +207,7 @@ export default function ConnectionQualityIndicator(props: Props) {
               <div style={{ display: 'flex', 'flex-direction': 'column', gap: '6px' }}>
                 <CqSparklineRow
                   label={t('cq.throughput')}
-                  value={`${safeNumber(lane()?.bitrateKbps)} kbps`}
+                  value={`${num(lane()?.bitrateKbps)} kbps`}
                   samples={throughputHistory.values()}
                   color={isMjpegLane() ? colors().dot : 'rgba(255, 255, 255, 0.6)'}
                   title={t('cq.throughputHistory')}
@@ -257,10 +246,10 @@ export default function ConnectionQualityIndicator(props: Props) {
                         {t('cq.client', { id: clientId.slice(0, 8) })}
                       </div>
                       <div style={{ display: 'flex', 'flex-direction': 'column', gap: '2px' }}>
-                        <CqStatRow label={t('cq.throughput')} value={`${safeNumber(detail?.avgThroughputKbps)} kbps`} compact />
-                        <CqStatRow label={t('cq.sendTime')} value={`${safeNumber(detail?.lastSendDurationMs)} ms`} compact />
-                        <CqStatRow label={t('cq.frame')} value={`${(safeNumber(detail?.lastFrameSizeBytes) / 1024).toFixed(1)} KB`} compact />
-                        <CqStatRow label={t('cq.frames')} value={`${safeNumber(detail?.framesSent)}`} compact />
+                        <CqStatRow label={t('cq.throughput')} value={`${num(detail?.avgThroughputKbps)} kbps`} compact />
+                        <CqStatRow label={t('cq.sendTime')} value={`${num(detail?.lastSendDurationMs)} ms`} compact />
+                        <CqStatRow label={t('cq.frame')} value={`${(num(detail?.lastFrameSizeBytes) / 1024).toFixed(1)} KB`} compact />
+                        <CqStatRow label={t('cq.frames')} value={`${num(detail?.framesSent)}`} compact />
                       </div>
                     </div>
                   )}
@@ -269,6 +258,26 @@ export default function ConnectionQualityIndicator(props: Props) {
             </PanelSection>
           </Show>
         </div>
+      </Show>
+    </div>
+  )
+}
+
+/**
+ * The encoded lane's row set — measured bitrate vs target, fps, codec,
+ * resolution. One helper for both places the encoded lane renders: the
+ * Preview section's fallback and the "Encoded stream" section (which reads
+ * the status block even while the preview rides another lane).
+ */
+function EncodedStatRows(props: { lane: () => LaneStats | null }) {
+  return (
+    <div style={{ display: 'flex', 'flex-direction': 'column', gap: '4px' }}>
+      <CqStatRow label={t('cq.encoded.bitrate')} value={`${num(props.lane()?.bitrateKbps)} kbps`} />
+      <CqStatRow label={t('cq.encoded.target')} value={`${num(props.lane()?.targetBitrateKbps)} kbps`} />
+      <CqStatRow label={t('cq.fps')} value={num(props.lane()?.fps).toFixed(1)} />
+      <CqStatRow label={t('cq.encoded.codec')} value={props.lane()?.codec ?? '—'} />
+      <Show when={props.lane()?.width && props.lane()?.height}>
+        <CqStatRow label={t('cq.encoded.resolution')} value={`${props.lane()!.width}×${props.lane()!.height}`} />
       </Show>
     </div>
   )
