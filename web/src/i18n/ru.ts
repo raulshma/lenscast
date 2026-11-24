@@ -876,21 +876,17 @@ export const ru: Partial<Record<MessageKey, string>> = {
   // ── Connection quality panel ──
   'cq.title': 'Качество соединения',
   'cq.quality': 'Качество',
-  'cq.bandwidth': 'Полоса',
   'cq.avgThroughput': 'Ср. пропускная',
   'cq.minThroughput': 'Мин. пропускная',
-  'cq.latency': 'Задержка',
   'cq.avgFrame': 'Ср. кадр',
   'cq.clients': 'Клиенты',
   'cq.totalSent': 'Всего отправлено',
   'cq.trend': 'Динамика',
   'cq.battery': 'Батарея',
-  'cq.perClient': 'По клиентам',
   'cq.client': 'Клиент {id}',
   'cq.throughput': 'Пропускная',
   'cq.frame': 'Кадр',
   'cq.frames': 'Кадры',
-  'cq.bandwidthHistory': 'История оценочной полосы (kbps)',
   'cq.batteryHistory': 'История уровня батареи (%)',
 
   // ── Automation (time-of-day rule scheduling) ──

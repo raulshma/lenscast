@@ -875,21 +875,17 @@ export const zh: Partial<Record<MessageKey, string>> = {
   // ── Connection quality panel ──
   'cq.title': '连接质量',
   'cq.quality': '画质',
-  'cq.bandwidth': '带宽',
   'cq.avgThroughput': '平均吞吐',
   'cq.minThroughput': '最低吞吐',
-  'cq.latency': '延迟',
   'cq.avgFrame': '平均帧',
   'cq.clients': '客户端',
   'cq.totalSent': '累计发送',
   'cq.trend': '趋势',
   'cq.battery': '电池',
-  'cq.perClient': '按客户端',
   'cq.client': '客户端 {id}',
   'cq.throughput': '吞吐',
   'cq.frame': '帧',
   'cq.frames': '帧数',
-  'cq.bandwidthHistory': '估计带宽历史 (kbps)',
   'cq.batteryHistory': '电池电量历史 (%)',
 
   // ── Automation (time-of-day rule scheduling) ──

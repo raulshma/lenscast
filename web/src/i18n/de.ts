@@ -877,21 +877,17 @@ export const de: Partial<Record<MessageKey, string>> = {
   // ── Connection quality panel ──
   'cq.title': 'Verbindungsqualität',
   'cq.quality': 'Qualität',
-  'cq.bandwidth': 'Bandbreite',
   'cq.avgThroughput': 'Ø-Durchsatz',
   'cq.minThroughput': 'Min. Durchsatz',
-  'cq.latency': 'Latenz',
   'cq.avgFrame': 'Ø-Frame',
   'cq.clients': 'Clients',
   'cq.totalSent': 'Gesendet gesamt',
   'cq.trend': 'Verlauf',
   'cq.battery': 'Akku',
-  'cq.perClient': 'Pro Client',
   'cq.client': 'Client {id}',
   'cq.throughput': 'Durchsatz',
   'cq.frame': 'Frame',
   'cq.frames': 'Frames',
-  'cq.bandwidthHistory': 'Geschätzter Bandbreitenverlauf (kbps)',
   'cq.batteryHistory': 'Akkustand-Verlauf (%)',
 
   // ── Automation (time-of-day rule scheduling) ──

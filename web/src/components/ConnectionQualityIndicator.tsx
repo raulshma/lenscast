@@ -1,13 +1,22 @@
-import { createEffect, createSignal, Show } from 'solid-js'
+import { createEffect, createSignal, For, Show } from 'solid-js'
+import type { JSX } from 'solid-js'
 import type { ConnectionQualityStatus, DeviceStatus } from '../types'
+import type { PlayerMode } from '../video/playerLadder'
 import { useSignalHistory } from '../hooks/useSignalHistory'
 import { formatBytes } from '../format'
 import Sparkline from './Sparkline'
 import { t } from '../lib/i18n'
+import { pickPreviewLane, type LaneStats } from '../lib/streamStats'
 
 interface Props {
-  /** The full device status: connection quality drives the panel, battery feeds the trend sparkline. */
+  /** The full device status: the picked lane drives the readout, battery feeds the trend sparkline. */
   status: () => DeviceStatus | undefined
+  /**
+   * The preview's player rung — the panel follows its lane (MJPEG rung → the
+   * MJPEG clients' measured lane; WHEP/H264/HLS → the encoded lane). Optional
+   * only for non-preview hosts: no rung means the encoded lane.
+   */
+  previewMode?: () => PlayerMode
 }
 
 const QUALITY_COLORS: Record<string, { dot: string; bg: string }> = {
@@ -34,21 +43,28 @@ export default function ConnectionQualityIndicator(props: Props) {
     const n = typeof value === 'number' ? value : Number(value)
     return Number.isFinite(n) ? n : fallback
   }
+  // The preview's lane: measured numbers only, null when the lane has no
+  // data (the gate in StreamPreview keeps this hidden then).
+  const lane = (): LaneStats | null => pickPreviewLane(props.previewMode?.(), props.status())
+  const isMjpegLane = () => lane()?.lane === 'mjpeg'
   const clientDetails = () => conn()?.clientDetails ?? {}
   const qualityLevel = () => conn()?.qualityLevel ?? 'GOOD'
   const colors = () => QUALITY_COLORS[qualityLevel()] ?? QUALITY_COLORS.GOOD
   const label = () => QUALITY_LABELS[qualityLevel()] ?? 'N/A'
+  const encoded = () => props.status()?.encodedStream
+  const hasClients = () => Object.keys(clientDetails()).length > 0
 
   // Sparkline history: both series ride the status payloads the parent
-  // already pushes — bandwidth from the connection-quality block, battery
-  // from the device status. No extra fetch lane.
-  const bandwidthHistory = useSignalHistory()
+  // already pushes — throughput from the picked lane's measured bitrate
+  // (the same number the badge shows, never the ladders' congestion
+  // estimate), battery from the device status. No extra fetch lane.
+  const throughputHistory = useSignalHistory()
   const batteryHistory = useSignalHistory()
 
   createEffect(() => {
-    const quality = props.status()?.connectionQuality
-    if (!quality) return
-    bandwidthHistory.push(safeNumber(quality.estimatedBandwidthKbps))
+    const kbps = lane()?.bitrateKbps
+    if (kbps == null) return
+    throughputHistory.push(kbps)
   })
 
   createEffect(() => {
@@ -79,27 +95,31 @@ export default function ConnectionQualityIndicator(props: Props) {
           'min-width': '80px',
         }}
       >
-        <div style={{ display: 'flex', 'align-items': 'center', gap: '4px' }}>
-          <div
-            style={{
-              width: '8px',
-              height: '8px',
-              'border-radius': '50%',
-              background: colors().dot,
-            }}
-          />
-          <span
-            style={{
-              'font-size': '11px',
-              'font-weight': '700',
-              'font-family': 'ui-monospace, monospace',
-              color: '#fff',
-            }}
-          >
-            {label()}
-          </span>
-        </div>
-        <Show when={conn()}>
+        {/* The quality verdict belongs to the MJPEG lane's network monitor;
+            an encoded-lane badge shows numbers only. */}
+        <Show when={isMjpegLane()}>
+          <div style={{ display: 'flex', 'align-items': 'center', gap: '4px' }}>
+            <div
+              style={{
+                width: '8px',
+                height: '8px',
+                'border-radius': '50%',
+                background: colors().dot,
+              }}
+            />
+            <span
+              style={{
+                'font-size': '11px',
+                'font-weight': '700',
+                'font-family': 'ui-monospace, monospace',
+                color: '#fff',
+              }}
+            >
+              {label()}
+            </span>
+          </div>
+        </Show>
+        <Show when={lane()}>
           <span
             style={{
               'font-size': '10px',
@@ -107,12 +127,12 @@ export default function ConnectionQualityIndicator(props: Props) {
               color: 'rgba(255, 255, 255, 0.7)',
             }}
           >
-            {safeNumber(conn()?.framesPerSecond).toFixed(1)} fps · {safeNumber(conn()?.avgThroughputKbps)} kbps
+            {safeNumber(lane()?.fps).toFixed(1)} fps · {safeNumber(lane()?.bitrateKbps)} kbps
           </span>
         </Show>
       </div>
 
-      <Show when={expanded() && conn()}>
+      <Show when={expanded() && (lane() || encoded() || hasClients())}>
         <div
           class="cq-detail-panel"
           style={{
@@ -141,45 +161,67 @@ export default function ConnectionQualityIndicator(props: Props) {
             {t('cq.title')}
           </div>
 
-          <div style={{ display: 'flex', 'flex-direction': 'column', gap: '4px' }}>
-            <CqStatRow label={t('cq.quality')} value={label()} valueColor={colors().dot} />
-            <CqStatRow label={t('cq.bandwidth')} value={`${safeNumber(conn()?.estimatedBandwidthKbps)} kbps`} />
-            <CqStatRow label={t('cq.avgThroughput')} value={`${safeNumber(conn()?.avgThroughputKbps)} kbps`} />
-            <CqStatRow label={t('cq.minThroughput')} value={`${safeNumber(conn()?.minThroughputKbps)} kbps`} />
-            <CqStatRow label={t('cq.latency')} value={`${safeNumber(conn()?.worstLatencyMs)} ms`} />
-            <CqStatRow label={t('cq.avgFrame')} value={`${(safeNumber(conn()?.avgFrameSizeBytes) / 1024).toFixed(1)} KB`} />
-            <CqStatRow label="FPS" value={safeNumber(conn()?.framesPerSecond).toFixed(1)} />
-            <CqStatRow label={t('cq.clients')} value={`${safeNumber(conn()?.activeClients)}`} />
-            <CqStatRow label={t('cq.totalSent')} value={formatBytes(safeNumber(conn()?.totalBytesSent))} />
-          </div>
+          {/* Preview — the active lane's measured numbers. */}
+          <Show when={lane()}>
+            <PanelSection title={t('cq.section.preview')}>
+              <Show when={isMjpegLane()} fallback={
+                <div style={{ display: 'flex', 'flex-direction': 'column', gap: '4px' }}>
+                  <CqStatRow label={t('cq.fps')} value={safeNumber(lane()?.fps).toFixed(1)} />
+                  <CqStatRow label={t('cq.encoded.bitrate')} value={`${safeNumber(lane()?.bitrateKbps)} kbps`} />
+                  <Show when={lane()?.codec}>
+                    <CqStatRow label={t('cq.encoded.codec')} value={lane()!.codec!} />
+                  </Show>
+                  <Show when={lane()?.width && lane()?.height}>
+                    <CqStatRow label={t('cq.encoded.resolution')} value={`${lane()!.width}×${lane()!.height}`} />
+                  </Show>
+                </div>
+              }>
+                <div style={{ display: 'flex', 'flex-direction': 'column', gap: '4px' }}>
+                  <CqStatRow label={t('cq.quality')} value={label()} valueColor={colors().dot} />
+                  <CqStatRow label={t('cq.avgThroughput')} value={`${safeNumber(conn()?.avgThroughputKbps)} kbps`} />
+                  <CqStatRow label={t('cq.minThroughput')} value={`${safeNumber(conn()?.minThroughputKbps)} kbps`} />
+                  {/* worstLatencyMs is the worst client's last frame send
+                      duration (the send loop's stopwatch), not network
+                      latency — the label says so now. */}
+                  <CqStatRow label={t('cq.sendTime')} value={`${safeNumber(conn()?.worstLatencyMs)} ms`} />
+                  <CqStatRow label={t('cq.avgFrame')} value={`${(safeNumber(conn()?.avgFrameSizeBytes) / 1024).toFixed(1)} KB`} />
+                  <CqStatRow label={t('cq.fps')} value={safeNumber(conn()?.framesPerSecond).toFixed(1)} />
+                  <CqStatRow label={t('cq.clients')} value={`${safeNumber(conn()?.activeClients)}`} />
+                  <CqStatRow label={t('cq.totalSent')} value={formatBytes(safeNumber(conn()?.totalBytesSent))} />
+                </div>
+              </Show>
+            </PanelSection>
+          </Show>
 
-          <Show when={bandwidthHistory.values().length > 1 || batteryHistory.values().length > 1}>
-            <div
-              style={{
-                'margin-top': '8px',
-                'padding-top': '8px',
-                'border-top': '1px solid rgba(255, 255, 255, 0.08)',
-              }}
-            >
-              <div
-                style={{
-                  'font-size': '10px',
-                  'font-weight': '600',
-                  color: 'rgba(255, 255, 255, 0.5)',
-                  'text-transform': 'uppercase',
-                  'letter-spacing': '0.5px',
-                  'margin-bottom': '6px',
-                }}
-              >
-                {t('cq.trend')}
+          {/* Encoded stream — the shared encoder's measured output, when one runs. */}
+          <Show when={encoded()}>
+            <PanelSection title={t('cq.section.encoded')}>
+              <div style={{ display: 'flex', 'flex-direction': 'column', gap: '4px' }}>
+                <CqStatRow
+                  label={t('cq.encoded.status')}
+                  value={encoded()!.running ? t('cq.encoded.live') : t('cq.encoded.stopped')}
+                  valueColor={encoded()!.running ? '#4CAF50' : undefined}
+                />
+                <CqStatRow label={t('cq.encoded.bitrate')} value={`${safeNumber(encoded()?.measuredBitrateKbps)} kbps`} />
+                <CqStatRow label={t('cq.encoded.target')} value={`${safeNumber(encoded()?.targetBitrateKbps)} kbps`} />
+                <CqStatRow label={t('cq.fps')} value={safeNumber(encoded()?.fps).toFixed(1)} />
+                <CqStatRow label={t('cq.encoded.codec')} value={encoded()?.codec ?? '—'} />
+                <Show when={encoded()?.width && encoded()?.height}>
+                  <CqStatRow label={t('cq.encoded.resolution')} value={`${encoded()!.width}×${encoded()!.height}`} />
+                </Show>
               </div>
+            </PanelSection>
+          </Show>
+
+          <Show when={throughputHistory.values().length > 1 || batteryHistory.values().length > 1}>
+            <PanelSection title={t('cq.trend')}>
               <div style={{ display: 'flex', 'flex-direction': 'column', gap: '6px' }}>
                 <CqSparklineRow
-                  label={t('cq.bandwidth')}
-                  value={`${safeNumber(conn()?.estimatedBandwidthKbps)} kbps`}
-                  samples={bandwidthHistory.values()}
-                  color={colors().dot}
-                  title={t('cq.bandwidthHistory')}
+                  label={t('cq.throughput')}
+                  value={`${safeNumber(lane()?.bitrateKbps)} kbps`}
+                  samples={throughputHistory.values()}
+                  color={isMjpegLane() ? colors().dot : 'rgba(255, 255, 255, 0.6)'}
+                  title={t('cq.throughputHistory')}
                 />
                 <CqSparklineRow
                   label={t('cq.battery')}
@@ -189,61 +231,72 @@ export default function ConnectionQualityIndicator(props: Props) {
                   title={t('cq.batteryHistory')}
                 />
               </div>
-            </div>
+            </PanelSection>
           </Show>
 
-          <Show when={Object.keys(clientDetails()).length > 0}>
-            <div
-              style={{
-                'margin-top': '8px',
-                'padding-top': '8px',
-                'border-top': '1px solid rgba(255, 255, 255, 0.08)',
-              }}
-            >
-              <div
-                style={{
-                  'font-size': '10px',
-                  'font-weight': '600',
-                  color: 'rgba(255, 255, 255, 0.5)',
-                  'text-transform': 'uppercase',
-                  'letter-spacing': '0.5px',
-                  'margin-bottom': '6px',
-                }}
-              >
-                {t('cq.perClient')}
-              </div>
+          <Show when={hasClients()}>
+            <PanelSection title={t('cq.mjpegViewers')}>
               <div style={{ display: 'flex', 'flex-direction': 'column', gap: '6px' }}>
-                {Object.entries(clientDetails()).map(([clientId, detail]) => (
-                  <div
-                    style={{
-                      background: 'rgba(255, 255, 255, 0.04)',
-                      'border-radius': '6px',
-                      padding: '6px 8px',
-                    }}
-                  >
+                <For each={Object.entries(clientDetails())}>
+                  {([clientId, detail]) => (
                     <div
                       style={{
-                        'font-size': '10px',
-                        'font-weight': '600',
-                        color: 'rgba(255, 255, 255, 0.7)',
-                        'margin-bottom': '4px',
+                        background: 'rgba(255, 255, 255, 0.04)',
+                        'border-radius': '6px',
+                        padding: '6px 8px',
                       }}
                     >
-                      {t('cq.client', { id: clientId.slice(0, 8) })}
+                      <div
+                        style={{
+                          'font-size': '10px',
+                          'font-weight': '600',
+                          color: 'rgba(255, 255, 255, 0.7)',
+                          'margin-bottom': '4px',
+                        }}
+                      >
+                        {t('cq.client', { id: clientId.slice(0, 8) })}
+                      </div>
+                      <div style={{ display: 'flex', 'flex-direction': 'column', gap: '2px' }}>
+                        <CqStatRow label={t('cq.throughput')} value={`${safeNumber(detail?.avgThroughputKbps)} kbps`} compact />
+                        <CqStatRow label={t('cq.sendTime')} value={`${safeNumber(detail?.lastSendDurationMs)} ms`} compact />
+                        <CqStatRow label={t('cq.frame')} value={`${(safeNumber(detail?.lastFrameSizeBytes) / 1024).toFixed(1)} KB`} compact />
+                        <CqStatRow label={t('cq.frames')} value={`${safeNumber(detail?.framesSent)}`} compact />
+                      </div>
                     </div>
-                    <div style={{ display: 'flex', 'flex-direction': 'column', gap: '2px' }}>
-                      <CqStatRow label={t('cq.throughput')} value={`${safeNumber(detail?.avgThroughputKbps)} kbps`} compact />
-                      <CqStatRow label={t('cq.latency')} value={`${safeNumber(detail?.lastSendDurationMs)} ms`} compact />
-                      <CqStatRow label={t('cq.frame')} value={`${(safeNumber(detail?.lastFrameSizeBytes) / 1024).toFixed(1)} KB`} compact />
-                      <CqStatRow label={t('cq.frames')} value={`${safeNumber(detail?.framesSent)}`} compact />
-                    </div>
-                  </div>
-                ))}
+                  )}
+                </For>
               </div>
-            </div>
+            </PanelSection>
           </Show>
         </div>
       </Show>
+    </div>
+  )
+}
+
+/** One titled panel section: the uppercase header + the rows below it. */
+function PanelSection(props: { title: string; children: JSX.Element }) {
+  return (
+    <div
+      style={{
+        'margin-top': '8px',
+        'padding-top': '8px',
+        'border-top': '1px solid rgba(255, 255, 255, 0.08)',
+      }}
+    >
+      <div
+        style={{
+          'font-size': '10px',
+          'font-weight': '600',
+          color: 'rgba(255, 255, 255, 0.5)',
+          'text-transform': 'uppercase',
+          'letter-spacing': '0.5px',
+          'margin-bottom': '6px',
+        }}
+      >
+        {props.title}
+      </div>
+      {props.children}
     </div>
   )
 }

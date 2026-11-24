@@ -9,6 +9,7 @@ import NextShell from './components/next/NextShell'
 import NxLogin from './components/next/NxLogin'
 import { cyclePlayerMode } from './video/playerLadder'
 import { uiModeStore } from './lib/uiMode'
+import { streamStatsOverlayStore } from './lib/streamStatsOverlay'
 import { hashRouter } from './lib/router'
 import { t } from './lib/i18n'
 import './App.css'
@@ -87,6 +88,9 @@ function App() {
     },
     'cycle-player': () => {
       state.setPlayerMode(cyclePlayerMode(state.playerMode()))
+    },
+    stats: () => {
+      streamStatsOverlayStore().cycle()
     },
     gallery: () => {
       // In the next UI the gallery is the Media view, not an overlay.

@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { render, screen, cleanup, fireEvent, waitFor } from '@solidjs/testing-library'
 import { createSignal } from 'solid-js'
 import StreamPreview from './StreamPreview'
+import { streamStatsOverlayStore } from '../lib/streamStatsOverlay'
 import type { PlayerMode } from '../video/playerLadder'
 
 // The full-screen preview's browser contract, exercised through the real
@@ -18,11 +19,11 @@ import type { PlayerMode } from '../video/playerLadder'
 // target element), window.isSecureContext (a prototype getter — shadowed with
 // an own property), and navigator.wakeLock resolving a fake sentinel.
 
-function renderPreview(opts: { live?: boolean } = {}) {
-  const [playerMode, setPlayerMode] = createSignal<PlayerMode>('mjpeg')
+function renderPreview(opts: { live?: boolean; mode?: PlayerMode; stats?: Record<string, unknown> } = {}) {
+  const [playerMode, setPlayerMode] = createSignal<PlayerMode>(opts.mode ?? 'mjpeg')
   const [live, setLive] = createSignal(opts.live ?? false)
   const props = {
-    status: () => (live() ? ({ streaming: { webStreamingActive: true, isActive: true } } as any) : null),
+    status: () => (live() ? ({ streaming: { webStreamingActive: true, isActive: true }, ...opts.stats } as any) : null),
     previewVisible: () => live(),
     streamNonce: () => 0,
     streamActionLoading: () => false,
@@ -210,5 +211,129 @@ describe('Graceful degradation', () => {
     clickToggle()
     await screen.findByText('Exit')
     expect(screen.queryByText(/Screen wake lock needs HTTPS/)).toBeNull()
+  })
+})
+
+// The stream-stats overlay (issue #25): the preview indicator follows the
+// stats toggle (auto/on/off, persisted app-wide) and the preview rung's
+// lane — auto is today's gate (Adaptive Bitrate required), on shows the
+// lane's measured numbers without it, off never shows. The Stats button in
+// the action bar cycles the toggle.
+describe('Stream stats overlay', () => {
+  const mjpegStatus = {
+    connectionQuality: {
+      qualityLevel: 'GOOD',
+      estimatedBandwidthKbps: 0,
+      avgThroughputKbps: 3900,
+      minThroughputKbps: 3500,
+      worstLatencyMs: 12,
+      avgFrameSizeBytes: 45000,
+      totalBytesSent: 0,
+      activeClients: 1,
+      framesPerSecond: 23.5,
+      clientDetails: {},
+    },
+  }
+  const adaptiveOn = { adaptiveBitrate: { enabled: true } }
+  const encodedStatus = {
+    encodedStream: {
+      running: true,
+      measuredBitrateKbps: 1890,
+      fps: 23.5,
+      targetBitrateKbps: 2000,
+      codec: 'h264',
+      width: 1280,
+      height: 720,
+    },
+  }
+
+  const badge = () => document.querySelector('.cq-badge')
+
+  function clickStats() {
+    fireEvent.click(screen.getByText(/^Stats: /).closest('button')!)
+  }
+
+  // jsdom has neither WebCodecs nor WebSocket, so the H264 rung reports
+  // 'error' at start() and the ladder demotes to MJPEG. Stubbing the pair
+  // keeps the rung mounted (a socket that never opens demotes nothing), the
+  // same never-fires stub style installFullscreen uses.
+  function installH264Rung() {
+    vi.stubGlobal('VideoDecoder', function FakeDecoder() {})
+    vi.stubGlobal('WebSocket', class FakeWebSocket {
+      binaryType = 'blob'
+      onopen: unknown = null
+      onmessage: unknown = null
+      onerror: unknown = null
+      onclose: unknown = null
+      close() {}
+      send() {}
+    })
+  }
+
+  beforeEach(() => {
+    // The app-wide singleton persists across a file's tests — start each
+    // from the default so the cycle tests are order-independent.
+    streamStatsOverlayStore().set('auto')
+  })
+
+  it('auto keeps today\'s gate: no indicator without Adaptive Bitrate, even with lane data', () => {
+    renderPreview({ live: true, stats: mjpegStatus })
+    expect(badge()).toBeNull()
+  })
+
+  it('auto shows the indicator once Adaptive Bitrate is enabled, with the MJPEG lane\'s numbers', () => {
+    renderPreview({ live: true, stats: { ...mjpegStatus, ...adaptiveOn } })
+    expect(badge()).not.toBeNull()
+    expect(screen.getByText('23.5 fps · 3900 kbps')).toBeTruthy()
+  })
+
+  it('on shows the indicator without Adaptive Bitrate', () => {
+    streamStatsOverlayStore().set('on')
+    renderPreview({ live: true, stats: mjpegStatus })
+    expect(badge()).not.toBeNull()
+  })
+
+  it('off hides the indicator even with Adaptive Bitrate enabled', () => {
+    streamStatsOverlayStore().set('off')
+    renderPreview({ live: true, stats: { ...mjpegStatus, ...adaptiveOn } })
+    expect(badge()).toBeNull()
+  })
+
+  it('a hidden preview hides the indicator in every mode', () => {
+    streamStatsOverlayStore().set('on')
+    renderPreview({ live: false, stats: mjpegStatus })
+    expect(badge()).toBeNull()
+  })
+
+  it('the badge follows the preview rung\'s lane: an H264 rung reads the encoded lane', () => {
+    installH264Rung()
+    streamStatsOverlayStore().set('on')
+    renderPreview({ live: true, mode: 'h264', stats: { ...mjpegStatus, ...encodedStatus } })
+    expect(screen.getByText('23.5 fps · 1890 kbps')).toBeTruthy()
+  })
+
+  it('an H264 rung while not encoding shows no lane data (no MJPEG fallback numbers)', () => {
+    installH264Rung()
+    streamStatsOverlayStore().set('on')
+    renderPreview({ live: true, mode: 'h264', stats: mjpegStatus })
+    expect(badge()).toBeNull()
+  })
+
+  it('the Stats button cycles auto → on → off → auto, gating the indicator along the way', () => {
+    renderPreview({ live: true, stats: mjpegStatus })
+    expect(screen.getByText('Stats: AUTO')).toBeTruthy()
+    expect(badge()).toBeNull()
+
+    clickStats() // auto → on
+    expect(screen.getByText('Stats: ON')).toBeTruthy()
+    expect(badge()).not.toBeNull()
+
+    clickStats() // on → off
+    expect(screen.getByText('Stats: OFF')).toBeTruthy()
+    expect(badge()).toBeNull()
+
+    clickStats() // off → auto
+    expect(screen.getByText('Stats: AUTO')).toBeTruthy()
+    expect(badge()).toBeNull()
   })
 })

@@ -875,21 +875,17 @@ export const fr: Partial<Record<MessageKey, string>> = {
   // ── Connection quality panel ──
   'cq.title': 'Qualité de connexion',
   'cq.quality': 'Qualité',
-  'cq.bandwidth': 'Bande passante',
   'cq.avgThroughput': 'Débit moyen',
   'cq.minThroughput': 'Débit min.',
-  'cq.latency': 'Latence',
   'cq.avgFrame': 'Image moy.',
   'cq.clients': 'Clients',
   'cq.totalSent': 'Total envoyé',
   'cq.trend': 'Tendance',
   'cq.battery': 'Batterie',
-  'cq.perClient': 'Par client',
   'cq.client': 'Client {id}',
   'cq.throughput': 'Débit',
   'cq.frame': 'Image',
   'cq.frames': 'Images',
-  'cq.bandwidthHistory': 'Historique de bande passante estimée (kbps)',
   'cq.batteryHistory': 'Historique du niveau de batterie (%)',
 
   // ── Automation (time-of-day rule scheduling) ──

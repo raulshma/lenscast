@@ -1567,6 +1567,47 @@ null while no encoded stream runs). The MJPEG chips freeze when the last
 viewer leaves no more: clients unregister and windows age out. Contract
 pinned through `web/contract/status.json` on all three sides.
 
+### Stream Stats Lane Picker
+**`web/src/lib/streamStats.ts`** — what the dashboard's stats blocks do with
+the two measured lanes (issue #25): they follow the preview's actual rung.
+`pickPreviewLane` maps the MJPEG player rung to the MJPEG lane
+(`connectionQuality`'s window-measured throughput/fps) and every
+WHEP/H264/HLS rung to the encoded lane (`encodedStream`'s
+measured-vs-target, codec, geometry), strict — an absent block picks null
+(the UI hides or dashes) instead of borrowing the other lane's numbers, and
+non-finite wire values read as absence, never NaN. `pickMeasuredRates` is
+the lane-agnostic read the next shell's TX/FPS chips consume: encoded-lane
+measured while an encoded stream runs, else the MJPEG lane's measured rates.
+The consumer of the first half is the lane-aware
+`ConnectionQualityIndicator`: the badge shows the picked lane's measured
+numbers (the quality dot stays MJPEG-only — it is that lane's network
+verdict), and the detail panel is three sections — "Preview" (the active
+lane's rows), "Encoded stream" (running, measured vs target, fps, codec,
+resolution, shown only while `encodedStream` exists), and "MJPEG viewers"
+(the per-client rows). The old duplicate "Bandwidth" row is gone (it
+displayed the ladders' drain-based congestion estimate), the "Latency" row
+is renamed "Send time" (what still backs it is the worst client's last
+frame-send duration, `worstLatencyMs`/`lastSendDurationMs` — a stopwatch on
+the send loop, not network latency), and the trend sparkline now rides the
+picked lane's measured bitrate instead of the congestion estimate.
+
+### Stream Stats Overlay Toggle
+**`web/src/lib/streamStatsOverlay.ts`** — the stats blocks' visibility
+switch, the uiMode store shape exactly (createStore/deps + localStorage
+singleton, `lenscast.streamStats`): `auto | on | off`, cycled by the Stats
+button in the preview action bar (beside "Preview: MODE") and the T
+shortcut (the lib/shortcuts key map, so the help overlay lists it). The
+toggle gates BOTH the preview indicator and the TX/FPS chips and decides
+VISIBILITY only — what they display is always the picker's measured lane.
+`auto` preserves the pre-toggle gate exactly (stream up + preview visible +
+Adaptive Bitrate enabled + lane data — for MJPEG, `connectionQuality`
+present); `on` drops only the adaptive condition (stats work with
+adaptation off, still live-preview + lane data); `off` never shows. The
+chips read measured values now (`pickMeasuredRates`) — never the stale
+adaptive-only numbers, and a null/0 value hides a chip in every mode (the
+honest idle convention); the CL chip stays the honest client count
+(`clientCount + whepClients`, untouched by the stats work).
+
 ### Stream Watchdog
 **`core/StreamWatchdog.kt`** — monitors a live stream and performs recovery
 (hard restart choreography) when it stalls. Recovery re-attaches the environment
