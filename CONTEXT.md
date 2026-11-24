@@ -1233,6 +1233,83 @@ GET verdict for POST/DELETE (curl viewers need no session cookie), and the
 Role Gate allows a viewer session's WHEP verbs as reads. The status
 snapshot's `whepClients` mirrors the live count; the dashboard's player
 ladder rides WHEP as the top rung (`web/src/lib/whepClient.ts`).
+The lane's measured stats (issue #25) also live here: each 2 s reap tick
+asks every live session's `getStats` (this lane never crosses the
+encoded-stream hub — libwebrtc encodes each viewer's stream itself), the
+pure modules below turn the reports into a rate, and
+`whepStreamStatus()` publishes the snapshot `/api/status`'s `whepStream`
+block carries. A session joins the lane's stats when it is created and
+leaves them at teardown, BEFORE its peer connection is disposed, so a
+report still in flight finds an unknown id and is dropped. The endpoint
+is the only place the lane's threading is decided — the bundled
+stream-webrtc-android gives no handle to libwebrtc's signaling thread, so
+the poll is issued from the loop thread under a per-session lock that
+teardown shares (never on a disposed connection), at the cadence
+[Whep Stats Poll Guard](#whep-stats-poll-guard) grants.
+
+### WHEP Stream Stats
+**`streaming/whep/WhepStreamStats.kt`** — the WHEP lane's measured-stream
+stats (issue #25), the pure rate accounting behind `whepStreamStatus()`.
+The input is libwebrtc's CUMULATIVE counters per viewer session
+(`onStats(sessionId, atMs, bytesSent, framesEncoded, codec?, width?,
+height?)`), so the rate is a delta against that session's previous totals:
+the first observation only stores a baseline, and a delta that did not
+advance (a stalled send) or went backwards (libwebrtc replaced the
+outbound stream) is accounted as silence and re-baselines — never a
+negative sample, never an inflated next interval.
+**Why the delta is spread over cells:** the endpoint polls every 2 s into
+a 5 s window, so each poll's delta is spread over the
+`StreamDefaults.STATS_SUB_SAMPLE_MS` (250 ms) cells its interval crossed,
+on one time lattice (cell `k` spans `[k·250, (k+1)·250)`, stamped at its
+centre), each cell carrying the poll's average rate; the window holds
+exactly 20 cells (`STATS_WINDOW_MS / STATS_SUB_SAMPLE_MS` — the pair is
+refused otherwise), and each cell is one sub-sample in the session's own
+[SlidingRateWindow](#stream-stats) (frames may be fractional). **The
+not-yet-polled tail is held at the last poll's rate:** cells only land
+when a poll does, so between polls up to one interval of elapsed cells
+are unobserved — without the hold the reading would still swing 100%→60%
+with the 2 s cadence; with it a steady stream reads its true rate at
+every instant, whatever the poll phase. A stalled send records silence at
+its next poll and polls that stop arriving release the hold after one
+interval: the reading decays to 0, never freezes. **Sessions are summed**
+(`onSessionAdmitted` / `onSessionRemoved`), and the session moving the
+most bytes describes the lane — the last-known codec and frame size, null
+until a report carried them (libwebrtc omits them until a frame was
+encoded). `snapshot()` is null until a session has reported, which is
+exactly when the wire block appears. Pure, injected clock, thread-safe;
+JVM-tested (`WhepStreamStatsTest`).
+
+### WHEP Stats Report Parser
+**`streaming/whep/WhepStatsReportParser.kt`** — the pure reading of a
+libwebrtc stats report: which row describes a viewer's video, and what it
+says. `videoOutbound(rows)` picks the `kind == "video"` `outbound-rtp` row
+(the largest by `bytesSent` if a build ever reports several; a build
+without `kind` is recognized by the codec's mime type), reads
+`bytesSent`/`framesEncoded` (a row without both is no observation) and
+the nullable `frameWidth`/`frameHeight` (absent or 0 = unknown), and
+resolves `codecId` to the codec's `mimeType`, lowered to the wire name
+(`video/VP8` → `vp8`, the encoded lane's `h264`/`h265` vocabulary). The
+members arrive boxed as Integer/Long/Double exactly as the JNI glue builds
+them, so every numeric member is read as any `Number`. JVM-tested
+(`WhepStatsReportParserTest`) without libwebrtc; the endpoint logs each
+session's first report as a type census and every report as the delta it
+accounted, so a parser mismatch is visible in logcat.
+
+### WHEP Stats Poll Guard
+**`streaming/whep/WhepStatsPollGuard.kt`** — one viewer session's
+stats-poll protocol, pure and JVM-tested (`WhepStatsPollGuardTest`). The
+reap tick calls `arm(nowMs)` and acts on the verdict: `ISSUE` and
+`REISSUE` each grant exactly one `getStats` request, `WAIT` leaves the
+session alone this tick; the report callback answers with
+`onDelivered(nowMs)`, a request libwebrtc refused with `onFailed()`.
+Three rules, each answering a way the naive "poll every tick" breaks:
+one request owed at a time; a 250 ms quiet gap (`QUIET_MS`) after every
+report callback before the next request — libwebrtc settles a request's
+own bookkeeping in its signaling thread around the moment it hands the
+report over, and the app holds no lock over that; and a request whose
+report never arrives is declared lost after
+`STALE_MS` (6 s, three polls) and asked again, so a dropped report cannot
+silence a session forever.
 
 ### AAC Format
 **`streaming/rtsp/AacFormat.kt`** — one home for the AAC stream's format
@@ -1588,22 +1665,31 @@ stats surface behind every DISPLAYED rate (issue #25). The vocabulary: the
 the HTTP server's buffer — a congestion signal (a 50 KB frame draining in
 1 ms reads 400 000 "kbps"), and the adaptation ladders' only throughput
 input; *measured stream stats* are what the dashboard shows, computed from
-(timestamp, bytes) samples in a sliding [StreamDefaults.STATS_WINDOW_MS]
-window so they are rates of actual frame production. The window divides by
-the full window span — a steady stream reads its true rate, a partial window
-reads LOW (never the drain spike), and silence decays the reading to 0 as
-samples slide out; nothing is summed forever. Three consumers: the
-NetworkQualityMonitor keeps one window per MJPEG client (display accessors
-keep the "throughput" names; the drain signal is renamed to
-`drainRateSamples`/`*DrainRateKbps*` and stays the ladders' input, with the
-default-aware idle view applied inside the level verdicts so the 5000 kbps
-default can never reach a display accessor), the EncodedStreamHub records
-its encoder-output AUs into one window and answers `encodedStreamStatus()`,
-and `/api/status` carries both — `connectionQuality`'s
-throughput/fps/`framesPerSecond` and the nullable `encodedStream` block
+(timestamp, bytes, frames) samples in a sliding
+[StreamDefaults.STATS_WINDOW_MS] window so they are rates of actual frame
+production — a sample is one frame (frame count 1) everywhere except the
+WHEP lane, whose samples are counter deltas spread over quarter-second
+cells. The window divides by the full window span — a steady stream reads
+its true rate, a partial window reads LOW (never the drain spike), and
+silence decays the reading to 0 as samples slide out; nothing is summed
+forever. Four consumers: the NetworkQualityMonitor keeps one window per
+MJPEG client (display accessors keep the "throughput" names; the drain
+signal is renamed to `drainRateSamples`/`*DrainRateKbps*` and stays the
+ladders' input, with the default-aware idle view applied inside the level
+verdicts so the 5000 kbps default can never reach a display accessor), the
+EncodedStreamHub records its encoder-output AUs into one window and
+answers `encodedStreamStatus()`, the WHEP endpoint keeps one window per
+viewer session in [WHEP Stream Stats](#whep-stream-stats) (fed with
+libwebrtc's `getStats` counter deltas — that lane never crosses the hub),
+and `/api/status` carries them — `connectionQuality`'s
+throughput/fps/`framesPerSecond`, the nullable `encodedStream` block
 (measured encoder-output bitrate/fps, target bitrate, codec, geometry;
-null while no encoded stream runs). The MJPEG chips freeze when the last
-viewer leaves no more: clients unregister and windows age out. Contract
+null while no encoded stream runs), and the nullable `whepStream` block
+(the WHEP lane's measured bitrate/fps summed over the viewers, the codec
+and geometry of the busiest viewer's session; null while no viewer has
+reported — independent of `encodedStream`, both may be present). The MJPEG
+chips freeze when the last viewer leaves no more: clients unregister and
+windows age out. Contract
 pinned through `web/contract/status.json` on all three sides.
 
 ### Stream Stats Lane Picker
@@ -2080,9 +2166,12 @@ between the two paths is the reason the text-box bitmap is shared.
 ### Status Snapshot Builder
 **`streaming/web/StatusSnapshotBuilder.kt`** — the pure `/api/status`
 aggregation: typed `StreamingInputs`/`ThermalInputs`/`BatteryInputs`/
-`WatchdogInputs`/`AdaptiveInputs`/`NetworkInputs`/`EncodedStreamInputs` in,
+`WatchdogInputs`/`AdaptiveInputs`/`NetworkInputs`/`EncodedStreamInputs`/
+`WhepStreamInputs` in,
 one `StatusResponseDto` out (adaptive null-when-disabled, connectionQuality
-null-when-idle, encodedStream null-while-not-encoding, first-client fps).
+null-when-idle, encodedStream null-while-not-encoding, whepStream
+null-while-no-viewer-has-reported — the two measured blocks do not gate
+each other — first-client fps).
 `StatusWebHandler` only collects flows and
 delegates — the dashboard/API mapping is tested without a manager.
 

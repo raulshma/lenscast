@@ -1045,6 +1045,15 @@ object OpenApiSpec {
                 "description" to "The encoded lane's measured stream status — the encoder output's real bitrate/fps over " +
                     "a sliding window, plus the configured target and encode geometry; present while the encoded pipeline runs",
             ),
+            "whepStream" to mapOf(
+                "type" to "object",
+                "description" to "The WHEP (WebRTC preview) lane's measured stream status — what libwebrtc actually sent " +
+                    "to the viewers, summed over the live viewer sessions: measuredBitrateKbps and fps over the same " +
+                    "sliding window, plus the negotiated codec (lowercase, e.g. `vp8`/`h264`) and the encoded frame " +
+                    "size; those three are omitted until a report resolved them. Independent of encodedStream (WHEP " +
+                    "never crosses the shared encoder, so both may be present). Present while at least one viewer " +
+                    "session has reported stats; absent on pre-issue-25 firmware",
+            ),
             required = listOf("streaming", "thermal", "camera", "battery"),
             fixture = "status.json",
         ),

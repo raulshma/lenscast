@@ -429,6 +429,33 @@ export interface DeviceStatus {
    * pre-issue-25 firmware.
    */
   encodedStream?: EncodedStreamStatus
+  /**
+   * The WHEP (WebRTC preview) lane's MEASURED stream status (issue #25):
+   * what libwebrtc actually sent to the viewers, summed over the live viewer
+   * sessions — bitrate/fps over the same sliding window as `encodedStream`.
+   * Independent of `encodedStream` (WHEP never crosses the shared encoder,
+   * so both may be present at once). Presence means at least one viewer
+   * session has reported — the block is absent while none has, and absent on
+   * pre-issue-25 firmware.
+   */
+  whepStream?: WhepStreamStatus
+}
+
+/**
+ * The WHEP lane's measured-stream block: `measuredBitrateKbps`/`fps` are
+ * window-measured at each viewer session's send side (never a drain-rate
+ * artifact or an invented default). There is no configured target or
+ * geometry to carry — libwebrtc negotiates per viewer — so `codec` (the
+ * lowercase wire name, e.g. `vp8`/`h264`), `width` and `height` are what the
+ * busiest viewer's session reported, and are omitted until a report resolved
+ * them.
+ */
+export interface WhepStreamStatus {
+  measuredBitrateKbps: number
+  fps: number
+  codec?: string
+  width?: number
+  height?: number
 }
 
 /**

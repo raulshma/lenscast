@@ -3,10 +3,13 @@ package com.raulshma.lenscast.streaming
 import com.raulshma.lenscast.core.StreamDefaults
 
 /**
- * A sliding window over (timestampMs, bytes) samples — the one measured-rate
- * primitive behind every DISPLAYED stream stat (issue #25): the per-client
- * MJPEG throughput/fps windows in the NetworkQualityMonitor and the encoded
- * lane's encoder-output window in the [EncodedStreamHub].
+ * A sliding window over (timestampMs, bytes, frames) samples — the one
+ * measured-rate primitive behind every DISPLAYED stream stat (issue #25): the
+ * per-client MJPEG throughput/fps windows in the NetworkQualityMonitor, the
+ * encoded lane's encoder-output window in the [EncodedStreamHub], and the
+ * WHEP lane's per-viewer windows in
+ * [com.raulshma.lenscast.streaming.whep.WhepStreamStats] (the one consumer
+ * whose samples carry a frame count other than 1 — see [record]).
  *
  * Semantics, and why the divisor is the whole window span: samples older than
  * [windowMs] slide out (pruned on every record and read — nothing is summed
@@ -33,7 +36,7 @@ class SlidingRateWindow(
     private val nowMs: () -> Long = System::currentTimeMillis,
 ) {
 
-    private class Sample(val timestampMs: Long, val bytes: Long)
+    private class Sample(val timestampMs: Long, val bytes: Long, val frames: Double)
 
     private val lock = Any()
     private val samples = ArrayDeque<Sample>()
@@ -43,11 +46,21 @@ class SlidingRateWindow(
      * forever — [pruneLocked] drops anything past the window on the way in.
      * A negative byte count is rejected; a zero-byte frame still counts
      * (it is a frame — [measuredFps] sees it, [measuredBitrateKbps] adds 0).
+     *
+     * [frames] is how many frames the sample stands for — 1 for a real frame
+     * delivery, which is every pre-existing caller. The WHEP lane's
+     * [com.raulshma.lenscast.streaming.whep.WhepStreamStats] is the caller
+     * that spreads one poll's delta over several sub-samples, where a
+     * sub-sample is a slice of the poll's interval and may stand for a
+     * fractional number of frames (hence a Double, and a zero-frame sample
+     * is legitimate: bytes without frames, or recorded silence). A negative
+     * or non-finite count is rejected.
      */
-    fun record(timestampMs: Long, bytes: Long) {
+    fun record(timestampMs: Long, bytes: Long, frames: Double = 1.0) {
         if (bytes < 0) return
+        if (frames < 0.0 || !frames.isFinite()) return
         synchronized(lock) {
-            samples.addLast(Sample(timestampMs, bytes))
+            samples.addLast(Sample(timestampMs, bytes, frames))
             pruneLocked(nowMs())
         }
     }
@@ -56,16 +69,32 @@ class SlidingRateWindow(
     fun measuredBitrateKbps(): Double = synchronized(lock) {
         pruneLocked(nowMs())
         if (samples.isEmpty()) return 0.0
-        val totalBytes = samples.fold(0L) { acc, sample -> acc + sample.bytes }
-        return totalBytes * 8.0 / 1000.0 / (windowMs / 1000.0)
+        return totalBytesLocked() * 8.0 / 1000.0 / (windowMs / 1000.0)
     }
 
     /** Measured frame rate over the window; 0.0 while nothing is in it. */
     fun measuredFps(): Double = synchronized(lock) {
         pruneLocked(nowMs())
         if (samples.isEmpty()) return 0.0
-        return samples.size / (windowMs / 1000.0)
+        return totalFramesLocked() / (windowMs / 1000.0)
     }
+
+    /**
+     * The bytes and frame count currently inside the window (post-prune) —
+     * the raw sums, for a consumer that completes the window itself instead
+     * of dividing by the full span. Both are 0 while nothing is in it.
+     */
+    fun totals(): Totals = synchronized(lock) {
+        pruneLocked(nowMs())
+        Totals(bytes = totalBytesLocked(), frames = totalFramesLocked())
+    }
+
+    /** The window's surviving bytes and frame count (see [totals]). */
+    data class Totals(val bytes: Long, val frames: Double)
+
+    private fun totalBytesLocked(): Long = samples.fold(0L) { acc, sample -> acc + sample.bytes }
+
+    private fun totalFramesLocked(): Double = samples.sumOf { it.frames }
 
     /** Samples currently inside the window (post-prune). */
     fun sampleCount(): Int = synchronized(lock) {

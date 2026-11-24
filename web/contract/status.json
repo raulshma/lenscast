@@ -19,7 +19,7 @@
     "srtEnabled": false,
     "srtActive": false,
     "srtStatus": "idle",
-    "whepClients": 0
+    "whepClients": 1
   },
   "thermal": "NORMAL",
   "camera": "Ready",
@@ -94,5 +94,12 @@
     "codec": "h264",
     "width": 1280,
     "height": 720
+  },
+  "whepStream": {
+    "measuredBitrateKbps": 1700,
+    "fps": 24.0,
+    "codec": "vp8",
+    "width": 600,
+    "height": 800
   }
 }

@@ -67,12 +67,22 @@ object StreamDefaults {
     const val MAX_HTTP_CLIENTS = 8
 
     // Stream stats display: the sliding window (SlidingRateWindow) over
-    // (timestamp, bytes) frame samples every measured display rate reads
-    // from — the MJPEG per-client windows and the encoded-output window.
-    // The divisor of the measured bitrate/fps, so a steady stream reads its
-    // true rate and a partial window reads LOW (never the bytes-over-drain-ms
-    // spike issue #25 describes).
+    // (timestamp, bytes, frames) samples every measured display rate reads
+    // from — the MJPEG per-client windows, the encoded-output window and the
+    // WHEP lane's per-viewer windows. The divisor of the measured
+    // bitrate/fps, so a steady stream reads its true rate and a partial
+    // window reads LOW (never the bytes-over-drain-ms spike issue #25
+    // describes).
     const val STATS_WINDOW_MS = 5_000L
+
+    // The WHEP lane (streaming/whep/WhepStreamStats.kt) learns its counters
+    // only once per stats poll, so it spreads each poll's delta over fixed
+    // cells of this length on one time lattice — every cell carries the
+    // poll's average rate, so a steady stream reads the same whichever cells
+    // the window holds. MUST divide STATS_WINDOW_MS exactly: the window then
+    // always spans a whole number of cells (WhepStreamStats refuses a pair
+    // that does not).
+    const val STATS_SUB_SAMPLE_MS = 250L
 
     // Storage manager bounds.
     const val STORAGE_QUOTA_MB_MIN = 100

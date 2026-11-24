@@ -10,6 +10,7 @@ import com.raulshma.lenscast.streaming.model.RangeDto
 import com.raulshma.lenscast.streaming.model.StatusResponseDto
 import com.raulshma.lenscast.streaming.model.StreamingStatusDto
 import com.raulshma.lenscast.streaming.model.WatchdogStatusDto
+import com.raulshma.lenscast.streaming.model.WhepStreamStatusDto
 
 /**
  * The pure status aggregation: typed inputs in, one [StatusResponseDto] out.
@@ -133,6 +134,23 @@ object StatusSnapshotBuilder {
         val height: Int,
     )
 
+    /**
+     * The WHEP (WebRTC preview) lane's MEASURED stream status (issue #25):
+     * what libwebrtc actually sent to the viewers, summed over the live
+     * viewer sessions — what the wire's `whepStream` block carries. The lane
+     * is independent of `encodedStream` (WHEP never crosses the shared
+     * encoder, so both blocks may be present at once) and has no configured
+     * target or geometry to ride along: codec and frame size are whatever
+     * the negotiation produced, null until a report resolved them.
+     */
+    data class WhepStreamInputs(
+        val measuredBitrateKbps: Int,
+        val fps: Double,
+        val codec: String?,
+        val width: Int?,
+        val height: Int?,
+    )
+
     data class AdaptiveInputs(
         val enabled: Boolean,
         val qualityLevelName: String,
@@ -186,6 +204,9 @@ object StatusSnapshotBuilder {
             width = 0,
             height = 0,
         ),
+        // Null (absent on the wire) while no viewer session has reported —
+        // the lane's presence IS its running fact, like encodedStream's.
+        whepStream: WhepStreamInputs? = null,
         sirenActive: Boolean = false,
         cameraBlockedByLock: Boolean = false,
     ): StatusResponseDto {
@@ -304,6 +325,18 @@ object StatusSnapshotBuilder {
                 )
             } else {
                 null
+            },
+            // Emitted only when a measurement exists. Its nullable members
+            // (codec, width, height) are omitted on the wire while unknown —
+            // the same serializeNulls-off rule as every other nullable here.
+            whepStream = whepStream?.let {
+                WhepStreamStatusDto(
+                    measuredBitrateKbps = it.measuredBitrateKbps,
+                    fps = it.fps,
+                    codec = it.codec,
+                    width = it.width,
+                    height = it.height,
+                )
             },
         )
     }

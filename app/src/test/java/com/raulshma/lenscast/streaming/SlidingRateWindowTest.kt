@@ -164,4 +164,87 @@ class SlidingRateWindowTest {
         window.record(clock.nowMs, -1)
         assertEquals(0, window.sampleCount())
     }
+
+    // ── the per-sample frame count (the WHEP lane spreads one poll delta over
+    // several sub-samples, so a sample no longer means exactly one frame) ──
+
+    @Test
+    fun `a sample can carry a frame count and fps sums the counts`() {
+        val clock = FakeClock()
+        val window = windowWith(clock)
+        // One sub-sample standing for 10 frames: 10 / 5 s = 2 fps; the bytes
+        // are read exactly as before.
+        window.record(clock.nowMs, 12_500, frames = 10.0)
+        assertEquals(1, window.sampleCount())
+        assertEquals(2.0, window.measuredFps(), 0.001)
+        assertEquals(20.0, window.measuredBitrateKbps(), 0.001)
+    }
+
+    @Test
+    fun `a sample with zero frames adds its bytes but no frame`() {
+        val clock = FakeClock()
+        val window = windowWith(clock)
+        window.record(clock.nowMs, 12_500, frames = 0.0)
+        assertEquals(1, window.sampleCount())
+        assertEquals(0.0, window.measuredFps(), 0.0)
+        assertEquals(20.0, window.measuredBitrateKbps(), 0.001)
+    }
+
+    @Test
+    fun `a negative frame count is rejected`() {
+        val clock = FakeClock()
+        val window = windowWith(clock)
+        window.record(clock.nowMs, 12_500, frames = -1.0)
+        assertEquals(0, window.sampleCount())
+    }
+
+    @Test
+    fun `frame counts sum across samples and age out with them`() {
+        val clock = FakeClock()
+        val window = windowWith(clock)
+        // 50 sub-samples of 6 frames every 100 ms = 300 frames / 5 s = 60 fps.
+        val startMs = clock.nowMs
+        repeat(50) { index -> window.record(startMs + index * 100, 1_000, frames = 6.0) }
+        clock.advance(4_900)
+        assertEquals(60.0, window.measuredFps(), 0.001)
+        // …and nothing is summed forever: the counts leave with their samples.
+        clock.advance(5_001)
+        assertEquals(0.0, window.measuredFps(), 0.0)
+    }
+
+    @Test
+    fun `a fractional frame count is kept as is`() {
+        val clock = FakeClock()
+        val window = windowWith(clock)
+        // A sub-sample standing for half a frame: 0.5 / 5 s = 0.1 fps.
+        window.record(clock.nowMs, 12_500, frames = 0.5)
+        assertEquals(0.1, window.measuredFps(), 0.001)
+        assertEquals(20.0, window.measuredBitrateKbps(), 0.001)
+    }
+
+    @Test
+    fun `a non-finite frame count is rejected`() {
+        val clock = FakeClock()
+        val window = windowWith(clock)
+        window.record(clock.nowMs, 12_500, frames = Double.NaN)
+        window.record(clock.nowMs, 12_500, frames = Double.POSITIVE_INFINITY)
+        assertEquals(0, window.sampleCount())
+    }
+
+    @Test
+    fun `totals hand out the window's raw bytes and frames`() {
+        val clock = FakeClock()
+        val window = windowWith(clock)
+        assertEquals(SlidingRateWindow.Totals(bytes = 0L, frames = 0.0), window.totals())
+
+        window.record(clock.nowMs, 12_500, frames = 6.0)
+        window.record(clock.nowMs, 1_000, frames = 0.0)
+        // The sums behind the two measured rates: 13 500 bytes and 6 frames.
+        assertEquals(SlidingRateWindow.Totals(bytes = 13_500L, frames = 6.0), window.totals())
+        assertEquals(13_500L * 8 / 5.0 / 1000.0, window.measuredBitrateKbps(), 0.001)
+        assertEquals(6.0 / 5.0, window.measuredFps(), 0.001)
+
+        clock.advance(5_001)
+        assertEquals(SlidingRateWindow.Totals(bytes = 0L, frames = 0.0), window.totals())
+    }
 }

@@ -30,6 +30,7 @@ import com.raulshma.lenscast.streaming.whip.WhipOutput
 import com.raulshma.lenscast.streaming.whip.WhipPublisher
 import com.raulshma.lenscast.streaming.whip.WhipStatus
 import com.raulshma.lenscast.streaming.whep.WhepServer
+import com.raulshma.lenscast.streaming.whep.WhepStreamStats
 import com.raulshma.lenscast.streaming.rtsp.RtspAuthSpec
 import com.raulshma.lenscast.streaming.rtsp.RtspInputFormat
 import com.raulshma.lenscast.streaming.rtsp.RtspResolution
@@ -265,8 +266,9 @@ class StreamingManager(
     // (libwebrtc encodes its own H.264 from the NV21 analysis tap); its
     // runtime couplings here are the frame feed, the fps fan-out, the
     // transport lifecycle (sessions die with the web server, like the WS
-    // sidecar), the WHIP STUN setting reused for ICE, and WHIP's exact
-    // mic-arbitration verdict re-evaluated per session at offer time.
+    // sidecar), the WHIP STUN setting reused for ICE, WHIP's exact
+    // mic-arbitration verdict re-evaluated per session at offer time, and
+    // the lane's own measured stats on their way to /api/status.
     private val whepServer: WhepServer =
         WhepServer(
             context = context,
@@ -1940,6 +1942,14 @@ class StreamingManager(
 
     /** The encoded lane's measured-stream status — StatusWebHandler projects it onto its /api/status inputs (issue #25). */
     internal fun encodedStreamStatus(): EncodedStreamHub.EncodedStreamStatus = encodedHub.encodedStreamStatus()
+
+    /**
+     * The WHEP lane's measured-stream status — the same pass-through for the
+     * endpoint the hub never sees (libwebrtc encodes each viewer's stream
+     * itself). Null until a viewer has reported, exactly while nothing is
+     * measured.
+     */
+    internal fun whepStreamStatus(): WhepStreamStats.Snapshot? = whepServer.whepStreamStatus()
 
     fun setMdnsEnabled(enabled: Boolean) {
         val changed = mdnsEnabled.getAndSet(enabled) != enabled
