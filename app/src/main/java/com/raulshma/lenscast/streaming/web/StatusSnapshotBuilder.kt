@@ -290,10 +290,11 @@ object StatusSnapshotBuilder {
             ),
             encodedVideoBitrate = encodedVideo.bitrateBps,
             // Present only while the encoder is actually running — the same
-            // null-when-idle shape adaptiveBitrate has when disabled.
+            // null-when-idle shape adaptiveBitrate has when disabled. The
+            // gate is the running fact; the wire block carries no redundant
+            // flag (Speculative Generality cleanup, issue #25).
             encodedStream = if (encodedStream.running) {
                 EncodedStreamStatusDto(
-                    running = encodedStream.running,
                     measuredBitrateKbps = encodedStream.measuredBitrateKbps,
                     fps = encodedStream.fps,
                     targetBitrateKbps = encodedStream.targetBitrateKbps,

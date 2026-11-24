@@ -300,8 +300,9 @@ class StatusSnapshotBuilderTest {
 
         val encoded = response.encodedStream
         assertNotNull(encoded)
-        assertEquals(true, encoded!!.running)
-        assertEquals(1890, encoded.measuredBitrateKbps)
+        // Presence IS the running fact: the input gate emitted the block, the
+        // wire block itself carries no redundant running flag.
+        assertEquals(1890, encoded!!.measuredBitrateKbps)
         assertEquals(23.5, encoded.fps, 0.0)
         assertEquals(2000, encoded.targetBitrateKbps)
         assertEquals("h264", encoded.codec)

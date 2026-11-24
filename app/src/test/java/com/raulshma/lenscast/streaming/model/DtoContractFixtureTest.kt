@@ -146,7 +146,6 @@ class DtoContractFixtureTest {
             ),
             encodedVideoBitrate = 2_000_000,
             encodedStream = EncodedStreamStatusDto(
-                running = true,
                 measuredBitrateKbps = 1890,
                 fps = 23.5,
                 targetBitrateKbps = 2000,

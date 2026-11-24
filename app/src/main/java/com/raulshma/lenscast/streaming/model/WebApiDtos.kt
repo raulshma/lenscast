@@ -553,12 +553,13 @@ data class ClientConnectionDetailDto(
  * encoder actually produced, measured over a sliding window at the encoder
  * output — measuredBitrateKbps/fps decay to 0 when the encoder stalls or
  * stops (and the whole block goes null then), while targetBitrateKbps is the
- * configured target the adaptive ladder drives. Absent on pre-issue-25
- * firmware; every dashboard consumer must treat it as optional.
+ * configured target the adaptive ladder drives. Presence IS the running
+ * fact — the block is omitted on the wire while no encoded stream runs —
+ * so there is no redundant running flag. Absent on pre-issue-25 firmware;
+ * every dashboard consumer must treat it as optional.
  */
 @JsonClass(generateAdapter = true)
 data class EncodedStreamStatusDto(
-    val running: Boolean,
     val measuredBitrateKbps: Int,
     val fps: Double,
     val targetBitrateKbps: Int,

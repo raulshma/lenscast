@@ -126,8 +126,8 @@ class NetworkQualityMonitor(
         }
     }
 
-    /** Average encoded-sink drain rate; 0 while the lane has no samples. */
-    fun getEncodedThroughputKbps(): Int = synchronized(encodedThroughputSamples) {
+    /** Average encoded-sink drain rate (the congestion signal, NOT a stream bitrate); 0 while the lane has no samples. */
+    fun getEncodedDrainRateKbps(): Int = synchronized(encodedThroughputSamples) {
         if (encodedThroughputSamples.isEmpty()) 0 else encodedThroughputSamples.average().toInt()
     }
 
@@ -163,35 +163,11 @@ class NetworkQualityMonitor(
      * samples 0 kbps and must read 0 (CRITICAL rung), not fall back to the
      * ladder's default.
      */
-    private fun minClientDrainRateSampled(): Int? {
-        var minDrainRate = Int.MAX_VALUE
-        var hasData = false
-        for (stats in clientStats.values) {
-            synchronized(stats) {
-                if (stats.drainRateSamples.isNotEmpty()) {
-                    hasData = true
-                    val avg = stats.drainRateSamples.average().toInt()
-                    if (avg < minDrainRate) minDrainRate = avg
-                }
-            }
-        }
-        return if (hasData) minDrainRate else null
-    }
+    private fun minClientDrainRateSampled(): Int? =
+        perClientMeasured { it.avgDrainRateKbpsOrNull() }.minOrNull()
 
     /** Avg per-client drain rate across clients with drain samples; 0 with none (never a default constant). */
-    fun getAvgClientDrainRateKbps(): Int {
-        var total = 0L
-        var count = 0
-        for (stats in clientStats.values) {
-            synchronized(stats) {
-                if (stats.drainRateSamples.isNotEmpty()) {
-                    total += stats.drainRateSamples.average().toLong()
-                    count++
-                }
-            }
-        }
-        return if (count > 0) (total / count).toInt() else 0
-    }
+    fun getAvgClientDrainRateKbps(): Int = perClientMeasured { it.avgDrainRateKbpsOrNull() }.avgKbps()
 
     /**
      * The measured aggregate client throughput for display: the sliding
@@ -200,34 +176,39 @@ class NetworkQualityMonitor(
      * past the window). Never invents a number — the ladder's default-aware
      * view lives in [getNetworkQualityLevel], not here.
      */
-    fun getAvgClientThroughputKbps(): Int {
-        var total = 0L
-        var count = 0
-        for (stats in clientStats.values) {
-            synchronized(stats) {
-                if (stats.rateWindow.sampleCount() > 0) {
-                    total += stats.rateWindow.measuredBitrateKbps().toLong()
-                    count++
-                }
-            }
-        }
-        return if (count > 0) (total / count).toInt() else 0
-    }
+    fun getAvgClientThroughputKbps(): Int = perClientMeasured { it.measuredThroughputKbpsOrNull() }.avgKbps()
 
     /** The measured min across clients' windows; 0 with no measured throughput anywhere. */
-    fun getMinClientThroughputKbps(): Int {
-        var minThroughput = Int.MAX_VALUE
-        var hasData = false
+    fun getMinClientThroughputKbps(): Int = perClientMeasured { it.measuredThroughputKbpsOrNull() }.minOrNull() ?: 0
+
+    /**
+     * One synchronized walk over the per-client stats, collecting each
+     * client's measured value — null when that client has no samples of the
+     * kind, so the reduction only ever sees clients that actually measured
+     * something. The drain/throughput min/avg aggregates are this one shape.
+     */
+    private inline fun <T : Any> perClientMeasured(value: (ClientStats) -> T?): List<T> {
+        val measured = mutableListOf<T>()
         for (stats in clientStats.values) {
-            synchronized(stats) {
-                if (stats.rateWindow.sampleCount() > 0) {
-                    hasData = true
-                    val measured = stats.rateWindow.measuredBitrateKbps().toInt()
-                    if (measured < minThroughput) minThroughput = measured
-                }
-            }
+            synchronized(stats) { value(stats)?.let { measured.add(it) } }
         }
-        return if (hasData) minThroughput else 0
+        return measured
+    }
+
+    /** The client's avg drain rate, null with no drain samples. */
+    private fun ClientStats.avgDrainRateKbpsOrNull(): Int? =
+        if (drainRateSamples.isEmpty()) null else drainRateSamples.average().toInt()
+
+    /** The client's measured window throughput, null with nothing inside the window. */
+    private fun ClientStats.measuredThroughputKbpsOrNull(): Int? =
+        if (rateWindow.sampleCount() > 0) rateWindow.measuredBitrateKbps().toInt() else null
+
+    /** Truncating long sum / count over per-client kbps values; 0 on empty — the aggregates' original arithmetic. */
+    private fun List<Int>.avgKbps(): Int {
+        if (isEmpty()) return 0
+        var total = 0L
+        forEach { total += it }
+        return (total / size).toInt()
     }
 
     /**

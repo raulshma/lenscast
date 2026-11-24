@@ -1582,8 +1582,9 @@ The consumer of the first half is the lane-aware
 `ConnectionQualityIndicator`: the badge shows the picked lane's measured
 numbers (the quality dot stays MJPEG-only — it is that lane's network
 verdict), and the detail panel is three sections — "Preview" (the active
-lane's rows), "Encoded stream" (running, measured vs target, fps, codec,
-resolution, shown only while `encodedStream` exists), and "MJPEG viewers"
+lane's rows), "Encoded stream" (measured vs target, fps, codec,
+resolution, shown only while `encodedStream` exists — presence is the
+running fact), and "MJPEG viewers"
 (the per-client rows). The old duplicate "Bandwidth" row is gone (it
 displayed the ladders' drain-based congestion estimate), the "Latency" row
 is renamed "Send time" (what still backs it is the worst client's last

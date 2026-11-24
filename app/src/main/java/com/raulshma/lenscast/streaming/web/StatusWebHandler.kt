@@ -120,7 +120,17 @@ class StatusWebHandler(
             encodedVideo = StatusSnapshotBuilder.EncodedVideoInputs(
                 bitrateBps = streamingManager.currentVideoBitrate(),
             ),
-            encodedStream = streamingManager.encodedStreamStatus(),
+            encodedStream = streamingManager.encodedStreamStatus().let {
+                StatusSnapshotBuilder.EncodedStreamInputs(
+                    running = it.running,
+                    measuredBitrateKbps = it.measuredBitrateKbps,
+                    fps = it.fps,
+                    targetBitrateKbps = it.targetBitrateKbps,
+                    codec = it.codec,
+                    width = it.width,
+                    height = it.height,
+                )
+            },
             sirenActive = streamingManager.sirenController().isRunning(),
             cameraBlockedByLock = streamingManager.isCameraBlockedByLock(),
         )

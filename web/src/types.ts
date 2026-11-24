@@ -424,8 +424,9 @@ export interface DeviceStatus {
   /**
    * The encoded lane's MEASURED stream status (issue #25): what the shared
    * encoder actually produced, measured over a sliding window at the encoder
-   * output — bitrate/fps decay to 0 when it stalls, and the block is absent
-   * while no encoded stream runs. Absent on pre-issue-25 firmware.
+   * output — bitrate/fps decay to 0 when it stalls. Presence IS the running
+   * fact: the block is absent while no encoded stream runs. Absent on
+   * pre-issue-25 firmware.
    */
   encodedStream?: EncodedStreamStatus
 }
@@ -434,10 +435,10 @@ export interface DeviceStatus {
  * The encoded lane's measured-stream block: `measuredBitrateKbps`/`fps` are
  * window-measured from the encoder output's production cadence (never a
  * drain-rate artifact or an invented default), while `targetBitrateKbps` is
- * the configured target the adaptive ladder drives.
+ * the configured target the adaptive ladder drives. Presence is the running
+ * fact — the device omits the whole block when nothing encodes.
  */
 export interface EncodedStreamStatus {
-  running: boolean
   measuredBitrateKbps: number
   fps: number
   targetBitrateKbps: number
