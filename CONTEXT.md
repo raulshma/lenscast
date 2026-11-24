@@ -813,24 +813,63 @@ API surface.
 
 ### Touched-Key Camera Save
 **`web/src/lib/touchedPatch.ts`** — the client half of issue #25's
-touched-fields camera save: `createTouchedKeys` accumulates the union of
-`Object.keys` of every patch `useAppState.updateCamera` receives across the
-400 ms sectioned-debounce window, and `pickKeys` builds the flush-time PUT
-section — only the touched keys, values read from the LATEST local mirror
-(a key touched twice carries its newest value), absent keys skipped. After a
-flush the touched set resets (`take`). The local mirror still updates
-wholesale exactly as before; only the wire body narrows, because the old
-whole-mirror PUT let a stale iso/exposure sitting in one tab overwrite what
-an automation rule or another client had just written on the device — the
-"applies, then reverts a few seconds later" repro. The server already
-merges each present section per raw key (`SettingsWebHandler.put` →
-`mergeSection`), and the TS `CameraSettings` keys are exactly the
-`CameraSettingsDto` property names the merge consumes — one key space, no
-translation. Whole-document camera writes keep their whole-document shape
-by contract: the reset-defaults handler and the import envelope call
-`saveSettings` directly and never pass through `updateCamera`. Pure and
-store-free (the uiMode shape), so the union/pick/reset rules vitest-pin
-without a Solid render.
+touched-fields camera save: `createPendingPatch` is the staged patch behind
+`useAppState.updateCamera`. Every patch the hook receives across the 400 ms
+sectioned-debounce window is `stage`d as *touched key → the value the user
+set at touch time* (a later write to the same key wins; an explicit `null`
+is a value — the ISO / exposure-time reset), and `take` hands that patch to
+the flush and resets it. The flush PUTs exactly `{ camera: values }`; no
+other source is ever read for the wire body. The local mirror still updates
+wholesale and optimistically, exactly as before; only the wire body narrows,
+because the old whole-mirror PUT let a stale iso/exposure sitting in one tab
+overwrite what an automation rule or another client had just written on the
+device — the "applies, then reverts a few seconds later" repro. A keys-only
+tracker was the interim shape and was refuted: it re-read the values from
+the LATEST mirror at flush time, and every settings GET replaces the mirror
+wholesale (the 30 s poll, the 3 s model-download lane, the visibility
+refresh), so a response landing inside the window — even one that started
+AFTER the edit — put the pre-edit value back on the wire, or an empty body
+where the server omits null keys (per the issue's reproduction: about 1 in
+75 camera gestures, 1 in 8 during a model download).
+
+A take also carries `settle(camera)`. Once the PUT succeeds the sent values
+are the device's truth for those keys, so the hook writes them back over a
+stale GET that flipped the control meanwhile — but only for keys no newer
+edit has claimed since the take. Every staged key takes a tick of an edit
+clock and the take remembers its keys' ticks, so a key re-touched while the
+PUT was in flight is left alone whether it is still staged or has already
+gone out with a newer flush: an older PUT answering late never pulls the
+mirror back off a newer edit. `settle` returns the same object when the
+mirror already agrees, and the hook skips its write on that. PUT failure is
+unchanged (keys dropped, `setError`, no retry).
+
+The staged patch never outlives what it was staged for. The flush takes
+BEFORE any early return, so a flush that finds the session gone drains the
+patch instead of leaving its keys for a later one (the tracker lives as
+long as the app — `App`'s single `useAppState`), and `signOut` clears it
+outright, so a next session's first edit re-arming the still-pending timer
+inherits nothing. `handleResetDefaults` clears it too: the reset is a
+whole-document write and supersedes an edit still inside its window, or
+the flush would re-assert the just-reset keys a moment later.
+
+The server already merges each present section per raw key
+(`SettingsWebHandler.put` → `mergeSection`), and the TS `CameraSettings`
+keys are exactly the `CameraSettingsDto` property names the merge consumes —
+one key space, no translation. Whole-document camera writes keep their
+whole-document shape by contract: the reset-defaults handler and the import
+envelope never pass through `updateCamera`. Pure and store-free (the uiMode
+shape), so the stage/take/clear/settle rules vitest-pin without a Solid
+render; `web/src/hooks/useAppState.test.tsx` mounts the real hook against a
+scripted fake server to pin the wire bodies themselves.
+
+Known and deliberately not closed here (the wire body is right in both, so
+neither is this path's to fix): a settings GET whose request predates the
+PUT but whose response lands after it still replaces the mirror until the
+next poll, and the stale flip inside the window stays on screen until the
+flush — both need `fetchSettings` to defer to pending or just-sent keys,
+and it still writes the mirror unconditionally. Camera PUTs are not
+serialized either: a key touched while one is in flight leaves with the
+next flush without waiting for it.
 
 ### Camera Controls Strip
 **`web/src/hooks/useCameraControls.ts`** — the floating camera strip's
@@ -3022,7 +3061,7 @@ contracts.
 | Camera-strip mirrors (zoom/torch/EV) | `createCameraControls` (one instance per skin renderer; only one shell is mounted) | `web/src/hooks/useCameraControls.ts` | device truth authoritative; optimistic flips bridge the round-trip | torch/zoom resync from every status push — the focused slider holds the zoom mirror via the `remote-zoom-slider` activeElement guard (the old preview-bar contract carried over) and a recent stepper press holds it for `ZOOM_MIRROR_HOLD_MS = 600` (its echo can land before the device applied), EV resyncs from the settings mirror once `evPressGuard`'s 800 ms post-press window closes; a failed POST reverts the optimistic flip and flashes the strip's message slot, and the next snapshot settles the truth anyway — the failure self-corrects through the same channel |
 | Zoom send throttle | `useCameraControls.setZoom` over the pure verdicts | `web/src/lib/cameraControlsPolicy.ts` | leading send + one trailing flush per `ZOOM_SEND_THROTTLE_MS = 150` | a slider drag lands as a handful of POSTs instead of one per input event (the old bar fired one per input); the flush carries the newest optimistic ratio and re-arms `lastZoomSentAt`; cleanup cancels a pending flush so an unmounted strip never POSTs |
 | Strip collapse | `useCameraControls` `collapsed` signal over `parseStripCollapsed` (pure) | `web/src/lib/cameraControlsPolicy.ts` | open / collapsed | persisted under `lenscast.camStrip`; anything but `'collapsed'` is open — an unknown value can never wedge the strip shut (uiMode's parse rule); the collapsed handle is also the HLS rung's escape hatch, since the expanded strip overlaps that rung's native seek bar |
-| Camera touched-key window | `useAppState` `cameraTouchedKeys` over `createTouchedKeys`/`pickKeys` (pure) | `web/src/lib/touchedPatch.ts` | empty / accumulating / flushed-empty | the union of patch keys across the 400 ms camera debounce, taken and reset at flush; the PUT carries only those keys with values read from the latest mirror — a whole-mirror PUT let a stale iso overwrite an automation rule's just-written value (issue #25, see Touched-Key Camera Save) |
+| Camera staged patch (touched-key save) | `useAppState` `pendingCamera` over `createPendingPatch` (pure) | `web/src/lib/touchedPatch.ts` | empty / accumulating / taken (a take may be in flight while the next accumulates) | touched key → the value set at touch time, across the 400 ms camera debounce; the flush takes it first (an abandoned flush drains it), PUTs exactly it, and on success `settle`s its keys back over the mirror unless a newer edit claimed one; `signOut` and reset-defaults clear it — a whole-mirror PUT let a stale iso overwrite an automation rule's just-written value, and a keys-only PUT re-read from the mirror re-sent the pre-edit value when a settings GET landed in the window (issue #25, see Touched-Key Camera Save) |
 
 ### Deliberately implicit
 
