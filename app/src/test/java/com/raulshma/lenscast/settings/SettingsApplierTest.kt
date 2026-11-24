@@ -28,6 +28,7 @@ import io.mockk.coVerify
 import io.mockk.coVerifyOrder
 import io.mockk.every
 import io.mockk.mockk
+import io.mockk.slot
 import io.mockk.verify
 import io.mockk.verifyOrder
 import kotlinx.coroutines.CoroutineScope
@@ -37,6 +38,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.newSingleThreadContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import org.junit.After
+import org.junit.Assert.assertEquals
 import org.junit.Before
 import org.junit.Test
 
@@ -348,6 +350,31 @@ private val rtspTlsEnabled = MutableStateFlow(false)
                 cameraService.applySettings(doc, true)
                 settingsDataStore.saveSettings(doc)
             }
+        }
+    }
+
+    @Test
+    fun `the wired torch fact persister persists one field-level camera write`() {
+        kotlinx.coroutines.runBlocking {
+            // Issue #25: the camera service's convergence hands over the
+            // LED fact only, and the wiring folds it into the store's
+            // field-level write — never the old whole-document save of the
+            // collector's snapshot.
+            val factSlot = slot<suspend (Boolean) -> Unit>()
+            verify { cameraService.setTorchFactPersister(capture(factSlot)) }
+            val transformSlot = slot<(CameraSettings) -> CameraSettings>()
+            coEvery { settingsDataStore.updateCameraSettings(capture(transformSlot)) } returns Unit
+
+            factSlot.captured(true)
+
+            coVerify(exactly = 1) { settingsDataStore.updateCameraSettings(any()) }
+            // The captured fact is true, so the transform moves ONLY
+            // torchEnabled; every other field comes from the disk truth the
+            // store hands the transform.
+            assertEquals(
+                CameraSettings(iso = 800, zoomRatio = 2.5f, torchEnabled = true),
+                transformSlot.captured(CameraSettings(iso = 800, zoomRatio = 2.5f, torchEnabled = false)),
+            )
         }
     }
 

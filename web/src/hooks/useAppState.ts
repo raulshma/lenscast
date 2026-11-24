@@ -1,11 +1,13 @@
 import { createEffect, createMemo, createSignal, onCleanup } from 'solid-js'
 import * as api from '../api/client'
+import type { SettingsPatch } from '../api/client'
 import { createRecordingTimer } from '../RecordingTimer'
 import { createLiveAudioPlayer, type LiveAudioStatus } from '../audio/LiveAudioPlayer'
 import { createPollLadder } from './pollLadder'
 import { sseLaneHealthy } from './sseHealth'
 import { hashRouter, type RouteName } from '../lib/router'
 import { createSectionedDebouncer } from '../lib/sectionedDebounce'
+import { createTouchedKeys, pickKeys } from '../lib/touchedPatch'
 import { recordingPhaseKind } from '../lib/recordingPhase'
 import { sessionPhase } from '../lib/sessionPhase'
 import { transportSwitchUrl } from '../lib/transportSwitch'
@@ -320,7 +322,7 @@ export function useAppState() {
   }
 
   // ── Settings ──
-  async function saveSettings(partial: Partial<AllSettings>) {
+  async function saveSettings(partial: SettingsPatch) {
     setSaving(true)
     try {
       await api.updateSettings(partial)
@@ -331,12 +333,29 @@ export function useAppState() {
     setSaving(false)
   }
 
+  // Issue #25: the debounced camera save PUTs only the keys touched inside
+  // the debounce window (lib/touchedPatch), values read at flush time from
+  // the latest local mirror. The old PUT carried this tab's whole mirror, so
+  // a stale iso/exposure sitting here overwrote what an automation rule (or
+  // another client) had just written on the device — the "applies, then
+  // reverts a few seconds later" repro. The local mirror still updates
+  // wholesale, exactly as before; only the wire body narrows.
+  const cameraTouchedKeys = createTouchedKeys<keyof CameraSettings & string>()
+
   function updateCamera(patch: Partial<CameraSettings>) {
     const current = settings()
     if (!current) return
     const newCam = { ...current.camera, ...patch }
     setSettings({ ...current, camera: newCam })
-    debounceSave('camera', () => saveSettings({ camera: newCam }))
+    cameraTouchedKeys.touch(Object.keys(patch) as (keyof CameraSettings & string)[])
+    debounceSave('camera', () => {
+      const latest = settings()
+      if (!latest) return
+      const keys = cameraTouchedKeys.take()
+      // Nothing touched (only empty patches armed this timer): nothing to persist.
+      if (keys.length === 0) return
+      saveSettings({ camera: pickKeys(latest.camera, keys) })
+    })
   }
 
   function updateStreaming(patch: Partial<AllSettings['streaming']>) {

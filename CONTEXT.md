@@ -46,6 +46,12 @@ module (ViewModels, Web API Settings Handler) only *writes* settings to the
 store; nobody else applies persisted settings. Direct runtime calls that are
 *not* settings changes (session begin/end via the Streaming Session, mic
 arbitration in RecordingService, camera rebinding) are allowed to bypass it.
+The torch convergence's persistence rides a narrowed torch-fact seam
+(`setTorchFactPersister`, wired at start): the CameraService hands over only
+the converged `Boolean` LED fact and the Applier folds it into the store's
+field-level write (`updateCameraSettings`) — the old whole-document save of
+the collector's snapshot could overwrite a second camera write landing
+milliseconds later (issue #25).
 One documented second application path exists for camera controls: gesture /
 quick-setting updates apply to the CameraService *before* persisting (for
 responsiveness) and the Applier re-applies after persistence — camera-control
@@ -84,7 +90,14 @@ Overlay/masking saves go
 through the pure
 `OverlaySettings.normalized` / `MaskingZone.normalized` — "persist a valid
 value" is the store's invariant, so ViewModels and the Web API Settings
-Handler write raw values and no caller pre-guards. Masking-zone lists
+Handler write raw values and no caller pre-guards. One field-level write
+seam exists beside the whole-document savers: `updateCameraSettings(transform)`
+runs the transform against the DISK truth inside ONE `dataStore.edit {}`
+pass and encodes through the same `cameraSettingsPref` descriptor — the
+write seam for writers that hold one field's fact instead of a document
+(the torch convergence's `Boolean` fact, issue #25), where a
+whole-snapshot write would clobber a concurrent camera write landing
+milliseconds later. Masking-zone lists
 serialize through App Json (a Moshi codec with the legacy org.json field
 names kept decode-compatible), not a second JSON stack. Enum strings parse
 through the one `core/EnumParsing.parseEnum(name, fallback)` with each
@@ -792,6 +805,27 @@ diagnostics/system cards share. The newer dashboard cards — AuditCard (the
 audit trail), SystemPanel (the /api/system triage view), and ConfigBackupCard
 (the settings export/import pair) — are one-card clients of the same client
 API surface.
+
+### Touched-Key Camera Save
+**`web/src/lib/touchedPatch.ts`** — the client half of issue #25's
+touched-fields camera save: `createTouchedKeys` accumulates the union of
+`Object.keys` of every patch `useAppState.updateCamera` receives across the
+400 ms sectioned-debounce window, and `pickKeys` builds the flush-time PUT
+section — only the touched keys, values read from the LATEST local mirror
+(a key touched twice carries its newest value), absent keys skipped. After a
+flush the touched set resets (`take`). The local mirror still updates
+wholesale exactly as before; only the wire body narrows, because the old
+whole-mirror PUT let a stale iso/exposure sitting in one tab overwrite what
+an automation rule or another client had just written on the device — the
+"applies, then reverts a few seconds later" repro. The server already
+merges each present section per raw key (`SettingsWebHandler.put` →
+`mergeSection`), and the TS `CameraSettings` keys are exactly the
+`CameraSettingsDto` property names the merge consumes — one key space, no
+translation. Whole-document camera writes keep their whole-document shape
+by contract: the reset-defaults handler and the import envelope call
+`saveSettings` directly and never pass through `updateCamera`. Pure and
+store-free (the uiMode shape), so the union/pick/reset rules vitest-pin
+without a Solid render.
 
 ### Camera Controls Strip
 **`web/src/hooks/useCameraControls.ts`** — the floating camera strip's
@@ -2906,6 +2940,7 @@ contracts.
 | Camera-strip mirrors (zoom/torch/EV) | `createCameraControls` (one instance per skin renderer; only one shell is mounted) | `web/src/hooks/useCameraControls.ts` | device truth authoritative; optimistic flips bridge the round-trip | torch/zoom resync from every status push — the focused slider holds the zoom mirror via the `remote-zoom-slider` activeElement guard (the old preview-bar contract carried over) and a recent stepper press holds it for `ZOOM_MIRROR_HOLD_MS = 600` (its echo can land before the device applied), EV resyncs from the settings mirror once `evPressGuard`'s 800 ms post-press window closes; a failed POST reverts the optimistic flip and flashes the strip's message slot, and the next snapshot settles the truth anyway — the failure self-corrects through the same channel |
 | Zoom send throttle | `useCameraControls.setZoom` over the pure verdicts | `web/src/lib/cameraControlsPolicy.ts` | leading send + one trailing flush per `ZOOM_SEND_THROTTLE_MS = 150` | a slider drag lands as a handful of POSTs instead of one per input event (the old bar fired one per input); the flush carries the newest optimistic ratio and re-arms `lastZoomSentAt`; cleanup cancels a pending flush so an unmounted strip never POSTs |
 | Strip collapse | `useCameraControls` `collapsed` signal over `parseStripCollapsed` (pure) | `web/src/lib/cameraControlsPolicy.ts` | open / collapsed | persisted under `lenscast.camStrip`; anything but `'collapsed'` is open — an unknown value can never wedge the strip shut (uiMode's parse rule); the collapsed handle is also the HLS rung's escape hatch, since the expanded strip overlaps that rung's native seek bar |
+| Camera touched-key window | `useAppState` `cameraTouchedKeys` over `createTouchedKeys`/`pickKeys` (pure) | `web/src/lib/touchedPatch.ts` | empty / accumulating / flushed-empty | the union of patch keys across the 400 ms camera debounce, taken and reset at flush; the PUT carries only those keys with values read from the latest mirror — a whole-mirror PUT let a stale iso overwrite an automation rule's just-written value (issue #25, see Touched-Key Camera Save) |
 
 ### Deliberately implicit
 

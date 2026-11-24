@@ -76,10 +76,15 @@ class SettingsApplier(
     fun start(scope: CoroutineScope) {
         cameraCollectorStarted = true
         // The untouched-write torch convergence persists through this store's
-        // own save — the camera service never sees DataStore, it calls back
-        // through this lambda inside applySettings (one write, the same save
-        // every writer uses).
-        cameraService.setSettingsPersister { settingsDataStore.saveSettings(it) }
+        // field-level write — the camera service never sees DataStore, it
+        // calls back through this lambda inside applySettings with the one
+        // LED fact it converged on, and the store folds it into the DISK
+        // truth inside one edit. The old whole-document save of the
+        // collector's snapshot could overwrite a second camera write landing
+        // milliseconds later (issue #25's applies-then-reverts history).
+        cameraService.setTorchFactPersister { fact ->
+            settingsDataStore.updateCameraSettings { it.copy(torchEnabled = fact) }
+        }
         // Camera settings. Plain collect (not collectLatest): applies run
         // serialized under the mutex in delivery order — idempotent by
         // contract — while StateFlow conflation already collapses a rapid

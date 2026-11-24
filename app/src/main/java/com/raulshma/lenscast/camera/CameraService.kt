@@ -233,17 +233,20 @@ class CameraService internal constructor(
     @Volatile private var settingsEverApplied = false
 
     /**
-     * The camera-settings save path the untouched-write torch convergence
+     * The torch-fact save path the untouched-write torch convergence
      * persists through — wired once by the Settings Applier at start
-     * ([setSettingsPersister]) against its DataStore, so this service never
-     * depends on the store and the converged document rides the exact save
-     * every writer uses (one DataStore write, no new store API). Null when
-     * unwired (never started, bare unit construction): the convergence still
-     * drives per the live fact in memory, only the persisted document is
-     * left for the next wired apply to settle.
+     * ([setTorchFactPersister]) against its DataStore, so this service never
+     * depends on the store and the converged fact lands as a field-level
+     * write (updateCameraSettings) whose base is the
+     * disk truth inside one DataStore edit — never a whole-document snapshot
+     * of this collector's view, which could overwrite a second camera write
+     * landing milliseconds later (issue #25). Null when unwired (never
+     * started, bare unit construction): the convergence still drives per the
+     * live fact in memory, only the persisted flag is left for the next
+     * wired apply to settle.
      */
     @Volatile
-    private var persistSettings: (suspend (CameraSettings) -> Unit)? = null
+    private var persistTorchFact: (suspend (Boolean) -> Unit)? = null
 
     // Incremented on every successful bind. Post-bind control rungs capture
     // it and drop themselves when a newer bind has landed: the new bind
@@ -1980,14 +1983,14 @@ class CameraService internal constructor(
     }
 
     /**
-     * Wire the camera-settings save path the untouched-write torch
-     * convergence persists through. Called by the Settings Applier at start
-     * — the one owner of "persisted settings → runtime" — so a converged
-     * document reaches the store through the existing save every writer
-     * uses.
+     * Wire the torch-fact save path the untouched-write torch convergence
+     * persists through. Called by the Settings Applier at start — the one
+     * owner of "persisted settings → runtime" — so the converged fact
+     * reaches the store as a field-level write on the disk truth, not as a
+     * whole-document snapshot of this service's applied view (issue #25).
      */
-    fun setSettingsPersister(persister: suspend (CameraSettings) -> Unit) {
-        persistSettings = persister
+    fun setTorchFactPersister(persister: suspend (Boolean) -> Unit) {
+        persistTorchFact = persister
     }
 
     /**
@@ -2016,11 +2019,11 @@ class CameraService internal constructor(
      *    and committed as written, LED included.
      *  - Torch pair UNCHANGED: this write does not touch torch, so the
      *    stored intent converges to the live LED fact ([isTorchOn]) through
-     *    ONE DataStore write on the wired [setSettingsPersister] save path —
-     *    and the LED-driving below runs per the CONVERGED value, because
-     *    driving per the raw value would extinguish a live-only lit LED (the
-     *    web torch route and the deterrence coordinator diverge from the
-     *    stored pair by design).
+     *    ONE field-level write on the wired [setTorchFactPersister] save
+     *    path — and the LED-driving below runs per the CONVERGED value,
+     *    because driving per the raw value would extinguish a live-only lit
+     *    LED (the web torch route and the deterrence coordinator diverge
+     *    from the stored pair by design).
      *
      * This replaces the per-writer convergence protocol — the since-deleted
      * `CameraSettings.convergeTorch` plus a transform-diff verdict in
@@ -2050,15 +2053,19 @@ class CameraService internal constructor(
         } else {
             val converged = settings.copy(torchEnabled = isTorchOn())
             if (converged != settings) {
-                val persister = persistSettings
-                if (persister == null) {
-                    Log.w(TAG, "applySettings: no settings persister wired; torch convergence not persisted")
+                val torchPersister = persistTorchFact
+                if (torchPersister == null) {
+                    Log.w(TAG, "applySettings: no torch fact persister wired; torch convergence not persisted")
                 } else {
                     Log.d(
                         TAG,
                         "applySettings: torch untouched — converging stored intent to the live fact (on=${converged.torchEnabled})",
                     )
-                    persister(converged)
+                    // The write carries only the LED fact; the store's field
+                    // write folds it into the disk truth (issue #25 — the
+                    // old whole-snapshot write could clobber a concurrent
+                    // camera write).
+                    torchPersister(converged.torchEnabled)
                 }
             }
             converged

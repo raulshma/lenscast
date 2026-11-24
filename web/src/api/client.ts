@@ -1,4 +1,4 @@
-import type { AllSettings, AuthConfig, DetectionEventType, DeviceStatus, LensesResponse, RtspClient, SessionRole } from '../types'
+import type { AllSettings, AuthConfig, CameraSettings, DetectionEventType, DeviceStatus, LensesResponse, RtspClient, SessionRole, StreamingSettings } from '../types'
 
 type JsonValue = Record<string, unknown> | unknown[] | string | number | boolean | null
 
@@ -121,10 +121,14 @@ function assertWriteSucceeded(body: unknown, fallback: string): void {
  * A settings PUT body: any section present may be partial — the server merges
  * each present section's raw JSON keys over the stored document
  * (SettingsWebHandler.put → mergeSection), so omitted fields keep their
- * stored values instead of resetting to defaults.
+ * stored values instead of resetting to defaults. The camera section rides
+ * the same merge: the dashboard's debounced camera save carries only the
+ * touched keys (lib/touchedPatch), so a stale mirror value can no longer
+ * overwrite what an automation rule just wrote on the device (issue #25).
  */
-export type SettingsPatch = Omit<Partial<AllSettings>, 'streaming'> & {
-  streaming?: Partial<AllSettings['streaming']>
+export type SettingsPatch = {
+  camera?: Partial<CameraSettings>
+  streaming?: Partial<StreamingSettings>
 }
 
 export async function updateSettings(settings: SettingsPatch): Promise<{ success: boolean; error?: string }> {
