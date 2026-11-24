@@ -5,6 +5,7 @@ import com.raulshma.lenscast.streaming.model.AdaptiveBitrateStatusDto
 import com.raulshma.lenscast.streaming.model.BatteryStatusDto
 import com.raulshma.lenscast.streaming.model.ClientConnectionDetailDto
 import com.raulshma.lenscast.streaming.model.ConnectionQualityStatusDto
+import com.raulshma.lenscast.streaming.model.EncodedStreamStatusDto
 import com.raulshma.lenscast.streaming.model.RangeDto
 import com.raulshma.lenscast.streaming.model.StatusResponseDto
 import com.raulshma.lenscast.streaming.model.StreamingStatusDto
@@ -115,6 +116,23 @@ object StatusSnapshotBuilder {
         val bitrateBps: Int,
     )
 
+    /**
+     * The encoded lane's MEASURED stream status (issue #25): the encoder
+     * output's real bitrate/fps from its sliding window, next to the
+     * configured target and encode geometry — what the wire's `encodedStream`
+     * block carries. Null (absent on the wire) while the encoder is not
+     * running, mirroring adaptiveBitrate's null-when-disabled.
+     */
+    data class EncodedStreamInputs(
+        val running: Boolean,
+        val measuredBitrateKbps: Int,
+        val fps: Double,
+        val targetBitrateKbps: Int,
+        val codec: String,
+        val width: Int,
+        val height: Int,
+    )
+
     data class AdaptiveInputs(
         val enabled: Boolean,
         val qualityLevelName: String,
@@ -159,6 +177,15 @@ object StatusSnapshotBuilder {
         adaptive: AdaptiveInputs,
         network: NetworkInputs,
         encodedVideo: EncodedVideoInputs = EncodedVideoInputs(bitrateBps = 0),
+        encodedStream: EncodedStreamInputs = EncodedStreamInputs(
+            running = false,
+            measuredBitrateKbps = 0,
+            fps = 0.0,
+            targetBitrateKbps = 0,
+            codec = "",
+            width = 0,
+            height = 0,
+        ),
         sirenActive: Boolean = false,
         cameraBlockedByLock: Boolean = false,
     ): StatusResponseDto {
@@ -262,6 +289,21 @@ object StatusSnapshotBuilder {
                 lastFailureReason = watchdog.lastFailureReason,
             ),
             encodedVideoBitrate = encodedVideo.bitrateBps,
+            // Present only while the encoder is actually running — the same
+            // null-when-idle shape adaptiveBitrate has when disabled.
+            encodedStream = if (encodedStream.running) {
+                EncodedStreamStatusDto(
+                    running = encodedStream.running,
+                    measuredBitrateKbps = encodedStream.measuredBitrateKbps,
+                    fps = encodedStream.fps,
+                    targetBitrateKbps = encodedStream.targetBitrateKbps,
+                    codec = encodedStream.codec,
+                    width = encodedStream.width,
+                    height = encodedStream.height,
+                )
+            } else {
+                null
+            },
         )
     }
 

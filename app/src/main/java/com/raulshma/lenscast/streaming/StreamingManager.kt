@@ -26,6 +26,7 @@ import com.raulshma.lenscast.streaming.srt.SrtStats
 import com.raulshma.lenscast.streaming.srt.SrtOutput
 import com.raulshma.lenscast.streaming.srt.SrtPublisher
 import com.raulshma.lenscast.streaming.srt.SrtStatus
+import com.raulshma.lenscast.streaming.web.StatusSnapshotBuilder
 import com.raulshma.lenscast.streaming.whip.WhipOutput
 import com.raulshma.lenscast.streaming.whip.WhipPublisher
 import com.raulshma.lenscast.streaming.whip.WhipStatus
@@ -1937,6 +1938,20 @@ class StreamingManager(
 
     /** The encoded pipeline's live target bitrate — the adaptive controller's current value, not the static default. */
     fun currentVideoBitrate(): Int = encodedHub.currentVideoBitrate()
+
+    /** The encoded lane's measured-stream status — /api/status's encodedStream inputs (issue #25). */
+    fun encodedStreamStatus(): StatusSnapshotBuilder.EncodedStreamInputs {
+        val status = encodedHub.encodedStreamStatus()
+        return StatusSnapshotBuilder.EncodedStreamInputs(
+            running = status.running,
+            measuredBitrateKbps = status.measuredBitrateKbps,
+            fps = status.fps,
+            targetBitrateKbps = status.targetBitrateKbps,
+            codec = status.codec,
+            width = status.width,
+            height = status.height,
+        )
+    }
 
     fun setMdnsEnabled(enabled: Boolean) {
         val changed = mdnsEnabled.getAndSet(enabled) != enabled

@@ -432,7 +432,12 @@ possibly re-scaled main frame: its dimensions move under `frameData`, and
 feeding the sub scale the stale source dims corrupted `/sub` whenever the
 encode resolution differed from the analysis resolution. The encoder
 instantiation is a constructor seam (`encoderFactory`), so the frame path —
-including the overlay stamping — is JVM-tested with fake encoders.
+including the overlay stamping — is JVM-tested with fake encoders. The
+fan-out records every AU's (timestamp, bytes) into the encoded lane's
+`SlidingRateWindow` before delivery, and `encodedStreamStatus()` reads the
+encoder output's measured bitrate/fps from it (see Stream Stats) — so
+`/api/status`'s `encodedStream` block is what the encoder produced, not
+what it was configured to produce.
 
 ### H264 Stream Assembler
 **`streaming/rtsp/H264StreamAssembler.kt`** — the wire-format core of the
@@ -1531,8 +1536,36 @@ screen's combines feed it; the `List<Any>`-plus-casts mapping is gone.
 **`streaming/AdaptiveBitrateController.kt`** — the single adaptive-bitrate
 brain. The frame path (`getAdaptiveQuality`, `getAdaptiveFrameInterval`)
 drives it and publishes the *driven* `AdaptiveState` that the app dashboard
-and `/api/status` display. Bandwidth numbers are measured client throughput —
-0 when no client is connected; no invented constants.
+and `/api/status` display. Its bandwidth numbers are the DRAIN-RATE
+congestion estimate (see Stream Stats — bytes over how long a frame took to
+drain into the viewer's buffer), 0 when no client is connected — never an
+invented constant, and deliberately not the window-measured stream bitrate
+the display blocks show.
+
+### Stream Stats
+**`streaming/SlidingRateWindow.kt`** (+ the consumers) — the measured-stream
+stats surface behind every DISPLAYED rate (issue #25). The vocabulary: the
+*drain rate* is per-frame bytes over how long the frame took to DRAIN into
+the HTTP server's buffer — a congestion signal (a 50 KB frame draining in
+1 ms reads 400 000 "kbps"), and the adaptation ladders' only throughput
+input; *measured stream stats* are what the dashboard shows, computed from
+(timestamp, bytes) samples in a sliding [StreamDefaults.STATS_WINDOW_MS]
+window so they are rates of actual frame production. The window divides by
+the full window span — a steady stream reads its true rate, a partial window
+reads LOW (never the drain spike), and silence decays the reading to 0 as
+samples slide out; nothing is summed forever. Three consumers: the
+NetworkQualityMonitor keeps one window per MJPEG client (display accessors
+keep the "throughput" names; the drain signal is renamed to
+`drainRateSamples`/`*DrainRateKbps*` and stays the ladders' input, with the
+default-aware idle view applied inside the level verdicts so the 5000 kbps
+default can never reach a display accessor), the EncodedStreamHub records
+its encoder-output AUs into one window and answers `encodedStreamStatus()`,
+and `/api/status` carries both — `connectionQuality`'s
+throughput/fps/`framesPerSecond` and the nullable `encodedStream` block
+(measured encoder-output bitrate/fps, target bitrate, codec, geometry;
+null while no encoded stream runs). The MJPEG chips freeze when the last
+viewer leaves no more: clients unregister and windows age out. Contract
+pinned through `web/contract/status.json` on all three sides.
 
 ### Stream Watchdog
 **`core/StreamWatchdog.kt`** — monitors a live stream and performs recovery
@@ -1960,9 +1993,10 @@ between the two paths is the reason the text-box bitmap is shared.
 ### Status Snapshot Builder
 **`streaming/web/StatusSnapshotBuilder.kt`** — the pure `/api/status`
 aggregation: typed `StreamingInputs`/`ThermalInputs`/`BatteryInputs`/
-`WatchdogInputs`/`AdaptiveInputs`/`NetworkInputs` in, one
-`StatusResponseDto` out (adaptive null-when-disabled, connectionQuality
-null-when-idle, first-client fps). `StatusWebHandler` only collects flows and
+`WatchdogInputs`/`AdaptiveInputs`/`NetworkInputs`/`EncodedStreamInputs` in,
+one `StatusResponseDto` out (adaptive null-when-disabled, connectionQuality
+null-when-idle, encodedStream null-while-not-encoding, first-client fps).
+`StatusWebHandler` only collects flows and
 delegates — the dashboard/API mapping is tested without a manager.
 
 ### Quiet Hours Policy

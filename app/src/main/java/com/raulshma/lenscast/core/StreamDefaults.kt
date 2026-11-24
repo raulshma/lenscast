@@ -66,6 +66,14 @@ object StreamDefaults {
     // HTTP fan-out guard: one hotspot phone can't serve unlimited browsers.
     const val MAX_HTTP_CLIENTS = 8
 
+    // Stream stats display: the sliding window (SlidingRateWindow) over
+    // (timestamp, bytes) frame samples every measured display rate reads
+    // from — the MJPEG per-client windows and the encoded-output window.
+    // The divisor of the measured bitrate/fps, so a steady stream reads its
+    // true rate and a partial window reads LOW (never the bytes-over-drain-ms
+    // spike issue #25 describes).
+    const val STATS_WINDOW_MS = 5_000L
+
     // Storage manager bounds.
     const val STORAGE_QUOTA_MB_MIN = 100
     const val STORAGE_QUOTA_MB_MAX = 32_768

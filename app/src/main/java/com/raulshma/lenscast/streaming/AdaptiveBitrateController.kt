@@ -113,10 +113,11 @@ class AdaptiveBitrateController(
             targetQuality = config.defaultQuality,
             currentFps = if (appliedIntervalMs > 0) (1000f / appliedIntervalMs).toInt() else 0,
             targetFps = if (defaultIntervalMs > 0) (1000f / defaultIntervalMs).toInt() else 0,
-            // Measured aggregate client throughput — 0 until a client is
-            // actually sending frames. Never invent a bandwidth number.
+            // The congestion estimate (drain-rate based, 0-while-idle) — the
+            // ladder's signal, deliberately not the window-measured stream
+            // bitrate. Never invents a bandwidth number.
             estimatedBandwidthKbps = networkMonitor.getMeasuredBandwidthKbps(),
-            minClientThroughputKbps = if (activeClients > 0) networkMonitor.getMinClientThroughputKbps() else 0,
+            minClientThroughputKbps = if (activeClients > 0) networkMonitor.getMinClientDrainRateKbps() else 0,
             activeClients = activeClients,
             adjustmentCount = adjustmentCount.get(),
         )

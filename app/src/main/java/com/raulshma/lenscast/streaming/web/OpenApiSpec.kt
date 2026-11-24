@@ -1040,6 +1040,11 @@ object OpenApiSpec {
             "connectionQuality" to mapOf("type" to "object", "description" to "Present while any stream is live"),
             "watchdog" to mapOf("type" to "object"),
             "encodedVideoBitrate" to intSchema("The encoded pipeline's live target bitrate in bps"),
+            "encodedStream" to mapOf(
+                "type" to "object",
+                "description" to "The encoded lane's measured stream status — the encoder output's real bitrate/fps over " +
+                    "a sliding window, plus the configured target and encode geometry; present while the encoded pipeline runs",
+            ),
             required = listOf("streaming", "thermal", "camera", "battery"),
             fixture = "status.json",
         ),

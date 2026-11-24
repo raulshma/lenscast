@@ -145,6 +145,15 @@ class DtoContractFixtureTest {
                 lastFailureReason = "Encoder stalled; pipeline restarted",
             ),
             encodedVideoBitrate = 2_000_000,
+            encodedStream = EncodedStreamStatusDto(
+                running = true,
+                measuredBitrateKbps = 1890,
+                fps = 23.5,
+                targetBitrateKbps = 2000,
+                codec = "h264",
+                width = 1280,
+                height = 720,
+            ),
         )
         assertMatchesFixture(
             "status.json",

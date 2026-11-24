@@ -485,6 +485,13 @@ data class StatusResponseDto(
      * ONVIF profiles read the same number through the manager.
      */
     val encodedVideoBitrate: Int = 0,
+    /**
+     * The encoded lane's MEASURED stream status (issue #25): the encoder
+     * output's real bitrate and frame rate, measured over a sliding window —
+     * never a drain-rate artifact or an invented default. Null (absent on the
+     * wire) while no encoded stream runs.
+     */
+    val encodedStream: EncodedStreamStatusDto? = null,
 )
 
 /** A device control range, min inclusive / max inclusive. */
@@ -539,6 +546,25 @@ data class ClientConnectionDetailDto(
     val avgThroughputKbps: Int,
     val lastFrameSizeBytes: Int,
     val lastSendDurationMs: Long,
+)
+
+/**
+ * The encoded lane's measured-stream block (issue #25): what the shared
+ * encoder actually produced, measured over a sliding window at the encoder
+ * output — measuredBitrateKbps/fps decay to 0 when the encoder stalls or
+ * stops (and the whole block goes null then), while targetBitrateKbps is the
+ * configured target the adaptive ladder drives. Absent on pre-issue-25
+ * firmware; every dashboard consumer must treat it as optional.
+ */
+@JsonClass(generateAdapter = true)
+data class EncodedStreamStatusDto(
+    val running: Boolean,
+    val measuredBitrateKbps: Int,
+    val fps: Double,
+    val targetBitrateKbps: Int,
+    val codec: String,
+    val width: Int,
+    val height: Int,
 )
 
 // ── API Response DTOs ──

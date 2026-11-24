@@ -1,10 +1,37 @@
 package com.raulshma.lenscast.core
 
 import android.util.Log
+import com.raulshma.lenscast.streaming.SlidingRateWindow
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicInteger
 
-class NetworkQualityMonitor {
+/**
+ * Two signals, never mixed (issue #25):
+ *
+ * The DRAIN RATE — per-frame bytes over how long the frame took to drain into
+ * the HTTP server's buffer (`drainRateSamples`, bytes×8/drainMs, the last
+ * [THROUGHPUT_WINDOW] frames). That is a congestion signal, not a stream
+ * bitrate: a 50 KB frame that drained in 1 ms reads 400 000 "kbps" even
+ * though the stream sent 50 KB per frame PERIOD. The adaptation ladders
+ * consume it under drain-rate names ([getMinClientDrainRateKbps],
+ * [getAvgClientDrainRateKbps], [getMeasuredBandwidthKbps]), with the
+ * default-aware idle view the policies own.
+ *
+ * The MEASURED STREAM STATS — what the dashboard displays — come from each
+ * client's [SlidingRateWindow]: (timestamp, bytes) samples over
+ * [StreamDefaults.STATS_WINDOW_MS], so throughput and fps are measured from
+ * the actual frame-record cadence and decay to 0 as samples age out. The
+ * throughput accessors keep their "throughput" names because that is what
+ * they now honestly are; the drain signal is renamed out of their way.
+ *
+ * Only the MJPEG lane feeds the per-client half; the encoded lane keeps its
+ * own aggregate drain sampling below, and the encoded-output display rate
+ * lives in the EncodedStreamHub's window.
+ */
+class NetworkQualityMonitor(
+    /** Injected clock — the stat windows and caches read time only through it. */
+    private val nowMs: () -> Long = System::currentTimeMillis,
+) {
 
     private val clientStats = ConcurrentHashMap<String, ClientStats>()
 
@@ -16,7 +43,7 @@ class NetworkQualityMonitor {
     fun registerClient(clientId: String) {
         // putIfAbsent (API 9 via ConcurrentMap), not Map.compute — the default
         // method is API 24+ and this monitor must run on API 23.
-        clientStats.putIfAbsent(clientId, ClientStats())
+        clientStats.putIfAbsent(clientId, ClientStats(rateWindow = SlidingRateWindow(nowMs = nowMs)))
         _activeClients.set(clientStats.size)
         Log.d(TAG, "Client registered: $clientId, active: ${_activeClients.get()}")
     }
@@ -29,25 +56,27 @@ class NetworkQualityMonitor {
 
     fun recordFrameSent(clientId: String, frameSizeBytes: Int, sendDurationMs: Long) {
         val stats = clientStats[clientId] ?: return
+        val now = nowMs()
         synchronized(stats) {
             stats.framesSent++
             stats.bytesSent += frameSizeBytes
             stats.totalSendDurationMs += sendDurationMs
 
+            // Drain-rate sample: the congestion signal (bytes over drain time),
+            // same math and same bounded window as ever — nothing here feeds a
+            // display number.
             if (sendDurationMs > 0) {
-                val throughputKbps = (frameSizeBytes * 8.0) / sendDurationMs.toDouble()
-                stats.throughputSamples.add(throughputKbps.toInt())
-                if (stats.throughputSamples.size > THROUGHPUT_WINDOW) {
-                    stats.throughputSamples.removeAt(0)
+                val drainRateKbps = (frameSizeBytes * 8.0) / sendDurationMs.toDouble()
+                stats.drainRateSamples.add(drainRateKbps.toInt())
+                if (stats.drainRateSamples.size > THROUGHPUT_WINDOW) {
+                    stats.drainRateSamples.removeAt(0)
                 }
             }
 
-            stats.frameTimestamps.add(System.currentTimeMillis())
-            if (stats.frameTimestamps.size > THROUGHPUT_WINDOW) {
-                stats.frameTimestamps.removeAt(0)
-            }
+            // Display sample: (timestamp, bytes) into the sliding window — the
+            // measured throughput/fps the dashboard shows.
+            stats.rateWindow.record(now, frameSizeBytes.toLong())
 
-            stats.lastFrameTimeMs = System.currentTimeMillis()
             stats.lastFrameSizeBytes = frameSizeBytes
             stats.lastSendDurationMs = sendDurationMs
         }
@@ -57,12 +86,20 @@ class NetworkQualityMonitor {
         }
     }
 
+    /** The client's avg drain rate (congestion signal, NOT a stream bitrate); 0 with no samples. */
+    fun getClientDrainRateKbps(clientId: String): Int {
+        val stats = clientStats[clientId] ?: return 0
+        synchronized(stats) {
+            if (stats.drainRateSamples.isEmpty()) return 0
+            return stats.drainRateSamples.average().toInt()
+        }
+    }
+
+    /** The client's measured stream throughput from its sliding window; 0 before frames flow or after they decay. */
     fun getClientThroughputKbps(clientId: String): Int {
         val stats = clientStats[clientId] ?: return 0
         synchronized(stats) {
-            val samples = stats.throughputSamples
-            if (samples.isEmpty()) return 0
-            return samples.average().toInt()
+            return stats.rateWindow.measuredBitrateKbps().toInt()
         }
     }
 
@@ -89,7 +126,7 @@ class NetworkQualityMonitor {
         }
     }
 
-    /** Average encoded-sink throughput; 0 while the lane has no samples. */
+    /** Average encoded-sink drain rate; 0 while the lane has no samples. */
     fun getEncodedThroughputKbps(): Int = synchronized(encodedThroughputSamples) {
         if (encodedThroughputSamples.isEmpty()) 0 else encodedThroughputSamples.average().toInt()
     }
@@ -117,48 +154,91 @@ class NetworkQualityMonitor {
         )
     }
 
-    fun getMinClientThroughputKbps(): Int {
-        if (clientStats.isEmpty()) return NetworkAdaptationPolicy.DEFAULT_BANDWIDTH_KBPS
-        var minThroughput = Int.MAX_VALUE
+    /** Slowest client's avg drain rate — the MJPEG ladder's congestion input; 0 with no drain samples. */
+    fun getMinClientDrainRateKbps(): Int = minClientDrainRateSampled() ?: 0
+
+    /**
+     * The min per-client avg drain rate, null when NO client has drain
+     * samples. Presence-gated, not value-gated: a stream of zero-byte frames
+     * samples 0 kbps and must read 0 (CRITICAL rung), not fall back to the
+     * ladder's default.
+     */
+    private fun minClientDrainRateSampled(): Int? {
+        var minDrainRate = Int.MAX_VALUE
         var hasData = false
         for (stats in clientStats.values) {
             synchronized(stats) {
-                val samples = stats.throughputSamples
-                if (samples.isNotEmpty()) {
+                if (stats.drainRateSamples.isNotEmpty()) {
                     hasData = true
-                    val avg = samples.average().toInt()
-                    if (avg < minThroughput) minThroughput = avg
+                    val avg = stats.drainRateSamples.average().toInt()
+                    if (avg < minDrainRate) minDrainRate = avg
                 }
             }
         }
-        return if (hasData) minThroughput else NetworkAdaptationPolicy.DEFAULT_BANDWIDTH_KBPS
+        return if (hasData) minDrainRate else null
     }
 
-    fun getAvgClientThroughputKbps(): Int {
-        if (clientStats.isEmpty()) return NetworkAdaptationPolicy.DEFAULT_BANDWIDTH_KBPS
+    /** Avg per-client drain rate across clients with drain samples; 0 with none (never a default constant). */
+    fun getAvgClientDrainRateKbps(): Int {
         var total = 0L
         var count = 0
         for (stats in clientStats.values) {
             synchronized(stats) {
-                val samples = stats.throughputSamples
-                if (samples.isNotEmpty()) {
-                    total += samples.average().toLong()
+                if (stats.drainRateSamples.isNotEmpty()) {
+                    total += stats.drainRateSamples.average().toLong()
                     count++
                 }
             }
         }
-        return if (count > 0) (total / count).toInt() else NetworkAdaptationPolicy.DEFAULT_BANDWIDTH_KBPS
+        return if (count > 0) (total / count).toInt() else 0
     }
 
     /**
-     * Measured aggregate client throughput for display: 0 while no client is
-     * sending frames. Unlike [getAvgClientThroughputKbps] (the adaptation
-     * ladder's view), this never reports a default constant — the 0-while-idle
-     * rule is [NetworkAdaptationPolicy.displayKbps]'s.
+     * The measured aggregate client throughput for display: the sliding
+     * windows' avg across clients with in-window frames, 0 while no client
+     * has frames inside its window (idle, or connected-but-silent, or silence
+     * past the window). Never invents a number — the ladder's default-aware
+     * view lives in [getNetworkQualityLevel], not here.
+     */
+    fun getAvgClientThroughputKbps(): Int {
+        var total = 0L
+        var count = 0
+        for (stats in clientStats.values) {
+            synchronized(stats) {
+                if (stats.rateWindow.sampleCount() > 0) {
+                    total += stats.rateWindow.measuredBitrateKbps().toLong()
+                    count++
+                }
+            }
+        }
+        return if (count > 0) (total / count).toInt() else 0
+    }
+
+    /** The measured min across clients' windows; 0 with no measured throughput anywhere. */
+    fun getMinClientThroughputKbps(): Int {
+        var minThroughput = Int.MAX_VALUE
+        var hasData = false
+        for (stats in clientStats.values) {
+            synchronized(stats) {
+                if (stats.rateWindow.sampleCount() > 0) {
+                    hasData = true
+                    val measured = stats.rateWindow.measuredBitrateKbps().toInt()
+                    if (measured < minThroughput) minThroughput = measured
+                }
+            }
+        }
+        return if (hasData) minThroughput else 0
+    }
+
+    /**
+     * The MJPEG ladder's congestion estimate: the drain-rate avg under the
+     * 0-while-idle display rule. Consumed by the AdaptiveBitrateController's
+     * published state — it estimates congestion from how long frames took to
+     * drain, which is deliberately NOT the window-measured stream bitrate.
      */
     fun getMeasuredBandwidthKbps(): Int {
         return NetworkAdaptationPolicy.displayKbps(
-            measuredKbps = getAvgClientThroughputKbps(),
+            measuredKbps = getAvgClientDrainRateKbps(),
             hasActiveClients = _activeClients.get() > 0,
         )
     }
@@ -183,21 +263,24 @@ class NetworkQualityMonitor {
 
     fun getTotalBytesSent(): Long = synchronized(this) { totalBytesSent }
 
+    /** The client's measured frame rate from its window's record cadence; 0.0 with no in-window frames. */
     fun getFramesPerSecond(clientId: String): Double {
         val stats = clientStats[clientId] ?: return 0.0
         synchronized(stats) {
-            val timestamps = stats.frameTimestamps
-            if (timestamps.size < 2) return 0.0
-            val elapsed = timestamps.last() - timestamps.first()
-            if (elapsed <= 0) return 0.0
-            return (timestamps.size - 1) * 1000.0 / elapsed
+            return stats.rateWindow.measuredFps()
         }
     }
 
-    /** The ladder verdict is the policy's; this only feeds it measured inputs. */
+    /**
+     * The MJPEG ladder verdict, default-aware exactly like the encoded lane's:
+     * with no drain samples the ladder assumes [NetworkAdaptationPolicy.DEFAULT_BANDWIDTH_KBPS]
+     * rather than stalling at the bottom rung — the default never leaks into a
+     * display accessor, it only shapes this verdict.
+     */
     fun getNetworkQualityLevel(): NetworkQualityLevel {
         return NetworkAdaptationPolicy.levelFor(
-            minThroughputKbps = getMinClientThroughputKbps(),
+            minThroughputKbps = minClientDrainRateSampled()
+                ?: NetworkAdaptationPolicy.DEFAULT_BANDWIDTH_KBPS,
             activeClients = _activeClients.get(),
         )
     }
@@ -207,7 +290,7 @@ class NetworkQualityMonitor {
     private val CACHE_VALIDITY_MS = 500L
 
     private fun getCachedQualityLevel(): NetworkQualityLevel {
-        val now = System.currentTimeMillis()
+        val now = nowMs()
         val cached = cachedQualityLevel
         if (cached != null && now - cachedQualityLevelTime < CACHE_VALIDITY_MS) {
             return cached
@@ -249,8 +332,9 @@ class NetworkQualityMonitor {
                 ClientStatsSnapshot(
                     framesSent = stats.framesSent,
                     bytesSent = stats.bytesSent,
-                    avgThroughputKbps = if (stats.throughputSamples.isNotEmpty())
-                        stats.throughputSamples.average().toInt() else 0,
+                    // Display truth: the client's measured window throughput,
+                    // 0 before frames flow or after they age out.
+                    avgThroughputKbps = stats.rateWindow.measuredBitrateKbps().toInt(),
                     lastFrameSizeBytes = stats.lastFrameSizeBytes,
                     lastSendDurationMs = stats.lastSendDurationMs,
                 )
@@ -258,19 +342,16 @@ class NetworkQualityMonitor {
         }
         return NetworkStatsSnapshot(
             activeClients = _activeClients.get(),
+            // The ladder's congestion estimate (drain-based, 0-while-idle) —
+            // deliberately not the window-measured bitrate; see
+            // getMeasuredBandwidthKbps.
             estimatedBandwidthKbps = getMeasuredBandwidthKbps(),
             totalBytesSent = getTotalBytesSent(),
-            // Display fields: 0 while nobody is connected — no invented constant
-            // (NetworkAdaptationPolicy.displayKbps). The adaptation ladder keeps
-            // its own default-aware view.
-            minThroughputKbps = NetworkAdaptationPolicy.displayKbps(
-                getMinClientThroughputKbps(),
-                _activeClients.get() > 0,
-            ),
-            avgThroughputKbps = NetworkAdaptationPolicy.displayKbps(
-                getAvgClientThroughputKbps(),
-                _activeClients.get() > 0,
-            ),
+            // Display fields: measured from the sliding windows, 0 whenever
+            // nothing is inside them — no invented constant, and no frozen
+            // last value (samples age out).
+            minThroughputKbps = getMinClientThroughputKbps(),
+            avgThroughputKbps = getAvgClientThroughputKbps(),
             worstLatencyMs = getWorstClientLatencyMs(),
             qualityLevel = getNetworkQualityLevel(),
             clientDetails = clientDetails,
@@ -282,9 +363,10 @@ class NetworkQualityMonitor {
         var framesSent: Long = 0,
         var bytesSent: Long = 0,
         var totalSendDurationMs: Long = 0,
-        val throughputSamples: MutableList<Int> = mutableListOf(),
-        val frameTimestamps: MutableList<Long> = mutableListOf(),
-        var lastFrameTimeMs: Long = 0,
+        /** Per-frame drain rates (bytes×8/drainMs, kbps) — the congestion signal, NOT a stream bitrate. */
+        val drainRateSamples: MutableList<Int> = mutableListOf(),
+        /** The measured-display window: (timestamp, bytes) samples, [StreamDefaults.STATS_WINDOW_MS] deep. */
+        val rateWindow: SlidingRateWindow,
         var lastFrameSizeBytes: Int = 0,
         var lastSendDurationMs: Long = 0,
     )

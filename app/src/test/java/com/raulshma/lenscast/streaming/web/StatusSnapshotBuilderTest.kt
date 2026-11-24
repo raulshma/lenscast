@@ -279,6 +279,71 @@ class StatusSnapshotBuilderTest {
     }
 
     @Test
+    fun `a running encoded stream maps the measured encodedStream block`() {
+        val response = StatusSnapshotBuilder.build(
+            streaming = streaming(active = true),
+            thermal = thermal(),
+            battery = battery(),
+            watchdog = watchdog(),
+            adaptive = adaptive(enabled = true),
+            network = network(),
+            encodedStream = StatusSnapshotBuilder.EncodedStreamInputs(
+                running = true,
+                measuredBitrateKbps = 1890,
+                fps = 23.5,
+                targetBitrateKbps = 2000,
+                codec = "h264",
+                width = 1280,
+                height = 720,
+            ),
+        )
+
+        val encoded = response.encodedStream
+        assertNotNull(encoded)
+        assertEquals(true, encoded!!.running)
+        assertEquals(1890, encoded.measuredBitrateKbps)
+        assertEquals(23.5, encoded.fps, 0.0)
+        assertEquals(2000, encoded.targetBitrateKbps)
+        assertEquals("h264", encoded.codec)
+        assertEquals(1280, encoded.width)
+        assertEquals(720, encoded.height)
+    }
+
+    @Test
+    fun `an idle encoded stream maps encodedStream null`() {
+        // Default inputs (encoder not running) — the block is absent on the
+        // wire, the same null-when-idle shape adaptiveBitrate has disabled.
+        val default = StatusSnapshotBuilder.build(
+            streaming = streaming(active = true),
+            thermal = thermal(),
+            battery = battery(),
+            watchdog = watchdog(),
+            adaptive = adaptive(enabled = true),
+            network = network(),
+        )
+        assertNull(default.encodedStream)
+
+        val stopped = StatusSnapshotBuilder.build(
+            streaming = streaming(active = true),
+            thermal = thermal(),
+            battery = battery(),
+            watchdog = watchdog(),
+            adaptive = adaptive(enabled = true),
+            network = network(),
+            encodedStream = StatusSnapshotBuilder.EncodedStreamInputs(
+                running = false,
+                measuredBitrateKbps = 0,
+                fps = 0.0,
+                targetBitrateKbps = 2000,
+                codec = "h264",
+                width = 1280,
+                height = 720,
+            ),
+        )
+        assertNull(stopped.encodedStream)
+    }
+
+    @Test
     fun `blocked-by-lock defaults false and passes through when supplied`() {
         val default = StatusSnapshotBuilder.build(
             streaming = streaming(active = true),

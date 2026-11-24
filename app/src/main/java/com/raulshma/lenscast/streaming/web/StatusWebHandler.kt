@@ -120,6 +120,7 @@ class StatusWebHandler(
             encodedVideo = StatusSnapshotBuilder.EncodedVideoInputs(
                 bitrateBps = streamingManager.currentVideoBitrate(),
             ),
+            encodedStream = streamingManager.encodedStreamStatus(),
             sirenActive = streamingManager.sirenController().isRunning(),
             cameraBlockedByLock = streamingManager.isCameraBlockedByLock(),
         )

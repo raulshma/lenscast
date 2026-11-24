@@ -86,5 +86,14 @@
     "lastRecoveryTimestamp": 1788825600000,
     "lastFailureReason": "Encoder stalled; pipeline restarted"
   },
-  "encodedVideoBitrate": 2000000
+  "encodedVideoBitrate": 2000000,
+  "encodedStream": {
+    "running": true,
+    "measuredBitrateKbps": 1890,
+    "fps": 23.5,
+    "targetBitrateKbps": 2000,
+    "codec": "h264",
+    "width": 1280,
+    "height": 720
+  }
 }
