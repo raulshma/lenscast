@@ -22,8 +22,11 @@ import type { PlayerMode } from '../video/playerLadder'
 function renderPreview(opts: { live?: boolean; mode?: PlayerMode; stats?: Record<string, unknown> } = {}) {
   const [playerMode, setPlayerMode] = createSignal<PlayerMode>(opts.mode ?? 'mjpeg')
   const [live, setLive] = createSignal(opts.live ?? false)
+  // The payload is a signal too: a test can change what the device reports
+  // (a lane appearing, a battery tick) under an already-mounted preview.
+  const [stats, setStats] = createSignal<Record<string, unknown>>(opts.stats ?? {})
   const props = {
-    status: () => (live() ? ({ streaming: { webStreamingActive: true, isActive: true }, ...opts.stats } as any) : null),
+    status: () => (live() ? ({ streaming: { webStreamingActive: true, isActive: true }, ...stats() } as any) : null),
     previewVisible: () => live(),
     streamNonce: () => 0,
     streamActionLoading: () => false,
@@ -42,7 +45,7 @@ function renderPreview(opts: { live?: boolean; mode?: PlayerMode; stats?: Record
     connectionLost: () => false,
   }
   const utils = render(() => <StreamPreview {...props} />)
-  return { ...utils, setLive }
+  return { ...utils, setLive, setStats, setPlayerMode }
 }
 
 interface FullscreenStubs {
@@ -218,7 +221,8 @@ describe('Graceful degradation', () => {
 // stats toggle (auto/on/off, persisted app-wide) and the preview rung's
 // lane — auto is today's gate (Adaptive Bitrate required), on shows the
 // lane's measured numbers without it, off never shows. The Stats button in
-// the action bar cycles the toggle.
+// the action bar cycles the toggle. The toggle decides whether the indicator
+// is MOUNTED; the lane's data only hides it.
 describe('Stream stats overlay', () => {
   const mjpegStatus = {
     connectionQuality: {
@@ -247,6 +251,9 @@ describe('Stream stats overlay', () => {
   }
 
   const badge = () => document.querySelector('.cq-badge')
+  // Mount vs visibility: the indicator's host (the wrapper's parent) stays
+  // in the DOM while the lane has no data and carries `hidden` instead.
+  const indicator = () => document.querySelector('.connection-quality-wrapper')?.parentElement ?? null
 
   function clickStats() {
     fireEvent.click(screen.getByText(/^Stats: /).closest('button')!)
@@ -315,7 +322,8 @@ describe('Stream stats overlay', () => {
     installH264Rung()
     streamStatsOverlayStore().set('on')
     renderPreview({ live: true, mode: 'h264', stats: mjpegStatus })
-    expect(badge()).toBeNull()
+    expect(indicator()?.hasAttribute('hidden')).toBe(true)
+    expect(document.body.textContent).not.toContain('3900 kbps')
   })
 
   // The deliberate auto-gate narrowing (issue #25 review round): the old
@@ -326,7 +334,42 @@ describe('Stream stats overlay', () => {
   it('auto on an encoded rung with Adaptive Bitrate on but no encoded stream hides (no wrong-lane numbers)', () => {
     installH264Rung()
     renderPreview({ live: true, mode: 'h264', stats: { ...mjpegStatus, ...adaptiveOn } })
-    expect(badge()).toBeNull()
+    expect(indicator()?.hasAttribute('hidden')).toBe(true)
+    expect(document.body.textContent).not.toContain('3900 kbps')
+  })
+
+  // The mount/visibility split: a lane switch reaches the gate as "the new
+  // lane has no data yet" (the encoded block only exists once the encoder
+  // runs, the WHEP block once a viewer reported). That hides the indicator
+  // — it must not unmount it, or the panel the operator opened would
+  // collapse and its sparkline history would start over on every switch.
+  it('a lane switch hides the indicator without unmounting it: the panel stays open and its battery history survives', () => {
+    installH264Rung()
+    streamStatsOverlayStore().set('on')
+    const battery = (level: number) => ({ ...mjpegStatus, battery: { level } })
+    const { setStats, setPlayerMode } = renderPreview({ live: true, mode: 'mjpeg', stats: battery(80) })
+    setStats(battery(79))
+    // The sparklines live in the panel, so the panel opens first.
+    fireEvent.click(badge()!)
+    expect(document.querySelector('.cq-detail-panel')).not.toBeNull()
+    const batteryPoints = () =>
+      (document.querySelector('svg[aria-label="Battery level history (%)"] polyline')?.getAttribute('points') ?? '')
+        .split(' ').filter(Boolean).length
+    const pointsBefore = batteryPoints()
+    expect(pointsBefore).toBeGreaterThan(1)
+
+    setPlayerMode('h264') // the encoded lane — nothing has reported yet
+    expect(indicator()?.hasAttribute('hidden')).toBe(true)
+    expect(document.querySelector('.connection-quality-wrapper')).not.toBeNull()
+
+    setStats({ ...encodedStatus, battery: { level: 78 } }) // the encoded lane reports
+    expect(indicator()?.hasAttribute('hidden')).toBe(false)
+    expect(screen.getByText('23.5 fps · 1890 kbps')).toBeTruthy()
+    // Still the operator's open panel — it did not collapse with the lane.
+    expect(document.querySelector('.cq-detail-panel')).not.toBeNull()
+    for (const row of screen.getAllByText('Bitrate')) expect(row.parentElement?.textContent).toContain('1890 kbps')
+    // One new sample per status push — the pre-switch samples are still there.
+    expect(batteryPoints()).toBe(pointsBefore + 1)
   })
 
   it('the Stats button cycles auto → on → off → auto, gating the indicator along the way', () => {

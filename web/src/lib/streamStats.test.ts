@@ -1,11 +1,16 @@
 import { describe, expect, it } from 'vitest'
-import type { ConnectionQualityStatus, DeviceStatus, EncodedStreamStatus } from '../types'
+import type {
+  ConnectionQualityStatus,
+  DeviceStatus,
+  EncodedStreamStatus,
+  WhepStreamStatus,
+} from '../types'
 import {
   encodedLane,
   laneForMode,
   mjpegLane,
-  pickMeasuredRates,
   pickPreviewLane,
+  whepLane,
   type LaneStats,
 } from './streamStats'
 
@@ -34,10 +39,19 @@ const encoded = (over: Partial<EncodedStreamStatus> = {}): EncodedStreamStatus =
   ...over,
 })
 
+const whep = (over: Partial<WhepStreamStatus> = {}): WhepStreamStatus => ({
+  measuredBitrateKbps: 1700,
+  fps: 24,
+  codec: 'vp8',
+  width: 600,
+  height: 800,
+  ...over,
+})
+
 describe('laneForMode', () => {
-  it('maps the MJPEG rung to the MJPEG lane and every other rung to the encoded lane', () => {
+  it('maps each rung to its own lane: MJPEG, WHEP, and H264/HLS to the encoded lane', () => {
     expect(laneForMode('mjpeg')).toBe('mjpeg')
-    expect(laneForMode('whep')).toBe('encoded')
+    expect(laneForMode('whep')).toBe('whep')
     expect(laneForMode('h264')).toBe('encoded')
     expect(laneForMode('hls')).toBe('encoded')
     expect(laneForMode(undefined)).toBe('encoded')
@@ -86,6 +100,53 @@ describe('encodedLane', () => {
   })
 })
 
+describe('whepLane', () => {
+  it('reads the measured bitrate, fps, codec and geometry', () => {
+    expect(whepLane(whep())).toEqual({
+      lane: 'whep',
+      bitrateKbps: 1700,
+      fps: 24,
+      codec: 'vp8',
+      width: 600,
+      height: 800,
+    })
+  })
+
+  it('carries no target — the WHEP lane has none, so none is invented', () => {
+    expect(whepLane(whep())?.targetBitrateKbps).toBeUndefined()
+  })
+
+  it('keeps the honest 0s of a viewer that is connected but not encoding yet', () => {
+    expect(whepLane(whep({ measuredBitrateKbps: 0, fps: 0 }))).toEqual({
+      lane: 'whep',
+      bitrateKbps: 0,
+      fps: 0,
+      codec: 'vp8',
+      width: 600,
+      height: 800,
+    })
+  })
+
+  it('leaves codec and geometry absent until the viewer session reports them', () => {
+    const lane = whepLane(whep({ codec: undefined, width: undefined, height: undefined }))
+    expect(lane?.codec).toBeUndefined()
+    expect(lane?.width).toBeUndefined()
+    expect(lane?.height).toBeUndefined()
+    expect(lane?.bitrateKbps).toBe(1700)
+  })
+
+  it('is null until a viewer session has reported', () => {
+    expect(whepLane(undefined)).toBeNull()
+    expect(whepLane(null)).toBeNull()
+  })
+
+  it('renders a non-finite wire value as absence', () => {
+    const lane = whepLane(whep({ measuredBitrateKbps: Number.NaN }))
+    expect(lane?.bitrateKbps).toBeNull()
+    expect(lane?.fps).toBe(24)
+  })
+})
+
 describe('pickPreviewLane', () => {
   it('returns null for an absent status, whatever the mode', () => {
     expect(pickPreviewLane('mjpeg', null)).toBeNull()
@@ -99,14 +160,41 @@ describe('pickPreviewLane', () => {
   })
 
   it('an MJPEG preview with no clients (no quality block) picks null — no invented numbers', () => {
-    const status = { encodedStream: encoded() } as DeviceStatus
+    const status = { encodedStream: encoded(), whepStream: whep() } as DeviceStatus
     expect(pickPreviewLane('mjpeg', status)).toBeNull()
   })
 
-  it('a WHEP/H264/HLS preview reads the encoded lane', () => {
-    const status = { encodedStream: encoded() } as DeviceStatus
-    for (const mode of ['whep', 'h264', 'hls'] as const) {
-      expect(pickPreviewLane(mode, status)?.lane).toBe('encoded')
+  it('a WHEP preview reads the WHEP lane', () => {
+    const status = { connectionQuality: quality(), encodedStream: encoded(), whepStream: whep() } as DeviceStatus
+    expect(pickPreviewLane('whep', status)).toEqual({
+      lane: 'whep',
+      bitrateKbps: 1700,
+      fps: 24,
+      codec: 'vp8',
+      width: 600,
+      height: 800,
+    })
+  })
+
+  it('a WHEP preview picks null while no viewer has reported — never the encoded lane it never crosses', () => {
+    // The old rule, inverted: libwebrtc encodes the WHEP preview itself, so
+    // the encoded block beside it measures a lane this preview does not use.
+    const status = { connectionQuality: quality(), encodedStream: encoded() } as DeviceStatus
+    expect(pickPreviewLane('whep', status)).toBeNull()
+  })
+
+  it('an H264/HLS preview reads the encoded lane', () => {
+    const status = { connectionQuality: quality(), encodedStream: encoded(), whepStream: whep() } as DeviceStatus
+    for (const mode of ['h264', 'hls'] as const) {
+      expect(pickPreviewLane(mode, status)).toEqual({
+        lane: 'encoded',
+        bitrateKbps: 1890,
+        fps: 23.5,
+        targetBitrateKbps: 2000,
+        codec: 'h264',
+        width: 1280,
+        height: 720,
+      })
     }
   })
 
@@ -115,29 +203,9 @@ describe('pickPreviewLane', () => {
     expect(pickPreviewLane('h264', status)).toBeNull()
   })
 
-  it('never throws on a status missing both blocks', () => {
-    expect(pickPreviewLane('mjpeg', {} as DeviceStatus)).toBeNull()
-    expect(pickPreviewLane('hls', {} as DeviceStatus)).toBeNull()
-  })
-})
-
-describe('pickMeasuredRates', () => {
-  it('prefers the encoded lane when its block is present (presence is the running fact)', () => {
-    const status = { connectionQuality: quality(), encodedStream: encoded() } as DeviceStatus
-    expect(pickMeasuredRates(status)).toEqual({ bitrateKbps: 1890, fps: 23.5 })
-  })
-
-  it('falls back to the MJPEG lane when the encoded block is absent', () => {
-    const status = { connectionQuality: quality() } as DeviceStatus
-    expect(pickMeasuredRates(status)).toEqual({ bitrateKbps: 3900, fps: 23.5 })
-    expect(pickMeasuredRates({ connectionQuality: quality(), encodedStream: undefined } as DeviceStatus))
-      .toEqual({ bitrateKbps: 3900, fps: 23.5 })
-  })
-
-  it('returns nulls when neither lane has data', () => {
-    expect(pickMeasuredRates(null)).toEqual({ bitrateKbps: null, fps: null })
-    expect(pickMeasuredRates({} as DeviceStatus)).toEqual({ bitrateKbps: null, fps: null })
-    expect(pickMeasuredRates({ connectionQuality: quality({ avgThroughputKbps: 0, framesPerSecond: 0 }) } as DeviceStatus))
-      .toEqual({ bitrateKbps: 0, fps: 0 })
+  it('never throws on a status missing every block', () => {
+    for (const mode of ['mjpeg', 'whep', 'h264', 'hls'] as const) {
+      expect(pickPreviewLane(mode, {} as DeviceStatus)).toBeNull()
+    }
   })
 })

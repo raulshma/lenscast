@@ -1,18 +1,21 @@
-import type { ConnectionQualityStatus, DeviceStatus } from '../types'
+import type { ConnectionQualityStatus, DeviceStatus, WhepStreamStatus } from '../types'
 import type { PlayerMode } from '../video/playerLadder'
 
-// Stream stats lane picking (issue #25): /api/status carries two measured
+// Stream stats lane picking (issue #25): /api/status carries three measured
 // lanes — the MJPEG lane (per-client windows in `connectionQuality`, the
-// throughput/fps of actual frame production to web viewers) and the encoded
+// throughput/fps of actual frame production to web viewers), the encoded
 // lane (`encodedStream`, what the shared H264 encoder actually produced,
-// null while no encoded stream runs). The dashboard's stats blocks follow
-// the preview's actual lane: an MJPEG rung shows the MJPEG lane, a
-// WHEP/H264/HLS rung shows the encoded lane. Pure verdicts over the status
-// snapshot — the callers own the rendering, and absence is a typed null
-// (dash/idle), never an invented number.
+// null while no encoded stream runs) and the WHEP lane (`whepStream`, what
+// libwebrtc sent to the WebRTC preview's viewers, absent until one has
+// reported). The dashboard's stats blocks follow the preview's own lane
+// and nothing else: an MJPEG rung shows the MJPEG lane, a WHEP rung the
+// WHEP lane, an H264/HLS rung the encoded lane. Pure verdicts over the
+// status snapshot — the callers own the rendering, and absence is a typed
+// null (dash/idle), never an invented number and never another lane's
+// measurement.
 
 /** Which measured lane a preview rung consumes. */
-export type StreamLaneKind = 'encoded' | 'mjpeg'
+export type StreamLaneKind = 'encoded' | 'mjpeg' | 'whep'
 
 /**
  * One lane's normalized measured read: numbers the UI can render directly.
@@ -36,9 +39,17 @@ export interface LaneStats {
 /** The lane pick: null = no lane data for this preview mode right now. */
 export type LanePick = LaneStats | null
 
-/** WHEP/H264/HLS all decode the encoded pipeline; MJPEG is its own lane. */
+/**
+ * The preview's own lane, per rung. WHEP is a lane of its own: libwebrtc
+ * encodes the WebRTC preview per viewer, and those bytes never cross the
+ * encoded-stream hub that `encodedStream` measures — only the H264/HLS
+ * rungs decode that pipeline. MJPEG is its own lane. No rung (a non-preview
+ * host) reads the encoded lane.
+ */
 export function laneForMode(mode: PlayerMode | undefined): StreamLaneKind {
-  return mode === 'mjpeg' ? 'mjpeg' : 'encoded'
+  if (mode === 'mjpeg') return 'mjpeg'
+  if (mode === 'whep') return 'whep'
+  return 'encoded'
 }
 
 /** Finite numbers only — a wire anomaly renders as absence, never NaN.
@@ -74,38 +85,32 @@ export function encodedLane(encoded: DeviceStatus['encodedStream'] | undefined |
 }
 
 /**
- * The preview's lane: an MJPEG rung reads the MJPEG lane, every other rung
- * reads the encoded lane. Strict — an absent lane block picks null (the UI
- * hides/idles) rather than falling back to the other lane's numbers.
+ * The WHEP lane's measured read; null until a viewer session has reported.
+ * No target — libwebrtc negotiates this lane per viewer, so the wire block
+ * carries none and nothing here invents one. A connected viewer that is
+ * not encoding yet reads the honest 0s, not null.
  */
-export function pickPreviewLane(mode: PlayerMode | undefined, status: DeviceStatus | null | undefined): LanePick {
-  if (!status) return null
-  return laneForMode(mode) === 'mjpeg'
-    ? mjpegLane(status.connectionQuality)
-    : encodedLane(status.encodedStream)
-}
-
-export interface MeasuredRates {
-  bitrateKbps: number | null
-  fps: number | null
+export function whepLane(whep: WhepStreamStatus | undefined | null): LaneStats | null {
+  if (!whep) return null
+  return {
+    lane: 'whep',
+    bitrateKbps: finiteOrNull(whep.measuredBitrateKbps),
+    fps: finiteOrNull(whep.fps),
+    codec: whep.codec,
+    width: finiteOrNull(whep.width) ?? undefined,
+    height: finiteOrNull(whep.height) ?? undefined,
+  }
 }
 
 /**
- * The TX/FPS chips' read, lane-agnostic by priority: the encoded lane's
- * measured rates whenever the `encodedStream` block is present (presence IS
- * the running fact — the wire carries no flag), else the MJPEG lane's
- * measured rates. Nulls when neither lane has data — the chips render their
- * idle convention (hidden), never the adaptation ladders' congestion
- * estimate or a frozen last value.
+ * The preview's lane: each rung reads its own lane. Strict — an absent lane
+ * block picks null (the UI hides/idles) rather than falling back to another
+ * lane's numbers.
  */
-export function pickMeasuredRates(status: DeviceStatus | null | undefined): MeasuredRates {
-  const encoded = status?.encodedStream
-  if (encoded) {
-    return { bitrateKbps: finiteOrNull(encoded.measuredBitrateKbps), fps: finiteOrNull(encoded.fps) }
-  }
-  const quality = status?.connectionQuality
-  return {
-    bitrateKbps: quality ? finiteOrNull(quality.avgThroughputKbps) : null,
-    fps: quality ? finiteOrNull(quality.framesPerSecond) : null,
-  }
+export function pickPreviewLane(mode: PlayerMode | undefined, status: DeviceStatus | null | undefined): LanePick {
+  if (!status) return null
+  const kind = laneForMode(mode)
+  if (kind === 'mjpeg') return mjpegLane(status.connectionQuality)
+  if (kind === 'whep') return whepLane(status.whepStream)
+  return encodedLane(status.encodedStream)
 }

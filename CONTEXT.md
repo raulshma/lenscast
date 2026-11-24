@@ -1694,31 +1694,39 @@ pinned through `web/contract/status.json` on all three sides.
 
 ### Stream Stats Lane Picker
 **`web/src/lib/streamStats.ts`** — what the dashboard's stats blocks do with
-the two measured lanes (issue #25): they follow the preview's actual rung.
-`pickPreviewLane` maps the MJPEG player rung to the MJPEG lane
-(`connectionQuality`'s window-measured throughput/fps) and every
-WHEP/H264/HLS rung to the encoded lane (`encodedStream`'s
-measured-vs-target, codec, geometry), strict — an absent block picks null
-(the UI hides or dashes) instead of borrowing the other lane's numbers, and
-non-finite wire values read as absence, never NaN. `pickMeasuredRates` is
-the lane-agnostic read the next shell's TX/FPS chips consume: encoded-lane
-measured whenever the `encodedStream` block is present (presence is the
-running fact — the wire carries no flag), else the MJPEG lane's measured
-rates. The consumer of the first half is the lane-aware
+the three measured lanes (issue #25): they follow the preview's OWN lane,
+strictly. `laneForMode`/`pickPreviewLane` map the MJPEG player rung to the
+MJPEG lane (`connectionQuality`'s window-measured throughput/fps), the WHEP
+rung to the WHEP lane (`whepStream`'s measured bitrate/fps, plus codec and
+geometry once a viewer session reported them — `whepLane` carries no
+target, because the wire block has none), and the H264/HLS rungs to the
+encoded lane (`encodedStream`'s measured-vs-target, codec, geometry). The
+WHEP rung is a lane of its own because libwebrtc encodes the WebRTC preview
+per viewer and those bytes never cross the encoded-stream hub — the old
+"WHEP/H264/HLS → encoded" mapping read a lane that preview does not use.
+An absent lane block picks null (the UI hides or idles), never another
+lane's numbers in either direction: there is no cross-lane fallback, and
+the lane-agnostic `pickMeasuredRates` read (encoded whenever that block
+was present, else MJPEG) is gone. A block that reads 0 is data (the honest
+idle — a viewer connected but not encoding yet); only a non-finite wire
+value reads as absence, never NaN. The consumer is the lane-aware
 `ConnectionQualityIndicator`: the badge shows the picked lane's measured
 numbers (the quality dot stays MJPEG-only — it is that lane's network
 verdict), and the detail panel is three sections — "Preview" (the active
-lane's rows), "Encoded stream" (measured vs target, fps, codec,
-resolution, shown only while `encodedStream` exists — presence is the
-running fact), and "MJPEG viewers"
-(the per-client rows); both places the encoded lane renders share one row
-helper. The old duplicate "Bandwidth" row is gone (it
-displayed the ladders' drain-based congestion estimate), the "Latency" row
-is renamed "Send time" (what still backs it is the worst client's last
-frame-send duration, `worstLatencyMs`/`lastSendDurationMs` — a stopwatch on
-the send loop, not network latency), and the trend sparkline now rides the
-picked lane's measured bitrate instead of the congestion estimate, resetting
-on a rung switch so samples never mix lanes.
+lane's rows: the MJPEG set, the WHEP set — bitrate and fps, codec and
+resolution only while known, no Target row — or the encoded set),
+"Encoded stream" (measured vs target, fps, codec, resolution, shown only
+while `encodedStream` exists — presence is the running fact), and "MJPEG
+viewers" (the per-client rows); both places the encoded lane renders share
+one row helper. The old duplicate "Bandwidth" row is gone (it displayed the
+ladders' drain-based congestion estimate), the "Latency" row is renamed
+"Send time" (what still backs it is the worst client's last frame-send
+duration, `worstLatencyMs`/`lastSendDurationMs` — a stopwatch on the send
+loop, not network latency), and the trend sparkline rides the picked lane's
+measured bitrate instead of the congestion estimate, resetting when the
+picked lane CHANGES so samples never mix lanes (H264 ↔ HLS is one lane, so
+that switch keeps the series); the battery series is lane-less and never
+resets.
 
 ### Stream Stats Overlay Toggle
 **`web/src/lib/streamStatsOverlay.ts`** — the stats blocks' visibility
@@ -1727,18 +1735,37 @@ singleton, `lenscast.streamStats`): `auto | on | off`, cycled by the Stats
 button in the preview action bar (beside "Preview: MODE") and the T
 shortcut (the lib/shortcuts key map, so the help overlay lists it). The
 toggle gates BOTH the preview indicator and the TX/FPS chips and decides
-VISIBILITY only — what they display is always the picker's measured lane.
-`auto` preserves the pre-toggle gate exactly (stream up + preview visible +
-Adaptive Bitrate enabled + lane data — for MJPEG, `connectionQuality`
-present); `on` drops only the adaptive condition (stats work with
-adaptation off, still live-preview + lane data); `off` never shows. One
-deliberate narrowing is pinned by test: on an encoded rung with Adaptive
-Bitrate enabled but no `encodedStream` block, auto hides where the old
-gate showed wrong-lane MJPEG numbers. The
-chips read measured values now (`pickMeasuredRates`) — never the stale
-adaptive-only numbers, and a null/0 value hides a chip in every mode (the
-honest idle convention); the CL chip stays the honest client count
-(`clientCount + whepClients`, untouched by the stats work).
+VISIBILITY only — what they display is always the preview's own lane's
+measured numbers (the lane picker).
+The indicator is two pure verdicts over one gate.
+`streamStatsOverlayMounted` decides whether its tree EXISTS — `off` never
+mounts, `on` mounts with a live preview, `auto` adds Adaptive Bitrate
+enabled (the pre-toggle gate's terms) — and is deliberately blind to the
+lane's data. `streamStatsOverlayVisible` is that verdict AND "the preview's
+lane has data" (for MJPEG, `connectionQuality` present), which StreamPreview
+applies as the host's `hidden` attribute, never an unmount. A lane switch
+reaches the gate as "the new lane has not reported yet": the indicator
+hides and comes back with an expanded panel still expanded and its
+sparkline histories intact, where the old `<Show when={gate}>` tore all of
+it down on every switch. (`hidden` cannot strand the sparklines: they are
+attribute-sized SVGs, nothing measures layout.) One deliberate narrowing is
+pinned by test: on an encoded rung with Adaptive Bitrate enabled but no
+`encodedStream` block, auto hides where the old gate showed wrong-lane MJPEG
+numbers.
+The chips are `pickStreamStatsChips` — the whole decision, values included,
+pure; the next shell only renders its result. The values are the preview
+lane's measured bitrate/fps, picked by the rung→lane map from the ONE
+preview-mode signal (`useAppState`'s `playerMode` — `StreamPreview` consumes
+it as props, `NextShell` reads it off the same state instance; no second
+copy, not persisted). Visibility: `off` hides both; `on` shows a chip
+whenever the lane measured it (the stream's liveness is not asked); `auto`
+first requires main's exact legacy gate — the stream live and Adaptive
+Bitrate on with a positive congestion estimate (`enabled` is read
+explicitly where main inferred it from the block's absence) — then the
+same measured data. A null/0 value hides its chip in every mode (the
+honest idle convention — nothing fake, nothing frozen); the CL chip stays
+the honest client count (`clientCount + whepClients`, untouched by the
+stats work).
 
 ### Stream Watchdog
 **`core/StreamWatchdog.kt`** — monitors a live stream and performs recovery

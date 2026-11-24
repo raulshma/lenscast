@@ -2,8 +2,7 @@ import { For, Show, createEffect, createSignal } from 'solid-js'
 import type { NextState } from './NextState'
 import type { NextThemeMode } from '../../hooks/useNextTheme'
 import { uiModeStore } from '../../lib/uiMode'
-import { pickMeasuredRates } from '../../lib/streamStats'
-import { streamStatsOverlayStore, streamStatsChipVisible } from '../../lib/streamStatsOverlay'
+import { pickStreamStatsChips, streamStatsOverlayStore } from '../../lib/streamStatsOverlay'
 import { hashRouter, isNextRoute, toNextRoute, type RouteName } from '../../lib/router'
 import { LOCALES, LOCALE_DISPLAY_NAMES, locale, setLocale, t, type Locale } from '../../lib/i18n'
 import {
@@ -143,25 +142,22 @@ export default function NextShell(props: Props) {
 
   const channels = () => channelStates(state.status())
 
-  // TX/FPS read the measured lanes via the picker (issue #25): the encoded
-  // lane's measured bitrate/fps whenever the encodedStream block is present
-  // (presence is the running fact), else the MJPEG clients' measured
-  // throughput — never the adaptation ladders' congestion estimate, and
-  // nothing once both lanes go quiet. streamStatsChipVisible is the single
-  // visibility source of truth (toggle mode + live requirement + honest
-  // zero): a null label from here hides the chip, no second gate.
+  // TX/FPS read the PREVIEW's own lane via the picker (issue #25): the
+  // measured bitrate/fps of the rung the preview is showing — the MJPEG
+  // clients' on MJPEG, libwebrtc's on WHEP, the encoded lane's on H264/HLS
+  // — never another lane's numbers and never the adaptation ladders'
+  // congestion estimate. state.playerMode is the one preview-mode signal
+  // (StreamPreview consumes the same one, as props). The lib's chip verdict
+  // is the single source of truth (toggle mode + auto's legacy adaptive
+  // gate + honest zero): a null value from it hides the chip, no second
+  // gate.
   const statsOverlay = streamStatsOverlayStore()
-  const measured = () => pickMeasuredRates(state.status())
-  const chipVisible = (value: number | null): boolean =>
-    streamStatsChipVisible(statsOverlay.mode(), isLive(), value)
+  const chips = () => pickStreamStatsChips(statsOverlay.mode(), state.status(), state.playerMode(), isLive())
   const txLabel = (): string | null => {
-    const kbps = measured().bitrateKbps
-    return chipVisible(kbps) && kbps ? formatKbps(kbps) : null
+    const kbps = chips().bitrateKbps
+    return kbps ? formatKbps(kbps) : null
   }
-  const fpsLabel = (): number | null => {
-    const fps = measured().fps
-    return chipVisible(fps) && fps && fps > 0 ? fps : null
-  }
+  const fpsLabel = (): number | null => chips().fps
 
   const clientsLabel = (): number | null => {
     const s = streaming()

@@ -12,9 +12,10 @@ interface Props {
   /** The full device status: the picked lane drives the readout, battery feeds the trend sparkline. */
   status: () => DeviceStatus | undefined
   /**
-   * The preview's player rung — the panel follows its lane (MJPEG rung → the
-   * MJPEG clients' measured lane; WHEP/H264/HLS → the encoded lane). Optional
-   * only for non-preview hosts: no rung means the encoded lane.
+   * The preview's player rung — the panel follows its own lane (MJPEG rung →
+   * the MJPEG clients' measured lane; WHEP → libwebrtc's, what it sent the
+   * WebRTC viewers; H264/HLS → the encoded lane). Optional only for
+   * non-preview hosts: no rung means the encoded lane.
    */
   previewMode?: () => PlayerMode
 }
@@ -47,6 +48,7 @@ export default function ConnectionQualityIndicator(props: Props) {
   // data (the gate in StreamPreview keeps this hidden then).
   const lane = (): LaneStats | null => pickPreviewLane(props.previewMode?.(), props.status())
   const isMjpegLane = () => lane()?.lane === 'mjpeg'
+  const isWhepLane = () => lane()?.lane === 'whep'
   const clientDetails = () => conn()?.clientDetails ?? {}
   const qualityLevel = () => conn()?.qualityLevel ?? 'GOOD'
   const colors = () => QUALITY_COLORS[qualityLevel()] ?? QUALITY_COLORS.GOOD
@@ -61,10 +63,13 @@ export default function ConnectionQualityIndicator(props: Props) {
   const throughputHistory = useSignalHistory()
   const batteryHistory = useSignalHistory()
 
-  // The sparkline never mixes lanes: a rung switch (MJPEG ↔ encoded) resets
-  // the series, so a sample from the previous lane can never sit next to one
-  // from the new one (the reset fires before the push — one effect, in
-  // order).
+  // The sparkline never mixes lanes: a switch to another lane (MJPEG ↔
+  // encoded ↔ WHEP — H264 and HLS share one, so moving between them keeps
+  // the series) resets it, so a sample from the previous lane can never sit
+  // next to one from the new one (the reset fires before the push — one
+  // effect, in order). The battery series is lane-less and never resets;
+  // both survive a lane switch because StreamPreview hides the indicator
+  // while the lane has no data instead of unmounting it.
   let historyLane: LaneStats['lane'] | null = null
   createEffect(() => {
     const kind = lane()?.lane ?? null
@@ -106,7 +111,7 @@ export default function ConnectionQualityIndicator(props: Props) {
         }}
       >
         {/* The quality verdict belongs to the MJPEG lane's network monitor;
-            an encoded-lane badge shows numbers only. */}
+            the WHEP and encoded lanes' badges show numbers only. */}
         <Show when={isMjpegLane()}>
           <div style={{ display: 'flex', 'align-items': 'center', gap: '4px' }}>
             <div
@@ -174,7 +179,7 @@ export default function ConnectionQualityIndicator(props: Props) {
           {/* Preview — the active lane's measured numbers. */}
           <Show when={lane()}>
             <PanelSection title={t('cq.section.preview')}>
-              <Show when={isMjpegLane()} fallback={<EncodedStatRows lane={lane} />}>
+              <Show when={isMjpegLane()} fallback={<LaneStatRows lane={lane} />}>
                 <div style={{ display: 'flex', 'flex-direction': 'column', gap: '4px' }}>
                   <CqStatRow label={t('cq.quality')} value={label()} valueColor={colors().dot} />
                   <CqStatRow label={t('cq.avgThroughput')} value={`${num(conn()?.avgThroughputKbps)} kbps`} />
@@ -258,6 +263,39 @@ export default function ConnectionQualityIndicator(props: Props) {
             </PanelSection>
           </Show>
         </div>
+      </Show>
+    </div>
+  )
+}
+
+/**
+ * The Preview section's rows for the non-MJPEG lanes, by lane: the WHEP
+ * lane's own row set or the encoded lane's.
+ */
+function LaneStatRows(props: { lane: () => LaneStats | null }) {
+  return (
+    <Show when={props.lane()?.lane === 'whep'} fallback={<EncodedStatRows lane={props.lane} />}>
+      <WhepStatRows lane={props.lane} />
+    </Show>
+  )
+}
+
+/**
+ * The WHEP lane's row set — measured bitrate, fps, then codec and
+ * resolution only while the viewer session reported them. No target row:
+ * libwebrtc negotiates this lane per viewer, so the wire block carries no
+ * target and none is invented here.
+ */
+function WhepStatRows(props: { lane: () => LaneStats | null }) {
+  return (
+    <div style={{ display: 'flex', 'flex-direction': 'column', gap: '4px' }}>
+      <CqStatRow label={t('cq.encoded.bitrate')} value={`${num(props.lane()?.bitrateKbps)} kbps`} />
+      <CqStatRow label={t('cq.fps')} value={num(props.lane()?.fps).toFixed(1)} />
+      <Show when={props.lane()?.codec}>
+        <CqStatRow label={t('cq.encoded.codec')} value={props.lane()?.codec ?? ''} />
+      </Show>
+      <Show when={props.lane()?.width && props.lane()?.height}>
+        <CqStatRow label={t('cq.encoded.resolution')} value={`${props.lane()!.width}×${props.lane()!.height}`} />
       </Show>
     </div>
   )

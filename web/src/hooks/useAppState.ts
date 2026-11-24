@@ -65,7 +65,8 @@ export function useAppState() {
   const [showShortcuts, setShowShortcuts] = createSignal(false)
   // The live preview's player rung, lifted here so the P shortcut can cycle
   // it — StreamPreview consumes it as props and keeps its ladder fall-down
-  // logic untouched.
+  // logic untouched. It is the ONE preview-mode signal: NextShell's TX/FPS
+  // chips read the same one, so they always follow the rung being shown.
   const [playerMode, setPlayerMode] = createSignal<PlayerMode>(
     nextPlayerMode('mjpeg', !whepSupported(), !h264Supported(), false, hlsSupported()),
   )

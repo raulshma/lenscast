@@ -11,8 +11,10 @@ import ConnectionQualityIndicator from './ConnectionQualityIndicator'
 import { pickPreviewLane } from '../lib/streamStats'
 import {
   nextStreamStatsOverlayMode,
+  streamStatsOverlayMounted,
   streamStatsOverlayStore,
   streamStatsOverlayVisible,
+  type StreamStatsGate,
   type StreamStatsOverlayMode,
 } from '../lib/streamStatsOverlay'
 import { tapToFocus as apiTapToFocus, pushTalkback } from '../api/client'
@@ -172,17 +174,25 @@ export default function StreamPreview(props: Props) {
   const blockedByLock = () => st()?.cameraBlockedByLock === true
 
   // Stream-stats overlay (issue #25): the indicator follows the preview's
-  // actual lane (MJPEG rung → the MJPEG clients' measured lane, every other
-  // rung → the encoded encoder-output lane) and the persisted auto/on/off
-  // toggle, cycled from the action bar's Stats button and the T shortcut.
-  // auto = the legacy gate — live + visible + Adaptive Bitrate on + lane
-  // data; on drops the adaptive condition; off never shows.
+  // own lane (MJPEG rung → the MJPEG clients' measured lane, WHEP rung →
+  // libwebrtc's, H264/HLS rung → the encoded encoder-output lane) and the
+  // persisted auto/on/off toggle, cycled from the action bar's Stats button
+  // and the T shortcut. auto = the legacy gate — live + visible + Adaptive
+  // Bitrate on + lane data; on drops the adaptive condition; off never
+  // shows.
   const statsOverlay = streamStatsOverlayStore()
-  const statsGate = () => streamStatsOverlayVisible(statsOverlay.mode(), {
+  const statsGate = (): StreamStatsGate => ({
     previewLive: isActive() && props.previewVisible(),
     adaptiveEnabled: st()?.adaptiveBitrate?.enabled === true,
     laneAvailable: pickPreviewLane(playerMode(), st()) !== null,
   })
+  // Mount and visibility are two verdicts over one gate. The toggle (and
+  // auto's adaptive term) decide whether the indicator exists; the lane's
+  // data only hides it. A lane switch lands here as "the new lane has not
+  // reported yet" — unmounting on that collapsed the panel the operator had
+  // opened and emptied its sparkline history on every switch.
+  const statsMounted = () => streamStatsOverlayMounted(statsOverlay.mode(), statsGate())
+  const statsVisible = () => streamStatsOverlayVisible(statsOverlay.mode(), statsGate())
   const statsLabel = () => statsStateLabel(statsOverlay.mode())
 
   const [focusIndicator, setFocusIndicator] = createSignal<{ x: number; y: number; visible: boolean }>({
@@ -757,16 +767,22 @@ export default function StreamPreview(props: Props) {
         </Show>
 
         {/* Stream-stats indicator — stacked below the LIVE badge when that
-            badge occupies the same top-right corner. Gated by the stats
-            overlay toggle (auto/on/off) and the preview's lane availability,
-            never by Adaptive Bitrate alone (issue #25). */}
-        <Show when={statsGate()}>
-          <div style={{
-            position: 'absolute',
-            top: webActive() && props.previewVisible() ? '46px' : '12px',
-            right: '12px',
-            'z-index': '10',
-          }}>
+            badge occupies the same top-right corner. Mounted by the stats
+            overlay toggle (auto/on/off, never by Adaptive Bitrate alone —
+            issue #25); hidden, not unmounted, while the preview's lane has
+            no data, so an open panel and its history survive a lane switch.
+            The sparklines are attribute-sized SVGs — nothing measures layout
+            — so `hidden` cannot strand them at zero width. */}
+        <Show when={statsMounted()}>
+          <div
+            hidden={!statsVisible()}
+            style={{
+              position: 'absolute',
+              top: webActive() && props.previewVisible() ? '46px' : '12px',
+              right: '12px',
+              'z-index': '10',
+            }}
+          >
             <ConnectionQualityIndicator status={() => st() ?? undefined} previewMode={playerMode} />
           </div>
         </Show>
