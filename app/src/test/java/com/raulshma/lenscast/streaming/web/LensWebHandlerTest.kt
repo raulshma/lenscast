@@ -4,11 +4,11 @@ import android.app.Application
 import com.raulshma.lenscast.camera.CameraService
 import com.raulshma.lenscast.camera.model.CameraSettings
 import com.raulshma.lenscast.data.SettingsDataStore
+import com.raulshma.lenscast.data.parkedDispatcher
 import kotlinx.coroutines.flow.MutableStateFlow
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
-import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -16,7 +16,6 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.setMain
-import kotlin.coroutines.CoroutineContext
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -43,9 +42,9 @@ import org.robolectric.annotation.Config
  * default-first race) — so a remote zoom landing inside that window saved
  * the DEFAULTS over every stored camera setting. The copy base is now
  * `settingsFromDisk()`, and the tests hold the race open deterministically
- * with the parked-dispatcher harness of `SettingsDataStoreDiskReadTest`
- * (real DataStore, real file; the share-in collectors never run, so the
- * flow stays at its default while the disk holds truth).
+ * with the shared `parkedDispatcher()` fixture (real DataStore, real file;
+ * the share-in collectors never run, so the flow stays at its default while
+ * the disk holds truth).
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34], application = LensWebHandlerTest.PlainApplication::class)
@@ -98,24 +97,11 @@ class LensWebHandlerTest {
 
     // ── setZoom: the persist reads disk truth, not the lagging flow ──
 
-    /**
-     * A dispatcher that parks every dispatched block forever: the store's
-     * eagerly-shared collectors queue up and never execute, so the settings
-     * StateFlow stays at its descriptor default for the whole test — the
-     * default-first race, held open deterministically.
-     */
-    private val parkedDispatcher = object : CoroutineDispatcher() {
-        override fun isDispatchNeeded(context: CoroutineContext): Boolean = true
-        override fun dispatch(context: CoroutineContext, block: Runnable) {
-            // Parked on purpose — see the KDoc.
-        }
-    }
-
     @Test
     fun `setZoom persists the accepted ratio onto disk truth and keeps every sibling field`() = runBlocking {
         val store = SettingsDataStore(
             RuntimeEnvironment.getApplication(),
-            CoroutineScope(SupervisorJob() + parkedDispatcher),
+            CoroutineScope(SupervisorJob() + parkedDispatcher()),
         )
         // Disk truth that discriminates from the descriptor default: a zoom
         // a previous session stored, plus a non-default camera field an
@@ -147,7 +133,7 @@ class LensWebHandlerTest {
     fun `setZoom clamps the persisted ratio to the device range`() = runBlocking {
         val store = SettingsDataStore(
             RuntimeEnvironment.getApplication(),
-            CoroutineScope(SupervisorJob() + parkedDispatcher),
+            CoroutineScope(SupervisorJob() + parkedDispatcher()),
         )
         every { cameraService.setZoomRatio(50f) } returns true
         every { cameraService.availableZoomRange } returns

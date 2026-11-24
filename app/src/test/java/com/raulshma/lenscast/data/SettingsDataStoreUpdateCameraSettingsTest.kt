@@ -3,11 +3,9 @@ package com.raulshma.lenscast.data
 import android.app.Application
 import com.raulshma.lenscast.camera.model.CameraSettings
 import com.raulshma.lenscast.camera.model.TorchStrengthPolicy
-import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.runBlocking
-import kotlin.coroutines.CoroutineContext
 import org.junit.Assert.assertEquals
 import org.junit.Before
 import org.junit.Test
@@ -21,10 +19,10 @@ import org.robolectric.annotation.Config
  * issue #25): the torch-fact convergence's write seam. The transform must see
  * the DISK truth — never the shared flow's placeholder-default replay — and
  * the result commits inside one DataStore edit, so only the transformed field
- * moves and every sibling field the flow never saw survives. The
- * parked-dispatcher harness is `SettingsDataStoreDiskReadTest`'s (real
- * DataStore, real file; the share-in collectors never run, so the flow stays
- * at its descriptor default for the whole test).
+ * moves and every sibling field the flow never saw survives. The store rides
+ * the shared `parkedDispatcher()` fixture (real DataStore, real file; the
+ * share-in collectors never run, so the flow stays at its descriptor default
+ * for the whole test).
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34], application = SettingsDataStoreUpdateCameraSettingsTest.PlainApplication::class)
@@ -32,26 +30,13 @@ class SettingsDataStoreUpdateCameraSettingsTest {
 
     class PlainApplication : Application()
 
-    /**
-     * A dispatcher that parks every dispatched block forever: the store's
-     * eagerly-shared collectors queue up and never execute, so each
-     * StateFlow stays at its descriptor default — exactly the state a fresh
-     * process serves until DataStore's first read lands.
-     */
-    private val parkedDispatcher = object : CoroutineDispatcher() {
-        override fun isDispatchNeeded(context: CoroutineContext): Boolean = true
-        override fun dispatch(context: CoroutineContext, block: Runnable) {
-            // Parked on purpose — see the class KDoc.
-        }
-    }
-
     private lateinit var store: SettingsDataStore
 
     @Before
     fun setUp() {
         store = SettingsDataStore(
             RuntimeEnvironment.getApplication(),
-            CoroutineScope(SupervisorJob() + parkedDispatcher),
+            CoroutineScope(SupervisorJob() + parkedDispatcher()),
         )
     }
 
