@@ -1,43 +1,50 @@
+/* Hallmark · shape: app screen · genre: modern-minimal · theme: Console (deal 1/3, seed operator-console-phone-as-camera-rig-9437·d469983a·2026-11-25·r0) · redesign: full
+ * nav: rail-first sidebar kept, rebuilt · signature: the live stage · states: loading, empty, error, full · console: graphite
+ * faces: Golos kept for cyrillic locales (theme face latin-only), Atkinson Hyperlegible Mono measures
+ * axes: dark/grotesk-sans/chromatic-amber · posture: restrained · contrast: pass · v2.0.0 */
 /* ══════════════════════════════════════════════════════════════════
-   NEXT UI — SHELL & LAYOUT ("Viewfinder" operator console)
-   A slim rail-first sidebar (brand mark, four view items, vitals
-   dock, utility row) + a 36px telemetry statusline above the view
-   outlet. The sidebar shares the canvas background — one surface
-   world, a hairline divides, never a color change. It collapses to
-   an icon rail on demand (persisted) and automatically below 1024px;
-   below 768px it docks as a labelled bottom tab bar. The statusline
-   carries the live data: channel LEDs, throughput, clients, REC,
-   thermal, battery — quiet chips, color only when a tone needs it.
-   Type law: Golos Text speaks, JetBrains Mono measures (DESIGN.md).
+   NEXT UI — SHELL & LAYOUT ("Console" operator deck)
+   A slim rail-first sidebar (brand mark, four view items, REC tally,
+   vitals dock, utility row) + a 40px telemetry statusline above the
+   view outlet. Everything sits on the one ground (--color-paper); a
+   1px hairline divides; selection is the amber tick. The REC row and
+   the LIVE badge are the on-air tally: amber presence, nothing else
+   in the shell raises its voice. It collapses to an icon rail on
+   demand (persisted, instant — width never animates) and
+   automatically below 1024px; below 768px it docks as a labelled
+   bottom tab bar. The statusline carries the live data: channel Leds,
+   throughput, clients, REC, thermal, battery — quiet chips; the
+   measured values read mono in cool.
+   Type law: Golos Text speaks, Atkinson Hyperlegible Mono measures
+   (DESIGN.md). All colours ride tokens.
    ══════════════════════════════════════════════════════════════════ */
 
 .nx-shell {
   display: flex;
   height: 100%;
   min-height: 0;
-  background: var(--nx-bg);
-  color: var(--nx-text);
+  background: var(--color-paper);
+  color: var(--color-ink);
 }
 
-/* ── Sidebar — the rail ───────────────────────────────────────────── */
+/* ── Sidebar — the rail on the ground ─────────────────────────────── */
 
 .nx-sidebar {
   display: flex;
   flex-direction: column;
   width: 220px;
   flex-shrink: 0;
-  padding: var(--nx-space-3) var(--nx-space-2);
-  border-right: 1px solid var(--nx-border);
-  background: var(--nx-bg);
-  z-index: 30;
-  transition: width var(--nx-duration) var(--nx-ease);
+  padding: var(--space-sm) var(--space-2xs);
+  border-right: 1px solid var(--color-rule);
+  background: var(--color-paper);
+  z-index: var(--z-raised);
 }
 
 .nx-side-head {
   display: flex;
   align-items: center;
-  gap: var(--nx-space-2);
-  padding: var(--nx-space-1) var(--nx-space-2) var(--nx-space-4);
+  gap: var(--space-2xs);
+  padding: var(--space-2xs) var(--space-2xs) var(--space-md);
   min-height: 44px;
 }
 
@@ -51,11 +58,11 @@
 .nx-side-brand {
   flex: 1;
   min-width: 0;
-  font-family: var(--nx-font);
-  font-size: var(--nx-text-md);
-  font-weight: 600;
-  letter-spacing: -0.01em;
-  color: var(--nx-text);
+  font-family: var(--font-body);
+  font-size: var(--text-md);
+  font-weight: var(--display-weight);
+  letter-spacing: var(--tracking-display);
+  color: var(--color-ink);
   white-space: nowrap;
   overflow: hidden;
 }
@@ -63,30 +70,45 @@
 .nx-side-nav {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: var(--space-3xs);
 }
 
 .nx-side-item {
   position: relative;
   display: flex;
   align-items: center;
-  gap: var(--nx-space-3);
-  height: 36px;
-  padding: 0 var(--nx-space-3);
+  gap: var(--space-sm);
+  height: var(--control-h-tall);
+  padding: 0 var(--space-sm);
   border: none;
-  border-radius: var(--nx-radius);
+  border-radius: var(--radius-pill);
   background: transparent;
-  color: var(--nx-text-secondary);
-  font-size: var(--nx-text-base);
+  color: var(--color-muted);
+  font-family: var(--font-body);
+  font-size: var(--text-sm);
   font-weight: 500;
   text-align: left;
   cursor: pointer;
-  transition: background var(--nx-duration-fast) var(--nx-ease), color var(--nx-duration-fast) var(--nx-ease);
+  transition:
+    background var(--dur-micro) var(--ease-out),
+    color var(--dur-micro) var(--ease-out),
+    transform var(--dur-micro) var(--ease-out);
+}
+
+/* The 44px hit target, drawn without changing the look. */
+.nx-side-item::before {
+  content: '';
+  position: absolute;
+  inset: -4px 0;
 }
 
 .nx-side-item:hover {
-  background: var(--nx-surface-2);
-  color: var(--nx-text);
+  background: var(--color-paper-2);
+  color: var(--color-ink-2);
+}
+
+.nx-side-item:active:not(:disabled) {
+  transform: scale(0.98);
 }
 
 .nx-side-item svg {
@@ -110,48 +132,39 @@
   flex-shrink: 0;
 }
 
-/* Active view: a plate, full-weight text, and the 2px cyan tick on the
-   item's left edge — selection is accent's job (DESIGN.md color law). */
+/* Active view: the panel plate, full-weight ink, and the 2px amber
+   tick on the item's left edge — an inset shadow, so selection never
+   shifts layout. */
 .nx-side-item-active,
 .nx-side-item-active:hover {
-  background: var(--nx-surface-3);
-  color: var(--nx-text);
-  font-weight: 600;
+  background: var(--color-paper-2);
+  color: var(--color-ink);
+  box-shadow: inset 2px 0 0 var(--color-accent);
 }
 
-.nx-side-item-active svg {
-  color: var(--nx-accent);
-}
-
-.nx-side-item-active::before {
-  content: '';
-  position: absolute;
-  left: 0;
-  top: 7px;
-  bottom: 7px;
-  width: 2px;
-  border-radius: var(--nx-radius-sm);
-  background: var(--nx-accent);
-}
-
-/* REC row under the nav — on-air, not an error: signal magenta, the
-   timer is a measurement so the row reads in mono. No red, no caps. */
+/* REC row under the nav — the on-air tally, the loudest thing in the
+   sidebar: amber presence, Led and a mono timer in the accent. It only
+   exists while recording. Never red — red is faults only. */
 .nx-side-rec {
   display: flex;
   align-items: center;
-  gap: var(--nx-space-2);
+  gap: var(--space-2xs);
   height: 28px;
-  margin: var(--nx-space-2) var(--nx-space-1) 0;
-  padding: 0 var(--nx-space-2);
-  border-radius: var(--nx-radius-sm);
-  background: var(--nx-signal-bg);
-  color: var(--nx-signal);
-  font-family: var(--nx-mono);
-  font-size: var(--nx-text-xs);
-  font-weight: 500;
-  font-variant-numeric: tabular-nums;
+  margin: var(--space-2xs) var(--space-2xs) 0;
+  padding: 0 var(--space-2xs);
+  border-radius: var(--radius-pill);
+  background: var(--color-accent-soft);
+  color: var(--color-accent-on-soft);
   white-space: nowrap;
   overflow: hidden;
+}
+
+.nx-side-rec-label {
+  font-family: var(--font-body);
+  font-size: var(--text-xs);
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .nx-side-spacer {
@@ -159,16 +172,17 @@
 }
 
 /* ── Vitals — battery, thermal, link as three quiet rows docked at
-   the sidebar's foot. Golos labels; only measurements go mono. The
-   tone classes color icon + value, the label stays quiet. ────────── */
+   the sidebar's foot. Chrome: no plates, no rules between rows.
+   Golos labels speak; measurements go mono (.nx-num in markup); at
+   rest the value is muted and the icon faint. Only the tone classes
+   raise the value + icon (amber = degradation, red = fault). ──────── */
 
 .nx-side-vitals {
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  margin: 0 var(--nx-space-1);
-  padding-top: var(--nx-space-2);
-  border-top: 1px solid var(--nx-border);
+  gap: var(--space-3xs);
+  margin: 0 var(--space-2xs);
+  padding-top: var(--space-2xs);
 }
 
 .nx-vital {
@@ -180,23 +194,23 @@
 .nx-vital-head {
   display: flex;
   align-items: center;
-  gap: var(--nx-space-2);
+  gap: var(--space-2xs);
   width: 100%;
   min-width: 0;
-  font-size: var(--nx-text-sm);
-  color: var(--nx-text-secondary);
+  font-size: var(--text-xs);
+  color: var(--color-muted);
 }
 
 .nx-vital-head svg {
   width: 13px;
   height: 13px;
   flex-shrink: 0;
-  opacity: 0.75;
+  color: var(--color-muted);
 }
 
 .nx-vital-label {
   flex-shrink: 0;
-  color: var(--nx-text-secondary);
+  color: var(--color-muted);
 }
 
 .nx-vital-value {
@@ -208,28 +222,39 @@
 }
 
 /* The charging state: the word after the level — a separate span,
-   never a middle-dot join (DESIGN.md voice law). */
+   never a middle-dot join (DESIGN.md voice law). The instrument's
+   colour, the instrument's face. */
 .nx-vital-charging {
   flex-shrink: 0;
-  margin-left: var(--nx-space-2);
-  font-size: var(--nx-text-xs);
-  color: var(--nx-text-tertiary);
+  margin-left: var(--space-2xs);
+  font-family: var(--font-outlier);
+  font-size: var(--text-2xs);
+  color: var(--color-cool);
 }
 
-.nx-vital-ok { color: var(--nx-success); }
-.nx-vital-warn { color: var(--nx-warning); }
-.nx-vital-danger { color: var(--nx-danger); }
+/* Healthy stays quiet (chrome); warn lifts to amber, danger to red. */
+.nx-vital-ok { color: var(--color-muted); }
 
-/* ── Utility rows (theme, locale, shortcuts, exit, logout) — ghost
-   icon buttons, one hover plate ───────────────────────────────────── */
+.nx-vital-warn svg,
+.nx-vital-warn .nx-vital-value {
+  color: var(--color-accent-on-soft);
+}
+
+.nx-vital-danger svg,
+.nx-vital-danger .nx-vital-value {
+  color: var(--color-bad);
+}
+
+/* ── Utility rows (theme, locale, shortcuts, exit, logout) — quiet
+   32px icon buttons, one hover plate, a hairline top rule ─────────── */
 
 .nx-side-util {
   display: flex;
   align-items: center;
-  gap: 2px;
-  margin-top: var(--nx-space-2);
-  padding-top: var(--nx-space-2);
-  border-top: 1px solid var(--nx-border);
+  gap: var(--space-3xs);
+  margin-top: var(--space-2xs);
+  padding-top: var(--space-2xs);
+  border-top: 1px solid var(--color-rule);
 }
 
 .nx-util-btn {
@@ -240,16 +265,29 @@
   width: 32px;
   height: 32px;
   border: none;
-  border-radius: var(--nx-radius);
+  border-radius: var(--radius-pill);
   background: transparent;
-  color: var(--nx-text-tertiary);
+  color: var(--color-muted);
   cursor: pointer;
-  transition: background var(--nx-duration-fast) var(--nx-ease), color var(--nx-duration-fast) var(--nx-ease);
+  transition:
+    background var(--dur-micro) var(--ease-out),
+    color var(--dur-micro) var(--ease-out),
+    transform var(--dur-micro) var(--ease-out);
+}
+
+.nx-util-btn::before {
+  content: '';
+  position: absolute;
+  inset: -6px;
 }
 
 .nx-util-btn:hover {
-  background: var(--nx-surface-2);
-  color: var(--nx-text);
+  background: var(--color-paper-2);
+  color: var(--color-ink);
+}
+
+.nx-util-btn:active:not(:disabled) {
+  transform: scale(0.95);
 }
 
 .nx-util-btn svg {
@@ -257,32 +295,52 @@
   height: 17px;
 }
 
-/* Language: a transparent select laid over the globe glyph. */
+/* Language: a transparent native select laid over the globe glyph.
+   No pseudo hit expansion here — the wrapper is a div, and clicks on a
+   ::before cannot reach the select; the native box is the target.
+   Focus reads on the wrapper — the input itself is opacity 0. */
 .nx-side-locale {
   position: relative;
-  overflow: hidden;
+  overflow: visible;
+}
+
+.nx-side-locale::before {
+  content: none;
 }
 
 .nx-side-locale svg {
   pointer-events: none;
-  opacity: 0.55;
+  color: var(--color-muted);
 }
 
 .nx-side-locale-select {
   position: absolute;
   inset: 0;
   width: 100%;
+  height: 100%;
   opacity: 0;
   cursor: pointer;
   border: none;
 }
 
+.nx-side-locale-select:focus-visible {
+  outline: none;
+}
+
+.nx-side-locale:focus-within {
+  background: var(--color-paper-2);
+  color: var(--color-ink);
+  outline: 2px solid var(--color-focus);
+  outline-offset: 2px;
+}
+
 /* ── Compact mode: user-toggled (persisted) at ≥1024px — a 56px
-   icon rail; titles live on the items' title tooltips ─────────────── */
+   icon rail; titles live on the items' title tooltips. The collapse
+   is instant: width never animates (DESIGN.md motion law). ────────── */
 
 .nx-shell-compact .nx-sidebar {
   width: 56px;
-  padding: var(--nx-space-3) var(--nx-space-1);
+  padding: var(--space-sm) var(--space-2xs);
 }
 
 .nx-shell-compact .nx-side-head {
@@ -310,10 +368,6 @@
   align-self: center;
 }
 
-.nx-shell-compact .nx-side-item-active::before {
-  left: 5px;
-}
-
 .nx-shell-compact .nx-side-rec {
   justify-content: center;
   padding: 0;
@@ -324,26 +378,27 @@
   flex-direction: column;
 }
 
-/* ── Telemetry strip — a 36px statusline ──────────────────────────────
-   Where you are (left, Golos 600) and what the camera is doing
-   (right): LIVE, channel LEDs, throughput, clients, REC, thermal,
-   battery, saving. Quiet chips; borders only where a tone needs one. */
+/* ── Telemetry strip — a 40px statusline ──────────────────────────────
+   Where you are (left, Golos 500) and what the camera is doing
+   (right): LIVE, channel Leds, throughput, clients, REC, thermal,
+   battery, saving. Quiet 22px chips on the ground; colour only when a
+   tone needs it; measured values mono in cool. */
 
 .nx-strip {
   display: flex;
   align-items: center;
-  gap: var(--nx-space-3);
-  height: 36px;
+  gap: var(--space-sm);
+  height: 40px;
   flex-shrink: 0;
-  padding: 0 var(--nx-space-4);
-  border-bottom: 1px solid var(--nx-border);
-  background: var(--nx-bg);
+  padding: 0 var(--space-md);
+  border-bottom: 1px solid var(--color-rule);
+  background: var(--color-paper);
 }
 
 .nx-strip-title {
-  font-size: var(--nx-text-base);
-  font-weight: 600;
-  letter-spacing: -0.01em;
+  font-family: var(--font-body);
+  font-size: var(--text-sm);
+  font-weight: 500;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -352,52 +407,24 @@
 .nx-strip-chips {
   display: flex;
   align-items: center;
-  gap: var(--nx-space-2);
+  gap: var(--space-2xs);
   flex: 1;
   min-width: 0;
   justify-content: flex-end;
   overflow: hidden;
 }
 
-/* The strip's chips are quiet: no borders, a low plate. The scoped
-   overrides land after components.css, so the statusline keeps this
-   look regardless of the shared chip's own styling. */
-.nx-strip-chips .nx-chip {
-  border-color: transparent;
-  background: var(--nx-surface-2);
-  text-transform: none;
-  letter-spacing: normal;
-}
-
-/* Tone chips trade the border for a tinted fill — quiet, but loud
-   enough to scan. REC is on-air: signal magenta, never red. */
-.nx-strip-chips .nx-chip-ok {
-  background: var(--nx-success-bg);
-  color: var(--nx-success);
-}
-
-.nx-strip-chips .nx-chip-warn {
-  background: var(--nx-warning-bg);
-  color: var(--nx-warning);
-}
-
-.nx-strip-chips .nx-chip-rec {
-  background: var(--nx-signal-bg);
-  color: var(--nx-signal);
-}
-
-/* A fault in the strip (critical battery) stays red — red means
-   something is wrong, magenta means the picture is going out. */
-.nx-strip-chips .nx-chip-crit {
-  background: var(--nx-danger-bg);
-  color: var(--nx-danger);
-}
-
-/* LIVE badge — the on-air state, signal magenta + its Led. */
+/* LIVE badge — the on-air state: amber presence, its Led, no outline. */
 .nx-strip-chips .nx-strip-live {
-  background: var(--nx-signal-bg);
-  color: var(--nx-signal);
-  font-weight: 600;
+  background: var(--color-accent-soft);
+  color: var(--color-accent-on-soft);
+  border-color: transparent;
+  font-weight: var(--display-weight);
+}
+
+/* The strip's measured chips read in the instrument's colour. */
+.nx-strip-chips .nx-chip-metric .nx-num {
+  color: var(--color-cool);
 }
 
 /* Content column ──────────────────────────────────────────────────── */
@@ -412,7 +439,7 @@
 
 /* ── System sub-tabs ─────────────────────────────────────────────────
    Flat instrument nav: text tabs on a hairline, the active one marked
-   by a 2px cyan underline — no pills, no fills. Deep-links as
+   by a 2px amber underline — no pills, no fills. Deep-links as
    #/system/<tab>; one short topic per tab kills the settings scroll.
    The bar is sticky: a settings page scrolls, and the whole point of
    sub-topics is switching without scrolling back up. The wrap pins to
@@ -426,35 +453,30 @@
    cards sliding through the gap. */
 .nx-systabs-wrap {
   position: sticky;
-  top: calc(-1 * var(--nx-space-5));
-  z-index: 20;
+  top: calc(-1 * var(--space-lg));
+  z-index: var(--z-sticky);
   flex-shrink: 0;
-  margin: 0 calc(-1 * var(--nx-space-6));
-  background: var(--nx-bg);
-  border-bottom: 1px solid var(--nx-border);
+  margin: 0 calc(-1 * var(--space-lg)) var(--space-lg);
+  background: var(--color-paper);
+  border-bottom: 1px solid var(--color-rule);
 }
 
 .nx-systabs {
   display: flex;
   align-items: stretch;
-  gap: var(--nx-space-4);
+  gap: var(--space-lg);
   flex-shrink: 0;
-  max-width: calc(1200px + 2 * var(--nx-space-6));
+  max-width: calc(1200px + 2 * var(--space-lg));
   margin: 0 auto;
-  padding: 0 var(--nx-space-6);
+  padding: 0 var(--space-lg);
   overflow-x: auto;
   scrollbar-width: none;
 }
 
+/* The old scroll fade was a gradient — banned. The class stays so the
+   markup hook is harmless; the hairline alone carries the edge. */
 .nx-systabs-fade {
   display: none;
-  position: absolute;
-  top: 0;
-  right: 0;
-  bottom: 1px; /* the hairline stays crisp under the fade */
-  width: 28px;
-  background: linear-gradient(to left, var(--nx-bg), transparent);
-  pointer-events: none;
 }
 
 .nx-systabs::-webkit-scrollbar {
@@ -464,23 +486,28 @@
 .nx-systab {
   position: relative;
   flex-shrink: 0;
-  padding: 10px 0;
+  padding: var(--space-xs) 0;
   border: none;
   background: transparent;
-  color: var(--nx-text-tertiary);
-  font-size: var(--nx-text-base);
+  color: var(--color-muted);
+  font-family: var(--font-body);
+  font-size: var(--text-md);
   font-weight: 500;
   cursor: pointer;
-  transition: color var(--nx-duration-fast) var(--nx-ease);
+  transition: color var(--dur-micro) var(--ease-out), transform var(--dur-micro) var(--ease-out);
 }
 
 .nx-systab:hover {
-  color: var(--nx-text);
+  color: var(--color-ink);
+}
+
+.nx-systab:active:not(:disabled) {
+  transform: scale(0.98);
 }
 
 .nx-systab-active {
-  color: var(--nx-text);
-  font-weight: 600;
+  color: var(--color-ink);
+  font-weight: var(--display-weight);
 }
 
 .nx-systab-active::after {
@@ -490,7 +517,7 @@
   right: 0;
   bottom: -1px;
   height: 2px;
-  background: var(--nx-accent);
+  background: var(--color-accent);
 }
 
 /* ── View outlet ──────────────────────────────────────────────────── */
@@ -499,7 +526,7 @@
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  padding: var(--nx-space-5) var(--nx-space-6) var(--nx-space-8);
+  padding: var(--space-lg) var(--space-lg) var(--space-xl);
 }
 
 /* Full-bleed variant: the live stage fills the viewport height — the
@@ -516,17 +543,17 @@
   margin: 0 auto;
   display: flex;
   flex-direction: column;
-  gap: var(--nx-space-4);
+  gap: var(--space-md);
 }
 
 /* The System pane stacks rack-bay sections: generous between bays, tight
-   inside one (head → cards is .nx-section's own 12px). From 1100px the
+   inside one (head → cards is .nx-section's own gap). From 1100px the
    pane itself becomes a two-column grid so consecutive single-card bays
    pair up side by side — stacked half-width bays would leave a dead
    column beside each. Multi-card bays (their own 2-col masonry inside)
    and wide singles read across both columns. */
 .nx-system-pane {
-  gap: var(--nx-space-6);
+  gap: var(--space-lg);
 }
 
 /* Loading state while settings/lenses fetch: loading bars in the grid's
@@ -534,14 +561,14 @@
 .nx-system-loading {
   display: flex;
   flex-direction: column;
-  gap: var(--nx-space-3);
+  gap: var(--space-sm);
 }
 
 @media (min-width: 1100px) {
   .nx-system-pane {
     display: grid;
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-    gap: var(--nx-space-6) var(--nx-space-4);
+    gap: var(--space-lg) var(--space-md);
     align-items: start;
   }
 
@@ -560,44 +587,31 @@
 .nx-section {
   display: flex;
   flex-direction: column;
-  gap: var(--nx-space-3);
+  gap: var(--space-sm);
 }
 
 .nx-section-head {
   display: flex;
   align-items: center;
-  gap: var(--nx-space-2);
-  padding: var(--nx-space-2) 0 0;
+  gap: var(--space-2xs);
+  padding: var(--space-2xs) 0 0;
 }
 
-/* Section titles speak: Golos 600, sentence case, with the 2px cyan
-   tick on the header's left edge — the faceplate's section marker
-   (DESIGN.md System direction). No numbered codes; nothing here is a
-   numbered sequence. */
+/* Section titles speak: Golos 600, sentence case. No tick — accent is
+   reserved for people and on-air (the colour law); a header owns
+   nothing. */
 .nx-section-title {
-  position: relative;
-  padding-left: 10px;
-  font-size: var(--nx-text-base);
-  font-weight: 600;
-  letter-spacing: -0.01em;
-  color: var(--nx-text);
-}
-
-.nx-section-title::before {
-  content: '';
-  position: absolute;
-  left: 0;
-  top: 2px;
-  bottom: 2px;
-  width: 2px;
-  border-radius: var(--nx-radius-sm);
-  background: var(--nx-accent);
+  font-family: var(--font-body);
+  font-size: var(--text-md);
+  font-weight: var(--display-weight);
+  letter-spacing: var(--tracking-display);
+  color: var(--color-ink);
 }
 
 .nx-section-rule {
   flex: 1;
   height: 1px;
-  background: var(--nx-border);
+  background: var(--color-rule);
 }
 
 /* Responsive card columns: one column on narrow, two ≥1100px. True
@@ -606,7 +620,7 @@
    right after the previous. Cards stay whole (break-inside). */
 .nx-columns {
   column-count: 1;
-  column-gap: var(--nx-space-4);
+  column-gap: var(--space-md);
 }
 
 @media (min-width: 1100px) {
@@ -619,7 +633,7 @@
   min-width: 0;
   width: 100%;
   break-inside: avoid;
-  margin: 0 0 var(--nx-space-4);
+  margin: 0 0 var(--space-md);
 }
 
 /* Detection view: the arming card is a tall single column; stats, feed
@@ -628,7 +642,7 @@
 .nx-detection-grid {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
-  gap: var(--nx-space-4);
+  gap: var(--space-md);
   align-items: start;
 }
 
@@ -638,7 +652,7 @@
      otherwise size the implicit auto track to their min-content — wider
      than a 360px phone's content box — and clip the right edge. */
   grid-template-columns: minmax(0, 1fr);
-  gap: var(--nx-space-4);
+  gap: var(--space-md);
   min-width: 0;
 }
 
@@ -672,9 +686,9 @@
   width: 300px;
   flex-shrink: 0;
   flex-direction: column;
-  gap: var(--nx-space-3);
-  padding: var(--nx-space-3);
-  border-left: 1px solid var(--nx-border);
+  gap: var(--space-sm);
+  padding: var(--space-sm);
+  border-left: 1px solid var(--color-rule);
   overflow-y: auto;
 }
 
@@ -692,16 +706,17 @@
 }
 
 /* ── Full-width banners above the view ──────────────────────────────
-   The connection-lost banner is a fault: red hairline on top and a
-   red tick — never a red wash. The viewer note is a neutral plate. */
+   The connection-lost banner is a fault: a red band, red text + icon,
+   role="alert" (markup). The viewer note is a neutral band. Bands, not
+   cards: full width, 32px, no radius. */
 
 .nx-banner-bar {
   display: flex;
   align-items: center;
-  gap: var(--nx-space-2);
-  padding: 8px var(--nx-space-4);
-  font-size: var(--nx-text-sm);
-  color: var(--nx-text-secondary);
+  gap: var(--space-2xs);
+  min-height: var(--control-h);
+  padding: var(--space-2xs) var(--space-md);
+  font-size: var(--text-sm);
   flex-shrink: 0;
 }
 
@@ -712,26 +727,17 @@
 }
 
 .nx-banner-bar-danger {
-  border-top: 1px solid color-mix(in srgb, var(--nx-danger) 32%, transparent);
-  color: var(--nx-danger);
-}
-
-.nx-banner-bar-danger::before {
-  content: '';
-  width: 2px;
-  height: 14px;
-  border-radius: var(--nx-radius-sm);
-  background: var(--nx-danger);
-  flex-shrink: 0;
+  background: var(--color-bad-soft);
+  color: var(--color-bad);
 }
 
 .nx-banner-bar-neutral {
-  background: var(--nx-surface-2);
-  color: var(--nx-text-secondary);
+  background: var(--color-paper-2);
+  color: var(--color-muted);
 }
 
 .nx-banner-bar-neutral svg {
-  color: var(--nx-text-tertiary);
+  color: var(--color-muted);
 }
 
 /* ── Auto-compact below 1024px: the sidebar narrows itself ────────── */
@@ -739,7 +745,7 @@
 @media (max-width: 1023px) and (min-width: 768px) {
   .nx-sidebar {
     width: 56px;
-    padding: var(--nx-space-3) var(--nx-space-1);
+    padding: var(--space-sm) var(--space-2xs);
   }
 
   .nx-side-head {
@@ -766,10 +772,6 @@
     align-self: center;
   }
 
-  .nx-side-item-active::before {
-    left: 5px;
-  }
-
   .nx-side-rec {
     justify-content: center;
     padding: 0;
@@ -794,10 +796,10 @@
     align-items: center;
     width: 100%;
     height: 58px;
-    padding: var(--nx-space-1) var(--nx-space-2);
-    padding-bottom: max(var(--nx-space-1), env(safe-area-inset-bottom));
+    padding: var(--space-2xs) var(--space-2xs);
+    padding-bottom: max(var(--space-2xs), env(safe-area-inset-bottom));
     border-right: none;
-    border-top: 1px solid var(--nx-border);
+    border-top: 1px solid var(--color-rule);
   }
 
   .nx-side-head,
@@ -818,10 +820,14 @@
     flex: 1;
     flex-direction: column;
     justify-content: center;
-    gap: 3px;
+    gap: var(--space-2xs);
     height: 48px;
-    padding: 0 2px;
+    padding: 0 var(--space-3xs);
     min-width: 0;
+  }
+
+  .nx-side-item::before {
+    inset: -4px -2px;
   }
 
   .nx-side-item svg {
@@ -832,9 +838,8 @@
   .nx-side-item-label {
     flex: none;
     max-width: 100%;
-    font-size: 9px;
-    font-weight: 600;
-    letter-spacing: 0;
+    font-size: var(--text-2xs);
+    font-weight: 500;
   }
 
   .nx-side-item-glyph {
@@ -845,13 +850,9 @@
   }
 
   /* The active marker flips to a 2px top edge tick. */
-  .nx-side-item-active::before {
-    left: 10px;
-    right: 10px;
-    top: -5px;
-    bottom: auto;
-    width: auto;
-    height: 2px;
+  .nx-side-item-active,
+  .nx-side-item-active:hover {
+    box-shadow: inset 0 2px 0 var(--color-accent);
   }
 
   .nx-side-rec {
@@ -862,7 +863,7 @@
     margin-top: 0;
     padding-top: 0;
     border-top: none;
-    padding-left: var(--nx-space-1);
+    padding-left: var(--space-2xs);
   }
 
   .nx-util-btn {
@@ -872,16 +873,16 @@
 
   /* Views own the tab bar; utilities stay reachable but visibly secondary. */
   .nx-view {
-    padding: var(--nx-space-3) var(--nx-space-3) var(--nx-space-6);
+    padding: var(--space-sm) var(--space-sm) var(--space-lg);
   }
 
   .nx-inspector {
     display: flex;
     border-left: none;
-    border-top: 1px solid var(--nx-border);
+    border-top: 1px solid var(--color-rule);
     width: 100%;
     flex-shrink: 0;
-    padding: var(--nx-space-3);
+    padding: var(--space-sm);
   }
 
   .nx-stage-row {
@@ -891,9 +892,9 @@
 
   .nx-strip {
     height: auto;
-    min-height: 36px;
+    min-height: 40px;
     flex-wrap: wrap;
-    padding: 4px var(--nx-space-3);
+    padding: var(--space-2xs) var(--space-sm);
   }
 
   /* Lower-priority telemetry drops out; title, LIVE, REC, battery stay. */
@@ -902,22 +903,17 @@
   }
 
   .nx-systabs-wrap {
-    top: calc(-1 * var(--nx-space-3));
-    margin: 0 calc(-1 * var(--nx-space-3));
+    top: calc(-1 * var(--space-sm));
+    margin: 0 calc(-1 * var(--space-sm)) var(--space-sm);
   }
 
   .nx-systabs {
     /* Tight enough that all six tabs fit a 360px phone instead of
-       clipping the last one at the edge; the strip still scrolls (with
-       the fade below) on narrower screens. */
-    padding: 0 10px;
-    gap: 6px;
+       clipping the last one at the edge; the strip still scrolls (the
+       hairline marks the edge) on narrower screens. */
+    padding: 0 var(--space-xs);
+    gap: var(--space-2xs);
     scroll-behavior: smooth;
-  }
-
-  .nx-systabs-fade {
-    display: block;
-    width: 40px;
   }
 }
 
@@ -928,11 +924,10 @@
   }
 }
 
-/* ── Sign-in (next mode) — one plate on the body-black canvas ────────
-   The single brand moment: the logo's lens ring, oversized and dim,
-   drawn as concentric hairline circles behind the plate (borders, not
-   gradients). One cyan submit; the error speaks in red text below the
-   fields. All colors ride tokens, so light theme reaches parity. */
+/* ── Sign-in (next mode) — one plate on the ground ──────────────────
+   No brand theatre: the wordmark + logo sit above a single hairline
+   plate. Fields stack in the field recipe; one amber primary submit
+   carries the plate; the error speaks in red text below the fields. */
 
 .nx-login {
   position: relative;
@@ -940,58 +935,33 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: var(--nx-space-6);
-  background: var(--nx-bg);
-  color: var(--nx-text);
+  padding: var(--space-lg);
+  background: var(--color-paper);
+  color: var(--color-ink);
   overflow: hidden;
 }
 
+/* The old oversized lens-ring backdrop was decorative glow chrome —
+   banned. The class stays so stale markup is harmless. */
 .nx-login-ring {
-  position: absolute;
-  left: 50%;
-  top: 50%;
-  width: min(72vh, 640px);
-  aspect-ratio: 1;
-  transform: translate(-50%, -54%);
-  border-radius: 50%;
-  border: 1px solid color-mix(in srgb, var(--nx-signal) 14%, transparent);
-  pointer-events: none;
-}
-
-/* The lens inside the ring: two more faint circles, cyan like the
-   logo's glass. */
-.nx-login-ring::before {
-  content: '';
-  position: absolute;
-  inset: 64px;
-  border-radius: inherit;
-  border: 1px solid color-mix(in srgb, var(--nx-accent) 10%, transparent);
-}
-
-.nx-login-ring::after {
-  content: '';
-  position: absolute;
-  inset: 132px;
-  border-radius: inherit;
-  border: 1px solid color-mix(in srgb, var(--nx-accent) 6%, transparent);
+  display: none;
 }
 
 .nx-login-card {
   position: relative;
-  z-index: 1;
+  z-index: var(--z-base);
   width: min(360px, 100%);
-  background: var(--nx-surface);
-  border: 1px solid var(--nx-border);
-  border-radius: var(--nx-radius-lg);
-  box-shadow: var(--nx-shadow-lg), var(--nx-bevel);
+  background: var(--color-paper-2);
+  border: 1px solid var(--color-rule);
+  border-radius: var(--radius-card);
 }
 
 .nx-login-brand {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: var(--nx-space-2);
-  padding: var(--nx-space-6) var(--nx-space-5) var(--nx-space-4);
+  gap: var(--space-2xs);
+  padding: var(--space-lg) var(--space-md) var(--space-md);
 }
 
 .nx-login-brand img {
@@ -1000,51 +970,41 @@
 }
 
 .nx-login-wordmark {
-  font-family: var(--nx-font);
-  font-size: var(--nx-text-xl);
-  font-weight: 600;
-  letter-spacing: -0.01em;
-  color: var(--nx-text);
+  font-family: var(--font-body);
+  font-size: var(--text-xl);
+  font-weight: var(--display-weight);
+  letter-spacing: var(--tracking-display);
+  color: var(--color-ink);
 }
 
 .nx-login-subtitle {
-  font-size: var(--nx-text-sm);
-  color: var(--nx-text-tertiary);
+  font-size: var(--text-sm);
+  color: var(--color-muted);
   text-align: center;
 }
 
 .nx-login-form {
   display: flex;
   flex-direction: column;
-  gap: var(--nx-space-3);
-  padding: var(--nx-space-2) var(--nx-space-5) var(--nx-space-5);
+  gap: var(--space-sm);
+  padding: var(--space-2xs) var(--space-md) var(--space-md);
 }
 
-/* Hairline inputs on the plate: inset wells, no heavy control chrome. */
+/* The field recipe, one step taller for the primary row. */
 .nx-login .nx-input {
-  height: 38px;
-  background: var(--nx-well);
-  border-color: var(--nx-border);
-}
-
-.nx-login .nx-input:hover:not(:disabled) {
-  border-color: var(--nx-border-strong);
-}
-
-.nx-login .nx-input:focus {
-  border-color: var(--nx-accent);
+  height: var(--control-h-tall);
 }
 
 /* The error is text in red below the fields — no wash, no box. */
 .nx-login .nx-banner-danger {
   background: transparent;
   padding: 0;
-  color: var(--nx-danger);
+  color: var(--color-bad);
   border-radius: 0;
 }
 
-/* The one cyan action carries the plate. */
+/* The one amber action carries the plate. */
 .nx-login .nx-btn-primary {
   width: 100%;
-  margin-top: var(--nx-space-2);
+  margin-top: var(--space-2xs);
 }

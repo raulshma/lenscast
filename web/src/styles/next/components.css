@@ -1,1220 +1,1055 @@
-/* ══════════════════════════════════════════════════════════════════
-   NEXT UI — COMPONENT PRIMITIVES ("Viewfinder" redesign)
-   One family per control kind. Every interactive element ships its
-   full state set (default / hover / active / focus-visible / disabled).
-
-   Color law (DESIGN.md): cyan = touchable, magenta = on air, red =
-   wrong, amber = degraded, green = healthy. Depth is plates and
-   hairlines; the only soft shadows here belong to overlays (drawer,
-   modal, toasts). Type: Golos Text speaks — labels and titles are
-   sentence case, never mono, never tracked caps. JetBrains Mono
-   strictly measures — timers, counts, codes. Presses answer the hand:
-   1px down, never a scale.
-   ══════════════════════════════════════════════════════════════════ */
-
-/* ── Buttons ──────────────────────────────────────────────────────── */
-
-.nx-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: var(--nx-space-2);
-  height: 32px;
-  padding: 0 14px;
-  border: 1px solid transparent;
-  border-radius: var(--nx-radius);
-  background: transparent;
-  font-family: var(--nx-font);
-  font-size: var(--nx-text-base);
-  font-weight: 500;
-  letter-spacing: -0.01em;
-  line-height: 1;
-  white-space: nowrap;
-  cursor: pointer;
-  user-select: none;
-  transition:
-    background var(--nx-duration-fast) var(--nx-ease),
-    color var(--nx-duration-fast) var(--nx-ease),
-    border-color var(--nx-duration-fast) var(--nx-ease);
-}
-
-/* The press: one pixel toward the glass. No scale, no bounce. */
-.nx-btn:active:not(:disabled) {
-  transform: translateY(1px);
-}
-
-.nx-btn:disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
-}
-
-.nx-btn svg {
-  width: 16px;
-  height: 16px;
-  flex-shrink: 0;
-}
-
-/* base.css' generic :focus-visible ring would snap the corner radius to
-   2px; keep each control's own shape under the ring. */
-.nx-btn:focus-visible {
-  border-radius: var(--nx-radius);
-}
-
-/* Primary — the cyan action. One per zone; everything else is quiet. */
-.nx-btn-primary {
-  background: var(--nx-accent);
-  color: var(--nx-on-accent);
-}
-
-.nx-btn-primary:hover:not(:disabled) {
-  background: var(--nx-accent-hover);
-}
-
-.nx-btn-primary:active:not(:disabled) {
-  background: var(--nx-accent-active);
-}
-
-/* Secondary — a quiet control face: control bg, hairline edge. */
-.nx-btn-secondary {
-  background: var(--nx-control-bg);
-  border-color: var(--nx-control-border);
-  color: var(--nx-text);
-}
-
-.nx-btn-secondary:hover:not(:disabled) {
-  background: var(--nx-surface-3);
-  border-color: var(--nx-control-border-hover);
-}
-
-.nx-btn-secondary:active:not(:disabled) {
-  background: var(--nx-surface-2);
-}
-
-/* Ghost — toolbars and dense rows; the hairline appears on hover only. */
-.nx-btn-ghost {
-  color: var(--nx-text-secondary);
-}
-
-.nx-btn-ghost:hover:not(:disabled) {
-  background: var(--nx-surface-2);
-  color: var(--nx-text);
-}
-
-/* Danger — destructive confirmation and faults only, never REC. The
-   on-fill ink follows the accent fill's rule: near-black on the bright
-   dark-theme red, white on the deep light-theme red — AA either way. */
-.nx-btn-danger {
-  background: var(--nx-danger);
-  color: var(--nx-on-accent);
-}
-
-.nx-btn-danger:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--nx-danger) 88%, black);
-}
-
-.nx-btn-danger-soft {
-  background: var(--nx-danger-bg);
-  color: var(--nx-danger);
-}
-
-.nx-btn-danger-soft:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--nx-danger) 16%, transparent);
-}
-
-/* Warning — a latched hot state (torch on), amber like its LED. */
-.nx-btn-warning {
-  background: var(--nx-warning-bg);
-  color: var(--nx-warning);
-}
-
-.nx-btn-warning:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--nx-warning) 16%, transparent);
-}
-
-/* Toggled — a latched on state: cyan edge, subtle cyan fill. Pairs
-   with `aria-pressed` (Button's `ariaPressed` prop). */
-.nx-btn-toggled {
-  background: var(--nx-accent-subtle);
-  border-color: color-mix(in srgb, var(--nx-accent) 45%, transparent);
-  color: var(--nx-accent-text);
-}
-
-.nx-btn-toggled:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--nx-accent) 16%, transparent);
-}
-
-/* Sizes — 28 / 32 / 38, all at or above the 28px hit floor. */
-.nx-btn-sm {
-  height: 28px;
-  padding: 0 10px;
-  font-size: var(--nx-text-sm);
-  border-radius: var(--nx-radius-sm);
-}
-
-.nx-btn-sm svg {
-  width: 14px;
-  height: 14px;
-}
-
-.nx-btn-sm:focus-visible {
-  border-radius: var(--nx-radius-sm);
-}
-
-.nx-btn-lg {
-  height: 38px;
-  padding: 0 18px;
-  font-size: var(--nx-text-md);
-}
-
-.nx-btn-icon {
-  width: 32px;
-  padding: 0;
-}
-
-.nx-btn-icon.nx-btn-sm {
-  width: 28px;
-}
-
-.nx-btn-icon.nx-btn-lg {
-  width: 38px;
-}
-
-/* ── Inputs & selects ─────────────────────────────────────────────── */
-
-/* One control system: control face, hairline, cyan when focused.
-   Hover lifts the hairline; focus turns it cyan and rings. */
-.nx-input,
-.nx-select {
-  height: 32px;
-  padding: 0 12px;
-  border: 1px solid var(--nx-control-border);
-  border-radius: var(--nx-radius);
-  background: var(--nx-control-bg);
-  color: var(--nx-text);
-  font-family: var(--nx-font);
-  font-size: var(--nx-text-base);
-  transition: border-color var(--nx-duration-fast) var(--nx-ease);
-}
-
-.nx-input::placeholder {
-  color: var(--nx-text-faint);
-}
-
-.nx-input:hover:not(:disabled),
-.nx-select:hover:not(:disabled) {
-  border-color: var(--nx-control-border-hover);
-}
-
-.nx-input:focus,
-.nx-select:focus {
-  outline: none;
-  border-color: var(--nx-accent);
-  box-shadow: 0 0 0 3px var(--nx-focus-ring);
-}
-
-.nx-input:focus-visible,
-.nx-select:focus-visible {
-  border-radius: var(--nx-radius);
-}
-
-.nx-input:disabled,
-.nx-select:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.nx-select {
-  appearance: none;
-  padding-right: 30px;
-  /* Neutral mid-gray chevron: legible on the control face in both
-     themes; an SVG data URI can't read a CSS variable. */
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23808695' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
-  background-repeat: no-repeat;
-  background-position: right 10px center;
-  cursor: pointer;
-}
-
-.nx-select option {
-  background: var(--nx-surface);
-  color: var(--nx-text);
-}
-
-.nx-input-sm,
-.nx-select.nx-input-sm {
-  height: 28px;
-  font-size: var(--nx-text-sm);
-}
-
-/* Multiline */
-.nx-textarea {
-  padding: 8px 12px;
-  border: 1px solid var(--nx-control-border);
-  border-radius: var(--nx-radius);
-  background: var(--nx-control-bg);
-  color: var(--nx-text);
-  font-family: var(--nx-font);
-  font-size: var(--nx-text-base);
-  line-height: 1.5;
-  resize: vertical;
-  min-height: 64px;
-  transition: border-color var(--nx-duration-fast) var(--nx-ease);
-}
-
-.nx-textarea:hover:not(:disabled) {
-  border-color: var(--nx-control-border-hover);
-}
-
-.nx-textarea:focus {
-  outline: none;
-  border-color: var(--nx-accent);
-  box-shadow: 0 0 0 3px var(--nx-focus-ring);
-}
-
-/* Color picker */
-.nx-color {
-  width: 32px;
-  height: 32px;
-  padding: 2px;
-  border: 1px solid var(--nx-control-border);
-  border-radius: var(--nx-radius);
-  background: var(--nx-control-bg);
-  cursor: pointer;
-}
-
-.nx-color:hover:not(:disabled) {
-  border-color: var(--nx-control-border-hover);
-}
-
-/* Checkbox / radio inherit the accent. */
-[data-ui='next'] input[type='checkbox'],
-[data-ui='next'] input[type='radio'] {
-  accent-color: var(--nx-accent);
-}
-
-/* ── Field system — label speaks Golos, hint stays tertiary ───────── */
-
-.nx-field {
-  display: flex;
-  flex-direction: column;
-  gap: var(--nx-space-1);
-}
-
-.nx-field-label {
-  font-family: var(--nx-font);
-  font-size: var(--nx-text-sm);
-  font-weight: 500;
-  color: var(--nx-text-secondary);
-}
-
-.nx-field-hint {
-  font-size: var(--nx-text-xs);
-  color: var(--nx-text-tertiary);
-}
-
-.nx-field-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--nx-space-3);
-  min-height: 34px;
-}
-
-/* Label + hint stack inside a row; the control sits on the right. */
-.nx-field-main {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-}
-
-/* Slider field: label + live mono value above, the range below. */
-.nx-slider-field {
-  display: flex;
-  flex-direction: column;
-  gap: var(--nx-space-1);
-  padding: var(--nx-space-1) 0;
-}
-
-.nx-slider-field-head {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: var(--nx-space-3);
-}
-
-/* The measurement — mono face comes from .nx-mono. */
-.nx-slider-field-value {
-  font-size: var(--nx-text-sm);
-  font-weight: 500;
-  color: var(--nx-text-secondary);
-  font-variant-numeric: tabular-nums;
-}
-
-/* Anchors dressed as buttons (export links, downloads). */
-a.nx-btn {
-  text-decoration: none;
-}
-
-/* Read-only diagnostics rows: values right-aligned in mono. */
-.nx-info-value {
-  font-size: var(--nx-text-sm);
-  color: var(--nx-text-secondary);
-  text-align: right;
-  max-width: 60%;
-}
-
-/* Number inputs are measurements — the data face. */
-.nx-input-num {
-  width: 84px;
-  text-align: right;
-  font-family: var(--nx-mono);
-  font-variant-numeric: tabular-nums;
-}
-
-/* ── Switch ───────────────────────────────────────────────────────── */
-
-.nx-switch {
-  position: relative;
-  display: inline-block;
-  flex-shrink: 0;
-  /* 44x28: the label is the hit target (≥28px floor); the track sits
-     24px tall inside it. */
-  width: 44px;
-  height: 28px;
-  cursor: pointer;
-}
-
-.nx-switch input {
-  position: absolute;
-  inset: 0;
-  opacity: 0;
-  width: 100%;
-  height: 100%;
-  margin: 0;
-  cursor: pointer;
-}
-
-.nx-switch-track {
-  position: absolute;
-  inset: 2px 0;
-  border-radius: var(--nx-radius-full);
-  background: var(--nx-control-bg);
-  border: 1px solid var(--nx-control-border);
-  transition: background var(--nx-duration) var(--nx-ease), border-color var(--nx-duration) var(--nx-ease);
-}
-
-.nx-switch-thumb {
-  position: absolute;
-  top: 5px;
-  left: 3px;
-  width: 18px;
-  height: 18px;
-  border-radius: 50%;
-  background: var(--nx-text);
-  transition: transform var(--nx-duration) var(--nx-ease), background var(--nx-duration) var(--nx-ease);
-}
-
-/* Checked = cyan; the thumb crosses to the dark side of the accent. */
-.nx-switch input:checked ~ .nx-switch-track {
-  background: var(--nx-accent);
-  border-color: var(--nx-accent);
-}
-
-.nx-switch input:checked ~ .nx-switch-thumb {
-  transform: translateX(20px);
-  background: var(--nx-on-accent);
-}
-
-/* One ring, on the track — suppress the generic ring on the invisible
-   input so focus doesn't draw twice. */
-.nx-switch input:focus-visible {
-  box-shadow: none;
-}
-
-.nx-switch input:focus-visible ~ .nx-switch-track {
-  box-shadow: 0 0 0 3px var(--nx-focus-ring);
-}
-
-.nx-switch input:disabled {
-  cursor: not-allowed;
-}
-
-.nx-switch input:disabled ~ .nx-switch-track {
-  opacity: 0.45;
-}
-
-.nx-switch input:disabled ~ .nx-switch-thumb {
-  opacity: 0.45;
-}
-
-/* ── Slider — the machined fader ──────────────────────────────────── */
-
-/* Cyan fill left of the value, quiet track right of it, bone thumb.
-   <Slider> sets --nx-slider-pct to the value's percentage, so the fill
-   reads as a level with no measured geometry. */
-.nx-slider {
-  appearance: none;
-  -webkit-appearance: none;
-  width: 100%;
-  height: 28px;
-  margin: 0;
-  border-radius: var(--nx-radius-full);
-  background:
-    linear-gradient(
-      to right,
-      var(--nx-accent) var(--nx-slider-pct, 50%),
-      var(--nx-surface-3) var(--nx-slider-pct, 50%)
-    )
-    no-repeat center / 100% 4px;
-  cursor: pointer;
-}
-
-.nx-slider::-webkit-slider-thumb {
-  appearance: none;
-  -webkit-appearance: none;
-  width: 14px;
-  height: 14px;
-  border-radius: 50%;
-  background: var(--nx-text);
-  border: none;
-  box-shadow: 0 0 0 1px var(--nx-border-strong);
-}
-
-.nx-slider::-moz-range-thumb {
-  width: 14px;
-  height: 14px;
-  border-radius: 50%;
-  background: var(--nx-text);
-  border: none;
-  box-shadow: 0 0 0 1px var(--nx-border-strong);
-}
-
-.nx-slider:focus-visible {
-  border-radius: var(--nx-radius-full);
-}
-
-.nx-slider:disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
-}
-
-/* ── Segmented control ────────────────────────────────────────────── */
-
-.nx-segment {
-  display: inline-flex;
-  align-items: center;
-  gap: 2px;
-  padding: 2px;
-  background: var(--nx-control-bg);
-  border: 1px solid var(--nx-control-border);
-  border-radius: var(--nx-radius);
-}
-
-.nx-segment-btn {
-  position: relative;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  height: 28px;
-  padding: 0 12px;
-  border: none;
-  border-radius: var(--nx-radius-sm);
-  background: transparent;
-  color: var(--nx-text-tertiary);
-  font-family: var(--nx-font);
-  font-size: var(--nx-text-sm);
-  font-weight: 500;
-  cursor: pointer;
-  transition: background var(--nx-duration-fast) var(--nx-ease), color var(--nx-duration-fast) var(--nx-ease);
-}
-
-.nx-segment-btn:hover {
-  color: var(--nx-text);
-}
-
-/* Active: the raised plate plus a 2px cyan tick under the chosen word. */
-.nx-segment-btn-active {
-  background: color-mix(in srgb, #fff 7%, var(--nx-control-bg));
-  color: var(--nx-text);
-}
-
-.nx-segment-btn-active::after {
-  content: '';
-  position: absolute;
-  left: 8px;
-  right: 8px;
-  bottom: 0;
-  height: 2px;
-  border-radius: 1px 1px 0 0;
-  background: var(--nx-accent);
-}
-
-/* ── Cards ────────────────────────────────────────────────────────── */
-
-/* A faceplate: plate surface, machined top bevel, hairline. No soft
-   shadow — the hairline carries the depth. */
-.nx-card {
-  background: var(--nx-surface);
-  border: 1px solid var(--nx-border);
-  border-radius: var(--nx-radius-lg);
-  box-shadow: var(--nx-bevel);
-}
-
-.nx-card-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--nx-space-3);
-  padding: var(--nx-space-4) var(--nx-space-4) 0;
-}
-
-.nx-card-title {
-  display: flex;
-  align-items: center;
-  gap: var(--nx-space-2);
-  font-family: var(--nx-font);
-  font-size: var(--nx-text-md);
-  font-weight: 600;
-  letter-spacing: -0.01em;
-  color: var(--nx-text);
-}
-
-.nx-card-title svg {
-  width: 16px;
-  height: 16px;
-  color: var(--nx-text-tertiary);
-}
-
-.nx-card-actions {
-  display: flex;
-  align-items: center;
-  gap: var(--nx-space-2);
-}
-
-.nx-card-body {
-  display: flex;
-  flex-direction: column;
-  gap: var(--nx-space-3);
-  padding: var(--nx-space-3) var(--nx-space-4) var(--nx-space-4);
-}
-
-/* A labeled section inside a card body. */
-.nx-card-section {
-  display: flex;
-  flex-direction: column;
-  gap: var(--nx-space-2);
-}
-
-.nx-card-section-title {
-  font-family: var(--nx-font);
-  font-size: var(--nx-text-xs);
-  font-weight: 600;
-  color: var(--nx-text-tertiary);
-}
-
-/* ── Badges — quiet tinted chips ──────────────────────────────────── */
-
-.nx-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  height: 20px;
-  padding: 0 7px;
-  border-radius: var(--nx-radius-sm);
-  font-size: var(--nx-text-xs);
-  font-weight: 600;
-  letter-spacing: -0.01em;
-  line-height: 1;
-  white-space: nowrap;
-}
-
-.nx-badge-neutral {
-  background: var(--nx-surface-3);
-  color: var(--nx-text-secondary);
-}
-
-.nx-badge-accent {
-  background: var(--nx-accent-subtle);
-  color: var(--nx-accent-text);
-}
-
-.nx-badge-success {
-  background: var(--nx-success-bg);
-  color: var(--nx-success);
-}
-
-.nx-badge-warning {
-  background: var(--nx-warning-bg);
-  color: var(--nx-warning);
-}
-
-/* `danger` is a fault: red. On-air states keep tone="danger" markup and
-   add class="nx-badge-signal" by hand (see below). */
-.nx-badge-danger {
-  background: var(--nx-danger-bg);
-  color: var(--nx-danger);
-}
-
-.nx-badge-info {
-  background: var(--nx-info-bg);
-  color: var(--nx-info);
-}
-
-/* On-air badge — REC / LIVE. Declared after the tone classes so it
-   wins at equal specificity: it re-points the red fault tint at signal
-   magenta (magenta = your picture is going out; red = something is
-   wrong). Additive class only — Badge props are unchanged. */
-.nx-badge-signal {
-  background: var(--nx-signal-bg);
-  color: var(--nx-signal);
-}
-
-/* Live/status dot — the recording & streaming tell. */
-.nx-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--nx-text-faint);
-  flex-shrink: 0;
-}
-
-/* On air — signal magenta, not red. */
-.nx-dot-live {
-  background: var(--nx-signal);
-  animation: nx-pulse 2s var(--nx-ease) infinite;
-}
-
-.nx-dot-success {
-  background: var(--nx-success);
-}
-
-.nx-dot-warning {
-  background: var(--nx-warning);
-}
-
-.nx-dot-danger {
-  background: var(--nx-danger);
-}
-
-@keyframes nx-pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.45; }
-}
-
-/* ── Banners — tinted, quiet, one per meaning ─────────────────────── */
-
-.nx-banner {
-  display: flex;
-  align-items: center;
-  gap: var(--nx-space-2);
-  padding: 8px 12px;
-  border-radius: var(--nx-radius);
-  font-size: var(--nx-text-sm);
-  line-height: 1.45;
-}
-
-.nx-banner svg {
-  width: 15px;
-  height: 15px;
-  flex-shrink: 0;
-}
-
-.nx-banner-info {
-  background: var(--nx-info-bg);
-  color: var(--nx-info);
-}
-
-.nx-banner-warning {
-  background: var(--nx-warning-bg);
-  color: var(--nx-warning);
-}
-
-.nx-banner-danger {
-  background: var(--nx-danger-bg);
-  color: var(--nx-danger);
-}
-
-.nx-banner-success {
-  background: var(--nx-success-bg);
-  color: var(--nx-success);
-}
-
-.nx-banner-neutral {
-  background: var(--nx-surface-2);
-  color: var(--nx-text-secondary);
-}
-
-/* ── Modal — an overlay: the only real shadow plus the drawer's ───── */
-
-.nx-modal-scrim {
-  position: fixed;
-  inset: 0;
-  z-index: 200;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: var(--nx-space-6);
-  background: var(--nx-scrim);
-  animation: nx-fade-in var(--nx-duration-fast) var(--nx-ease);
-}
-
-.nx-modal {
-  width: min(480px, 100%);
-  max-height: 90vh;
-  overflow-y: auto;
-  background: var(--nx-surface);
-  border: 1px solid var(--nx-border-strong);
-  border-radius: var(--nx-radius-lg);
-  box-shadow: var(--nx-shadow-lg);
-}
-
-/* Entrance: a short fade answering the click — no slide-up choreography. */
-@keyframes nx-modal-in {
-  from { opacity: 0; transform: translateY(4px); }
-  to { opacity: 1; transform: none; }
-}
-
-/* Confirm dialog — the kit's ask-before-destructive-action modal. */
-.nx-confirm {
-  width: min(400px, 100%);
-}
-
-.nx-confirm-body {
-  display: flex;
-  flex-direction: column;
-  gap: var(--nx-space-2);
-  padding: var(--nx-space-5) var(--nx-space-5) 0;
-}
-
-.nx-confirm-title {
-  font-family: var(--nx-font);
-  font-size: var(--nx-text-md);
-  font-weight: 600;
-  letter-spacing: -0.01em;
-  color: var(--nx-text);
-}
-
-.nx-confirm-message {
-  font-family: var(--nx-font);
-  font-size: var(--nx-text-base);
-  line-height: 1.5;
-  color: var(--nx-text-secondary);
-}
-
-.nx-confirm-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: var(--nx-space-2);
-  padding: var(--nx-space-4) var(--nx-space-5) var(--nx-space-5);
-}
-
-[data-ui='next'] .automation-editor-modal,
-[data-ui='next'] .automation-picker-modal,
-[data-ui='next'] .nx-modal {
-  animation: nx-modal-in var(--nx-duration) var(--nx-ease);
-}
-
-@keyframes nx-fade-in {
-  from { opacity: 0; }
-}
-
-/* ── Menu / list rows ─────────────────────────────────────────────── */
-
-.nx-list {
-  display: flex;
-  flex-direction: column;
-}
-
-.nx-list-row {
-  display: flex;
-  align-items: center;
-  gap: var(--nx-space-3);
-  padding: var(--nx-space-2) var(--nx-space-3);
-  border-radius: var(--nx-radius);
-  font-size: var(--nx-text-base);
-  transition: background var(--nx-duration-fast) var(--nx-ease);
-}
-
-.nx-list-row:hover {
-  background: var(--nx-surface-2);
-}
-
-/* ── Empty state — quiet text, then the first action ──────────────── */
-
-.nx-empty {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: var(--nx-space-2);
-  padding: var(--nx-space-8) var(--nx-space-4);
-  text-align: center;
-  color: var(--nx-text-tertiary);
-}
-
-.nx-empty svg {
-  width: 28px;
-  height: 28px;
-  color: var(--nx-text-faint);
-}
-
-.nx-empty-title {
-  font-family: var(--nx-font);
-  font-size: var(--nx-text-base);
-  font-weight: 600;
-  color: var(--nx-text-secondary);
-}
-
-.nx-empty-hint {
-  font-size: var(--nx-text-sm);
-  max-width: 44ch;
-}
-
-/* The first action (Empty's `action` slot) lands under the hint. */
-.nx-empty-actions {
-  display: flex;
-  align-items: center;
-  gap: var(--nx-space-2);
-  margin-top: var(--nx-space-1);
-}
-
-/* ══════════════════════════════════════════════════════════════════
-   OPERATOR CONSOLE KIT
-   Quiet labels, telemetry chips, LED state dots, instrument panels,
-   toasts, drawer, loading vocabulary.
-   ══════════════════════════════════════════════════════════════════ */
-
-/* ── Quiet section label — Golos, sentence case. The old mono-caps
-   tracked eyebrow is banned chrome (type law); this class now reads as
-   a small spoken label, nothing more. ───────────────────────────── */
-
-.nx-label {
-  font-family: var(--nx-font);
-  font-size: var(--nx-text-xs);
-  font-weight: 600;
-  letter-spacing: -0.01em;
-  color: var(--nx-text-tertiary);
-  white-space: nowrap;
-}
-
-/* ── Telemetry chip — the data face: mono, tabular, no caps ───────── */
-
-.nx-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  height: 24px;
-  padding: 0 8px;
-  background: var(--nx-surface-2);
-  border: 1px solid var(--nx-border);
-  border-radius: var(--nx-radius-sm);
-  font-family: var(--nx-mono);
-  font-size: var(--nx-text-xs);
-  font-weight: 500;
-  color: var(--nx-text-secondary);
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-}
-
-/* Interactive chips (filters) meet the 28px hit floor. */
-button.nx-chip {
-  height: 28px;
-  cursor: pointer;
-  transition: border-color var(--nx-duration-fast) var(--nx-ease), color var(--nx-duration-fast) var(--nx-ease);
-}
-
-button.nx-chip:hover {
-  border-color: var(--nx-control-border-hover);
-  color: var(--nx-text);
-}
-
-.nx-chip-ok {
-  color: var(--nx-success);
-  border-color: color-mix(in srgb, var(--nx-success) 24%, transparent);
-}
-
-.nx-chip-warn {
-  color: var(--nx-warning);
-  border-color: color-mix(in srgb, var(--nx-warning) 24%, transparent);
-}
-
-/* On air — signal magenta. Red stays with faults. */
-.nx-chip-rec {
-  color: var(--nx-signal);
-  border-color: color-mix(in srgb, var(--nx-signal) 32%, transparent);
-  background: var(--nx-signal-bg);
-}
-
-/* Selected filter chip — cyan edge, subtle cyan fill. */
-.nx-chip-active {
-  color: var(--nx-accent-text);
-  border-color: color-mix(in srgb, var(--nx-accent) 36%, transparent);
-  background: var(--nx-accent-subtle);
-}
-
-/* ── LED — state at a glance; color carries the meaning. Glow lives
-   here and on the on-air edge only, never as decoration. ─────────── */
-
-.nx-led {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: var(--nx-text-faint);
-  flex-shrink: 0;
-}
-
-.nx-led-ok {
-  background: var(--nx-success);
-  box-shadow: var(--nx-glow-ok);
-}
-
-.nx-led-warn {
-  background: var(--nx-warning);
-  box-shadow: var(--nx-glow-warn);
-  animation: nx-pulse 1.6s var(--nx-ease) infinite;
-}
-
-/* On air — the signal-magenta pulse (was red; red is faults only). */
-.nx-led-rec {
-  background: var(--nx-signal);
-  box-shadow: var(--nx-glow-rec);
-  animation: nx-pulse 1.2s var(--nx-ease) infinite;
-}
-
-.nx-led-accent {
-  background: var(--nx-accent);
-}
-
-/* Static red — a fault, not the live pulse. */
-.nx-led-danger {
-  background: var(--nx-danger);
-}
-
-/* ── Panel — the instrument faceplate: plate surface, machined top
-   bevel (--nx-bevel), hairline, radius 6. The title speaks Golos 600
-   sentence case; a 2px cyan tick marks the header's left edge. The
-   numbered section code is banned chrome — `Panel.code` is gone. ── */
-
-.nx-panel {
-  background: var(--nx-surface);
-  border: 1px solid var(--nx-border);
-  border-radius: var(--nx-radius-lg);
-  box-shadow: var(--nx-bevel);
-}
-
-.nx-panel-header {
-  position: relative;
-  display: flex;
-  align-items: center;
-  /* Wrap when narrow — the action row drops under the title instead of
-     squeezing the flexible title down to a couple of ellipsized letters. */
-  flex-wrap: wrap;
-  gap: var(--nx-space-2);
-  row-gap: 2px;
-  min-height: 38px;
-  padding: 8px 12px 8px 14px;
-  border-bottom: 1px solid var(--nx-border);
-  border-radius: var(--nx-radius-lg) var(--nx-radius-lg) 0 0;
-}
-
-/* The tick: 2px of cyan on the header's left edge — not a full border. */
-.nx-panel-header::before {
-  content: '';
-  position: absolute;
-  left: 0;
-  top: 50%;
-  width: 2px;
-  height: 16px;
-  transform: translateY(-50%);
-  border-radius: 0 1px 1px 0;
-  background: var(--nx-accent);
-}
-
-.nx-panel-title {
-  /* basis auto (not the 0 of `flex: 1`): the header's wrap decision must
-     see the title's real width, or the line never breaks and the title
-     crushes to a couple of ellipsized letters on a 360px phone. */
-  flex: 1 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  font-family: var(--nx-font);
-  font-size: var(--nx-text-base);
-  font-weight: 600;
-  letter-spacing: -0.01em;
-  color: var(--nx-text);
-}
-
-/* Legacy hook: numbered section codes are banned, the class stays so
-   stale markup can't paint accent chrome. It measures; it doesn't shout. */
-.nx-panel-code {
-  font-family: var(--nx-mono);
-  font-size: var(--nx-text-2xs);
-  font-weight: 500;
-  color: var(--nx-text-tertiary);
-  font-variant-numeric: tabular-nums;
-}
-
-.nx-panel-actions {
-  display: flex;
-  align-items: center;
-  gap: var(--nx-space-1);
-}
-
-.nx-panel-body {
-  display: flex;
-  flex-direction: column;
-  gap: var(--nx-space-3);
-  padding: var(--nx-space-3);
-}
-
-.nx-panel-body-flush {
-  padding: 0;
-}
-
-/* ── Skeleton & spinner — loading vocabulary ──────────────────────── */
-
-/* Shimmer walks surface-2 → surface-3; both via tokens, light parity. */
-.nx-skeleton {
-  background: var(--nx-surface-2);
-  border-radius: var(--nx-radius-sm);
-  animation: nx-shimmer 1.4s ease-in-out infinite;
-}
-
-@keyframes nx-shimmer {
-  0%, 100% { background-color: var(--nx-surface-2); }
-  50% { background-color: var(--nx-surface-3); }
-}
-
-.nx-spinner {
-  width: 14px;
-  height: 14px;
-  flex-shrink: 0;
-  border: 1.5px solid var(--nx-border-strong);
-  border-top-color: var(--nx-accent);
-  border-radius: 50%;
-  animation: nx-spin 0.7s linear infinite;
-}
-
-.nx-spinner-sm {
-  width: 11px;
-  height: 11px;
-  border-width: 1.5px;
-}
-
+/* Hallmark · shape: app screen · genre: modern-minimal · theme: Console (deal 1/3, seed operator-console-phone-as-camera-rig-9437·d469983a·2026-11-25·r0) · redesign: full
+ * nav: rail-first sidebar kept, rebuilt · signature: the live stage · states: loading, empty, error, full · console: graphite
+ * faces: Golos kept for cyrillic locales (theme face latin-only), Atkinson Hyperlegible Mono measures
+ * axes: dark/grotesk-sans/chromatic-amber · posture: restrained · contrast: pass · v2.0.0 */
+[data-ui='next'] .nx-cut {
+  background:var(--color-rule);
+  border-radius:var(--radius-card);
+  flex-direction:column;
+  gap:1px;
+  display:flex;
+  overflow:hidden;
+}
+[data-ui='next'] .nx-cut>* {
+  background:var(--color-paper-2);
+  min-width:0;
+}
+[data-ui='next'] .nx-btn {
+  justify-content:center;
+  align-items:center;
+  gap:var(--space-2xs);
+  height:var(--control-h-tall);
+  padding:0 var(--space-md);
+  border-radius:var(--radius-pill);
+  font-family:var(--font-body);
+  font-size:var(--text-md);
+  white-space:nowrap;
+  cursor:pointer;
+  -webkit-user-select:none;
+  user-select:none;
+  transition:background var(--dur-micro) var(--ease-out), color var(--dur-micro) var(--ease-out), border-color var(--dur-micro) var(--ease-out), transform var(--dur-micro) var(--ease-out);
+  background:0 0;
+  border:1px solid #0000;
+  font-weight:500;
+  line-height:1;
+  display:inline-flex;
+  position:relative;
+}
+[data-ui='next'] .nx-btn:before {
+  content:"";
+  position:absolute;
+  inset:-4px;
+}
+/* Press — the console answers: 0.95-0.98 scale eased over the micro duration. */
+[data-ui='next'] .nx-btn:active:not(:disabled) {
+  transform:scale(0.97);
+}
+[data-ui='next'] .nx-btn:disabled {
+  opacity:.55;
+  cursor:not-allowed;
+}
+[data-ui='next'] .nx-btn svg {
+  flex-shrink:0;
+  width:16px;
+  height:16px;
+}
+[data-ui='next'] .nx-btn[aria-busy=true] {
+  pointer-events:none;
+}
+[data-ui='next'] .nx-btn-primary {
+  background:var(--color-accent);
+  color:var(--color-accent-ink);
+}
+[data-ui='next'] .nx-btn-primary:hover:not(:disabled) {
+  background:var(--color-accent-strong);
+}
+[data-ui='next'] .nx-btn-secondary {
+  border-color:var(--color-muted);
+  color:var(--color-ink);
+  background:0 0;
+}
+[data-ui='next'] .nx-btn-secondary:hover:not(:disabled) {
+  background:var(--color-paper-2);
+}
+[data-ui='next'] .nx-btn-secondary:active:not(:disabled) {
+  background:var(--color-paper-3);
+}
+[data-ui='next'] .nx-btn-ghost {
+  color:var(--color-muted);
+}
+[data-ui='next'] .nx-btn-ghost:hover:not(:disabled) {
+  background:var(--color-paper-2);
+  color:var(--color-ink);
+}
+[data-ui='next'] .nx-btn-danger {
+  border-color:var(--color-bad);
+  background:0 0;
+}
+@supports (color:color-mix(in lab, red, red)) {
+[data-ui='next'] .nx-btn-danger {
+    border-color:color-mix(in oklab, var(--color-bad) 45%, transparent);
+  }
+}
+[data-ui='next'] .nx-btn-danger {
+  color:var(--color-bad);
+}
+[data-ui='next'] .nx-btn-danger:hover:not(:disabled) {
+  background:var(--color-bad-soft);
+}
+[data-ui='next'] .nx-btn-danger-soft {
+  background:transparent;
+  color:var(--color-bad);
+  border-color:color-mix(in oklab,var(--color-bad) 45%,transparent);
+}
+[data-ui='next'] .nx-btn-danger-soft:hover:not(:disabled) {
+  background:var(--color-bad);
+}
+@supports (color:color-mix(in lab, red, red)) {
+[data-ui='next'] .nx-btn-danger-soft:hover:not(:disabled) {
+    background:color-mix(in oklab, var(--color-bad) 12%, var(--color-bad-soft));
+  }
+}
+[data-ui='next'] .nx-btn-warning {
+  background:var(--color-accent-soft);
+  color:var(--color-accent-on-soft);
+  border-color:#0000;
+}
+[data-ui='next'] .nx-btn-warning:hover:not(:disabled) {
+  background:var(--color-accent);
+}
+@supports (color:color-mix(in lab, red, red)) {
+[data-ui='next'] .nx-btn-warning:hover:not(:disabled) {
+    background:color-mix(in oklab, var(--color-accent) 12%, var(--color-accent-soft));
+  }
+}
+[data-ui='next'] .nx-btn-toggled {
+  background:var(--color-accent-soft);
+  border-color:var(--color-accent);
+}
+@supports (color:color-mix(in lab, red, red)) {
+[data-ui='next'] .nx-btn-toggled {
+    border-color:color-mix(in oklab, var(--color-accent) 40%, transparent);
+  }
+}
+[data-ui='next'] .nx-btn-toggled {
+  color:var(--color-accent-on-soft);
+}
+[data-ui='next'] .nx-btn-toggled:hover:not(:disabled) {
+  background:var(--color-accent);
+}
+@supports (color:color-mix(in lab, red, red)) {
+[data-ui='next'] .nx-btn-toggled:hover:not(:disabled) {
+    background:color-mix(in oklab, var(--color-accent) 12%, var(--color-accent-soft));
+  }
+}
+[data-ui='next'] .nx-btn-sm {
+  height:var(--control-h);
+  padding:0 var(--space-sm);
+  font-size:var(--text-sm);
+}
+[data-ui='next'] .nx-btn-sm:before {
+  inset:-6px;
+}
+[data-ui='next'] .nx-btn-sm svg {
+  width:14px;
+  height:14px;
+}
+[data-ui='next'] .nx-btn-lg {
+  height:var(--control-h-tall);
+  padding:0 var(--space-md);
+}
+[data-ui='next'] .nx-btn-icon {
+  width:var(--control-h-tall);
+  padding:0;
+}
+[data-ui='next'] .nx-btn-icon.nx-btn-sm {
+  width:var(--control-h);
+}
+[data-ui='next'] .nx-btn-icon.nx-btn-lg {
+  width:var(--control-h-tall);
+}
+[data-ui='next'] a.nx-btn {
+  text-decoration:none;
+}
+[data-ui='next'] .nx-input, [data-ui='next'] .nx-select {
+  height:var(--control-h);
+  padding:0 var(--space-sm);
+  border:1px solid var(--color-muted);
+  border-radius:var(--radius-pill);
+  background:var(--color-paper-3);
+  color:var(--color-ink);
+  font-family:var(--font-body);
+  font-size:var(--text-md);
+  transition:border-color var(--dur-micro) var(--ease-out), background var(--dur-micro) var(--ease-out);
+}
+[data-ui='next'] .nx-input::placeholder {
+  color:var(--color-muted);
+}
+[data-ui='next'] .nx-input:hover:not(:disabled), [data-ui='next'] .nx-select:hover:not(:disabled) {
+  border-color:var(--color-ink-2);
+}
+[data-ui='next'] .nx-input:focus, [data-ui='next'] .nx-select:focus {
+  outline:2px solid var(--color-focus);
+  outline-offset:-3px;
+}
+[data-ui='next'] .nx-input:disabled, [data-ui='next'] .nx-select:disabled {
+  opacity:.55;
+  cursor:not-allowed;
+}
+[data-ui='next'] .nx-select-wrap {
+  align-items:center;
+  min-width:0;
+  display:inline-flex;
+  position:relative;
+}
+[data-ui='next'] .nx-select-wrap .nx-select {
+  appearance:none;
+  padding-right:var(--space-lg);
+  cursor:pointer;
+  width:100%;
+}
+[data-ui='next'] .nx-select-chevron {
+  pointer-events:none;
+  width:12px;
+  height:12px;
+  color:var(--color-muted);
+  position:absolute;
+  right:8px;
+}
+[data-ui='next'] .nx-input-sm, [data-ui='next'] .nx-select.nx-input-sm {
+  height:var(--control-h);
+  font-size:var(--text-sm);
+}
+[data-ui='next'] .nx-textarea {
+  padding:var(--space-2xs) var(--space-sm);
+  border:1px solid var(--color-muted);
+  border-radius:var(--radius-pill);
+  background:var(--color-paper-3);
+  color:var(--color-ink);
+  font-family:var(--font-body);
+  font-size:var(--text-md);
+  resize:vertical;
+  min-height:64px;
+  transition:border-color var(--dur-micro) var(--ease-out);
+  line-height:1.5;
+}
+[data-ui='next'] .nx-textarea:hover:not(:disabled) {
+  border-color:var(--color-ink-2);
+}
+[data-ui='next'] .nx-textarea:focus {
+  outline:2px solid var(--color-focus);
+  outline-offset:-3px;
+}
+[data-ui='next'] .nx-textarea:disabled {
+  opacity:.55;
+  cursor:not-allowed;
+}
+[data-ui='next'] .nx-color {
+  width:var(--control-h);
+  height:var(--control-h);
+  padding:var(--space-3xs);
+  border:1px solid var(--color-muted);
+  border-radius:var(--radius-pill);
+  background:var(--color-paper-3);
+  cursor:pointer;
+}
+[data-ui='next'] .nx-color:hover:not(:disabled) {
+  border-color:var(--color-ink-2);
+}
+[data-ui='next'] .nx-color:disabled {
+  opacity:.55;
+  cursor:not-allowed;
+}
+[data-ui=next] input[type=checkbox], [data-ui=next] input[type=radio] {
+  accent-color:var(--color-accent-on-soft);
+}
+[data-ui='next'] .nx-info-value {
+  font-size:var(--text-sm);
+  color:var(--color-muted);
+  text-align:right;
+  max-width:60%;
+}
+[data-ui='next'] .nx-input-num {
+  text-align:right;
+  width:84px;
+  font-family:var(--font-outlier);
+  font-variant-numeric:tabular-nums slashed-zero;
+}
+[data-ui='next'] .nx-field {
+  gap:var(--space-2xs);
+  flex-direction:column;
+  display:flex;
+}
+[data-ui='next'] .nx-field-label {
+  font-family:var(--font-body);
+  font-size:var(--text-sm);
+  color:var(--color-ink-2);
+  font-weight:500;
+}
+[data-ui='next'] .nx-field-hint {
+  font-size:var(--text-xs);
+  color:var(--color-muted);
+}
+[data-ui='next'] .nx-field-row {
+  justify-content:space-between;
+  align-items:center;
+  gap:var(--space-sm);
+  min-height:var(--control-h);
+  display:flex;
+}
+[data-ui='next'] .nx-field-main {
+  gap:var(--space-3xs);
+  flex-direction:column;
+  flex:1;
+  min-width:0;
+  display:flex;
+}
+[data-ui='next'] .nx-slider-field {
+  gap:var(--space-2xs);
+  padding:var(--space-2xs) 0;
+  flex-direction:column;
+  display:flex;
+}
+[data-ui='next'] .nx-slider-field-head {
+  justify-content:space-between;
+  align-items:baseline;
+  gap:var(--space-sm);
+  display:flex;
+}
+[data-ui='next'] .nx-slider-field-value {
+  font-size:var(--text-sm);
+  color:var(--color-ink-2);
+  font-weight:500;
+}
+[data-ui='next'] .nx-switch {
+  cursor:pointer;
+  flex-shrink:0;
+  width:44px;
+  height:28px;
+  display:inline-block;
+  position:relative;
+}
+[data-ui='next'] .nx-switch:before {
+  content:"";
+  position:absolute;
+  inset:-8px 0;
+}
+[data-ui='next'] .nx-switch input {
+  opacity:0;
+  cursor:pointer;
+  width:100%;
+  height:100%;
+  margin:0;
+  position:absolute;
+  inset:0;
+}
+[data-ui='next'] .nx-switch-track {
+  border-radius:var(--radius-full);
+  background:var(--color-paper-3);
+  border:1px solid var(--color-muted);
+  transition:background var(--dur-micro) var(--ease-out), border-color var(--dur-micro) var(--ease-out);
+  position:absolute;
+  inset:4px;
+}
+[data-ui='next'] .nx-switch-thumb {
+  background:var(--color-ink);
+  width:16px;
+  height:16px;
+  transition:transform var(--dur-micro) var(--ease-out), background var(--dur-micro) var(--ease-out);
+  border-radius:50%;
+  position:absolute;
+  top:6px;
+  left:6px;
+}
+[data-ui='next'] .nx-switch input:checked~.nx-switch-track {
+  background:var(--color-accent);
+  border-color:var(--color-accent-on-soft);
+}
+[data-ui='next'] .nx-switch input:checked~.nx-switch-thumb {
+  background:var(--color-accent-ink);
+  transform:translate(16px);
+}
+[data-ui='next'] .nx-switch input:focus-visible {
+  outline:none;
+}
+[data-ui='next'] .nx-switch input:focus-visible~.nx-switch-track {
+  outline:2px solid var(--color-focus);
+  outline-offset:2px;
+}
+[data-ui='next'] .nx-switch input:disabled {
+  cursor:not-allowed;
+}
+[data-ui='next'] .nx-switch input:disabled~.nx-switch-track, [data-ui='next'] .nx-switch input:disabled~.nx-switch-thumb {
+  opacity:.55;
+  cursor:not-allowed;
+}
+[data-ui='next'] .nx-switch input:disabled~.nx-switch-track {
+  background:var(--color-paper-3);
+}
+[data-ui='next'] .nx-switch:has(input:disabled) {
+  cursor:not-allowed;
+}
+[data-ui='next'] .nx-slider {
+  appearance:none;
+  cursor:pointer;
+  background:0 0;
+  width:100%;
+  height:44px;
+  margin:0;
+}
+[data-ui='next'] .nx-slider::-webkit-slider-runnable-track {
+  border-radius:var(--radius-full);
+  background:linear-gradient(to right, var(--color-cool) var(--slider-pct,50%), var(--color-rule) var(--slider-pct,50%));
+  height:4px;
+}
+[data-ui='next'] .nx-slider::-webkit-slider-thumb {
+  appearance:none;
+  width:12px;
+  height:12px;
+  margin-top:calc(-1 * var(--space-2xs));
+  background:var(--color-ink);
+  border:none;
+  border-radius:50%;
+  transition:transform var(--dur-micro) var(--ease-out);
+}
+[data-ui='next'] .nx-slider::-moz-range-track {
+  border-radius:var(--radius-full);
+  background:linear-gradient(to right, var(--color-cool) var(--slider-pct,50%), var(--color-rule) var(--slider-pct,50%));
+  height:4px;
+}
+[data-ui='next'] .nx-slider::-moz-range-thumb {
+  background:var(--color-ink);
+  border:none;
+  border-radius:50%;
+  width:14px;
+  height:14px;
+  transition:transform var(--dur-micro) var(--ease-out);
+}
+[data-ui='next'] .nx-slider:disabled {
+  opacity:.55;
+  cursor:not-allowed;
+}
+/* The thumb grows while grabbed — a held knob, not a depressed key, so
+   the direction inverts the button press. The fill stays unanimated:
+   gradients do not interpolate. */
+[data-ui='next'] .nx-slider:active:not(:disabled)::-webkit-slider-thumb,
+[data-ui='next'] .nx-slider:active:not(:disabled)::-moz-range-thumb {
+  transform:scale(1.08);
+}
+[data-ui='next'] .nx-segment {
+  align-items:center;
+  gap:var(--space-3xs);
+  padding:var(--space-3xs);
+  background:var(--color-paper-2);
+  border:1px solid var(--color-rule);
+  border-radius:var(--radius-pill);
+  display:inline-flex;
+}
+[data-ui='next'] .nx-segment-btn {
+  align-items:center;
+  gap:var(--space-2xs);
+  height:28px;
+  padding:0 var(--space-sm);
+  border-radius:var(--radius-pill);
+  color:var(--color-muted);
+  font-family:var(--font-body);
+  font-size:var(--text-sm);
+  cursor:pointer;
+  transition:background var(--dur-micro) var(--ease-out), color var(--dur-micro) var(--ease-out), transform var(--dur-micro) var(--ease-out);
+  background:0 0;
+  border:none;
+  font-weight:500;
+  display:inline-flex;
+  position:relative;
+}
+[data-ui='next'] .nx-segment-btn:before {
+  content:"";
+  position:absolute;
+  inset:-8px -6px;
+}
+[data-ui='next'] .nx-segment-btn:hover {
+  color:var(--color-ink);
+}
+[data-ui='next'] .nx-segment-btn:active:not(:disabled) {
+  transform:scale(0.97);
+}
+[data-ui='next'] .nx-segment-btn:focus-visible {
+  outline-offset:-2px;
+}
+[data-ui='next'] .nx-segment-btn-active, [data-ui='next'] .nx-segment-btn-active:hover {
+  background:var(--color-paper-3);
+  color:var(--color-ink);
+}
+[data-ui='next'] .nx-card {
+  background:var(--color-paper-2);
+  border:1px solid var(--color-rule);
+  border-radius:var(--radius-card);
+}
+[data-ui='next'] .nx-card-header {
+  justify-content:space-between;
+  align-items:center;
+  gap:var(--space-sm);
+  padding:var(--space-md) var(--space-md) 0;
+  display:flex;
+}
+[data-ui='next'] .nx-card-title {
+  align-items:center;
+  gap:var(--space-2xs);
+  font-family:var(--font-body);
+  font-size:var(--text-md);
+  font-weight:var(--display-weight);
+  letter-spacing:var(--tracking-display);
+  color:var(--color-ink);
+  display:flex;
+}
+[data-ui='next'] .nx-card-title svg {
+  width:16px;
+  height:16px;
+  color:var(--color-muted);
+}
+[data-ui='next'] .nx-card-actions {
+  align-items:center;
+  gap:var(--space-2xs);
+  display:flex;
+}
+[data-ui='next'] .nx-card-body {
+  gap:var(--space-sm);
+  padding:var(--space-sm) var(--space-md) var(--space-md);
+  flex-direction:column;
+  display:flex;
+}
+[data-ui='next'] .nx-card-section {
+  gap:var(--space-2xs);
+  flex-direction:column;
+  display:flex;
+}
+[data-ui='next'] .nx-card-section-title {
+  font-family:var(--font-body);
+  font-size:var(--text-xs);
+  font-weight:var(--display-weight);
+  color:var(--color-muted);
+}
+[data-ui='next'] .nx-badge {
+  align-items:center;
+  gap:var(--space-2xs);
+  height:24px;
+  padding:0 var(--space-xs);
+  border:1px solid var(--color-rule);
+  border-radius:var(--radius-pill);
+  font-family:var(--font-body);
+  font-size:var(--text-xs);
+  white-space:nowrap;
+  color:var(--color-muted);
+  background:0 0;
+  font-weight:500;
+  line-height:1;
+  display:inline-flex;
+}
+[data-ui='next'] .nx-badge-neutral {
+  color:var(--color-muted);
+}
+[data-ui='next'] .nx-badge-accent {
+  background:var(--color-accent-soft);
+  color:var(--color-accent-on-soft);
+  border-color:#0000;
+}
+[data-ui='next'] .nx-badge-success {
+  background:var(--color-ok-soft);
+  color:var(--color-ok-on-soft);
+  border-color:#0000;
+}
+[data-ui='next'] .nx-badge-warning {
+  background:var(--color-accent-soft);
+  color:var(--color-accent-on-soft);
+  border-color:#0000;
+}
+[data-ui='next'] .nx-badge-danger {
+  background:var(--color-bad-soft);
+  color:var(--color-bad);
+  border-color:#0000;
+}
+[data-ui='next'] .nx-badge-info {
+  background:var(--color-cool-soft);
+  color:var(--color-cool);
+  border-color:#0000;
+}
+[data-ui='next'] .nx-badge-signal {
+  background:var(--color-accent-soft);
+  color:var(--color-accent-on-soft);
+  border-color:#0000;
+}
+[data-ui='next'] .nx-dot {
+  background:var(--color-faint);
+  border-radius:50%;
+  flex-shrink:0;
+  width:8px;
+  height:8px;
+}
+[data-ui='next'] .nx-dot-live {
+  background:var(--color-accent);
+}
+[data-ui='next'] .nx-dot-success {
+  background:var(--color-ok);
+}
+[data-ui='next'] .nx-dot-warning {
+  background:var(--color-accent);
+}
+[data-ui='next'] .nx-dot-danger {
+  background:var(--color-bad);
+}
+[data-ui='next'] .nx-banner {
+  align-items:center;
+  gap:var(--space-2xs);
+  padding:var(--space-xs) var(--space-sm);
+  border-radius:var(--radius-pill);
+  font-size:var(--text-sm);
+  line-height:1.45;
+  display:flex;
+}
+[data-ui='next'] .nx-banner svg {
+  flex-shrink:0;
+  width:15px;
+  height:15px;
+}
+[data-ui='next'] .nx-banner-info {
+  background:var(--color-cool-soft);
+  color:var(--color-cool);
+}
+[data-ui='next'] .nx-banner-warning {
+  background:var(--color-accent-soft);
+  color:var(--color-accent-on-soft);
+}
+[data-ui='next'] .nx-banner-danger {
+  background:var(--color-bad-soft);
+  color:var(--color-bad);
+}
+[data-ui='next'] .nx-banner-success {
+  background:var(--color-ok-soft);
+  color:var(--color-ok-on-soft);
+}
+[data-ui='next'] .nx-banner-neutral {
+  background:var(--color-paper-2);
+  color:var(--color-muted);
+}
+[data-ui='next'] .nx-banner-rec {
+  background:var(--color-accent-soft);
+  color:var(--color-accent-on-soft);
+}
+[data-ui='next'] .nx-list {
+  flex-direction:column;
+  display:flex;
+}
+[data-ui='next'] .nx-list-row {
+  align-items:center;
+  gap:var(--space-sm);
+  padding:var(--space-2xs) var(--space-sm);
+  border-radius:var(--radius-pill);
+  font-size:var(--text-md);
+  transition:background var(--dur-micro) var(--ease-out), transform var(--dur-micro) var(--ease-out);
+  display:flex;
+}
+[data-ui='next'] .nx-list-row:hover {
+  background:var(--color-paper-2);
+}
+[data-ui='next'] .nx-list-row:active:not(:disabled) {
+  transform:scale(0.98);
+}
+[data-ui='next'] .nx-empty {
+  justify-content:center;
+  align-items:center;
+  gap:var(--space-2xs);
+  padding:var(--space-xl) var(--space-md);
+  text-align:center;
+  color:var(--color-muted);
+  flex-direction:column;
+  display:flex;
+}
+[data-ui='next'] .nx-empty svg {
+  width:20px;
+  height:20px;
+  color:var(--color-muted);
+}
+[data-ui='next'] .nx-empty-title {
+  font-family:var(--font-body);
+  font-size:var(--text-md);
+  color:var(--color-ink-2);
+  font-weight:500;
+}
+[data-ui='next'] .nx-empty-hint {
+  font-size:var(--text-sm);
+  max-width:44ch;
+}
+[data-ui='next'] .nx-empty-actions {
+  align-items:center;
+  gap:var(--space-2xs);
+  margin-top:var(--space-2xs);
+  display:flex;
+}
+[data-ui='next'] .nx-label {
+  font-family:var(--font-body);
+  font-size:var(--text-xs);
+  font-weight:var(--display-weight);
+  letter-spacing:var(--tracking-display);
+  color:var(--color-muted);
+  white-space:nowrap;
+}
+[data-ui='next'] .nx-chip {
+  align-items:center;
+  gap:var(--space-2xs);
+  height:24px;
+  padding:0 var(--space-xs);
+  background:var(--color-paper-2);
+  border:1px solid var(--color-rule);
+  border-radius:var(--radius-pill);
+  font-family:var(--font-body);
+  font-size:var(--text-xs);
+  color:var(--color-muted);
+  white-space:nowrap;
+  font-weight:500;
+  display:inline-flex;
+  position:relative;
+}
+[data-ui='next'] .nx-chip .nx-num, [data-ui='next'] .nx-chip.nx-mono {
+  font-size:var(--text-xs);
+}
+[data-ui='next'] .nx-chip-metric .nx-num {
+  color:var(--color-cool);
+}
+[data-ui='next'] .nx-chip-rec .nx-num, [data-ui='next'] .nx-chip-ok .nx-num, [data-ui='next'] .nx-chip-warn .nx-num, [data-ui='next'] .nx-chip-crit .nx-num {
+  color:inherit;
+}
+[data-ui='next'] button.nx-chip {
+  cursor:pointer;
+  transition:border-color var(--dur-micro) var(--ease-out), color var(--dur-micro) var(--ease-out), background var(--dur-micro) var(--ease-out), transform var(--dur-micro) var(--ease-out);
+}
+[data-ui='next'] button.nx-chip:before {
+  content:"";
+  position:absolute;
+  inset:-10px -8px;
+}
+[data-ui='next'] button.nx-chip:hover {
+  border-color:var(--color-muted);
+  color:var(--color-ink);
+}
+[data-ui='next'] button.nx-chip:active:not(:disabled) {
+  transform:scale(0.97);
+}
+[data-ui='next'] .nx-chip-ok {
+  color:var(--color-ok-on-soft);
+  border-color:var(--color-ok);
+}
+@supports (color:color-mix(in lab, red, red)) {
+[data-ui='next'] .nx-chip-ok {
+    border-color:color-mix(in oklab, var(--color-ok) 45%, transparent);
+  }
+}
+[data-ui='next'] .nx-chip-warn {
+  color:var(--color-accent-on-soft);
+  border-color:var(--color-accent);
+}
+@supports (color:color-mix(in lab, red, red)) {
+[data-ui='next'] .nx-chip-warn {
+    border-color:color-mix(in oklab, var(--color-accent) 45%, transparent);
+  }
+}
+[data-ui='next'] .nx-chip-crit {
+  color:var(--color-bad);
+  border-color:var(--color-bad);
+}
+@supports (color:color-mix(in lab, red, red)) {
+[data-ui='next'] .nx-chip-crit {
+    border-color:color-mix(in oklab, var(--color-bad) 45%, transparent);
+  }
+}
+[data-ui='next'] .nx-chip-rec {
+  color:var(--color-accent-on-soft);
+  background:var(--color-accent-soft);
+  border-color:#0000;
+}
+[data-ui='next'] .nx-chip-active {
+  color:var(--color-accent-on-soft);
+  border-color:var(--color-accent);
+}
+@supports (color:color-mix(in lab, red, red)) {
+[data-ui='next'] .nx-chip-active {
+    border-color:color-mix(in oklab, var(--color-accent) 40%, transparent);
+  }
+}
+[data-ui='next'] .nx-chip-active {
+  background:var(--color-accent-soft);
+}
+[data-ui='next'] .nx-led {
+  background:var(--color-faint);
+  border-radius:50%;
+  flex-shrink:0;
+  width:8px;
+  height:8px;
+}
+[data-ui='next'] .nx-led-ok {
+  background:var(--color-ok);
+}
+[data-ui='next'] .nx-led-warn {
+  border:1.5px solid var(--color-accent);
+  background:0 0;
+}
+[data-ui='next'] .nx-led-rec, [data-ui='next'] .nx-led-accent {
+  background:var(--color-accent);
+}
+/* The tally breathes while recording — a slow opacity cycle, not a blink; status Leds stay static by the status discipline. */
+[data-ui='next'] .nx-led-rec {
+  animation:nx-breathe 2.2s var(--ease-inout) infinite;
+}
+[data-ui='next'] .nx-led-danger {
+  background:var(--color-bad);
+}
+[data-ui='next'] .nx-panel {
+  background:var(--color-paper-2);
+  border:1px solid var(--color-rule);
+  border-radius:var(--radius-card);
+}
+[data-ui='next'] .nx-panel-header {
+  align-items:center;
+  gap:var(--space-2xs);
+  row-gap:var(--space-3xs);
+  min-height:40px;
+  padding:var(--space-xs) var(--space-sm);
+  border-bottom:1px solid var(--color-rule);
+  border-radius:var(--radius-card) var(--radius-card) 0 0;
+  flex-wrap:wrap;
+  display:flex;
+}
+[data-ui='next'] .nx-panel-title {
+  text-overflow:ellipsis;
+  min-width:0;
+  font-family:var(--font-body);
+  font-size:var(--text-md);
+  font-weight:var(--display-weight);
+  letter-spacing:var(--tracking-display);
+  color:var(--color-ink);
+  flex:auto;
+  overflow:hidden;
+}
+[data-ui='next'] .nx-panel-code {
+  font-family:var(--font-outlier);
+  font-size:var(--text-2xs);
+  color:var(--color-muted);
+  font-variant-numeric:tabular-nums slashed-zero;
+  font-weight:500;
+}
+[data-ui='next'] .nx-panel-actions {
+  align-items:center;
+  gap:var(--space-2xs);
+  display:flex;
+}
+[data-ui='next'] .nx-panel-body {
+  gap:var(--space-sm);
+  padding:var(--space-md);
+  flex-direction:column;
+  display:flex;
+}
+[data-ui='next'] .nx-panel-body-flush {
+  padding:0;
+}
+[data-ui='next'] .nx-skeleton {
+  background:var(--color-paper-3);
+  border-radius:var(--radius-pill);
+}
+[data-ui='next'] .nx-spinner {
+  border:1.5px solid var(--color-rule-2);
+  border-top-color:var(--color-muted);
+  border-radius:50%;
+  flex-shrink:0;
+  width:14px;
+  height:14px;
+  animation:.7s linear infinite nx-spin;
+}
+[data-ui='next'] .nx-spinner-sm {
+  border-width:1.5px;
+  width:11px;
+  height:11px;
+}
 @keyframes nx-spin {
-  to { transform: rotate(360deg); }
+to {
+    transform:rotate(360deg);
+  }
 }
-
-/* ── Drawer — the slide-over inspector. An overlay: the real shadow,
-   and a slide that answers the hand. ──────────────────────────────── */
-
-.nx-drawer-scrim {
-  position: fixed;
-  inset: 0;
-  z-index: 150;
-  background: var(--nx-scrim);
-  animation: nx-fade-in var(--nx-duration-fast) var(--nx-ease);
+[data-ui='next'] .nx-modal-scrim {
+  z-index:var(--z-modal);
+  padding:var(--space-lg);
+  background:var(--color-scrim);
+  animation:nx-fade-in var(--dur-short) var(--ease-out);
+  justify-content:center;
+  align-items:center;
+  display:flex;
+  position:fixed;
+  inset:0;
 }
-
-.nx-drawer {
-  position: fixed;
-  top: 0;
-  right: 0;
-  bottom: 0;
-  z-index: 151;
-  width: min(360px, 92vw);
-  display: flex;
-  flex-direction: column;
-  background: var(--nx-surface);
-  border-left: 1px solid var(--nx-border-strong);
-  box-shadow: var(--nx-shadow-lg);
-  animation: nx-drawer-in var(--nx-duration) var(--nx-ease);
+[data-ui='next'] .nx-modal {
+  /* Viewport-centered overlay — keeps a center origin, exempt from trigger-origin scaling. */
+  transform-origin:center;
+  background:var(--color-paper-2);
+  border-radius:var(--radius-card);
+  width:min(480px,100%);
+  max-height:90vh;
+  box-shadow:var(--shadow-overlay);
+  overflow-y:auto;
 }
-
-/* The slide: from off-screen, no fade — it arrives like a drawer. */
+@keyframes nx-modal-in {
+0% {
+    opacity:0;
+    transform:translateY(4px) scale(0.97);
+  }
+to {
+    opacity:1;
+    transform:none;
+  }
+}
+[data-ui='next'] .nx-confirm {
+  width:min(400px,100%);
+}
+[data-ui='next'] .nx-confirm-body {
+  gap:var(--space-2xs);
+  padding:var(--space-md) var(--space-lg) 0;
+  flex-direction:column;
+  display:flex;
+}
+[data-ui='next'] .nx-confirm-title {
+  font-family:var(--font-body);
+  font-size:var(--text-md);
+  font-weight:var(--display-weight);
+  letter-spacing:var(--tracking-display);
+  color:var(--color-ink);
+}
+[data-ui='next'] .nx-confirm-message {
+  font-family:var(--font-body);
+  font-size:var(--text-md);
+  color:var(--color-ink-2);
+  line-height:1.5;
+}
+[data-ui='next'] .nx-confirm-actions {
+  justify-content:flex-end;
+  gap:var(--space-2xs);
+  padding:var(--space-md) var(--space-lg) var(--space-lg);
+  display:flex;
+}
+[data-ui=next] .automation-editor-modal, [data-ui=next] .automation-picker-modal, [data-ui=next] .nx-modal {
+  animation:nx-modal-in var(--dur-short) var(--ease-out);
+}
+@keyframes nx-fade-in {
+0% {
+    opacity:0;
+  }
+}
+[data-ui='next'] .nx-drawer-scrim {
+  z-index:var(--z-modal);
+  background:var(--color-scrim);
+  animation:nx-fade-in var(--dur-short) var(--ease-out);
+  position:fixed;
+  inset:0;
+}
+[data-ui='next'] .nx-drawer {
+  z-index:var(--z-modal);
+  background:var(--color-paper-2);
+  width:min(360px,92vw);
+  box-shadow:var(--shadow-overlay);
+  animation:nx-drawer-in var(--dur-long) var(--ease-drawer);
+  flex-direction:column;
+  display:flex;
+  position:fixed;
+  top:0;
+  bottom:0;
+  right:0;
+}
 @keyframes nx-drawer-in {
-  from {
-    transform: translateX(100%);
+0% {
+    transform:translate(100%);
   }
 }
-
-.nx-drawer-header {
-  display: flex;
-  align-items: center;
-  gap: var(--nx-space-2);
-  min-height: 44px;
-  padding: 0 12px;
-  border-bottom: 1px solid var(--nx-border);
+[data-ui='next'] .nx-drawer-header {
+  align-items:center;
+  gap:var(--space-2xs);
+  min-height:44px;
+  padding:0 var(--space-sm);
+  border-bottom:1px solid var(--color-rule);
+  display:flex;
 }
-
-.nx-drawer-body {
-  flex: 1;
-  overflow-y: auto;
-  padding: var(--nx-space-3);
-  display: flex;
-  flex-direction: column;
-  gap: var(--nx-space-3);
+[data-ui='next'] .nx-drawer-body {
+  padding:var(--space-sm);
+  gap:var(--space-sm);
+  flex-direction:column;
+  flex:1;
+  display:flex;
+  overflow-y:auto;
 }
-
-/* ── Toasts — quiet plates with a 2px tone tick, bottom-right stack ── */
-
-.nx-toasts {
-  position: fixed;
-  right: var(--nx-space-4);
-  bottom: var(--nx-space-4);
-  z-index: 300;
-  display: flex;
-  flex-direction: column;
-  gap: var(--nx-space-2);
-  pointer-events: none;
+[data-ui='next'] .nx-toasts {
+  right:var(--space-md);
+  bottom:var(--space-md);
+  z-index:var(--z-toast);
+  gap:var(--space-2xs);
+  pointer-events:none;
+  flex-direction:column;
+  display:flex;
+  position:fixed;
 }
-
-.nx-toast {
-  pointer-events: auto;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  gap: var(--nx-space-2);
-  min-width: 240px;
-  max-width: 360px;
-  padding: 10px 12px;
-  background: var(--nx-surface);
-  border: 1px solid var(--nx-border-strong);
-  border-left: 2px solid var(--nx-text-tertiary);
-  border-radius: var(--nx-radius);
-  box-shadow: var(--nx-shadow-lg);
-  font-size: var(--nx-text-sm);
-  line-height: 1.45;
-  animation: nx-toast-in var(--nx-duration) var(--nx-ease);
+[data-ui='next'] .nx-toast {
+  pointer-events:auto;
+  cursor:pointer;
+  align-items:center;
+  gap:var(--space-2xs);
+  min-width:240px;
+  max-width:360px;
+  padding:var(--space-xs) var(--space-sm);
+  background:var(--color-paper-2);
+  border:1px solid var(--color-muted);
+  border-left:2px solid var(--color-muted);
+  border-radius:var(--radius-pill);
+  font-size:var(--text-sm);
+  /* Toasts stack bottom-right — the rise follows the stack direction. */
+  animation:nx-toast-in 260ms var(--ease-out);
+  line-height:1.45;
+  display:flex;
 }
-
-/* The tick is the tone: info cyan, success green, danger red, warning
-   amber — one meaning each, no tinted washes. */
-.nx-toast-success { border-left-color: var(--nx-success); }
-.nx-toast-danger { border-left-color: var(--nx-danger); }
-.nx-toast-warning { border-left-color: var(--nx-warning); }
-.nx-toast-info { border-left-color: var(--nx-info); }
-
-/* Arrival is a fade — the one autonomous moment in this app is the
-   on-air transition, so a toast doesn't get choreography. */
+[data-ui='next'] .nx-toast-success {
+  border-left-color:var(--color-ok-on-soft);
+}
+[data-ui='next'] .nx-toast-danger {
+  border-left-color:var(--color-bad);
+}
+[data-ui='next'] .nx-toast-warning {
+  border-left-color:var(--color-accent-on-soft);
+}
+[data-ui='next'] .nx-toast-info {
+  border-left-color:var(--color-cool);
+}
+/* Exit — faster than the entrance, dropping toward the bottom of the stack. */
+[data-ui='next'] .nx-toast-exit {
+  animation:nx-toast-out 180ms var(--ease-out) forwards;
+}
+@keyframes nx-toast-out {
+to {
+    opacity:0;
+    transform:translateY(6px);
+  }
+}
 @keyframes nx-toast-in {
-  from { opacity: 0; }
-}
-
-/* On phones the fixed bottom-right stack lands on the labelled tab bar
-   (58px, plus its safe-area padding) — lift the stack above it and let
-   the cards span the content width. */
-@media (max-width: 767px) {
-  .nx-toasts {
-    left: var(--nx-space-3);
-    right: var(--nx-space-3);
-    bottom: calc(58px + env(safe-area-inset-bottom, 0px) + var(--nx-space-2));
+0% {
+    opacity:0;
+    transform:translateY(10px);
   }
-
-  .nx-toast {
-    max-width: none;
-    width: 100%;
+}
+@media (width<=767px) {
+[data-ui='next'] .nx-toasts {
+    left:var(--space-sm);
+    right:var(--space-sm);
+    bottom:calc(58px + env(safe-area-inset-bottom,0px) + var(--space-2xs));
+  }
+[data-ui='next'] .nx-toast {
+    width:100%;
+    max-width:none;
+  }
+}
+@media (prefers-reduced-motion:reduce) {
+[data-ui='next'] .nx-btn, [data-ui='next'] .nx-chip, [data-ui='next'] .nx-side-item, [data-ui='next'] .nx-modal, [data-ui='next'] .nx-drawer, [data-ui='next'] .nx-toast {
+    transition:none;
   }
 }

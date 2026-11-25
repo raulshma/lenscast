@@ -27,6 +27,12 @@ import '@fontsource/golos-text/latin-600.css'
 import '@fontsource/golos-text/cyrillic-400.css'
 import '@fontsource/golos-text/cyrillic-500.css'
 import '@fontsource/golos-text/cyrillic-600.css'
+// Atkinson Hyperlegible Mono: the next console's measured face (Console
+// theme). Latin-only content by nature; ru falls back to JetBrains Mono
+// below it, which carries cyrillic.
+import '@fontsource/atkinson-hyperlegible-mono/latin-400.css'
+import '@fontsource/atkinson-hyperlegible-mono/latin-500.css'
+import '@fontsource/atkinson-hyperlegible-mono/latin-600.css'
 
 import { render } from 'solid-js/web'
 import App from './App'

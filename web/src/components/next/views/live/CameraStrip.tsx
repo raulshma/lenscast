@@ -53,7 +53,6 @@ export default function CameraStrip(props: { state: NextState }) {
           <IconButton
             label={t('cam.zoomOut')}
             variant="ghost"
-            size="sm"
             disabled={locked()}
             title={lockTitle() ?? t('cam.zoomOut')}
             onClick={cam.zoomOut}
@@ -72,7 +71,6 @@ export default function CameraStrip(props: { state: NextState }) {
           <IconButton
             label={t('cam.zoomIn')}
             variant="ghost"
-            size="sm"
             disabled={locked()}
             title={lockTitle() ?? t('cam.zoomIn')}
             onClick={cam.zoomIn}
@@ -117,7 +115,6 @@ export default function CameraStrip(props: { state: NextState }) {
           <IconButton
             label={t('cam.exposureLower')}
             variant="ghost"
-            size="sm"
             disabled={locked()}
             title={lockTitle() ?? t('cam.exposureLower')}
             onClick={() => cam.stepExposure(-1)}
@@ -130,7 +127,6 @@ export default function CameraStrip(props: { state: NextState }) {
           <IconButton
             label={t('cam.exposureRaise')}
             variant="ghost"
-            size="sm"
             disabled={locked()}
             title={lockTitle() ?? t('cam.exposureRaise')}
             onClick={() => cam.stepExposure(1)}
@@ -165,7 +161,6 @@ export default function CameraStrip(props: { state: NextState }) {
         <IconButton
           label={cam.torchOn() ? t('preview.torchOn') : t('preview.torch')}
           variant={cam.torchOn() ? 'toggled' : 'ghost'}
-          size="sm"
           ariaPressed={cam.torchOn()}
           disabled={locked()}
           title={lockTitle() ?? t('preview.torchTitle')}
@@ -177,7 +172,6 @@ export default function CameraStrip(props: { state: NextState }) {
         <IconButton
           label={t('cam.collapse')}
           variant="ghost"
-          size="sm"
           ariaExpanded={true}
           onClick={cam.toggleCollapsed}
         >

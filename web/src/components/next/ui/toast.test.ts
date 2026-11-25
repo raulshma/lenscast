@@ -28,6 +28,8 @@ describe('toast store', () => {
     pushToast('success', 'bye', 1000)
     expect(toastList()).toHaveLength(1)
     vi.advanceTimersByTime(1001)
+    expect(toastList()[0].exiting).toBe(true)
+    vi.advanceTimersByTime(190)
     expect(toastList()).toHaveLength(0)
   })
 
@@ -39,10 +41,26 @@ describe('toast store', () => {
     expect(list[3].message).toBe('m7')
   })
 
-  it('dismisses by id', () => {
+  it('dismisses by id through the exit window', () => {
     pushToast('info', 'a')
     const id = toastList()[0].id
     dismissToast(id)
+    // The exit holds the toast in place (layout does not collapse)…
+    expect(toastList()).toHaveLength(1)
+    expect(toastList()[0].exiting).toBe(true)
+    // …then the timer removes it once the window has elapsed.
+    vi.advanceTimersByTime(190)
+    expect(toastList()).toHaveLength(0)
+  })
+
+  it('never double-schedules an exiting toast', () => {
+    pushToast('info', 'a')
+    const id = toastList()[0].id
+    dismissToast(id)
+    const scheduled = vi.getTimerCount()
+    dismissToast(id)
+    expect(vi.getTimerCount()).toBe(scheduled)
+    vi.advanceTimersByTime(190)
     expect(toastList()).toHaveLength(0)
   })
 })

@@ -726,4 +726,106 @@ class CameraControlPlanTest {
             plan.unsupported,
         )
     }
+
+    // ── target FPS range resolution ──
+
+    @Test
+    fun `null or empty target fps ranges keep requested range without reporting unsupported`() {
+        val settings = CameraSettings(frameRate = 60)
+        val fromNull = planFor(settings, CaptureSupport(targetFpsRanges = null))
+        assertEquals(60, fromNull.fpsLower)
+        assertEquals(60, fromNull.fpsUpper)
+        assertTrue(fromNull.unsupported.isEmpty())
+
+        val fromEmpty = planFor(settings, CaptureSupport(targetFpsRanges = emptySet()))
+        assertEquals(60, fromEmpty.fpsLower)
+        assertEquals(60, fromEmpty.fpsUpper)
+        assertTrue(fromEmpty.unsupported.isEmpty())
+    }
+
+    @Test
+    fun `exact target fps range match passes through without reporting unsupported`() {
+        val plan = planFor(
+            CameraSettings(frameRate = 60),
+            CaptureSupport(
+                targetFpsRanges = setOf(
+                    CaptureSupport.FpsRange(30, 30),
+                    CaptureSupport.FpsRange(30, 60),
+                    CaptureSupport.FpsRange(60, 60),
+                ),
+            ),
+        )
+        assertEquals(60, plan.fpsLower)
+        assertEquals(60, plan.fpsUpper)
+        assertTrue(plan.unsupported.isEmpty())
+    }
+
+    @Test
+    fun `when exact fps range is absent but upper is reachable, picks min upper with max lower at or below requested`() {
+        val plan = planFor(
+            CameraSettings(frameRate = 60),
+            CaptureSupport(
+                targetFpsRanges = setOf(
+                    CaptureSupport.FpsRange(7, 60),
+                    CaptureSupport.FpsRange(15, 60),
+                    CaptureSupport.FpsRange(30, 60),
+                    CaptureSupport.FpsRange(30, 120),
+                ),
+            ),
+        )
+        assertEquals(30, plan.fpsLower)
+        assertEquals(60, plan.fpsUpper)
+        assertTrue(plan.unsupported.isEmpty())
+    }
+
+    @Test
+    fun `when reaching upper only has ranges with lower above requested, picks minimum lower`() {
+        val plan = planFor(
+            CameraSettings(frameRate = 24),
+            CaptureSupport(
+                targetFpsRanges = setOf(
+                    CaptureSupport.FpsRange(25, 30),
+                    CaptureSupport.FpsRange(30, 30),
+                    CaptureSupport.FpsRange(60, 60),
+                ),
+            ),
+        )
+        assertEquals(25, plan.fpsLower)
+        assertEquals(30, plan.fpsUpper)
+        assertTrue(plan.unsupported.isEmpty())
+    }
+
+    @Test
+    fun `when device max fps is below requested, picks highest upper and marks unsupported`() {
+        val plan = planFor(
+            CameraSettings(frameRate = 60),
+            CaptureSupport(
+                targetFpsRanges = setOf(
+                    CaptureSupport.FpsRange(15, 15),
+                    CaptureSupport.FpsRange(7, 30),
+                    CaptureSupport.FpsRange(30, 30),
+                ),
+            ),
+        )
+        assertEquals(30, plan.fpsLower)
+        assertEquals(30, plan.fpsUpper)
+        assertEquals(listOf(CameraControlPlan.UNSUPPORTED_FPS_RANGE), plan.unsupported)
+    }
+
+    @Test
+    fun `when device max fps is below requested and all lowers exceed requested lower, picks min lower`() {
+        val plan = planFor(
+            CameraSettings(frameRate = 15, nightVisionMode = NightVisionMode.ON),
+            CaptureSupport(
+                sceneModes = setOf(CaptureRequest.CONTROL_SCENE_MODE_NIGHT),
+                targetFpsRanges = setOf(
+                    CaptureSupport.FpsRange(12, 14),
+                    CaptureSupport.FpsRange(14, 14),
+                ),
+            ),
+        )
+        assertEquals(12, plan.fpsLower)
+        assertEquals(14, plan.fpsUpper)
+        assertEquals(listOf(CameraControlPlan.UNSUPPORTED_FPS_RANGE), plan.unsupported)
+    }
 }

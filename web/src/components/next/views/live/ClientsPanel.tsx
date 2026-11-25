@@ -103,9 +103,14 @@ export default function ClientsPanel(props: { readOnly?: () => boolean } = {}) {
             )}
           </For>
         </ul>
-        <div class="nx-field-hint">
-          {t('clients.slotsInUse', { used: clients()!.httpCount, max: clients()!.maxHttp })}
-        </div>
+        {/* The slot line is a fact, not chrome: with no answer from the
+            rig (fields missing on the wire) the line withholds itself
+            rather than printing undefined for a measurement. */}
+        <Show when={Number.isFinite(clients()!.httpCount) && Number.isFinite(clients()!.maxHttp)}>
+          <div class="nx-field-hint">
+            {t('clients.slotsInUse', { used: clients()!.httpCount, max: clients()!.maxHttp })}
+          </div>
+        </Show>
       </Show>
     </Panel>
   )

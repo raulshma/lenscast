@@ -50,6 +50,8 @@ object CaptureReadbackPolicy {
         val sensorSensitivity: Int?,
         val sensorExposureTimeNs: Long?,
         val sceneMode: Int,
+        val fpsLower: Int? = null,
+        val fpsUpper: Int? = null,
     )
 
     /** What one capture result reported; null means the device did not report that key. */
@@ -58,6 +60,8 @@ object CaptureReadbackPolicy {
         val sensorSensitivity: Int?,
         val sensorExposureTimeNs: Long?,
         val sceneMode: Int?,
+        val fpsLower: Int? = null,
+        val fpsUpper: Int? = null,
     )
 
     enum class Verdict {
@@ -83,6 +87,8 @@ object CaptureReadbackPolicy {
         sensorSensitivity = plan.sensorSensitivity,
         sensorExposureTimeNs = plan.sensorExposureTimeNs,
         sceneMode = plan.sceneMode,
+        fpsLower = plan.fpsLower,
+        fpsUpper = plan.fpsUpper,
     )
 
     /**
@@ -93,12 +99,18 @@ object CaptureReadbackPolicy {
      * take no tolerance — there is no "near" mode; ISO and shutter are
      * accepted within [SENSOR_TOLERANCE_PERCENT] of the request. A missing
      * value is [Verdict.Unknown] — neither a match nor a mismatch may be
-     * claimed from what the device did not say.
+     * claimed from what the device did not say. When both expected and
+     * reported carry an AE target fps range, it must match exactly.
      */
     fun compare(expected: Expected, reported: Reported): Verdict {
         if (reported.aeMode == null || reported.sceneMode == null) return Verdict.Unknown
         val modesMatch = reported.aeMode == expected.aeMode && reported.sceneMode == expected.sceneMode
-        if (!pinsSensor(expected)) return if (modesMatch) Verdict.Match else Verdict.Mismatch
+        val fpsMatches = if (showFps(expected, reported)) {
+            reported.fpsLower == expected.fpsLower && reported.fpsUpper == expected.fpsUpper
+        } else {
+            true
+        }
+        if (!pinsSensor(expected)) return if (modesMatch && fpsMatches) Verdict.Match else Verdict.Mismatch
 
         val requestedSensitivity = expected.sensorSensitivity ?: return Verdict.Unknown
         val requestedExposureTimeNs = expected.sensorExposureTimeNs ?: return Verdict.Unknown
@@ -106,7 +118,7 @@ object CaptureReadbackPolicy {
         val deviceExposureTimeNs = reported.sensorExposureTimeNs ?: return Verdict.Unknown
         val sensorMatches = withinTolerance(requestedSensitivity, deviceSensitivity) &&
             withinTolerance(requestedExposureTimeNs, deviceExposureTimeNs)
-        return if (modesMatch && sensorMatches) Verdict.Match else Verdict.Mismatch
+        return if (modesMatch && fpsMatches && sensorMatches) Verdict.Match else Verdict.Mismatch
     }
 
     /** Whether [device] sits within [SENSOR_TOLERANCE_PERCENT] of [requested]. Whole-number maths: the boundary does not round. */
@@ -120,8 +132,13 @@ object CaptureReadbackPolicy {
     fun ok(expected: Expected): Line = Line(Level.Info, LOG_PREFIX + "ok (${describe(expected)})")
 
     /** The device reports values other than the submitted ones. */
-    fun mismatch(expected: Expected, reported: Reported): Line =
-        Line(Level.Warning, LOG_PREFIX + "MISMATCH requested ${describe(expected)} | device ${describe(expected, reported)}")
+    fun mismatch(expected: Expected, reported: Reported): Line {
+        val includeFps = showFps(expected, reported)
+        return Line(
+            Level.Warning,
+            LOG_PREFIX + "MISMATCH requested ${describe(expected, includeFps)} | device ${describe(expected, reported, includeFps)}",
+        )
+    }
 
     /**
      * The window closed without a conclusive sample: either no capture
@@ -129,9 +146,10 @@ object CaptureReadbackPolicy {
      * from every one that did.
      */
     fun unknown(expected: Expected, reported: Reported?): Line {
-        val device = reported?.let { describe(expected, it) }
+        val includeFps = showFps(expected, reported)
+        val device = reported?.let { describe(expected, it, includeFps) }
             ?: "reported no capture result within ${TIMEOUT_MS}ms"
-        return Line(Level.Warning, LOG_PREFIX + "UNKNOWN requested ${describe(expected)} | device $device")
+        return Line(Level.Warning, LOG_PREFIX + "UNKNOWN requested ${describe(expected, includeFps)} | device $device")
     }
 
     /**
@@ -141,22 +159,32 @@ object CaptureReadbackPolicy {
      */
     fun disabled(): Line = Line(Level.Warning, LOG_PREFIX + "disabled — the capture-result hook failed")
 
+    private fun showFps(expected: Expected, reported: Reported?): Boolean =
+        expected.fpsLower != null && expected.fpsUpper != null &&
+            reported?.fpsLower != null && reported.fpsUpper != null
+
     /** The requested side: `AE=OFF ISO=3200 exp=100000000ns scene=NIGHT`. */
-    private fun describe(expected: Expected): String = describe(
+    private fun describe(expected: Expected, includeFps: Boolean = false): String = describe(
         aeMode = expected.aeMode,
         sensorSensitivity = expected.sensorSensitivity,
         sensorExposureTimeNs = expected.sensorExposureTimeNs,
         sceneMode = expected.sceneMode,
+        fpsLower = expected.fpsLower,
+        fpsUpper = expected.fpsUpper,
         expected = expected,
+        includeFps = includeFps,
     )
 
     /** The device side of a line, under the same predicate as the requested side. */
-    private fun describe(expected: Expected, reported: Reported): String = describe(
+    private fun describe(expected: Expected, reported: Reported, includeFps: Boolean): String = describe(
         aeMode = reported.aeMode,
         sensorSensitivity = reported.sensorSensitivity,
         sensorExposureTimeNs = reported.sensorExposureTimeNs,
         sceneMode = reported.sceneMode,
+        fpsLower = reported.fpsLower,
+        fpsUpper = reported.fpsUpper,
         expected = expected,
+        includeFps = includeFps,
     )
 
     /**
@@ -169,10 +197,14 @@ object CaptureReadbackPolicy {
         sensorSensitivity: Int?,
         sensorExposureTimeNs: Long?,
         sceneMode: Int?,
+        fpsLower: Int?,
+        fpsUpper: Int?,
         expected: Expected,
+        includeFps: Boolean,
     ): String {
         val sensor = if (pinsSensor(expected)) " ISO=${sensorSensitivity ?: "null"} exp=${sensorExposureTimeNs ?: "null"}ns" else ""
-        return "AE=${aeModeName(aeMode)}$sensor scene=${sceneModeName(sceneMode)}"
+        val fps = if (includeFps) " fps=[${fpsLower ?: "null"}..${fpsUpper ?: "null"}]" else ""
+        return "AE=${aeModeName(aeMode)}$sensor scene=${sceneModeName(sceneMode)}$fps"
     }
 
     /** Whether the plan pins the sensor: only a manual plan (AE OFF) submits ISO and shutter. */

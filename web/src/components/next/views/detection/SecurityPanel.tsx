@@ -45,10 +45,13 @@ function webhookHeadersWarning(value: string | undefined): string {
 }
 
 /**
- * Security arming, ported from the classic SecurityCard onto the kit with
- * every binding unchanged: motion (zones + sensitivity + schedule + recording
- * trigger), sound, ML object detection, continuous recording, alerts and
- * tamper, webhook alerting, and the deterrence actions (siren + torch).
+ * Security arming — the config layer under the news, ported from the
+ * classic SecurityCard onto the kit with every binding unchanged: motion
+ * (zones + sensitivity + schedule + recording trigger), sound, ML object
+ * detection, continuous recording, alerts and tamper, webhook alerting,
+ * and the deterrence actions (siren + torch). The long form reads as one
+ * surface divided into unlabelled hairline sections; Send Test Alert sits
+ * in the form's action row as a quiet secondary verb beside its result.
  */
 export default function SecurityPanel(props: Props) {
   const s = () => props.settings()
@@ -200,398 +203,418 @@ export default function SecurityPanel(props: Props) {
   return (
     <Panel title={t('security.title')}>
       {/* Motion */}
-      <ToggleField
-        label={t('security.motion')}
-        checked={motionOn()}
-        onChange={() => props.updateStreamingAndSave({ motionDetectionEnabled: !motionOn() })}
-      />
-
-      <Show when={motionOn()}>
-        <SliderField
-          label={t('security.sensitivity')}
-          display={`${stream()?.motionSensitivityPercent ?? API_DEFAULTS.motionSensitivityPercent}%`}
-          min={1}
-          max={100}
-          step={1}
-          value={stream()?.motionSensitivityPercent ?? API_DEFAULTS.motionSensitivityPercent}
-          onChange={(v) => props.updateStreamingDebounced({ motionSensitivityPercent: v })}
-        />
-        <SliderField
-          label={t('security.cooldown')}
-          display={`${stream()?.motionCooldownSeconds ?? API_DEFAULTS.motionCooldownSeconds}s`}
-          min={API_DEFAULTS.detectionCooldownMinSeconds}
-          max={API_DEFAULTS.detectionCooldownMaxSeconds}
-          step={1}
-          value={stream()?.motionCooldownSeconds ?? API_DEFAULTS.motionCooldownSeconds}
-          onChange={(v) => props.updateStreamingDebounced({ motionCooldownSeconds: v })}
-        />
-
+      <div class="nx-security-section">
         <ToggleField
-          label={t('security.recordOnMotion')}
-          checked={motionRecordingOn()}
-          onChange={() => props.updateStreamingAndSave({ motionRecordingEnabled: !motionRecordingOn() })}
+          label={t('security.motion')}
+          checked={motionOn()}
+          onChange={() => props.updateStreamingAndSave({ motionDetectionEnabled: !motionOn() })}
         />
-        <Show when={motionRecordingOn()}>
-          <SliderField
-            label={t('security.postRoll')}
-            display={`${stream()?.motionPostRollSeconds ?? API_DEFAULTS.motionPostRollSeconds}s`}
-            min={0}
-            max={120}
-            step={5}
-            value={stream()?.motionPostRollSeconds ?? API_DEFAULTS.motionPostRollSeconds}
-            onChange={(v) => props.updateStreamingDebounced({ motionPostRollSeconds: v })}
-          />
-        </Show>
 
-        {/* Arm schedule */}
-        <ToggleField
-          label={t('security.armSchedule')}
-          checked={armScheduleOn()}
-          onChange={() => props.updateStreamingAndSave({ motionArmScheduleEnabled: !armScheduleOn() })}
-        />
-        <Show when={armScheduleOn()}>
+        <Show when={motionOn()}>
           <SliderField
-            label={t('security.from')}
-            display={minutesToLabel(stream()?.motionArmStartMinute ?? API_DEFAULTS.motionArmStartMinute)}
-            min={0}
-            max={MINUTES_PER_DAY - 1}
-            step={15}
-            value={stream()?.motionArmStartMinute ?? API_DEFAULTS.motionArmStartMinute}
-            onChange={(v) => props.updateStreamingDebounced({ motionArmStartMinute: v })}
+            label={t('security.sensitivity')}
+            display={`${stream()?.motionSensitivityPercent ?? API_DEFAULTS.motionSensitivityPercent}%`}
+            min={1}
+            max={100}
+            step={1}
+            value={stream()?.motionSensitivityPercent ?? API_DEFAULTS.motionSensitivityPercent}
+            onChange={(v) => props.updateStreamingDebounced({ motionSensitivityPercent: v })}
           />
           <SliderField
-            label={t('security.until')}
-            display={minutesToLabel(stream()?.motionArmEndMinute ?? API_DEFAULTS.motionArmEndMinute)}
-            min={0}
-            max={MINUTES_PER_DAY - 1}
-            step={15}
-            value={stream()?.motionArmEndMinute ?? API_DEFAULTS.motionArmEndMinute}
-            onChange={(v) => props.updateStreamingDebounced({ motionArmEndMinute: v })}
+            label={t('security.cooldown')}
+            display={`${stream()?.motionCooldownSeconds ?? API_DEFAULTS.motionCooldownSeconds}s`}
+            min={API_DEFAULTS.detectionCooldownMinSeconds}
+            max={API_DEFAULTS.detectionCooldownMaxSeconds}
+            step={1}
+            value={stream()?.motionCooldownSeconds ?? API_DEFAULTS.motionCooldownSeconds}
+            onChange={(v) => props.updateStreamingDebounced({ motionCooldownSeconds: v })}
           />
-          <div class="nx-arm-days" role="group" aria-label={t('security.armDaysAria')}>
-            <For each={[0, 1, 2, 3, 4, 5, 6]}>
-              {(day) => (
-                <button
-                  type="button"
-                  class="nx-daychip"
-                  classList={{ 'nx-daychip-active': isDayArmed(armDaysMask(), day) }}
-                  onClick={() => toggleArmDay(day)}
-                >
-                  {t(automationDayLabelKey(day))}
-                </button>
-              )}
-            </For>
-          </div>
-          {/* The schedule restated as a plain sentence — the toggles stay
-              compact, this line carries the reading: days, then the window.
-              Equal bounds arm the whole day (isArmed's never-restricts
-              verdict), so the interval reads as the all-day label instead
-              of a nonsensical "14:00–14:00". */}
-          <div class="nx-arm-summary">
-            <span>
-              {isEveryDayMask(armDaysMask())
-                ? t('automation.daysEveryDay')
-                : dayListLabel(armDaysMask(), t)}
-            </span>
-            <span class="nx-arm-summary-time nx-mono">
-              {armStartMinute() === armEndMinute()
-                ? t('security.allDay')
-                : `${minutesToLabel(armStartMinute())}–${minutesToLabel(armEndMinute())}`}
-            </span>
-          </div>
-        </Show>
 
-        {/* Detection zones */}
-        <FieldRow label={t('security.zones')}>
-          <Button size="sm" variant="ghost" onClick={addZone} ariaLabel={t('security.addZone')}>
-            {t('security.addZone')}
-          </Button>
-        </FieldRow>
-        <Show when={zones().length === 0}>
-          <Empty title={t('security.noZones')} />
-        </Show>
-        <For each={zones()}>
-          {(zone) => (
-            <div class="nx-zone-row">
-              <span class="nx-mono nx-zone-rect" title={zone.label}>
-                ({zone.x.toFixed(2)}, {zone.y.toFixed(2)}) {zone.width.toFixed(2)}×{zone.height.toFixed(2)}
-              </span>
-              <div class="nx-zone-actions">
-                <label class="nx-switch" title={t('security.enableZone')}>
-                  <input
-                    type="checkbox"
-                    checked={zone.enabled}
-                    aria-label={t('security.enableZone')}
-                    onChange={() => patchZone(zone.id, { enabled: !zone.enabled })}
-                  />
-                  <span class="nx-switch-track" aria-hidden="true" />
-                  <span class="nx-switch-thumb" aria-hidden="true" />
-                </label>
-                <Button size="sm" variant="danger-soft" onClick={() => removeZone(zone.id)} ariaLabel={t('security.remove')}>
-                  {t('security.remove')}
-                </Button>
-              </div>
+          <ToggleField
+            label={t('security.recordOnMotion')}
+            checked={motionRecordingOn()}
+            onChange={() => props.updateStreamingAndSave({ motionRecordingEnabled: !motionRecordingOn() })}
+          />
+          <Show when={motionRecordingOn()}>
+            <SliderField
+              label={t('security.postRoll')}
+              display={`${stream()?.motionPostRollSeconds ?? API_DEFAULTS.motionPostRollSeconds}s`}
+              min={0}
+              max={120}
+              step={5}
+              value={stream()?.motionPostRollSeconds ?? API_DEFAULTS.motionPostRollSeconds}
+              onChange={(v) => props.updateStreamingDebounced({ motionPostRollSeconds: v })}
+            />
+          </Show>
+
+          {/* Arm schedule */}
+          <ToggleField
+            label={t('security.armSchedule')}
+            checked={armScheduleOn()}
+            onChange={() => props.updateStreamingAndSave({ motionArmScheduleEnabled: !armScheduleOn() })}
+          />
+          <Show when={armScheduleOn()}>
+            <SliderField
+              label={t('security.from')}
+              display={minutesToLabel(stream()?.motionArmStartMinute ?? API_DEFAULTS.motionArmStartMinute)}
+              min={0}
+              max={MINUTES_PER_DAY - 1}
+              step={15}
+              value={stream()?.motionArmStartMinute ?? API_DEFAULTS.motionArmStartMinute}
+              onChange={(v) => props.updateStreamingDebounced({ motionArmStartMinute: v })}
+            />
+            <SliderField
+              label={t('security.until')}
+              display={minutesToLabel(stream()?.motionArmEndMinute ?? API_DEFAULTS.motionArmEndMinute)}
+              min={0}
+              max={MINUTES_PER_DAY - 1}
+              step={15}
+              value={stream()?.motionArmEndMinute ?? API_DEFAULTS.motionArmEndMinute}
+              onChange={(v) => props.updateStreamingDebounced({ motionArmEndMinute: v })}
+            />
+            {/* The chips are the wired controls; the sentence below carries
+                the reading — the schedule stays prose, not a chip wall. */}
+            <div class="nx-arm-days" role="group" aria-label={t('security.armDaysAria')}>
+              <For each={[0, 1, 2, 3, 4, 5, 6]}>
+                {(day) => (
+                  <button
+                    type="button"
+                    class="nx-daychip"
+                    classList={{ 'nx-daychip-active': isDayArmed(armDaysMask(), day) }}
+                    onClick={() => toggleArmDay(day)}
+                  >
+                    {t(automationDayLabelKey(day))}
+                  </button>
+                )}
+              </For>
             </div>
-          )}
-        </For>
-      </Show>
+            {/* The schedule restated as a plain sentence — days, then the
+                window. Equal bounds arm the whole day (isArmed's
+                never-restricts verdict), so the interval reads as the
+                all-day label instead of a nonsensical "14:00–14:00". */}
+            <div class="nx-arm-summary">
+              <span>
+                {isEveryDayMask(armDaysMask())
+                  ? t('automation.daysEveryDay')
+                  : dayListLabel(armDaysMask(), t)}
+              </span>
+              <span class="nx-arm-summary-time nx-mono">
+                {armStartMinute() === armEndMinute()
+                  ? t('security.allDay')
+                  : `${minutesToLabel(armStartMinute())}–${minutesToLabel(armEndMinute())}`}
+              </span>
+            </div>
+          </Show>
+
+          {/* Detection zones */}
+          <FieldRow label={t('security.zones')}>
+            <Button size="sm" variant="ghost" onClick={addZone} ariaLabel={t('security.addZone')}>
+              {t('security.addZone')}
+            </Button>
+          </FieldRow>
+          <Show when={zones().length === 0}>
+            <Empty title={t('security.noZones')} />
+          </Show>
+          <For each={zones()}>
+            {(zone) => (
+              <div class="nx-zone-row">
+                <span class="nx-mono nx-zone-rect" title={zone.label}>
+                  ({zone.x.toFixed(2)}, {zone.y.toFixed(2)}) {zone.width.toFixed(2)}×{zone.height.toFixed(2)}
+                </span>
+                <div class="nx-zone-actions">
+                  <label class="nx-switch" title={t('security.enableZone')}>
+                    <input
+                      type="checkbox"
+                      checked={zone.enabled}
+                      aria-label={t('security.enableZone')}
+                      onChange={() => patchZone(zone.id, { enabled: !zone.enabled })}
+                    />
+                    <span class="nx-switch-track" aria-hidden="true" />
+                    <span class="nx-switch-thumb" aria-hidden="true" />
+                  </label>
+                  <Button size="sm" variant="danger-soft" onClick={() => removeZone(zone.id)} ariaLabel={t('security.remove')}>
+                    {t('security.remove')}
+                  </Button>
+                </div>
+              </div>
+            )}
+          </For>
+        </Show>
+      </div>
 
       {/* Sound */}
-      <ToggleField
-        label={t('security.sound')}
-        checked={soundOn()}
-        onChange={() => props.updateStreamingAndSave({ soundDetectionEnabled: !soundOn() })}
-      />
-      <Show when={soundOn()}>
-        <SliderField
-          label={t('security.threshold')}
-          display={`${stream()?.soundThresholdPercent ?? API_DEFAULTS.soundThresholdPercent}%`}
-          min={1}
-          max={100}
-          step={1}
-          value={stream()?.soundThresholdPercent ?? API_DEFAULTS.soundThresholdPercent}
-          onChange={(v) => props.updateStreamingDebounced({ soundThresholdPercent: v })}
-        />
+      <div class="nx-security-section">
         <ToggleField
-          label={t('security.adaptiveFloor')}
-          hint={stream()?.soundAdaptiveNoiseFloor ? t('security.adaptiveFloorDesc') : undefined}
-          checked={stream()?.soundAdaptiveNoiseFloor ?? API_DEFAULTS.soundAdaptiveNoiseFloor}
-          onChange={() =>
-            props.updateStreamingAndSave({
-              soundAdaptiveNoiseFloor: !(stream()?.soundAdaptiveNoiseFloor ?? API_DEFAULTS.soundAdaptiveNoiseFloor),
-            })
-          }
+          label={t('security.sound')}
+          checked={soundOn()}
+          onChange={() => props.updateStreamingAndSave({ soundDetectionEnabled: !soundOn() })}
         />
-        <SliderField
-          label={t('security.cooldown')}
-          display={`${stream()?.soundCooldownSeconds ?? API_DEFAULTS.soundCooldownSeconds}s`}
-          min={API_DEFAULTS.detectionCooldownMinSeconds}
-          max={API_DEFAULTS.detectionCooldownMaxSeconds}
-          step={1}
-          value={stream()?.soundCooldownSeconds ?? API_DEFAULTS.soundCooldownSeconds}
-          onChange={(v) => props.updateStreamingDebounced({ soundCooldownSeconds: v })}
-        />
-        <ToggleField
-          label={t('security.recordOnSound')}
-          hint={soundRecordingOn() ? t('security.recordOnSoundDesc') : undefined}
-          checked={soundRecordingOn()}
-          onChange={() => props.updateStreamingAndSave({ soundRecordingEnabled: !soundRecordingOn() })}
-        />
-      </Show>
+        <Show when={soundOn()}>
+          <SliderField
+            label={t('security.threshold')}
+            display={`${stream()?.soundThresholdPercent ?? API_DEFAULTS.soundThresholdPercent}%`}
+            min={1}
+            max={100}
+            step={1}
+            value={stream()?.soundThresholdPercent ?? API_DEFAULTS.soundThresholdPercent}
+            onChange={(v) => props.updateStreamingDebounced({ soundThresholdPercent: v })}
+          />
+          <ToggleField
+            label={t('security.adaptiveFloor')}
+            hint={stream()?.soundAdaptiveNoiseFloor ? t('security.adaptiveFloorDesc') : undefined}
+            checked={stream()?.soundAdaptiveNoiseFloor ?? API_DEFAULTS.soundAdaptiveNoiseFloor}
+            onChange={() =>
+              props.updateStreamingAndSave({
+                soundAdaptiveNoiseFloor: !(stream()?.soundAdaptiveNoiseFloor ?? API_DEFAULTS.soundAdaptiveNoiseFloor),
+              })
+            }
+          />
+          <SliderField
+            label={t('security.cooldown')}
+            display={`${stream()?.soundCooldownSeconds ?? API_DEFAULTS.soundCooldownSeconds}s`}
+            min={API_DEFAULTS.detectionCooldownMinSeconds}
+            max={API_DEFAULTS.detectionCooldownMaxSeconds}
+            step={1}
+            value={stream()?.soundCooldownSeconds ?? API_DEFAULTS.soundCooldownSeconds}
+            onChange={(v) => props.updateStreamingDebounced({ soundCooldownSeconds: v })}
+          />
+          <ToggleField
+            label={t('security.recordOnSound')}
+            hint={soundRecordingOn() ? t('security.recordOnSoundDesc') : undefined}
+            checked={soundRecordingOn()}
+            onChange={() => props.updateStreamingAndSave({ soundRecordingEnabled: !soundRecordingOn() })}
+          />
+        </Show>
+      </div>
 
       {/* Object detection (ML) */}
-      <ToggleField
-        label={t('security.ml')}
-        hint={t('security.mlDesc')}
-        checked={mlOn()}
-        onChange={() => props.updateStreamingAndSave({ mlDetectionEnabled: !mlOn() })}
-      />
-      <SliderField
-        label={t('security.minConfidence')}
-        display={`${stream()?.mlMinScorePercent ?? API_DEFAULTS.mlMinScorePercent}%`}
-        min={API_DEFAULTS.mlMinScoreMinPercent}
-        max={API_DEFAULTS.mlMinScoreMaxPercent}
-        step={5}
-        disabled={!mlOn()}
-        value={stream()?.mlMinScorePercent ?? API_DEFAULTS.mlMinScorePercent}
-        onChange={(v) => props.updateStreamingDebounced({ mlMinScorePercent: v })}
-      />
-      <span class="nx-label">{t('security.alertClasses')}</span>
-      <ToggleField
-        label={t('security.people')}
-        checked={mlPersonOn()}
-        disabled={!mlOn()}
-        onChange={() => props.updateStreamingAndSave({ mlIncludePerson: !mlPersonOn() })}
-      />
-      <ToggleField
-        label={t('security.animals')}
-        checked={mlPetsOn()}
-        disabled={!mlOn()}
-        onChange={() => props.updateStreamingAndSave({ mlIncludePets: !mlPetsOn() })}
-      />
-      <ToggleField
-        label={t('security.vehicles')}
-        checked={mlVehiclesOn()}
-        disabled={!mlOn()}
-        onChange={() => props.updateStreamingAndSave({ mlIncludeVehicles: !mlVehiclesOn() })}
-      />
-      <FieldRow label={t('security.model')}>
-        <span class="nx-mono nx-info-value">{mlModelView().status}</span>
-      </FieldRow>
-      <Show when={mlModelView().showError}>
-        <div class="nx-banner nx-banner-danger" role="alert">{mlModelError()}</div>
-      </Show>
-      <Show when={mlModelView().button}>
-        {(button) => (
-          <Button
-            size="sm"
-            variant="ghost"
-            disabled={button().disabled}
-            onClick={downloadModel}
-            ariaLabel={button().label}
-          >
-            {button().label}
-          </Button>
-        )}
-      </Show>
-
-      {/* Continuous recording */}
-      <ToggleField
-        label={t('security.continuous')}
-        hint={t('security.continuousDesc')}
-        checked={continuousOn()}
-        onChange={() => props.updateStreamingAndSave({ continuousRecording: !continuousOn() })}
-      />
-      <SliderField
-        label={t('security.segmentLength')}
-        display={`${stream()?.continuousSegmentMinutes ?? API_DEFAULTS.continuousSegmentMinutes} min`}
-        min={API_DEFAULTS.continuousSegmentMinMinutes}
-        max={API_DEFAULTS.continuousSegmentMaxMinutes}
-        step={5}
-        disabled={!continuousOn()}
-        value={stream()?.continuousSegmentMinutes ?? API_DEFAULTS.continuousSegmentMinutes}
-        onChange={(v) => props.updateStreamingDebounced({ continuousSegmentMinutes: v })}
-      />
-
-      {/* On-device alerts and tamper */}
-      <ToggleField
-        label={t('security.localAlerts')}
-        checked={localAlertsOn()}
-        onChange={() => props.updateStreamingAndSave({ detectionNotificationsEnabled: !localAlertsOn() })}
-      />
-      <Show when={localAlertsOn()}>
+      <div class="nx-security-section">
         <ToggleField
-          label={t('security.quietHours')}
-          checked={quietHoursOn()}
-          onChange={() => props.updateStreamingAndSave({ alertQuietHoursEnabled: !quietHoursOn() })}
+          label={t('security.ml')}
+          hint={t('security.mlDesc')}
+          checked={mlOn()}
+          onChange={() => props.updateStreamingAndSave({ mlDetectionEnabled: !mlOn() })}
         />
-        <Show when={quietHoursOn()}>
-          <SliderField
-            label={t('security.quietFrom')}
-            display={minutesToLabel(stream()?.alertQuietHoursStartMinute ?? API_DEFAULTS.alertQuietHoursStartMinute)}
-            min={0}
-            max={MINUTES_PER_DAY - 1}
-            step={15}
-            value={stream()?.alertQuietHoursStartMinute ?? API_DEFAULTS.alertQuietHoursStartMinute}
-            onChange={(v) => props.updateStreamingDebounced({ alertQuietHoursStartMinute: v })}
-          />
-          <SliderField
-            label={t('security.quietUntil')}
-            display={minutesToLabel(stream()?.alertQuietHoursEndMinute ?? API_DEFAULTS.alertQuietHoursEndMinute)}
-            min={0}
-            max={MINUTES_PER_DAY - 1}
-            step={15}
-            value={stream()?.alertQuietHoursEndMinute ?? API_DEFAULTS.alertQuietHoursEndMinute}
-            onChange={(v) => props.updateStreamingDebounced({ alertQuietHoursEndMinute: v })}
-          />
+        <SliderField
+          label={t('security.minConfidence')}
+          display={`${stream()?.mlMinScorePercent ?? API_DEFAULTS.mlMinScorePercent}%`}
+          min={API_DEFAULTS.mlMinScoreMinPercent}
+          max={API_DEFAULTS.mlMinScoreMaxPercent}
+          step={5}
+          disabled={!mlOn()}
+          value={stream()?.mlMinScorePercent ?? API_DEFAULTS.mlMinScorePercent}
+          onChange={(v) => props.updateStreamingDebounced({ mlMinScorePercent: v })}
+        />
+        <span class="nx-label">{t('security.alertClasses')}</span>
+        <ToggleField
+          label={t('security.people')}
+          checked={mlPersonOn()}
+          disabled={!mlOn()}
+          onChange={() => props.updateStreamingAndSave({ mlIncludePerson: !mlPersonOn() })}
+        />
+        <ToggleField
+          label={t('security.animals')}
+          checked={mlPetsOn()}
+          disabled={!mlOn()}
+          onChange={() => props.updateStreamingAndSave({ mlIncludePets: !mlPetsOn() })}
+        />
+        <ToggleField
+          label={t('security.vehicles')}
+          checked={mlVehiclesOn()}
+          disabled={!mlOn()}
+          onChange={() => props.updateStreamingAndSave({ mlIncludeVehicles: !mlVehiclesOn() })}
+        />
+        <FieldRow label={t('security.model')}>
+          <span class="nx-mono nx-info-value">{mlModelView().status}</span>
+        </FieldRow>
+        <Show when={mlModelView().showError}>
+          <div class="nx-banner nx-banner-danger" role="alert">{mlModelError()}</div>
         </Show>
-      </Show>
-      <ToggleField
-        label={t('security.tamper')}
-        checked={tamperOn()}
-        onChange={() => props.updateStreamingAndSave({ tamperDetectionEnabled: !tamperOn() })}
-      />
-
-      {/* Webhook alerts */}
-      <ToggleField
-        label={t('security.webhook')}
-        checked={webhookOn()}
-        onChange={() => props.updateStreamingAndSave({ webhookEnabled: !webhookOn() })}
-      />
-      <Show when={webhookOn()}>
-        <TextInput
-          mono
-          type="url"
-          placeholder={t('security.webhookUrlPlaceholder')}
-          value={stream()?.webhookUrl ?? ''}
-          onInput={(v) => props.updateStreamingDebounced({ webhookUrl: v })}
-          ariaLabel={t('security.webhook')}
-        />
-        <TextInput
-          mono
-          type="text"
-          placeholder={t('security.webhookHeadersPlaceholder')}
-          value={stream()?.webhookHeaders ?? API_DEFAULTS.webhookHeaders}
-          onInput={(v) => props.updateStreamingDebounced({ webhookHeaders: v })}
-          ariaLabel={t('security.webhookHeadersPlaceholder')}
-        />
-        <Show when={webhookHeadersWarning(stream()?.webhookHeaders)}>
-          {(warning) => (
-            <div class="nx-banner nx-banner-warning" role="alert">{warning()}</div>
+        <Show when={mlModelView().button}>
+          {(button) => (
+            <Button
+              size="sm"
+              variant="ghost"
+              disabled={button().disabled}
+              onClick={downloadModel}
+              ariaLabel={button().label}
+            >
+              {button().label}
+            </Button>
           )}
         </Show>
-      </Show>
-      {/* The test alert fires every configured sink (webhook, MQTT, Web
-          Push, local notification), not just the webhook — so it stays
-          visible with the webhook off: a local-alerts-only user needs it
-          to verify their chain too. The zero-sink verdict reads honestly
-          in the result line below. */}
-      <Button
-        size="sm"
-        variant="ghost"
-        disabled={testAlertBusy()}
-        onClick={sendTestAlertNow}
-        ariaLabel={t('security.sendTestAlert')}
-      >
-        {testAlertBusy() ? t('security.sending') : t('security.sendTestAlert')}
-      </Button>
-      <Show when={testAlertResult()}>
-        <div class="nx-banner nx-banner-neutral" role="status" aria-live="polite">{testAlertResult()}</div>
-      </Show>
+      </div>
 
-      {/* Deterrence automation */}
-      <ToggleField
-        label={t('security.autoSiren')}
-        checked={autoSirenOn()}
-        onChange={() => props.updateStreamingAndSave({ autoSiren: !autoSirenOn() })}
-      />
-      <Show when={autoSirenOn()}>
-        <SliderField
-          label={t('security.sirenDuration')}
-          display={`${stream()?.sirenDurationSeconds ?? API_DEFAULTS.sirenDurationSeconds}s`}
-          min={API_DEFAULTS.sirenDurationMinSeconds}
-          max={API_DEFAULTS.sirenDurationMaxSeconds}
-          step={1}
-          value={stream()?.sirenDurationSeconds ?? API_DEFAULTS.sirenDurationSeconds}
-          onChange={(v) => props.updateStreamingDebounced({ sirenDurationSeconds: v })}
+      {/* Continuous recording */}
+      <div class="nx-security-section">
+        <ToggleField
+          label={t('security.continuous')}
+          hint={t('security.continuousDesc')}
+          checked={continuousOn()}
+          onChange={() => props.updateStreamingAndSave({ continuousRecording: !continuousOn() })}
         />
-      </Show>
-      <ToggleField
-        label={t('security.autoTorch')}
-        checked={autoTorchOn()}
-        onChange={() => props.updateStreamingAndSave({ autoTorch: !autoTorchOn() })}
-      />
-      <SliderField
-        label={t('security.retriggerCooldown')}
-        display={`${stream()?.autoDeterrenceCooldownSeconds ?? API_DEFAULTS.autoDeterrenceCooldownSeconds}s`}
-        min={API_DEFAULTS.deterrenceCooldownMinSeconds}
-        max={API_DEFAULTS.deterrenceCooldownMaxSeconds}
-        step={5}
-        value={stream()?.autoDeterrenceCooldownSeconds ?? API_DEFAULTS.autoDeterrenceCooldownSeconds}
-        onChange={(v) => props.updateStreamingDebounced({ autoDeterrenceCooldownSeconds: v })}
-      />
+        <SliderField
+          label={t('security.segmentLength')}
+          display={`${stream()?.continuousSegmentMinutes ?? API_DEFAULTS.continuousSegmentMinutes} min`}
+          min={API_DEFAULTS.continuousSegmentMinMinutes}
+          max={API_DEFAULTS.continuousSegmentMaxMinutes}
+          step={5}
+          disabled={!continuousOn()}
+          value={stream()?.continuousSegmentMinutes ?? API_DEFAULTS.continuousSegmentMinutes}
+          onChange={(v) => props.updateStreamingDebounced({ continuousSegmentMinutes: v })}
+        />
+      </div>
 
-      {/* Manual deterrence */}
-      <span class="nx-label">{t('security.deterrence')}</span>
-      <div class="nx-deterrence">
-        <Button
-          variant={sirenOn() ? 'danger' : 'secondary'}
-          size="sm"
-          disabled={sirenBusy()}
-          onClick={toggleSiren}
-          ariaLabel={sirenOn() ? t('security.sirenOff') : t('security.sirenOn')}
-        >
-          {sirenOn() ? t('security.sirenOff') : t('security.sirenOn')}
-        </Button>
-        <Button
-          variant={torchOn() ? 'warning' : 'secondary'}
-          size="sm"
-          disabled={torchBusy()}
-          onClick={toggleTorch}
-          ariaLabel={torchOn() ? t('security.lightOff') : t('security.lightOn')}
-        >
-          {torchOn() ? t('security.lightOff') : t('security.lightOn')}
-        </Button>
+      {/* On-device alerts and tamper */}
+      <div class="nx-security-section">
+        <ToggleField
+          label={t('security.localAlerts')}
+          checked={localAlertsOn()}
+          onChange={() => props.updateStreamingAndSave({ detectionNotificationsEnabled: !localAlertsOn() })}
+        />
+        <Show when={localAlertsOn()}>
+          <ToggleField
+            label={t('security.quietHours')}
+            checked={quietHoursOn()}
+            onChange={() => props.updateStreamingAndSave({ alertQuietHoursEnabled: !quietHoursOn() })}
+          />
+          <Show when={quietHoursOn()}>
+            <SliderField
+              label={t('security.quietFrom')}
+              display={minutesToLabel(stream()?.alertQuietHoursStartMinute ?? API_DEFAULTS.alertQuietHoursStartMinute)}
+              min={0}
+              max={MINUTES_PER_DAY - 1}
+              step={15}
+              value={stream()?.alertQuietHoursStartMinute ?? API_DEFAULTS.alertQuietHoursStartMinute}
+              onChange={(v) => props.updateStreamingDebounced({ alertQuietHoursStartMinute: v })}
+            />
+            <SliderField
+              label={t('security.quietUntil')}
+              display={minutesToLabel(stream()?.alertQuietHoursEndMinute ?? API_DEFAULTS.alertQuietHoursEndMinute)}
+              min={0}
+              max={MINUTES_PER_DAY - 1}
+              step={15}
+              value={stream()?.alertQuietHoursEndMinute ?? API_DEFAULTS.alertQuietHoursEndMinute}
+              onChange={(v) => props.updateStreamingDebounced({ alertQuietHoursEndMinute: v })}
+            />
+          </Show>
+        </Show>
+        <ToggleField
+          label={t('security.tamper')}
+          checked={tamperOn()}
+          onChange={() => props.updateStreamingAndSave({ tamperDetectionEnabled: !tamperOn() })}
+        />
+      </div>
+
+      {/* Webhook alerts */}
+      <div class="nx-security-section">
+        <ToggleField
+          label={t('security.webhook')}
+          checked={webhookOn()}
+          onChange={() => props.updateStreamingAndSave({ webhookEnabled: !webhookOn() })}
+        />
+        <Show when={webhookOn()}>
+          <TextInput
+            mono
+            type="url"
+            placeholder={t('security.webhookUrlPlaceholder')}
+            value={stream()?.webhookUrl ?? ''}
+            onInput={(v) => props.updateStreamingDebounced({ webhookUrl: v })}
+            ariaLabel={t('security.webhook')}
+          />
+          <TextInput
+            mono
+            type="text"
+            placeholder={t('security.webhookHeadersPlaceholder')}
+            value={stream()?.webhookHeaders ?? API_DEFAULTS.webhookHeaders}
+            onInput={(v) => props.updateStreamingDebounced({ webhookHeaders: v })}
+            ariaLabel={t('security.webhookHeadersPlaceholder')}
+          />
+          <Show when={webhookHeadersWarning(stream()?.webhookHeaders)}>
+            {(warning) => (
+              <div class="nx-banner nx-banner-warning" role="alert">{warning()}</div>
+            )}
+          </Show>
+        </Show>
+        {/* The test alert fires every configured sink (webhook, MQTT, Web
+            Push, local notification), not just the webhook — so it stays
+            visible with the webhook off: a local-alerts-only user needs it
+            to verify their chain too. The zero-sink verdict reads honestly
+            in the result line beside it. The verb sits in the form's action
+            row — a quiet secondary, never a stranded centred button. */}
+        <div class="nx-security-actions">
+          <Button
+            size="sm"
+            variant="secondary"
+            disabled={testAlertBusy()}
+            onClick={sendTestAlertNow}
+            ariaLabel={t('security.sendTestAlert')}
+          >
+            {testAlertBusy() ? t('security.sending') : t('security.sendTestAlert')}
+          </Button>
+          <Show when={testAlertResult()}>
+            <div class="nx-banner nx-banner-neutral" role="status" aria-live="polite">{testAlertResult()}</div>
+          </Show>
+        </div>
+      </div>
+
+      {/* Deterrence automation + the manual verbs */}
+      <div class="nx-security-section">
+        <ToggleField
+          label={t('security.autoSiren')}
+          checked={autoSirenOn()}
+          onChange={() => props.updateStreamingAndSave({ autoSiren: !autoSirenOn() })}
+        />
+        <Show when={autoSirenOn()}>
+          <SliderField
+            label={t('security.sirenDuration')}
+            display={`${stream()?.sirenDurationSeconds ?? API_DEFAULTS.sirenDurationSeconds}s`}
+            min={API_DEFAULTS.sirenDurationMinSeconds}
+            max={API_DEFAULTS.sirenDurationMaxSeconds}
+            step={1}
+            value={stream()?.sirenDurationSeconds ?? API_DEFAULTS.sirenDurationSeconds}
+            onChange={(v) => props.updateStreamingDebounced({ sirenDurationSeconds: v })}
+          />
+        </Show>
+        <ToggleField
+          label={t('security.autoTorch')}
+          checked={autoTorchOn()}
+          onChange={() => props.updateStreamingAndSave({ autoTorch: !autoTorchOn() })}
+        />
+        <SliderField
+          label={t('security.retriggerCooldown')}
+          display={`${stream()?.autoDeterrenceCooldownSeconds ?? API_DEFAULTS.autoDeterrenceCooldownSeconds}s`}
+          min={API_DEFAULTS.deterrenceCooldownMinSeconds}
+          max={API_DEFAULTS.deterrenceCooldownMaxSeconds}
+          step={5}
+          value={stream()?.autoDeterrenceCooldownSeconds ?? API_DEFAULTS.autoDeterrenceCooldownSeconds}
+          onChange={(v) => props.updateStreamingDebounced({ autoDeterrenceCooldownSeconds: v })}
+        />
+
+        {/* Manual deterrence: a latched siren or torch is the operator's
+            hot state — the amber presence, like its Led. Red stays for
+            faults; a wailing siren is not one. */}
+        <span class="nx-label">{t('security.deterrence')}</span>
+        <div class="nx-deterrence">
+          <Button
+            variant={sirenOn() ? 'warning' : 'secondary'}
+            size="sm"
+            disabled={sirenBusy()}
+            onClick={toggleSiren}
+            ariaLabel={sirenOn() ? t('security.sirenOff') : t('security.sirenOn')}
+          >
+            {sirenOn() ? t('security.sirenOff') : t('security.sirenOn')}
+          </Button>
+          <Button
+            variant={torchOn() ? 'warning' : 'secondary'}
+            size="sm"
+            disabled={torchBusy()}
+            onClick={toggleTorch}
+            ariaLabel={torchOn() ? t('security.lightOff') : t('security.lightOn')}
+          >
+            {torchOn() ? t('security.lightOff') : t('security.lightOn')}
+          </Button>
+        </div>
       </div>
     </Panel>
   )

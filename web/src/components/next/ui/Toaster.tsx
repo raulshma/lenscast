@@ -16,6 +16,7 @@ export default function Toaster() {
         {(toast) => (
           <div
             class={`nx-toast ${TONE_CLASSES[toast.tone]}`}
+            classList={{ 'nx-toast-exit': !!toast.exiting }}
             role="status"
             onClick={() => dismissToast(toast.id)}
           >

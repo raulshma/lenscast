@@ -80,7 +80,7 @@ export default function UnifiedPushPanel(props: Props) {
         checked={enabled()}
         onChange={() => props.updateStreamingAndSave({ unifiedPushEnabled: !enabled() })}
       />
-      <div class="nx-banner nx-banner-info" role="note" aria-live="polite">
+      <div class="nx-banner nx-banner-neutral" role="note" aria-live="polite">
         <span>{t('unifiedPush.desc')}</span>
       </div>
 
@@ -90,7 +90,7 @@ export default function UnifiedPushPanel(props: Props) {
       <Button size="sm" variant="ghost" disabled={!vapid()} onClick={() => void copyVapid()}>
         {t('unifiedPush.copyKey')}
       </Button>
-      <div class="nx-banner nx-banner-info" role="note">
+      <div class="nx-banner nx-banner-neutral" role="note">
         <span>{t('unifiedPush.pairingHint')}</span>
       </div>
 

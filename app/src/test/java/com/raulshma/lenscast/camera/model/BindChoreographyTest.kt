@@ -30,6 +30,7 @@ class BindChoreographyTest {
         readyAlreadyPublished: Boolean = false,
         previouslyObserved: Boolean = false,
         cameraIsLive: Boolean = true,
+        isStalePreBindError: Boolean = false,
     ) = BindChoreography.openStatePlan(
         errorCode = errorCode,
         typeOpen = typeOpen,
@@ -37,6 +38,7 @@ class BindChoreographyTest {
         readyAlreadyPublished = readyAlreadyPublished,
         previouslyObserved = previouslyObserved,
         cameraIsLive = cameraIsLive,
+        isStalePreBindError = isStalePreBindError,
     )
 
     // ── the observation attach identity guard ──
@@ -257,6 +259,45 @@ class BindChoreographyTest {
                 reassertControls = false,
             ),
             openPlan(typeOpen = false, rebindAttempts = 2, readyAlreadyPublished = false),
+        )
+    }
+
+    @Test
+    fun `stale pre-bind error returns IgnoreStaleError`() {
+        assertEquals(
+            OpenStatePlan.IgnoreStaleError,
+            openPlan(
+                errorCode = CameraErrorPolicy.CODE_CAMERA_DISABLED,
+                isStalePreBindError = true,
+            ),
+        )
+    }
+
+    @Test
+    fun `non-stale error returns ErrorObservation even for policy denied`() {
+        val plan = openPlan(
+            errorCode = CameraErrorPolicy.CODE_CAMERA_DISABLED,
+            isStalePreBindError = false,
+        )
+        assertTrue(plan is OpenStatePlan.ErrorObservation)
+        plan as OpenStatePlan.ErrorObservation
+        assertEquals(Verdict.POLICY_DENIED, plan.verdict)
+    }
+
+    @Test
+    fun `non-error state ignores isStalePreBindError flag and returns StateObservation`() {
+        assertEquals(
+            OpenStatePlan.StateObservation(
+                openObserved = true,
+                resetRebindAttempts = true,
+                publishReady = true,
+                reassertControls = true,
+            ),
+            openPlan(
+                errorCode = null,
+                typeOpen = true,
+                isStalePreBindError = true,
+            ),
         )
     }
 

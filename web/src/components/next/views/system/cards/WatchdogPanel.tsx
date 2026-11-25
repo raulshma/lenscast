@@ -73,7 +73,7 @@ export default function WatchdogPanel(props: Props) {
       title={t('watchdog.title')}
       badge={
         <Show when={enabled()}>
-          <Badge tone={STATE_TONES[wd()?.status ?? 'IDLE'] ?? 'neutral'} mono>
+          <Badge tone={STATE_TONES[wd()?.status ?? 'IDLE'] ?? 'neutral'}>
             <Led tone={STATE_LEDS[wd()?.status ?? 'IDLE'] ?? 'off'} />
             {statusLabel()}
           </Badge>
@@ -86,7 +86,7 @@ export default function WatchdogPanel(props: Props) {
         checked={enabled()}
         onChange={() => props.updateStreamingAndSave({ watchdogEnabled: !enabled() })}
       />
-      <div class="nx-banner nx-banner-info" role="note" aria-live="polite">
+      <div class="nx-banner nx-banner-neutral" role="note" aria-live="polite">
         {t('watchdog.desc')}
       </div>
 
@@ -96,7 +96,7 @@ export default function WatchdogPanel(props: Props) {
         checked={fsiResume()}
         onChange={() => props.updateStreamingAndSave({ fsiCameraResumeEnabled: !fsiResume() })}
       />
-      <div class="nx-banner nx-banner-info" role="note" aria-live="polite">
+      <div class="nx-banner nx-banner-neutral" role="note" aria-live="polite">
         {t('watchdog.fsiResume.desc')}
       </div>
 
@@ -110,7 +110,7 @@ export default function WatchdogPanel(props: Props) {
         <FieldRow label={t('watchdog.crashGuard')}>
           <span
             class="nx-mono nx-info-value"
-            style={{ color: crashGuard()!.state === 'GIVE_UP' ? 'var(--nx-warning)' : undefined }}
+            style={{ color: crashGuard()!.state === 'GIVE_UP' ? 'var(--color-accent)' : undefined }}
           >
             {crashGuard()!.crashCount} · {crashGuard()!.state}
           </span>
@@ -160,7 +160,7 @@ export default function WatchdogPanel(props: Props) {
           <Show when={wd()!.totalRecoveries > 0 || wd()!.consecutiveFailures > 0}>
             <Show when={wd()!.consecutiveFailures > 0}>
               <FieldRow label={t('watchdog.consecutiveFailures')}>
-                <span class="nx-mono nx-info-value" style={{ color: 'var(--nx-warning)' }}>
+                <span class="nx-mono nx-info-value" style={{ color: 'var(--color-accent)' }}>
                   {wd()!.consecutiveFailures}
                 </span>
               </FieldRow>

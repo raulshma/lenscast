@@ -67,12 +67,12 @@ class FramePipeline(
     @Volatile
     private var jpegQuality = StreamDefaults.JPEG_QUALITY
 
-    // The pipeline's throttle accepts at exactly the resolved interval and
-    // stamps the reference time only for accepted frames (bursts measure
-    // against the last frame that actually flowed) — hence the 1.0 tolerance
-    // and clock-on-accept defaults.
+    // Accept slightly early frames (TOLERANCE = 0.8) so 60 fps (16ms interval)
+    // does not drop frames on 1-2 ms camera-clock jitter, while still stamping
+    // the reference time only on accepted frames.
     private val throttle = FrameThrottle(
         intervalMs = { qualityPolicy.resolveInterval(minFrameIntervalMs) },
+        tolerance = FrameThrottle.TOLERANCE,
     )
 
     private val maxBufferSize = 4 * 1024 * 1024

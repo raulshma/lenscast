@@ -332,8 +332,73 @@ class CaptureReadbackPolicyTest {
                 sensorSensitivity = 3200,
                 sensorExposureTimeNs = 100_000_000L,
                 sceneMode = CaptureRequest.CONTROL_SCENE_MODE_DISABLED,
+                fpsLower = 10,
+                fpsUpper = 10,
             ),
             CaptureReadbackPolicy.expectedFrom(plan),
         )
+    }
+
+    @Test
+    fun `a matching fps range passes and a mismatched one fails with fps shown on both sides`() {
+        val expected = CaptureReadbackPolicy.Expected(
+            aeMode = CaptureRequest.CONTROL_AE_MODE_ON,
+            sensorSensitivity = null,
+            sensorExposureTimeNs = null,
+            sceneMode = CaptureRequest.CONTROL_SCENE_MODE_DISABLED,
+            fpsLower = 30,
+            fpsUpper = 60,
+        )
+        assertEquals(
+            CaptureReadbackPolicy.Verdict.Match,
+            CaptureReadbackPolicy.compare(
+                expected,
+                CaptureReadbackPolicy.Reported(
+                    aeMode = CaptureRequest.CONTROL_AE_MODE_ON,
+                    sensorSensitivity = null,
+                    sensorExposureTimeNs = null,
+                    sceneMode = CaptureRequest.CONTROL_SCENE_MODE_DISABLED,
+                    fpsLower = 30,
+                    fpsUpper = 60,
+                ),
+            ),
+        )
+
+        val mismatched = CaptureReadbackPolicy.Reported(
+            aeMode = CaptureRequest.CONTROL_AE_MODE_ON,
+            sensorSensitivity = null,
+            sensorExposureTimeNs = null,
+            sceneMode = CaptureRequest.CONTROL_SCENE_MODE_DISABLED,
+            fpsLower = 15,
+            fpsUpper = 30,
+        )
+        assertEquals(CaptureReadbackPolicy.Verdict.Mismatch, CaptureReadbackPolicy.compare(expected, mismatched))
+        assertEquals(
+            "Camera controls readback: MISMATCH requested AE=ON scene=DISABLED fps=[30..60] " +
+                "| device AE=ON scene=DISABLED fps=[15..30]",
+            CaptureReadbackPolicy.mismatch(expected, mismatched).message,
+        )
+    }
+
+    @Test
+    fun `null reported fps does not fail comparison or pollute describe`() {
+        val expected = CaptureReadbackPolicy.Expected(
+            aeMode = CaptureRequest.CONTROL_AE_MODE_ON,
+            sensorSensitivity = null,
+            sensorExposureTimeNs = null,
+            sceneMode = CaptureRequest.CONTROL_SCENE_MODE_DISABLED,
+            fpsLower = 60,
+            fpsUpper = 60,
+        )
+        val missingFps = CaptureReadbackPolicy.Reported(
+            aeMode = CaptureRequest.CONTROL_AE_MODE_ON,
+            sensorSensitivity = null,
+            sensorExposureTimeNs = null,
+            sceneMode = CaptureRequest.CONTROL_SCENE_MODE_DISABLED,
+            fpsLower = null,
+            fpsUpper = null,
+        )
+        assertEquals(CaptureReadbackPolicy.Verdict.Match, CaptureReadbackPolicy.compare(expected, missingFps))
+        assertEquals("Camera controls readback: ok (AE=ON scene=DISABLED)", CaptureReadbackPolicy.ok(expected).message)
     }
 }

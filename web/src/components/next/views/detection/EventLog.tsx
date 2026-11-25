@@ -61,10 +61,12 @@ function actionLabel(action: string): string {
 const MODE_LEDS = { live: 'ok', polling: 'warn', connecting: 'off' } as const
 
 /**
- * The event log, ported from the classic EventFeed: rows pushed live over
- * SSE with polling fallback (useEventStream), type + label filters, CSV/JSON
- * export, and clips that open the shared media viewer. The log reads as a
- * console journal: mono timestamps, type tags, quiet action lines.
+ * The event journal — the news this view opens for: rows pushed live over
+ * SSE with polling fallback (useEventStream), type + label filters,
+ * CSV/JSON export, and clips that open the shared media viewer. Each row
+ * reads as one quiet instrument line — timestamp and event in the first
+ * row, dispatched actions under it — and colour stays out except where a
+ * genuine fault (tamper) speaks red.
  */
 export default function EventLog(props: { readOnly?: () => boolean } = {}) {
   const { events, mode, clear } = useEventStream()
@@ -186,7 +188,7 @@ export default function EventLog(props: { readOnly?: () => boolean } = {}) {
                         {(zone) => <span class="nx-chip">{zone}</span>}
                       </For>
                       <For each={eventLabels(event)}>
-                        {(label) => <span class="nx-chip nx-chip-active">{label}</span>}
+                        {(label) => <span class="nx-chip nx-log-chip-label">{label}</span>}
                       </For>
                     </div>
                   </Show>

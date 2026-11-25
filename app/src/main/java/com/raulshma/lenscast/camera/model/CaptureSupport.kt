@@ -35,7 +35,13 @@ data class CaptureSupport(
 
     /** Whether `REQUEST_AVAILABLE_CAPABILITIES` lists `MANUAL_POST_PROCESSING`. */
     val manualPostProcessing: Boolean? = null,
+
+    /** `CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES`. */
+    val targetFpsRanges: Set<FpsRange>? = null,
 ) {
+    /** One Camera2 AE target fps range `[lower, upper]`. */
+    data class FpsRange(val lower: Int, val upper: Int)
+
     /**
      * The values both sides advertise — what the logical camera and a
      * selected physical lens can each honour. A null side is unrestricted,
@@ -57,6 +63,7 @@ data class CaptureSupport(
             other.manualPostProcessing == null -> manualPostProcessing
             else -> manualPostProcessing && other.manualPostProcessing
         },
+        targetFpsRanges = targetFpsRanges.intersectKnown(other.targetFpsRanges),
     )
 
     companion object {

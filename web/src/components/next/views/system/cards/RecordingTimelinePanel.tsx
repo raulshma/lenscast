@@ -165,8 +165,9 @@ export default function RecordingTimelinePanel() {
             class="timeline-day-btn"
             onClick={() => changeDay(-1)}
             title={t('timeline.prevDay')}
+            aria-label={t('timeline.prevDay')}
           >
-            ‹
+            <svg aria-hidden="true" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6" /></svg>
           </button>
           <span class="timeline-day-label">{dayGroupLabel(dayLabel(day(), nowMs()))}</span>
           <button
@@ -175,8 +176,9 @@ export default function RecordingTimelinePanel() {
             onClick={() => changeDay(1)}
             disabled={day() === todayKey()}
             title={t('timeline.nextDay')}
+            aria-label={t('timeline.nextDay')}
           >
-            ›
+            <svg aria-hidden="true" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M9 18l6-6-6-6" /></svg>
           </button>
         </div>
         <span class="nx-mono">{tCount('timeline.sessions', sessions()?.length ?? 0)}</span>
@@ -251,21 +253,21 @@ export default function RecordingTimelinePanel() {
       </div>
 
       <Show when={!loading()} fallback={
-        <div class="nx-banner nx-banner-info" role="note">
+        <div class="nx-banner nx-banner-neutral" role="note">
           {t('timeline.loading')}
         </div>
       }>
         <Show when={!noSessionData()} fallback={
-          <div class="nx-banner nx-banner-info" role="note">
+          <div class="nx-banner nx-banner-neutral" role="note">
             {t('timeline.noSessionData')}
           </div>
         }>
           <Show when={(sessions()?.length ?? 0) > 0} fallback={
-            <div class="nx-banner nx-banner-info" role="note">
+            <div class="nx-banner nx-banner-neutral" role="note">
               {t('timeline.noRecordings')}
             </div>
           }>
-            <div class="nx-banner nx-banner-info" role="note">
+            <div class="nx-banner nx-banner-neutral" role="note">
               {t('timeline.hint')}
             </div>
           </Show>

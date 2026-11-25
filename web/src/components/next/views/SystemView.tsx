@@ -43,36 +43,35 @@ import AuditPanel from './system/cards/AuditPanel'
 /**
  * System view: one settings topic per sub-tab (#/system/<tab>), so nothing
  * from another topic is ever in view — the old single 29-card page is six
- * short ones. The tab bar is flat instrument nav (hairline + cyan underline);
- * an invalid or missing tab normalizes to `camera`. Every card is a
- * next-native port (`system/cards/*`) with logic copied verbatim from its
- * classic counterpart — same signals, same bindings, same API_DEFAULTS.
+ * short ones. The tab is the chapter: flat instrument nav (hairline + amber
+ * underline); an invalid or missing tab normalizes to `camera`. Every card
+ * is a next-native port (`system/cards/*`) with logic copied verbatim from
+ * its classic counterpart — same signals, same bindings, same API_DEFAULTS.
  *
- * Inside a tab, panels are grouped into labelled sections (`.nx-section`,
- * the rack-bay vocabulary from layout.css): a Golos 600 sentence-case title
- * with a 2px cyan tick on the header's left edge and a hairline rule, then
- * that section's own masonry. Reading order is therefore deliberate —
- * related modules sit together instead of masonry scattering them.
+ * Inside a tab, related panels group into racks (`.nx-rack`): ONE faceplate
+ * cut by 1px --color-rule seams (the `.nx-cut` pattern), its panels stacked
+ * in a single readable column — no floating cards, no masonry. The rack's
+ * own name is the grouping's aria heading only (`.nx-rack-title` is visually
+ * hidden): the tab names the chapter, each panel's own title is the one
+ * visible heading per idea, and the seams alone carry the grouping.
  */
 
 /**
- * One rack bay: a labelled group of panels rendered as its own masonry.
- * `single` marks one-card bays so the pane grid can pair them side by side;
- * `wide` (single-card bays whose panel genuinely wants width — the camera
- * lens rack, the QR share, the audit log) spans both columns instead.
+ * One rack: a group of panels cut from a single plate. `title` stays the
+ * rack's accessible heading (the t() key stays wired 1:1); `single` marks
+ * one-card racks so the pane grid can pair them side by side; `wide`
+ * (single-card racks whose panel genuinely wants width — the camera lens
+ * rack, the QR share, the audit log) spans both columns instead.
  */
-function Section(props: { id: string; title: string; single?: boolean; wide?: boolean; children: JSX.Element }) {
+function Rack(props: { id: string; title: string; single?: boolean; wide?: boolean; children: JSX.Element }) {
   return (
     <section
-      class="nx-section"
+      class="nx-section nx-rack"
       classList={{ 'nx-section-single': !!props.single, 'nx-section-wide': !!props.wide }}
       aria-labelledby={props.id}
     >
-      <div class="nx-section-head">
-        <h2 class="nx-section-title" id={props.id}>{props.title}</h2>
-        <div class="nx-section-rule" aria-hidden="true" />
-      </div>
-      <div class="nx-columns">{props.children}</div>
+      <h2 class="nx-rack-title" id={props.id}>{props.title}</h2>
+      <div class="nx-cut nx-rack-plate">{props.children}</div>
     </section>
   )
 }
@@ -166,25 +165,25 @@ export default function SystemView(props: { state: NextState }) {
           {/* ── Camera ── */}
           <Show when={tab() === 'camera'}>
             <Show when={state.lenses().length > 0}>
-              <Section id={sectionId('lens')} title={t('system.section.lens')} single wide>
+              <Rack id={sectionId('lens')} title={t('system.section.lens')} single wide>
                 <LensPanel lenses={state.lenses} handleSelectLens={state.handleSelectLens} />
-              </Section>
+              </Rack>
             </Show>
-            <Section id={sectionId('exposure')} title={t('system.section.exposure')}>
+            <Rack id={sectionId('exposure')} title={t('system.section.exposure')}>
               <ExposurePanel settings={state.settings} updateCamera={state.updateCamera} />
               <FocusPanel settings={state.settings} updateCamera={state.updateCamera} />
               <WhiteBalancePanel settings={state.settings} updateCamera={state.updateCamera} />
-            </Section>
-            <Section id={sectionId('image')} title={t('system.section.image')}>
+            </Rack>
+            <Rack id={sectionId('image')} title={t('system.section.image')}>
               <ZoomFramePanel settings={state.settings} updateCamera={state.updateCamera} />
               <EffectsPanel settings={state.settings} updateCamera={state.updateCamera} />
               <NightVisionPanel
                 value={state.settings()?.camera?.nightVisionMode ?? API_DEFAULTS.cameraNightVisionMode}
                 onChange={(mode: NightVisionMode) => state.updateCamera({ nightVisionMode: mode })}
               />
-            </Section>
+            </Rack>
             <Show when={state.settings()?.streaming}>
-              <Section id={sectionId('overlays')} title={t('system.section.overlays')}>
+              <Rack id={sectionId('overlays')} title={t('system.section.overlays')}>
                 <OverlayPanel
                   streaming={() => state.settings()!.streaming}
                   onUpdate={state.updateStreamingDebounced}
@@ -193,13 +192,13 @@ export default function SystemView(props: { state: NextState }) {
                   streaming={() => state.settings()!.streaming}
                   onUpdate={state.updateStreamingDebounced}
                 />
-              </Section>
+              </Rack>
             </Show>
           </Show>
 
           {/* ── Capture ── */}
           <Show when={tab() === 'capture'}>
-            <Section id={sectionId('scheduled')} title={t('system.section.scheduled')}>
+            <Rack id={sectionId('scheduled')} title={t('system.section.scheduled')}>
               <IntervalCapturePanel
                 intervalConfig={state.intervalConfig}
                 setIntervalConfig={state.setIntervalConfig}
@@ -218,26 +217,26 @@ export default function SystemView(props: { state: NextState }) {
                 handleStartRecording={state.handleStartRecording}
                 handleStopRecording={state.handleStopRecording}
               />
-            </Section>
+            </Rack>
             <Show when={state.settings()?.streaming}>
-              <Section id={sectionId('reliability')} title={t('system.section.reliability')} single>
+              <Rack id={sectionId('reliability')} title={t('system.section.reliability')} single>
                 <WatchdogPanel
                   settings={state.settings}
                   status={state.status}
                   updateStreamingAndSave={state.updateStreamingAndSave}
                   updateStreamingDebounced={state.updateStreamingDebounced}
                 />
-              </Section>
+              </Rack>
             </Show>
           </Show>
 
           {/* ── Streaming ── */}
           <Show when={tab() === 'streaming'}>
-            <Section id={sectionId('web')} title={t('system.section.web')}>
+            <Rack id={sectionId('web')} title={t('system.section.web')}>
               <WebStreamCard {...streamingCardProps()} />
               <AudioCard {...streamingCardProps()} />
-            </Section>
-            <Section id={sectionId('protocols')} title={t('system.section.protocols')}>
+            </Rack>
+            <Rack id={sectionId('protocols')} title={t('system.section.protocols')}>
               <RtspCard {...streamingCardProps()} />
               <Show when={state.settings()?.streaming}>
                 <WhipPanel
@@ -259,69 +258,69 @@ export default function SystemView(props: { state: NextState }) {
                   handleStopRtmp={state.handleStopRtmp}
                 />
               </Show>
-            </Section>
-            <Section id={sectionId('service')} title={t('system.section.service')}>
+            </Rack>
+            <Rack id={sectionId('service')} title={t('system.section.service')}>
               <HttpsCard {...streamingCardProps()} />
               <KeepAwakeCard {...streamingCardProps()} />
-            </Section>
+            </Rack>
           </Show>
 
           {/* ── Storage ── */}
           <Show when={tab() === 'storage'}>
             <Show when={state.settings()?.streaming}>
-              <Section id={sectionId('retention')} title={t('system.section.retention')} single>
+              <Rack id={sectionId('retention')} title={t('system.section.retention')} single>
                 <StoragePanel
                   settings={state.settings}
                   updateStreamingAndSave={state.updateStreamingAndSave}
                   updateStreamingDebounced={state.updateStreamingDebounced}
                 />
-              </Section>
+              </Rack>
             </Show>
-            <Section id={sectionId('history')} title={t('system.section.history')} single>
+            <Rack id={sectionId('history')} title={t('system.section.history')} single>
               <RecordingTimelinePanel />
-            </Section>
-            <Section id={sectionId('device')} title={t('system.section.device')} single>
+            </Rack>
+            <Rack id={sectionId('device')} title={t('system.section.device')} single>
               <SystemInfoPanel />
-            </Section>
+            </Rack>
           </Show>
 
           {/* ── Links (connections) ── */}
           <Show when={tab() === 'links'}>
-            <Section id={sectionId('cameras')} title={t('system.section.cameras')} single wide>
+            <Rack id={sectionId('cameras')} title={t('system.section.cameras')} single wide>
               <MultiCamPanel />
-            </Section>
-            <Section id={sectionId('sharing')} title={t('system.section.sharing')} single wide>
+            </Rack>
+            <Rack id={sectionId('sharing')} title={t('system.section.sharing')} single wide>
               <SharePanel />
-            </Section>
-            <Section id={sectionId('notifications')} title={t('system.section.notifications')}>
+            </Rack>
+            <Rack id={sectionId('notifications')} title={t('system.section.notifications')}>
               <PushPanel settings={state.settings} updateStreamingAndSave={state.updateStreamingAndSave} />
               <UnifiedPushPanel settings={state.settings} updateStreamingAndSave={state.updateStreamingAndSave} />
-            </Section>
-            <Section id={sectionId('messaging')} title={t('system.section.messaging')} single>
+            </Rack>
+            <Rack id={sectionId('messaging')} title={t('system.section.messaging')} single>
               <MqttPanel
                 settings={state.settings}
                 updateStreamingAndSave={state.updateStreamingAndSave}
                 updateStreamingDebounced={state.updateStreamingDebounced}
               />
-            </Section>
+            </Rack>
           </Show>
 
           {/* ── Admin ── */}
           <Show when={tab() === 'admin' && !state.isViewer()}>
-            <Section id={sectionId('access')} title={t('system.section.access')} single>
+            <Rack id={sectionId('access')} title={t('system.section.access')} single>
               <AuthPanel />
-            </Section>
-            <Section id={sectionId('backup')} title={t('system.section.backup')}>
+            </Rack>
+            <Rack id={sectionId('backup')} title={t('system.section.backup')}>
               <BackupPanel
                 settings={state.settings}
                 updateStreamingAndSave={state.updateStreamingAndSave}
                 updateStreamingDebounced={state.updateStreamingDebounced}
               />
               <ConfigBackupPanel />
-            </Section>
-            <Section id={sectionId('audit')} title={t('system.section.audit')} single wide>
+            </Rack>
+            <Rack id={sectionId('audit')} title={t('system.section.audit')} single wide>
               <AuditPanel />
-            </Section>
+            </Rack>
           </Show>
         </div>
       </Show>

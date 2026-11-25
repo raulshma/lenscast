@@ -163,7 +163,7 @@ class WhepServer internal constructor(
     private val frameThrottle = FrameThrottle(
         intervalMs = { FrameTiming.frameIntervalMs(targetFps) },
         tolerance = FrameThrottle.TOLERANCE,
-        updateClockOnReject = true,
+        updateClockOnReject = false,
     )
 
     /** The shared libwebrtc environment, built lazily and only rebuilt while no session holds it. */

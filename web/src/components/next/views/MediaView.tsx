@@ -180,11 +180,11 @@ export default function MediaView(props: { state: NextState }) {
             />
           </div>
           <div class="nx-media-toolbar-actions">
-            <Badge tone="neutral" mono>{tCount('gallery.count', total())}</Badge>
+            <span class="nx-media-count">{tCount('gallery.count', total())}</span>
             <Show when={canDelete()}>
               <Button
                 size="sm"
-                variant={selectMode() ? 'toggled' : 'ghost'}
+                variant={selectMode() ? 'toggled' : 'secondary'}
                 onClick={() => {
                   setSelectMode(!selectMode())
                   setSelectedIds(new Set<string>())
@@ -232,16 +232,16 @@ export default function MediaView(props: { state: NextState }) {
             </Panel>
           }>
             <For each={dayGroups()}>
-              {(group) => (
+              {(group, dayIdx) => (
                 <section class="nx-media-day">
                   <div class="nx-media-day-head">
-                    <span class="nx-media-day-label nx-mono">{dayGroupLabel(group.label)}</span>
-                    <span class="nx-section-rule" />
+                    <span class="nx-media-day-label">{dayGroupLabel(group.label)}</span>
                     <span class="nx-media-day-count nx-mono">{group.items.length}</span>
+                    <span class="nx-section-rule" />
                   </div>
                   <div class="nx-media-grid">
                     <For each={group.items}>
-                      {(item) => (
+                      {(item, itemIdx) => (
                         <div
                           class="nx-tile"
                           classList={{
@@ -253,13 +253,34 @@ export default function MediaView(props: { state: NextState }) {
                           onClick={() => openTile(item)}
                           onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') openTile(item) }}
                         >
-                          <img class="nx-tile-thumb" src={item.thumbnailUrl} alt={item.fileName} loading="lazy" />
-                          <Show when={item.type === 'VIDEO'}>
-                            <span class="nx-tile-badge nx-mono">
-                              <IconFilm size={10} />
-                              {formatDuration(item.durationMs)}
-                            </span>
-                          </Show>
+                          <div class="nx-tile-media">
+                            <img
+                              class="nx-tile-thumb"
+                              src={item.thumbnailUrl}
+                              alt={item.fileName}
+                              width={480}
+                              height={360}
+                              loading={dayIdx() === 0 && itemIdx() === 0 ? 'eager' : 'lazy'}
+                              fetchpriority={dayIdx() === 0 && itemIdx() === 0 ? 'high' : undefined}
+                            />
+                            <Show when={item.type === 'VIDEO'}>
+                              <span class="nx-tile-badge nx-mono">
+                                <IconFilm size={10} />
+                                {formatDuration(item.durationMs)}
+                              </span>
+                            </Show>
+                            <Show when={canDelete()}>
+                              <button
+                                type="button"
+                                class="nx-tile-delete"
+                                title={t('common.delete')}
+                                aria-label={t('common.delete')}
+                                onClick={(e) => { e.stopPropagation(); deleteOne(item) }}
+                              >
+                                <IconTrash size={13} />
+                              </button>
+                            </Show>
+                          </div>
                           <Show when={selectMode() && selectedIds().has(item.id)}>
                             <span class="nx-tile-check">
                               <IconCheck size={14} />
@@ -274,17 +295,6 @@ export default function MediaView(props: { state: NextState }) {
                               </Show>
                             </span>
                           </div>
-                          <Show when={canDelete()}>
-                            <button
-                              type="button"
-                              class="nx-tile-delete"
-                              title={t('common.delete')}
-                              aria-label={t('common.delete')}
-                              onClick={(e) => { e.stopPropagation(); deleteOne(item) }}
-                            >
-                              <IconTrash size={13} />
-                            </button>
-                          </Show>
                         </div>
                       )}
                     </For>
@@ -295,7 +305,7 @@ export default function MediaView(props: { state: NextState }) {
 
             <Show when={hasMore()}>
               <div class="nx-media-more">
-                <Button variant="secondary" loading={loadingMore()} onClick={() => fetchPage(page() + 1, true)}>
+                <Button variant="secondary" size="sm" loading={loadingMore()} onClick={() => fetchPage(page() + 1, true)}>
                   {t('gallery.loadMore', { count: Math.max(0, total() - items().length) })}
                 </Button>
               </div>

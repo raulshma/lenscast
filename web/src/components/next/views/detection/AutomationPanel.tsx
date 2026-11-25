@@ -34,12 +34,14 @@ interface Props {
 }
 
 /**
- * The automation engine, ported from the classic AutomationCard onto the
- * kit where it pays (chrome, master toggle, banners, rule buttons). The
- * rule rows and the catalog-driven editor keep their DOM — their styling
- * flows through the token bridge — because that sub-UI is its own world.
- * Fetches its own document, refetches on a 60s visibility-gated poll, and
- * every mutation PUTs the whole { enabled, rules } document.
+ * The automation engine — the deepest config layer, last on the surface —
+ * ported from the classic AutomationCard onto the kit where it pays
+ * (chrome, master toggle, banners, rule buttons). The rule rows keep
+ * their DOM but read as quiet journal rows on the panel, separated by
+ * 1px rules — no nested cards; the catalog-driven editor keeps its
+ * styling through the token bridge. Fetches its own document, refetches
+ * on a 60s visibility-gated poll, and every mutation PUTs the whole
+ * { enabled, rules } document.
  */
 export default function AutomationPanel(props: Props) {
   const [state, setState] = createSignal<AutomationStateDto | null>(null)
@@ -241,19 +243,26 @@ export default function AutomationPanel(props: Props) {
           </span>
         </Show>
 
-        {/* The empty state: what rules do, plus the first CTA — the add
-            button below stays for the non-empty list. */}
+        {/* The empty state: what rules do, plus the one action in the
+            kit's action slot — the add button below stays for the
+            non-empty list. */}
         <Show when={state()!.rules.length === 0}>
-          <Empty title={t('automation.emptyTitle')} hint={t('automation.emptyBody')} icon={<AutomationBoltGlyph />} />
-          <Button
-            variant="primary"
-            size="sm"
-            onClick={addRule}
-            disabled={readOnly() || saving() || atRuleCap()}
-            ariaLabel={t('automation.addRule')}
-          >
-            {t('automation.addRule')}
-          </Button>
+          <Empty
+            title={t('automation.emptyTitle')}
+            hint={t('automation.emptyBody')}
+            icon={<AutomationBoltGlyph />}
+            action={
+              <Button
+                variant="primary"
+                size="sm"
+                onClick={addRule}
+                disabled={readOnly() || saving() || atRuleCap()}
+                ariaLabel={t('automation.addRule')}
+              >
+                {t('automation.addRule')}
+              </Button>
+            }
+          />
         </Show>
 
         <For each={state()!.rules}>
@@ -321,7 +330,7 @@ export default function AutomationPanel(props: Props) {
                             <span class="nx-rule-condition">
                               {automationConditionText(condition)}
                               <Show when={condition.type === 'time_window' && !isEveryDayMask(conditionDaysMask(condition))}>
-                                <span class="nx-rule-days"> — {daysText(conditionDaysMask(condition))}</span>
+                                <span class="nx-rule-days"> ({daysText(conditionDaysMask(condition))})</span>
                               </Show>
                             </span>
                           </>

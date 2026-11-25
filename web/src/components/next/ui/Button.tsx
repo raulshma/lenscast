@@ -46,6 +46,7 @@ export default function Button(props: Props) {
         'nx-btn-icon': props.icon === true,
       }}
       disabled={props.disabled || props.loading}
+      aria-busy={props.loading ? 'true' : undefined}
       title={props.title}
       aria-label={props.ariaLabel}
       aria-pressed={props.ariaPressed}

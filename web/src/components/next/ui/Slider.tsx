@@ -8,8 +8,9 @@ interface Props {
   ariaLabel?: string
 }
 
-/** Range slider: cyan fill up to the value, bone thumb — the fill length
- *  rides a `--nx-slider-pct` custom property the kit CSS reads. */
+/** Range slider: cool fill up to the value (a measurement), ink thumb —
+ *  the fill length rides a `--slider-pct` custom property the kit CSS
+ *  reads. The 44px input box is the hit target. */
 export default function Slider(props: Props) {
   const fill = () => {
     const span = props.max - props.min || 1
@@ -26,7 +27,7 @@ export default function Slider(props: Props) {
       value={props.value}
       disabled={props.disabled}
       aria-label={props.ariaLabel}
-      style={{ '--nx-slider-pct': fill() }}
+      style={{ '--slider-pct': fill() }}
       onInput={(e) => props.onChange(Number(e.currentTarget.value))}
     />
   )

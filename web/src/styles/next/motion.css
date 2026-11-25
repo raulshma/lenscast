@@ -1,0 +1,40 @@
+/* Hallmark · shape: app screen · genre: modern-minimal · theme: Console (deal 1/3, seed operator-console-phone-as-camera-rig-9437·d469983a·2026-11-25·r0) · redesign: full
+ * nav: rail-first sidebar kept, rebuilt · signature: the live stage · states: loading, empty, error, full · console: graphite
+ * faces: Golos kept for cyrillic locales (theme face latin-only), Atkinson Hyperlegible Mono measures
+ * axes: dark/grotesk-sans/chromatic-amber · posture: restrained · contrast: pass · v2.0.0 */
+/* ══════════════════════════════════════════════════════════════════
+   NEXT UI — MOTION
+   Motion is states, not spectacle, and it borrows the console clock:
+   micro (120ms) press and hover feedback; short (220ms) entrances;
+   long (420ms) overlays on the drawer curve. View switches are
+   opacity only. Breathe is reserved for live-state markers and
+   skeletons — nothing else repeats. prefers-reduced-motion is clamped
+   globally in base.css (animation- and transition-duration forced to
+   0.01ms), so no rule here carries its own reduce handling.
+   ══════════════════════════════════════════════════════════════════ */
+
+/* View-switch entrance — opacity only. A transform here would leave a
+   transformed ancestor over the view subtree, breaking the
+   position:fixed overlays mounted inside views (confirm dialogs, the
+   inspector FAB), and would re-animate the persistent stream player
+   that re-parents into the live stage; opacity avoids both. The flush
+   stage root (Live) has no inner wrapper, so it joins the selector
+   directly. Nested @starting-style form: unsupported browsers simply
+   render the view instantly, so there is no invisible-element risk. */
+[data-ui='next'] .nx-view-inner,
+[data-ui='next'] .nx-view-flush {
+  opacity: 1;
+  transition: opacity 160ms var(--ease-out);
+  @starting-style { opacity: 0; }
+}
+
+/* Skeleton pulse — loading state indication. */
+[data-ui='next'] .nx-skeleton { animation: nx-breathe 1.6s var(--ease-inout) infinite; }
+@keyframes nx-breathe { 0%, 100% { opacity: 1 } 50% { opacity: 0.55 } }
+
+/* Gallery viewer entrance — one settle on the container root (one
+   entrance per container; the viewer mounts fresh per open via Show).
+   Scoped under [data-ui='next'] precisely so the classic shell, which
+   consumes the same MediaViewer classes, keeps its own behavior. */
+[data-ui='next'] .gallery-viewer { animation: nx-viewer-in 220ms var(--ease-out); transform-origin: center; }
+@keyframes nx-viewer-in { from { opacity: 0; transform: scale(0.985) } }

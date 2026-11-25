@@ -44,10 +44,12 @@ class MainActivity : ComponentActivity() {
         lifecycle.addObserver(LifecycleEventObserver { _, event ->
             when (event) {
                 Lifecycle.Event.ON_RESUME -> {
-                    app.cameraService.onActivityResume()
                     // Retry a foreground promotion Android may have denied
-                    // while the app was backgrounded.
+                    // while the app was backgrounded BEFORE resuming the
+                    // camera so any active session re-asserts its `camera`
+                    // foreground service intent before the camera rebind runs.
                     app.ensureServerForeground()
+                    app.cameraService.onActivityResume()
                     // The app is visible — the state every post-death camera
                     // recovery needs. Dismiss the FSI camera-resume prompt
                     // (blueprint P1 item 11): a manual visit is the recovery

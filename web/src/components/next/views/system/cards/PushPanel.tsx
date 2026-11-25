@@ -140,25 +140,26 @@ export default function PushPanel(props: Props) {
         checked={pushOn()}
         onChange={() => props.updateStreamingAndSave({ pushEnabled: !pushOn() })}
       />
-      <div class="nx-banner nx-banner-info" role="note" aria-live="polite">
+      <div class="nx-banner nx-banner-neutral" role="note" aria-live="polite">
         <span>{t('push.desc')}</span>
       </div>
 
       <Show
         when={supported}
         fallback={
-          <div class="nx-banner nx-banner-info" role="note">
+          <div class="nx-banner nx-banner-neutral" role="note">
             <span>{SUPPORT_HINTS[support]()}</span>
           </div>
         }
       >
         <FieldRow label={t('push.thisBrowser')}>
-          <span class="nx-mono nx-info-value">
+          {/* State words, not measurements: Golos, not the mono face. */}
+          <span class="nx-info-value">
             {subscribed() === undefined ? t('push.checking') : subscribed() ? t('push.subscribed') : t('push.notSubscribed')}
           </span>
         </FieldRow>
         <FieldRow label={t('push.notifications')}>
-          <span class="nx-mono nx-info-value">{localizedPermissionLabel(permission())}</span>
+          <span class="nx-info-value">{localizedPermissionLabel(permission())}</span>
         </FieldRow>
         <Show when={subscribed() === true}>
           <Button size="sm" variant="ghost" disabled={busy()} onClick={disable}>

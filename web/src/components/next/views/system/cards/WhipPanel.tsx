@@ -67,7 +67,7 @@ export default function WhipPanel(props: Props) {
       badge={
         <Show when={chipTone()}>
           {(tone) => (
-            <Badge tone={tone()} mono>
+            <Badge tone={tone()}>
               <Led tone={VARIANT_LED[statusView().variant]} />
               {statusView().label}
             </Badge>
@@ -80,7 +80,7 @@ export default function WhipPanel(props: Props) {
         checked={whipOn()}
         onChange={() => props.updateStreamingAndSave({ whipEnabled: !whipOn() })}
       />
-      <div class="nx-banner nx-banner-info" role="note" aria-live="polite">
+      <div class="nx-banner nx-banner-neutral" role="note" aria-live="polite">
         {t('whip.desc')}
       </div>
 
@@ -119,7 +119,7 @@ export default function WhipPanel(props: Props) {
           />
         </Field>
         <div
-          class={`nx-banner ${stunField().invalid ? 'nx-banner-danger' : 'nx-banner-info'}`}
+          class={`nx-banner ${stunField().invalid ? 'nx-banner-danger' : 'nx-banner-neutral'}`}
           role="note"
           aria-live="polite"
         >
@@ -136,7 +136,8 @@ export default function WhipPanel(props: Props) {
           </span>
         </div>
 
-        {/* Start/Stop */}
+        {/* Start/Stop — the start verb is a quiet outline key: the Protocols
+            rack pairs it with RTMP's, and the rack has no one primary. */}
         {whipActive() ? (
           <Button
             variant="danger"
@@ -149,7 +150,7 @@ export default function WhipPanel(props: Props) {
           </Button>
         ) : (
           <Button
-            variant="primary"
+            variant="secondary"
             size="sm"
             // The server refuses a start when the push is disabled or the
             // endpoint is unusable — gate on both so the reason never has

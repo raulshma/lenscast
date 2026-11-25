@@ -87,6 +87,7 @@ describe('StreamPipHost', () => {
     await waitFor(() => expect(host().parentElement).toBe(document.querySelector('.nx-pip-slot')))
     expect(dock().classList.contains('nx-pip-hidden')).toBe(false)
     expect(dock().getAttribute('aria-hidden')).toBe('false')
+    expect(document.documentElement.hasAttribute('data-pip-dock')).toBe(false)
   })
 
   it('hands the player to the stage slot on live and back without remounting it', async () => {

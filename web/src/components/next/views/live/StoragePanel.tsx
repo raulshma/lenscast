@@ -128,7 +128,7 @@ export default function StoragePanel(props: Props) {
         {(f) => (
           <div class="nx-banner nx-banner-info" role="note">
             <span>
-              {tCount('storage.untilQuota', f().daysRemaining)} — {t('storage.forecastDesc', { perDay: formatBytes(f().bytesPerDay), days: tCount('storage.daysSpanned', Math.round(f().daysSpanned)) })}
+              {tCount('storage.untilQuota', f().daysRemaining)}. {t('storage.forecastDesc', { perDay: formatBytes(f().bytesPerDay), days: tCount('storage.daysSpanned', Math.round(f().daysSpanned)) })}
             </span>
           </div>
         )}

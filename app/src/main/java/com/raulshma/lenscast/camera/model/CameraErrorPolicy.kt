@@ -130,4 +130,13 @@ object CameraErrorPolicy {
             null, Verdict.REBIND -> if (rebindAttempts < MAX_REBIND_ATTEMPTS) Verdict.REBIND else Verdict.CAMERAX_HANDLES
             else -> publishedRecovery
         }
+
+    /**
+     * Whether a standing error published while backgrounded should clear and
+     * rebind when the activity resumes in the foreground. Only [Verdict.POLICY_DENIED]
+     * (the while-in-use policy denial from background open) resolves solely by
+     * returning to foreground; fatal/removed/other verdicts remain standing.
+     */
+    fun shouldRecoverOnResume(publishedRecovery: Verdict?): Boolean =
+        publishedRecovery == Verdict.POLICY_DENIED
 }

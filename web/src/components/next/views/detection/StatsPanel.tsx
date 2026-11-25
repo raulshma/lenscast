@@ -23,15 +23,16 @@ function typeLabel(type: string): string {
 }
 
 /**
- * Aggregate detection statistics, ported from the classic DetectionStatsCard:
- * a 24h/7d/all-time window over the per-type counts, the zero-filled
- * seven-day bar chart, and the top zones / ML labels. The payload carries
- * all three windows at once, so the toggle never refetches.
+ * Aggregate detection statistics — the context the event journal reads
+ * against: a 24h/7d/all-time window over the per-type counts, the
+ * zero-filled seven-day bar chart, and the top zones / ML labels. The
+ * payload carries all three windows at once, so the toggle never
+ * refetches.
  *
- * The composition varies by content rather than repeating a stat-card
- * grid: the lead metric speaks in one big tabular numeral, the remaining
- * types share a compact column row, the total runs quiet under a
- * hairline, and the seven-day sparkline sits beside them ≥900px.
+ * The recipe per metric: ONE big tabular numeral leads (the reading is
+ * the headline, the instrument's cool voice), the label quiet underneath.
+ * The lead metric takes the largest step, the remaining types share the
+ * second, and the total runs quiet under a hairline.
  */
 export default function StatsPanel() {
   const [stats] = createResource(() => getDetectionStats())
@@ -79,7 +80,7 @@ export default function StatsPanel() {
             <For each={counts()}>
               {(row, index) => (
                 <div class="nx-stats-row" classList={{ 'nx-stats-row-lead': index() === 0 }}>
-                  <span class="nx-stats-count nx-mono">{row.count}</span>
+                  <span class="nx-stats-count nx-num">{row.count}</span>
                   <span class="nx-stat-label">{typeLabel(row.type)}</span>
                 </div>
               )}

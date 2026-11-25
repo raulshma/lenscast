@@ -69,7 +69,7 @@ export default function RtmpPanel(props: Props) {
       badge={
         <Show when={chipTone()}>
           {(tone) => (
-            <Badge tone={tone()} mono>
+            <Badge tone={tone()}>
               <Led tone={VARIANT_LED[statusView().variant]} />
               {statusView().label}
             </Badge>
@@ -82,7 +82,7 @@ export default function RtmpPanel(props: Props) {
         checked={rtmpOn()}
         onChange={() => props.updateStreamingAndSave({ rtmpEnabled: !rtmpOn() })}
       />
-      <div class="nx-banner nx-banner-info" role="note" aria-live="polite">
+      <div class="nx-banner nx-banner-neutral" role="note" aria-live="polite">
         {t('rtmp.desc')}
       </div>
 
@@ -101,7 +101,7 @@ export default function RtmpPanel(props: Props) {
           />
         </Field>
         <div
-          class={`nx-banner ${urlField().invalid ? 'nx-banner-danger' : 'nx-banner-info'}`}
+          class={`nx-banner ${urlField().invalid ? 'nx-banner-danger' : 'nx-banner-neutral'}`}
           role="note"
           aria-live="polite"
         >
@@ -118,7 +118,8 @@ export default function RtmpPanel(props: Props) {
           </span>
         </div>
 
-        {/* Start/Stop */}
+        {/* Start/Stop — the start verb is a quiet outline key: the Protocols
+            rack pairs it with WHIP's, and the rack has no one primary. */}
         {rtmpActive() ? (
           <Button
             variant="danger"
@@ -131,7 +132,7 @@ export default function RtmpPanel(props: Props) {
           </Button>
         ) : (
           <Button
-            variant="primary"
+            variant="secondary"
             size="sm"
             // The server refuses a start when the push is disabled or the
             // stored URL is unusable — the field is write-only (blank

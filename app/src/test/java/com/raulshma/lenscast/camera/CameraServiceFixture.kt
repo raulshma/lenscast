@@ -60,6 +60,9 @@ internal class CameraServiceFixture {
     /** Every standard bind's use-case list, in bind order — what CameraX was handed. */
     val binds = ArrayList<List<UseCase>>()
 
+    /** Every SessionConfig handed to `bindToLifecycle(..., SessionConfig)`, in bind order. */
+    val sessionConfigs = ArrayList<androidx.camera.core.SessionConfig>()
+
     /** Runs inside the submit seam after a bundle is recorded — a concurrency test's parking spot. */
     val onSubmitInterceptors = ArrayList<(CaptureRequestOptions) -> Unit>()
 
@@ -103,6 +106,14 @@ internal class CameraServiceFixture {
                 is Collection<*> -> third.filterIsInstance<UseCase>()
                 else -> emptyList()
             }
+            camera
+        }
+        every {
+            provider.bindToLifecycle(any(), any(), any<androidx.camera.core.SessionConfig>())
+        } answers {
+            val sessionConfig = thirdArg<androidx.camera.core.SessionConfig>()
+            sessionConfigs += sessionConfig
+            binds += sessionConfig.useCases
             camera
         }
         setServiceField("cameraProvider", provider)

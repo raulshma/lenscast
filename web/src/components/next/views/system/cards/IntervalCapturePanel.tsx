@@ -38,7 +38,9 @@ export default function IntervalCapturePanel(props: Props) {
       badge={<Show when={props.intervalRunning()}><Led tone="rec" /></Show>}
     >
       <Show when={props.intervalRunning()}>
-        <div class="nx-banner nx-banner-info" role="status" aria-live="polite">
+        {/* The run is the operator's on-air process: the amber presence,
+            same voice as the recording panel's REC banner. */}
+        <div class="nx-banner nx-banner-rec" role="status" aria-live="polite">
           {t('interval.running', { count: props.intervalCompleted() })}
         </div>
       </Show>
@@ -76,13 +78,14 @@ export default function IntervalCapturePanel(props: Props) {
         />
       </FieldRow>
 
-      {/* Start/Stop */}
+      {/* Start/Stop — a quiet outline start: this rack pairs the verb with
+          the recording panel's, and two amber primaries would shout. */}
       {props.intervalRunning() ? (
         <Button variant="danger" size="sm" onClick={props.handleStopIntervalCapture} ariaLabel={t('interval.stop')}>
           {t('interval.stop')}
         </Button>
       ) : (
-        <Button variant="primary" size="sm" onClick={props.handleStartIntervalCapture} ariaLabel={t('interval.start')}>
+        <Button variant="secondary" size="sm" onClick={props.handleStartIntervalCapture} ariaLabel={t('interval.start')}>
           {t('interval.start')}
         </Button>
       )}

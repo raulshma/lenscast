@@ -27,6 +27,7 @@ class CaptureSupportTest {
         assertNull(support.opticalStabilizationModes)
         assertNull(support.videoStabilizationModes)
         assertNull(support.manualPostProcessing)
+        assertNull(support.targetFpsRanges)
     }
 
     @Test
@@ -39,6 +40,7 @@ class CaptureSupportTest {
             opticalStabilizationModes = a,
             videoStabilizationModes = b,
             manualPostProcessing = false,
+            targetFpsRanges = setOf(CaptureSupport.FpsRange(30, 30), CaptureSupport.FpsRange(30, 60)),
         )
 
         assertEquals(known, CaptureSupport.UNRESTRICTED.intersect(known))
@@ -122,6 +124,26 @@ class CaptureSupportTest {
             .intersect(CaptureSupport(opticalStabilizationModes = setOf(0)))
 
         assertEquals(setOf(0), support.opticalStabilizationModes)
+    }
+
+    @Test
+    fun `target fps ranges intersect when both sides are known and keep known when one is null`() {
+        val r30 = CaptureSupport.FpsRange(30, 30)
+        val r60 = CaptureSupport.FpsRange(30, 60)
+        val r15 = CaptureSupport.FpsRange(15, 30)
+
+        assertEquals(
+            setOf(r30),
+            CaptureSupport(targetFpsRanges = setOf(r30, r60))
+                .intersect(CaptureSupport(targetFpsRanges = setOf(r15, r30)))
+                .targetFpsRanges,
+        )
+        assertEquals(
+            setOf(r30, r60),
+            CaptureSupport(targetFpsRanges = setOf(r30, r60))
+                .intersect(CaptureSupport(targetFpsRanges = null))
+                .targetFpsRanges,
+        )
     }
 
     @Test

@@ -78,11 +78,13 @@ class CameraServiceCaptureReadbackTest {
         sensorSensitivity: Int? = 3200,
         sensorExposureTimeNs: Long? = 100_000_000L,
         sceneMode: Int? = CaptureRequest.CONTROL_SCENE_MODE_NIGHT,
+        fpsRange: android.util.Range<Int>? = null,
     ): TotalCaptureResult = mockk {
         every { get(CaptureResult.CONTROL_AE_MODE) } answers { aeMode }
         every { get(CaptureResult.SENSOR_SENSITIVITY) } answers { sensorSensitivity }
         every { get(CaptureResult.SENSOR_EXPOSURE_TIME) } answers { sensorExposureTimeNs }
         every { get(CaptureResult.CONTROL_SCENE_MODE) } answers { sceneMode }
+        every { get(CaptureResult.CONTROL_AE_TARGET_FPS_RANGE) } answers { fpsRange }
     }
 
     /** What a camera still running its defaults reports. */
@@ -200,7 +202,7 @@ class CameraServiceCaptureReadbackTest {
     }
 
     @Test
-    fun `an armed hook reads exactly the four read-back keys`() {
+    fun `an armed hook reads exactly the five read-back keys`() {
         armManualNight()
 
         val result = captureResult()
@@ -210,7 +212,32 @@ class CameraServiceCaptureReadbackTest {
         verify(exactly = 1) { result.get(CaptureResult.SENSOR_SENSITIVITY) }
         verify(exactly = 1) { result.get(CaptureResult.SENSOR_EXPOSURE_TIME) }
         verify(exactly = 1) { result.get(CaptureResult.CONTROL_SCENE_MODE) }
+        verify(exactly = 1) { result.get(CaptureResult.CONTROL_AE_TARGET_FPS_RANGE) }
         confirmVerified(result)
+    }
+
+    @Test
+    fun `an fps range mismatch is logged at timeout when device clamps fps`() {
+        apply(CameraSettings(frameRate = 60))
+
+        val clamped = captureResult(
+            aeMode = CaptureRequest.CONTROL_AE_MODE_ON,
+            sceneMode = CaptureRequest.CONTROL_SCENE_MODE_DISABLED,
+            fpsRange = android.util.Range(30, 30),
+        )
+        frame(clamped)
+        assertTrue(readbackLines().isEmpty())
+
+        ShadowSystemClock.advanceBy(Duration.ofMillis(10_000))
+        frame(clamped)
+
+        assertEquals(
+            listOf(
+                "Camera controls readback: MISMATCH requested AE=ON scene=DISABLED fps=[60..60] " +
+                    "| device AE=ON scene=DISABLED fps=[30..30]",
+            ),
+            readbackLines().map { it.msg },
+        )
     }
 
     @Test

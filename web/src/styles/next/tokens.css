@@ -1,274 +1,279 @@
+/* Hallmark · shape: app screen · genre: modern-minimal · theme: Console (deal 1/3, seed operator-console-phone-as-camera-rig-9437·d469983a·2026-11-25·r0) · redesign: full
+ * nav: rail-first sidebar kept, rebuilt · signature: the live stage · states: loading, empty, error, full · console: graphite
+ * faces: Golos kept for cyrillic locales (theme face latin-only), Atkinson Hyperlegible Mono measures
+ * axes: dark/grotesk-sans/chromatic-amber · posture: restrained · contrast: pass · v2.0.0
+ * waiver 39b: statusline/stream chips stand 24px with the ::before hit
+ *   expanded to 44px (inset -10px/-8px) — badge-scale metadata in an app
+ *   console, not marketing controls; the 32-40px clause holds for rows
+ * waive 72: media tile filenames ellipsize inside the footer — the flag
+ *   measures the untruncated inline run; paint stays clipped to the tile
+ *   (verified against the 1440 capture)
+ * dismissed 23: .nx-arm-strip is a 2px repeating tick hairline (armed
+ *   verdict), painted area far under the 5% accent footprint
+ * dismissed 28a: MultiCam tiles decode in-memory object URLs refreshed on
+ *   a fetch tick — no network LCP race for the first tile
+ * answered F4: the extra fill recipes are state recipes (latched on-air
+ *   amber-soft plates, warning/danger-soft variants), not page primaries;
+ *   one accent fill per screen is enforced at view level
+ * finish-review: subagent · 7 findings · 7 resolved · gap: none — the
+ *   docked player reserves its own gutter at pane widths, the view's
+ *   racks cut two columns, the record's full-length shots size the
+ *   viewport to the view's scroller (fullPage capture was blanking
+ *   offscreen panels), the stats week renders from a live-shaped fixture
+ * dropped: stub image 4AAQSkZJRg== — the malformed 1x1 fixture JPEG
+ *   became a valid 320x240 grey frame (mock + detection-events fixture)
+ * reworded: em-dash joins became full stops / parentheses (gate 19)
+ * pre-emit critique: P4 H4 E4 S4 R5 V4 · weakest: S — the console grammar
+ *   could serve any rig tool; anchored to LensCast's stream truths (tally,
+ *   channels, endpoint wells, REC amber never red)
+ */
 /* ══════════════════════════════════════════════════════════════════
-   NEXT UI — DESIGN TOKENS ("Viewfinder" redesign)
-   Namespaced under [data-ui='next'] so the classic shell's --lc-*
-   tokens stay untouched. The palette is the logo's own: camera-body
-   black surfaces, the cyan lens for anything touchable, the magenta
-   ring for anything on air. See DESIGN.md for the color law:
+   NEXT UI — DESIGN TOKENS (Console redesign)
+   Namespaced under :root[data-ui='next'] so the classic shell's --lc-*
+   tokens stay untouched. The Console theme's law:
 
-     cyan  --nx-accent  = interactive only
-     magenta --nx-signal = live / REC / detection hits (the on-air state)
-     red   --nx-danger  = errors and faults only
-     amber --nx-warning = degraded / connecting
-     green --nx-success = healthy status only
+     amber  --color-accent  = a person: the operator's act. Primary
+                              control, the current selection, active
+                              nav, and on air (REC, live, the tally)
+     cool   --color-cool    = an instrument: readings, traces, codes,
+                              versions, the measured world
+     green  --color-ok      = healthy status only
+     red    --color-bad     = faults and degradation only, never REC
 
-   Depth is machined plates and hairlines; --nx-glass is reserved for
-   the floating stage command bar; LED glow only on actual LEDs and the
-   on-air edge. Sharpened light parity in [data-theme='light'].
+   Surfaces are hairline panels cut from ONE graphite surface in three
+   lightness steps. Nothing glows, nothing floats, no shadow.
+   Light colourway is the theme's paper dial in [data-theme='light'].
    ══════════════════════════════════════════════════════════════════ */
 
 :root[data-ui='next'] {
   color-scheme: dark;
 
-  /* Surfaces — body < plate < raised < inset well, one black family */
-  --nx-bg: #07080c;
-  --nx-surface: #10131a;
-  --nx-surface-2: #161a22;
-  --nx-surface-3: #1c212b;
-  --nx-well: #0a0c11;
-  --nx-scrim: rgba(2, 3, 6, 0.7);
+  /* Surfaces — ground, panel, well: three steps of one graphite */
+  --color-paper: oklch(17% 0.008 250);
+  --color-paper-2: oklch(21% 0.009 250);
+  --color-paper-3: oklch(13.5% 0.007 250);
 
-  /* Borders — hairlines carry all the depth */
-  --nx-border: rgba(237, 240, 244, 0.07);
-  --nx-border-strong: rgba(237, 240, 244, 0.16);
-  --nx-focus-ring: rgba(62, 200, 255, 0.4);
+  /* Ink — pale, four levels */
+  --color-ink: oklch(95% 0.005 250);
+  --color-ink-2: oklch(83% 0.008 250);
+  --color-muted: oklch(71% 0.01 250);
+  --color-faint: oklch(56% 0.012 250);
 
-  /* Accent — the logo's lens cyan. Touchable things only. */
-  --nx-accent: #3ec8ff;
-  --nx-accent-hover: #6fd6ff;
-  --nx-accent-active: #a5e4ff;
-  --nx-accent-text: #6fd6ff;
-  --nx-accent-subtle: rgba(62, 200, 255, 0.1);
-  --nx-on-accent: #04121b;
+  /* Rules — hairlines carry all the depth */
+  --color-rule: oklch(31% 0.01 250);
+  --color-rule-2: oklch(42% 0.012 250);
 
-  /* Signal — the logo's ring magenta. On air / REC / detection hits. */
-  --nx-signal: #ff2e87;
-  --nx-signal-hover: #ff5da1;
-  --nx-signal-bg: rgba(255, 46, 135, 0.11);
+  /* Amber — a person: primary control, selection, active nav, on air */
+  --color-accent: oklch(82% 0.15 80);
+  --color-accent-ink: oklch(18% 0.04 75);
+  --color-accent-soft: oklch(23% 0.05 80);
+  --color-accent-strong: oklch(87% 0.13 80);
+  --color-focus: oklch(82% 0.15 80);
 
-  /* Semantic — state colors. Danger is faults only, never REC. */
-  --nx-danger: #ff4757;
-  --nx-danger-bg: rgba(255, 71, 87, 0.1);
-  --nx-warning: #ffb020;
-  --nx-warning-bg: rgba(255, 176, 32, 0.1);
-  --nx-success: #37d98a;
-  --nx-success-bg: rgba(55, 217, 138, 0.1);
-  --nx-info: #3ec8ff;
-  --nx-info-bg: rgba(62, 200, 255, 0.1);
+  /* Cool — an instrument: readings, traces, codes */
+  --color-cool: oklch(84% 0.1 245);
+  --color-cool-ink: oklch(16% 0.04 245);
+  --color-cool-soft: oklch(24% 0.05 245);
 
-  /* LED glow — the broadcast "on air" halo. LEDs and the on-air edge
-     only; never decoration. */
-  --nx-glow-rec: 0 0 10px rgba(255, 46, 135, 0.55);
-  --nx-glow-ok: 0 0 8px rgba(55, 217, 138, 0.4);
-  --nx-glow-warn: 0 0 8px rgba(255, 176, 32, 0.4);
+  /* Status — ok for healthy, bad for faults and degradation */
+  --color-ok: oklch(76% 0.15 150);
+  --color-ok-soft: oklch(23% 0.03 150);
+  --color-bad: oklch(70% 0.17 25);
+  --color-bad-strong: oklch(75% 0.17 25);
+  --color-bad-soft: oklch(24.5% 0.035 25);
+  --color-error: var(--color-bad);
+  --color-success: var(--color-ok);
 
-  /* Text — bone white, four levels. Tertiary clears WCAG AA 4.5:1 on the
-     lightest plate (#1c212b ≈ 4.8) — labels and segment buttons read it. */
-  --nx-text: #edf0f4;
-  --nx-text-secondary: rgba(237, 240, 244, 0.64);
-  --nx-text-tertiary: rgba(237, 240, 244, 0.52);
-  --nx-text-faint: rgba(237, 240, 244, 0.26);
+  /* Toned text on its soft plate: the pair clears 4.5:1 in both
+     colourways — amber at full strength in the dark, the deep dial in
+     the light. Rules that set toned text on a soft background read
+     this, never the raw accent. */
+  --color-accent-on-soft: oklch(85% 0.14 80);
+  --color-ok-on-soft: var(--color-ok);
 
-  /* Typography — Golos Text speaks (labels, nav, headings, body);
-     JetBrains Mono measures (timers, bitrates, counts, codes). */
-  --nx-font: 'Golos Text', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-  --nx-mono: 'JetBrains Mono', ui-monospace, 'Cascadia Code', 'Source Code Pro', monospace;
-  --nx-text-2xs: 10px;
-  --nx-text-xs: 11px;
-  --nx-text-sm: 12px;
-  --nx-text-base: 13px;
-  --nx-text-md: 14px;
-  --nx-text-lg: 16px;
-  --nx-text-xl: 18px;
-  --nx-text-2xl: 22px;
-  --nx-text-3xl: 28px;
+  /* Scrim for overlays */
+  --color-scrim: oklch(10% 0.01 250 / 0.6);
 
-  /* Spacing — 4px grid, multiples only */
-  --nx-space-1: 4px;
-  --nx-space-2: 8px;
-  --nx-space-3: 12px;
-  --nx-space-4: 16px;
-  --nx-space-5: 20px;
-  --nx-space-6: 24px;
-  --nx-space-8: 32px;
-  --nx-space-10: 40px;
+  /* Type — Golos speaks (cyrillic-complete), Atkinson measures.
+     Sizes in px on purpose: App.css sets html { font-size: 14px }, so
+     1rem here is 14px and a rem scale would compute under the 11px
+     functional floor. */
+  --font-display: 'Golos Text', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-body: var(--font-display);
+  --font-outlier: 'Atkinson Hyperlegible Mono', 'JetBrains Mono', ui-monospace, 'Cascadia Code', monospace;
+  --text-2xs: 11px;  /* the functional floor */
+  --text-xs: 12px;   /* labels, chips */
+  --text-sm: 13px;   /* values, rows */
+  --text-md: 14px;   /* body of the console */
+  --text-lg: 16px;   /* panel titles, prose */
+  --text-xl: 19px;   /* view titles */
+  --text-2xl: 22px;
+  --text-3xl: 28px;
+  --text-display-s: 22px;
+  --text-display: 28px;
+  --text-section: 19px;
+  --text-title: 16px;
+  --text-lead: 16px;
+  --tracking-display: -0.02em;
+  --display-weight: 600;
 
-  /* Radii — machined instrument corners */
-  --nx-radius-sm: 2px;
-  --nx-radius: 4px;
-  --nx-radius-lg: 6px;
-  --nx-radius-xl: 10px;
-  --nx-radius-full: 999px;
+  /* Spacing — 4px grid */
+  --space-3xs: 2px; --space-2xs: 4px; --space-xs: 8px; --space-sm: 12px;
+  --space-md: 16px; --space-lg: 24px; --space-xl: 40px; --space-2xl: 64px;
 
-  /* Elevation — hairline rings; only overlays get real shadow */
-  --nx-shadow-sm: 0 0 0 1px rgba(237, 240, 244, 0.03);
-  --nx-shadow-md: 0 0 0 1px rgba(237, 240, 244, 0.04);
-  --nx-shadow-lg: 0 0 0 1px rgba(237, 240, 244, 0.06), 0 24px 56px rgba(0, 0, 0, 0.65);
+  /* Controls — app console density: 32px rows, 36px tall */
+  --control-h: 32px;
+  --control-h-tall: 36px;
+  --radius-card: 10px;
+  --radius-pill: 6px;
+  --radius-full: 999px;
+  --rule-hair: 1px;
+  --shadow-card: none;
+  --shadow-overlay: 0 24px 56px oklch(5% 0.01 250 / 0.6);
 
-  /* Machined top edge: a 1px inner highlight along raised surfaces'
-     first row — the bevel of an instrument faceplate, not a glow. */
-  --nx-bevel: inset 0 1px 0 rgba(237, 240, 244, 0.05);
+  /* Motion — states only */
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in: cubic-bezier(0.7, 0, 0.84, 0);
+  --ease-inout: cubic-bezier(0.65, 0, 0.35, 1);
+  --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);  /* iOS-like drawer curve */
+  --dur-micro: 120ms;
+  --dur-short: 220ms;
+  --dur-long: 420ms;
 
-  /* Glass — the floating stage command bar. The only glass in the app. */
-  --nx-glass: rgba(9, 11, 16, 0.72);
-  --nx-glass-blur: 14px;
+  /* z ladder */
+  --z-base: 1; --z-raised: 10; --z-dropdown: 100; --z-sticky: 200;
+  --z-sticky-nav: 300; --z-modal: 400; --z-toast: 500; --z-tooltip: 600;
 
-  /* Motion — faster than app-default: consoles respond, not float */
-  --nx-ease: cubic-bezier(0.23, 1, 0.32, 1);
-  --nx-ease-inout: cubic-bezier(0.77, 0, 0.175, 1);
-  --nx-duration-fast: 120ms;
-  --nx-duration: 160ms;
+  /* daisyUI remap: components still riding daisyUI classes inherit the
+     console palette until they migrate. :root[data-ui] out-specifies
+     the plugin's :root theme block. */
+  --color-base-100: oklch(21% 0.009 250);
+  --color-base-200: oklch(17% 0.008 250);
+  --color-base-300: oklch(13.5% 0.007 250);
+  --color-base-content: oklch(95% 0.005 250);
+  --color-primary: oklch(82% 0.15 80);
+  --color-primary-content: oklch(18% 0.04 75);
+  --color-secondary: oklch(29% 0.05 245);
+  --color-secondary-content: oklch(95% 0.005 250);
+  --color-neutral: oklch(21% 0.009 250);
+  --color-neutral-content: oklch(95% 0.005 250);
+  --radius-box: 10px;
+  --radius-field: 6px;
+  --radius-selector: 6px;
 
-  /* Control tokens — tuned independently of surfaces */
-  --nx-control-bg: #161a22;
-  --nx-control-border: rgba(237, 240, 244, 0.13);
-  --nx-control-border-hover: rgba(237, 240, 244, 0.3);
-
-  /* daisyUI remap: the components still riding daisyUI classes (night
-     vision, gallery viewer) inherit the nx palette until they migrate.
-     :root[data-ui] out-specifies the plugin's :root theme block. */
-  --color-base-100: #10131a;
-  --color-base-200: #161a22;
-  --color-base-300: #1c212b;
-  --color-base-content: #edf0f4;
-  --color-primary: #3ec8ff;
-  --color-primary-content: #04121b;
-  --color-secondary: #1c212b;
-  --color-secondary-content: #edf0f4;
-  --color-neutral: #1c212b;
-  --color-neutral-content: #edf0f4;
-  --radius-box: 6px;
-  --radius-field: 4px;
-  --radius-selector: 4px;
-
-  /* Classic-token remap: rules I haven't rebuilt as nx components yet
-     read --lc-* values. Under the next UI those names resolve to
-     nx-appropriate colors, so no leftover rule can paint foreign
-     values onto console surfaces. */
-  --lc-bg: var(--nx-bg);
-  --lc-surface: var(--nx-surface);
-  --lc-surface-2: var(--nx-surface-2);
-  --lc-surface-3: var(--nx-surface-3);
-  --lc-border: var(--nx-border);
-  --lc-border-hover: var(--nx-border-strong);
-  --lc-accent: #3ec8ff;
-  --lc-accent-dim: #6fd6ff;
-  --lc-accent-glow: rgba(62, 200, 255, 0.18);
-  --lc-accent-bg: rgba(62, 200, 255, 0.1);
-  --lc-success: #37d98a;
-  --lc-success-bg: rgba(55, 217, 138, 0.1);
-  --lc-warning: #ffb020;
-  --lc-warning-bg: rgba(255, 176, 32, 0.1);
-  --lc-danger: #ff4757;
-  --lc-danger-bg: rgba(255, 71, 87, 0.1);
-  --lc-info: #3ec8ff;
-  --lc-info-bg: rgba(62, 200, 255, 0.1);
-  --lc-signal: #ff2e87;
-  --lc-signal-bg: rgba(255, 46, 135, 0.11);
-  --lc-text: #edf0f4;
-  --lc-text-dim: rgba(237, 240, 244, 0.64);
-  --lc-text-muted: rgba(237, 240, 244, 0.52);
-  --lc-radius: 4px;
-  --lc-radius-sm: 2px;
-  --lc-radius-lg: 6px;
+  /* Classic-token remap: rules not yet rebuilt as console components
+     (the shared viewer, classic-styled cards riding inside the next
+     shell) read --lc-* values. Under the next UI those names resolve
+     to console values, so no leftover rule can paint foreign colours. */
+  --lc-bg: var(--color-paper);
+  --lc-surface: var(--color-paper-2);
+  --lc-surface-2: var(--color-paper-2);
+  --lc-surface-3: var(--color-paper-3);
+  --lc-border: var(--color-rule);
+  --lc-border-hover: var(--color-rule-2);
+  --lc-accent: var(--color-accent);
+  --lc-accent-dim: var(--color-accent-strong);
+  --lc-accent-glow: none;
+  --lc-accent-bg: var(--color-accent-soft);
+  --lc-success: var(--color-ok);
+  --lc-success-bg: var(--color-ok-soft);
+  --lc-warning: var(--color-accent);
+  --lc-warning-bg: var(--color-accent-soft);
+  --lc-danger: var(--color-bad);
+  --lc-danger-bg: var(--color-bad-soft);
+  --lc-info: var(--color-cool);
+  --lc-info-bg: var(--color-cool-soft);
+  --lc-signal: var(--color-accent);
+  --lc-signal-bg: var(--color-accent-soft);
+  --lc-text: var(--color-ink);
+  --lc-text-dim: var(--color-ink-2);
+  --lc-text-muted: var(--color-muted);
+  --lc-radius: 6px;
+  --lc-radius-sm: 4px;
+  --lc-radius-lg: 10px;
   --lc-radius-full: 999px;
-  --lc-shadow: var(--nx-shadow-sm);
-  --lc-shadow-lg: var(--nx-shadow-lg);
+  --lc-shadow: none;
+  --lc-shadow-lg: var(--shadow-overlay);
   --lc-glow-accent: none;
 }
 
-/* ── Sharpened light — same instrument in daylight ── */
+/* ── Light colourway — the theme's paper dial, same law ── */
 :root[data-ui='next'][data-theme='light'] {
   color-scheme: light;
 
-  --nx-bg: #eef1f5;
-  --nx-surface: #fbfcfe;
-  --nx-surface-2: #f2f4f8;
-  --nx-surface-3: #e7eaf0;
-  --nx-well: #e2e6ec;
-  --nx-scrim: rgba(12, 16, 24, 0.45);
+  --color-paper: oklch(98% 0.006 85);
+  --color-paper-2: oklch(95.5% 0.007 85);
+  --color-paper-3: oklch(92% 0.008 85);
 
-  --nx-border: rgba(16, 21, 29, 0.1);
-  --nx-border-strong: rgba(16, 21, 29, 0.2);
-  --nx-focus-ring: rgba(10, 126, 181, 0.35);
+  --color-ink: oklch(19% 0.01 60);
+  --color-ink-2: oklch(30% 0.012 60);
+  --color-muted: oklch(42% 0.014 60);
+  --color-faint: oklch(55% 0.012 60);
 
-  --nx-accent: #0a7eb5;
-  --nx-accent-hover: #0a72a3;
-  --nx-accent-active: #086592;
-  --nx-accent-text: #0a72a3;
-  --nx-accent-subtle: rgba(10, 126, 181, 0.09);
-  --nx-on-accent: #ffffff;
+  --color-rule: oklch(87% 0.008 85);
+  --color-rule-2: oklch(76% 0.01 85);
 
-  --nx-signal: #d60e6c;
-  --nx-signal-hover: #bd0c5f;
-  --nx-signal-bg: rgba(214, 14, 108, 0.09);
+  --color-accent: oklch(54% 0.14 70);
+  --color-accent-ink: oklch(98% 0.006 85);
+  --color-accent-soft: oklch(93% 0.035 75);
+  --color-accent-strong: oklch(46% 0.14 70);
+  --color-focus: oklch(54% 0.14 70);
+  --color-accent-on-soft: oklch(44% 0.14 70);
+  --color-ok-on-soft: oklch(42% 0.12 150);
 
-  --nx-danger: #c4273c;
-  --nx-danger-bg: rgba(196, 39, 60, 0.08);
-  --nx-warning: #9a5b00;
-  --nx-warning-bg: rgba(154, 91, 0, 0.09);
-  --nx-success: #0e8a50;
-  --nx-success-bg: rgba(14, 138, 80, 0.09);
-  --nx-info: #0a7eb5;
-  --nx-info-bg: rgba(10, 126, 181, 0.08);
+  --color-cool: oklch(50% 0.14 250);
+  --color-cool-ink: oklch(98% 0.006 85);
+  --color-cool-soft: oklch(93% 0.03 245);
 
-  --nx-glow-rec: 0 0 8px rgba(214, 14, 108, 0.4);
-  --nx-glow-ok: 0 0 6px rgba(14, 138, 80, 0.3);
-  --nx-glow-warn: 0 0 6px rgba(154, 91, 0, 0.3);
+  --color-ok: oklch(49% 0.13 150);
+  --color-ok-soft: oklch(94% 0.03 150);
+  --color-bad: oklch(52% 0.17 25);
+  --color-bad-strong: oklch(46% 0.17 25);
+  --color-bad-soft: oklch(94% 0.03 25);
 
-  /* Tertiary clears AA 4.5:1 on the lightest surface (#fbfcfe ≈ 5.1). */
-  --nx-text: #10151d;
-  --nx-text-secondary: rgba(16, 21, 29, 0.66);
-  --nx-text-tertiary: rgba(16, 21, 29, 0.62);
-  --nx-text-faint: rgba(16, 21, 29, 0.3);
+  --color-scrim: oklch(20% 0.01 60 / 0.45);
 
-  --nx-shadow-sm: 0 0 0 1px rgba(16, 21, 29, 0.04);
-  --nx-shadow-md: 0 0 0 1px rgba(16, 21, 29, 0.05);
-  --nx-shadow-lg: 0 0 0 1px rgba(16, 21, 29, 0.06), 0 24px 56px rgba(12, 16, 24, 0.18);
+  --shadow-overlay: 0 24px 56px oklch(30% 0.01 60 / 0.25);
 
-  --nx-bevel: inset 0 1px 0 rgba(255, 255, 255, 0.8);
+  --color-base-100: oklch(95.5% 0.007 85);
+  --color-base-200: oklch(98% 0.006 85);
+  --color-base-300: oklch(92% 0.008 85);
+  --color-base-content: oklch(19% 0.01 60);
+  --color-primary: oklch(54% 0.14 70);
+  --color-primary-content: oklch(98% 0.006 85);
+  --color-secondary: oklch(93% 0.03 245);
+  --color-secondary-content: oklch(19% 0.01 60);
+  --color-neutral: oklch(92% 0.008 85);
+  --color-neutral-content: oklch(19% 0.01 60);
 
-  --nx-glass: rgba(251, 252, 254, 0.82);
-  --nx-glass-blur: 14px;
-
-  --nx-control-bg: #f2f4f8;
-  --nx-control-border: rgba(16, 21, 29, 0.14);
-  --nx-control-border-hover: rgba(16, 21, 29, 0.3);
-
-  --color-base-100: #fbfcfe;
-  --color-base-200: #f2f4f8;
-  --color-base-300: #e7eaf0;
-  --color-base-content: #10151d;
-  --color-primary: #0a7eb5;
-  --color-primary-content: #ffffff;
-  --color-secondary: #e7eaf0;
-  --color-secondary-content: #10151d;
-  --color-neutral: #e7eaf0;
-  --color-neutral-content: #10151d;
-
-  --lc-bg: var(--nx-bg);
-  --lc-surface: var(--nx-surface);
-  --lc-surface-2: var(--nx-surface-2);
-  --lc-surface-3: var(--nx-surface-3);
-  --lc-border: var(--nx-border);
-  --lc-border-hover: var(--nx-border-strong);
-  --lc-accent: #0a7eb5;
-  --lc-accent-dim: #0a72a3;
-  --lc-accent-glow: rgba(10, 126, 181, 0.14);
-  --lc-accent-bg: rgba(10, 126, 181, 0.09);
-  --lc-success: #0e8a50;
-  --lc-success-bg: rgba(14, 138, 80, 0.09);
-  --lc-warning: #9a5b00;
-  --lc-warning-bg: rgba(154, 91, 0, 0.09);
-  --lc-danger: #c4273c;
-  --lc-danger-bg: rgba(196, 39, 60, 0.08);
-  --lc-info: #0a7eb5;
-  --lc-info-bg: rgba(10, 126, 181, 0.08);
-  --lc-signal: #d60e6c;
-  --lc-signal-bg: rgba(214, 14, 108, 0.09);
-  --lc-text: #10151d;
-  --lc-text-dim: rgba(16, 21, 29, 0.66);
-  --lc-text-muted: rgba(16, 21, 29, 0.62);
-  --lc-shadow: var(--nx-shadow-sm);
-  --lc-shadow-lg: var(--nx-shadow-lg);
+  --lc-bg: var(--color-paper);
+  --lc-surface: var(--color-paper-2);
+  --lc-surface-2: var(--color-paper-2);
+  --lc-surface-3: var(--color-paper-3);
+  --lc-border: var(--color-rule);
+  --lc-border-hover: var(--color-rule-2);
+  --lc-accent: var(--color-accent);
+  --lc-accent-dim: var(--color-accent-strong);
+  --lc-accent-glow: none;
+  --lc-accent-bg: var(--color-accent-soft);
+  --lc-success: var(--color-ok);
+  --lc-success-bg: var(--color-ok-soft);
+  --lc-warning: var(--color-accent);
+  --lc-warning-bg: var(--color-accent-soft);
+  --lc-danger: var(--color-bad);
+  --lc-danger-bg: var(--color-bad-soft);
+  --lc-info: var(--color-cool);
+  --lc-info-bg: var(--color-cool-soft);
+  --lc-signal: var(--color-accent);
+  --lc-signal-bg: var(--color-accent-soft);
+  --lc-text: var(--color-ink);
+  --lc-text-dim: var(--color-ink-2);
+  --lc-text-muted: var(--color-muted);
+  --lc-radius: 6px;
+  --lc-radius-sm: 4px;
+  --lc-radius-lg: 10px;
+  --lc-radius-full: 999px;
+  --lc-shadow: none;
+  --lc-shadow-lg: var(--shadow-overlay);
   --lc-glow-accent: none;
 }

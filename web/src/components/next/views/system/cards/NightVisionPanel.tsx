@@ -25,7 +25,7 @@ export default function NightVisionPanel(props: NightVisionPanelProps) {
     <Panel
       title={t('nightvision.title')}
       badge={
-        <Badge tone={props.value === 'ON' ? 'accent' : props.value === 'AUTO' ? 'info' : 'neutral'} mono>
+        <Badge tone={props.value === 'ON' ? 'accent' : props.value === 'AUTO' ? 'info' : 'neutral'}>
           {props.value === 'ON' ? t('common.active') : props.value === 'AUTO' ? t('common.auto') : t('common.off')}
         </Badge>
       }

@@ -1,131 +1,139 @@
-# LensCast β console — design contract ("Viewfinder")
+# LensCast β console — design contract ("Console")
 
 Design source of truth for the `next` UI. Every file under
-`src/components/next/**` and `src/styles/next/**` implements this document.
-Tokens live in `tokens.css`; the quality floor (focus, motion, scrollbars)
-lives in `base.css`.
+`src/components/next/**` and `src/styles/next/**` implements this
+document. Tokens live in `tokens.css`; the scoped document floor lives
+in `base.css`. Hallmark Console theme, full redesign of the Viewfinder
+system (2026-11-25).
 
 ## The idea
 
 LensCast turns an Android phone into a camera rig. This console is the
-operator's **monitor and control deck**: mostly used while a live picture is
-going out, often next to real broadcast tools. The redesign leans into that
-world instead of a generic ops dashboard:
+operator's **monitor and control deck**, and it behaves like one
+instrument kept by careful people: one graphite surface, hairline
+panels cut from it, amber for everything the operator does, cool blue
+for everything the rig measures. **Minimal does not mean fewer
+controls — it means nothing competes for attention, and information
+arrives when it is valuable:**
 
-- **The picture is the hero.** On Live, the video runs near edge-to-edge;
-  chrome frames it and never competes with it.
-- The identity comes from the **logo's own palette**: camera-body black,
-  the cyan lens, the magenta ring. Dark default, sharpened light parity.
-- One orchestrated moment per session: the **on-air transition** (chip,
-  LED, hairline edge all turn signal-magenta together when the stream
-  starts). Everything else moves only when the hand acts.
+- **The picture leads.** On Live, the video is the deck's reason to
+  exist; every control stands aside until the hand reaches for it.
+- **Information on demand, not all at once.** A constant is chrome; a
+  signal is news. Battery at 87% is chrome until it drops low; a
+  channel idling is chrome until it faults. Surfaces show the state
+  that needs a decision, and hold the rest behind one deliberate
+  interaction (a panel, a popover, the inspector).
+- **One surface, not many plates.** Related controls sit in panels
+  divided by 1px rules, never floating cards, never shadows, never
+  glass, never glow.
 
-## Signals — the color law
+## Signals — the colour law
 
-Color is a signal, never decoration. Exactly five meanings:
+Four meanings, nothing decorative. Amber and cool are the two voices;
+ok and bad exist for status only.
 
 | Meaning | Token | Dark | Light | Notes |
 |---|---|---|---|---|
-| Touchable (interactive) | `--nx-accent` | `#3EC8FF` cyan | `#0A7EB5` | buttons, links, focus, toggles-on, selection, active nav |
-| On air (live/rec) | `--nx-signal` | `#FF2E87` magenta | `#D60E6C` | LIVE chip, REC dot + timer, Led `rec`, recording timeline, detection hit marks |
-| Wrong (error/fault) | `--nx-danger` | `#FF4757` red | `#C4273C` | error banners, failed states, Led `danger` |
-| Degraded | `--nx-warning` | `#FFB020` amber | `#9A5B00` | connecting, thermal warn, degraded link |
-| Healthy | `--nx-success` | `#37D98A` green | `#0E8A50` | connected/ok status **only** |
+| The operator (interactive, selection, on air) | `--color-accent` | `oklch(82% .15 80)` amber | `oklch(54% .14 70)` | primary button, active nav, selected row, REC + LIVE + the tally, focus ring |
+| The instrument (readings) | `--color-cool` | `oklch(84% .1 245)` | `oklch(50% .14 250)` | bitrates, fps, counts, timestamps, channel codes, versions, links on hover |
+| Healthy | `--color-ok` | `oklch(76% .15 150)` | `oklch(49% .13 150)` | connected/ok status **only** |
+| Fault or degradation | `--color-bad` | `oklch(70% .17 25)` | `oklch(52% .17 25)` | errors, failed states, degraded link, low battery |
 
-Rule of thumb: *magenta = your picture is going out; red = something is
-wrong.* Anywhere the old CSS pointed a live/rec meaning at `--nx-danger`
-(`.nx-chip-rec`, `Led tone="rec"`, recording timers, the LIVE badge),
-re-point the color at `--nx-signal`. Keep tone *names* (`danger`, `rec`)
-— they are API; only the color mapping changes.
+Rule of thumb: *amber = you or your rig are doing something; cool =
+the rig is telling you a number; red = look now.* REC and LIVE are
+amber (the tally), never red — red is only ever a fault. Degraded
+(reads as "the person should look") takes amber at soft strength
+(`--color-accent-soft`); a hard fault takes `--color-bad`.
 
-Surfaces: `--nx-bg` (body black) < `--nx-surface` (plate) <
-`--nx-surface-2` < `--nx-surface-3`; inset wells read `--nx-well`.
-Depth is plates + hairlines; **glass only** for floating stage chrome
-(`--nx-glass`); real shadows only on overlays (Drawer, Toaster, viewer).
+Surfaces: `--color-paper` (ground) > `--color-paper-2` (panel) >
+`--color-paper-3` (well: inputs, logs, the stage surround). Panels
+that belong together are **one surface divided by 1px `--color-rule`
+seams** (the `.cut` pattern in components.css). No shadows on panels;
+the one real shadow is for overlays (`--shadow-overlay`). Edge law: a
+boundary that identifies an interactive component (fields, buttons,
+switches, chips, toasts) takes `--color-muted`, the only edge token
+that clears 3:1 on every surface; `--color-rule` / `--color-rule-2`
+hairlines are decorative seams only.
 
 ## Type law
 
-- **UI face: Golos Text** (`--nx-font`). All labels, nav, buttons, headings,
-  body. Sentence case, weights 400/500/600, headings 600, tracking −0.01em.
-- **Data face: JetBrains Mono** (`--nx-mono`). Strictly for *measurements*:
-  timers, bitrates, fps, counts, timestamps, channel codes, versions,
-  IP/ports. `.nx-num`/`.nx-mono` classes, tabular numerals.
-- **Banned**: mono + uppercase + letter-spacing for labels/brand/nav/panel
-  titles (the old tell). Panel titles are Golos 600 sentence case.
-  No ALL-CAPS eyebrows anywhere. No numbered section codes (01, 02…)
-  — nothing in this console is a numbered sequence.
+- **Speaking face: Golos Text** (`--font-body` = `--font-display`).
+  All labels, nav, buttons, headings, body. Sentence case, weights
+  400/500/600, headings 600, tracking −0.02em. Kept from the previous
+  system because it carries cyrillic (ru locale); the theme's face is
+  latin-only and would render ru as a fallback mid-sentence.
+- **Measured face: Atkinson Hyperlegible Mono** (`--font-outlier`).
+  Strictly what an instrument wrote: timers, bitrates, fps, counts,
+  timestamps, channel codes, versions, IP/ports. Tabular, slashed
+  zero. Never a label, a head, a button or a nav item.
+- **Banned**: mono on non-measured text; ALL-CAPS anything; tracked
+  labels; letter-spacing past 0.03em on anything smaller than a
+  wordmark.
 
-## Voice law
+## Density and controls
 
-- Sentence case everywhere; no ellipses on buttons (spinners show waiting).
-- Status text states the fact: "Recording 04:12", "3 viewers",
-  "Connection lost — retrying".
-- Empty states name the object and the first action ("No events yet —
-  detection is armed Mon–Fri"). No apology, no mood.
+- App console density: controls 32px tall (`--control-h`), 36px tall
+  (`--control-h-tall`) for primary rows; every hit target expands to
+  44px (`::before { inset: -8px }` pattern) without changing the look.
+- One primary (amber fill, `--color-accent-ink` text) per screen;
+  secondaries are 1px `--color-rule-2` outlines on `--color-paper-2`.
+  Destructive actions are outlined, never filled red.
+- Every control ships all eight states (default, hover, focus-visible,
+  active, disabled × 3 channels + native attribute, loading, error,
+  success). Inputs: constant border width, inset ring; panel forms run
+  label-left / control-right on ≥1024px and stack below that.
+- Every region that loads data has four states: skeleton loading,
+  empty (what belongs here + the one action), error (what broke + what
+  to do), full.
 
-## Banned template chrome (hunt it down)
+## Progressive disclosure (the redesign's spine)
 
-1. Uppercase tracked-out labels, mono label styling on non-data text.
-2. Meta strings joined with middle dots (`84% · Charging`) — separate
-   chips, or plain sentences.
-3. `→` appended to buttons/links.
-4. Identical rounded cards in uniform grids with the same soft shadow.
-5. Decorative gradients/washes; glow on anything that is not an LED or
-   the on-air state.
-6. Fade-and-slide-up entrances on load; hover transitions on everything.
+1. **Decide what is news.** A value is news when it changed, when it
+   faults, or when the operator must act. Everything else is chrome.
+2. **Chrome is quiet:** muted ink, no borders of its own, no chip
+   unless it carries state.
+3. **News is legible at a glance:** at most one amber and one red
+   signal visible per region at rest.
+4. **Depth is one deliberate interaction away:** a disclosure, a
+   drawer, a tab — never a nested card, never a modal for reading.
+5. **The stage shows the state, not the settings:** live view leads
+   with the picture and the transport truth (on air, REC, clients);
+   tuning lives in the strip and the inspector.
 
-Motion: transitions answer the hand (open, expand, confirm, toggle) at
-`--nx-duration`; the one autonomous moment is the on-air transition.
-`prefers-reduced-motion` already collapses all of it — keep that intact.
+## Motion
+
+Transitions answer the hand only: `--dur-micro` for press and colour,
+`--dur-short` for hover and menus, `--dur-long` for drawer and modal.
+`transform` and `opacity` only. No reveal on load, no autonomous
+motion except a value changing when its source does. Reduced motion
+collapses all of it (base.css).
 
 ## Hard contract (do not break)
 
-- **Class names are API.** Every existing `nx-*` class stays (tests and
-  cross-file CSS depend on them, e.g. `.nx-cam-strip`, `.nx-chip`,
-  `.nx-slider`, `.nx-select`). Restyle freely; add classes; never rename
-  or drop.
-- **Component and state APIs stay.** Props of `ui/*` components, `NextState`
-  accessors, router calls, i18n keys (`t(...)`) are untouched, except:
-  - `Panel.code` is removed from `Panel`'s props (primitives agent removes
-    it; view agents remove the `code={...}` usages in their files).
-  - `Led` keeps tone names; CSS re-maps `rec` to signal magenta.
-- **File ownership is disjoint** (no two agents touch one file).
-  `src/components/icons/*`, `src/lib/*`, `src/hooks/*`, classic shell,
-  `App.css` are read-only. Need a new icon? Note it in your report; the
-  integrator adds it.
-- **Accessibility floor**: visible `:focus-visible` ring on every control;
-  labels/aria on icon-only buttons; contrast AA for text; hit targets ≥ 28px
-  (desktop console density); `role="alert"` stays on error banners.
-- Breakpoints keep their behavior: ≤1023px sidebar compacts, ≤767px bottom
-  tab bar, tablet inspector via Drawer.
-- Fonts are self-hosted (`@fontsource/golos-text` + jetbrains-mono), no
-  runtime CDN. Light theme (`[data-theme='light']`) must reach parity for
-  every surface you restyle.
-
-## Per-surface direction
-
-- **Shell** (`layout.css`, `NextShell.tsx`): a slim rail-first sidebar —
-  brand mark, four view items (active item carries a cyan left tick and
-  plate background), vitals dock as three quiet rows, utility row pinned
-  bottom. The telemetry strip becomes a 36px statusline: view name left;
-  channel LEDs, TX/fps/clients, REC (magenta, mono), thermal/battery right,
-  each a quiet chip, no borders between. Canvas `--nx-bg`; the sidebar
-  shares it, a hairline divides.
-- **Login** (`NxLogin.tsx`): one plate, centered, on the body black — the
-  logo's lens ring oversized and dim behind the form is *the* brand moment;
-  a single cyan submit. No gradient hero, no caps.
-- **Live** (`views/live.css`): the stage gets `--nx-well` surround and
-  viewfinder corner ticks (1px, `--nx-border-strong`, ~24px arms, CSS only);
-  floating command bar under the picture uses `--nx-glass` + blur — the only
-  glass in the app; inspector column stacks faceplates (channel rack first).
-- **System** (`views/cards.css`): panels are faceplates — plate surface,
-  machined top bevel, hairline, radius 6, section title Golos 600 with a
-  2px cyan tick on the left edge of the header; forms label-left /
-  control-right on ≥1024px, stacked below. Danger zone: red hairline
-  top, never a red wash.
-- **Detection** (`views/detection.css`): event rows with a 2px signal tick
-  on new/hit rows; stats panel leads with one big tabular numeral per
-  metric; the arm schedule reads as a plain sentence, not chips.
-- **Media** (`views/media.css`): gallery on `--nx-well`; tiles hairline,
-  radius 6, hover raises plate + cyan hairline; selection is cyan edge +
-  subtle cyan fill; no rounded-photo-app look.
+- **Class names are API.** Every existing `nx-*` class stays (tests
+  and cross-file CSS depend on them: `.nx-cam-strip`, `.nx-chip`,
+  `.nx-slider`, `.nx-select`, `.nx-pip*`, `.nx-vital-*`,
+  `.nx-strip-chips`…). Restyle freely; add classes; never rename or
+  drop.
+- **Component and state APIs stay.** Props of `ui/*` components,
+  `NextState` accessors, router calls, i18n keys (`t(...)`) are
+  untouched.
+- **File ownership is disjoint** per agent run; the current mapping is
+  recorded in `.hallmark/preflight.json` and each run's brief.
+- **Shared components are read-only markup:** `StreamPreview.tsx`,
+  `MediaViewer*.tsx`, `ShortcutsOverlay.tsx`, `RecordingTimer.tsx`,
+  `src/components/icons/*`, `src/lib/*`, `src/hooks/*`, the classic
+  shell, `App.css`. Restyle them only with `[data-ui='next']`-scoped
+  rules inside `styles/next/**`. Need a new icon: inline it in your
+  own file.
+- **i18n:** reuse existing keys wherever the wording serves. A new key
+  goes in the agent's report (proposed en string); the integrator adds
+  it to all seven catalogs, so catalogs stay single-owner.
+- **Accessibility floor:** visible `:focus-visible` ring; labels/aria
+  on icon-only buttons; contrast AA (body 4.5:1, edges 3:1); hit
+  targets ≥ 44px expanded; `role="alert"` stays on error banners.
+- Breakpoints keep their behaviour: ≤1023px sidebar compacts, ≤767px
+  bottom tab bar, tablet inspector via Drawer.
+- Fonts self-hosted (`@fontsource/*`), no runtime CDN.
+- Light theme (`[data-theme='light']`) reaches parity for every
+  surface restyled.

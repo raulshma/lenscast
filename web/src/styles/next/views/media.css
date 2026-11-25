@@ -1,185 +1,324 @@
+/* Hallmark · shape: app screen · genre: modern-minimal · theme: Console (deal 1/3, seed operator-console-phone-as-camera-rig-9437·d469983a·2026-11-25·r0) · redesign: full
+ * nav: rail-first sidebar kept, rebuilt · signature: the live stage · states: loading, empty, error, full · console: graphite
+ * faces: Golos kept for cyrillic locales (theme face latin-only), Atkinson Hyperlegible Mono measures
+ * axes: dark/grotesk-sans/chromatic-amber · posture: restrained · contrast: pass · v2.0.0 */
 /* ══════════════════════════════════════════════════════════════════
-   NEXT UI — MEDIA VIEW ("Viewfinder")
-   The light table: the gallery sits in a recessed --nx-well plate,
-   tiles are hairline plates in a tight uniform rhythm — the filmstrip
-   feel comes from that rhythm and the mono duration/size labels, not
-   from skeuomorphic chrome. Hover answers the hand (plate raise +
-   cyan hairline); selection is a cyan edge and a subtle cyan fill.
-   Red appears only on destructive controls. Golos speaks, JetBrains
-   Mono measures. Loads after cards.css.
+   NEXT UI — MEDIA VIEW (the gallery: a quiet contact sheet)
+   The gallery sits on the ground — no light-table plate, no photo-app
+   roundness, no shadows. The tile grid is the deck's record of what
+   the rig captured: hairline plates cut from paper-2 at radius 6, a
+   tight 4px rhythm, hover answering with one hairline step, selection
+   the amber edge. Day heads speak (Golos 500, muted) beside one
+   hairline; every measurement (count, time, size, duration) reads
+   mono in the instrument's quiet voices. The thumbnail well is
+   paper-3 so a missing capture is a still plate, never a spilled
+   filename — the name lives truncated in the tile footer. Golos
+   speaks, Atkinson measures (DESIGN.md). Loads after detection.css.
    ══════════════════════════════════════════════════════════════════ */
 
-.nx-media {
-  gap: var(--nx-space-4);
-  /* The recessed light table the whole browser sits on. */
-  background: var(--nx-well);
-  border: 1px solid var(--nx-border);
-  border-radius: var(--nx-radius-lg);
-  padding: var(--nx-space-4);
+/* ── The view: a quiet column on the ground ────────────────────────── */
+
+[data-ui='next'] .nx-media {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+  min-width: 0;
 }
 
-/* ── Toolbar ──────────────────────────────────────────────────────── */
+/* Gate 50 — image-bearing grid: heads and tiles may never force their
+   own width; long names break or truncate, never overflow. */
+[data-ui='next'] .nx-media-day,
+[data-ui='next'] .nx-media-day-head,
+[data-ui='next'] .nx-tile {
+  min-width: 0;
+  overflow-wrap: break-word;
+}
 
-.nx-media-toolbar {
+/* ── Filter row: segment · search · count · select ─────────────────── */
+
+[data-ui='next'] .nx-media-toolbar {
   display: flex;
   align-items: center;
-  gap: var(--nx-space-3);
   flex-wrap: wrap;
+  gap: var(--space-xs);
 }
 
-.nx-media-search {
+/* The search field follows the kit's field recipe — the paper-3 well,
+   constant 1px hairline — with the lens glyph inside and the ring
+   inset on focus, exactly like .nx-input. */
+[data-ui='next'] .nx-media-search {
   display: flex;
   align-items: center;
-  gap: var(--nx-space-2);
+  gap: var(--space-2xs);
   flex: 1;
-  min-width: 180px;
+  min-width: 160px;
   max-width: 340px;
-  height: 28px;
-  padding: 0 var(--nx-space-2);
-  border: 1px solid var(--nx-control-border);
-  border-radius: var(--nx-radius);
-  background: var(--nx-control-bg);
-  color: var(--nx-text-tertiary);
-  transition: border-color var(--nx-duration-fast) var(--nx-ease), box-shadow var(--nx-duration-fast) var(--nx-ease);
+  height: var(--control-h);
+  padding: 0 var(--space-sm);
+  background: var(--color-paper-3);
+  border: 1px solid var(--color-muted);
+  border-radius: var(--radius-pill);
+  color: var(--color-muted);
+  transition: border-color var(--dur-micro) var(--ease-out);
 }
 
-.nx-media-search:focus-within {
-  border-color: var(--nx-accent);
-  box-shadow: 0 0 0 3px var(--nx-focus-ring);
+[data-ui='next'] .nx-media-search:hover {
+  border-color: var(--color-ink-2);
 }
 
-.nx-media-search-input {
+/* The kit's inset ring: focus never resizes the field. */
+[data-ui='next'] .nx-media-search:focus-within {
+  outline: 2px solid var(--color-focus);
+  outline-offset: -3px;
+}
+
+[data-ui='next'] .nx-media-search svg {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+}
+
+/* The input itself carries no plate — the wrapper is the field. */
+[data-ui='next'] .nx-media-search .nx-media-search-input {
   flex: 1;
   min-width: 0;
   height: auto;
+  padding: 0;
   border: none;
   background: transparent;
-  padding: 0;
 }
 
-.nx-media-search-input:focus {
-  border: none;
-  box-shadow: none;
+[data-ui='next'] .nx-media-search .nx-media-search-input:focus {
+  outline: none;
 }
 
-.nx-media-toolbar-actions {
+[data-ui='next'] .nx-media-search .nx-media-search-input::placeholder {
+  color: var(--color-muted);
+}
+
+[data-ui='next'] .nx-media-toolbar-actions {
   display: flex;
   align-items: center;
-  gap: var(--nx-space-2);
-  margin-left: auto;
   flex-wrap: wrap;
+  gap: var(--space-2xs);
+  margin-left: auto;
 }
 
-/* ── Day groups — quiet mono date + hairline rule + count ─────────── */
+/* The total is chrome — plain measured text, no chip. The selected
+   count (a state) keeps its Badge. */
+[data-ui='next'] .nx-media-count {
+  font-family: var(--font-outlier);
+  font-variant-numeric: tabular-nums slashed-zero;
+  font-size: var(--text-xs);
+  color: var(--color-muted);
+  white-space: nowrap;
+}
 
-.nx-media-day {
+/* ── Day heads — the date speaks, the hairline divides ─────────────── */
+
+[data-ui='next'] .nx-media-day {
   display: flex;
   flex-direction: column;
-  gap: var(--nx-space-2);
+  gap: var(--space-2xs);
 }
 
-.nx-media-day-head {
+[data-ui='next'] .nx-media-day-head {
   display: flex;
   align-items: center;
-  gap: var(--nx-space-3);
-  padding-top: var(--nx-space-2);
+  gap: var(--space-xs);
 }
 
-/* A date is data — mono, sentence case, never tracked caps. */
-.nx-media-day-label {
-  font-family: var(--nx-mono);
-  font-size: var(--nx-text-xs);
+/* Golos 500, muted, sentence case — a day is a word, not a tracked
+   label; the hairline beside it is the one divider language. */
+[data-ui='next'] .nx-media-day-label {
+  font-family: var(--font-body);
+  font-size: var(--text-sm);
   font-weight: 500;
-  color: var(--nx-text-secondary);
-  font-variant-numeric: tabular-nums;
+  color: var(--color-muted);
+  white-space: nowrap;
 }
 
-.nx-media-day-count {
-  font-family: var(--nx-mono);
-  font-size: var(--nx-text-xs);
-  color: var(--nx-text-faint);
-  font-variant-numeric: tabular-nums;
+/* The per-day total is a measurement — mono, faint. */
+[data-ui='next'] .nx-media-day-count {
+  font-family: var(--font-outlier);
+  font-variant-numeric: tabular-nums slashed-zero;
+  font-size: var(--text-xs);
+  color: var(--color-muted);
+  flex-shrink: 0;
 }
 
-/* ── Grid — tight uniform tile rhythm on the well ─────────────────── */
+/* ── The contact sheet — tight uniform rhythm ────────────────────────
+   Explicit shrinkable tracks (Gate 50): every column is minmax(0,
+   1fr), so a tile can never be widened by its content. The count
+   steps 2 → 5 across the shell's breakpoints and holds. */
 
-.nx-media-grid {
+[data-ui='next'] .nx-media-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
-  gap: var(--nx-space-2);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-2xs);
 }
 
-.nx-media-grid-skeleton .nx-skeleton {
-  height: 140px;
-  border-radius: var(--nx-radius-lg);
+@media (min-width: 480px) {
+  [data-ui='next'] .nx-media-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
 }
 
-/* Tiles are hairline plates, radius 6 — not rounded-photo cards. */
-.nx-tile {
+@media (min-width: 768px) {
+  [data-ui='next'] .nx-media-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 1100px) {
+  [data-ui='next'] .nx-media-grid {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+  }
+}
+
+/* Loading rows mirror the grid so the real sheet never pops layout. */
+[data-ui='next'] .nx-media-grid-skeleton .nx-skeleton {
+  border: 1px solid var(--color-rule);
+  border-radius: var(--radius-pill);
+}
+
+/* ── Tiles — hairline plates, machined radius, no shadows ──────────── */
+
+[data-ui='next'] .nx-tile {
   position: relative;
   display: flex;
   flex-direction: column;
-  border: 1px solid var(--nx-border);
-  border-radius: var(--nx-radius-lg);
-  background: var(--nx-surface);
+  background: var(--color-paper-2);
+  border: 1px solid var(--color-rule);
+  border-radius: var(--radius-pill);
   overflow: hidden;
   cursor: pointer;
-  transition: border-color var(--nx-duration-fast) var(--nx-ease), background var(--nx-duration-fast) var(--nx-ease), transform var(--nx-duration-fast) var(--nx-ease);
+  /* Hover is ONE signal: the hairline steps one level. */
+  transition: border-color var(--dur-micro) var(--ease-out);
 }
 
-/* The hand's answer: the plate raises, the hairline turns cyan. */
-.nx-tile:hover {
-  border-color: color-mix(in srgb, var(--nx-accent) 45%, transparent);
-  background: var(--nx-surface-2);
-  transform: translateY(-1px);
+[data-ui='next'] .nx-tile:hover {
+  border-color: var(--color-muted);
 }
 
-.nx-tile:focus-visible {
-  outline: none;
-  box-shadow: 0 0 0 3px var(--nx-focus-ring);
+/* Select mode keeps the same one-signal hover — the amber edge is
+   reserved for tiles actually selected. */
+[data-ui='next'] .nx-tile-selectable:hover {
+  border-color: var(--color-muted);
 }
 
-.nx-tile-selectable:hover {
-  border-color: color-mix(in srgb, var(--nx-accent) 45%, transparent);
+[data-ui='next'] .nx-tile:focus-visible {
+  outline-offset: 1px;
 }
 
-/* Selection: cyan edge + subtle cyan fill on the plate. */
-.nx-tile-selected,
-.nx-tile-selected:hover {
-  border-color: var(--nx-accent);
-  background: var(--nx-accent-subtle);
-  box-shadow: 0 0 0 1px var(--nx-accent);
-  transform: none;
+/* Selection: the amber edge and the soft amber plate — the kit's
+   selection fill (a whisper, ~12% presence), no ring, no shadow.
+   Hover keeps the amber edge (never steps it back down). */
+[data-ui='next'] .nx-tile-selected,
+[data-ui='next'] .nx-tile-selected:hover {
+  border-color: var(--color-accent);
+  background: var(--color-accent-soft);
 }
 
-.nx-tile-thumb {
+/* ── The image area — the paper-3 well ───────────────────────────────
+   A missing thumbnail is a still plate: the img renders over the well,
+   and its alt text is collapsed to nothing VISUALLY only (the string
+   stays in the accessibility tree); the visible name lives in the
+   footer, so a broken capture can never paint a filename across the
+   grid. */
+
+[data-ui='next'] .nx-tile-media {
+  position: relative;
+  background: var(--color-paper-3);
+  min-width: 0;
+}
+
+[data-ui='next'] .nx-tile-thumb {
+  display: block;
   width: 100%;
+  height: auto;
   aspect-ratio: 4 / 3;
   object-fit: cover;
-  display: block;
-  background: var(--nx-well);
+  font-size: 0;
+  line-height: 0;
 }
 
-/* Duration badge rides the thumbnail like a camera OSD: dark scrim,
-   mono tabular — same in both themes (it sits over photo content). */
-.nx-tile-badge {
+/* Duration — a state chip inside the picture area, bottom-right: the
+   paper-3 plate, the instrument's mono face. */
+[data-ui='next'] .nx-tile-badge {
   position: absolute;
-  top: 6px;
-  left: 6px;
+  right: 6px;
+  bottom: 6px;
   display: inline-flex;
   align-items: center;
   gap: 4px;
   height: 18px;
-  padding: 0 6px;
-  border-radius: var(--nx-radius-sm);
-  background: rgba(2, 3, 6, 0.72);
-  color: #fff;
-  font-size: var(--nx-text-2xs);
+  padding: 0 var(--space-2xs);
+  background: var(--color-paper-3);
+  border: 1px solid var(--color-rule);
+  border-radius: var(--radius-pill);
+  font-size: var(--text-2xs);
   font-weight: 500;
-  font-variant-numeric: tabular-nums;
+  color: var(--color-ink-2);
 }
 
-.nx-tile-check {
+[data-ui='next'] .nx-tile-badge svg {
+  width: 10px;
+  height: 10px;
+  flex-shrink: 0;
+}
+
+/* Delete — the destructive verb stays outlined-red text on the scrim,
+   never a red fill; it appears only when the hand is on the tile. */
+[data-ui='next'] .nx-tile-delete {
+  position: absolute;
+  left: 6px;
+  bottom: 6px;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border: none;
+  border-radius: var(--radius-pill);
+  background: var(--color-scrim);
+  color: var(--color-bad);
+  cursor: pointer;
+  transition:
+    background var(--dur-micro) var(--ease-out),
+    color var(--dur-micro) var(--ease-out),
+    transform var(--dur-micro) var(--ease-out);
+}
+
+/* The 44px hit target, drawn without changing the look. */
+[data-ui='next'] .nx-tile-delete::before {
+  content: '';
+  position: absolute;
+  inset: -9px;
+}
+
+[data-ui='next'] .nx-tile-delete svg {
+  width: 13px;
+  height: 13px;
+}
+
+[data-ui='next'] .nx-tile:hover .nx-tile-delete,
+[data-ui='next'] .nx-tile:focus-within .nx-tile-delete {
+  display: flex;
+}
+
+[data-ui='next'] .nx-tile-delete:hover,
+[data-ui='next'] .nx-tile-delete:focus-visible {
+  background: var(--color-bad-soft);
+  color: var(--color-bad);
+}
+
+[data-ui='next'] .nx-tile-delete:active:not(:disabled) {
+  transform: scale(0.95);
+}
+
+/* Selection check — the operator's mark: the amber plate, dark tick. */
+[data-ui='next'] .nx-tile-check {
   position: absolute;
   top: 6px;
   right: 6px;
@@ -188,71 +327,69 @@
   justify-content: center;
   width: 22px;
   height: 22px;
-  border-radius: var(--nx-radius-sm);
-  background: var(--nx-accent);
-  color: var(--nx-on-accent);
+  border-radius: var(--radius-pill);
+  background: var(--color-accent);
+  color: var(--color-accent-ink);
 }
 
-.nx-tile-meta {
+[data-ui='next'] .nx-tile-check svg {
+  width: 14px;
+  height: 14px;
+}
+
+/* ── Tile footer — the filename lives here, never on the image ─────── */
+
+[data-ui='next'] .nx-tile-meta {
   display: flex;
   flex-direction: column;
-  gap: 1px;
-  padding: 6px var(--nx-space-2);
+  gap: 2px;
   min-width: 0;
-  border-top: 1px solid var(--nx-border);
+  padding: var(--space-2xs) var(--space-xs);
+  border-top: 1px solid var(--color-rule);
 }
 
-.nx-tile-name {
-  font-family: var(--nx-font);
-  font-size: var(--nx-text-xs);
-  color: var(--nx-text-secondary);
+/* The name truncates with an ellipsis inside the footer. */
+[data-ui='next'] .nx-tile-name {
+  min-width: 0;
+  font-family: var(--font-body);
+  font-size: var(--text-2xs);
+  color: var(--color-muted);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-/* Time and size: separate mono spans in a rhythm — no dot joiners. */
-.nx-tile-sub {
+/* Time and size: separate mono spans — no dot joiners; the size
+   yields first, the time holds its column. */
+[data-ui='next'] .nx-tile-sub {
   display: flex;
   align-items: baseline;
-  gap: var(--nx-space-2);
-  font-size: var(--nx-text-2xs);
-  color: var(--nx-text-faint);
-  font-variant-numeric: tabular-nums;
+  gap: var(--space-xs);
+  min-width: 0;
+  font-size: var(--text-2xs);
+  color: var(--color-muted);
   white-space: nowrap;
   overflow: hidden;
 }
 
-/* Destructive = red, only here. */
-.nx-tile-delete {
-  position: absolute;
-  bottom: 40px;
-  right: 6px;
-  display: none;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 28px;
-  border: none;
-  border-radius: var(--nx-radius-sm);
-  background: rgba(2, 3, 6, 0.72);
-  color: var(--nx-danger);
-  cursor: pointer;
+[data-ui='next'] .nx-tile-sub span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-.nx-tile:hover .nx-tile-delete,
-.nx-tile:focus-within .nx-tile-delete {
-  display: flex;
+[data-ui='next'] .nx-tile-sub span:first-child {
+  flex-shrink: 0;
 }
 
-.nx-tile-delete:hover,
-.nx-tile-delete:focus-visible {
-  background: var(--nx-danger);
-  color: #fff;
-}
+/* ── Load more — one quiet outline row ─────────────────────────────── */
 
-.nx-media-more {
+[data-ui='next'] .nx-media-more {
   display: flex;
   justify-content: center;
-  padding: var(--nx-space-2) 0 0;
+  padding: var(--space-2xs) 0 0;
+}
+
+[data-ui='next'] .nx-media-more .nx-btn {
+  width: 100%;
 }

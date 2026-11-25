@@ -34,12 +34,12 @@ function CopyButton(props: { text: () => string; label: string }) {
   return (
     <Button size="sm" variant="ghost" onClick={() => void handleCopy()} ariaLabel={copied() ? t('share.copied') : props.label}>
       <Show when={copied()} fallback={
-        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
+        <svg class="w-4 h-4" aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
           <path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71" />
           <path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71" />
         </svg>
       }>
-        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
+        <svg class="w-4 h-4" aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
           <path d="M20 6L9 17l-5-5" />
         </svg>
       </Show>
@@ -69,7 +69,9 @@ export default function SharePanel() {
     if (!target || !canvas) return
     let cancelled = false
     setQrError(false)
-    toCanvas(canvas, target, { width: 148, margin: 1, errorCorrectionLevel: 'M' })
+    // margin: 4 paints the spec quiet zone inside the canvas itself — the
+    // console's QR wrap is a paper plate, not a white card (cards.css).
+    toCanvas(canvas, target, { width: 148, margin: 4, errorCorrectionLevel: 'M' })
       .catch(() => { if (!cancelled) setQrError(true) })
     onCleanup(() => { cancelled = true })
   })

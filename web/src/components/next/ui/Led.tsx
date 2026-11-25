@@ -6,10 +6,11 @@ interface Props {
 }
 
 /**
- * State LED: off = faint, ok = green + glow, warn = amber pulse,
- * rec = signal-magenta pulse (the on-air state), accent = cyan,
- * danger = static red fault. Magenta = your picture is going out;
- * red = something is wrong. Color carries the meaning.
+ * State LED: off = faint, ok = green (static), warn = amber outline
+ * (static), rec = amber and breathing (the on-air state — a slow
+ * opacity cycle, not a blink; the only Led that moves), accent =
+ * amber (static), danger = static red fault. Amber = your picture
+ * is going out; red = something is wrong. Color carries the meaning.
  */
 export default function Led(props: Props) {
   const tone = () => props.tone ?? 'off'

@@ -219,7 +219,7 @@ export default function NextShell(props: Props) {
           <div class="nx-side-rec" title={state.recordingTimer.formatElapsed()}>
             <Led tone="rec" />
             <span class="nx-side-rec-label">
-              {t('next.rec')} {state.recordingTimer.formatElapsed()}
+              {t('next.rec')} <span class="nx-num">{state.recordingTimer.formatElapsed()}</span>
             </span>
           </div>
         </Show>
@@ -334,7 +334,7 @@ export default function NextShell(props: Props) {
           <span class="nx-strip-title">{viewLabel(view())}</span>
           <div class="nx-strip-chips">
             <Show when={isLive()}>
-              {/* On air — signal magenta (layout.css), not the danger red. */}
+              {/* On air — the amber tally (layout.css), never the fault red. */}
               <Badge tone="neutral" class="nx-strip-live">
                 <Led tone="rec" />
                 {t('next.live')}
@@ -355,21 +355,21 @@ export default function NextShell(props: Props) {
                   title={channel.error || channel.code}
                 >
                   <Led tone={channelLed(channel)} />
-                  {channel.code}
+                  <span class="nx-num">{channel.code}</span>
                 </button>
               )}
             </For>
 
             <Show when={txLabel()}>
-              <span class="nx-chip nx-strip-hide-lg" title={t('next.strip.throughput')}>
-                TX {txLabel()}
+              <span class="nx-chip nx-chip-metric nx-strip-hide-lg" title={t('next.strip.throughput')}>
+                TX <span class="nx-num">{txLabel()}</span>
               </span>
             </Show>
             <Show when={fpsLabel()}>
-              <span class="nx-chip nx-strip-hide-lg">{fpsLabel()}FPS</span>
+              <span class="nx-chip nx-chip-metric nx-strip-hide-lg"><span class="nx-num">{fpsLabel()}</span>FPS</span>
             </Show>
             <Show when={clientsLabel() !== null}>
-              <span class="nx-chip nx-strip-hide-lg">CL {clientsLabel()}</span>
+              <span class="nx-chip nx-chip-metric nx-strip-hide-lg">CL <span class="nx-num">{clientsLabel()}</span></span>
             </Show>
 
             {/* Live view is excluded: its stage already carries the REC
@@ -377,7 +377,7 @@ export default function NextShell(props: Props) {
             <Show when={state.isRecording() && view() !== 'live'}>
               <span class="nx-chip nx-chip-rec">
                 <Led tone="rec" />
-                {t('next.rec')} {state.recordingTimer.formatElapsed()}
+                {t('next.rec')} <span class="nx-num">{state.recordingTimer.formatElapsed()}</span>
               </span>
             </Show>
 
@@ -388,9 +388,9 @@ export default function NextShell(props: Props) {
             </Show>
             <Show when={battery()}>
               {/* Critical battery is a fault — red (nx-chip-crit), never
-                  the on-air magenta that nx-chip-rec now carries. */}
+                  the on-air amber that nx-chip-rec carries. */}
               <span class="nx-chip nx-strip-hide-sm" classList={{ 'nx-chip-warn': batteryTone(battery()?.level) === 'warn', 'nx-chip-crit': batteryTone(battery()?.level) === 'danger' }}>
-                {battery()!.level}%
+                <span class="nx-num">{battery()!.level}%</span>
               </span>
             </Show>
             <Show when={state.saving()}>

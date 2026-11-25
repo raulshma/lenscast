@@ -308,11 +308,11 @@ export default function AuthPanel() {
           onInput={setViewerPasswordDraft}
           ariaLabel={t('common.unchanged')}
         />
-        <Button size="sm" variant="primary" disabled={viewerBusy()} onClick={() => void applyViewer()}>
+        <Button size="sm" variant="secondary" disabled={viewerBusy()} onClick={() => void applyViewer()}>
           {viewerBusy() ? t('auth.saving') : t('auth.saveViewer')}
         </Button>
       </Show>
-      <div class="nx-banner nx-banner-info" role="note">
+      <div class="nx-banner nx-banner-neutral" role="note">
         <span>{t('auth.viewerDesc')}</span>
       </div>
       <Show when={viewerMsg()}>
@@ -328,7 +328,7 @@ export default function AuthPanel() {
       <FieldRow label={t('auth.configured')}>
         <span class="nx-mono nx-info-value">{tokenConfigured() ? t('auth.yes') : t('auth.no')}</span>
       </FieldRow>
-      <Button size="sm" variant="primary" disabled={tokenBusy()} onClick={() => void generateToken()}>
+      <Button size="sm" variant="secondary" disabled={tokenBusy()} onClick={() => void generateToken()}>
         {tokenBusy() ? t('auth.saving') : t('auth.generate')}
       </Button>
       <Show when={generatedToken()}>
@@ -348,7 +348,7 @@ export default function AuthPanel() {
             {t('auth.copy')}
           </Button>
         </div>
-        <div class="nx-banner nx-banner-info" role="note">
+        <div class="nx-banner nx-banner-neutral" role="note">
           <span>{t('auth.tokenWarning')}</span>
         </div>
         <Show when={!window.isSecureContext}>
@@ -371,7 +371,7 @@ export default function AuthPanel() {
               {t('auth.copyPairing')}
             </Button>
           </div>
-          <div class="nx-banner nx-banner-info" role="note">
+          <div class="nx-banner nx-banner-neutral" role="note">
             <span>{t('auth.pairingHint')}</span>
           </div>
         </Show>

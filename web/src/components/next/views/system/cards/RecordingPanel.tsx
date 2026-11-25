@@ -61,11 +61,13 @@ export default function RecordingPanel(props: Props) {
           when={props.isRecording()}
           fallback={
             <Show when={props.isScheduled()}>
-              <Badge tone="warning" mono><Led tone="warn" />{t('recording.badge.scheduled')}</Badge>
+              <Badge tone="warning"><Led tone="warn" />{t('recording.badge.scheduled')}</Badge>
             </Show>
           }
         >
-          <Badge tone="danger" class="nx-badge-rec" mono><Led tone="rec" />{t('recording.badge.rec')}</Badge>
+          {/* REC is the tally: tone="danger" markup, re-pointed amber by
+              .nx-badge-rec (views/cards.css) — on air is never red. */}
+          <Badge tone="danger" class="nx-badge-rec"><Led tone="rec" />{t('recording.badge.rec')}</Badge>
         </Show>
       }
     >
@@ -138,7 +140,9 @@ export default function RecordingPanel(props: Props) {
         />
       </Field>
 
-      {/* Start/Stop */}
+      {/* Start/Stop — the start verb rides a quiet outline key: the
+          Scheduled rack pairs it with interval capture, and a rack with
+          two competing verbs has no one primary (the labels say it). */}
       {props.isRecording() || props.isScheduled() ? (
         <Button
           variant="danger"
@@ -150,7 +154,7 @@ export default function RecordingPanel(props: Props) {
         </Button>
       ) : (
         <Button
-          variant="primary"
+          variant="secondary"
           size="sm"
           onClick={handleStartAction}
           ariaLabel={scheduleTimeStr() ? t('recording.schedule') : t('recording.start')}

@@ -2,6 +2,7 @@ import { createSignal, onCleanup, Show } from 'solid-js'
 import type { NextState } from '../NextState'
 import { isArmed } from '../../../armDays'
 import { t } from '../../../lib/i18n'
+import { Led, Skeleton } from '../ui'
 import StatsPanel from './detection/StatsPanel'
 import EventLog from './detection/EventLog'
 import SecurityPanel from './detection/SecurityPanel'
@@ -16,14 +17,13 @@ function minuteOfDay(now: Date): number {
 }
 
 /**
- * Detection view — the surface leads with state. A signal-magenta tick
- * strip runs across the stats head while armed motion detection is
- * inside its live window (schedule-aware: motion on, and when the arm
- * schedule gates it, today armed between the hours); the surface is
- * quiet when idle. Below, the stats header spans the full width and
- * the arming panel takes the main column with the event log and
- * automation rules packed in a side column ≥1100px so toggle rows
- * don't stretch the full width.
+ * Detection view — information ordered by value to the operator. A quiet
+ * armed-state line opens the surface (the amber tick strip + spoken verdict
+ * while armed motion detection is inside its live window; schedule-aware:
+ * motion on, and when the arm schedule gates it, today armed between the
+ * hours). The news leads: the event journal with its aggregate stats beside
+ * it ≥1100px, one cut surface. Configuration follows: the security form,
+ * then automation as the deepest layer in the side column ≥1100px.
  */
 export default function DetectionView(props: { state: NextState }) {
   const state = props.state
@@ -60,17 +60,38 @@ export default function DetectionView(props: { state: NextState }) {
   return (
     <div class="nx-view">
       <div class="nx-view-inner">
+        {/* The one-glance verdict: the strip is pure decoration; the status
+            line beside it speaks for assistive tech and sighted operators
+            alike. Amber only while armed — red stays for faults. */}
         <div class="nx-detect-head" classList={{ 'nx-detect-armed': armedNow() }}>
-          {/* The strip is pure decoration; the spoken state rides the status
-              line below it so assistive tech reads what the strip shows. */}
           <div class="nx-arm-strip" aria-hidden="true" />
           <span class="nx-detect-status" role="status">
+            <Led tone={armedNow() ? 'accent' : 'off'} />
             {armedNow() ? t('security.armedNow') : t('security.armedIdle')}
           </span>
+        </div>
+
+        {/* The news: the journal leads, its aggregate reads beside it. One
+            cut surface — two panels joined by the 1px seam. */}
+        <div class="nx-cut nx-detect-news">
+          <EventLog readOnly={state.isViewer} />
           <StatsPanel />
         </div>
+
+        {/* The config: the security form in the main column, automation —
+            the deepest layer — in the side column ≥1100px. */}
         <div class="nx-detection-grid">
-          <Show when={state.settings()?.streaming}>
+          <Show
+            when={state.settings()?.streaming}
+            fallback={
+              <div class="nx-detect-loading" aria-hidden="true">
+                <Skeleton h="40px" />
+                <Skeleton h="52px" />
+                <Skeleton h="52px" />
+                <Skeleton h="52px" />
+              </div>
+            }
+          >
             <SecurityPanel
               settings={state.settings}
               status={state.status}
@@ -79,7 +100,6 @@ export default function DetectionView(props: { state: NextState }) {
             />
           </Show>
           <div class="nx-detection-side">
-            <EventLog readOnly={state.isViewer} />
             <AutomationPanel readOnly={state.isViewer} />
           </div>
         </div>

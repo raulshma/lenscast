@@ -611,7 +611,13 @@ class CameraService internal constructor(
      * a stale attach when a fast rebind replaced the camera before this ran.
      */
     private fun observeCameraOpenState(cam: Camera) {
+        val preBindErrorState = cam.cameraInfo.cameraState.value?.takeIf { it.error != null }
+        var seenLiveState = false
         val observer = Observer<CameraXCameraState> { state ->
+            val isStalePreBindError = !seenLiveState && state === preBindErrorState
+            if (state !== preBindErrorState) {
+                seenLiveState = true
+            }
             // CameraX carries errors as a non-null StateError on the emitted
             // state (the Type enum has no ERROR member — it stays one of the
             // five lifecycle states), so the error's presence, not the type,
@@ -626,8 +632,12 @@ class CameraService internal constructor(
                     // fact below: the edge is "OPEN while the fact was down".
                     previouslyObserved = _cameraOpenObserved.value,
                     cameraIsLive = liveCamera === cam,
+                    isStalePreBindError = isStalePreBindError,
                 )
             ) {
+                BindChoreography.OpenStatePlan.IgnoreStaleError -> {
+                    Log.d(TAG, "Ignoring stale pre-bind camera error (code=${state.error?.code})")
+                }
                 is BindChoreography.OpenStatePlan.ErrorObservation -> {
                     val disabled = plan.messageKind is BindChoreography.ErrorMessage.DisabledByPolicy
                     Log.w(TAG, "Observed camera-state error (disabled=$disabled, code=${plan.errorCode}, verdict=${plan.verdict})")
@@ -1486,6 +1496,21 @@ class CameraService internal constructor(
         Camera2Interop.Extender(analysisBuilder).setSessionCaptureCallback(captureReadbackCallback)
 
         val selectedLens = _availableLenses.value.getOrNull(_selectedLens.value.index)
+        val preBindSupport = queryPreBindSupport(provider, selectedLens?.physicalCameraId)
+        val bindPlan = CameraControlPlan.from(
+            activeSettings,
+            _availableIsoRange.value,
+            sensorExposureTimeRange,
+            preBindSupport,
+        )
+        val bindFpsRange = Range(bindPlan.fpsLower, bindPlan.fpsUpper)
+        Camera2Interop.Extender(previewBuilder)
+            .setCaptureRequestOption(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, bindFpsRange)
+        Camera2Interop.Extender(captureBuilder)
+            .setCaptureRequestOption(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, bindFpsRange)
+        Camera2Interop.Extender(analysisBuilder)
+            .setCaptureRequestOption(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, bindFpsRange)
+
         // setPhysicalCameraId is API 28+; below P the logical camera serves
         // all use cases, which is the pre-multi-lens behavior anyway.
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P && selectedLens?.physicalCameraId != null) {
@@ -1531,6 +1556,7 @@ class CameraService internal constructor(
                         extra = null,
                     ),
                     writeBack = true,
+                    targetFpsRange = bindFpsRange,
                 )
             } catch (e: Exception) {
                 Log.e(TAG, "bindUseCases: failed to bind camera", e)
@@ -1610,6 +1636,14 @@ class CameraService internal constructor(
                     Log.d(TAG, "Capture support for camera $logicalId (physical=$physicalId): $captureSupport")
                 } catch (e: Exception) {
                     Log.w(TAG, "Failed to query capture support — keeping the previous capability lists", e)
+                }
+
+                val maxHalFps = captureSupport.targetFpsRanges?.maxOfOrNull { it.upper } ?: Int.MAX_VALUE
+                if (activeSettings.frameRate > maxHalFps) {
+                    Log.i(
+                        TAG,
+                        "Requested ${activeSettings.frameRate} fps exceeds HAL max $maxHalFps fps; bound with $bindFpsRange",
+                    )
                 }
 
                 // Torch strength ceiling for the API 33+ per-level torch API.
@@ -1705,42 +1739,57 @@ class CameraService internal constructor(
         owner: LifecycleOwner,
         combinations: List<List<UseCase>>,
         writeBack: Boolean,
+        targetFpsRange: Range<Int>? = null,
     ): Camera {
+        fun tryBind(useCases: List<UseCase>, withSessionFps: Boolean): Camera {
+            provider.unbindAll()
+            return if (withSessionFps && targetFpsRange != null) {
+                val sessionConfig = androidx.camera.core.SessionConfig.Builder(useCases)
+                    .setFrameRateRange(targetFpsRange)
+                    .build()
+                provider.bindToLifecycle(owner, _selectedLens.value.selector, sessionConfig)
+            } else {
+                provider.bindToLifecycle(owner, _selectedLens.value.selector, *useCases.toTypedArray())
+            }
+        }
+
+        fun acceptBound(useCases: List<UseCase>, boundCamera: Camera): Camera {
+            // Both variants bind a live session — the write-back=false
+            // caller (bindRecording) must route its control applies and
+            // observations at this instance too, not the dead predecessor.
+            liveCamera = boundCamera
+            bindGeneration++
+
+            if (writeBack) {
+                preview = useCases.filterIsInstance<Preview>().firstOrNull()
+                imageCapture = useCases.filterIsInstance<ImageCapture>().firstOrNull()
+                imageAnalysis = useCases.filterIsInstance<ImageAnalysis>().firstOrNull()
+            }
+
+            Log.d(
+                TAG,
+                "bindLargestCompatible: bound ${useCases.joinToString { it.javaClass.simpleName }}"
+            )
+            return boundCamera
+        }
+
         var lastError: Exception? = null
-        for (useCases in combinations) {
-            if (useCases.isEmpty()) continue
-            try {
-                provider.unbindAll()
-                val boundCamera = provider.bindToLifecycle(
-                    owner,
-                    _selectedLens.value.selector,
-                    *useCases.toTypedArray()
-                )
-
-                // Both variants bind a live session — the write-back=false
-                // caller (bindRecording) must route its control applies and
-                // observations at this instance too, not the dead predecessor.
-                liveCamera = boundCamera
-                bindGeneration++
-
-                if (writeBack) {
-                    preview = useCases.filterIsInstance<Preview>().firstOrNull()
-                    imageCapture = useCases.filterIsInstance<ImageCapture>().firstOrNull()
-                    imageAnalysis = useCases.filterIsInstance<ImageAnalysis>().firstOrNull()
+        val passes = if (targetFpsRange != null) listOf(true, false) else listOf(false)
+        for (withSessionFps in passes) {
+            for (useCases in combinations) {
+                if (useCases.isEmpty()) continue
+                try {
+                    val boundCamera = tryBind(useCases, withSessionFps)
+                    return acceptBound(useCases, boundCamera)
+                } catch (e: Exception) {
+                    lastError = e
+                    Log.w(
+                        TAG,
+                        "bindLargestCompatible: failed for ${useCases.joinToString { it.javaClass.simpleName }}" +
+                            if (withSessionFps) " (sessionFps=$targetFpsRange)" else "",
+                        e
+                    )
                 }
-
-                Log.d(
-                    TAG,
-                    "bindLargestCompatible: bound ${useCases.joinToString { it.javaClass.simpleName }}"
-                )
-                return boundCamera
-            } catch (e: Exception) {
-                lastError = e
-                Log.w(
-                    TAG,
-                    "bindLargestCompatible: failed for ${useCases.joinToString { it.javaClass.simpleName }}",
-                    e
-                )
             }
         }
 
@@ -1778,6 +1827,32 @@ class CameraService internal constructor(
     }
 
     /**
+     * Queries [CaptureSupport] before building use cases so the bind-time
+     * fps range is already folded to the selected lens's capabilities; falls
+     * back to the last known [captureSupport] if the provider has no infos or
+     * the characteristics lookup fails.
+     */
+    @androidx.camera.camera2.interop.ExperimentalCamera2Interop
+    private fun queryPreBindSupport(
+        provider: ProcessCameraProvider,
+        physicalCameraId: String?,
+    ): CaptureSupport = try {
+        val info = _selectedLens.value.selector.filter(provider.availableCameraInfos).firstOrNull()
+            ?: return captureSupport
+        val logicalId = Camera2CameraInfo.from(info).cameraId
+        val cameraManager =
+            context.getSystemService(Context.CAMERA_SERVICE) as android.hardware.camera2.CameraManager
+        val logical = captureSupportOf(cameraManager.getCameraCharacteristics(logicalId))
+        if (physicalCameraId != null) {
+            logical.intersect(captureSupportOf(cameraManager.getCameraCharacteristics(physicalCameraId)))
+        } else {
+            logical
+        }
+    } catch (_: Exception) {
+        captureSupport
+    }
+
+    /**
      * One camera's camera2 "available" lists as [CaptureSupport] —
      * translation only: each list read into its set, a key the device did
      * not publish left null (unknown = unrestricted, the type's contract).
@@ -1794,6 +1869,9 @@ class CameraService internal constructor(
             chars.get(CameraCharacteristics.CONTROL_AVAILABLE_VIDEO_STABILIZATION_MODES)?.toSet(),
         manualPostProcessing = chars.get(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES)
             ?.contains(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES_MANUAL_POST_PROCESSING),
+        targetFpsRanges = chars.get(CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES)
+            ?.map { CaptureSupport.FpsRange(it.lower, it.upper) }
+            ?.toSet(),
     )
 
     fun switchCamera() {
@@ -2089,6 +2167,23 @@ class CameraService internal constructor(
                     }
                 }
                 else -> Log.d(TAG, "applySettings: deferring output-rotation rebind until next active session")
+            }
+        }
+        if (effective.frameRate != boundSettings.frameRate) {
+            // SessionConfig.setFrameRateRange is baked at bind time so a
+            // stream-config switch (e.g. 30 <-> 60 fps) re-negotiates the
+            // Camera2 session when free.
+            when (
+                val action = CameraSessionArbiter.decide(
+                    demandState(CameraSessionArbiter.Trigger.RebindIfFree)
+                )
+            ) {
+                is CameraSessionArbiter.BindingAction -> {
+                    withContext(Dispatchers.Main) {
+                        executeBindingUnlessExclusiveStarted(action)
+                    }
+                }
+                else -> Log.d(TAG, "applySettings: deferring frame-rate rebind until next active session")
             }
         }
         if (effective.resolution.size != currentResolution) {
@@ -2400,13 +2495,20 @@ class CameraService internal constructor(
     private fun onCaptureResult(result: CaptureResult) {
         if (captureReadbackDisabled || !captureReadback.isArmed) return
         try {
+            val aeMode = result.get(CaptureResult.CONTROL_AE_MODE)
+            val sensorSensitivity = result.get(CaptureResult.SENSOR_SENSITIVITY)
+            val sensorExposureTimeNs = result.get(CaptureResult.SENSOR_EXPOSURE_TIME)
+            val sceneMode = result.get(CaptureResult.CONTROL_SCENE_MODE)
+            val fpsRange = result.get(CaptureResult.CONTROL_AE_TARGET_FPS_RANGE)
             val line = captureReadback.onFrame(
                 nowMs = SystemClock.elapsedRealtime(),
                 reported = CaptureReadbackPolicy.Reported(
-                    aeMode = result.get(CaptureResult.CONTROL_AE_MODE),
-                    sensorSensitivity = result.get(CaptureResult.SENSOR_SENSITIVITY),
-                    sensorExposureTimeNs = result.get(CaptureResult.SENSOR_EXPOSURE_TIME),
-                    sceneMode = result.get(CaptureResult.CONTROL_SCENE_MODE),
+                    aeMode = aeMode,
+                    sensorSensitivity = sensorSensitivity,
+                    sensorExposureTimeNs = sensorExposureTimeNs,
+                    sceneMode = sceneMode,
+                    fpsLower = fpsRange?.lower,
+                    fpsUpper = fpsRange?.upper,
                 ),
             ) ?: return
             if (line.level == CaptureReadbackPolicy.Level.Warning) Log.w(TAG, line.message) else Log.i(TAG, line.message)
@@ -2461,6 +2563,13 @@ class CameraService internal constructor(
 
     fun onActivityResume() {
         updateDemand { it.copy(isActivityForeground = true) }
+        val recoverPolicyDenied = CameraErrorPolicy.shouldRecoverOnResume(
+            (_cameraState.value as? CameraState.Error)?.recovery
+        )
+        if (recoverPolicyDenied) {
+            errorRebindAttempts.set(0)
+            Log.i(TAG, "onActivityResume: recovering from POLICY_DENIED camera error")
+        }
         // One arbiter consult. Its demand input is previewRequested ALONE
         // (see the arbiter) — keep-alive-only sessions are not restored here;
         // that asymmetry is preserved, not fixed.
@@ -2477,7 +2586,19 @@ class CameraService internal constructor(
                 executeBinding(action)
                 Log.d(TAG, "onActivityResume: restored preview")
             }
-            else -> {}
+            else -> if (recoverPolicyDenied) {
+                val demand = demandState(CameraSessionArbiter.Trigger.RebindIfFree)
+                if (demand.demandActive) {
+                    val freeAction = CameraSessionArbiter.decide(demand)
+                    if (freeAction is CameraSessionArbiter.BindingAction) {
+                        executeBinding(freeAction)
+                        Log.d(TAG, "onActivityResume: restored keep-alive session after policy denial")
+                    }
+                } else if (ensureCameraProviderAvailable() != null) {
+                    _cameraState.value = CameraState.Ready
+                    Log.d(TAG, "onActivityResume: cleared POLICY_DENIED error — ready for preview")
+                }
+            }
         }
     }
 

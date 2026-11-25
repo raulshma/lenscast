@@ -38,10 +38,13 @@ export default function BackupPanel(props: Props) {
       />
 
       <Show when={backupOn()}>
+        {/* The target picker is a selection, not an action: the chosen
+            target wears the amber toggled plate, the other a quiet outline. */}
         <div class="nx-deterrence">
           <Button
             size="sm"
-            variant={!telegramSelected() ? 'primary' : 'ghost'}
+            variant={!telegramSelected() ? 'toggled' : 'secondary'}
+            ariaPressed={!telegramSelected()}
             onClick={() => props.updateStreamingAndSave({ backupTarget: 'webdav' })}
             ariaLabel="WebDAV"
           >
@@ -49,7 +52,8 @@ export default function BackupPanel(props: Props) {
           </Button>
           <Button
             size="sm"
-            variant={telegramSelected() ? 'primary' : 'ghost'}
+            variant={telegramSelected() ? 'toggled' : 'secondary'}
+            ariaPressed={telegramSelected()}
             onClick={() => props.updateStreamingAndSave({ backupTarget: 'telegram' })}
             ariaLabel="Telegram"
           >

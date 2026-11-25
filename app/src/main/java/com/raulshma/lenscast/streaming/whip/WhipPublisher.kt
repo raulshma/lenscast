@@ -117,7 +117,7 @@ internal class WhipPublisher(
     private val frameThrottle = FrameThrottle(
         intervalMs = { FrameTiming.frameIntervalMs(targetFps) },
         tolerance = FrameThrottle.TOLERANCE,
-        updateClockOnReject = true,
+        updateClockOnReject = false,
     )
 
     // The session's live collaborators, owned by the attempt coroutine and

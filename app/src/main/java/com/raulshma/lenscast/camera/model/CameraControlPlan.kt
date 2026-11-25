@@ -131,7 +131,17 @@ data class CameraControlPlan(
             name = UNSUPPORTED_VIDEO_STABILIZATION,
         )
 
+        val (resolvedFps, fpsRetired) = resolveFpsRange(fpsLower, fpsUpper, support.targetFpsRanges)
+        val supportedFps = fold.value(
+            resolvedFps,
+            retired = fpsRetired,
+            fallback = resolvedFps,
+            name = UNSUPPORTED_FPS_RANGE,
+        )
+
         return copy(
+            fpsLower = supportedFps.lower,
+            fpsUpper = supportedFps.upper,
             videoStabilizationOn = supportedVideoStabilization,
             opticalStabilizationOn = supportedOpticalStabilization,
             sceneMode = supportedSceneMode,
@@ -207,6 +217,41 @@ data class CameraControlPlan(
         const val UNSUPPORTED_FOCUS = "manual focus"
         const val UNSUPPORTED_OPTICAL_STABILIZATION = "optical stabilization"
         const val UNSUPPORTED_VIDEO_STABILIZATION = "video stabilization"
+        const val UNSUPPORTED_FPS_RANGE = "target frame rate"
+
+        /**
+         * Resolves the requested `(fpsLower, fpsUpper)` against the camera's
+         * advertised `CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES`, returning the
+         * chosen range and whether the requested ceiling could not be reached
+         * (and should therefore be reported as unsupported).
+         */
+        private fun resolveFpsRange(
+            fpsLower: Int,
+            fpsUpper: Int,
+            available: Set<CaptureSupport.FpsRange>?,
+        ): Pair<CaptureSupport.FpsRange, Boolean> {
+            val requested = CaptureSupport.FpsRange(fpsLower, fpsUpper)
+            if (available.isNullOrEmpty() || requested in available) {
+                return requested to false
+            }
+            val reaching = available.filter { it.upper >= fpsUpper }
+            return if (reaching.isNotEmpty()) {
+                val minUpper = reaching.minOf { it.upper }
+                val atMinUpper = reaching.filter { it.upper == minUpper }
+                pickPreferredLower(atMinUpper, fpsLower) to false
+            } else {
+                val maxUpper = available.maxOf { it.upper }
+                val atMaxUpper = available.filter { it.upper == maxUpper }
+                pickPreferredLower(atMaxUpper, fpsLower) to true
+            }
+        }
+
+        private fun pickPreferredLower(
+            candidates: List<CaptureSupport.FpsRange>,
+            fpsLower: Int,
+        ): CaptureSupport.FpsRange =
+            candidates.filter { it.lower <= fpsLower }.maxByOrNull { it.lower }
+                ?: candidates.minBy { it.lower }
 
         /**
          * The plan in two stages: what the settings ask for ([requested]),

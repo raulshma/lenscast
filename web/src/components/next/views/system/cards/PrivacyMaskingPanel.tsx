@@ -96,7 +96,7 @@ export default function PrivacyMaskingPanel(props: Props) {
                   aria-hidden="true"
                   style={{
                     transform: expandedZoneId() === zone.id ? 'rotate(90deg)' : 'none',
-                    transition: 'transform 0.15s',
+                    transition: 'transform var(--dur-micro) var(--ease-out)',
                   }}
                 >
                   <polyline points="9 18 15 12 9 6" />
@@ -104,7 +104,9 @@ export default function PrivacyMaskingPanel(props: Props) {
                 <span class="nx-field-label" style={{ flex: 1 }}>
                   {zone.label || t('privacy.zone', { n: zones().indexOf(zone) + 1 })}
                 </span>
-                <Badge tone={zone.type === 'BLACKOUT' ? 'neutral' : zone.type === 'PIXELATE' ? 'info' : 'accent'}>
+                {/* The zone's type is a reading, not a selection: quiet
+                    neutral/cool tags, never the amber of a chosen chip. */}
+                <Badge tone={zone.type === 'BLACKOUT' ? 'neutral' : 'info'}>
                   {t(MASK_KEYS[zone.type])}
                 </Badge>
                 <Button

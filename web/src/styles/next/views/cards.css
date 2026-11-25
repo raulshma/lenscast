@@ -1,43 +1,104 @@
+/* Hallmark · shape: app screen · genre: modern-minimal · theme: Console (deal 1/3, seed operator-console-phone-as-camera-rig-9437·d469983a·2026-11-25·r0) · redesign: full
+ * nav: rail-first sidebar kept, rebuilt · signature: the live stage · states: loading, empty, error, full · console: graphite
+ * faces: Golos kept for cyrillic locales (theme face latin-only), Atkinson Hyperlegible Mono measures
+ * axes: dark/grotesk-sans/chromatic-amber · posture: restrained · contrast: pass · v2.0.0 */
 /* ══════════════════════════════════════════════════════════════════
-   NEXT UI — SYSTEM VIEW ("Viewfinder")
-   The settings surface as a workbench of instrument faceplates: rack
-   bays with a Golos 600 section title and a 2px cyan tick, panels as
-   machined plates (hairline, radius 6, top bevel), forms label-left /
-   control-right on ≥1024px and stacked below. Danger zones wear a red
-   hairline and red text/buttons — never a red wash. The file also
-   carries the bridge for the classic-DOM internals that still render
-   inside system panels (MultiCam tiles, the recording timeline, the
-   share QR) and under other shells (StreamPreview rows, the shared
-   overlays), restated in the same token language.
+   NEXT UI — SYSTEM VIEW (Console)
+   The settings deck as faceplate racks. The tab is the chapter; each
+   related group of panels is ONE surface cut by 1px --color-rule seams
+   (the .nx-cut pattern) — no floating cards, no shadows, no masonry.
+   The rack's own name is an aria heading only; each panel's own title
+   is the one visible heading per idea. Forms read label-left /
+   control-right (the kit's .nx-field-row) and stack below 1024px.
+   Danger zones wear a red hairline top edge — never a red wash, never
+   a filled red button.
 
-   Everything here is scoped with [data-ui='next']: App.css imports
-   this file before its own rules, so equal-specificity overrides must
-   out-rank them to win the cascade.
+   The file also carries the token bridge for the classic-DOM internals
+   that still render inside system panels (MultiCam tiles, the recording
+   timeline, the share QR, the field-* inputs) and for the shared
+   overlays (ShortcutsOverlay, the media viewer), restated in Console
+   tokens. Stream-preview URL/audio rows live in live.css; automation
+   rows live in detection.css — both load after this file and own those
+   vocabularies.
+
+   Everything here is scoped with [data-ui='next']: App.css imports this
+   file after components.css, so these rules win the equal-specificity
+   cascade over the kit and out-rank App.css's unscoped classics.
+   Golos speaks, Atkinson measures.
    ══════════════════════════════════════════════════════════════════ */
 
-/* ── Rack bays & faceplates ───────────────────────────────────────────
-   Section headers (Golos 600 title, 2px cyan tick) and the panel
-   faceplate (plate surface, machined top bevel, hairline, radius 6)
-   are the kit's shared vocabulary — layout.css styles `.nx-section-*`
-   and components.css styles `.nx-panel*`, so every view inherits the
-   faceplate treatment. What this surface adds on top: the danger-zone
-   hairline, its form rhythm, and the row vocabularies below. */
+/* ── Racks — one surface per group, seams for structure ────────────── */
 
-/* Danger zones (credential rotation, config restore): a red hairline
-   along the top edge and red text/buttons only — never a red wash. */
-[data-ui='next'] .nx-panel-danger {
-  border-top-color: color-mix(in srgb, var(--nx-danger) 55%, transparent);
+/* The rack's accessible heading: announced, never seen. The seams and
+   the panel titles carry the visible structure (one heading per idea). */
+[data-ui='next'] .nx-rack {
+  min-width: 0;
 }
 
-/* ── Forms: label-left / control-right ≥1024px, stacked below ────── */
+[data-ui='next'] .nx-rack-title {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+[data-ui='next'] .nx-rack-plate {
+  min-width: 0;
+}
+
+/* Panels lose their own borders inside the cut — the container owns the
+   plate, the corners, and the seams (same recipe as the detection band). */
+[data-ui='next'] .nx-rack-plate > .nx-panel {
+  border: none;
+  border-radius: 0;
+  min-width: 0;
+}
+
+[data-ui='next'] .nx-rack-plate > .nx-panel > .nx-panel-header {
+  border-radius: 0;
+}
+
+/* Danger zones (credential rotation, config restore): a red hairline
+   along the top edge and outlined red verbs only — never a red wash. */
+[data-ui='next'] .nx-rack-plate > .nx-panel-danger {
+  border-top: 1px solid color-mix(in oklab, var(--color-bad) 55%, transparent);
+}
+
+[data-ui='next'] .nx-panel-danger {
+  border-top-color: color-mix(in oklab, var(--color-bad) 55%, transparent);
+}
+
+/* ── Paired panels: the plate cuts two columns at pane widths ────────
+   Short families (focus beside white balance, push beside unified
+   push) share the rack's faceplate instead of each holding a
+   full-width band — the density of the old two-column rack, kept on
+   the one surface: .nx-cut's 1px gutters over --color-rule are the
+   seams in both directions. A trailing odd panel closes the rack
+   across both columns. */
+@media (min-width: 1100px) {
+  [data-ui='next'] .nx-system-pane .nx-section:not(.nx-section-single):not(.nx-section-wide) .nx-rack-plate {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  [data-ui='next'] .nx-system-pane .nx-section:not(.nx-section-single):not(.nx-section-wide) .nx-rack-plate > .nx-panel:last-child:nth-child(odd) {
+    grid-column: 1 / -1;
+  }
+}
+
+/* ── Forms: label-left / control-right ≥1024px, stacked below ─────── */
 
 @media (max-width: 1023px) {
   [data-ui='next'] .nx-view-system .nx-field-row {
     flex-direction: column;
     align-items: flex-start;
-    gap: var(--nx-space-1);
+    gap: var(--space-2xs);
     min-height: 0;
-    padding: var(--nx-space-1) 0;
+    padding: var(--space-2xs) 0;
   }
 
   /* Diagnostics values keep their column but read left when stacked. */
@@ -49,41 +110,34 @@
 
 /* ── Small in-panel vocabulary ────────────────────────────────────── */
 
-/* Sentence-case sub-heading (replaces the old uppercase mono label). */
+/* Sentence-case sub-heading inside a panel body. */
 [data-ui='next'] .nx-subhead {
-  font-size: var(--nx-text-sm);
-  font-weight: 600;
-  letter-spacing: -0.01em;
-  color: var(--nx-text-secondary);
+  font-family: var(--font-body);
+  font-size: var(--text-sm);
+  font-weight: var(--display-weight);
+  letter-spacing: var(--tracking-display);
+  color: var(--color-ink-2);
 }
 
-/* REC / on-air readings keep their tone names but carry the signal
-   color: magenta means the picture is going out, red means a fault. */
+/* REC — the tally. Amber (a person's on-air state), never red: this
+   overrides the tone="danger" class the badge also carries. */
 [data-ui='next'] .nx-badge-rec {
-  background: var(--nx-signal-bg);
-  color: var(--nx-signal);
-}
-
-[data-ui='next'] .nx-banner-rec {
-  background: var(--nx-signal-bg);
-  color: var(--nx-signal);
+  background: var(--color-accent-soft);
+  border-color: transparent;
+  color: var(--color-accent-on-soft);
 }
 
 /* Lens picker chips: lens names speak Golos; the focal readout inside
-   stays mono (data face). */
+   stays mono (data face, the instrument's colour). */
 [data-ui='next'] .nx-lens-chip {
   height: 28px;
-  padding: 0 10px;
-  border-radius: var(--nx-radius);
-  font-family: var(--nx-font);
-  font-size: var(--nx-text-sm);
-  font-weight: 500;
-  letter-spacing: normal;
-  text-transform: none;
+  padding: 0 var(--space-sm);
+  border-radius: var(--radius-pill);
+  font-size: var(--text-sm);
 }
 
 [data-ui='next'] .nx-lens-chip .nx-mono {
-  color: var(--nx-text-tertiary);
+  color: var(--color-cool);
 }
 
 /* Audit trail rows: mono timestamp, plain-sentence action, detail as a
@@ -93,20 +147,20 @@
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 1px;
+  gap: var(--space-3xs);
 }
 
 [data-ui='next'] .nx-audit-line {
   display: flex;
   align-items: baseline;
-  gap: var(--nx-space-2);
+  gap: var(--space-xs);
   min-width: 0;
 }
 
 [data-ui='next'] .nx-audit-time {
   flex-shrink: 0;
-  font-size: var(--nx-text-xs);
-  color: var(--nx-text-tertiary);
+  font-size: var(--text-2xs);
+  color: var(--color-cool);
   white-space: nowrap;
 }
 
@@ -114,50 +168,51 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: var(--nx-text-sm);
-  color: var(--nx-text-secondary);
+  font-size: var(--text-sm);
+  color: var(--color-ink-2);
 }
 
 [data-ui='next'] .nx-audit-detail {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: var(--nx-text-xs);
-  color: var(--nx-text-tertiary);
+  font-size: var(--text-xs);
+  color: var(--color-muted);
 }
 
 /* ══════════════════════════════════════════════════════════════════
-   MULTI-CAM — camera frames as faceplates
-   Frames sit on the well with a hairline; a live tile carries a cyan
-   edge (cyan = this camera is on the stage); offline frames go faint.
-   No shadows anywhere in the grid.
+   MULTI-CAM — camera frames on the well
+   Tiles sit on the paper-3 well with a hairline; the live tile wears
+   the amber edge (a person put it on air); offline is the fault voice.
+   Status badges are solid instrument plates pinned on the picture —
+   no glass, no caps. Amber only on the one live tile per camera.
    ══════════════════════════════════════════════════════════════════ */
 
 [data-ui='next'] .multicam-grid {
-  gap: var(--nx-space-3);
+  gap: var(--space-sm);
 }
 
 [data-ui='next'] .multicam-tile {
-  background: var(--nx-well);
-  border: 1px solid var(--nx-border);
-  border-radius: var(--nx-radius-lg);
+  background: var(--color-paper-3);
+  border: 1px solid var(--color-rule);
+  border-radius: var(--radius-card);
   box-shadow: none;
-  padding: var(--nx-space-2);
-  gap: var(--nx-space-2);
+  padding: var(--space-sm);
+  gap: var(--space-sm);
 }
 
-/* Active camera: cyan edge, nothing louder. */
+/* Live tile: the amber edge, nothing louder. */
 [data-ui='next'] .multicam-tile-live {
-  border-color: color-mix(in srgb, var(--nx-accent) 45%, var(--nx-border));
+  border-color: color-mix(in oklab, var(--color-accent) 45%, var(--color-rule));
 }
 
 [data-ui='next'] .multicam-tile-media {
-  background: var(--nx-bg);
-  border-radius: var(--nx-radius);
+  background: var(--color-paper);
+  border-radius: var(--radius-pill);
 }
 
 [data-ui='next'] .multicam-tile-img {
-  transition: opacity var(--nx-duration) var(--nx-ease), filter var(--nx-duration) var(--nx-ease);
+  transition: opacity var(--dur-micro) var(--ease-out);
 }
 
 [data-ui='next'] .multicam-tile-offline .multicam-tile-img {
@@ -166,172 +221,280 @@
 }
 
 [data-ui='next'] .multicam-tile-name {
-  font-size: var(--nx-text-sm);
-  font-weight: 600;
-  letter-spacing: -0.01em;
+  font-family: var(--font-body);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  letter-spacing: var(--tracking-display);
+  color: var(--color-ink);
 }
 
 [data-ui='next'] .multicam-offline-hint {
-  color: var(--nx-text-tertiary);
+  font-size: var(--text-2xs);
+  line-height: 1.4;
+  color: var(--color-muted);
 }
 
-/* Tile status badge: a small plate over the frame — sentence case,
-   color from the state law (live = signal magenta, on-air). */
+/* Tile status badge: a solid paper-3 plate over the frame (media.css's
+   tile-badge recipe), sentence case, tone in the text — never caps,
+   never tracked, never glass. */
 [data-ui='next'] .multicam-badge {
-  font-family: var(--nx-font);
-  font-size: var(--nx-text-2xs);
-  font-weight: 600;
+  font-family: var(--font-body);
+  font-size: var(--text-2xs);
+  font-weight: 500;
   letter-spacing: normal;
   text-transform: none;
-  padding: 3px 8px;
-  border-radius: var(--nx-radius-sm);
-  backdrop-filter: blur(6px);
+  line-height: 1;
+  padding: var(--space-2xs) var(--space-xs);
+  border-radius: var(--radius-pill);
+  background: var(--color-paper-3);
+  border: 1px solid var(--color-rule);
+  backdrop-filter: none;
 }
 
 [data-ui='next'] .multicam-badge-online {
-  color: var(--nx-success);
-  background: color-mix(in srgb, var(--nx-bg) 68%, transparent);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--nx-success) 32%, transparent);
+  color: var(--color-ok);
 }
 
+/* On air — the amber presence, the tally's voice. */
 [data-ui='next'] .multicam-badge-live {
-  color: #fff;
-  background: color-mix(in srgb, var(--nx-signal) 88%, transparent);
-  box-shadow: var(--nx-glow-rec);
+  background: var(--color-accent-soft);
+  border-color: transparent;
+  color: var(--color-accent-on-soft);
 }
 
+/* An unreachable camera is a degraded link: the fault voice. */
 [data-ui='next'] .multicam-badge-offline {
-  color: var(--nx-text-tertiary);
-  background: color-mix(in srgb, var(--nx-bg) 68%, transparent);
-  box-shadow: inset 0 0 0 1px var(--nx-border-strong);
+  background: var(--color-bad-soft);
+  border-color: transparent;
+  color: var(--color-bad);
 }
 
 [data-ui='next'] .multicam-capture-sending {
-  color: var(--nx-accent-text);
-  background: color-mix(in srgb, var(--nx-bg) 68%, transparent);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--nx-accent) 36%, transparent);
+  background: var(--color-accent-soft);
+  border-color: transparent;
+  color: var(--color-accent-on-soft);
 }
 
 [data-ui='next'] .multicam-capture-sent {
-  color: var(--nx-success);
-  background: color-mix(in srgb, var(--nx-bg) 68%, transparent);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--nx-success) 32%, transparent);
+  color: var(--color-ok);
 }
 
 [data-ui='next'] .multicam-capture-failed {
-  color: var(--nx-danger);
-  background: color-mix(in srgb, var(--nx-bg) 68%, transparent);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--nx-danger) 36%, transparent);
+  background: var(--color-bad-soft);
+  border-color: transparent;
+  color: var(--color-bad);
 }
 
-/* Tile actions: small quiet buttons, 28px targets. */
+/* Tile actions: quiet outline keys, 28px faces over an expanded hit. */
 [data-ui='next'] .multicam-mini-btn {
+  position: relative;
   display: inline-flex;
   align-items: center;
   min-height: 28px;
-  padding: 2px 10px;
-  font-family: var(--nx-font);
-  font-size: var(--nx-text-xs);
+  padding: var(--space-3xs) var(--space-sm);
+  font-family: var(--font-body);
+  font-size: var(--text-xs);
   font-weight: 500;
-  background: var(--nx-surface-2);
-  border: 1px solid var(--nx-control-border);
-  border-radius: var(--nx-radius);
-  color: var(--nx-text-secondary);
+  background: transparent;
+  border: 1px solid var(--color-muted);
+  border-radius: var(--radius-pill);
+  color: var(--color-muted);
   text-decoration: none;
-  transition: color var(--nx-duration-fast) var(--nx-ease), border-color var(--nx-duration-fast) var(--nx-ease), background var(--nx-duration-fast) var(--nx-ease);
+  cursor: pointer;
+  transition:
+    color var(--dur-micro) var(--ease-out),
+    border-color var(--dur-micro) var(--ease-out),
+    background var(--dur-micro) var(--ease-out),
+    transform var(--dur-micro) var(--ease-out);
+}
+
+[data-ui='next'] .multicam-mini-btn::before {
+  content: '';
+  position: absolute;
+  inset: -8px;
 }
 
 [data-ui='next'] .multicam-mini-btn:hover {
-  color: var(--nx-text);
-  background: var(--nx-surface-3);
-  border-color: var(--nx-control-border-hover);
+  color: var(--color-ink);
+  background: var(--color-paper-2);
+  border-color: var(--color-muted);
 }
 
+[data-ui='next'] .multicam-mini-btn:active:not(:disabled) {
+  transform: scale(0.95);
+}
+
+/* Remove — the destructive verb, outlined red, never a red fill. */
 [data-ui='next'] .multicam-mini-btn-danger:hover {
-  color: var(--nx-danger);
-  border-color: color-mix(in srgb, var(--nx-danger) 45%, transparent);
-  background: var(--nx-surface-3);
+  color: var(--color-bad);
+  border-color: color-mix(in oklab, var(--color-bad) 45%, transparent);
+  background: var(--color-bad-soft);
 }
 
 [data-ui='next'] .multicam-edit-label {
-  font-size: var(--nx-text-xs);
+  font-size: var(--text-xs);
   font-weight: 500;
-  color: var(--nx-text-tertiary);
+  color: var(--color-muted);
 }
 
 [data-ui='next'] .multicam-edit-input {
-  height: 28px;
-  font-size: var(--nx-text-sm);
+  font-size: var(--text-sm);
 }
 
+/* Plaintext-credential warning: the operator-attention plate. */
 [data-ui='next'] .multicam-auth-warning {
-  color: var(--nx-warning);
-  background: var(--nx-warning-bg);
-  border: 1px solid color-mix(in srgb, var(--nx-warning) 28%, transparent);
-  border-radius: var(--nx-radius);
+  font-size: var(--text-xs);
+  line-height: 1.5;
+  color: var(--color-accent-on-soft);
+  background: var(--color-accent-soft);
+  border: 1px solid transparent;
+  border-radius: var(--radius-pill);
+  padding: var(--space-2xs) var(--space-sm);
 }
 
 [data-ui='next'] .multicam-form-error {
-  color: var(--nx-danger);
+  font-size: var(--text-xs);
+  color: var(--color-bad);
 }
 
 /* ══════════════════════════════════════════════════════════════════
    RECORDING TIMELINE — the NVR day view as a data visualization
-   Hairline track on the well, REC segments in signal magenta, hourly
-   hairlines, mono time labels, and a cyan playhead marking now.
+   One instrument readout: hairline track on the well, mono hour ticks,
+   and six distinct, high-contrast series colours across dark and light
+   themes. Legend items keep a transparent ground and ink-2 text so
+   App.css's unscoped .timeline-trigger-* backgrounds never bleed onto
+   the labels; only the swatches and track bars carry series colour.
    ══════════════════════════════════════════════════════════════════ */
 
+:root[data-ui='next'] {
+  --tl-manual: var(--color-accent);
+  --tl-motion: var(--color-cool);
+  --tl-sound: var(--color-ok);
+  --tl-continuous: oklch(77% 0.11 195);
+  --tl-scheduled: oklch(75% 0.14 295);
+  --tl-interval: oklch(74% 0.14 340);
+}
+
+:root[data-ui='next'][data-theme='light'] {
+  --tl-manual: var(--color-accent);
+  --tl-motion: var(--color-cool);
+  --tl-sound: var(--color-ok);
+  --tl-continuous: oklch(48% 0.11 195);
+  --tl-scheduled: oklch(50% 0.16 295);
+  --tl-interval: oklch(51% 0.15 340);
+}
+
 [data-ui='next'] .timeline-day-picker {
-  gap: var(--nx-space-2);
+  gap: var(--space-2xs);
 }
 
 [data-ui='next'] .timeline-day-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   min-width: 28px;
   height: 28px;
-  border: 1px solid var(--nx-control-border);
-  border-radius: var(--nx-radius);
-  background: var(--nx-surface-2);
-  color: var(--nx-text-secondary);
-  font-size: var(--nx-text-base);
-  transition: color var(--nx-duration-fast) var(--nx-ease), border-color var(--nx-duration-fast) var(--nx-ease);
+  border: 1px solid var(--color-muted);
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--color-muted);
+  font-family: var(--font-body);
+  font-size: var(--text-sm);
+  cursor: pointer;
+  transition:
+    color var(--dur-micro) var(--ease-out),
+    border-color var(--dur-micro) var(--ease-out),
+    background var(--dur-micro) var(--ease-out),
+    transform var(--dur-micro) var(--ease-out);
 }
 
 [data-ui='next'] .timeline-day-btn:hover:not(:disabled) {
-  border-color: var(--nx-accent);
-  color: var(--nx-accent-text);
+  background: var(--color-paper-2);
+  border-color: var(--color-muted);
+  color: var(--color-ink);
 }
 
+[data-ui='next'] .timeline-day-btn:active:not(:disabled) {
+  transform: scale(0.97);
+}
+
+[data-ui='next'] .timeline-day-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* The picked day: a word, not a code — Golos, full ink. */
 [data-ui='next'] .timeline-day-label {
-  font-size: var(--nx-text-base);
-  font-weight: 600;
-  letter-spacing: -0.01em;
-  color: var(--nx-text);
+  font-family: var(--font-body);
+  font-size: var(--text-md);
+  font-weight: 500;
+  color: var(--color-ink);
 }
 
-/* Legend: plain sentence-case labels, swatch carries the series color. */
+/* Legend: plain sentence-case labels in readable ink; the swatch alone
+   carries the series colour. Background stays transparent to defeat
+   App.css's unscoped .timeline-trigger-* rules. */
 [data-ui='next'] .timeline-legend {
-  gap: var(--nx-space-3);
-  font-family: var(--nx-font);
-  font-size: var(--nx-text-xs);
+  gap: var(--space-xs) var(--space-sm);
+  font-family: var(--font-body);
+  font-size: var(--text-xs);
   font-weight: 500;
   letter-spacing: normal;
   text-transform: none;
-  color: var(--nx-text-tertiary);
+  color: var(--color-ink-2);
+}
+
+[data-ui='next'] .timeline-legend-item {
+  background: transparent;
+  color: var(--color-ink-2);
+  gap: 6px;
 }
 
 [data-ui='next'] .timeline-legend-swatch {
-  border-radius: 1px;
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
 }
 
-[data-ui='next'] .timeline-legend-item.timeline-trigger-manual { color: var(--nx-signal); }
-[data-ui='next'] .timeline-legend-item.timeline-trigger-motion { color: var(--nx-warning); }
-[data-ui='next'] .timeline-legend-item.timeline-trigger-sound { color: var(--nx-success); }
-[data-ui='next'] .timeline-legend-item.timeline-trigger-continuous { color: var(--nx-info); }
-[data-ui='next'] .timeline-legend-item.timeline-trigger-scheduled { color: color-mix(in srgb, var(--nx-signal) 62%, var(--nx-text-secondary)); }
-[data-ui='next'] .timeline-legend-item.timeline-trigger-interval { color: color-mix(in srgb, var(--nx-info) 62%, var(--nx-text-secondary)); }
+[data-ui='next'] .timeline-legend-swatch.timeline-marker-swatch {
+  width: 4px;
+  height: 10px;
+  border-radius: 1px;
+  background: var(--color-ink-2);
+}
+
+[data-ui='next'] .timeline-legend-item.timeline-trigger-manual .timeline-legend-swatch,
+[data-ui='next'] .timeline-segment.timeline-trigger-manual {
+  background: var(--tl-manual);
+}
+
+[data-ui='next'] .timeline-legend-item.timeline-trigger-motion .timeline-legend-swatch,
+[data-ui='next'] .timeline-segment.timeline-trigger-motion {
+  background: var(--tl-motion);
+}
+
+[data-ui='next'] .timeline-legend-item.timeline-trigger-sound .timeline-legend-swatch,
+[data-ui='next'] .timeline-segment.timeline-trigger-sound {
+  background: var(--tl-sound);
+}
+
+[data-ui='next'] .timeline-legend-item.timeline-trigger-continuous .timeline-legend-swatch,
+[data-ui='next'] .timeline-segment.timeline-trigger-continuous {
+  background: var(--tl-continuous);
+}
+
+[data-ui='next'] .timeline-legend-item.timeline-trigger-scheduled .timeline-legend-swatch,
+[data-ui='next'] .timeline-segment.timeline-trigger-scheduled {
+  background: var(--tl-scheduled);
+}
+
+[data-ui='next'] .timeline-legend-item.timeline-trigger-interval .timeline-legend-swatch,
+[data-ui='next'] .timeline-segment.timeline-trigger-interval {
+  background: var(--tl-interval);
+}
 
 [data-ui='next'] .timeline-wrap {
-  padding: var(--nx-space-2) 2px 2px;
+  padding: var(--space-2xs) 2px 2px;
 }
 
 /* The 24h track: hourly hairlines behind the session bars, well inset. */
@@ -341,285 +504,203 @@
       to right,
       transparent 0,
       transparent calc(100% / 24 - 1px),
-      var(--nx-border) calc(100% / 24 - 1px),
-      var(--nx-border) calc(100% / 24)
+      var(--color-rule) calc(100% / 24 - 1px),
+      var(--color-rule) calc(100% / 24)
     ),
-    var(--nx-well);
-  border: 1px solid var(--nx-border);
-  border-radius: var(--nx-radius);
+    var(--color-paper-3);
+  border: 1px solid var(--color-rule-2);
+  border-radius: var(--radius-pill);
 }
 
 [data-ui='next'] .timeline-segment {
   border-radius: 2px;
-  opacity: 0.92;
+  opacity: 1;
+}
+
+/* A linked segment answers the hand with one opacity step and crisp edge. */
+[data-ui='next'] .timeline-segment-link {
+  cursor: pointer;
+  transition: opacity var(--dur-micro) var(--ease-out);
 }
 
 [data-ui='next'] .timeline-segment-link:hover {
-  opacity: 1;
-  filter: brightness(1.2);
+  opacity: 0.85;
+  outline: 1px solid var(--color-ink);
 }
 
-/* REC segments: signal magenta — the recording family. Derived mixes
-   keep the six series readable while every hue follows the color law. */
-[data-ui='next'] .timeline-trigger-manual {
-  background: var(--nx-signal);
-}
-
-[data-ui='next'] .timeline-trigger-motion {
-  background: var(--nx-warning);
-}
-
-[data-ui='next'] .timeline-trigger-sound {
-  background: var(--nx-success);
-}
-
-[data-ui='next'] .timeline-trigger-continuous {
-  background: var(--nx-info);
-}
-
-[data-ui='next'] .timeline-trigger-scheduled {
-  background: color-mix(in srgb, var(--nx-signal) 62%, var(--nx-surface-3));
-}
-
-[data-ui='next'] .timeline-trigger-interval {
-  background: color-mix(in srgb, var(--nx-info) 62%, var(--nx-surface-3));
-}
-
-/* Detection markers under the track, colored by event type. */
+/* Detection markers under the track: distinct voice per event type. */
 [data-ui='next'] .timeline-marker-motion {
-  background: var(--nx-warning);
+  background: var(--tl-motion);
 }
 
 [data-ui='next'] .timeline-marker-sound {
-  background: var(--nx-success);
+  background: var(--tl-sound);
 }
 
 [data-ui='next'] .timeline-marker-tamper {
-  background: var(--nx-danger);
+  background: var(--color-bad);
 }
 
 /* Hour ticks: mono, tabular, quiet. */
 [data-ui='next'] .timeline-ticks {
   height: 16px;
-  font-family: var(--nx-mono);
-  font-size: var(--nx-text-2xs);
-  font-variant-numeric: tabular-nums;
-  color: var(--nx-text-tertiary);
+  font-family: var(--font-outlier);
+  font-size: var(--text-2xs);
+  font-variant-numeric: tabular-nums slashed-zero;
+  color: var(--color-muted);
 }
 
-/* The playhead: a 2px cyan line at the current time (today only). */
+/* The playhead: the live edge — amber, 2px, today only. */
 [data-ui='next'] .timeline-now {
   position: absolute;
   top: 0;
   bottom: 0;
   width: 2px;
-  background: var(--nx-accent);
+  background: var(--color-accent);
   transform: translateX(-1px);
   pointer-events: none;
 }
 
 /* ══════════════════════════════════════════════════════════════════
-   SHARE — QR plate and the URL as data
+   SHARE — the QR plate and the URL as data
+   The canvas paints its own white quiet zone (margin: 4 modules), so
+   the wrap is a quiet instrument plate, not a white card.
    ══════════════════════════════════════════════════════════════════ */
 
 [data-ui='next'] .share-qr-wrap {
-  background: #fff; /* scanners need the white quiet zone, both themes */
-  border: 1px solid var(--nx-border-strong);
-  border-radius: var(--nx-radius);
+  background: var(--color-paper-3);
+  border: 1px solid var(--color-rule);
+  border-radius: var(--radius-card);
 }
 
+/* The address: the instrument's voice on the well. */
 [data-ui='next'] .share-url {
-  background: var(--nx-well);
-  border: 1px solid var(--nx-border);
-  border-radius: var(--nx-radius);
-  color: var(--nx-text);
-  font-size: var(--nx-text-sm);
-  padding: 8px 10px;
+  background: var(--color-paper-3);
+  border: 1px solid var(--color-rule);
+  border-radius: var(--radius-pill);
+  color: var(--color-ink-2);
+  font-family: var(--font-outlier);
+  font-variant-numeric: tabular-nums slashed-zero;
+  font-size: var(--text-sm);
+  padding: var(--space-2xs) var(--space-sm);
 }
 
 [data-ui='next'] .share-hint {
-  color: var(--nx-text-tertiary);
+  color: var(--color-muted);
 }
 
 [data-ui='next'] .share-hint code {
-  color: var(--nx-text-secondary);
+  font-family: var(--font-outlier);
+  color: var(--color-ink-2);
+}
+
+[data-ui='next'] .share-qr-error {
+  font-size: var(--text-xs);
+  color: var(--color-muted);
 }
 
 /* ══════════════════════════════════════════════════════════════════
-   LEGACY BRIDGE
-   The classic-DOM internals that still render under [data-ui='next']:
-     · StreamPreview internals — the stage keeps its URL bar, copy
-       button and audio state chip (player internals are not ported).
-     · Kept port internals — MultiCam's edit rows and the recording
-       timeline reuse the field-input/field-select/field-row vocabulary.
-     · Shared overlays — ShortcutsOverlay reuses the gallery overlay
-       shell, and the media viewer (MediaViewerOverlay) is the gallery
-       viewer. Both are mounted by both shells.
-   Classic UI is untouched — every rule here is scoped.
+   FIELD VOCABULARY BRIDGE
+   The kept classic internals (MultiCam's edit rows, the timeline's day
+   header) still render field-input/field-select/field-row — restated
+   as the kit's field recipe: the paper-3 well, a constant 1px hairline,
+   the inset ring on focus. Selects keep the native arrow (color-scheme
+   paints it); no appearance override.
    ══════════════════════════════════════════════════════════════════ */
 
-/* ── Field vocabulary (kept port internals) ───────────────────────── */
-
 [data-ui='next'] .field-group {
-  gap: var(--nx-space-1);
+  gap: var(--space-2xs);
 }
 
 [data-ui='next'] .field-row {
-  gap: var(--nx-space-3);
+  gap: var(--space-sm);
 }
 
 [data-ui='next'] .field-select,
 [data-ui='next'] .field-input {
-  appearance: none;
-  height: 32px;
-  padding: 0 12px;
-  border-radius: var(--nx-radius);
-  border: 1px solid var(--nx-control-border);
-  background: var(--nx-control-bg);
-  color: var(--nx-text);
-  font-size: var(--nx-text-base);
-  font-family: var(--nx-font);
-  transition: border-color var(--nx-duration-fast) var(--nx-ease), box-shadow var(--nx-duration-fast) var(--nx-ease);
+  height: var(--control-h);
+  padding: 0 var(--space-sm);
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--color-muted);
+  background: var(--color-paper-3);
+  color: var(--color-ink);
+  font-family: var(--font-body);
+  font-size: var(--text-sm);
+  transition:
+    border-color var(--dur-micro) var(--ease-out),
+    background var(--dur-micro) var(--ease-out);
 }
 
 [data-ui='next'] .field-select {
-  padding-right: 30px;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23808695' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
-  background-repeat: no-repeat;
-  background-position: right 10px center;
+  /* The classic shell strips the native arrow and paints a data-URI
+     chevron; the console keeps the OS arrow (color-scheme paints it) —
+     appearance is restored explicitly since the classic rule is unscoped. */
+  appearance: auto;
+  padding-right: var(--space-lg);
   cursor: pointer;
 }
 
+/* The kit's inset ring: focus never resizes the field. The classic
+   focus ring's box-shadow is cancelled with it. */
 [data-ui='next'] .field-select:focus,
 [data-ui='next'] .field-input:focus {
-  outline: none;
-  border-color: var(--nx-accent);
-  box-shadow: 0 0 0 3px var(--nx-focus-ring);
-  background-color: var(--nx-surface);
+  outline: 2px solid var(--color-focus);
+  outline-offset: -3px;
+  box-shadow: none;
+}
+
+[data-ui='next'] .field-select:hover:not(:disabled),
+[data-ui='next'] .field-input:hover:not(:disabled) {
+  border-color: var(--color-ink-2);
 }
 
 [data-ui='next'] .field-select:disabled,
 [data-ui='next'] .field-input:disabled {
-  opacity: 0.5;
+  opacity: 0.55;
   cursor: not-allowed;
 }
 
-/* ── Stream URL & audio rows (StreamPreview internals) ────────────── */
+/* ══════════════════════════════════════════════════════════════════
+   SHARED OVERLAYS
+   ShortcutsOverlay reuses the gallery overlay shell and the media
+   viewer mounts over every view; both take over the viewport. The
+   console dims instead of blurring — no glass — and the viewer's room
+   follows the theme's deepest surface.
+   ══════════════════════════════════════════════════════════════════ */
 
-[data-ui='next'] .stream-url-bar {
-  background: var(--nx-surface-2);
-  border: 1px solid var(--nx-border);
-  border-radius: var(--nx-radius);
-  padding: 8px 12px;
-  gap: var(--nx-space-2);
-}
-
-[data-ui='next'] .stream-url-bar code {
-  font-family: var(--nx-mono);
-  font-size: var(--nx-text-sm);
-  color: var(--nx-text-secondary);
-}
-
-[data-ui='next'] .url-copy-btn {
-  color: var(--nx-text-tertiary);
-  border-radius: var(--nx-radius-sm);
-}
-
-[data-ui='next'] .url-copy-btn:hover {
-  color: var(--nx-text);
-  background: var(--nx-surface-3);
-}
-
-[data-ui='next'] .url-copy-btn-copied,
-[data-ui='next'] .url-copy-btn-copied:hover {
-  color: var(--nx-success);
-}
-
-[data-ui='next'] .audio-status-indicator {
-  background: var(--nx-surface-2);
-  border: 1px solid var(--nx-border);
-  border-radius: var(--nx-radius);
-  font-size: var(--nx-text-sm);
-  color: var(--nx-text-secondary);
-  padding: 8px 12px;
-  gap: var(--nx-space-2);
-}
-
-[data-ui='next'] .audio-live {
-  background: var(--nx-success-bg);
-  border-color: transparent;
-  color: var(--nx-success);
-}
-
-[data-ui='next'] .audio-connecting {
-  background: var(--nx-warning-bg);
-  border-color: transparent;
-  color: var(--nx-warning);
-}
-
-[data-ui='next'] .audio-blocked {
-  background: var(--nx-warning-bg);
-  border-color: transparent;
-  color: var(--nx-warning);
-}
-
-[data-ui='next'] .audio-error {
-  background: var(--nx-danger-bg);
-  border-color: transparent;
-  color: var(--nx-danger);
-}
-
-/* ── Automation rule grammar (AutomationPanel kept internals) ─────── */
-
-/* The WHEN / ONLY WHEN / THEN structural labels are grammar, not signal:
-   recoloring each word cyan/green made every rule look alarmed. Neutral
-   labels, one voice; the missing-action state keeps its danger color. */
-[data-ui='next'] .automation-when .automation-when-label,
-[data-ui='next'] .automation-onlywhen .automation-when-label,
-[data-ui='next'] .automation-then .automation-when-label {
-  color: var(--nx-text-tertiary);
-}
-
-[data-ui='next'] .automation-when .automation-when-text,
-[data-ui='next'] .automation-onlywhen .automation-when-text {
-  color: var(--nx-text-secondary);
-}
-
-/* ── Shared overlays ──────────────────────────────────────────────── */
-
-/* The classic overlays take over the whole viewport with an opaque page
-   background; the next UI dims the app behind them instead. This catches
-   the shortcuts help too (it reuses the gallery overlay shell). */
 [data-ui='next'] .gallery-overlay {
-  background: var(--nx-scrim);
-  backdrop-filter: blur(4px);
+  background: var(--color-scrim);
+  backdrop-filter: none;
 }
 
 /* Gradient wordmarks read as decoration; headers carry plain titles. */
 [data-ui='next'] .gallery-header {
-  background: var(--nx-surface);
-  border-bottom: 1px solid var(--nx-border);
+  background: var(--color-paper-2);
+  border-bottom: 1px solid var(--color-rule);
 }
 
 [data-ui='next'] .gallery-header h2 {
+  text-wrap: balance;
   background: none;
   -webkit-background-clip: initial;
   -webkit-text-fill-color: currentColor;
   background-clip: initial;
-  color: var(--nx-text);
-  font-size: var(--nx-text-lg);
-  font-weight: 600;
+  color: var(--color-ink);
+  font-size: var(--text-lg);
+  font-weight: var(--display-weight);
+  letter-spacing: var(--tracking-display);
   white-space: nowrap;
 }
 
-/* The shared media viewer overlay (still fullscreen above every view). */
+/* The shared media viewer: the room is the theme's deepest surface,
+   near-opaque, and the hand's bar sits on the panel plate. */
 [data-ui='next'] .gallery-viewer {
-  background: var(--nx-scrim);
-  backdrop-filter: blur(6px);
+  background: color-mix(in oklab, var(--color-paper-3) 92%, transparent);
+  backdrop-filter: none;
 }
 
 [data-ui='next'] .gallery-viewer-bar {
-  background: color-mix(in srgb, var(--nx-surface) 88%, transparent);
-  border-bottom: 1px solid var(--nx-border);
-  backdrop-filter: blur(8px);
+  background: var(--color-paper-2);
+  border-bottom: 1px solid var(--color-rule);
+  backdrop-filter: none;
 }

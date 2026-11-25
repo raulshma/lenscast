@@ -189,7 +189,7 @@ internal class EncodedStreamHub(
     private val frameThrottle = FrameThrottle(
         intervalMs = { FrameTiming.frameIntervalMs(frameRate) },
         tolerance = FrameThrottle.TOLERANCE,
-        updateClockOnReject = true,
+        updateClockOnReject = false,
     )
 
     init {

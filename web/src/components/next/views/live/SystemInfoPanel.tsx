@@ -128,7 +128,7 @@ export default function SystemInfoPanel() {
   }
 
   return (
-    <Panel title={t('system.title')}>
+    <Panel title={t('system.title')} class="nx-info-panel">
       <Show
         when={info()}
         fallback={

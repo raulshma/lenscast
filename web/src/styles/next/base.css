@@ -1,35 +1,51 @@
+/* Hallmark · shape: app screen · genre: modern-minimal · theme: Console (deal 1/3, seed operator-console-phone-as-camera-rig-9437·d469983a·2026-11-25·r0) · redesign: full
+ * nav: rail-first sidebar kept, rebuilt · signature: the live stage · states: loading, empty, error, full · console: graphite
+ * faces: Golos kept for cyrillic locales (theme face latin-only), Atkinson Hyperlegible Mono measures
+ * axes: dark/grotesk-sans/chromatic-amber · posture: restrained · contrast: pass · v2.0.0 */
 /* ══════════════════════════════════════════════════════════════════
-   NEXT UI — BASE ("Viewfinder" redesign)
-   Scoped resets and document-level styling for the next shell. The
-   classic App.css rules on html/body stay authoritative for the classic
-   UI; these only apply while [data-ui='next'] is set. Type law lives
-   here: Golos Text speaks, JetBrains Mono measures (DESIGN.md).
+   NEXT UI — BASE (Console redesign)
+   Scoped resets and document-level styling for the next shell only.
+   The classic App.css rules on html/body stay authoritative for the
+   classic UI; these apply while [data-ui='next'] is set. Every rule
+   here is inside the [data-ui='next'] scope — nothing may leak onto
+   the classic shell.
    ══════════════════════════════════════════════════════════════════ */
 
+:root[data-ui='next'],
+:root[data-ui='next'] body {
+  overflow-x: clip;
+}
+
 :root[data-ui='next'] {
-  background: var(--nx-bg);
+  background: var(--color-paper);
+  scrollbar-color: var(--color-rule-2) var(--color-paper);
 }
 
 :root[data-ui='next'] body {
-  background: var(--nx-bg);
-  color: var(--nx-text);
-  font-family: var(--nx-font);
-  font-size: var(--nx-text-base);
+  margin: 0;
+  background: var(--color-paper);
+  color: var(--color-ink);
+  font-family: var(--font-body);
+  font-size: var(--text-md);
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   text-wrap: pretty;
 }
 
-/* Typographic defaults: headings get optical tightening + balance.
-   Golos Text carries UI at 600 for headings — never uppercase, never
-   letter-spaced caps (the DESIGN.md type law). */
+/* Headings: Golos 600, tight, balanced. Sentence case, never caps. */
 [data-ui='next'] h1,
 [data-ui='next'] h2,
-[data-ui='next'] h3 {
+[data-ui='next'] h3,
+[data-ui='next'] h4 {
   margin: 0;
-  font-weight: 600;
-  letter-spacing: -0.01em;
+  font-family: var(--font-display);
+  font-weight: var(--display-weight);
+  font-synthesis: none;
+  letter-spacing: var(--tracking-display);
+  line-height: 1.15;
+  overflow-wrap: break-word;
+  min-width: 0;
   text-wrap: balance;
 }
 
@@ -37,62 +53,66 @@
   margin: 0;
 }
 
-/* Buttons and controls inherit the product face, not UA defaults. */
+[data-ui='next'] a {
+  color: inherit;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 0.16em;
+}
+
+[data-ui='next'] img,
+[data-ui='next'] video {
+  max-width: 100%;
+  height: auto;
+  display: block;
+}
+
+[data-ui='next'] svg {
+  display: block;
+}
+
 [data-ui='next'] button,
 [data-ui='next'] input,
 [data-ui='next'] select,
 [data-ui='next'] textarea {
-  font-family: inherit;
+  font: inherit;
   color: inherit;
 }
 
-/* Visible keyboard focus everywhere, styled once. */
-[data-ui='next'] :focus-visible {
-  outline: none;
-  box-shadow: 0 0 0 3px var(--nx-focus-ring);
-  border-radius: var(--nx-radius-sm);
+[data-ui='next'] [hidden] {
+  display: none !important;
 }
 
-/* Inline data (timers, bitrates, counts) never shifts the layout. */
+/* The ring, instant, on the amber */
+[data-ui='next'] :focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 2px;
+}
+
+/* Measured figures: the instrument's voice, always tabular */
 [data-ui='next'] .nx-num,
 [data-ui='next'] .nx-mono {
-  font-family: var(--nx-mono);
-  font-variant-numeric: tabular-nums;
-}
-
-/* Scrollbars: quiet, matching the canvas. */
-[data-ui='next'] * {
-  scrollbar-width: thin;
-  scrollbar-color: var(--nx-border-strong) transparent;
-}
-
-[data-ui='next'] ::-webkit-scrollbar {
-  width: 10px;
-  height: 10px;
-}
-
-[data-ui='next'] ::-webkit-scrollbar-thumb {
-  background: var(--nx-border-strong);
-  border-radius: var(--nx-radius-full);
-  border: 3px solid transparent;
-  background-clip: content-box;
-}
-
-[data-ui='next'] ::-webkit-scrollbar-track {
-  background: transparent;
+  font-family: var(--font-outlier);
+  font-variant-numeric: tabular-nums slashed-zero;
+  letter-spacing: 0;
 }
 
 [data-ui='next'] ::selection {
-  background: var(--nx-accent-subtle);
+  background: color-mix(in oklab, var(--color-accent) 25%, transparent);
 }
 
-/* Reduced motion: keep state/color changes, drop movement. */
+/* Overlays (drawer, toaster, viewer) cast the one real shadow */
+[data-ui='next'] [data-overlay] {
+  box-shadow: var(--shadow-overlay);
+}
+
 @media (prefers-reduced-motion: reduce) {
+  [data-ui='next'],
   [data-ui='next'] *,
   [data-ui='next'] *::before,
   [data-ui='next'] *::after {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
   }
 }

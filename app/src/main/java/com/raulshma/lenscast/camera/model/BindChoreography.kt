@@ -108,6 +108,13 @@ object BindChoreography {
 
     /** The decision for one camera-state emission. */
     sealed interface OpenStatePlan {
+        /**
+         * A pre-bind StateError replayed synchronously when `observeForever`
+         * attaches to a singleton CameraX `CameraInfo.cameraState` whose
+         * previous graph closed with an error — ignore it without publishing.
+         */
+        data object IgnoreStaleError : OpenStatePlan
+
         /** A StateError rode the emission: publish Error, then run the follow-up. */
         data class ErrorObservation(
             /** The [CameraErrorPolicy] verdict — published on the error and logged. */
@@ -179,6 +186,7 @@ object BindChoreography {
         readyAlreadyPublished: Boolean,
         previouslyObserved: Boolean,
         cameraIsLive: Boolean,
+        isStalePreBindError: Boolean = false,
     ): OpenStatePlan {
         val code = errorCode ?: return OpenStatePlan.StateObservation(
             openObserved = typeOpen,
@@ -186,6 +194,9 @@ object BindChoreography {
             publishReady = typeOpen && !readyAlreadyPublished,
             reassertControls = typeOpen && !previouslyObserved && cameraIsLive,
         )
+        if (isStalePreBindError) {
+            return OpenStatePlan.IgnoreStaleError
+        }
         val verdict = CameraErrorPolicy.decide(code, rebindAttempts)
         val messageKind = when {
             code == CameraErrorPolicy.CODE_CAMERA_DISABLED -> ErrorMessage.DisabledByPolicy

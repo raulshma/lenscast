@@ -568,7 +568,7 @@ export default function MultiCamPanel() {
           </Button>
         </div>
       </FieldRow>
-      <div class="nx-banner nx-banner-info" role="note">
+      <div class="nx-banner nx-banner-neutral" role="note">
         <span>{t('multicam.desc')}</span>
       </div>
 

@@ -1,8 +1,8 @@
 import { For, Show } from 'solid-js'
 import type { NextState } from '../../NextState'
 import { t } from '../../../../lib/i18n'
-import { Led, Panel } from '../../ui'
-import { channelStates, channelLed, type ChannelState } from '../../lib/telemetry'
+import { Led, Panel, type LedTone } from '../../ui'
+import { channelStates, type ChannelState } from '../../lib/telemetry'
 
 /**
  * The channel rack: one row per output (WEB / RTSP / RTMP / WHIP) with
@@ -26,14 +26,25 @@ export default function ChannelMatrix(props: { state: NextState }) {
   }
 
   const statusTone = (c: ChannelState): string => {
-    // On air is the signal state — magenta per the color law (DESIGN.md).
-    // Green stays for healthy-idle (RDY); red is faults only; blocked is
-    // amber (a condition, not a fault — it heals on unlock).
+    // On air is the tally state — amber per the color law (DESIGN.md).
+    // SYNC and LOCKED read soft amber (a condition that heals); red is
+    // faults only; RDY / OFF stay quiet (chrome, not news).
     if (c.status === 'blocked') return 'nx-channel-status-warn'
     if (c.active) return 'nx-channel-status-air'
     if (c.status === 'connecting') return 'nx-channel-status-warn'
     if (c.status === 'error') return 'nx-channel-status-fault'
     return ''
+  }
+
+  // The rack's own Led mapping: amber is on air (the tally), amber hollow
+  // is the wait (SYNC, LOCKED), red is the fault, off is chrome. Local to
+  // this surface — the statusline chips keep their own healthy-idle green.
+  const ledTone = (c: ChannelState): LedTone => {
+    if (c.status === 'blocked') return 'warn'
+    if (c.active) return 'rec'
+    if (c.status === 'connecting') return 'warn'
+    if (c.status === 'error') return 'danger'
+    return 'off'
   }
 
   const canToggle = (c: ChannelState): boolean => c.enabled && !state.isViewer()
@@ -61,13 +72,14 @@ export default function ChannelMatrix(props: { state: NextState }) {
         {(channel) => (
           <div class="nx-channel">
             <div class="nx-channel-head">
-              <Led tone={channelLed(channel)} />
+              <Led tone={ledTone(channel)} />
               <span class="nx-channel-code">{channel.code}</span>
               <span class={`nx-channel-status ${statusTone(channel)}`}>{statusText(channel)}</span>
               <Show when={canToggle(channel)}>
                 <button
                   type="button"
                   class="nx-channel-btn"
+                  classList={{ 'nx-channel-btn-stop': channel.active }}
                   disabled={state.streamActionLoading()}
                   onClick={() => toggle(channel)}
                 >

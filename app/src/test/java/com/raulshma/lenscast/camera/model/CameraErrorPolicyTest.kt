@@ -215,4 +215,16 @@ class CameraErrorPolicyTest {
             CameraErrorPolicy.decideResetCamera(CameraErrorPolicy.Verdict.REBIND, CameraErrorPolicy.MAX_REBIND_ATTEMPTS),
         )
     }
+
+    // ── foreground-resume recovery ──
+
+    @Test
+    fun `only POLICY_DENIED recovers on activity resume`() {
+        assertTrue(CameraErrorPolicy.shouldRecoverOnResume(CameraErrorPolicy.Verdict.POLICY_DENIED))
+        assertEquals(false, CameraErrorPolicy.shouldRecoverOnResume(null))
+        assertEquals(false, CameraErrorPolicy.shouldRecoverOnResume(CameraErrorPolicy.Verdict.CAMERAX_HANDLES))
+        assertEquals(false, CameraErrorPolicy.shouldRecoverOnResume(CameraErrorPolicy.Verdict.REBIND))
+        assertEquals(false, CameraErrorPolicy.shouldRecoverOnResume(CameraErrorPolicy.Verdict.WAIT_CAMERA_ADDED))
+        assertEquals(false, CameraErrorPolicy.shouldRecoverOnResume(CameraErrorPolicy.Verdict.REBOOT_REQUIRED))
+    }
 }

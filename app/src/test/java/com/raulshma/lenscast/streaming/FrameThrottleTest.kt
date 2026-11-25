@@ -114,4 +114,17 @@ class FrameThrottleTest {
         assertTrue(throttle.accept(1_000))
         assertFalse(throttle.accept(900)) // negative elapsed
     }
+
+    @Test
+    fun `60fps with tolerance and updateClockOnReject false tolerates 1-2ms jitter and ignores early rejects`() {
+        // 60 fps -> 1000 / 60 = 16 ms nominal interval; TOLERANCE 0.8 -> 12.8 ms threshold.
+        val throttle = FrameThrottle({ 16L }, tolerance = FrameThrottle.TOLERANCE, updateClockOnReject = false)
+        assertTrue(throttle.accept(1_000))
+        // 1-2 ms jitter (14 ms elapsed >= 12.8 ms) is accepted.
+        assertTrue(throttle.accept(1_014))
+        // An early frame at +8 ms is rejected without advancing lastReferenceMs,
+        // so the next nominal frame at +16 ms (1_030) still passes!
+        assertFalse(throttle.accept(1_022))
+        assertTrue(throttle.accept(1_030))
+    }
 }
