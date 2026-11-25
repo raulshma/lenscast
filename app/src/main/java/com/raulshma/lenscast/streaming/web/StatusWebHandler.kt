@@ -120,6 +120,27 @@ class StatusWebHandler(
             encodedVideo = StatusSnapshotBuilder.EncodedVideoInputs(
                 bitrateBps = streamingManager.currentVideoBitrate(),
             ),
+            encodedStream = streamingManager.encodedStreamStatus().let {
+                StatusSnapshotBuilder.EncodedStreamInputs(
+                    running = it.running,
+                    measuredBitrateKbps = it.measuredBitrateKbps,
+                    fps = it.fps,
+                    targetBitrateKbps = it.targetBitrateKbps,
+                    codec = it.codec,
+                    width = it.width,
+                    height = it.height,
+                )
+            },
+            // Null until a WHEP viewer has reported — the builder then omits the wire block.
+            whepStream = streamingManager.whepStreamStatus()?.let {
+                StatusSnapshotBuilder.WhepStreamInputs(
+                    measuredBitrateKbps = it.measuredBitrateKbps,
+                    fps = it.fps,
+                    codec = it.codec,
+                    width = it.width,
+                    height = it.height,
+                )
+            },
             sirenActive = streamingManager.sirenController().isRunning(),
             cameraBlockedByLock = streamingManager.isCameraBlockedByLock(),
         )

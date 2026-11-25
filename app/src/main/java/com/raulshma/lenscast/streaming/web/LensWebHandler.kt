@@ -85,12 +85,18 @@ class LensWebHandler(
         val ok = withContext(Dispatchers.Main) { cameraService.setZoomRatio(ratio) }
         if (!ok) throw IllegalStateException("Zoom not available")
         // Persist the clamped ratio the device actually accepted (the in-app
-        // slider's contract): the next session starts where this one left off.
+        // slider's contract): the next session starts where this one left
+        // off. The copy base is the DISK truth ([SettingsDataStore.settingsFromDisk]),
+        // never the shared flow's lagging `.value` — the flow replays the
+        // descriptor default until DataStore's first read lands (the
+        // default-first race) and can trail a just-written value after it, so
+        // a copy from it wiped every other camera setting on disk (issue #25;
+        // the same merge base SettingsWebHandler.put reads).
         settingsDataStore?.let { store ->
             val maxZoom = runCatching { cameraService.availableZoomRange.value.endInclusive }
                 .getOrNull() ?: CameraSettings.ZOOM_RATIO_MAX
             val accepted = ratio.coerceIn(1f, maxZoom)
-            runCatching { store.saveSettings(store.settings.value.copy(zoomRatio = accepted)) }
+            runCatching { store.saveSettings(store.settingsFromDisk().copy(zoomRatio = accepted)) }
         }
         return successAdapter.toJson(SuccessResponse())
     }

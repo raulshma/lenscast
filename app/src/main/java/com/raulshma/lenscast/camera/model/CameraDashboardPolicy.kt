@@ -152,13 +152,48 @@ object CameraDashboardPolicy {
     data class ConnectionStatRow(val labelRes: Int, val value: String)
 
     /**
-     * The expanded panel's stat rows, from Bandwidth down to Total Sent (the
-     * quality badge renders its own row). Frame sizes go through
-     * [formatBytes] — the panel keeps no second byte formatter.
+     * The encoded lane's measured block as the dashboard reads it (issue
+     * #25): the hub's window measurement and its running fact — the screen's
+     * version of /api/status's encodedStream block, unmapped from the
+     * internal hub type. Null while the backend hasn't polled the lane.
      */
-    fun connectionStatRows(estimatedBandwidthKbps: Int, stats: NetworkStatsSnapshot): List<ConnectionStatRow> =
+    data class EncodedLaneStatus(val running: Boolean, val measuredBitrateKbps: Int)
+
+    /**
+     * The Bandwidth row's measured value source (issue #25): the encoded
+     * hub's window-measured bitrate while its lane runs, else the MJPEG
+     * clients' measured window average when that is the lane serving the
+     * viewers (the phone panel has no lane switcher — one row follows the
+     * lane actually carrying bytes), else the honest 0 idle. Never the
+     * adaptation ladders' drain-rate estimate — that stays their internal
+     * input, the same rule the web dashboard's lane picker applies.
+     */
+    fun measuredBandwidthKbps(
+        encodedStream: EncodedLaneStatus?,
+        stats: NetworkStatsSnapshot?,
+    ): Int = when {
+        encodedStream?.running == true -> encodedStream.measuredBitrateKbps
+        stats != null -> stats.avgThroughputKbps
+        else -> 0
+    }
+
+    /**
+     * The collapsed "N clients · kbps" readout's kbps: the clients' measured
+     * window minimum — 0 before any window measures (the honest idle, like
+     * the web dashboard's blocks), never the ladders' drain-rate estimate.
+     */
+    fun clientSummaryKbps(stats: NetworkStatsSnapshot?): Int = stats?.minThroughputKbps ?: 0
+
+    /**
+     * The expanded panel's stat rows, from Bandwidth down to Total Sent (the
+     * quality badge renders its own row). The Bandwidth row renders the
+     * measured kbps picked by [measuredBandwidthKbps] — never the adaptation
+     * ladders' drain-rate estimate. Frame sizes go through [formatBytes] —
+     * the panel keeps no second byte formatter.
+     */
+    fun connectionStatRows(measuredBandwidthKbps: Int, stats: NetworkStatsSnapshot): List<ConnectionStatRow> =
         listOf(
-            ConnectionStatRow(R.string.camera_stat_bandwidth, "$estimatedBandwidthKbps kbps"),
+            ConnectionStatRow(R.string.camera_stat_bandwidth, "$measuredBandwidthKbps kbps"),
             ConnectionStatRow(R.string.camera_stat_min_throughput, "${stats.minThroughputKbps} kbps"),
             ConnectionStatRow(R.string.camera_stat_avg_throughput, "${stats.avgThroughputKbps} kbps"),
             ConnectionStatRow(R.string.camera_stat_latency, "${stats.worstLatencyMs} ms"),

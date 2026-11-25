@@ -5,10 +5,12 @@ import com.raulshma.lenscast.streaming.model.AdaptiveBitrateStatusDto
 import com.raulshma.lenscast.streaming.model.BatteryStatusDto
 import com.raulshma.lenscast.streaming.model.ClientConnectionDetailDto
 import com.raulshma.lenscast.streaming.model.ConnectionQualityStatusDto
+import com.raulshma.lenscast.streaming.model.EncodedStreamStatusDto
 import com.raulshma.lenscast.streaming.model.RangeDto
 import com.raulshma.lenscast.streaming.model.StatusResponseDto
 import com.raulshma.lenscast.streaming.model.StreamingStatusDto
 import com.raulshma.lenscast.streaming.model.WatchdogStatusDto
+import com.raulshma.lenscast.streaming.model.WhepStreamStatusDto
 
 /**
  * The pure status aggregation: typed inputs in, one [StatusResponseDto] out.
@@ -115,6 +117,40 @@ object StatusSnapshotBuilder {
         val bitrateBps: Int,
     )
 
+    /**
+     * The encoded lane's MEASURED stream status (issue #25): the encoder
+     * output's real bitrate/fps from its sliding window, next to the
+     * configured target and encode geometry — what the wire's `encodedStream`
+     * block carries. Null (absent on the wire) while the encoder is not
+     * running, mirroring adaptiveBitrate's null-when-disabled.
+     */
+    data class EncodedStreamInputs(
+        val running: Boolean,
+        val measuredBitrateKbps: Int,
+        val fps: Double,
+        val targetBitrateKbps: Int,
+        val codec: String,
+        val width: Int,
+        val height: Int,
+    )
+
+    /**
+     * The WHEP (WebRTC preview) lane's MEASURED stream status (issue #25):
+     * what libwebrtc actually sent to the viewers, summed over the live
+     * viewer sessions — what the wire's `whepStream` block carries. The lane
+     * is independent of `encodedStream` (WHEP never crosses the shared
+     * encoder, so both blocks may be present at once) and has no configured
+     * target or geometry to ride along: codec and frame size are whatever
+     * the negotiation produced, null until a report resolved them.
+     */
+    data class WhepStreamInputs(
+        val measuredBitrateKbps: Int,
+        val fps: Double,
+        val codec: String?,
+        val width: Int?,
+        val height: Int?,
+    )
+
     data class AdaptiveInputs(
         val enabled: Boolean,
         val qualityLevelName: String,
@@ -159,6 +195,18 @@ object StatusSnapshotBuilder {
         adaptive: AdaptiveInputs,
         network: NetworkInputs,
         encodedVideo: EncodedVideoInputs = EncodedVideoInputs(bitrateBps = 0),
+        encodedStream: EncodedStreamInputs = EncodedStreamInputs(
+            running = false,
+            measuredBitrateKbps = 0,
+            fps = 0.0,
+            targetBitrateKbps = 0,
+            codec = "",
+            width = 0,
+            height = 0,
+        ),
+        // Null (absent on the wire) while no viewer session has reported —
+        // the lane's presence IS its running fact, like encodedStream's.
+        whepStream: WhepStreamInputs? = null,
         sirenActive: Boolean = false,
         cameraBlockedByLock: Boolean = false,
     ): StatusResponseDto {
@@ -262,6 +310,34 @@ object StatusSnapshotBuilder {
                 lastFailureReason = watchdog.lastFailureReason,
             ),
             encodedVideoBitrate = encodedVideo.bitrateBps,
+            // Present only while the encoder is actually running — the same
+            // null-when-idle shape adaptiveBitrate has when disabled. The
+            // gate is the running fact; the wire block carries no redundant
+            // flag (Speculative Generality cleanup, issue #25).
+            encodedStream = if (encodedStream.running) {
+                EncodedStreamStatusDto(
+                    measuredBitrateKbps = encodedStream.measuredBitrateKbps,
+                    fps = encodedStream.fps,
+                    targetBitrateKbps = encodedStream.targetBitrateKbps,
+                    codec = encodedStream.codec,
+                    width = encodedStream.width,
+                    height = encodedStream.height,
+                )
+            } else {
+                null
+            },
+            // Emitted only when a measurement exists. Its nullable members
+            // (codec, width, height) are omitted on the wire while unknown —
+            // the same serializeNulls-off rule as every other nullable here.
+            whepStream = whepStream?.let {
+                WhepStreamStatusDto(
+                    measuredBitrateKbps = it.measuredBitrateKbps,
+                    fps = it.fps,
+                    codec = it.codec,
+                    width = it.width,
+                    height = it.height,
+                )
+            },
         )
     }
 

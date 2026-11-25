@@ -10,6 +10,7 @@ import com.raulshma.lenscast.R
 import com.raulshma.lenscast.camera.SelfTimerRunner
 import com.raulshma.lenscast.camera.UrlClipboard
 import com.raulshma.lenscast.camera.CameraConsole
+import com.raulshma.lenscast.camera.model.CameraDashboardPolicy
 import com.raulshma.lenscast.camera.model.CameraLensInfo
 import com.raulshma.lenscast.camera.model.CameraSettings
 import com.raulshma.lenscast.camera.model.CameraState
@@ -309,6 +310,12 @@ class DeviceConsoleViewModel(
     // phone, so null (the card's "nothing to show" value).
     override val connectionQualityStats:
         StateFlow<NetworkQualityMonitor.NetworkStatsSnapshot?> = MutableStateFlow(null)
+
+    // The dashboard's Bandwidth row reads the encoded lane's measured block;
+    // no measured block crosses the remote API for this phone, so null — and
+    // with the MJPEG stats null too, the Bandwidth row reads the honest 0 idle.
+    override val encodedStreamStatus:
+        StateFlow<CameraDashboardPolicy.EncodedLaneStatus?> = MutableStateFlow(null)
 
     // ── settings: the device document ⊕ the status lane's live facts ──
 

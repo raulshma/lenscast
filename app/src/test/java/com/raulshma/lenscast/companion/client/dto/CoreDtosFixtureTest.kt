@@ -45,7 +45,8 @@ class CoreDtosFixtureTest {
         assertEquals("rtsp://192.168.1.10:8554/live", streaming.rtspUrl)
         assertEquals(false, streaming.rtmpEnabled)
         assertEquals("idle", streaming.rtmpStatus)
-        assertEquals(0, streaming.whepClients)
+        // One WHEP viewer — the session whose measured `whepStream` block the fixture carries.
+        assertEquals(1, streaming.whepClients)
         assertNull(streaming.rtmpError)
         assertEquals("NORMAL", status.thermal)
         assertEquals(87, status.battery.level)

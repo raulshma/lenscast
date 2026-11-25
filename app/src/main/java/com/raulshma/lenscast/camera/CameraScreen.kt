@@ -329,6 +329,7 @@ fun CameraScreen(
     val showPreview by console.showPreview.collectAsState()
     val adaptiveBitrateState by console.adaptiveBitrateState.collectAsState()
     val connectionQualityStats by console.connectionQualityStats.collectAsState()
+    val encodedStreamStatus by console.encodedStreamStatus.collectAsState()
     val hasAudioPermission by console.hasAudioPermission.collectAsState()
     val flashMode by console.flashModeSetting.collectAsState()
     val availableZoomRange by console.availableZoomRange.collectAsState()
@@ -559,6 +560,7 @@ fun CameraScreen(
                 showPreview = showPreview,
                 adaptiveBitrateState = adaptiveBitrateState,
                 connectionQualityStats = connectionQualityStats,
+                encodedStreamStatus = encodedStreamStatus,
                 quickSettingsExpanded = quickSettingsUiState.isBarExpanded,
                 activeSetting = quickSettingsUiState.openSetting,
                 flashAlpha = flashAlpha,
@@ -691,6 +693,7 @@ private fun ImmersiveCameraView(
     showPreview: Boolean,
     adaptiveBitrateState: com.raulshma.lenscast.streaming.AdaptiveBitrateController.AdaptiveState,
     connectionQualityStats: com.raulshma.lenscast.core.NetworkQualityMonitor.NetworkStatsSnapshot?,
+    encodedStreamStatus: CameraDashboardPolicy.EncodedLaneStatus?,
     quickSettingsExpanded: Boolean,
     activeSetting: QuickSettingType?,
     flashAlpha: Animatable<Float, *>,
@@ -926,13 +929,20 @@ private fun ImmersiveCameraView(
                 adaptiveEnabled = adaptiveBitrateState.enabled,
             )
         ) {
+            // The kbps readouts are window-measured facts (issue #25): the
+            // per-client figure from the clients' windows, the Bandwidth row
+            // from the encoded lane while it runs (else the MJPEG windows) —
+            // the ladders' drain-rate estimate stays their internal input.
             ConnectionQualityIndicator(
                 qualityLevel = adaptiveBitrateState.qualityLevel,
                 currentQuality = adaptiveBitrateState.currentQuality,
                 currentFps = adaptiveBitrateState.currentFps,
                 activeClients = adaptiveBitrateState.activeClients,
-                minThroughputKbps = adaptiveBitrateState.minClientThroughputKbps,
-                estimatedBandwidthKbps = adaptiveBitrateState.estimatedBandwidthKbps,
+                minThroughputKbps = CameraDashboardPolicy.clientSummaryKbps(connectionQualityStats),
+                measuredBandwidthKbps = CameraDashboardPolicy.measuredBandwidthKbps(
+                    encodedStream = encodedStreamStatus,
+                    stats = connectionQualityStats,
+                ),
                 stats = connectionQualityStats,
                 modifier = Modifier
                     .align(Alignment.TopEnd)
@@ -3161,7 +3171,7 @@ private fun ConnectionQualityIndicator(
     currentFps: Int,
     activeClients: Int,
     minThroughputKbps: Int,
-    estimatedBandwidthKbps: Int,
+    measuredBandwidthKbps: Int,
     stats: com.raulshma.lenscast.core.NetworkQualityMonitor.NetworkStatsSnapshot?,
     modifier: Modifier = Modifier,
 ) {
@@ -3250,7 +3260,7 @@ private fun ConnectionQualityIndicator(
                     Spacer(modifier = Modifier.height(6.dp))
                     ConnectionStatRow(label = stringResource(R.string.camera_quality_label), value = label, valueColor = dotColor)
                     CameraDashboardPolicy.connectionStatRows(
-                        estimatedBandwidthKbps = estimatedBandwidthKbps,
+                        measuredBandwidthKbps = measuredBandwidthKbps,
                         stats = stats,
                     ).forEach { row ->
                         ConnectionStatRow(label = stringResource(row.labelRes), value = row.value)

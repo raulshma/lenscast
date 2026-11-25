@@ -10,6 +10,7 @@ import com.raulshma.lenscast.camera.model.BindChoreography.RecordingBindStep
 import com.raulshma.lenscast.camera.model.BindChoreography.RungAction
 import com.raulshma.lenscast.camera.model.CameraErrorPolicy.Verdict
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -27,11 +28,15 @@ class BindChoreographyTest {
         typeOpen: Boolean = false,
         rebindAttempts: Int = 0,
         readyAlreadyPublished: Boolean = false,
+        previouslyObserved: Boolean = false,
+        cameraIsLive: Boolean = true,
     ) = BindChoreography.openStatePlan(
         errorCode = errorCode,
         typeOpen = typeOpen,
         rebindAttempts = rebindAttempts,
         readyAlreadyPublished = readyAlreadyPublished,
+        previouslyObserved = previouslyObserved,
+        cameraIsLive = cameraIsLive,
     )
 
     // ── the observation attach identity guard ──
@@ -160,8 +165,68 @@ class BindChoreographyTest {
                 openObserved = true,
                 resetRebindAttempts = true,
                 publishReady = true,
+                reassertControls = true,
             ),
             plan,
+        )
+    }
+
+    @Test
+    fun `a first observed OPEN re-asserts the controls`() {
+        // The event-driven rung: the open fact was not standing and OPEN
+        // arrived — the rising edge. This is the camera that opens LATER than
+        // its bind, past both timed rungs; the observed open is the only
+        // receipt that the session can take controls at all.
+        val plan = openPlan(typeOpen = true, previouslyObserved = false) as OpenStatePlan.StateObservation
+        assertTrue(plan.reassertControls)
+    }
+
+    @Test
+    fun `a re-stated OPEN does not re-assert the controls`() {
+        // LiveData re-delivers the current value on attach and on lifecycle
+        // moves: an OPEN the observer already counted is not an edge. Without
+        // this every re-attach would fire a force-focus apply that cancels a
+        // deliberate tap-to-focus.
+        val plan = openPlan(typeOpen = true, previouslyObserved = true) as OpenStatePlan.StateObservation
+        assertEquals(false, plan.reassertControls)
+        // The fact still stands and the budget still reads as reset.
+        assertTrue(plan.openObserved)
+        assertTrue(plan.resetRebindAttempts)
+    }
+
+    @Test
+    fun `the re-assert is the edge alone - independent of the Ready claim`() {
+        // The bind already claimed Ready, so nothing is published — and the
+        // first observed OPEN still re-asserts: the claim is bookkeeping,
+        // the controls need the real open.
+        val plan = openPlan(typeOpen = true, readyAlreadyPublished = true, previouslyObserved = false)
+            as OpenStatePlan.StateObservation
+        assertEquals(false, plan.publishReady)
+        assertTrue(plan.reassertControls)
+    }
+
+    @Test
+    fun `an OPEN observed for a camera that is no longer live does not re-assert`() {
+        // The stale-generation half of the guard, as data: a late dispatch
+        // from a camera a newer bind replaced must not drive its force-focus
+        // apply onto the session that replaced it. The open fact itself is
+        // the emission's and still stands.
+        val plan = openPlan(typeOpen = true, previouslyObserved = false, cameraIsLive = false)
+            as OpenStatePlan.StateObservation
+        assertEquals(false, plan.reassertControls)
+        assertTrue(plan.openObserved)
+        assertTrue(plan.resetRebindAttempts)
+    }
+
+    @Test
+    fun `the re-assert needs the edge and the live camera together`() {
+        assertFalse(
+            (openPlan(typeOpen = true, previouslyObserved = true, cameraIsLive = false)
+                as OpenStatePlan.StateObservation).reassertControls,
+        )
+        assertTrue(
+            (openPlan(typeOpen = true, previouslyObserved = false, cameraIsLive = true)
+                as OpenStatePlan.StateObservation).reassertControls,
         )
     }
 
@@ -182,12 +247,14 @@ class BindChoreographyTest {
     @Test
     fun `a non-open transition withdraws the open fact and resets nothing`() {
         // OPENING/PENDING_OPEN/CLOSING/CLOSED emissions: the confirmation
-        // dies, the budget is untouched, no state is published.
+        // dies, the budget is untouched, no state is published, nothing is
+        // re-asserted.
         assertEquals(
             OpenStatePlan.StateObservation(
                 openObserved = false,
                 resetRebindAttempts = false,
                 publishReady = false,
+                reassertControls = false,
             ),
             openPlan(typeOpen = false, rebindAttempts = 2, readyAlreadyPublished = false),
         )

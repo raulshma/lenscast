@@ -15,6 +15,7 @@ import com.raulshma.lenscast.streaming.web.AutomationWebHandler
 import com.raulshma.lenscast.streaming.web.AuthWebHandler
 import com.squareup.moshi.Types
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -89,6 +90,8 @@ class DtoContractFixtureTest {
                 rtspEnabled = true,
                 rtspStreamingActive = true,
                 rtspUrl = "rtsp://192.168.1.10:8554/live",
+                // The one WHEP viewer whose measured block rides below.
+                whepClients = 1,
             ),
             thermal = "NORMAL",
             camera = "Ready",
@@ -145,11 +148,60 @@ class DtoContractFixtureTest {
                 lastFailureReason = "Encoder stalled; pipeline restarted",
             ),
             encodedVideoBitrate = 2_000_000,
+            encodedStream = EncodedStreamStatusDto(
+                measuredBitrateKbps = 1890,
+                fps = 23.5,
+                targetBitrateKbps = 2000,
+                codec = "h264",
+                width = 1280,
+                height = 720,
+            ),
+            whepStream = WhepStreamStatusDto(
+                measuredBitrateKbps = 1700,
+                fps = 24.0,
+                codec = "vp8",
+                width = 600,
+                height = 800,
+            ),
         )
         assertMatchesFixture(
             "status.json",
             moshi.adapter(StatusResponseDto::class.java).toJson(status),
         )
+    }
+
+    @Test
+    fun `the whepStream block is omitted while unmeasured and drops its unknown members on the wire`() {
+        val adapter = moshi.adapter(StatusResponseDto::class.java)
+        val unmeasured = StatusResponseDto(
+            streaming = StreamingStatusDto(
+                isActive = false,
+                url = "",
+                clientCount = 0,
+                audioEnabled = false,
+                audioUrl = "",
+            ),
+            thermal = "NORMAL",
+            camera = "Ready",
+            battery = BatteryStatusDto(level = 50, isCharging = false, isPowerSaveMode = false),
+        )
+        // No viewer session has reported: not a key on the wire, exactly like encodedStream.
+        assertFalse(adapter.toJson(unmeasured).contains("whepStream"))
+
+        // A viewer has reported but no frame was encoded yet (libwebrtc omits
+        // the codec and the geometry until then): the rates ride, the
+        // nullable members are omitted rather than sent as null.
+        val measured = unmeasured.copy(
+            whepStream = WhepStreamStatusDto(
+                measuredBitrateKbps = 0,
+                fps = 0.0,
+                codec = null,
+                width = null,
+                height = null,
+            ),
+        )
+        val wire = requireNotNull(mapAdapter.fromJson(adapter.toJson(measured)))
+        assertEquals(mapOf("measuredBitrateKbps" to 0.0, "fps" to 0.0), wire["whepStream"])
     }
 
     @Test

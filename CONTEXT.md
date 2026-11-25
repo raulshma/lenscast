@@ -46,6 +46,12 @@ module (ViewModels, Web API Settings Handler) only *writes* settings to the
 store; nobody else applies persisted settings. Direct runtime calls that are
 *not* settings changes (session begin/end via the Streaming Session, mic
 arbitration in RecordingService, camera rebinding) are allowed to bypass it.
+The torch convergence's persistence rides a narrowed torch-fact seam
+(`setTorchFactPersister`, wired at start): the CameraService hands over only
+the converged `Boolean` LED fact and the Applier folds it into the store's
+field-level write (`updateCameraSettings`) — the old whole-document save of
+the collector's snapshot could overwrite a second camera write landing
+milliseconds later (issue #25).
 One documented second application path exists for camera controls: gesture /
 quick-setting updates apply to the CameraService *before* persisting (for
 responsiveness) and the Applier re-applies after persistence — camera-control
@@ -84,7 +90,14 @@ Overlay/masking saves go
 through the pure
 `OverlaySettings.normalized` / `MaskingZone.normalized` — "persist a valid
 value" is the store's invariant, so ViewModels and the Web API Settings
-Handler write raw values and no caller pre-guards. Masking-zone lists
+Handler write raw values and no caller pre-guards. One field-level write
+seam exists beside the whole-document savers: `updateCameraSettings(transform)`
+runs the transform against the DISK truth inside ONE `dataStore.edit {}`
+pass and encodes through the same `cameraSettingsPref` descriptor — the
+write seam for writers that hold one field's fact instead of a document
+(the torch convergence's `Boolean` fact, issue #25), where a
+whole-snapshot write would clobber a concurrent camera write landing
+milliseconds later. Masking-zone lists
 serialize through App Json (a Moshi codec with the legacy org.json field
 names kept decode-compatible), not a second JSON stack. Enum strings parse
 through the one `core/EnumParsing.parseEnum(name, fallback)` with each
@@ -419,7 +432,12 @@ possibly re-scaled main frame: its dimensions move under `frameData`, and
 feeding the sub scale the stale source dims corrupted `/sub` whenever the
 encode resolution differed from the analysis resolution. The encoder
 instantiation is a constructor seam (`encoderFactory`), so the frame path —
-including the overlay stamping — is JVM-tested with fake encoders.
+including the overlay stamping — is JVM-tested with fake encoders. The
+fan-out records every AU's (timestamp, bytes) into the encoded lane's
+`SlidingRateWindow` before delivery, and `encodedStreamStatus()` reads the
+encoder output's measured bitrate/fps from it (see Stream Stats) — so
+`/api/status`'s `encodedStream` block is what the encoder produced, not
+what it was configured to produce.
 
 ### H264 Stream Assembler
 **`streaming/rtsp/H264StreamAssembler.kt`** — the wire-format core of the
@@ -793,6 +811,66 @@ audit trail), SystemPanel (the /api/system triage view), and ConfigBackupCard
 (the settings export/import pair) — are one-card clients of the same client
 API surface.
 
+### Touched-Key Camera Save
+**`web/src/lib/touchedPatch.ts`** — the client half of issue #25's
+touched-fields camera save: `createPendingPatch` is the staged patch behind
+`useAppState.updateCamera`. Every patch the hook receives across the 400 ms
+sectioned-debounce window is `stage`d as *touched key → the value the user
+set at touch time* (a later write to the same key wins; an explicit `null`
+is a value — the ISO / exposure-time reset), and `take` hands that patch to
+the flush and resets it. The flush PUTs exactly `{ camera: values }`; no
+other source is ever read for the wire body. The local mirror still updates
+wholesale and optimistically, exactly as before; only the wire body narrows,
+because the old whole-mirror PUT let a stale iso/exposure sitting in one tab
+overwrite what an automation rule or another client had just written on the
+device — the "applies, then reverts a few seconds later" repro. A keys-only
+tracker was the interim shape and was refuted: it re-read the values from
+the LATEST mirror at flush time, and every settings GET replaces the mirror
+wholesale (the 30 s poll, the 3 s model-download lane, the visibility
+refresh), so a response landing inside the window — even one that started
+AFTER the edit — put the pre-edit value back on the wire, or an empty body
+where the server omits null keys (per the issue's reproduction: about 1 in
+75 camera gestures, 1 in 8 during a model download).
+
+A take also carries `settle(camera)`. Once the PUT succeeds the sent values
+are the device's truth for those keys, so the hook writes them back over a
+stale GET that flipped the control meanwhile — but only for keys no newer
+edit has claimed since the take. Every staged key takes a tick of an edit
+clock and the take remembers its keys' ticks, so a key re-touched while the
+PUT was in flight is left alone whether it is still staged or has already
+gone out with a newer flush: an older PUT answering late never pulls the
+mirror back off a newer edit. `settle` returns the same object when the
+mirror already agrees, and the hook skips its write on that. PUT failure is
+unchanged (keys dropped, `setError`, no retry).
+
+The staged patch never outlives what it was staged for. The flush takes
+BEFORE any early return, so a flush that finds the session gone drains the
+patch instead of leaving its keys for a later one (the tracker lives as
+long as the app — `App`'s single `useAppState`), and `signOut` clears it
+outright, so a next session's first edit re-arming the still-pending timer
+inherits nothing. `handleResetDefaults` clears it too: the reset is a
+whole-document write and supersedes an edit still inside its window, or
+the flush would re-assert the just-reset keys a moment later.
+
+The server already merges each present section per raw key
+(`SettingsWebHandler.put` → `mergeSection`), and the TS `CameraSettings`
+keys are exactly the `CameraSettingsDto` property names the merge consumes —
+one key space, no translation. Whole-document camera writes keep their
+whole-document shape by contract: the reset-defaults handler and the import
+envelope never pass through `updateCamera`. Pure and store-free (the uiMode
+shape), so the stage/take/clear/settle rules vitest-pin without a Solid
+render; `web/src/hooks/useAppState.test.tsx` mounts the real hook against a
+scripted fake server to pin the wire bodies themselves.
+
+Known and deliberately not closed here (the wire body is right in both, so
+neither is this path's to fix): a settings GET whose request predates the
+PUT but whose response lands after it still replaces the mirror until the
+next poll, and the stale flip inside the window stays on screen until the
+flush — both need `fetchSettings` to defer to pending or just-sent keys,
+and it still writes the mirror unconditionally. Camera PUTs are not
+serialized either: a key touched while one is in flight leaves with the
+next flush without waiting for it.
+
 ### Camera Controls Strip
 **`web/src/hooks/useCameraControls.ts`** — the floating camera strip's
 behavior, one factory consumed by two thin skins: the classic
@@ -1136,8 +1214,9 @@ sub-second over WebRTC. `WhepServer` owns the sessions: one shared
 libwebrtc environment (factory + `VideoSource` tapping the same NV21
 analysis frames WHIP consumes, plus one shared 16 kHz mono
 `JavaAudioDeviceModule` when WHIP's mic-arbitration verdict allows audio)
-under per-viewer `PeerConnection`s, each with its own hardware H.264
-encoder — H.264 only by construction, independent of the RTSP codec. The
+under per-viewer `PeerConnection`s, each with its own libwebrtc encoder —
+the wire codec is whatever libwebrtc negotiates per viewer (VP8 or H.264,
+device-dependent; H.265 is not offered), independent of the RTSP codec. The
 handshake is one-shot ICE like WHIP (answer after the ~3 s capped gather,
 candidates inline, no trickle), answered `201` with `Location:
 /whep/{id}`; `DELETE /whep/{id}` (or endpoint stop) disposes the session,
@@ -1155,6 +1234,83 @@ GET verdict for POST/DELETE (curl viewers need no session cookie), and the
 Role Gate allows a viewer session's WHEP verbs as reads. The status
 snapshot's `whepClients` mirrors the live count; the dashboard's player
 ladder rides WHEP as the top rung (`web/src/lib/whepClient.ts`).
+The lane's measured stats (issue #25) also live here: each 2 s reap tick
+asks every live session's `getStats` (this lane never crosses the
+encoded-stream hub — libwebrtc encodes each viewer's stream itself), the
+pure modules below turn the reports into a rate, and
+`whepStreamStatus()` publishes the snapshot `/api/status`'s `whepStream`
+block carries. A session joins the lane's stats when it is created and
+leaves them at teardown, BEFORE its peer connection is disposed, so a
+report still in flight finds an unknown id and is dropped. The endpoint
+is the only place the lane's threading is decided — the bundled
+stream-webrtc-android gives no handle to libwebrtc's signaling thread, so
+the poll is issued from the loop thread under a per-session lock that
+teardown shares (never on a disposed connection), at the cadence
+[Whep Stats Poll Guard](#whep-stats-poll-guard) grants.
+
+### WHEP Stream Stats
+**`streaming/whep/WhepStreamStats.kt`** — the WHEP lane's measured-stream
+stats (issue #25), the pure rate accounting behind `whepStreamStatus()`.
+The input is libwebrtc's CUMULATIVE counters per viewer session
+(`onStats(sessionId, atMs, bytesSent, framesEncoded, codec?, width?,
+height?)`), so the rate is a delta against that session's previous totals:
+the first observation only stores a baseline, and a delta that did not
+advance (a stalled send) or went backwards (libwebrtc replaced the
+outbound stream) is accounted as silence and re-baselines — never a
+negative sample, never an inflated next interval.
+**Why the delta is spread over cells:** the endpoint polls every 2 s into
+a 5 s window, so each poll's delta is spread over the
+`StreamDefaults.STATS_SUB_SAMPLE_MS` (250 ms) cells its interval crossed,
+on one time lattice (cell `k` spans `[k·250, (k+1)·250)`, stamped at its
+centre), each cell carrying the poll's average rate; the window holds
+exactly 20 cells (`STATS_WINDOW_MS / STATS_SUB_SAMPLE_MS` — the pair is
+refused otherwise), and each cell is one sub-sample in the session's own
+[SlidingRateWindow](#stream-stats) (frames may be fractional). **The
+not-yet-polled tail is held at the last poll's rate:** cells only land
+when a poll does, so between polls up to one interval of elapsed cells
+are unobserved — without the hold the reading would still swing 100%→60%
+with the 2 s cadence; with it a steady stream reads its true rate at
+every instant, whatever the poll phase. A stalled send records silence at
+its next poll and polls that stop arriving release the hold after one
+interval: the reading decays to 0, never freezes. **Sessions are summed**
+(`onSessionAdmitted` / `onSessionRemoved`), and the session moving the
+most bytes describes the lane — the last-known codec and frame size, null
+until a report carried them (libwebrtc omits them until a frame was
+encoded). `snapshot()` is null until a session has reported, which is
+exactly when the wire block appears. Pure, injected clock, thread-safe;
+JVM-tested (`WhepStreamStatsTest`).
+
+### WHEP Stats Report Parser
+**`streaming/whep/WhepStatsReportParser.kt`** — the pure reading of a
+libwebrtc stats report: which row describes a viewer's video, and what it
+says. `videoOutbound(rows)` picks the `kind == "video"` `outbound-rtp` row
+(the largest by `bytesSent` if a build ever reports several; a build
+without `kind` is recognized by the codec's mime type), reads
+`bytesSent`/`framesEncoded` (a row without both is no observation) and
+the nullable `frameWidth`/`frameHeight` (absent or 0 = unknown), and
+resolves `codecId` to the codec's `mimeType`, lowered to the wire name
+(`video/VP8` → `vp8`, the encoded lane's `h264`/`h265` vocabulary). The
+members arrive boxed as Integer/Long/Double exactly as the JNI glue builds
+them, so every numeric member is read as any `Number`. JVM-tested
+(`WhepStatsReportParserTest`) without libwebrtc; the endpoint logs each
+session's first report as a type census and every report as the delta it
+accounted, so a parser mismatch is visible in logcat.
+
+### WHEP Stats Poll Guard
+**`streaming/whep/WhepStatsPollGuard.kt`** — one viewer session's
+stats-poll protocol, pure and JVM-tested (`WhepStatsPollGuardTest`). The
+reap tick calls `arm(nowMs)` and acts on the verdict: `ISSUE` and
+`REISSUE` each grant exactly one `getStats` request, `WAIT` leaves the
+session alone this tick; the report callback answers with
+`onDelivered(nowMs)`, a request libwebrtc refused with `onFailed()`.
+Three rules, each answering a way the naive "poll every tick" breaks:
+one request owed at a time; a 250 ms quiet gap (`QUIET_MS`) after every
+report callback before the next request — libwebrtc settles a request's
+own bookkeeping in its signaling thread around the moment it hands the
+report over, and the app holds no lock over that; and a request whose
+report never arrives is declared lost after
+`STALE_MS` (6 s, three polls) and asked again, so a dropped report cannot
+silence a session forever.
 
 ### AAC Format
 **`streaming/rtsp/AacFormat.kt`** — one home for the AAC stream's format
@@ -1192,9 +1348,15 @@ with `acquireKeepAlive()` / `beginExclusiveSession()` and restore with
 ### Camera Control Plan
 **`camera/model/CameraControlPlan.kt`** — the CaptureRequest *decisions*
 (fps range, exposure, scene mode, white balance, focus, color temperature) as
-pure data built from `CameraSettings` plus the device's live ranges.
-`CameraService` only translates the plan into `CaptureRequestOptions` — the
-ISO/fps/night-vision math is unit-tested on the JVM instead of hiding in the
+pure data built from `CameraSettings` plus the device's live ranges, in two
+stages: what the settings ask for, then what the bound camera advertises
+(Capture Support) — an unadvertised value is neutralised to the camera2
+default every device honours and named in `plan.unsupported`, so one
+unsupported control never costs its neighbours. The `support` parameter
+defaults to unknown/unrestricted: a caller that does not know the capability
+lists gets the plan exactly as requested. `CameraService` only translates
+the plan into `CaptureRequestOptions` — the ISO/fps/night-vision math and
+the capability fold are unit-tested on the JVM instead of hiding in the
 service. The plan also owns the exposure-index decision
 (`exposureIndex`: clamp to the live range, skip when unchanged) and the
 metering ladder (`meteringOnApply` / `meteringOnTap` returning a
@@ -1205,7 +1367,20 @@ auto-cancel constant named here); the service deduplicates all
 (`COLOR_TEMPERATURE_MIN..MAX`, null unless white balance is MANUAL); manual
 mode is conveyed by AWB OFF and the Kelvin value is logged at apply time —
 per-sensor gains/matrix mapping stays device-default until a calibrated
-Kelvin→gains table exists.
+Kelvin→gains table exists. `controlMode` is the scene switch, always
+derived from `sceneMode`: aside from FACE_PRIORITY — the documented
+exception that works under AUTO — a scene mode only takes effect while
+`CONTROL_MODE` is USE_SCENE_MODE, so DISABLED and FACE_PRIORITY stay at
+AUTO, every other scene arms USE_SCENE_MODE, and the fold retires the
+switch together with a retired scene. Two invariants hold on every folded plan, pin as
+data in the fold: **the sensor pair rides only an AE OFF plan** — the HAL
+ignores `SENSOR_*` under automatic exposure, so when AE OFF is not
+advertised the ISO/shutter are retired with the AE mode, or the bundle would
+claim a manual exposure the device never runs and the read-back would chase
+it; and **manual white balance rides only a camera that can apply it** — it
+is AWB OFF driven by the color-correction gains, which need
+`MANUAL_POST_PROCESSING`, so without that capability the whole request falls
+back to AWB AUTO (Kelvin null), never bare AWB OFF at the default gains.
 
 ### Focus Apply Policy
 **`camera/model/FocusApplyPolicy.kt`** — the pure verdict on whether a
@@ -1223,7 +1398,16 @@ the post-bind controls choreography and the mid-recording apply target
 deferred controls apply is scheduled at 400 ms (the empirically-settled
 first rung — CameraX drops control calls issued synchronously inside the
 bind window) and again at 1500 ms, bounded by the settle budget; applies
-are idempotent, so rungs are cheap. `bindRecording` rebinds with
+are idempotent, so rungs are cheap. A third, event-driven rung re-asserts on
+the observed OPEN's rising edge on the LIVE camera
+(`BindChoreography.openStatePlan`'s `reassertControls`, computed from the
+`cameraIsLive` fact the observer passes in like every other identity guard,
+executed inline in `observeCameraOpenState`): both timed
+rungs count from the bind and fire before a camera that opens late can take
+controls, and the observed open is the first receipt that it can. An edge,
+not an emission — LiveData re-delivers OPEN on every attach — because a
+re-assert carries a force-focus apply that would cancel a deliberate
+tap-to-focus. `bindRecording` rebinds with
 `writeBack=false` — the fresh session starts at platform defaults — so the
 same ladder runs for the recording session, and the returned Camera is
 tracked in `liveCamera` (the camera of the LIVE session): every remote,
@@ -1232,6 +1416,115 @@ observer identity guards) targets `liveCamera` first, so mid-recording
 dashboard changes land on the live session instead of silently targeting
 the closed one. `clearBoundUseCases` clears the seam and cancels pending
 applies.
+
+### Capture Options Submit
+**`camera/CameraService.kt` `CaptureOptionsSubmitter` + the tail of
+`applyCameraControls`** — the device write of the CaptureRequest bundle:
+ONE `CaptureRequestOptions` carrying every non-null plan field, submitted
+exactly once per controls apply through a `fun interface` seam. Production
+rides `Camera2CameraControl.setCaptureRequestOptions`; a recording submitter
+is injected through the internal constructor so the bundle a settings apply
+submits is JVM-assertable (`CameraServiceCaptureBundleTest`). The scene
+mode rides with its `CONTROL_MODE` switch in that same bundle: aside from
+FACE_PRIORITY, a scene mode only takes effect while the control mode itself
+is USE_SCENE_MODE, so a `CONTROL_SCENE_MODE` submitted with the control
+mode left at AUTO is ignored by every device — the night-vision branch did
+exactly that and the read-back chased the `scene=DISABLED` mismatch it
+produced (issue #25).
+
+**Replace semantics — the lesson of issue #25.** `setCaptureRequestOptions`
+first clears every option already set, then applies what it is given (the
+merging variant is `addCaptureRequestOptions`). 0.2.3 submitted its controls
+in five to eight per-group calls so one unsupported key would not drop every
+other control (1794645) — and each call wiped the one before it, so only the
+last group, white balance, reached the device. Manual ISO/exposure and night
+vision silently stopped working from every writer (dashboard, automation,
+the Run-now test) while exposure compensation, zoom and torch carried on:
+those ride CameraX's native APIs, not the bundle. Replace semantics are also
+what the fix relies on — a manual → auto apply simply omits the sensor keys,
+and AE and the scene mode return to defaults in the same write.
+
+**Validate, never split.** Isolation against unsupported keys belongs on the
+VALUES — the Camera Control Plan retires what the camera does not advertise
+(Capture Support) — never on the submit. A per-group `setCaptureRequestOptions`
+here is the regression, whatever its rationale. The future the submit returns
+is watched: a cancel (superseded by a newer submit, or the session closed
+under it) logs at debug, anything else at warn with the cause. Device-side
+log lines: `Capture options not supported by this camera: …` (one per apply
+that retired something) and `Capture options submit failed`. What the
+device then reports it is running is the Capture Read-back's.
+
+### Capture Support
+**`camera/model/CaptureSupport.kt`** — the values the bound camera
+advertises for the capture-request keys the plan sets: nullable sets of
+camera2 constants (`CONTROL_AVAILABLE_SCENE_MODES`,
+`CONTROL_AE_AVAILABLE_MODES`, `CONTROL_AWB_AVAILABLE_MODES`,
+`CONTROL_AF_AVAILABLE_MODES`, `LENS_INFO_AVAILABLE_OPTICAL_STABILIZATION`,
+`CONTROL_AVAILABLE_VIDEO_STABILIZATION_MODES`) plus the
+`MANUAL_POST_PROCESSING` capability flag. **Null = unknown =
+unrestricted**: the key keeps being sent exactly as before the type existed
+— an unreadable capability must never read as "unsupported" and neutralise
+a control that works. `CameraService.bindUseCases` reads the lists beside
+the sensor ranges, from the logical camera's `CameraCharacteristics`
+intersected (`intersect`) with the selected physical lens's when one drives
+the use cases: a logical multi-camera can advertise what only one of its
+physical lenses has (optical stabilization on the zoom lens, none on the
+wide one), so only the intersection is what the selected lens can honour. A
+missing list on either side leaves that set unrestricted; a failed query
+keeps the previous value.
+
+### Capture Read-back
+**`camera/model/CaptureReadbackPolicy.kt` + `camera/model/CaptureReadbackTracker.kt`
++ `CameraService.onCaptureResult`** — the on-device oracle for the Capture
+Options Submit: what the device *reports it is running*, against what the
+last submit asked for. CameraX accepting a bundle is no proof — the HAL can
+clamp, rewrite or drop a control without an error — so every submit arms the
+read-back with the plan's submitted values (after the capability fold and
+the clamps), and the line it concludes with is what the issue #25
+verification greps logcat for.
+
+**Where the frames come from.** CameraX 1.6.2 has no `Camera2CameraCaptureResult`
+and `ImageInfo` exposes no capture-result values. The hook is the public
+interop one: `Camera2Interop.Extender(analysisBuilder).setSessionCaptureCallback`,
+registered where the analysis use case is built. Camera2Interop stores the
+callback as a config option of the use case and re-reads it on every bind, so
+it belongs to the built `ImageAnalysis` instance and outlives rebinds — the
+recording bind re-binds that same instance and keeps the read-back. Each
+frame it receives the framework's real `TotalCaptureResult`, on CameraX's
+callback executor. The only alternative was restricted
+`androidx.camera.core.impl` API, deliberately not used.
+
+**Per frame, forever.** While nothing is armed the hook is two volatile
+reads and a return — nothing allocated, the capture result not opened. A
+hook that throws switches the read-back off for the process with one line
+rather than risk CameraX's executor thread.
+
+**The policy** is the verdict and the lines: the sensor pair (ISO, shutter)
+is compared only when AE is expected OFF — under automatic exposure the
+device varies both by design — and a missing value is `Unknown`, never a
+match or a mismatch. The AE and scene modes compare exactly (there is no
+"near" mode); ISO and shutter are accepted within
+`SENSOR_TOLERANCE_PERCENT` (10) of the request, because HALs quantise both —
+shutter to line times, gain to their own steps — and an exact comparison
+would report every manual exposure on such a device as a mismatch. **The
+tracker** is the
+sampling state machine, clock-free (every call takes the time in ms): at
+most one sample per `SAMPLE_INTERVAL_MS`, concluded exactly once — on the
+first match, or when the window closes after `TIMEOUT_MS` with the last
+state seen. A first-sample mismatch is not reported at once; the results
+right behind a submit can still carry the previous request, so it keeps
+sampling and only a device still disagreeing at the end is a mismatch. A
+submit that lands while an apply is pending re-arms the tracker, and the
+superseded apply owes no line. The tracker owns no thread: a stalled stream
+is concluded, as unknown, by the next frame whenever it arrives. Submit and
+arm are one step under CameraService's `captureSubmitLock` — applies arrive
+from several threads the applier's mutex does not cover, and the armed
+expectation must always belong to the last submitted bundle.
+
+Lines, tag `CameraService`, exact prefix `Camera controls readback: ` — all
+four: `ok (AE=OFF ISO=3200 exp=100000000ns scene=NIGHT)` at info;
+`MISMATCH requested … | device …`, `UNKNOWN requested … | device …` and
+`disabled — the capture-result hook failed` at warn.
 
 ### Quick Setting Catalog
 **`camera/model/QuickSettingCatalog.kt`** — one pure descriptor per
@@ -1262,7 +1555,17 @@ one `StreamShutterButton`), thermal banner, network-quality badge, client
 pluralization, byte formatting, the slider-endpoint trim, and the connection
 panel (`qualityIndicatorVisible`, `qualitySummary`, `connectionStatRows`,
 per-client header/rows — the panel renders policy-produced strings, so the
-KB-vs-formatBytes split is gone). CameraScreen only maps the policy's
+KB-vs-formatBytes split is gone). Since issue #25 the panel's kbps readouts
+are measured facts picked here, never the ladders' drain-rate estimate:
+`measuredBandwidthKbps` picks the Bandwidth row's value — the encoded lane's
+window bitrate (fed in as the public `EncodedLaneStatus` pair, the screen's
+version of /api/status's encodedStream block) while that lane runs, else the
+MJPEG clients' measured window average when that is the lane serving the
+viewers (the phone panel has no lane switcher, so one row follows the lane
+actually carrying bytes — no cross-lane borrowing), else the honest 0 idle —
+and `clientSummaryKbps` reads the collapsed "N clients · kbps" line off the
+clients' measured window minimum — both fall to the honest 0 idle when no
+measured source exists. CameraScreen only maps the policy's
 answers onto composables — every ladder is JVM-tested, and no
 `String.format` without an explicit locale survives.
 
@@ -1370,9 +1673,128 @@ screen's combines feed it; the `List<Any>`-plus-casts mapping is gone.
 ### Adaptive Bitrate Controller
 **`streaming/AdaptiveBitrateController.kt`** — the single adaptive-bitrate
 brain. The frame path (`getAdaptiveQuality`, `getAdaptiveFrameInterval`)
-drives it and publishes the *driven* `AdaptiveState` that the app dashboard
-and `/api/status` display. Bandwidth numbers are measured client throughput —
-0 when no client is connected; no invented constants.
+drives it and publishes the *driven* `AdaptiveState` that `/api/status`
+carries and the app dashboard renders — its verdict/applied fields and
+client count only: since issue #25 the dashboard's kbps readouts read the
+measured windows through CameraDashboardPolicy, never this state's
+bandwidth numbers. Its bandwidth numbers are the DRAIN-RATE
+congestion estimate (see Stream Stats — bytes over how long a frame took to
+drain into the viewer's buffer), 0 when no client is connected — never an
+invented constant, and deliberately not the window-measured stream bitrate
+the display blocks show.
+
+### Stream Stats
+**`streaming/SlidingRateWindow.kt`** (+ the consumers) — the measured-stream
+stats surface behind every DISPLAYED rate (issue #25). The vocabulary: the
+*drain rate* is per-frame bytes over how long the frame took to DRAIN into
+the HTTP server's buffer — a congestion signal (a 50 KB frame draining in
+1 ms reads 400 000 "kbps"), and the adaptation ladders' only throughput
+input; *measured stream stats* are what the dashboard shows, computed from
+(timestamp, bytes, frames) samples in a sliding
+[StreamDefaults.STATS_WINDOW_MS] window so they are rates of actual frame
+production — a sample is one frame (frame count 1) everywhere except the
+WHEP lane, whose samples are counter deltas spread over quarter-second
+cells. The window divides by the full window span — a steady stream reads
+its true rate, a partial window reads LOW (never the drain spike), and
+silence decays the reading to 0 as samples slide out; nothing is summed
+forever. Four consumers: the NetworkQualityMonitor keeps one window per
+MJPEG client (display accessors keep the "throughput" names; the drain
+signal is renamed to `drainRateSamples`/`*DrainRateKbps*` and stays the
+ladders' input, with the default-aware idle view applied inside the level
+verdicts so the 5000 kbps default can never reach a display accessor), the
+EncodedStreamHub records its encoder-output AUs into one window and
+answers `encodedStreamStatus()`, the WHEP endpoint keeps one window per
+viewer session in [WHEP Stream Stats](#whep-stream-stats) (fed with
+libwebrtc's `getStats` counter deltas — that lane never crosses the hub),
+and `/api/status` carries them — `connectionQuality`'s
+throughput/fps/`framesPerSecond`, the nullable `encodedStream` block
+(measured encoder-output bitrate/fps, target bitrate, codec, geometry;
+null while no encoded stream runs), and the nullable `whepStream` block
+(the WHEP lane's measured bitrate/fps summed over the viewers, the codec
+and geometry of the busiest viewer's session; null while no viewer has
+reported — independent of `encodedStream`, both may be present). The MJPEG
+chips freeze when the last viewer leaves no more: clients unregister and
+windows age out. The on-phone camera panel reads the same facts (issue #25):
+its Bandwidth row and "N clients · kbps" line pick the encoded lane's window
+while that lane runs, else the MJPEG windows, through CameraDashboardPolicy —
+the phone's mapping of the lane picker, with 0 as the honest idle and no
+cross-lane borrowing. Contract
+pinned through `web/contract/status.json` on all three sides.
+
+### Stream Stats Lane Picker
+**`web/src/lib/streamStats.ts`** — what the dashboard's stats blocks do with
+the three measured lanes (issue #25): they follow the preview's OWN lane,
+strictly. `laneForMode`/`pickPreviewLane` map the MJPEG player rung to the
+MJPEG lane (`connectionQuality`'s window-measured throughput/fps), the WHEP
+rung to the WHEP lane (`whepStream`'s measured bitrate/fps, plus codec and
+geometry once a viewer session reported them — `whepLane` carries no
+target, because the wire block has none), and the H264/HLS rungs to the
+encoded lane (`encodedStream`'s measured-vs-target, codec, geometry). The
+WHEP rung is a lane of its own because libwebrtc encodes the WebRTC preview
+per viewer and those bytes never cross the encoded-stream hub — the old
+"WHEP/H264/HLS → encoded" mapping read a lane that preview does not use.
+An absent lane block picks null (the UI hides or idles), never another
+lane's numbers in either direction: there is no cross-lane fallback, and
+the lane-agnostic `pickMeasuredRates` read (encoded whenever that block
+was present, else MJPEG) is gone. A block that reads 0 is data (the honest
+idle — a viewer connected but not encoding yet); only a non-finite wire
+value reads as absence, never NaN. The consumer is the lane-aware
+`ConnectionQualityIndicator`: the badge shows the picked lane's measured
+numbers (the quality dot stays MJPEG-only — it is that lane's network
+verdict), and the detail panel is three sections — "Preview" (the active
+lane's rows: the MJPEG set, the WHEP set — bitrate and fps, codec and
+resolution only while known, no Target row — or the encoded set),
+"Encoded stream" (measured vs target, fps, codec, resolution, shown only
+while `encodedStream` exists — presence is the running fact), and "MJPEG
+viewers" (the per-client rows); both places the encoded lane renders share
+one row helper. The old duplicate "Bandwidth" row is gone (it displayed the
+ladders' drain-based congestion estimate), the "Latency" row is renamed
+"Send time" (what still backs it is the worst client's last frame-send
+duration, `worstLatencyMs`/`lastSendDurationMs` — a stopwatch on the send
+loop, not network latency), and the trend sparkline rides the picked lane's
+measured bitrate instead of the congestion estimate, resetting when the
+picked lane CHANGES so samples never mix lanes (H264 ↔ HLS is one lane, so
+that switch keeps the series); the battery series is lane-less and never
+resets.
+
+### Stream Stats Overlay Toggle
+**`web/src/lib/streamStatsOverlay.ts`** — the stats blocks' visibility
+switch, the uiMode store shape exactly (createStore/deps + localStorage
+singleton, `lenscast.streamStats`): `auto | on | off`, cycled by the Stats
+button in the preview action bar (beside "Preview: MODE") and the T
+shortcut (the lib/shortcuts key map, so the help overlay lists it). The
+toggle gates BOTH the preview indicator and the TX/FPS chips and decides
+VISIBILITY only — what they display is always the preview's own lane's
+measured numbers (the lane picker).
+The indicator is two pure verdicts over one gate.
+`streamStatsOverlayMounted` decides whether its tree EXISTS — `off` never
+mounts, `on` mounts with a live preview, `auto` adds Adaptive Bitrate
+enabled (the pre-toggle gate's terms) — and is deliberately blind to the
+lane's data. `streamStatsOverlayVisible` is that verdict AND "the preview's
+lane has data" (for MJPEG, `connectionQuality` present), which StreamPreview
+applies as the host's `hidden` attribute, never an unmount. A lane switch
+reaches the gate as "the new lane has not reported yet": the indicator
+hides and comes back with an expanded panel still expanded and its
+sparkline histories intact, where the old `<Show when={gate}>` tore all of
+it down on every switch. (`hidden` cannot strand the sparklines: they are
+attribute-sized SVGs, nothing measures layout.) One deliberate narrowing is
+pinned by test: on an encoded rung with Adaptive Bitrate enabled but no
+`encodedStream` block, auto hides where the old gate showed wrong-lane MJPEG
+numbers.
+The chips are `pickStreamStatsChips` — the whole decision, values included,
+pure; the next shell only renders its result. The values are the preview
+lane's measured bitrate/fps, picked by the rung→lane map from the ONE
+preview-mode signal (`useAppState`'s `playerMode` — `StreamPreview` consumes
+it as props, `NextShell` reads it off the same state instance; no second
+copy, not persisted). Visibility: `off` hides both; `on` shows a chip
+whenever the lane measured it (the stream's liveness is not asked); `auto`
+first requires main's exact legacy gate — the stream live and Adaptive
+Bitrate on with a positive congestion estimate (`enabled` is read
+explicitly where main inferred it from the block's absence) — then the
+same measured data. A null/0 value hides its chip in every mode (the
+honest idle convention — nothing fake, nothing frozen); the CL chip stays
+the honest client count (`clientCount + whepClients`, untouched by the
+stats work).
 
 ### Stream Watchdog
 **`core/StreamWatchdog.kt`** — monitors a live stream and performs recovery
@@ -1800,9 +2222,13 @@ between the two paths is the reason the text-box bitmap is shared.
 ### Status Snapshot Builder
 **`streaming/web/StatusSnapshotBuilder.kt`** — the pure `/api/status`
 aggregation: typed `StreamingInputs`/`ThermalInputs`/`BatteryInputs`/
-`WatchdogInputs`/`AdaptiveInputs`/`NetworkInputs` in, one
-`StatusResponseDto` out (adaptive null-when-disabled, connectionQuality
-null-when-idle, first-client fps). `StatusWebHandler` only collects flows and
+`WatchdogInputs`/`AdaptiveInputs`/`NetworkInputs`/`EncodedStreamInputs`/
+`WhepStreamInputs` in,
+one `StatusResponseDto` out (adaptive null-when-disabled, connectionQuality
+null-when-idle, encodedStream null-while-not-encoding, whepStream
+null-while-no-viewer-has-reported — the two measured blocks do not gate
+each other — first-client fps).
+`StatusWebHandler` only collects flows and
 delegates — the dashboard/API mapping is tested without a manager.
 
 ### Quiet Hours Policy
@@ -2780,6 +3206,7 @@ contracts.
 | Camera-strip mirrors (zoom/torch/EV) | `createCameraControls` (one instance per skin renderer; only one shell is mounted) | `web/src/hooks/useCameraControls.ts` | device truth authoritative; optimistic flips bridge the round-trip | torch/zoom resync from every status push — the focused slider holds the zoom mirror via the `remote-zoom-slider` activeElement guard (the old preview-bar contract carried over) and a recent stepper press holds it for `ZOOM_MIRROR_HOLD_MS = 600` (its echo can land before the device applied), EV resyncs from the settings mirror once `evPressGuard`'s 800 ms post-press window closes; a failed POST reverts the optimistic flip and flashes the strip's message slot, and the next snapshot settles the truth anyway — the failure self-corrects through the same channel |
 | Zoom send throttle | `useCameraControls.setZoom` over the pure verdicts | `web/src/lib/cameraControlsPolicy.ts` | leading send + one trailing flush per `ZOOM_SEND_THROTTLE_MS = 150` | a slider drag lands as a handful of POSTs instead of one per input event (the old bar fired one per input); the flush carries the newest optimistic ratio and re-arms `lastZoomSentAt`; cleanup cancels a pending flush so an unmounted strip never POSTs |
 | Strip collapse | `useCameraControls` `collapsed` signal over `parseStripCollapsed` (pure) | `web/src/lib/cameraControlsPolicy.ts` | open / collapsed | persisted under `lenscast.camStrip`; anything but `'collapsed'` is open — an unknown value can never wedge the strip shut (uiMode's parse rule); the collapsed handle is also the HLS rung's escape hatch, since the expanded strip overlaps that rung's native seek bar |
+| Camera staged patch (touched-key save) | `useAppState` `pendingCamera` over `createPendingPatch` (pure) | `web/src/lib/touchedPatch.ts` | empty / accumulating / taken (a take may be in flight while the next accumulates) | touched key → the value set at touch time, across the 400 ms camera debounce; the flush takes it first (an abandoned flush drains it), PUTs exactly it, and on success `settle`s its keys back over the mirror unless a newer edit claimed one; `signOut` and reset-defaults clear it — a whole-mirror PUT let a stale iso overwrite an automation rule's just-written value, and a keys-only PUT re-read from the mirror re-sent the pre-edit value when a settings GET landed in the window (issue #25, see Touched-Key Camera Save) |
 
 ### Deliberately implicit
 

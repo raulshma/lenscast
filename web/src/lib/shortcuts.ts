@@ -9,6 +9,7 @@ export type ShortcutAction =
   | 'toggle-web'    // W — start/stop the web stream
   | 'toggle-rtsp'   // R — start/stop the RTSP stream
   | 'cycle-player'  // P — cycle the player mode (H.264 → MJPEG → HLS)
+  | 'stats'         // T — cycle the stream-stats overlay (auto → on → off)
   | 'gallery'       // G — open/close the gallery
   | 'search'        // / — focus the gallery search
   | 'help'          // ? — show the shortcut overlay
@@ -20,6 +21,7 @@ const KEY_ACTIONS: Record<string, ShortcutAction> = {
   w: 'toggle-web',
   r: 'toggle-rtsp',
   p: 'cycle-player',
+  t: 'stats',
   g: 'gallery',
   '/': 'search',
   '?': 'help',
@@ -63,6 +65,7 @@ export const SHORTCUT_HELP: ReadonlyArray<{ action: ShortcutAction; key: string;
   { action: 'toggle-web', key: 'W', label: 'Toggle web stream' },
   { action: 'toggle-rtsp', key: 'R', label: 'Toggle RTSP stream' },
   { action: 'cycle-player', key: 'P', label: 'Cycle player mode' },
+  { action: 'stats', key: 'T', label: 'Cycle stream stats overlay' },
   { action: 'gallery', key: 'G', label: 'Open / close gallery' },
   { action: 'search', key: '/', label: 'Focus gallery search' },
   { action: 'help', key: '?', label: 'Show this help' },

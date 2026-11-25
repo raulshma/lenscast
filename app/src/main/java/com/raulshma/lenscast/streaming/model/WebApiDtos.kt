@@ -485,6 +485,22 @@ data class StatusResponseDto(
      * ONVIF profiles read the same number through the manager.
      */
     val encodedVideoBitrate: Int = 0,
+    /**
+     * The encoded lane's MEASURED stream status (issue #25): the encoder
+     * output's real bitrate and frame rate, measured over a sliding window —
+     * never a drain-rate artifact or an invented default. Null (absent on the
+     * wire) while no encoded stream runs.
+     */
+    val encodedStream: EncodedStreamStatusDto? = null,
+    /**
+     * The WHEP (WebRTC preview) lane's MEASURED stream status (issue #25):
+     * what libwebrtc actually sent to the viewers — the same sliding-window
+     * bitrate/fps, summed over the live viewer sessions. Independent of
+     * [encodedStream]: WHEP never crosses the shared encoder, so both may be
+     * present at once. Null (absent on the wire) while no viewer session has
+     * reported stats. Absent on pre-issue-25 firmware.
+     */
+    val whepStream: WhepStreamStatusDto? = null,
 )
 
 /** A device control range, min inclusive / max inclusive. */
@@ -539,6 +555,48 @@ data class ClientConnectionDetailDto(
     val avgThroughputKbps: Int,
     val lastFrameSizeBytes: Int,
     val lastSendDurationMs: Long,
+)
+
+/**
+ * The encoded lane's measured-stream block (issue #25): what the shared
+ * encoder actually produced, measured over a sliding window at the encoder
+ * output — measuredBitrateKbps/fps decay to 0 when the encoder stalls or
+ * stops (and the whole block goes null then), while targetBitrateKbps is the
+ * configured target the adaptive ladder drives. Presence IS the running
+ * fact — the block is omitted on the wire while no encoded stream runs —
+ * so there is no redundant running flag. Absent on pre-issue-25 firmware;
+ * every dashboard consumer must treat it as optional.
+ */
+@JsonClass(generateAdapter = true)
+data class EncodedStreamStatusDto(
+    val measuredBitrateKbps: Int,
+    val fps: Double,
+    val targetBitrateKbps: Int,
+    val codec: String,
+    val width: Int,
+    val height: Int,
+)
+
+/**
+ * The WHEP lane's measured-stream block (issue #25): what libwebrtc sent to
+ * the WebRTC preview's viewers, measured over a sliding window at the
+ * session send side and summed over the live viewer sessions — there is no
+ * shared encoder here, so there is no configured target or geometry to
+ * carry. [codec] is the negotiated codec's lowercase wire name (`vp8`,
+ * `h264`); it and [width]/[height] are what the busiest viewer's session
+ * reported and are omitted on the wire until a report resolved them.
+ * measuredBitrateKbps/fps decay to 0 when the sends stall; presence IS the
+ * fact that viewers are being measured — the block is omitted while none
+ * has reported. Absent on pre-issue-25 firmware; every dashboard consumer
+ * must treat it as optional.
+ */
+@JsonClass(generateAdapter = true)
+data class WhepStreamStatusDto(
+    val measuredBitrateKbps: Int,
+    val fps: Double,
+    val codec: String?,
+    val width: Int?,
+    val height: Int?,
 )
 
 // ── API Response DTOs ──

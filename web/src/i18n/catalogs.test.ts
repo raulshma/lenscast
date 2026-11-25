@@ -16,6 +16,22 @@ import { pt } from './pt'
 
 const CATALOGS: Record<string, Partial<Record<string, string>>> = { de, es, fr, ru, zh, pt }
 
+// The stream-stats UI (issue #25): the Preview menu's stats toggle, its
+// shortcut entry, and the connection-quality panel with its section titles
+// and row labels. A key in these namespaces must be translated in every
+// locale, and its {placeholders} must match en's exactly — the subset rule
+// above only guards en's direction, so without this the new key would be
+// silently missing (or wrongly interpolated) in six catalogs.
+const STREAM_STATS_PREFIXES = ['preview.stats', 'stats.state.', 'shortcuts.action.stats', 'cq.']
+
+function isStreamStatsKey(key: string): boolean {
+  return STREAM_STATS_PREFIXES.some((prefix) => key.startsWith(prefix))
+}
+
+function placeholders(value: string): string {
+  return [...value.matchAll(/\{(\w+)\}/g)].map((m) => m[1]).sort().join(',')
+}
+
 /** Key-name tokens declared in the module source, in order — duplicates show up twice. */
 function sourceKeys(file: string): string[] {
   const text = readFileSync(new URL(`./${file}`, import.meta.url), 'utf8')
@@ -71,6 +87,20 @@ describe('catalog integrity', () => {
       if (!/_(one|few|many|other)$/.test(key)) continue
       const other = key.replace(/_(one|few|many|other)$/, '_other')
       expect(value).toBe(zh[other])
+    }
+  })
+
+  it('stream-stats keys exist in every locale with en-identical placeholders', () => {
+    const statsKeys = Object.keys(en).filter(isStreamStatsKey)
+    expect(statsKeys.length, 'the stats prefix list matched nothing').toBeGreaterThanOrEqual(16)
+    for (const [name, catalog] of Object.entries(CATALOGS)) {
+      for (const key of statsKeys) {
+        expect(key in catalog, `${name} is missing stream-stats key '${key}'`).toBe(true)
+        expect(
+          placeholders(catalog[key] ?? ''),
+          `${name}['${key}'] placeholders differ from en`,
+        ).toBe(placeholders(en[key]))
+      }
     }
   })
 })

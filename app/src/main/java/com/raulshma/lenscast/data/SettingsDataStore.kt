@@ -1387,6 +1387,24 @@ class SettingsDataStore(
     suspend fun settingsFromDisk(): CameraSettings = disk(cameraSettingsPref)
 
     /**
+     * Field-level camera-settings write: [transform] runs against the DISK
+     * truth inside ONE `dataStore.edit {}` pass (read-modify-write in a
+     * single DataStore transaction — the truest atomicity [SettingPref]'s
+     * descriptor mechanism allows), and the result encodes through the same
+     * [cameraSettingsPref] descriptor — the identical clamp its whole-document
+     * saver applies. The shared flow is never read and never the base: this
+     * is the write seam for writers that hold one field's fact instead of a
+     * whole document (the torch convergence's [Boolean] fact, issue #25) —
+     * a concurrent write that lands just before it survives, where the old
+     * whole-snapshot persister would have overwritten it.
+     */
+    suspend fun updateCameraSettings(transform: (CameraSettings) -> CameraSettings) {
+        context.dataStore.edit { prefs ->
+            cameraSettingsPref.encode(prefs, transform(cameraSettingsPref.decode(prefs)))
+        }
+    }
+
+    /**
      * One untorn pass over the DataStore file, handed to the caller for
      * descriptor decodes. The read-your-write seam for whole documents: a
      * GET or PUT reply landing right after a save answers from the file,

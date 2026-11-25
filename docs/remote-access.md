@@ -209,9 +209,10 @@ HLS paths as before.
   while the device's microphone is free — the same arbitration as the WHIP
   push (a live recording or talkback claims it, and the session runs
   video-only).
-- **Limits** — H.264 only (each viewer gets its own hardware encoder,
-  independent of the RTSP codec setting; H.265 is *not* offered over WHEP),
-  at most `WHEP_MAX_VIEWERS` (4) concurrent viewers, one-shot ICE with no
+- **Limits** — the wire codec is whatever libwebrtc negotiates per viewer
+  (VP8 or H.264, device-dependent; H.265 is *not* offered over WHEP), each
+  viewer gets its own encoder, independent of the RTSP codec setting, at
+  most `WHEP_MAX_VIEWERS` (4) concurrent viewers, one-shot ICE with no
   trickle, and **no TURN server** — like the WHIP push, only the WHIP STUN
   setting is honored, so both ends must be routable to each other (LAN or a
   VPN such as Tailscale/WireGuard; WHEP does not magically cross NATs or the

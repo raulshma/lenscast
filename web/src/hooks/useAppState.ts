@@ -1,11 +1,13 @@
 import { createEffect, createMemo, createSignal, onCleanup } from 'solid-js'
 import * as api from '../api/client'
+import type { SettingsPatch } from '../api/client'
 import { createRecordingTimer } from '../RecordingTimer'
 import { createLiveAudioPlayer, type LiveAudioStatus } from '../audio/LiveAudioPlayer'
 import { createPollLadder } from './pollLadder'
 import { sseLaneHealthy } from './sseHealth'
 import { hashRouter, type RouteName } from '../lib/router'
 import { createSectionedDebouncer } from '../lib/sectionedDebounce'
+import { createPendingPatch } from '../lib/touchedPatch'
 import { recordingPhaseKind } from '../lib/recordingPhase'
 import { sessionPhase } from '../lib/sessionPhase'
 import { transportSwitchUrl } from '../lib/transportSwitch'
@@ -63,7 +65,8 @@ export function useAppState() {
   const [showShortcuts, setShowShortcuts] = createSignal(false)
   // The live preview's player rung, lifted here so the P shortcut can cycle
   // it — StreamPreview consumes it as props and keeps its ladder fall-down
-  // logic untouched.
+  // logic untouched. It is the ONE preview-mode signal: NextShell's TX/FPS
+  // chips read the same one, so they always follow the rung being shown.
   const [playerMode, setPlayerMode] = createSignal<PlayerMode>(
     nextPlayerMode('mjpeg', !whepSupported(), !h264Supported(), false, hlsSupported()),
   )
@@ -136,6 +139,11 @@ export function useAppState() {
     setAuthenticated(false)
     setSessionRole('admin')
     setSettings(null)
+    // A camera edit still inside its debounce window dies with the session.
+    // The staged patch holds values THIS session's user set, and the tracker
+    // lives as long as the app — left alone, its keys would ride along with
+    // the next session's first camera PUT.
+    pendingCamera.clear()
     setStatus(null)
     setStatusFailures(0)
     setSseConnected(false)
@@ -320,23 +328,64 @@ export function useAppState() {
   }
 
   // ── Settings ──
-  async function saveSettings(partial: Partial<AllSettings>) {
+  // Resolves true when the device took the write — the camera flush's
+  // mirror repair keys on it (lib/touchedPatch's `settle`).
+  async function saveSettings(partial: SettingsPatch): Promise<boolean> {
     setSaving(true)
     try {
       await api.updateSettings(partial)
       setError('')
+      return true
     } catch (e: any) {
       setError(e.message)
+      return false
+    } finally {
+      setSaving(false)
     }
-    setSaving(false)
   }
+
+  // Issue #25: the debounced camera save PUTs only the keys touched inside
+  // the debounce window — each with the value the user set, staged at touch
+  // time (lib/touchedPatch) — never what the settings mirror holds at flush
+  // time. Two races made the mirror the wrong source: (1) the old whole-
+  // mirror PUT let a stale iso/exposure sitting in this tab overwrite what an
+  // automation rule (or another client) had just written on the device — the
+  // "applies, then reverts a few seconds later" repro; (2) a keys-only PUT
+  // that re-read the mirror at flush time sent whatever the last settings GET
+  // had put there, and every GET replaces the mirror wholesale (the 30 s
+  // poll, the 3 s model-download lane, the visibility refresh). A response
+  // landing inside the 400 ms window — even one that STARTED after the edit
+  // — put the pre-edit value back on the wire, or an empty body where the
+  // server omits null keys. The mirror still updates optimistically and
+  // wholesale, exactly as before; only the wire body is the staged patch.
+  const pendingCamera = createPendingPatch<CameraSettings>()
 
   function updateCamera(patch: Partial<CameraSettings>) {
     const current = settings()
     if (!current) return
     const newCam = { ...current.camera, ...patch }
     setSettings({ ...current, camera: newCam })
-    debounceSave('camera', () => saveSettings({ camera: newCam }))
+    pendingCamera.stage(patch)
+    debounceSave('camera', flushCamera)
+  }
+
+  async function flushCamera() {
+    // Taken before any early return: a flush with nothing left to save for
+    // (the session ended inside the window) must still empty the patch, or
+    // its keys would wait here for the next session's first PUT. signOut
+    // clears it too; taking first keeps the flush itself safe, whatever
+    // ends a session.
+    const flush = pendingCamera.take()
+    // Nothing staged (only empty patches armed this timer): nothing to persist.
+    if (Object.keys(flush.values).length === 0 || !settings()) return
+    if (!(await saveSettings({ camera: flush.values }))) return
+    // The device now holds the sent values for these keys. Put them back over
+    // a stale GET that flipped the control meanwhile, unless a newer edit has
+    // claimed a key — that edit owns the screen until its own flush lands.
+    const current = settings()
+    if (!current) return
+    const camera = flush.settle(current.camera)
+    if (camera !== current.camera) setSettings({ ...current, camera })
   }
 
   function updateStreaming(patch: Partial<AllSettings['streaming']>) {
@@ -386,6 +435,10 @@ export function useAppState() {
       resolution: 'FHD_1080P', stabilization: true, hdrMode: 'OFF', sceneMode: null,
       nightVisionMode: 'OFF', outputRotation: 0, orientationLocked: false,
     }
+    // The reset is a whole-document write: it supersedes any camera edit
+    // still inside its debounce window. Drop that staged patch, or its flush
+    // would re-assert the just-reset keys a moment later.
+    pendingCamera.clear()
     await saveSettings({ camera: defaults })
     fetchSettings()
   }

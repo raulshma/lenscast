@@ -2,6 +2,7 @@ package com.raulshma.lenscast.streaming.whep
 
 import android.content.Context
 import android.media.MediaRecorder
+import android.os.SystemClock
 import android.util.Log
 import com.raulshma.lenscast.core.StreamDefaults
 import com.raulshma.lenscast.core.YuvConverter
@@ -30,13 +31,17 @@ import org.webrtc.MediaConstraints
 import org.webrtc.NV21Buffer
 import org.webrtc.PeerConnection
 import org.webrtc.PeerConnectionFactory
+import org.webrtc.RTCStatsCollectorCallback
+import org.webrtc.RTCStatsReport
 import org.webrtc.SessionDescription
 import org.webrtc.VideoFrame
 import org.webrtc.VideoSource
 import org.webrtc.audio.AudioDeviceModule
 import org.webrtc.audio.JavaAudioDeviceModule
 import java.security.SecureRandom
+import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * The WHEP viewer endpoint (RFC 9725's egress twin): browsers POST an SDP
@@ -44,8 +49,8 @@ import java.util.concurrent.ConcurrentHashMap
  * viewing half of the WHIP push output's publishing half.
  *
  * **Media:** every viewer gets its own [PeerConnection] with its own
- * libwebrtc hardware H.264 encoder (the same
- * [DefaultVideoEncoderFactory] WHIP uses), fed from ONE shared
+ * libwebrtc encoder (the same [DefaultVideoEncoderFactory]
+ * WHIP uses), fed from ONE shared
  * [VideoSource] that taps the same NV21 analysis frames the WHIP publisher
  * consumes — the manager fans every camera frame in through
  * [feedVideoFrame], throttled to the stream's target fps, rotated upright
@@ -53,9 +58,10 @@ import java.util.concurrent.ConcurrentHashMap
  * ([EncodedOverlayCompositor]) so viewers see the same timestamp/branding as
  * every other output. The tap is the supported libwebrtc
  * integration; the encoded-hub access units are deliberately not fed here
- * (see the WHIP publisher's KDoc for that decision). WHEP v1 is H.264-only
- * by construction — libwebrtc encodes its own video, independent of the
- * RTSP codec setting, and H.265 is not offered.
+ * (see the WHIP publisher's KDoc for that decision). libwebrtc encodes its
+ * own video, independent of the RTSP codec setting — the wire codec is
+ * whatever it negotiates per viewer (VP8 or H.264, device-dependent);
+ * H.265 is not offered.
  *
  * **Audio:** one mic-arbitration verdict with WHIP's
  * (`streamAudioEnabled && !recording && !ecoIdle && shared capture free`),
@@ -78,7 +84,38 @@ import java.util.concurrent.ConcurrentHashMap
  * The whole libwebrtc path is device-only (the factory loads the native
  * library), so — like the WHIP publisher — this class is compile- and
  * device-verified; the decisions around it (offer gating, registry cap and
- * reap, auth) are the pure modules next to it, JVM-tested.
+ * reap, auth, the stats report reading, the rate accounting and the stats
+ * poll protocol) are the pure modules next to it, JVM-tested.
+ *
+ * **Stats (issue #25):** this lane never crosses the encoded-stream hub, so
+ * its measured bitrate/fps come from libwebrtc itself. Each tick of the reap
+ * loop asks every live session's peer connection for a stats report
+ * ([PeerConnection.getStats], every [REAP_INTERVAL_MS]); the report's video
+ * send row is read by the pure [WhepStatsReportParser] and its cumulative
+ * counters are turned into a rate by [WhepStreamStats].
+ * [whepStreamStatus] publishes it for /api/status's `whepStream` block.
+ *
+ * **Threading of that poll.** In the bundled stream-webrtc-android 1.3.10
+ * (read off its bytecode and native library, not assumed) `getStats` is a
+ * direct native call on the CALLING thread: no hop into libwebrtc's
+ * signaling thread, and no disposed guard. Upstream libwebrtc wants that
+ * call on the signaling thread (a debug-only check, compiled out of this
+ * release build) and delivers the report there. This app's factory owns no
+ * handle to that thread (libwebrtc creates it natively), so the endpoint
+ * cannot post to it and issues the poll from its loop thread instead —
+ * exactly as the handshake above issues its SDP verbs from the HTTP worker
+ * thread. What the endpoint keeps safe is its own side, per session
+ * ([WhepSession.pollStats] and [WhepSession.dispose] share one lock):
+ *
+ *  - never on a disposed peer connection — `dispose()` frees the native
+ *    peer connection and leaves the Java pointer dangling, so a poll racing
+ *    a teardown would call into freed memory;
+ *  - one request owed at a time, with a quiet gap after every report —
+ *    [WhepStatsPollGuard]'s two rules, so the app never touches a session's
+ *    stats collector while libwebrtc's signaling thread is in it.
+ *
+ * The report callback does no libwebrtc call of its own, and never throws:
+ * an exception escaping a native callback takes the process down.
  */
 class WhepServer internal constructor(
     private val context: Context,
@@ -111,6 +148,13 @@ class WhepServer internal constructor(
     private val sessions = ConcurrentHashMap<String, WhepSession>()
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
+    /**
+     * The lane's measured-stream stats (issue #25). Its clock is the
+     * monotonic one: a rate is a difference between two readings, and the
+     * wall clock can be stepped under it.
+     */
+    private val streamStats = WhepStreamStats(pollIntervalMs = REAP_INTERVAL_MS, nowMs = SystemClock::elapsedRealtime)
+
     /** The reap loop's handle — the idempotence and teardown seam for [start]/[stop]. */
     @Volatile private var reapJob: Job? = null
     private val random = SecureRandom()
@@ -133,6 +177,10 @@ class WhepServer internal constructor(
      * fresh loop (the flag this replaces never reset, so a start-after-stop
      * skipped the relaunch and dead sessions could hold encoder slots).
      * Also called lazily by [handleOffer].
+     *
+     * Each tick reaps, then polls the live sessions' stats — the reap first,
+     * so a session going out on this tick is not asked for a report (one
+     * torn down concurrently is skipped under its own lock).
      */
     fun start() {
         if (reapJob?.isActive == true) return
@@ -140,6 +188,8 @@ class WhepServer internal constructor(
             while (isActive) {
                 delay(REAP_INTERVAL_MS)
                 runCatching { reapDeadSessions() }
+                runCatching { pollStreamStats() }
+                    .onFailure { Log.w(TAG, "WHEP stats poll failed: $it") }
             }
         }
     }
@@ -185,6 +235,100 @@ class WhepServer internal constructor(
     /** The live viewer count — the status snapshot's `whepClients` value. */
     fun sessionCount(): Int = sessions.size
 
+    /**
+     * The WHEP lane's measured-stream status (issue #25): the preview's own
+     * bitrate, frame rate, codec and encoded frame size, summed over the
+     * live viewers. Null until a viewer's first stats report — the caller
+     * omits the wire block then, exactly while `encodedStream` is absent.
+     */
+    fun whepStreamStatus(): WhepStreamStats.Snapshot? = streamStats.snapshot()
+
+    // ── the measured-stream stats poll ──
+
+    /**
+     * One tick of the poll: asks every live session for a stats report, in
+     * the order the map hands them out. A session that is owed a report, or
+     * still inside its quiet gap, is left alone ([WhepStatsPollGuard]); one
+     * torn down concurrently is skipped under its own lock. No viewers, no
+     * work: the map read is the whole cost.
+     */
+    private fun pollStreamStats() {
+        if (sessions.isEmpty()) return
+        val nowMs = SystemClock.elapsedRealtime()
+        for (session in sessions.values) {
+            try {
+                session.pollStats(nowMs)
+            } catch (e: Exception) {
+                // The loop must outlive one bad session; its reports are the only thing lost.
+                Log.w(TAG, "WHEP stats ${session.id}: poll failed: $e")
+            }
+        }
+        // One line per tick for the lane's reading — what a device log is
+        // read against when the dashboard disagrees. It is the PREVIOUS
+        // tick's reports (the ones just asked for land milliseconds later).
+        Log.d(TAG, "WHEP stream: ${sessions.size} viewer(s), ${describe(streamStats.snapshot())}")
+    }
+
+    /**
+     * The report callback's whole body, for one session. Runs on whatever
+     * thread libwebrtc delivers on (its signaling thread) and must not
+     * throw; it makes no libwebrtc call.
+     */
+    private fun onStatsReport(session: WhepSession, report: RTCStatsReport) {
+        try {
+            val rows = report.statsMap.values.map { WhepStatRow(it.type, it.id, it.members) }
+            if (session.markStatsShapeLogged()) {
+                // Once per session: what this libwebrtc build actually
+                // reports — the row types, and every RTP send row's media
+                // and member names — and where from, in case the parser's
+                // reading of it is ever wrong or the delivery thread is not
+                // the expected one. Member names only; the video row's
+                // values are on the line every report logs.
+                val census = rows.groupingBy { it.type }.eachCount().entries.sortedBy { it.key }
+                val sends = rows.filter { it.type == WhepStatsReportParser.TYPE_OUTBOUND_RTP }.joinToString { row ->
+                    "${row.id}[${row.members["kind"] ?: "?"}]: ${row.members.keys.sorted()}"
+                }
+                Log.d(
+                    TAG,
+                    "WHEP stats ${session.id}: first report on ${Thread.currentThread().name}: " +
+                        "timestampUs=${report.timestampUs} rows=${rows.size} types=$census sends={$sends}",
+                )
+            }
+            val video = WhepStatsReportParser.videoOutbound(rows)
+            if (video == null) {
+                Log.d(TAG, "WHEP stats ${session.id}: no video outbound-rtp row in ${rows.size} rows")
+                return
+            }
+            val accounted = streamStats.onStats(
+                session.id,
+                SystemClock.elapsedRealtime(),
+                video.bytesSent,
+                video.framesEncoded,
+                video.codec,
+                video.width,
+                video.height,
+            )
+            val delta = accounted?.let { "+${it.bytes} B / ${it.frames} frames over ${it.intervalMs} ms" } ?: "baseline"
+            Log.d(TAG, "WHEP stats ${session.id}: $delta -> ${describe(video)}")
+        } catch (e: Exception) {
+            Log.w(TAG, "WHEP stats ${session.id}: report dropped: $e")
+        } finally {
+            // Stamped last: the quiet gap starts when this callback is done.
+            session.onStatsDelivered(SystemClock.elapsedRealtime())
+        }
+    }
+
+    private fun describe(video: WhepVideoOutbound): String =
+        "${video.bytesSent} B, ${video.framesEncoded} frames, ${video.codec ?: "?"}, " +
+            "${video.width ?: "?"}x${video.height ?: "?"}"
+
+    /** The lane's reading for the device log; "no measurement" until a viewer has reported. */
+    private fun describe(snapshot: WhepStreamStats.Snapshot?): String {
+        val measured = snapshot ?: return "no measurement"
+        return "${measured.measuredBitrateKbps} kbps, ${"%.1f".format(Locale.ROOT, measured.fps)} fps, " +
+            "${measured.codec ?: "?"}, ${measured.width ?: "?"}x${measured.height ?: "?"}"
+    }
+
     // ── the WHEP handshake ──
 
     /**
@@ -206,6 +350,9 @@ class WhepServer internal constructor(
             val session = createSession(sessionId, offerSdp)
             registry.admit(sessionId, System.currentTimeMillis())
             sessions[sessionId] = session
+            // The lane's stats only ever count sessions the endpoint knows
+            // (see [teardown] for why that is the rule).
+            streamStats.onSessionAdmitted(sessionId)
             Log.i(
                 TAG,
                 "WHEP session $sessionId created (${sessions.size}/$maxSessions, " +
@@ -221,10 +368,18 @@ class WhepServer internal constructor(
         }
     }
 
-    /** Tears one session down (the viewer's DELETE, a reap verdict, or endpoint stop). True when it existed. */
+    /**
+     * Tears one session down (the viewer's DELETE, a reap verdict, or endpoint stop). True when it existed.
+     *
+     * The lane's stats forget the session BEFORE its peer connection goes:
+     * a stats report still in flight for it then names an id nobody knows
+     * and is dropped — it cannot resurrect the session as a silent viewer
+     * that never leaves.
+     */
     fun teardown(sessionId: String): Boolean {
         val session = sessions.remove(sessionId) ?: return registry.remove(sessionId)
         registry.remove(sessionId)
+        streamStats.onSessionRemoved(sessionId)
         session.dispose()
         Log.d(TAG, "WHEP session $sessionId torn down (${sessions.size} left)")
         return true
@@ -325,16 +480,36 @@ class WhepServer internal constructor(
      * One viewer's session: its own peer connection and hardware encoder
      * over the shared video source (and the shared Opus audio source when
      * audio is allowed). Owns the answer SDP and the ICE-state marks that
-     * drive the registry's GC.
+     * drive the registry's GC, and its own share of the lane's stats poll.
      */
     private inner class WhepSession(
-        private val id: String,
+        /** The session resource id — also the lane stats' key for this viewer. */
+        val id: String,
         private val env: PeerEnvironment,
         offerSdp: String,
     ) {
         val audioEnabled: Boolean
         val answerSdp: String
         private val peerConnection: PeerConnection
+
+        /**
+         * The one lock the threads that touch this session's peer connection
+         * after the handshake share — the stats poll and the teardown — so
+         * a poll is never issued on a disposed connection. The report
+         * callback never takes it: it would hold libwebrtc's signaling thread
+         * behind a teardown.
+         */
+        private val lifecycle = Any()
+
+        /** Set under [lifecycle] by [dispose]; read under it by [pollStats]. */
+        private var disposed = false
+
+        /** When this session may be asked for its next stats report. */
+        private val statsPoll = WhepStatsPollGuard()
+
+        private val statsShapeLogged = AtomicBoolean(false)
+
+        private val statsCallback = RTCStatsCollectorCallback { report -> onStatsReport(this@WhepSession, report) }
 
         init {
             val config = PeerConnection.RTCConfiguration(WebRtcPlumbing.stunIceServers(stunServer()))
@@ -391,9 +566,49 @@ class WhepServer internal constructor(
             PeerConnection.IceConnectionState.CLOSED
         }
 
+        /**
+         * One tick's ask for this session's stats report (the class doc has
+         * the threading): skipped once disposed, and left to a later tick
+         * while a report is owed or the last one's quiet gap has not passed.
+         */
+        fun pollStats(nowMs: Long) {
+            synchronized(lifecycle) {
+                if (disposed) return
+                when (statsPoll.arm(nowMs)) {
+                    WhepStatsPollGuard.Verdict.WAIT -> Unit
+                    WhepStatsPollGuard.Verdict.REISSUE -> {
+                        Log.w(TAG, "WHEP stats $id: no report for over ${WhepStatsPollGuard.STALE_MS} ms; asking again")
+                        requestStats()
+                    }
+                    WhepStatsPollGuard.Verdict.ISSUE -> requestStats()
+                }
+            }
+        }
+
+        private fun requestStats() {
+            try {
+                peerConnection.getStats(statsCallback)
+            } catch (e: Exception) {
+                // Nothing is owed now; a later tick asks again.
+                statsPoll.onFailed()
+                Log.w(TAG, "WHEP stats $id: getStats failed: $e")
+            }
+        }
+
+        /** The report callback's last act, on its own thread: nothing is owed from here, and the quiet gap starts. */
+        fun onStatsDelivered(nowMs: Long) {
+            statsPoll.onDelivered(nowMs)
+        }
+
+        /** Once per session: true for the first report, which gets its shape logged. */
+        fun markStatsShapeLogged(): Boolean = statsShapeLogged.compareAndSet(false, true)
+
         fun dispose() {
-            runCatching { peerConnection.close() }
-            runCatching { peerConnection.dispose() }
+            synchronized(lifecycle) {
+                disposed = true
+                runCatching { peerConnection.close() }
+                runCatching { peerConnection.dispose() }
+            }
         }
     }
 
@@ -422,7 +637,12 @@ class WhepServer internal constructor(
 
         private const val SESSION_ID_BYTES = 16
 
-        /** The reap loop's cadence — comfortably under the connect-reap window. */
+        /**
+         * The reap loop's cadence — comfortably under the connect-reap
+         * window. The stats poll rides the same tick, so it is also the
+         * lane's poll cadence ([streamStats] holds the not-yet-polled tail
+         * for exactly one interval).
+         */
         private const val REAP_INTERVAL_MS = 2_000L
 
         /**

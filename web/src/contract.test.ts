@@ -191,6 +191,8 @@ describe('DTO contract fixtures', () => {
       keysOf(Object.values(statusFixture.connectionQuality.clientDetails)[0]),
     )
     expectKeys(status.watchdog as unknown as Record<string, unknown>, keysOf(statusFixture.watchdog))
+    expectKeys(status.encodedStream as unknown as Record<string, unknown>, keysOf(statusFixture.encodedStream))
+    expectKeys(status.whepStream as unknown as Record<string, unknown>, keysOf(statusFixture.whepStream))
   })
 
   it('gallery fixture assigns to GalleryResponse', () => {

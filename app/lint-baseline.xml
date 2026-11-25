@@ -404,7 +404,7 @@
         errorLine2="                                                         ~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/java/com/raulshma/lenscast/camera/CameraScreen.kt"
-            line="3324"
+            line="3382"
             column="58"/>
     </issue>
 
@@ -415,7 +415,7 @@
         errorLine2="                                                            ~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/java/com/raulshma/lenscast/camera/CameraScreen.kt"
-            line="3326"
+            line="3384"
             column="61"/>
     </issue>
 
@@ -426,7 +426,7 @@
         errorLine2="                                                                           ~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/java/com/raulshma/lenscast/camera/CameraScreen.kt"
-            line="3331"
+            line="3389"
             column="76"/>
     </issue>
 
@@ -729,17 +729,6 @@
 
     <issue
         id="UnsafeOptInUsageError"
-        message="This declaration is opt-in and its usage should be marked with `@androidx.camera.camera2.interop.ExperimentalCamera2Interop` or `@OptIn(markerClass = androidx.camera.camera2.interop.ExperimentalCamera2Interop.class)`"
-        errorLine1="        configure: CaptureRequestOptions.Builder.() -> Unit,"
-        errorLine2="                   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
-        <location
-            file="src/main/java/com/raulshma/lenscast/camera/CameraService.kt"
-            line="2190"
-            column="20"/>
-    </issue>
-
-    <issue
-        id="UnsafeOptInUsageError"
         message="This declaration is opt-in and its usage should be marked with `@androidx.media3.common.util.UnstableApi` or `@OptIn(markerClass = androidx.media3.common.util.UnstableApi.class)`"
         errorLine1="    override fun createDataSource(): DataSource = DecryptingDataSource(mediaResolver, filePath)"
         errorLine2="                 ~~~~~~~~~~~~~~~~">
@@ -910,7 +899,7 @@
         errorLine2="                            ~~~~~~~~~~~~~">
         <location
             file="src/main/java/com/raulshma/lenscast/camera/CameraService.kt"
-            line="794"
+            line="904"
             column="29"/>
     </issue>
 
@@ -954,7 +943,7 @@
         errorLine2="    ~~~~~~~~">
         <location
             file="src/main/java/com/raulshma/lenscast/camera/CameraScreen.kt"
-            line="1335"
+            line="1342"
             column="5"/>
     </issue>
 

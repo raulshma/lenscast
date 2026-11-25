@@ -15,7 +15,7 @@ class NetworkQualityMonitorEncodedLaneTest {
     @Test
     fun `empty lane answers zero and the default-aware level`() {
         val monitor = NetworkQualityMonitor()
-        assertEquals(0, monitor.getEncodedThroughputKbps())
+        assertEquals(0, monitor.getEncodedDrainRateKbps())
         assertFalse(monitor.hasEncodedSamples())
         // No samples: the ladder's default view applies → EXCELLENT, not CRITICAL.
         assertEquals(
@@ -31,7 +31,7 @@ class NetworkQualityMonitorEncodedLaneTest {
         monitor.recordEncodedSend(10_000, 40)
         monitor.recordEncodedSend(20_000, 40)
         assertTrue(monitor.hasEncodedSamples())
-        assertEquals(3000, monitor.getEncodedThroughputKbps())
+        assertEquals(3000, monitor.getEncodedDrainRateKbps())
     }
 
     @Test
@@ -81,6 +81,6 @@ class NetworkQualityMonitorEncodedLaneTest {
         // window slides, the slow samples age out.
         repeat(20) { monitor.recordEncodedSend(400, 40) }
         repeat(20) { monitor.recordEncodedSend(40_000, 40) }
-        assertTrue(monitor.getEncodedThroughputKbps() >= 8000 - 1)
+        assertTrue(monitor.getEncodedDrainRateKbps() >= 8000 - 1)
     }
 }

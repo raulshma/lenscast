@@ -117,6 +117,8 @@ internal class EncodedStreamHub(
      * same overlay the MJPEG stream does. Faked in JVM tests.
      */
     private val overlayCompositor: EncodedOverlayCompositor = EncodedOverlayCompositor(),
+    /** Injected clock — the measured-output window reads time only through it. */
+    private val nowMs: () -> Long = System::currentTimeMillis,
 ) : EncodedSource {
 
     /** The fan-out's no-op sink — the default keeps every existing construction site compiling. */
@@ -157,6 +159,14 @@ internal class EncodedStreamHub(
 
     private val acceptedFrames = AtomicLong(0)
     private val droppedFrames = AtomicLong(0)
+
+    // The encoded lane's MEASURED display window (issue #25): every fan-out
+    // records (timestamp, total AU bytes) here, and /api/status reads the
+    // encoder output's real bitrate and frame rate from it — measured from
+    // the encoder's production cadence, decaying to 0 when it stops. The
+    // adaptation ladder's drain-rate signal in NetworkQualityMonitor is a
+    // different measurement and stays untouched.
+    private val encodedRateWindow = SlidingRateWindow(nowMs = nowMs)
 
     // Retained encode config: settings land here even while the pipeline is
     // stopped, so the next start picks them all up (the RtspOutput pattern).
@@ -501,6 +511,35 @@ internal class EncodedStreamHub(
     fun currentVideoBitrate(): Int = videoBitrate
 
     /**
+     * The encoded lane's measured-stream status (issue #25): the encoder
+     * output's real bitrate and frame rate from the sliding window, next to
+     * the configured target and the encode geometry. [running] is the
+     * encoder-active truth ([running] flag AND a live encoder in the slot —
+     * the self-heal window deliberately answers false), so /api/status folds
+     * the whole block to null when nothing encodes.
+     */
+    fun encodedStreamStatus(): EncodedStreamStatus = EncodedStreamStatus(
+        running = running.get() && activeEncoder != null,
+        measuredBitrateKbps = encodedRateWindow.measuredBitrateKbps().toInt(),
+        fps = encodedRateWindow.measuredFps(),
+        targetBitrateKbps = videoBitrate / 1000,
+        codec = activeVideoCodec.wireName,
+        width = videoWidth,
+        height = videoHeight,
+    )
+
+    /** The encoded lane's display status as /api/status publishes it. */
+    data class EncodedStreamStatus(
+        val running: Boolean,
+        val measuredBitrateKbps: Int,
+        val fps: Double,
+        val targetBitrateKbps: Int,
+        val codec: String,
+        val width: Int,
+        val height: Int,
+    )
+
+    /**
      * The persisted RTSP resolution lands on the hub's retained dimensions —
      * the size every incoming frame is aspect-filled onto ([YuvConverter.scaleNv21])
      * AND the encoder is configured at, independent of the camera's analysis
@@ -630,6 +669,10 @@ internal class EncodedStreamHub(
      */
     private fun fanOutVideo(producingCodec: RtspVideoCodec, nalUnits: List<EncodedNalUnit>) {
         if (nalUnits.isEmpty()) return
+        // The measured-output sample lands BEFORE the fan-out: the AUs exist
+        // and are about to be delivered — their bytes and cadence are the
+        // encoder's output rate whatever the per-sink outcomes are.
+        encodedRateWindow.record(nowMs(), nalUnits.sumOf { it.data.size }.toLong())
         fanOut("RTSP video") { rtspSink.feedVideo(nalUnits) }
         fanOut("HLS video") { hlsSink.feedVideo(nalUnits) }
         fanOut("WS video") { wsVideoSink(nalUnits) }

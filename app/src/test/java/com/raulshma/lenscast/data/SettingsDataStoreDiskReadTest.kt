@@ -4,11 +4,9 @@ import android.app.Application
 import com.raulshma.lenscast.core.StreamDefaults
 import com.raulshma.lenscast.streaming.rtsp.RtspInputFormat
 import com.raulshma.lenscast.streaming.rtsp.rtspAuthSpecFromPrefs
-import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.runBlocking
-import kotlin.coroutines.CoroutineContext
 import org.junit.Assert.assertEquals
 import org.junit.Before
 import org.junit.Test
@@ -33,26 +31,15 @@ class SettingsDataStoreDiskReadTest {
 
     class PlainApplication : Application()
 
-    /**
-     * A dispatcher that parks every dispatched block forever: the store's
-     * eagerly-shared collectors queue up and never execute, so each
-     * StateFlow stays at its descriptor default for the whole test —
-     * exactly the state a fresh process serves RTSP from.
-     */
-    private val parkedDispatcher = object : CoroutineDispatcher() {
-        override fun isDispatchNeeded(context: CoroutineContext): Boolean = true
-        override fun dispatch(context: CoroutineContext, block: Runnable) {
-            // Parked on purpose — see the class KDoc.
-        }
-    }
-
     private lateinit var store: SettingsDataStore
 
     @Before
     fun setUp() {
         store = SettingsDataStore(
             RuntimeEnvironment.getApplication(),
-            CoroutineScope(SupervisorJob() + parkedDispatcher),
+            // Parked dispatcher (ParkedDispatcher.kt): the eagerly-shared
+            // collectors never run, so the flows can never converge mid-test.
+            CoroutineScope(SupervisorJob() + parkedDispatcher()),
         )
     }
 

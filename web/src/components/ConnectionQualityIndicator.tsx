@@ -1,13 +1,23 @@
-import { createEffect, createSignal, Show } from 'solid-js'
+import { createEffect, createSignal, For, Show } from 'solid-js'
+import type { JSX } from 'solid-js'
 import type { ConnectionQualityStatus, DeviceStatus } from '../types'
+import type { PlayerMode } from '../video/playerLadder'
 import { useSignalHistory } from '../hooks/useSignalHistory'
 import { formatBytes } from '../format'
 import Sparkline from './Sparkline'
 import { t } from '../lib/i18n'
+import { encodedLane, finiteOrNull, pickPreviewLane, type LaneStats } from '../lib/streamStats'
 
 interface Props {
-  /** The full device status: connection quality drives the panel, battery feeds the trend sparkline. */
+  /** The full device status: the picked lane drives the readout, battery feeds the trend sparkline. */
   status: () => DeviceStatus | undefined
+  /**
+   * The preview's player rung — the panel follows its own lane (MJPEG rung →
+   * the MJPEG clients' measured lane; WHEP → libwebrtc's, what it sent the
+   * WebRTC viewers; H264/HLS → the encoded lane). Optional only for
+   * non-preview hosts: no rung means the encoded lane.
+   */
+  previewMode?: () => PlayerMode
 }
 
 const QUALITY_COLORS: Record<string, { dot: string; bg: string }> = {
@@ -26,35 +36,56 @@ const QUALITY_LABELS: Record<string, string> = {
   CRITICAL: 'CRIT',
 }
 
+/** Display view of the lib's one coerce shape (finiteOrNull): non-finite
+    reads as absence, shown as the honest 0. */
+const num = (value: unknown): number => finiteOrNull(value) ?? 0
+
 export default function ConnectionQualityIndicator(props: Props) {
   const [expanded, setExpanded] = createSignal(false)
 
   const conn = (): ConnectionQualityStatus | undefined => props.status()?.connectionQuality
-  const safeNumber = (value: unknown, fallback = 0): number => {
-    const n = typeof value === 'number' ? value : Number(value)
-    return Number.isFinite(n) ? n : fallback
-  }
+  // The preview's lane: measured numbers only, null when the lane has no
+  // data (the gate in StreamPreview keeps this hidden then).
+  const lane = (): LaneStats | null => pickPreviewLane(props.previewMode?.(), props.status())
+  const isMjpegLane = () => lane()?.lane === 'mjpeg'
+  const isWhepLane = () => lane()?.lane === 'whep'
   const clientDetails = () => conn()?.clientDetails ?? {}
   const qualityLevel = () => conn()?.qualityLevel ?? 'GOOD'
   const colors = () => QUALITY_COLORS[qualityLevel()] ?? QUALITY_COLORS.GOOD
   const label = () => QUALITY_LABELS[qualityLevel()] ?? 'N/A'
+  const encoded = () => props.status()?.encodedStream
+  const hasClients = () => Object.keys(clientDetails()).length > 0
 
   // Sparkline history: both series ride the status payloads the parent
-  // already pushes — bandwidth from the connection-quality block, battery
-  // from the device status. No extra fetch lane.
-  const bandwidthHistory = useSignalHistory()
+  // already pushes — throughput from the picked lane's measured bitrate
+  // (the same number the badge shows, never the ladders' congestion
+  // estimate), battery from the device status. No extra fetch lane.
+  const throughputHistory = useSignalHistory()
   const batteryHistory = useSignalHistory()
 
+  // The sparkline never mixes lanes: a switch to another lane (MJPEG ↔
+  // encoded ↔ WHEP — H264 and HLS share one, so moving between them keeps
+  // the series) resets it, so a sample from the previous lane can never sit
+  // next to one from the new one (the reset fires before the push — one
+  // effect, in order). The battery series is lane-less and never resets;
+  // both survive a lane switch because StreamPreview hides the indicator
+  // while the lane has no data instead of unmounting it.
+  let historyLane: LaneStats['lane'] | null = null
   createEffect(() => {
-    const quality = props.status()?.connectionQuality
-    if (!quality) return
-    bandwidthHistory.push(safeNumber(quality.estimatedBandwidthKbps))
+    const kind = lane()?.lane ?? null
+    if (kind !== historyLane) {
+      historyLane = kind
+      throughputHistory.reset()
+    }
+    const kbps = lane()?.bitrateKbps
+    if (kbps == null) return
+    throughputHistory.push(kbps)
   })
 
   createEffect(() => {
     const level = props.status()?.battery?.level
     if (level == null) return
-    batteryHistory.push(safeNumber(level))
+    batteryHistory.push(num(level))
   })
 
   const lastBatteryPercent = () => {
@@ -79,27 +110,31 @@ export default function ConnectionQualityIndicator(props: Props) {
           'min-width': '80px',
         }}
       >
-        <div style={{ display: 'flex', 'align-items': 'center', gap: '4px' }}>
-          <div
-            style={{
-              width: '8px',
-              height: '8px',
-              'border-radius': '50%',
-              background: colors().dot,
-            }}
-          />
-          <span
-            style={{
-              'font-size': '11px',
-              'font-weight': '700',
-              'font-family': 'ui-monospace, monospace',
-              color: '#fff',
-            }}
-          >
-            {label()}
-          </span>
-        </div>
-        <Show when={conn()}>
+        {/* The quality verdict belongs to the MJPEG lane's network monitor;
+            the WHEP and encoded lanes' badges show numbers only. */}
+        <Show when={isMjpegLane()}>
+          <div style={{ display: 'flex', 'align-items': 'center', gap: '4px' }}>
+            <div
+              style={{
+                width: '8px',
+                height: '8px',
+                'border-radius': '50%',
+                background: colors().dot,
+              }}
+            />
+            <span
+              style={{
+                'font-size': '11px',
+                'font-weight': '700',
+                'font-family': 'ui-monospace, monospace',
+                color: '#fff',
+              }}
+            >
+              {label()}
+            </span>
+          </div>
+        </Show>
+        <Show when={lane()}>
           <span
             style={{
               'font-size': '10px',
@@ -107,12 +142,12 @@ export default function ConnectionQualityIndicator(props: Props) {
               color: 'rgba(255, 255, 255, 0.7)',
             }}
           >
-            {safeNumber(conn()?.framesPerSecond).toFixed(1)} fps · {safeNumber(conn()?.avgThroughputKbps)} kbps
+            {num(lane()?.fps).toFixed(1)} fps · {num(lane()?.bitrateKbps)} kbps
           </span>
         </Show>
       </div>
 
-      <Show when={expanded() && conn()}>
+      <Show when={expanded() && (lane() || encoded() || hasClients())}>
         <div
           class="cq-detail-panel"
           style={{
@@ -141,45 +176,46 @@ export default function ConnectionQualityIndicator(props: Props) {
             {t('cq.title')}
           </div>
 
-          <div style={{ display: 'flex', 'flex-direction': 'column', gap: '4px' }}>
-            <CqStatRow label={t('cq.quality')} value={label()} valueColor={colors().dot} />
-            <CqStatRow label={t('cq.bandwidth')} value={`${safeNumber(conn()?.estimatedBandwidthKbps)} kbps`} />
-            <CqStatRow label={t('cq.avgThroughput')} value={`${safeNumber(conn()?.avgThroughputKbps)} kbps`} />
-            <CqStatRow label={t('cq.minThroughput')} value={`${safeNumber(conn()?.minThroughputKbps)} kbps`} />
-            <CqStatRow label={t('cq.latency')} value={`${safeNumber(conn()?.worstLatencyMs)} ms`} />
-            <CqStatRow label={t('cq.avgFrame')} value={`${(safeNumber(conn()?.avgFrameSizeBytes) / 1024).toFixed(1)} KB`} />
-            <CqStatRow label="FPS" value={safeNumber(conn()?.framesPerSecond).toFixed(1)} />
-            <CqStatRow label={t('cq.clients')} value={`${safeNumber(conn()?.activeClients)}`} />
-            <CqStatRow label={t('cq.totalSent')} value={formatBytes(safeNumber(conn()?.totalBytesSent))} />
-          </div>
+          {/* Preview — the active lane's measured numbers. */}
+          <Show when={lane()}>
+            <PanelSection title={t('cq.section.preview')}>
+              <Show when={isMjpegLane()} fallback={<LaneStatRows lane={lane} />}>
+                <div style={{ display: 'flex', 'flex-direction': 'column', gap: '4px' }}>
+                  <CqStatRow label={t('cq.quality')} value={label()} valueColor={colors().dot} />
+                  <CqStatRow label={t('cq.avgThroughput')} value={`${num(conn()?.avgThroughputKbps)} kbps`} />
+                  <CqStatRow label={t('cq.minThroughput')} value={`${num(conn()?.minThroughputKbps)} kbps`} />
+                  {/* worstLatencyMs is the worst client's last frame send
+                      duration (the send loop's stopwatch), not network
+                      latency — the label says so now. */}
+                  <CqStatRow label={t('cq.sendTime')} value={`${num(conn()?.worstLatencyMs)} ms`} />
+                  <CqStatRow label={t('cq.avgFrame')} value={`${(num(conn()?.avgFrameSizeBytes) / 1024).toFixed(1)} KB`} />
+                  <CqStatRow label={t('cq.fps')} value={num(conn()?.framesPerSecond).toFixed(1)} />
+                  <CqStatRow label={t('cq.clients')} value={`${num(conn()?.activeClients)}`} />
+                  <CqStatRow label={t('cq.totalSent')} value={formatBytes(num(conn()?.totalBytesSent))} />
+                </div>
+              </Show>
+            </PanelSection>
+          </Show>
 
-          <Show when={bandwidthHistory.values().length > 1 || batteryHistory.values().length > 1}>
-            <div
-              style={{
-                'margin-top': '8px',
-                'padding-top': '8px',
-                'border-top': '1px solid rgba(255, 255, 255, 0.08)',
-              }}
-            >
-              <div
-                style={{
-                  'font-size': '10px',
-                  'font-weight': '600',
-                  color: 'rgba(255, 255, 255, 0.5)',
-                  'text-transform': 'uppercase',
-                  'letter-spacing': '0.5px',
-                  'margin-bottom': '6px',
-                }}
-              >
-                {t('cq.trend')}
-              </div>
+          {/* Encoded stream — the shared encoder's measured output whenever
+              the block exists (presence IS the running fact). Shown even
+              while the preview rides another lane: it is device truth, not
+              the preview's lane. */}
+          <Show when={encoded()}>
+            <PanelSection title={t('cq.section.encoded')}>
+              <EncodedStatRows lane={() => encodedLane(encoded())} />
+            </PanelSection>
+          </Show>
+
+          <Show when={throughputHistory.values().length > 1 || batteryHistory.values().length > 1}>
+            <PanelSection title={t('cq.trend')}>
               <div style={{ display: 'flex', 'flex-direction': 'column', gap: '6px' }}>
                 <CqSparklineRow
-                  label={t('cq.bandwidth')}
-                  value={`${safeNumber(conn()?.estimatedBandwidthKbps)} kbps`}
-                  samples={bandwidthHistory.values()}
-                  color={colors().dot}
-                  title={t('cq.bandwidthHistory')}
+                  label={t('cq.throughput')}
+                  value={`${num(lane()?.bitrateKbps)} kbps`}
+                  samples={throughputHistory.values()}
+                  color={isMjpegLane() ? colors().dot : 'rgba(255, 255, 255, 0.6)'}
+                  title={t('cq.throughputHistory')}
                 />
                 <CqSparklineRow
                   label={t('cq.battery')}
@@ -189,61 +225,125 @@ export default function ConnectionQualityIndicator(props: Props) {
                   title={t('cq.batteryHistory')}
                 />
               </div>
-            </div>
+            </PanelSection>
           </Show>
 
-          <Show when={Object.keys(clientDetails()).length > 0}>
-            <div
-              style={{
-                'margin-top': '8px',
-                'padding-top': '8px',
-                'border-top': '1px solid rgba(255, 255, 255, 0.08)',
-              }}
-            >
-              <div
-                style={{
-                  'font-size': '10px',
-                  'font-weight': '600',
-                  color: 'rgba(255, 255, 255, 0.5)',
-                  'text-transform': 'uppercase',
-                  'letter-spacing': '0.5px',
-                  'margin-bottom': '6px',
-                }}
-              >
-                {t('cq.perClient')}
-              </div>
+          <Show when={hasClients()}>
+            <PanelSection title={t('cq.mjpegViewers')}>
               <div style={{ display: 'flex', 'flex-direction': 'column', gap: '6px' }}>
-                {Object.entries(clientDetails()).map(([clientId, detail]) => (
-                  <div
-                    style={{
-                      background: 'rgba(255, 255, 255, 0.04)',
-                      'border-radius': '6px',
-                      padding: '6px 8px',
-                    }}
-                  >
+                <For each={Object.entries(clientDetails())}>
+                  {([clientId, detail]) => (
                     <div
                       style={{
-                        'font-size': '10px',
-                        'font-weight': '600',
-                        color: 'rgba(255, 255, 255, 0.7)',
-                        'margin-bottom': '4px',
+                        background: 'rgba(255, 255, 255, 0.04)',
+                        'border-radius': '6px',
+                        padding: '6px 8px',
                       }}
                     >
-                      {t('cq.client', { id: clientId.slice(0, 8) })}
+                      <div
+                        style={{
+                          'font-size': '10px',
+                          'font-weight': '600',
+                          color: 'rgba(255, 255, 255, 0.7)',
+                          'margin-bottom': '4px',
+                        }}
+                      >
+                        {t('cq.client', { id: clientId.slice(0, 8) })}
+                      </div>
+                      <div style={{ display: 'flex', 'flex-direction': 'column', gap: '2px' }}>
+                        <CqStatRow label={t('cq.throughput')} value={`${num(detail?.avgThroughputKbps)} kbps`} compact />
+                        <CqStatRow label={t('cq.sendTime')} value={`${num(detail?.lastSendDurationMs)} ms`} compact />
+                        <CqStatRow label={t('cq.frame')} value={`${(num(detail?.lastFrameSizeBytes) / 1024).toFixed(1)} KB`} compact />
+                        <CqStatRow label={t('cq.frames')} value={`${num(detail?.framesSent)}`} compact />
+                      </div>
                     </div>
-                    <div style={{ display: 'flex', 'flex-direction': 'column', gap: '2px' }}>
-                      <CqStatRow label={t('cq.throughput')} value={`${safeNumber(detail?.avgThroughputKbps)} kbps`} compact />
-                      <CqStatRow label={t('cq.latency')} value={`${safeNumber(detail?.lastSendDurationMs)} ms`} compact />
-                      <CqStatRow label={t('cq.frame')} value={`${(safeNumber(detail?.lastFrameSizeBytes) / 1024).toFixed(1)} KB`} compact />
-                      <CqStatRow label={t('cq.frames')} value={`${safeNumber(detail?.framesSent)}`} compact />
-                    </div>
-                  </div>
-                ))}
+                  )}
+                </For>
               </div>
-            </div>
+            </PanelSection>
           </Show>
         </div>
       </Show>
+    </div>
+  )
+}
+
+/**
+ * The Preview section's rows for the non-MJPEG lanes, by lane: the WHEP
+ * lane's own row set or the encoded lane's.
+ */
+function LaneStatRows(props: { lane: () => LaneStats | null }) {
+  return (
+    <Show when={props.lane()?.lane === 'whep'} fallback={<EncodedStatRows lane={props.lane} />}>
+      <WhepStatRows lane={props.lane} />
+    </Show>
+  )
+}
+
+/**
+ * The WHEP lane's row set — measured bitrate, fps, then codec and
+ * resolution only while the viewer session reported them. No target row:
+ * libwebrtc negotiates this lane per viewer, so the wire block carries no
+ * target and none is invented here.
+ */
+function WhepStatRows(props: { lane: () => LaneStats | null }) {
+  return (
+    <div style={{ display: 'flex', 'flex-direction': 'column', gap: '4px' }}>
+      <CqStatRow label={t('cq.encoded.bitrate')} value={`${num(props.lane()?.bitrateKbps)} kbps`} />
+      <CqStatRow label={t('cq.fps')} value={num(props.lane()?.fps).toFixed(1)} />
+      <Show when={props.lane()?.codec}>
+        <CqStatRow label={t('cq.encoded.codec')} value={props.lane()?.codec ?? ''} />
+      </Show>
+      <Show when={props.lane()?.width && props.lane()?.height}>
+        <CqStatRow label={t('cq.encoded.resolution')} value={`${props.lane()!.width}×${props.lane()!.height}`} />
+      </Show>
+    </div>
+  )
+}
+
+/**
+ * The encoded lane's row set — measured bitrate vs target, fps, codec,
+ * resolution. One helper for both places the encoded lane renders: the
+ * Preview section's fallback and the "Encoded stream" section (which reads
+ * the status block even while the preview rides another lane).
+ */
+function EncodedStatRows(props: { lane: () => LaneStats | null }) {
+  return (
+    <div style={{ display: 'flex', 'flex-direction': 'column', gap: '4px' }}>
+      <CqStatRow label={t('cq.encoded.bitrate')} value={`${num(props.lane()?.bitrateKbps)} kbps`} />
+      <CqStatRow label={t('cq.encoded.target')} value={`${num(props.lane()?.targetBitrateKbps)} kbps`} />
+      <CqStatRow label={t('cq.fps')} value={num(props.lane()?.fps).toFixed(1)} />
+      <CqStatRow label={t('cq.encoded.codec')} value={props.lane()?.codec ?? '—'} />
+      <Show when={props.lane()?.width && props.lane()?.height}>
+        <CqStatRow label={t('cq.encoded.resolution')} value={`${props.lane()!.width}×${props.lane()!.height}`} />
+      </Show>
+    </div>
+  )
+}
+
+/** One titled panel section: the uppercase header + the rows below it. */
+function PanelSection(props: { title: string; children: JSX.Element }) {
+  return (
+    <div
+      style={{
+        'margin-top': '8px',
+        'padding-top': '8px',
+        'border-top': '1px solid rgba(255, 255, 255, 0.08)',
+      }}
+    >
+      <div
+        style={{
+          'font-size': '10px',
+          'font-weight': '600',
+          color: 'rgba(255, 255, 255, 0.5)',
+          'text-transform': 'uppercase',
+          'letter-spacing': '0.5px',
+          'margin-bottom': '6px',
+        }}
+      >
+        {props.title}
+      </div>
+      {props.children}
     </div>
   )
 }

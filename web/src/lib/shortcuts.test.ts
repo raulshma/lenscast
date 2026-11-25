@@ -8,6 +8,7 @@ describe('shortcutFor', () => {
     expect(shortcutFor({ key: 'w' })).toBe<ShortcutAction>('toggle-web')
     expect(shortcutFor({ key: 'r' })).toBe<ShortcutAction>('toggle-rtsp')
     expect(shortcutFor({ key: 'p' })).toBe<ShortcutAction>('cycle-player')
+    expect(shortcutFor({ key: 't' })).toBe<ShortcutAction>('stats')
     expect(shortcutFor({ key: 'g' })).toBe<ShortcutAction>('gallery')
     expect(shortcutFor({ key: '/' })).toBe<ShortcutAction>('search')
     expect(shortcutFor({ key: '?' })).toBe<ShortcutAction>('help')
@@ -57,7 +58,7 @@ describe('isEditableTarget', () => {
 describe('SHORTCUT_HELP', () => {
   it('covers exactly the actions the key map produces, each with a non-empty label', () => {
     const actions = SHORTCUT_HELP.map((row) => row.action)
-    expect(new Set(actions).size).toBe(8)
+    expect(new Set(actions).size).toBe(9)
     for (const row of SHORTCUT_HELP) {
       expect(row.label.length).toBeGreaterThan(0)
       expect(row.key.length).toBeGreaterThan(0)

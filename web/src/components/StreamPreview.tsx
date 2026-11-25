@@ -8,6 +8,15 @@ import { useFullscreen } from '../hooks/useFullscreen'
 import { pttBusy, pttTransition, type PttPhase } from '../lib/pttPhase'
 import { flashLater } from '../lib/flashLater'
 import ConnectionQualityIndicator from './ConnectionQualityIndicator'
+import { pickPreviewLane } from '../lib/streamStats'
+import {
+  nextStreamStatsOverlayMode,
+  streamStatsOverlayMounted,
+  streamStatsOverlayStore,
+  streamStatsOverlayVisible,
+  type StreamStatsGate,
+  type StreamStatsOverlayMode,
+} from '../lib/streamStatsOverlay'
 import { tapToFocus as apiTapToFocus, pushTalkback } from '../api/client'
 import { API_DEFAULTS } from '../api/defaults'
 import { createH264Player, h264Supported, wsUrl } from '../video/h264Player'
@@ -138,6 +147,18 @@ class TalkUnavailableError extends Error {
   constructor(public readonly reason: 'insecure' | 'mic') { super(reason) }
 }
 
+const STATS_STATE_KEYS: Record<StreamStatsOverlayMode, string> = {
+  auto: 'stats.state.auto',
+  on: 'stats.state.on',
+  off: 'stats.state.off',
+}
+
+/** The Stats button's label parts: the current and the next cycle state. */
+function statsStateLabel(mode: StreamStatsOverlayMode): { state: string; next: string } {
+  const next = nextStreamStatsOverlayMode(mode)
+  return { state: t(STATS_STATE_KEYS[mode]).toUpperCase(), next: t(STATS_STATE_KEYS[next]).toUpperCase() }
+}
+
 export default function StreamPreview(props: Props) {
   const st = () => props.status()
   const isActive = () => !!st()?.streaming?.isActive
@@ -151,6 +172,28 @@ export default function StreamPreview(props: Props) {
   // a black screen no error can explain. Absent on older firmware → never
   // blocked, the old behavior exactly.
   const blockedByLock = () => st()?.cameraBlockedByLock === true
+
+  // Stream-stats overlay (issue #25): the indicator follows the preview's
+  // own lane (MJPEG rung → the MJPEG clients' measured lane, WHEP rung →
+  // libwebrtc's, H264/HLS rung → the encoded encoder-output lane) and the
+  // persisted auto/on/off toggle, cycled from the action bar's Stats button
+  // and the T shortcut. auto = the legacy gate — live + visible + Adaptive
+  // Bitrate on + lane data; on drops the adaptive condition; off never
+  // shows.
+  const statsOverlay = streamStatsOverlayStore()
+  const statsGate = (): StreamStatsGate => ({
+    previewLive: isActive() && props.previewVisible(),
+    adaptiveEnabled: st()?.adaptiveBitrate?.enabled === true,
+    laneAvailable: pickPreviewLane(playerMode(), st()) !== null,
+  })
+  // Mount and visibility are two verdicts over one gate. The toggle (and
+  // auto's adaptive term) decide whether the indicator exists; the lane's
+  // data only hides it. A lane switch lands here as "the new lane has not
+  // reported yet" — unmounting on that collapsed the panel the operator had
+  // opened and emptied its sparkline history on every switch.
+  const statsMounted = () => streamStatsOverlayMounted(statsOverlay.mode(), statsGate())
+  const statsVisible = () => streamStatsOverlayVisible(statsOverlay.mode(), statsGate())
+  const statsLabel = () => statsStateLabel(statsOverlay.mode())
 
   const [focusIndicator, setFocusIndicator] = createSignal<{ x: number; y: number; visible: boolean }>({
     x: 0,
@@ -723,16 +766,24 @@ export default function StreamPreview(props: Props) {
           </div>
         </Show>
 
-        {/* Connection quality indicator — stacked below the LIVE badge when
-            that badge occupies the same top-right corner. */}
-        <Show when={isActive() && props.previewVisible() && st()?.adaptiveBitrate?.enabled && st()?.connectionQuality}>
-          <div style={{
-            position: 'absolute',
-            top: webActive() && props.previewVisible() ? '46px' : '12px',
-            right: '12px',
-            'z-index': '10',
-          }}>
-            <ConnectionQualityIndicator status={() => st() ?? undefined} />
+        {/* Stream-stats indicator — stacked below the LIVE badge when that
+            badge occupies the same top-right corner. Mounted by the stats
+            overlay toggle (auto/on/off, never by Adaptive Bitrate alone —
+            issue #25); hidden, not unmounted, while the preview's lane has
+            no data, so an open panel and its history survive a lane switch.
+            The sparklines are attribute-sized SVGs — nothing measures layout
+            — so `hidden` cannot strand them at zero width. */}
+        <Show when={statsMounted()}>
+          <div
+            hidden={!statsVisible()}
+            style={{
+              position: 'absolute',
+              top: webActive() && props.previewVisible() ? '46px' : '12px',
+              right: '12px',
+              'z-index': '10',
+            }}
+          >
+            <ConnectionQualityIndicator status={() => st() ?? undefined} previewMode={playerMode} />
           </div>
         </Show>
 
@@ -807,6 +858,18 @@ export default function StreamPreview(props: Props) {
               <polyline points="2 12 12 17 22 12" />
             </svg>
             <span>{t('preview.playerLabel', { mode: playerMode().toUpperCase() })}</span>
+          </button>
+          <button
+            type="button"
+            class="action-btn action-btn-ghost"
+            onClick={() => statsOverlay.cycle()}
+            title={t('preview.statsTitle', statsLabel())}
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <polyline points="3 17 9 11 13 15 21 7" />
+              <polyline points="15 7 21 7 21 13" />
+            </svg>
+            <span>{t('preview.statsLabel', { state: statsLabel().state })}</span>
           </button>
           <button
             type="button"

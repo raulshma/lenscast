@@ -19,7 +19,7 @@
     "srtEnabled": false,
     "srtActive": false,
     "srtStatus": "idle",
-    "whepClients": 0
+    "whepClients": 1
   },
   "thermal": "NORMAL",
   "camera": "Ready",
@@ -86,5 +86,20 @@
     "lastRecoveryTimestamp": 1788825600000,
     "lastFailureReason": "Encoder stalled; pipeline restarted"
   },
-  "encodedVideoBitrate": 2000000
+  "encodedVideoBitrate": 2000000,
+  "encodedStream": {
+    "measuredBitrateKbps": 1890,
+    "fps": 23.5,
+    "targetBitrateKbps": 2000,
+    "codec": "h264",
+    "width": 1280,
+    "height": 720
+  },
+  "whepStream": {
+    "measuredBitrateKbps": 1700,
+    "fps": 24.0,
+    "codec": "vp8",
+    "width": 600,
+    "height": 800
+  }
 }

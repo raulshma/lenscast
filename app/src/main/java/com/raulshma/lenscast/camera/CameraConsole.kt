@@ -4,6 +4,7 @@ import androidx.camera.view.PreviewView
 import androidx.lifecycle.LifecycleOwner
 import com.raulshma.lenscast.capture.RecordingState
 import com.raulshma.lenscast.capture.model.FlashMode
+import com.raulshma.lenscast.camera.model.CameraDashboardPolicy
 import com.raulshma.lenscast.camera.model.CameraLensInfo
 import com.raulshma.lenscast.camera.model.CameraSettings
 import com.raulshma.lenscast.camera.model.CameraState
@@ -72,6 +73,16 @@ interface CameraConsole {
     val wifiConnected: StateFlow<Boolean>
     val adaptiveBitrateState: StateFlow<AdaptiveBitrateController.AdaptiveState>
     val connectionQualityStats: StateFlow<NetworkQualityMonitor.NetworkStatsSnapshot?>
+
+    /**
+     * The encoded lane's measured block, or null before the backend polls
+     * it. Local-only feed: the local backend republishes
+     * [StreamingManager.encodedStreamStatus] on the connection-quality poll;
+     * the remote backend holds it at null (no measured block crosses its
+     * API), which parks the Bandwidth row on the MJPEG windows — null there
+     * too, so ultimately the honest 0 idle.
+     */
+    val encodedStreamStatus: StateFlow<CameraDashboardPolicy.EncodedLaneStatus?>
     val showPreview: StateFlow<Boolean>
     val lastServerError: StateFlow<String?>
 

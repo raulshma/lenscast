@@ -28,11 +28,19 @@ import org.robolectric.annotation.Config
  * - the first apply of a process is the cold-start one: the stored intent
  *   commits as written, which is what re-lights the LED after a restart.
  *
+ * The persist is the narrowed torch-fact seam (issue #25): the service
+ * hands over the converged [Boolean] fact only and the store's field-level
+ * write folds it into the disk truth — the old whole-document persister
+ * carried this collector's snapshot, which could overwrite a concurrent
+ * camera write landing milliseconds later. These tests pin the verdict and
+ * the persisted facts; the store side (the field-level write keeping every
+ * sibling field) is pinned in SettingsDataStoreUpdateCameraSettingsTest.
+ *
  * JVM-level limits, deliberately not papered over: with no bound camera the
- * controls apply is a no-op, so these tests pin the verdict and the
- * persisted document — the LED driving itself (applyCameraControls' torch
- * branch, the post-rebind re-assert, the torchDrivenOn arbitration) is
- * unchanged code exercised only on a device.
+ * controls apply is a no-op, so these tests pin the verdict — the LED
+ * driving itself (applyCameraControls' torch branch, the post-rebind
+ * re-assert, the torchDrivenOn arbitration) is unchanged code exercised
+ * only on a device.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34], application = CameraServiceTorchConvergenceTest.PlainApplication::class)
@@ -42,8 +50,8 @@ class CameraServiceTorchConvergenceTest {
 
     private lateinit var service: CameraService
 
-    /** Every document the convergence persisted, in order. */
-    private val persistedDocuments = ArrayList<CameraSettings>()
+    /** Every torch fact the convergence persisted, in order. */
+    private val persistedFacts = ArrayList<Boolean>()
 
     /** The live LED fact, driven through the same reflective seam the torch observation publishes through. */
     @Suppress("UNCHECKED_CAST")
@@ -64,23 +72,24 @@ class CameraServiceTorchConvergenceTest {
     @Before
     fun setUp() {
         service = CameraService(RuntimeEnvironment.getApplication())
-        service.setSettingsPersister { persistedDocuments.add(it) }
+        service.setTorchFactPersister { persistedFacts.add(it) }
     }
 
     @Test
     fun `an untouched write converges the stored intent to the live lit fact`() = runBlocking {
         // Cold start commits the stored dark intent verbatim.
         service.applySettings(CameraSettings(torchEnabled = false, torchStrength = 3, iso = 100))
-        assertTrue(persistedDocuments.isEmpty())
+        assertTrue(persistedFacts.isEmpty())
 
         // A live-only writer (web torch route, deterrence) lights the LED
         // without persisting; the next wholesale write only means iso = 200.
         setLiveTorchFact(on = true)
         service.applySettings(CameraSettings(torchEnabled = false, torchStrength = 3, iso = 200))
 
-        // One converged document — the live fact, the strength intent and
-        // the write's own field, nothing else moved.
-        assertEquals(listOf(CameraSettings(torchEnabled = true, torchStrength = 3, iso = 200)), persistedDocuments)
+        // One converged fact — the live LED state and nothing else: the
+        // write's own fields land through the collector's normal apply, the
+        // convergence persist carries the fact only.
+        assertEquals(listOf(true), persistedFacts)
         // The verdict converged instead of driving the raw value: the LED
         // fact is exactly where it was.
         assertEquals(TorchState.On(null), liveTorchFact())
@@ -95,8 +104,7 @@ class CameraServiceTorchConvergenceTest {
 
         service.applySettings(CameraSettings(torchEnabled = true, zoomRatio = 2.5f))
 
-        assertEquals(false, persistedDocuments.single().torchEnabled)
-        assertEquals(2.5f, persistedDocuments.single().zoomRatio)
+        assertEquals(listOf(false), persistedFacts)
     }
 
     @Test
@@ -105,7 +113,7 @@ class CameraServiceTorchConvergenceTest {
         service.applySettings(CameraSettings(torchEnabled = false))
         service.applySettings(CameraSettings(torchEnabled = false, frameRate = 30))
 
-        assertTrue(persistedDocuments.isEmpty())
+        assertTrue(persistedFacts.isEmpty())
     }
 
     @Test
@@ -117,7 +125,7 @@ class CameraServiceTorchConvergenceTest {
         // the writer's document IS the torch verdict.
         service.applySettings(CameraSettings(torchEnabled = true, torchStrength = 5))
 
-        assertTrue(persistedDocuments.isEmpty())
+        assertTrue(persistedFacts.isEmpty())
     }
 
     @Test
@@ -129,7 +137,7 @@ class CameraServiceTorchConvergenceTest {
         // write even though the enabled flag stayed put.
         service.applySettings(CameraSettings(torchEnabled = false, torchStrength = 5))
 
-        assertTrue(persistedDocuments.isEmpty())
+        assertTrue(persistedFacts.isEmpty())
     }
 
     @Test
@@ -141,7 +149,7 @@ class CameraServiceTorchConvergenceTest {
 
         service.applySettings(CameraSettings(torchEnabled = true))
 
-        assertTrue(persistedDocuments.isEmpty())
+        assertTrue(persistedFacts.isEmpty())
     }
 
     @Test
@@ -156,7 +164,7 @@ class CameraServiceTorchConvergenceTest {
 
         service.applySettings(CameraSettings(torchEnabled = true), torchIntent = true)
 
-        assertTrue(persistedDocuments.isEmpty())
+        assertTrue(persistedFacts.isEmpty())
     }
 
     @Test
@@ -170,6 +178,6 @@ class CameraServiceTorchConvergenceTest {
 
         service.applySettings(CameraSettings(torchEnabled = false), torchIntent = false)
 
-        assertTrue(persistedDocuments.isEmpty())
+        assertTrue(persistedFacts.isEmpty())
     }
 }
