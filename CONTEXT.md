@@ -1554,7 +1554,17 @@ one `StreamShutterButton`), thermal banner, network-quality badge, client
 pluralization, byte formatting, the slider-endpoint trim, and the connection
 panel (`qualityIndicatorVisible`, `qualitySummary`, `connectionStatRows`,
 per-client header/rows — the panel renders policy-produced strings, so the
-KB-vs-formatBytes split is gone). CameraScreen only maps the policy's
+KB-vs-formatBytes split is gone). Since issue #25 the panel's kbps readouts
+are measured facts picked here, never the ladders' drain-rate estimate:
+`measuredBandwidthKbps` picks the Bandwidth row's value — the encoded lane's
+window bitrate (fed in as the public `EncodedLaneStatus` pair, the screen's
+version of /api/status's encodedStream block) while that lane runs, else the
+MJPEG clients' measured window average when that is the lane serving the
+viewers (the phone panel has no lane switcher, so one row follows the lane
+actually carrying bytes — no cross-lane borrowing), else the honest 0 idle —
+and `clientSummaryKbps` reads the collapsed "N clients · kbps" line off the
+clients' measured window minimum — both fall to the honest 0 idle when no
+measured source exists. CameraScreen only maps the policy's
 answers onto composables — every ladder is JVM-tested, and no
 `String.format` without an explicit locale survives.
 
@@ -1662,8 +1672,11 @@ screen's combines feed it; the `List<Any>`-plus-casts mapping is gone.
 ### Adaptive Bitrate Controller
 **`streaming/AdaptiveBitrateController.kt`** — the single adaptive-bitrate
 brain. The frame path (`getAdaptiveQuality`, `getAdaptiveFrameInterval`)
-drives it and publishes the *driven* `AdaptiveState` that the app dashboard
-and `/api/status` display. Its bandwidth numbers are the DRAIN-RATE
+drives it and publishes the *driven* `AdaptiveState` that `/api/status`
+carries and the app dashboard renders — its verdict/applied fields and
+client count only: since issue #25 the dashboard's kbps readouts read the
+measured windows through CameraDashboardPolicy, never this state's
+bandwidth numbers. Its bandwidth numbers are the DRAIN-RATE
 congestion estimate (see Stream Stats — bytes over how long a frame took to
 drain into the viewer's buffer), 0 when no client is connected — never an
 invented constant, and deliberately not the window-measured stream bitrate
@@ -1700,7 +1713,11 @@ null while no encoded stream runs), and the nullable `whepStream` block
 and geometry of the busiest viewer's session; null while no viewer has
 reported — independent of `encodedStream`, both may be present). The MJPEG
 chips freeze when the last viewer leaves no more: clients unregister and
-windows age out. Contract
+windows age out. The on-phone camera panel reads the same facts (issue #25):
+its Bandwidth row and "N clients · kbps" line pick the encoded lane's window
+while that lane runs, else the MJPEG windows, through CameraDashboardPolicy —
+the phone's mapping of the lane picker, with 0 as the honest idle and no
+cross-lane borrowing. Contract
 pinned through `web/contract/status.json` on all three sides.
 
 ### Stream Stats Lane Picker

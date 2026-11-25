@@ -239,7 +239,7 @@ class CameraDashboardPolicyTest {
         )
         assertEquals(
             listOf(
-                CameraDashboardPolicy.ConnectionStatRow(R.string.camera_stat_bandwidth, "8000 kbps"),
+                CameraDashboardPolicy.ConnectionStatRow(R.string.camera_stat_bandwidth, "4200 kbps"),
                 CameraDashboardPolicy.ConnectionStatRow(R.string.camera_stat_min_throughput, "1200 kbps"),
                 CameraDashboardPolicy.ConnectionStatRow(R.string.camera_stat_avg_throughput, "2400 kbps"),
                 CameraDashboardPolicy.ConnectionStatRow(R.string.camera_stat_latency, "45 ms"),
@@ -247,8 +247,77 @@ class CameraDashboardPolicyTest {
                 CameraDashboardPolicy.ConnectionStatRow(R.string.camera_stat_clients, "2"),
                 CameraDashboardPolicy.ConnectionStatRow(R.string.camera_stat_total_sent, "1 MB"),
             ),
-            CameraDashboardPolicy.connectionStatRows(estimatedBandwidthKbps = 8000, stats = stats),
+            CameraDashboardPolicy.connectionStatRows(measuredBandwidthKbps = 4200, stats = stats),
         )
+    }
+
+    // ── measured bandwidth sources (issue #25) ──
+
+    /** A snapshot whose only live fields are the measured window min/avg; the estimate field is filler. */
+    private fun measuredStats(minKbps: Int, avgKbps: Int): NetworkStatsSnapshot = NetworkStatsSnapshot(
+        activeClients = 2,
+        estimatedBandwidthKbps = 9000,
+        totalBytesSent = 0L,
+        minThroughputKbps = minKbps,
+        avgThroughputKbps = avgKbps,
+        worstLatencyMs = 0L,
+        qualityLevel = NetworkQualityLevel.GOOD,
+        clientDetails = emptyMap(),
+        avgFrameSizeBytes = 0,
+    )
+
+    /** An encoded-lane block over the only fields the bandwidth source reads. */
+    private fun encodedLane(running: Boolean, measuredKbps: Int) = CameraDashboardPolicy.EncodedLaneStatus(
+        running = running,
+        measuredBitrateKbps = measuredKbps,
+    )
+
+    @Test
+    fun `bandwidth source is the encoded lane's measured bitrate while it runs`() {
+        assertEquals(
+            4200,
+            CameraDashboardPolicy.measuredBandwidthKbps(
+                encodedStream = encodedLane(running = true, measuredKbps = 4200),
+                stats = measuredStats(minKbps = 1200, avgKbps = 2400),
+            ),
+        )
+    }
+
+    @Test
+    fun `bandwidth source falls to the MJPEG clients' measured window while the encoded lane is down`() {
+        assertEquals(
+            2400,
+            CameraDashboardPolicy.measuredBandwidthKbps(
+                encodedStream = encodedLane(running = false, measuredKbps = 4200),
+                stats = measuredStats(minKbps = 1200, avgKbps = 2400),
+            ),
+        )
+        assertEquals(
+            2400,
+            CameraDashboardPolicy.measuredBandwidthKbps(
+                encodedStream = null,
+                stats = measuredStats(minKbps = 1200, avgKbps = 2400),
+            ),
+        )
+    }
+
+    @Test
+    fun `bandwidth source reads the honest zero idle with no measured source — no estimate leaks`() {
+        assertEquals(0, CameraDashboardPolicy.measuredBandwidthKbps(encodedStream = null, stats = null))
+        assertEquals(
+            0,
+            CameraDashboardPolicy.measuredBandwidthKbps(
+                encodedStream = encodedLane(running = true, measuredKbps = 0),
+                stats = measuredStats(minKbps = 0, avgKbps = 0),
+            ),
+        )
+    }
+
+    @Test
+    fun `client summary kbps reads the clients' measured window minimum`() {
+        assertEquals(1200, CameraDashboardPolicy.clientSummaryKbps(measuredStats(minKbps = 1200, avgKbps = 2400)))
+        assertEquals(0, CameraDashboardPolicy.clientSummaryKbps(measuredStats(minKbps = 0, avgKbps = 0)))
+        assertEquals(0, CameraDashboardPolicy.clientSummaryKbps(null))
     }
 
     @Test

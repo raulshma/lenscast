@@ -16,6 +16,7 @@ import com.raulshma.lenscast.R
 import com.raulshma.lenscast.capture.model.FlashMode
 import com.raulshma.lenscast.capture.model.FlashModePolicy
 import com.raulshma.lenscast.camera.model.CameraInitRetry
+import com.raulshma.lenscast.camera.model.CameraDashboardPolicy
 import com.raulshma.lenscast.camera.model.CameraLensInfo
 import com.raulshma.lenscast.camera.model.ConsoleCapabilities
 import com.raulshma.lenscast.camera.model.CountdownState
@@ -155,6 +156,9 @@ class CameraViewModel(
     private val _connectionQualityStats = MutableStateFlow<NetworkQualityMonitor.NetworkStatsSnapshot?>(null)
     override val connectionQualityStats: StateFlow<NetworkQualityMonitor.NetworkStatsSnapshot?> = _connectionQualityStats.asStateFlow()
 
+    private val _encodedStreamStatus = MutableStateFlow<CameraDashboardPolicy.EncodedLaneStatus?>(null)
+    override val encodedStreamStatus: StateFlow<CameraDashboardPolicy.EncodedLaneStatus?> = _encodedStreamStatus.asStateFlow()
+
     // ── Camera pro mode ──
     // Viewfinder aids (grid, spirit level, pro-tools overlays) and the
     // self-timer read straight from the Settings Store; the analyzer/monitor
@@ -281,10 +285,17 @@ class CameraViewModel(
                 if (isActive) {
                     while (true) {
                         _connectionQualityStats.value = streamingManager.getNetworkStatsSnapshot()
+                        _encodedStreamStatus.value = streamingManager.encodedStreamStatus().let {
+                            CameraDashboardPolicy.EncodedLaneStatus(
+                                running = it.running,
+                                measuredBitrateKbps = it.measuredBitrateKbps,
+                            )
+                        }
                         delay(2500)
                     }
                 } else {
                     _connectionQualityStats.value = null
+                    _encodedStreamStatus.value = null
                 }
             }
         }
