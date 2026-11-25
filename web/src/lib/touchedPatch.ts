@@ -39,7 +39,9 @@ export interface PendingPatch<T extends object> {
   take(): PatchTake<T>
   /**
    * Discards the staged patch without sending it: the session ended, or a
-   * whole-document write (reset defaults) superseded it.
+   * whole-document write (reset defaults) superseded it. Also invalidates a
+   * take already handed to an in-flight flush — a superseded patch's
+   * `settle` must not re-assert the values the discard just overruled.
    */
   clear(): void
 }
@@ -69,6 +71,13 @@ export function createPendingPatch<T extends object>(): PendingPatch<T> {
   // whether an edit newer than the take has claimed a key since, whatever
   // became of that edit afterwards.
   let clock = 0
+  // The generation. `clear` bumps it, because clearing cannot reach a patch
+  // an earlier take already handed to an in-flight flush: with only the
+  // per-key clock, that flush's `settle` would find its keys unedited since
+  // the take and re-assert the discarded values over the mirror (its PUT
+  // racing whatever superseded them). A take from before the bump sees the
+  // mismatch in `settle` and skips every key it holds.
+  let generation = 0
   const editedAt = new Map<string, number>()
 
   return {
@@ -84,11 +93,13 @@ export function createPendingPatch<T extends object>(): PendingPatch<T> {
       // window: the PUT body is fixed at this moment.
       const values = Object.fromEntries(staged) as Partial<T>
       staged.clear()
+      const takenAtGeneration = generation
       const takenAt = new Map<string, number | undefined>()
       for (const key of Object.keys(values)) takenAt.set(key, editedAt.get(key))
       return {
         values,
         settle(camera) {
+          if (generation !== takenAtGeneration) return camera
           const current = camera as Record<string, unknown>
           let settled: Record<string, unknown> | undefined
           for (const [key, value] of Object.entries(values)) {
@@ -104,6 +115,7 @@ export function createPendingPatch<T extends object>(): PendingPatch<T> {
 
     clear() {
       staged.clear()
+      generation++
     },
   }
 }

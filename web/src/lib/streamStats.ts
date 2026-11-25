@@ -43,8 +43,8 @@ export type LanePick = LaneStats | null
  * The preview's own lane, per rung. WHEP is a lane of its own: libwebrtc
  * encodes the WebRTC preview per viewer, and those bytes never cross the
  * encoded-stream hub that `encodedStream` measures — only the H264/HLS
- * rungs decode that pipeline. MJPEG is its own lane. No rung (a non-preview
- * host) reads the encoded lane.
+ * rungs decode that pipeline. MJPEG is its own lane; no rung (a
+ * non-preview host) → the encoded lane.
  */
 export function laneForMode(mode: PlayerMode | undefined): StreamLaneKind {
   if (mode === 'mjpeg') return 'mjpeg'

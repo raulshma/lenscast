@@ -1214,8 +1214,9 @@ sub-second over WebRTC. `WhepServer` owns the sessions: one shared
 libwebrtc environment (factory + `VideoSource` tapping the same NV21
 analysis frames WHIP consumes, plus one shared 16 kHz mono
 `JavaAudioDeviceModule` when WHIP's mic-arbitration verdict allows audio)
-under per-viewer `PeerConnection`s, each with its own hardware H.264
-encoder — H.264 only by construction, independent of the RTSP codec. The
+under per-viewer `PeerConnection`s, each with its own libwebrtc encoder —
+the wire codec is whatever libwebrtc negotiates per viewer (VP8 or H.264,
+device-dependent; H.265 is not offered), independent of the RTSP codec. The
 handshake is one-shot ICE like WHIP (answer after the ~3 s capped gather,
 candidates inline, no trickle), answered `201` with `Location:
 /whep/{id}`; `DELETE /whep/{id}` (or endpoint stop) disposes the session,

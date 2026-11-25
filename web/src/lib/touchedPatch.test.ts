@@ -114,6 +114,21 @@ describe('a take settling over the settings mirror', () => {
     expect(older.settle(STALE_MIRROR)).toEqual(STALE_MIRROR)
   })
 
+  it('clear also invalidates a take already in flight — a superseded PUT must not re-assert the discarded values', () => {
+    const pending = createPendingPatch<Camera>()
+    pending.stage({ iso: 800, stabilization: false })
+    const inFlight = pending.take()
+    // A whole-document write (reset defaults) lands while the PUT is in
+    // flight: the discard must silence this take's settle too, or it would
+    // put the just-reset values back over the mirror.
+    pending.clear()
+    expect(inFlight.settle(STALE_MIRROR)).toBe(STALE_MIRROR)
+    // The tracker still works afterwards: a later edit of the same key
+    // settles normally again.
+    pending.stage({ iso: 400 })
+    expect(pending.take().settle(STALE_MIRROR)).toEqual({ ...STALE_MIRROR, iso: 400 })
+  })
+
   it('returns the same object when the mirror already agrees, so no consumer re-renders for nothing', () => {
     const pending = createPendingPatch<Camera>()
     pending.stage({ iso: 800 })

@@ -49,8 +49,8 @@ import java.util.concurrent.atomic.AtomicBoolean
  * viewing half of the WHIP push output's publishing half.
  *
  * **Media:** every viewer gets its own [PeerConnection] with its own
- * libwebrtc hardware H.264 encoder (the same
- * [DefaultVideoEncoderFactory] WHIP uses), fed from ONE shared
+ * libwebrtc encoder (the same [DefaultVideoEncoderFactory]
+ * WHIP uses), fed from ONE shared
  * [VideoSource] that taps the same NV21 analysis frames the WHIP publisher
  * consumes — the manager fans every camera frame in through
  * [feedVideoFrame], throttled to the stream's target fps, rotated upright
@@ -58,9 +58,10 @@ import java.util.concurrent.atomic.AtomicBoolean
  * ([EncodedOverlayCompositor]) so viewers see the same timestamp/branding as
  * every other output. The tap is the supported libwebrtc
  * integration; the encoded-hub access units are deliberately not fed here
- * (see the WHIP publisher's KDoc for that decision). WHEP v1 is H.264-only
- * by construction — libwebrtc encodes its own video, independent of the
- * RTSP codec setting, and H.265 is not offered.
+ * (see the WHIP publisher's KDoc for that decision). libwebrtc encodes its
+ * own video, independent of the RTSP codec setting — the wire codec is
+ * whatever it negotiates per viewer (VP8 or H.264, device-dependent);
+ * H.265 is not offered.
  *
  * **Audio:** one mic-arbitration verdict with WHIP's
  * (`streamAudioEnabled && !recording && !ecoIdle && shared capture free`),
