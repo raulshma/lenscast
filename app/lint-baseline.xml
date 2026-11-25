@@ -899,7 +899,7 @@
         errorLine2="                            ~~~~~~~~~~~~~">
         <location
             file="src/main/java/com/raulshma/lenscast/camera/CameraService.kt"
-            line="893"
+            line="904"
             column="29"/>
     </issue>
 

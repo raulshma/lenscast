@@ -1366,7 +1366,12 @@ auto-cancel constant named here); the service deduplicates all
 (`COLOR_TEMPERATURE_MIN..MAX`, null unless white balance is MANUAL); manual
 mode is conveyed by AWB OFF and the Kelvin value is logged at apply time —
 per-sensor gains/matrix mapping stays device-default until a calibrated
-Kelvin→gains table exists. Two invariants hold on every folded plan, pin as
+Kelvin→gains table exists. `controlMode` is the scene switch, always
+derived from `sceneMode`: aside from FACE_PRIORITY — the documented
+exception that works under AUTO — a scene mode only takes effect while
+`CONTROL_MODE` is USE_SCENE_MODE, so DISABLED and FACE_PRIORITY stay at
+AUTO, every other scene arms USE_SCENE_MODE, and the fold retires the
+switch together with a retired scene. Two invariants hold on every folded plan, pin as
 data in the fold: **the sensor pair rides only an AE OFF plan** — the HAL
 ignores `SENSOR_*` under automatic exposure, so when AE OFF is not
 advertised the ISO/shutter are retired with the AE mode, or the bundle would
@@ -1418,7 +1423,13 @@ ONE `CaptureRequestOptions` carrying every non-null plan field, submitted
 exactly once per controls apply through a `fun interface` seam. Production
 rides `Camera2CameraControl.setCaptureRequestOptions`; a recording submitter
 is injected through the internal constructor so the bundle a settings apply
-submits is JVM-assertable (`CameraServiceCaptureBundleTest`).
+submits is JVM-assertable (`CameraServiceCaptureBundleTest`). The scene
+mode rides with its `CONTROL_MODE` switch in that same bundle: aside from
+FACE_PRIORITY, a scene mode only takes effect while the control mode itself
+is USE_SCENE_MODE, so a `CONTROL_SCENE_MODE` submitted with the control
+mode left at AUTO is ignored by every device — the night-vision branch did
+exactly that and the read-back chased the `scene=DISABLED` mismatch it
+produced (issue #25).
 
 **Replace semantics — the lesson of issue #25.** `setCaptureRequestOptions`
 first clears every option already set, then applies what it is given (the

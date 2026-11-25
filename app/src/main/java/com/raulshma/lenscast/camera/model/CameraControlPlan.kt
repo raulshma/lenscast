@@ -24,6 +24,13 @@ data class CameraControlPlan(
     val opticalStabilizationOn: Boolean,
     /** Camera2 scene mode; always resolved (OFF resets to DISABLED). */
     val sceneMode: Int,
+    /**
+     * Camera2 control mode — the switch that arms the scene mode: aside from
+     * FACE_PRIORITY, a scene mode only takes effect while the control mode is
+     * USE_SCENE_MODE, so this is always derived from [sceneMode] and the pair
+     * can never disagree.
+     */
+    val controlMode: Int,
     val aeMode: Int,
     /** Null leaves AE unlock unset (night AUTO); otherwise false. */
     val aeLock: Boolean?,
@@ -128,6 +135,7 @@ data class CameraControlPlan(
             videoStabilizationOn = supportedVideoStabilization,
             opticalStabilizationOn = supportedOpticalStabilization,
             sceneMode = supportedSceneMode,
+            controlMode = controlModeFor(supportedSceneMode),
             aeMode = supportedAeMode,
             sensorSensitivity = supportedSensitivity,
             sensorExposureTimeNs = supportedExposureTimeNs,
@@ -173,6 +181,22 @@ data class CameraControlPlan(
     companion object {
         /** The auto-cancel window, in seconds, for deliberate metering. */
         const val METERING_AUTO_CANCEL_SECONDS = 5L
+
+        /**
+         * The CONTROL_MODE [sceneMode] needs: aside from FACE_PRIORITY — the
+         * documented exception that works under AUTO — a scene mode only
+         * takes effect while the control mode itself is USE_SCENE_MODE, so
+         * submitting CONTROL_SCENE_MODE with the control mode left at AUTO
+         * is ignored by every device (issue #25).
+         */
+        private fun controlModeFor(sceneMode: Int): Int =
+            if (sceneMode == CaptureRequest.CONTROL_SCENE_MODE_DISABLED ||
+                sceneMode == CaptureRequest.CONTROL_SCENE_MODE_FACE_PRIORITY
+            ) {
+                CaptureRequest.CONTROL_MODE_AUTO
+            } else {
+                CaptureRequest.CONTROL_MODE_USE_SCENE_MODE
+            }
 
         /** The [CameraControlPlan.unsupported] names — one per control the plan can neutralise. */
         const val UNSUPPORTED_SCENE_MODE = "scene mode"
@@ -297,6 +321,7 @@ data class CameraControlPlan(
                         videoStabilizationOn = videoStabilizationOn,
                         opticalStabilizationOn = opticalStabilizationOn,
                         sceneMode = sceneMode ?: CaptureRequest.CONTROL_SCENE_MODE_NIGHT,
+                        controlMode = controlModeFor(sceneMode ?: CaptureRequest.CONTROL_SCENE_MODE_NIGHT),
                         aeMode = baseAeMode,
                         aeLock = false,
                         sensorSensitivity = sensorSensitivity,
@@ -318,6 +343,7 @@ data class CameraControlPlan(
                         videoStabilizationOn = videoStabilizationOn,
                         opticalStabilizationOn = opticalStabilizationOn,
                         sceneMode = sceneMode ?: CaptureRequest.CONTROL_SCENE_MODE_NIGHT_PORTRAIT,
+                        controlMode = controlModeFor(sceneMode ?: CaptureRequest.CONTROL_SCENE_MODE_NIGHT_PORTRAIT),
                         aeMode = autoAeMode,
                         aeLock = null,
                         sensorSensitivity = sensorSensitivity,
@@ -343,6 +369,7 @@ data class CameraControlPlan(
                         videoStabilizationOn = videoStabilizationOn,
                         opticalStabilizationOn = opticalStabilizationOn,
                         sceneMode = sceneMode ?: CaptureRequest.CONTROL_SCENE_MODE_DISABLED,
+                        controlMode = controlModeFor(sceneMode ?: CaptureRequest.CONTROL_SCENE_MODE_DISABLED),
                         aeMode = offAeMode,
                         aeLock = false,
                         sensorSensitivity = sensorSensitivity,

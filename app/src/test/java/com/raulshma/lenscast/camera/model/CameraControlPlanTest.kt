@@ -112,6 +112,94 @@ class CameraControlPlanTest {
         assertNull(plan.colorTemperatureKelvin)
     }
 
+    // ── the CONTROL_MODE switch ──
+
+    @Test
+    fun `night vision arms its scene mode under USE_SCENE_MODE`() {
+        val settings = CameraSettings(frameRate = 60, nightVisionMode = NightVisionMode.ON)
+        val plan = CameraControlPlan.from(settings, isoRange, exposureRange)
+        assertEquals(CaptureRequest.CONTROL_SCENE_MODE_NIGHT, plan.sceneMode)
+        assertEquals(CaptureRequest.CONTROL_MODE_USE_SCENE_MODE, plan.controlMode)
+        // The switch changes nothing else: fps and the AE unlock stand.
+        assertEquals(10, plan.fpsLower)
+        assertEquals(15, plan.fpsUpper)
+        assertFalse(plan.aeLock!!)
+    }
+
+    @Test
+    fun `night auto arms NIGHT_PORTRAIT under USE_SCENE_MODE`() {
+        val plan = CameraControlPlan.from(
+            CameraSettings(nightVisionMode = NightVisionMode.AUTO),
+            isoRange,
+            exposureRange,
+        )
+        assertEquals(CaptureRequest.CONTROL_SCENE_MODE_NIGHT_PORTRAIT, plan.sceneMode)
+        assertEquals(CaptureRequest.CONTROL_MODE_USE_SCENE_MODE, plan.controlMode)
+    }
+
+    @Test
+    fun `a night scene mode and the manual exposure pair ride together`() {
+        // The device-proven combination: AE OFF with its sensor pair still
+        // travels under USE_SCENE_MODE — the scene does not retire it.
+        val plan = CameraControlPlan.from(
+            CameraSettings(iso = 3200, exposureTime = 100_000_000L, nightVisionMode = NightVisionMode.ON),
+            isoRange,
+            exposureRange,
+        )
+        assertEquals(CaptureRequest.CONTROL_AE_MODE_OFF, plan.aeMode)
+        assertEquals(3200, plan.sensorSensitivity)
+        assertEquals(100_000_000L, plan.sensorExposureTimeNs)
+        assertEquals(CaptureRequest.CONTROL_SCENE_MODE_NIGHT, plan.sceneMode)
+        assertEquals(CaptureRequest.CONTROL_MODE_USE_SCENE_MODE, plan.controlMode)
+    }
+
+    @Test
+    fun `disabled and face priority scenes stay under the auto control mode`() {
+        val defaults = CameraControlPlan.from(CameraSettings(), isoRange, exposureRange)
+        assertEquals(CaptureRequest.CONTROL_SCENE_MODE_DISABLED, defaults.sceneMode)
+        assertEquals(CaptureRequest.CONTROL_MODE_AUTO, defaults.controlMode)
+
+        // FACE_PRIORITY is the documented exception that works under AUTO.
+        val facePriority = CameraControlPlan.from(
+            CameraSettings(sceneMode = CaptureRequest.CONTROL_SCENE_MODE_FACE_PRIORITY.toString()),
+            isoRange,
+            exposureRange,
+        )
+        assertEquals(CaptureRequest.CONTROL_SCENE_MODE_FACE_PRIORITY, facePriority.sceneMode)
+        assertEquals(CaptureRequest.CONTROL_MODE_AUTO, facePriority.controlMode)
+    }
+
+    @Test
+    fun `hdr and a manual scene mode arm the control mode as well`() {
+        val hdr = CameraControlPlan.from(CameraSettings(hdrMode = HdrMode.ON), isoRange, exposureRange)
+        assertEquals(CaptureRequest.CONTROL_SCENE_MODE_HDR, hdr.sceneMode)
+        assertEquals(CaptureRequest.CONTROL_MODE_USE_SCENE_MODE, hdr.controlMode)
+
+        val sports = CameraControlPlan.from(
+            CameraSettings(sceneMode = CaptureRequest.CONTROL_SCENE_MODE_SPORTS.toString()),
+            isoRange,
+            exposureRange,
+        )
+        assertEquals(CaptureRequest.CONTROL_SCENE_MODE_SPORTS, sports.sceneMode)
+        assertEquals(CaptureRequest.CONTROL_MODE_USE_SCENE_MODE, sports.controlMode)
+    }
+
+    @Test
+    fun `a retired scene mode retires the control mode with it`() {
+        // The camera lists no NIGHT: the fold resets the scene to DISABLED,
+        // and the switch must fall back with it — USE_SCENE_MODE without a
+        // scene would linger on the last one the device picked.
+        val plan = CameraControlPlan.from(
+            CameraSettings(nightVisionMode = NightVisionMode.ON, frameRate = 60),
+            isoRange,
+            exposureRange,
+            CaptureSupport(sceneModes = setOf(CaptureRequest.CONTROL_SCENE_MODE_DISABLED)),
+        )
+        assertEquals(CaptureRequest.CONTROL_SCENE_MODE_DISABLED, plan.sceneMode)
+        assertEquals(CaptureRequest.CONTROL_MODE_AUTO, plan.controlMode)
+        assertEquals(listOf(CameraControlPlan.UNSUPPORTED_SCENE_MODE), plan.unsupported)
+    }
+
     // ── the exposure-compensation decision ──
 
     @Test

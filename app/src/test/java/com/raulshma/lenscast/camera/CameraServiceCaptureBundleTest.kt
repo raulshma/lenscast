@@ -96,6 +96,7 @@ class CameraServiceCaptureBundleTest {
         videoStabilization,
         opticalStabilization,
         CaptureRequest.CONTROL_SCENE_MODE.name,
+        CaptureRequest.CONTROL_MODE.name,
         CaptureRequest.CONTROL_AE_MODE.name,
         CaptureRequest.CONTROL_AWB_MODE.name,
     )
@@ -121,6 +122,8 @@ class CameraServiceCaptureBundleTest {
         assertEquals(3200, bundle.getCaptureRequestOption(CaptureRequest.SENSOR_SENSITIVITY))
         assertEquals(100_000_000L, bundle.getCaptureRequestOption(CaptureRequest.SENSOR_EXPOSURE_TIME))
         assertEquals(CaptureRequest.CONTROL_SCENE_MODE_NIGHT, bundle.getCaptureRequestOption(CaptureRequest.CONTROL_SCENE_MODE))
+        // The scene travels with the switch that arms it (issue #25).
+        assertEquals(CaptureRequest.CONTROL_MODE_USE_SCENE_MODE, bundle.getCaptureRequestOption(CaptureRequest.CONTROL_MODE))
         // Night vision's 10..15 range, capped to the 100 ms shutter's frame period.
         assertEquals(Range(10, 10), bundle.getCaptureRequestOption(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE))
         assertEquals(CaptureRequest.CONTROL_AWB_MODE_AUTO, bundle.getCaptureRequestOption(CaptureRequest.CONTROL_AWB_MODE))
@@ -147,6 +150,7 @@ class CameraServiceCaptureBundleTest {
         val bundle = submitted[1]
         assertEquals(CaptureRequest.CONTROL_AE_MODE_ON, bundle.getCaptureRequestOption(CaptureRequest.CONTROL_AE_MODE))
         assertEquals(CaptureRequest.CONTROL_SCENE_MODE_DISABLED, bundle.getCaptureRequestOption(CaptureRequest.CONTROL_SCENE_MODE))
+        assertEquals(CaptureRequest.CONTROL_MODE_AUTO, bundle.getCaptureRequestOption(CaptureRequest.CONTROL_MODE))
         assertFalse(sensorSensitivity in bundle.keyNames())
         assertFalse(sensorExposureTime in bundle.keyNames())
         assertEquals(Range(24, 24), bundle.getCaptureRequestOption(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE))
@@ -187,6 +191,42 @@ class CameraServiceCaptureBundleTest {
         )
     }
 
+    @Test
+    fun `the scene mode always travels with the control mode that arms it`() {
+        // CONTROL_SCENE_MODE alone, with the control mode left at AUTO, is
+        // what every device ignored (issue #25): the switch rides the same
+        // bundle, derived from the scene.
+        apply(CameraSettings(nightVisionMode = NightVisionMode.ON))
+        val night = submitted[0]
+        assertEquals(CaptureRequest.CONTROL_SCENE_MODE_NIGHT, night.getCaptureRequestOption(CaptureRequest.CONTROL_SCENE_MODE))
+        assertEquals(CaptureRequest.CONTROL_MODE_USE_SCENE_MODE, night.getCaptureRequestOption(CaptureRequest.CONTROL_MODE))
+
+        // AUTO picks NIGHT_PORTRAIT — still a scene mode, still armed.
+        apply(CameraSettings(nightVisionMode = NightVisionMode.AUTO))
+        val auto = submitted[1]
+        assertEquals(
+            CaptureRequest.CONTROL_SCENE_MODE_NIGHT_PORTRAIT,
+            auto.getCaptureRequestOption(CaptureRequest.CONTROL_SCENE_MODE),
+        )
+        assertEquals(CaptureRequest.CONTROL_MODE_USE_SCENE_MODE, auto.getCaptureRequestOption(CaptureRequest.CONTROL_MODE))
+
+        // FACE_PRIORITY is the documented AUTO exception: the scene rides,
+        // the switch stays AUTO.
+        apply(CameraSettings(sceneMode = CaptureRequest.CONTROL_SCENE_MODE_FACE_PRIORITY.toString()))
+        val facePriority = submitted[2]
+        assertEquals(
+            CaptureRequest.CONTROL_SCENE_MODE_FACE_PRIORITY,
+            facePriority.getCaptureRequestOption(CaptureRequest.CONTROL_SCENE_MODE),
+        )
+        assertEquals(CaptureRequest.CONTROL_MODE_AUTO, facePriority.getCaptureRequestOption(CaptureRequest.CONTROL_MODE))
+
+        // And the way back leaves the switch at AUTO beside the disabled scene.
+        apply(CameraSettings())
+        val defaults = submitted[3]
+        assertEquals(CaptureRequest.CONTROL_SCENE_MODE_DISABLED, defaults.getCaptureRequestOption(CaptureRequest.CONTROL_SCENE_MODE))
+        assertEquals(CaptureRequest.CONTROL_MODE_AUTO, defaults.getCaptureRequestOption(CaptureRequest.CONTROL_MODE))
+    }
+
     // ── capability-aware: one unadvertised value never costs its neighbours ──
 
     @Test
@@ -200,6 +240,9 @@ class CameraServiceCaptureBundleTest {
         assertEquals(1, submitted.size)
         val bundle = submitted.single()
         assertEquals(CaptureRequest.CONTROL_SCENE_MODE_DISABLED, bundle.getCaptureRequestOption(CaptureRequest.CONTROL_SCENE_MODE))
+        // The switch falls back with the retired scene — USE_SCENE_MODE
+        // without a scene would linger on the last one the device picked.
+        assertEquals(CaptureRequest.CONTROL_MODE_AUTO, bundle.getCaptureRequestOption(CaptureRequest.CONTROL_MODE))
         assertEquals(CaptureRequest.CONTROL_AE_MODE_OFF, bundle.getCaptureRequestOption(CaptureRequest.CONTROL_AE_MODE))
         assertEquals(3200, bundle.getCaptureRequestOption(CaptureRequest.SENSOR_SENSITIVITY))
         assertEquals(100_000_000L, bundle.getCaptureRequestOption(CaptureRequest.SENSOR_EXPOSURE_TIME))

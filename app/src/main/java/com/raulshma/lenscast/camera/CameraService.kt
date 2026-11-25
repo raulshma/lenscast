@@ -2282,6 +2282,12 @@ class CameraService internal constructor(
                     },
                 )
                 .setCaptureRequestOption(CaptureRequest.CONTROL_SCENE_MODE, plan.sceneMode)
+                // The scene switch: aside from FACE_PRIORITY, a scene mode is
+                // only active while the control mode itself is USE_SCENE_MODE
+                // — CONTROL_SCENE_MODE with the control mode left at AUTO is
+                // ignored by every device (issue #25). The plan derives the
+                // switch from the scene mode, so the pair always agrees.
+                .setCaptureRequestOption(CaptureRequest.CONTROL_MODE, plan.controlMode)
                 .setCaptureRequestOption(CaptureRequest.CONTROL_AE_MODE, plan.aeMode)
             plan.aeLock?.let {
                 builder.setCaptureRequestOption(CaptureRequest.CONTROL_AE_LOCK, it)
